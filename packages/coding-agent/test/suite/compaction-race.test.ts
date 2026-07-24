@@ -55,6 +55,20 @@ async function waitForCompactionStart(deferred: Deferred): Promise<void> {
 	}
 }
 
+async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise.then(() => true),
+			new Promise<boolean>((resolve) => {
+				timeout = setTimeout(() => resolve(false), timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timeout !== undefined) clearTimeout(timeout);
+	}
+}
+
 function getRunAutoCompaction(harness: Harness) {
 	const runAutoCompaction = Reflect.get(harness.session, "_runAutoCompaction");
 	if (typeof runAutoCompaction !== "function") {
@@ -261,6 +275,67 @@ describe("AgentSession compaction race handling", () => {
 		).toBe(true);
 		expect(secondCall?.context.messages.some((message) => contextHasText(message, initialPrompt))).toBe(false);
 		expect(getUserTexts(harness)).toEqual(["after compaction prompt"]);
+	});
+
+	it("aborts an active run before manual compaction disconnects the agent-event subscription", async () => {
+		const eventOrder: string[] = [];
+		let resolveStreamingUpdate: (() => void) | undefined;
+		const streamingUpdate = new Promise<void>((resolve) => {
+			resolveStreamingUpdate = resolve;
+		});
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", (event) => ({
+						compaction: {
+							summary: "manual compaction after active abort",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+						},
+					}));
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("first seed response"),
+			fauxAssistantMessage("second seed response"),
+			fauxAssistantMessage("streaming response ".repeat(4_000)),
+		]);
+		await harness.session.prompt("first seed prompt");
+		await harness.session.prompt("second seed prompt");
+
+		harness.session.subscribe((event) => {
+			if (event.type === "message_update" && event.message.role === "assistant") {
+				resolveStreamingUpdate?.();
+				resolveStreamingUpdate = undefined;
+			}
+			if (event.type === "agent_end") eventOrder.push("agent_end");
+			if (event.type === "compaction_start") eventOrder.push("compaction_start");
+		});
+
+		const activePrompt = harness.session.prompt("prompt whose provider stream is active");
+		await streamingUpdate;
+		expect(harness.session.isStreaming).toBe(true);
+
+		const manualCompaction = harness.session.compact();
+		const settled = await settlesWithin(Promise.allSettled([activePrompt, manualCompaction]), 1_000);
+		expect(settled, "manual compaction must not deadlock behind an aborted active run").toBe(true);
+		if (!settled) return;
+
+		const activeAgentEnd = harness.eventsOfType("agent_end").at(-1);
+		expect(activeAgentEnd?.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "aborted" });
+		expect(eventOrder).toEqual(expect.arrayContaining(["agent_end", "compaction_start"]));
+		expect(eventOrder.indexOf("agent_end")).toBeLessThan(eventOrder.indexOf("compaction_start"));
+		expect(harness.session.isStreaming).toBe(false);
+		expect(harness.session.isCompacting).toBe(false);
+
+		harness.setResponses([fauxAssistantMessage("later prompt succeeded")]);
+		await harness.session.prompt("later prompt after manual compaction");
+		expect(getUserTexts(harness).at(-1)).toBe("later prompt after manual compaction");
+		expect(harness.session.isStreaming).toBe(false);
+		expect(harness.session.isCompacting).toBe(false);
 	});
 
 	it("auto compaction supersedes unrelated extension feedback without promoting it", async () => {

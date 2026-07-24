@@ -773,7 +773,19 @@ describe("OpenAI remote compaction", () => {
 		const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(
 			{
 				model: "gpt-5.4",
-				input: [{ role: "developer", content: "current system prompt" }],
+				input: [
+					{ role: "developer", content: "current system prompt" },
+					{ role: "user", content: [{ type: "input_text", text: "fallback compact summary" }] },
+					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
+					{ role: "user", content: [{ type: "input_text", text: "Ran `git status`\n```\nclean\n```" }] },
+					{
+						type: "message",
+						role: "assistant",
+						status: "completed",
+						id: "msg_post_compaction",
+						content: [{ type: "output_text", text: "switched to claude after compaction", annotations: [] }],
+					},
+				],
 				stream: true,
 			},
 			{ model: OPENAI_MODEL, branchEntries: branchWithMixedTail },
@@ -890,7 +902,7 @@ describe("OpenAI remote compaction", () => {
 		]);
 	});
 
-	it("appends the pending prompt that is not yet persisted in the branch", () => {
+	it("replays the in-flight prompt from the final provider payload", () => {
 		const remoteResult = buildOpenAiRemoteCompactionResult({
 			model: OPENAI_MODEL,
 			firstKeptEntryId: "u2",
@@ -932,21 +944,12 @@ describe("OpenAI remote compaction", () => {
 				input: [
 					{ role: "developer", content: "current system prompt" },
 					{ role: "user", content: [{ type: "input_text", text: "fallback compact summary" }] },
+					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
 					{ role: "user", content: [{ type: "input_text", text: "Turn three: after compaction." }] },
 				],
 				stream: true,
 			},
-			{
-				model: OPENAI_MODEL,
-				branchEntries: branchEndingAtCompaction,
-				pendingMessages: [
-					{
-						role: "user",
-						content: [{ type: "text", text: "Turn three: after compaction." }],
-						timestamp: 7,
-					},
-				],
-			},
+			{ model: OPENAI_MODEL, branchEntries: branchEndingAtCompaction },
 		);
 
 		expect(rewritten).toMatchObject({
@@ -1011,6 +1014,8 @@ describe("OpenAI remote compaction", () => {
 				input: [
 					{ role: "developer", content: "current system prompt" },
 					{ role: "user", content: [{ type: "input_text", text: "fallback compact summary" }] },
+					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
+					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
 				],
 				stream: true,
 			},

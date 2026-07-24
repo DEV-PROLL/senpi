@@ -1,3 +1,13 @@
+## Replay remote checkpoints from final context payloads (2026-07-24)
+
+- `index.ts`, `openai-remote.ts`: remote replay now takes all post-checkpoint items, including the in-flight prompt,
+  directly from the final provider payload after every `context` hook has completed. It retains the persisted remote
+  checkpoint prefix and uses persisted history only to locate that prefix; raw post-checkpoint session content is not
+  reconstructed for the provider request.
+- Regressions: `test/compaction/canonical-routes.test.ts` redacts both persisted post-checkpoint content and the
+  current prompt through later context hooks, while `test/compaction/openai-remote-compaction.test.ts` and the Codex
+  remote-compaction regression exercise final-payload replay in native and mixed-history paths.
+
 # Builtin compaction extension changes
 
 ## Active-tool-only summarization requests (2026-07-23)

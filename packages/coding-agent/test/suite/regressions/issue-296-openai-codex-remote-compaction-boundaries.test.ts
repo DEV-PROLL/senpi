@@ -105,7 +105,7 @@ describe("issue #296 remote compaction boundaries", () => {
 	])("does not replay $persistedProvider state through $current.provider", ({ current, persistedProvider }) => {
 		const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(
 			{ model: current.id, input: [], stream: true },
-			{ model: current, branchEntries: compactedBranch(persistedProvider), pendingMessages: [] },
+			{ model: current, branchEntries: compactedBranch(persistedProvider) },
 		);
 
 		expect(rewritten).toBeUndefined();

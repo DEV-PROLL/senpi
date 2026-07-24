@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type CompactionResult, DEFAULT_COMPACTION_SETTINGS } from "../../src/core/compaction/index.ts";
 import { createEventBus } from "../../src/core/event-bus.ts";
 import compactionExtension from "../../src/core/extensions/builtin/compaction/index.ts";
+import { buildOpenAiRemoteCompactionResult } from "../../src/core/extensions/builtin/compaction/openai-remote.ts";
 import type { BeforeAgentStartEvent } from "../../src/core/extensions/index.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../../src/core/extensions/loader.ts";
 import type { SessionEntry, SessionMessageEntry } from "../../src/core/session-manager.ts";
+import { createHarness } from "../suite/harness.ts";
 
 const OPENAI_MODEL = {
 	id: "gpt-5.4",
@@ -154,5 +156,134 @@ describe("builtin compaction canonical routes", () => {
 			mode: "openai-remote",
 			transport: "compact-endpoint",
 		});
+	});
+
+	it("replays a remote checkpoint from the final redacted context without mutating persisted messages", async () => {
+		const sensitivePostCompaction = "SENSITIVE_POST_COMPACTION_CONTEXT";
+		const sensitiveCurrentPrompt = "SENSITIVE_CURRENT_PROMPT";
+		const redactedPostCompaction = "[redacted post-compaction context]";
+		const redactedCurrentPrompt = "[redacted current prompt]";
+		const contextHookOrder: string[] = [];
+		let firstContextHookInput = "";
+		const harness = await createHarness({
+			api: "openai-responses",
+			provider: "openai",
+			models: [
+				{ id: OPENAI_MODEL.id, contextWindow: OPENAI_MODEL.contextWindow, maxTokens: OPENAI_MODEL.maxTokens },
+			],
+			extensionFactories: [
+				compactionExtension,
+				(pi) => {
+					pi.on("context", (event) => {
+						contextHookOrder.push("first");
+						firstContextHookInput = JSON.stringify(event.messages);
+						return { messages: event.messages };
+					});
+				},
+				(pi) => {
+					pi.on("context", (event) => {
+						contextHookOrder.push("redact");
+						return {
+							messages: event.messages.map((message) => {
+								if (message.role !== "user" || typeof message.content === "string") return message;
+								return {
+									...message,
+									content: message.content.map((part) =>
+										part.type !== "text"
+											? part
+											: {
+													...part,
+													text: part.text
+														.replaceAll(sensitivePostCompaction, redactedPostCompaction)
+														.replaceAll(sensitiveCurrentPrompt, redactedCurrentPrompt),
+												},
+									),
+								};
+							}),
+						};
+					});
+				},
+			],
+		});
+
+		try {
+			const model = harness.getModel() as Model<"openai-responses">;
+			const retainedEntryId = harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "retained checkpoint context" }],
+				timestamp: 1,
+			});
+			const checkpoint = buildOpenAiRemoteCompactionResult({
+				model,
+				firstKeptEntryId: retainedEntryId,
+				tokensBefore: 1_234,
+				requestInputItemCount: 1,
+				response: {
+					id: "resp_checkpoint",
+					created_at: 1_775_000_001,
+					object: "response.compaction",
+					output: [{ type: "compaction", id: "cmp_checkpoint", encrypted_content: "encrypted-checkpoint" }],
+				},
+			});
+			harness.sessionManager.appendCompaction(
+				checkpoint.summary,
+				checkpoint.firstKeptEntryId,
+				checkpoint.tokensBefore,
+				checkpoint.details,
+				true,
+			);
+			harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: `post-checkpoint: ${sensitivePostCompaction}` }],
+				timestamp: 2,
+			});
+
+			const persistedBeforeTransform = JSON.stringify(harness.sessionManager.getBranch());
+			const transformedContext = await harness.getExtensionRunner().emitContext([
+				...harness.sessionManager.buildSessionContext().messages,
+				{
+					role: "user",
+					content: [{ type: "text", text: `current prompt: ${sensitiveCurrentPrompt}` }],
+					timestamp: 3,
+				},
+			]);
+			const transformedContextText = JSON.stringify(transformedContext);
+			expect(contextHookOrder).toEqual(["first", "redact"]);
+			expect(firstContextHookInput).toContain(sensitivePostCompaction);
+			expect(firstContextHookInput).toContain(sensitiveCurrentPrompt);
+			expect(transformedContextText).toContain(redactedPostCompaction);
+			expect(transformedContextText).toContain(redactedCurrentPrompt);
+			expect(transformedContextText).not.toContain(sensitivePostCompaction);
+			expect(transformedContextText).not.toContain(sensitiveCurrentPrompt);
+			expect(JSON.stringify(harness.sessionManager.getBranch())).toBe(persistedBeforeTransform);
+			expect(persistedBeforeTransform).toContain(sensitivePostCompaction);
+			const finalProviderInput = transformedContext.flatMap((message) => {
+				if (message.role !== "user") return [];
+				return [
+					{
+						role: "user" as const,
+						content:
+							typeof message.content === "string"
+								? [{ type: "input_text" as const, text: message.content }]
+								: message.content.flatMap((part) =>
+										part.type === "text" ? [{ type: "input_text" as const, text: part.text }] : [],
+									),
+					},
+				];
+			});
+
+			const rewritten = await harness.getExtensionRunner().emitBeforeProviderRequest({
+				model: model.id,
+				input: [{ role: "developer", content: "current system prompt" }, ...finalProviderInput],
+				stream: true,
+			});
+			const outgoingRemoteInput = JSON.stringify(rewritten);
+			expect(outgoingRemoteInput).toContain(redactedPostCompaction);
+			expect(outgoingRemoteInput).toContain(redactedCurrentPrompt);
+			expect(outgoingRemoteInput).not.toContain(sensitivePostCompaction);
+			expect(outgoingRemoteInput).not.toContain(sensitiveCurrentPrompt);
+		} finally {
+			harness.cleanup();
+		}
 	});
 });

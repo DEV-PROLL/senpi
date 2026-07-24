@@ -1,4 +1,3 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_COMPACTION_SETTINGS } from "../../../src/core/compaction/index.ts";
@@ -191,16 +190,18 @@ describe("issue #296 OpenAI Codex remote compaction", () => {
 				fromHook: true,
 			},
 		];
-		const pendingMessages = [
-			{
-				role: "user",
-				content: [{ type: "text", text: "Continue after compaction." }],
-				timestamp: 4,
-			},
-		] satisfies AgentMessage[];
 		const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(
-			{ model: CODEX_MODEL.id, input: [{ role: "developer", content: "Current prompt." }], stream: true },
-			{ model: CODEX_MODEL, branchEntries: compactedBranch, pendingMessages },
+			{
+				model: CODEX_MODEL.id,
+				input: [
+					{ role: "developer", content: "Current prompt." },
+					{ role: "user", content: [{ type: "input_text", text: "fallback compact summary" }] },
+					{ role: "user", content: [{ type: "input_text", text: "Keep the diagnosis." }] },
+					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
+				],
+				stream: true,
+			},
+			{ model: CODEX_MODEL, branchEntries: compactedBranch },
 		) as { input?: unknown[] } | undefined;
 
 		expect(rewritten?.input).toContainEqual({

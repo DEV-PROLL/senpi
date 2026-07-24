@@ -3285,10 +3285,15 @@ export class AgentSession {
 		const admission = this._claimPendingCompactionAdmission();
 		const controller = admission.controller;
 		let outcome: "completed" | "failed" | "aborted" = "failed";
-		this._disconnectFromAgent();
+		let disconnected = false;
 
 		try {
+			// Keep the session subscriber attached until the aborted run emits
+			// agent_end. That event clears the active-run and retry state that
+			// waitForIdle() depends on.
 			await this._abortActiveAgentAndRetry();
+			this._disconnectFromAgent();
+			disconnected = true;
 			this._emit({ type: "compaction_start", reason: "manual" });
 			const execution = await this._executeCompaction({
 				controller,
@@ -3325,7 +3330,7 @@ export class AgentSession {
 				this._compactionAbortController = undefined;
 			}
 			this._releasePendingCompactionAdmission(admission, outcome);
-			if (!this.isCompacting) this._reconnectToAgent();
+			if (disconnected && !this.isCompacting) this._reconnectToAgent();
 		}
 	}
 

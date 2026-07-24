@@ -1,8 +1,7 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { CompactionResult } from "../../../compaction/index.ts";
-import type { SessionEntry } from "../../../session-manager.ts";
+import { type SessionEntry, sessionEntryToContextMessages } from "../../../session-manager.ts";
 import type { ServiceTier, SessionBeforeCompactEvent } from "../../types.ts";
 import type {
 	OpenAiCompactBody,
@@ -714,12 +713,12 @@ export async function runOpenAiRemoteCompaction(
 
 function latestRemoteCompaction(
 	entries: SessionEntry[],
-): { entryId: string; index: number; details: OpenAiRemoteCompactionDetails } | undefined {
+): { entryId: string; index: number; firstKeptEntryId: string; details: OpenAiRemoteCompactionDetails } | undefined {
 	for (let index = entries.length - 1; index >= 0; index--) {
 		const entry = entries[index];
 		if (entry?.type !== "compaction") continue;
 		const details = getOpenAiRemoteCompactionDetails(entry.details);
-		if (details) return { entryId: entry.id, index, details };
+		if (details) return { entryId: entry.id, index, firstKeptEntryId: entry.firstKeptEntryId, details };
 		return undefined;
 	}
 	return undefined;
@@ -737,25 +736,50 @@ function leadingPromptMessages(input: unknown): OpenAiRemoteInputItem[] {
 	return result;
 }
 
+function checkpointContextInputItemCount(
+	entries: SessionEntry[],
+	remote: { index: number; firstKeptEntryId: string },
+	model: Model<Api>,
+): number {
+	const compactionEntry = entries[remote.index];
+	if (!compactionEntry) return 0;
+
+	const firstKeptIndex = entries.findIndex((entry) => entry.id === remote.firstKeptEntryId);
+	const checkpointContextEntries = [
+		compactionEntry,
+		...(firstKeptIndex >= 0 && firstKeptIndex < remote.index ? entries.slice(firstKeptIndex, remote.index) : []),
+	];
+	return convertPendingMessages(checkpointContextEntries.flatMap(sessionEntryToContextMessages), model).length;
+}
+
+function postCheckpointPayloadItems(
+	input: unknown,
+	entries: SessionEntry[],
+	remote: { index: number; firstKeptEntryId: string },
+	model: Model<Api>,
+): Record<string, unknown>[] {
+	if (!Array.isArray(input)) return [];
+	const leadingPromptCount = leadingPromptMessages(input).length;
+	const checkpointInputItemCount = checkpointContextInputItemCount(entries, remote, model);
+	return input.slice(leadingPromptCount + checkpointInputItemCount).filter(isRecord);
+}
+
 export function rewriteOpenAiPayloadWithRemoteCompaction(
 	payload: unknown,
-	options: { model: Model<Api> | undefined; branchEntries: SessionEntry[]; pendingMessages?: AgentMessage[] },
+	options: { model: Model<Api> | undefined; branchEntries: SessionEntry[] },
 	emit?: EmitCompactionEvent,
 ): unknown | undefined {
 	if (!isOpenAiRemoteCompactionModel(options.model) || !isRecord(payload)) return undefined;
 	const remote = latestRemoteCompaction(options.branchEntries);
 	if (!remote || !matchesOpenAiRemoteCompactionIdentity(options.model, remote.details)) return undefined;
 
-	const postCompactionItems = convertBranchEntries(options.branchEntries.slice(remote.index + 1), options.model);
-	// The in-flight prompt is not yet persisted in the branch at provider-request
-	// time; append it so the replayed payload still carries the user's message.
-	const pendingItems = convertPendingMessages(options.pendingMessages ?? [], options.model);
-
 	const input = [
 		...leadingPromptMessages(payload.input),
 		...remote.details.replacementInput,
-		...postCompactionItems,
-		...pendingItems,
+		// Context hooks can redact or otherwise transform the live post-checkpoint
+		// messages. Replay only their final provider representation; persisted
+		// history is used solely to locate the checkpoint boundary.
+		...postCheckpointPayloadItems(payload.input, options.branchEntries, remote, options.model),
 	];
 	emit?.({
 		version: 1,
