@@ -44,6 +44,10 @@
 - Trigger-turn custom messages serialize behind manual/extension compaction before they are appended or sent.
   Scheduled continuation revalidates the canonical context against any model selected by `session_compact`, retaining
   queues when the smaller model requires rejected re-compaction.
+- Manual and extension compaction claim a synchronous pending-admission barrier before their first await, closing the
+  same-tick window where a trigger-turn custom message could overtake startup. Retry continuation failures that occur
+  before provider dispatch now settle retry/idle state and retain queues instead of hanging the session.
+- Fire-and-forget `session_start` messages defer past replacement-session work without being discarded as stale.
 
 ### Why extension system couldn't handle this alone
 

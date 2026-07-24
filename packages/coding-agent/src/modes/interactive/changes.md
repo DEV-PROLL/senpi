@@ -13,6 +13,8 @@
   summaries and provider/session content remain unchanged.
 - The shared compaction-summary component applies the same display-only sanitization, covering rebuilt chat and
   reopened-session expansion in addition to live `compaction_end` rendering.
+- Provider-derived fallback exhaustion errors are sanitized at the shared `showError()` render boundary; raw retry
+  events and persisted/provider error content remain unchanged.
 
 ### Why
 

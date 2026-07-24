@@ -298,6 +298,20 @@ type CompactionExecutionResult =
 			rejectionCause: CompactionRejectionCause;
 	  };
 
+type PendingCompactionAdmission = {
+	readonly controller: AbortController;
+	readonly finishSessionWork: () => void;
+	outcome?: "completed" | "failed" | "aborted";
+};
+
+function isCompactionOwnedPreCompactDiagnostic(message: AgentMessage, requestId: string): boolean {
+	if (message.role !== "custom" || message.customType !== "senpi.hook") return false;
+	const details = message.details;
+	if (!details || typeof details !== "object") return false;
+	const diagnostic = details as { event?: unknown; compactionRequestId?: unknown };
+	return diagnostic.event === "PreCompact" && diagnostic.compactionRequestId === requestId;
+}
+
 /**
  * Human-readable rejection message paired with a `CompactionRejectionCause`.
  *
@@ -519,6 +533,7 @@ export class AgentSession {
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
+	private _pendingCompactionAdmission: PendingCompactionAdmission | undefined = undefined;
 	private readonly _compactionLifecycle = new CompactionLifecycleCoordinator();
 	private readonly _sessionWorkBarrier = new SessionWorkBarrier();
 	private _overflowRecoveryAttempted = false;
@@ -574,6 +589,7 @@ export class AgentSession {
 	private _extensionShutdownHandler?: ShutdownHandler;
 	private _extensionErrorListener?: ExtensionErrorListener;
 	private _extensionErrorUnsubscriber?: () => void;
+	private _extensionBindingPromptReadiness: Set<Promise<void>> | undefined;
 
 	private _modelRuntime: ModelRuntime;
 	private _modelRegistry: ModelRegistry;
@@ -1083,6 +1099,10 @@ export class AgentSession {
 		this._retryPromise = new Promise((resolve) => {
 			this._retryResolve = resolve;
 		});
+		// Agent core normally drains queued input immediately after agent_end.
+		// Retry owns that continuation until its final provider-admission check has
+		// either started it or reported a terminal rejection.
+		this.agent.suppressQueuedMessageDrain();
 	}
 
 	private _findLastAssistantInMessages(messages: AgentMessage[]): AssistantMessage | undefined {
@@ -1880,6 +1900,7 @@ export class AgentSession {
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return (
+			this._pendingCompactionAdmission !== undefined ||
 			this._compactionLifecycle.state.status === "running" ||
 			this._autoCompactionAbortController !== undefined ||
 			this._compactionAbortController !== undefined ||
@@ -2073,6 +2094,8 @@ export class AgentSession {
 		// turn must still serialize behind compaction and other session work just
 		// like an interactive prompt does.
 		const shouldWaitForSessionWork = true;
+		const pendingCompactionAdmissionAtExtensionAdmission =
+			options?.source === "extension" ? this._pendingCompactionAdmission : undefined;
 		const compactionGenerationAtExtensionAdmission =
 			options?.source === "extension" &&
 			this._sessionWorkBarrier.hasActiveWork &&
@@ -2228,10 +2251,12 @@ export class AgentSession {
 			// must never overtake a rejected or aborted compaction. Keep its normal
 			// queue ownership instead of attempting another provider admission.
 			if (
-				compactionGenerationAtExtensionAdmission !== undefined &&
-				this._compactionLifecycle.state.generation === compactionGenerationAtExtensionAdmission &&
-				(this._compactionLifecycle.state.status === "failed" ||
-					this._compactionLifecycle.state.status === "aborted")
+				(pendingCompactionAdmissionAtExtensionAdmission !== undefined &&
+					pendingCompactionAdmissionAtExtensionAdmission.outcome !== "completed") ||
+				(compactionGenerationAtExtensionAdmission !== undefined &&
+					this._compactionLifecycle.state.generation === compactionGenerationAtExtensionAdmission &&
+					(this._compactionLifecycle.state.status === "failed" ||
+						this._compactionLifecycle.state.status === "aborted"))
 			) {
 				if (options?.streamingBehavior === "followUp") {
 					await this._queueFollowUp(expandedText, currentImages);
@@ -2633,6 +2658,7 @@ export class AgentSession {
 			options.deliverAs !== "nextTurn" &&
 			!this.isStreaming &&
 			this._sessionWorkBarrier.hasActiveWork;
+		const pendingCompactionAdmission = this._pendingCompactionAdmission;
 		const activeCompactionGeneration =
 			this._compactionLifecycle.state.status === "running" ? this._compactionLifecycle.state.generation : undefined;
 		let finishSessionWork: (() => void) | undefined;
@@ -2652,9 +2678,10 @@ export class AgentSession {
 				}
 			} else if (
 				options?.triggerTurn === true &&
-				activeCompactionGeneration !== undefined &&
-				this._compactionLifecycle.state.generation === activeCompactionGeneration &&
-				this._compactionLifecycle.state.status !== "completed"
+				((pendingCompactionAdmission !== undefined && pendingCompactionAdmission.outcome !== "completed") ||
+					(activeCompactionGeneration !== undefined &&
+						this._compactionLifecycle.state.generation === activeCompactionGeneration &&
+						this._compactionLifecycle.state.status !== "completed"))
 			) {
 				if (options?.deliverAs === "followUp") {
 					this.agent.followUp(appMessage);
@@ -2693,6 +2720,14 @@ export class AgentSession {
 		content: string | (TextContent | ImageContent)[],
 		options?: { deliverAs?: "steer" | "followUp" },
 	): Promise<void> {
+		const bindingPromptReadiness = this._extensionBindingPromptReadiness;
+		let resolveBindingPromptReadiness: (() => void) | undefined;
+		if (bindingPromptReadiness) {
+			const readiness = new Promise<void>((resolve) => {
+				resolveBindingPromptReadiness = resolve;
+			});
+			bindingPromptReadiness.add(readiness);
+		}
 		// Normalize content to text string + optional images
 		let text: string;
 		let images: ImageContent[] | undefined;
@@ -2725,6 +2760,7 @@ export class AgentSession {
 				streamingBehavior: options?.deliverAs,
 				images,
 				source: "extension",
+				promptDisposition: () => resolveBindingPromptReadiness?.(),
 				onSessionWorkReady: waitForExistingSessionWork
 					? () => {
 							finishSessionWork ??= this._sessionWorkBarrier.begin();
@@ -2733,6 +2769,7 @@ export class AgentSession {
 				sessionTitlePrompt: false,
 			});
 		} finally {
+			resolveBindingPromptReadiness?.();
 			finishSessionWork?.();
 		}
 	}
@@ -2780,30 +2817,8 @@ export class AgentSession {
 	 * Abort current operation and wait for agent to become idle.
 	 */
 	async abort(): Promise<void> {
-		this.abortRetry();
 		this.abortCompaction();
-		this.abortBranchSummary();
-		if (this._userAbortPromise) {
-			this.agent.abort();
-			await this._userAbortPromise;
-			return;
-		}
-		if (this.isStreaming) {
-			this._suppressQueuedContinuationAfterUserAbort = true;
-		}
-
-		const abortPromise = (async () => {
-			this.agent.abort();
-			await this.waitForIdle();
-		})();
-		this._userAbortPromise = abortPromise;
-		try {
-			await abortPromise;
-		} finally {
-			if (this._userAbortPromise === abortPromise) {
-				this._userAbortPromise = undefined;
-			}
-		}
+		await this._abortActiveAgentAndRetry();
 	}
 
 	async waitForIdle(): Promise<void> {
@@ -3207,20 +3222,74 @@ export class AgentSession {
 		}
 	}
 
+	private _claimPendingCompactionAdmission(): PendingCompactionAdmission {
+		const priorAdmission = this._pendingCompactionAdmission;
+		if (priorAdmission) {
+			priorAdmission.controller.abort();
+			priorAdmission.outcome = "aborted";
+			priorAdmission.finishSessionWork();
+		}
+
+		const controller = new AbortController();
+		const admission: PendingCompactionAdmission = {
+			controller,
+			finishSessionWork: this._sessionWorkBarrier.begin(),
+		};
+		this._pendingCompactionAdmission = admission;
+		this._claimCompactionController(controller, "compaction");
+		return admission;
+	}
+
+	private _releasePendingCompactionAdmission(
+		admission: PendingCompactionAdmission,
+		outcome: "completed" | "failed" | "aborted",
+	): void {
+		admission.outcome = outcome;
+		if (this._pendingCompactionAdmission !== admission) return;
+		this._pendingCompactionAdmission = undefined;
+		admission.finishSessionWork();
+	}
+
+	private async _abortActiveAgentAndRetry(): Promise<void> {
+		this.abortRetry();
+		this.abortBranchSummary();
+		if (this._userAbortPromise) {
+			this.agent.abort();
+			await this._userAbortPromise;
+			return;
+		}
+		if (this.isStreaming) {
+			this._suppressQueuedContinuationAfterUserAbort = true;
+		}
+
+		const abortPromise = (async () => {
+			this.agent.abort();
+			await this.waitForIdle();
+		})();
+		this._userAbortPromise = abortPromise;
+		try {
+			await abortPromise;
+		} finally {
+			if (this._userAbortPromise === abortPromise) {
+				this._userAbortPromise = undefined;
+			}
+		}
+	}
+
 	/**
 	 * Manually compact the session context.
 	 * Aborts current agent operation first.
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
-		const finishManualCompactionWork = this._sessionWorkBarrier.begin();
+		const admission = this._claimPendingCompactionAdmission();
+		const controller = admission.controller;
+		let outcome: "completed" | "failed" | "aborted" = "failed";
 		this._disconnectFromAgent();
-		await this.abort();
-		const controller = new AbortController();
-		this._claimCompactionController(controller, "compaction");
-		this._emit({ type: "compaction_start", reason: "manual" });
 
 		try {
+			await this._abortActiveAgentAndRetry();
+			this._emit({ type: "compaction_start", reason: "manual" });
 			const execution = await this._executeCompaction({
 				controller,
 				reason: "manual",
@@ -3230,8 +3299,10 @@ export class AgentSession {
 			if (!execution.accepted) {
 				throw new CompactionRejectedError(execution.rejectionCause);
 			}
+			outcome = "completed";
 			return execution.result;
 		} catch (error) {
+			outcome = isCompactionExecutionAborted(error) ? "aborted" : "failed";
 			if (error instanceof CompactionRejectedError) {
 				throw new Error(error.message);
 			}
@@ -3253,8 +3324,8 @@ export class AgentSession {
 			if (this._compactionAbortController === controller && this._compactionLifecycle.state.status !== "running") {
 				this._compactionAbortController = undefined;
 			}
-			this._reconnectToAgent();
-			finishManualCompactionWork();
+			this._releasePendingCompactionAdmission(admission, outcome);
+			if (!this.isCompacting) this._reconnectToAgent();
 		}
 	}
 
@@ -3395,8 +3466,12 @@ export class AgentSession {
 		);
 		const finishCompactionWork = this._sessionWorkBarrier.begin();
 		const agentMessagesAtStart = request.agentMessagesAtStart ?? this.agent.state.messages.slice();
+		const compactionOwnedDiagnosticMessages = new Set<AgentMessage>();
 		const signal = controller.signal;
 		try {
+			if (signal.aborted) {
+				throw new CompactionCancelledError();
+			}
 			const pathEntries = this.sessionManager.getBranch();
 			const settings = this.settingsManager.getCompactionSettings();
 
@@ -3420,6 +3495,7 @@ export class AgentSession {
 				}
 
 				if (this._extensionRunner.hasHandlers("session_before_compact")) {
+					const messagesBeforeExtension = new Set(this.agent.state.messages);
 					const extensionResult = (await this._extensionRunner.emit({
 						type: "session_before_compact",
 						reason: request.reason,
@@ -3430,6 +3506,14 @@ export class AgentSession {
 						customInstructions: request.customInstructions,
 						signal,
 					})) as SessionBeforeCompactResult | undefined;
+					for (const message of this.agent.state.messages) {
+						if (
+							!messagesBeforeExtension.has(message) &&
+							isCompactionOwnedPreCompactDiagnostic(message, requestId)
+						) {
+							compactionOwnedDiagnosticMessages.add(message);
+						}
+					}
 
 					if (!this._compactionLifecycle.isCurrent(operationId, controller)) {
 						throw new CompactionCancelledError();
@@ -3489,11 +3573,15 @@ export class AgentSession {
 				startPrefixIntact &&
 				currentMessagesAtCheck
 					.slice(agentMessagesAtStart.length)
-					.every((message) => this._messageEndsAwaitingPersistence.has(message));
+					.every(
+						(message) =>
+							this._messageEndsAwaitingPersistence.has(message) ||
+							compactionOwnedDiagnosticMessages.has(message),
+					);
 			const sourceChanged =
 				lifecycleState.status !== "running" ||
 				lifecycleState.operationId !== operationId ||
-				lifecycleState.startedRevision !== this._messageRevision ||
+				lifecycleState.startedRevision + compactionOwnedDiagnosticMessages.size !== this._messageRevision ||
 				!onlyPendingPersistenceAppends;
 			if (sourceChanged) {
 				return await this._rejectCompaction(request, requestId, operationId, "stale-revision", false);
@@ -4234,28 +4322,39 @@ export class AgentSession {
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {
-		if (bindings.uiContext !== undefined) {
-			this._extensionUIContext = bindings.uiContext;
-		}
-		if (bindings.mode !== undefined) {
-			this._extensionMode = bindings.mode;
-		}
-		if (bindings.commandContextActions !== undefined) {
-			this._extensionCommandContextActions = bindings.commandContextActions;
-		}
-		if (bindings.abortHandler !== undefined) {
-			this._extensionAbortHandler = bindings.abortHandler;
-		}
-		if (bindings.shutdownHandler !== undefined) {
-			this._extensionShutdownHandler = bindings.shutdownHandler;
-		}
-		if (bindings.onError !== undefined) {
-			this._extensionErrorListener = bindings.onError;
-		}
+		const finishBindingWork = this._sessionWorkBarrier.begin();
+		const bindingPromptReadiness = new Set<Promise<void>>();
+		this._extensionBindingPromptReadiness = bindingPromptReadiness;
+		try {
+			if (bindings.uiContext !== undefined) {
+				this._extensionUIContext = bindings.uiContext;
+			}
+			if (bindings.mode !== undefined) {
+				this._extensionMode = bindings.mode;
+			}
+			if (bindings.commandContextActions !== undefined) {
+				this._extensionCommandContextActions = bindings.commandContextActions;
+			}
+			if (bindings.abortHandler !== undefined) {
+				this._extensionAbortHandler = bindings.abortHandler;
+			}
+			if (bindings.shutdownHandler !== undefined) {
+				this._extensionShutdownHandler = bindings.shutdownHandler;
+			}
+			if (bindings.onError !== undefined) {
+				this._extensionErrorListener = bindings.onError;
+			}
 
-		this._applyExtensionBindings(this._extensionRunner);
-		await this._extensionRunner.emit(this._sessionStartEvent);
-		await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
+			this._applyExtensionBindings(this._extensionRunner);
+			await this._extensionRunner.emit(this._sessionStartEvent);
+			await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
+		} finally {
+			if (this._extensionBindingPromptReadiness === bindingPromptReadiness) {
+				this._extensionBindingPromptReadiness = undefined;
+			}
+			finishBindingWork();
+		}
+		await Promise.all(bindingPromptReadiness);
 	}
 
 	private async extendResourcesFromExtensions(reason: "startup" | "reload"): Promise<void> {
@@ -4480,14 +4579,15 @@ export class AgentSession {
 					},
 				},
 				compact: (options) => {
+					const admission = this._claimPendingCompactionAdmission();
+					const controller = admission.controller;
 					void (async () => {
+						let outcome: "completed" | "failed" | "aborted" = "failed";
 						this._disconnectFromAgent();
-						await this.abort();
-						const controller = new AbortController();
-						this._claimCompactionController(controller, "compaction");
-						this._emit({ type: "compaction_start", reason: "extension" });
 
 						try {
+							await this._abortActiveAgentAndRetry();
+							this._emit({ type: "compaction_start", reason: "extension" });
 							const execution = await this._executeCompaction({
 								controller,
 								reason: "extension",
@@ -4495,11 +4595,14 @@ export class AgentSession {
 								willRetry: false,
 							});
 							if (execution.accepted) {
+								outcome = "completed";
 								options?.onComplete?.(execution.result);
 							} else {
+								outcome = "failed";
 								options?.onError?.(new CompactionRejectedError(execution.rejectionCause));
 							}
 						} catch (error) {
+							outcome = isCompactionExecutionAborted(error) ? "aborted" : "failed";
 							if (!compactionExecutionOwnsTerminalTransition(error)) {
 								return;
 							}
@@ -4522,7 +4625,8 @@ export class AgentSession {
 							) {
 								this._compactionAbortController = undefined;
 							}
-							this._reconnectToAgent();
+							this._releasePendingCompactionAdmission(admission, outcome);
+							if (!this.isCompacting) this._reconnectToAgent();
 						}
 					})();
 				},
@@ -4994,9 +5098,19 @@ export class AgentSession {
 		}
 
 		// Retry via the shared continuation path after the event handler chain settles.
+		// Agent core would otherwise drain these queues before the continuation
+		// revalidates its provider admission. The scheduled continuation owns them
+		// until it either starts or reports a terminal admission failure.
+		this.agent.suppressQueuedMessageDrain();
 		setTimeout(() => {
-			this._continueAgentAfterCurrentRun().catch(() => {
-				// Retry failed - terminal handling remains owned by the next agent_end.
+			void this._continueAgentAfterCurrentRun().catch(async (error) => {
+				const message = error instanceof Error ? error.message : String(error);
+				this._emit({
+					type: "continuation_error",
+					errorMessage: `Failed to continue queued messages: ${message}`,
+				});
+				await this._emitAgentSettled();
+				this._resolveRetry();
 			});
 		}, 0);
 

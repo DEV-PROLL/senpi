@@ -234,6 +234,15 @@ function formatToolHookTerminalTitle(event: ToolHookStatusStartEvent): string {
 	return `${APP_TITLE} - ${hookName}: ${statusMessage}`;
 }
 
+function sanitizeTuiErrorMessage(value: string): string {
+	return value
+		.replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g, "")
+		.replace(/(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g, "")
+		.replace(/\r\n?/g, "\n")
+		.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")
+		.replace(/[ \t\f\v]+/g, " ");
+}
+
 type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }>;
 
 function isCustomSessionEntry(item: RenderSessionItem): item is Extract<SessionEntry, { type: "custom" }> {
@@ -4452,7 +4461,7 @@ export class InteractiveMode {
 
 	showError(errorMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0));
+		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${sanitizeTuiErrorMessage(errorMessage)}`), 1, 0));
 		this.ui.requestRender();
 	}
 
