@@ -1,5 +1,27 @@
 # prompt-preset Extension Changes
 
+## Claude Opus 5 dieted full-core rewrite (2026-07-24)
+
+### What changed
+
+- `claude-opus-5.ts`: converted from the thin-`tuningSection` shape to a full core rewrite via the `corePrompt` override, by explicit fork direction ("the whole new prompt, not just appending") and in lockstep with the dieted `claude-fable-5.ts`. Static prompt shrinks from 8,564 to 6,852 chars (~-428 tokens, -20.0%) with every behavior preserved — verified by a probe audit over rendered before/after prompts (shared-core probes + 15 Opus-5-specific probes covering the stop contract, observable-end-state goal framing, mandatory-immediate stopping, scope discipline, bounded single-pass verification, no post-stop re-checks, delegation caps, narration cadence, correction filter, document calibration, auto-compaction continuation; negative probes for scope-literalism, house-style counter, GPT/Kimi leakage, and fable-only tuning imports).
+- Each Opus 5 guide behavior merged where it binds tightest: stop contract in the intent gate; scope discipline beside intent routing (the "user's call is final" style rule is subsumed by the guide's "say so in a sentence and continue as asked"); bounded verification fused with the shared tier definitions ("run the tier that matches the change once and trust a green result"); delegation caps in Working the Task; narration cadence, correction filter, and document calibration in Style; auto-compaction continuation retargeted at the declared stop condition.
+- Deliberately NOT carried (unchanged from the tuning-era preset): 4.7/4.8 scope literalism, the cream/serif/terracotta counter, and any added re-check instructions (the Opus 5 guide says they compound into over-verification).
+- Test pins kept verbatim: "You are senpi", "## Intent Gate", "I'll stop when [the exact, observable condition that ends this turn]", "a defect, not diligence", "narrowing, widening, or transforming", "auto-compacts context".
+- `AGENTS.md`: `claude-opus-5.ts` joins the `corePrompt` exception list; file-table line updated.
+
+### Why
+
+- Fork direction: Fable 5 and Opus 5 must ship whole rewritten prompts, not the shared core with tuning appended. The tuning-era prompt restated checkpoint/stop/verification rules the shared core already carried; duplicated rules compete for attention. The earlier "not warranted" rationale argued sufficiency of the shared core, not minimality.
+
+### Why extension system couldn't handle this differently
+
+- Content-only change inside this builtin, consuming the existing `corePrompt` override; no core prompt code changed.
+
+### Expected merge conflict zones on next upstream sync
+
+- `claude-opus-5.ts` whole-file rewrite. Resolution: keep the `corePrompt` full-core shape and re-run the probe audit if upstream reshapes the shared core.
+
 ## Claude Fable 5 dieted full-core rewrite + binding stop contract (2026-07-24)
 
 ### What changed

@@ -17,8 +17,8 @@ prompt-preset/
 ├── gpt-5.4.ts           # GPT-5.4 preset
 ├── gpt-5.5.ts           # GPT-5.5 preset — full-core rewrite via `corePrompt` (outcome-first, per the GPT-5.5 prompting guide)
 ├── gpt-5.6.ts           # GPT-5.6 series preset (sol/terra/luna) — full-core rewrite via `corePrompt`; Hephaestus-parity autonomous deep worker (implement-don't-propose, Manual QA Gate, binding stop contract: declared per-turn stop condition + Stop Goal) under GPT-5.6 doctrine
-├── claude-fable-5.ts    # Claude Fable 5 preset
-├── claude-opus-5.ts     # Claude Opus 5 preset — Opus 5 prompting-guide tuning + binding stop contract (declared stop condition in the routing line)
+├── claude-fable-5.ts    # Claude Fable 5 preset — dieted full-core rewrite via `corePrompt` (Fable 5 prompting guide; binding stop contract)
+├── claude-opus-5.ts     # Claude Opus 5 preset — dieted full-core rewrite via `corePrompt` (Opus 5 prompting-guide behaviors; binding stop contract)
 ├── claude-opus-4-5.ts   # Claude Opus 4.5 preset
 ├── claude-opus-4-6.ts   # Claude Opus 4.6 preset
 ├── claude-opus-4-7.ts   # Claude Opus 4.7 preset
@@ -55,7 +55,7 @@ export function buildGpt55Prompt(options: BuildDynamicSystemPromptOptions): stri
 
 Each preset is ~10 lines. The shared default in `dynamic-prompt/` carries identity, intent gate, exploration, parallel-tools, verification, policies, style. Preset only carries **what's different for that model family**.
 
-Exception: `gpt-5.5.ts`, `gpt-5.6.ts`, and `kimi-k3.ts` pass `corePrompt` instead of `tuningSection` — full core rewrites (GPT-5.5+ wants short, outcome-first prompts, not the shared scaffolding; GPT-5.6 additionally over-compresses under generic brevity wording, so its style rules are prioritization/preserve-first; Kimi K3 gets the shared contracts restated once each in a leaner Kimi-shaped core, because the K2-line guidance says duplicate strictness layered over its RL-tuned instruction following double-taxes into redundant verification loops). The 5.6 core is modeled on the oh-my-opencode Hephaestus GPT-5.6 prompt (autonomous deep worker: implement-don't-propose, Manual QA Gate, failure-recovery circuit breaker, stop rules), minus omo-only tool contracts. They still reuse `buildTestDisciplineSection()` (and, GPT-only, `buildFileOperationsTuning()`) plus the builder's dynamic assembly, so shared rules stay single-sourced.
+Exception: `gpt-5.5.ts`, `gpt-5.6.ts`, `kimi-k3.ts`, `claude-fable-5.ts`, and `claude-opus-5.ts` pass `corePrompt` instead of `tuningSection` — full core rewrites (the two Claude 5 presets are dieted per the Fable 5 prompting guide — strong instruction following makes the shared scaffolding over-prescriptive — and carry the binding declared-stop-condition contract) (GPT-5.5+ wants short, outcome-first prompts, not the shared scaffolding; GPT-5.6 additionally over-compresses under generic brevity wording, so its style rules are prioritization/preserve-first; Kimi K3 gets the shared contracts restated once each in a leaner Kimi-shaped core, because the K2-line guidance says duplicate strictness layered over its RL-tuned instruction following double-taxes into redundant verification loops). The 5.6 core is modeled on the oh-my-opencode Hephaestus GPT-5.6 prompt (autonomous deep worker: implement-don't-propose, Manual QA Gate, failure-recovery circuit breaker, stop rules), minus omo-only tool contracts. They still reuse `buildTestDisciplineSection()` (and, GPT-only, `buildFileOperationsTuning()`) plus the builder's dynamic assembly, so shared rules stay single-sourced.
 
 ## CONVENTIONS
 
