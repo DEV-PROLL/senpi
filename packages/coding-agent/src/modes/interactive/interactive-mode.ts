@@ -96,6 +96,7 @@ import { formatTimings, time } from "../../core/timings.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
+import { isRecoverableInspectorVmImportError } from "../../inspector-policy.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
@@ -4207,9 +4208,15 @@ export class InteractiveMode {
 	 * call ui.stop() to restore cooked mode, the cursor, and disable bracketed
 	 * paste / Kitty / modifyOtherKeys sequences.
 	 */
-	private uncaughtCrash(error: Error): never {
+	private uncaughtCrash(error: Error, origin: "uncaughtException" | "unhandledRejection"): void {
 		if (this.isShuttingDown) {
 			process.exit(1);
+		}
+		if (isRecoverableInspectorVmImportError(error, origin)) {
+			this.showWarning(
+				"Node Inspector dynamic import is unsupported; use require() or a target-side loader. Senpi kept running.",
+			);
+			return;
 		}
 		this.isShuttingDown = true;
 		try {
@@ -4270,7 +4277,8 @@ export class InteractiveMode {
 		// Restore the terminal before the process dies on any uncaught throw.
 		// Without this, an unhandled exception from extension code (or anywhere
 		// in pi) leaves the terminal in raw mode with no cursor.
-		const uncaughtExceptionHandler = (error: Error) => this.uncaughtCrash(error);
+		const uncaughtExceptionHandler = (error: Error, origin: "uncaughtException" | "unhandledRejection") =>
+			this.uncaughtCrash(error, origin);
 		process.prependListener("uncaughtException", uncaughtExceptionHandler);
 		this.signalCleanupHandlers.push(() => process.off("uncaughtException", uncaughtExceptionHandler));
 	}
