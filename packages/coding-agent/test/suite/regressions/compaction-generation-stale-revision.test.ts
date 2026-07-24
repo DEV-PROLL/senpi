@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
 import { AgentSession, type AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import type { ExtensionAPI, ExtensionRunner } from "../../../src/core/extensions/index.ts";
@@ -82,6 +83,7 @@ async function reloadHarnessFromSessionFile(
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 	const agent = new Agent({
 		getApiKey: () => "faux-key",
+		streamFn: streamSimple,
 		initialState: {
 			model,
 			systemPrompt: "You are a test assistant.",

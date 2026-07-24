@@ -34,8 +34,9 @@ import {
 	convertTools,
 	isThinkingPart,
 	mapStopReason,
-	mapToolChoice,
+	resolveGoogleFunctionCallingMode,
 	retainThoughtSignature,
+	supportsGoogleStrictToolSampling,
 	toProviderNativeContent,
 } from "./google-shared.ts";
 import { applyExtraBody, buildBaseOptions, GOOGLE_RESERVED_BODY_KEYS } from "./simple-options.ts";
@@ -483,21 +484,17 @@ function buildParams(
 		generationConfig.maxOutputTokens = options.maxTokens;
 	}
 
+	const functionCallingMode = context.tools?.length
+		? resolveGoogleFunctionCallingMode(context.tools, options.toolChoice, supportsGoogleStrictToolSampling(model.id))
+		: undefined;
 	const config: GenerateContentConfig = {
 		...(Object.keys(generationConfig).length > 0 && generationConfig),
 		...(context.systemPrompt && { systemInstruction: sanitizeSurrogates(context.systemPrompt) }),
 		...(context.tools && context.tools.length > 0 && { tools: convertTools(context.tools) }),
+		...(functionCallingMode !== undefined && {
+			toolConfig: { functionCallingConfig: { mode: functionCallingMode } },
+		}),
 	};
-
-	if (context.tools && context.tools.length > 0 && options.toolChoice) {
-		config.toolConfig = {
-			functionCallingConfig: {
-				mode: mapToolChoice(options.toolChoice),
-			},
-		};
-	} else {
-		config.toolConfig = undefined;
-	}
 
 	if (options.thinking?.enabled && model.reasoning) {
 		const thinkingConfig: ThinkingConfig = { includeThoughts: true };

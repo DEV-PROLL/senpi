@@ -11,6 +11,11 @@ export interface TerminalToolContext {
 	readonly defaultRows: number;
 	/** Resolve the environment for spawned sessions (mirrors core bash `getShellEnv`). */
 	readonly getEnv: () => NodeJS.ProcessEnv;
+	/**
+	 * Current extension session context (set on session_start/model_select), used to
+	 * expose PI_* session metadata to spawned commands like the core bash tool does.
+	 */
+	readonly getSessionContext?: () => import("../../../types.ts").ExtensionContext | undefined;
 	/** Notified when a background session exits, so the notify layer can wake the agent. */
 	readonly onBackgroundExit?: (id: string, runtime: TerminalRuntimeSession) => void;
 }

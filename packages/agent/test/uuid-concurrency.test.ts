@@ -1,5 +1,5 @@
+import { uuidv7 } from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
-import { uuidv7 } from "../src/harness/session/uuid.ts";
 
 const TIMESTAMP = 0x01_9d_00_00_00_00;
 const TASK_COUNT = 64;

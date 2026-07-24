@@ -1,3 +1,8 @@
+## App-server daemon launch diagnostics and hermetic lifecycle coverage (2026-07-24)
+
+- The daemon launcher now classifies websocket listener occupancy before spawn: a compatible app-server answers `initialize` and attaches, while any other TCP listener fails immediately with an `EADDRINUSE` diagnostic instead of consuming the child readiness budget. Child-process startup stderr still accompanies actual post-spawn failures, and each launch replaces stale diagnostics.
+- The real-CLI daemon lifecycle test isolates home/XDG state, verifies the pre-spawn occupied-port diagnostic and that it does not create a child stderr log, retries the bounded QA port pool, and awaits lock/process events rather than polling sleeps.
+
 ## Manual compaction keeps agent lifecycle subscription through abort (2026-07-24)
 
 - `core/agent-session.ts`: manual or extension-initiated compaction claims its synchronous admission/barrier first,

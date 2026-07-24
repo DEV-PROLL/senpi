@@ -19,6 +19,7 @@ import type {
 	Api,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
+	ConstrainedSamplingConfig,
 	Context,
 	FreeformToolFormat,
 	ImageContent,
@@ -31,6 +32,7 @@ import type {
 	SimpleStreamOptions,
 	TextContent,
 	ToolResultMessage,
+	Usage,
 } from "@earendil-works/pi-ai";
 import type {
 	AutocompleteItem,
@@ -382,6 +384,8 @@ export interface ExtensionContext {
 	model: Model<any> | undefined;
 	/** Current service tier for the active model (from -fast suffix or scoped model config) */
 	serviceTier: ServiceTier | undefined;
+	/** Current thinking level, when provided by the session runtime. */
+	thinkingLevel?: ThinkingLevel;
 	/** Whether the agent is idle (not streaming) */
 	isIdle(): boolean;
 	/** Whether project-local trust is active for this context. */
@@ -574,6 +578,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	parameters: TParams;
 	/** Optional OpenAI Responses freeform tool metadata. */
 	freeform?: FreeformToolFormat;
+	/** Optional provider-side constrained sampling request for this tool. Set false to explicitly disable it, equivalent to leaving it undefined. */
+	constrainedSampling?: false | ConstrainedSamplingConfig;
 	/** Controls whether ToolExecutionComponent renders the standard colored shell or the tool renders its own framing. */
 	renderShell?: "default" | "self";
 
@@ -1090,6 +1096,8 @@ interface ToolResultEventBase {
 	input: Record<string, unknown>;
 	content: (TextContent | ImageContent)[];
 	isError: boolean;
+	/** Usage from the tool execution itself, if available. */
+	usage?: Usage;
 }
 
 export interface BashToolResultEvent extends ToolResultEventBase {
@@ -1258,6 +1266,7 @@ export interface ToolResultEventResult {
 	content?: (TextContent | ImageContent)[];
 	details?: unknown;
 	isError?: boolean;
+	usage?: Usage;
 }
 
 export interface MessageEndEventResult {
@@ -1303,6 +1312,7 @@ export interface SessionBeforeTreeResult {
 	summary?: {
 		summary: string;
 		details?: unknown;
+		usage?: Usage;
 	};
 	/** Override custom instructions for summarization */
 	customInstructions?: string;

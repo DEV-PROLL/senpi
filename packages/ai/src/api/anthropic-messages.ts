@@ -36,10 +36,12 @@ import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
+import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
 
 import { resolveCloudflareBaseUrl } from "./cloudflare.ts";
+import { resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
 import {
 	ANTHROPIC_RESERVED_BODY_KEYS,
@@ -277,6 +279,7 @@ function getAnthropicCompat(
 		allowEmptySignature: model.compat?.allowEmptySignature ?? false,
 		unsignedThinkingReplay:
 			model.compat?.unsignedThinkingReplay ?? (model.compat?.allowEmptySignature ? "empty-signature" : "text"),
+		supportsStrictTools: model.compat?.supportsStrictTools ?? false,
 		supportsToolReferences: model.compat?.supportsToolReferences ?? defaultSupportsToolReferences(model),
 		// Default: first-party Anthropic only. Anthropic-compatible providers
 		// (kimi-coding, fireworks, copilot, gateways) may execute the server-side
@@ -371,6 +374,10 @@ function mergeHeaders(...headerSources: (Record<string, string | null> | undefin
 		}
 	}
 	return merged;
+}
+
+function hasAuthorizationHeader(headers?: Record<string, string>): boolean {
+	return Object.keys(headers ?? {}).some((name) => name.toLowerCase() === "authorization");
 }
 
 interface ServerSentEvent {
@@ -947,7 +954,8 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				isOAuth = false;
 			} else {
 				const apiKey = options?.apiKey;
-				if (!apiKey) {
+				const optionsHeaders = providerHeadersToRecord(options?.headers);
+				if (!apiKey && !hasAuthorizationHeader(optionsHeaders)) {
 					throw new Error(`No API key for provider: ${model.provider}`);
 				}
 
@@ -972,7 +980,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					apiKey,
 					options?.interleavedThinking ?? true,
 					shouldUseFineGrainedToolStreamingBeta(model, context),
-					providerHeadersToRecord(options?.headers),
+					optionsHeaders,
 					copilotDynamicHeaders,
 					cacheSessionId,
 					options?.env,
@@ -998,7 +1006,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				const requestOptions = {
 					...(options?.signal ? { signal: options.signal } : {}),
 					...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
-					maxRetries: options?.maxRetries ?? 0,
+					maxRetries: 0,
 					...(payloadRequestMetadata.headers ? { headers: payloadRequestMetadata.headers } : {}),
 				};
 				try {
@@ -1015,19 +1023,25 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					throw error;
 				}
 			};
-			let request: { params: MessageCreateParamsStreaming; response: Response };
-			try {
-				request = await createRequest();
-			} catch (error) {
-				if (unsignedThinkingReplay !== "text" && isInvalidUnsignedThinkingSignatureError(error)) {
-					unsignedThinkingReplay = "text";
-					if (fallbackKey) unsignedThinkingTextReplayFallbacks.add(fallbackKey);
-					request = await createRequest();
-				} else {
-					throw error;
-				}
-			}
-			const { response } = request;
+			const { response } = await retryProviderRequest(
+				async () => {
+					try {
+						return await createRequest();
+					} catch (error) {
+						if (unsignedThinkingReplay !== "text" && isInvalidUnsignedThinkingSignatureError(error)) {
+							unsignedThinkingReplay = "text";
+							if (fallbackKey) unsignedThinkingTextReplayFallbacks.add(fallbackKey);
+							return createRequest();
+						}
+						throw error;
+					}
+				},
+				{
+					maxRetries: options?.maxRetries,
+					maxRetryDelayMs: options?.maxRetryDelayMs,
+					signal: options?.signal,
+				},
+			);
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 
@@ -1339,7 +1353,7 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
 	const apiKey = options?.apiKey;
-	if (!apiKey) {
+	if (!apiKey && !hasAuthorizationHeader(providerHeadersToRecord(options?.headers))) {
 		throw new Error(`No API key for provider: ${model.provider}`);
 	}
 
@@ -1384,7 +1398,7 @@ function isOAuthToken(apiKey: string): boolean {
 
 function createClient(
 	model: Model<"anthropic-messages">,
-	apiKey: string,
+	apiKey: string | undefined,
 	interleavedThinking: boolean,
 	useFineGrainedToolStreamingBeta: boolean,
 	optionsHeaders?: Record<string, string>,
@@ -1454,7 +1468,7 @@ function createClient(
 	}
 
 	// OAuth: Bearer auth, Claude Code identity headers
-	if (isOAuthToken(apiKey)) {
+	if (apiKey && isOAuthToken(apiKey)) {
 		const client = new Anthropic({
 			apiKey: null,
 			authToken: apiKey,
@@ -1483,7 +1497,7 @@ function createClient(
 	const sessionAffinityHeaders: Record<string, string | null> =
 		sessionId && getAnthropicCompat(model).sendSessionAffinityHeaders ? { "x-session-affinity": sessionId } : {};
 	const client = new Anthropic({
-		apiKey,
+		apiKey: apiKey ?? null,
 		authToken: null,
 		baseURL: model.baseUrl,
 		dangerouslyAllowBrowser: true,
@@ -1596,9 +1610,17 @@ function buildParams(
 				immediateTools,
 				isOAuthToken,
 				compat.supportsEagerToolInputStreaming,
+				compat.supportsStrictTools,
 				compat.supportsCacheControlOnTools ? cacheControl : undefined,
 			),
-			...convertTools(deferredTools, isOAuthToken, compat.supportsEagerToolInputStreaming, undefined, true),
+			...convertTools(
+				deferredTools,
+				isOAuthToken,
+				compat.supportsEagerToolInputStreaming,
+				compat.supportsStrictTools,
+				undefined,
+				true,
+			),
 		];
 	}
 
@@ -1934,23 +1956,34 @@ function convertTools(
 	tools: Tool[],
 	isOAuthToken: boolean,
 	supportsEagerToolInputStreaming: boolean,
+	supportsStrictTools: boolean,
 	cacheControl?: CacheControlEphemeral,
 	deferLoading = false,
 ): Anthropic.Messages.Tool[] {
 	if (!tools) return [];
 
 	return tools.map((tool, index) => {
+		const strict = resolveJsonSchemaStrictSampling(tool, supportsStrictTools);
 		const schema = tool.parameters as { properties?: unknown; required?: string[] };
+		const legacyInputSchema = {
+			type: "object" as const,
+			properties: schema.properties ?? {},
+			required: schema.required ?? [],
+		};
+		const inputSchema =
+			strict === true
+				? {
+						...(tool.parameters as Record<string, unknown>),
+						...legacyInputSchema,
+					}
+				: legacyInputSchema;
 
 		return {
 			name: isOAuthToken ? toClaudeCodeName(tool.name) : tool.name,
 			description: tool.description,
 			...(supportsEagerToolInputStreaming ? { eager_input_streaming: true } : {}),
-			input_schema: {
-				type: "object",
-				properties: schema.properties ?? {},
-				required: schema.required ?? [],
-			},
+			...(strict === true ? { strict: true } : {}),
+			input_schema: inputSchema,
 			...(deferLoading ? { defer_loading: true } : {}),
 			...(cacheControl && index === tools.length - 1 ? { cache_control: cacheControl } : {}),
 		};
