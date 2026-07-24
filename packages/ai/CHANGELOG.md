@@ -34,6 +34,8 @@
 
 ### Changed
 
+- Changed Radius OAuth device authorization, token exchange, and refresh requests to use the configured gateway directly.
+
 ### Fixed
 
 - Updated e2e and xhigh reasoning tests to use `gpt-5.3-codex` after the regenerated model catalog rotated out `gpt-5.2-codex` and `gpt-5.1-codex-max` from the `openai` provider.
