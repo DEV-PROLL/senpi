@@ -1,3 +1,11 @@
+## Manual compaction keeps agent lifecycle subscription through abort (2026-07-24)
+
+- `core/agent-session.ts`: manual or extension-initiated compaction claims its synchronous admission/barrier first,
+  then aborts and waits for the active agent run while still subscribed. The abort's `agent_end` now clears the
+  active-run and retry state before compaction disconnects for summary generation; all disconnected exits reconnect.
+- Regression: `test/suite/compaction-race.test.ts` covers compaction during a live provider stream and asserts the
+  aborted `agent_end` precedes compaction startup without deadlocking future prompts.
+
 # changes
 
 ## Multi-session RPC mode, session-owned MCP/config-reload state, and back-compat guarantee (2026-07-23)

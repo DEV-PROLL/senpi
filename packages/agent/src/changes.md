@@ -1,5 +1,31 @@
 # Changes
 
+## 2026-07-23 - Session-owned post-agent_end queue drain suppression
+
+### What changed and why
+
+- `Agent` now exposes `suppressQueuedMessageDrain()` for the active run. It stops only the lifecycle-owned
+  post-`agent_end` steering/follow-up drain, retaining both queues without aborting the run signal.
+- `Agent` now exposes `continueWithQueuedMessages()` so compaction recovery can deliver retained steer/follow-up input
+  when custom context leaves the transcript tail non-assistant.
+- The coding-agent compaction admission gate uses this ownership transfer for required recovery. Real user aborts
+  continue to abort the active signal and retain the normal terminal semantics.
+- Scheduled continuation can revalidate a model changed by `session_compact`, recompact if required, and then deliver
+  retained queues without inventing an empty continuation turn.
+
+### Files modified
+
+- `agent.ts`
+- `../test/agent.test.ts`
+
+### Why the extension system could not handle this
+
+- Native queue draining and active-run signal ownership occur inside `Agent` after event subscribers return.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `agent.ts` active-run lifecycle and post-`agent_end` queue draining.
+
 ## 2026-07-23 - uuidv7 concurrency refutation + immutable launch profile
 
 ### What changed and why
@@ -35,7 +61,6 @@
 
 - LOW: `harness/session/uuid.ts` (unchanged production code; test is fork-only).
 - MEDIUM: `core/agent-session-runtime.ts` around `CreateAgentSessionRuntimeFactory` options.
-
 ## 2026-07-17 - Truncation-recovery flagged-call failure and proxy payload
 
 ### What changed and why

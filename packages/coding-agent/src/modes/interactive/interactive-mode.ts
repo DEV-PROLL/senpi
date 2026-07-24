@@ -234,6 +234,15 @@ function formatToolHookTerminalTitle(event: ToolHookStatusStartEvent): string {
 	return `${APP_TITLE} - ${hookName}: ${statusMessage}`;
 }
 
+function sanitizeTuiErrorMessage(value: string): string {
+	return value
+		.replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g, "")
+		.replace(/(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g, "")
+		.replace(/\r\n?/g, "\n")
+		.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")
+		.replace(/[ \t\f\v]+/g, " ");
+}
+
 type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }>;
 
 function isCustomSessionEntry(item: RenderSessionItem): item is Extract<SessionEntry, { type: "custom" }> {
@@ -418,6 +427,13 @@ export interface InteractiveModeOptions {
 }
 
 export class InteractiveMode {
+	private static restoreCompactionEscapeOverride(host: InteractiveMode): void {
+		if (!host.compactionEscapeOverrideActive) return;
+		host.defaultEditor.onEscape = host.autoCompactionEscapeHandler;
+		host.autoCompactionEscapeHandler = undefined;
+		host.compactionEscapeOverrideActive = false;
+	}
+
 	private runtimeHost: AgentSessionRuntime;
 	private options: InteractiveModeOptions;
 	private ui: TUI;
@@ -512,6 +528,7 @@ export class InteractiveMode {
 
 	// Auto-compaction state
 	private autoCompactionEscapeHandler?: () => void;
+	private compactionEscapeOverrideActive = false;
 	private autoCompactionProgressText = "";
 
 	// Auto-retry state
@@ -572,6 +589,7 @@ export class InteractiveMode {
 		this.options = options;
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
+			InteractiveMode.restoreCompactionEscapeOverride(this);
 			this.resetExtensionUI();
 		});
 		this.runtimeHost.setRebindSession(async () => {
@@ -1895,6 +1913,7 @@ export class InteractiveMode {
 	}
 
 	private async rebindCurrentSession(options: { renderBeforeBind?: boolean } = {}): Promise<void> {
+		InteractiveMode.restoreCompactionEscapeOverride(this);
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
 		this.applyRuntimeSettings();
@@ -3541,7 +3560,10 @@ export class InteractiveMode {
 					this.ui.terminal.setProgress(true);
 				}
 				// Keep editor active; submissions are queued during compaction.
-				this.autoCompactionEscapeHandler = this.defaultEditor.onEscape;
+				if (!this.compactionEscapeOverrideActive) {
+					this.autoCompactionEscapeHandler = this.defaultEditor.onEscape;
+					this.compactionEscapeOverrideActive = true;
+				}
 				this.defaultEditor.onEscape = () => {
 					this.session.abortCompaction();
 				};
@@ -3562,10 +3584,7 @@ export class InteractiveMode {
 				if (!nextText) break;
 				this.autoCompactionProgressText = nextText;
 				const preview = nextText.length > 4_000 ? `...${nextText.slice(nextText.length - 4_000)}` : nextText;
-				this.statusContainer.clear();
-				this.statusContainer.addChild(this.activeStatusIndicator);
-				this.statusContainer.addChild(new Spacer(1));
-				this.statusContainer.addChild(new Text(theme.fg("muted", preview), 1, 0));
+				this.activeStatusIndicator.setProgressText(sanitizeTerminalLabel(preview));
 				this.ui.requestRender();
 				break;
 			}
@@ -3574,22 +3593,19 @@ export class InteractiveMode {
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(false);
 				}
-				if (this.autoCompactionEscapeHandler) {
-					this.defaultEditor.onEscape = this.autoCompactionEscapeHandler;
-					this.autoCompactionEscapeHandler = undefined;
-				}
+				InteractiveMode.restoreCompactionEscapeOverride(this);
 				this.clearStatusIndicator("compaction");
 				this.autoCompactionProgressText = "";
 				if (event.aborted) {
 					// Prefer the extension-provided reason over the generic "cancelled"
 					// label so per-turn-cap / circuit-breaker / provider-error cancels are
 					// no longer indistinguishable from a user-triggered abort.
-					const cancelMessage = event.errorMessage ?? "Compaction cancelled";
+					const cancelMessage = sanitizeTerminalLabel(event.errorMessage ?? "Compaction cancelled");
 					if (event.reason === "manual") {
 						this.showError(cancelMessage);
 					} else if (event.errorMessage) {
 						this.chatContainer.addChild(new Spacer(1));
-						this.chatContainer.addChild(new Text(theme.fg("error", event.errorMessage), 1, 0));
+						this.chatContainer.addChild(new Text(theme.fg("error", cancelMessage), 1, 0));
 					} else {
 						this.showStatus("Auto-compaction cancelled");
 					}
@@ -3598,7 +3614,7 @@ export class InteractiveMode {
 					this.rebuildChatFromMessages();
 					this.addMessageToChat(
 						createCompactionSummaryMessage(
-							event.result.summary,
+							sanitizeTerminalLabel(event.result.summary),
 							event.result.tokensBefore,
 							new Date().toISOString(),
 							event.result.details,
@@ -3606,11 +3622,11 @@ export class InteractiveMode {
 					);
 					this.footer.invalidate();
 				} else if (event.errorMessage) {
+					const errorMessage = sanitizeTerminalLabel(event.errorMessage);
 					if (event.reason === "manual") {
-						this.showError(event.errorMessage);
+						this.showError(errorMessage);
 					} else {
-						this.chatContainer.addChild(new Spacer(1));
-						this.chatContainer.addChild(new Text(theme.fg("error", event.errorMessage), 1, 0));
+						this.chatContainer.addChild(new Text(theme.fg("error", errorMessage), 1, 0));
 					}
 				} else if (event.accepted === false) {
 					// Exhaustive fallback per plan Section 1: compaction_end must never fall
@@ -3625,7 +3641,12 @@ export class InteractiveMode {
 						this.chatContainer.addChild(new Text(theme.fg("error", message), 1, 0));
 					}
 				}
-				void this.flushCompactionQueue({ willRetry: event.willRetry });
+				// Only an accepted compaction transfers editor-owned input to the
+				// session. Rejections and aborts retain the draft for an explicit
+				// user retry while the UI cleanup above still always runs.
+				if (event.accepted === true || event.result !== undefined) {
+					void this.flushCompactionQueue({ willRetry: event.willRetry });
+				}
 				this.ui.requestRender();
 				break;
 			}
@@ -4440,7 +4461,7 @@ export class InteractiveMode {
 
 	showError(errorMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0));
+		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${sanitizeTuiErrorMessage(errorMessage)}`), 1, 0));
 		this.ui.requestRender();
 	}
 
@@ -6676,6 +6697,7 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
+		InteractiveMode.restoreCompactionEscapeOverride(this);
 		this.streamingReveal.stop();
 		this.toolResultReveal.stop();
 		if (this.settingsManager.getShowTerminalProgress()) {

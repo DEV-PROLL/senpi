@@ -91,7 +91,12 @@ export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 export type ServiceTier = "auto" | "flex" | "priority";
 // biome-ignore format: keep literal union alias consistent with nearby ServiceTier style.
 export type CompactionReason = "manual" | "threshold" | "overflow" | "pre_prompt" | "branch" | "extension";
-export type CompactionRejectionCause = "cancelled-by-extension" | "would-overflow" | "circuit-breaker" | "per-turn-cap";
+export type CompactionRejectionCause =
+	| "cancelled-by-extension"
+	| "would-overflow"
+	| "circuit-breaker"
+	| "per-turn-cap"
+	| "stale-revision";
 
 // ============================================================================
 // UI Context
@@ -331,6 +336,8 @@ export interface CompactOptions {
 export interface ApplyCompactionOptions {
 	reason: CompactionReason;
 	expectedRevision?: number;
+	/** The feedback operation that owns this apply, when one was begun. */
+	signal?: AbortSignal;
 }
 
 export type ApplyCompactionResult = { applied: true; reason: "ok" } | { applied: false; reason: "stale" | "rejected" };
@@ -341,12 +348,14 @@ export interface BeginCompactionOptions {
 
 export interface UpdateCompactionOptions {
 	reason: CompactionReason;
+	signal?: AbortSignal;
 	delta?: string;
 	text?: string;
 }
 
 export interface EndCompactionOptions {
 	reason: CompactionReason;
+	signal?: AbortSignal;
 	aborted?: boolean;
 	errorMessage?: string;
 }
@@ -405,6 +414,11 @@ export interface ExtensionContext {
 	sessionSettings: ExtensionSessionSettings;
 	/** Trigger compaction without awaiting completion. */
 	compact(options?: CompactOptions): void;
+	/**
+	 * Prepare a request-local provider context through the normal extension
+	 * boundary. Persisted session messages are never modified.
+	 */
+	prepareProviderRequest?(messages: AgentMessage[]): Promise<ProviderRequestPreparation>;
 	/** Start user-visible compaction feedback before an extension has a precomputed summary to apply. */
 	beginCompaction?(options: BeginCompactionOptions): AbortSignal | undefined;
 	/** Stream user-visible compaction content while an extension-generated summary is available. */
@@ -428,6 +442,13 @@ export interface ExtensionContext {
 	 * after the handler finished are ignored.
 	 */
 	updateToolHookStatus?(statusMessage: string): void;
+}
+
+/** Request-local transformations shared by normal and compaction provider calls. */
+export interface ProviderRequestPreparation {
+	messages: AgentMessage[];
+	transformPayload(payload: unknown): Promise<unknown>;
+	transformHeaders(headers: ProviderHeaders): Promise<ProviderHeaders>;
 }
 
 /**
@@ -802,6 +823,10 @@ export interface ContextEvent {
 export interface BeforeProviderRequestEvent {
 	type: "before_provider_request";
 	payload: unknown;
+	/** Effective request model after auth/base-url/upstream-model resolution. */
+	model?: Model<Api>;
+	/** Final header transform output for this request. Values are never persisted. */
+	headers?: ProviderHeaders;
 }
 
 /**
@@ -914,7 +939,7 @@ export interface ToolExecutionEndEvent {
 // Model Events
 // ============================================================================
 
-export type ModelSelectSource = "set" | "cycle" | "restore";
+export type ModelSelectSource = "set" | "cycle" | "restore" | "fallback" | "fallback-revert";
 
 /** Fired when a new model is selected */
 export interface ModelSelectEvent {

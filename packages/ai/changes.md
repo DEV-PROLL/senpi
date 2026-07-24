@@ -1,5 +1,59 @@
 # changes.md — ai
 
+## Carry non-enumerable context provenance through Responses conversion (2026-07-24)
+
+### What changed
+
+- `src/context-provenance.ts`: added request-local, non-enumerable message/item provenance tokens.
+- `src/api/openai-responses-shared.ts`: preserves those tokens while converting messages to Responses input items.
+- `src/types.ts` and `src/index.ts`: expose the typed provenance helpers needed by coding-agent's replay boundary.
+- `src/utils/openai-codex-auth.ts`: centralizes browser-safe ChatGPT account-ID extraction so normal Codex requests
+  and remote compaction canonicalize the same wire tenant across bearer-token refreshes.
+
+### Why
+
+- Provider-wire value equality cannot distinguish duplicated messages after filtering or injection. Replay slicing now
+  requires the exact checkpoint-origin identities to survive the canonical context pipeline.
+
+### Why extension system couldn't handle this
+
+- The provenance must survive conversion inside `packages/ai`, below extension-visible provider payloads.
+
+### Modified upstream files
+
+- `src/api/openai-responses-shared.ts`
+- `src/index.ts`
+- `src/types.ts`
+- `src/utils/openai-codex-auth.ts`
+
+### Expected merge conflict zones
+
+- MEDIUM: Responses message conversion and shared public types.
+
+## Export canonical OpenAI Responses message conversion (2026-07-24)
+
+### What changed
+
+- `src/index.ts`: exports `convertResponsesMessages` from the browser-safe root so coding-agent remote-compaction
+  replay can locate checkpoint boundaries with the exact conversion semantics used by the real provider pipeline.
+
+### Why
+
+- Counting checkpoint items with a separate converter could drop or duplicate the current prompt when errored/aborted
+  assistants, orphaned tool results, empty users, or provider-native blocks changed item cardinality.
+
+### Why extension system couldn't handle this
+
+- The boundary is defined by the provider wire conversion in `packages/ai`, below the coding-agent extension layer.
+
+### Modified upstream files
+
+- `src/index.ts`
+
+### Expected merge conflict zones
+
+- LOW: root exports if upstream reorganizes OpenAI Responses helpers.
+
 ## Commit generated model catalog data for reproducible builds (2026-07-18)
 
 ### What changed

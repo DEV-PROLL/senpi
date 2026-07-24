@@ -46,6 +46,7 @@ import { formatProviderError, normalizeProviderError } from "../utils/error-body
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord } from "../utils/headers.ts";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
+import { extractOpenAiCodexAccountId } from "../utils/openai-codex-auth.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
 import {
@@ -60,7 +61,6 @@ import {
 // ============================================================================
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
-const JWT_CLAIM_PATH = "https://api.openai.com/auth" as const;
 const DEFAULT_MAX_RETRIES = 0;
 const BASE_DELAY_MS = 1000;
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
@@ -1589,15 +1589,7 @@ async function parseErrorResponse(response: Response): Promise<{ message: string
 // ============================================================================
 
 function extractAccountId(token: string): string | undefined {
-	try {
-		const parts = token.split(".");
-		if (parts.length !== 3) return undefined;
-		const payload = JSON.parse(atob(parts[1]));
-		const accountId = payload?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
-		return typeof accountId === "string" && accountId.length > 0 ? accountId : undefined;
-	} catch {
-		return undefined;
-	}
+	return extractOpenAiCodexAccountId(token);
 }
 
 function createCodexRequestId(): string {

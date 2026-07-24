@@ -1,5 +1,9 @@
 import type { ServiceTier } from "../../types.ts";
-import { type OpenAiRemoteCompactionIdentity, parseOpenAiRemoteCompactionIdentity } from "./openai-remote-model.ts";
+import {
+	type OpenAiRemoteCompactionIdentity,
+	type OpenAiRemoteCompactionOrigin,
+	parseOpenAiRemoteCompactionIdentity,
+} from "./openai-remote-model.ts";
 
 export const OPENAI_REMOTE_COMPACTION_SCHEMA = "senpi.compaction.openai-remote.v1";
 
@@ -78,11 +82,30 @@ export type OpenAiRemoteCompactionDetails = OpenAiRemoteCompactionIdentity & {
 	requestInputItemCount: number;
 	retainedInputItemCount: number;
 	replacementInput: OpenAiRemoteInputItem[];
+	/** Absent in legacy checkpoints, which intentionally cannot use native replay. */
+	origin?: OpenAiRemoteCompactionOrigin;
 	usage?: Record<string, unknown>;
 };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseOpenAiRemoteCompactionOrigin(value: unknown): OpenAiRemoteCompactionOrigin | undefined {
+	if (!isRecord(value)) return undefined;
+	if (
+		typeof value.endpoint !== "string" ||
+		typeof value.trustDomain !== "string" ||
+		typeof value.authTenantFingerprint !== "string" ||
+		!value.authTenantFingerprint.startsWith("sha256:")
+	) {
+		return undefined;
+	}
+	return {
+		endpoint: value.endpoint,
+		trustDomain: value.trustDomain,
+		authTenantFingerprint: value.authTenantFingerprint,
+	};
 }
 
 export function getOpenAiRemoteCompactionDetails(value: unknown): OpenAiRemoteCompactionDetails | undefined {
@@ -107,6 +130,9 @@ export function getOpenAiRemoteCompactionDetails(value: unknown): OpenAiRemoteCo
 		requestInputItemCount: value.requestInputItemCount,
 		retainedInputItemCount: value.retainedInputItemCount,
 		replacementInput: value.replacementInput.filter((item): item is OpenAiRemoteInputItem => isRecord(item)),
+		...(parseOpenAiRemoteCompactionOrigin(value.origin)
+			? { origin: parseOpenAiRemoteCompactionOrigin(value.origin) }
+			: {}),
 		...(isRecord(value.usage) ? { usage: value.usage } : {}),
 	};
 }

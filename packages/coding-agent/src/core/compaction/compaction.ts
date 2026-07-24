@@ -752,6 +752,8 @@ export interface CompactionPreparation {
 export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
+	forceProgress = false,
+	allowSummaryOnly = false,
 ): CompactionPreparation | undefined {
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
 		return undefined;
@@ -779,7 +781,18 @@ export function prepareCompaction(
 		filterContextExcludedMessages(buildSessionContext(pathEntries).messages),
 	).tokens;
 
-	const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
+	let cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
+	if (forceProgress && cutPoint.firstKeptEntryIndex === boundaryStart) {
+		const nextCutPoint = findValidCutPoints(pathEntries, boundaryStart + 1, boundaryEnd)[0];
+		if (nextCutPoint !== undefined) {
+			const turnStartIndex = findTurnStartIndex(pathEntries, nextCutPoint, boundaryStart);
+			cutPoint = {
+				firstKeptEntryIndex: nextCutPoint,
+				turnStartIndex,
+				isSplitTurn: turnStartIndex !== -1,
+			};
+		}
+	}
 
 	// Get UUID of first kept entry
 	const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
@@ -806,7 +819,10 @@ export function prepareCompaction(
 		}
 	}
 
-	if (messagesToSummarize.length === 0 && turnPrefixMessages.length === 0) {
+	// A model switch can make an existing summary too large even when no new
+	// messages were added. The retry fallback path explicitly opts into
+	// regenerating that summary for its selected model's smaller context window.
+	if (messagesToSummarize.length === 0 && turnPrefixMessages.length === 0 && (!previousSummary || !allowSummaryOnly)) {
 		return undefined;
 	}
 

@@ -1,5 +1,29 @@
 # Core Extensions Changes
 
+## 2026-07-23 - Compaction feedback operation handles
+
+### What changed
+
+- `ExtensionContext` compaction feedback actions now return and accept an optional operation `AbortSignal`, allowing
+  progress and terminal feedback from superseded generations to be ignored without breaking existing extensions.
+  Each handler invocation receives an isolated context that remembers its own `beginCompaction()` signal and supplies
+  it to legacy `updateCompaction()`, `endCompaction()`, and `applyCompaction()` calls that omit the signal, so another
+  handler in the same event emission cannot rebind an old completion or durable apply to a newer operation.
+- `stale-revision` is a structured compaction rejection cause for a source that changed before durable append.
+- The builtin compaction extension threads that signal through local and remote summary generation and application.
+- `model_select` sources now distinguish fallback apply and fallback revert transitions, allowing model-scoped
+  extensions to update prompts and active tools before the retry request.
+- Builtin PreCompact diagnostics carry the active compaction request ID so their own feedback does not falsely trip the
+  source-revision guard; unrelated session or tool mutations remain stale-rejected.
+- `ExtensionRunner.prepareProviderRequest()` provides a request-local canonical path for compaction generation:
+  ordered `context` hooks, provider-body transforms, and header transforms run without mutating persisted messages.
+  The originating compaction handler is excluded to avoid recursive re-entry while later redaction hooks still run.
+
+### Why
+
+Asynchronous summary feedback can arrive after a newer compaction begins; operation identity prevents stale progress
+or completion from mutating the current session lifecycle.
+
 ## 2026-07-22 - Config-reload rejection loop breaker
 
 ### What changed

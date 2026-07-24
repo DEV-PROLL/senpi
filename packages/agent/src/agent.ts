@@ -171,6 +171,7 @@ type ActiveRun = {
 	promise: Promise<void>;
 	resolve: () => void;
 	abortController: AbortController;
+	suppressQueuedMessageDrain: boolean;
 };
 
 /**
@@ -325,6 +326,16 @@ export class Agent {
 	}
 
 	/**
+	 * Keep queued steering and follow-up messages for an external owner after
+	 * this run reaches agent_end, without changing the active abort signal.
+	 */
+	suppressQueuedMessageDrain(): void {
+		if (this.activeRun) {
+			this.activeRun.suppressQueuedMessageDrain = true;
+		}
+	}
+
+	/**
 	 * Resolve when the current run and all awaited event listeners have finished.
 	 *
 	 * This resolves after `agent_end` listeners settle.
@@ -355,6 +366,32 @@ export class Agent {
 		}
 		const messages = this.normalizePromptInput(input, images);
 		await this.runPromptMessages(messages);
+	}
+
+	/** Continue by delivering queued input first when a compaction leaves custom context at the tail. */
+	async continueWithQueuedMessages(): Promise<void> {
+		if (this.activeRun) {
+			throw new Error("Agent is already processing. Wait for completion before continuing.");
+		}
+
+		if (this._state.messages[this._state.messages.length - 1]?.role === "assistant") {
+			await this.continue();
+			return;
+		}
+
+		const queuedSteering = this.steeringQueue.drain();
+		if (queuedSteering.length > 0) {
+			await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true });
+			return;
+		}
+
+		const queuedFollowUps = this.followUpQueue.drain();
+		if (queuedFollowUps.length > 0) {
+			await this.runPromptMessages(queuedFollowUps);
+			return;
+		}
+
+		await this.continue();
 	}
 
 	/** Continue from the current transcript. The last message must be a user or tool-result message. */
@@ -505,7 +542,7 @@ export class Agent {
 		const promise = new Promise<void>((resolve) => {
 			resolvePromise = resolve;
 		});
-		this.activeRun = { promise, resolve: resolvePromise, abortController };
+		this.activeRun = { promise, resolve: resolvePromise, abortController, suppressQueuedMessageDrain: false };
 
 		this._state.isStreaming = true;
 		this._state.streamingMessage = undefined;
@@ -513,7 +550,11 @@ export class Agent {
 
 		try {
 			await executor(abortController.signal);
-			while (!abortController.signal.aborted && this.hasQueuedMessages()) {
+			while (
+				!abortController.signal.aborted &&
+				!this.activeRun?.suppressQueuedMessageDrain &&
+				this.hasQueuedMessages()
+			) {
 				await this.runQueuedMessagesAfterAgentEnd(abortController.signal);
 			}
 		} catch (error) {

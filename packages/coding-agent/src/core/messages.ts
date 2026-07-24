@@ -6,7 +6,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
+import { copyContextProvenance, type ImageContent, type Message, type TextContent } from "@earendil-works/pi-ai";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
@@ -156,6 +156,8 @@ export function createCustomMessage(
  * - Custom extensions and tools
  */
 export function convertToLlm(messages: AgentMessage[]): Message[] {
+	const withContextProvenance = <T extends Message>(source: AgentMessage, target: T): T =>
+		copyContextProvenance(source, target);
 	return messages
 		.map((m): Message | undefined => {
 			switch (m.role) {
@@ -164,37 +166,37 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 					if (m.excludeFromContext) {
 						return undefined;
 					}
-					return {
+					return withContextProvenance(m, {
 						role: "user",
 						content: [{ type: "text", text: bashExecutionToText(m) }],
 						timestamp: m.timestamp,
-					};
+					});
 				case "custom": {
 					if (isContextExcludedCustomMessage(m.customType)) {
 						return undefined;
 					}
 
 					const content = typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
-					return {
+					return withContextProvenance(m, {
 						role: "user",
 						content,
 						timestamp: m.timestamp,
-					};
+					});
 				}
 				case "branchSummary":
-					return {
+					return withContextProvenance(m, {
 						role: "user",
 						content: [{ type: "text" as const, text: BRANCH_SUMMARY_PREFIX + m.summary + BRANCH_SUMMARY_SUFFIX }],
 						timestamp: m.timestamp,
-					};
+					});
 				case "compactionSummary":
-					return {
+					return withContextProvenance(m, {
 						role: "user",
 						content: [
 							{ type: "text" as const, text: COMPACTION_SUMMARY_PREFIX + m.summary + COMPACTION_SUMMARY_SUFFIX },
 						],
 						timestamp: m.timestamp,
-					};
+					});
 				case "user":
 				case "assistant":
 				case "toolResult":

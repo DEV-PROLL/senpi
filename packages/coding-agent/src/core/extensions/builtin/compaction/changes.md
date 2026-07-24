@@ -1,4 +1,64 @@
+## Canonical remote compaction provenance and route ownership (2026-07-24)
+
+- `openai-remote-model.ts`: provenance now hashes the normalized endpoint and every final header by default. The only excluded volatile transport headers are `content-length`, `user-agent`, `request-id`, `x-request-id`, and `x-client-request-id`; raw values are never persisted. This binds non-Codex checkpoints to authorization plus final tenant/workspace routing headers.
+- Codex checkpoints instead bind to the JWT-derived `chatgpt-account-id` and every other final non-volatile header, deliberately excluding only the rotating `authorization` bearer value. Codex remote compaction now applies normal Responses header ordering: extension header transforms first, then configured authorization/account, originator, user agent, beta, and session/cache-affinity fields.
+- `agent-session.ts`: each compaction execution now proves its explicit auto/manual route controller still owns the operation before beginning lifecycle state. An auto compaction superseded during async auth admission publishes no lifecycle events and cannot disturb the newer manual operation.
+- Regressions: `test/compaction/canonical-routes.test.ts`, `test/suite/regressions/issue-296-openai-codex-remote-compaction.test.ts`, and `test/suite/compaction-race.test.ts` cover header routing differences, refresh-stable Codex account provenance, canonical override repair, and auth-admission supersession.
+
+## Replay remote checkpoints from final context payloads (2026-07-24)
+
+- `openai-remote.ts`: replay proves the checkpoint boundary by projecting the compaction-aware session prefix through
+  the same OpenAI Responses converter used by the real provider request, then requiring the final payload prefix to
+  match item-for-item. It only replaces a proven prefix; a context hook that inserts, removes, reorders, or changes a
+  checkpoint item declines native replay and sends the final transformed full payload unchanged. The post-checkpoint
+  suffix, including the in-flight prompt, always comes directly from that final payload and is never reconstructed
+  from persisted raw messages.
+- `openai-remote.ts`: both the direct compact endpoint and WebSocket route validate the final
+  `before_provider_request` replacement as an OpenAI compact body. Invalid replacements emit
+  `remote_fallback` with `invalid-compact-request-payload` and are rejected before transport, never retried with the
+  pre-hook payload.
+- Regressions: `test/compaction/canonical-routes.test.ts` covers a context hook that changes prefix cardinality and
+  confirms final-payload fallback, while `test/compaction/openai-remote-compaction.test.ts` covers invalid downstream
+  compact request replacements, final-payload redaction, and native/mixed-history provenance. The Codex regression
+  exercises the same proven-prefix replay path.
+- Repeated checkpoints project their prefix through the same compaction-aware branch view as normal session context,
+  excluding superseded older summaries before canonical Responses conversion.
+- Non-remote summarization runs context hooks on raw `AgentMessage` values before `convertToLlm`, preserving
+  role/customType-based redaction contracts while leaving persisted messages byte-identical.
+- Remote checkpoint provenance now records normalized endpoint/trust-domain identity plus a SHA-256 fingerprint of the
+  effective auth tenant (never raw credentials). Legacy, cross-endpoint, or cross-tenant entries decline replay.
+- Replay boundaries require non-enumerable message/item provenance to survive the canonical context pipeline. Missing,
+  duplicated, reordered, reconstructed, or mutated provenance keeps the final transformed full payload unchanged.
+
 # Builtin compaction extension changes
+
+## Active-tool-only summarization requests (2026-07-23)
+
+- `index.ts`: direct local summarization requests now map the current active tool names to registered definitions.
+  Inactive registered tools, including inactive MCP catalog entries, no longer consume remote compaction payload
+  budget or appear as callable tools to the summarizer.
+- Applied speculative summaries carry their handler's feedback signal, allowing core to reject a superseded apply
+  before durable session mutation.
+
+Expected upstream conflict zones: `builtin/compaction/index.ts` tool snapshot construction and
+`builtin/compaction/speculative.ts` apply path.
+
+## Session-owned compaction completion state (2026-07-23)
+
+- AgentSession now records compaction as `idle`, `running`, `completed`, `failed`, or `aborted` with a monotonic
+  generation and operation identity.
+- Compaction snapshots the current AgentSession model at operation start. If main-thread retry fallback selected a
+  different model, that active model performs compaction; there is no compaction-specific fallback policy.
+- Extension feedback starts the same operation before summary generation and carries its abort signal through
+  progress, application, and terminal feedback.
+- Stale or duplicate terminal events cannot overwrite a newer compaction operation.
+- Durable append is guarded by the current operation and controller identity.
+- Required compaction remains fail-closed when generation or application fails, including provider-confirmed overflow
+  that the local token estimate places below the configured threshold; rejected recovery restores the overflow
+  context so a later prompt cannot bypass the same requirement.
+
+Expected upstream conflict zones: `agent-session.ts` around compaction execution, abort handling, and status access;
+`core/compaction/lifecycle.ts`.
 
 ## Sanitize Anthropic tool pairs on direct summarization requests (2026-07-23)
 

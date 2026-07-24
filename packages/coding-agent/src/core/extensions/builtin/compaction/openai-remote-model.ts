@@ -1,4 +1,6 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import { createHash } from "node:crypto";
+import { arch, platform, release } from "node:os";
+import { type Api, extractOpenAiCodexAccountId, type Model } from "@earendil-works/pi-ai";
 
 export type OpenAiRemoteCompactionModel = Model<"openai-responses"> | Model<"openai-codex-responses">;
 
@@ -6,12 +8,33 @@ export type OpenAiRemoteCompactionIdentity =
 	| { provider: "openai"; api: "openai-responses" }
 	| { provider: "openai-codex"; api: "openai-codex-responses" };
 
-type RemoteCompactionAuth = {
-	apiKey?: string;
-	headers?: Record<string, string>;
+/** Non-secret remote state ownership persisted with a native checkpoint. */
+export type OpenAiRemoteCompactionOrigin = {
+	endpoint: string;
+	trustDomain: string;
+	authTenantFingerprint: string;
 };
 
-const OPENAI_CODEX_INSTALLATION_ID = crypto.randomUUID();
+type RemoteCompactionAuth = {
+	apiKey?: string;
+	headers?: Record<string, string | null | undefined>;
+};
+
+/**
+ * These headers carry request-local transport metadata only. All other final
+ * headers, including routing and security headers, scope replay provenance.
+ */
+const VOLATILE_TRANSPORT_HEADER_NAMES = new Set([
+	"content-length",
+	"user-agent",
+	"request-id",
+	"x-client-request-id",
+	"x-request-id",
+]);
+
+function defaultOpenAiRemoteCompactionBaseUrl(model: OpenAiRemoteCompactionModel): string {
+	return model.api === "openai-codex-responses" ? "https://chatgpt.com/backend-api" : "https://api.openai.com/v1";
+}
 
 function isTrustedOpenAiCodexBaseUrl(baseUrl: string | undefined): boolean {
 	try {
@@ -60,28 +83,67 @@ export function openAiRemoteCompactionEndpointPath(model: OpenAiRemoteCompaction
 }
 
 export function openAiRemoteCompactionEndpointUrl(model: OpenAiRemoteCompactionModel): string {
-	const defaultBaseUrl =
-		model.api === "openai-codex-responses" ? "https://chatgpt.com/backend-api" : "https://api.openai.com/v1";
-	const baseUrl = model.baseUrl || defaultBaseUrl;
+	const baseUrl = model.baseUrl || defaultOpenAiRemoteCompactionBaseUrl(model);
 	return new URL(
 		openAiRemoteCompactionEndpointPath(model),
 		baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
 	).toString();
 }
 
-function extractCodexAccountId(token: string): string | undefined {
+function normalizedOpenAiRemoteCompactionEndpoint(
+	model: OpenAiRemoteCompactionModel,
+): { endpoint: string; trustDomain: string } | undefined {
 	try {
-		const parts = token.split(".");
-		if (parts.length !== 3 || !parts[1]) return undefined;
-		const base64 = parts[1].replaceAll("-", "+").replaceAll("_", "/");
-		const payload: unknown = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")));
-		if (typeof payload !== "object" || payload === null) return undefined;
-		const auth = Reflect.get(payload, "https://api.openai.com/auth");
-		if (typeof auth !== "object" || auth === null) return undefined;
-		const accountId = Reflect.get(auth, "chatgpt_account_id");
-		return typeof accountId === "string" && accountId.length > 0 ? accountId : undefined;
+		const url = new URL(model.baseUrl || defaultOpenAiRemoteCompactionBaseUrl(model));
+		url.username = "";
+		url.password = "";
+		url.search = "";
+		url.hash = "";
+		url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+		const endpoint = url.pathname === "/" ? url.origin : url.toString().replace(/\/$/, "");
+		return { endpoint, trustDomain: url.origin };
 	} catch {
 		return undefined;
+	}
+}
+
+export function openAiRemoteCompactionOrigin(
+	model: OpenAiRemoteCompactionModel,
+	headers: Headers | Record<string, string | null | undefined>,
+): OpenAiRemoteCompactionOrigin | undefined {
+	const endpoint = normalizedOpenAiRemoteCompactionEndpoint(model);
+	if (!endpoint) return undefined;
+	const finalHeaders = headers instanceof Headers ? [...headers.entries()] : Object.entries(headers);
+	const codexAccountId = finalHeaders.find(([name]) => name.toLowerCase() === "chatgpt-account-id")?.[1];
+	if (model.api === "openai-codex-responses" && (typeof codexAccountId !== "string" || !codexAccountId)) {
+		return undefined;
+	}
+
+	const tenantMaterial = finalHeaders
+		.flatMap(([name, value]) => {
+			const normalizedName = name.toLowerCase();
+			if (typeof value !== "string" || VOLATILE_TRANSPORT_HEADER_NAMES.has(normalizedName)) return [];
+			// Codex access JWTs rotate frequently. Its account header is stable and
+			// remains in the fingerprint alongside every other final non-volatile
+			// routing or security decision.
+			if (model.api === "openai-codex-responses" && normalizedName === "authorization") return [];
+			return [`${normalizedName}\u0000${value.trim()}`];
+		})
+		.sort();
+	if (tenantMaterial.length === 0) return undefined;
+	return {
+		...endpoint,
+		authTenantFingerprint: `sha256:${createHash("sha256").update(tenantMaterial.join("\n")).digest("hex")}`,
+	};
+}
+
+function applyHeaders(
+	headers: Headers,
+	additionalHeaders: Record<string, string | null | undefined> | undefined,
+): void {
+	for (const [key, value] of Object.entries(additionalHeaders ?? {})) {
+		if (value === null || value === undefined) headers.delete(key);
+		else headers.set(key, value);
 	}
 }
 
@@ -90,30 +152,30 @@ export function createOpenAiRemoteCompactionHeaders(
 	auth: RemoteCompactionAuth,
 	sessionId?: string,
 ): Headers | undefined {
-	const headers = new Headers(auth.headers);
+	const headers = new Headers(model.headers);
+	applyHeaders(headers, auth.headers);
 	headers.set("content-type", "application/json");
 	if (model.api === "openai-codex-responses" && auth.apiKey) {
+		// This matches the final Codex request contract: header hooks may add
+		// routing headers, but cannot replace configured OAuth identity.
 		headers.set("authorization", `Bearer ${auth.apiKey}`);
+		const accountId = extractOpenAiCodexAccountId(auth.apiKey);
+		if (accountId) headers.set("chatgpt-account-id", accountId);
+		else headers.delete("chatgpt-account-id");
 	} else if (!headers.has("authorization") && auth.apiKey) {
 		headers.set("authorization", `Bearer ${auth.apiKey}`);
 	}
 	if (!headers.has("authorization")) return undefined;
 
 	if (model.api === "openai-codex-responses") {
-		const accountId = auth.apiKey ? extractCodexAccountId(auth.apiKey) : undefined;
-		if (accountId && !headers.has("chatgpt-account-id")) {
-			headers.set("chatgpt-account-id", accountId);
-		}
-		if (sessionId) {
-			headers.set("session_id", sessionId);
-			headers.set("session-id", sessionId);
-			headers.set("thread-id", sessionId);
-			headers.set("x-codex-installation-id", OPENAI_CODEX_INSTALLATION_ID);
-			headers.set("x-codex-window-id", `${sessionId}:0`);
-		}
 		headers.set("originator", "senpi");
-		headers.set("user-agent", "senpi");
+		headers.set("user-agent", `senpi (${platform()} ${release()}; ${arch()})`);
 		headers.set("OpenAI-Beta", "responses=experimental");
+		headers.set("accept", "text/event-stream");
+		if (sessionId) {
+			headers.set("session-id", sessionId);
+			headers.set("x-client-request-id", sessionId);
+		}
 	}
 	return headers;
 }

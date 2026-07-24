@@ -50,6 +50,21 @@ import {
 	createCustomMessage,
 } from "./messages.ts";
 
+const contextMessageEntryIds = new WeakMap<object, string>();
+
+/** Request-local field carried across context hooks; never persisted or sent to providers. */
+export const SESSION_CONTEXT_ENTRY_ID = "__piSessionContextEntryId";
+
+function withContextEntryId<T extends AgentMessage>(entryId: string, message: T): T {
+	contextMessageEntryIds.set(message, entryId);
+	return message;
+}
+
+/** Entry identity for a transient message projected from session history. */
+export function getSessionContextEntryId(message: AgentMessage): string | undefined {
+	return contextMessageEntryIds.get(message);
+}
+
 export interface UsageTotals {
 	input: number;
 	output: number;
@@ -433,20 +448,28 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 			(message.role === "user" || message.role === "assistant" || message.role === "toolResult") &&
 			message.content == null
 		) {
-			return [{ ...message, content: [] }];
+			return [withContextEntryId(entry.id, { ...message, content: [] })];
 		}
-		return [message];
+		return [withContextEntryId(entry.id, message)];
 	}
 	if (entry.type === "custom_message") {
 		return [
-			createCustomMessage(entry.customType, entry.content ?? [], entry.display, entry.details, entry.timestamp),
+			withContextEntryId(
+				entry.id,
+				createCustomMessage(entry.customType, entry.content ?? [], entry.display, entry.details, entry.timestamp),
+			),
 		];
 	}
 	if (entry.type === "branch_summary" && entry.summary) {
-		return [createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp)];
+		return [withContextEntryId(entry.id, createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp))];
 	}
 	if (entry.type === "compaction") {
-		return [createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp, entry.details)];
+		return [
+			withContextEntryId(
+				entry.id,
+				createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp, entry.details),
+			),
+		];
 	}
 	return [];
 }
@@ -486,6 +509,10 @@ export function buildContextEntries(
 	let foundFirstKept = false;
 	for (let i = 0; i < compactionIdx; i++) {
 		const entry = path[i];
+		// The latest summary supersedes every older compaction summary. Older
+		// entries selected by firstKeptEntryId remain verbatim, but nesting a
+		// prior summary here would double-count it in the model context.
+		if (entry.type === "compaction") continue;
 		if (entry.id === compaction.firstKeptEntryId) {
 			foundFirstKept = true;
 		}
@@ -878,6 +905,12 @@ export class SessionManager {
 	private flushed: boolean = false;
 	private fileEntries: FileEntry[] = [];
 	private byId: Map<string, SessionEntry> = new Map();
+	// Runtime-only identity tracking lets AgentSession compare messages to a
+	// compaction boundary by append order rather than provider timestamps.
+	// Materialized persisted messages are bound as they are read; only pending
+	// messages that have not reached a session entry use AgentSession's fallback.
+	private entryOrdersById: Map<string, number> = new Map();
+	private messageEntryPositions = new WeakMap<AgentMessage, { entryId: string; order: number }>();
 	private labelsById: Map<string, string> = new Map();
 	private labelTimestampsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
@@ -978,6 +1011,8 @@ export class SessionManager {
 		this.fileEntries = [header];
 		this.residentStore.clear();
 		this.byId.clear();
+		this.entryOrdersById.clear();
+		this.messageEntryPositions = new WeakMap();
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
 		this.leafId = null;
@@ -1002,6 +1037,8 @@ export class SessionManager {
 
 	private _buildIndex(): void {
 		this.byId.clear();
+		this.entryOrdersById.clear();
+		this.messageEntryPositions = new WeakMap();
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
 		this.leafId = null;
@@ -1014,9 +1051,10 @@ export class SessionManager {
 			cost: 0,
 			latestCacheHitRate: undefined,
 		};
-		for (const entry of this.fileEntries) {
+		for (const [order, entry] of this.fileEntries.entries()) {
 			if (entry.type === "session") continue;
 			this.byId.set(entry.id, entry);
+			this.entryOrdersById.set(entry.id, order);
 			this.leafId = entry.id;
 			this._accumulateUsage(entry);
 			if (entry.type === "session_info") {
@@ -1109,10 +1147,22 @@ export class SessionManager {
 		const residentEntry = this.residentStore.externalize(entry);
 		this.fileEntries.push(residentEntry);
 		this.byId.set(residentEntry.id, residentEntry);
+		this.entryOrdersById.set(residentEntry.id, this.fileEntries.length - 1);
 		this.leafId = residentEntry.id;
 		this._accumulateUsage(residentEntry);
 		this.mutationCount++;
 		this._persist(residentEntry);
+	}
+
+	private _materializeEntry(entry: SessionEntry): SessionEntry {
+		const materialized = this.residentStore.materialize(entry);
+		if (materialized.type === "message") {
+			const order = this.entryOrdersById.get(materialized.id);
+			if (order !== undefined) {
+				this.messageEntryPositions.set(materialized.message, { entryId: materialized.id, order });
+			}
+		}
+		return materialized;
 	}
 
 	/**
@@ -1158,7 +1208,21 @@ export class SessionManager {
 			message,
 		};
 		this._appendEntry(entry);
+		const order = this.entryOrdersById.get(entry.id);
+		if (order !== undefined) {
+			this.messageEntryPositions.set(message, { entryId: entry.id, order });
+		}
 		return entry.id;
+	}
+
+	/** Runtime append position for this exact persisted message object, if known. */
+	getMessageEntryPosition(message: AgentMessage): Readonly<{ entryId: string; order: number }> | undefined {
+		return this.messageEntryPositions.get(message);
+	}
+
+	/** Runtime/file append position for an entry, used with getMessageEntryPosition(). */
+	getEntryOrder(entryId: string): number | undefined {
+		return this.entryOrdersById.get(entryId);
 	}
 
 	/** Append a thinking level change as child of current leaf, then advance leaf. Returns entry id. */
@@ -1295,12 +1359,12 @@ export class SessionManager {
 
 	getLeafEntry(): SessionEntry | undefined {
 		const entry = this.leafId ? this.byId.get(this.leafId) : undefined;
-		return entry ? this.residentStore.materialize(entry) : undefined;
+		return entry ? this._materializeEntry(entry) : undefined;
 	}
 
 	getEntry(id: string): SessionEntry | undefined {
 		const entry = this.byId.get(id);
-		return entry ? this.residentStore.materialize(entry) : undefined;
+		return entry ? this._materializeEntry(entry) : undefined;
 	}
 
 	/**
@@ -1310,7 +1374,7 @@ export class SessionManager {
 		const children: SessionEntry[] = [];
 		for (const entry of this.byId.values()) {
 			if (entry.parentId === parentId) {
-				children.push(this.residentStore.materialize(entry));
+				children.push(this._materializeEntry(entry));
 			}
 		}
 		return children;
@@ -1371,7 +1435,7 @@ export class SessionManager {
 		const startId = fromId ?? this.leafId;
 		let current = startId ? this.byId.get(startId) : undefined;
 		while (current) {
-			path.unshift(this.residentStore.materialize(current));
+			path.unshift(this._materializeEntry(current));
 			current = current.parentId ? this.byId.get(current.parentId) : undefined;
 		}
 		if (fromId === undefined) {
@@ -1451,7 +1515,7 @@ export class SessionManager {
 		}
 		const entries = this.fileEntries
 			.filter((e): e is SessionEntry => e.type !== "session")
-			.map((entry) => this.residentStore.materialize(entry));
+			.map((entry) => this._materializeEntry(entry));
 		this.entriesCache = { mutation: this.mutationCount, entries };
 		return entries;
 	}

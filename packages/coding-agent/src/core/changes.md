@@ -1,5 +1,65 @@
 # changes
 
+## Session-owned compaction lifecycle (2026-07-23)
+
+### What changed
+
+- `agent-session.ts` now holds a monotonic compaction lifecycle coordinator that snapshots the active model and
+  controller at operation start, rejects stale completion/feedback, and retains the terminal result until another
+  operation begins. Feedback-only aborts publish one terminal event, and accepted completions publish their terminal
+  event before `session_compact` handlers can begin a fresh operation.
+- Durable append now rejects a generation whose message revision or agent-message snapshot changed during preparation
+  or summary generation (`stale-revision`), preserving intervening context without duplicate replay.
+- Required compaction uses one provider-admission gate for normal prompts, extension-triggered turns, and every next
+  turn. Provider-confirmed overflow remains fail-closed even when the local token estimate is below the configured
+  threshold; `agent_end` synchronously transfers both silent-overflow and threshold-compaction continuation ownership
+  to `AgentSession` before agent-core can drain native queues, and failed recovery restores the overflow context so
+  later prompts cannot bypass the same requirement.
+- Next-turn snapshots reapply the live active tools and effective per-run system prompt after asynchronous preparation,
+  so a tool removed during the turn is neither advertised nor executable by the following provider request.
+- Required ownership now suppresses only agent-core's post-`agent_end` queue drain, not the run abort signal. Deferred
+  extension dispatch retains the real source signal, so compaction ownership does not masquerade as user cancellation.
+- Retry and fallback admission resolve required compaction first; rejected recovery retains native queues without
+  dispatching a provider retry. Active-tool changes advance the context revision and abort active core compaction so
+  summaries prepared against a prior tool set cannot apply.
+- Fallback apply/revert transitions emit typed model-selection events, rebuild model-scoped tools and prompts, abort
+  compaction prepared for the prior model, and re-run required compaction against the selected model's context window
+  before retrying.
+- Message objects are associated with their persisted session-entry order. Compaction-boundary checks use that order
+  (and treat pending `message_end` persistence as post-boundary) instead of relying only on payload timestamps.
+- Session reload materialization restores those message-to-entry associations, so older payload timestamps cannot
+  bypass post-compaction admission after reopening a session.
+- When a late queue triggers compaction after a host `prepareNextTurnWithContext` callback, the callback is replayed
+  once against the compacted context so its message filtering/injection contract reaches the provider request.
+- Every compaction execution receives its route-owned controller explicitly. Auto compaction cannot promote unrelated
+  extension feedback, and superseded feedback controller references are released even when their stale terminal
+  callback never arrives.
+- Post-retry and post-compaction usage exemptions suppress only stale threshold accounting. Provider-confirmed
+  overflow always retains queue ownership and runs fail-closed recovery.
+- Extension-originated provider turns now wait behind active session work and manual compaction. `clearQueue()` clears
+  both native and post-compaction deferred ownership layers, preventing canceled steer/follow-up input from resurfacing.
+- Provider admission is checked again after assembling `nextTurn` and `before_agent_start` custom messages. Rejected
+  compaction restores one-shot additions transactionally; accepted compaction rebuilds and rechecks the final visible
+  request before the provider is called.
+- Request-local context provenance is attached non-enumerably to message identities and removed from persisted/session
+  JSON. Remote replay uses it to prove the exact checkpoint boundary after filtering, injection, or reordering.
+- Trigger-turn custom messages serialize behind manual/extension compaction before they are appended or sent.
+  Scheduled continuation revalidates the canonical context against any model selected by `session_compact`, retaining
+  queues when the smaller model requires rejected re-compaction.
+- Manual and extension compaction claim a synchronous pending-admission barrier before their first await, closing the
+  same-tick window where a trigger-turn custom message could overtake startup. Retry continuation failures that occur
+  before provider dispatch now settle retry/idle state and retain queues instead of hanging the session.
+- Fire-and-forget `session_start` messages defer past replacement-session work without being discarded as stale.
+
+### Why extension system couldn't handle this alone
+
+- Model selection, durable session append, provider-overflow recovery, controller ownership, and prompt admission are
+  private `AgentSession` lifecycle boundaries.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts` compaction execution, pre-prompt recovery, abort handling, and extension context bindings.
+
 ## Streaming steer/followUp submissions bypass the session-work barrier (2026-07-21)
 
 ### What changed

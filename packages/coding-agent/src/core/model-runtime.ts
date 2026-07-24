@@ -90,6 +90,16 @@ function mergeHeaders(
 	return merged;
 }
 
+function withPayloadRequestMetadata(options: StreamOptions, model: Model<Api>): StreamOptions {
+	if (!options.onPayload) return options;
+	const onPayload = options.onPayload;
+	return {
+		...options,
+		onPayload: async (payload, providerModel) =>
+			await onPayload(payload, providerModel, { model, headers: options.headers ?? {} }),
+	};
+}
+
 /** Configured pi-ai Models collection used by coding-agent and SDK consumers. */
 export class ModelRuntime implements Models {
 	private readonly models: MutableModels;
@@ -524,7 +534,7 @@ export class ModelRuntime implements Models {
 			const inner = prepared.provider.stream(
 				prepared.model as Model<TApi>,
 				context,
-				prepared.options as ApiStreamOptions<TApi>,
+				withPayloadRequestMetadata(prepared.options, prepared.model) as ApiStreamOptions<TApi>,
 			);
 			return shouldRecoverTextToolCalls(model) && context.tools?.length
 				? wrapStreamWithInvokeRecovery(inner, context.tools)
@@ -542,7 +552,11 @@ export class ModelRuntime implements Models {
 	streamSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): AssistantMessageEventStream {
 		return lazyStream(model, async () => {
 			const prepared = await this.prepareRequest(model, options);
-			const inner = prepared.provider.streamSimple(prepared.model, context, prepared.options as SimpleStreamOptions);
+			const inner = prepared.provider.streamSimple(
+				prepared.model,
+				context,
+				withPayloadRequestMetadata(prepared.options, prepared.model) as SimpleStreamOptions,
+			);
 			return shouldRecoverTextToolCalls(model) && context.tools?.length
 				? wrapStreamWithInvokeRecovery(inner, context.tools)
 				: inner;

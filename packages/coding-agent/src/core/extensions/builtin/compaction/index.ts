@@ -3,7 +3,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
-import { buildContextEntries, type CompactionEntry, sessionEntryToContextMessages } from "../../../session-manager.ts";
+import type { CompactionEntry } from "../../../session-manager.ts";
 import type { ContextUsage, ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "../../types.ts";
 import * as checkpointState from "./checkpoint-state.ts";
 import * as breaker from "./circuit-breaker.ts";
@@ -20,11 +20,16 @@ import {
 	resetOnSessionCompact,
 } from "./degradation-monitor.ts";
 import {
+	markOpenAiRemoteReplayBoundary,
 	rewriteOpenAiPayloadWithRemoteCompaction,
 	runOpenAiRemoteCompaction,
 	SENPI_COMPACTION_EVENT,
 } from "./openai-remote.ts";
-import { isOpenAiRemoteCompactionModel } from "./openai-remote-model.ts";
+import {
+	createOpenAiRemoteCompactionHeaders,
+	isOpenAiRemoteCompactionModel,
+	openAiRemoteCompactionOrigin,
+} from "./openai-remote-model.ts";
 import * as cap from "./per-turn-cap.ts";
 import * as policy from "./policy.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
@@ -112,7 +117,7 @@ function endCompactionFeedback(
 	result: SpeculativeCompactionResult,
 ): void {
 	if (shouldEndFeedback(result)) {
-		ctx.endCompaction?.({ reason: "extension", aborted: signal?.aborted });
+		ctx.endCompaction?.({ reason: "extension", signal, aborted: signal?.aborted });
 	}
 }
 
@@ -147,10 +152,6 @@ function createBlockingRemoteCompactionEvent(
 
 export default function compactionExtension(pi: ExtensionAPI): void {
 	let state: CompactionExtensionState = createInitialState();
-	// Messages not yet persisted in the session branch (the in-flight prompt),
-	// captured at context-assembly time so the remote-compaction payload replay
-	// can append them after the branch-derived items.
-	let pendingProviderMessages: AgentMessage[] = [];
 	const degradationState = createDegradationMonitorState();
 	const restorationState = state.restoration ?? restoration.createRestorationTrackerState();
 	state = { ...state, restoration: restorationState };
@@ -166,13 +167,13 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 	const pendingMetadata = new Map<string, PendingCompactionMetadata>();
 
 	function getSummarizationTools(): Tool[] {
-		if (typeof pi.getAllTools !== "function") return [];
+		if (typeof pi.getAllTools !== "function" || typeof pi.getActiveTools !== "function") return [];
 		try {
-			return pi.getAllTools().map((tool) => ({
-				name: tool.name,
-				description: tool.description,
-				parameters: tool.parameters,
-			}));
+			const definitionsByName = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
+			return pi.getActiveTools().flatMap((name) => {
+				const tool = definitionsByName.get(name);
+				return tool ? [{ name: tool.name, description: tool.description, parameters: tool.parameters }] : [];
+			});
 		} catch {
 			// Tool registry not bound yet (extension still loading); the summary
 			// request simply goes out without tool definitions.
@@ -254,6 +255,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 							remoteSnapshot,
 							() => speculativeGeneration,
 							remoteCompaction,
+							feedbackSignal,
 						);
 						endCompactionFeedback(ctx, feedbackSignal, result);
 						return result;
@@ -275,6 +277,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 					pendingJob.snapshot,
 					() => speculativeGeneration,
 					compaction,
+					feedbackSignal,
 				);
 				if (result.applied || result.reason === "stale") {
 					speculativeJob = undefined;
@@ -301,7 +304,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 			let compaction: CompactionResult | undefined;
 			try {
 				compaction = await runExtensionCompaction(ctx, snapshot, feedbackSignal, (delta) =>
-					ctx.updateCompaction?.({ reason: "extension", delta }),
+					ctx.updateCompaction?.({ reason: "extension", signal: feedbackSignal, delta }),
 				);
 			} catch (error) {
 				// Auto-path parity: summary-generation failures (missing credentials,
@@ -310,13 +313,20 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 				// the session_before_compact route.
 				if (!(error instanceof SummaryGenerationError)) throw error;
 			}
-			const result = await applyGeneratedCompaction(ctx, snapshot, () => speculativeGeneration, compaction);
+			const result = await applyGeneratedCompaction(
+				ctx,
+				snapshot,
+				() => speculativeGeneration,
+				compaction,
+				feedbackSignal,
+			);
 			endCompactionFeedback(ctx, feedbackSignal, result);
 			return result;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			ctx.endCompaction?.({
 				reason: "extension",
+				signal: feedbackSignal,
 				aborted: feedbackSignal?.aborted,
 				errorMessage: `Compaction failed: ${message}`,
 			});
@@ -369,7 +379,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 		let compaction: CompactionResult | undefined;
 		try {
 			compaction = await runExtensionCompaction(ctx, snapshot, event.signal, (delta) =>
-				ctx.updateCompaction?.({ reason: event.reason, delta }),
+				ctx.updateCompaction?.({ reason: event.reason, signal: event.signal, delta }),
 			);
 		} catch (error) {
 			// Surface the real provider failure (e.g. a policy refusal or rate
@@ -477,14 +487,6 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("context", (event, ctx) => {
-		// Messages beyond the persisted branch history are the in-flight prompt;
-		// stash them so the remote-compaction payload replay can append them.
-		const branchEntries = typeof ctx.sessionManager.getBranch === "function" ? ctx.sessionManager.getBranch() : [];
-		const historyMessageCount = buildContextEntries(branchEntries).flatMap((entry) =>
-			sessionEntryToContextMessages(entry),
-		).length;
-		pendingProviderMessages = event.messages.slice(historyMessageCount);
-
 		const usage = ctx.getContextUsage();
 		const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 		const promptContextWindow = getPromptContextWindow(contextWindow, ctx.model?.maxTokens);
@@ -496,13 +498,36 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 			? reduceContextMessages(event.messages, BUILTIN_CONTEXT_REDUCTION_OPTIONS).messages
 			: event.messages;
 		const emergency = hardLimitEmergencyPrune(sourceMessages, promptContextWindow);
-		return { messages: repairOrphanedToolResults(convertToLlm(emergency.messages)) };
+		const marked = markOpenAiRemoteReplayBoundary(emergency.messages, {
+			model: ctx.model,
+			branchEntries: ctx.sessionManager.getBranch(),
+		});
+		return { messages: repairOrphanedToolResults(convertToLlm(marked)) };
 	});
 
-	pi.on("before_provider_request", (event, ctx) => {
+	pi.on("before_provider_request", async (event, ctx) => {
+		const model = event.model ?? ctx.model;
+		if (!isOpenAiRemoteCompactionModel(model)) return undefined;
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+		if (!auth.ok) return undefined;
+		const effectiveModel =
+			auth.upstreamModelId || auth.baseUrl
+				? {
+						...model,
+						...(auth.upstreamModelId ? { id: auth.upstreamModelId } : {}),
+						...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}),
+					}
+				: model;
+		const headers = createOpenAiRemoteCompactionHeaders(
+			effectiveModel,
+			{ ...auth, headers: event.headers ?? auth.headers },
+			ctx.sessionManager.getSessionId(),
+		);
+		if (!headers) return undefined;
+		const origin = openAiRemoteCompactionOrigin(effectiveModel, headers);
 		return rewriteOpenAiPayloadWithRemoteCompaction(
 			event.payload,
-			{ model: ctx.model, branchEntries: ctx.sessionManager.getBranch(), pendingMessages: pendingProviderMessages },
+			{ model: effectiveModel, branchEntries: ctx.sessionManager.getBranch(), origin },
 			(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
 		);
 	});
