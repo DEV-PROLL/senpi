@@ -4326,6 +4326,7 @@ export class AgentSession {
 		this._claimCompactionController(autoCompactionController, "auto");
 		const endBeforeExecution = (): false => {
 			this._emit({ type: "compaction_start", reason });
+			if (!this._ownsCompactionController(autoCompactionController, "auto")) return false;
 			if (reason === "overflow") this._overflowRecoveryAttempted = false;
 			this._emit({
 				type: "compaction_end",
