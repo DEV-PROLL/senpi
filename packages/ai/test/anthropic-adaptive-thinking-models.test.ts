@@ -12,7 +12,10 @@ const EXPECTED_CURRENT_ADAPTIVE_THINKING_MODELS = [
 	"kimi-coding/k3",
 	"kimi-coding/kimi-for-coding-highspeed",
 	"opencode/claude-opus-4-8",
+	"opencode/claude-opus-5",
 	"vercel-ai-gateway/anthropic/claude-opus-4.8",
+	"vercel-ai-gateway/anthropic/claude-opus-5",
+	"vercel-ai-gateway/anthropic/claude-opus-5-fast",
 	"vercel-ai-gateway/anthropic/claude-sonnet-5",
 ];
 
