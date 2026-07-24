@@ -1,5 +1,29 @@
 # prompt-preset Extension Changes
 
+## Claude Fable 5 dieted full-core rewrite + binding stop contract (2026-07-24)
+
+### What changed
+
+- `claude-fable-5.ts`: replaced the shared-core-plus-`tuningSection` shape with a full core rewrite via the `corePrompt` override (the documented full-rewrite path; same shape as `gpt-5.5.ts` / `gpt-5.6.ts` / `grok-4.5.ts`). The static prompt shrinks from 7,765 to 6,608 chars (~-290 tokens, -14.9%; -20.6% like-for-like before the stop-contract addition) with every behavior of the previous prompt preserved — verified by a 55-probe regex audit over the rendered before/after prompts (identity, routing line, anti-leakage guard, all six intent-routing rows, the five scope rules, turn-local reset, context-completion gate, parallel waves, exploration stop rules, verification tiers, all six shared test-discipline rules, claim audit, all hard blocks and anti-patterns, execution stance, style and summary rules, context-limit continuation; negative probes for `apply_patch` and Kimi filler-verification leakage).
+- Diet mechanics, per the Fable 5 prompting guide (instruction following is strong enough that one brief instruction steers behavior older models needed an enumerated list for; prompts written for prior models are often too prescriptive and can degrade output): the tuning's duplicated rule families are merged into the core and stated once (act-on-enough-info into Working the Task, claim-audit into Verification, outcome-first summary and context-limit continuation into Style), the 6-row intent table plus 5 scope bullets compress into 3 decision rules carrying the same routing behaviors, and enumerated example lists trim to one defining example per category.
+- **Binding stop contract** (explicit fork direction, mirroring `claude-opus-5.ts` / `gpt-5.6.ts`): the routing line gains "I'll stop when [the exact, observable condition that ends this turn]" — an observable end state, not a step count; binding once declared; when it holds: check against already-captured evidence, deliver the final message, stop ("anything past it ... is a defect, not diligence"). The context-limit line is retargeted at it ("Continue the work until your declared stop condition holds"). Fable 5's documented early-stopping and high-effort over-deliberation failure modes are both stop-goal misalignment, so one contract covers both directions.
+- Shared pieces stay single-sourced: `buildTestDisciplineSection()`, the rendered tool section via `DynamicPromptCoreContext`, the grep/glob specialized-search line via `getToolsPromptDisplay()`, `workstationDialect: "claude"`.
+- All existing test/QA marker phrases kept verbatim ("You are senpi", "## Intent Gate", "I read this as [intent] - [plan].", "a recommendation, not a survey", "audit each claim against a tool result", "on account of context limits").
+- `test/suite/prompt-presets-claude-fable-5.test.ts`: added a `TEST_DISCIPLINE_RULES` sweep (the rewrite must never silently drop a shared rule) and a stop-contract assertion.
+- `AGENTS.md`: `claude-fable-5.ts` joins the `corePrompt` exception list; file-table line updated.
+
+### Why
+
+- The Fable 5 preset stacked a 1.5K-char tuning on the full shared core, restating Style/Verification rules the core already carried; duplicated rules compete for attention and dilute each other. The Fable 5 prompting guide explicitly calls for removing over-prescriptive prior-model scaffolding. The stop contract follows the same fork direction already adopted for Opus 5 and GPT-5.6: reason about the observable goal, declare when to stop, and stop there.
+
+### Why extension system couldn't handle this differently
+
+- Content-only change inside this builtin, consuming the existing `corePrompt` override; no core prompt code changed.
+
+### Expected merge conflict zones on next upstream sync
+
+- `claude-fable-5.ts` whole-file rewrite. Resolution: keep the `corePrompt` full-core shape and re-run the probe audit if upstream reshapes the shared core.
+
 ## Kimi K3 token diet via `corePrompt` rewrite + binding stop contract (2026-07-24)
 
 ### What changed
