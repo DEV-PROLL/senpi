@@ -1,4 +1,4 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
@@ -252,6 +252,99 @@ describe("AgentSession queue characterization", () => {
 		expect(barrierStatesAtExtensionAdmission[0]).toBe(true);
 		expect(harness.faux.state.callCount).toBe(1);
 		expect(harness.session.getFollowUpMessages()).toEqual([marker]);
+	});
+
+	it.each([
+		"accepted",
+		"rejected",
+		"aborted",
+	] as const)("keeps pi.sendMessage({ triggerTurn: true }) behind the %s manual compaction boundary", async (outcome) => {
+		const marker = `custom trigger-turn during ${outcome} manual compaction`;
+		let beforeCompactCalls = 0;
+		let resolveBeforeCompact: (() => void) | undefined;
+		const beforeCompact = new Promise<void>((resolve) => {
+			resolveBeforeCompact = resolve;
+		});
+		const providerContexts: AgentMessage[][] = [];
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", async (event) => {
+						beforeCompactCalls++;
+						pi.sendMessage(
+							{
+								customType: "compaction-trigger-turn",
+								content: marker,
+								display: false,
+							},
+							{ triggerTurn: true },
+						);
+						resolveBeforeCompact?.();
+
+						if (outcome === "accepted") {
+							return {
+								compaction: {
+									summary: `accepted summary before ${marker}`,
+									firstKeptEntryId: event.preparation.firstKeptEntryId,
+									tokensBefore: event.preparation.tokensBefore,
+								},
+							};
+						}
+						if (outcome === "rejected") {
+							return { cancel: true, rejectionCause: "cancelled-by-extension" as const };
+						}
+						return await new Promise<{ cancel: true }>((resolve) => {
+							event.signal.addEventListener("abort", () => resolve({ cancel: true }), { once: true });
+						});
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("seed response")]);
+		await harness.session.prompt("seed manual compaction context");
+		harness.setResponses([
+			(context) => {
+				providerContexts.push(context.messages);
+				return fauxAssistantMessage("custom trigger-turn handled");
+			},
+		]);
+
+		const compact = harness.session.compact();
+		await beforeCompact;
+		if (outcome === "aborted") harness.session.abortCompaction();
+		if (outcome === "accepted") {
+			await compact;
+		} else {
+			await compact.catch(() => undefined);
+		}
+		await harness.session.waitForSettledSessionWork();
+		await harness.session.agent.waitForIdle();
+
+		expect(beforeCompactCalls).toBe(1);
+		if (outcome === "accepted") {
+			expect(harness.faux.state.callCount).toBe(2);
+			expect(providerContexts).toHaveLength(1);
+			const providerContext = providerContexts[0] ?? [];
+			const summaryIndex = providerContext.findIndex(
+				(message) => message.role === "user" && getMessageText(message).includes("accepted summary"),
+			);
+			const customIndex = providerContext.findIndex(
+				(message) => message.role === "user" && getMessageText(message) === marker,
+			);
+			expect(summaryIndex).toBeGreaterThanOrEqual(0);
+			expect(customIndex).toBeGreaterThan(summaryIndex);
+			expect(
+				harness.sessionManager
+					.getEntries()
+					.filter((entry) => entry.type === "custom_message" && entry.content === marker),
+			).toHaveLength(1);
+		} else {
+			expect(harness.faux.state.callCount).toBe(1);
+			expect(providerContexts).toEqual([]);
+			expect(harness.session.agent.hasQueuedMessages()).toBe(true);
+		}
 	});
 
 	it("delivers follow-up messages only after the current run finishes", async () => {

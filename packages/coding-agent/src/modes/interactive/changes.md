@@ -11,6 +11,8 @@
   supersession and restored exactly once on terminal cleanup, session rebind, invalidation, or TUI stop.
 - Compaction progress, errors, and summaries are stripped of terminal control sequences only when rendered. Persisted
   summaries and provider/session content remain unchanged.
+- The shared compaction-summary component applies the same display-only sanitization, covering rebuilt chat and
+  reopened-session expansion in addition to live `compaction_end` rendering.
 
 ### Why
 

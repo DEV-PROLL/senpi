@@ -6,8 +6,12 @@
 
 - `Agent` now exposes `suppressQueuedMessageDrain()` for the active run. It stops only the lifecycle-owned
   post-`agent_end` steering/follow-up drain, retaining both queues without aborting the run signal.
+- `Agent` now exposes `continueWithQueuedMessages()` so compaction recovery can deliver retained steer/follow-up input
+  when custom context leaves the transcript tail non-assistant.
 - The coding-agent compaction admission gate uses this ownership transfer for required recovery. Real user aborts
   continue to abort the active signal and retain the normal terminal semantics.
+- Scheduled continuation can revalidate a model changed by `session_compact`, recompact if required, and then deliver
+  retained queues without inventing an empty continuation turn.
 
 ### Files modified
 

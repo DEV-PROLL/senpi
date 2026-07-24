@@ -1,11 +1,61 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Container, sanitizeTerminalLabel } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
+import { SessionManager } from "../src/core/session-manager.ts";
 import { CompactionSummaryMessageComponent } from "../src/modes/interactive/components/compaction-summary-message.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.ts";
 
 function stripAnsi(value: string): string {
 	return value.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+type PrivateMethod = (this: object, ...args: unknown[]) => void;
+
+function renderExpandedPersistedCompactionSummary(sessionManager: SessionManager): string {
+	const chatContainer = new Container();
+	const addMessageToChat = Reflect.get(InteractiveMode.prototype, "addMessageToChat") as PrivateMethod;
+	const renderSessionItems = Reflect.get(InteractiveMode.prototype, "renderSessionItems") as PrivateMethod;
+	const renderSessionEntries = Reflect.get(InteractiveMode.prototype, "renderSessionEntries") as PrivateMethod;
+	const rebuildChatFromMessages = Reflect.get(InteractiveMode.prototype, "rebuildChatFromMessages") as PrivateMethod;
+	if (
+		typeof addMessageToChat !== "function" ||
+		typeof renderSessionItems !== "function" ||
+		typeof renderSessionEntries !== "function" ||
+		typeof rebuildChatFromMessages !== "function"
+	) {
+		throw new Error("Expected InteractiveMode chat rebuilding methods");
+	}
+
+	const fakeThis = {
+		chatContainer,
+		sessionManager,
+		toolOutputExpanded: true,
+		clearPendingTools: () => {},
+		pendingTools: new Map(),
+		settingsManager: {
+			getCodeBlockIndent: () => 0,
+			getShowCacheMissNotices: () => false,
+		},
+		ui: { requestRender: () => {} },
+		getMarkdownThemeWithSettings: () => getMarkdownTheme(),
+		addMessageToChat: (..._args: unknown[]) => {},
+		renderSessionItems: (..._args: unknown[]) => {},
+		renderSessionEntries: (..._args: unknown[]) => {},
+	};
+	fakeThis.addMessageToChat = (...args) => addMessageToChat.call(fakeThis, ...args);
+	fakeThis.renderSessionItems = (...args) => renderSessionItems.call(fakeThis, ...args);
+	fakeThis.renderSessionEntries = (...args) => renderSessionEntries.call(fakeThis, ...args);
+
+	rebuildChatFromMessages.call(fakeThis);
+	const component = chatContainer.children.find(
+		(child): child is CompactionSummaryMessageComponent => child instanceof CompactionSummaryMessageComponent,
+	);
+	if (!component) throw new Error("Expected rebuilt chat to contain a compaction summary");
+	component.setExpanded(true);
+	return stripAnsi(component.render(120).join("\n"));
 }
 
 describe("InteractiveMode compaction events", () => {
@@ -298,6 +348,73 @@ describe("InteractiveMode compaction events", () => {
 		expect(renderedError).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
 		expect(renderedError).not.toContain("attacker.invalid");
 		expect(renderedError).not.toContain("stolen title");
+	});
+
+	test("renders persisted hostile summaries safely after a chat rebuild and session reopen", () => {
+		const hostileSummary =
+			"persisted\u001b]52;c;c2VjcmV0\u0007 summary\u001b]0;stolen title\u0007 " +
+			"\u001b]8;;https://attacker.invalid\u0007link\u001b]8;;\u0007 \u001b[31mcolor\u001b[0m \u0000\u0001\u007f\u0085\u009b31mprovider\u009b0m";
+		const tempDir = mkdtempSync(join(tmpdir(), "pi-hostile-compaction-summary-"));
+
+		try {
+			const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"));
+			sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "context that was compacted" }],
+				timestamp: 1,
+			});
+			const firstKeptEntryId = sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "message retained after compaction" }],
+				api: "test",
+				provider: "test",
+				model: "test",
+				usage: {
+					input: 1,
+					output: 1,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 2,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "stop",
+				timestamp: 2,
+			});
+			sessionManager.appendCompaction(hostileSummary, firstKeptEntryId, 1234);
+
+			const sessionFile = sessionManager.getSessionFile();
+			if (!sessionFile) throw new Error("Expected a persisted session file");
+			const persistedEntry = sessionManager.getEntries().find((entry) => entry.type === "compaction");
+			if (persistedEntry?.type !== "compaction") {
+				throw new Error("Expected a persisted compaction entry");
+			}
+			expect(Buffer.from(persistedEntry.summary)).toEqual(Buffer.from(hostileSummary));
+			const onDiskEntry = readFileSync(sessionFile, "utf8")
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line) as { type: string; summary?: string })
+				.find((entry) => entry.type === "compaction");
+			expect(Buffer.from(onDiskEntry?.summary ?? "")).toEqual(Buffer.from(hostileSummary));
+
+			expect(sessionManager.buildSessionContext().messages[0]).toMatchObject({
+				role: "compactionSummary",
+				summary: hostileSummary,
+			});
+			const rebuiltOutput = renderExpandedPersistedCompactionSummary(sessionManager);
+			expect(rebuiltOutput).not.toMatch(/[\u0000-\u0009\u000B-\u001F\u007f-\u009f]/);
+			expect(rebuiltOutput).not.toContain("attacker.invalid");
+			expect(rebuiltOutput).not.toContain("stolen title");
+
+			const reloaded = SessionManager.open(sessionFile);
+			const reloadedSummary = reloaded.buildSessionContext().messages[0];
+			expect(reloadedSummary).toMatchObject({ role: "compactionSummary", summary: hostileSummary });
+			const reloadedOutput = renderExpandedPersistedCompactionSummary(reloaded);
+			expect(reloadedOutput).not.toMatch(/[\u0000-\u0009\u000B-\u001F\u007f-\u009f]/);
+			expect(reloadedOutput).not.toContain("attacker.invalid");
+			expect(reloadedOutput).not.toContain("stolen title");
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
 	});
 
 	test("renders OpenAI remote compaction details in the summary card", () => {

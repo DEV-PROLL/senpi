@@ -528,6 +528,7 @@ export class AgentSession {
 	private _skipNextPostRetryCompactionCheck = false;
 	private _blockedPostCompactionAssistant: { assistant: AssistantMessage; revision: number } | undefined;
 	private _skipNextPostCompactionAssistantCheck = false;
+	private _scheduledContinuationRecompacted = false;
 	private readonly _assistantsPendingAtCompaction = new WeakSet<AssistantMessage>();
 	private readonly _postCompactionUsageExemptAssistants = new WeakSet<AssistantMessage>();
 	private _messageRevision = 0;
@@ -2627,29 +2628,57 @@ export class AgentSession {
 			details: message.details,
 			timestamp: Date.now(),
 		} satisfies CustomMessage<T>;
-		if (options?.deliverAs === "nextTurn") {
-			this._pendingNextTurnMessages.push(appMessage);
-		} else if (this.isStreaming) {
-			if (options?.deliverAs === "followUp") {
-				this.agent.followUp(appMessage);
-			} else {
-				this.agent.steer(appMessage);
+		const waitForExistingSessionWork =
+			options?.triggerTurn === true &&
+			options.deliverAs !== "nextTurn" &&
+			!this.isStreaming &&
+			this._sessionWorkBarrier.hasActiveWork;
+		const activeCompactionGeneration =
+			this._compactionLifecycle.state.status === "running" ? this._compactionLifecycle.state.generation : undefined;
+		let finishSessionWork: (() => void) | undefined;
+		try {
+			if (waitForExistingSessionWork) {
+				await this._waitForSettledSessionWork();
+				finishSessionWork = this._sessionWorkBarrier.begin();
 			}
-		} else if (options?.triggerTurn) {
-			await this._enforceCompactionBeforeProvider(this._findLastAssistantMessage(), false, "pre_prompt");
-			await this._enforceFinalProviderAdmission([appMessage]);
-			await this._promptAgent(appMessage);
-		} else {
-			this.agent.state.messages.push(appMessage);
-			this.sessionManager.appendCustomMessageEntry(
-				message.customType,
-				message.content,
-				message.display,
-				message.details,
-			);
-			this._incrementMessageRevision();
-			this._emit({ type: "message_start", message: appMessage });
-			this._emit({ type: "message_end", message: appMessage });
+
+			if (options?.deliverAs === "nextTurn") {
+				this._pendingNextTurnMessages.push(appMessage);
+			} else if (this.isStreaming) {
+				if (options?.deliverAs === "followUp") {
+					this.agent.followUp(appMessage);
+				} else {
+					this.agent.steer(appMessage);
+				}
+			} else if (
+				options?.triggerTurn === true &&
+				activeCompactionGeneration !== undefined &&
+				this._compactionLifecycle.state.generation === activeCompactionGeneration &&
+				this._compactionLifecycle.state.status !== "completed"
+			) {
+				if (options?.deliverAs === "followUp") {
+					this.agent.followUp(appMessage);
+				} else {
+					this.agent.steer(appMessage);
+				}
+			} else if (options?.triggerTurn) {
+				await this._enforceCompactionBeforeProvider(this._findLastAssistantMessage(), false, "pre_prompt");
+				await this._enforceFinalProviderAdmission([appMessage]);
+				await this._promptAgent(appMessage);
+			} else {
+				this.agent.state.messages.push(appMessage);
+				this.sessionManager.appendCustomMessageEntry(
+					message.customType,
+					message.content,
+					message.display,
+					message.details,
+				);
+				this._incrementMessageRevision();
+				this._emit({ type: "message_start", message: appMessage });
+				this._emit({ type: "message_end", message: appMessage });
+			}
+		} finally {
+			finishSessionWork?.();
 		}
 	}
 
@@ -3969,7 +3998,7 @@ export class AgentSession {
 	}
 
 	private async _runPrePromptCompaction(
-		lastAssistantMessage: AssistantMessage,
+		lastAssistantMessage: AssistantMessage | undefined,
 		skipAbortedCheck: boolean,
 		reason: "pre_prompt" | "overflow" | "threshold" = "pre_prompt",
 		willRetry = false,
@@ -3988,7 +4017,11 @@ export class AgentSession {
 				skipAbortedCheck,
 				allowSummaryOnly,
 			});
-			if (!execution.accepted && isContextOverflow(lastAssistantMessage, this.model?.contextWindow ?? 0)) {
+			if (
+				!execution.accepted &&
+				lastAssistantMessage &&
+				isContextOverflow(lastAssistantMessage, this.model?.contextWindow ?? 0)
+			) {
 				this._overflowRecoveryAttempted = false;
 			}
 			return execution.accepted;
@@ -3996,7 +4029,7 @@ export class AgentSession {
 			if (!compactionExecutionOwnsTerminalTransition(error)) {
 				return false;
 			}
-			if (isContextOverflow(lastAssistantMessage, this.model?.contextWindow ?? 0)) {
+			if (lastAssistantMessage && isContextOverflow(lastAssistantMessage, this.model?.contextWindow ?? 0)) {
 				this._overflowRecoveryAttempted = false;
 			}
 			const errorMessage = error instanceof Error ? error.message : "compaction failed";
@@ -4017,9 +4050,38 @@ export class AgentSession {
 		}
 	}
 
+	private async _revalidateScheduledContinuationAdmission(): Promise<void> {
+		const model = this.model;
+		const settings = this.settingsManager.getCompactionSettings();
+		if (!model || !settings.enabled) return;
+
+		const canonicalMessages = filterContextExcludedMessages(this.sessionManager.buildSessionContext().messages);
+		const estimate = estimateContextTokens(canonicalMessages);
+		const usageMessage = estimate.lastUsageIndex === null ? undefined : canonicalMessages[estimate.lastUsageIndex];
+		const contextTokens =
+			usageMessage?.role === "assistant" && this._isAssistantFromBeforeLatestCompaction(usageMessage)
+				? estimateMessagesTokens(canonicalMessages)
+				: estimate.tokens;
+		if (!shouldCompact(contextTokens, model.contextWindow, settings)) return;
+
+		const compacted = await this._runPrePromptCompaction(this._findLastAssistantMessage(), true, "pre_prompt");
+		if (!compacted) throw new RequiredCompactionError();
+		this._scheduledContinuationRecompacted = true;
+	}
+
 	private async _continueAgentAfterCurrentRun(): Promise<void> {
 		await this.agent.waitForIdle();
-		await this.agent.continue();
+		await this._revalidateScheduledContinuationAdmission();
+		const useQueuedContinuation = this._scheduledContinuationRecompacted;
+		try {
+			if (useQueuedContinuation) {
+				await this.agent.continueWithQueuedMessages();
+			} else {
+				await this.agent.continue();
+			}
+		} finally {
+			this._scheduledContinuationRecompacted = false;
+		}
 	}
 
 	private _scheduleContinuationAfterCurrentEvent(): void {
@@ -4931,10 +4993,10 @@ export class AgentSession {
 			this._skipNextPostRetryCompactionCheck = true;
 		}
 
-		// Retry via continue() - use setTimeout to break out of event handler chain
+		// Retry via the shared continuation path after the event handler chain settles.
 		setTimeout(() => {
-			this.agent.continue().catch(() => {
-				// Retry failed - will be caught by next agent_end
+			this._continueAgentAfterCurrentRun().catch(() => {
+				// Retry failed - terminal handling remains owned by the next agent_end.
 			});
 		}, 0);
 

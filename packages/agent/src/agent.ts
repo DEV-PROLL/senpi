@@ -368,6 +368,32 @@ export class Agent {
 		await this.runPromptMessages(messages);
 	}
 
+	/** Continue by delivering queued input first when a compaction leaves custom context at the tail. */
+	async continueWithQueuedMessages(): Promise<void> {
+		if (this.activeRun) {
+			throw new Error("Agent is already processing. Wait for completion before continuing.");
+		}
+
+		if (this._state.messages[this._state.messages.length - 1]?.role === "assistant") {
+			await this.continue();
+			return;
+		}
+
+		const queuedSteering = this.steeringQueue.drain();
+		if (queuedSteering.length > 0) {
+			await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true });
+			return;
+		}
+
+		const queuedFollowUps = this.followUpQueue.drain();
+		if (queuedFollowUps.length > 0) {
+			await this.runPromptMessages(queuedFollowUps);
+			return;
+		}
+
+		await this.continue();
+	}
+
 	/** Continue from the current transcript. The last message must be a user or tool-result message. */
 	async continue(): Promise<void> {
 		if (this.activeRun) {

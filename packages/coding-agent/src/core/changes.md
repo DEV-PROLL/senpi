@@ -41,6 +41,9 @@
 - Provider admission is checked again after assembling `nextTurn` and `before_agent_start` custom messages. Rejected
   compaction restores one-shot additions transactionally; accepted compaction rebuilds and rechecks the final visible
   request before the provider is called.
+- Trigger-turn custom messages serialize behind manual/extension compaction before they are appended or sent.
+  Scheduled continuation revalidates the canonical context against any model selected by `session_compact`, retaining
+  queues when the smaller model requires rejected re-compaction.
 
 ### Why extension system couldn't handle this alone
 
