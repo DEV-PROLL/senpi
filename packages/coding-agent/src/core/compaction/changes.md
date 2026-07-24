@@ -19,6 +19,10 @@
   Summary-only re-compaction is allowed only for this retry boundary.
 - Assistant history is classified around the latest compaction by persisted branch order; an older payload timestamp
   cannot hide a message whose entry was appended after the compaction boundary.
+- Execution routes pass their own controller into core compaction; an auto request supersedes unrelated feedback
+  instead of inheriting/promoting its controller and leaving outer compaction state stuck.
+- The one-turn post-compaction and post-retry stale-usage exemptions are shared across synchronous queue ownership,
+  asynchronous checking, and admission resampling, while explicit provider overflow is never exempt.
 
 ### Why
 

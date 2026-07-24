@@ -31,6 +31,11 @@
   bypass post-compaction admission after reopening a session.
 - When a late queue triggers compaction after a host `prepareNextTurnWithContext` callback, the callback is replayed
   once against the compacted context so its message filtering/injection contract reaches the provider request.
+- Every compaction execution receives its route-owned controller explicitly. Auto compaction cannot promote unrelated
+  extension feedback, and superseded feedback controller references are released even when their stale terminal
+  callback never arrives.
+- Post-retry and post-compaction usage exemptions suppress only stale threshold accounting. Provider-confirmed
+  overflow always retains queue ownership and runs fail-closed recovery.
 
 ### Why extension system couldn't handle this alone
 

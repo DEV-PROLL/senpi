@@ -10,6 +10,14 @@ type Deferred = {
 	readonly resolve: () => void;
 };
 
+type BeginFeedback = (reason: "extension") => AbortSignal;
+type EndFeedback = (options: {
+	reason: "extension";
+	signal?: AbortSignal;
+	aborted?: boolean;
+	errorMessage?: string;
+}) => void;
+
 type TextBlock = {
 	readonly type: "text";
 	readonly text?: string;
@@ -45,6 +53,15 @@ async function waitForCompactionStart(deferred: Deferred): Promise<void> {
 			clearTimeout(timeout);
 		}
 	}
+}
+
+function getRunAutoCompaction(harness: Harness) {
+	const runAutoCompaction = Reflect.get(harness.session, "_runAutoCompaction");
+	if (typeof runAutoCompaction !== "function") {
+		throw new Error("Expected AgentSession._runAutoCompaction");
+	}
+	return (reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> =>
+		Promise.resolve(runAutoCompaction.call(harness.session, reason, willRetry));
 }
 
 function createBlockingCompactionExtension(started: Deferred, release: Deferred, summary: string) {
@@ -244,5 +261,73 @@ describe("AgentSession compaction race handling", () => {
 		).toBe(true);
 		expect(secondCall?.context.messages.some((message) => contextHasText(message, initialPrompt))).toBe(false);
 		expect(getUserTexts(harness)).toEqual(["after compaction prompt"]);
+	});
+
+	it("auto compaction supersedes unrelated extension feedback without promoting it", async () => {
+		// RED 1: an active extension feedback operation owns neither the auto
+		// compaction that starts underneath it nor the final terminal event. The
+		// auto operation must supersede/abort the stale feedback operation instead
+		// of promoting or reusing its controller: the stale feedback end must not
+		// publish a terminal, the matching outer controller must still clear, and
+		// the auto compaction must complete exactly once.
+		const compactionStarted = createDeferred();
+		const releaseCompaction = createDeferred();
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 16_384 } },
+			extensionFactories: [
+				createBlockingCompactionExtension(compactionStarted, releaseCompaction, "auto threshold summary"),
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("seed response")]);
+		await harness.session.prompt("seed context ".repeat(40));
+		harness.events.length = 0;
+
+		const begin = Reflect.get(harness.session, "_beginExtensionCompactionFeedback");
+		const end = Reflect.get(harness.session, "_endExtensionCompactionFeedback");
+		if (typeof begin !== "function" || typeof end !== "function") {
+			throw new Error("Compaction feedback lifecycle methods unavailable");
+		}
+
+		const staleFeedbackSignal = (begin as BeginFeedback).call(harness.session, "extension");
+		expect(harness.session.isCompacting).toBe(true);
+		expect(harness.session.compactionState).toMatchObject({
+			status: "running",
+			generation: 1,
+			stage: "feedback",
+		});
+
+		const autoCompaction = getRunAutoCompaction(harness)("threshold", false);
+		await compactionStarted.promise;
+		try {
+			// The auto compaction runs on its own controller: it supersedes the
+			// unrelated feedback operation rather than promoting or reusing it.
+			expect(staleFeedbackSignal.aborted).toBe(true);
+			expect(harness.session.compactionState).toMatchObject({
+				status: "running",
+				generation: 2,
+				stage: "execution",
+			});
+		} finally {
+			releaseCompaction.resolve();
+		}
+		await autoCompaction;
+		await harness.session.waitForSettledSessionWork();
+
+		// The stale feedback end publishes no terminal of its own: the auto
+		// completion is the final lifecycle terminal, with no duplicate
+		// compaction entry appended and no duplicate terminal event.
+		(end as EndFeedback).call(harness.session, {
+			reason: "extension",
+			signal: staleFeedbackSignal,
+			errorMessage: "stale feedback ended after auto compaction",
+		});
+		expect(harness.session.compactionState).toMatchObject({ status: "completed", generation: 2 });
+		expect(harness.session.isCompacting).toBe(false);
+		expect(harness.eventsOfType("compaction_start")).toHaveLength(2);
+		expect(harness.eventsOfType("compaction_end")).toEqual([
+			expect.objectContaining({ reason: "threshold", accepted: true, aborted: false }),
+		]);
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(1);
 	});
 });

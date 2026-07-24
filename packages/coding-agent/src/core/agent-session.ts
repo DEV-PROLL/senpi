@@ -273,6 +273,7 @@ export interface AgentSessionConfig {
 type SessionModelEntry = { model: Model<any>; thinkingLevel?: ThinkingLevel; serviceTier?: ServiceTier };
 
 interface CompactionExecutionRequest {
+	controller: AbortController;
 	reason: CompactionReason;
 	customInstructions?: string;
 	willRetry: boolean;
@@ -497,6 +498,7 @@ export class AgentSession {
 	 */
 	private readonly _messageEndsAwaitingPersistence = new Set<AgentMessage>();
 	private _isAgentRunActive = false;
+	private _promptStartPending = false;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
 
@@ -506,6 +508,11 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
+	// Queues held while the first post-compaction response is classified. Agent
+	// core otherwise drains steering immediately before AgentSession can consume
+	// the stale-usage exemption and schedule the continuation itself.
+	private _postCompactionDeferredSteeringMessages: AgentMessage[] = [];
+	private _postCompactionDeferredFollowUpMessages: AgentMessage[] = [];
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -520,6 +527,7 @@ export class AgentSession {
 	private _blockedPostCompactionAssistant: { assistant: AssistantMessage; revision: number } | undefined;
 	private _skipNextPostCompactionAssistantCheck = false;
 	private readonly _assistantsPendingAtCompaction = new WeakSet<AssistantMessage>();
+	private readonly _postCompactionUsageExemptAssistants = new WeakSet<AssistantMessage>();
 	private _messageRevision = 0;
 
 	// Branch summarization state
@@ -1013,7 +1021,10 @@ export class AgentSession {
 		// compaction to AgentSession, retaining queues until recovery is accepted.
 		if (event.type === "agent_end") {
 			const lastAssistant = this._findLastAssistantInMessages(event.messages);
-			if (lastAssistant && this._getRequiredAutoCompactionReason(lastAssistant)) {
+			const requiredAutoCompaction = lastAssistant
+				? this._getRequiredAutoCompactionReason(lastAssistant)
+				: undefined;
+			if (requiredAutoCompaction) {
 				this.agent.suppressQueuedMessageDrain();
 			}
 		}
@@ -1087,7 +1098,33 @@ export class AgentSession {
 	 * runs, so only this preflight can transfer required admissions safely.
 	 */
 	private _getRequiredAutoCompactionReason(message: AssistantMessage): "overflow" | "threshold" | undefined {
-		if (this._skipNextPostRetryCompactionCheck) return undefined;
+		const reason = this._getAutoCompactionReason(message);
+		// Retry and post-compaction exemptions only cover stale usage estimates.
+		// A provider-confirmed overflow must always retain queue ownership and run
+		// fail-closed recovery.
+		if (
+			reason === "overflow" &&
+			message.stopReason === "stop" &&
+			this._hasPendingPostCompactionUsageExemption(message)
+		) {
+			// A successful post-compaction response can carry stale provider usage.
+			// Retain its queues while the asynchronous check consumes the exemption.
+			return "threshold";
+		}
+		if (reason === "overflow") return reason;
+		// Keep queued continuations under AgentSession ownership while the
+		// asynchronous check consumes this post-compaction usage exemption.
+		if (this._hasPendingPostCompactionUsageExemption(message)) return "threshold";
+		if (
+			reason === "threshold" &&
+			(this._skipNextPostRetryCompactionCheck || this._postCompactionUsageExemptAssistants.has(message))
+		) {
+			return undefined;
+		}
+		return reason;
+	}
+
+	private _getAutoCompactionReason(message: AssistantMessage): "overflow" | "threshold" | undefined {
 		const settings = this.settingsManager.getCompactionSettings();
 		if (!settings.enabled || message.stopReason === "aborted") {
 			return undefined;
@@ -1135,6 +1172,28 @@ export class AgentSession {
 		}
 
 		return shouldCompact(contextTokens, model.contextWindow, settings) ? "threshold" : undefined;
+	}
+
+	private _hasPendingPostCompactionUsageExemption(message: AssistantMessage): boolean {
+		return (
+			this._skipNextPostCompactionAssistantCheck &&
+			!this._assistantsPendingAtCompaction.has(message) &&
+			!this._overflowRecoveryAttempted
+		);
+	}
+
+	private _isPostCompactionUsageExempt(message: AssistantMessage): boolean {
+		return (
+			this._postCompactionUsageExemptAssistants.has(message) || this._hasPendingPostCompactionUsageExemption(message)
+		);
+	}
+
+	private _consumePostCompactionUsageExemption(message: AssistantMessage): boolean {
+		if (this._postCompactionUsageExemptAssistants.has(message)) return true;
+		if (!this._isPostCompactionUsageExempt(message)) return false;
+		this._skipNextPostCompactionAssistantCheck = false;
+		this._postCompactionUsageExemptAssistants.add(message);
+		return true;
 	}
 
 	private _agentEndAllowsQueuedContinuation(messages: AgentMessage[]): boolean {
@@ -1305,6 +1364,7 @@ export class AgentSession {
 		// Check auto-retry and auto-compaction after agent completes.
 		let launchedContinuation = false;
 		let retryContinuationBlocked = false;
+		let allowsPostCompactionUsageExemptContinuation = false;
 		const userAbortSuppressedQueuedContinuation =
 			event.type === "agent_end" && this._suppressQueuedContinuationAfterUserAbort;
 		if (userAbortSuppressedQueuedContinuation) {
@@ -1317,11 +1377,8 @@ export class AgentSession {
 		if (event.type === "agent_end" && this._lastAssistantMessage) {
 			const msg = this._lastAssistantMessage;
 			this._lastAssistantMessage = undefined;
-			const skipPostRetryCompaction = this._skipNextPostRetryCompactionCheck;
 			this._skipNextPostRetryCompactionCheck = false;
-			const requiredAutoCompaction = skipPostRetryCompaction
-				? undefined
-				: this._getRequiredAutoCompactionReason(msg);
+			const requiredAutoCompaction = this._getRequiredAutoCompactionReason(msg);
 
 			// Retry transient failures normally and eligible hard errors only through a fallback.
 			const retryableError = this._isRetryableError(msg);
@@ -1329,7 +1386,11 @@ export class AgentSession {
 			const retryCanAdmitProvider =
 				this.settingsManager.getRetrySettings().enabled && (retryableError || hardErrorFallbackEligible);
 			let compactedBeforeRetry = false;
-			if (retryCanAdmitProvider && requiredAutoCompaction) {
+			if (
+				retryCanAdmitProvider &&
+				requiredAutoCompaction &&
+				!(requiredAutoCompaction === "threshold" && this._hasPendingPostCompactionUsageExemption(msg))
+			) {
 				this._retireFailedRetryAssistant(msg);
 				compactedBeforeRetry = await this._runPrePromptCompaction(msg, true, "threshold", true);
 				retryContinuationBlocked = !compactedBeforeRetry;
@@ -1347,12 +1408,16 @@ export class AgentSession {
 
 			this._resolveRetry();
 			retryContinuationBlocked ||= retryOutcome === "blocked";
-			if (!retryContinuationBlocked && !skipPostRetryCompaction) {
+			if (!retryContinuationBlocked) {
 				if (compactedBeforeRetry && this.agent.hasQueuedMessages()) {
 					this._scheduleContinuationAfterCurrentEvent();
 					launchedContinuation = true;
 				} else {
 					launchedContinuation = await this._checkCompaction(msg);
+					allowsPostCompactionUsageExemptContinuation = this._postCompactionUsageExemptAssistants.has(msg);
+					if (allowsPostCompactionUsageExemptContinuation) {
+						this._flushPostCompactionDeferredMessages();
+					}
 					// _runAutoCompaction() returns false both when recovery was rejected and
 					// when an accepted compaction had no queue to continue. Re-sample after
 					// it settles so only the still-required (rejected) case fails admission.
@@ -1373,7 +1438,7 @@ export class AgentSession {
 			if (
 				!launchedContinuation &&
 				!retryContinuationBlocked &&
-				allowsQueuedContinuation &&
+				(allowsQueuedContinuation || allowsPostCompactionUsageExemptContinuation) &&
 				this.agent.hasQueuedMessages()
 			) {
 				this._scheduleContinuationAfterCurrentEvent();
@@ -1997,13 +2062,19 @@ export class AgentSession {
 			await userAbortPromise;
 			throwIfCancelled();
 		}
+		const ownsPromptStart =
+			!this.isStreaming && !this._promptStartPending && options?.streamingBehavior === undefined;
+		if (ownsPromptStart) this._promptStartPending = true;
 		const shouldWaitForSessionWork = options?.source !== "extension";
 		// A steer/followUp submission during an active run can be queued immediately.
 		// Waiting on the session-work barrier here would trap the message inside this
 		// call for the rest of the run whenever a queued continuation (e.g. an active
 		// goal chain) holds the barrier, making typed input invisible until the run
 		// ends or the user aborts.
-		const canQueueWhileStreaming = this.isStreaming && !this.isCompacting && options?.streamingBehavior !== undefined;
+		const canQueueWhileStreaming =
+			(this.isStreaming || this._promptStartPending) &&
+			!this.isCompacting &&
+			options?.streamingBehavior !== undefined;
 		if (
 			shouldWaitForSessionWork &&
 			!canQueueWhileStreaming &&
@@ -2015,7 +2086,12 @@ export class AgentSession {
 
 		// Turn boundary: restore the primary model if the fallback cooldown expired.
 		if (!this.isStreaming) {
-			await this._maybeRestoreFallbackPrimary();
+			try {
+				await this._maybeRestoreFallbackPrimary();
+			} catch (error) {
+				if (ownsPromptStart) this._promptStartPending = false;
+				throw error;
+			}
 		}
 
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
@@ -2079,6 +2155,23 @@ export class AgentSession {
 					throw new Error("Cannot set thinkingLevel on a queued prompt; set it after the current turn completes.");
 				}
 				if (options.streamingBehavior === "followUp") {
+					await this._queueFollowUp(expandedText, currentImages);
+				} else {
+					await this._queueSteer(expandedText, currentImages);
+				}
+				promptDisposition?.("queued");
+				preflightResult?.(true);
+				return;
+			}
+
+			// Input accepted while a run was active remains queued even if that run
+			// ends while extension input handling or template expansion is pending.
+			// Starting a fresh prompt here would let it overtake the held continuation.
+			if (canQueueWhileStreaming && !this.isStreaming) {
+				if (options?.thinkingLevel !== undefined) {
+					throw new Error("Cannot set thinkingLevel on a queued prompt; set it after the current turn completes.");
+				}
+				if (options?.streamingBehavior === "followUp") {
 					await this._queueFollowUp(expandedText, currentImages);
 				} else {
 					await this._queueSteer(expandedText, currentImages);
@@ -2195,6 +2288,8 @@ export class AgentSession {
 		} catch (error) {
 			preflightResult?.(false);
 			throw error;
+		} finally {
+			if (ownsPromptStart) this._promptStartPending = false;
 		}
 
 		if (!messages) {
@@ -2405,11 +2500,12 @@ export class AgentSession {
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.steer({
-			role: "user",
-			content,
-			timestamp: Date.now(),
-		});
+		const message: AgentMessage = { role: "user", content, timestamp: Date.now() };
+		if (this._promptStartPending && this._skipNextPostCompactionAssistantCheck) {
+			this._postCompactionDeferredSteeringMessages.push(message);
+			return;
+		}
+		this.agent.steer(message);
 	}
 
 	/**
@@ -2422,11 +2518,23 @@ export class AgentSession {
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.followUp({
-			role: "user",
-			content,
-			timestamp: Date.now(),
-		});
+		const message: AgentMessage = { role: "user", content, timestamp: Date.now() };
+		if (this._promptStartPending && this._skipNextPostCompactionAssistantCheck) {
+			this._postCompactionDeferredFollowUpMessages.push(message);
+			return;
+		}
+		this.agent.followUp(message);
+	}
+
+	private _flushPostCompactionDeferredMessages(): void {
+		for (const message of this._postCompactionDeferredSteeringMessages) {
+			this.agent.steer(message);
+		}
+		this._postCompactionDeferredSteeringMessages = [];
+		for (const message of this._postCompactionDeferredFollowUpMessages) {
+			this.agent.followUp(message);
+		}
+		this._postCompactionDeferredFollowUpMessages = [];
 	}
 
 	/**
@@ -2966,6 +3074,40 @@ export class AgentSession {
 	// Compaction
 	// =========================================================================
 
+	private _claimCompactionController(controller: AbortController, owner: "auto" | "compaction"): void {
+		const supersedesCurrentOperation =
+			(this._compactionAbortController !== undefined && this._compactionAbortController !== controller) ||
+			(this._autoCompactionAbortController !== undefined && this._autoCompactionAbortController !== controller);
+		if (supersedesCurrentOperation) {
+			// Supersession has no public terminal event: the stale operation no
+			// longer owns the route. Finishing its lifecycle state here prevents a
+			// missing late feedback end from keeping isCompacting true.
+			this._compactionLifecycle.abort(this._messageRevision);
+		}
+		if (this._compactionAbortController && this._compactionAbortController !== controller) {
+			this._compactionAbortController.abort();
+			this._compactionAbortController = undefined;
+		}
+		if (this._autoCompactionAbortController && this._autoCompactionAbortController !== controller) {
+			this._autoCompactionAbortController.abort();
+			this._autoCompactionAbortController = undefined;
+		}
+		if (owner === "auto") {
+			this._autoCompactionAbortController = controller;
+		} else {
+			this._compactionAbortController = controller;
+		}
+	}
+
+	private _releaseCompactionController(signal: AbortSignal): void {
+		if (this._compactionAbortController?.signal === signal) {
+			this._compactionAbortController = undefined;
+		}
+		if (this._autoCompactionAbortController?.signal === signal) {
+			this._autoCompactionAbortController = undefined;
+		}
+	}
+
 	/**
 	 * Manually compact the session context.
 	 * Aborts current agent operation first.
@@ -2975,11 +3117,16 @@ export class AgentSession {
 		this._disconnectFromAgent();
 		await this.abort();
 		const controller = new AbortController();
-		this._compactionAbortController = controller;
+		this._claimCompactionController(controller, "compaction");
 		this._emit({ type: "compaction_start", reason: "manual" });
 
 		try {
-			const execution = await this._executeCompaction({ reason: "manual", customInstructions, willRetry: false });
+			const execution = await this._executeCompaction({
+				controller,
+				reason: "manual",
+				customInstructions,
+				willRetry: false,
+			});
 			if (!execution.accepted) {
 				throw new CompactionRejectedError(execution.rejectionCause);
 			}
@@ -3023,14 +3170,16 @@ export class AgentSession {
 
 		const ownsController = this._compactionAbortController === undefined;
 		if (ownsController) {
-			this._compactionAbortController = new AbortController();
+			this._claimCompactionController(new AbortController(), "compaction");
 			this._emit({ type: "compaction_start", reason: options.reason });
 		}
 		const controller = this._compactionAbortController;
 		if (!controller) return { applied: false, reason: "rejected" };
+		this._claimCompactionController(controller, "compaction");
 
 		try {
 			const execution = await this._executeCompaction({
+				controller,
 				reason: options.reason,
 				willRetry: false,
 				precomputed,
@@ -3063,7 +3212,7 @@ export class AgentSession {
 
 	private _beginExtensionCompactionFeedback(reason: CompactionReason): AbortSignal {
 		const controller = new AbortController();
-		this._compactionAbortController = controller;
+		this._claimCompactionController(controller, "compaction");
 		const model = this.model;
 		this._compactionLifecycle.begin(
 			{
@@ -3100,7 +3249,11 @@ export class AgentSession {
 		aborted?: boolean;
 		errorMessage?: string;
 	}): void {
-		if (!options.signal || !this._compactionLifecycle.hasCurrentSignal(options.signal)) return;
+		if (!options.signal) return;
+		if (!this._compactionLifecycle.hasCurrentSignal(options.signal)) {
+			this._releaseCompactionController(options.signal);
+			return;
+		}
 		const operation = this._compactionLifecycle.state;
 		if (operation.status !== "running" || operation.stage !== "feedback") return;
 		const aborted = options.aborted ?? options.signal.aborted;
@@ -3120,17 +3273,14 @@ export class AgentSession {
 			willRetry: false,
 			errorMessage: aborted ? undefined : options.errorMessage,
 		});
-		if (this._compactionAbortController?.signal === options.signal) {
-			this._compactionAbortController = undefined;
-		}
+		this._releaseCompactionController(options.signal);
 	}
 
 	private async _executeCompaction(request: CompactionExecutionRequest): Promise<CompactionExecutionResult> {
 		const model = this.model;
 		if (!model) throw new Error(formatNoModelSelectedMessage());
 		const thinkingLevel = this.thinkingLevel;
-		const controller = this._compactionAbortController ?? this._autoCompactionAbortController;
-		if (!controller) throw new Error("Compaction abort controller unavailable");
+		const controller = request.controller;
 		const requestId = randomUUID();
 		const operationId = this._compactionLifecycle.begin(
 			{
@@ -3506,7 +3656,7 @@ export class AgentSession {
 		const compacted = assistantMessage
 			? await this._checkCompaction(assistantMessage, skipAbortedCheck, inlineReason, retryAfterCompaction)
 			: false;
-		if (compacted) {
+		if (compacted || (assistantMessage && this._postCompactionUsageExemptAssistants.has(assistantMessage))) {
 			return compacted;
 		}
 
@@ -3566,16 +3716,6 @@ export class AgentSession {
 		if (this._isAssistantFromBeforeLatestCompaction(assistantMessage)) {
 			return false;
 		}
-		if (this._skipNextPostCompactionAssistantCheck) {
-			this._skipNextPostCompactionAssistantCheck = false;
-			// The first ordinary post-compaction response can still report stale
-			// provider usage. An active overflow recovery is different: its retry
-			// response must be checked so the one-retry cap can terminate it.
-			if (!this._assistantsPendingAtCompaction.has(assistantMessage) && !this._overflowRecoveryAttempted) {
-				return false;
-			}
-		}
-
 		// Case 1: Overflow - LLM returned context overflow error.
 		// If the saved assistant provider differs from the currently selected provider alias,
 		// still recover as overflow when the current context is also at the compaction limit.
@@ -3584,7 +3724,17 @@ export class AgentSession {
 			contextUsage !== undefined &&
 			contextUsage.tokens !== null &&
 			shouldCompact(contextUsage.tokens, contextUsage.contextWindow, settings);
-		if (isContextOverflow(assistantMessage, contextWindow) && (sameModel || currentContextNeedsCompaction)) {
+		const isOverflow =
+			isContextOverflow(assistantMessage, contextWindow) && (sameModel || currentContextNeedsCompaction);
+		if (
+			isOverflow &&
+			assistantMessage.stopReason === "stop" &&
+			this._consumePostCompactionUsageExemption(assistantMessage)
+		) {
+			return false;
+		}
+		if (isOverflow) {
+			this._flushPostCompactionDeferredMessages();
 			const willRetry = retryAfterCompaction || assistantMessage.stopReason !== "stop";
 
 			if (!willRetry) {
@@ -3641,6 +3791,11 @@ export class AgentSession {
 			}
 			return compacted;
 		}
+
+		// The first ordinary response can carry provider usage calculated before
+		// compaction. Consume that exemption only after proving this is not an
+		// overflow, then retain the decision for later admission re-sampling.
+		if (this._consumePostCompactionUsageExemption(assistantMessage)) return false;
 
 		// Case 2: Threshold - context is getting large
 		// For error messages or all-zero usage messages, estimate from the last valid response.
@@ -3705,12 +3860,13 @@ export class AgentSession {
 		willRetry = false,
 		allowSummaryOnly = false,
 	): Promise<boolean> {
-		this._emit({ type: "compaction_start", reason });
 		const controller = new AbortController();
-		this._compactionAbortController = controller;
+		this._claimCompactionController(controller, "compaction");
+		this._emit({ type: "compaction_start", reason });
 
 		try {
 			const execution = await this._executeCompaction({
+				controller,
 				reason,
 				willRetry,
 				lastAssistantMessage,
@@ -3780,9 +3936,9 @@ export class AgentSession {
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
 		const finishCompactionWork = this._sessionWorkBarrier.begin();
 		const agentMessagesAtStart = this.agent.state.messages.slice();
-		this._emit({ type: "compaction_start", reason });
 		const autoCompactionController = new AbortController();
-		this._autoCompactionAbortController = autoCompactionController;
+		this._claimCompactionController(autoCompactionController, "auto");
+		this._emit({ type: "compaction_start", reason });
 
 		try {
 			if (!this.model) {
@@ -3827,7 +3983,12 @@ export class AgentSession {
 				return false;
 			}
 
-			const execution = await this._executeCompaction({ reason, willRetry, agentMessagesAtStart });
+			const execution = await this._executeCompaction({
+				controller: autoCompactionController,
+				reason,
+				willRetry,
+				agentMessagesAtStart,
+			});
 			if (!execution.accepted) {
 				if (reason === "overflow") this._overflowRecoveryAttempted = false;
 				return false;
@@ -4146,11 +4307,12 @@ export class AgentSession {
 						this._disconnectFromAgent();
 						await this.abort();
 						const controller = new AbortController();
-						this._compactionAbortController = controller;
+						this._claimCompactionController(controller, "compaction");
 						this._emit({ type: "compaction_start", reason: "extension" });
 
 						try {
 							const execution = await this._executeCompaction({
+								controller,
 								reason: "extension",
 								customInstructions: options?.customInstructions,
 								willRetry: false,
