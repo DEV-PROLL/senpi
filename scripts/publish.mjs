@@ -11,10 +11,12 @@ import { assertSenpiPackedWorkspaceFiles, prepareSenpiBundledWorkspaces } from "
 //    INTO the @code-yeongyu/senpi tarball), so consumers get it without a registry
 //    entry; publishing it standalone via OIDC trusted publishing fails E404 because
 //    it is a brand-new scoped package name OIDC cannot create.
+//  - @earendil-works/pi-storage-sqlite-node follows upstream's independent semver
+//    release line and is already published separately, so it is not part of the
+//    fork's CalVer lockstep release.
 const packages = [
 	{ directory: "packages/ai", name: "@earendil-works/pi-ai" },
 	{ directory: "packages/agent", name: "@earendil-works/pi-agent-core" },
-	{ directory: "packages/storage/sqlite-node", name: "@earendil-works/pi-storage-sqlite-node" },
 	{ directory: "packages/tui", name: "@earendil-works/pi-tui" },
 	{ directory: "packages/coding-agent", name: "@code-yeongyu/senpi" },
 ];
