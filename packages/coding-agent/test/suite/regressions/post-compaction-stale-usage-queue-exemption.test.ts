@@ -1,6 +1,7 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI } from "../../../src/core/extensions/index.ts";
+import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.ts";
 import { createHarness, getAssistantTexts, type Harness } from "../harness.ts";
 
 const STALE_USAGE_TOTAL_TOKENS = 127_500;
@@ -36,6 +37,18 @@ function getRunAutoCompaction(harness: Harness) {
 	}
 	return (reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> =>
 		Promise.resolve(runAutoCompaction.call(harness.session, reason, willRetry));
+}
+
+function getClearAllQueues() {
+	const clearAllQueues = Reflect.get(InteractiveMode.prototype, "clearAllQueues");
+	if (typeof clearAllQueues !== "function") throw new Error("Expected InteractiveMode.clearAllQueues");
+	return (context: object): { steering: string[]; followUp: string[] } => clearAllQueues.call(context);
+}
+
+function getAbortAndFireQueuedMessages() {
+	const abortAndFire = Reflect.get(InteractiveMode.prototype, "abortAndFireQueuedMessages");
+	if (typeof abortAndFire !== "function") throw new Error("Expected InteractiveMode.abortAndFireQueuedMessages");
+	return (context: object): Promise<number> => Promise.resolve(abortAndFire.call(context));
 }
 
 function createPostCompactionExemptionHarness() {
@@ -156,5 +169,97 @@ describe("post-compaction queued continuation exemption", () => {
 		expect(harness.session.getSteeringMessages()).toEqual([]);
 		expect(harness.session.getFollowUpMessages()).toEqual([]);
 		expect(harness.session.isCompacting).toBe(false);
+	});
+
+	it.each([
+		{
+			label: "the public session queue clear",
+			clear: (harness: Harness) => harness.session.clearQueue(),
+		},
+		{
+			label: "the InteractiveMode queue clear",
+			clear: (harness: Harness) =>
+				getClearAllQueues()({
+					compactionQueuedMessages: [],
+					compactionInFlightMessages: [],
+					compactionTransferAbortControllers: new Map(),
+					session: harness.session,
+				}),
+		},
+	])("does not resurrect deferred post-compaction work after $label", async ({ clear }) => {
+		const steerMarker = "clear deferred post-compaction steer";
+		const followUpMarker = "clear deferred post-compaction follow-up";
+		const harness = await createPostCompactionExemptionHarness();
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("seed response")]);
+		await harness.session.prompt("seed clear-deferred context ".repeat(40));
+		await getRunAutoCompaction(harness)("threshold", false);
+		harness.events.length = 0;
+
+		harness.setResponses([
+			{
+				...fauxAssistantMessage("stale response before queue clear"),
+				usage: staleHighUsage(),
+			},
+			fauxAssistantMessage("deferred steer must not reach provider"),
+			fauxAssistantMessage("deferred follow-up must not reach provider"),
+		]);
+		const prompt = harness.session.prompt("first prompt after accepted compaction");
+		await harness.session.waitForIdle();
+		await harness.session.prompt(steerMarker, { streamingBehavior: "steer" });
+		await harness.session.followUp(followUpMarker);
+
+		const cleared = clear(harness);
+		expect(cleared).toEqual({ steering: [steerMarker], followUp: [followUpMarker] });
+		expect(cleared.steering.filter((text) => text === steerMarker)).toHaveLength(1);
+		expect(cleared.followUp.filter((text) => text === followUpMarker)).toHaveLength(1);
+
+		await prompt;
+		await harness.session.waitForSettledSessionWork();
+
+		expect(harness.faux.state.callCount).toBe(2);
+		expect(harness.session.getSteeringMessages()).toEqual([]);
+		expect(harness.session.getFollowUpMessages()).toEqual([]);
+		expect(getAssistantTexts(harness)).not.toContain("deferred steer must not reach provider");
+		expect(getAssistantTexts(harness)).not.toContain("deferred follow-up must not reach provider");
+	});
+
+	it("does not resurrect deferred work after InteractiveMode abort clears the visible queue", async () => {
+		const steerMarker = "abort deferred post-compaction steer";
+		const followUpMarker = "abort deferred post-compaction follow-up";
+		const harness = await createPostCompactionExemptionHarness();
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("seed response")]);
+		await harness.session.prompt("seed abort-deferred context ".repeat(40));
+		await getRunAutoCompaction(harness)("threshold", false);
+		harness.setResponses([
+			{ ...fauxAssistantMessage("stale response before abort"), usage: staleHighUsage() },
+			fauxAssistantMessage("aborted deferred steer must not reach provider"),
+			fauxAssistantMessage("aborted deferred follow-up must not reach provider"),
+		]);
+		const prompt = harness.session.prompt("first prompt before queue abort");
+		await harness.session.waitForIdle();
+		await harness.session.prompt(steerMarker, { streamingBehavior: "steer" });
+		await harness.session.followUp(followUpMarker);
+
+		const setText = vi.fn<(text: string) => void>();
+		const context = {
+			compactionQueuedMessages: [],
+			compactionInFlightMessages: [],
+			compactionTransferAbortControllers: new Map(),
+			session: harness.session,
+			updatePendingMessagesDisplay: vi.fn(),
+			editor: { getText: () => "draft", setText },
+			clearAllQueues: () => getClearAllQueues()(context),
+		};
+		const restored = await getAbortAndFireQueuedMessages()(context);
+		expect(restored).toBe(2);
+		expect(setText).toHaveBeenCalledWith(`${steerMarker}\n\n${followUpMarker}\n\ndraft`);
+
+		await prompt;
+		await harness.session.waitForSettledSessionWork();
+		expect(harness.faux.state.callCount).toBe(2);
+		expect(getAssistantTexts(harness)).not.toContain("aborted deferred steer must not reach provider");
+		expect(getAssistantTexts(harness)).not.toContain("aborted deferred follow-up must not reach provider");
 	});
 });

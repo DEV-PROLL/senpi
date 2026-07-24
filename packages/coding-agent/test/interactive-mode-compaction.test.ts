@@ -1,4 +1,4 @@
-import { Container } from "@earendil-works/pi-tui";
+import { Container, sanitizeTerminalLabel } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { CompactionSummaryMessageComponent } from "../src/modes/interactive/components/compaction-summary-message.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
@@ -231,6 +231,73 @@ describe("InteractiveMode compaction events", () => {
 		expect(rendered).not.toContain("]52;");
 		expect(rendered).not.toContain("attacker.invalid");
 		expect(rendered).not.toContain("stolen title");
+	});
+
+	test("sanitizes compaction progress, errors, and display summaries without rewriting the event result", async () => {
+		const hostileText =
+			"compaction\u001b]52;c;c2VjcmV0\u0007 live\u001b]0;stolen title\u0007 " +
+			"\u001b]8;;https://attacker.invalid\u0007link\u001b]8;;\u0007 \u001b[31mcolor\u001b[0m \u009b31mprovider\u009b0m";
+		const sanitizedText = sanitizeTerminalLabel(hostileText);
+		const statusContainer = new Container();
+		const chatContainer = new Container();
+		const fakeThis = {
+			isInitialized: true,
+			footer: { invalidate: vi.fn() },
+			autoCompactionEscapeHandler: undefined as (() => void) | undefined,
+			autoCompactionLoader: undefined as { stop(): void } | undefined,
+			autoCompactionProgressText: "",
+			defaultEditor: {} as { onEscape?: () => void },
+			session: { abortCompaction: vi.fn() },
+			statusContainer,
+			chatContainer,
+			clearStatusIndicator: vi.fn(),
+			rebuildChatFromMessages: vi.fn(),
+			addMessageToChat: vi.fn(),
+			showError: vi.fn(),
+			showStatus: vi.fn(),
+			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
+			settingsManager: { getShowTerminalProgress: () => false },
+			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
+		};
+		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
+			this: typeof fakeThis,
+			event: object,
+		) => Promise<void>;
+
+		await handleEvent.call(fakeThis, { type: "compaction_start", reason: "extension" });
+		await handleEvent.call(fakeThis, { type: "compaction_progress", reason: "extension", delta: hostileText });
+		const renderedProgress = stripAnsi(statusContainer.children.flatMap((child) => child.render(120)).join("\n"));
+		expect(renderedProgress).toContain(sanitizedText);
+		expect(renderedProgress).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+		expect(renderedProgress).not.toContain("attacker.invalid");
+		expect(renderedProgress).not.toContain("stolen title");
+
+		const result = { tokensBefore: 123, summary: hostileText };
+		await handleEvent.call(fakeThis, {
+			type: "compaction_end",
+			reason: "extension",
+			result,
+			aborted: false,
+			willRetry: false,
+			accepted: true,
+		});
+		expect(result.summary).toBe(hostileText);
+		expect(fakeThis.addMessageToChat).toHaveBeenCalledWith(expect.objectContaining({ summary: sanitizedText }));
+
+		await handleEvent.call(fakeThis, { type: "compaction_start", reason: "extension" });
+		await handleEvent.call(fakeThis, {
+			type: "compaction_end",
+			reason: "extension",
+			result: undefined,
+			aborted: false,
+			willRetry: false,
+			errorMessage: hostileText,
+		});
+		const renderedError = stripAnsi(chatContainer.children.flatMap((child) => child.render(120)).join("\n"));
+		expect(renderedError).toContain(sanitizedText);
+		expect(renderedError).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+		expect(renderedError).not.toContain("attacker.invalid");
+		expect(renderedError).not.toContain("stolen title");
 	});
 
 	test("renders OpenAI remote compaction details in the summary card", () => {

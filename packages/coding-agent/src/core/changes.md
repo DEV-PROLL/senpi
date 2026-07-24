@@ -36,6 +36,11 @@
   callback never arrives.
 - Post-retry and post-compaction usage exemptions suppress only stale threshold accounting. Provider-confirmed
   overflow always retains queue ownership and runs fail-closed recovery.
+- Extension-originated provider turns now wait behind active session work and manual compaction. `clearQueue()` clears
+  both native and post-compaction deferred ownership layers, preventing canceled steer/follow-up input from resurfacing.
+- Provider admission is checked again after assembling `nextTurn` and `before_agent_start` custom messages. Rejected
+  compaction restores one-shot additions transactionally; accepted compaction rebuilds and rechecks the final visible
+  request before the provider is called.
 
 ### Why extension system couldn't handle this alone
 

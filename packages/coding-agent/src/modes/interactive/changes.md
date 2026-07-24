@@ -9,6 +9,8 @@
   instead of resubmitting it through the unchanged required-compaction gate and recursively starting compaction.
 - Consecutive `compaction_start` events share one Escape override. The original editor handler is preserved through
   supersession and restored exactly once on terminal cleanup, session rebind, invalidation, or TUI stop.
+- Compaction progress, errors, and summaries are stripped of terminal control sequences only when rendered. Persisted
+  summaries and provider/session content remain unchanged.
 
 ### Why
 

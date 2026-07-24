@@ -3575,10 +3575,7 @@ export class InteractiveMode {
 				if (!nextText) break;
 				this.autoCompactionProgressText = nextText;
 				const preview = nextText.length > 4_000 ? `...${nextText.slice(nextText.length - 4_000)}` : nextText;
-				this.statusContainer.clear();
-				this.statusContainer.addChild(this.activeStatusIndicator);
-				this.statusContainer.addChild(new Spacer(1));
-				this.statusContainer.addChild(new Text(theme.fg("muted", preview), 1, 0));
+				this.activeStatusIndicator.setProgressText(sanitizeTerminalLabel(preview));
 				this.ui.requestRender();
 				break;
 			}
@@ -3594,12 +3591,12 @@ export class InteractiveMode {
 					// Prefer the extension-provided reason over the generic "cancelled"
 					// label so per-turn-cap / circuit-breaker / provider-error cancels are
 					// no longer indistinguishable from a user-triggered abort.
-					const cancelMessage = event.errorMessage ?? "Compaction cancelled";
+					const cancelMessage = sanitizeTerminalLabel(event.errorMessage ?? "Compaction cancelled");
 					if (event.reason === "manual") {
 						this.showError(cancelMessage);
 					} else if (event.errorMessage) {
 						this.chatContainer.addChild(new Spacer(1));
-						this.chatContainer.addChild(new Text(theme.fg("error", event.errorMessage), 1, 0));
+						this.chatContainer.addChild(new Text(theme.fg("error", cancelMessage), 1, 0));
 					} else {
 						this.showStatus("Auto-compaction cancelled");
 					}
@@ -3608,7 +3605,7 @@ export class InteractiveMode {
 					this.rebuildChatFromMessages();
 					this.addMessageToChat(
 						createCompactionSummaryMessage(
-							event.result.summary,
+							sanitizeTerminalLabel(event.result.summary),
 							event.result.tokensBefore,
 							new Date().toISOString(),
 							event.result.details,
@@ -3616,11 +3613,11 @@ export class InteractiveMode {
 					);
 					this.footer.invalidate();
 				} else if (event.errorMessage) {
+					const errorMessage = sanitizeTerminalLabel(event.errorMessage);
 					if (event.reason === "manual") {
-						this.showError(event.errorMessage);
+						this.showError(errorMessage);
 					} else {
-						this.chatContainer.addChild(new Spacer(1));
-						this.chatContainer.addChild(new Text(theme.fg("error", event.errorMessage), 1, 0));
+						this.chatContainer.addChild(new Text(theme.fg("error", errorMessage), 1, 0));
 					}
 				} else if (event.accepted === false) {
 					// Exhaustive fallback per plan Section 1: compaction_end must never fall

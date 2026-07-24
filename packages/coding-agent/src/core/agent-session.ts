@@ -411,6 +411,8 @@ export interface PromptOptions {
 	promptDisposition?: (disposition: PromptDisposition) => void;
 	/** Internal cancellation signal for a prompt that has not acquired session-work ownership yet. */
 	signal?: AbortSignal;
+	/** Internal callback used by fire-and-forget extension input to retain session-work ownership after its barrier wait. */
+	onSessionWorkReady?: () => void;
 	sessionTitlePrompt?: string | false;
 }
 
@@ -2065,7 +2067,17 @@ export class AgentSession {
 		const ownsPromptStart =
 			!this.isStreaming && !this._promptStartPending && options?.streamingBehavior === undefined;
 		if (ownsPromptStart) this._promptStartPending = true;
-		const shouldWaitForSessionWork = options?.source !== "extension";
+		// Extension bindings deliberately fire-and-forget sendUserMessage(), so an
+		// extension callback cannot deadlock on this wait. The resulting provider
+		// turn must still serialize behind compaction and other session work just
+		// like an interactive prompt does.
+		const shouldWaitForSessionWork = true;
+		const compactionGenerationAtExtensionAdmission =
+			options?.source === "extension" &&
+			this._sessionWorkBarrier.hasActiveWork &&
+			this._compactionLifecycle.state.status !== "idle"
+				? this._compactionLifecycle.state.generation
+				: undefined;
 		// A steer/followUp submission during an active run can be queued immediately.
 		// Waiting on the session-work barrier here would trap the message inside this
 		// call for the rest of the run whenever a queued continuation (e.g. an active
@@ -2082,6 +2094,7 @@ export class AgentSession {
 		) {
 			await this._waitForSettledSessionWork();
 			throwIfCancelled();
+			options?.onSessionWorkReady?.();
 		}
 
 		// Turn boundary: restore the primary model if the fallback cooldown expired.
@@ -2099,6 +2112,7 @@ export class AgentSession {
 		const promptDisposition = options?.promptDisposition;
 		let messages: AgentMessage[] | undefined;
 		let titlePrompt: string | undefined;
+		let consumedNextTurnMessages: CustomMessage[] | undefined;
 
 		try {
 			// Handle extension commands first (execute immediately, even during streaming)
@@ -2209,6 +2223,25 @@ export class AgentSession {
 				}
 			}
 
+			// A background extension prompt that arrived during a manual compaction
+			// must never overtake a rejected or aborted compaction. Keep its normal
+			// queue ownership instead of attempting another provider admission.
+			if (
+				compactionGenerationAtExtensionAdmission !== undefined &&
+				this._compactionLifecycle.state.generation === compactionGenerationAtExtensionAdmission &&
+				(this._compactionLifecycle.state.status === "failed" ||
+					this._compactionLifecycle.state.status === "aborted")
+			) {
+				if (options?.streamingBehavior === "followUp") {
+					await this._queueFollowUp(expandedText, currentImages);
+				} else {
+					await this._queueSteer(expandedText, currentImages);
+				}
+				promptDisposition?.("queued");
+				preflightResult?.(true);
+				return;
+			}
+
 			// Flush any pending bash messages before the new prompt
 			this._flushPendingBashMessages();
 
@@ -2249,11 +2282,14 @@ export class AgentSession {
 				timestamp: Date.now(),
 			});
 
-			// Inject any pending "nextTurn" messages as context alongside the user message
-			for (const msg of this._pendingNextTurnMessages) {
+			// Consume next-turn messages transactionally: a final admission rejection
+			// restores them in their original order rather than dropping or duplicating
+			// one-shot extension state.
+			consumedNextTurnMessages = this._pendingNextTurnMessages;
+			this._pendingNextTurnMessages = [];
+			for (const msg of consumedNextTurnMessages) {
 				messages.push(msg);
 			}
-			this._pendingNextTurnMessages = [];
 
 			// Emit before_agent_start extension event
 			const result = await this._extensionRunner.emitBeforeAgentStart(
@@ -2285,7 +2321,15 @@ export class AgentSession {
 				this._systemPromptOverride = undefined;
 				this.agent.state.systemPrompt = this._baseSystemPrompt;
 			}
+
+			// The preflight above only sees persisted session context. These prompt,
+			// next-turn, and before_agent_start additions are also provider-visible,
+			// so make one final admission decision against the complete request.
+			await this._enforceFinalProviderAdmission(messages);
 		} catch (error) {
+			if (consumedNextTurnMessages && consumedNextTurnMessages.length > 0) {
+				this._pendingNextTurnMessages = [...consumedNextTurnMessages, ...this._pendingNextTurnMessages];
+			}
 			preflightResult?.(false);
 			throw error;
 		} finally {
@@ -2305,7 +2349,13 @@ export class AgentSession {
 		await this._promptAgent(messages);
 		await this.waitForRetry();
 		await this.waitForIdle();
-		if (shouldWaitForSessionWork) {
+		if (options?.onSessionWorkReady) {
+			// This prompt owns a session-work token acquired after waiting for a
+			// prior operation, so waiting for the global barrier here would await
+			// itself. _promptAgent() already drained its event queue; any newly
+			// scheduled continuation retains its own barrier ownership.
+			await this.agent.waitForIdle();
+		} else if (shouldWaitForSessionWork) {
 			await this._waitForSettledSessionWork();
 		} else {
 			await this.agent.waitForIdle();
@@ -2587,6 +2637,7 @@ export class AgentSession {
 			}
 		} else if (options?.triggerTurn) {
 			await this._enforceCompactionBeforeProvider(this._findLastAssistantMessage(), false, "pre_prompt");
+			await this._enforceFinalProviderAdmission([appMessage]);
 			await this._promptAgent(appMessage);
 		} else {
 			this.agent.state.messages.push(appMessage);
@@ -2633,14 +2684,28 @@ export class AgentSession {
 			if (images.length === 0) images = undefined;
 		}
 
-		// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
-		await this.prompt(text, {
-			expandPromptTemplates: false,
-			streamingBehavior: options?.deliverAs,
-			images,
-			source: "extension",
-			sessionTitlePrompt: false,
-		});
+		// An extension binding invokes this method fire-and-forget. When it
+		// arrives during session work, retain a barrier token after the prior work
+		// settles so callers observing session idle cannot race its provider turn.
+		const waitForExistingSessionWork = this._sessionWorkBarrier.hasActiveWork;
+		let finishSessionWork: (() => void) | undefined;
+		try {
+			// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
+			await this.prompt(text, {
+				expandPromptTemplates: false,
+				streamingBehavior: options?.deliverAs,
+				images,
+				source: "extension",
+				onSessionWorkReady: waitForExistingSessionWork
+					? () => {
+							finishSessionWork ??= this._sessionWorkBarrier.begin();
+						}
+					: undefined,
+				sessionTitlePrompt: false,
+			});
+		} finally {
+			finishSessionWork?.();
+		}
 	}
 
 	/**
@@ -2651,8 +2716,13 @@ export class AgentSession {
 	clearQueue(): { steering: string[]; followUp: string[] } {
 		const steering = [...this._steeringMessages];
 		const followUp = [...this._followUpMessages];
+		// Clear every queue synchronously. Deferred post-compaction messages are
+		// already represented in visible bookkeeping, so they must not be returned
+		// a second time or later resurrected into Agent's native queues.
 		this._steeringMessages = [];
 		this._followUpMessages = [];
+		this._postCompactionDeferredSteeringMessages = [];
+		this._postCompactionDeferredFollowUpMessages = [];
 		this.agent.clearAllQueues();
 		this._emitQueueUpdate();
 		return { steering, followUp };
@@ -3114,6 +3184,7 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
+		const finishManualCompactionWork = this._sessionWorkBarrier.begin();
 		this._disconnectFromAgent();
 		await this.abort();
 		const controller = new AbortController();
@@ -3154,6 +3225,7 @@ export class AgentSession {
 				this._compactionAbortController = undefined;
 			}
 			this._reconnectToAgent();
+			finishManualCompactionWork();
 		}
 	}
 
@@ -3681,6 +3753,49 @@ export class AgentSession {
 			if (compacted) return true;
 		}
 		throw new RequiredCompactionError();
+	}
+
+	/**
+	 * The normal pre-prompt check only estimates persisted session context. This
+	 * final gate also includes turn-local messages which the provider will see:
+	 * the current prompt, next-turn custom messages, and before_agent_start
+	 * additions. Compaction rewrites only session context, so callers retain and
+	 * reapply their already-assembled one-shot additions after it succeeds.
+	 */
+	private async _enforceFinalProviderAdmission(messages: readonly AgentMessage[]): Promise<void> {
+		// Normal user-only prompts keep the established provider-overflow recovery
+		// path. This final gate closes the separate gap introduced by turn-local
+		// custom additions, which the normal pre-prompt check cannot observe.
+		if (!messages.some((message) => message.role === "custom")) return;
+
+		const model = this.model;
+		if (!model) return;
+		const settings = this.settingsManager.getCompactionSettings();
+		const isOversized = (): boolean => {
+			const providerMessages = filterContextExcludedMessages([...this.agent.state.messages, ...messages]);
+			const estimate = estimateContextTokens(providerMessages);
+			const usageMessage = estimate.lastUsageIndex === null ? undefined : providerMessages[estimate.lastUsageIndex];
+			// Kept assistant usage can describe the pre-compaction request. Once a
+			// compaction boundary exists, fall back to byte-derived message estimates
+			// until a provider response refreshes that usage.
+			const contextTokens =
+				usageMessage?.role === "assistant" && this._isAssistantFromBeforeLatestCompaction(usageMessage)
+					? estimateMessagesTokens(providerMessages)
+					: estimate.tokens;
+			return contextTokens > model.contextWindow - settings.reserveTokens;
+		};
+
+		if (!settings.enabled || !isOversized()) return;
+
+		const lastAssistantMessage = this._findLastAssistantMessage();
+		if (!lastAssistantMessage) {
+			throw new RequiredCompactionError();
+		}
+
+		const compacted = await this._runPrePromptCompaction(lastAssistantMessage, false, "pre_prompt");
+		if (!compacted || isOversized()) {
+			throw new RequiredCompactionError();
+		}
 	}
 
 	private async _checkCompaction(
