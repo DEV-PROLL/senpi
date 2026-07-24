@@ -585,12 +585,16 @@ export class ExtensionRunner {
 		return this.extensions.map((e) => e.path);
 	}
 
-	/** Get all registered tools from all extensions (first registration per name wins). */
+	/**
+	 * Get all registered tools from all extensions. The first registration within a source tier
+	 * wins, while a non-builtin extension may override a builtin extension tool.
+	 */
 	getAllRegisteredTools(): RegisteredTool[] {
 		const toolsByName = new Map<string, RegisteredTool>();
 		for (const ext of this.extensions) {
 			for (const tool of ext.tools.values()) {
-				if (!toolsByName.has(tool.definition.name)) {
+				const existing = toolsByName.get(tool.definition.name);
+				if (!existing || (existing.sourceInfo.source === "builtin" && tool.sourceInfo.source !== "builtin")) {
 					toolsByName.set(tool.definition.name, tool);
 				}
 			}
@@ -937,6 +941,10 @@ export class ExtensionRunner {
 				runner.assertActive();
 				return getServiceTier();
 			},
+			get thinkingLevel() {
+				runner.assertActive();
+				return runner.runtime.getThinkingLevel();
+			},
 			isIdle: () => {
 				runner.assertActive();
 				return runner.isIdleFn();
@@ -1239,6 +1247,10 @@ export class ExtensionRunner {
 						currentEvent.isError = handlerResult.isError;
 						modified = true;
 					}
+					if (handlerResult.usage !== undefined) {
+						currentEvent.usage = handlerResult.usage;
+						modified = true;
+					}
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					const stack = err instanceof Error ? err.stack : undefined;
@@ -1264,6 +1276,7 @@ export class ExtensionRunner {
 			content: currentEvent.content,
 			details: currentEvent.details,
 			isError: currentEvent.isError,
+			usage: currentEvent.usage,
 		};
 	}
 

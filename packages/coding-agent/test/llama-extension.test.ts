@@ -92,7 +92,7 @@ describe("llama.cpp extension", () => {
 					id: "loaded",
 					status: { value: "loaded", args: ["llama-server", "--n-gpu-layers", "999"] },
 					architecture: { input_modalities: ["text", "image"] },
-					meta: { n_ctx: 16384, n_ctx_train: 131072 },
+					meta: { n_ctx: 65536, n_ctx_train: 131072 },
 				},
 				{
 					id: "sleeping",
@@ -109,8 +109,8 @@ describe("llama.cpp extension", () => {
 			expect.objectContaining({
 				id: "loaded",
 				baseUrl: "http://localhost:8080/v1",
-				contextWindow: 16384,
-				maxTokens: 16384,
+				contextWindow: 65536,
+				maxTokens: 65536,
 				input: ["text", "image"],
 			}),
 			expect.objectContaining({
@@ -275,7 +275,7 @@ describe("llama.cpp extension", () => {
 					hub.send({
 						model: "owner/repo:Q4_K_M",
 						event: "download_progress",
-						data: { "https://example/model.gguf": { done: 512, total: 1024 } },
+						data: { progress: { "https://example/model.gguf": { done: 512, total: 1024 } } },
 					});
 					status = "unloaded";
 					hub.send({ model: "owner/repo:Q4_K_M", event: "download_finished", data: {} });

@@ -90,7 +90,7 @@ type OpenAiResponsesStreamRunner = (
 	options: SimpleStreamOptions,
 ) => OpenAiResponsesStream;
 
-type OpenAiRemoteCompactionDependencies = {
+export type OpenAiRemoteCompactionDependencies = {
 	fetch?: typeof fetch;
 	now?: () => number;
 	remoteTimeoutMs?: number;

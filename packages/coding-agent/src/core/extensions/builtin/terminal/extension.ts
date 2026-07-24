@@ -53,6 +53,7 @@ function buildToolContext(state: TerminalExtensionState): TerminalToolContext {
 			return state.settings.defaultRows;
 		},
 		getEnv: () => getShellEnv(),
+		getSessionContext: () => state.ctx,
 		onBackgroundExit: (id: string, runtime: TerminalRuntimeSession) => {
 			state.notifier?.notifyCompletion(id, runtime);
 		},

@@ -30,16 +30,17 @@ import type {
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { prepareAgentToolCall } from "@earendil-works/pi-agent-core";
+import { contentText } from "@earendil-works/pi-ai";
 import type {
 	Api,
 	AssistantMessage,
 	AuthResult,
 	ImageContent,
-	Message,
 	Model,
 	ProviderHeaders,
 	SimpleStreamOptions,
 	TextContent,
+	Usage,
 } from "@earendil-works/pi-ai/compat";
 import {
 	cleanupSessionResources,
@@ -47,6 +48,7 @@ import {
 	isContextOverflow,
 	isRetryableAssistantError,
 	modelsAreEqual,
+	type RetryCallbacks,
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
@@ -138,6 +140,7 @@ import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinki
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
+import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
 // ============================================================================
 // Skill Block Parsing
@@ -214,7 +217,22 @@ export type AgentSessionEvent =
 	// terminal result arrive here, because an interactive browser round-trip
 	// cannot fit inside the request timeout.
 	| { type: "auth_login_url"; provider: string; url: string }
-	| { type: "auth_login_end"; provider: string; success: boolean; error?: string };
+	| { type: "auth_login_end"; provider: string; success: boolean; error?: string }
+	| {
+			type: "summarization_retry_scheduled";
+			attempt: number;
+			maxAttempts: number;
+			delayMs: number;
+			errorMessage: string;
+	  }
+	| { type: "summarization_retry_attempt_start"; source: "branchSummary" }
+	| {
+			type: "summarization_retry_attempt_start";
+			source: "compaction";
+			reason: CompactionReason;
+	  }
+	| { type: "summarization_retry_finished" }
+	| { type: "bash_execution_update"; id?: string; delta: string };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -691,7 +709,7 @@ export class AgentSession {
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
-		apiKey: string;
+		apiKey?: string;
 		headers?: Record<string, string>;
 		extraBody?: Record<string, unknown>;
 		env?: Record<string, string>;
@@ -706,7 +724,7 @@ export class AgentSession {
 			}
 			throw error;
 		}
-		if (result?.auth.apiKey) {
+		if (result && (result.auth.apiKey || result.auth.headers)) {
 			return {
 				apiKey: result.auth.apiKey,
 				headers: withoutDeletedHeaders(result.auth.headers),
@@ -726,30 +744,40 @@ export class AgentSession {
 		throw new Error(formatNoApiKeyFoundMessage(model.provider));
 	}
 
+	/**
+	 * Resolve optional auth for a summarization stream. Native/custom stream
+	 * functions may provide ambient credentials, unlike streamSimple.
+	 */
+	private async _getSummarizationRequestAuth(model: Model<any>): Promise<{
+		apiKey?: string;
+		headers?: Record<string, string>;
+		env?: Record<string, string>;
+	}> {
+		if (this.agent.streamFunction === streamSimple) {
+			return this._getRequiredRequestAuth(model);
+		}
+
+		try {
+			const result = await this._modelRuntime.getAuth(model);
+			return result
+				? { apiKey: result.auth.apiKey, headers: withoutDeletedHeaders(result.auth.headers), env: result.env }
+				: {};
+		} catch {
+			return {};
+		}
+	}
+
 	private async _getCompactionRequestAuth(model: Model<any>): Promise<{
 		apiKey?: string;
 		headers?: Record<string, string>;
 		extraBody?: Record<string, unknown>;
 		env?: Record<string, string>;
 	}> {
-		if (this.agent.streamFn === streamSimple) {
-			return this._getRequiredRequestAuth(model);
-		}
-
-		const compatibility = this._modelRuntime.getCompatibilityRequestConfig(model);
-		try {
-			const result = await this._modelRuntime.getAuth(model);
-			return result
-				? {
-						apiKey: result.auth.apiKey,
-						headers: withoutDeletedHeaders(result.auth.headers),
-						extraBody: compatibility.extraBody,
-						env: result.env,
-					}
-				: { extraBody: compatibility.extraBody };
-		} catch {
-			return { extraBody: compatibility.extraBody };
-		}
+		const auth = await this._getSummarizationRequestAuth(model);
+		return {
+			...auth,
+			extraBody: this._modelRuntime.getCompatibilityRequestConfig(model).extraBody,
+		};
 	}
 
 	/**
@@ -812,6 +840,7 @@ export class AgentSession {
 			content: result.content,
 			details: result.details,
 			isError,
+			usage: result.usage,
 		});
 
 		if (!hookResult) {
@@ -822,6 +851,7 @@ export class AgentSession {
 			content: hookResult.content,
 			details: hookResult.details,
 			isError: hookResult.isError ?? isError,
+			usage: hookResult.usage,
 		};
 	}
 
@@ -1026,6 +1056,15 @@ export class AgentSession {
 			await this._emitAgentSettled();
 			throw error;
 		}
+	}
+
+	/** Extract text content used to track fork-owned queued user messages. */
+	private _extractUserMessageText(content: string | Array<{ type: string; text?: string }>): string {
+		if (typeof content === "string") return content;
+		return content
+			.filter((part): part is { type: "text"; text: string } => part.type === "text")
+			.map((part) => part.text)
+			.join("");
 	}
 
 	// Track last assistant message for auto-compaction check
@@ -1300,7 +1339,7 @@ export class AgentSession {
 		if (event.type === "message_start" && event.message.role === "user") {
 			this._overflowRecoveryAttempted = false;
 			this._retryFallback.resetTurn();
-			const messageText = this._getUserMessageText(event.message);
+			const messageText = contentText(event.message.content, "");
 			if (messageText) {
 				// Check steering queue first
 				const steeringIndex = this._steeringMessages.indexOf(messageText);
@@ -1481,15 +1520,6 @@ export class AgentSession {
 			this._retryResolve = undefined;
 			this._retryPromise = undefined;
 		}
-	}
-
-	/** Extract text content from a message */
-	private _getUserMessageText(message: Message): string {
-		if (message.role !== "user") return "";
-		const content = message.content;
-		if (typeof content === "string") return content;
-		const textBlocks = content.filter((c) => c.type === "text");
-		return textBlocks.map((c) => (c as TextContent).text).join("");
 	}
 
 	/** Find the last assistant message in agent state (including aborted ones) */
@@ -2523,7 +2553,7 @@ export class AgentSession {
 				sessionId: this.sessionId,
 				baseOptions: this._buildSessionTitleBaseOptions(),
 				signal: abortController.signal,
-				streamFn: this.agent.streamFn,
+				streamFn: this.agent.streamFunction,
 			});
 			if (abortController.signal.aborted) {
 				return;
@@ -3569,9 +3599,11 @@ export class AgentSession {
 						signal,
 						extraBody,
 						thinkingLevel,
-						this.agent.streamFn,
+						this.agent.streamFunction,
 						env,
 						this.agent.transformContext,
+						this.settingsManager.getRetrySettings(),
+						this._summarizationRetryCallbacks({ source: "compaction", reason: request.reason }),
 					);
 				}
 			}
@@ -3619,6 +3651,7 @@ export class AgentSession {
 				compactionResult.tokensBefore,
 				compactionResult.details,
 				fromExtension,
+				compactionResult.usage,
 			);
 			const savedEntry = this.sessionManager.getEntry(compactionEntryId);
 			if (savedEntry?.type !== "compaction") {
@@ -4226,19 +4259,35 @@ export class AgentSession {
 		const agentMessagesAtStart = this.agent.state.messages.slice();
 		const autoCompactionController = new AbortController();
 		this._claimCompactionController(autoCompactionController, "auto");
+		const endBeforeExecution = (): false => {
+			this._emit({ type: "compaction_start", reason });
+			if (reason === "overflow") this._overflowRecoveryAttempted = false;
+			this._emit({
+				type: "compaction_end",
+				reason,
+				result: undefined,
+				aborted: false,
+				willRetry: false,
+			});
+			return false;
+		};
 
 		try {
 			if (!this.model) {
-				if (reason === "overflow") this._overflowRecoveryAttempted = false;
-				return false;
+				return endBeforeExecution();
 			}
 
-			const authResult = await this._modelRuntime.getAuth(this.model);
-			if (!this._ownsCompactionController(autoCompactionController, "auto")) return false;
-			if (this.agent.streamFn === streamSimple && !authResult?.auth.apiKey) {
-				if (reason === "overflow") this._overflowRecoveryAttempted = false;
-				return false;
+			try {
+				// Resolve once before admission so a pending auth refresh remains a
+				// cancellable boundary. _executeCompaction resolves the policy-specific
+				// auth after extension compaction hooks have had a chance to provide a
+				// summary without credentials.
+				await this._modelRuntime.getAuth(this.model);
+			} catch {
+				if (!this._ownsCompactionController(autoCompactionController, "auto")) return false;
+				return endBeforeExecution();
 			}
+			if (!this._ownsCompactionController(autoCompactionController, "auto")) return false;
 
 			const preparation = prepareCompaction(
 				this.sessionManager.getBranch(),
@@ -4246,8 +4295,7 @@ export class AgentSession {
 				reason === "overflow",
 			);
 			if (!preparation) {
-				if (reason === "overflow") this._overflowRecoveryAttempted = false;
-				return false;
+				return endBeforeExecution();
 			}
 			if (!this._ownsCompactionController(autoCompactionController, "auto")) return false;
 			this._emit({ type: "compaction_start", reason });
@@ -4931,6 +4979,37 @@ export class AgentSession {
 	}
 
 	/**
+	 * Retry policy + callbacks shared by compaction and branch-summary summarization calls.
+	 * Uses the same `settings.retry` budget/backoff as agent-turn retries so a single transient
+	 * stream drop no longer fails the whole operation. `source` carries the context
+	 * the TUI needs to render the retry and recreate the underlying indicator.
+	 */
+	private _summarizationRetryCallbacks(
+		source: { source: "branchSummary" } | { source: "compaction"; reason: CompactionReason },
+	): RetryCallbacks {
+		return {
+			onRetryScheduled: (attempt, maxAttempts, delayMs, errorMessage) => {
+				this._emit({
+					type: "summarization_retry_scheduled",
+					attempt,
+					maxAttempts,
+					delayMs,
+					errorMessage,
+				});
+			},
+			onRetryAttemptStart: () => {
+				this._emit({
+					type: "summarization_retry_attempt_start",
+					...source,
+				});
+			},
+			onRetryFinished: () => {
+				this._emit({ type: "summarization_retry_finished" });
+			},
+		};
+	}
+
+	/**
 	 * Handle retryable errors with exponential backoff.
 	 * @returns whether retry continuation started, was blocked by compaction, or was not handled
 	 */
@@ -5174,12 +5253,13 @@ export class AgentSession {
 	 * @param command The bash command to execute
 	 * @param onChunk Optional streaming callback for output
 	 * @param options.excludeFromContext If true, command output won't be sent to LLM (!! prefix)
+	 * @param options.id Optional identifier included in bash execution update events
 	 * @param options.operations Custom BashOperations for remote execution
 	 */
 	async executeBash(
 		command: string,
 		onChunk?: (chunk: string) => void,
-		options?: { excludeFromContext?: boolean; operations?: BashOperations },
+		options?: { excludeFromContext?: boolean; id?: string; operations?: BashOperations },
 	): Promise<BashResult> {
 		this._bashAbortController = new AbortController();
 
@@ -5194,7 +5274,10 @@ export class AgentSession {
 				this.sessionManager.getCwd(),
 				options?.operations ?? createLocalBashOperations({ shellPath }),
 				{
-					onChunk,
+					onChunk: (delta) => {
+						onChunk?.(delta);
+						this._emit({ type: "bash_execution_update", id: options?.id, delta });
+					},
 					signal: this._bashAbortController.signal,
 				},
 			);
@@ -5350,7 +5433,7 @@ export class AgentSession {
 		this._branchSummaryAbortController = new AbortController();
 
 		try {
-			let extensionSummary: { summary: string; details?: unknown } | undefined;
+			let extensionSummary: { summary: string; details?: unknown; usage?: Usage } | undefined;
 			let fromExtension = false;
 
 			// Emit session_before_tree event
@@ -5385,6 +5468,7 @@ export class AgentSession {
 			// Run default summarizer if needed
 			let summaryText: string | undefined;
 			let summaryDetails: unknown;
+			let summaryUsage: Usage | undefined;
 			if (options.summarize && entriesToSummarize.length > 0 && !extensionSummary) {
 				const model = this.model!;
 				const { apiKey, headers, extraBody, env } = await this._getCompactionRequestAuth(model);
@@ -5399,7 +5483,9 @@ export class AgentSession {
 					customInstructions,
 					replaceInstructions,
 					reserveTokens: branchSummarySettings.reserveTokens,
-					streamFn: this.agent.streamFn,
+					streamFn: this.agent.streamFunction,
+					retry: this.settingsManager.getRetrySettings(),
+					callbacks: this._summarizationRetryCallbacks({ source: "branchSummary" }),
 				});
 				if (result.aborted) {
 					return { cancelled: true, aborted: true };
@@ -5408,6 +5494,7 @@ export class AgentSession {
 					throw new Error(result.error);
 				}
 				summaryText = result.summary;
+				summaryUsage = result.usage;
 				summaryDetails = {
 					readFiles: result.readFiles || [],
 					modifiedFiles: result.modifiedFiles || [],
@@ -5415,6 +5502,7 @@ export class AgentSession {
 			} else if (extensionSummary) {
 				summaryText = extensionSummary.summary;
 				summaryDetails = extensionSummary.details;
+				summaryUsage = extensionSummary.usage;
 			}
 
 			// Determine the new leaf position based on target type
@@ -5424,17 +5512,11 @@ export class AgentSession {
 			if (targetEntry.type === "message" && targetEntry.message.role === "user") {
 				// User message: leaf = parent (null if root), text goes to editor
 				newLeafId = targetEntry.parentId;
-				editorText = this._extractUserMessageText(targetEntry.message.content);
+				editorText = contentText(targetEntry.message.content, "");
 			} else if (targetEntry.type === "custom_message") {
 				// Custom message: leaf = parent (null if root), text goes to editor
 				newLeafId = targetEntry.parentId;
-				editorText =
-					typeof targetEntry.content === "string"
-						? targetEntry.content
-						: targetEntry.content
-								.filter((c): c is { type: "text"; text: string } => c.type === "text")
-								.map((c) => c.text)
-								.join("");
+				editorText = contentText(targetEntry.content, "");
 			} else {
 				// Non-user message: leaf = selected node
 				newLeafId = targetId;
@@ -5450,6 +5532,7 @@ export class AgentSession {
 					summaryText,
 					summaryDetails,
 					fromExtension,
+					summaryUsage,
 				);
 				summaryEntry = this.sessionManager.getEntry(summaryId) as BranchSummaryEntry;
 
@@ -5502,24 +5585,13 @@ export class AgentSession {
 			if (entry.type !== "message") continue;
 			if (entry.message.role !== "user") continue;
 
-			const text = this._extractUserMessageText(entry.message.content);
+			const text = contentText(entry.message.content, "");
 			if (text) {
 				result.push({ entryId: entry.id, text });
 			}
 		}
 
 		return result;
-	}
-
-	private _extractUserMessageText(content: string | Array<{ type: string; text?: string }>): string {
-		if (typeof content === "string") return content;
-		if (Array.isArray(content)) {
-			return content
-				.filter((c): c is { type: "text"; text: string } => c.type === "text")
-				.map((c) => c.text)
-				.join("");
-		}
-		return "";
 	}
 
 	/**
@@ -5533,13 +5605,12 @@ export class AgentSession {
 		let toolResults = 0;
 		let totalMessages = 0;
 		let toolCalls = 0;
-		let totalInput = 0;
-		let totalOutput = 0;
-		let totalCacheRead = 0;
-		let totalCacheWrite = 0;
-		let totalCost = 0;
+		const usageTotals = createUsageTotals();
 
 		for (const entry of this.sessionManager.getEntries()) {
+			if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
+				addUsageToTotals(usageTotals, entry.usage);
+			}
 			if (entry.type !== "message") continue;
 			totalMessages++;
 			const message = entry.message;
@@ -5547,18 +5618,16 @@ export class AgentSession {
 				userMessages++;
 			} else if (message.role === "toolResult") {
 				toolResults++;
+				if (message.usage) {
+					addUsageToTotals(usageTotals, message.usage);
+				}
 			} else if (message.role === "assistant") {
 				assistantMessages++;
 				const assistantMsg = message as AssistantMessage;
 				if (Array.isArray(assistantMsg.content)) {
 					toolCalls += assistantMsg.content.filter((c) => c.type === "toolCall").length;
 				}
-				const usage = assistantMsg.usage;
-				totalInput += usage.input;
-				totalOutput += usage.output;
-				totalCacheRead += usage.cacheRead;
-				totalCacheWrite += usage.cacheWrite;
-				totalCost += usage.cost.total;
+				addUsageToTotals(usageTotals, assistantMsg.usage);
 			}
 		}
 
@@ -5571,13 +5640,13 @@ export class AgentSession {
 			toolResults,
 			totalMessages,
 			tokens: {
-				input: totalInput,
-				output: totalOutput,
-				cacheRead: totalCacheRead,
-				cacheWrite: totalCacheWrite,
-				total: totalInput + totalOutput + totalCacheRead + totalCacheWrite,
+				input: usageTotals.input,
+				output: usageTotals.output,
+				cacheRead: usageTotals.cacheRead,
+				cacheWrite: usageTotals.cacheWrite,
+				total: usageTotals.input + usageTotals.output + usageTotals.cacheRead + usageTotals.cacheWrite,
 			},
-			cost: totalCost,
+			cost: usageTotals.cost,
 			contextUsage: this.getContextUsage(),
 		};
 	}

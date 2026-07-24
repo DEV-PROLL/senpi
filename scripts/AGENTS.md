@@ -36,7 +36,7 @@ Colocated `*.test.mjs` files run via root `npm run test:scripts` (`node --test s
 
 - `publish.mjs`: Publishes the four standalone packages (`@earendil-works/pi-ai`,
   `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`, `@code-yeongyu/senpi`).
-  `@code-yeongyu/senpi-orchestrator` is `private: true` and explicitly excluded.
+  `@code-yeongyu/senpi-server` is `private: true` and explicitly excluded.
 
 - `build-binaries.sh`: Mirrors `.github/workflows/build-binaries.yml` for local
   cross-platform binary builds.

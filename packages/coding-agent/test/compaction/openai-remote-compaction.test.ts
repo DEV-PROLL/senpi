@@ -1,5 +1,5 @@
 import { type AssistantMessage, fauxAssistantMessage, type Model } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_COMPACTION_SETTINGS } from "../../src/core/compaction/index.ts";
 import compactionExtension from "../../src/core/extensions/builtin/compaction/index.ts";
 import {
@@ -118,10 +118,6 @@ function compactionEvent(branchEntries: SessionEntry[]): SessionBeforeCompactEve
 		signal: new AbortController().signal,
 	};
 }
-
-afterEach(() => {
-	vi.unstubAllGlobals();
-});
 
 describe("OpenAI remote compaction", () => {
 	it("builds a compact request from a fully OpenAI-native branch", () => {
@@ -377,7 +373,6 @@ describe("OpenAI remote compaction", () => {
 				{ status: 200, headers: { "content-type": "application/json" } },
 			);
 		});
-		vi.stubGlobal("fetch", fetchMock);
 
 		const harness = await createHarness({
 			api: "openai-responses",
@@ -387,7 +382,7 @@ describe("OpenAI remote compaction", () => {
 			],
 			settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
 			extensionFactories: [
-				compactionExtension,
+				(pi) => compactionExtension(pi, { fetch: fetchMock }),
 				(pi) => {
 					pi.on("context", (event) => {
 						stages.push("context-redact");
@@ -451,11 +446,7 @@ describe("OpenAI remote compaction", () => {
 			expect(outgoing).not.toContain(rawSecret);
 			expect(capturedBody).toMatchObject({ extension_request_hook: "applied" });
 			expect(capturedHeaders?.get("x-compaction-request-hook")).toBe("applied");
-			for (const stage of ["context-redact", "context-final", "payload", "headers"]) {
-				expect(stages.indexOf(stage)).toBeGreaterThanOrEqual(0);
-				expect(stages.indexOf(stage)).toBeLessThan(stages.indexOf("fetch"));
-			}
-			expect(stages.indexOf("context-redact")).toBeLessThan(stages.indexOf("context-final"));
+			expect(stages).toEqual(["context-redact", "context-final", "headers", "payload", "fetch"]);
 		} finally {
 			harness.cleanup();
 		}

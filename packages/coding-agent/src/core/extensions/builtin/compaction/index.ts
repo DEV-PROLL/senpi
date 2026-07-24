@@ -21,6 +21,7 @@ import {
 } from "./degradation-monitor.ts";
 import {
 	markOpenAiRemoteReplayBoundary,
+	type OpenAiRemoteCompactionDependencies,
 	rewriteOpenAiPayloadWithRemoteCompaction,
 	runOpenAiRemoteCompaction,
 	SENPI_COMPACTION_EVENT,
@@ -150,7 +151,10 @@ function createBlockingRemoteCompactionEvent(
 	};
 }
 
-export default function compactionExtension(pi: ExtensionAPI): void {
+export default function compactionExtension(
+	pi: ExtensionAPI,
+	remoteCompactionDependencies: OpenAiRemoteCompactionDependencies = {},
+): void {
 	let state: CompactionExtensionState = createInitialState();
 	const degradationState = createDegradationMonitorState();
 	const restorationState = state.restoration ?? restoration.createRestorationTrackerState();
@@ -240,6 +244,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 						ctx,
 						createBlockingRemoteCompactionEvent(ctx, remoteSnapshot, customInstructions, remoteSignal),
 						(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
+						remoteCompactionDependencies,
 					);
 					if (remoteCompaction) {
 						if (speculativeGeneration !== remoteGeneration - 1) {
@@ -358,8 +363,11 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 
 		const model = ctx.model;
 		if (!model) return undefined;
-		const remoteCompaction = await runOpenAiRemoteCompaction(ctx, event, (data) =>
-			pi.events.emit(SENPI_COMPACTION_EVENT, data),
+		const remoteCompaction = await runOpenAiRemoteCompaction(
+			ctx,
+			event,
+			(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
+			remoteCompactionDependencies,
 		);
 		if (remoteCompaction) {
 			return { compaction: remoteCompaction };

@@ -18,7 +18,7 @@ Senpi is an extension-first coding-agent monorepo. Keep changes scoped, preserve
 | `packages/tui/` | Differential terminal renderer and editor primitives |
 | `packages/web-ui/` | Lit browser components, storage, sandboxed artifacts |
 | `packages/neo/` | Independent Go TUI and TypeScript RPC bridge client |
-| `packages/orchestrator/` | Experimental daemon, IPC, RPC-process supervision |
+| `packages/server/` | Experimental daemon, IPC, RPC-process supervision |
 | `packages/pty/` | TypeScript PTY loader, sessions, registry, pipe fallback |
 | `packages/senpi-codemode/` | Source-only persistent-kernel `eval` extension |
 | `crates/senpi-pty/` | Rust/N-API native PTY implementation and ABI owner |

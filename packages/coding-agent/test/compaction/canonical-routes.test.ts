@@ -718,13 +718,12 @@ describe("builtin compaction canonical routes", () => {
 				{ status: 200, headers: { "content-type": "application/json" } },
 			);
 		});
-		vi.stubGlobal("fetch", fetchMock);
 		const harness = await createHarness({
 			api: "openai-responses",
 			provider: "openai",
 			models: [{ id: OPENAI_MODEL.id, contextWindow: 200_000, maxTokens: 16_384 }],
 			settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
-			extensionFactories: [compactionExtension],
+			extensionFactories: [(pi) => compactionExtension(pi, { fetch: fetchMock })],
 		});
 
 		try {
