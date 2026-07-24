@@ -1,6 +1,6 @@
 import { setImmediate as waitForImmediate } from "node:timers/promises";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/index.ts";
 import { COMPACTION_SUMMARY_PREFIX } from "../../src/core/messages.ts";
 import { createHarness, getUserTexts, type Harness } from "./harness.ts";
@@ -475,6 +475,62 @@ describe("AgentSession compaction race handling", () => {
 		expect(harness.eventsOfType("compaction_end")).toEqual([
 			expect.objectContaining({ reason: "threshold", accepted: true, aborted: false }),
 		]);
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(1);
+	});
+
+	it("does not let an auto-compaction admitted before auth supersede a manual compaction", async () => {
+		const autoAuthStarted = createDeferred();
+		const releaseAutoAuth = createDeferred();
+		const harness = await createHarness({
+			models: [{ id: "auto-auth-race", contextWindow: 128_000, maxTokens: 64 }],
+			settings: { compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", (event) => ({
+						compaction: {
+							summary: "manual wins auto-auth race",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+						},
+					}));
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("seed response")]);
+		await harness.session.prompt("seed context ".repeat(40));
+		harness.events.length = 0;
+
+		const lifecycle = Reflect.get(harness.session, "_compactionLifecycle") as {
+			begin: (...args: never[]) => unknown;
+		};
+		const lifecycleBegin = vi.spyOn(lifecycle, "begin");
+		const modelRuntime = Reflect.get(harness.session, "_modelRuntime") as {
+			getAuth: (...args: unknown[]) => Promise<unknown>;
+		};
+		const originalGetAuth = modelRuntime.getAuth.bind(modelRuntime);
+		vi.spyOn(modelRuntime, "getAuth").mockImplementation(async (...args) => {
+			autoAuthStarted.resolve();
+			await releaseAutoAuth.promise;
+			return await originalGetAuth(...args);
+		});
+
+		const autoCompaction = getRunAutoCompaction(harness)("threshold", false);
+		await autoAuthStarted.promise;
+		const manualCompaction = harness.session.compact();
+		await manualCompaction;
+		releaseAutoAuth.resolve();
+		expect(await autoCompaction).toBe(false);
+		await harness.session.waitForSettledSessionWork();
+
+		// The auto attempt was superseded while auth was pending. It owns no
+		// lifecycle transition or public events; the manual operation completes once.
+		expect(lifecycleBegin).toHaveBeenCalledTimes(1);
+		expect(harness.eventsOfType("compaction_start")).toEqual([expect.objectContaining({ reason: "manual" })]);
+		expect(harness.eventsOfType("compaction_end")).toEqual([
+			expect.objectContaining({ reason: "manual", accepted: true, aborted: false }),
+		]);
+		expect(harness.session.compactionState).toMatchObject({ status: "completed" });
 		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(1);
 	});
 });

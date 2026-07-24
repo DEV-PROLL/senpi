@@ -274,6 +274,7 @@ type SessionModelEntry = { model: Model<any>; thinkingLevel?: ThinkingLevel; ser
 
 interface CompactionExecutionRequest {
 	controller: AbortController;
+	owner: "auto" | "compaction";
 	reason: CompactionReason;
 	customInstructions?: string;
 	willRetry: boolean;
@@ -3213,6 +3214,15 @@ export class AgentSession {
 		}
 	}
 
+	private _ownsCompactionController(controller: AbortController, owner: "auto" | "compaction"): boolean {
+		return (
+			!controller.signal.aborted &&
+			(owner === "auto"
+				? this._autoCompactionAbortController === controller
+				: this._compactionAbortController === controller)
+		);
+	}
+
 	private _releaseCompactionController(signal: AbortSignal): void {
 		if (this._compactionAbortController?.signal === signal) {
 			this._compactionAbortController = undefined;
@@ -3297,6 +3307,7 @@ export class AgentSession {
 			this._emit({ type: "compaction_start", reason: "manual" });
 			const execution = await this._executeCompaction({
 				controller,
+				owner: "compaction",
 				reason: "manual",
 				customInstructions,
 				willRetry: false,
@@ -3357,6 +3368,7 @@ export class AgentSession {
 		try {
 			const execution = await this._executeCompaction({
 				controller,
+				owner: "compaction",
 				reason: options.reason,
 				willRetry: false,
 				precomputed,
@@ -3458,6 +3470,11 @@ export class AgentSession {
 		if (!model) throw new Error(formatNoModelSelectedMessage());
 		const thinkingLevel = this.thinkingLevel;
 		const controller = request.controller;
+		// Async auth and provider preparation may yield to a newer route. A stale
+		// controller must never promote itself into a lifecycle generation.
+		if (!this._ownsCompactionController(controller, request.owner)) {
+			throw new CompactionExecutionError(new CompactionCancelledError(), false, true);
+		}
 		const requestId = randomUUID();
 		const operationId = this._compactionLifecycle.begin(
 			{
@@ -4104,6 +4121,7 @@ export class AgentSession {
 		try {
 			const execution = await this._executeCompaction({
 				controller,
+				owner: "compaction",
 				reason,
 				willRetry,
 				lastAssistantMessage,
@@ -4208,31 +4226,17 @@ export class AgentSession {
 		const agentMessagesAtStart = this.agent.state.messages.slice();
 		const autoCompactionController = new AbortController();
 		this._claimCompactionController(autoCompactionController, "auto");
-		this._emit({ type: "compaction_start", reason });
 
 		try {
 			if (!this.model) {
 				if (reason === "overflow") this._overflowRecoveryAttempted = false;
-				this._emit({
-					type: "compaction_end",
-					reason,
-					result: undefined,
-					aborted: false,
-					willRetry: false,
-				});
 				return false;
 			}
 
 			const authResult = await this._modelRuntime.getAuth(this.model);
+			if (!this._ownsCompactionController(autoCompactionController, "auto")) return false;
 			if (this.agent.streamFn === streamSimple && !authResult?.auth.apiKey) {
 				if (reason === "overflow") this._overflowRecoveryAttempted = false;
-				this._emit({
-					type: "compaction_end",
-					reason,
-					result: undefined,
-					aborted: false,
-					willRetry: false,
-				});
 				return false;
 			}
 
@@ -4243,18 +4247,14 @@ export class AgentSession {
 			);
 			if (!preparation) {
 				if (reason === "overflow") this._overflowRecoveryAttempted = false;
-				this._emit({
-					type: "compaction_end",
-					reason,
-					result: undefined,
-					aborted: false,
-					willRetry: false,
-				});
 				return false;
 			}
+			if (!this._ownsCompactionController(autoCompactionController, "auto")) return false;
+			this._emit({ type: "compaction_start", reason });
 
 			const execution = await this._executeCompaction({
 				controller: autoCompactionController,
+				owner: "auto",
 				reason,
 				willRetry,
 				agentMessagesAtStart,
@@ -4597,6 +4597,7 @@ export class AgentSession {
 							this._emit({ type: "compaction_start", reason: "extension" });
 							const execution = await this._executeCompaction({
 								controller,
+								owner: "compaction",
 								reason: "extension",
 								customInstructions: options?.customInstructions,
 								willRetry: false,

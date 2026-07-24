@@ -6,9 +6,13 @@ import { createEventBus } from "../../src/core/event-bus.ts";
 import compactionExtension from "../../src/core/extensions/builtin/compaction/index.ts";
 import {
 	buildOpenAiRemoteCompactionResult,
+	markOpenAiRemoteReplayBoundary,
 	rewriteOpenAiPayloadWithRemoteCompaction,
 } from "../../src/core/extensions/builtin/compaction/openai-remote.ts";
-import { openAiRemoteCompactionOrigin } from "../../src/core/extensions/builtin/compaction/openai-remote-model.ts";
+import {
+	createOpenAiRemoteCompactionHeaders,
+	openAiRemoteCompactionOrigin,
+} from "../../src/core/extensions/builtin/compaction/openai-remote-model.ts";
 import type { BeforeAgentStartEvent } from "../../src/core/extensions/index.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../../src/core/extensions/loader.ts";
 import { COMPACTION_SUMMARY_PREFIX, COMPACTION_SUMMARY_SUFFIX, convertToLlm } from "../../src/core/messages.ts";
@@ -838,7 +842,12 @@ describe("builtin compaction canonical routes", () => {
 
 		try {
 			const model = harness.getModel() as Model<"openai-responses">;
-			const origin = openAiRemoteCompactionOrigin(model, new Headers({ authorization: "Bearer faux-key" }));
+			const headers = createOpenAiRemoteCompactionHeaders(
+				model,
+				{ apiKey: "faux-key" },
+				harness.sessionManager.getSessionId(),
+			);
+			const origin = headers ? openAiRemoteCompactionOrigin(model, headers) : undefined;
 			expect(origin).toBeDefined();
 			if (!origin) return;
 			const retainedEntryId = harness.sessionManager.appendMessage({
@@ -909,5 +918,109 @@ describe("builtin compaction canonical routes", () => {
 		} finally {
 			harness.cleanup();
 		}
+	});
+
+	it.each([
+		"x-tenant-id",
+		"x-workspace-id",
+	] as const)("declines replay when final routing header %s changes for the same endpoint and credential", (routingHeader) => {
+		const commonHeaders = {
+			authorization: "Bearer shared-account-credential",
+			"x-tenant-id": "tenant-a",
+			"x-workspace-id": "workspace-a",
+		};
+		const originA = openAiRemoteCompactionOrigin(OPENAI_MODEL, new Headers(commonHeaders));
+		const originB = openAiRemoteCompactionOrigin(
+			OPENAI_MODEL,
+			new Headers({ ...commonHeaders, [routingHeader]: `${routingHeader}-b` }),
+		);
+		if (!originA || !originB) throw new Error("Expected remote replay origins");
+
+		const checkpoint = buildOpenAiRemoteCompactionResult({
+			model: OPENAI_MODEL,
+			firstKeptEntryId: "u2",
+			tokensBefore: 1_234,
+			requestInputItemCount: 4,
+			response: {
+				id: `resp_${routingHeader}`,
+				created_at: 1_775_000_001,
+				object: "response.compaction",
+				output: [{ type: "context_compaction", encrypted_content: "routing-bound-checkpoint" }],
+			},
+			origin: originA,
+		});
+		const branch: SessionEntry[] = [
+			...openAiBranch(),
+			{
+				type: "compaction",
+				id: "routing-checkpoint",
+				parentId: "u2",
+				timestamp: new Date(1_775_000_002_000).toISOString(),
+				summary: checkpoint.summary,
+				firstKeptEntryId: checkpoint.firstKeptEntryId,
+				tokensBefore: checkpoint.tokensBefore,
+				details: checkpoint.details,
+				fromHook: true,
+			},
+		];
+		const markedContext = markOpenAiRemoteReplayBoundary(
+			[
+				...buildSessionContext(branch).messages,
+				{ role: "user", content: [{ type: "text", text: "Continue on the new route." }], timestamp: 4 },
+			],
+			{ model: OPENAI_MODEL, branchEntries: branch },
+		);
+		const finalPayload = {
+			model: OPENAI_MODEL.id,
+			input: convertResponsesMessages(OPENAI_MODEL, { messages: convertToLlm(markedContext) }, new Set(["openai"])),
+			stream: true,
+		};
+
+		const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(finalPayload, {
+			model: OPENAI_MODEL,
+			branchEntries: branch,
+			origin: originB,
+		});
+
+		// Every final routing decision scopes the native checkpoint, not only
+		// credentials. Neither tenant nor workspace state may cross-replay.
+		expect(rewritten).toBeUndefined();
+		expect(originB.authTenantFingerprint).not.toBe(originA.authTenantFingerprint);
+	});
+
+	it("excludes only documented volatile transport headers from non-Codex provenance", () => {
+		const stableHeaders = {
+			authorization: "Bearer tenant-a",
+			"x-tenant-id": "tenant-a",
+			accept: "application/json",
+		};
+		const first = openAiRemoteCompactionOrigin(
+			OPENAI_MODEL,
+			new Headers({
+				...stableHeaders,
+				"content-length": "123",
+				"user-agent": "senpi test A",
+				"x-request-id": "request-a",
+				"x-client-request-id": "client-a",
+			}),
+		);
+		const onlyVolatileHeadersChanged = openAiRemoteCompactionOrigin(
+			OPENAI_MODEL,
+			new Headers({
+				...stableHeaders,
+				"content-length": "456",
+				"user-agent": "senpi test B",
+				"x-request-id": "request-b",
+				"x-client-request-id": "client-b",
+			}),
+		);
+		const finalNonVolatileHeaderChanged = openAiRemoteCompactionOrigin(
+			OPENAI_MODEL,
+			new Headers({ ...stableHeaders, accept: "application/vnd.route-b+json" }),
+		);
+
+		expect(first).toBeDefined();
+		expect(onlyVolatileHeadersChanged).toEqual(first);
+		expect(finalNonVolatileHeaderChanged?.authTenantFingerprint).not.toBe(first?.authTenantFingerprint);
 	});
 });

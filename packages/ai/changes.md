@@ -7,6 +7,8 @@
 - `src/context-provenance.ts`: added request-local, non-enumerable message/item provenance tokens.
 - `src/api/openai-responses-shared.ts`: preserves those tokens while converting messages to Responses input items.
 - `src/types.ts` and `src/index.ts`: expose the typed provenance helpers needed by coding-agent's replay boundary.
+- `src/utils/openai-codex-auth.ts`: centralizes browser-safe ChatGPT account-ID extraction so normal Codex requests
+  and remote compaction canonicalize the same wire tenant across bearer-token refreshes.
 
 ### Why
 
@@ -22,6 +24,7 @@
 - `src/api/openai-responses-shared.ts`
 - `src/index.ts`
 - `src/types.ts`
+- `src/utils/openai-codex-auth.ts`
 
 ### Expected merge conflict zones
 

@@ -518,17 +518,12 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 						...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}),
 					}
 				: model;
-		const initialHeaders = createOpenAiRemoteCompactionHeaders(
+		const headers = createOpenAiRemoteCompactionHeaders(
 			effectiveModel,
-			auth,
+			{ ...auth, headers: event.headers ?? auth.headers },
 			ctx.sessionManager.getSessionId(),
 		);
-		if (!initialHeaders) return undefined;
-		const headers = new Headers(initialHeaders);
-		for (const [key, value] of Object.entries(event.headers ?? {})) {
-			if (value === null) headers.delete(key);
-			else headers.set(key, value);
-		}
+		if (!headers) return undefined;
 		const origin = openAiRemoteCompactionOrigin(effectiveModel, headers);
 		return rewriteOpenAiPayloadWithRemoteCompaction(
 			event.payload,

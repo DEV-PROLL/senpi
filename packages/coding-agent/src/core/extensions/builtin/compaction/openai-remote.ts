@@ -658,8 +658,19 @@ export async function runOpenAiRemoteCompaction(
 		return undefined;
 	}
 	const remoteTimeoutMs = dependencies.remoteTimeoutMs ?? OPENAI_REMOTE_COMPACTION_TIMEOUT_MS;
-	const headers = createOpenAiRemoteCompactionHeaders(requestModel, auth, request.body.prompt_cache_key);
-	if (!headers) {
+	// Normal provider requests transform configured headers before the Codex
+	// transport applies its canonical auth/account fields. Mirror that ordering
+	// so extension routing choices are retained but cannot impersonate another
+	// OAuth account on either the wire or persisted provenance.
+	const transformedHeaders = providerRequest
+		? await providerRequest.transformHeaders(auth.headers ?? {})
+		: auth.headers;
+	const requestHeaders = createOpenAiRemoteCompactionHeaders(
+		requestModel,
+		{ ...auth, headers: transformedHeaders },
+		request.body.prompt_cache_key,
+	);
+	if (!requestHeaders) {
 		emit?.({
 			version: 1,
 			action: "remote_fallback",
@@ -670,14 +681,6 @@ export async function runOpenAiRemoteCompaction(
 		});
 		return undefined;
 	}
-	const transformedHeaders = providerRequest
-		? await providerRequest.transformHeaders(Object.fromEntries(headers.entries()))
-		: undefined;
-	const requestHeaders = transformedHeaders
-		? new Headers(
-				Object.entries(transformedHeaders).flatMap(([key, value]) => (value === null ? [] : [[key, value]])),
-			)
-		: headers;
 	const origin = openAiRemoteCompactionOrigin(requestModel, requestHeaders);
 	if (!origin) {
 		emit?.({

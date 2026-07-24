@@ -1,3 +1,10 @@
+## Canonical remote compaction provenance and route ownership (2026-07-24)
+
+- `openai-remote-model.ts`: provenance now hashes the normalized endpoint and every final header by default. The only excluded volatile transport headers are `content-length`, `user-agent`, `request-id`, `x-request-id`, and `x-client-request-id`; raw values are never persisted. This binds non-Codex checkpoints to authorization plus final tenant/workspace routing headers.
+- Codex checkpoints instead bind to the JWT-derived `chatgpt-account-id` and every other final non-volatile header, deliberately excluding only the rotating `authorization` bearer value. Codex remote compaction now applies normal Responses header ordering: extension header transforms first, then configured authorization/account, originator, user agent, beta, and session/cache-affinity fields.
+- `agent-session.ts`: each compaction execution now proves its explicit auto/manual route controller still owns the operation before beginning lifecycle state. An auto compaction superseded during async auth admission publishes no lifecycle events and cannot disturb the newer manual operation.
+- Regressions: `test/compaction/canonical-routes.test.ts`, `test/suite/regressions/issue-296-openai-codex-remote-compaction.test.ts`, and `test/suite/compaction-race.test.ts` cover header routing differences, refresh-stable Codex account provenance, canonical override repair, and auth-admission supersession.
+
 ## Replay remote checkpoints from final context payloads (2026-07-24)
 
 - `openai-remote.ts`: replay proves the checkpoint boundary by projecting the compaction-aware session prefix through
