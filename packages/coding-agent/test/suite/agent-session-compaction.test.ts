@@ -1358,8 +1358,11 @@ describe("AgentSession compaction characterization", () => {
 			.filter((event) =>
 				event.errorMessage?.startsWith("Context overflow recovery failed after one compact-and-retry attempt"),
 			);
-		expect(overflowStarts).toHaveLength(2);
+		// Compaction fails at preparation (before any retry), so no compaction_start is
+		// emitted and the overflow compact-and-retry attempt is NOT consumed.
+		expect(overflowStarts).toHaveLength(0);
 		expect(terminalOverflowFailures).toHaveLength(0);
+		expect(Reflect.get(harness.session, "_overflowRecoveryAttempted")).toBe(false);
 	});
 
 	it("auto-retries overflow recovery when a provider alias differs but current context is still near the limit", async () => {

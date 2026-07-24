@@ -26,7 +26,7 @@ prompt-preset/
 ├── glm-5-2.ts           # GLM 5.2 preset
 ├── kimi-k2-6.ts         # Kimi K2.6 preset
 ├── kimi-k2-7.ts         # Kimi K2.7 preset
-├── kimi-k3.ts           # Kimi K3 preset — K2-family loop discipline + Opus 4.8/Fable 5 distillation traits
+├── kimi-k3.ts           # Kimi K3 preset — full-core rewrite via `corePrompt` (K3 tuning merged into a leaner Kimi-shaped core; K2-family loop discipline + Opus 4.8/Fable 5 distillation traits) + binding stop contract (declared stop condition in the routing line)
 └── changes.md           # Fork tracker (model-family rename 2026-04-30, file-operations 2026-05-07)
 ```
 
@@ -55,7 +55,7 @@ export function buildGpt55Prompt(options: BuildDynamicSystemPromptOptions): stri
 
 Each preset is ~10 lines. The shared default in `dynamic-prompt/` carries identity, intent gate, exploration, parallel-tools, verification, policies, style. Preset only carries **what's different for that model family**.
 
-Exception: `gpt-5.5.ts` and `gpt-5.6.ts` pass `corePrompt` instead of `tuningSection` — full core rewrites (GPT-5.5+ wants short, outcome-first prompts, not the shared scaffolding; GPT-5.6 additionally over-compresses under generic brevity wording, so its style rules are prioritization/preserve-first). The 5.6 core is modeled on the oh-my-opencode Hephaestus GPT-5.6 prompt (autonomous deep worker: implement-don't-propose, Manual QA Gate, failure-recovery circuit breaker, stop rules), minus omo-only tool contracts. They still reuse `buildTestDisciplineSection()`, `buildFileOperationsTuning()`, and the builder's dynamic assembly, so shared rules stay single-sourced.
+Exception: `gpt-5.5.ts`, `gpt-5.6.ts`, and `kimi-k3.ts` pass `corePrompt` instead of `tuningSection` — full core rewrites (GPT-5.5+ wants short, outcome-first prompts, not the shared scaffolding; GPT-5.6 additionally over-compresses under generic brevity wording, so its style rules are prioritization/preserve-first; Kimi K3 gets the shared contracts restated once each in a leaner Kimi-shaped core, because the K2-line guidance says duplicate strictness layered over its RL-tuned instruction following double-taxes into redundant verification loops). The 5.6 core is modeled on the oh-my-opencode Hephaestus GPT-5.6 prompt (autonomous deep worker: implement-don't-propose, Manual QA Gate, failure-recovery circuit breaker, stop rules), minus omo-only tool contracts. They still reuse `buildTestDisciplineSection()` (and, GPT-only, `buildFileOperationsTuning()`) plus the builder's dynamic assembly, so shared rules stay single-sourced.
 
 ## CONVENTIONS
 

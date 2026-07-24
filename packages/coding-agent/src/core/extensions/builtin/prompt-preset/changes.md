@@ -1,5 +1,28 @@
 # prompt-preset Extension Changes
 
+## Kimi K3 token diet via `corePrompt` rewrite + binding stop contract (2026-07-24)
+
+### What changed
+
+- `kimi-k3.ts`: switched from shared core + `tuningSection` to a `corePrompt` full-core rewrite (precedent: `gpt-5.5.ts`/`gpt-5.6.ts`). The K3 tuning is merged into a leaner Kimi-shaped core (~19% fewer static prompt chars) with every behavioral contract preserved and stated exactly once: identity/senior-engineer bar, required routing line, anti-leakage guard, dynamic specialized-search trigger line (via `getToolsPromptDisplay`), routing-by-true-intent classifier, scope discipline, turn-local intent reset, confirmation-turn re-entry rule, one-path commitment, mechanical-work direct action, parallel tool waves, exploration stop conditions, no-restate/no-re-derive/filler-verification ban, V1/V2/V3 verification tiers, shared `buildTestDisciplineSection()`, hard blocks, execution stance (act-then-report, recommendation-not-survey, opinionated disagreement, user's call final), smallest-correct-change, non-refusal, ASCII default, auto-compaction continuation. `workstationDialect: "kimi"` unchanged.
+- `kimi-k3.ts`: the routing line adopts the **binding stop contract** from the `claude-opus-5.ts`/`gpt-5.6.ts` presets — "I read this as [intent] - [plan]. I'll stop when [the exact, observable condition that ends this turn]." — with the think-through-the-goal requirement (observable end state, not a step count), evidence-only confirmation at the stop point, and "every action past the declared stop condition is a defect, not diligence". Phrased as a positive terminal condition in Opus 5's calm wording rather than GPT-5.6's all-caps Stop Goal, because the K2-line guidance says the trained loop terminates on a condition, not a token count, and all-caps directives make K2/K3-class models overthink. The auto-compaction continuation is retargeted at the declared stop condition.
+- `test/suite/prompt-presets-kimi-k3.test.ts`: added the stop-contract pin (mirrors the opus-5 suite).
+- `AGENTS.md`: `kimi-k3.ts` FILES row + the `corePrompt` exception paragraph now include K3.
+
+### Why
+
+- The shared core plus appended tuning double-taxed K3: the act-bias rule appeared three times (intent gate, style, tuning) and the no-re-derivation rule twice. Per the Kimi K2-line prompting guidance, K2/K3-class models reason proportionally to the unresolved decisions in their input, and duplicate strictness layered over their RL-tuned instruction following produces redundant verification loops and self-second-guessing — the exact overthinking the 2026-07-17 tuning tightening targeted. A `tuningSection` cannot remove scaffolding the builder already emitted, so the sanctioned `corePrompt` override is the only mechanism that both diets the prompt and keeps the change K3-scoped.
+- The stop contract is explicit fork direction (adopted on Opus 5 and GPT-5.6): make the model reason about its actual goal, declare an observable stop condition every turn, and stop there. For K3 it doubles as the strongest documented anti-overthinking lever — an explicit terminal condition for the think-act loop.
+- All pre-existing `prompt-presets-kimi-k3.test.ts` content pins hold unchanged ("You are senpi", "## Intent Gate", "running on Kimi K3", "evidence-first", "skip filler verification language", "a recommendation, not a survey", >2000 chars, no `apply_patch`/K2.x tuning leakage).
+
+### Why extension system couldn't handle this differently
+
+- Content-only change inside this builtin, using the builder's existing `corePrompt` override; no core prompt code changed.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `kimi-k3.ts` is fork-only; `AGENTS.md` prose rows and the K3 test suite only.
+
 ## Claude Opus 5 preset (2026-07-24)
 
 ### What changed
