@@ -14,6 +14,12 @@ import type {
 	ResponseStreamEvent,
 	ResponseToolSearchOutputItemParam,
 } from "openai/resources/responses/responses.js";
+import {
+	CONTEXT_PROVENANCE_FIELD,
+	type ContextProvenance,
+	contextProvenanceFingerprint,
+	getContextProvenance,
+} from "../context-provenance.ts";
 import { calculateCost } from "../models.ts";
 import type {
 	Api,
@@ -83,6 +89,8 @@ export interface ConvertResponsesMessagesOptions {
 	preserveThinking?: boolean;
 	preserveTextSignatures?: boolean;
 	deferredTools?: ReadonlyMap<string, Tool>;
+	/** Internal request-local provenance sealing pass. Never serialized to provider payloads. */
+	sealContextProvenance?: boolean;
 }
 
 export interface ConvertResponsesToolsOptions {
@@ -123,6 +131,31 @@ function isFreeformToolName(toolName: string, tools: Tool[] | undefined): boolea
 function getFreeformToolInput(argumentsValue: Record<string, unknown>): string {
 	return typeof argumentsValue.input === "string" ? argumentsValue.input : JSON.stringify(argumentsValue);
 }
+
+function contextProvenanceForInput(message: unknown, seal: boolean | undefined): ContextProvenance | undefined {
+	const provenance = getContextProvenance(message);
+	if (!provenance) return undefined;
+	const fingerprint = contextProvenanceFingerprint(message);
+	if (fingerprint === undefined) return undefined;
+	const stored = provenance.integrity;
+	if (stored === undefined && seal) {
+		provenance.integrity = fingerprint;
+		return provenance;
+	}
+	return stored === fingerprint ? provenance : undefined;
+}
+
+function withContextProvenance<T extends object>(item: T, message: unknown, seal: boolean | undefined): T {
+	const provenance = contextProvenanceForInput(message, seal);
+	if (provenance) {
+		Object.defineProperty(item, CONTEXT_PROVENANCE_FIELD, {
+			value: provenance,
+			enumerable: false,
+		});
+	}
+	return item;
+}
+
 // =============================================================================
 // Message conversion
 // =============================================================================
@@ -180,10 +213,16 @@ export function convertResponsesMessages<TApi extends Api>(
 	for (const msg of transformedMessages) {
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
-				messages.push({
-					role: "user",
-					content: [{ type: "input_text", text: sanitizeSurrogates(msg.content) }],
-				});
+				messages.push(
+					withContextProvenance(
+						{
+							role: "user",
+							content: [{ type: "input_text", text: sanitizeSurrogates(msg.content) }],
+						},
+						msg,
+						options?.sealContextProvenance,
+					),
+				);
 			} else {
 				const content: ResponseInputContent[] = msg.content.map((item): ResponseInputContent => {
 					if (item.type === "text") {
@@ -199,10 +238,7 @@ export function convertResponsesMessages<TApi extends Api>(
 					} satisfies ResponseInputImage;
 				});
 				if (content.length === 0) continue;
-				messages.push({
-					role: "user",
-					content,
-				});
+				messages.push(withContextProvenance({ role: "user", content }, msg, options?.sealContextProvenance));
 			}
 		} else if (msg.role === "assistant") {
 			const output: ResponseInputItem[] = [];
@@ -277,7 +313,7 @@ export function convertResponsesMessages<TApi extends Api>(
 				}
 			}
 			if (output.length === 0) continue;
-			messages.push(...output);
+			messages.push(...output.map((item) => withContextProvenance(item, msg, options?.sealContextProvenance)));
 		} else if (msg.role === "toolResult") {
 			const textResult = msg.content
 				.filter((c): c is TextContent => c.type === "text")
@@ -313,18 +349,26 @@ export function convertResponsesMessages<TApi extends Api>(
 				output = sanitizeSurrogates(hasText ? textResult : hasImages ? "(see attached image)" : "(no tool output)");
 			}
 			if (isFreeformToolName(msg.toolName, context.tools)) {
-				messages.push({
-					type: "custom_tool_call_output",
-					call_id: callId,
-					name: msg.toolName,
-					output,
-				} satisfies ResponseCustomToolCallOutputItem);
+				messages.push(
+					withContextProvenance(
+						{
+							type: "custom_tool_call_output",
+							call_id: callId,
+							name: msg.toolName,
+							output,
+						} satisfies ResponseCustomToolCallOutputItem,
+						msg,
+						options?.sealContextProvenance,
+					),
+				);
 			} else {
-				messages.push({
-					type: "function_call_output",
-					call_id: callId,
-					output,
-				});
+				messages.push(
+					withContextProvenance(
+						{ type: "function_call_output", call_id: callId, output },
+						msg,
+						options?.sealContextProvenance,
+					),
+				);
 			}
 
 			const deferredTools: Tool[] = [];
@@ -337,20 +381,32 @@ export function convertResponsesMessages<TApi extends Api>(
 			if (deferredTools.length > 0) {
 				const names = deferredTools.map((tool) => tool.name);
 				const searchCallId = `pi_tool_load_${shortHash(`${msg.toolCallId}:${names.join(",")}`)}`;
-				messages.push({
-					type: "tool_search_call",
-					call_id: searchCallId,
-					execution: "client",
-					status: "completed",
-					arguments: { query: names.join(" "), limit: names.length },
-				} satisfies ResponseInputItem);
-				messages.push({
-					type: "tool_search_output",
-					call_id: searchCallId,
-					execution: "client",
-					status: "completed",
-					tools: convertResponsesTools(deferredTools, { deferLoading: true }),
-				} satisfies ResponseToolSearchOutputItemParam);
+				messages.push(
+					withContextProvenance(
+						{
+							type: "tool_search_call",
+							call_id: searchCallId,
+							execution: "client",
+							status: "completed",
+							arguments: { query: names.join(" "), limit: names.length },
+						} satisfies ResponseInputItem,
+						msg,
+						options?.sealContextProvenance,
+					),
+				);
+				messages.push(
+					withContextProvenance(
+						{
+							type: "tool_search_output",
+							call_id: searchCallId,
+							execution: "client",
+							status: "completed",
+							tools: convertResponsesTools(deferredTools, { deferLoading: true }),
+						} satisfies ResponseToolSearchOutputItemParam,
+						msg,
+						options?.sealContextProvenance,
+					),
+				);
 			}
 		}
 		msgIndex++;

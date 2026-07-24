@@ -1,5 +1,32 @@
 # changes.md — ai
 
+## Carry non-enumerable context provenance through Responses conversion (2026-07-24)
+
+### What changed
+
+- `src/context-provenance.ts`: added request-local, non-enumerable message/item provenance tokens.
+- `src/api/openai-responses-shared.ts`: preserves those tokens while converting messages to Responses input items.
+- `src/types.ts` and `src/index.ts`: expose the typed provenance helpers needed by coding-agent's replay boundary.
+
+### Why
+
+- Provider-wire value equality cannot distinguish duplicated messages after filtering or injection. Replay slicing now
+  requires the exact checkpoint-origin identities to survive the canonical context pipeline.
+
+### Why extension system couldn't handle this
+
+- The provenance must survive conversion inside `packages/ai`, below extension-visible provider payloads.
+
+### Modified upstream files
+
+- `src/api/openai-responses-shared.ts`
+- `src/index.ts`
+- `src/types.ts`
+
+### Expected merge conflict zones
+
+- MEDIUM: Responses message conversion and shared public types.
+
 ## Export canonical OpenAI Responses message conversion (2026-07-24)
 
 ### What changed

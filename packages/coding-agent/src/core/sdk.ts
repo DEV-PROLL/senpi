@@ -369,12 +369,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				},
 			});
 		},
-		onPayload: async (payload, _model) => {
+		onPayload: async (payload, _model, request) => {
 			const runner = extensionRunnerRef.current;
 			if (!runner?.hasHandlers("before_provider_request")) {
 				return payload;
 			}
-			return runner.emitBeforeProviderRequest(payload);
+			return runner.emitBeforeProviderRequest(payload, undefined, request);
 		},
 		onResponse: async (response, _model) => {
 			const runner = extensionRunnerRef.current;

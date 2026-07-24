@@ -18,6 +18,10 @@
   excluding superseded older summaries before canonical Responses conversion.
 - Non-remote summarization runs context hooks on raw `AgentMessage` values before `convertToLlm`, preserving
   role/customType-based redaction contracts while leaving persisted messages byte-identical.
+- Remote checkpoint provenance now records normalized endpoint/trust-domain identity plus a SHA-256 fingerprint of the
+  effective auth tenant (never raw credentials). Legacy, cross-endpoint, or cross-tenant entries decline replay.
+- Replay boundaries require non-enumerable message/item provenance to survive the canonical context pipeline. Missing,
+  duplicated, reordered, reconstructed, or mutated provenance keeps the final transformed full payload unchanged.
 
 # Builtin compaction extension changes
 

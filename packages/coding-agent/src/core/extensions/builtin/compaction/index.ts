@@ -20,11 +20,16 @@ import {
 	resetOnSessionCompact,
 } from "./degradation-monitor.ts";
 import {
+	markOpenAiRemoteReplayBoundary,
 	rewriteOpenAiPayloadWithRemoteCompaction,
 	runOpenAiRemoteCompaction,
 	SENPI_COMPACTION_EVENT,
 } from "./openai-remote.ts";
-import { isOpenAiRemoteCompactionModel } from "./openai-remote-model.ts";
+import {
+	createOpenAiRemoteCompactionHeaders,
+	isOpenAiRemoteCompactionModel,
+	openAiRemoteCompactionOrigin,
+} from "./openai-remote-model.ts";
 import * as cap from "./per-turn-cap.ts";
 import * as policy from "./policy.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
@@ -493,13 +498,41 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 			? reduceContextMessages(event.messages, BUILTIN_CONTEXT_REDUCTION_OPTIONS).messages
 			: event.messages;
 		const emergency = hardLimitEmergencyPrune(sourceMessages, promptContextWindow);
-		return { messages: repairOrphanedToolResults(convertToLlm(emergency.messages)) };
+		const marked = markOpenAiRemoteReplayBoundary(emergency.messages, {
+			model: ctx.model,
+			branchEntries: ctx.sessionManager.getBranch(),
+		});
+		return { messages: repairOrphanedToolResults(convertToLlm(marked)) };
 	});
 
-	pi.on("before_provider_request", (event, ctx) => {
+	pi.on("before_provider_request", async (event, ctx) => {
+		const model = event.model ?? ctx.model;
+		if (!isOpenAiRemoteCompactionModel(model)) return undefined;
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+		if (!auth.ok) return undefined;
+		const effectiveModel =
+			auth.upstreamModelId || auth.baseUrl
+				? {
+						...model,
+						...(auth.upstreamModelId ? { id: auth.upstreamModelId } : {}),
+						...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}),
+					}
+				: model;
+		const initialHeaders = createOpenAiRemoteCompactionHeaders(
+			effectiveModel,
+			auth,
+			ctx.sessionManager.getSessionId(),
+		);
+		if (!initialHeaders) return undefined;
+		const headers = new Headers(initialHeaders);
+		for (const [key, value] of Object.entries(event.headers ?? {})) {
+			if (value === null) headers.delete(key);
+			else headers.set(key, value);
+		}
+		const origin = openAiRemoteCompactionOrigin(effectiveModel, headers);
 		return rewriteOpenAiPayloadWithRemoteCompaction(
 			event.payload,
-			{ model: ctx.model, branchEntries: ctx.sessionManager.getBranch() },
+			{ model: effectiveModel, branchEntries: ctx.sessionManager.getBranch(), origin },
 			(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
 		);
 	});

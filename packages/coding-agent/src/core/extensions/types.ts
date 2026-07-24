@@ -823,6 +823,10 @@ export interface ContextEvent {
 export interface BeforeProviderRequestEvent {
 	type: "before_provider_request";
 	payload: unknown;
+	/** Effective request model after auth/base-url/upstream-model resolution. */
+	model?: Model<Api>;
+	/** Final header transform output for this request. Values are never persisted. */
+	headers?: ProviderHeaders;
 }
 
 /**

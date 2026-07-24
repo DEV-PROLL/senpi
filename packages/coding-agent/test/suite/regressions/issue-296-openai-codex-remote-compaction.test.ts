@@ -1,14 +1,15 @@
-import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
+import { type Api, type AssistantMessage, convertResponsesMessages, type Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_COMPACTION_SETTINGS } from "../../../src/core/compaction/index.ts";
 import {
+	markOpenAiRemoteReplayBoundary,
 	OPENAI_REMOTE_COMPACTION_SCHEMA,
 	rewriteOpenAiPayloadWithRemoteCompaction,
 	runOpenAiRemoteCompaction,
 } from "../../../src/core/extensions/builtin/compaction/openai-remote.ts";
 import type { SessionBeforeCompactEvent } from "../../../src/core/extensions/types.ts";
-import { COMPACTION_SUMMARY_PREFIX, COMPACTION_SUMMARY_SUFFIX } from "../../../src/core/messages.ts";
-import type { SessionEntry, SessionMessageEntry } from "../../../src/core/session-manager.ts";
+import { convertToLlm } from "../../../src/core/messages.ts";
+import { buildSessionContext, type SessionEntry, type SessionMessageEntry } from "../../../src/core/session-manager.ts";
 
 const CODEX_MODEL = {
 	id: "gpt-5.4-codex",
@@ -191,26 +192,25 @@ describe("issue #296 OpenAI Codex remote compaction", () => {
 				fromHook: true,
 			},
 		];
+		const markedContext = markOpenAiRemoteReplayBoundary(
+			[
+				...buildSessionContext(compactedBranch).messages,
+				{ role: "user", content: [{ type: "text", text: "Continue after compaction." }], timestamp: 4 },
+			],
+			{ model: CODEX_MODEL, branchEntries: compactedBranch },
+		);
 		const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(
 			{
 				model: CODEX_MODEL.id,
-				input: [
-					{ role: "developer", content: "Current prompt." },
-					{
-						role: "user",
-						content: [
-							{
-								type: "input_text",
-								text: `${COMPACTION_SUMMARY_PREFIX}${result.summary}${COMPACTION_SUMMARY_SUFFIX}`,
-							},
-						],
-					},
-					{ role: "user", content: [{ type: "input_text", text: "Keep the diagnosis." }] },
-					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
-				],
+				input: convertResponsesMessages(
+					CODEX_MODEL,
+					{ messages: convertToLlm(markedContext) },
+					new Set(["openai-codex"]),
+					{ includeSystemPrompt: false, preserveTextSignatures: true },
+				),
 				stream: true,
 			},
-			{ model: CODEX_MODEL, branchEntries: compactedBranch },
+			{ model: CODEX_MODEL, branchEntries: compactedBranch, origin: result.details.origin },
 		) as { input?: unknown[] } | undefined;
 
 		expect(rewritten?.input).toContainEqual({

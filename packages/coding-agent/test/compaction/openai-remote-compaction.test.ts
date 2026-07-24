@@ -959,28 +959,9 @@ describe("OpenAI remote compaction", () => {
 			{ model: OPENAI_MODEL, branchEntries: branchWithMixedTail },
 		);
 
-		expect(rewritten).toMatchObject({
-			model: "gpt-5.4",
-			input: [
-				{ role: "developer", content: "current system prompt" },
-				{
-					type: "message",
-					id: "u1_remote",
-					role: "user",
-					content: [{ type: "input_text", text: "Please inspect the build." }],
-				},
-				{ type: "compaction", id: "cmp_1", encrypted_content: "encrypted-summary" },
-				{ role: "user", content: [{ type: "input_text", text: "Ran `git status`\n```\nclean\n```" }] },
-				{
-					type: "message",
-					role: "assistant",
-					status: "completed",
-					id: expect.any(String),
-					content: [{ type: "output_text", text: "switched to claude after compaction", annotations: [] }],
-				},
-			],
-			stream: true,
-		});
+		// Raw provider items carry no context-boundary provenance and must never
+		// authorize replacement, even when they look like session history.
+		expect(rewritten).toBeUndefined();
 	});
 
 	it("stores remote compaction replacement input in result details for replay", () => {
@@ -1128,19 +1109,7 @@ describe("OpenAI remote compaction", () => {
 			{ model: OPENAI_MODEL, branchEntries: branchEndingAtCompaction },
 		);
 
-		expect(rewritten).toMatchObject({
-			input: [
-				{ role: "developer", content: "current system prompt" },
-				{
-					type: "message",
-					id: "u1_remote",
-					role: "user",
-					content: [{ type: "input_text", text: "Please inspect the build." }],
-				},
-				{ type: "compaction", id: "cmp_1", encrypted_content: "encrypted-summary" },
-				{ role: "user", content: [{ type: "input_text", text: "Turn three: after compaction." }] },
-			],
-		});
+		expect(rewritten).toBeUndefined();
 	});
 
 	it("rewrites provider payloads to replay native compacted history plus post-compact messages", () => {
@@ -1207,21 +1176,6 @@ describe("OpenAI remote compaction", () => {
 			{ model: OPENAI_MODEL, branchEntries: branchWithRemoteCompaction },
 		);
 
-		expect(rewritten).toMatchObject({
-			model: "gpt-5.4",
-			input: [
-				{ role: "developer", content: "current system prompt" },
-				{
-					type: "message",
-					id: "u1_remote",
-					role: "user",
-					content: [{ type: "input_text", text: "Please inspect the build." }],
-				},
-				{ type: "compaction", id: "cmp_1", encrypted_content: "encrypted-summary" },
-				{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
-				{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
-			],
-			stream: true,
-		});
+		expect(rewritten).toBeUndefined();
 	});
 });

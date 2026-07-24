@@ -32,6 +32,13 @@ export type {
 	OAuthSelectOption,
 	OAuthSelectPrompt,
 } from "./compat/extension-oauth-types.ts";
+export {
+	CONTEXT_PROVENANCE_FIELD,
+	type ContextProvenance,
+	contextProvenanceFingerprint,
+	copyContextProvenance,
+	getContextProvenance,
+} from "./context-provenance.ts";
 export * from "./env-api-keys.ts";
 export * from "./images-models.ts";
 export * from "./models.ts";

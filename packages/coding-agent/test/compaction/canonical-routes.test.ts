@@ -1,4 +1,4 @@
-import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
+import { type AssistantMessage, fauxAssistantMessage, type Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { convertResponsesMessages } from "../../../ai/src/api/openai-responses-shared.ts";
 import { type CompactionResult, DEFAULT_COMPACTION_SETTINGS } from "../../src/core/compaction/index.ts";
@@ -8,9 +8,10 @@ import {
 	buildOpenAiRemoteCompactionResult,
 	rewriteOpenAiPayloadWithRemoteCompaction,
 } from "../../src/core/extensions/builtin/compaction/openai-remote.ts";
+import { openAiRemoteCompactionOrigin } from "../../src/core/extensions/builtin/compaction/openai-remote-model.ts";
 import type { BeforeAgentStartEvent } from "../../src/core/extensions/index.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../../src/core/extensions/loader.ts";
-import { convertToLlm } from "../../src/core/messages.ts";
+import { COMPACTION_SUMMARY_PREFIX, COMPACTION_SUMMARY_SUFFIX, convertToLlm } from "../../src/core/messages.ts";
 import {
 	buildSessionContext,
 	type SessionEntry,
@@ -165,6 +166,11 @@ describe("builtin compaction canonical routes", () => {
 			schema: "senpi.compaction.openai-remote.v1",
 			mode: "openai-remote",
 			transport: "compact-endpoint",
+			origin: {
+				endpoint: "http://openai.test/v1",
+				trustDomain: "http://openai.test",
+				authTenantFingerprint: expect.stringMatching(/^sha256:/),
+			},
 		});
 	});
 
@@ -282,12 +288,10 @@ describe("builtin compaction canonical routes", () => {
 			{ model: OPENAI_MODEL.id, input: canonicalInput, stream: true },
 			{ model: OPENAI_MODEL, branchEntries: branch },
 		);
-		const rewrittenPayload = JSON.stringify(rewritten);
 
-		// The boundary must come from the actual provider payload, not a second
-		// converter that counts the empty user and dropped tool pairs above.
-		expect(rewrittenPayload.split(currentPrompt)).toHaveLength(2);
-		expect(rewrittenPayload).toContain("provider-checkpoint");
+		// A manually reconstructed payload has no request-local boundary marker.
+		// It is intentionally not enough to carry equal provider items.
+		expect(rewritten).toBeUndefined();
 	});
 
 	it("uses the canonical projection for the checkpoint prefix when a newer checkpoint supersedes an older compaction", () => {
@@ -418,16 +422,10 @@ describe("builtin compaction canonical routes", () => {
 			{ model: OPENAI_MODEL.id, input: canonicalInput, stream: true },
 			{ model: OPENAI_MODEL, branchEntries: branch },
 		);
-		const rewrittenPayload = JSON.stringify(rewritten);
 
-		// The checkpoint prefix boundary must use the same projection: the
-		// superseded older summary contributes no payload item, so it must not
-		// shift the boundary past the first post-checkpoint item.
-		expect(rewrittenPayload).toContain("LATEST_CHECKPOINT");
-		expect(rewrittenPayload).not.toContain("OLDER_CHECKPOINT_SUPERSEDED");
-		expect(rewrittenPayload).not.toContain("kept turn one");
-		expect(rewrittenPayload.split(currentPrompt)).toHaveLength(2);
-		expect(rewrittenPayload).toContain(firstPostCheckpoint);
+		// The compaction projection alone is not provenance. Only the actual
+		// context pipeline may authorize replay.
+		expect(rewritten).toBeUndefined();
 	});
 
 	it("declines remote checkpoint replay when context hooks change the checkpoint prefix boundary", async () => {
@@ -536,6 +534,260 @@ describe("builtin compaction canonical routes", () => {
 		}
 	});
 
+	it("declines replay when a later context hook filters a retained prompt with the same text as the current prompt", async () => {
+		const currentPrompt = "IDENTICAL_RETAINED_AND_CURRENT_PROMPT";
+		let filteredPersistedPrompt = false;
+		const harness = await createHarness({
+			api: "openai-responses",
+			provider: "openai",
+			models: [
+				{ id: OPENAI_MODEL.id, contextWindow: OPENAI_MODEL.contextWindow, maxTokens: OPENAI_MODEL.maxTokens },
+			],
+			extensionFactories: [
+				compactionExtension,
+				(pi) => {
+					pi.on("context", (event) => {
+						const messages = event.messages.filter((message) => {
+							const isRetainedPrompt =
+								message.role === "user" &&
+								message.timestamp === 1 &&
+								typeof message.content !== "string" &&
+								message.content.some((part) => part.type === "text" && part.text === currentPrompt);
+							if (isRetainedPrompt) filteredPersistedPrompt = true;
+							return !isRetainedPrompt;
+						});
+						return { messages };
+					});
+				},
+			],
+		});
+
+		try {
+			const model = harness.getModel() as Model<"openai-responses">;
+			const retainedEntryId = harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: currentPrompt }],
+				timestamp: 1,
+			});
+			const checkpoint = buildOpenAiRemoteCompactionResult({
+				model,
+				firstKeptEntryId: retainedEntryId,
+				tokensBefore: 1_234,
+				requestInputItemCount: 1,
+				response: {
+					id: "resp_identical_prompt_checkpoint",
+					created_at: 1_775_000_001,
+					object: "response.compaction",
+					output: [{ type: "compaction", id: "cmp_identical_prompt", encrypted_content: "provider-checkpoint" }],
+				},
+			});
+			harness.sessionManager.appendCompaction(
+				checkpoint.summary,
+				checkpoint.firstKeptEntryId,
+				checkpoint.tokensBefore,
+				checkpoint.details,
+				true,
+			);
+
+			const finalContext = await harness
+				.getExtensionRunner()
+				.emitContext([
+					...harness.sessionManager.buildSessionContext().messages,
+					{ role: "user", content: [{ type: "text", text: currentPrompt }], timestamp: 2 },
+				]);
+			const finalProviderInput = convertResponsesMessages(
+				model,
+				{ systemPrompt: "current system prompt", messages: convertToLlm(finalContext) },
+				new Set(["openai"]),
+			);
+			const finalPayload = { model: model.id, input: finalProviderInput, stream: true };
+			expect(filteredPersistedPrompt).toBe(true);
+			expect(JSON.stringify(finalPayload).split(currentPrompt)).toHaveLength(2);
+
+			const rewritten = await harness.getExtensionRunner().emitBeforeProviderRequest(finalPayload);
+
+			// The timestamp-selected retained message is gone, even though the
+			// in-flight prompt has identical text. Content equality alone cannot
+			// establish the checkpoint boundary.
+			expect(rewritten).toEqual(finalPayload);
+			const outgoingPayload = JSON.stringify(rewritten);
+			expect(outgoingPayload.split(currentPrompt)).toHaveLength(2);
+			expect(outgoingPayload).not.toContain("provider-checkpoint");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("declines a checkpoint generated at endpoint A after the same effective model is reconfigured to endpoint B", () => {
+		const endpointA = {
+			...OPENAI_MODEL,
+			baseUrl: "https://endpoint-a.example.test/v1",
+		} satisfies Model<"openai-responses">;
+		const endpointB = {
+			...endpointA,
+			baseUrl: "https://endpoint-b.example.test/v1",
+		} satisfies Model<"openai-responses">;
+		const retainedPrompt = "RETAINED_AT_ENDPOINT_A";
+		const originA = openAiRemoteCompactionOrigin(endpointA, new Headers({ authorization: "Bearer tenant-a" }));
+		const originB = openAiRemoteCompactionOrigin(endpointB, new Headers({ authorization: "Bearer tenant-a" }));
+		expect(originA).toBeDefined();
+		expect(originB).toBeDefined();
+		if (!originA || !originB) return;
+		const checkpoint = buildOpenAiRemoteCompactionResult({
+			model: endpointA,
+			firstKeptEntryId: "retained",
+			tokensBefore: 1_234,
+			requestInputItemCount: 1,
+			response: {
+				id: "resp_endpoint_a",
+				created_at: 1_775_000_001,
+				object: "response.compaction",
+				output: [{ type: "compaction", id: "cmp_endpoint_a", encrypted_content: "endpoint-a-checkpoint" }],
+			},
+			origin: originA,
+		});
+		const branch: SessionEntry[] = [
+			messageEntry("retained", null, {
+				role: "user",
+				content: [{ type: "text", text: retainedPrompt }],
+				timestamp: 1,
+			}),
+			{
+				type: "compaction",
+				id: "checkpoint",
+				parentId: "retained",
+				timestamp: new Date(1_775_000_001_000).toISOString(),
+				summary: checkpoint.summary,
+				firstKeptEntryId: checkpoint.firstKeptEntryId,
+				tokensBefore: checkpoint.tokensBefore,
+				details: checkpoint.details,
+				fromHook: true,
+			},
+		];
+		const finalPayload = {
+			model: endpointB.id,
+			input: [
+				{ role: "developer", content: "current system prompt" },
+				{
+					role: "user",
+					content: [
+						{
+							type: "input_text",
+							text: `${COMPACTION_SUMMARY_PREFIX}${checkpoint.summary}${COMPACTION_SUMMARY_SUFFIX}`,
+						},
+					],
+				},
+				{ role: "user", content: [{ type: "input_text", text: retainedPrompt }] },
+			],
+			stream: true,
+		};
+
+		const emitted: unknown[] = [];
+		const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(
+			finalPayload,
+			{ model: endpointB, branchEntries: branch, origin: originB },
+			(event) => emitted.push(event),
+		);
+
+		// Provider/API/model-id equality is insufficient: endpoint B must never
+		// receive a replacement issued by endpoint A.
+		expect(rewritten).toBeUndefined();
+		expect(emitted).toContainEqual(
+			expect.objectContaining({ action: "remote_fallback", reason: "remote-replay-origin-mismatch" }),
+		);
+		expect(rewritten ?? finalPayload).toEqual(finalPayload);
+	});
+
+	it("declines replay after the authorization tenant changes without persisting the raw credential", async () => {
+		const tenantAKey = "sk-tenant-a-remote-replay-secret";
+		const tenantBKey = "sk-tenant-b-remote-replay-secret";
+		const currentPrompt = "CURRENT_PROMPT_AFTER_AUTH_TENANT_CHANGE";
+		const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+			expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${tenantAKey}`);
+			return new Response(
+				JSON.stringify({
+					id: "resp_tenant_a_checkpoint",
+					created_at: 1_775_000_001,
+					object: "response.compaction",
+					output: [{ type: "compaction", id: "cmp_tenant_a", encrypted_content: "encrypted-checkpoint" }],
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		const harness = await createHarness({
+			api: "openai-responses",
+			provider: "openai",
+			models: [{ id: OPENAI_MODEL.id, contextWindow: 200_000, maxTokens: 16_384 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
+			extensionFactories: [compactionExtension],
+		});
+
+		try {
+			await harness.session.bindExtensions({});
+			const model = harness.getModel() as Model<"openai-responses">;
+			await harness.authStorage.modify(model.provider, async () => ({ type: "api_key", key: tenantAKey }));
+			harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "context compacted for tenant A" }],
+				timestamp: 1,
+			});
+			harness.sessionManager.appendMessage({
+				...fauxAssistantMessage("tenant A completed this turn"),
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				timestamp: 2,
+			});
+			harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "retain this tenant A turn" }],
+				timestamp: 3,
+			});
+			harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+			await harness.session.compact();
+
+			expect(fetchMock).toHaveBeenCalledOnce();
+			const persistedCheckpoint = JSON.stringify(
+				harness.sessionManager.getBranch().find((entry) => entry.type === "compaction"),
+			);
+			expect(persistedCheckpoint).not.toContain(tenantAKey);
+
+			await harness.authStorage.modify(model.provider, async () => ({ type: "api_key", key: tenantBKey }));
+			expect(await harness.getExtensionRunner().getModelRegistry().getApiKeyAndHeaders(model)).toMatchObject({
+				ok: true,
+				apiKey: tenantBKey,
+			});
+			const finalContext = await harness
+				.getExtensionRunner()
+				.emitContext([
+					...harness.sessionManager.buildSessionContext().messages,
+					{ role: "user", content: [{ type: "text", text: currentPrompt }], timestamp: 4 },
+				]);
+			const finalPayload = {
+				model: model.id,
+				input: convertResponsesMessages(
+					model,
+					{ systemPrompt: "current system prompt", messages: convertToLlm(finalContext) },
+					new Set(["openai"]),
+				),
+				stream: true,
+			};
+
+			const rewritten = await harness.getExtensionRunner().emitBeforeProviderRequest(finalPayload);
+
+			// A tenant switch cannot replay a checkpoint authorized for tenant A.
+			// Persisted provenance may contain a one-way fingerprint, but never the
+			// credential itself.
+			expect(rewritten).toEqual(finalPayload);
+			const outgoingPayload = JSON.stringify(rewritten);
+			expect(outgoingPayload.split(currentPrompt)).toHaveLength(2);
+			expect(outgoingPayload).not.toContain("encrypted-checkpoint");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
 	it("replays a remote checkpoint from the final redacted context without mutating persisted messages", async () => {
 		const sensitivePostCompaction = "SENSITIVE_POST_COMPACTION_CONTEXT";
 		const sensitiveCurrentPrompt = "SENSITIVE_CURRENT_PROMPT";
@@ -586,6 +838,9 @@ describe("builtin compaction canonical routes", () => {
 
 		try {
 			const model = harness.getModel() as Model<"openai-responses">;
+			const origin = openAiRemoteCompactionOrigin(model, new Headers({ authorization: "Bearer faux-key" }));
+			expect(origin).toBeDefined();
+			if (!origin) return;
 			const retainedEntryId = harness.sessionManager.appendMessage({
 				role: "user",
 				content: [{ type: "text", text: "retained checkpoint context" }],
@@ -602,6 +857,7 @@ describe("builtin compaction canonical routes", () => {
 					object: "response.compaction",
 					output: [{ type: "compaction", id: "cmp_checkpoint", encrypted_content: "encrypted-checkpoint" }],
 				},
+				origin,
 			});
 			harness.sessionManager.appendCompaction(
 				checkpoint.summary,
@@ -635,27 +891,17 @@ describe("builtin compaction canonical routes", () => {
 			expect(transformedContextText).not.toContain(sensitiveCurrentPrompt);
 			expect(JSON.stringify(harness.sessionManager.getBranch())).toBe(persistedBeforeTransform);
 			expect(persistedBeforeTransform).toContain(sensitivePostCompaction);
-			const finalProviderInput = transformedContext.flatMap((message) => {
-				if (message.role !== "user") return [];
-				return [
-					{
-						role: "user" as const,
-						content:
-							typeof message.content === "string"
-								? [{ type: "input_text" as const, text: message.content }]
-								: message.content.flatMap((part) =>
-										part.type === "text" ? [{ type: "input_text" as const, text: part.text }] : [],
-									),
-					},
-				];
-			});
-
 			const rewritten = await harness.getExtensionRunner().emitBeforeProviderRequest({
 				model: model.id,
-				input: [{ role: "developer", content: "current system prompt" }, ...finalProviderInput],
+				input: convertResponsesMessages(
+					model,
+					{ systemPrompt: "current system prompt", messages: convertToLlm(transformedContext) },
+					new Set(["openai"]),
+				),
 				stream: true,
 			});
 			const outgoingRemoteInput = JSON.stringify(rewritten);
+			expect(outgoingRemoteInput).toContain("encrypted-checkpoint");
 			expect(outgoingRemoteInput).toContain(redactedPostCompaction);
 			expect(outgoingRemoteInput).toContain(redactedCurrentPrompt);
 			expect(outgoingRemoteInput).not.toContain(sensitivePostCompaction);

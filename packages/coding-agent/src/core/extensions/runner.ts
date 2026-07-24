@@ -4,14 +4,14 @@
 
 import { basename } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ImageContent, Model, Provider, ProviderHeaders } from "@earendil-works/pi-ai";
+import type { Api, ImageContent, Model, Provider, ProviderHeaders } from "@earendil-works/pi-ai";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { type Theme, theme } from "../../modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../utils/ansi.ts";
 import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";
-import type { SessionManager } from "../session-manager.ts";
+import { getSessionContextEntryId, SESSION_CONTEXT_ENTRY_ID, type SessionManager } from "../session-manager.ts";
 import { SettingsManager } from "../settings-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import { drainPendingProviderRegistrations } from "./loader.ts";
@@ -1334,7 +1334,10 @@ export class ExtensionRunner {
 	}
 
 	async emitContext(messages: AgentMessage[], excludeExtensionPath?: string): Promise<AgentMessage[]> {
-		let currentMessages = cloneJsonValue(messages);
+		let currentMessages = cloneJsonValue(messages).map((message, index) => {
+			const entryId = getSessionContextEntryId(messages[index]!);
+			return entryId ? Object.assign(message, { [SESSION_CONTEXT_ENTRY_ID]: entryId }) : message;
+		});
 
 		for (const ext of this.extensions) {
 			if (ext.path === excludeExtensionPath) continue;
@@ -1377,7 +1380,11 @@ export class ExtensionRunner {
 		};
 	}
 
-	async emitBeforeProviderRequest(payload: unknown, excludeExtensionPath?: string): Promise<unknown> {
+	async emitBeforeProviderRequest(
+		payload: unknown,
+		excludeExtensionPath?: string,
+		request?: { model: Model<Api>; headers: ProviderHeaders },
+	): Promise<unknown> {
 		let currentPayload = payload;
 
 		for (const ext of this.extensions) {
@@ -1390,6 +1397,7 @@ export class ExtensionRunner {
 					const event: BeforeProviderRequestEvent = {
 						type: "before_provider_request",
 						payload: currentPayload,
+						...(request ? { model: request.model, headers: request.headers } : {}),
 					};
 					const handlerResult = await handler(event, this.createContext(ext.path));
 					if (handlerResult !== undefined) {

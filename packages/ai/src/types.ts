@@ -109,6 +109,12 @@ export type ProviderEnv = Record<string, string>;
 export type ProviderHeaders = Record<string, string | null>;
 export type SessionAffinityFormat = "openai" | "openai-nosession" | "openrouter";
 
+/** Effective model and fully transformed headers for a request payload hook. */
+export type ProviderRequestMetadata = {
+	model: Model<Api>;
+	headers: ProviderHeaders;
+};
+
 export interface ProviderResponse {
 	status: number;
 	headers: Record<string, string>;
@@ -139,7 +145,11 @@ export interface StreamOptions {
 	 * Optional callback for inspecting or replacing provider payloads before sending.
 	 * Return undefined to keep the payload unchanged.
 	 */
-	onPayload?: (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
+	onPayload?: (
+		payload: unknown,
+		model: Model<Api>,
+		request?: ProviderRequestMetadata,
+	) => unknown | undefined | Promise<unknown | undefined>;
 	/**
 	 * Optional callback invoked after an HTTP response is received and before
 	 * its body stream is consumed.
