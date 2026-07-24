@@ -1,5 +1,18 @@
 # AI Source Changes
 
+## 2026-07-26 - Retry transient Codex upstream websocket failures
+
+### What changed and why
+
+- `utils/retry.ts` classifies `upstream_unavailable` provider errors as transient so the existing bounded retry policy
+  retries Codex websocket proxy disconnects such as `ConnectionClosedOK`.
+- The retry classifier and coding-agent event-contract tests pin the exact reported error through the existing retry
+  lifecycle rather than introducing provider-specific retry behavior.
+
+### Expected merge conflict zones
+
+- LOW: `utils/retry.ts` transient transport error patterns.
+
 ## 2026-07-26 - Preserve persisted freeform identity when replaying OpenAI Responses calls (#256)
 
 ### What changed and why
