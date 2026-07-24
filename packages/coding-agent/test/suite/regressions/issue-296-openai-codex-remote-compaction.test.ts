@@ -7,6 +7,7 @@ import {
 	runOpenAiRemoteCompaction,
 } from "../../../src/core/extensions/builtin/compaction/openai-remote.ts";
 import type { SessionBeforeCompactEvent } from "../../../src/core/extensions/types.ts";
+import { COMPACTION_SUMMARY_PREFIX, COMPACTION_SUMMARY_SUFFIX } from "../../../src/core/messages.ts";
 import type { SessionEntry, SessionMessageEntry } from "../../../src/core/session-manager.ts";
 
 const CODEX_MODEL = {
@@ -195,7 +196,15 @@ describe("issue #296 OpenAI Codex remote compaction", () => {
 				model: CODEX_MODEL.id,
 				input: [
 					{ role: "developer", content: "Current prompt." },
-					{ role: "user", content: [{ type: "input_text", text: "fallback compact summary" }] },
+					{
+						role: "user",
+						content: [
+							{
+								type: "input_text",
+								text: `${COMPACTION_SUMMARY_PREFIX}${result.summary}${COMPACTION_SUMMARY_SUFFIX}`,
+							},
+						],
+					},
 					{ role: "user", content: [{ type: "input_text", text: "Keep the diagnosis." }] },
 					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
 				],

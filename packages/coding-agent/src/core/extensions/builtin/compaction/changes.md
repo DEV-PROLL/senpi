@@ -1,12 +1,19 @@
 ## Replay remote checkpoints from final context payloads (2026-07-24)
 
-- `index.ts`, `openai-remote.ts`: remote replay now takes all post-checkpoint items, including the in-flight prompt,
-  directly from the final provider payload after every `context` hook has completed. It retains the persisted remote
-  checkpoint prefix and uses persisted history only to locate that prefix; raw post-checkpoint session content is not
-  reconstructed for the provider request.
-- Regressions: `test/compaction/canonical-routes.test.ts` redacts both persisted post-checkpoint content and the
-  current prompt through later context hooks, while `test/compaction/openai-remote-compaction.test.ts` and the Codex
-  remote-compaction regression exercise final-payload replay in native and mixed-history paths.
+- `openai-remote.ts`: replay proves the checkpoint boundary by projecting the compaction-aware session prefix through
+  the same OpenAI Responses converter used by the real provider request, then requiring the final payload prefix to
+  match item-for-item. It only replaces a proven prefix; a context hook that inserts, removes, reorders, or changes a
+  checkpoint item declines native replay and sends the final transformed full payload unchanged. The post-checkpoint
+  suffix, including the in-flight prompt, always comes directly from that final payload and is never reconstructed
+  from persisted raw messages.
+- `openai-remote.ts`: both the direct compact endpoint and WebSocket route validate the final
+  `before_provider_request` replacement as an OpenAI compact body. Invalid replacements emit
+  `remote_fallback` with `invalid-compact-request-payload` and are rejected before transport, never retried with the
+  pre-hook payload.
+- Regressions: `test/compaction/canonical-routes.test.ts` covers a context hook that changes prefix cardinality and
+  confirms final-payload fallback, while `test/compaction/openai-remote-compaction.test.ts` covers invalid downstream
+  compact request replacements, final-payload redaction, and native/mixed-history provenance. The Codex regression
+  exercises the same proven-prefix replay path.
 - Repeated checkpoints project their prefix through the same compaction-aware branch view as normal session context,
   excluding superseded older summaries before canonical Responses conversion.
 - Non-remote summarization runs context hooks on raw `AgentMessage` values before `convertToLlm`, preserving

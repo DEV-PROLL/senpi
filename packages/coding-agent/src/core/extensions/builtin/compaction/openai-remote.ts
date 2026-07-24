@@ -159,6 +159,7 @@ type EmitCompactionEvent = (event: OpenAiRemoteCompactionEvent) => void;
 
 const OPENAI_REMOTE_COMPACTION_TIMEOUT_MS = 15_000;
 const REMOTE_COMPACTION_TIMEOUT_REASON = "remote-compaction-timeout";
+const INVALID_COMPACT_REQUEST_PAYLOAD_REASON = "invalid-compact-request-payload";
 const OPENAI_RESPONSES_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 
 function supportsOpenAiResponsesWebSocket(model: OpenAiRemoteCompactionModel): model is Model<"openai-responses"> {
@@ -413,12 +414,18 @@ async function runOpenAiResponsesStreamCompaction(options: {
 			cacheRetention: "short",
 			extraBody: options.auth.extraBody,
 			headers: options.headers ?? options.auth.headers,
-			onPayload: (payload) => {
+			onPayload: async (payload) => {
 				const rewritten = createOpenAiResponsesStreamCompactionPayload(payload, options.request);
 				if (!isRecord(rewritten) || !Array.isArray(rewritten.input)) {
 					throw new Error("Unable to build OpenAI Responses stream compaction payload");
 				}
-				return options.providerRequest ? options.providerRequest.transformPayload(rewritten) : rewritten;
+				const transformedPayload = options.providerRequest
+					? await options.providerRequest.transformPayload(rewritten)
+					: rewritten;
+				if (!isOpenAiCompactBody(transformedPayload)) {
+					throw new Error(INVALID_COMPACT_REQUEST_PAYLOAD_REASON);
+				}
+				return transformedPayload;
 			},
 			sessionId: options.request.body.prompt_cache_key,
 			signal: options.signal,
@@ -564,7 +571,9 @@ async function runOpenAiCompactEndpointCompaction(options: {
 }
 
 function isOpenAiCompactBody(value: unknown): value is OpenAiCompactBody {
-	return isRecord(value) && typeof value.model === "string" && Array.isArray(value.input);
+	return (
+		isRecord(value) && typeof value.model === "string" && Array.isArray(value.input) && value.input.every(isRecord)
+	);
 }
 
 export async function runOpenAiRemoteCompaction(
@@ -714,9 +723,19 @@ export async function runOpenAiRemoteCompaction(
 		return undefined;
 	}
 	const transformedPayload = providerRequest ? await providerRequest.transformPayload(request.body) : request.body;
-	const transformedRequest = isOpenAiCompactBody(transformedPayload)
-		? { ...request, body: transformedPayload }
-		: request;
+	if (!isOpenAiCompactBody(transformedPayload)) {
+		emit?.({
+			version: 1,
+			action: "remote_fallback",
+			route: "builtin.compaction.openai_remote",
+			requestId: event.requestId,
+			modelId: requestModel.id,
+			reason: INVALID_COMPACT_REQUEST_PAYLOAD_REASON,
+			transport: "compact-endpoint",
+		});
+		return undefined;
+	}
+	const transformedRequest = { ...request, body: transformedPayload };
 	const transformedHeaders = providerRequest
 		? await providerRequest.transformHeaders(Object.fromEntries(headers.entries()))
 		: undefined;
@@ -767,6 +786,16 @@ function latestRemoteCompaction(
 	return undefined;
 }
 
+function checkpointContextMessages(
+	entries: SessionEntry[],
+	remote: { index: number; firstKeptEntryId: string },
+): AgentMessage[] {
+	const checkpointEntryIds = new Set(entries.slice(0, remote.index + 1).map((entry) => entry.id));
+	return buildContextEntries(entries)
+		.filter((entry) => checkpointEntryIds.has(entry.id))
+		.flatMap(sessionEntryToContextMessages);
+}
+
 function leadingPromptMessages(input: unknown): OpenAiRemoteInputItem[] {
 	if (!Array.isArray(input)) return [];
 	const result: OpenAiRemoteInputItem[] = [];
@@ -779,36 +808,30 @@ function leadingPromptMessages(input: unknown): OpenAiRemoteInputItem[] {
 	return result;
 }
 
-function checkpointContextInputItemCount(
-	entries: SessionEntry[],
-	remote: { index: number; firstKeptEntryId: string },
-	model: Model<Api>,
-): number {
-	const checkpointEntryIds = new Set(entries.slice(0, remote.index + 1).map((entry) => entry.id));
-	// Project through the same compaction-aware helper as live session context,
-	// then retain only the prefix that existed at this checkpoint. This omits
-	// older summaries superseded by the latest compaction entry.
-	const checkpointContextEntries = buildContextEntries(entries).filter((entry) => checkpointEntryIds.has(entry.id));
-	// Match the converter that produced the final Responses payload. In
-	// particular, it drops aborted/error assistants, their orphaned results,
-	// and empty users, so this boundary stays aligned with the live request.
-	return convertResponsesMessages(
-		model,
-		{ messages: convertToLlm(checkpointContextEntries.flatMap(sessionEntryToContextMessages)) },
-		OPENAI_RESPONSES_TOOL_CALL_PROVIDERS,
-	).length;
+function replayBoundaryConversionOptions(model: Model<Api>): {
+	includeSystemPrompt?: boolean;
+	preserveTextSignatures?: boolean;
+} {
+	return model.api === "openai-codex-responses" ? { includeSystemPrompt: false, preserveTextSignatures: true } : {};
 }
 
-function postCheckpointPayloadItems(
-	input: unknown,
+function checkpointProviderInputItems(
 	entries: SessionEntry[],
 	remote: { index: number; firstKeptEntryId: string },
 	model: Model<Api>,
-): Record<string, unknown>[] {
-	if (!Array.isArray(input)) return [];
-	const leadingPromptCount = leadingPromptMessages(input).length;
-	const checkpointInputItemCount = checkpointContextInputItemCount(entries, remote, model);
-	return input.slice(leadingPromptCount + checkpointInputItemCount).filter(isRecord);
+): unknown[] {
+	const input = convertResponsesMessages(
+		model,
+		{ messages: convertToLlm(checkpointContextMessages(entries, remote)) },
+		OPENAI_RESPONSES_TOOL_CALL_PROVIDERS,
+		replayBoundaryConversionOptions(model),
+	);
+	return Array.isArray(input) ? input : [];
+}
+
+function hasExactReplayPrefix(input: unknown[], startIndex: number, expected: unknown[]): boolean {
+	if (expected.length === 0 || input.length < startIndex + expected.length) return false;
+	return expected.every((item, index) => JSON.stringify(input[startIndex + index]) === JSON.stringify(item));
 }
 
 export function rewriteOpenAiPayloadWithRemoteCompaction(
@@ -816,17 +839,24 @@ export function rewriteOpenAiPayloadWithRemoteCompaction(
 	options: { model: Model<Api> | undefined; branchEntries: SessionEntry[] },
 	emit?: EmitCompactionEvent,
 ): unknown | undefined {
-	if (!isOpenAiRemoteCompactionModel(options.model) || !isRecord(payload)) return undefined;
+	if (!isOpenAiRemoteCompactionModel(options.model) || !isRecord(payload) || !Array.isArray(payload.input)) {
+		return undefined;
+	}
 	const remote = latestRemoteCompaction(options.branchEntries);
 	if (!remote || !matchesOpenAiRemoteCompactionIdentity(options.model, remote.details)) return undefined;
 
+	const checkpointInput = checkpointProviderInputItems(options.branchEntries, remote, options.model);
+	const checkpointStart = leadingPromptMessages(payload.input).length;
+	// This is a provenance check, not a persisted-item count: use the same
+	// Responses converter as the real provider path, then require every final
+	// prefix item to match exactly. Context changes that insert, remove, reorder,
+	// or alter checkpoint content leave the final payload untouched.
+	if (!hasExactReplayPrefix(payload.input, checkpointStart, checkpointInput)) return undefined;
+
 	const input = [
-		...leadingPromptMessages(payload.input),
+		...payload.input.slice(0, checkpointStart).filter(isRecord),
 		...remote.details.replacementInput,
-		// Context hooks can redact or otherwise transform the live post-checkpoint
-		// messages. Replay only their final provider representation; persisted
-		// history is used solely to locate the checkpoint boundary.
-		...postCheckpointPayloadItems(payload.input, options.branchEntries, remote, options.model),
+		...payload.input.slice(checkpointStart + checkpointInput.length).filter(isRecord),
 	];
 	emit?.({
 		version: 1,

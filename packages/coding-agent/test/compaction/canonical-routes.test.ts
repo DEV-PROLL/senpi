@@ -430,6 +430,112 @@ describe("builtin compaction canonical routes", () => {
 		expect(rewrittenPayload).toContain(firstPostCheckpoint);
 	});
 
+	it("declines remote checkpoint replay when context hooks change the checkpoint prefix boundary", async () => {
+		const filteredPrefix = "FILTERED_CHECKPOINT_PREFIX";
+		const injectedPrefixOne = "INJECTED_CHECKPOINT_PREFIX_ONE";
+		const injectedPrefixTwo = "INJECTED_CHECKPOINT_PREFIX_TWO";
+		const postCheckpointMessage = "POST_CHECKPOINT_MESSAGE_MUST_APPEAR_ONCE";
+		const currentPrompt = "CURRENT_PROMPT_MUST_APPEAR_ONCE";
+		const harness = await createHarness({
+			api: "openai-responses",
+			provider: "openai",
+			models: [
+				{ id: OPENAI_MODEL.id, contextWindow: OPENAI_MODEL.contextWindow, maxTokens: OPENAI_MODEL.maxTokens },
+			],
+			extensionFactories: [
+				compactionExtension,
+				(pi) => {
+					pi.on("context", (event) => {
+						const withoutFilteredPrefix = event.messages.filter((message) => {
+							if (message.role !== "user" || typeof message.content === "string") return true;
+							return !message.content.some((part) => part.type === "text" && part.text.includes(filteredPrefix));
+						});
+						return {
+							// The transformed checkpoint prefix is no longer identifiable by
+							// persisted-entry count: one item was removed and two injected.
+							messages: [
+								{
+									role: "user",
+									content: [{ type: "text", text: injectedPrefixOne }],
+									timestamp: 10,
+								},
+								{
+									role: "user",
+									content: [{ type: "text", text: injectedPrefixTwo }],
+									timestamp: 11,
+								},
+								...withoutFilteredPrefix,
+							],
+						};
+					});
+				},
+			],
+		});
+
+		try {
+			const model = harness.getModel() as Model<"openai-responses">;
+			const retainedEntryId = harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: filteredPrefix }],
+				timestamp: 1,
+			});
+			const checkpoint = buildOpenAiRemoteCompactionResult({
+				model,
+				firstKeptEntryId: retainedEntryId,
+				tokensBefore: 1_234,
+				requestInputItemCount: 1,
+				response: {
+					id: "resp_checkpoint",
+					created_at: 1_775_000_001,
+					object: "response.compaction",
+					output: [{ type: "compaction", id: "cmp_checkpoint", encrypted_content: "provider-checkpoint" }],
+				},
+			});
+			harness.sessionManager.appendCompaction(
+				checkpoint.summary,
+				checkpoint.firstKeptEntryId,
+				checkpoint.tokensBefore,
+				checkpoint.details,
+				true,
+			);
+			harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: postCheckpointMessage }],
+				timestamp: 2,
+			});
+
+			const finalContext = await harness
+				.getExtensionRunner()
+				.emitContext([
+					...harness.sessionManager.buildSessionContext().messages,
+					{ role: "user", content: [{ type: "text", text: currentPrompt }], timestamp: 3 },
+				]);
+			const finalProviderInput = convertResponsesMessages(
+				model,
+				{ systemPrompt: "current system prompt", messages: convertToLlm(finalContext) },
+				new Set(["openai"]),
+			);
+			const finalPayload = { model: model.id, input: finalProviderInput, stream: true };
+			const finalPayloadText = JSON.stringify(finalPayload);
+			expect(finalPayloadText).not.toContain(filteredPrefix);
+			expect(finalPayloadText).toContain(injectedPrefixOne);
+			expect(finalPayloadText).toContain(injectedPrefixTwo);
+
+			const rewritten = await harness.getExtensionRunner().emitBeforeProviderRequest(finalPayload);
+
+			// A count derived from persisted entries cannot prove this transformed
+			// boundary. Preserve the final transformed payload instead of slicing it.
+			expect(rewritten).toEqual(finalPayload);
+			const outgoingPayload = JSON.stringify(rewritten);
+			for (const text of [injectedPrefixOne, injectedPrefixTwo, postCheckpointMessage, currentPrompt]) {
+				expect(outgoingPayload.split(text)).toHaveLength(2);
+			}
+			expect(outgoingPayload).not.toContain("provider-checkpoint");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
 	it("replays a remote checkpoint from the final redacted context without mutating persisted messages", async () => {
 		const sensitivePostCompaction = "SENSITIVE_POST_COMPACTION_CONTEXT";
 		const sensitiveCurrentPrompt = "SENSITIVE_CURRENT_PROMPT";

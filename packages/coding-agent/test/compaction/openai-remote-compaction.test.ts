@@ -461,6 +461,56 @@ describe("OpenAI remote compaction", () => {
 		}
 	});
 
+	it("rejects an invalid downstream compact request replacement before it reaches the network", async () => {
+		const compactOnlyModel = {
+			...OPENAI_MODEL,
+			baseUrl: "https://ccapi.example.com/v1",
+			compat: { supportsWebSocket: false },
+		} satisfies Model<"openai-responses">;
+		const emitted: unknown[] = [];
+		const originalPayloads: unknown[] = [];
+		const fetchMock = vi.fn(async () => {
+			throw new Error("an invalid replacement must not reach the compact endpoint");
+		});
+
+		const result = await runOpenAiRemoteCompaction(
+			{
+				model: compactOnlyModel,
+				serviceTier: undefined,
+				modelRegistry: {
+					getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "test-key" }),
+				},
+				sessionManager: { getSessionId: () => "session-1" },
+				getSystemPrompt: () => "You are senpi.",
+				prepareProviderRequest: async (messages) => ({
+					messages,
+					transformPayload: async (payload) => {
+						originalPayloads.push(payload);
+						// This is the replacement returned by a downstream
+						// before_provider_request handler. It is not an OpenAiCompactBody.
+						return { model: 42, input: "not-an-input-array" };
+					},
+					transformHeaders: async (headers) => headers,
+				}),
+			},
+			compactionEvent(openAiBranch()),
+			(event) => emitted.push(event),
+			{ fetch: fetchMock },
+		);
+
+		expect(originalPayloads).toHaveLength(1);
+		expect(JSON.stringify(originalPayloads[0])).toContain("Please inspect the build.");
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(result).toBeUndefined();
+		expect(emitted).toContainEqual(
+			expect.objectContaining({
+				action: "remote_fallback",
+				reason: "invalid-compact-request-payload",
+				transport: "compact-endpoint",
+			}),
+		);
+	});
+
 	it("falls back when the compact endpoint does not respond before the remote timeout", async () => {
 		const emitted: unknown[] = [];
 		const compactOnlyModel = {
@@ -885,8 +935,16 @@ describe("OpenAI remote compaction", () => {
 				model: "gpt-5.4",
 				input: [
 					{ role: "developer", content: "current system prompt" },
-					{ role: "user", content: [{ type: "input_text", text: "fallback compact summary" }] },
-					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
+					{
+						role: "user",
+						content: [
+							{
+								type: "input_text",
+								text: `${COMPACTION_SUMMARY_PREFIX}${remoteResult.summary}${COMPACTION_SUMMARY_SUFFIX}`,
+							},
+						],
+					},
+					{ role: "user", content: [{ type: "input_text", text: "Great. Commit it." }] },
 					{ role: "user", content: [{ type: "input_text", text: "Ran `git status`\n```\nclean\n```" }] },
 					{
 						type: "message",
@@ -1053,8 +1111,16 @@ describe("OpenAI remote compaction", () => {
 				model: "gpt-5.4",
 				input: [
 					{ role: "developer", content: "current system prompt" },
-					{ role: "user", content: [{ type: "input_text", text: "fallback compact summary" }] },
-					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
+					{
+						role: "user",
+						content: [
+							{
+								type: "input_text",
+								text: `${COMPACTION_SUMMARY_PREFIX}${remoteResult.summary}${COMPACTION_SUMMARY_SUFFIX}`,
+							},
+						],
+					},
+					{ role: "user", content: [{ type: "input_text", text: "Great. Commit it." }] },
 					{ role: "user", content: [{ type: "input_text", text: "Turn three: after compaction." }] },
 				],
 				stream: true,
@@ -1123,7 +1189,16 @@ describe("OpenAI remote compaction", () => {
 				model: "gpt-5.4",
 				input: [
 					{ role: "developer", content: "current system prompt" },
-					{ role: "user", content: [{ type: "input_text", text: "fallback compact summary" }] },
+					{
+						role: "user",
+						content: [
+							{
+								type: "input_text",
+								text: `${COMPACTION_SUMMARY_PREFIX}${remoteResult.summary}${COMPACTION_SUMMARY_SUFFIX}`,
+							},
+						],
+					},
+					{ role: "user", content: [{ type: "input_text", text: "Great. Commit it." }] },
 					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
 					{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
 				],
@@ -1143,6 +1218,7 @@ describe("OpenAI remote compaction", () => {
 					content: [{ type: "input_text", text: "Please inspect the build." }],
 				},
 				{ type: "compaction", id: "cmp_1", encrypted_content: "encrypted-summary" },
+				{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
 				{ role: "user", content: [{ type: "input_text", text: "Continue after compaction." }] },
 			],
 			stream: true,
