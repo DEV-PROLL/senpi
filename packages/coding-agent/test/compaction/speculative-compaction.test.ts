@@ -374,6 +374,91 @@ describe("speculative compaction", () => {
 		}
 	});
 
+	it("redacts a persisted custom message via raw-message context hooks before the non-remote summarizer stream", async () => {
+		const api = `compaction-stream-${Math.random().toString(36).slice(2)}`;
+		const provider = `compaction-provider-${Math.random().toString(36).slice(2)}`;
+		const sourceId = `compaction-stream-capture-${api}`;
+		const rawSecret = "PERSISTED_CUSTOM_RAW_SECRET";
+		const redactedSecret = "[redacted persisted custom secret]";
+		let contextHookRan = false;
+		let hookSawRawCustomSecret = false;
+		let captured: Context | undefined;
+		const captureStream = (_model: Model<typeof api>, context: Context, _options?: StreamOptions) => {
+			const stream = createAssistantMessageEventStream();
+			queueMicrotask(() => {
+				captured = context;
+				const message = fauxAssistantMessage("stream summary");
+				stream.push({ type: "done", reason: "stop", message });
+				stream.end(message);
+			});
+			return stream;
+		};
+
+		const harness = await createHarness({
+			api,
+			provider,
+			models: [{ id: "stream-compact", contextWindow: 32_000 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
+			extensionFactories: [
+				compactionExtension,
+				(pi) => {
+					pi.on("context", (event) => {
+						contextHookRan = true;
+						return {
+							messages: event.messages.map((message) => {
+								if (message.role !== "custom" || message.customType !== "secret") return message;
+								hookSawRawCustomSecret = true;
+								return { ...message, content: redactedSecret };
+							}),
+						};
+					});
+				},
+			],
+		});
+
+		harness.faux.unregister();
+		registerApiProvider({ api, stream: captureStream, streamSimple: captureStream }, sourceId);
+		try {
+			await harness.session.bindExtensions({});
+			const model = harness.getModel();
+			harness.sessionManager.appendCustomMessageEntry(
+				"secret",
+				[{ type: "text", text: `persisted ${rawSecret}` }],
+				false,
+			);
+			harness.sessionManager.appendMessage({
+				...fauxAssistantMessage("persisted assistant"),
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				timestamp: 2,
+			});
+			harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "retain this turn" }],
+				timestamp: 3,
+			});
+			harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+
+			await harness.session.compact();
+
+			// The raw session keeps the persisted secret untouched; only the
+			// outgoing summarization stream input is redacted.
+			expect(JSON.stringify(harness.sessionManager.getEntries())).toContain(rawSecret);
+			expect(contextHookRan).toBe(true);
+			// Ordered context hooks must run on the raw AgentMessage list, before
+			// convertToLlm/repair erases role + customType.
+			expect(hookSawRawCustomSecret).toBe(true);
+			expect(captured).toBeDefined();
+			const capturedText = JSON.stringify(captured?.messages);
+			expect(capturedText).toContain(redactedSecret);
+			expect(capturedText).not.toContain(rawSecret);
+		} finally {
+			unregisterApiProviders(sourceId);
+			harness.cleanup();
+		}
+	});
+
 	it("streams generated summary deltas to the compaction progress callback", async () => {
 		// Given
 		const context = createContext();

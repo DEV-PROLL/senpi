@@ -11,7 +11,12 @@ import {
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { CompactionResult } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
-import { buildSessionContext, type SessionEntry, sessionEntryToContextMessages } from "../../../session-manager.ts";
+import {
+	buildContextEntries,
+	buildSessionContext,
+	type SessionEntry,
+	sessionEntryToContextMessages,
+} from "../../../session-manager.ts";
 import type { ProviderRequestPreparation, ServiceTier, SessionBeforeCompactEvent } from "../../types.ts";
 import type {
 	OpenAiCompactBody,
@@ -779,14 +784,11 @@ function checkpointContextInputItemCount(
 	remote: { index: number; firstKeptEntryId: string },
 	model: Model<Api>,
 ): number {
-	const compactionEntry = entries[remote.index];
-	if (!compactionEntry) return 0;
-
-	const firstKeptIndex = entries.findIndex((entry) => entry.id === remote.firstKeptEntryId);
-	const checkpointContextEntries = [
-		compactionEntry,
-		...(firstKeptIndex >= 0 && firstKeptIndex < remote.index ? entries.slice(firstKeptIndex, remote.index) : []),
-	];
+	const checkpointEntryIds = new Set(entries.slice(0, remote.index + 1).map((entry) => entry.id));
+	// Project through the same compaction-aware helper as live session context,
+	// then retain only the prefix that existed at this checkpoint. This omits
+	// older summaries superseded by the latest compaction entry.
+	const checkpointContextEntries = buildContextEntries(entries).filter((entry) => checkpointEntryIds.has(entry.id));
 	// Match the converter that produced the final Responses payload. In
 	// particular, it drops aborted/error assistants, their orphaned results,
 	// and empty users, so this boundary stays aligned with the live request.

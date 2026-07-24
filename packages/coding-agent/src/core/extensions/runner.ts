@@ -1333,10 +1333,11 @@ export class ExtensionRunner {
 		return undefined;
 	}
 
-	async emitContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
+	async emitContext(messages: AgentMessage[], excludeExtensionPath?: string): Promise<AgentMessage[]> {
 		let currentMessages = cloneJsonValue(messages);
 
 		for (const ext of this.extensions) {
+			if (ext.path === excludeExtensionPath) continue;
 			const handlers = ext.handlers.get("context");
 			if (!handlers || handlers.length === 0) continue;
 
@@ -1366,13 +1367,12 @@ export class ExtensionRunner {
 
 	async prepareProviderRequest(
 		messages: AgentMessage[],
-		excludeBeforeProviderRequestExtensionPath?: string,
+		excludeExtensionPath?: string,
 	): Promise<ProviderRequestPreparation> {
-		const transformedMessages = await this.emitContext(messages);
+		const transformedMessages = await this.emitContext(messages, excludeExtensionPath);
 		return {
 			messages: transformedMessages,
-			transformPayload: async (payload) =>
-				await this.emitBeforeProviderRequest(payload, excludeBeforeProviderRequestExtensionPath),
+			transformPayload: async (payload) => await this.emitBeforeProviderRequest(payload, excludeExtensionPath),
 			transformHeaders: async (headers) => await this.emitBeforeProviderHeaders(headers),
 		};
 	}

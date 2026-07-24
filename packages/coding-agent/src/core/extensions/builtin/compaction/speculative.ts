@@ -140,7 +140,6 @@ async function generateSummaryMessage(options: {
 	// deterministically refused by Anthropic's anti-distillation classifier
 	// ("reverse engineering or duplicating model outputs"), while the same
 	// content as native blocks with the agent's system prompt and tools passes.
-	const conversationMessages = repairOrphanedToolResults(convertToLlm(options.messages));
 	// Request-local controller: the idle watchdog must be able to tear down a
 	// stalled summarization request without aborting the caller's own signal.
 	const requestController = new AbortController();
@@ -150,26 +149,24 @@ async function generateSummaryMessage(options: {
 		else options.signal.addEventListener("abort", onCallerAbort, { once: true });
 	}
 	try {
+		const requestMessages: AgentMessage[] = [
+			...options.messages,
+			{
+				role: "user",
+				content: [{ type: "text", text: options.prompt.user }],
+				timestamp: Date.now(),
+			},
+		];
+		const providerRequest = await options.context.prepareProviderRequest?.(requestMessages);
 		const requestContext = {
 			systemPrompt: options.snapshot.systemPrompt ?? options.prompt.system,
-			messages: [
-				...conversationMessages,
-				{
-					role: "user" as const,
-					content: [{ type: "text" as const, text: options.prompt.user }],
-					timestamp: Date.now(),
-				},
-			],
+			messages: repairOrphanedToolResults(convertToLlm(providerRequest?.messages ?? requestMessages)),
 			...(options.snapshot.tools && options.snapshot.tools.length > 0 ? { tools: options.snapshot.tools } : {}),
 		};
-		const providerRequest = await options.context.prepareProviderRequest?.(requestContext.messages);
-		const providerContext = providerRequest
-			? { ...requestContext, messages: convertToLlm(providerRequest.messages) }
-			: requestContext;
 		const headers = providerRequest
 			? await providerRequest.transformHeaders(options.auth.headers ?? {})
 			: options.auth.headers;
-		const responseStream = stream(options.snapshot.model, providerContext, {
+		const responseStream = stream(options.snapshot.model, requestContext, {
 			apiKey: options.auth.apiKey,
 			headers,
 			extraBody: options.auth.extraBody,

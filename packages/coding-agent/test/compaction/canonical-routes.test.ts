@@ -12,6 +12,7 @@ import type { BeforeAgentStartEvent } from "../../src/core/extensions/index.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../../src/core/extensions/loader.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import {
+	buildSessionContext,
 	type SessionEntry,
 	type SessionMessageEntry,
 	sessionEntryToContextMessages,
@@ -287,6 +288,146 @@ describe("builtin compaction canonical routes", () => {
 		// converter that counts the empty user and dropped tool pairs above.
 		expect(rewrittenPayload.split(currentPrompt)).toHaveLength(2);
 		expect(rewrittenPayload).toContain("provider-checkpoint");
+	});
+
+	it("uses the canonical projection for the checkpoint prefix when a newer checkpoint supersedes an older compaction", () => {
+		const currentPrompt = "CURRENT_PROMPT_MUST_APPEAR_ONCE";
+		const firstPostCheckpoint = "FIRST_POST_CHECKPOINT_ITEM";
+		const olderRemote = buildOpenAiRemoteCompactionResult({
+			model: OPENAI_MODEL,
+			firstKeptEntryId: "u2",
+			tokensBefore: 100,
+			requestInputItemCount: 3,
+			response: {
+				id: "resp_older",
+				created_at: 1_775_000_001,
+				object: "response.compaction",
+				output: [{ type: "compaction", id: "cmp_older", encrypted_content: "OLDER_CHECKPOINT_SUPERSEDED" }],
+			},
+		});
+		const latestRemote = buildOpenAiRemoteCompactionResult({
+			model: OPENAI_MODEL,
+			firstKeptEntryId: "u1",
+			tokensBefore: 200,
+			requestInputItemCount: 6,
+			response: {
+				id: "resp_latest",
+				created_at: 1_775_000_002,
+				object: "response.compaction",
+				output: [{ type: "compaction", id: "cmp_latest", encrypted_content: "LATEST_CHECKPOINT" }],
+			},
+		});
+		// The latest checkpoint's firstKeptEntryId (u1) reaches before the older
+		// compaction entry, so the older summary is superseded.
+		const branch: SessionEntry[] = [
+			{
+				type: "model_change",
+				id: "model",
+				parentId: null,
+				timestamp: new Date(1_775_000_000_000).toISOString(),
+				provider: "openai",
+				modelId: OPENAI_MODEL.id,
+			},
+			messageEntry("u1", "model", {
+				role: "user",
+				content: [{ type: "text", text: "kept turn one" }],
+				timestamp: 1,
+			}),
+			messageEntry("a1", "u1", {
+				role: "assistant",
+				api: "openai-responses",
+				provider: "openai",
+				model: OPENAI_MODEL.id,
+				content: [{ type: "text", text: "kept assistant one" }],
+				usage: {
+					input: 10,
+					output: 5,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 15,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "stop",
+				timestamp: 2,
+			}),
+			messageEntry("u2", "a1", {
+				role: "user",
+				content: [{ type: "text", text: "kept turn two" }],
+				timestamp: 3,
+			}),
+			{
+				type: "compaction",
+				id: "compact-older",
+				parentId: "u2",
+				timestamp: new Date(1_775_000_001_000).toISOString(),
+				summary: "OLDER_SUMMARY_SUPERSEDED",
+				firstKeptEntryId: olderRemote.firstKeptEntryId,
+				tokensBefore: olderRemote.tokensBefore,
+				details: olderRemote.details,
+				fromHook: true,
+			},
+			messageEntry("u3", "compact-older", {
+				role: "user",
+				content: [{ type: "text", text: "kept turn three" }],
+				timestamp: 4,
+			}),
+			messageEntry("u4", "u3", {
+				role: "user",
+				content: [{ type: "text", text: "kept turn four" }],
+				timestamp: 5,
+			}),
+			{
+				type: "compaction",
+				id: "compact-latest",
+				parentId: "u4",
+				timestamp: new Date(1_775_000_002_000).toISOString(),
+				summary: "LATEST_SUMMARY",
+				firstKeptEntryId: latestRemote.firstKeptEntryId,
+				tokensBefore: latestRemote.tokensBefore,
+				details: latestRemote.details,
+				fromHook: true,
+			},
+			messageEntry("u5", "compact-latest", {
+				role: "user",
+				content: [{ type: "text", text: firstPostCheckpoint }],
+				timestamp: 6,
+			}),
+		];
+
+		// Canonical session context skips the superseded older summary.
+		const canonicalMessages = convertToLlm(buildSessionContext(branch).messages);
+		const canonicalText = JSON.stringify(canonicalMessages);
+		expect(canonicalText).toContain("LATEST_SUMMARY");
+		expect(canonicalText).not.toContain("OLDER_SUMMARY_SUPERSEDED");
+		expect(canonicalText).toContain("kept turn one");
+		expect(canonicalText).toContain(firstPostCheckpoint);
+
+		const canonicalInput = convertResponsesMessages(
+			OPENAI_MODEL,
+			{
+				systemPrompt: "current system prompt",
+				messages: [
+					...canonicalMessages,
+					{ role: "user", content: [{ type: "text", text: currentPrompt }], timestamp: 7 },
+				],
+			},
+			new Set(["openai"]),
+		);
+
+		const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(
+			{ model: OPENAI_MODEL.id, input: canonicalInput, stream: true },
+			{ model: OPENAI_MODEL, branchEntries: branch },
+		);
+		const rewrittenPayload = JSON.stringify(rewritten);
+
+		// The checkpoint prefix boundary must use the same projection: the
+		// superseded older summary contributes no payload item, so it must not
+		// shift the boundary past the first post-checkpoint item.
+		expect(rewrittenPayload).toContain("LATEST_CHECKPOINT");
+		expect(rewrittenPayload).not.toContain("OLDER_CHECKPOINT_SUPERSEDED");
+		expect(rewrittenPayload).not.toContain("kept turn one");
+		expect(rewrittenPayload.split(currentPrompt)).toHaveLength(2);
+		expect(rewrittenPayload).toContain(firstPostCheckpoint);
 	});
 
 	it("replays a remote checkpoint from the final redacted context without mutating persisted messages", async () => {

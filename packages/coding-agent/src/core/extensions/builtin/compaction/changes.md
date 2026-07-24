@@ -7,6 +7,10 @@
 - Regressions: `test/compaction/canonical-routes.test.ts` redacts both persisted post-checkpoint content and the
   current prompt through later context hooks, while `test/compaction/openai-remote-compaction.test.ts` and the Codex
   remote-compaction regression exercise final-payload replay in native and mixed-history paths.
+- Repeated checkpoints project their prefix through the same compaction-aware branch view as normal session context,
+  excluding superseded older summaries before canonical Responses conversion.
+- Non-remote summarization runs context hooks on raw `AgentMessage` values before `convertToLlm`, preserving
+  role/customType-based redaction contracts while leaving persisted messages byte-identical.
 
 # Builtin compaction extension changes
 
