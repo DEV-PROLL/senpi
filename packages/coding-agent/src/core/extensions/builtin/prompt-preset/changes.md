@@ -1,5 +1,35 @@
 # prompt-preset Extension Changes
 
+## Claude Opus 5 preset (2026-07-24)
+
+### What changed
+
+- `claude-opus-5.ts`: new preset for the Claude Opus 5 family, following the thin-wrapper Claude lineage (`tuningSection` + `workstationDialect: "claude"`, never `corePrompt` — Anthropic's Opus 5 prompting guide states the model performs well out of the box on Opus 4.8 prompts, and 4.8 runs the shared dynamic core). The tuning is built paragraph-per-paragraph from the official guide (platform.claude.com → prompting-claude-opus-5) plus one harness fact:
+  - **Binding stop contract** (adapted from the `gpt-5.6.ts` Stop Goal): the routing line gains a declared, observable, per-turn stop condition ("I'll stop when …"), the model must think through the actual goal before naming it, and stopping the moment it holds is mandatory and immediate — "every action past the declared stop condition is a defect, not diligence". This one contract subsumes Opus 5's two documented failure modes, scope expansion and over-verification.
+  - **Scope constraint**: the guide's own anti-transformation text (no quiet narrowing/widening/transforming; finish the whole task; stop short of clearly-beyond actions). The 4.7/4.8 scope-literalism paragraph ("every"/"all" mean the full set) is deliberately NOT carried — Opus 5's failure mode inverted from under-scoping to over-scoping.
+  - **Bounded verification**: Opus 5 self-verifies unprompted; the tuning binds the shared verification tiers to a single pass and bans post-stop re-checks instead of adding verification instructions (which the guide says compound into over-verification).
+  - **Delegation caps**: guide text, phrased conditionally ("when a delegation tool is available") since base senpi exposes no spawn surface; inert without one, binding with one (e.g. omo-senpi task tools).
+  - **Narration cadence + late conciseness reminder**: Opus 5 narrates readily and runs longer responses; the guide recommends a short reminder near the end of long prompts — exactly where `tuningSection` lands.
+  - **Correction filter and written-deliverable length calibration**: trimmed guide text.
+  - **Auto-compaction continuation**: harness fact carried from every prior Claude preset, retargeted at the declared stop condition.
+  - NOT carried from 4.7/4.8: the tool-use-over-reasoning nudge (Opus 5 is documented as tool-forward) and the cream/serif/terracotta design counter (undocumented for Opus 5). NOT added: thinking-disabled artifact mitigations (senpi runs Claude with thinking enabled; the guide's primary mitigation is keeping it on).
+- `presets.ts`: `isClaudeOpus5Model` (`opus-5` boundary on the normalized id — cannot collide with `opus-4-5`/`opus-4.5`, which contain no `opus-5` substring), checked after the Fable 5 signal and before the 4.x version extraction; dispatch case added.
+- `settings.ts`: `"claude-opus-5"` joins `PromptPresetName` and `VALID_PRESETS`.
+- `docs/settings.md`, `AGENTS.md`, `builtin/AGENTS.md`: preset lists updated.
+- `test/suite/prompt-presets-claude-opus-5.test.ts`: id resolution across bare/provider-prefixed/Bedrock/dated/display-name shapes, non-routing of 4.x/4.5-dotted/fable-5 neighbors (and the reverse), settings force, GPT/Kimi tuning isolation, dropped-lineage pins (no scope-literalism, no house-style counter), and a future-proof catalog sweep (no Opus 5 ids ship in the catalog yet; the sweep guards the day they do).
+
+### Why
+
+- Claude Opus 5 shipped with its own prompting guide; without a preset it fell back to the untuned dynamic prompt and inherited none of the documented behavior counters. The stop-contract emphasis mirrors the gpt-5.6 preset per explicit fork direction: make the model reason deeply about its goal, declare when it will stop, and stop there.
+
+### Why extension system couldn't handle this differently
+
+- Content-only addition inside this builtin; follows the thin-wrapper preset architecture (tuningSection only).
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `claude-opus-5.ts` is fork-only; `presets.ts`/`settings.ts` touch shared lists — trivial adjacent-line conflicts if upstream adds presets.
+
 ## GPT Code Mode routing for GPT presets (2026-07-22)
 
 ### What changed

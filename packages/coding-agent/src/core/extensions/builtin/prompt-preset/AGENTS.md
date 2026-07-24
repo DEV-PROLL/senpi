@@ -1,6 +1,6 @@
 # builtin/prompt-preset
 
-Builtin extension #3. On `before_agent_start` and `model_select`, picks a system prompt preset by **model family** (gpt-5.x through gpt-5.6, claude-fable-5, claude-opus-4-{5,6,7,8}, glm-5.2, kimi-k2-{6,7}, kimi-k3) and falls back to the senpi dynamic prompt when nothing matches. Renders the active preset name in the startup header. After 2026-04-30, presets are thin wrappers around `buildDynamicSystemPrompt()` carrying only model-specific tuning.
+Builtin extension #3. On `before_agent_start` and `model_select`, picks a system prompt preset by **model family** (gpt-5.x through gpt-5.6, claude-fable-5, claude-opus-5, claude-opus-4-{5,6,7,8}, glm-5.2, kimi-k2-{6,7}, kimi-k3) and falls back to the senpi dynamic prompt when nothing matches. Renders the active preset name in the startup header. After 2026-04-30, presets are thin wrappers around `buildDynamicSystemPrompt()` carrying only model-specific tuning.
 
 ## FILES
 
@@ -18,6 +18,7 @@ prompt-preset/
 ├── gpt-5.5.ts           # GPT-5.5 preset — full-core rewrite via `corePrompt` (outcome-first, per the GPT-5.5 prompting guide)
 ├── gpt-5.6.ts           # GPT-5.6 series preset (sol/terra/luna) — full-core rewrite via `corePrompt`; Hephaestus-parity autonomous deep worker (implement-don't-propose, Manual QA Gate, binding stop contract: declared per-turn stop condition + Stop Goal) under GPT-5.6 doctrine
 ├── claude-fable-5.ts    # Claude Fable 5 preset
+├── claude-opus-5.ts     # Claude Opus 5 preset — Opus 5 prompting-guide tuning + binding stop contract (declared stop condition in the routing line)
 ├── claude-opus-4-5.ts   # Claude Opus 4.5 preset
 ├── claude-opus-4-6.ts   # Claude Opus 4.6 preset
 ├── claude-opus-4-7.ts   # Claude Opus 4.7 preset
