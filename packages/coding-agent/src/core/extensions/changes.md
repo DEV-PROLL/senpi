@@ -15,6 +15,9 @@
   extensions to update prompts and active tools before the retry request.
 - Builtin PreCompact diagnostics carry the active compaction request ID so their own feedback does not falsely trip the
   source-revision guard; unrelated session or tool mutations remain stale-rejected.
+- `ExtensionRunner.prepareProviderRequest()` provides a request-local canonical path for compaction generation:
+  ordered `context` hooks, provider-body transforms, and header transforms run without mutating persisted messages.
+  The originating compaction handler is excluded to avoid recursive re-entry while later redaction hooks still run.
 
 ### Why
 

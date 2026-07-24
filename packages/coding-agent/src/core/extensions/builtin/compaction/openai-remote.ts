@@ -1,8 +1,18 @@
-import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import {
+	type Api,
+	type AssistantMessage,
+	type Context,
+	convertResponsesMessages,
+	type Model,
+	type ProviderHeaders,
+	type SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { CompactionResult } from "../../../compaction/index.ts";
-import { type SessionEntry, sessionEntryToContextMessages } from "../../../session-manager.ts";
-import type { ServiceTier, SessionBeforeCompactEvent } from "../../types.ts";
+import { convertToLlm } from "../../../messages.ts";
+import { buildSessionContext, type SessionEntry, sessionEntryToContextMessages } from "../../../session-manager.ts";
+import type { ProviderRequestPreparation, ServiceTier, SessionBeforeCompactEvent } from "../../types.ts";
 import type {
 	OpenAiCompactBody,
 	OpenAiContextCompactionItem,
@@ -99,6 +109,7 @@ type OpenAiRemoteCompactionContext = {
 	sessionManager: {
 		getSessionId(): string;
 	};
+	prepareProviderRequest?(messages: AgentMessage[]): Promise<ProviderRequestPreparation>;
 };
 
 type OpenAiRemoteCompactionEvent =
@@ -143,6 +154,7 @@ type EmitCompactionEvent = (event: OpenAiRemoteCompactionEvent) => void;
 
 const OPENAI_REMOTE_COMPACTION_TIMEOUT_MS = 15_000;
 const REMOTE_COMPACTION_TIMEOUT_REASON = "remote-compaction-timeout";
+const OPENAI_RESPONSES_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 
 function supportsOpenAiResponsesWebSocket(model: OpenAiRemoteCompactionModel): model is Model<"openai-responses"> {
 	if (model.provider !== "openai" || model.api !== "openai-responses") return false;
@@ -158,12 +170,15 @@ export function createOpenAiRemoteCompactionRequest(options: {
 	model: Model<Api> | undefined;
 	systemPrompt: string;
 	branchEntries: SessionEntry[];
+	messages?: AgentMessage[];
 	tokensBefore: number;
 	promptCacheKey?: string;
 	serviceTier?: ServiceTier;
 }): OpenAiRemoteCompactionRequest | undefined {
 	if (!isOpenAiRemoteCompactionModel(options.model)) return undefined;
-	const input = convertBranchEntries(options.branchEntries, options.model);
+	const input = options.messages
+		? convertPendingMessages(options.messages, options.model)
+		: convertBranchEntries(options.branchEntries, options.model);
 	if (input.length === 0) return undefined;
 	return {
 		body: {
@@ -382,6 +397,8 @@ async function runOpenAiResponsesStreamCompaction(options: {
 	signal: AbortSignal;
 	streamRunner: OpenAiResponsesStreamRunner;
 	systemPrompt: string;
+	headers?: ProviderHeaders;
+	providerRequest?: ProviderRequestPreparation;
 }): Promise<OpenAiRemoteCompactionResult | undefined> {
 	const stream = options.streamRunner(
 		options.model,
@@ -390,13 +407,13 @@ async function runOpenAiResponsesStreamCompaction(options: {
 			apiKey: options.auth.apiKey,
 			cacheRetention: "short",
 			extraBody: options.auth.extraBody,
-			headers: options.auth.headers,
+			headers: options.headers ?? options.auth.headers,
 			onPayload: (payload) => {
 				const rewritten = createOpenAiResponsesStreamCompactionPayload(payload, options.request);
 				if (!isRecord(rewritten) || !Array.isArray(rewritten.input)) {
 					throw new Error("Unable to build OpenAI Responses stream compaction payload");
 				}
-				return rewritten;
+				return options.providerRequest ? options.providerRequest.transformPayload(rewritten) : rewritten;
 			},
 			sessionId: options.request.body.prompt_cache_key,
 			signal: options.signal,
@@ -541,6 +558,10 @@ async function runOpenAiCompactEndpointCompaction(options: {
 	return result;
 }
 
+function isOpenAiCompactBody(value: unknown): value is OpenAiCompactBody {
+	return isRecord(value) && typeof value.model === "string" && Array.isArray(value.input);
+}
+
 export async function runOpenAiRemoteCompaction(
 	ctx: OpenAiRemoteCompactionContext,
 	event: SessionBeforeCompactEvent,
@@ -575,10 +596,12 @@ export async function runOpenAiRemoteCompaction(
 
 	const requestModel = auth.upstreamModelId ? { ...model, id: auth.upstreamModelId } : model;
 	const serviceTier = ctx.serviceTier ?? auth.serviceTier;
+	const providerRequest = await ctx.prepareProviderRequest?.(buildSessionContext(event.branchEntries).messages);
 	const request = createOpenAiRemoteCompactionRequest({
 		model: requestModel,
 		systemPrompt: ctx.getSystemPrompt(),
 		branchEntries: event.branchEntries,
+		messages: providerRequest?.messages,
 		tokensBefore: event.preparation.tokensBefore,
 		promptCacheKey: ctx.sessionManager.getSessionId(),
 		serviceTier,
@@ -597,6 +620,7 @@ export async function runOpenAiRemoteCompaction(
 	const remoteTimeoutMs = dependencies.remoteTimeoutMs ?? OPENAI_REMOTE_COMPACTION_TIMEOUT_MS;
 
 	if (supportsOpenAiResponsesWebSocket(requestModel)) {
+		const headers = providerRequest ? await providerRequest.transformHeaders(auth.headers ?? {}) : auth.headers;
 		emit?.({
 			version: 1,
 			action: "remote_started",
@@ -632,6 +656,8 @@ export async function runOpenAiRemoteCompaction(
 							dependencies.streamRunner ??
 							((streamModel, context, options) => streamSimple(streamModel, context, options)),
 						systemPrompt: ctx.getSystemPrompt(),
+						headers,
+						providerRequest,
 					}),
 			});
 			if (result) {
@@ -682,6 +708,18 @@ export async function runOpenAiRemoteCompaction(
 		});
 		return undefined;
 	}
+	const transformedPayload = providerRequest ? await providerRequest.transformPayload(request.body) : request.body;
+	const transformedRequest = isOpenAiCompactBody(transformedPayload)
+		? { ...request, body: transformedPayload }
+		: request;
+	const transformedHeaders = providerRequest
+		? await providerRequest.transformHeaders(Object.fromEntries(headers.entries()))
+		: undefined;
+	const requestHeaders = transformedHeaders
+		? new Headers(
+				Object.entries(transformedHeaders).flatMap(([key, value]) => (value === null ? [] : [[key, value]])),
+			)
+		: headers;
 
 	return runWithRemoteTimeout({
 		signal: event.signal,
@@ -699,9 +737,9 @@ export async function runOpenAiRemoteCompaction(
 		run: (signal) =>
 			runOpenAiCompactEndpointCompaction({
 				fetchImpl: dependencies.fetch ?? fetch,
-				headers,
+				headers: requestHeaders,
 				model: requestModel,
-				request,
+				request: transformedRequest,
 				requestId: event.requestId,
 				signal,
 				firstKeptEntryId: event.preparation.firstKeptEntryId,
@@ -749,7 +787,14 @@ function checkpointContextInputItemCount(
 		compactionEntry,
 		...(firstKeptIndex >= 0 && firstKeptIndex < remote.index ? entries.slice(firstKeptIndex, remote.index) : []),
 	];
-	return convertPendingMessages(checkpointContextEntries.flatMap(sessionEntryToContextMessages), model).length;
+	// Match the converter that produced the final Responses payload. In
+	// particular, it drops aborted/error assistants, their orphaned results,
+	// and empty users, so this boundary stays aligned with the live request.
+	return convertResponsesMessages(
+		model,
+		{ messages: convertToLlm(checkpointContextEntries.flatMap(sessionEntryToContextMessages)) },
+		OPENAI_RESPONSES_TOOL_CALL_PROVIDERS,
+	).length;
 }
 
 function postCheckpointPayloadItems(

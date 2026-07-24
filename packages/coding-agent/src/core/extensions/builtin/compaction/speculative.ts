@@ -23,7 +23,7 @@ import {
 import { convertToLlm } from "../../../messages.ts";
 import type { ModelRegistry } from "../../../model-registry.ts";
 import type { ReadonlySessionManager } from "../../../session-manager.ts";
-import type { ApplyCompactionResult, ContextUsage } from "../../types.ts";
+import type { ApplyCompactionResult, ContextUsage, ProviderRequestPreparation } from "../../types.ts";
 import { sanitizeAnthropicPayload } from "../tool-pair-guard/sanitize-anthropic-payload.ts";
 import { computeEffectiveKeepRecentTokens, computeEffectiveThreshold } from "./policy.ts";
 import { buildPrompt, type MergedCompactionPromptVariant } from "./prompts.ts";
@@ -47,6 +47,7 @@ export interface SpeculativeCompactionContext {
 	getCompactionSettings?(): CompactionPreparation["settings"];
 	getMessageRevision(): number;
 	getSystemPrompt?(): string;
+	prepareProviderRequest?(messages: AgentMessage[]): Promise<ProviderRequestPreparation>;
 	applyCompaction(
 		precomputed: CompactionResult,
 		options: { reason: "extension"; expectedRevision: number; signal?: AbortSignal },
@@ -121,6 +122,7 @@ function isAssistantMessage(message: Message): message is AssistantMessage {
 }
 
 async function generateSummaryMessage(options: {
+	context: SpeculativeCompactionContext;
 	messages: AgentMessage[];
 	onProgress?: CompactionProgressCallback;
 	prompt: ReturnType<typeof buildPrompt>;
@@ -148,29 +150,36 @@ async function generateSummaryMessage(options: {
 		else options.signal.addEventListener("abort", onCallerAbort, { once: true });
 	}
 	try {
-		const responseStream = stream(
-			options.snapshot.model,
-			{
-				systemPrompt: options.snapshot.systemPrompt ?? options.prompt.system,
-				messages: [
-					...conversationMessages,
-					{
-						role: "user",
-						content: [{ type: "text", text: options.prompt.user }],
-						timestamp: Date.now(),
-					},
-				],
-				...(options.snapshot.tools && options.snapshot.tools.length > 0 ? { tools: options.snapshot.tools } : {}),
+		const requestContext = {
+			systemPrompt: options.snapshot.systemPrompt ?? options.prompt.system,
+			messages: [
+				...conversationMessages,
+				{
+					role: "user" as const,
+					content: [{ type: "text" as const, text: options.prompt.user }],
+					timestamp: Date.now(),
+				},
+			],
+			...(options.snapshot.tools && options.snapshot.tools.length > 0 ? { tools: options.snapshot.tools } : {}),
+		};
+		const providerRequest = await options.context.prepareProviderRequest?.(requestContext.messages);
+		const providerContext = providerRequest
+			? { ...requestContext, messages: convertToLlm(providerRequest.messages) }
+			: requestContext;
+		const headers = providerRequest
+			? await providerRequest.transformHeaders(options.auth.headers ?? {})
+			: options.auth.headers;
+		const responseStream = stream(options.snapshot.model, providerContext, {
+			apiKey: options.auth.apiKey,
+			headers,
+			extraBody: options.auth.extraBody,
+			onPayload: async (payload, model) => {
+				const sanitized = model.api === "anthropic-messages" ? sanitizeAnthropicPayload(payload) : payload;
+				return providerRequest ? await providerRequest.transformPayload(sanitized) : sanitized;
 			},
-			{
-				apiKey: options.auth.apiKey,
-				headers: options.auth.headers,
-				extraBody: options.auth.extraBody,
-				...(options.snapshot.model.api === "anthropic-messages" ? { onPayload: sanitizeAnthropicPayload } : {}),
-				maxTokens: summaryMaxTokens(options.snapshot.model, options.snapshot.contextWindow),
-				signal: requestController.signal,
-			},
-		);
+			maxTokens: summaryMaxTokens(options.snapshot.model, options.snapshot.contextWindow),
+			signal: requestController.signal,
+		});
 		await consumeStreamWithIdleTimeout(responseStream, {
 			idleTimeoutMs: DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,
 			abort: () => requestController.abort(),
@@ -403,6 +412,7 @@ export async function runExtensionCompaction(
 	while (true) {
 		if (signal?.aborted) return undefined;
 		const response = await generateSummaryMessage({
+			context,
 			messages,
 			onProgress,
 			prompt,

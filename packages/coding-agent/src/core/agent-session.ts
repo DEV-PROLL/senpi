@@ -4588,10 +4588,12 @@ export class AgentSession {
 					const controller = admission.controller;
 					void (async () => {
 						let outcome: "completed" | "failed" | "aborted" = "failed";
-						this._disconnectFromAgent();
+						let disconnected = false;
 
 						try {
 							await this._abortActiveAgentAndRetry();
+							this._disconnectFromAgent();
+							disconnected = true;
 							this._emit({ type: "compaction_start", reason: "extension" });
 							const execution = await this._executeCompaction({
 								controller,
@@ -4631,7 +4633,7 @@ export class AgentSession {
 								this._compactionAbortController = undefined;
 							}
 							this._releasePendingCompactionAdmission(admission, outcome);
-							if (!this.isCompacting) this._reconnectToAgent();
+							if (disconnected && !this.isCompacting) this._reconnectToAgent();
 						}
 					})();
 				},

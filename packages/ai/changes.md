@@ -1,5 +1,29 @@
 # changes.md — ai
 
+## Export canonical OpenAI Responses message conversion (2026-07-24)
+
+### What changed
+
+- `src/index.ts`: exports `convertResponsesMessages` from the browser-safe root so coding-agent remote-compaction
+  replay can locate checkpoint boundaries with the exact conversion semantics used by the real provider pipeline.
+
+### Why
+
+- Counting checkpoint items with a separate converter could drop or duplicate the current prompt when errored/aborted
+  assistants, orphaned tool results, empty users, or provider-native blocks changed item cardinality.
+
+### Why extension system couldn't handle this
+
+- The boundary is defined by the provider wire conversion in `packages/ai`, below the coding-agent extension layer.
+
+### Modified upstream files
+
+- `src/index.ts`
+
+### Expected merge conflict zones
+
+- LOW: root exports if upstream reorganizes OpenAI Responses helpers.
+
 ## Commit generated model catalog data for reproducible builds (2026-07-18)
 
 ### What changed

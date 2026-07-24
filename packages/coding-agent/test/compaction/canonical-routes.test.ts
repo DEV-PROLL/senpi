@@ -1,12 +1,21 @@
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { convertResponsesMessages } from "../../../ai/src/api/openai-responses-shared.ts";
 import { type CompactionResult, DEFAULT_COMPACTION_SETTINGS } from "../../src/core/compaction/index.ts";
 import { createEventBus } from "../../src/core/event-bus.ts";
 import compactionExtension from "../../src/core/extensions/builtin/compaction/index.ts";
-import { buildOpenAiRemoteCompactionResult } from "../../src/core/extensions/builtin/compaction/openai-remote.ts";
+import {
+	buildOpenAiRemoteCompactionResult,
+	rewriteOpenAiPayloadWithRemoteCompaction,
+} from "../../src/core/extensions/builtin/compaction/openai-remote.ts";
 import type { BeforeAgentStartEvent } from "../../src/core/extensions/index.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../../src/core/extensions/loader.ts";
-import type { SessionEntry, SessionMessageEntry } from "../../src/core/session-manager.ts";
+import { convertToLlm } from "../../src/core/messages.ts";
+import {
+	type SessionEntry,
+	type SessionMessageEntry,
+	sessionEntryToContextMessages,
+} from "../../src/core/session-manager.ts";
 import { createHarness } from "../suite/harness.ts";
 
 const OPENAI_MODEL = {
@@ -156,6 +165,128 @@ describe("builtin compaction canonical routes", () => {
 			mode: "openai-remote",
 			transport: "compact-endpoint",
 		});
+	});
+
+	it("retains the current prompt after a checkpoint prefix whose failed turns Responses drops", () => {
+		const currentPrompt = "CURRENT_PROMPT_MUST_APPEAR_ONCE";
+		const usage = {
+			input: 1,
+			output: 1,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 2,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const branch: SessionEntry[] = [
+			messageEntry("u1", null, {
+				role: "user",
+				content: [{ type: "text", text: "kept checkpoint context" }],
+				timestamp: 1,
+			}),
+			messageEntry("error", "u1", {
+				role: "assistant",
+				api: "openai-responses",
+				provider: "openai",
+				model: OPENAI_MODEL.id,
+				content: [
+					{ type: "text", text: "ERRORED_ASSISTANT_SHOULD_NOT_REPLAY" },
+					{ type: "toolCall", id: "call_error|fc_error", name: "read", arguments: {} },
+				],
+				usage,
+				stopReason: "error",
+				timestamp: 2,
+			}),
+			messageEntry("error-result", "error", {
+				role: "toolResult",
+				toolCallId: "call_error|fc_error",
+				toolName: "read",
+				content: [{ type: "text", text: "ERRORED_TOOL_RESULT_SHOULD_NOT_REPLAY" }],
+				isError: true,
+				timestamp: 3,
+			}),
+			messageEntry("aborted", "error-result", {
+				role: "assistant",
+				api: "openai-responses",
+				provider: "openai",
+				model: OPENAI_MODEL.id,
+				content: [
+					{ type: "text", text: "ABORTED_ASSISTANT_SHOULD_NOT_REPLAY" },
+					{ type: "toolCall", id: "call_abort|fc_abort", name: "read", arguments: {} },
+				],
+				usage,
+				stopReason: "aborted",
+				timestamp: 4,
+			}),
+			messageEntry("aborted-result", "aborted", {
+				role: "toolResult",
+				toolCallId: "call_abort|fc_abort",
+				toolName: "read",
+				content: [{ type: "text", text: "ABORTED_TOOL_RESULT_SHOULD_NOT_REPLAY" }],
+				isError: true,
+				timestamp: 5,
+			}),
+			messageEntry("empty", "aborted-result", {
+				role: "user",
+				content: [],
+				timestamp: 6,
+			}),
+			{
+				type: "compaction",
+				id: "checkpoint",
+				parentId: "empty",
+				timestamp: new Date(1_775_000_001_000).toISOString(),
+				summary: "fallback checkpoint summary",
+				firstKeptEntryId: "u1",
+				tokensBefore: 100,
+				fromHook: true,
+				details: {
+					schema: "senpi.compaction.openai-remote.v1",
+					mode: "openai-remote",
+					provider: "openai",
+					api: "openai-responses",
+					transport: "compact-endpoint",
+					modelId: OPENAI_MODEL.id,
+					responseId: "checkpoint-response",
+					createdAt: 1_775_000_001,
+					requestInputItemCount: 1,
+					retainedInputItemCount: 1,
+					replacementInput: [{ type: "compaction", encrypted_content: "provider-checkpoint" }],
+				},
+			},
+		];
+
+		const checkpointIndex = branch.findIndex((entry) => entry.id === "checkpoint");
+		const canonicalInput = convertResponsesMessages(
+			OPENAI_MODEL,
+			{
+				systemPrompt: "current system prompt",
+				messages: [
+					...convertToLlm(
+						[branch[checkpointIndex]!, ...branch.slice(0, checkpointIndex)].flatMap(
+							sessionEntryToContextMessages,
+						),
+					),
+					{ role: "user", content: [{ type: "text", text: currentPrompt }], timestamp: 7 },
+				],
+			},
+			new Set(["openai"]),
+		);
+		const canonicalPayload = JSON.stringify(canonicalInput);
+		expect(canonicalPayload).not.toContain("ERRORED_ASSISTANT_SHOULD_NOT_REPLAY");
+		expect(canonicalPayload).not.toContain("ERRORED_TOOL_RESULT_SHOULD_NOT_REPLAY");
+		expect(canonicalPayload).not.toContain("ABORTED_ASSISTANT_SHOULD_NOT_REPLAY");
+		expect(canonicalPayload).not.toContain("ABORTED_TOOL_RESULT_SHOULD_NOT_REPLAY");
+
+		const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(
+			{ model: OPENAI_MODEL.id, input: canonicalInput, stream: true },
+			{ model: OPENAI_MODEL, branchEntries: branch },
+		);
+		const rewrittenPayload = JSON.stringify(rewritten);
+
+		// The boundary must come from the actual provider payload, not a second
+		// converter that counts the empty user and dropped tool pairs above.
+		expect(rewrittenPayload.split(currentPrompt)).toHaveLength(2);
+		expect(rewrittenPayload).toContain("provider-checkpoint");
 	});
 
 	it("replays a remote checkpoint from the final redacted context without mutating persisted messages", async () => {

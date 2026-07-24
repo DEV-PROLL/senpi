@@ -414,6 +414,11 @@ export interface ExtensionContext {
 	sessionSettings: ExtensionSessionSettings;
 	/** Trigger compaction without awaiting completion. */
 	compact(options?: CompactOptions): void;
+	/**
+	 * Prepare a request-local provider context through the normal extension
+	 * boundary. Persisted session messages are never modified.
+	 */
+	prepareProviderRequest?(messages: AgentMessage[]): Promise<ProviderRequestPreparation>;
 	/** Start user-visible compaction feedback before an extension has a precomputed summary to apply. */
 	beginCompaction?(options: BeginCompactionOptions): AbortSignal | undefined;
 	/** Stream user-visible compaction content while an extension-generated summary is available. */
@@ -437,6 +442,13 @@ export interface ExtensionContext {
 	 * after the handler finished are ignored.
 	 */
 	updateToolHookStatus?(statusMessage: string): void;
+}
+
+/** Request-local transformations shared by normal and compaction provider calls. */
+export interface ProviderRequestPreparation {
+	messages: AgentMessage[];
+	transformPayload(payload: unknown): Promise<unknown>;
+	transformHeaders(headers: ProviderHeaders): Promise<ProviderHeaders>;
 }
 
 /**

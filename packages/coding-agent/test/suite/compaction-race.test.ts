@@ -1,7 +1,7 @@
 import { setImmediate as waitForImmediate } from "node:timers/promises";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ExtensionAPI } from "../../src/core/extensions/index.ts";
+import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/index.ts";
 import { COMPACTION_SUMMARY_PREFIX } from "../../src/core/messages.ts";
 import { createHarness, getUserTexts, type Harness } from "./harness.ts";
 
@@ -334,6 +334,78 @@ describe("AgentSession compaction race handling", () => {
 		harness.setResponses([fauxAssistantMessage("later prompt succeeded")]);
 		await harness.session.prompt("later prompt after manual compaction");
 		expect(getUserTexts(harness).at(-1)).toBe("later prompt after manual compaction");
+		expect(harness.session.isStreaming).toBe(false);
+		expect(harness.session.isCompacting).toBe(false);
+	});
+
+	it("settles an active stream before extension-context compaction starts", async () => {
+		const eventOrder: string[] = [];
+		const extensionCompactionEnded = createDeferred();
+		let extensionContext: ExtensionContext | undefined;
+		let resolveStreamingUpdate: (() => void) | undefined;
+		const streamingUpdate = new Promise<void>((resolve) => {
+			resolveStreamingUpdate = resolve;
+		});
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_start", (_event, ctx) => {
+						extensionContext = ctx;
+					});
+					pi.on("session_before_compact", (event) => ({
+						compaction: {
+							summary: "extension-context compaction after active abort",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+						},
+					}));
+				},
+			],
+		});
+		harnesses.push(harness);
+		await harness.session.bindExtensions({});
+		if (!extensionContext) throw new Error("Expected session_start extension context");
+
+		harness.setResponses([
+			fauxAssistantMessage("first seed response"),
+			fauxAssistantMessage("second seed response"),
+			fauxAssistantMessage("streaming response ".repeat(4_000)),
+		]);
+		await harness.session.prompt("first seed prompt");
+		await harness.session.prompt("second seed prompt");
+
+		harness.session.subscribe((event) => {
+			if (event.type === "message_update" && event.message.role === "assistant") {
+				resolveStreamingUpdate?.();
+				resolveStreamingUpdate = undefined;
+			}
+			if (event.type === "agent_end") eventOrder.push("agent_end");
+			if (event.type === "compaction_start") eventOrder.push("compaction_start");
+			if (event.type === "compaction_end" && event.reason === "extension") extensionCompactionEnded.resolve();
+		});
+
+		const activePrompt = harness.session.prompt("prompt whose provider stream is active");
+		await streamingUpdate;
+		expect(harness.session.isStreaming).toBe(true);
+
+		// Exercise the actual ctx.compact() binding rather than AgentSession.compact().
+		extensionContext.compact();
+		const settled = await settlesWithin(Promise.allSettled([activePrompt, extensionCompactionEnded.promise]), 1_000);
+		expect(settled, "extension compaction must not deadlock behind an aborted active run").toBe(true);
+		if (!settled) return;
+		await harness.session.waitForSettledSessionWork();
+
+		const activeAgentEnd = harness.eventsOfType("agent_end").at(-1);
+		expect(activeAgentEnd?.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "aborted" });
+		expect(eventOrder.indexOf("agent_end")).toBeGreaterThanOrEqual(0);
+		expect(eventOrder.indexOf("compaction_start")).toBeGreaterThan(eventOrder.indexOf("agent_end"));
+		expect(harness.session.isStreaming).toBe(false);
+		expect(harness.session.isCompacting).toBe(false);
+
+		harness.setResponses([fauxAssistantMessage("later prompt succeeded")]);
+		await harness.session.prompt("later prompt after extension compaction");
+		expect(getUserTexts(harness).at(-1)).toBe("later prompt after extension compaction");
 		expect(harness.session.isStreaming).toBe(false);
 		expect(harness.session.isCompacting).toBe(false);
 	});

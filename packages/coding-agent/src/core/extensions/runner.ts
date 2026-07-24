@@ -51,6 +51,7 @@ import type {
 	ProjectTrustEvent,
 	ProjectTrustEventResult,
 	ProviderConfig,
+	ProviderRequestPreparation,
 	RegisteredCommand,
 	RegisteredMcpServerDeclaration,
 	RegisteredTool,
@@ -898,7 +899,7 @@ export class ExtensionRunner {
 	 * Create an ExtensionContext for use in event handlers and tool execution.
 	 * Context values are resolved at call time, so changes via bindCore/bindUI are reflected.
 	 */
-	createContext(): ExtensionContext {
+	createContext(excludeBeforeProviderRequestExtensionPath?: string): ExtensionContext {
 		const runner = this;
 		const getModel = this.getModel;
 		const getServiceTier = this.getServiceTier;
@@ -991,6 +992,10 @@ export class ExtensionRunner {
 			compact: (options) => {
 				runner.assertActive();
 				runner.compactFn(options);
+			},
+			prepareProviderRequest: async (messages) => {
+				runner.assertActive();
+				return runner.prepareProviderRequest(messages, excludeBeforeProviderRequestExtensionPath);
 			},
 			beginCompaction: (options) => {
 				runner.assertActive();
@@ -1085,7 +1090,7 @@ export class ExtensionRunner {
 
 			for (const handler of handlers) {
 				try {
-					const handlerResult = await handler(event, this.createContext());
+					const handlerResult = await handler(event, this.createContext(ext.path));
 
 					if (this.isSessionBeforeEvent(event) && handlerResult) {
 						result = handlerResult as SessionBeforeEventResult;
@@ -1122,7 +1127,7 @@ export class ExtensionRunner {
 					// the active toolset (gpt-apply-patch) must let later handlers
 					// (prompt-preset) rebuild from the post-swap tools in the same emission.
 					const liveEvent: ModelSelectEvent = { ...event, systemPromptOptions: this.getSystemPromptOptionsFn() };
-					const handlerResult = await handler(liveEvent, this.createContext());
+					const handlerResult = await handler(liveEvent, this.createContext(ext.path));
 					if (handlerResult) {
 						const nextResult = handlerResult as ModelSelectEventResult;
 						if (nextResult.systemPrompt !== undefined || nextResult.systemPromptName !== undefined) {
@@ -1167,7 +1172,7 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const currentEvent: MessageEndEvent = { ...event, message: currentMessage };
-					const handlerResult = (await handler(currentEvent, this.createContext())) as
+					const handlerResult = (await handler(currentEvent, this.createContext(ext.path))) as
 						| MessageEndEventResult
 						| undefined;
 					if (!handlerResult?.message) continue;
@@ -1338,7 +1343,7 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const event: ContextEvent = { type: "context", messages: currentMessages };
-					const handlerResult = await handler(event, this.createContext());
+					const handlerResult = await handler(event, this.createContext(ext.path));
 
 					if (handlerResult && (handlerResult as ContextEventResult).messages) {
 						currentMessages = (handlerResult as ContextEventResult).messages!;
@@ -1359,10 +1364,24 @@ export class ExtensionRunner {
 		return currentMessages;
 	}
 
-	async emitBeforeProviderRequest(payload: unknown): Promise<unknown> {
+	async prepareProviderRequest(
+		messages: AgentMessage[],
+		excludeBeforeProviderRequestExtensionPath?: string,
+	): Promise<ProviderRequestPreparation> {
+		const transformedMessages = await this.emitContext(messages);
+		return {
+			messages: transformedMessages,
+			transformPayload: async (payload) =>
+				await this.emitBeforeProviderRequest(payload, excludeBeforeProviderRequestExtensionPath),
+			transformHeaders: async (headers) => await this.emitBeforeProviderHeaders(headers),
+		};
+	}
+
+	async emitBeforeProviderRequest(payload: unknown, excludeExtensionPath?: string): Promise<unknown> {
 		let currentPayload = payload;
 
 		for (const ext of this.extensions) {
+			if (ext.path === excludeExtensionPath) continue;
 			const handlers = ext.handlers.get("before_provider_request");
 			if (!handlers || handlers.length === 0) continue;
 
@@ -1372,7 +1391,7 @@ export class ExtensionRunner {
 						type: "before_provider_request",
 						payload: currentPayload,
 					};
-					const handlerResult = await handler(event, this.createContext());
+					const handlerResult = await handler(event, this.createContext(ext.path));
 					if (handlerResult !== undefined) {
 						currentPayload = handlerResult;
 					}
@@ -1404,7 +1423,7 @@ export class ExtensionRunner {
 						type: "before_provider_headers",
 						headers,
 					};
-					await handler(event, this.createContext());
+					await handler(event, this.createContext(ext.path));
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					const stack = err instanceof Error ? err.stack : undefined;
@@ -1441,7 +1460,7 @@ export class ExtensionRunner {
 					// own legacy omitted-signal ownership slot.
 					const ctx = Object.defineProperties(
 						{},
-						Object.getOwnPropertyDescriptors(this.createContext()),
+						Object.getOwnPropertyDescriptors(this.createContext(ext.path)),
 					) as ExtensionContext;
 					ctx.getSystemPrompt = () => {
 						this.assertActive();
@@ -1510,7 +1529,7 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const event: ResourcesDiscoverEvent = { type: "resources_discover", cwd, reason };
-					const handlerResult = await handler(event, this.createContext());
+					const handlerResult = await handler(event, this.createContext(ext.path));
 					const result = handlerResult as ResourcesDiscoverResult | undefined;
 
 					if (result?.skillPaths?.length) {
@@ -1561,7 +1580,7 @@ export class ExtensionRunner {
 						source,
 						streamingBehavior,
 					};
-					const result = (await handler(event, this.createContext())) as InputEventResult | undefined;
+					const result = (await handler(event, this.createContext(ext.path))) as InputEventResult | undefined;
 					if (result?.action === "handled") return result;
 					if (result?.action === "transform") {
 						currentText = result.text;
