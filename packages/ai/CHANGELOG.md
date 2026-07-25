@@ -37,6 +37,7 @@
 ### Changed
 
 - Changed Radius OAuth device authorization, token exchange, and refresh requests to use the configured gateway directly.
+- Changed `ModelsError` messages to append the underlying cause, so auth failures such as `OAuth refresh failed for openai-codex` report the provider response instead of a bare wrapper message.
 
 ### Fixed
 
