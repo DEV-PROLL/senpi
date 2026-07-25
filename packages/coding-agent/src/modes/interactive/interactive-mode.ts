@@ -84,6 +84,7 @@ import {
 	defaultModelPerProvider,
 	findExactModelReferenceMatch,
 	resolveModelScope,
+	resolveModelScopeWithDiagnostics,
 	type ScopedModel,
 } from "../../core/model-resolver.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
@@ -137,6 +138,7 @@ import {
 } from "./components/oauth-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
+import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.ts";
 import {
 	BranchSummaryStatusIndicator,
@@ -3125,6 +3127,11 @@ export class InteractiveMode {
 				await this.showFavoriteModelsSelector();
 				return;
 			}
+			if (text === "/scoped-models") {
+				this.editor.setText("");
+				await this.showModelsSelector();
+				return;
+			}
 			if (text === "/model" || text.startsWith("/model ")) {
 				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
 				this.editor.setText("");
@@ -5225,6 +5232,83 @@ export class InteractiveMode {
 					},
 					onSelect: (model) => {
 						void this.selectModelFromUi(model, done);
+					},
+					onCancel: () => {
+						done();
+						this.ui.requestRender();
+					},
+				},
+			);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	private async showModelsSelector(): Promise<void> {
+		await this.session.modelRuntime.refresh();
+		const allModels = [...(await this.session.modelRuntime.getAvailable())];
+		const allModelIds = new Set(allModels.map((model) => getModelFullId(model)));
+		const configuredPatterns = this.settingsManager.getEnabledModels();
+		const sessionScopedModels = this.session.scopedModels;
+
+		if (allModels.length === 0 && !configuredPatterns?.length && sessionScopedModels.length === 0) {
+			this.showStatus("No models available");
+			return;
+		}
+
+		const configuredScope = configuredPatterns?.length
+			? await resolveModelScopeWithDiagnostics(configuredPatterns, this.session.modelRuntime)
+			: undefined;
+
+		let currentEnabledIds: string[] | null = null;
+
+		if (sessionScopedModels.length > 0) {
+			currentEnabledIds = sessionScopedModels.map((scoped) => getModelFullId(scoped.model));
+		} else if (configuredScope) {
+			currentEnabledIds = configuredScope.scopedModels.map((scoped) => getModelFullId(scoped.model));
+		}
+
+		for (const diagnostic of configuredScope?.diagnostics ?? []) {
+			if (diagnostic.code !== "no-match") continue;
+			currentEnabledIds ??= [];
+			if (!currentEnabledIds.includes(diagnostic.pattern)) currentEnabledIds.push(diagnostic.pattern);
+		}
+
+		const updateSessionModels = async (enabledIds: string[] | null) => {
+			currentEnabledIds = enabledIds === null ? null : [...enabledIds];
+			const hasEnabledAvailableModel = enabledIds?.some((id) => allModelIds.has(id)) ?? false;
+			const allAvailableModelsEnabled =
+				enabledIds !== null && [...allModelIds].every((id) => enabledIds.includes(id));
+			if (enabledIds && hasEnabledAvailableModel && !allAvailableModelsEnabled) {
+				const newScopedModels = await resolveModelScope(enabledIds, this.session.modelRuntime);
+				this.session.setScopedModels(
+					newScopedModels.map((scoped) => ({
+						model: scoped.model,
+						thinkingLevel: scoped.thinkingLevel,
+					})),
+				);
+			} else {
+				this.session.setScopedModels([]);
+			}
+			await this.updateAvailableProviderCount();
+			this.ui.requestRender();
+		};
+
+		this.showSelector((done) => {
+			const selector = new ScopedModelsSelectorComponent(
+				{
+					allModels,
+					enabledModelIds: currentEnabledIds,
+				},
+				{
+					onChange: updateSessionModels,
+					onPersist: (enabledIds) => {
+						const allEnabled =
+							enabledIds !== null &&
+							enabledIds.length === allModels.length &&
+							enabledIds.every((id) => allModelIds.has(id));
+						const newPatterns = enabledIds === null || allEnabled ? undefined : enabledIds;
+						this.settingsManager.setEnabledModels(newPatterns ? [...newPatterns] : undefined);
+						this.showStatus("Model scope saved to settings");
 					},
 					onCancel: () => {
 						done();

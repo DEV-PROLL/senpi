@@ -95,7 +95,22 @@ function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue
 	installLockPackages[outputPath] = copyLockEntry(entry);
 	addedPaths.add(outputPath);
 
-	for (const [dependencyName, dependencySpec] of Object.entries(packageDependencies(entry))) {
+	for (const [dependencyName, dependencySpec] of Object.entries(entry.dependencies ?? {})) {
+		queue.push({
+			name: dependencyName,
+			spec: dependencySpec,
+			from: outputPath,
+			resolveFrom: lockPath,
+			sourceBase: item.sourceBase,
+			outputBase: item.outputBase,
+		});
+	}
+	for (const [dependencyName, dependencySpec] of Object.entries(entry.optionalDependencies ?? {})) {
+		try {
+			resolveExternalDependency(lockPackages, dependencyName, lockPath, dependencySpec);
+		} catch {
+			continue;
+		}
 		queue.push({
 			name: dependencyName,
 			spec: dependencySpec,

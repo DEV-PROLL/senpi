@@ -43,6 +43,20 @@ function packageDependencies(entry) {
 	};
 }
 
+function queuePackageDependencies(lockPackages, queue, entry, from) {
+	for (const dependencyName of Object.keys(entry.dependencies ?? {})) {
+		queue.push({ name: dependencyName, from });
+	}
+	for (const dependencyName of Object.keys(entry.optionalDependencies ?? {})) {
+		try {
+			resolveExternalDependency(lockPackages, dependencyName, from);
+		} catch {
+			continue;
+		}
+		queue.push({ name: dependencyName, from });
+	}
+}
+
 function sortedObject(object) {
 	return Object.fromEntries(Object.entries(object).sort(([a], [b]) => a.localeCompare(b)));
 }
@@ -224,9 +238,7 @@ function addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, queue,
 	shrinkwrapPackages[lockPath] = copyLockEntry(entry);
 	addedPaths.add(lockPath);
 
-	for (const dependencyName of Object.keys(packageDependencies(entry))) {
-		queue.push({ name: dependencyName, from: lockPath });
-	}
+	queuePackageDependencies(lockPackages, queue, entry, lockPath);
 }
 
 function validateShrinkwrap(shrinkwrap, internalNames) {
@@ -275,7 +287,7 @@ function validateShrinkwrap(shrinkwrap, internalNames) {
 	}
 
 	for (const [lockPath, entry] of Object.entries(shrinkwrap.packages)) {
-		for (const dependencyName of Object.keys(packageDependencies(entry))) {
+		for (const dependencyName of Object.keys(entry.dependencies ?? {})) {
 			const dependencyIncluded = [...includedPaths].some(
 				(candidate) => candidate === `node_modules/${dependencyName}` || candidate.endsWith(`/node_modules/${dependencyName}`),
 			);

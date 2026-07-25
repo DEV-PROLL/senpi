@@ -77,7 +77,7 @@ export function validateGeneratedFiles(options) {
 	}
 
 	for (const [lockPath, entry] of Object.entries(installLock.packages)) {
-		for (const [dependencyName, dependencySpec] of Object.entries(packageDependencies(entry))) {
+		for (const [dependencyName, dependencySpec] of Object.entries(entry.dependencies ?? {})) {
 			let dependencyLockPath;
 			try {
 				dependencyLockPath = resolveExternalDependency(installLock.packages, dependencyName, lockPath, dependencySpec);
