@@ -1,3 +1,9 @@
+## Beta: bare `senpi update` syncs and rebuilds a local OMO plugin checkout (2026-07-25)
+
+- `src/beta/omo-local-update.ts` (removable beta module): on a bare `senpi update` — the no-flags invocation that also prints the extensions-skipped note — the CLI now runs a beta hook BEFORE any self-update work. The hook detects a locally-installed OMO plugin checkout (`@code-yeongyu/omo-senpi` plugin plus the `@oh-my-opencode/omo-senpi` / `@oh-my-opencode/senpi-task` workspace packages in one git repo), fast-forwards it to `origin/dev` (source dirt is first snapshotted onto a pushed `backup/senpi-update-*` branch; diverged local work is never reset), then rebuilds via `bun install` + `bun run build:senpi-plugin` and prints a green success line with the short sha and commit subject. A skip-stamp short-circuits when the checkout is already current; `--force` rebuilds anyway. The hook never throws and never sets `process.exitCode` — every failure degrades to a yellow warning so the senpi self-update continues untouched.
+- Kill-switch: `SENPI_OMO_LOCAL_UPDATE=0` disables the hook entirely (zero beta output, zero side effects).
+- Removal (3 steps): delete `src/beta/omo-local-update.ts`; delete all `test/omo-local-update*` files; delete the two BETA-marked touch points in `src/package-manager-cli.ts` (the top-of-file import and the marked block inside `case "update":`).
+
 ## App-server daemon launch diagnostics and hermetic lifecycle coverage (2026-07-24)
 
 - The daemon launcher now classifies websocket listener occupancy before spawn: a compatible app-server answers `initialize` and attaches, while any other TCP listener fails immediately with an `EADDRINUSE` diagnostic instead of consuming the child readiness budget. Child-process startup stderr still accompanies actual post-spawn failures, and each launch replaces stale diagnostics.
