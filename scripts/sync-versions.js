@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { findPackageDirectories } from "./package-workspaces.mjs";
 import { WORKSPACE_PACKAGES } from "./release-packages.mjs";
 
@@ -17,11 +17,11 @@ const workspacePackages = findPackageDirectories(packageRoot)
 	.filter((directory) => !GENERATED_PACKAGE_SUFFIXES.some((suffix) => directory.endsWith(suffix)))
 	.map((directory) => {
 		const path = join(directory, "package.json");
-		return { data: JSON.parse(readFileSync(path, "utf8")), path };
+		return { data: JSON.parse(readFileSync(path, "utf8")), path, relativePath: relative(process.cwd(), path) };
 	})
 	.filter((pkg) => pkg.data.name && pkg.data.version);
 const lockstepPackagePaths = new Set(WORKSPACE_PACKAGES);
-const lockstepPackages = workspacePackages.filter((pkg) => lockstepPackagePaths.has(pkg.path));
+const lockstepPackages = workspacePackages.filter((pkg) => lockstepPackagePaths.has(pkg.relativePath));
 const versionMap = new Map(workspacePackages.map((pkg) => [pkg.data.name, pkg.data.version]));
 
 console.log("Current versions:");

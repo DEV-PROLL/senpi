@@ -23,6 +23,7 @@ interface ModelItem {
 	provider: string;
 	id: string;
 	model: Model<any>;
+	unavailable?: boolean;
 }
 
 interface ScopedModelItem {
@@ -183,9 +184,18 @@ export class ModelSelectorComponent extends Container implements Focusable {
 					: this.modelRuntime.getModel(scoped.model.provider, scoped.model.id);
 			return refreshed ? { ...scoped, model: refreshed } : scoped;
 		});
-		this.scopedModelItems = this.scopedModels.flatMap((scoped) => {
-			const refreshed = modelsById.get(`${scoped.model.provider}/${scoped.model.id}`);
-			return refreshed ? [refreshed] : [];
+		this.scopedModelItems = this.scopedModels.map((scoped) => {
+			const fullId = `${scoped.model.provider}/${scoped.model.id}`;
+			const refreshed = modelsById.get(fullId);
+			return (
+				refreshed ?? {
+					fullId,
+					provider: scoped.model.provider,
+					id: scoped.model.id,
+					model: scoped.model,
+					unavailable: true,
+				}
+			);
 		});
 		this.activeModels = this.scope === "narrowed" ? this.scopedModelItems : this.allModels;
 		this.filteredModels = this.activeModels;
@@ -314,14 +324,14 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			if (isSelected) {
 				const prefix = theme.fg("accent", "→ ");
 				const modelText = `${favoriteMarker}${theme.fg("accent", item.id)}`;
-				const providerBadge = theme.fg("muted", `[${item.provider}]`);
-				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-				line = `${prefix}${modelText} ${providerBadge}${checkmark}`;
+				const providerBadge = theme.fg("muted", item.unavailable ? "[unavailable]" : `[${item.provider}]`);
+				const status = item.unavailable ? theme.fg("dim", " ✗") : isCurrent ? theme.fg("success", " ✓") : "";
+				line = `${prefix}${modelText} ${providerBadge}${status}`;
 			} else {
 				const modelText = `  ${favoriteMarker}${item.id}`;
-				const providerBadge = theme.fg("muted", `[${item.provider}]`);
-				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-				line = `${modelText} ${providerBadge}${checkmark}`;
+				const providerBadge = theme.fg("muted", item.unavailable ? "[unavailable]" : `[${item.provider}]`);
+				const status = item.unavailable ? theme.fg("dim", " ✗") : isCurrent ? theme.fg("success", " ✓") : "";
+				line = `${modelText} ${providerBadge}${status}`;
 			}
 
 			this.listContainer.addChild(new Text(line, 0, 0));
