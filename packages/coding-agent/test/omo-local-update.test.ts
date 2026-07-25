@@ -121,15 +121,6 @@ function pidAlive(pid: number): boolean {
 	}
 }
 
-async function expectPidDead(pid: number): Promise<void> {
-	const deadline = Date.now() + 5000;
-	while (Date.now() < deadline) {
-		if (!pidAlive(pid)) return;
-		await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
-	}
-	expect(pidAlive(pid)).toBe(false);
-}
-
 function headSha(cwd: string): string {
 	return git(["rev-parse", "HEAD"], cwd);
 }
@@ -294,17 +285,22 @@ describe("defaultRun process seam", () => {
 	});
 
 	it("kills the whole process tree and reports timedOut on timeout", async () => {
+		// The grandchild INHERITS the child's stdout pipe (fd 1), so the seam's stdout stream
+		// only reaches EOF once BOTH processes have released it - i.e. once the whole tree is
+		// dead. defaultRun resolves on that stream close, which makes this proof event-driven:
+		// no wall-clock deadline, no liveness polling, nothing that can pass by timing luck.
 		const script = [
 			'const { spawn } = require("node:child_process");',
-			'const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+			'const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", 1, "ignore"] });',
 			"console.log(JSON.stringify({ self: process.pid, grandchild: grandchild.pid }));",
 			"setInterval(() => {}, 1000);",
 		].join("\n");
-		const result = await defaultRun(process.execPath, ["-e", script], { timeoutMs: 2000 });
+		const result = await defaultRun(process.execPath, ["-e", script], { timeoutMs: 500 });
 		expect(result.timedOut).toBe(true);
 		const pids = JSON.parse(result.stdout.trim()) as { self: number; grandchild: number };
-		await expectPidDead(pids.self);
-		await expectPidDead(pids.grandchild);
+		// Pipe EOF already proved both processes released fd 1, which only happens at exit.
+		expect(pidAlive(pids.self)).toBe(false);
+		expect(pidAlive(pids.grandchild)).toBe(false);
 	});
 });
 
