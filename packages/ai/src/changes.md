@@ -1,5 +1,68 @@
 # AI Source Changes
 
+## 2026-07-25 - Thinking-off actually disables reasoning; wire-exact effort ladders across adapters
+
+### What changed and why
+
+Turning thinking **off** silently kept paid reasoning on for several model families, and several
+effort ladders degraded a requested level to a weaker wire value. Both are fixed adapter-side; the
+generated catalog only gained one compat fact.
+
+Wire truth was established by probing the live Anthropic Messages endpoint before any edit
+(7 families x `thinking:{type:"disabled"}`, plus pin/display controls, `max_tokens: 16`):
+
+| probe | result |
+|---|---|
+| `thinking:{type:"disabled"}` on opus-4-6 / 4-7 / 4-8 / 5, sonnet-4-6 / 5 | **200** - true disable works, kept as-is |
+| `thinking:{type:"disabled"}` on `claude-fable-5` | **400** `"thinking.type.disabled" is not supported for this model. Thinking defaults to adaptive mode when not specified` |
+| no `thinking` + `output_config:{effort:"low"}` on fable-5 / opus-5 | **200** (with and without an effort beta header) |
+| `thinking:{type:"adaptive",display:"summarized"}` on opus-4-6 | **200** |
+
+- `api/anthropic-messages.ts`: the thinking-off branch no longer silently omits the thinking field
+  for adaptive families that reject `disabled`. Families that accept `disabled` keep sending it;
+  families that cannot (encoded as `compat.supportsDisabledThinking: false`) now send **no** thinking
+  block plus `output_config:{effort:"low"}`, because the API defaults to adaptive thinking when the
+  field is absent - previously "off" billed full reasoning.
+- `api/anthropic-messages.ts`: `ADAPTIVE_THINKING_MODEL_MARKERS` gained `opus-4-8`, `opus-5`,
+  `sonnet-5`, `fable-5`, so models without the `forceAdaptiveThinking` compat pin (custom
+  `models.json` entries, third-party gateways) get adaptive effort control instead of a
+  budget-token request. `mapThinkingLevelToEffort` now floors the extended levels at the adaptive
+  ladder's top tier via `NATIVE_XHIGH_EFFORT_MODEL_MARKERS`: `xhigh` -> native `xhigh` where the
+  family has it, otherwise `max`; `max` -> `max` always. It previously returned `high` for
+  everything except Opus 4.6/4.7, so a map-less Sonnet 4.6/5, Opus 4.8/5 or Fable 5 silently
+  under-thought at `high`.
+- `api/bedrock-converse-stream.ts`: `buildAdditionalModelRequestFields` returned `undefined` for a
+  thinking-off turn, which let every adaptive Claude family on Bedrock fall back to the adaptive
+  default. It now sends `thinking:{type:"disabled"}`, or `output_config:{effort:"low"}` for families
+  that reject `disabled`; budget-based Claude still sends nothing (extended thinking is opt-in
+  there). Its effort ladder got the same `xhigh`/`max` floor fix.
+- `models.ts` `supportsXhigh`: recognizes `gpt-5.6`, `opus-5`, `sonnet-5` and `fable-5`.
+- `api/openai-completions.ts`: added the missing no-map fallback ladders (Kimi K3 `low/high/max`,
+  DeepSeek and GLM 5.2 `high/max`, OpenRouter DeepSeek `high`-only, MiMo `minimal->low` /
+  `xhigh->high`, Ollama `low/medium/high/max`) and made an explicit catalog `null` suppress the wire
+  effort instead of forwarding the raw requested value. Applied consistently to `streamSimple`, every
+  value-bearing `thinkingFormat` branch, and chat-template effort kwargs.
+- `api/openai-responses.ts`, `api/azure-openai-responses.ts`, `api/openai-codex-responses.ts`:
+  explicit `max: "max"` is preserved for GPT-5.6 instead of being clamped, an explicit
+  `thinkingLevelMap` `null` wins for direct adapter options (including summary-default resolution),
+  and Codex sends its catalog-directed off sentinel when agent-level off arrives as omitted reasoning.
+- `api/google-generative-ai.ts`, `api/google-vertex.ts`: a runtime thinking-off request fell through
+  to an *enabled* reasoning form (worst case `thinkingBudget: 24576` with `includeThoughts: true` on
+  Gemini 2.5 Flash). Both `streamSimple` paths now route off to the adapter's disabled form.
+  `api/mistral-conversations.ts` was audited and needed no change: off provably cannot reach the
+  `?? "high"` fallback.
+- `scripts/generate-models.ts`: Fable 5 on `anthropic-messages` is now encoded as
+  `compat.supportsDisabledThinking: false` instead of `thinkingLevelMap.off: null`. Both express
+  "never send `thinking.type: disabled`", but the compat form keeps `off` a **selectable** level, so
+  the UI can offer off and the provider pins the cheapest effort. Bedrock/Converse Fable rows keep
+  `off: null` unchanged. Regenerated data therefore differs only in those fable-5 rows (plus one
+  incidental OpenRouter price refresh).
+
+### Why extension system couldn't handle this
+
+The thinking-off wire shape, the effort ladder floors and the beta/compat gating all live inside the
+provider request builders in `packages/ai`, below any extension-visible surface.
+
 ## 2026-07-23 - Session-scoped provider resolution via node-only AsyncLocalStorage subpath
 
 ### What changed and why
