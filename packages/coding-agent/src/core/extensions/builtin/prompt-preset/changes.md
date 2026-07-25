@@ -14,7 +14,7 @@
   - `lsp-symbol-routing` lands in the "never speculate about code you have not read" paragraph; `delegation` lands on the `Explore -> Plan -> …` line.
 - `test/suite/prompt-presets-gpt-5-6.test.ts` (new) asserts the rule set as parsed data (ids → concerns, no emoji, minimum directive weight), that every directive renders exactly once and inside its expected `## ` section, that the eval-routing bridge sits in `Working the Task`, that "Default to not adding tests" is gone while `apply_patch` tuning stays, that the dieted core's sections survive, and that neither `gpt-5.5` nor `grok-4.5` inherits any 5.6 directive.
 - `test/suite/prompt-presets-extension.test.ts`: the stale `"serial is the exception"` sentence pin was replaced by a loop over `GPT56_EXECUTION_RULES`, so the case asserts rule data instead of a prompt sentence.
-- Rendered static prompt: 11,435 → 13,589 chars against this branch's base (+2,154, +18.8%, ~+540 tokens) under the same fixed options. That increase is the deliverable and is defended on its own: ten behaviors the model cannot derive, minus three sentences deleted outright, two overlapping fallback rules merged into one, and cell mechanics the eval tool description already owns trimmed back out.
+- Rendered static prompt: 11,435 → 13,691 chars against this branch's base (+2,256, +19.7%, ~+565 tokens) under the same fixed options. That increase is the deliverable and is defended on its own: ten behaviors the model cannot derive, minus three sentences deleted outright, two overlapping fallback rules merged into one, and cell mechanics the eval tool description already owns trimmed back out.
 
 ### Why
 
