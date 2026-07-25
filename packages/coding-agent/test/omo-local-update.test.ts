@@ -453,13 +453,12 @@ async function captureFailure(promise: Promise<unknown>): Promise<unknown> {
 
 describe("classifyDirt", () => {
 	it("classifies tracked modifications under every generated prefix as generated", () => {
-		const porcelain =
-			[
-				" M packages/omo-senpi/plugin/extensions/omo.js",
-				" M packages/omo-senpi/plugin/skills/alpha/SKILL.md",
-				" M packages/omo-senpi/plugin/runtime/lsp-daemon/dist/cli.js",
-				" M packages/omo-senpi/plugin/scripts/install.mjs",
-			].join("\0") + "\0";
+		const porcelain = `${[
+			" M packages/omo-senpi/plugin/extensions/omo.js",
+			" M packages/omo-senpi/plugin/skills/alpha/SKILL.md",
+			" M packages/omo-senpi/plugin/runtime/lsp-daemon/dist/cli.js",
+			" M packages/omo-senpi/plugin/scripts/install.mjs",
+		].join("\0")}\0`;
 		const dirt = classifyDirt(porcelain);
 		expect(dirt.source).toEqual([]);
 		expect(dirt.generated.map((entry) => entry.path)).toEqual([
@@ -471,20 +470,18 @@ describe("classifyDirt", () => {
 	});
 
 	it("classifies untracked entries by path and marks them untracked", () => {
-		const porcelain =
-			["?? packages/omo-senpi/plugin/skills/newskill/", "?? packages/omo-senpi/src/new-file.ts"].join("\0") + "\0";
+		const porcelain = `${["?? packages/omo-senpi/plugin/skills/newskill/", "?? packages/omo-senpi/src/new-file.ts"].join("\0")}\0`;
 		const dirt = classifyDirt(porcelain);
 		expect(dirt.generated).toEqual([{ path: "packages/omo-senpi/plugin/skills/newskill/", untracked: true }]);
 		expect(dirt.source).toEqual([{ path: "packages/omo-senpi/src/new-file.ts", untracked: true }]);
 	});
 
 	it("treats files merely NEAR the generated prefixes as source", () => {
-		const porcelain =
-			[
-				" M packages/omo-senpi/plugin/scripts/other.mjs",
-				" M packages/omo-senpi/plugin/extensions.json",
-				" M packages/omo-senpi/plugin/package.json",
-			].join("\0") + "\0";
+		const porcelain = `${[
+			" M packages/omo-senpi/plugin/scripts/other.mjs",
+			" M packages/omo-senpi/plugin/extensions.json",
+			" M packages/omo-senpi/plugin/package.json",
+		].join("\0")}\0`;
 		const dirt = classifyDirt(porcelain);
 		expect(dirt.generated).toEqual([]);
 		expect(dirt.source).toHaveLength(3);
@@ -519,12 +516,11 @@ describe("classifyDirt", () => {
 
 	it("handles an empty status and mixed streams", () => {
 		expect(classifyDirt("")).toEqual({ generated: [], source: [] });
-		const porcelain =
-			[
-				" M packages/omo-senpi/plugin/extensions/omo.js",
-				" M packages/omo-senpi/src/index.ts",
-				"?? packages/omo-senpi/plugin/runtime/extra.js",
-			].join("\0") + "\0";
+		const porcelain = `${[
+			" M packages/omo-senpi/plugin/extensions/omo.js",
+			" M packages/omo-senpi/src/index.ts",
+			"?? packages/omo-senpi/plugin/runtime/extra.js",
+		].join("\0")}\0`;
 		const dirt = classifyDirt(porcelain);
 		expect(dirt.generated).toHaveLength(2);
 		expect(dirt.source).toHaveLength(1);
