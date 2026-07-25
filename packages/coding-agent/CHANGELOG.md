@@ -8,17 +8,7 @@
 
 ### Changed
 
-### Fixed
-
-### Removed
-
-## [2026.7.25] - 2026-07-25
-
-### Breaking Changes
-
-### Added
-
-### Changed
+- Changed pi.dev model catalog refreshes to revalidate with `If-None-Match`, so unchanged provider catalogs answer with an empty `304` instead of a full download.
 
 ### Fixed
 
@@ -27,12 +17,6 @@
 ### Removed
 
 ## [2026.7.24] - 2026-07-24
-
-### Breaking Changes
-
-### Added
-
-### Changed
 
 ### Fixed
 
