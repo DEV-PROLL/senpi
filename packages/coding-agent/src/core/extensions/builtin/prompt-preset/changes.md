@@ -1,5 +1,38 @@
 # prompt-preset Extension Changes
 
+## GPT-5.6 execution discipline: eval-first parallel orchestration, test-first, atomic commits, LSP routing (2026-07-25)
+
+### What changed
+
+- `gpt-5.6.ts` exports `GPT56_EXECUTION_RULES` — typed rule data (`Gpt56ExecutionRuleId` / `Gpt56ExecutionConcern` / `Gpt56ExecutionRule`), the same shape `dynamic-prompt/verification.ts` uses for the shared test-discipline rules — carrying ten directives across six concerns: `tool-orchestration` (`eval-first-routing`, `parallel-batching`, `over-call-bias`, `in-kernel-reduction`, `stay-direct-exceptions`), `delegation`, `todo-discipline` (`todo-granularity`), `test-first`, `commit-discipline` (`atomic-commits`), `symbol-routing` (`lsp-symbol-routing`).
+- Each directive is interpolated exactly once, at its point of use in the existing core, replacing the weaker text it supersedes instead of being appended as a trailer:
+  - `Tool loops:` became `Tool orchestration:` — the old "Independent tool calls run in the same message - serial is the exception…" and "Each independent shell command is its own bash call" pair is gone, replaced by the code-cell routing contract (bridge → eval-first → parallel batching → over-call bias → in-kernel reduction → stay-direct exceptions), with a one-sentence fallback for sessions where no code-execution tool is registered. `buildGptEvalRoutingTuning()` moved from a trailing standalone paragraph into this paragraph, so the "which surface" bridge sits next to the "how wide" contract.
+  - `stay-direct-exceptions` absorbed the old standalone "empty or suspiciously narrow results" fallback sentence (one rule instead of two overlapping ones), and `over-call-bias` absorbed "when uncertain whether to call a tool, call it".
+  - Todo discipline: the mid-paragraph mechanics ("mark items `completed` the moment they finish, and update the list when scope shifts") collapsed into `todo-granularity`, which also adds finest-grain sizing (one item per edit plus the check that proves it) and the never-batch-updates rule.
+  - `## Pragmatism & Scope`: **"Default to not adding tests" was deleted** and replaced by `test-first`. This is an intentional policy flip for this preset — the two rules directly contradict each other, and the owner's workflow is TDD. The "never add tests to a codebase with no tests" carve-out went with it.
+  - `## Hard Limits`: the commit bullet keeps its permission gate and now also carries `atomic-commits` (per verified increment, repository's existing message convention, each commit green on its own).
+  - `lsp-symbol-routing` lands in the "never speculate about code you have not read" paragraph; `delegation` lands on the `Explore -> Plan -> …` line.
+  - `lsp-symbol-routing` is deliberately **conditional** ("when LSP tools are available"), which does not reopen the 2026-06 decision to rebind the Verification tiers from "diagnostics" to "type check / lint": senpi's own tool surface still exposes no LSP tool, and the Verification tiers are untouched. Harnesses that do expose `lsp_*` tools get the routing; sessions without them read a condition that is simply false, not a phantom validator.
+- `test/suite/prompt-presets-gpt-5-6.test.ts` (new) asserts the rule set as parsed data (ids → concerns, no emoji, minimum directive weight), that every directive renders exactly once and inside its expected `## ` section, that the eval-routing bridge sits in `Working the Task`, that "Default to not adding tests" is gone while `apply_patch` tuning stays, that the dieted core's sections survive, and that neither `gpt-5.5` nor `grok-4.5` inherits any 5.6 directive.
+- `test/suite/prompt-presets-extension.test.ts`: the stale `"serial is the exception"` sentence pin was replaced by a loop over `GPT56_EXECUTION_RULES`, so the case asserts rule data instead of a prompt sentence.
+- Rendered static prompt: 11,435 → 13,691 chars against this branch's base (+2,256, +19.7%, ~+565 tokens) under the same fixed options. That increase is the deliverable and is defended on its own: ten behaviors the model cannot derive, minus three sentences deleted outright, two overlapping fallback rules merged into one, and cell mechanics the eval tool description already owns trimmed back out.
+
+### Why
+
+- These ten behaviors are category-C context: GPT-5.6 cannot derive from priors that senpi exposes a persistent code kernel (`eval`, or `exec`/`wait`) that can batch a whole step's tool calls, that this fork wants deep-planned maximum-parallel batching and in-kernel reduction, that its workflow is TDD with atomic per-increment commits, or that LSP tools own symbol work. Everything the model already does well stays untouched.
+- The GPT-5.6 prompting guide's Programmatic-Tool-Calling section is explicit that generic wording ("use PTC efficiently") does not route: the prompt must name the stage, the eligible surface, the reduction/output expectation, and what stays direct. The rule set is written as that bounded contract, which is also why the emphasis is carried by declarative invariants (EVERY / NEVER / AT ONCE) rather than caps-spam the guide warns degrades 5.6.
+- Growth is defended per the entropy gate against this branch's base, not against savings banked by the earlier diet: every added directive replaces or absorbs weaker text, and review feedback bounded the two riskiest ones - the code-cell rule now scopes to steps whose calls can be planned up front (so it no longer contradicts the stay-direct exceptions), and the over-call bias is read-only, with side-effecting or approval-gated calls explicitly barred from riding along.
+- Rule data instead of prose keeps the coverage honest: senpi's own test-discipline rule requires prompt tests to assert behavior, decisions, structure, or parsed rule data rather than pinning sentences — and the placement table makes "bolted on at the bottom" a test failure.
+
+### Why extension system couldn't handle this differently
+
+- Everything lives inside the builtin `prompt-preset` extension (`gpt-5.6.ts` plus its tests) and reuses the shared `gpt-eval-routing.ts` / `file-operations.ts` / `buildTestDisciplineSection()` blocks; no core prompt code and no other preset changed. The eval tool's own model-aware batching dialect (`packages/senpi-codemode/src/prompt/eval-prompt.ts`, `codex` style for GPT ids) is deliberately left alone so other GPT presets keep their current wording.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `gpt-5.6.ts` — the file is fork-only; upstream has no counterpart.
+- LOW: `prompt-presets-extension.test.ts` gpt-5.6 case block, if upstream edits the same assertions.
+
 ## GPT-5.6 dieted full-core rewrite (2026-07-25)
 
 ### What changed
