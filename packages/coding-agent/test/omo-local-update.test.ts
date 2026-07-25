@@ -4,16 +4,32 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+	classifyDirt,
 	defaultRun,
 	detectOmoLocalInstall,
 	isKillSwitched,
+	type OmoLocalRun,
+	OmoLocalSyncError,
 	type OmoLocalUpdateStamp,
 	omoLocalUpdateStampPath,
 	readStamp,
 	runOmoLocalUpdateBeta,
 	shouldSkipBuild,
+	syncToOriginDev,
 	writeStamp,
 } from "../src/beta/omo-local-update.ts";
+import {
+	advanceLocalDevOnly,
+	advanceOriginDev,
+	blockCommits,
+	blockPushes,
+	createOmoFixture,
+	deleteLocalDev,
+	dirtyGenerated,
+	dirtyRenameAcrossSets,
+	dirtySource,
+	divergeLocalDev,
+} from "./omo-local-update-fixture.ts";
 
 // Git determinism: isolate every git invocation in this file (test-side AND
 // engine-side through the inherited process.env) from ambient host config.
@@ -393,5 +409,330 @@ describe("runOmoLocalUpdateBeta stub", () => {
 		await expect(
 			runOmoLocalUpdateBeta({ env: {}, agentDir, settings: { packages: ["npm:@scope/other"] } }),
 		).resolves.toBeUndefined();
+	});
+});
+
+function headSha(cwd: string): string {
+	return git(["rev-parse", "HEAD"], cwd);
+}
+
+function currentBranch(cwd: string): string | undefined {
+	try {
+		return git(["symbolic-ref", "--short", "-q", "HEAD"], cwd) || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function makeLogCollector(): { lines: string[]; log: (message: string) => void } {
+	const lines: string[] = [];
+	return {
+		lines,
+		log: (message: string) => {
+			lines.push(message);
+		},
+	};
+}
+
+/** Fetch origin/dev in the fixture clone (the orchestrator's job) and return the frozen sha. */
+function fetchTargetSha(repoRoot: string): string {
+	git(["fetch", "origin", "dev"], repoRoot);
+	return git(["rev-parse", "origin/dev"], repoRoot);
+}
+
+async function captureFailure(promise: Promise<unknown>): Promise<unknown> {
+	try {
+		await promise;
+		return undefined;
+	} catch (error) {
+		return error;
+	}
+}
+
+describe("classifyDirt", () => {
+	it("classifies tracked modifications under every generated prefix as generated", () => {
+		const porcelain =
+			[
+				" M packages/omo-senpi/plugin/extensions/omo.js",
+				" M packages/omo-senpi/plugin/skills/alpha/SKILL.md",
+				" M packages/omo-senpi/plugin/runtime/lsp-daemon/dist/cli.js",
+				" M packages/omo-senpi/plugin/scripts/install.mjs",
+			].join("\0") + "\0";
+		const dirt = classifyDirt(porcelain);
+		expect(dirt.source).toEqual([]);
+		expect(dirt.generated.map((entry) => entry.path)).toEqual([
+			"packages/omo-senpi/plugin/extensions/omo.js",
+			"packages/omo-senpi/plugin/skills/alpha/SKILL.md",
+			"packages/omo-senpi/plugin/runtime/lsp-daemon/dist/cli.js",
+			"packages/omo-senpi/plugin/scripts/install.mjs",
+		]);
+	});
+
+	it("classifies untracked entries by path and marks them untracked", () => {
+		const porcelain =
+			["?? packages/omo-senpi/plugin/skills/newskill/", "?? packages/omo-senpi/src/new-file.ts"].join("\0") + "\0";
+		const dirt = classifyDirt(porcelain);
+		expect(dirt.generated).toEqual([{ path: "packages/omo-senpi/plugin/skills/newskill/", untracked: true }]);
+		expect(dirt.source).toEqual([{ path: "packages/omo-senpi/src/new-file.ts", untracked: true }]);
+	});
+
+	it("treats files merely NEAR the generated prefixes as source", () => {
+		const porcelain =
+			[
+				" M packages/omo-senpi/plugin/scripts/other.mjs",
+				" M packages/omo-senpi/plugin/extensions.json",
+				" M packages/omo-senpi/plugin/package.json",
+			].join("\0") + "\0";
+		const dirt = classifyDirt(porcelain);
+		expect(dirt.generated).toEqual([]);
+		expect(dirt.source).toHaveLength(3);
+	});
+
+	it("keeps a rename fully inside the generated prefixes generated, recording the source path", () => {
+		const porcelain =
+			"R  packages/omo-senpi/plugin/skills/beta/SKILL.md\0packages/omo-senpi/plugin/skills/alpha/SKILL.md\0";
+		const dirt = classifyDirt(porcelain);
+		expect(dirt.source).toEqual([]);
+		expect(dirt.generated).toEqual([
+			{
+				path: "packages/omo-senpi/plugin/skills/beta/SKILL.md",
+				origPath: "packages/omo-senpi/plugin/skills/alpha/SKILL.md",
+				untracked: false,
+			},
+		]);
+	});
+
+	it("classifies a rename as source when EITHER half leaves the generated prefixes", () => {
+		const generatedToSource =
+			"R  packages/omo-senpi/src/alpha-skill.md\0packages/omo-senpi/plugin/skills/alpha/SKILL.md\0";
+		const sourceToGenerated =
+			"R  packages/omo-senpi/plugin/skills/alpha/SKILL.md\0packages/omo-senpi/src/alpha-skill.md\0";
+		for (const porcelain of [generatedToSource, sourceToGenerated]) {
+			const dirt = classifyDirt(porcelain);
+			expect(dirt.generated).toEqual([]);
+			expect(dirt.source).toHaveLength(1);
+			expect(dirt.source[0]?.origPath).toBeDefined();
+		}
+	});
+
+	it("handles an empty status and mixed streams", () => {
+		expect(classifyDirt("")).toEqual({ generated: [], source: [] });
+		const porcelain =
+			[
+				" M packages/omo-senpi/plugin/extensions/omo.js",
+				" M packages/omo-senpi/src/index.ts",
+				"?? packages/omo-senpi/plugin/runtime/extra.js",
+			].join("\0") + "\0";
+		const dirt = classifyDirt(porcelain);
+		expect(dirt.generated).toHaveLength(2);
+		expect(dirt.source).toHaveLength(1);
+	});
+});
+
+describe("syncToOriginDev", () => {
+	it("fast-forwards a clean checkout to the frozen origin/dev sha", { timeout: 30000 }, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		advanceOriginDev(fixture.originDir);
+		const targetSha = fetchTargetSha(fixture.repoRoot);
+		const { log } = makeLogCollector();
+		const report = await syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: defaultRun, log });
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+		expect(git(["rev-parse", "dev"], fixture.repoRoot)).toBe(targetSha);
+		expect(report.prevRef).toBe("dev");
+		expect(report.subject).toBe("origin dev commit 2");
+		expect(report.backupBranch).toBeUndefined();
+		expect(report.detached).toBeUndefined();
+		expect(report.discardedPaths).toEqual([]);
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+	});
+
+	it("discards generated-only dirt (tracked and untracked) without any backup branch", {
+		timeout: 30000,
+	}, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		const generatedPath = dirtyGenerated(fixture.repoRoot);
+		const untrackedDir = join(fixture.repoRoot, "packages", "omo-senpi", "plugin", "skills", "newskill");
+		mkdirSync(untrackedDir, { recursive: true });
+		writeFileSync(join(untrackedDir, "SKILL.md"), "# junk\n");
+		const targetSha = git(["rev-parse", "origin/dev"], fixture.repoRoot);
+		const { log } = makeLogCollector();
+		const report = await syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: defaultRun, log });
+		expect(report.backupBranch).toBeUndefined();
+		expect(git(["branch", "--list", "backup/*"], fixture.repoRoot)).toBe("");
+		expect(report.discardedPaths).toContain(generatedPath);
+		expect(report.discardedPaths).toContain("packages/omo-senpi/plugin/skills/newskill/");
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+	});
+
+	it("backs up source dirt to a PUSHED backup branch, then syncs dev to the target", { timeout: 30000 }, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		dirtySource(fixture.repoRoot);
+		advanceOriginDev(fixture.originDir);
+		const targetSha = fetchTargetSha(fixture.repoRoot);
+		const { log } = makeLogCollector();
+		const report = await syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: defaultRun, log });
+		if (report.backupBranch === undefined) throw new Error("expected a backup branch");
+		expect(report.backupBranch).toMatch(/^backup\/senpi-update-\d{8}-\d{6}Z$/);
+		expect(report.backupPushed).toBe(true);
+		// The backup branch exists on the bare origin and carries exactly the snapshot commit.
+		expect(git(["-C", fixture.originDir, "branch", "--list", report.backupBranch], ".")).not.toBe("");
+		const ahead = git(["log", `origin/dev..${report.backupBranch}`, "--oneline"], fixture.repoRoot);
+		expect(ahead.split("\n")).toHaveLength(1);
+		const snapshot = git(["show", `${report.backupBranch}:packages/omo-senpi/src/index.ts`], fixture.repoRoot);
+		expect(snapshot).toContain("fixture source dirt");
+		// Worktree clean, dev synced, previous branch ref unchanged.
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+		expect(git(["rev-parse", "dev"], fixture.repoRoot)).toBe(targetSha);
+		expect(report.prevRef).toBe("dev");
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+	});
+
+	it("keeps the backup branch locally (with a warning) when the push is rejected", { timeout: 30000 }, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		dirtySource(fixture.repoRoot);
+		blockPushes(fixture.originDir);
+		const targetSha = git(["rev-parse", "origin/dev"], fixture.repoRoot);
+		const { lines, log } = makeLogCollector();
+		const report = await syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: defaultRun, log });
+		if (report.backupBranch === undefined) throw new Error("expected a backup branch");
+		expect(report.backupPushed).toBe(false);
+		// Local branch retains the snapshot; origin rejected it.
+		expect(git(["rev-parse", report.backupBranch], fixture.repoRoot)).not.toBe("");
+		expect(git(["-C", fixture.originDir, "branch", "--list", "backup/*"], ".")).toBe("");
+		const snapshot = git(["show", `${report.backupBranch}:packages/omo-senpi/src/index.ts`], fixture.repoRoot);
+		expect(snapshot).toContain("fixture source dirt");
+		expect(lines.some((line) => line.includes(report.backupBranch ?? "\0") && line.includes("locally"))).toBe(true);
+		// Sync still completes.
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+	});
+
+	it("detaches at the frozen target when local dev has diverged, leaving local commits intact", {
+		timeout: 30000,
+	}, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		const { localSha, originSha } = divergeLocalDev(fixture.repoRoot);
+		const { lines, log } = makeLogCollector();
+		const report = await syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha: originSha, run: defaultRun, log });
+		expect(report.detached).toBe(true);
+		expect(headSha(fixture.repoRoot)).toBe(originSha);
+		expect(currentBranch(fixture.repoRoot)).toBeUndefined();
+		expect(git(["rev-parse", "dev"], fixture.repoRoot)).toBe(localSha);
+		expect(lines.some((line) => line.includes("detached"))).toBe(true);
+	});
+
+	it("detaches at the frozen target when local dev is AHEAD of origin (never builds local-only commits)", {
+		timeout: 30000,
+	}, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		const localSha = advanceLocalDevOnly(fixture.repoRoot);
+		const targetSha = git(["rev-parse", "origin/dev"], fixture.repoRoot);
+		expect(localSha).not.toBe(targetSha);
+		const { log } = makeLogCollector();
+		const report = await syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: defaultRun, log });
+		expect(report.detached).toBe(true);
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+		expect(git(["rev-parse", "dev"], fixture.repoRoot)).toBe(localSha);
+		expect(report.prevRef).toBe("dev");
+	});
+
+	it("creates an absent local dev AT the frozen target with upstream set, then checks it out", {
+		timeout: 30000,
+	}, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		deleteLocalDev(fixture.repoRoot);
+		advanceOriginDev(fixture.originDir);
+		const targetSha = fetchTargetSha(fixture.repoRoot);
+		const { log } = makeLogCollector();
+		const report = await syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: defaultRun, log });
+		expect(report.prevRef).toBe("fixture-side");
+		expect(git(["rev-parse", "dev"], fixture.repoRoot)).toBe(targetSha);
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+		expect(git(["rev-parse", "--abbrev-ref", "dev@{upstream}"], fixture.repoRoot)).toBe("origin/dev");
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+	});
+
+	it("treats a rename across the generated/source boundary as source and snapshots it", {
+		timeout: 30000,
+	}, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		dirtyRenameAcrossSets(fixture.repoRoot);
+		const targetSha = git(["rev-parse", "origin/dev"], fixture.repoRoot);
+		const { log } = makeLogCollector();
+		const report = await syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: defaultRun, log });
+		if (report.backupBranch === undefined) throw new Error("expected a backup branch");
+		const snapshot = git(["show", `${report.backupBranch}:packages/omo-senpi/src/alpha-skill.md`], fixture.repoRoot);
+		expect(snapshot).toContain("alpha skill");
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+	});
+
+	it("rolls back and aborts when the backup COMMIT fails (dirt preserved, empty branch deleted)", {
+		timeout: 30000,
+	}, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		dirtySource(fixture.repoRoot);
+		blockCommits(fixture.repoRoot);
+		const devShaBefore = headSha(fixture.repoRoot);
+		const targetSha = git(["rev-parse", "origin/dev"], fixture.repoRoot);
+		const { log } = makeLogCollector();
+		const failure = await captureFailure(
+			syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: defaultRun, log }),
+		);
+		expect(failure).toBeInstanceOf(OmoLocalSyncError);
+		expect((failure as OmoLocalSyncError).stage).toBe("backup");
+		// prevRef restored, empty backup branch deleted, source dirt never destroyed.
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+		expect(headSha(fixture.repoRoot)).toBe(devShaBefore);
+		expect(git(["branch", "--list", "backup/*"], fixture.repoRoot)).toBe("");
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toContain("packages/omo-senpi/src/index.ts");
+	});
+
+	it("restores prevRef but KEEPS the backup ref when a later sync stage fails after a successful backup", {
+		timeout: 30000,
+	}, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		dirtySource(fixture.repoRoot);
+		const devShaBefore = headSha(fixture.repoRoot);
+		advanceOriginDev(fixture.originDir);
+		const targetSha = fetchTargetSha(fixture.repoRoot);
+		let failedOnce = false;
+		const failFirstCheckoutDev: OmoLocalRun = async (command, args, options) => {
+			if (!failedOnce && command === "git" && args[0] === "checkout" && args.includes("dev")) {
+				failedOnce = true;
+				return { code: 1, stdout: "", stderr: "error: simulated checkout refusal", timedOut: false };
+			}
+			return defaultRun(command, args, options);
+		};
+		const { log } = makeLogCollector();
+		const failure = await captureFailure(
+			syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: failFirstCheckoutDev, log }),
+		);
+		expect(failure).toBeInstanceOf(OmoLocalSyncError);
+		expect((failure as OmoLocalSyncError).stage).toBe("sync");
+		// prevRef restored to its exact pre-sync commit; the snapshot backup ref is retained.
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+		expect(headSha(fixture.repoRoot)).toBe(devShaBefore);
+		expect(git(["branch", "--list", "backup/*"], fixture.repoRoot)).not.toBe("");
+	});
+
+	it("reports prevRef as the detached HEAD sha when starting detached", { timeout: 30000 }, async () => {
+		const fixture = createOmoFixture(makeTempRoot());
+		git(["checkout", "--detach", "HEAD"], fixture.repoRoot);
+		const detachedSha = headSha(fixture.repoRoot);
+		dirtySource(fixture.repoRoot);
+		const targetSha = git(["rev-parse", "origin/dev"], fixture.repoRoot);
+		const { log } = makeLogCollector();
+		const report = await syncToOriginDev({ repoRoot: fixture.repoRoot, targetSha, run: defaultRun, log });
+		expect(report.prevRef).toBe(detachedSha);
+		expect(report.backupBranch).toBeDefined();
+		expect(report.backupPushed).toBe(true);
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
 	});
 });
