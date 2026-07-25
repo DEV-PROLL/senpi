@@ -64,6 +64,7 @@ var transcriptIgnoredEvents = map[string]string{
 	"retry_fallback_succeeded":          "fallback status rendering is not part of Neo's transcript projection",
 	"retry_fallback_reverted":           "fallback status rendering is not part of Neo's transcript projection",
 	"retry_fallback_exhausted":          "fallback status rendering is not part of Neo's transcript projection",
+	"server_fallback_aborted":           "fallback status rendering is not part of Neo's transcript projection",
 	"auth_login_url":                    "auth login overlay (todo 13)",
 	"auth_login_end":                    "auth login overlay (todo 13)",
 	"extension_error":                   "delivered as ExtensionErrorMsg by the session adapter demux, never as an EventMsg",

@@ -225,6 +225,7 @@ var eventTypes = []string{
 	// --- retry fallback lifecycle (agent-session.ts) ---
 	"retry_fallback_applied", "retry_fallback_succeeded",
 	"retry_fallback_reverted", "retry_fallback_exhausted",
+	"server_fallback_aborted",
 	// --- auth login flow (task 13): additive, event-only completion ---
 	"auth_login_url", "auth_login_end",
 	// --- emitted by the connection handler (not in AgentSessionEvent) ---
