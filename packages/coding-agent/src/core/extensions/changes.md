@@ -1,5 +1,17 @@
 # Core Extensions Changes
 
+## 2026-07-25 - Config-reload skips routine cross-process settings changes
+
+### What changed
+
+- `builtin/config-reload/routine-settings.ts` (new): content-diff classification for watched `settings.json` paths. When a change's top-level key diff is limited to routine, live-applied keys (`defaultModel`, `defaultProvider`, `defaultThinkingLevel`, `lastChangelogVersion`), the change is suppressed before validation and never reaches the notify/reload flow. The extension keeps a per-path content snapshot as the diff base, refreshed on watcher rebuild and advanced on every observed settings change (including self-write-suppressed ones), so each event is classified against the previous event's content. Missing or unparseable content is never suppressed and falls through to the existing validator.
+- `builtin/config-reload/index.ts`: `processChange` applies `excludeRoutineOnlySettingsChanges` after `excludeSelfWrites`; `isSettingsPath`/`joinConfigDir` moved into the new module.
+- `test/suite/config-reload-extension.test.ts`: coverage for idle and busy-deferred routine-only suppression, non-routine/mixed reload preservation with diff-base freshness, consecutive routine writes, and unparseable fall-through.
+
+### Why
+
+The self-write tracker is process-local, so /model or a thinking-level change in one session (or a background CLI run writing the shared global `settings.json`) surfaced in every other session as "Config changed; reloading when idle" followed by a full hot reload. These keys are applied live by the owning session (or never read back), so reloading other sessions buys nothing; structural changes (packages, extensions, retry, …) keep the existing reload behavior.
+
 ## 2026-07-23 - Compaction feedback operation handles
 
 ### What changed

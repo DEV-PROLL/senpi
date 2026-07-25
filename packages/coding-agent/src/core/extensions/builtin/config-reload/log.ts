@@ -13,6 +13,7 @@ export type ConfigReloadLogEvent =
 	| "watcher_started"
 	| "change_detected"
 	| "self_write_suppressed"
+	| "routine_settings_change_suppressed"
 	| "reload_requested"
 	| "reload_completed"
 	| "validation_rejected"
@@ -26,6 +27,7 @@ export interface ConfigReloadLogDetails {
 	watcher_started: { targetCount: number };
 	change_detected: { registrationId: string; paths: readonly string[]; deferred: boolean };
 	self_write_suppressed: { path: string };
+	routine_settings_change_suppressed: { path: string };
 	reload_requested: { reason: string; paths: readonly string[] };
 	reload_completed: { durationMs: number };
 	validation_rejected: { registrationId: string; errorCount: number };
