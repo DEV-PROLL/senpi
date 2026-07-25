@@ -16,7 +16,7 @@ prompt-preset/
 ├── gpt-5.3-codex.ts     # GPT-5.3 Codex preset
 ├── gpt-5.4.ts           # GPT-5.4 preset
 ├── gpt-5.5.ts           # GPT-5.5 preset — full-core rewrite via `corePrompt` (outcome-first, per the GPT-5.5 prompting guide)
-├── gpt-5.6.ts           # GPT-5.6 series preset (sol/terra/luna) — dieted full-core rewrite via `corePrompt`; Hephaestus-parity autonomous deep worker (implement-don't-propose, Manual QA Gate, binding stop contract: declared per-turn stop condition + Stop Goal) under GPT-5.6 simplify-first doctrine
+├── gpt-5.6.ts           # GPT-5.6 series preset (sol/terra/luna) — dieted full-core rewrite via `corePrompt`; Hephaestus-parity autonomous deep worker (implement-don't-propose, Manual QA Gate, binding stop contract: declared per-turn stop condition + Stop Goal) under GPT-5.6 simplify-first doctrine; also owns `GPT56_EXECUTION_RULES` — typed execution-discipline rule data (eval-first code-cell routing, maximum parallel batching, over-call bias, in-kernel reduction, stay-direct exceptions, subagent fan-out, finest-grain todos, test-first, atomic commits, LSP symbol routing) rendered one directive per point of use
 ├── claude-fable-5.ts    # Claude Fable 5 preset — dieted full-core rewrite via `corePrompt` (Fable 5 prompting guide; binding stop contract)
 ├── claude-opus-5.ts     # Claude Opus 5 preset — dieted full-core rewrite via `corePrompt` (Opus 5 prompting-guide behaviors; binding stop contract)
 ├── claude-opus-4-5.ts   # Claude Opus 4.5 preset
@@ -36,6 +36,7 @@ prompt-preset/
 |------|------|
 | Add a preset for a new model release | new `<family>.ts` + entry in `presets.ts` |
 | Tune GPT-5.x file-handling guidance | `file-operations.ts` (all GPT presets append it) |
+| Tune GPT-5.6 execution discipline (eval/parallel/TDD/commits/LSP) | `gpt-5.6.ts` `GPT56_EXECUTION_RULES` + `test/suite/prompt-presets-gpt-5-6.test.ts` |
 | Adjust model-id → preset matching | `presets.ts` `resolvePresetName()` |
 | User override via settings | `settings.ts` `PromptPresetName` |
 
@@ -74,5 +75,6 @@ Exception: `gpt-5.5.ts`, `gpt-5.6.ts`, `kimi-k3.ts`, `claude-fable-5.ts`, and `c
 ## NOTES
 
 - Tests under `packages/coding-agent/test/suite/prompt-presets-*.test.ts` validate that each preset produces a non-empty `tuningSection` and contains the model-family signal.
+- Prompt-content coverage asserts **parsed rule data**, never pinned sentences (senpi's `prompt-behavior-coverage` test-discipline rule). `prompt-presets-gpt-5-6.test.ts` is the reference shape: ids → concerns, each directive rendered exactly once, and a placement table that fails if a directive drifts out of its owning `## ` section.
 - The fork rationale: senpi is a neutral coding agent; persona-named presets collapsed identity into specific personas and made `--model` ↔ active preset hard to reason about. Family naming is the canonical resolution.
 - Adding a new model release: copy the closest existing preset, replace the model family in the test, update `presets.ts` matcher, add a regression test.
