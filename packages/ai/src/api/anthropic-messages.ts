@@ -31,6 +31,7 @@ import type {
 	ToolResultMessage,
 } from "../types.ts";
 import { isVideoMimeType } from "../types.ts";
+import { combineAbortSignals } from "../utils/abort-signals.ts";
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
@@ -38,6 +39,12 @@ import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts"
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import {
+	applyServerFallbackAbort,
+	parseServerFallbackReceipt,
+	parseStickyFallbackReceipt,
+	type ServerFallbackReceipt,
+} from "../utils/server-fallback-receipt.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
 
 import { resolveCloudflareBaseUrl } from "./cloudflare.ts";
@@ -945,6 +952,10 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 			timestamp: Date.now(),
 		};
 
+		const serverFallbackAbort = new AbortController();
+		let serverFallbackReceipt: ServerFallbackReceipt | undefined;
+		const combinedAbort = combineAbortSignals([options?.signal, serverFallbackAbort.signal]);
+		const requestSignal = combinedAbort.signal;
 		try {
 			let client: Anthropic;
 			let isOAuth: boolean;
@@ -1004,7 +1015,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				const payloadRequestMetadata = extractPayloadRequestMetadata(params);
 				params = payloadRequestMetadata.params;
 				const requestOptions = {
-					...(options?.signal ? { signal: options.signal } : {}),
+					...(requestSignal ? { signal: requestSignal } : {}),
 					...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
 					maxRetries: 0,
 					...(payloadRequestMetadata.headers ? { headers: payloadRequestMetadata.headers } : {}),
@@ -1023,7 +1034,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					throw error;
 				}
 			};
-			const { response } = await retryProviderRequest(
+			const { params: sentParams, response } = await retryProviderRequest(
 				async () => {
 					try {
 						return await createRequest();
@@ -1039,7 +1050,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				{
 					maxRetries: options?.maxRetries,
 					maxRetryDelayMs: options?.maxRetryDelayMs,
-					signal: options?.signal,
+					signal: requestSignal,
 				},
 			);
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
@@ -1052,7 +1063,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				| (ProviderNativeContent & { partialJson?: string; index?: number });
 			const blocks = output.content as Block[];
 
-			for await (const event of iterateAnthropicEvents(response, options?.signal)) {
+			for await (const event of iterateAnthropicEvents(response, requestSignal)) {
 				if (event.type === "message_start") {
 					output.responseId = event.message.id;
 					// Capture initial token usage from message_start event
@@ -1066,7 +1077,25 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					output.usage.totalTokens =
 						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 					calculateCost(model, output.usage);
+					const stickyReceipt =
+						options?.abortServerSideFallback === true
+							? parseStickyFallbackReceipt(event.message.usage, sentParams.model, event.message.model)
+							: undefined;
+					if (stickyReceipt !== undefined) {
+						serverFallbackReceipt = stickyReceipt;
+						serverFallbackAbort.abort();
+						break;
+					}
 				} else if (event.type === "content_block_start") {
+					const receipt =
+						options?.abortServerSideFallback === true
+							? parseServerFallbackReceipt(event.content_block)
+							: undefined;
+					if (receipt !== undefined) {
+						serverFallbackReceipt = receipt;
+						serverFallbackAbort.abort();
+						break;
+					}
 					if (event.content_block.type === "text") {
 						const block: Block = {
 							type: "text",
@@ -1252,13 +1281,19 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				throw new Error("Request was aborted");
 			}
 
+			if (serverFallbackReceipt !== undefined) {
+				applyServerFallbackAbort(output, serverFallbackReceipt);
+			}
+
 			if (output.stopReason === "aborted" || output.stopReason === "error") {
 				throw new Error(output.errorMessage || "An unknown error occurred");
 			}
 
+			combinedAbort.cleanup();
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
+			combinedAbort.cleanup();
 			for (const block of output.content) {
 				delete (block as { index?: number }).index;
 				// An aborted stream never reaches content_block_stop; keep whatever
