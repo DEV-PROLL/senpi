@@ -11,6 +11,7 @@
 
 ### Added
 
+- Added configurable Claude text tool-call recovery across both `ModelRuntime` streaming entry points, `models.json` definitions/overrides, persisted sessions, and isolated Anthropic/OpenAI mock-loop QA.
 - Exposed the `outputPad` setting to custom message renderers. See [Extensions](docs/extensions.md) ([#7045](https://github.com/earendil-works/pi/pull/7045) by [@xl0](https://github.com/xl0)).
 - Added inherited `ANTHROPIC_AUTH_TOKEN` bearer authentication for Anthropic-compatible gateways. See [Providers](docs/providers.md#environment-variables-or-auth-file) ([#5871](https://github.com/earendil-works/pi/issues/5871)).
 - Added inherited Claude Opus 5 support for Anthropic and Amazon Bedrock with adaptive thinking, inference profiles, prompt caching, and preserved AWS validation messages ([#7081](https://github.com/earendil-works/pi/pull/7081) by [@unexge](https://github.com/unexge), [#7083](https://github.com/earendil-works/pi/pull/7083) by [@davidbrai](https://github.com/davidbrai)).

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added Claude text tool-call recovery for leaked bare or `antml:` invokes, with code/thinking exclusions, eager streaming projection, native-call ordering, fail-closed collision and abort handling, bounded parsing, and native history replay support.
 - Added `ModelsStoreEntry.etag` so persisted provider catalogs can carry the remote ETag validator for conditional refreshes.
 - Added Claude Opus 5 support for Anthropic and Amazon Bedrock with adaptive thinking, inference profiles, prompt caching, and preserved AWS validation messages ([#7081](https://github.com/earendil-works/pi/pull/7081) by [@unexge](https://github.com/unexge), [#7083](https://github.com/earendil-works/pi/pull/7083) by [@davidbrai](https://github.com/davidbrai)).
 
