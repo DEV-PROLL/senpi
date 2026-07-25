@@ -1,3 +1,10 @@
+## OMO local plugin remote-diff updater beta on bare `senpi update` (2026-07-26)
+
+- A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
+- The user's checkout receives ZERO git mutations: the hook performs one read-only `git fetch origin dev`, builds in a feature-owned persistent worktree under the agent directory, and atomically swaps the installed plugin directory by rename. No checkout/branch/commit/merge/reset/clean/stash/push ever touches the user's tree.
+- `SENPI_OMO_LOCAL_UPDATE=0` is a kill-switch that disables the hook entirely. All failures are non-fatal: the hook never throws and never sets `process.exitCode`; any error downgrades to a warning plus a manual-update hint so the `senpi` self-update proceeds untouched.
+- Removal is exactly three steps: delete `src/beta/omo-local-update.ts`; delete all `test/omo-local-update*` files; delete the two BETA-marked touch points (the import and the hook call) in `package-manager-cli.ts`.
+
 ## App-server daemon launch diagnostics and hermetic lifecycle coverage (2026-07-24)
 
 - The daemon launcher now classifies websocket listener occupancy before spawn: a compatible app-server answers `initialize` and attaches, while any other TCP listener fails immediately with an `EADDRINUSE` diagnostic instead of consuming the child readiness budget. Child-process startup stderr still accompanies actual post-spawn failures, and each launch replaces stale diagnostics.
