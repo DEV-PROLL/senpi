@@ -82,7 +82,9 @@ export function validateGeneratedFiles(options) {
 			try {
 				dependencyLockPath = resolveExternalDependency(installLock.packages, dependencyName, lockPath, dependencySpec);
 			} catch {
-				errors.push(`${lockPath || "root"} dependency ${dependencyName} is missing`);
+				if (!entry.optionalDependencies?.[dependencyName]) {
+					errors.push(`${lockPath || "root"} dependency ${dependencyName} is missing`);
+				}
 				continue;
 			}
 

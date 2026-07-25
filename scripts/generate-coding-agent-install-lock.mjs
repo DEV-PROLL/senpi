@@ -85,7 +85,15 @@ function addInternalWorkspace(installLockPackages, addedPaths, queue, name, work
 }
 
 function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, item) {
-	const lockPath = resolveExternalDependency(lockPackages, item.name, item.resolveFrom, item.spec);
+	let lockPath;
+	try {
+		lockPath = resolveExternalDependency(lockPackages, item.name, item.resolveFrom, item.spec);
+	} catch (error) {
+		if (lockPackages[item.resolveFrom]?.optionalDependencies?.[item.name]) {
+			return;
+		}
+		throw error;
+	}
 	const outputPath = rebaseResolvedLockPath(lockPath, item.sourceBase, item.outputBase);
 	if (addedPaths.has(outputPath)) {
 		return;

@@ -215,7 +215,15 @@ function addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, name, works
 }
 
 function addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, queue, name, from) {
-	const lockPath = resolveExternalDependency(lockPackages, name, from);
+	let lockPath;
+	try {
+		lockPath = resolveExternalDependency(lockPackages, name, from);
+	} catch (error) {
+		if (lockPackages[from]?.optionalDependencies?.[name]) {
+			return;
+		}
+		throw error;
+	}
 	if (addedPaths.has(lockPath)) {
 		return;
 	}
@@ -279,7 +287,7 @@ function validateShrinkwrap(shrinkwrap, internalNames) {
 			const dependencyIncluded = [...includedPaths].some(
 				(candidate) => candidate === `node_modules/${dependencyName}` || candidate.endsWith(`/node_modules/${dependencyName}`),
 			);
-			if (!dependencyIncluded) {
+			if (!dependencyIncluded && !entry.optionalDependencies?.[dependencyName]) {
 				errors.push(`${lockPath || "root"} dependency ${dependencyName} is missing`);
 			}
 		}

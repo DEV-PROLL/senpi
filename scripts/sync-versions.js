@@ -1,106 +1,90 @@
 #!/usr/bin/env node
 
 /**
- * Syncs all workspace package dependency versions to match their current versions.
- * This ensures lockstep versioning across the monorepo.
+ * Synchronizes workspace package dependency versions to source-local workspace versions.
+ * Release tooling rewrites publish-only dependency pins immediately before publish.
  */
 
-import { readFileSync, writeFileSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { findPackageDirectories } from "./package-workspaces.mjs";
 
-const packagesDir = join(process.cwd(), 'packages');
-const packageDirs = readdirSync(packagesDir, { withFileTypes: true })
-	.filter(dirent => dirent.isDirectory())
-	.map(dirent => dirent.name);
+const GENERATED_PACKAGE_SUFFIXES = [join("coding-agent", "install-lock")];
+const LOCKSTEP_PACKAGE_NAMES = new Set([
+	"@code-yeongyu/senpi",
+	"@code-yeongyu/senpi-codemode",
+	"@code-yeongyu/senpi-server",
+	"@earendil-works/pi-agent-core",
+	"@earendil-works/pi-ai",
+	"@earendil-works/pi-pty",
+	"@earendil-works/pi-tui",
+	"@earendil-works/pi-web-ui",
+]);
 
-// Read all package.json files and build version map
-const packages = {};
-const versionMap = {};
+const packageRoot = process.argv[2] ?? "packages";
+const workspacePackages = findPackageDirectories(packageRoot)
+	.filter((directory) => !GENERATED_PACKAGE_SUFFIXES.some((suffix) => directory.endsWith(suffix)))
+	.map((directory) => {
+		const path = join(directory, "package.json");
+		return { data: JSON.parse(readFileSync(path, "utf8")), path };
+	});
+const versionMap = new Map(workspacePackages.map((pkg) => [pkg.data.name, pkg.data.version]));
+const lockstepPackages = workspacePackages.filter((pkg) => LOCKSTEP_PACKAGE_NAMES.has(pkg.data.name));
 
-for (const dir of packageDirs) {
-	const pkgPath = join(packagesDir, dir, 'package.json');
-	try {
-		const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-		packages[dir] = { path: pkgPath, data: pkg };
-		versionMap[pkg.name] = pkg.version;
-	} catch (e) {
-		console.error(`Failed to read ${pkgPath}:`, e.message);
-	}
+console.log("Current versions:");
+for (const pkg of [...lockstepPackages].sort((a, b) => a.data.name.localeCompare(b.data.name))) {
+	console.log(`  ${pkg.data.name}: ${pkg.data.version}`);
 }
 
-console.log('Current versions:');
-for (const [name, version] of Object.entries(versionMap).sort()) {
-	console.log(`  ${name}: ${version}`);
-}
-
-// Verify all versions are the same (lockstep)
-const versions = new Set(Object.values(versionMap));
-if (versions.size > 1) {
-	console.error('\n❌ ERROR: Not all packages have the same version!');
-	console.error('Expected lockstep versioning. Run one of:');
-	console.error('  npm run version:patch');
-	console.error('  npm run version:minor');
-	console.error('  npm run version:major');
+const lockstepVersions = new Set(lockstepPackages.map((pkg) => pkg.data.version));
+if (lockstepVersions.size > 1) {
+	console.error("\nERROR: Not all lockstep release packages have the same version.");
+	console.error("Expected lockstep versioning. Run one of:");
+	console.error("  npm run version:patch");
+	console.error("  npm run version:minor");
+	console.error("  npm run version:major");
 	process.exit(1);
 }
 
-console.log('\n✅ All packages at same version (lockstep)');
+console.log("\nAll lockstep release packages are at the same version.");
 
-// Source manifests must stay on local lockstep workspace versions so local
-// builds and tests resolve the current workspace packages. The release script
-// rewrites publish-only dependency pins immediately before `npm publish` and
-// restores these source versions afterward.
-
-// Update all inter-package dependencies
 let totalUpdates = 0;
+const updatedPackages = new Set();
 
-function nextWorkspaceVersion(currentVersion, nextVersion) {
-	return currentVersion.startsWith('^') ? `^${nextVersion}` : nextVersion;
+function nextWorkspaceVersion(currentSpecifier, nextVersion) {
+	if (/^(file|link|workspace):/.test(currentSpecifier) || currentSpecifier.startsWith("npm:")) {
+		return null;
+	}
+	return currentSpecifier.startsWith("^") ? `^${nextVersion}` : nextVersion;
 }
 
-for (const [dir, pkg] of Object.entries(packages)) {
-	let updated = false;
-	
-	// Check dependencies
-	if (pkg.data.dependencies) {
-		for (const [depName, currentVersion] of Object.entries(pkg.data.dependencies)) {
-			if (versionMap[depName]) {
-				const newVersion = nextWorkspaceVersion(currentVersion, versionMap[depName]);
-				if (currentVersion !== newVersion) {
-					console.log(`\n${pkg.data.name}:`);
-					console.log(`  ${depName}: ${currentVersion} → ${newVersion}`);
-					pkg.data.dependencies[depName] = newVersion;
-					updated = true;
-					totalUpdates++;
-				}
-			}
+for (const pkg of workspacePackages) {
+	for (const dependencyType of ["dependencies", "devDependencies"]) {
+		const dependencies = pkg.data[dependencyType];
+		if (!dependencies) continue;
+
+		for (const [dependencyName, currentSpecifier] of Object.entries(dependencies)) {
+			const version = versionMap.get(dependencyName);
+			const newSpecifier = version ? nextWorkspaceVersion(currentSpecifier, version) : null;
+			if (!newSpecifier || currentSpecifier === newSpecifier) continue;
+
+			console.log(`\n${pkg.data.name}:`);
+			console.log(
+				`  ${dependencyName}: ${currentSpecifier} -> ${newSpecifier}${dependencyType === "devDependencies" ? " (devDependencies)" : ""}`,
+			);
+			dependencies[dependencyName] = newSpecifier;
+			updatedPackages.add(pkg);
+			totalUpdates++;
 		}
 	}
-	
-	// Check devDependencies
-	if (pkg.data.devDependencies) {
-		for (const [depName, currentVersion] of Object.entries(pkg.data.devDependencies)) {
-			if (versionMap[depName]) {
-				const newVersion = nextWorkspaceVersion(currentVersion, versionMap[depName]);
-				if (currentVersion !== newVersion) {
-					console.log(`\n${pkg.data.name}:`);
-					console.log(`  ${depName}: ${currentVersion} → ${newVersion} (devDependencies)`);
-					pkg.data.devDependencies[depName] = newVersion;
-					updated = true;
-					totalUpdates++;
-				}
-			}
-		}
-	}
-	
-	// Write if updated
-	if (updated) {
-		writeFileSync(pkg.path, JSON.stringify(pkg.data, null, '\t') + '\n');
-	}
+}
+
+for (const pkg of updatedPackages) {
+	writeFileSync(pkg.path, `${JSON.stringify(pkg.data, null, "\t")}\n`);
 }
 
 if (totalUpdates === 0) {
-	console.log('\nAll inter-package dependencies already in sync.');
+	console.log("\nAll inter-package dependencies are already in sync.");
 } else {
-	console.log(`\n✅ Updated ${totalUpdates} dependency version(s)`);
+	console.log(`\nUpdated ${totalUpdates} dependency version(s).`);
 }
