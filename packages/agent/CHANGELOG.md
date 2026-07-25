@@ -2,39 +2,7 @@
 
 ## [Unreleased]
 
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.25] - 2026-07-25
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.24] - 2026-07-24
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
+## [0.82.1] - 2026-07-25
 
 ## [0.82.0] - 2026-07-24
 
@@ -76,178 +44,17 @@
 
 - Added usage metadata to tool results, compaction entries, and branch summaries in the agent harness ([#6671](https://github.com/earendil-works/pi/pull/6671) by [@davidbrai](https://github.com/davidbrai)).
 
-## [2026.7.23] - 2026-07-23
-
-### Breaking Changes
-
-### Added
-
-- Added timing metadata to completed thinking blocks so clients can present per-section durations.
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.22-2] - 2026-07-22
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.22] - 2026-07-22
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.20-2] - 2026-07-20
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-- Fixed terminating turns to retain queued steering and follow-up input through compaction preparation failures and aborts.
-
-### Removed
-
-## [2026.7.20] - 2026-07-20
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.17-5] - 2026-07-17
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.17-4] - 2026-07-17
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.17-3] - 2026-07-17
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.17-2] - 2026-07-17
-
-## [2026.7.17] - 2026-07-17
-
-## [2026.7.16-3] - 2026-07-16
-
-## [2026.7.16-2] - 2026-07-16
-
-## [2026.7.16] - 2026-07-16
-
 ## [0.80.10] - 2026-07-16
 
 ## [0.80.9] - 2026-07-16
 
 ## [0.80.8] - 2026-07-16
 
-## [2026.7.14-3] - 2026-07-14
-
 ## [0.80.7] - 2026-07-14
 
 ### Added
 
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.14-2] - 2026-07-14
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.14] - 2026-07-14
-
-### Added
-
-### Changed
-
-### Fixed
-
-- Skipped next-turn preparation when every tool result terminates the current batch and no queued message requires another provider turn, retained queued input when next-turn preparation fails, and stopped before provider continuation when next-turn preparation aborts.
-
-### Removed
-
-## [2026.7.13] - 2026-07-13
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.11] - 2026-07-11
-
-### Added
-
 - Added `AgentToolResult.addedToolNames` propagation to `ToolResultMessage` so tools introduced by a result can be loaded from that transcript point onward ([#6474](https://github.com/earendil-works/pi-mono/pull/6474)).
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.10-2] - 2026-07-10
 
 ## [0.80.6] - 2026-07-09
 
@@ -255,205 +62,57 @@
 
 - Added the `max` model thinking level after `xhigh`.
 
-### Changed
+## [0.80.5] - 2026-07-09
 
-### Fixed
-
-### Removed
-
-## [2026.7.10] - 2026-07-10
+## [0.80.4] - 2026-07-09
 
 ### Added
 
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.9-2] - 2026-07-09
-
-### Added
-
-- Exported `InMemorySessionStorage` and `JsonlSessionStorage`.
-- Supported custom metadata in JSONL session headers.
-
-### Changed
-
-### Fixed
-
-- Added session context entry projection for harness sessions.
-- Failed tool calls from length-truncated assistant messages.
-- Normalized null message content at ingestion boundaries.
-
-### Removed
-
-## [2026.7.9] - 2026-07-09
-
-### Added
-
-- Added an exported `prepareAgentToolCall` helper so host integrations can reuse agent-loop tool argument preparation and schema validation.
-
-### Changed
-
-### Fixed
-
-- Fixed harness session storage short entry ids to use the random tail of the generated uuidv7 instead of the timestamp prefix, which was nearly constant between calls ([#6242](https://github.com/earendil-works/pi/issues/6242)).
-- Fixed the agent loop leaving the provider request dangling when the stream idle timeout fires: the loop now passes a per-request abort signal to the stream function and aborts it on idle timeout, so dead connections (e.g. after a network drop and reconnect) are torn down instead of leaking.
-
-### Removed
-
-## [2026.7.5-2] - 2026-07-05
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.5] - 2026-07-05
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.4] - 2026-07-04
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.3] - 2026-07-03
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.2] - 2026-07-02
-
-### Added
-
-### Changed
+- Added configurable harness session context entry transforms and custom-entry message projectors.
+- Added custom metadata support in JSONL session headers ([#6417](https://github.com/earendil-works/pi/pull/6417) by [@ArcadiaLin](https://github.com/ArcadiaLin)).
+- Exported `InMemorySessionStorage` and `JsonlSessionStorage` ([#6435](https://github.com/earendil-works/pi/issues/6435)).
 
 ### Fixed
 
 - Fixed harness split-turn compaction to serialize summary requests so single-concurrency providers are not asked to run overlapping generations ([#5536](https://github.com/earendil-works/pi/issues/5536)).
-- Fixed oversized harness shell execution timeouts to fail with a clear validation error instead of being clamped to an immediate timeout ([#6181](https://github.com/earendil-works/pi/issues/6181)).
+- Fixed harness tool calls from length-truncated assistant messages to fail instead of waiting for missing tool results ([#6285](https://github.com/earendil-works/pi/pull/6285)).
+- Fixed harness session ingestion to normalize `null` message content before context projection, avoiding crashes on lax imported transcripts ([#6343](https://github.com/earendil-works/pi/pull/6343)).
+- Fixed non-positive or oversized harness shell execution timeouts to fail with a clear validation error instead of being clamped to an immediate timeout ([#6181](https://github.com/earendil-works/pi/issues/6181)).
+- Fixed harness session storage short entry ids to use the random tail of the generated uuidv7 instead of the timestamp prefix, which was nearly constant between calls ([#6242](https://github.com/earendil-works/pi/issues/6242)).
 
-### Removed
-
-## [2026.6.30-2] - 2026-06-30
+## [0.80.3] - 2026-06-30
 
 ### Added
 
 - Added `prepareNextTurnWithContext` for `Agent` users that need the next-turn loop context.
 
-### Changed
-
 ### Fixed
 
 - Fixed `Agent.prepareNextTurn` to keep receiving the run abort signal instead of the next-turn context.
 
-### Removed
-
-## [2026.6.30] - 2026-06-30
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.6.28-4] - 2026-06-28
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.6.28-3] - 2026-06-28
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.6.28-2] - 2026-06-28
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.6.28] - 2026-06-28
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.6.23-2] - 2026-06-23
-
-### Added
+## [0.80.2] - 2026-06-23
 
 ### Changed
 
 - Renamed the public harness shell execution options type from `ExecutionEnvExecOptions` to `ShellExecOptions`.
 
+## [0.80.1] - 2026-06-23
+
+## [0.80.0] - 2026-06-23
+
+### Breaking Changes
+
+- `AgentHarnessOptions.models` is required and is the only auth path: the harness streams turns, compaction, and branch summarization through the provided `Models` instance (`models.streamSimple()`/`completeSimple()`), resolving auth through the providers. `AgentHarnessOptions.getApiKeyAndHeaders` is removed — apps that resolved keys per request now express that as provider auth (`ApiKeyAuth`/`OAuthAuth`) on the providers in the `Models` collection. Build one with `createModels()` + provider factories (or `builtinModels()` from `@earendil-works/pi-ai/providers/all`); tests use `fauxProvider()`.
+- `compact()`, `generateSummary()`, and `generateBranchSummary()` take a `Models` parameter and no longer accept explicit `apiKey`/`headers`.
+- `StreamFn` is defined structurally (`(model, context, options?) => AssistantMessageEventStream | Promise<...>`); `Models.streamSimple` satisfies it.
+- Removed the `@earendil-works/pi-agent-core/base` selective-provider entrypoint; use the root package with an explicit `Models` instance instead.
+
 ### Fixed
 
-### Removed
-
-## [2026.6.23] - 2026-06-23
-
-### Added
-
-- Added the inherited harness Models integration so agent harness streams resolve provider auth exclusively through a required Models instance.
-
-### Fixed
-
-- Fixed inherited session-name normalization.
-- Fixed fork compatibility with the restored `@earendil-works/pi-ai/compat` streaming API after the Models runtime migration.
-
-### Removed
-
-## [2026.6.22] - 2026-06-22
-
-### Removed
-
-- Removed the temporary `@earendil-works/pi-agent-core/base` entrypoint and selective provider-registration surface.
+- Fixed harness session names to normalize newline characters before storing labels ([#5999](https://github.com/earendil-works/pi/pull/5999) by [@haoqixu](https://github.com/haoqixu)).
+- Fixed harness compaction estimates to ignore malformed all-zero assistant usage after truncated responses ([#5526](https://github.com/earendil-works/pi/pull/5526) by [@dmmulroy](https://github.com/dmmulroy)).
 
 ## [0.79.10] - 2026-06-22
-
-## [2026.6.21] - 2026-06-21
 
 ## [0.79.9] - 2026-06-20
 

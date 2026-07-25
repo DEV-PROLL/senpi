@@ -2,39 +2,7 @@
 
 ## [Unreleased]
 
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.25] - 2026-07-25
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.24] - 2026-07-24
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
+## [0.82.1] - 2026-07-25
 
 ## [0.82.0] - 2026-07-24
 
@@ -53,143 +21,7 @@
 - Fixed ANSI-aware text wrapping to recognize CRLF and CR line endings while preserving styles across lines ([#6764](https://github.com/earendil-works/pi/pull/6764) by [@xz-dev](https://github.com/xz-dev)).
 - Fixed editor paste registry corruption when deleting paste markers: undo now restores the paste registry together with the text, and marker renumbering shifts registry entries in ascending id order, so submitted prompts no longer contain literal `[paste #N ...]` markers or the wrong paste's content ([#6844](https://github.com/earendil-works/pi/issues/6844)).
 
-## [2026.7.23] - 2026-07-23
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-- Fixed tool-progress duration formatting to use the shared OpenCode-parity formatter.
-
-### Removed
-
-## [2026.7.22-2] - 2026-07-22
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.22] - 2026-07-22
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.20-2] - 2026-07-20
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.20] - 2026-07-20
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.17-5] - 2026-07-17
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.17-4] - 2026-07-17
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.17-3] - 2026-07-17
-
-### Breaking Changes
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-
-## [2026.7.17-2] - 2026-07-17
-
-### Added
-
-### Changed
-
-### Fixed
-
-## [2026.7.17] - 2026-07-17
-
-### Added
-
-### Changed
-
-### Fixed
-
-## [2026.7.16-3] - 2026-07-16
-
-### Added
-
-### Changed
-
-### Fixed
-
-## [2026.7.16-2] - 2026-07-16
-
-### Added
-
-### Changed
-
-### Fixed
-
-## [2026.7.16] - 2026-07-16
-
-### Added
-
-### Changed
-
-### Fixed
+## [0.80.10] - 2026-07-16
 
 ## [0.80.9] - 2026-07-16
 
@@ -199,181 +31,27 @@
 
 - Fixed terminal output to normalize tab characters consistently ([#6697](https://github.com/earendil-works/pi-mono/pull/6697) by [@xz-dev](https://github.com/xz-dev)).
 
-## [2026.7.14-3] - 2026-07-14
-
-### Added
-
-### Changed
+## [0.80.7] - 2026-07-14
 
 ### Fixed
 
-## [2026.7.14-2] - 2026-07-14
+- Fixed legacy terminal decoding for Alt+symbol key combinations such as `Alt+,` and `Alt+.` ([#6523](https://github.com/earendil-works/pi-mono/pull/6523) by [@ribelo](https://github.com/ribelo)).
 
-### Added
+## [0.80.6] - 2026-07-09
 
-### Changed
+## [0.80.5] - 2026-07-09
 
-### Fixed
-
-## [2026.7.14] - 2026-07-14
-
-### Added
-
-### Changed
+## [0.80.4] - 2026-07-09
 
 ### Fixed
 
-## [2026.7.13] - 2026-07-13
-
-### Added
-
-### Changed
-
-### Fixed
-
-## [2026.7.11] - 2026-07-11
-
-### Added
-
-### Changed
-
-### Fixed
-
-- Fixed the legacy alt-key parser to also recognize alt+symbol combinations (e.g. `alt+/`, `alt+.`), not just alt+letter and alt+digit ([#6523](https://github.com/earendil-works/pi/pull/6523)).
-- Sanitized terminal control characters from image fallback MIME types and filenames.
-
-## [2026.7.10-2] - 2026-07-10
-
-### Added
-
-### Changed
-
-- Added optional `thinkingMax` theme color support through inherited coding-agent theme integration.
-
-### Fixed
-
-## [2026.7.10] - 2026-07-10
-
-### Added
-
-### Changed
-
-### Fixed
-
-## [2026.7.9-2] - 2026-07-09
-
-### Added
-
-### Changed
-
-### Fixed
-
-- Decremented the paste counter when paste markers are deleted or the terminal is cleared.
-
-## [2026.7.9] - 2026-07-09
-
-### Added
-
-### Changed
-
-### Fixed
-
-- Fixed the editor swallowing Enter when the terminal delivers it as a bare LF (`\n`): the submit binding now runs before the newline branch, so LF Enter submits the prompt instead of silently inserting a newline. Explicit Shift+Enter/Ctrl+J newline insertion and the trailing-backslash newline workaround are unchanged. ([#156](https://github.com/code-yeongyu/senpi/pull/156))
-
-## [2026.7.5-2] - 2026-07-05
-
-### Added
-
-### Changed
-
-### Fixed
-
-## [2026.7.5] - 2026-07-05
-
-### Added
-
-### Changed
-
-### Fixed
-
-## [2026.7.4] - 2026-07-04
-
-### Added
-
-- Added an opt-in `ProcessTerminal` external stdout guard (`onExternalStdoutWrite`): while the terminal is started, stdout writes not issued by the terminal itself (e.g. `console.log` from libraries or extensions) are forwarded to the handler instead of reaching the screen, preventing differential-render desync and visual corruption.
-
-### Changed
-
-### Fixed
-
-- Fixed render scheduling state leaking across TUI `stop()`/`start()`, which could leave a restarted TUI unable to render passive updates (streaming output, timers) until a keypress or forced redraw.
-- Fixed `setTitle` to strip control characters so session, tool, or extension titles containing BEL/ESC cannot terminate the OSC sequence early and dump the remainder onto the screen.
-
-## [2026.7.3] - 2026-07-03
-
-### Added
-
-- Added multiplexer-aware TUI render policy switches and bounded viewport repaint support for preserving terminal scrollback while keeping the full-frame renderer available.
-
-### Changed
-
-- Improved TUI frame rendering performance with SGR run coalescing, post-frame cursor write coalescing, cached cursor visibility state, and a two-generation width cache.
-
-### Fixed
-
-- Fixed TUI render-path failures to be contained in release builds instead of crashing the process.
-- Fixed SGR state reset handling after row clears and kept over-wide diagnostic output best-effort.
-- Fixed diagnostic log permissions for TUI debug output.
-
-## [2026.7.2] - 2026-07-02
-
-### Fixed
-
-- Disabled terminal autowrap (DECAWM) while frames are painted so rows the terminal draws wider than measured (East-Asian-ambiguous glyphs, newer emoji, decomposed jamo) clip at the last column instead of wrapping, desyncing the cursor by one row, and leaving stale ghost lines (e.g. a duplicated `Working (0s • esc to interrupt)` loader) behind.
-
-## [2026.6.30-2] - 2026-06-30
+- Fixed editor paste marker accounting when paste markers are deleted or terminal state is cleared, preventing stale paste state after marker removal ([#6397](https://github.com/earendil-works/pi/pull/6397) by [@affanali2k3](https://github.com/affanali2k3)).
 
 ## [0.80.3] - 2026-06-30
 
 ### Added
 
-### Fixed
-
-## [2026.6.30] - 2026-06-30
-
-### Added
-
-### Fixed
-
-- Fixed the initial TUI render to clear dirty lines before drawing the first frame.
-
-## [2026.6.28-4] - 2026-06-28
-
-### Added
-
-## [2026.6.28-3] - 2026-06-28
-
-### Added
-
-## [2026.6.28-2] - 2026-06-28
-
-### Added
-
-## [2026.6.28] - 2026-06-28
-
-### Added
-
 - Added an opt-in Markdown renderer option to preserve source backslash escapes for transcript rendering ([#6105](https://github.com/earendil-works/pi/issues/6105)).
-
-## [2026.6.23-2] - 2026-06-23
-
-### Fixed
-
-## [2026.6.23] - 2026-06-23
-
-### Fixed
-
-- Fixed inherited tall dialog redraw-loop handling by preserving the upstream revert state from v0.80.1.
 
 ## [0.80.2] - 2026-06-23
 
@@ -383,15 +61,9 @@
 
 ### Changed
 
-## [2026.6.22] - 2026-06-22
-
-### Changed
-
 - Added `Ctrl+J` as a default newline keybinding alongside `Shift+Enter`.
 
 ## [0.79.10] - 2026-06-22
-
-## [2026.6.21] - 2026-06-21
 
 ## [0.79.9] - 2026-06-20
 
