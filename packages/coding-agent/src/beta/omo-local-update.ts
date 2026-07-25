@@ -828,7 +828,9 @@ export async function runOmoLocalUpdateBeta(options: RunOmoLocalUpdateBetaOption
 					force: options.force ?? false,
 				})
 			) {
-				log(chalk.dim(`OMO local plugins already at origin/dev @${remoteState.sha.slice(0, 7)}; skipping rebuild.`));
+				log(
+					chalk.dim(`OMO local plugins already at origin/dev @${remoteState.sha.slice(0, 7)}; skipping rebuild.`),
+				);
 				return;
 			}
 
