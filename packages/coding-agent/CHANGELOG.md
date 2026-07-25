@@ -6,6 +6,8 @@
 
 ### Added
 
+- Added a private Vitest eval harness package with a root `npm run eval` wrapper for credential-gated coding-agent evaluations.
+
 ### Changed
 
 ### Fixed
