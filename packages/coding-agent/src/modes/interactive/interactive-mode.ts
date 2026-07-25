@@ -84,8 +84,8 @@ import {
 	defaultModelPerProvider,
 	findExactModelReferenceMatch,
 	resolveModelScope,
-	type ScopedModel,
 	resolveModelScopeWithDiagnostics,
+	type ScopedModel,
 } from "../../core/model-resolver.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
