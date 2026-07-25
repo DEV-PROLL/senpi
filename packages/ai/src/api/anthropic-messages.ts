@@ -222,7 +222,15 @@ const FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 const COMPUTER_USE_BETA_PREFIX = "computer-use-";
 const NATIVE_COMPUTER_TOOL_TYPE = "computer_20250124";
-const ADAPTIVE_THINKING_MODEL_MARKERS = ["opus-4-6", "opus-4-7", "sonnet-4-6"] as const;
+const ADAPTIVE_THINKING_MODEL_MARKERS = [
+	"opus-4-6",
+	"opus-4-7",
+	"opus-4-8",
+	"opus-5",
+	"sonnet-4-6",
+	"sonnet-5",
+	"fable-5",
+] as const;
 const CLAUDE_FABLE_OR_MYTHOS_MODEL_ID = /^claude-(?:fable|mythos)(?:-|$)/i;
 const UNSUPPORTED_NATIVE_COMPUTER_TOOL_MODEL_MARKERS = [
 	"opus-4-6",
@@ -1308,6 +1316,10 @@ function isOpus47(model: Pick<Model<"anthropic-messages">, "id" | "name">): bool
 	return matchesModelMarker(model, ["opus-4-7"]);
 }
 
+function supportsNativeXhighEffort(model: Pick<Model<"anthropic-messages">, "id" | "name">): boolean {
+	return matchesModelMarker(model, ["opus-4-7", "opus-4-8", "opus-5", "sonnet-5", "fable-5"]);
+}
+
 function supportsAdaptiveThinking(model: Model<"anthropic-messages">): boolean {
 	if (model.compat?.forceAdaptiveThinking !== undefined) {
 		return model.compat.forceAdaptiveThinking;
@@ -1336,11 +1348,12 @@ function mapThinkingLevelToEffort(
 		case "high":
 			return "high";
 		case "xhigh":
+			if (supportsNativeXhighEffort(model)) return "xhigh";
 			if (isOpus47(model)) return "xhigh";
 			if (isOpus46(model)) return "max";
 			return "high";
 		case "max":
-			if (isOpus47(model) || isOpus46(model)) return "max";
+			if (supportsAdaptiveThinking(model) || isOpus47(model) || isOpus46(model)) return "max";
 			return "high";
 		default:
 			return "high";

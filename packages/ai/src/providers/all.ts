@@ -1,7 +1,7 @@
 import { createImagesModels, type ImagesProvider, type MutableImagesModels } from "../images-models.ts";
 import { MODELS } from "../models.generated.ts";
 import { type CreateModelsOptions, createModels, type MutableModels, type Provider } from "../models.ts";
-import type { Api, Model } from "../types.ts";
+import type { Api, Model, ThinkingLevelMap } from "../types.ts";
 import { alibabaTokenPlanProvider } from "./alibaba-token-plan.ts";
 import { amazonBedrockProvider } from "./amazon-bedrock.ts";
 import { antLingProvider } from "./ant-ling.ts";
@@ -63,6 +63,48 @@ const XIAOMI_MIMO_PROVIDERS = new Set([
 	"xiaomi-token-plan-sgp",
 ]);
 
+const ADAPTIVE_THINKING_MAX_MARKERS = [
+	"opus-4-6",
+	"opus-4-7",
+	"opus-4-8",
+	"opus-5",
+	"sonnet-4-6",
+	"sonnet-5",
+	"fable-5",
+] as const;
+const ADAPTIVE_THINKING_XHIGH_MARKERS = ["opus-4-7", "opus-4-8", "opus-5", "sonnet-5", "fable-5"] as const;
+
+function getModelMatchCandidates<TApi extends Api>(model: Model<TApi>): string[] {
+	return [model.id, model.name].flatMap((value) => {
+		const lower = value.toLowerCase();
+		return [lower, lower.replace(/[\s_.:]+/g, "-")];
+	});
+}
+
+function matchesModelMarker<TApi extends Api>(model: Model<TApi>, markers: readonly string[]): boolean {
+	const candidates = getModelMatchCandidates(model);
+	return candidates.some((candidate) => markers.some((marker) => candidate.includes(marker)));
+}
+
+function normalizeAdaptiveAnthropicModel<TApi extends Api>(model: Model<TApi>): Model<TApi> {
+	if (model.api !== "anthropic-messages" || !matchesModelMarker(model, ADAPTIVE_THINKING_MAX_MARKERS)) return model;
+
+	const compat = model.compat as Model<"anthropic-messages">["compat"] | undefined;
+	const thinkingLevelMap: ThinkingLevelMap = { ...model.thinkingLevelMap, max: "max" };
+	if (matchesModelMarker(model, ADAPTIVE_THINKING_XHIGH_MARKERS)) {
+		thinkingLevelMap.xhigh = "xhigh";
+	}
+
+	return {
+		...model,
+		thinkingLevelMap,
+		compat: {
+			...compat,
+			forceAdaptiveThinking: compat?.forceAdaptiveThinking ?? true,
+		},
+	} as Model<TApi>;
+}
+
 function normalizeBuiltinModel<TApi extends Api>(model: Model<TApi> | undefined): Model<TApi> | undefined {
 	if (!model) return undefined;
 
@@ -88,7 +130,7 @@ function normalizeBuiltinModel<TApi extends Api>(model: Model<TApi> | undefined)
 		};
 	}
 
-	return model;
+	return normalizeAdaptiveAnthropicModel(model);
 }
 
 /** Typed read of the generated built-in catalog. */

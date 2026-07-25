@@ -642,7 +642,7 @@ function mapThinkingLevelToEffort(
 			if (isOpus46) return "max";
 			return "high";
 		case "max":
-			if (isOpus47 || isOpus46) return "max";
+			if (supportsAdaptiveThinking(model.id, model.name) || isOpus47 || isOpus46) return "max";
 			return "high";
 		default:
 			return "high";

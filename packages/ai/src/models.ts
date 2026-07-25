@@ -660,13 +660,48 @@ export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage
 
 const EXTENDED_THINKING_LEVELS: ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
+function getThinkingModelMatchCandidates<TApi extends Api>(model: Model<TApi>): string[] {
+	const values = model.name ? [model.id, model.name] : [model.id];
+	return values.flatMap((value) => {
+		const lower = value.toLowerCase();
+		return [lower, lower.replace(/[\s_.:]+/g, "-")];
+	});
+}
+
+function hasInferredAdaptiveMaxThinking<TApi extends Api>(model: Model<TApi>): boolean {
+	const candidates = getThinkingModelMatchCandidates(model);
+	return candidates.some(
+		(candidate) =>
+			candidate.includes("opus-4-6") ||
+			candidate.includes("opus-4-7") ||
+			candidate.includes("opus-4-8") ||
+			candidate.includes("opus-5") ||
+			candidate.includes("sonnet-4-6") ||
+			candidate.includes("sonnet-5") ||
+			candidate.includes("fable-5"),
+	);
+}
+
+function hasInferredAdaptiveXhighThinking<TApi extends Api>(model: Model<TApi>): boolean {
+	const candidates = getThinkingModelMatchCandidates(model);
+	return candidates.some(
+		(candidate) =>
+			candidate.includes("opus-4-7") ||
+			candidate.includes("opus-4-8") ||
+			candidate.includes("opus-5") ||
+			candidate.includes("sonnet-5") ||
+			candidate.includes("fable-5"),
+	);
+}
+
 export function getSupportedThinkingLevels<TApi extends Api>(model: Model<TApi>): ModelThinkingLevel[] {
 	if (!model.reasoning) return ["off"];
 
 	return EXTENDED_THINKING_LEVELS.filter((level) => {
 		const mapped = model.thinkingLevelMap?.[level];
 		if (mapped === null) return false;
-		if (level === "xhigh" || level === "max") return mapped !== undefined;
+		if (level === "xhigh") return mapped !== undefined || hasInferredAdaptiveXhighThinking(model);
+		if (level === "max") return mapped !== undefined || hasInferredAdaptiveMaxThinking(model);
 		return true;
 	});
 }
@@ -706,7 +741,13 @@ export function supportsXhigh<TApi extends Api>(model: Model<TApi>): boolean {
 		model.id.includes("opus-4-7") ||
 		model.id.includes("opus-4.7") ||
 		model.id.includes("opus-4-8") ||
-		model.id.includes("opus-4.8")
+		model.id.includes("opus-4.8") ||
+		model.id.includes("opus-5") ||
+		model.id.includes("opus.5") ||
+		model.id.includes("sonnet-5") ||
+		model.id.includes("sonnet.5") ||
+		model.id.includes("fable-5") ||
+		model.id.includes("fable.5")
 	);
 }
 
