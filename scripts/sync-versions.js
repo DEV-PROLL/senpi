@@ -17,17 +17,7 @@ function nextWorkspaceVersion(currentVersion, nextVersion) {
 
 function synchronizedDependencyVersion(dependencyName, currentSpecifier, versionMap) {
 	const directVersion = versionMap.get(dependencyName);
-	if (directVersion) {
-		return nextWorkspaceVersion(currentSpecifier, directVersion);
-	}
-	if (typeof currentSpecifier !== "string" || !currentSpecifier.startsWith("npm:")) {
-		return null;
-	}
-
-	const separator = currentSpecifier.lastIndexOf("@");
-	const aliasPackage = currentSpecifier.slice("npm:".length, separator);
-	const aliasVersion = versionMap.get(aliasPackage);
-	return aliasVersion ? `npm:${aliasPackage}@${aliasVersion}` : null;
+	return directVersion ? nextWorkspaceVersion(currentSpecifier, directVersion) : null;
 }
 
 const packageRoot = process.argv[2] ?? "packages";
