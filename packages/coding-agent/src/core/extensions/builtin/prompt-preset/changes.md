@@ -1,5 +1,29 @@
 # prompt-preset Extension Changes
 
+## GPT-5.6 dieted full-core rewrite (2026-07-25)
+
+### What changed
+
+- `gpt-5.6.ts`: dieted the full-core prompt in lockstep with the dieted `claude-fable-5.ts`/`claude-opus-5.ts` presets, using the GPT-5.6 prompting guide's own "simplify prompts first" doctrine (trim repeated rules, generic rationale, and examples that do not change behavior; keep outcomes, success criteria, stopping conditions, constraints, tool routing, and output shape). Rendered static prompt shrinks from 12,599 to 11,327 chars (~-318 tokens, -10.1%); the preset-owned core body — excluding the shared test-discipline/eval-routing/file-operations/workstation blocks, which stay byte-identical — shrinks from 10,634 to 9,362 chars (-12.0%). Every behavior preserved, verified by a 114-presence + 13-absence probe audit over rendered before/after prompts (probes derived from the before prompt; the same audit fails 84/127 probes against the gpt-5.5 render, so it discriminates).
+- Rules the prompt previously stated more than once are now stated exactly once: the `## Goal` section (goal-not-green-build / spec-satisfied-in-observable-behavior) merged into the Manual QA Gate intro and the first Stop Goal bullet; the final-message reporting shape lives only in `## Output` (the Stop Goal bullet references it instead of restating it); the shared-workspace fact lives only in the concurrency rule; "Never ask permission for obvious work" is subsumed by the authorization policy's opening sentence; `## Code Review Requests` collapsed into one Output rule.
+- Enumerated examples trimmed to the defining one per category: "why is A broken" kept, "how does X work" dropped; the "naming, indentation, imports, error handling" style list dropped from the surgical-implementation rule; "never in batches" / "never left `in_progress`" dropped as subsumed by "the moment they finish" and the reconcile-every-item enumeration.
+- The complete four-part GPT-5.6 stop contract is intact: binding declared per-turn stop condition in the routing line, per-result stop check in Tool loops, three-attempt failure cap in Failure Recovery, and the Stop Goal with mandatory-immediate stopping. Style remains prioritization/preserve-first — never generic brevity, which GPT-5.6 over-compresses under.
+- All test pins kept verbatim ("Implement, don't propose", "## Manual QA Gate", "## Failure Recovery", "## Pragmatism & Scope", "## Stop Goal", "I'll stop right away when", "BINDING", "STOPPING IS MANDATORY AND IMMEDIATE", "serial is the exception", "reconcile every item", "fewest useful tool loops", "Lead with the conclusion", "Never revert or modify changes you did not make", "type check", plus the omo-tool absence guards). No test changes needed.
+- `AGENTS.md`: `gpt-5.6.ts` file-table row and the `corePrompt` exception paragraph note the dieted state.
+
+### Why
+
+- Fork direction: diet the system prompts per the prompt-engineering skill. The GPT-5.6 guide itself reports minimal prompts beating process-heavy stacks by ~10-15% in OpenAI's evals at 41-66% fewer total tokens, and duplicated rules compete for attention. The reduction is smaller than the opus-5 diet (-20.0%) because this preset never carried a duplicated shared-core-plus-tuning stack — the savings are pure wording density plus true duplicate merges, with zero dropped behaviors.
+
+### Why extension system couldn't handle this differently
+
+- Content-only change inside this builtin's existing `corePrompt` override; no core prompt code changed.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `gpt-5.6.ts` is fork-only; conflicts only if upstream adds its own GPT-5.6 preset.
+
+
 ## Claude Opus 5 dieted full-core rewrite (2026-07-24)
 
 ### What changed
