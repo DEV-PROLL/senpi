@@ -119,6 +119,7 @@ export interface AgentOptions {
 	timeoutMs?: number;
 	maxRetryDelayMs?: number;
 	toolExecution?: ToolExecutionMode;
+	abortServerSideFallback?: boolean;
 }
 
 class PendingMessageQueue {
@@ -219,6 +220,8 @@ export class Agent {
 	public maxRetryDelayMs?: number;
 	/** Tool execution strategy for assistant messages that contain multiple tool calls. */
 	public toolExecution: ToolExecutionMode;
+	/** Forwarded to the stream function; providers without server-side fallback ignore it. */
+	public abortServerSideFallback?: boolean;
 
 	constructor(options: AgentOptions) {
 		// Older compiled consumers may omit options or streamFn even though the current API requires them.
@@ -242,6 +245,7 @@ export class Agent {
 		this.timeoutMs = runtimeOptions.timeoutMs;
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
+		this.abortServerSideFallback = runtimeOptions.abortServerSideFallback;
 	}
 
 	/**
@@ -495,6 +499,7 @@ export class Agent {
 			thinkingBudgets: this.thinkingBudgets,
 			timeoutMs: this.timeoutMs,
 			maxRetryDelayMs: this.maxRetryDelayMs,
+			abortServerSideFallback: this.abortServerSideFallback,
 			toolExecution: this.toolExecution,
 			beforeToolCall: this.beforeToolCall,
 			afterToolCall: this.afterToolCall,

@@ -11,6 +11,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
+import { buildBaseOptions } from "../src/api/simple-options.ts";
 import { getModel } from "../src/compat.ts";
 import type { Context, ProviderNativeContent } from "../src/types.ts";
 
@@ -283,5 +284,14 @@ describe("Anthropic sticky-served fallback detection", () => {
 
 		expect(result.stopReason).toBe("stop");
 		expect(JSON.stringify(result.content)).toContain(SUBSTITUTE_TEXT);
+	});
+});
+
+describe("abortServerSideFallback option seam", () => {
+	it("survives buildBaseOptions, which copies a fixed field list", () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		expect(buildBaseOptions(model, context, { abortServerSideFallback: true }).abortServerSideFallback).toBe(true);
+		expect(buildBaseOptions(model, context, { abortServerSideFallback: false }).abortServerSideFallback).toBe(false);
+		expect(buildBaseOptions(model, context, {}).abortServerSideFallback).toBeUndefined();
 	});
 });

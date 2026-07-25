@@ -41,6 +41,7 @@ export interface RetrySettings {
 	modelFallback?: boolean; // default: true
 	fallbackChains?: Record<string, string[]>;
 	fallbackRevertPolicy?: "cooldown-expiry" | "never"; // default: "cooldown-expiry"
+	abortServerSideFallback?: boolean; // default: true
 }
 
 export interface TerminalSettings {
@@ -971,6 +972,17 @@ export class SettingsManager {
 			maxRetries: this.settings.retry?.maxRetries ?? 3,
 			baseDelayMs: this.settings.retry?.baseDelayMs ?? 2000,
 		};
+	}
+
+	/**
+	 * Abort a turn when the provider silently substitutes the requested model
+	 * after a classifier decline, so model choice stays with the configured
+	 * fallback chain instead of the provider. Defaults to enabled.
+	 */
+	getAbortServerSideFallback(): boolean {
+		return typeof this.settings.retry?.abortServerSideFallback === "boolean"
+			? this.settings.retry.abortServerSideFallback
+			: true;
 	}
 
 	/** Raw retry.fallbackChains value before sanitization, for startup validation warnings. */

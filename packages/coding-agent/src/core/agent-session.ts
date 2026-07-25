@@ -631,6 +631,7 @@ export class AgentSession {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
+		this.agent.abortServerSideFallback = this.settingsManager.getAbortServerSideFallback();
 		const noModelFallback =
 			config.resourceLoader.getExtensions().runtime.flagValues.get("no-model-fallback") === true ||
 			process.env.SENPI_NO_FALLBACK === "1";
