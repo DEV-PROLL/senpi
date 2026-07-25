@@ -6,11 +6,29 @@
 
 ### Added
 
+- Added a private Vitest eval harness for coding-agent evaluation runs ([#7085](https://github.com/earendil-works/pi/pull/7085)).
+- Exposed output padding metadata to custom message renderers ([#7045](https://github.com/earendil-works/pi/pull/7045)).
+- Added inherited Claude Opus 5 support on Amazon Bedrock and refreshed Opus 5 adaptive-thinking metadata across model catalogs ([#7081](https://github.com/earendil-works/pi/pull/7081), [#7083](https://github.com/earendil-works/pi/pull/7083)).
+
 ### Changed
+
+- Revalidate remote model catalogs with ETag metadata to avoid unnecessary full catalog downloads.
+- Cache llama.cpp model catalogs for cache-only startup refreshes ([#7072](https://github.com/earendil-works/pi/pull/7072)).
+- Reduced the GPT-5.6 prompt preset size while preserving routing and tool-use behavior.
 
 ### Fixed
 
+- Fixed unavailable scoped models so they remain visible and removable in the model selector ([#7032](https://github.com/earendil-works/pi/pull/7032)).
+- Fixed resource loading to exclude directories where files are expected ([#7106](https://github.com/earendil-works/pi/pull/7106)).
+- Fixed websearch progress rendering to show the live search source and refreshed native model routing.
+- Fixed the GPT-5.6 prompt preset to preserve the `how does X work` routing exception.
+- Fixed inherited Radius OAuth token refreshes to route through the configured gateway.
+- Fixed inherited `ModelsError` wrapping to preserve the original cause for provider/auth failures.
+- Fixed inherited Claude Opus 5 adaptive-thinking payloads and native `xhigh`/`max` effort mapping.
+
 ### Removed
+
+- Removed the eval harness dependency on legacy `harness-pi-ai` aliases.
 
 ## [2026.7.25] - 2026-07-25
 

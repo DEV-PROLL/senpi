@@ -6,9 +6,17 @@
 
 ### Added
 
+- Added Claude Opus 5 support on Amazon Bedrock and generated Opus 5 adaptive-thinking metadata across Anthropic-compatible catalogs ([#7081](https://github.com/earendil-works/pi/pull/7081), [#7083](https://github.com/earendil-works/pi/pull/7083)).
+
 ### Changed
 
+- Added ETag metadata to cached remote model catalogs so callers can revalidate them without full downloads.
+
 ### Fixed
+
+- Fixed Radius OAuth token refreshes to route through the configured gateway.
+- Fixed `ModelsError` wrapping to preserve the original cause for provider/auth failures.
+- Fixed Claude Opus 5 to use adaptive thinking and native `xhigh`/`max` effort mapping instead of the legacy thinking payload.
 
 ### Removed
 
