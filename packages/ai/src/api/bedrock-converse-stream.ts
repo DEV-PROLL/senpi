@@ -598,17 +598,36 @@ function supportsAdaptiveThinking(modelId: string, modelName?: string): boolean 
 			s.includes("opus-4-6") ||
 			s.includes("opus-4-7") ||
 			s.includes("opus-4-8") ||
+			s.includes("opus-5") ||
 			s.includes("sonnet-4-6") ||
 			s.includes("sonnet-5") ||
-			s.includes("fable-5"),
+			s.includes("fable-5") ||
+			s.includes("mythos-5"),
 	);
 }
 
 function supportsNativeXhighEffort(model: Model<"bedrock-converse-stream">): boolean {
 	const candidates = getModelMatchCandidates(model.id, model.name);
 	return candidates.some(
-		(s) => s.includes("opus-4-7") || s.includes("opus-4-8") || s.includes("sonnet-5") || s.includes("fable-5"),
+		(s) =>
+			s.includes("opus-4-7") ||
+			s.includes("opus-4-8") ||
+			s.includes("opus-5") ||
+			s.includes("sonnet-5") ||
+			s.includes("fable-5") ||
+			s.includes("mythos-5"),
 	);
+}
+
+/**
+ * True when the family rejects `thinking: {type: "disabled"}` (verified 400 on the Messages API).
+ * Checked by family marker as well as catalog metadata, because application inference profiles and
+ * custom rows carry neither a thinking level map nor generated compat.
+ */
+function rejectsDisabledThinking(model: Model<"bedrock-converse-stream">): boolean {
+	if (model.thinkingLevelMap?.off === null) return true;
+	const candidates = getModelMatchCandidates(model.id, model.name);
+	return candidates.some((s) => s.includes("fable-5") || s.includes("mythos-5"));
 }
 
 function mapThinkingLevelToEffort(
@@ -620,9 +639,6 @@ function mapThinkingLevelToEffort(
 	const mapped = level ? model.thinkingLevelMap?.[level] : undefined;
 	if (typeof mapped === "string") return mapped as "low" | "medium" | "high" | "xhigh" | "max";
 
-	const candidates = getModelMatchCandidates(model.id, model.name);
-	const isOpus47 = candidates.some((s) => s.includes("opus-4-7") || s.includes("opus-4.7"));
-	const isOpus46 = candidates.some((s) => s.includes("opus-4-6") || s.includes("opus-4.6"));
 	switch (level) {
 		case "minimal":
 		case "low":
@@ -631,13 +647,12 @@ function mapThinkingLevelToEffort(
 			return "medium";
 		case "high":
 			return "high";
+		// Only reached for adaptive Claude families (see buildAdditionalModelRequestFields), and the
+		// native-xhigh tier is resolved above, so the extended levels floor at the adaptive top tier
+		// (`max`) instead of silently degrading to `high`.
 		case "xhigh":
-			if (isOpus47) return "xhigh";
-			if (isOpus46) return "max";
-			return "high";
 		case "max":
-			if (isOpus47 || isOpus46) return "max";
-			return "high";
+			return "max";
 		default:
 			return "high";
 	}
@@ -1054,8 +1069,21 @@ function buildAdditionalModelRequestFields(
 	model: Model<"bedrock-converse-stream">,
 	options: BedrockOptions,
 ): Record<string, any> | undefined {
-	if (!options.reasoning || !model.reasoning) {
+	if (!model.reasoning) {
 		return undefined;
+	}
+
+	if (!options.reasoning) {
+		// Adaptive Claude families default to adaptive thinking when no thinking field reaches the
+		// model, so omitting the config silently bills reasoning for a thinking-off turn. Budget-based
+		// Claude only reasons when a budget is supplied, so those keep sending nothing.
+		if (!isAnthropicClaudeModel(model) || !supportsAdaptiveThinking(model.id, model.name)) {
+			return undefined;
+		}
+
+		// Families that reject `thinking.type: "disabled"` (Fable 5) get the cheapest effort pinned
+		// instead, because omitting the field entirely would fall back to adaptive thinking.
+		return rejectsDisabledThinking(model) ? { output_config: { effort: "low" } } : { thinking: { type: "disabled" } };
 	}
 
 	if (isAnthropicClaudeModel(model)) {

@@ -1,5 +1,24 @@
 # changes
 
+## Thinking-level tier detection for Claude 5 families and GPT-5.6 (2026-07-25)
+
+### What changed
+
+- `src/core/thinking-levels.ts`: `supportsXhigh` now recognizes `gpt-5.6`, `opus-5`, `sonnet-5` and
+  `fable-5`; `supportsMax` recognizes `opus-5`, `sonnet-5` and `fable-5`. These lists are the fallback
+  for models with no `thinkingLevelMap` (custom `models.json` entries and third-party gateways), so
+  those models previously could not reach the `xhigh` / `max` tiers in the level cycler even though
+  their provider accepts them. Bundled catalog models are unaffected because an explicit map wins.
+- This file is the coding-agent copy of the tier predicates; `packages/ai/src/models.ts` owns the
+  `pi-ai` copy and was updated in lockstep.
+
+### Why
+
+- `off` also became selectable for Claude Fable 5 in this change set: `packages/ai` now encodes
+  "cannot send `thinking.type: disabled`" as a compat fact rather than `thinkingLevelMap.off: null`,
+  and the Messages provider pins the cheapest effort for an off turn. The selector needed no change
+  for that - removing the `null` was enough.
+
 ## Session-owned compaction lifecycle (2026-07-23)
 
 ### What changed

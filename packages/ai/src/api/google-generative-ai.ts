@@ -11,6 +11,7 @@ import type {
 	AssistantMessage,
 	Context,
 	Model,
+	ModelThinkingLevel,
 	SimpleStreamOptions,
 	StreamFunction,
 	StreamOptions,
@@ -329,12 +330,19 @@ export const streamSimple: StreamFunction<"google-generative-ai", SimpleStreamOp
 	}
 
 	const base = buildBaseOptions(model, context, options, apiKey);
-	if (!options?.reasoning) {
+	// `reasoning` is typed as ThinkingLevel, but runtime callers can hand "off"
+	// through, and Gemini 3 maps null "off" so a post-clamp check cannot see it.
+	// Thinking-off takes the disabled wire form, never an enabled one.
+	if (!options?.reasoning || (options.reasoning as ModelThinkingLevel) === "off") {
 		return stream(model, context, { ...base, thinking: { enabled: false } } satisfies GoogleOptions);
 	}
 
 	const clampedReasoning = clampThinkingLevel(model, options.reasoning);
-	const effort = (clampedReasoning === "off" ? "high" : clampedReasoning) as ClampedThinkingLevel;
+	if (clampedReasoning === "off") {
+		// Only non-reasoning models clamp every request to "off".
+		return stream(model, context, { ...base, thinking: { enabled: false } } satisfies GoogleOptions);
+	}
+	const effort = clampedReasoning as ClampedThinkingLevel;
 	const googleModel = model as Model<"google-generative-ai">;
 
 	if (isGemini3ProModel(googleModel) || isGemini3FlashModel(googleModel) || isGemma4Model(googleModel)) {

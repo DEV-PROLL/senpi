@@ -168,7 +168,13 @@ export const streamSimple: StreamFunction<"azure-openai-responses", SimpleStream
 	const base = buildBaseOptions(model, context, options, apiKey);
 	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
 	const reasoningEffort =
-		clampedReasoning === "off" ? undefined : clampedReasoning === "max" ? "high" : clampedReasoning;
+		clampedReasoning === "off"
+			? undefined
+			: clampedReasoning === "max" && model.thinkingLevelMap?.max !== undefined
+				? "max"
+				: clampedReasoning === "max"
+					? "high"
+					: clampedReasoning;
 
 	return stream(model, context, {
 		...base,
@@ -274,6 +280,12 @@ function buildParams(
 		model.compat?.supportsOpenAIGrammarTools ?? false,
 	),
 ) {
+	const requestedReasoningEffort = options?.reasoningEffort ?? (options?.reasoningSummary ? "medium" : undefined);
+	const mappedReasoningEffort =
+		requestedReasoningEffort === undefined ? undefined : model.thinkingLevelMap?.[requestedReasoningEffort];
+	const reasoningEffort = mappedReasoningEffort === undefined ? requestedReasoningEffort : mappedReasoningEffort;
+	const reasoningRequested = reasoningEffort !== undefined && reasoningEffort !== null;
+	const reasoningUnavailable = reasoningEffort === null;
 	const messages = convertResponsesMessages(model, context, AZURE_TOOL_CALL_PROVIDERS, {
 		grammarToolInputProperties,
 	});
@@ -302,16 +314,13 @@ function buildParams(
 	}
 
 	if (model.reasoning) {
-		if (options?.reasoningEffort || options?.reasoningSummary) {
-			const effort = options?.reasoningEffort
-				? (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort)
-				: "medium";
+		if (reasoningRequested) {
 			params.reasoning = {
-				effort: effort as NonNullable<typeof params.reasoning>["effort"],
+				effort: reasoningEffort as NonNullable<typeof params.reasoning>["effort"],
 				summary: options?.reasoningSummary || "auto",
 			};
 			params.include = ["reasoning.encrypted_content"];
-		} else if (model.thinkingLevelMap?.off !== null) {
+		} else if (!reasoningUnavailable && model.thinkingLevelMap?.off !== null) {
 			params.reasoning = {
 				effort: (model.thinkingLevelMap?.off ?? "none") as NonNullable<typeof params.reasoning>["effort"],
 			};

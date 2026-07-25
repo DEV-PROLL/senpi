@@ -13,6 +13,7 @@ import type {
 	AssistantMessage,
 	Context,
 	Model,
+	ModelThinkingLevel,
 	ThinkingLevel as PiThinkingLevel,
 	ProviderEnv,
 	SimpleStreamOptions,
@@ -333,7 +334,10 @@ export const streamSimple: StreamFunction<"google-vertex", SimpleStreamOptions> 
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
 	const base = buildBaseOptions(model, context, options, undefined);
-	if (!options?.reasoning) {
+	// `reasoning` is typed as ThinkingLevel, but runtime callers can hand "off"
+	// through, and Gemini 3 maps null "off" so a post-clamp check cannot see it.
+	// Thinking-off takes the disabled wire form, never an enabled one.
+	if (!options?.reasoning || (options.reasoning as ModelThinkingLevel) === "off") {
 		return stream(model, context, {
 			...base,
 			thinking: { enabled: false },
@@ -341,7 +345,14 @@ export const streamSimple: StreamFunction<"google-vertex", SimpleStreamOptions> 
 	}
 
 	const clampedReasoning = clampThinkingLevel(model, options.reasoning);
-	const effort = (clampedReasoning === "off" ? "high" : clampedReasoning) as ClampedThinkingLevel;
+	if (clampedReasoning === "off") {
+		// Only non-reasoning models clamp every request to "off".
+		return stream(model, context, {
+			...base,
+			thinking: { enabled: false },
+		} satisfies GoogleVertexOptions);
+	}
+	const effort = clampedReasoning as ClampedThinkingLevel;
 
 	if (isGemini3ProModel(model) || isGemini3FlashModel(model)) {
 		return stream(model, context, {
