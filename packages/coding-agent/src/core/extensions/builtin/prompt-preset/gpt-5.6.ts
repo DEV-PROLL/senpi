@@ -75,22 +75,22 @@ export interface Gpt56ExecutionRule {
 }
 
 const EVAL_FIRST_ROUTING =
-	"EVERY step that needs more than one tool call is ONE code cell, NEVER a chain of single calls: before writing it, enumerate every read, search, symbol lookup, and command that step could need, and mark which of them are independent.";
+	"EVERY step whose calls can be planned up front is ONE code cell, NEVER a chain of single calls: before writing it, enumerate every read, search, symbol lookup, and command that step could need, and mark which of them are independent.";
 
 const PARALLEL_BATCHING =
 	"Dispatch every independent item of that plan inside the same cell AT ONCE - fan out with the runtime's parallel helper over files, directories, searches, symbols, and shell commands, as wide as the step allows - and keep sequential only the calls whose input is another call's result.";
 
 const OVER_CALL_BIAS =
-	"Bias hard toward over-calling in that one wide wave: pull in everything even loosely relevant now instead of serially later, and when uncertain whether a call is worth making, make it - an extra read inside a batched cell costs almost nothing, while acting on a stale assumption costs the whole turn.";
+	"Bias hard toward over-calling read-only work in that one wave: pull in everything even loosely relevant now instead of serially later, and when uncertain whether a read is worth making, make it - an extra read inside a batched cell costs almost nothing, while acting on a stale assumption costs the whole turn. Side-effecting or approval-gated calls never ride along.";
 
 const IN_KERNEL_REDUCTION =
-	"Write real code around those calls - comprehensions, filters, joins, ranking, dedup, aggregation - with per-item error handling so one failure degrades only its own item, and return the distilled facts the step needs instead of raw dumps.";
+	"Write real code around those calls - comprehensions, filters, joins, ranking, dedup, aggregation, each risky call guarded - and return the distilled facts the step needs instead of raw dumps.";
 
 const STAY_DIRECT_EXCEPTIONS =
 	"Call tools directly instead when one call is enough, the output is already small, each result decides the next call, semantic judgment sits between calls, or the action needs approval - and after two failed cell strategies for the same fact, or an empty or suspiciously narrow result, fall back to direct calls and one or two meaningful alternatives before concluding nothing exists.";
 
 const DELEGATION =
-	"When subagent or task tools are available, fan sizeable independent tracks out to them in one wave - each with its own deliverable, scope, and observable stop condition - and keep work you can finish in a few calls yourself.";
+	"When subagent or task tools are available, fan sizeable independent tracks out to them in one wave - each brief naming its deliverable, scope, observable stop condition, and the evidence it returns for you to verify - and keep work you can finish in a few calls yourself.";
 
 const TODO_GRANULARITY =
 	"Split the work to the finest actionable grain - one item per edit plus the check that proves it - and drive every transition the moment it happens: start it, complete it, append newly discovered steps, drop abandoned ones, never batch the updates.";

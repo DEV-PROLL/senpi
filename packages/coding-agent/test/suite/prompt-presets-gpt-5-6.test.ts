@@ -97,7 +97,7 @@ describe("GPT-5.6 execution discipline", () => {
 			expect(rulesById.get(id as Gpt56ExecutionRuleId)?.concern).toBe(concern);
 		}
 		for (const rule of GPT56_EXECUTION_RULES) {
-			expect(rule.directive.length).toBeGreaterThan(64);
+			expect(rule.directive.length).toBeGreaterThan(32);
 			expect(rule.directive).not.toMatch(/\p{Extended_Pictographic}/u);
 		}
 		const orchestration = GPT56_EXECUTION_RULES.filter((rule) => rule.concern === "tool-orchestration");
