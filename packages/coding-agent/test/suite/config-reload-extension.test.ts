@@ -368,6 +368,40 @@ describe("config reload builtin extension", () => {
 		expect(fixture.notifications.some((message) => message.includes("Config change rejected"))).toBe(true);
 	});
 
+	it("suppresses a routine external write when another registration watches the same settings file", async () => {
+		vi.useFakeTimers();
+		const fixture = await createFixture({ settingsContent: '{"theme":"dark","defaultModel":"m1"}\n' });
+		fixture.events.emit(CONFIG_WATCH_REGISTER, {
+			id: "external-settings",
+			displayName: "External settings watcher",
+			targets: [{ path: fixture.settingsPath, kind: "file" }],
+		});
+
+		writeFileSync(fixture.settingsPath, '{"theme":"dark","defaultModel":"m2"}\n');
+		await settleChange(fixture, fixture.agentDir, "settings.json");
+
+		expect(fixture.reload).not.toHaveBeenCalled();
+		expect(fixture.notifications).toEqual([]);
+	});
+
+	it("suppresses a self-write when another registration watches the same settings file", async () => {
+		vi.useFakeTimers();
+		const fixture = await createFixture();
+		fixture.events.emit(CONFIG_WATCH_REGISTER, {
+			id: "external-settings",
+			displayName: "External settings watcher",
+			targets: [{ path: fixture.settingsPath, kind: "file" }],
+		});
+		const writer = SettingsManager.create(fixture.harness.tempDir, fixture.agentDir, { projectTrusted: true });
+		writer.setTheme("light");
+		await writer.flush();
+
+		await settleChange(fixture, fixture.agentDir, "settings.json");
+
+		expect(fixture.reload).not.toHaveBeenCalled();
+		expect(fixture.notifications).toEqual([]);
+	});
+
 	it("rejects a registered target whose validator fails", async () => {
 		vi.useFakeTimers();
 		const fixture = await createFixture();

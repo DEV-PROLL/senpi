@@ -128,6 +128,9 @@ function formatEntry<Event extends ConfigReloadLogEvent>(
 		case "self_write_suppressed":
 			addSafePath(entry, (details as ConfigReloadLogDetails["self_write_suppressed"]).path);
 			break;
+		case "routine_settings_change_suppressed":
+			addSafePath(entry, (details as ConfigReloadLogDetails["routine_settings_change_suppressed"]).path);
+			break;
 		case "reload_requested": {
 			const eventDetails = details as ConfigReloadLogDetails["reload_requested"];
 			entry.reason = safeText(eventDetails.reason);

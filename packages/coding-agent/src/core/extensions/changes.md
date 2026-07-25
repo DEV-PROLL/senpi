@@ -5,8 +5,8 @@
 ### What changed
 
 - `builtin/config-reload/routine-settings.ts` (new): content-diff classification for watched `settings.json` paths. When a change's top-level key diff is limited to routine, live-applied keys (`defaultModel`, `defaultProvider`, `defaultThinkingLevel`, `lastChangelogVersion`), the change is suppressed before validation and never reaches the notify/reload flow. The extension keeps a per-path content snapshot as the diff base, refreshed on watcher rebuild and advanced on every observed settings change (including self-write-suppressed ones), so each event is classified against the previous event's content. Missing or unparseable content is never suppressed and falls through to the existing validator.
-- `builtin/config-reload/index.ts`: `processChange` applies `excludeRoutineOnlySettingsChanges` after `excludeSelfWrites`; `isSettingsPath`/`joinConfigDir` moved into the new module.
-- `test/suite/config-reload-extension.test.ts`: coverage for idle and busy-deferred routine-only suppression, non-routine/mixed reload preservation with diff-base freshness, consecutive routine writes, and unparseable fall-through.
+- `builtin/config-reload/index.ts`: `processChange` now resolves the self-write and routine-change exclusions once over the change's unique paths before `groupChangedPaths`, then groups the surviving paths for per-registration validation. Suppression state is per path, so classifying inside the registration loop double-processed a path watched by several registrations (external registrations may watch the agent dir; only `auth.json`, `sessions` and `logs` are restricted): the later group saw a consumed self-write marker and an already-advanced diff base and still notified and reloaded. `isSettingsPath`/`joinConfigDir` moved into the new module.
+- `test/suite/config-reload-extension.test.ts`: coverage for idle and busy-deferred routine-only suppression, non-routine/mixed reload preservation with diff-base freshness, consecutive routine writes, unparseable fall-through, and overlapping-registration suppression for both routine external writes and `SettingsManager` self-writes.
 
 ### Why
 

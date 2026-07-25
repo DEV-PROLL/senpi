@@ -236,43 +236,44 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 
 	const processChange = async (change: RealChange): Promise<void> => {
 		if (reloadInFlight || !currentContext) return;
-		const groups = groupChangedPaths(change.changedPaths, activeTargets);
+		// Suppression state (self-write consumption, routine-diff base) is per path,
+		// so it must be resolved before grouping: a path watched by several
+		// registrations would otherwise be classified once per group and reach the
+		// reload flow through the later group.
+		const watchedPaths = excludeSelfWrites(
+			change.changedPaths,
+			engine,
+			agentDir,
+			currentContext.cwd,
+			logger,
+			settingsContents,
+		);
+		const significantPaths = excludeRoutineOnlySettingsChanges(
+			watchedPaths,
+			settingsContents,
+			agentDir,
+			currentContext.cwd,
+			logger,
+		);
+		const groups = groupChangedPaths(significantPaths, activeTargets);
 		const rearmDirectoryWatch = change.created.some((path) =>
 			activeTargets.some((target) => target.rearmOnCreation === resolve(path)),
 		);
 		for (const [registrationId, paths] of groups) {
-			const watchedPaths = excludeSelfWrites(paths, engine, agentDir, currentContext.cwd, logger, settingsContents);
-			if (watchedPaths.length === 0) continue;
-
-			const significantPaths = excludeRoutineOnlySettingsChanges(
-				watchedPaths,
-				settingsContents,
-				agentDir,
-				currentContext.cwd,
-				logger,
-			);
-			if (significantPaths.length === 0) continue;
-
-			const errors = await validateChangedPaths(
-				registrationId,
-				significantPaths,
-				registrations,
-				agentDir,
-				currentContext.cwd,
-			);
+			const errors = await validateChangedPaths(registrationId, paths, registrations, agentDir, currentContext.cwd);
 			if (errors.length > 0) {
-				rejectChange(currentContext, registrationId, significantPaths, errors, logger, pi);
+				rejectChange(currentContext, registrationId, paths, errors, logger, pi);
 				continue;
 			}
 
-			addPending(pending, registrationId, significantPaths);
+			addPending(pending, registrationId, paths);
 			const deferred = !canRequestReload(currentContext);
 			pi.events.emit(CONFIG_WATCH_CHANGED, {
 				registrationId,
-				paths: [...significantPaths],
+				paths: [...paths],
 				deferred,
 			});
-			logger.info("change_detected", { registrationId, paths: significantPaths, deferred });
+			logger.info("change_detected", { registrationId, paths, deferred });
 		}
 		if (rearmDirectoryWatch) rebuildWatchers(currentContext);
 		await flushPending();
