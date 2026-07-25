@@ -75,7 +75,7 @@ export interface Gpt56ExecutionRule {
 }
 
 const EVAL_FIRST_ROUTING =
-	"EVERY step whose calls can be planned up front is ONE code cell, NEVER a chain of single calls: before writing it, enumerate every read, search, symbol lookup, and command that step could need, and mark which of them are independent.";
+	"WHEN a code-execution tool is available, EVERY multi-call step whose calls can be planned up front is ONE code cell, NEVER a chain of single calls: before writing it, enumerate every read, search, symbol lookup, and command that step could need, and mark which of them are independent.";
 
 const PARALLEL_BATCHING =
 	"Dispatch every independent item of that plan inside the same cell AT ONCE - fan out with the runtime's parallel helper over files, directories, searches, symbols, and shell commands, as wide as the step allows - and keep sequential only the calls whose input is another call's result.";
