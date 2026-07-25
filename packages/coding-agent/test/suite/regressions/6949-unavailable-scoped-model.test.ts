@@ -40,7 +40,7 @@ function createInteractiveContext(options: {
 }
 
 async function showModelsSelector(context: object): Promise<void> {
-	const show = Reflect.get(InteractiveMode.prototype, "showModelsSelector") as (this: object) => Promise<void>;
+	const show = Reflect.get(InteractiveMode.prototype, "showScopedModelsSelector") as (this: object) => Promise<void>;
 	await show.call(context);
 }
 
