@@ -126,6 +126,15 @@ export interface StreamOptions {
 	temperature?: number;
 	maxTokens?: number;
 	signal?: AbortSignal;
+	/**
+	 * Abort the request when the provider reports that a safety classifier
+	 * declined the requested model and a substitute model served the turn
+	 * instead (Anthropic `server-side-fallback-*` betas). The substitute's output
+	 * is billed but was never requested, so aborting keeps model selection with
+	 * the caller. Providers without server-side fallback ignore this.
+	 * Default: undefined (honor the substituted response).
+	 */
+	abortServerSideFallback?: boolean;
 	apiKey?: string;
 	/**
 	 * Preferred transport for providers that support multiple transports.

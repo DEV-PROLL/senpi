@@ -622,3 +622,20 @@
 ### Expected merge conflict zones
 
 - LOW: `src/types.ts` `ThinkingContent` interface.
+
+## Client abort on Anthropic server-side fallback receipts (2026-07-25)
+
+### What changed
+
+- `utils/server-fallback-receipt.ts`: new module parsing Anthropic's `fallback` content block and the `fallback_message` entry in `usage.iterations`, plus the refusal-shaped rewrite applied to an aborted turn.
+- `types.ts`: `StreamOptions.abortServerSideFallback` (opt-in), inherited by `SimpleStreamOptions` and `AnthropicOptions`; `api/simple-options.ts` forwards it through `buildBaseOptions`.
+- `api/anthropic-messages.ts`: a provider-local `AbortController`, merged with the caller signal through `combineAbortSignals`, is passed to the request and the SSE iterator. A receipt block or a `fallback_message` usage entry aborts it and finalizes the turn as `{stopReason:"error", stopDetails:{type:"refusal"}}` with empty content plus `server_fallback_aborted` and `billing_incomplete_after_client_abort` diagnostics. A caller abort is checked first and always wins.
+
+### Why the extension system couldn't handle this
+
+Detection has to happen inside the Anthropic SSE loop while the stream is still open; nothing outside the provider can stop reading a response mid-flight.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/anthropic-messages.ts` streaming event loop and request-option construction.
+- LOW: `types.ts` `StreamOptions`, `api/simple-options.ts` `buildBaseOptions` field list, `index.ts` export list.
