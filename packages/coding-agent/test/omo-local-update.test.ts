@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { delimiter, join, relative, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
 	classifyDirt,
@@ -11,6 +11,7 @@ import {
 	type OmoLocalRun,
 	OmoLocalSyncError,
 	type OmoLocalUpdateStamp,
+	omoLocalUpdateLockPath,
 	omoLocalUpdateStampPath,
 	readStamp,
 	runOmoLocalUpdateBeta,
@@ -29,6 +30,7 @@ import {
 	dirtyRenameAcrossSets,
 	dirtySource,
 	divergeLocalDev,
+	FIXTURE_PLUGIN_ARTIFACTS,
 } from "./omo-local-update-fixture.ts";
 
 // Git determinism: isolate every git invocation in this file (test-side AND
@@ -734,5 +736,505 @@ describe("syncToOriginDev", () => {
 		expect(report.backupPushed).toBe(true);
 		expect(headSha(fixture.repoRoot)).toBe(targetSha);
 		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+	});
+});
+
+function makeSpyRun(): { calls: string[][]; run: OmoLocalRun } {
+	const calls: string[][] = [];
+	return {
+		calls,
+		run: (command, args, options) => {
+			calls.push([command, ...args]);
+			return defaultRun(command, args, options);
+		},
+	};
+}
+
+/**
+ * Executable `bun` stand-in for orchestrator tests: `bun install` succeeds quietly;
+ * `bun run build:senpi-plugin` runs the fixture's real stub build. FAKE_BUN_BUILD_FAIL
+ * makes the build exit 1 after writing artifacts; FAKE_BUN_SOURCE_LEFTOVER additionally
+ * drops a NEW source-path file (post-failure SOURCE dirt).
+ */
+function installFakeBun(binDir: string): void {
+	mkdirSync(binDir, { recursive: true });
+	const script = [
+		"#!/bin/sh",
+		'if [ "$1" = "install" ]; then',
+		'  echo "fake bun install: ok"',
+		"  exit 0",
+		"fi",
+		'if [ "$1" = "run" ] && [ "$2" = "build:senpi-plugin" ]; then',
+		"  node scripts/build-senpi-plugin.mjs",
+		"  build_status=$?",
+		'  if [ -n "$FAKE_BUN_SOURCE_LEFTOVER" ]; then',
+		'    echo "leftover" > packages/omo-senpi/src/build-leftover.txt',
+		"  fi",
+		'  if [ -n "$FAKE_BUN_BUILD_FAIL" ]; then',
+		'    echo "// failed build leftover" >> packages/omo-senpi/plugin/extensions/omo.js',
+		'    echo "fake bun: simulated build failure" >&2',
+		"    exit 1",
+		"  fi",
+		"  exit $build_status",
+		"fi",
+		'echo "fake bun: unexpected argv: $*" >&2',
+		"exit 1",
+		"",
+	].join("\n");
+	const bunPath = join(binDir, "bun");
+	writeFileSync(bunPath, script);
+	chmodSync(bunPath, 0o755);
+}
+
+/** Prepend binDir to PATH; returns a restore function. */
+function withPrependedPath(binDir: string): () => void {
+	const originalPath = process.env.PATH;
+	process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
+	return () => {
+		if (originalPath === undefined) {
+			delete process.env.PATH;
+		} else {
+			process.env.PATH = originalPath;
+		}
+	};
+}
+
+describe("runOmoLocalUpdateBeta orchestrator", () => {
+	function makeAgentDir(root: string): string {
+		const agentDir = join(root, "agent");
+		mkdirSync(agentDir, { recursive: true });
+		return agentDir;
+	}
+
+	it("runs the full happy path: fetch, sync, bun install/build via the real run seam, stamp, notify", {
+		timeout: 60000,
+	}, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const binDir = join(root, "bin");
+		installFakeBun(binDir);
+		const restorePath = withPrependedPath(binDir);
+		const { calls, run } = makeSpyRun();
+		const { lines, log } = makeLogCollector();
+		try {
+			await expect(
+				runOmoLocalUpdateBeta({
+					env: {},
+					agentDir,
+					settings: { packages: [fixture.pluginPath] },
+					log,
+					run,
+				}),
+			).resolves.toBeUndefined();
+		} finally {
+			restorePath();
+		}
+		const targetSha = git(["rev-parse", "origin/dev"], fixture.repoRoot);
+		const short = targetSha.slice(0, 7);
+		// Green success line with the short sha + subject of the FROZEN commit.
+		expect(lines).toContain(
+			`Updated OMO local plugins (omo-senpi + senpi-task) to origin/dev @${short} - fixture: seed fake omo repo`,
+		);
+		// Dim progress lines for fetch/install/build.
+		expect(lines.some((line) => line.includes("Updating OMO local plugins: fetching origin/dev..."))).toBe(true);
+		expect(lines.some((line) => line.includes("Updating OMO local plugins: installing deps..."))).toBe(true);
+		expect(lines.some((line) => line.includes("Updating OMO local plugins: building plugin..."))).toBe(true);
+		// The REAL run seam received the exact bun argv.
+		expect(calls).toContainEqual(["bun", "install"]);
+		expect(calls).toContainEqual(["bun", "run", "build:senpi-plugin"]);
+		// The stub build wrote the full artifact set; the stamp records the post-build inventory.
+		for (const artifact of FIXTURE_PLUGIN_ARTIFACTS) {
+			expect(existsSync(join(fixture.pluginPath, artifact))).toBe(true);
+		}
+		const stamp = readStamp(agentDir);
+		expect(stamp?.repoRoot).toBe(fixture.repoRoot);
+		expect(stamp?.builtSha).toBe(targetSha);
+		expect(stamp?.artifacts).toEqual([...FIXTURE_PLUGIN_ARTIFACTS].sort());
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+		// Lock released by the finally.
+		expect(existsSync(omoLocalUpdateLockPath(agentDir))).toBe(false);
+	});
+
+	it("emits the detached-build success variant when local dev has diverged", { timeout: 60000 }, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const binDir = join(root, "bin");
+		installFakeBun(binDir);
+		const restorePath = withPrependedPath(binDir);
+		const { localSha, originSha } = divergeLocalDev(fixture.repoRoot);
+		const { lines, log } = makeLogCollector();
+		try {
+			await runOmoLocalUpdateBeta({
+				env: {},
+				agentDir,
+				settings: { packages: [fixture.pluginPath] },
+				log,
+				run: defaultRun,
+			});
+		} finally {
+			restorePath();
+		}
+		const short = originSha.slice(0, 7);
+		expect(
+			lines.some((line) => line.includes("local dev has commits not on origin/dev") && line.includes("detached")),
+		).toBe(true);
+		expect(lines).toContain(
+			`Built OMO local plugins (omo-senpi + senpi-task) from origin/dev @${short} - origin dev commit 2 (detached HEAD)`,
+		);
+		expect(headSha(fixture.repoRoot)).toBe(originSha);
+		expect(currentBranch(fixture.repoRoot)).toBeUndefined();
+		expect(git(["rev-parse", "dev"], fixture.repoRoot)).toBe(localSha);
+		expect(readStamp(agentDir)?.builtSha).toBe(originSha);
+	});
+
+	it("skips the rebuild on a second run, and declines the skip when a stamped skills file is deleted", {
+		timeout: 90000,
+	}, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const binDir = join(root, "bin");
+		installFakeBun(binDir);
+		const restorePath = withPrependedPath(binDir);
+		const { calls, run } = makeSpyRun();
+		const targetSha = git(["rev-parse", "origin/dev"], fixture.repoRoot);
+		const short = targetSha.slice(0, 7);
+		const base = { env: {}, agentDir, settings: { packages: [fixture.pluginPath] }, run };
+		try {
+			const first = makeLogCollector();
+			await runOmoLocalUpdateBeta({ ...base, log: first.log });
+			expect(first.lines.some((line) => line.includes("Updated OMO local plugins"))).toBe(true);
+
+			// Second run: dim skip line, and the skip touches NOTHING (no bun, no classify/sync git calls).
+			calls.length = 0;
+			const second = makeLogCollector();
+			await runOmoLocalUpdateBeta({ ...base, log: second.log });
+			expect(second.lines.some((line) => line.includes(`already at origin/dev @${short}`))).toBe(true);
+			expect(second.lines.some((line) => line.includes("Updated OMO local plugins"))).toBe(false);
+			expect(calls.some(([command]) => command === "bun")).toBe(false);
+			expect(
+				calls.some(([, ...args]) => args.includes("status") || args.includes("checkout") || args.includes("merge")),
+			).toBe(false);
+			expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+
+			// Deleting one stamped skills file declines the skip -> full rebuild.
+			const stampedSkill = join(fixture.pluginPath, "skills", "alpha", "SKILL.md");
+			expect(readStamp(agentDir)?.artifacts).toContain("skills/alpha/SKILL.md");
+			rmSync(stampedSkill);
+			calls.length = 0;
+			const third = makeLogCollector();
+			await runOmoLocalUpdateBeta({ ...base, log: third.log });
+			expect(third.lines.some((line) => line.includes("Updated OMO local plugins"))).toBe(true);
+			expect(calls).toContainEqual(["bun", "install"]);
+			expect(calls).toContainEqual(["bun", "run", "build:senpi-plugin"]);
+			expect(existsSync(stampedSkill)).toBe(true);
+		} finally {
+			restorePath();
+		}
+	});
+
+	it("rebuilds when force is set even with a matching stamp", { timeout: 90000 }, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const binDir = join(root, "bin");
+		installFakeBun(binDir);
+		const restorePath = withPrependedPath(binDir);
+		const { calls, run } = makeSpyRun();
+		const base = { env: {}, agentDir, settings: { packages: [fixture.pluginPath] }, run };
+		try {
+			const first = makeLogCollector();
+			await runOmoLocalUpdateBeta({ ...base, log: first.log });
+			expect(first.lines.some((line) => line.includes("Updated OMO local plugins"))).toBe(true);
+			calls.length = 0;
+			const second = makeLogCollector();
+			await runOmoLocalUpdateBeta({ ...base, force: true, log: second.log });
+			expect(second.lines.some((line) => line.includes("Updated OMO local plugins"))).toBe(true);
+			expect(second.lines.some((line) => line.includes("already at origin/dev"))).toBe(false);
+			expect(calls).toContainEqual(["bun", "install"]);
+			expect(calls).toContainEqual(["bun", "run", "build:senpi-plugin"]);
+		} finally {
+			restorePath();
+		}
+	});
+
+	it("warns once and skips when the bun binary is missing", { timeout: 60000 }, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const noBun: OmoLocalRun = async (command, args, runOptions) => {
+			if (command === "bun") {
+				throw Object.assign(new Error("spawn bun ENOENT"), { code: "ENOENT" });
+			}
+			return defaultRun(command, args, runOptions);
+		};
+		const { lines, log } = makeLogCollector();
+		await expect(
+			runOmoLocalUpdateBeta({
+				env: {},
+				agentDir,
+				settings: { packages: [fixture.pluginPath] },
+				log,
+				run: noBun,
+			}),
+		).resolves.toBeUndefined();
+		expect(lines.filter((line) => line.includes("bun is required"))).toHaveLength(1);
+		expect(lines.some((line) => line.includes("OMO local plugin update failed"))).toBe(false);
+		expect(lines.some((line) => line.includes("Updated OMO local plugins"))).toBe(false);
+		expect(readStamp(agentDir)).toBeUndefined();
+	});
+
+	it("reports a build failure (yellow line, dim output tail, manual hint), writes no stamp, never throws", {
+		timeout: 60000,
+	}, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const binDir = join(root, "bin");
+		installFakeBun(binDir);
+		const restorePath = withPrependedPath(binDir);
+		process.env.FAKE_BUN_BUILD_FAIL = "1";
+		const { lines, log } = makeLogCollector();
+		try {
+			await expect(
+				runOmoLocalUpdateBeta({
+					env: {},
+					agentDir,
+					settings: { packages: [fixture.pluginPath] },
+					log,
+					run: defaultRun,
+				}),
+			).resolves.toBeUndefined();
+		} finally {
+			restorePath();
+			delete process.env.FAKE_BUN_BUILD_FAIL;
+		}
+		expect(lines.some((line) => line.includes("OMO local plugin update failed (build):"))).toBe(true);
+		// The failed step's output tail is echoed (the stub wrote artifacts before exiting 1).
+		expect(lines.some((line) => line.includes("fixture build:senpi-plugin wrote"))).toBe(true);
+		expect(
+			lines.some((line) =>
+				line.includes(`git -C ${fixture.repoRoot} pull origin dev && bun install && bun run build:senpi-plugin`),
+			),
+		).toBe(true);
+		expect(lines.some((line) => line.includes("Updated OMO local plugins"))).toBe(false);
+		expect(readStamp(agentDir)).toBeUndefined();
+		expect(existsSync(omoLocalUpdateLockPath(agentDir))).toBe(false);
+		// No backup branch existed, so no restoration runs: the partial build state stays.
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toContain("packages/omo-senpi/plugin/extensions/omo.js");
+	});
+
+	it("restores prevRef and keeps the backup ref when the build fails after a source-dirt backup", {
+		timeout: 60000,
+	}, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const binDir = join(root, "bin");
+		installFakeBun(binDir);
+		const restorePath = withPrependedPath(binDir);
+		dirtySource(fixture.repoRoot);
+		process.env.FAKE_BUN_BUILD_FAIL = "1";
+		const targetSha = git(["rev-parse", "origin/dev"], fixture.repoRoot);
+		const { lines, log } = makeLogCollector();
+		try {
+			await runOmoLocalUpdateBeta({
+				env: {},
+				agentDir,
+				settings: { packages: [fixture.pluginPath] },
+				log,
+				run: defaultRun,
+			});
+		} finally {
+			restorePath();
+			delete process.env.FAKE_BUN_BUILD_FAIL;
+		}
+		expect(lines.some((line) => line.includes("OMO local plugin update failed (build):"))).toBe(true);
+		expect(lines.some((line) => line.includes("backed up to backup/senpi-update-"))).toBe(true);
+		// RESTORATION PROCEDURE ran: generated build leftovers discarded, prevRef checked out,
+		// worktree clean, backup ref retained, no stamp.
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+		expect(currentBranch(fixture.repoRoot)).toBe("dev");
+		expect(headSha(fixture.repoRoot)).toBe(targetSha);
+		expect(git(["branch", "--list", "backup/*"], fixture.repoRoot)).not.toBe("");
+		expect(readStamp(agentDir)).toBeUndefined();
+	});
+
+	it("preserves the worktree untouched and warns when post-failure SOURCE dirt blocks restoration", {
+		timeout: 60000,
+	}, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const binDir = join(root, "bin");
+		installFakeBun(binDir);
+		const restorePath = withPrependedPath(binDir);
+		dirtySource(fixture.repoRoot);
+		process.env.FAKE_BUN_BUILD_FAIL = "1";
+		process.env.FAKE_BUN_SOURCE_LEFTOVER = "1";
+		const { lines, log } = makeLogCollector();
+		try {
+			await runOmoLocalUpdateBeta({
+				env: {},
+				agentDir,
+				settings: { packages: [fixture.pluginPath] },
+				log,
+				run: defaultRun,
+			});
+		} finally {
+			restorePath();
+			delete process.env.FAKE_BUN_BUILD_FAIL;
+			delete process.env.FAKE_BUN_SOURCE_LEFTOVER;
+		}
+		// Restoration-failed warning (naming prevRef) comes BEFORE the failure warning.
+		const restoreIndex = lines.findIndex((line) => line.includes("could not restore dev"));
+		const failureIndex = lines.findIndex((line) => line.includes("OMO local plugin update failed (build):"));
+		expect(restoreIndex).toBeGreaterThanOrEqual(0);
+		expect(failureIndex).toBeGreaterThan(restoreIndex);
+		// Worktree preserved untouched: the new source-path file AND the generated leftovers
+		// are all still there; the backup ref is kept; no stamp.
+		expect(existsSync(join(fixture.repoRoot, "packages", "omo-senpi", "src", "build-leftover.txt"))).toBe(true);
+		const status = git(["status", "--porcelain"], fixture.repoRoot);
+		expect(status).toContain("build-leftover.txt");
+		expect(status).toContain("packages/omo-senpi/plugin/extensions/omo.js");
+		expect(git(["branch", "--list", "backup/*"], fixture.repoRoot)).not.toBe("");
+		expect(readStamp(agentDir)).toBeUndefined();
+	});
+
+	it("downgrades a fetch failure to a yellow warning and leaves the repo untouched", {
+		timeout: 60000,
+	}, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		git(["remote", "set-url", "origin", join(root, "does-not-exist.git")], fixture.repoRoot);
+		const headBefore = headSha(fixture.repoRoot);
+		const { lines, log } = makeLogCollector();
+		await expect(
+			runOmoLocalUpdateBeta({
+				env: {},
+				agentDir,
+				settings: { packages: [fixture.pluginPath] },
+				log,
+				run: defaultRun,
+			}),
+		).resolves.toBeUndefined();
+		expect(lines.some((line) => line.includes("OMO local plugin update failed (fetch):"))).toBe(true);
+		expect(lines.some((line) => line.includes(`git -C ${fixture.repoRoot} pull origin dev`))).toBe(true);
+		expect(headSha(fixture.repoRoot)).toBe(headBefore);
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+		expect(readStamp(agentDir)).toBeUndefined();
+		expect(existsSync(omoLocalUpdateLockPath(agentDir))).toBe(false);
+	});
+
+	it("allows exactly one of two simultaneous runs to proceed", { timeout: 90000 }, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const binDir = join(root, "bin");
+		installFakeBun(binDir);
+		const restorePath = withPrependedPath(binDir);
+		const { lines, log } = makeLogCollector();
+		const options = {
+			env: {},
+			agentDir,
+			settings: { packages: [fixture.pluginPath] },
+			log,
+			run: defaultRun,
+		};
+		try {
+			await expect(Promise.all([runOmoLocalUpdateBeta(options), runOmoLocalUpdateBeta(options)])).resolves.toEqual([
+				undefined,
+				undefined,
+			]);
+		} finally {
+			restorePath();
+		}
+		expect(lines.filter((line) => line.includes("Updated OMO local plugins"))).toHaveLength(1);
+		expect(lines.filter((line) => line.includes("already running (pid"))).toHaveLength(1);
+		expect(readStamp(agentDir)).toBeDefined();
+		expect(existsSync(omoLocalUpdateLockPath(agentDir))).toBe(false);
+	});
+
+	it("reclaims the lock from a dead pid and proceeds", { timeout: 60000 }, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const binDir = join(root, "bin");
+		installFakeBun(binDir);
+		const restorePath = withPrependedPath(binDir);
+		const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+		if (deadPid === undefined) throw new Error("expected a child pid");
+		writeFileSync(
+			omoLocalUpdateLockPath(agentDir),
+			JSON.stringify({ pid: deadPid, nonce: "stale", startedAt: "2020-01-01T00:00:00.000Z" }),
+		);
+		const { lines, log } = makeLogCollector();
+		try {
+			await runOmoLocalUpdateBeta({
+				env: {},
+				agentDir,
+				settings: { packages: [fixture.pluginPath] },
+				log,
+				run: defaultRun,
+			});
+		} finally {
+			restorePath();
+		}
+		expect(lines.some((line) => line.includes("Updated OMO local plugins"))).toBe(true);
+		expect(readStamp(agentDir)).toBeDefined();
+		expect(existsSync(omoLocalUpdateLockPath(agentDir))).toBe(false);
+	});
+
+	it("never takes over a live pid's lock, regardless of age", { timeout: 60000 }, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		writeFileSync(
+			omoLocalUpdateLockPath(agentDir),
+			JSON.stringify({ pid: process.pid, nonce: "someone-else", startedAt: "2020-01-01T00:00:00.000Z" }),
+		);
+		const { calls, run } = makeSpyRun();
+		const { lines, log } = makeLogCollector();
+		await runOmoLocalUpdateBeta({
+			env: {},
+			agentDir,
+			settings: { packages: [fixture.pluginPath] },
+			log,
+			run,
+		});
+		expect(lines.some((line) => line.includes(`already running (pid ${process.pid})`))).toBe(true);
+		// No fetch, no sync, no build - nothing but detection ran.
+		expect(calls.some(([, ...args]) => args.includes("fetch"))).toBe(false);
+		expect(calls.some(([command]) => command === "bun")).toBe(false);
+		expect(readStamp(agentDir)).toBeUndefined();
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+		// The other owner's lock is left in place.
+		expect(existsSync(omoLocalUpdateLockPath(agentDir))).toBe(true);
+	});
+
+	it("kill-switch run has zero fs/git side effects", { timeout: 60000 }, async () => {
+		const root = makeTempRoot();
+		const fixture = createOmoFixture(root);
+		const agentDir = makeAgentDir(root);
+		const headBefore = headSha(fixture.repoRoot);
+		const { calls, run } = makeSpyRun();
+		const { lines, log } = makeLogCollector();
+		await runOmoLocalUpdateBeta({
+			env: { SENPI_OMO_LOCAL_UPDATE: "0" },
+			agentDir,
+			settings: { packages: [fixture.pluginPath] },
+			log,
+			run,
+		});
+		expect(lines).toEqual([]);
+		expect(calls).toEqual([]);
+		expect(headSha(fixture.repoRoot)).toBe(headBefore);
+		expect(git(["status", "--porcelain"], fixture.repoRoot)).toBe("");
+		expect(readStamp(agentDir)).toBeUndefined();
+		expect(existsSync(omoLocalUpdateLockPath(agentDir))).toBe(false);
 	});
 });
