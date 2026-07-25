@@ -82,6 +82,106 @@ type OpenAICompletionsRequestParams = Omit<
 	providerOptions?: { gateway: Record<string, string[]> };
 };
 
+type ReasoningEffort = NonNullable<OpenAICompletionsOptions["reasoningEffort"]>;
+type ThinkingLevelMap = NonNullable<Model<"openai-completions">["thinkingLevelMap"]>;
+
+const KIMI_K3_THINKING_LEVEL_MAP = {
+	off: null,
+	minimal: null,
+	low: "low",
+	medium: null,
+	high: "high",
+	xhigh: null,
+	max: "max",
+} satisfies ThinkingLevelMap;
+
+const DEEPSEEK_THINKING_LEVEL_MAP = {
+	minimal: "high",
+	low: "high",
+	medium: "high",
+	high: "high",
+	xhigh: "max",
+	max: "max",
+} satisfies ThinkingLevelMap;
+
+const OPENROUTER_DEEPSEEK_THINKING_LEVEL_MAP = {
+	minimal: "high",
+	low: "high",
+	medium: "high",
+	high: "high",
+	xhigh: "high",
+	max: "high",
+} satisfies ThinkingLevelMap;
+
+const MIMO_THINKING_LEVEL_MAP = {
+	minimal: "low",
+	low: "low",
+	medium: "medium",
+	high: "high",
+	xhigh: "high",
+	max: null,
+} satisfies ThinkingLevelMap;
+
+const OLLAMA_THINKING_LEVEL_MAP = {
+	off: "none",
+	minimal: null,
+	low: "low",
+	medium: "medium",
+	high: "high",
+	xhigh: null,
+	max: "max",
+} satisfies ThinkingLevelMap;
+
+function getThinkingLevelMap(
+	model: Model<"openai-completions">,
+	compat: ResolvedOpenAICompletionsCompat,
+): ThinkingLevelMap | undefined {
+	if (model.thinkingLevelMap !== undefined) {
+		return model.thinkingLevelMap;
+	}
+
+	const id = model.id.toLowerCase();
+	const isKimiK3 = id === "k3" || id.startsWith("k3-") || /(?:^|[/:-])kimi-k3(?:$|[/.:_-])/.test(id);
+	const isDeepSeek = id.includes("deepseek");
+	const isMiMo = /\bmimo\b/.test(id);
+	const isGlm52 = /(?:^|[/:-])glm-5\.2(?:$|[/.:_-])/.test(id);
+
+	if (model.provider === "ollama") {
+		return OLLAMA_THINKING_LEVEL_MAP;
+	}
+	if (isKimiK3) {
+		return KIMI_K3_THINKING_LEVEL_MAP;
+	}
+	if (compat.thinkingFormat === "openrouter" && isDeepSeek) {
+		return OPENROUTER_DEEPSEEK_THINKING_LEVEL_MAP;
+	}
+	if ((compat.thinkingFormat === "openai" || compat.thinkingFormat === "openrouter") && isMiMo) {
+		return MIMO_THINKING_LEVEL_MAP;
+	}
+	if (isDeepSeek) {
+		return DEEPSEEK_THINKING_LEVEL_MAP;
+	}
+	if (isGlm52) {
+		if (compat.thinkingFormat === "zai") {
+			return DEEPSEEK_THINKING_LEVEL_MAP;
+		}
+		if (compat.thinkingFormat === "openrouter") {
+			return { xhigh: "xhigh" };
+		}
+		return { max: "max" };
+	}
+
+	return undefined;
+}
+
+function resolveReasoningEffort(
+	thinkingLevelMap: ThinkingLevelMap | undefined,
+	effort: ReasoningEffort,
+): string | undefined {
+	const mapped = thinkingLevelMap?.[effort];
+	return mapped === undefined ? effort : typeof mapped === "string" ? mapped : undefined;
+}
+
 /**
  * Check if conversation messages contain tool calls or tool results.
  * This is needed because Anthropic (via proxy) requires the tools param
@@ -677,13 +777,16 @@ export const streamSimple: StreamFunction<"openai-completions", SimpleStreamOpti
 	getClientApiKey(model.provider, options?.apiKey, options?.headers);
 
 	const base = buildBaseOptions(model, context, options, options?.apiKey);
-	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
+	const compat = getCompat(model);
+	const thinkingLevelMap = getThinkingLevelMap(model, compat);
+	const thinkingModel = thinkingLevelMap === model.thinkingLevelMap ? model : { ...model, thinkingLevelMap };
+	const clampedReasoning = options?.reasoning ? clampThinkingLevel(thinkingModel, options.reasoning) : undefined;
 	const reasoningEffort =
 		clampedReasoning === "off"
 			? undefined
-			: clampedReasoning === "max" && model.thinkingLevelMap?.max !== undefined
+			: clampedReasoning === "max" && thinkingLevelMap?.max !== undefined
 				? "max"
-				: clampMaxForOpenAI(clampedReasoning, supportsXhigh(model));
+				: clampMaxForOpenAI(clampedReasoning, supportsXhigh(thinkingModel));
 	const toolChoice = (options as OpenAICompletionsOptions | undefined)?.toolChoice;
 
 	return stream(model, context, {
@@ -755,6 +858,7 @@ function buildParams(
 		grammarToolInputProperties,
 	});
 	const cacheControl = getCompatCacheControl(compat, cacheRetention);
+	const thinkingLevelMap = getThinkingLevelMap(model, compat);
 
 	const params: OpenAICompletionsRequestParams = {
 		model: model.id,
@@ -816,9 +920,8 @@ function buildParams(
 		};
 		zaiParams.thinking = options?.reasoningEffort ? { type: "enabled", clear_thinking: false } : { type: "disabled" };
 		if (options?.reasoningEffort && compat.supportsReasoningEffort) {
-			const mappedEffort = model.thinkingLevelMap?.[options.reasoningEffort];
-			const effort = mappedEffort === undefined ? options.reasoningEffort : mappedEffort;
-			if (typeof effort === "string") {
+			const effort = resolveReasoningEffort(thinkingLevelMap, options.reasoningEffort);
+			if (effort !== undefined) {
 				zaiParams.reasoning_effort = effort;
 			}
 		}
@@ -838,23 +941,27 @@ function buildParams(
 		if (options?.reasoningEffort) {
 			params.thinking = { type: "enabled" };
 			if (compat.supportsReasoningEffort) {
-				params.reasoning_effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
+				const effort = resolveReasoningEffort(thinkingLevelMap, options.reasoningEffort);
+				if (effort !== undefined) {
+					params.reasoning_effort = effort;
+				}
 			}
-		} else if (compat.supportsDisabledThinking !== false && model.thinkingLevelMap?.off !== null) {
+		} else if (compat.supportsDisabledThinking !== false && thinkingLevelMap?.off !== null) {
 			params.thinking = { type: "disabled" };
 		}
 	} else if (compat.thinkingFormat === "openrouter" && model.reasoning) {
 		// OpenRouter normalizes reasoning across providers via a nested reasoning object.
 		const openRouterParams = params as typeof params & { reasoning?: { effort?: string } };
 		if (options?.reasoningEffort) {
-			openRouterParams.reasoning = {
-				effort: model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort,
-			};
-		} else if (model.thinkingLevelMap?.off !== null) {
-			openRouterParams.reasoning = { effort: model.thinkingLevelMap?.off ?? "none" };
+			const effort = resolveReasoningEffort(thinkingLevelMap, options.reasoningEffort);
+			if (effort !== undefined) {
+				openRouterParams.reasoning = { effort };
+			}
+		} else if (thinkingLevelMap?.off !== null) {
+			openRouterParams.reasoning = { effort: thinkingLevelMap?.off ?? "none" };
 		}
 	} else if (compat.thinkingFormat === "ant-ling" && model.reasoning && options?.reasoningEffort) {
-		const effort = model.thinkingLevelMap?.[options.reasoningEffort];
+		const effort = thinkingLevelMap?.[options.reasoningEffort];
 		if (typeof effort === "string") {
 			(params as typeof params & { reasoning?: { effort: string } }).reasoning = { effort };
 		}
@@ -865,19 +972,28 @@ function buildParams(
 		};
 		togetherParams.reasoning = { enabled: !!options?.reasoningEffort };
 		if (options?.reasoningEffort && compat.supportsReasoningEffort) {
-			togetherParams.reasoning_effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
+			const effort = resolveReasoningEffort(thinkingLevelMap, options.reasoningEffort);
+			if (effort !== undefined) {
+				togetherParams.reasoning_effort = effort;
+			}
 		}
 	} else if (compat.thinkingFormat === "string-thinking" && model.reasoning) {
 		if (options?.reasoningEffort) {
-			params.thinking = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
-		} else if (model.thinkingLevelMap?.off !== null) {
-			params.thinking = model.thinkingLevelMap?.off ?? "none";
+			const effort = resolveReasoningEffort(thinkingLevelMap, options.reasoningEffort);
+			if (effort !== undefined) {
+				params.thinking = effort;
+			}
+		} else if (thinkingLevelMap?.off !== null) {
+			params.thinking = thinkingLevelMap?.off ?? "none";
 		}
 	} else if (options?.reasoningEffort && model.reasoning && compat.supportsReasoningEffort) {
 		// OpenAI-style reasoning_effort
-		params.reasoning_effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
+		const effort = resolveReasoningEffort(thinkingLevelMap, options.reasoningEffort);
+		if (effort !== undefined) {
+			params.reasoning_effort = effort;
+		}
 	} else if (!options?.reasoningEffort && model.reasoning && compat.supportsReasoningEffort) {
-		const offValue = model.thinkingLevelMap?.off;
+		const offValue = thinkingLevelMap?.off;
 		if (typeof offValue === "string") {
 			params.reasoning_effort = offValue;
 		}
@@ -912,7 +1028,7 @@ function buildChatTemplateKwargs(
 	const kwargs: Record<string, ResolvedChatTemplateKwargValue> = {};
 
 	for (const [key, value] of Object.entries(compat.chatTemplateKwargs)) {
-		const resolved = resolveChatTemplateKwargValue(model, options, value);
+		const resolved = resolveChatTemplateKwargValue(model, options, compat, value);
 		if (resolved !== undefined) {
 			kwargs[key] = resolved;
 		}
@@ -924,6 +1040,7 @@ function buildChatTemplateKwargs(
 function resolveChatTemplateKwargValue(
 	model: Model<"openai-completions">,
 	options: OpenAICompletionsOptions | undefined,
+	compat: ResolvedOpenAICompletionsCompat,
 	value: ChatTemplateKwargValue,
 ): ResolvedChatTemplateKwargValue | undefined {
 	if (typeof value !== "object" || value === null) {
@@ -938,7 +1055,8 @@ function resolveChatTemplateKwargValue(
 		return !!reasoningEffort;
 	}
 
-	const mappedValue = reasoningEffort ? model.thinkingLevelMap?.[reasoningEffort] : model.thinkingLevelMap?.off;
+	const thinkingLevelMap = getThinkingLevelMap(model, compat);
+	const mappedValue = reasoningEffort ? thinkingLevelMap?.[reasoningEffort] : thinkingLevelMap?.off;
 	return mappedValue === undefined ? reasoningEffort : typeof mappedValue === "string" ? mappedValue : undefined;
 }
 

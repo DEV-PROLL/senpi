@@ -699,6 +699,7 @@ export function supportsXhigh<TApi extends Api>(model: Model<TApi>): boolean {
 		model.id.includes("gpt-5.3") ||
 		model.id.includes("gpt-5.4") ||
 		model.id.includes("gpt-5.5") ||
+		model.id.includes("gpt-5.6") ||
 		model.id.includes("deepseek-v4-pro") ||
 		model.id.includes("deepseek-v4-flash") ||
 		model.id.includes("opus-4-6") ||
@@ -706,7 +707,10 @@ export function supportsXhigh<TApi extends Api>(model: Model<TApi>): boolean {
 		model.id.includes("opus-4-7") ||
 		model.id.includes("opus-4.7") ||
 		model.id.includes("opus-4-8") ||
-		model.id.includes("opus-4.8")
+		model.id.includes("opus-4.8") ||
+		model.id.includes("opus-5") ||
+		model.id.includes("sonnet-5") ||
+		model.id.includes("fable-5")
 	);
 }
 

@@ -540,7 +540,16 @@ function buildRequestBody(
 		model.compat?.supportsOpenAIGrammarTools ?? false,
 	),
 ): RequestBody {
-	const reasoningRequested = options?.reasoningEffort !== undefined && options.reasoningEffort !== "none";
+	const requestedReasoningEffort = options?.reasoningEffort;
+	const mappedReasoningEffort =
+		requestedReasoningEffort === undefined
+			? undefined
+			: requestedReasoningEffort === "none"
+				? model.thinkingLevelMap?.off
+				: model.thinkingLevelMap?.[requestedReasoningEffort];
+	const reasoningEffort = mappedReasoningEffort === undefined ? requestedReasoningEffort : mappedReasoningEffort;
+	const reasoningRequested =
+		requestedReasoningEffort !== undefined && requestedReasoningEffort !== "none" && reasoningEffort !== null;
 	const supportsStrictMode = model.compat?.supportsStrictMode ?? true;
 	const supportsOpenAIGrammarTools = model.compat?.supportsOpenAIGrammarTools ?? false;
 	const toolPlacement = splitDeferredTools(context, model.compat?.supportsToolSearch ?? false);
@@ -586,17 +595,16 @@ function buildRequestBody(
 		});
 	}
 
-	if (options?.reasoningEffort !== undefined) {
-		const effort =
-			options.reasoningEffort === "none"
-				? (model.thinkingLevelMap?.off ?? "none")
-				: (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort);
-		if (effort !== null) {
-			body.reasoning = {
-				effort,
-				summary: options.reasoningSummary ?? "auto",
-			};
-		}
+	if (reasoningEffort !== undefined && reasoningEffort !== null) {
+		body.reasoning = {
+			effort: reasoningEffort,
+			summary: options?.reasoningSummary ?? "auto",
+		};
+	} else if (reasoningEffort === undefined && model.reasoning && model.thinkingLevelMap?.off !== null) {
+		body.reasoning = {
+			effort: model.thinkingLevelMap?.off ?? "none",
+			summary: options?.reasoningSummary ?? "auto",
+		};
 	}
 
 	applyExtraBody(body, options?.extraBody, OPENAI_RESPONSES_RESERVED_BODY_KEYS);

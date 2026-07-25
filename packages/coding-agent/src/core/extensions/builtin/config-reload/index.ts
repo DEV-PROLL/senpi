@@ -21,6 +21,13 @@ import {
 	matchesConfigWatchFilter,
 } from "./protocol.ts";
 import {
+	excludeRoutineOnlySettingsChanges,
+	isSettingsPath,
+	joinConfigDir,
+	refreshSettingsContentSnapshots,
+	updateSettingsContentSnapshot,
+} from "./routine-settings.ts";
+import {
 	ConfigReloadWatchEngine,
 	createFsWatchEventSource,
 	type RealChange,
@@ -143,6 +150,8 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 	const logger = options.logger ?? createConfigReloadLogger(agentDir);
 	const registrations = new Map<string, ConfigWatchRegistration>();
 	const rejectedRegistrations = new Map<string, string>();
+	/** Last-seen settings.json contents per path; the diff base for routine-key classification. */
+	const settingsContents = new Map<string, string>();
 	const eventUnsubscribes: Array<() => void> = [];
 	const pending = new Map<string, PendingChange>();
 	let engine: ConfigReloadWatchEngine | undefined;
@@ -227,34 +236,44 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 
 	const processChange = async (change: RealChange): Promise<void> => {
 		if (reloadInFlight || !currentContext) return;
-		const groups = groupChangedPaths(change.changedPaths, activeTargets);
+		// Suppression state (self-write consumption, routine-diff base) is per path,
+		// so it must be resolved before grouping: a path watched by several
+		// registrations would otherwise be classified once per group and reach the
+		// reload flow through the later group.
+		const watchedPaths = excludeSelfWrites(
+			change.changedPaths,
+			engine,
+			agentDir,
+			currentContext.cwd,
+			logger,
+			settingsContents,
+		);
+		const significantPaths = excludeRoutineOnlySettingsChanges(
+			watchedPaths,
+			settingsContents,
+			agentDir,
+			currentContext.cwd,
+			logger,
+		);
+		const groups = groupChangedPaths(significantPaths, activeTargets);
 		const rearmDirectoryWatch = change.created.some((path) =>
 			activeTargets.some((target) => target.rearmOnCreation === resolve(path)),
 		);
 		for (const [registrationId, paths] of groups) {
-			const watchedPaths = excludeSelfWrites(paths, engine, agentDir, currentContext.cwd, logger);
-			if (watchedPaths.length === 0) continue;
-
-			const errors = await validateChangedPaths(
-				registrationId,
-				watchedPaths,
-				registrations,
-				agentDir,
-				currentContext.cwd,
-			);
+			const errors = await validateChangedPaths(registrationId, paths, registrations, agentDir, currentContext.cwd);
 			if (errors.length > 0) {
-				rejectChange(currentContext, registrationId, watchedPaths, errors, logger, pi);
+				rejectChange(currentContext, registrationId, paths, errors, logger, pi);
 				continue;
 			}
 
-			addPending(pending, registrationId, watchedPaths);
+			addPending(pending, registrationId, paths);
 			const deferred = !canRequestReload(currentContext);
 			pi.events.emit(CONFIG_WATCH_CHANGED, {
 				registrationId,
-				paths: [...watchedPaths],
+				paths: [...paths],
 				deferred,
 			});
-			logger.info("change_detected", { registrationId, paths: watchedPaths, deferred });
+			logger.info("change_detected", { registrationId, paths, deferred });
 		}
 		if (rearmDirectoryWatch) rebuildWatchers(currentContext);
 		await flushPending();
@@ -298,6 +317,7 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 				logger.error("watcher_error", { path, message: errorMessage(error) });
 			}),
 		});
+		refreshSettingsContentSnapshots(settingsContents, agentDir, ctx.cwd);
 		logger.info("watcher_started", { targetCount: activeTargets.length });
 		pi.events.emit(CONFIG_WATCH_READY, { enabled: true });
 	};
@@ -701,6 +721,7 @@ function excludeSelfWrites(
 	agentDir: string,
 	cwd: string,
 	logger: ConfigReloadLogger,
+	settingsContents: Map<string, string>,
 ): string[] {
 	const snapshot = engine?.getBaselineSnapshot();
 	return paths.filter((path) => {
@@ -708,6 +729,9 @@ function excludeSelfWrites(
 		const hash = snapshot?.get(path);
 		if (hash === undefined || !wasSelfWrite(path, hash)) return true;
 		logger.debug("self_write_suppressed", { path });
+		// Advance the routine-diff base so a later external change is not
+		// polluted by this session's own just-applied write.
+		updateSettingsContentSnapshot(settingsContents, path);
 		return false;
 	});
 }
@@ -838,17 +862,6 @@ function compareSnapshots(previous: ReadonlyMap<string, string>, next: ReadonlyM
 
 function uniquePaths(paths: readonly string[]): string[] {
 	return [...new Set(paths)].sort();
-}
-
-function joinConfigDir(cwd: string): string {
-	return resolve(cwd, CONFIG_DIR_NAME);
-}
-
-function isSettingsPath(path: string, agentDir: string, cwd: string): boolean {
-	return (
-		resolve(path) === resolve(agentDir, "settings.json") ||
-		resolve(path) === resolve(joinConfigDir(cwd), "settings.json")
-	);
 }
 
 function isWithin(path: string, root: string): boolean {
