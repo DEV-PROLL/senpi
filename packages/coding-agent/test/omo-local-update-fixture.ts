@@ -1,10 +1,19 @@
 /**
- * Fake omo repo factory for omo-local-update tests and QA.
+ * Fake omo repo factory for omo-local-update (v2) tests and QA.
  *
  * Builds a fully local git fixture (bare origin + clone) under a caller-provided
  * tmpDir: the clone carries a stub `build:senpi-plugin` script that writes the
  * FULL artifact completeness set, the three omo package manifests with their
  * real names, and seed source files - all committed on `dev` and pushed.
+ *
+ * The stub build is runnable BOTH via `bun run build:senpi-plugin` (through the
+ * root package.json script) and directly via `node scripts/build-senpi-plugin.mjs`,
+ * and writes every artifact relative to its CURRENT WORKING DIRECTORY, so the
+ * same committed script produces the artifact set in ANY worktree it is run from
+ * (the updater builds in its own persistent build worktree, never in the user's
+ * checkout). The stub embeds the tracked `packages/omo-senpi/build-marker.txt`
+ * content into `plugin/extensions/omo.js`, so a test can prove the installed
+ * plugin was built from a SPECIFIC origin/dev commit.
  *
  * Determinism contract: no network, everything under the passed tmpDir, and
  * every git invocation runs with GIT_CONFIG_GLOBAL pointed at an empty file,
@@ -16,7 +25,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export interface OmoFixture {
@@ -39,17 +48,26 @@ export const FIXTURE_PLUGIN_ARTIFACTS = [
 	"skills/beta/SKILL.md",
 ] as const;
 
-const GENERATED_OMO_JS = "packages/omo-senpi/plugin/extensions/omo.js";
 const SOURCE_INDEX_TS = "packages/omo-senpi/src/index.ts";
+const BUILD_MARKER = "packages/omo-senpi/build-marker.txt";
+const SENPI_TASK_INDEX_TS = "packages/senpi-task/src/index.ts";
 
-const BUILD_SCRIPT = `import { mkdirSync, writeFileSync } from "node:fs";
+/**
+ * Cwd-relative stub build: the updater runs `bun run build:senpi-plugin` with
+ * cwd = the build worktree, so basing every path on process.cwd() makes the
+ * same committed script correct in ANY worktree. The tracked build marker is
+ * embedded into extensions/omo.js so tests can assert WHICH origin/dev commit
+ * the installed plugin content was built from.
+ */
+const BUILD_SCRIPT = `import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const repoRoot = process.cwd();
 const pluginRoot = join(repoRoot, "packages", "omo-senpi", "plugin");
+const markerPath = join(repoRoot, "packages", "omo-senpi", "build-marker.txt");
+const marker = existsSync(markerPath) ? readFileSync(markerPath, "utf8").trim() : "none";
 const artifacts = {
-	"extensions/omo.js": "// omo extension bundle (fixture stub)\\nexport {};\\n",
+	"extensions/omo.js": "// omo extension bundle (fixture stub)\\n// marker: " + marker + "\\nexport {};\\n",
 	"runtime/lsp-daemon/dist/cli.js": "// lsp daemon cli (fixture stub)\\n",
 	"runtime/lsp-daemon/dist/index.js": "// lsp daemon index (fixture stub)\\n",
 	"runtime/lsp-daemon/dist/.omo-runtime-manifest.json": JSON.stringify({ fixture: true, schema: 1 }) + "\\n",
@@ -62,7 +80,7 @@ for (const [relativePath, content] of Object.entries(artifacts)) {
 	mkdirSync(dirname(target), { recursive: true });
 	writeFileSync(target, content);
 }
-console.log("fixture build:senpi-plugin wrote " + Object.keys(artifacts).length + " artifacts");
+console.log("fixture build:senpi-plugin wrote " + Object.keys(artifacts).length + " artifacts (marker: " + marker + ")");
 `;
 
 function gitDirFor(anchorDir: string): string {
@@ -120,8 +138,9 @@ function writeSeedJson(repoRoot: string, relativePath: string, value: Record<str
 
 /**
  * Build the fake omo repo: bare origin + clone, stub build writing the full
- * artifact completeness set, all three omo package manifests, committed on
- * `dev` and pushed, origin URL set to the local bare path.
+ * artifact completeness set (cwd-relative, runnable via bun AND node), all
+ * three omo package manifests, committed on `dev` and pushed, origin URL set
+ * to the local bare path.
  */
 export function createOmoFixture(tmpDir: string): OmoFixture {
 	mkdirSync(tmpDir, { recursive: true });
@@ -159,7 +178,8 @@ export function createOmoFixture(tmpDir: string): OmoFixture {
 		version: "0.0.0",
 	});
 	writeSeedFile(repoRoot, SOURCE_INDEX_TS, "// omo-senpi fixture source\nexport {};\n");
-	writeSeedFile(repoRoot, "packages/senpi-task/src/index.ts", "// senpi-task fixture source\nexport {};\n");
+	writeSeedFile(repoRoot, SENPI_TASK_INDEX_TS, "// senpi-task fixture source\nexport {};\n");
+	writeSeedFile(repoRoot, BUILD_MARKER, "marker-1\n");
 
 	// Run the stub build once so the generated artifacts are TRACKED (matching
 	// the real omo checkout, where plugin/extensions/omo.js etc. are committed).
@@ -176,50 +196,46 @@ export function createOmoFixture(tmpDir: string): OmoFixture {
 	return { repoRoot, originDir, pluginPath };
 }
 
-/** Modify a tracked SOURCE-set file (outside every generated prefix). */
+/** Modify a tracked SOURCE file (outside the plugin dir). Returns the relative path. */
 export function dirtySource(repoRoot: string): string {
 	appendFileSync(join(repoRoot, SOURCE_INDEX_TS), "// fixture source dirt\n");
 	return SOURCE_INDEX_TS;
 }
 
-/** Modify a tracked GENERATED-set file (under plugin/extensions/). */
-export function dirtyGenerated(repoRoot: string): string {
-	appendFileSync(join(repoRoot, GENERATED_OMO_JS), "// fixture generated dirt\n");
-	return GENERATED_OMO_JS;
+/** Create an UNTRACKED file outside the plugin dir. Returns the relative path. */
+export function dirtyUntracked(repoRoot: string): string {
+	const relativePath = "packages/omo-senpi/src/local-notes.txt";
+	writeSeedFile(repoRoot, relativePath, "// untracked local notes (fixture)\n");
+	return relativePath;
 }
 
-/**
- * `git mv` a generated file to a source path, producing a porcelain rename
- * whose halves straddle the GENERATED/SOURCE boundary.
- */
-export function dirtyRenameAcrossSets(repoRoot: string): { from: string; to: string } {
-	const from = "packages/omo-senpi/plugin/skills/alpha/SKILL.md";
-	const to = "packages/omo-senpi/src/alpha-skill.md";
-	runGit(["mv", from, to], repoRoot, ensureConfig(repoRoot));
-	return { from, to };
-}
-
-function commitOnLocalDev(repoRoot: string, label: string): string {
-	const configPath = ensureConfig(repoRoot);
-	const n = Number(runGit(["rev-list", "--count", "HEAD"], repoRoot, configPath)) + 1;
-	writeSeedFile(repoRoot, `local-dev-${n}.txt`, `${label} ${n}\n`);
-	runGit(["add", "-A"], repoRoot, configPath);
-	runGit(["commit", "-m", `${label} ${n}`], repoRoot, configPath);
-	return runGit(["rev-parse", "HEAD"], repoRoot, configPath);
-}
+export type OmoAdvanceTouch = "omo-senpi" | "senpi-task" | "other";
 
 /**
  * Advance origin/dev by committing in a second temporary clone of the bare
- * origin. Returns the new origin/dev sha. The fixture clone is NOT fetched.
+ * origin. `touch` selects WHERE the commit changes content:
+ * - "omo-senpi": rewrites packages/omo-senpi/build-marker.txt (moves the
+ *   omo-senpi tree AND the marker the stub build embeds into omo.js)
+ * - "senpi-task": appends to packages/senpi-task/src/index.ts (moves only
+ *   the senpi-task tree)
+ * - "other": adds a root-level file (moves neither package tree)
+ * Returns the new origin/dev sha. The fixture clone is NOT fetched.
  */
-export function advanceOriginDev(originDir: string): string {
+export function advanceOriginDev(options: { originDir: string; touch: OmoAdvanceTouch }): string {
+	const { originDir, touch } = options;
 	const configPath = ensureConfig(originDir);
 	const n = Number(runGit(["rev-list", "--count", "dev"], originDir, configPath)) + 1;
 	const workDir = join(dirname(originDir), "origin-advance-work");
 	rmSync(workDir, { recursive: true, force: true });
 	try {
 		runGit(["clone", originDir, workDir], dirname(originDir), configPath);
-		writeSeedFile(workDir, `origin-dev-${n}.txt`, `origin dev commit ${n}\n`);
+		if (touch === "omo-senpi") {
+			writeSeedFile(workDir, BUILD_MARKER, `marker-${n}\n`);
+		} else if (touch === "senpi-task") {
+			appendFileSync(join(workDir, SENPI_TASK_INDEX_TS), `// senpi-task change ${n}\n`);
+		} else {
+			writeSeedFile(workDir, `origin-dev-${n}.txt`, `origin dev commit ${n}\n`);
+		}
 		runGit(["add", "-A"], workDir, configPath);
 		runGit(["commit", "-m", `origin dev commit ${n}`], workDir, configPath);
 		runGit(["push", "origin", "dev"], workDir, configPath);
@@ -227,49 +243,4 @@ export function advanceOriginDev(originDir: string): string {
 	} finally {
 		rmSync(workDir, { recursive: true, force: true });
 	}
-}
-
-/** Commit on the fixture's local dev WITHOUT pushing (local-only commit). */
-export function advanceLocalDevOnly(repoRoot: string): string {
-	return commitOnLocalDev(repoRoot, "local dev commit");
-}
-
-/**
- * Commit locally on dev without pushing AND advance origin/dev, leaving the
- * two diverged (one commit each side after the fixture fetches).
- */
-export function divergeLocalDev(repoRoot: string): { localSha: string; originSha: string } {
-	const configPath = ensureConfig(repoRoot);
-	const localSha = commitOnLocalDev(repoRoot, "local dev commit");
-	const originDir = runGit(["remote", "get-url", "origin"], repoRoot, configPath);
-	const originSha = advanceOriginDev(originDir);
-	runGit(["fetch", "origin", "dev"], repoRoot, configPath);
-	return { localSha, originSha };
-}
-
-/** Check out a side branch and delete the local dev branch. */
-export function deleteLocalDev(repoRoot: string): void {
-	const configPath = ensureConfig(repoRoot);
-	runGit(["checkout", "-B", "fixture-side"], repoRoot, configPath);
-	runGit(["branch", "-D", "dev"], repoRoot, configPath);
-}
-
-/**
- * Install an executable pre-receive hook exiting 1 in the bare origin, so
- * pushes deterministically fail while fetches keep working.
- */
-export function blockPushes(originDir: string): void {
-	const hookPath = join(originDir, "hooks", "pre-receive");
-	writeFileSync(hookPath, "#!/bin/sh\nexit 1\n");
-	chmodSync(hookPath, 0o755);
-}
-
-/**
- * Install an executable pre-commit hook exiting 1 in the fixture clone, so
- * `git commit` deterministically fails (regardless of identity env).
- */
-export function blockCommits(repoRoot: string): void {
-	const hookPath = join(repoRoot, ".git", "hooks", "pre-commit");
-	writeFileSync(hookPath, "#!/bin/sh\nexit 1\n");
-	chmodSync(hookPath, 0o755);
 }
