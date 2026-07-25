@@ -222,7 +222,20 @@ const FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 const COMPUTER_USE_BETA_PREFIX = "computer-use-";
 const NATIVE_COMPUTER_TOOL_TYPE = "computer_20250124";
-const ADAPTIVE_THINKING_MODEL_MARKERS = ["opus-4-6", "opus-4-7", "sonnet-4-6"] as const;
+const ADAPTIVE_THINKING_MODEL_MARKERS = [
+	"opus-4-6",
+	"opus-4-7",
+	"opus-4-8",
+	"opus-5",
+	"sonnet-4-6",
+	"sonnet-5",
+	"fable-5",
+] as const;
+/**
+ * Adaptive families that expose the real `xhigh` effort tier. Everything else on the
+ * adaptive ladder tops out at `max` (Opus/Sonnet 4.6 are four-tier: low/medium/high/max).
+ */
+const NATIVE_XHIGH_EFFORT_MODEL_MARKERS = ["opus-4-7", "opus-4-8", "opus-5", "sonnet-5", "fable-5"] as const;
 const CLAUDE_FABLE_OR_MYTHOS_MODEL_ID = /^claude-(?:fable|mythos)(?:-|$)/i;
 const UNSUPPORTED_NATIVE_COMPUTER_TOOL_MODEL_MARKERS = [
 	"opus-4-6",
@@ -1300,12 +1313,8 @@ function matchesModelMarker(
 	return candidates.some((candidate) => markers.some((marker) => candidate.includes(marker)));
 }
 
-function isOpus46(model: Pick<Model<"anthropic-messages">, "id" | "name">): boolean {
-	return matchesModelMarker(model, ["opus-4-6"]);
-}
-
-function isOpus47(model: Pick<Model<"anthropic-messages">, "id" | "name">): boolean {
-	return matchesModelMarker(model, ["opus-4-7"]);
+function supportsNativeXhighEffort(model: Pick<Model<"anthropic-messages">, "id" | "name">): boolean {
+	return matchesModelMarker(model, NATIVE_XHIGH_EFFORT_MODEL_MARKERS);
 }
 
 function supportsAdaptiveThinking(model: Model<"anthropic-messages">): boolean {
@@ -1318,7 +1327,7 @@ function supportsAdaptiveThinking(model: Model<"anthropic-messages">): boolean {
 /**
  * Map ThinkingLevel to Anthropic effort levels for adaptive thinking.
  * Note: effort "max" is available on all adaptive-thinking Claude models, while native
- * "xhigh" is only available on Opus 4.7/4.8, Sonnet 5, and Fable 5.
+ * "xhigh" is only available on Opus 4.7/4.8, Opus 5, Sonnet 5, and Fable 5.
  */
 function mapThinkingLevelToEffort(
 	model: Model<"anthropic-messages">,
@@ -1336,12 +1345,11 @@ function mapThinkingLevelToEffort(
 		case "high":
 			return "high";
 		case "xhigh":
-			if (isOpus47(model)) return "xhigh";
-			if (isOpus46(model)) return "max";
-			return "high";
+			// Only called for adaptive models, so the floor is the adaptive ladder's top
+			// tier (`max`), never `high` — degrading xhigh to high silently under-thinks.
+			return supportsNativeXhighEffort(model) ? "xhigh" : "max";
 		case "max":
-			if (isOpus47(model) || isOpus46(model)) return "max";
-			return "high";
+			return "max";
 		default:
 			return "high";
 	}
@@ -1647,12 +1655,16 @@ function buildParams(
 					display,
 				} as MessageCreateParamsStreaming["thinking"];
 			}
-		} else if (
-			options?.thinkingEnabled === false &&
-			compat.supportsDisabledThinking &&
-			model.thinkingLevelMap?.off !== null
-		) {
-			params.thinking = { type: "disabled" };
+		} else if (options?.thinkingEnabled === false) {
+			if (compat.supportsDisabledThinking && model.thinkingLevelMap?.off !== null) {
+				params.thinking = { type: "disabled" };
+			} else if (supportsAdaptiveThinking(model)) {
+				// Adaptive-only Claude models (Fable 5) reject `thinking.type: "disabled"` with a
+				// 400 AND default to adaptive thinking when the field is absent, so omitting it
+				// silently bills full reasoning for a "thinking off" turn. Pin the cheapest
+				// effort instead: the request stays valid and reasoning stays minimal.
+				params.output_config = { effort: "low" } as NonNullable<MessageCreateParamsStreaming["output_config"]>;
+			}
 		}
 	}
 

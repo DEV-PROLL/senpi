@@ -301,3 +301,49 @@ describe("Application inference profile support", () => {
 		expect(payload.additionalModelRequestFields?.anthropic_beta).toEqual(["interleaved-thinking-2025-05-14"]);
 	});
 });
+
+describe("Bedrock adaptive thinking-off parity", () => {
+	function maplessSonnet46(): Model<"bedrock-converse-stream"> {
+		const base = getModel("amazon-bedrock", "anthropic.claude-sonnet-4-6") as Model<"bedrock-converse-stream">;
+		const { thinkingLevelMap: _thinkingLevelMap, ...rest } = base;
+		return rest as Model<"bedrock-converse-stream">;
+	}
+
+	it("disables thinking explicitly for an adaptive Claude family when reasoning is off", async () => {
+		const model = getModel("amazon-bedrock", "anthropic.claude-opus-4-8") as Model<"bedrock-converse-stream">;
+		const payload = await capturePayloadWithoutReasoning(model, makeContext());
+
+		expect(payload.additionalModelRequestFields?.thinking).toEqual({ type: "disabled" });
+		expect(payload.additionalModelRequestFields?.output_config).toBeUndefined();
+	});
+
+	it("pins effort low for a Claude family that rejects disabled thinking when reasoning is off", async () => {
+		const model = getModel("amazon-bedrock", "anthropic.claude-fable-5") as Model<"bedrock-converse-stream">;
+		const payload = await capturePayloadWithoutReasoning(model, makeContext());
+
+		expect(payload.additionalModelRequestFields?.thinking).toBeUndefined();
+		expect(payload.additionalModelRequestFields?.output_config).toEqual({ effort: "low" });
+	});
+
+	it("still sends no thinking config for a budget-based Claude when reasoning is off", async () => {
+		const model = getModel(
+			"amazon-bedrock",
+			"anthropic.claude-sonnet-4-5-20250929-v1:0",
+		) as Model<"bedrock-converse-stream">;
+		const payload = await capturePayloadWithoutReasoning(model, makeContext());
+
+		expect(payload.additionalModelRequestFields).toBeUndefined();
+	});
+
+	it("maps max to max for a map-less adaptive Sonnet 4.6", async () => {
+		const payload = await capturePayload(maplessSonnet46(), { reasoning: "max" });
+
+		expect(payload.additionalModelRequestFields?.output_config).toEqual({ effort: "max" });
+	});
+
+	it("maps xhigh down to max for a map-less adaptive Sonnet 4.6", async () => {
+		const payload = await capturePayload(maplessSonnet46(), { reasoning: "xhigh" });
+
+		expect(payload.additionalModelRequestFields?.output_config).toEqual({ effort: "max" });
+	});
+});

@@ -799,7 +799,17 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 		mergeThinkingLevelMap(model, { xhigh: "xhigh", max: "max" });
 	}
 	if (model.id.includes("fable-5")) {
-		mergeThinkingLevelMap(model, { off: null, xhigh: "xhigh", max: "max" });
+		mergeThinkingLevelMap(model, { xhigh: "xhigh", max: "max" });
+		if (model.api === "anthropic-messages") {
+			// Fable 5 rejects `thinking: {type: "disabled"}` (verified 400: `"thinking.type.disabled"
+			// is not supported for this model`) and defaults to adaptive thinking when the field is
+			// omitted, so the Messages provider pins the cheapest effort for a thinking-off turn.
+			// Encoding that as a compat fact instead of `thinkingLevelMap.off: null` keeps `off` a
+			// selectable level while still keeping `thinking.type: "disabled"` off the wire.
+			mergeAnthropicMessagesCompat(model, { supportsDisabledThinking: false });
+		} else {
+			mergeThinkingLevelMap(model, { off: null });
+		}
 	}
 	if (model.api === "anthropic-messages" && isAnthropicAdaptiveThinkingModel(model.id)) {
 		mergeAnthropicMessagesCompat(model, { forceAdaptiveThinking: true });

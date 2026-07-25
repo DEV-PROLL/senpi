@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getModel, getSupportedThinkingLevels } from "../src/compat.ts";
+import { getModel, getSupportedThinkingLevels, supportsXhigh } from "../src/compat.ts";
 
 describe("getSupportedThinkingLevels", () => {
 	it("includes max but not xhigh for Anthropic Opus 4.6 on anthropic-messages API", () => {
@@ -30,12 +30,14 @@ describe("getSupportedThinkingLevels", () => {
 		expect(getSupportedThinkingLevels(model!)).toContain("max");
 	});
 
-	it("includes xhigh and max but not off for Anthropic Claude Fable 5 on anthropic-messages API", () => {
+	it("includes off, xhigh and max for Anthropic Claude Fable 5 on anthropic-messages API", () => {
 		const model = getModel("anthropic", "claude-fable-5");
 		expect(model).toBeDefined();
 		expect(getSupportedThinkingLevels(model!)).toContain("xhigh");
 		expect(getSupportedThinkingLevels(model!)).toContain("max");
-		expect(getSupportedThinkingLevels(model!)).not.toContain("off");
+		// Fable 5 rejects `thinking.type: "disabled"`, but "off" is still a real user choice:
+		// the Messages provider pins the cheapest effort instead of sending a thinking block.
+		expect(getSupportedThinkingLevels(model!)).toContain("off");
 	});
 
 	it("does not include xhigh or max for Claude Sonnet 4.5", () => {
@@ -143,5 +145,27 @@ describe("getSupportedThinkingLevels", () => {
 		expect(getSupportedThinkingLevels(model!)).toContain("xhigh");
 		expect(getSupportedThinkingLevels(model!)).toContain("max");
 		expect(getSupportedThinkingLevels(model!)).not.toContain("off");
+	});
+});
+
+describe("supportsXhigh tier detection for map-less models", () => {
+	function maplessWithId(id: string) {
+		const base = getModel("anthropic", "claude-opus-4-8");
+		if (!base) throw new Error("fixture model missing");
+		const { thinkingLevelMap: _thinkingLevelMap, ...rest } = base;
+		return { ...rest, id };
+	}
+
+	it.each([
+		"claude-opus-5",
+		"claude-sonnet-5",
+		"claude-fable-5",
+		"gpt-5.6-sol",
+	])("detects the xhigh tier for map-less %s", (id) => {
+		expect(supportsXhigh(maplessWithId(id))).toBe(true);
+	});
+
+	it("still reports no xhigh tier for a map-less Sonnet 4.5", () => {
+		expect(supportsXhigh(maplessWithId("claude-sonnet-4-5"))).toBe(false);
 	});
 });

@@ -124,10 +124,24 @@ describe("Anthropic thinking disable payload", () => {
 		expect(payload.output_config).toBeUndefined();
 	});
 
-	it("omits thinking.type=disabled for Claude Fable 5 when thinking is off", async () => {
+	it("pins effort low without a thinking block for Claude Fable 5 when thinking is off", async () => {
 		const payload = await capturePayload(getModel("anthropic", "claude-fable-5"));
 
 		expect(payload.thinking).toBeUndefined();
+		expect(payload.output_config).toEqual({ effort: "low" });
+	});
+
+	it("sends thinking.type=disabled for Claude Opus 5 when thinking is off", async () => {
+		const payload = await capturePayload(getModel("anthropic", "claude-opus-5"));
+
+		expect(payload.thinking).toEqual({ type: "disabled" });
+		expect(payload.output_config).toBeUndefined();
+	});
+
+	it("sends thinking.type=disabled for Claude Sonnet 5 when thinking is off", async () => {
+		const payload = await capturePayload(getModel("anthropic", "claude-sonnet-5"));
+
+		expect(payload.thinking).toEqual({ type: "disabled" });
 		expect(payload.output_config).toBeUndefined();
 	});
 
