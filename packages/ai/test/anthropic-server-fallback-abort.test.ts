@@ -208,3 +208,80 @@ describe("Anthropic server-side fallback receipt abort", () => {
 		expect(result.diagnostics?.some((entry) => entry.type === "server_fallback_aborted")).not.toBe(true);
 	});
 });
+
+describe("Anthropic sticky-served fallback detection", () => {
+	const stickyIterations = [
+		{ type: "message", model: "claude-fable-5", input_tokens: 535, output_tokens: 0 },
+		{ type: "fallback_message", model: "claude-opus-4-8", input_tokens: 412, output_tokens: 264 },
+	];
+
+	it("aborts when message_start usage reports a fallback_message attempt", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const body = createChunkedSseResponse([
+			messageStart("claude-opus-4-8", { iterations: stickyIterations }),
+			...substituteOutputEvents,
+		]);
+
+		const result = await streamAnthropic(model, context, {
+			abortServerSideFallback: true,
+			client: createFakeAnthropicClient(body.response),
+		}).result();
+
+		expect(result.stopReason).toBe("error");
+		expect(result.stopDetails).toEqual({
+			type: "refusal",
+			explanation: "Server-side fallback (claude-fable-5 -> claude-opus-4-8) aborted by client policy",
+		});
+		expect(result.content).toEqual([]);
+		expect(JSON.stringify(result)).not.toContain(SUBSTITUTE_TEXT);
+		expect(body.chunksDelivered()).toBeLessThan(1 + substituteOutputEvents.length);
+	});
+
+	it("does not abort when every usage iteration is a normal attempt", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const body = createChunkedSseResponse([
+			messageStart("claude-fable-5", {
+				iterations: [{ type: "message", model: "claude-fable-5", input_tokens: 535, output_tokens: 264 }],
+			}),
+			...substituteOutputEvents,
+		]);
+
+		const result = await streamAnthropic(model, context, {
+			abortServerSideFallback: true,
+			client: createFakeAnthropicClient(body.response),
+		}).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(JSON.stringify(result.content)).toContain(SUBSTITUTE_TEXT);
+	});
+
+	it("does not abort on a canonicalized served-model string with no fallback iteration", async () => {
+		// Gateways and Bedrock-style endpoints rewrite the model id, so a bare
+		// model mismatch is not evidence of a fallback and must never abort.
+		const model = getModel("anthropic", "claude-fable-5");
+		const body = createChunkedSseResponse([messageStart("anthropic.claude-fable-5-v1:0"), ...substituteOutputEvents]);
+
+		const result = await streamAnthropic(model, context, {
+			abortServerSideFallback: true,
+			client: createFakeAnthropicClient(body.response),
+		}).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(JSON.stringify(result.content)).toContain(SUBSTITUTE_TEXT);
+	});
+
+	it("ignores a fallback_message attempt when the option is off", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const body = createChunkedSseResponse([
+			messageStart("claude-opus-4-8", { iterations: stickyIterations }),
+			...substituteOutputEvents,
+		]);
+
+		const result = await streamAnthropic(model, context, {
+			client: createFakeAnthropicClient(body.response),
+		}).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(JSON.stringify(result.content)).toContain(SUBSTITUTE_TEXT);
+	});
+});

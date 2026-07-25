@@ -42,6 +42,7 @@ import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import {
 	applyServerFallbackAbort,
 	parseServerFallbackReceipt,
+	parseStickyFallbackReceipt,
 	type ServerFallbackReceipt,
 } from "../utils/server-fallback-receipt.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
@@ -1033,7 +1034,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					throw error;
 				}
 			};
-			const { response } = await retryProviderRequest(
+			const { params: sentParams, response } = await retryProviderRequest(
 				async () => {
 					try {
 						return await createRequest();
@@ -1076,6 +1077,15 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					output.usage.totalTokens =
 						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 					calculateCost(model, output.usage);
+					const stickyReceipt =
+						options?.abortServerSideFallback === true
+							? parseStickyFallbackReceipt(event.message.usage, sentParams.model, event.message.model)
+							: undefined;
+					if (stickyReceipt !== undefined) {
+						serverFallbackReceipt = stickyReceipt;
+						serverFallbackAbort.abort();
+						break;
+					}
 				} else if (event.type === "content_block_start") {
 					const receipt =
 						options?.abortServerSideFallback === true

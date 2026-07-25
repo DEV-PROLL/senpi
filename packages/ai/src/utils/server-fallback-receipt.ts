@@ -30,6 +30,29 @@ export function parseServerFallbackReceipt(block: unknown): ServerFallbackReceip
 	return from !== undefined && to !== undefined ? { from, to } : undefined;
 }
 
+/**
+ * Sticky routing serves later turns of a fallen-back conversation from the
+ * substitute model with no `fallback` block at all; a `fallback_message` entry
+ * in `usage.iterations` is the documented signal. A served-model string
+ * comparison is deliberately NOT used: gateways and Bedrock-style endpoints
+ * rewrite model ids, so a mismatch is not evidence of a fallback.
+ */
+export function parseStickyFallbackReceipt(
+	usage: unknown,
+	requestedModel: string,
+	servedModel?: string,
+): ServerFallbackReceipt | undefined {
+	if (!isRecord(usage) || !Array.isArray(usage.iterations)) return undefined;
+	for (let index = usage.iterations.length - 1; index >= 0; index--) {
+		const entry: unknown = usage.iterations[index];
+		if (!isRecord(entry) || entry.type !== "fallback_message") continue;
+		const entryModel = typeof entry.model === "string" && entry.model.length > 0 ? entry.model : undefined;
+		const to = entryModel ?? servedModel;
+		return to !== undefined ? { from: requestedModel, to } : undefined;
+	}
+	return undefined;
+}
+
 export function serverFallbackRefusalExplanation(receipt: ServerFallbackReceipt): string {
 	return `Server-side fallback (${receipt.from} -> ${receipt.to}) aborted by client policy`;
 }
