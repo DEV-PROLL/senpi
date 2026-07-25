@@ -373,4 +373,16 @@ describe("Bedrock Opus 5 and custom Fable thinking parity", () => {
 		expect(payload.additionalModelRequestFields?.thinking).toBeUndefined();
 		expect(payload.additionalModelRequestFields?.output_config).toEqual({ effort: "low" });
 	});
+
+	it("pins effort low for a Bedrock Mythos model with no catalog metadata", async () => {
+		const base = getModel("amazon-bedrock", "anthropic.claude-fable-5") as Model<"bedrock-converse-stream">;
+		const { thinkingLevelMap: _thinkingLevelMap, ...rest } = base;
+		const custom = { ...rest, id: "anthropic.claude-mythos-5", name: "Claude Mythos 5" } as Model<
+			"bedrock-converse-stream"
+		>;
+		const payload = await capturePayloadWithoutReasoning(custom, makeContext());
+
+		expect(payload.additionalModelRequestFields?.thinking).toBeUndefined();
+		expect(payload.additionalModelRequestFields?.output_config).toEqual({ effort: "low" });
+	});
 });

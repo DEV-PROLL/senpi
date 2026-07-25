@@ -149,6 +149,23 @@ describe("Anthropic thinking disable payload", () => {
 		expect(payload.output_config).toEqual({ effort: "low" });
 	});
 
+	it("pins effort low for a custom Mythos model with no catalog metadata", async () => {
+		const base = getModel("anthropic", "claude-fable-5") as Model<"anthropic-messages">;
+		const { thinkingLevelMap: _thinkingLevelMap, ...rest } = base;
+		// Same family as Fable 5, but no catalog row exists for it at all.
+		const custom: Model<"anthropic-messages"> = {
+			...rest,
+			id: "claude-mythos-5",
+			name: "Claude Mythos 5",
+			provider: "custom-gateway",
+			compat: {},
+		};
+		const payload = await capturePayload(custom);
+
+		expect(payload.thinking).toBeUndefined();
+		expect(payload.output_config).toEqual({ effort: "low" });
+	});
+
 	it("sends thinking.type=disabled for Claude Sonnet 5 when thinking is off", async () => {
 		const payload = await capturePayload(getModel("anthropic", "claude-sonnet-5"));
 

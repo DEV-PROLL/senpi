@@ -237,12 +237,20 @@ const ADAPTIVE_THINKING_MODEL_MARKERS = [
 	"sonnet-4-6",
 	"sonnet-5",
 	"fable-5",
+	"mythos-5",
 ] as const;
 /**
  * Adaptive families that expose the real `xhigh` effort tier. Everything else on the
  * adaptive ladder tops out at `max` (Opus/Sonnet 4.6 are four-tier: low/medium/high/max).
  */
-const NATIVE_XHIGH_EFFORT_MODEL_MARKERS = ["opus-4-7", "opus-4-8", "opus-5", "sonnet-5", "fable-5"] as const;
+const NATIVE_XHIGH_EFFORT_MODEL_MARKERS = [
+	"opus-4-7",
+	"opus-4-8",
+	"opus-5",
+	"sonnet-5",
+	"fable-5",
+	"mythos-5",
+] as const;
 /**
  * Adaptive families that reject `thinking: {type: "disabled"}` outright (verified 400:
  * `"thinking.type.disabled" is not supported for this model`). The generated catalog also encodes
@@ -1714,9 +1722,7 @@ function buildParams(
 				// "thinking off" turn. The API exposes no true off switch here, so pin the cheapest
 				// effort: the request stays valid and reasoning stays at the documented minimum.
 				if (supportsAdaptiveThinking(model)) {
-					params.output_config = { effort: "low" } as NonNullable<
-						MessageCreateParamsStreaming["output_config"]
-					>;
+					params.output_config = { effort: "low" } as NonNullable<MessageCreateParamsStreaming["output_config"]>;
 				}
 			} else {
 				params.thinking = { type: "disabled" };

@@ -601,7 +601,8 @@ function supportsAdaptiveThinking(modelId: string, modelName?: string): boolean 
 			s.includes("opus-5") ||
 			s.includes("sonnet-4-6") ||
 			s.includes("sonnet-5") ||
-			s.includes("fable-5"),
+			s.includes("fable-5") ||
+			s.includes("mythos-5"),
 	);
 }
 
@@ -613,7 +614,8 @@ function supportsNativeXhighEffort(model: Model<"bedrock-converse-stream">): boo
 			s.includes("opus-4-8") ||
 			s.includes("opus-5") ||
 			s.includes("sonnet-5") ||
-			s.includes("fable-5"),
+			s.includes("fable-5") ||
+			s.includes("mythos-5"),
 	);
 }
 
@@ -1081,9 +1083,7 @@ function buildAdditionalModelRequestFields(
 
 		// Families that reject `thinking.type: "disabled"` (Fable 5) get the cheapest effort pinned
 		// instead, because omitting the field entirely would fall back to adaptive thinking.
-		return rejectsDisabledThinking(model)
-			? { output_config: { effort: "low" } }
-			: { thinking: { type: "disabled" } };
+		return rejectsDisabledThinking(model) ? { output_config: { effort: "low" } } : { thinking: { type: "disabled" } };
 	}
 
 	if (isAnthropicClaudeModel(model)) {
