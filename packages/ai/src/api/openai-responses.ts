@@ -333,7 +333,11 @@ export const streamSimple: StreamFunction<"openai-responses", SimpleStreamOption
 	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
 	const reasoningEffort =
-		clampedReasoning === "off" ? undefined : clampMaxForOpenAI(clampedReasoning, supportsXhigh(model));
+		clampedReasoning === "off"
+			? undefined
+			: clampedReasoning === "max" && model.thinkingLevelMap?.max !== undefined
+				? "max"
+				: clampMaxForOpenAI(clampedReasoning, supportsXhigh(model));
 
 	return stream(model, context, {
 		...base,
@@ -395,7 +399,12 @@ function buildParams(
 	),
 ) {
 	const toolPlacement = splitDeferredTools(context, compat.supportsToolSearch);
-	const reasoningRequested = options?.reasoningEffort !== undefined || !!options?.reasoningSummary;
+	const requestedReasoningEffort = options?.reasoningEffort ?? (options?.reasoningSummary ? "medium" : undefined);
+	const mappedReasoningEffort =
+		requestedReasoningEffort === undefined ? undefined : model.thinkingLevelMap?.[requestedReasoningEffort];
+	const reasoningEffort = mappedReasoningEffort === undefined ? requestedReasoningEffort : mappedReasoningEffort;
+	const reasoningRequested = reasoningEffort !== undefined && reasoningEffort !== null;
+	const reasoningUnavailable = reasoningEffort === null;
 	const messages = convertResponsesMessages(model, context, OPENAI_TOOL_CALL_PROVIDERS, {
 		preserveThinking: reasoningRequested,
 		grammarToolInputProperties,
@@ -443,15 +452,12 @@ function buildParams(
 
 	if (model.reasoning) {
 		if (reasoningRequested) {
-			const effort = options?.reasoningEffort
-				? (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort)
-				: "medium";
 			params.reasoning = {
-				effort: effort as NonNullable<typeof params.reasoning>["effort"],
+				effort: reasoningEffort as NonNullable<typeof params.reasoning>["effort"],
 				summary: options?.reasoningSummary || "auto",
 			};
 			params.include = ["reasoning.encrypted_content"];
-		} else if (model.provider !== "github-copilot" && model.thinkingLevelMap?.off !== null) {
+		} else if (!reasoningUnavailable && model.provider !== "github-copilot" && model.thinkingLevelMap?.off !== null) {
 			params.reasoning = {
 				effort: (model.thinkingLevelMap?.off ?? "none") as NonNullable<typeof params.reasoning>["effort"],
 			};
