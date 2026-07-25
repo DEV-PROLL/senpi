@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Fixed npm installs on non-Linux x64 platforms by keeping platform-constrained native packages out of bundled dependencies ([#343](https://github.com/code-yeongyu/senpi/pull/343) by [@realsigridjin](https://github.com/realsigridjin)).
+
 ### Removed
 
 ## [2026.7.24] - 2026-07-24
