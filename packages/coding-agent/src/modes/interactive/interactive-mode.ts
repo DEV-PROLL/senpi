@@ -3698,6 +3698,14 @@ export class InteractiveMode {
 				this.setExtensionStatus(FALLBACK_STATUS_KEY, undefined);
 				break;
 
+			case "server_fallback_aborted":
+				this.showWarning(
+					event.chainConfigured
+						? `Server fallback ${event.from} -> ${event.to} aborted; retrying on your fallback chain`
+						: `Server fallback ${event.from} -> ${event.to} aborted; no chain configured (set one with /fallback)`,
+				);
+				break;
+
 			case "auto_retry_start": {
 				// During retry waits, isStreaming flips false between attempts. The main Esc handler
 				// keys off both isStreaming and retryAttempt so we keep the same close-out path here;

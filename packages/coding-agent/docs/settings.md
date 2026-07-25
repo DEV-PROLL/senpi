@@ -209,6 +209,7 @@ Set `PI_SKIP_VERSION_CHECK=1` to disable the senpi version update check. Use `--
 | `retry.modelFallback` | boolean | `true` | Let eligible retry failures advance through configured per-model fallback chains |
 | `retry.fallbackChains` | `Record<string, string[]>` | `{}` | Ordered exact model-selector to fallback-selector chains |
 | `retry.fallbackRevertPolicy` | `"cooldown-expiry"` \| `"never"` | `"cooldown-expiry"` | Automatic primary-model restoration policy |
+| `retry.abortServerSideFallback` | boolean | `true` | Abort a turn when the provider substitutes a different model after a classifier decline |
 | `retry.provider.timeoutMs` | number | `300000` | Provider/SDK request timeout and stream idle timeout in milliseconds |
 | `retry.provider.maxRetries` | number | `0` | Provider/SDK retry attempts |
 | `retry.provider.maxRetryDelayMs` | number | `60000` | Max server-requested delay before failing (60s) |
@@ -259,6 +260,16 @@ A fallback entry with `:thinking-level` requests that level on the target model;
 With `retry.enabled` and `retry.modelFallback` enabled, Senpi can switch from a transient or eligible hard provider failure to the next configured candidate. The switch continues the current turn without changing the existing conversation prefix, preserving prompt-cache inputs; fallback lifecycle events are never added to model context. Returning to a primary model happens only at a turn boundary, never while a response is streaming.
 
 Anthropic streaming refusals are identified from typed `stopDetails`. A configured candidate receives an immediate **pinned** fallback switch with a user-visible fallback notice: Senpi does not retry the refusing model and a pinned fallback never auto-reverts. Set `retry.fallbackRevertPolicy` to `"cooldown-expiry"` (the default) to return an unpinned fallback to its primary after the primary's cooldown expires, or `"never"` to keep the fallback until you change models.
+
+#### Provider-substituted models
+
+Anthropic's server-side fallback betas can retry a classifier-declined request on a substitute model *inside the same response*, marking the handoff with a `fallback` content block; a gateway may enable this on your behalf. Honoring that response means paying for a model you did not select, and after the first handoff Anthropic routes later turns of the conversation straight to the substitute with no marker at all — reported only as a `fallback_message` entry in `usage.iterations`.
+
+With `retry.abortServerSideFallback` enabled (the default), Senpi treats either signal as a decline: it aborts the request as soon as the signal arrives, discards the substitute's partial output, and re-enters the turn as a classifier refusal so your own `retry.fallbackChains` chooses the replacement model. The transcript shows `Server fallback <from> -> <to> aborted`, naming `/fallback` when no chain is configured for the current model.
+
+Two caveats. Aborting minimizes but cannot eliminate cost: output already streamed before the abort is billed, and because per-attempt usage never arrives on an aborted stream, the turn carries a `billing_incomplete_after_client_abort` diagnostic instead of a precise cost. A served-model string that merely differs from the requested one never triggers an abort, because gateways and Bedrock-style endpoints legitimately rewrite model ids.
+
+Set it to `false` to keep the substituted response instead. If a gateway in front of Senpi injects the fallback itself, disabling the injection there avoids launching the substitute at all and is cheaper than aborting it client-side.
 
 Fallback decisions are process-local. A `senpi-task` or subagent child process reads its own settings and maintains its own in-memory suppression state; it does not affect its parent process. Disable fallback for one run without changing settings with `--no-model-fallback` or `SENPI_NO_FALLBACK=1`.
 

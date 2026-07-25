@@ -1,5 +1,44 @@
 # changes.md — ai
 
+## Cover Claude Opus 5 in Anthropic adaptive-thinking metadata (2026-07-25)
+
+### What changed
+
+- `scripts/generate-models.ts`: `isAnthropicAdaptiveThinkingModel` and `isAnthropicTemperatureUnsupportedModel` now
+  match Opus 5 ids, and Opus 5 joins the native `xhigh`/`max` effort ladder alongside Opus 4.7/4.8 and Sonnet 5.
+- `src/api/anthropic-messages.ts`: `ADAPTIVE_THINKING_MODEL_MARKERS` gained `opus-4-8` and `opus-5`, and
+  `mapThinkingLevelToEffort` maps Opus 5 `xhigh`/`max` to native efforts instead of collapsing them to `high`.
+- `src/providers/data/*.json`: regenerated so every provider that serves Opus 5 (anthropic, github-copilot,
+  opencode, vercel-ai-gateway, openrouter, amazon-bedrock) carries `forceAdaptiveThinking`, `supportsTemperature:
+  false`, and the `xhigh`/`max` thinking level map.
+
+### Why
+
+- Opus 5 is adaptive-thinking only. Sending it the legacy `thinking: { type: "enabled", budget_tokens }` payload is
+  accepted by the API but produces a thinking block with no thinking text, so the model answers as if reasoning were
+  disabled. Measured against the live API: legacy payload returned 0 thinking characters, while
+  `thinking: { type: "adaptive" }` on the same prompt returned real thinking content.
+- Without markers or catalog metadata, `supportsAdaptiveThinking()` fell through to the legacy branch for every
+  provider whose Opus 5 entry had no `compat`, including proxy providers.
+- Opus 5 also honors native `xhigh` and `max` effort, and they scale reasoning materially (measured on one prompt:
+  high 849 thinking chars, xhigh 1123, max 3217). Mapping both down to `high` silently capped the model.
+
+### Why extension system couldn't handle this
+
+- Adaptive-thinking detection and effort mapping happen while building the Anthropic Messages payload inside
+  `packages/ai`, below any extension-visible surface, and the model catalog is generated build-time data.
+
+### Modified upstream files
+
+- `scripts/generate-models.ts`
+- `src/api/anthropic-messages.ts`
+- `src/providers/data/*.json`
+
+### Expected merge conflict zones
+
+- LOW: marker/predicate lists are append-only additions next to existing Opus/Sonnet entries.
+- MEDIUM: regenerated provider data files conflict textually whenever upstream regenerates the same catalogs.
+
 ## Carry non-enumerable context provenance through Responses conversion (2026-07-24)
 
 ### What changed
