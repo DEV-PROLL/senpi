@@ -10,12 +10,20 @@ import { join } from "node:path";
 import { findPackageDirectories } from "./package-workspaces.mjs";
 
 const GENERATED_PACKAGE_SUFFIXES = [join("coding-agent", "install-lock")];
+// Fork-specific: `@earendil-works/pi-storage-sqlite-node` follows upstream's independent
+// semver line (see scripts/publish.mjs), so it stays out of this fork's CalVer lockstep
+// validation and its dependency pins are left alone.
+const INDEPENDENT_VERSION_PACKAGE_NAMES = new Set(["@earendil-works/pi-storage-sqlite-node"]);
 
 function nextWorkspaceVersion(currentVersion, nextVersion) {
 	return currentVersion.startsWith("^") ? `^${nextVersion}` : nextVersion;
 }
 
 function synchronizedDependencyVersion(dependencyName, currentSpecifier, versionMap) {
+	// Fork-specific: `file:`, `link:`, `workspace:` and `npm:` specifiers point at a
+	// location rather than a published version, so rewriting them to a bare version
+	// breaks local installs (for example `packages/web-ui/example`).
+	if (currentSpecifier.includes(":")) return null;
 	const directVersion = versionMap.get(dependencyName);
 	return directVersion ? nextWorkspaceVersion(currentSpecifier, directVersion) : null;
 }
@@ -26,7 +34,8 @@ const workspacePackages = findPackageDirectories(packageRoot)
 	.map((directory) => {
 		const path = join(directory, "package.json");
 		return { data: JSON.parse(readFileSync(path, "utf8")), path };
-	});
+	})
+	.filter((pkg) => !INDEPENDENT_VERSION_PACKAGE_NAMES.has(pkg.data.name));
 const publishedPackages = workspacePackages.filter((pkg) => pkg.data.private !== true);
 const versionMap = new Map(workspacePackages.map((pkg) => [pkg.data.name, pkg.data.version]));
 
