@@ -73,4 +73,3 @@ Evidence files were written under:
 - `local-ignore/qa-evidence/20260725-upstream-v0821/`
 - `local-ignore/qa-evidence/20260725-upstream-agent-tui/`
 - `local-ignore/qa-evidence/20260725-mock-loop-text-leak-*`
-
