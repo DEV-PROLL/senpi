@@ -3,11 +3,13 @@
 //
 // Beta: on bare `senpi update`, compare a locally-installed OMO plugin (omo-senpi +
 // senpi-task) against origin/dev of its source checkout and replace the LOCAL PLUGIN
-// INSTALL only when different. The user's checkout receives ZERO git mutations: no
-// checkout/branch/commit/merge/reset/clean/stash/push anywhere in this module. The only
-// git writes are `git fetch origin dev` (read-only ref update) plus worktree add/remove on
-// the FEATURE-OWNED persistent build worktree under <agentDir>/omo-local-update/. Builds
-// run in that worktree; the install target (pluginPath) is swapped atomically by rename.
+// INSTALL only when different. The user's checkout receives ZERO git mutations: this module
+// never runs checkout/branch/commit/merge/reset/clean/stash/push against the user's repo.
+// Its only git writes are `git fetch origin dev` (remote-tracking ref update) plus
+// worktree add/remove/prune registering the FEATURE-OWNED persistent build worktree under
+// <agentDir>/omo-local-update/. `checkout --detach --force` is used exactly once and only
+// inside that feature-owned worktree, which this module creates and owns exclusively.
+// Builds run there; the install target (pluginPath) is swapped atomically by rename.
 //
 // Export policy: `runOmoLocalUpdateBeta` is the ONLY production API and the only symbol the
 // CLI may import. Every other export in this module is /** exported for tests only */ so the
@@ -456,8 +458,7 @@ function acquireOmoLocalLock(agentDir: string, log: (message: string) => void): 
 	}
 	const existing = readLockFile(path);
 	if (existing !== undefined && pidIsAlive(existing.pid)) {
-		log(chalk.dim(`OMO local plugin update already running (pid ${existing.pid}); skipping.`));
-		return undefined;
+		return reportBusy();
 	}
 	try {
 		rmSync(path);
