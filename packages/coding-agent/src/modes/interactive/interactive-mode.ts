@@ -47,6 +47,7 @@ import {
 	APP_TITLE,
 	CONFIG_DIR_NAME,
 	expandTildePath,
+	getAgentDir,
 	getAuthPath,
 	getDebugLogPath,
 	getDocsPath,
@@ -84,8 +85,10 @@ import {
 	defaultModelPerProvider,
 	findExactModelReferenceMatch,
 	resolveModelScope,
+	resolveModelScopeWithDiagnostics,
 	type ScopedModel,
 } from "../../core/model-resolver.ts";
+import { DefaultPackageManager } from "../../core/package-manager.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
@@ -135,6 +138,7 @@ import {
 	formatAuthSelectorProviderType,
 	OAuthSelectorComponent,
 } from "./components/oauth-selector.ts";
+import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.ts";
@@ -1115,7 +1119,21 @@ export class InteractiveMode {
 	}
 
 	private async checkForPackageUpdates(): Promise<string[]> {
-		return [];
+		if (process.env.PI_OFFLINE) {
+			return [];
+		}
+
+		try {
+			const packageManager = new DefaultPackageManager({
+				cwd: this.sessionManager.getCwd(),
+				agentDir: getAgentDir(),
+				settingsManager: this.settingsManager,
+			});
+			const updates = await packageManager.checkForAvailableUpdates();
+			return updates.map((update) => update.displayName);
+		} catch {
+			return [];
+		}
 	}
 
 	private async checkTmuxKeyboardSetup(): Promise<string | undefined> {
@@ -3123,6 +3141,11 @@ export class InteractiveMode {
 			if (text === "/favorite-models") {
 				this.editor.setText("");
 				await this.showFavoriteModelsSelector();
+				return;
+			}
+			if (text === "/scoped-models") {
+				this.editor.setText("");
+				await this.showModelsSelector();
 				return;
 			}
 			if (text === "/model" || text.startsWith("/model ")) {
@@ -5225,6 +5248,96 @@ export class InteractiveMode {
 					},
 					onSelect: (model) => {
 						void this.selectModelFromUi(model, done);
+					},
+					onCancel: () => {
+						done();
+						this.ui.requestRender();
+					},
+				},
+			);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	private async showModelsSelector(): Promise<void> {
+		// Get all available models
+		await this.session.modelRuntime.refresh();
+		const allModels = [...(await this.session.modelRuntime.getAvailable())];
+		const allModelIds = new Set(allModels.map((model) => `${model.provider}/${model.id}`));
+		const configuredPatterns = this.settingsManager.getEnabledModels();
+		const sessionScopedModels = this.session.scopedModels;
+
+		if (allModels.length === 0 && !configuredPatterns?.length && sessionScopedModels.length === 0) {
+			this.showStatus("No models available");
+			return;
+		}
+
+		const configuredScope = configuredPatterns?.length
+			? await resolveModelScopeWithDiagnostics(configuredPatterns, this.session.modelRuntime)
+			: undefined;
+
+		// Check if session has scoped models (from previous session-only changes or CLI --models)
+		const hasSessionScope = sessionScopedModels.length > 0;
+
+		// Build enabled model IDs from session state or settings
+		let currentEnabledIds: string[] | null = null;
+
+		if (hasSessionScope) {
+			// Use current session's scoped models
+			currentEnabledIds = sessionScopedModels.map((scoped) => `${scoped.model.provider}/${scoped.model.id}`);
+		} else if (configuredScope) {
+			currentEnabledIds = configuredScope.scopedModels.map(
+				(scoped) => `${scoped.model.provider}/${scoped.model.id}`,
+			);
+		}
+
+		for (const diagnostic of configuredScope?.diagnostics ?? []) {
+			if (diagnostic.code !== "no-match") continue;
+			currentEnabledIds ??= [];
+			if (!currentEnabledIds.includes(diagnostic.pattern)) currentEnabledIds.push(diagnostic.pattern);
+		}
+
+		// Helper to update session's scoped models (session-only, no persist)
+		const updateSessionModels = async (enabledIds: string[] | null) => {
+			currentEnabledIds = enabledIds === null ? null : [...enabledIds];
+			const hasEnabledAvailableModel = enabledIds?.some((id) => allModelIds.has(id)) ?? false;
+			const allAvailableModelsEnabled =
+				enabledIds !== null && [...allModelIds].every((id) => enabledIds.includes(id));
+			if (enabledIds && hasEnabledAvailableModel && !allAvailableModelsEnabled) {
+				const newScopedModels = await resolveModelScope(enabledIds, this.session.modelRuntime);
+				this.session.setScopedModels(
+					newScopedModels.map((sm) => ({
+						model: sm.model,
+						thinkingLevel: sm.thinkingLevel,
+					})),
+				);
+			} else {
+				// All enabled or none enabled = no filter
+				this.session.setScopedModels([]);
+			}
+			await this.updateAvailableProviderCount();
+			this.ui.requestRender();
+		};
+
+		this.showSelector((done) => {
+			const selector = new ScopedModelsSelectorComponent(
+				{
+					allModels,
+					enabledModelIds: currentEnabledIds,
+				},
+				{
+					onChange: async (enabledIds) => {
+						await updateSessionModels(enabledIds);
+					},
+					onPersist: (enabledIds) => {
+						// Persist to settings
+						const allEnabled =
+							enabledIds !== null &&
+							enabledIds.length === allModels.length &&
+							enabledIds.every((id) => allModelIds.has(id));
+						const newPatterns = enabledIds === null || allEnabled ? undefined : enabledIds;
+						this.settingsManager.setEnabledModels(newPatterns ? [...newPatterns] : undefined);
+						this.showStatus("Model selection saved to settings");
 					},
 					onCancel: () => {
 						done();

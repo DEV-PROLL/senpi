@@ -267,6 +267,7 @@ export function parseModelPattern(
  */
 export interface ModelScopeDiagnostic {
 	type: "warning";
+	code: "no-match" | "invalid-thinking-level";
 	message: string;
 	pattern: string;
 }
@@ -316,7 +317,12 @@ export async function resolveModelScopeWithDiagnostics(
 			});
 
 			if (matchingModels.length === 0) {
-				diagnostics.push({ type: "warning", message: `No models match pattern "${pattern}"`, pattern });
+				diagnostics.push({
+					type: "warning",
+					code: "no-match",
+					message: `No models match pattern "${pattern}"`,
+					pattern,
+				});
 				continue;
 			}
 
@@ -331,11 +337,16 @@ export async function resolveModelScopeWithDiagnostics(
 		const { model, thinkingLevel, serviceTier, warning } = parseModelPattern(pattern, availableModels);
 
 		if (warning) {
-			diagnostics.push({ type: "warning", message: warning, pattern });
+			diagnostics.push({ type: "warning", code: "invalid-thinking-level", message: warning, pattern });
 		}
 
 		if (!model) {
-			diagnostics.push({ type: "warning", message: `No models match pattern "${pattern}"`, pattern });
+			diagnostics.push({
+				type: "warning",
+				code: "no-match",
+				message: `No models match pattern "${pattern}"`,
+				pattern,
+			});
 			continue;
 		}
 
