@@ -243,6 +243,13 @@ const ADAPTIVE_THINKING_MODEL_MARKERS = [
  * adaptive ladder tops out at `max` (Opus/Sonnet 4.6 are four-tier: low/medium/high/max).
  */
 const NATIVE_XHIGH_EFFORT_MODEL_MARKERS = ["opus-4-7", "opus-4-8", "opus-5", "sonnet-5", "fable-5"] as const;
+/**
+ * Adaptive families that reject `thinking: {type: "disabled"}` outright (verified 400:
+ * `"thinking.type.disabled" is not supported for this model`). The generated catalog also encodes
+ * this as `compat.supportsDisabledThinking: false`, but `models.json` entries and third-party
+ * gateway rows carry no generated compat, so the family fact has to live here as well.
+ */
+const DISABLED_THINKING_REJECTING_MODEL_MARKERS = ["fable-5", "mythos-5"] as const;
 const CLAUDE_FABLE_OR_MYTHOS_MODEL_ID = /^claude-(?:fable|mythos)(?:-|$)/i;
 const UNSUPPORTED_NATIVE_COMPUTER_TOOL_MODEL_MARKERS = [
 	"opus-4-6",
@@ -1352,6 +1359,16 @@ function supportsNativeXhighEffort(model: Pick<Model<"anthropic-messages">, "id"
 	return matchesModelMarker(model, NATIVE_XHIGH_EFFORT_MODEL_MARKERS);
 }
 
+/** True when the model cannot accept `thinking: {type: "disabled"}` on the wire. */
+function cannotDisableThinking(
+	model: Model<"anthropic-messages">,
+	compat: { supportsDisabledThinking: boolean },
+): boolean {
+	if (!compat.supportsDisabledThinking) return true;
+	if (model.thinkingLevelMap?.off === null) return true;
+	return matchesModelMarker(model, DISABLED_THINKING_REJECTING_MODEL_MARKERS);
+}
+
 function supportsAdaptiveThinking(model: Model<"anthropic-messages">): boolean {
 	if (model.compat?.forceAdaptiveThinking !== undefined) {
 		return model.compat.forceAdaptiveThinking;
@@ -1691,14 +1708,18 @@ function buildParams(
 				} as MessageCreateParamsStreaming["thinking"];
 			}
 		} else if (options?.thinkingEnabled === false) {
-			if (compat.supportsDisabledThinking && model.thinkingLevelMap?.off !== null) {
+			if (cannotDisableThinking(model, compat)) {
+				// These families reject `thinking.type: "disabled"` with a 400 AND default to adaptive
+				// thinking when the field is absent, so omitting it silently bills full reasoning for a
+				// "thinking off" turn. The API exposes no true off switch here, so pin the cheapest
+				// effort: the request stays valid and reasoning stays at the documented minimum.
+				if (supportsAdaptiveThinking(model)) {
+					params.output_config = { effort: "low" } as NonNullable<
+						MessageCreateParamsStreaming["output_config"]
+					>;
+				}
+			} else {
 				params.thinking = { type: "disabled" };
-			} else if (supportsAdaptiveThinking(model)) {
-				// Adaptive-only Claude models (Fable 5) reject `thinking.type: "disabled"` with a
-				// 400 AND default to adaptive thinking when the field is absent, so omitting it
-				// silently bills full reasoning for a "thinking off" turn. Pin the cheapest
-				// effort instead: the request stays valid and reasoning stays minimal.
-				params.output_config = { effort: "low" } as NonNullable<MessageCreateParamsStreaming["output_config"]>;
 			}
 		}
 	}

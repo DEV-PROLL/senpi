@@ -598,6 +598,7 @@ function supportsAdaptiveThinking(modelId: string, modelName?: string): boolean 
 			s.includes("opus-4-6") ||
 			s.includes("opus-4-7") ||
 			s.includes("opus-4-8") ||
+			s.includes("opus-5") ||
 			s.includes("sonnet-4-6") ||
 			s.includes("sonnet-5") ||
 			s.includes("fable-5"),
@@ -607,8 +608,24 @@ function supportsAdaptiveThinking(modelId: string, modelName?: string): boolean 
 function supportsNativeXhighEffort(model: Model<"bedrock-converse-stream">): boolean {
 	const candidates = getModelMatchCandidates(model.id, model.name);
 	return candidates.some(
-		(s) => s.includes("opus-4-7") || s.includes("opus-4-8") || s.includes("sonnet-5") || s.includes("fable-5"),
+		(s) =>
+			s.includes("opus-4-7") ||
+			s.includes("opus-4-8") ||
+			s.includes("opus-5") ||
+			s.includes("sonnet-5") ||
+			s.includes("fable-5"),
 	);
+}
+
+/**
+ * True when the family rejects `thinking: {type: "disabled"}` (verified 400 on the Messages API).
+ * Checked by family marker as well as catalog metadata, because application inference profiles and
+ * custom rows carry neither a thinking level map nor generated compat.
+ */
+function rejectsDisabledThinking(model: Model<"bedrock-converse-stream">): boolean {
+	if (model.thinkingLevelMap?.off === null) return true;
+	const candidates = getModelMatchCandidates(model.id, model.name);
+	return candidates.some((s) => s.includes("fable-5") || s.includes("mythos-5"));
 }
 
 function mapThinkingLevelToEffort(
@@ -1062,9 +1079,9 @@ function buildAdditionalModelRequestFields(
 			return undefined;
 		}
 
-		// `thinkingLevelMap.off === null` marks the families that reject `thinking.type: "disabled"`
-		// outright (Fable 5); pin the cheapest effort for them instead of sending nothing.
-		return model.thinkingLevelMap?.off === null
+		// Families that reject `thinking.type: "disabled"` (Fable 5) get the cheapest effort pinned
+		// instead, because omitting the field entirely would fall back to adaptive thinking.
+		return rejectsDisabledThinking(model)
 			? { output_config: { effort: "low" } }
 			: { thinking: { type: "disabled" } };
 	}

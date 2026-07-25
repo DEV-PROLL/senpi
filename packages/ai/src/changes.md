@@ -36,6 +36,16 @@ Wire truth was established by probing the live Anthropic Messages endpoint befor
   default. It now sends `thinking:{type:"disabled"}`, or `output_config:{effort:"low"}` for families
   that reject `disabled`; budget-based Claude still sends nothing (extended thinking is opt-in
   there). Its effort ladder got the same `xhigh`/`max` floor fix.
+- `api/anthropic-messages.ts`: the "cannot disable thinking" fact is owned by code as well as the
+  catalog (`DISABLED_THINKING_REJECTING_MODEL_MARKERS` + `cannotDisableThinking()`). `models.json`
+  entries and third-party gateway rows carry no generated compat, so a custom Fable/Mythos model
+  would otherwise take the `disabled` branch and get the probe-confirmed 400.
+- `api/bedrock-converse-stream.ts`: `supportsAdaptiveThinking` and `supportsNativeXhighEffort` now
+  include `opus-5`. Bedrock Opus 5 was classified as budget-based, so it sent
+  `thinking:{type:"enabled",budget_tokens}` instead of adaptive + `output_config.effort`, and a
+  thinking-off turn sent nothing at all and fell back to adaptive. It also gained the same
+  family-marker check so application inference profiles and custom Fable rows never receive
+  `disabled`.
 - `models.ts` `supportsXhigh`: recognizes `gpt-5.6`, `opus-5`, `sonnet-5` and `fable-5`.
 - `api/openai-completions.ts`: added the missing no-map fallback ladders (Kimi K3 `low/high/max`,
   DeepSeek and GLM 5.2 `high/max`, OpenRouter DeepSeek `high`-only, MiMo `minimal->low` /
@@ -57,6 +67,15 @@ Wire truth was established by probing the live Anthropic Messages endpoint befor
   the UI can offer off and the provider pins the cheapest effort. Bedrock/Converse Fable rows keep
   `off: null` unchanged. Regenerated data therefore differs only in those fable-5 rows (plus one
   incidental OpenRouter price refresh).
+
+### Known limitation (deliberate)
+
+For Fable 5 the API exposes **no** true off switch: `thinking.type: "disabled"` is rejected and an
+absent thinking field means adaptive. `off` therefore maps to the cheapest adaptive effort rather
+than zero reasoning. That is strictly better than the alternatives - before this change `off` was
+hidden and the level clamped to the lowest selectable tier, which produced the *same* wire effort
+while labelling it `minimal`. The level stays labelled `off` because it is the cheapest reasoning the
+model can be asked for, and no other senpi surface can promise more.
 
 ### Why extension system couldn't handle this
 

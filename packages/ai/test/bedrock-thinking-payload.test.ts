@@ -347,3 +347,30 @@ describe("Bedrock adaptive thinking-off parity", () => {
 		expect(payload.additionalModelRequestFields?.output_config).toEqual({ effort: "max" });
 	});
 });
+
+describe("Bedrock Opus 5 and custom Fable thinking parity", () => {
+	it("uses adaptive thinking with an effort for Bedrock Claude Opus 5", async () => {
+		const model = getModel("amazon-bedrock", "anthropic.claude-opus-5") as Model<"bedrock-converse-stream">;
+		const payload = await capturePayload(model, { reasoning: "xhigh" });
+
+		expect(payload.additionalModelRequestFields?.thinking).toEqual({ type: "adaptive", display: "summarized" });
+		expect(payload.additionalModelRequestFields?.output_config).toEqual({ effort: "xhigh" });
+	});
+
+	it("disables thinking explicitly for Bedrock Claude Opus 5 when reasoning is off", async () => {
+		const model = getModel("amazon-bedrock", "anthropic.claude-opus-5") as Model<"bedrock-converse-stream">;
+		const payload = await capturePayloadWithoutReasoning(model, makeContext());
+
+		expect(payload.additionalModelRequestFields?.thinking).toEqual({ type: "disabled" });
+	});
+
+	it("never sends thinking.type=disabled for a Bedrock Fable model with no catalog metadata", async () => {
+		const base = getModel("amazon-bedrock", "anthropic.claude-fable-5") as Model<"bedrock-converse-stream">;
+		const { thinkingLevelMap: _thinkingLevelMap, ...rest } = base;
+		const custom = rest as Model<"bedrock-converse-stream">;
+		const payload = await capturePayloadWithoutReasoning(custom, makeContext());
+
+		expect(payload.additionalModelRequestFields?.thinking).toBeUndefined();
+		expect(payload.additionalModelRequestFields?.output_config).toEqual({ effort: "low" });
+	});
+});

@@ -138,6 +138,17 @@ describe("Anthropic thinking disable payload", () => {
 		expect(payload.output_config).toBeUndefined();
 	});
 
+	it("never sends thinking.type=disabled for a custom Fable model with no catalog metadata", async () => {
+		const base = getModel("anthropic", "claude-fable-5") as Model<"anthropic-messages">;
+		const { thinkingLevelMap: _thinkingLevelMap, ...rest } = base;
+		// A models.json-defined entry carries no generated compat and no thinking level map.
+		const custom: Model<"anthropic-messages"> = { ...rest, provider: "custom-gateway", compat: {} };
+		const payload = await capturePayload(custom);
+
+		expect(payload.thinking).toBeUndefined();
+		expect(payload.output_config).toEqual({ effort: "low" });
+	});
+
 	it("sends thinking.type=disabled for Claude Sonnet 5 when thinking is off", async () => {
 		const payload = await capturePayload(getModel("anthropic", "claude-sonnet-5"));
 
