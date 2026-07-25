@@ -6,9 +6,18 @@
 
 ### Added
 
+- Added the beta omo local-update pipeline, including git sync, skip stamps, backup-branch dirt triage, and `senpi update` wiring.
+- Added `retry.abortServerSideFallback` support so server-side fallback receipts can abort sticky provider streams and continue through configured client fallback chains.
+
 ### Changed
 
+- Changed the GPT-5.6 prompt preset to use a smaller system prompt while preserving the `how does X work` routing exception.
+- Integrated upstream `v0.82.1`, including Claude Opus 5 support, ETag-backed remote model catalog revalidation, output padding for custom renderers, llama.cpp catalog persistence, and the private eval harness.
+
 ### Fixed
+
+- Fixed unavailable scoped models so `/scoped-models` displays entries missing from the current catalog and lets users remove them without editing settings manually.
+- Fixed websearch rendering to show the live search source and refresh native search routes.
 
 ### Removed
 

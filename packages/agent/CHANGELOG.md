@@ -6,6 +6,8 @@
 
 ### Added
 
+- Added agent-loop support for suppressing queued-message drain during server-side fallback abort recovery.
+
 ### Changed
 
 ### Fixed

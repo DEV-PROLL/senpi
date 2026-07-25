@@ -6,9 +6,13 @@
 
 ### Added
 
+- Added Anthropic server-side fallback receipt detection so sticky-served turns can be aborted and retried through client fallback chains.
+
 ### Changed
 
 ### Fixed
+
+- Fixed Claude Opus 5 catalog metadata to use Anthropic adaptive thinking and expose native `xhigh`/`max` effort where supported.
 
 ### Removed
 
