@@ -30,7 +30,7 @@ import type {
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { prepareAgentToolCall } from "@earendil-works/pi-agent-core";
-import { contentText } from "@earendil-works/pi-ai";
+import { contentText, SERVER_FALLBACK_ABORTED_DIAGNOSTIC } from "@earendil-works/pi-ai";
 import type {
 	Api,
 	AssistantMessage,
@@ -212,6 +212,7 @@ export type AgentSessionEvent =
 	| { type: "retry_fallback_succeeded"; model: string; chainKey: string }
 	| { type: "retry_fallback_reverted"; from: string; to: string }
 	| { type: "retry_fallback_exhausted"; chainKey: string; lastError: string }
+	| { type: "server_fallback_aborted"; from: string; to: string; chainConfigured: boolean }
 	// Auth login flow (task 13) is additive with event-only completion. The
 	// login_start command responds immediately, then the OAuth URL and the
 	// terminal result arrive here, because an interactive browser round-trip
@@ -789,6 +790,24 @@ export class AgentSession {
 	 * registered tool execution to the extension context. Tool call and tool result interception now
 	 * happens here instead of in wrappers.
 	 */
+	/**
+	 * Surface a provider-level server-fallback abort before retry handling runs so
+	 * the UI can explain the switch. Emitted synchronously here because retry work
+	 * for the following agent_end starts before queued message_end processing
+	 * drains. `chainConfigured` is required because the no-chain refusal path
+	 * emits no retry_fallback_exhausted, leaving the UI no other signal.
+	 */
+	private _emitServerFallbackAborted(message: AssistantMessage): void {
+		const details = message.diagnostics?.find((entry) => entry.type === SERVER_FALLBACK_ABORTED_DIAGNOSTIC)?.details;
+		if (details === undefined) return;
+		this._emit({
+			type: "server_fallback_aborted",
+			from: typeof details.from === "string" ? details.from : message.model,
+			to: typeof details.to === "string" ? details.to : message.model,
+			chainConfigured: this._retryFallback.hasConfiguredChain(),
+		});
+	}
+
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
 			return this._emitBeforeToolCallHooks(toolCall, args);
@@ -1099,6 +1118,10 @@ export class AgentSession {
 		// The message object is already in agent.state.messages when message_end
 		// fires; track its exact identity until this event's queued processing
 		// settles so compaction can distinguish pending persistence from stale state.
+		if (event.type === "message_end" && event.message.role === "assistant") {
+			this._emitServerFallbackAborted(event.message);
+		}
+
 		const pendingMessage = event.type === "message_end" ? event.message : undefined;
 		if (pendingMessage !== undefined) {
 			this._messageEndsAwaitingPersistence.add(pendingMessage);
