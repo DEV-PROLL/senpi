@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added agent-loop support for aborting provider streams when server-side fallback receipts should be handled by the client fallback chain.
+
 ## [0.82.1] - 2026-07-25
 
 ## [0.82.0] - 2026-07-24

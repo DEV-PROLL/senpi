@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `ModelsStoreEntry.etag` so persisted provider catalogs can carry the remote ETag validator for conditional refreshes.
+- Added Claude Opus 5 support for Anthropic and Amazon Bedrock with adaptive thinking, inference profiles, prompt caching, and preserved AWS validation messages ([#7081](https://github.com/earendil-works/pi/pull/7081) by [@unexge](https://github.com/unexge), [#7083](https://github.com/earendil-works/pi/pull/7083) by [@davidbrai](https://github.com/davidbrai)).
+
+### Changed
+
+- Changed Radius OAuth device authorization, token exchange, and refresh requests to use the configured gateway directly.
+- Changed `ModelsError` messages to append the underlying cause, so auth failures such as `OAuth refresh failed for openai-codex` report the provider response instead of a bare wrapper message.
+
+### Fixed
+
+- Fixed thinking-off requests across Anthropic, Amazon Bedrock, OpenAI Responses, OpenAI-compatible completions, Google Gemini, and Vertex adapters so `off`, `xhigh`, and `max` map to the correct wire effort for newer model families, including Opus 5, Sonnet 5, Fable 5, and Mythos 5.
+- Fixed Anthropic server-side fallback receipts to abort sticky-served turns and surface them to client fallback handling.
+
 ## [0.82.1] - 2026-07-25
 
 ### Added
