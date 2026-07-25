@@ -13,7 +13,7 @@ export default mergeConfig(
 			reporters: ["vitest-evals/reporter"],
 		},
 		resolve: {
-			alias: [{ find: /^@earendil-works\/pi-coding-agent$/, replacement: workspaceSourcePaths.codingAgentIndex }],
+			alias: [{ find: /^@code-yeongyu\/senpi$/, replacement: workspaceSourcePaths.codingAgentIndex }],
 		},
 	}),
 );

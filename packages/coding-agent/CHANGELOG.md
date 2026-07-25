@@ -24,18 +24,36 @@
 
 ### Fixed
 
+- Fixed startup context file discovery to skip directories that match context file names such as `AGENTS.md`, which produced `EISDIR` warnings ([#7106](https://github.com/earendil-works/pi/pull/7106) by [@mrexodia](https://github.com/mrexodia)).
+- Fixed the llama.cpp extension to persist its model catalog, so llama.cpp models stay listed before the first successful refresh. See [llama.cpp](docs/llama-cpp.md) ([#7072](https://github.com/earendil-works/pi/pull/7072) by [@davidbrai](https://github.com/davidbrai)).
+
+### Removed
+
+## [2026.7.25] - 2026-07-25
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
 - Fixed npm installs on non-Linux x64 platforms by keeping platform-constrained native packages out of bundled dependencies ([#343](https://github.com/code-yeongyu/senpi/pull/343) by [@realsigridjin](https://github.com/realsigridjin)).
 
 ### Removed
 
 ## [2026.7.24] - 2026-07-24
 
+### Breaking Changes
+
+### Added
+
+### Changed
+
 ### Fixed
 
 - Fixed compaction and branch summaries for providers whose authentication resolves entirely to request headers ([#5871](https://github.com/earendil-works/pi/issues/5871))
-- Fixed unavailable scoped models being hidden from `/models`, allowing them to be removed without editing settings manually ([#6949](https://github.com/earendil-works/pi/issues/6949), [#7032](https://github.com/earendil-works/pi/pull/7032) by [@christianklotz](https://github.com/christianklotz)).
-- Fixed startup context file discovery to skip directories that match context file names such as `AGENTS.md`, which produced `EISDIR` warnings ([#7106](https://github.com/earendil-works/pi/pull/7106) by [@mrexodia](https://github.com/mrexodia)).
-- Fixed the llama.cpp extension to persist its model catalog, so llama.cpp models stay listed before the first successful refresh. See [llama.cpp](docs/llama-cpp.md) ([#7072](https://github.com/earendil-works/pi/pull/7072) by [@davidbrai](https://github.com/davidbrai)).
 
 ### Removed
 

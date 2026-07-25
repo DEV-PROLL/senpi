@@ -7,7 +7,7 @@ import {
 	ModelRuntime,
 	SessionManager,
 	SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+} from "@code-yeongyu/senpi";
 import { createHarness, type SimpleHarnessResult } from "vitest-evals/harness";
 
 type EvalSession = Awaited<ReturnType<typeof createAgentSession>>["session"];

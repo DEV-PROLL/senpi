@@ -370,7 +370,7 @@ describe("Bedrock adaptive thinking-off parity", () => {
 
 describe("Bedrock Opus 5 and custom Fable thinking parity", () => {
 	it("uses adaptive thinking with an effort for Bedrock Claude Opus 5", async () => {
-		const model = getModel("amazon-bedrock", "anthropic.claude-opus-5") as Model<"bedrock-converse-stream">;
+		const model = getModel("amazon-bedrock", "global.anthropic.claude-opus-5") as Model<"bedrock-converse-stream">;
 		const payload = await capturePayload(model, { reasoning: "xhigh" });
 
 		expect(payload.additionalModelRequestFields?.thinking).toEqual({ type: "adaptive", display: "summarized" });
@@ -378,7 +378,7 @@ describe("Bedrock Opus 5 and custom Fable thinking parity", () => {
 	});
 
 	it("disables thinking explicitly for Bedrock Claude Opus 5 when reasoning is off", async () => {
-		const model = getModel("amazon-bedrock", "anthropic.claude-opus-5") as Model<"bedrock-converse-stream">;
+		const model = getModel("amazon-bedrock", "global.anthropic.claude-opus-5") as Model<"bedrock-converse-stream">;
 		const payload = await capturePayloadWithoutReasoning(model, makeContext());
 
 		expect(payload.additionalModelRequestFields?.thinking).toEqual({ type: "disabled" });
@@ -397,9 +397,11 @@ describe("Bedrock Opus 5 and custom Fable thinking parity", () => {
 	it("pins effort low for a Bedrock Mythos model with no catalog metadata", async () => {
 		const base = getModel("amazon-bedrock", "anthropic.claude-fable-5") as Model<"bedrock-converse-stream">;
 		const { thinkingLevelMap: _thinkingLevelMap, ...rest } = base;
-		const custom = { ...rest, id: "anthropic.claude-mythos-5", name: "Claude Mythos 5" } as Model<
-			"bedrock-converse-stream"
-		>;
+		const custom = {
+			...rest,
+			id: "anthropic.claude-mythos-5",
+			name: "Claude Mythos 5",
+		} as Model<"bedrock-converse-stream">;
 		const payload = await capturePayloadWithoutReasoning(custom, makeContext());
 
 		expect(payload.additionalModelRequestFields?.thinking).toBeUndefined();
