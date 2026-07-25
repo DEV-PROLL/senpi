@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type RequestListener, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { AuthContext, AuthPrompt, RefreshModelsContext } from "@earendil-works/pi-ai";
+import type { AuthContext, AuthPrompt, ModelsStoreEntry, RefreshModelsContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../src/core/event-bus.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
@@ -143,6 +143,50 @@ describe("llama.cpp extension", () => {
 		status = "sleeping";
 		await provider.refreshModels!(context);
 		expect(provider.getModels().map((model) => model.id)).toEqual(["test-model"]);
+	});
+
+	it("persists and restores loaded models for cache-only startup refreshes", async () => {
+		let cachedEntry: ModelsStoreEntry | undefined;
+		const store = {
+			read: async () => cachedEntry,
+			write: async (entry: ModelsStoreEntry) => {
+				cachedEntry = structuredClone(entry);
+			},
+			delete: async () => {
+				cachedEntry = undefined;
+			},
+		};
+		const { url } = await listen((request, response) => {
+			if (request.url === "/models") {
+				json(response, {
+					data: [
+						{ id: "loaded", status: { value: "loaded" }, meta: { n_ctx: 32768 } },
+						{ id: "unloaded", status: { value: "unloaded" } },
+					],
+				});
+				return;
+			}
+			response.writeHead(404).end();
+		});
+
+		const first = createLlamaProvider();
+		await first.provider.refreshModels?.({
+			credential: { type: "api_key", key: "local", env: { LLAMA_BASE_URL: url } },
+			store,
+			allowNetwork: true,
+		});
+		expect(first.provider.getModels().map((model) => model.id)).toEqual(["loaded"]);
+		expect(cachedEntry?.models.map((model) => model.id)).toEqual(["loaded"]);
+
+		const second = createLlamaProvider();
+		await second.provider.refreshModels?.({
+			credential: { type: "api_key", key: "local", env: { LLAMA_BASE_URL: url } },
+			store,
+			allowNetwork: false,
+		});
+		expect(second.provider.getModels()).toEqual([
+			expect.objectContaining({ id: "loaded", baseUrl: `${url}/v1`, contextWindow: 32768 }),
+		]);
 	});
 
 	it("stays dormant until configured and stores URL plus optional key", async () => {

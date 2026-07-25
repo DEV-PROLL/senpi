@@ -85,6 +85,7 @@ import {
 	findExactModelReferenceMatch,
 	resolveModelScope,
 	type ScopedModel,
+	resolveModelScopeWithDiagnostics,
 } from "../../core/model-resolver.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
@@ -135,6 +136,7 @@ import {
 	formatAuthSelectorProviderType,
 	OAuthSelectorComponent,
 } from "./components/oauth-selector.ts";
+import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.ts";
@@ -3125,6 +3127,11 @@ export class InteractiveMode {
 				await this.showFavoriteModelsSelector();
 				return;
 			}
+			if (text === "/scoped-models") {
+				this.editor.setText("");
+				await this.showScopedModelsSelector();
+				return;
+			}
 			if (text === "/model" || text.startsWith("/model ")) {
 				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
 				this.editor.setText("");
@@ -3857,7 +3864,12 @@ export class InteractiveMode {
 			case "custom": {
 				if (message.display) {
 					const renderer = this.session.extensionRunner.getMessageRenderer(message.customType);
-					const component = new CustomMessageComponent(message, renderer, this.getMarkdownThemeWithSettings());
+					const component = new CustomMessageComponent(
+						message,
+						renderer,
+						this.getMarkdownThemeWithSettings(),
+						this.outputPad,
+					);
 					component.setExpanded(this.toolOutputExpanded);
 					this.chatContainer.addChild(component);
 				}
@@ -4931,7 +4943,11 @@ export class InteractiveMode {
 						this.outputPad = padding;
 						if (this.streamingComponent || this.session.isStreaming) {
 							for (const child of this.chatContainer.children) {
-								if (child instanceof AssistantMessageComponent || child instanceof UserMessageComponent) {
+								if (
+									child instanceof AssistantMessageComponent ||
+									child instanceof CustomMessageComponent ||
+									child instanceof UserMessageComponent
+								) {
 									child.setOutputPad(padding);
 								}
 							}
@@ -5225,6 +5241,92 @@ export class InteractiveMode {
 					},
 					onSelect: (model) => {
 						void this.selectModelFromUi(model, done);
+					},
+					onCancel: () => {
+						done();
+						this.ui.requestRender();
+					},
+				},
+			);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	private async showScopedModelsSelector(): Promise<void> {
+		await this.session.modelRuntime.refresh();
+		const allModels = [...(await this.session.modelRuntime.getAvailable())];
+		const allModelIds = new Set(allModels.map((model) => `${model.provider}/${model.id}`));
+		const configuredPatterns = this.settingsManager.getEnabledModels();
+		const sessionScopedModels = this.session.scopedModels;
+
+		if (allModels.length === 0 && !configuredPatterns?.length && sessionScopedModels.length === 0) {
+			this.showStatus("No models available");
+			return;
+		}
+
+		const configuredScope = configuredPatterns?.length
+			? await resolveModelScopeWithDiagnostics(configuredPatterns, this.session.modelRuntime)
+			: undefined;
+
+		// Check if session has scoped models (from previous session-only changes or CLI --models)
+		const hasSessionScope = sessionScopedModels.length > 0;
+
+		// Build enabled model IDs from session state or settings
+		let currentEnabledIds: string[] | null = null;
+
+		if (hasSessionScope) {
+			// Use current session's scoped models
+			currentEnabledIds = sessionScopedModels.map((scoped) => `${scoped.model.provider}/${scoped.model.id}`);
+		} else if (configuredScope) {
+			currentEnabledIds = configuredScope.scopedModels.map(
+				(scoped) => `${scoped.model.provider}/${scoped.model.id}`,
+			);
+		}
+
+		for (const diagnostic of configuredScope?.diagnostics ?? []) {
+			if (diagnostic.code !== "no-match") continue;
+			currentEnabledIds ??= [];
+			if (!currentEnabledIds.includes(diagnostic.pattern)) currentEnabledIds.push(diagnostic.pattern);
+		}
+
+		// Helper to update session's scoped models (session-only, no persist)
+		const updateSessionModels = async (enabledIds: string[] | null) => {
+			currentEnabledIds = enabledIds === null ? null : [...enabledIds];
+			const hasEnabledAvailableModel = enabledIds?.some((id) => allModelIds.has(id)) ?? false;
+			const allAvailableModelsEnabled =
+				enabledIds !== null && [...allModelIds].every((id) => enabledIds.includes(id));
+			if (enabledIds && hasEnabledAvailableModel && !allAvailableModelsEnabled) {
+				const newScopedModels = await resolveModelScope(enabledIds, this.session.modelRuntime);
+				this.session.setScopedModels(
+					newScopedModels.map((sm) => ({
+						model: sm.model,
+						thinkingLevel: sm.thinkingLevel,
+					})),
+				);
+			} else {
+				// All enabled or none enabled = no filter
+				this.session.setScopedModels([]);
+			}
+			await this.updateAvailableProviderCount();
+			this.ui.requestRender();
+		};
+
+		this.showSelector((done) => {
+			const selector = new ScopedModelsSelectorComponent(
+				{
+					allModels,
+					enabledModelIds: currentEnabledIds,
+				},
+				{
+					onChange: updateSessionModels,
+					onPersist: (enabledIds) => {
+						const allEnabled =
+							enabledIds !== null &&
+							enabledIds.length === allModels.length &&
+							enabledIds.every((id) => allModelIds.has(id));
+						const newPatterns = enabledIds === null || allEnabled ? undefined : enabledIds;
+						this.settingsManager.setEnabledModels(newPatterns ? [...newPatterns] : undefined);
+						this.showStatus("Model selection saved to settings");
 					},
 					onCancel: () => {
 						done();
