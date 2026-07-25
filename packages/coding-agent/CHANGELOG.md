@@ -18,7 +18,6 @@
 
 ### Fixed
 
-- Fixed unavailable scoped models so they remain visible and removable in the model selector ([#7032](https://github.com/earendil-works/pi/pull/7032)).
 - Fixed resource loading to exclude directories where files are expected ([#7106](https://github.com/earendil-works/pi/pull/7106)).
 - Fixed websearch progress rendering to show the live search source and refreshed native model routing.
 - Fixed the GPT-5.6 prompt preset to preserve the `how does X work` routing exception.
