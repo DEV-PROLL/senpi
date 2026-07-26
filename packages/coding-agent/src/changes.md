@@ -1,3 +1,20 @@
+## Experimental `--grok-neo` mode: env-gated grok chrome for the interactive loop (2026-07-26)
+
+### What changed
+
+- New opt-in flag `--grok-neo` (`src/cli/args.ts`, gate `src/cli/grok-neo-gate.ts`): `SENPI_ENABLE_GROK_NEO` accepts `1`/`true`/`yes`, default OFF. When the gate is off the flag is absent from `--help` and parses as an unknown extension flag, exactly as if the feature did not exist. When on, it runs the ordinary interactive mode with the grok chrome (`chrome: "grok"` dispatch in `main.ts`) — same senpi process, no separate binary or daemon.
+- New built-in themes `grok-night` and `grok-day` (`src/modes/interactive/theme/grok-night.json` / `grok-day.json`, registered in `getBuiltinThemes()` in `src/modes/interactive/theme/theme.ts`). Precedence: an existing settings theme always wins; `grok-night` is only an in-memory fallback when no theme was ever chosen (`applyGrokNeoThemeFallback` in `main.ts`) and is never written to `settings.json`. `--theme` registers theme resources; it does not select one.
+- Chrome components under `src/modes/interactive/grok/`: rounded input card, compact footer (model + cwd only), welcome card, single-line tool rows with a `┃`/`◆` guide column, braille working indicator, and a palette/chrome-token layer that resolves colour through the active theme.
+- User docs: `docs/grok-neo.md` (mode, gate, themes, in-process architecture, experimental status, independent-reimplementation and non-affiliation statement) plus a `docs/docs.json` navigation entry.
+
+### Why
+
+- Replaces the removed out-of-process Go TUI with an in-process presentation layer: one process and one deployable directory for the Bun binary (native addons ship as sidecars), with the classic TUI unchanged as the default.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: additive seams only — the gate module, one conditional branch each in `args.ts` parse/help, the theme-fallback and `chrome` dispatch lines in `main.ts`, and the `grok-night`/`grok-day` registration in `theme.ts`.
+
 ## OMO local plugin remote-diff updater beta on bare `senpi update` (2026-07-26)
 
 - A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
