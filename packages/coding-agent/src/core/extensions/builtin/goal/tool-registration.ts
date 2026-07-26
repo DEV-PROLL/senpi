@@ -56,7 +56,7 @@ export function registerGoalTools(pi: ExtensionAPI, deps: GoalToolRegistrationDe
 		name: "update_goal",
 		label: "Update Goal",
 		description:
-			"Update the existing goal.\nSet status to `complete` only when the objective has actually been achieved and no required work remains. Do not mark a goal complete merely because you are stopping work.\nSet status to `blocked` only after the same blocking condition recurs for at least 3 consecutive goal turns. After resuming, begin a fresh blocked audit after resume. Never mark a goal blocked merely because the work is hard, slow, or uncertain.\nA non-empty reason is required when blocking; reason must not be provided when completing.\nYou cannot use this tool to pause or resume a goal; those status changes are controlled by the user or system.\nWhen marking the goal achieved with status `complete`, report the final elapsed time and token usage from the tool result to the user.",
+			"Update the existing goal.\nSet status to `complete` only when the objective has actually been achieved and no required work remains. Do not mark a goal complete merely because you are stopping work.\nSet status to `blocked` only after the same blocking condition recurs for at least 3 consecutive goal turns. After resume, begin a fresh blocked audit. Never mark a goal blocked merely because the work is hard, slow, or uncertain.\nA non-empty reason is required when blocking; reason must not be provided when completing.\nYou cannot use this tool to pause or resume a goal; those status changes are controlled by the user or system.\nWhen marking the goal achieved with status `complete`, report the final elapsed time and token usage from the tool result to the user.",
 		parameters: Type.Object(
 			{
 				status: Type.Union(

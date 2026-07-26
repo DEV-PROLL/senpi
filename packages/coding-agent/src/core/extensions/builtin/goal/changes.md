@@ -18,6 +18,8 @@ codex-aligned tool naming, and budget-driven behavior removed. An optional
 - User-facing status and command notifications use Ultragoal branding.
 - Tool descriptions no longer claim that objective input is capped at 4,000 characters; existing spill-file
   persistence continues to preserve the full text automatically.
+- The `update_goal` blocked-audit guidance no longer duplicates its "after resume" instruction; it now matches
+  the continuation prompt wording (`After resume, begin a fresh blocked audit.`).
 
 ### Why
 - Long, multi-turn work needs an explicit execution and verification discipline instead of a generic continuation
