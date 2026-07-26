@@ -109,6 +109,11 @@ describe("Inspector VM dynamic import crash handling", () => {
 			expect(context.showWarning).toHaveBeenCalledWith(
 				"Node Inspector dynamic import is unsupported; use require() or a target-side loader. Senpi kept running.",
 			);
+			// Recovery must leave the TUI fully alive: no terminal teardown, no signal
+			// unregister, and no latch into the shutting-down state.
+			expect(context.ui.stop).not.toHaveBeenCalled();
+			expect(context.unregisterSignalHandlers).not.toHaveBeenCalled();
+			expect(context.isShuttingDown).toBe(false);
 		} finally {
 			if (openedInspector) closeInspector();
 		}
