@@ -1,3 +1,13 @@
+## Same-model-first transient retries and capped server waits (2026-07-26)
+
+### What changed
+
+- Supersedes the 2026-07-20 entry's sentence "retryable transient failures now switch to a configured fallback ...": transient retryable failures (timeouts, overload, 429, 5xx, transport drops) now retry the same model on the existing exponential backoff until `retry.maxRetries` is spent; only then does the configured `retry.fallbackChains` chain engage, and each fallback candidate starts with a fresh retry budget.
+- `core/agent-session.ts`: `retry.provider.maxRetryDelayMs` (default 60000) now bounds the server-requested wait honored on the same model. Beyond the cap the fallback chain engages and the primary is suppressed for the requested duration; the turn fails with an informative error only when no chain candidate is available. Waits at or below the cap are honored as before.
+- `core/retry-fallback/cooldown.ts`: timeout and connection/transport errors now carry a 60-second selector cooldown instead of the five-minute unmatched default, so revert-to-primary is no longer blocked for five minutes after one network blip. Existing tiers keep precedence: quota/billing 30 minutes, rate-limit 30 seconds, capacity 45 seconds plus jitter, 5xx 20 seconds, and a provider retry-after hint always wins.
+- Unchanged: classifier-refusal fallback (immediate, pinned), hard-error fallback (quota/auth/model-not-found, immediate), and `retry.abortServerSideFallback` (default true) routing provider-side model substitution onto the configured chain.
+- Cost/latency: a fully failing chain now costs up to `1 + (chainLength + 1) * maxRetries` provider calls plus per-rung backoff before the turn fails.
+
 ## OMO local plugin remote-diff updater beta on bare `senpi update` (2026-07-26)
 
 - A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
