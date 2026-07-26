@@ -6,14 +6,38 @@
 
 ### Breaking Changes
 
+- Make `bash_output` a non-blocking snapshot operation; use background monitor subscriptions and completion notifications for event-driven waits.
+- Remove the separate GPT-only Code Mode `exec`/`wait` tools in favor of persistent `eval` tool composition.
+
 ### Added
+
+- Add env-gated `--grok-neo` interactive chrome with `grok-night` and `grok-day` themes while keeping the classic TUI as the default.
+- Compose up to five leading `/skill:` commands across prompt, steer, follow-up, and autocomplete paths, and add `/exit` as an alias for `/quit`.
+- Add the background `monitor` tool, coalesced line-event notifications, and exit-code/output-tail completion messages for long-running terminal sessions.
+- Auto-correct supported malformed todo calls, conservatively resolve fuzzy task names, and render every optional todo operation exhaustively.
+- Project extension-injected app-server messages as tracked turns and emit `session_extensions_removed` when reloads or session replacement remove extensions.
+- Add durable blocked-goal persistence and resume handling, including explicit user-abort lifecycle data.
+- Add opt-in Inspector VM-import recovery and transfer fixed Inspector endpoints from the launcher to the interactive child ([#336](https://github.com/code-yeongyu/senpi/pull/336) by [@minpeter](https://github.com/minpeter)).
 
 ### Changed
 
+- Retry transient failures on the same model before entering fallback chains, cap server-requested waits, and use shorter cooldowns for transport failures; Codex upstream websocket failures now participate in the retry path ([#330](https://github.com/code-yeongyu/senpi/pull/330) by [@minpeter](https://github.com/minpeter)).
+- Keep unchanged classic MCP servers alive across `/reload`, report reload timing phases, and eliminate redundant settings/model scans.
+- Bound inline provider image history, preserve compaction ownership across preflight/abort races, and pin cheap compaction warmups to the active model ([#341](https://github.com/code-yeongyu/senpi/pull/341) by [@minpeter](https://github.com/minpeter)).
+- Speed up compaction across model switches and harden cross-provider replay ([#380](https://github.com/code-yeongyu/senpi/pull/380) by [@realsigridjin](https://github.com/realsigridjin)).
+- Bound compaction status rows to the terminal width while retaining cancellation guidance ([#328](https://github.com/code-yeongyu/senpi/pull/328) by [@minpeter](https://github.com/minpeter)).
+
 ### Fixed
+
+- Retain extension-injected user messages when prompt admission rejects, and stop stale extension-context error spray after session replacement.
+- Prevent classifier-refused partial tool calls from executing and route Anthropic policy blocks through the pinned refusal fallback.
+- Preserve OpenAI freeform tool replay, repair Anthropic server-tool histories, and avoid cross-provider reasoning/tool-ID corruption ([#256](https://github.com/code-yeongyu/senpi/pull/256) by [@ThewindMom](https://github.com/ThewindMom)).
+- Ship the native sidecars and bundled dependency aliases that the compiled and npm-installed CLI probes at runtime.
+- Stabilize alternate-chrome tool rendering, slash-menu colors, CJK/select-list layout, and compaction labels across narrow terminals.
 
 ### Removed
 
+- Remove the legacy out-of-process `--neo` Go TUI/daemon surface and the `/sessions` observer HUD.
 ## [2026.7.25-2] - 2026-07-25
 
 ### New Features

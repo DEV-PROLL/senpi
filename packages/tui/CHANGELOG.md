@@ -6,7 +6,12 @@
 
 ### Added
 
+- Allow leading `/skill:` commands to compose through autocomplete while keeping ordinary slash commands leading-only.
+- Add select-list row composition and editor/root layout seams for alternate interactive chrome.
+
 ### Changed
+
+- Keep CJK, truncation, scrolling, filtering, and description rendering stable through the new composable select-list presentation path.
 
 ### Fixed
 

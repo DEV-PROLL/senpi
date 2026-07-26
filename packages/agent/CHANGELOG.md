@@ -8,7 +8,11 @@
 
 ### Changed
 
+- Expanded timeout-output and classifier-refusal regression coverage around terminal agent-loop behavior.
+
 ### Fixed
+
+- End classifier-refused assistant turns before executing any partial tool calls, allowing the host to apply its refusal fallback policy safely.
 
 ### Removed
 
