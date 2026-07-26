@@ -1,5 +1,21 @@
 # changes
 
+## Composable leading skill commands (2026-07-26)
+
+### What changed
+
+- `agent-session.ts`: `/skill:<name>` now accepts a leading whitespace-separated run of loaded skills, expanding each unique skill in written order before appending the remaining prompt text. Repeated skills expand only once, unknown skills stop the run and remain literal, and slash text outside that leading run is never interpreted as a skill command.
+- Explicit expansion is capped at `MAX_SKILL_EXPANSIONS_PER_PROMPT` (5). Commands beyond the cap remain literal and emit an existing `skill_expansion` error-channel notification, preventing a composed prompt from growing context without bound.
+- The shared expansion seam is called by `prompt()`, `steer()`, and `followUp()`, so queued and non-TUI/RPC prompt paths receive identical behavior.
+
+### Why extension system couldn't handle this alone
+
+Skill commands are resource-loader entries rather than extension commands, and their substitution happens in the private `AgentSession` prompt and queue boundary before the outbound user message is assembled.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` `_expandSkillCommand()` if upstream revises skill-command parsing.
+
 ## Provider-bound inline image budget (2026-07-26)
 
 ### What changed
