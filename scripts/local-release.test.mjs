@@ -87,6 +87,9 @@ describe("local release package list", () => {
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line));
+		const testIndex = npmCalls.findIndex((call) => call.args.join(" ") === "test");
+		const lastBuildIndex = npmCalls.findLastIndex((call) => call.args.join(" ") === "run build");
+		assert.ok(testIndex > lastBuildIndex, "expected local-release to build every package before running tests");
 		assert.ok(
 			npmCalls.some((call) => call.cwd.endsWith(ptyDirectorySuffix) && call.args.join(" ") === "run build"),
 			"expected local-release to build packages/pty",

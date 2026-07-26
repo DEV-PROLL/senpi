@@ -226,13 +226,13 @@ function main() {
 		run("npm", ["run", "check"], { cwd: repoRoot });
 	}
 
-	if (!options.skipTest) {
-		run("npm", ["test"], { cwd: repoRoot });
-	}
-
 	for (const pkg of packages) {
 		run("npm", ["run", "clean"], { cwd: pkg.directory });
 		run("npm", ["run", "build"], { cwd: pkg.directory });
+	}
+
+	if (!options.skipTest) {
+		run("npm", ["test"], { cwd: repoRoot });
 	}
 
 	prepareSenpiBundledWorkspaces(repoRoot);
