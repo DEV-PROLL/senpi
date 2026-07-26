@@ -69,6 +69,7 @@ describe("Regression: compaction state during model fallback", () => {
 				},
 				retry: {
 					enabled: true,
+					maxRetries: 0,
 					baseDelayMs: 1,
 					fallbackChains: { "faux/faux-1": ["faux/faux-2"] },
 				},
