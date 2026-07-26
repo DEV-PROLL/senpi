@@ -1,10 +1,10 @@
 # @code-yeongyu/senpi-codemode
 
 `@code-yeongyu/senpi-codemode` is Senpi's source-only Code Mode extension. It
-registers persistent-kernel `eval` for every eligible model and GPT-only
-`exec`/`wait` cells for bounded JavaScript orchestration. `eval` owns one
-persistent kernel per enabled language and re-registers at session start after
-configuration, interpreter availability, and active task-tool names are known.
+registers the persistent-kernel `eval` execution surface for every eligible
+model. `eval` owns one persistent kernel per enabled language and re-registers
+at session start after configuration, interpreter availability, and active
+task-tool names are known.
 
 ## Capabilities
 
@@ -24,8 +24,8 @@ configuration, interpreter availability, and active task-tool names are known.
   fallbacks.
 - JavaScript import rewriting for supported local modules and package imports
   in the persistent Node.js worker.
-- GPT Code Mode `exec`/`wait` cells use fresh JavaScript workers, can compose
-  active tools through `tools.<name>(args)`, and never replace `eval`.
+- GPT models receive a terse `eval` prompt dialect that prioritizes composing
+  active tools through `tool.<name>(args)` and documents detach-on-timeout.
 
 ## Kernels
 
@@ -100,7 +100,7 @@ options object and asynchronous helpers are `await`-able.
 | `read(path, offset?, limit?)` | Reads text with 1-indexed line slicing. `local://` paths resolve under the session artifact root. |
 | `write(path, content)` | Creates parent directories and writes text. `local://` paths persist in the session artifact root. |
 | `env(key?, value?)` | Reads all kernel environment values, one value, or sets one value. |
-| `tool.<name>(args)` / `tools.<name>(args)` | Invokes an active Senpi tool through the normal `pi.executeTool` pipeline. `tools` is the GPT Code Mode spelling. |
+| `tool.<name>(args)` | Invokes an active Senpi tool through the normal `pi.executeTool` pipeline. |
 | `completion(prompt, model?, system?, schema?)` | Requests a one-shot host completion; `schema` asks the host to parse structured output. |
 | `agent(prompt, ...)` | Delegates to the configured active `taskTools.task` tool. Supports background handles and structured JSON results. |
 | `output(ids, format?, offset?, limit?)` | Delegates transcript retrieval to the configured active `taskTools.output` tool. |
@@ -109,10 +109,12 @@ options object and asynchronous helpers are `await`-able.
 | `log(message)` / `phase(title)` | Emits progress text and starts a status phase. |
 
 `agent()` is available only when the configured task tool is active in the
-session. `output()` similarly requires the configured task-output tool. Missing
-tools produce a clear availability error instead of importing an orchestration
-package. `agent()` delegates through the tool contract, so task-engine
-permissions, progress updates, and transcripts remain owned by that engine.
+session. `output()` similarly requires the configured task-output tool and
+returns immediately: a running task reports its current status, while completed
+tasks return the requested transcript. Missing tools produce a clear
+availability error instead of importing an orchestration package. `agent()`
+delegates through the tool contract, so task-engine permissions, progress
+updates, and transcripts remain owned by that engine.
 `isolated`, `apply`, and `merge` are accepted for compatibility but emit a
 warning because this task-engine integration has no isolation model.
 
@@ -159,11 +161,9 @@ Session generations fence retired kernels and callbacks; each cell settles once
 across completion, errors, cancellation, timeout, bridge failure, or a kernel
 crash.
 
-GPT Code Mode is not an additional sandbox: it uses the same Node worker trust
-boundary as JavaScript `eval`. Its separate cell lifecycle exists so a yielded
-`exec` can be observed or terminated with `wait` without affecting persistent
-`eval` kernels. `eval`, `exec`, and `wait` are excluded from the nested tool
-namespace to prevent recursive Code Mode execution.
+GPT models use the same JavaScript `eval` worker trust boundary as other JavaScript cells;
+there is no separate execution runtime. `eval` is excluded from the nested tool
+namespace to prevent recursive execution.
 
 ## Validation
 
@@ -177,5 +177,5 @@ npm run check
 
 Direct real-surface QA drivers live in `scripts/qa-*.ts`: kernel cells
 (`qa-py-cell.ts`, `qa-js-cell.ts`, `qa-rb-cell.ts`, `qa-jl-cell.ts`), end-to-end
-extension execution (`qa-e2e-eval.ts`, `qa-gpt-code-mode.ts`), and renderer output
+extension execution (`qa-e2e-eval.ts`), and renderer output
 (`qa-render-dump.ts`).

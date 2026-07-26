@@ -1,3 +1,33 @@
+## Experimental `--grok-neo` mode: env-gated grok chrome for the interactive loop (2026-07-26)
+
+### What changed
+
+- New opt-in flag `--grok-neo` (`src/cli/args.ts`, gate `src/cli/grok-neo-gate.ts`): `SENPI_ENABLE_GROK_NEO` accepts `1`/`true`/`yes`, default OFF. When the gate is off the flag is absent from `--help` and parses as an unknown extension flag, exactly as if the feature did not exist. When on, it runs the ordinary interactive mode with the grok chrome (`chrome: "grok"` dispatch in `main.ts`) — same senpi process, no separate binary or daemon.
+- New built-in themes `grok-night` and `grok-day` (`src/modes/interactive/theme/grok-night.json` / `grok-day.json`, registered in `getBuiltinThemes()` in `src/modes/interactive/theme/theme.ts`). Precedence: an existing settings theme always wins; `grok-night` is only an in-memory fallback when no theme was ever chosen (`applyGrokNeoThemeFallback` in `main.ts`) and is never written to `settings.json`. `--theme` registers theme resources; it does not select one.
+- Chrome components under `src/modes/interactive/grok/`: rounded input card, compact footer (model + cwd only), welcome card, single-line tool rows with a `┃`/`◆` guide column, braille working indicator, and a palette/chrome-token layer that resolves colour through the active theme.
+- User docs: `docs/grok-neo.md` (mode, gate, themes, in-process architecture, experimental status, independent-reimplementation and non-affiliation statement) plus a `docs/docs.json` navigation entry.
+
+### Why
+
+- Replaces the removed out-of-process Go TUI with an in-process presentation layer: one process and one deployable directory for the Bun binary (native addons ship as sidecars), with the classic TUI unchanged as the default.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: additive seams only — the gate module, one conditional branch each in `args.ts` parse/help, the theme-fallback and `chrome` dispatch lines in `main.ts`, and the `grok-night`/`grok-day` registration in `theme.ts`.
+
+## Extension user-message injections are retained when the prompt path rejects (2026-07-26)
+
+- `core/agent-session.ts`: `sendUserMessage()` now tracks the prompt disposition. When `prompt()` rejects before the message reaches a queue or a turn (e.g. a required compaction that cannot complete, auth/model validation, or provider admission), the message is queued for later delivery (`deliverAs: "steer"` goes to the steering queue, otherwise the followUp queue) instead of being silently dropped. The rejection still propagates, so fire-and-forget extension bindings keep emitting their `send_user_message` error event.
+- Root cause of the omo `team_wait` starvation forensics: member self-poller injections via `pi.sendUserMessage(..., { deliverAs: "followUp" })` vanished without a trace when the fresh-prompt path threw, leaving no record in the session JSONL while RPC-path `steer`/`follow_up` commands (which bypass `prompt()`) landed normally.
+- Interactive `prompt()` behavior is unchanged: a rejected interactive prompt still drops the input and surfaces the error to the user (pinned by `test/suite/regressions/pre-prompt-compaction-no-continue.test.ts`).
+- Coverage: `test/suite/agent-session-extension-injection.test.ts` pins retention for followUp and steer injections, exact-once delivery after recovery through the post-run drain, and no double-queueing on the streaming accept path.
+
+## Reload-safe MCP preservation and extension-removal lifecycle event (2026-07-26)
+
+- `session_extensions_removed` is emitted on the old extension runner when a `/reload` or a session replacement (`/new`, `/resume`, `/fork`, import) rebuilds the extension set. Its payload is `{ type: "session_extensions_removed", reason: SessionShutdownEvent["reason"], removed: Array<{ path, resolvedPath }> }`, allowing an extension that did not survive the rebuild to release resources after the new settings and active builtin set are known.
+- Unchanged MCP servers now survive a classic `/reload`: the shared service reattaches and reconciles by config hash, preserving live connections while replacing changed servers and disposing removed ones. Provider-scoped MCP services still dispose on reload because their factory creates a replacement instance.
+- If the MCP builtin itself is disabled during a reload or replacement, its removal event disposes the preserved classic service so stdio children cannot leak. For an otherwise wedged server, use `/mcp reconnect <name>` to force a fresh connection.
+
 ## Same-model-first transient retries and capped server waits (2026-07-26)
 
 ### What changed
@@ -7,7 +37,6 @@
 - `core/retry-fallback/cooldown.ts`: timeout and connection/transport errors now carry a 60-second selector cooldown instead of the five-minute unmatched default, so revert-to-primary is no longer blocked for five minutes after one network blip. Existing tiers keep precedence: quota/billing 30 minutes, rate-limit 30 seconds, capacity 45 seconds plus jitter, 5xx 20 seconds, and a provider retry-after hint always wins.
 - Unchanged: classifier-refusal fallback (immediate, pinned), hard-error fallback (quota/auth/model-not-found, immediate), and `retry.abortServerSideFallback` (default true) routing provider-side model substitution onto the configured chain.
 - Cost/latency: with `retry.maxRetries >= 1` a fully failing chain now costs up to `1 + (chainLength + 1) * maxRetries` provider calls plus per-rung backoff before the turn fails; with `maxRetries: 0` every failure switches immediately, costing `1 + chainLength` calls.
-
 ## OMO local plugin remote-diff updater beta on bare `senpi update` (2026-07-26)
 
 - A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
@@ -29,6 +58,21 @@
   aborted `agent_end` precedes compaction startup without deadlocking future prompts.
 
 # changes
+
+## Removed the legacy `--neo` Go TUI surface (2026-07-26)
+
+### What changed
+
+- Removed the Go TUI launcher, daemon dispatch, CLI flags, settings, documentation, build gate, and the retired Go package. The classic interactive and `--mode rpc` paths remain unchanged.
+- Migrated generic RPC authentication and connection-handler framing coverage into `test/suite/rpc-auth-and-connection-handler.test.ts` before deleting the legacy-specific suites.
+
+### Why
+
+- The legacy out-of-process TUI and its daemon are no longer part of the supported CLI surface.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: removal-only changes across fork-owned legacy surfaces.
 
 ## Inspector handoff and VM-import crash isolation (2026-07-24)
 
@@ -78,7 +122,6 @@
 - `scripts/bench-reload.mjs` measures `DefaultResourceLoader.reload()` from
   source through a subprocess probe (real jiti path), reporting cold-first and
   warm p50/p95 across fresh processes.
-
 ## Multi-session RPC mode, session-owned MCP/config-reload state, and back-compat guarantee (2026-07-23)
 
 ### What changed

@@ -16,6 +16,10 @@
  *   node mock-loop.mjs --self-test                       # all three APIs round-trip
  *   node mock-loop.mjs --self-test --api anthropic-messages
  *   node mock-loop.mjs --with-tool [--api ...]           # full loop: model -> bash -> final text
+ *   node mock-loop.mjs --with-tool --serve --serve-env /tmp/senpi-qa.env
+ *     Optional: SENPI_QA_TOOL_SERVE_DELAY_MS=<positive integer> spaces the
+ *     scripted streaming responses, keeping the tool loop in flight for QA.
+ *   node mock-loop.mjs --with-tool --serve --self-test   # HTTP scenario proof
  *   node mock-loop.mjs --with-reasoning [--slow] [--api ...]
  *   node mock-loop.mjs --with-reasoning --serve --serve-env /tmp/senpi-qa.env
  *   (the flag is --serve-env, NOT --env-file: Node treats --env-file as a native
@@ -60,6 +64,47 @@ import {
 	runTextToolLeakScenario,
 	TEXT_LEAK_APIS,
 } from "./lib/mock-loop-text-leak.mjs";
+
+const QA_TOOL_SERVE_ASSISTANT_MARKER = "SENPI-QA-TOOL-SERVE-ASSISTANT-24c7";
+const QA_TOOL_SERVE_RESULT_MARKER = "SENPI-QA-TOOL-SERVE-RESULT-24c7";
+const QA_TOOL_SERVE_FINAL_MARKER = "SENPI-QA-TOOL-SERVE-FINAL-24c7";
+const TOOL_SERVE_DELAY_ENV = "SENPI_QA_TOOL_SERVE_DELAY_MS";
+const TOOL_SERVE_SELF_TEST_DELAY_MS = 25;
+
+function toolServeDelayMs(raw = process.env[TOOL_SERVE_DELAY_ENV]) {
+	if (raw === undefined || raw === "") return 0;
+	if (!/^[1-9]\d*$/.test(raw)) {
+		throw new Error(`${TOOL_SERVE_DELAY_ENV} must be a positive integer milliseconds value when set; got ${JSON.stringify(raw)}`);
+	}
+	const delayMs = Number(raw);
+	if (!Number.isSafeInteger(delayMs)) {
+		throw new Error(`${TOOL_SERVE_DELAY_ENV} exceeds the supported integer range; got ${JSON.stringify(raw)}`);
+	}
+	return delayMs;
+}
+
+/**
+ * The normal scripted tool loop is assistant text -> bash call -> final text.
+ * Evidence callers may opt in to streaming assistant text before the tool call
+ * and spacing the final text's two deltas after the real tool result returns.
+ * The default remains the original three synchronous scripted turns.
+ */
+function toolServeScriptedTurns({ finalResponseDelayMs = 0 } = {}) {
+	if (!Number.isSafeInteger(finalResponseDelayMs) || finalResponseDelayMs < 0) {
+		throw new Error(`finalResponseDelayMs must be a non-negative safe integer; got ${finalResponseDelayMs}`);
+	}
+	const bashCall = { name: "bash", args: { command: `printf '${QA_TOOL_SERVE_RESULT_MARKER}\\n'` } };
+	if (finalResponseDelayMs > 0) {
+		// The first delta contains the complete assistant marker. Two delayed
+		// trailing deltas keep it visibly streamed before the tool call arrives.
+		const assistantStreamingText = `${QA_TOOL_SERVE_ASSISTANT_MARKER}${" ".repeat(96)}`;
+		return [
+			{ text: assistantStreamingText, chunks: 3, chunkDelayMs: finalResponseDelayMs, toolCalls: [bashCall] },
+			{ text: QA_TOOL_SERVE_FINAL_MARKER, chunks: 2, chunkDelayMs: finalResponseDelayMs },
+		];
+	}
+	return [{ text: QA_TOOL_SERVE_ASSISTANT_MARKER }, { toolCalls: [bashCall] }, { text: QA_TOOL_SERVE_FINAL_MARKER }];
+}
 
 async function driveTurn({
 	apiName,
@@ -323,6 +368,140 @@ async function serveReasoning(apiName, envFile, slow) {
 	});
 }
 
+async function requestToolServeTurn(server, preset, messages, { observePartialFinal = false } = {}) {
+	const headers = { "content-type": "application/json" };
+	if (preset.auth === "x-api-key") headers["x-api-key"] = preset.apiKey;
+	else headers.authorization = `Bearer ${preset.apiKey}`;
+	const response = await fetch(`${server.origin}${preset.path}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify({ model: preset.modelId, stream: true, messages }),
+	});
+	if (!observePartialFinal || !response.body) {
+		return { ok: response.ok, bytes: Buffer.from(await response.arrayBuffer()), observedPartialFinal: false };
+	}
+
+	// A read is an output event, not a time-based sample. The delayed script must
+	// expose a final-marker prefix before its delayed completing chunk.
+	const reader = response.body.getReader();
+	const chunks = [];
+	let observedPartialFinal = false;
+	const finalPrefix = QA_TOOL_SERVE_FINAL_MARKER.slice(0, Math.ceil(QA_TOOL_SERVE_FINAL_MARKER.length / 2));
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		chunks.push(Buffer.from(value));
+		const received = Buffer.concat(chunks);
+		if (received.includes(Buffer.from(finalPrefix)) && !received.includes(Buffer.from(QA_TOOL_SERVE_FINAL_MARKER))) {
+			observedPartialFinal = true;
+		}
+	}
+	return { ok: response.ok, bytes: Buffer.concat(chunks), observedPartialFinal };
+}
+
+/** Exercise the serve script over the same localhost HTTP boundary an interactive CLI uses. */
+async function checkToolServeScenario(apiName, { finalResponseDelayMs = 0 } = {}) {
+	const preset = API_PRESETS[apiName];
+	const server = await startFakeModelServer({ turns: toolServeScriptedTurns({ finalResponseDelayMs }) });
+	try {
+		const first = await requestToolServeTurn(server, preset, [{ role: "user", content: "first interactive turn" }]);
+		if (finalResponseDelayMs > 0) {
+			const final = await requestToolServeTurn(
+				server,
+				preset,
+				[{ role: "assistant", content: QA_TOOL_SERVE_ASSISTANT_MARKER }, { role: "tool", tool_call_id: "call_1", content: QA_TOOL_SERVE_RESULT_MARKER }],
+				{ observePartialFinal: true },
+			);
+			const assistantDeltas = server.streamLog.filter((entry) => entry.streamId === 0 && entry.kind === "text_delta").map((entry) => entry.delta);
+			const finalDeltas = server.streamLog.filter((entry) => entry.streamId === 1 && entry.kind === "text_delta").map((entry) => entry.delta);
+			const delayedBoundary = first.ok && final.ok && first.bytes.includes(Buffer.from('"bash"')) && server.requests.length === 2 && server.requests[1].raw.includes(QA_TOOL_SERVE_RESULT_MARKER) && assistantDeltas.length === 3 && assistantDeltas.join("").startsWith(QA_TOOL_SERVE_ASSISTANT_MARKER) && finalDeltas.length === 2 && finalDeltas.join("") === QA_TOOL_SERVE_FINAL_MARKER && final.observedPartialFinal;
+			return { pass: delayedBoundary, detail: `requests=${server.requests.length} assistantDeltas=${JSON.stringify(assistantDeltas)} finalDeltas=${JSON.stringify(finalDeltas)} partialFinal=${final.observedPartialFinal}`, defaultFast: false, delayedBoundary };
+		}
+		const second = await requestToolServeTurn(server, preset, [{ role: "user", content: "please run the scripted tool" }]);
+		const third = await requestToolServeTurn(server, preset, [{ role: "assistant", content: "tool call emitted" }, { role: "tool", tool_call_id: "call_1", content: QA_TOOL_SERVE_RESULT_MARKER }]);
+		const finalDeltas = server.streamLog.filter((entry) => entry.streamId === 2 && entry.kind === "text_delta").map((entry) => entry.delta);
+		const defaultFast = first.ok && second.ok && third.ok && first.bytes.includes(Buffer.from(QA_TOOL_SERVE_ASSISTANT_MARKER)) && second.bytes.includes(Buffer.from('"bash"')) && third.bytes.includes(Buffer.from(QA_TOOL_SERVE_FINAL_MARKER)) && server.requests.length === 3 && server.requests[2].raw.includes(QA_TOOL_SERVE_RESULT_MARKER) && finalDeltas.length === 1 && finalDeltas[0] === QA_TOOL_SERVE_FINAL_MARKER;
+		return { pass: defaultFast, detail: `requests=${server.requests.length} assistant=${first.ok} tool=${second.ok} final=${third.ok} finalDeltas=${JSON.stringify(finalDeltas)}`, defaultFast, delayedBoundary: false };
+	} finally {
+		await server.stop();
+	}
+}
+
+async function toolServeSelfTest(apiName) {
+	installCleanupHooks();
+	const checks = createChecks(`mock-loop.mjs --with-tool --serve --self-test (${apiName})`);
+	const guard = guardRealAuth();
+	const defaultResult = await checkToolServeScenario(apiName);
+	checks.ok(
+		"interactive tool serve scenario returns assistant text, tool call, tool result, and final text over HTTP",
+		defaultResult.pass,
+		defaultResult.detail,
+	);
+	checks.ok(
+		"tool serve default remains a single immediate final delta",
+		defaultResult.defaultFast,
+		defaultResult.detail,
+	);
+	const delayedResult = await checkToolServeScenario(apiName, { finalResponseDelayMs: TOOL_SERVE_SELF_TEST_DELAY_MS });
+	checks.ok(
+		"opt-in tool serve delay exposes a partial final marker before the delayed completion",
+		delayedResult.pass && delayedResult.delayedBoundary,
+		`${delayedResult.detail} delayMs=${TOOL_SERVE_SELF_TEST_DELAY_MS}`,
+	);
+	checks.ok(
+		"tool serve delay environment accepts only positive integer milliseconds",
+		toolServeDelayMs("37") === 37 && toolServeDelayMs("") === 0,
+		`${TOOL_SERVE_DELAY_ENV}=37`,
+	);
+	checkRealAuthUnchanged(checks, guard);
+	process.exit(checks.finish() ? 0 : 1);
+}
+
+async function serveTool(apiName, envFile) {
+	const guard = guardRealAuth();
+	const finalResponseDelayMs = toolServeDelayMs();
+	const box = makeSandbox(`mock-loop-serve-tool-${apiName}`);
+	let server;
+	try {
+		server = await startFakeModelServer({ turns: toolServeScriptedTurns({ finalResponseDelayMs }) });
+		writeMockModelsJson(box.agentDir, server, apiName);
+		writeServeEnvFile(envFile, box);
+	} catch (error) {
+		if (server) await server.stop();
+		box.cleanup();
+		throw error;
+	}
+
+	const authDigest = guard.before ? `sha256=${guard.before.slice(0, 12)}...` : "sha256=absent";
+	process.stdout.write(`SENPI_QA_AUTH_GUARD=1 ${authDigest} path=${guard.path}\n`);
+	process.stdout.write(`SENPI_QA_SERVE_ENV_FILE=${envFile}\n`);
+	process.stdout.write("SENPI_QA_SERVE_SCENARIO=tool-call\n");
+	process.stdout.write(`SENPI_QA_TOOL_SERVE_ASSISTANT_MARKER=${QA_TOOL_SERVE_ASSISTANT_MARKER}\n`);
+	process.stdout.write(`SENPI_QA_TOOL_SERVE_RESULT_MARKER=${QA_TOOL_SERVE_RESULT_MARKER}\n`);
+	process.stdout.write(`SENPI_QA_TOOL_SERVE_FINAL_MARKER=${QA_TOOL_SERVE_FINAL_MARKER}\n`);
+	process.stdout.write(`SENPI_QA_TOOL_SERVE_FINAL_RESPONSE_DELAY_MS=${finalResponseDelayMs}\n`);
+	process.stdout.write("SENPI_QA_SERVE_READY=1\n");
+
+	let shutdown;
+	const stop = async () => {
+		if (!shutdown) {
+			shutdown = (async () => {
+				await server.stop();
+				box.cleanup();
+				guard.assertUnchanged();
+			})();
+		}
+		return shutdown;
+	};
+	await new Promise((resolve, reject) => {
+		const onSignal = () => {
+			void stop().then(resolve, reject);
+		};
+		process.once("SIGTERM", onSignal);
+		process.once("SIGINT", onSignal);
+	});
+}
+
 async function withMcpTool(apiName, toolName, toolArgs, evidenceSlug) {
 	assertMcpFixtureToolName(toolName);
 	const fixture = mcpFixtureForToolName(toolName);
@@ -411,6 +590,11 @@ if (argv[0] === "--self-test") {
 		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
 		process.exit(1);
 	});
+} else if (argv[0] === "--with-tool" && argv.includes("--serve") && argv.includes("--self-test")) {
+	toolServeSelfTest(api || "openai-completions").catch((e) => {
+		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+		process.exit(1);
+	});
 } else if (scenario) {
 	runRetryScenario(scenario, api || "openai-completions").catch((e) => {
 		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
@@ -418,14 +602,24 @@ if (argv[0] === "--self-test") {
 	});
 } else if (argv.includes("--serve")) {
 	const envFile = flagValue(argv, "--serve-env");
-	if (argv[0] !== "--with-reasoning" || !envFile) {
+	if (argv[0] === "--with-reasoning" && envFile) {
+		serveReasoning(api || "openai-completions", envFile, argv.includes("--slow")).catch((e) => {
+			process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+			process.exit(1);
+		});
+	} else if (argv[0] === "--with-tool" && envFile) {
+		serveTool(api || "openai-completions", envFile).catch((e) => {
+			process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+			process.exit(1);
+		});
+	} else if (argv[0] === "--with-tool") {
+		process.stderr.write("--serve requires --with-tool and --serve-env <path>\n");
+		process.exit(2);
+	} else {
+		// Preserve the established reasoning serve error for every prior invalid form.
 		process.stderr.write("--serve requires --with-reasoning and --serve-env <path>\n");
 		process.exit(2);
 	}
-	serveReasoning(api || "openai-completions", envFile, argv.includes("--slow")).catch((e) => {
-		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
-		process.exit(1);
-	});
 } else if (argv[0] === "--with-reasoning") {
 	withReasoning(api || "openai-completions", argv.includes("--slow")).catch((e) => {
 		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
@@ -477,6 +671,8 @@ if (argv[0] === "--self-test") {
 			"senpi-qa Channel 3 — Mock loop (zero real API calls)",
 			"  node mock-loop.mjs --self-test [--api <name>]   round-trip 1 or all 3 wire formats",
 			"  node mock-loop.mjs --with-tool [--api <name>]   full loop with a bash tool call",
+			`  ${TOOL_SERVE_DELAY_ENV}=<ms> node mock-loop.mjs --with-tool --serve --serve-env <path> [--api <name>]`,
+			"  node mock-loop.mjs --with-tool --serve --self-test [--api <name>]",
 			"  node mock-loop.mjs --with-reasoning [--slow] [--api <name>]",
 			"  node mock-loop.mjs --with-reasoning --serve --serve-env <path> [--slow] [--api <name>]",
 			"  node mock-loop.mjs --with-text-tool-leak --api <anthropic-messages|openai-completions>",

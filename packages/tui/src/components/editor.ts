@@ -285,6 +285,12 @@ interface LayoutLine {
 
 export interface EditorTheme {
 	borderColor: (str: string) => string;
+	/**
+	 * Theme for the autocomplete/slash SelectList built by
+	 * createAutocompleteList(). May carry the optional `renderRow` seam (see
+	 * SelectListTheme) to style the row prefix, primary text, and selected-row
+	 * background independently.
+	 */
 	selectList: SelectListTheme;
 }
 

@@ -1,5 +1,21 @@
 # changes
 
+## grok chrome seam for interactive mode (2026-07-26)
+
+### What changed
+
+- `interactive-mode.ts`: new optional `chrome` seam. `chrome: "grok"` constructs the `GrokChrome` strategy (`grok/chrome.ts`), which owns the base editor (wrapped in the rounded `GrokInputCard`), the compact `GrokFooter` (model and cwd only), the `GrokWelcomeCard` startup content, the braille working indicator (`⠹`, accent-tinted), the editor theme and border colour, overlay decoration, and root arrangement. Extensions continue to own their editor factory; the default no-chrome path is unchanged.
+- `grok/tool-row.ts`: single-line tool presentation with a stable guide column (`┃` guide, `◆` marker), selected when the chrome's `toolPresentation` is `"grok"`.
+- `grok/palette.ts` + `grok/chrome-tokens.ts`: capture-measured hex constants and glyphs, with chrome tokens delegating to the active theme so `grok-day` and custom themes stay coherent.
+
+### Why
+
+- The experimental `--grok-neo` mode reuses the ordinary interactive loop; the seam injects presentation without forking interactive-mode logic.
+
+### Expected merge conflict zones
+
+- LOW: the `chrome` constructor option and the `this.chrome ?` branches in `interactive-mode.ts`; the `grok/` directory is additive.
+
 ## Inspector VM-import rejection recovery (2026-07-24)
 
 ### What changed

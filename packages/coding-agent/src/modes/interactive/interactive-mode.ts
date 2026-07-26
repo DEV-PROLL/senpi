@@ -158,6 +158,7 @@ import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 import { editInExternalEditor } from "./external-editor.ts";
+import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./grok/chrome.ts";
 import { restoreInteractiveStderr, takeOverInteractiveStderr } from "./interactive-stderr-guard.ts";
 import { getModelSearchText } from "./model-search.ts";
 import { resolveStartupToolPaths } from "./startup-tools.ts";
@@ -354,9 +355,9 @@ function hasDefaultModelProvider(providerId: string): providerId is keyof typeof
 	return providerId in defaultModelPerProvider;
 }
 
-// isApiKeyLoginProvider now lives in core/auth-providers.ts so the RPC login path
-// (neo) and the classic selectors share ONE source of truth. Re-exported here to
-// keep the existing public import (test/oauth-selector.test.ts) working, and used
+// isApiKeyLoginProvider now lives in core/auth-providers.ts so RPC clients and
+// the classic selectors share ONE source of truth. Re-exported here to keep the
+// existing public import (test/oauth-selector.test.ts) working, and used
 // locally by getLoginProviderOptions below.
 export { isApiKeyLoginProvider };
 
@@ -432,6 +433,8 @@ export interface InteractiveModeOptions {
 	initialMessages?: string[];
 	/** Force verbose startup (overrides quietStartup setting) */
 	verbose?: boolean;
+	/** Select an experimental interactive chrome. */
+	chrome?: InteractiveChrome | "grok";
 }
 
 export class InteractiveMode {
@@ -444,6 +447,7 @@ export class InteractiveMode {
 
 	private runtimeHost: AgentSessionRuntime;
 	private options: InteractiveModeOptions;
+	private chrome: InteractiveChrome | undefined;
 	private ui: TUI;
 	private loadedResourcesContainer: Container;
 	private chatContainer: Container;
@@ -457,7 +461,7 @@ export class InteractiveMode {
 	private autocompleteProviderWrappers: AutocompleteProviderFactory[] = [];
 	private fdPath: string | undefined;
 	private editorContainer: Container;
-	private footer: FooterComponent;
+	private footer: InteractiveFooter;
 	private footerDataProvider: FooterDataProvider;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
 	private keybindings: KeybindingsManager;
@@ -595,6 +599,7 @@ export class InteractiveMode {
 	constructor(runtimeHost: AgentSessionRuntime, options: InteractiveModeOptions = {}) {
 		this.runtimeHost = runtimeHost;
 		this.options = options;
+		this.chrome = options.chrome === "grok" ? new GrokChrome() : options.chrome;
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
 			InteractiveMode.restoreCompactionEscapeOverride(this);
@@ -638,15 +643,25 @@ export class InteractiveMode {
 		setKeybindings(this.keybindings);
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
 		const autocompleteMaxVisible = this.settingsManager.getAutocompleteMaxVisible();
-		this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
-			paddingX: editorPaddingX,
-			autocompleteMaxVisible,
-		});
+		if (this.chrome) {
+			this.defaultEditor = this.chrome.createBaseEditor({
+				ui: this.ui,
+				keybindings: this.keybindings,
+				editorOptions: { paddingX: editorPaddingX, autocompleteMaxVisible },
+			});
+		} else {
+			this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
+				paddingX: editorPaddingX,
+				autocompleteMaxVisible,
+			});
+		}
 		this.editor = this.defaultEditor;
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
-		this.footer = new FooterComponent(this.session, this.footerDataProvider);
+		this.footer = this.chrome
+			? this.chrome.createFooter(this.session, this.footerDataProvider)
+			: new FooterComponent(this.session, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 
 		// Load hide thinking block setting
@@ -874,18 +889,39 @@ export class InteractiveMode {
 
 		// Add header container as first child. Populate it after applying theme settings.
 		// Keep loaded resources before chat so restored session messages never precede them.
-		this.ui.addChild(this.headerContainer);
-		this.ui.addChild(this.loadedResourcesContainer);
+		if (this.chrome) {
+			this.renderWidgets(); // Initialize with default spacer
+			for (const component of this.chrome.arrangeRoot(
+				[
+					this.headerContainer,
+					this.loadedResourcesContainer,
+					this.chatContainer,
+					this.pendingMessagesContainer,
+					this.statusContainer,
+					this.hookStatusContainer,
+					this.widgetContainerAbove,
+					this.editorContainer,
+					this.widgetContainerBelow,
+					this.footer,
+				],
+				this.ui,
+			)) {
+				this.ui.addChild(component);
+			}
+		} else {
+			this.ui.addChild(this.headerContainer);
+			this.ui.addChild(this.loadedResourcesContainer);
 
-		this.ui.addChild(this.chatContainer);
-		this.ui.addChild(this.pendingMessagesContainer);
-		this.ui.addChild(this.statusContainer);
-		this.ui.addChild(this.hookStatusContainer);
-		this.renderWidgets(); // Initialize with default spacer
-		this.ui.addChild(this.widgetContainerAbove);
-		this.ui.addChild(this.editorContainer);
-		this.ui.addChild(this.widgetContainerBelow);
-		this.ui.addChild(this.footer);
+			this.ui.addChild(this.chatContainer);
+			this.ui.addChild(this.pendingMessagesContainer);
+			this.ui.addChild(this.statusContainer);
+			this.ui.addChild(this.hookStatusContainer);
+			this.renderWidgets(); // Initialize with default spacer
+			this.ui.addChild(this.widgetContainerAbove);
+			this.ui.addChild(this.editorContainer);
+			this.ui.addChild(this.widgetContainerBelow);
+			this.ui.addChild(this.footer);
+		}
 		this.ui.setFocus(this.editor);
 
 		this.setupKeyHandlers();
@@ -904,7 +940,12 @@ export class InteractiveMode {
 		await this.themeController.applyFromSettings();
 
 		// Add header with keybindings from config (unless silenced)
-		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
+		if (this.chrome) {
+			this.builtInHeader = this.chrome.createWelcomeContent(APP_NAME, this.version);
+			this.headerContainer.addChild(new Spacer(1));
+			this.headerContainer.addChild(this.builtInHeader);
+			this.headerContainer.addChild(new Spacer(1));
+		} else if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
 			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
 
 			// Build startup instructions using keybinding hint helpers
@@ -2310,11 +2351,17 @@ export class InteractiveMode {
 		}
 		if (this.session.isStreaming && this.activeStatusIndicator?.kind !== "working") {
 			this.showStatusIndicator(
-				new WorkingStatusIndicator(
-					this.ui,
-					this.workingMessage ?? this.defaultWorkingMessage,
-					this.getWorkingIndicatorOptions(),
-				),
+				this.chrome
+					? this.chrome.createWorkingIndicator(
+							this.ui,
+							this.workingMessage ?? this.defaultWorkingMessage,
+							this.getWorkingIndicatorOptions(),
+						)
+					: new WorkingStatusIndicator(
+							this.ui,
+							this.workingMessage ?? this.defaultWorkingMessage,
+							this.getWorkingIndicatorOptions(),
+						),
 			);
 		}
 		this.ui.requestRender();
@@ -2824,7 +2871,11 @@ export class InteractiveMode {
 
 		if (factory) {
 			// Create the custom editor with tui, theme, and keybindings
-			const newEditor = factory(this.ui, getEditorTheme(), this.keybindings);
+			const newEditor = factory(
+				this.ui,
+				this.chrome ? this.chrome.getEditorTheme() : getEditorTheme(),
+				this.keybindings,
+			);
 
 			// Wire up callbacks from the default editor
 			newEditor.onSubmit = this.defaultEditor.onSubmit;
@@ -2963,7 +3014,8 @@ export class InteractiveMode {
 							const w = (component as { width?: number }).width;
 							return w ? { width: w } : undefined;
 						};
-						const handle = this.ui.showOverlay(component, resolveOptions());
+						const overlayOptions = resolveOptions();
+						const handle = this.ui.showOverlay(component, overlayOptions);
 						// Expose handle to caller for visibility control
 						options?.onHandle?.(handle);
 					} else {
@@ -3330,11 +3382,17 @@ export class InteractiveMode {
 				}
 				if (this.workingVisible) {
 					this.showStatusIndicator(
-						new WorkingStatusIndicator(
-							this.ui,
-							this.workingMessage ?? this.defaultWorkingMessage,
-							this.getWorkingIndicatorOptions(),
-						),
+						this.chrome
+							? this.chrome.createWorkingIndicator(
+									this.ui,
+									this.workingMessage ?? this.defaultWorkingMessage,
+									this.getWorkingIndicatorOptions(),
+								)
+							: new WorkingStatusIndicator(
+									this.ui,
+									this.workingMessage ?? this.defaultWorkingMessage,
+									this.getWorkingIndicatorOptions(),
+								),
 					);
 				} else {
 					this.clearStatusIndicator();
@@ -3404,18 +3462,7 @@ export class InteractiveMode {
 						if (content.type === "toolCall") {
 							let component = this.pendingTools.get(content.id);
 							if (!component) {
-								component = new ToolExecutionComponent(
-									content.name,
-									content.id,
-									content.arguments,
-									{
-										showImages: this.settingsManager.getShowImages(),
-										imageWidthCells: this.settingsManager.getImageWidthCells(),
-									},
-									this.getRegisteredToolDefinition(content.name),
-									this.ui,
-									this.sessionManager.getCwd(),
-								);
+								component = this.createToolExecutionComponent(content.name, content.id, content.arguments);
 								component.setExpanded(this.toolOutputExpanded);
 								this.chatContainer.addChild(component);
 								this.pendingTools.set(content.id, component);
@@ -3486,18 +3533,7 @@ export class InteractiveMode {
 				this.handleToolExecutionStart(event);
 				let component = this.pendingTools.get(event.toolCallId);
 				if (!component) {
-					component = new ToolExecutionComponent(
-						event.toolName,
-						event.toolCallId,
-						event.args,
-						{
-							showImages: this.settingsManager.getShowImages(),
-							imageWidthCells: this.settingsManager.getImageWidthCells(),
-						},
-						this.getRegisteredToolDefinition(event.toolName),
-						this.ui,
-						this.sessionManager.getCwd(),
-					);
+					component = this.createToolExecutionComponent(event.toolName, event.toolCallId, event.args);
 					component.setExpanded(this.toolOutputExpanded);
 					this.chatContainer.addChild(component);
 					this.pendingTools.set(event.toolCallId, component);
@@ -3941,6 +3977,36 @@ export class InteractiveMode {
 		}
 	}
 
+	private createToolExecutionComponent(toolName: string, toolCallId: string, args: unknown): ToolExecutionComponent {
+		if (this.chrome) {
+			return new ToolExecutionComponent(
+				toolName,
+				toolCallId,
+				args,
+				{
+					showImages: this.settingsManager.getShowImages(),
+					imageWidthCells: this.settingsManager.getImageWidthCells(),
+				},
+				this.getRegisteredToolDefinition(toolName),
+				this.ui,
+				this.sessionManager.getCwd(),
+				this.chrome.toolPresentation,
+			);
+		}
+		return new ToolExecutionComponent(
+			toolName,
+			toolCallId,
+			args,
+			{
+				showImages: this.settingsManager.getShowImages(),
+				imageWidthCells: this.settingsManager.getImageWidthCells(),
+			},
+			this.getRegisteredToolDefinition(toolName),
+			this.ui,
+			this.sessionManager.getCwd(),
+		);
+	}
+
 	private renderSessionItems(
 		items: readonly RenderSessionItem[],
 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
@@ -3971,18 +4037,7 @@ export class InteractiveMode {
 				// Render tool call components
 				for (const content of message.content) {
 					if (content.type === "toolCall") {
-						const component = new ToolExecutionComponent(
-							content.name,
-							content.id,
-							content.arguments,
-							{
-								showImages: this.settingsManager.getShowImages(),
-								imageWidthCells: this.settingsManager.getImageWidthCells(),
-							},
-							this.getRegisteredToolDefinition(content.name),
-							this.ui,
-							this.sessionManager.getCwd(),
-						);
+						const component = this.createToolExecutionComponent(content.name, content.id, content.arguments);
 						component.setExpanded(this.toolOutputExpanded);
 						this.chatContainer.addChild(component);
 
@@ -4379,7 +4434,12 @@ export class InteractiveMode {
 	}
 
 	private updateEditorBorderColor(): void {
-		if (this.isBashMode) {
+		if (this.chrome) {
+			this.editor.borderColor = this.chrome.getEditorBorderColor({
+				isBashMode: this.isBashMode,
+				thinkingLevel: this.session.thinkingLevel || "off",
+			});
+		} else if (this.isBashMode) {
 			this.editor.borderColor = theme.getBashModeBorderColor();
 		} else {
 			const level = this.session.thinkingLevel || "off";

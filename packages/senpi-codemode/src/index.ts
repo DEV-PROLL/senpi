@@ -1,8 +1,6 @@
 import * as os from "node:os";
 import type { ExtensionContext } from "@code-yeongyu/senpi";
 import type { AgentExecuteTool } from "./bridges/agent-bridge.ts";
-import { CodeModeSessionRuntime } from "./codemode/runtime.ts";
-import { type CodeModeTool, createCodeModeTools, isGptCodeModeModel } from "./codemode/tools.ts";
 import { type CompletionRequest, type CompletionResult, createCompletionHandler } from "./completion/handler.ts";
 import { defaultCodemodeSettings } from "./config/settings.ts";
 import { EvalNotifier } from "./extension/eval-notifier.ts";
@@ -31,11 +29,10 @@ type CodemodeEvent = SessionLifecycleEvent | "model_select";
 
 export interface CodemodeExtensionAPI {
 	registerTool(tool: ReturnType<typeof createEvalTool>): void;
+	registerRemovedToolHint(name: string, hint: string): void;
 	on(event: CodemodeEvent, handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
 	executeTool: AgentExecuteTool;
 	getActiveTools(): string[];
-	setActiveTools?(toolNames: string[]): void | Promise<void>;
-	getAllTools?(): readonly { readonly name: string }[];
 	sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
 }
 
@@ -46,17 +43,11 @@ export interface SenpiCodemodeOptions {
 	readonly complete?: (request: CompletionRequest, ctx: ExtensionContext) => Promise<CompletionResult>;
 }
 
-type DynamicCodeModeExtensionAPI = CodemodeExtensionAPI & {
-	registerTool(tool: CodeModeTool): void;
-	setActiveTools(toolNames: string[]): void | Promise<void>;
-	getAllTools(): readonly { readonly name: string }[];
-};
-
 export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCodemodeOptions = {}): void {
 	const manager = new SessionManagerProxy();
 	const complete = options.complete ?? ((request, ctx) => createCompletionHandler()(ctx)(request));
 	const renderers = { renderCall: renderEvalCall, renderResult: renderEvalResult };
-	let activeRuntime: (SessionRuntime & { readonly codeMode?: CodeModeSessionRuntime }) | undefined;
+	let activeRuntime: SessionRuntime | undefined;
 	let activeModelId: string | undefined;
 	let activeContext: ExtensionContext | undefined;
 	let activeCells: EvalDetachedCellManager | undefined;
@@ -90,25 +81,13 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 		);
 	};
 	const dropRuntime = async (): Promise<void> => {
-		const codeMode = activeRuntime?.codeMode;
 		const cells = activeCells;
 		activeRuntime = undefined;
 		activeModelId = undefined;
 		activeCells = undefined;
 		await cells?.dispose();
 		activeContext = undefined;
-		await Promise.all([manager.dispose(), codeMode?.dispose()]);
-	};
-	const activateCodeModeTools = async (runtime: CodeModeSessionRuntime): Promise<void> => {
-		if (!isDynamicCodeModeExtensionAPI(pi)) return;
-		const tools = createCodeModeTools({ runtime });
-		pi.registerTool(tools.exec);
-		pi.registerTool(tools.wait);
-		await pi.setActiveTools([...new Set([...pi.getActiveTools(), "exec", "wait"])]);
-	};
-	const deactivateCodeModeTools = async (): Promise<void> => {
-		if (!isDynamicCodeModeExtensionAPI(pi)) return;
-		await pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "exec" && name !== "wait"));
+		await manager.dispose();
 	};
 	pi.registerTool(
 		createEvalTool({
@@ -124,9 +103,16 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			hostLine: hostLine(),
 		}),
 	);
+	pi.registerRemovedToolHint(
+		"exec",
+		'exec was removed; use eval({ language: "js", code }) instead. Long eval cells detach on timeout and notify when complete.',
+	);
+	pi.registerRemovedToolHint(
+		"wait",
+		'wait was removed; detached eval cells notify when complete. Use eval({ action: "peek"|"stop", cell_id }) to inspect or stop one.',
+	);
 
 	pi.on("session_start", async (event, ctx) => {
-		const previousCodeMode = activeRuntime?.codeMode;
 		const previousCells = activeCells;
 		activeCells = undefined;
 		await previousCells?.dispose();
@@ -134,24 +120,13 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 		const runtime = await createRuntime(pi, ctx, event, complete, options);
 		const replaced = await manager.replace(generation, runtime.manager);
 		if (!replaced) return;
-		await previousCodeMode?.dispose();
 		notifier.reset();
 		activeContext = ctx;
 		const cellManager = new EvalDetachedCellManager({ artifactsDir: runtime.artifactsDir, notifier });
 		activeCells = cellManager;
-		const codeMode = isGptCodeModeModel(ctx.model?.id)
-			? new CodeModeSessionRuntime({
-					sessionId: runtime.sessionId,
-					cwd: runtime.cwd,
-					parallelPoolWidth: runtime.parallelPoolWidth,
-					executeTool: runtime.executeTool,
-				})
-			: undefined;
-		activeRuntime = { ...runtime, ...(codeMode === undefined ? {} : { codeMode }) };
+		activeRuntime = runtime;
 		activeModelId = ctx.model?.id;
-		registerEvalForRuntime(activeRuntime, activeModelId, cellManager);
-		if (codeMode) await activateCodeModeTools(codeMode);
-		else await deactivateCodeModeTools();
+		registerEvalForRuntime(runtime, activeModelId, cellManager);
 	});
 	pi.on("session_shutdown", async () => dropRuntime());
 	pi.on("session_before_switch", async () => dropRuntime());
@@ -166,32 +141,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 		const cellManager = activeCells;
 		if (cellManager === undefined) return;
 		registerEvalForRuntime(runtime, modelId, cellManager);
-		if (!isGptCodeModeModel(modelId)) {
-			const { codeMode, ...nextRuntime } = runtime;
-			await codeMode?.dispose();
-			activeRuntime = nextRuntime;
-			await deactivateCodeModeTools();
-			return;
-		}
-		if (runtime.codeMode) {
-			if (isDynamicCodeModeExtensionAPI(pi)) {
-				await pi.setActiveTools([...new Set([...pi.getActiveTools(), "exec", "wait"])]);
-			}
-			return;
-		}
-		const codeMode = new CodeModeSessionRuntime({
-			sessionId: runtime.sessionId,
-			cwd: runtime.cwd,
-			parallelPoolWidth: runtime.parallelPoolWidth,
-			executeTool: runtime.executeTool,
-		});
-		activeRuntime = { ...runtime, codeMode };
-		await activateCodeModeTools(codeMode);
 	});
-}
-
-function isDynamicCodeModeExtensionAPI(pi: CodemodeExtensionAPI): pi is DynamicCodeModeExtensionAPI {
-	return typeof pi.setActiveTools === "function" && typeof pi.getAllTools === "function";
 }
 
 function hostLine(): string {
