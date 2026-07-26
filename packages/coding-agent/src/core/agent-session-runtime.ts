@@ -187,11 +187,15 @@ export class AgentSessionRuntime {
 
 	private async teardownCurrent(reason: SessionShutdownEvent["reason"], targetSessionFile?: string): Promise<void> {
 		const oldRunner = this.session.extensionRunner;
-		this._removedOnReplacement = {
-			oldRunner,
-			oldIdentities: oldRunner.getExtensionIdentities(),
-			reason,
-		};
+		// Test hosts and partial runner implementations may lack identity introspection;
+		// skip removal reporting there rather than break the replacement itself.
+		if (typeof oldRunner.getExtensionIdentities === "function") {
+			this._removedOnReplacement = {
+				oldRunner,
+				oldIdentities: oldRunner.getExtensionIdentities(),
+				reason,
+			};
+		}
 		await emitSessionShutdownEvent(oldRunner, {
 			type: "session_shutdown",
 			reason,
@@ -205,8 +209,10 @@ export class AgentSessionRuntime {
 		const pending = this._removedOnReplacement;
 		this._removedOnReplacement = undefined;
 		if (!pending) return;
+		const newRunner = this.session.extensionRunner;
+		if (typeof newRunner.getExtensionIdentities !== "function") return;
 		const newResolvedPaths = new Set(
-			this.session.extensionRunner.getExtensionIdentities().map((extension) => extension.resolvedPath),
+			newRunner.getExtensionIdentities().map((extension) => extension.resolvedPath),
 		);
 		const removed = pending.oldIdentities.filter((extension) => !newResolvedPaths.has(extension.resolvedPath));
 		if (removed.length === 0) return;
