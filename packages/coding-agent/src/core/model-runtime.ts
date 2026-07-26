@@ -379,6 +379,11 @@ export class ModelRuntime implements Models {
 		return this.snapshot.available;
 	}
 
+	/** True only when the most recent availability refresh completed without error. */
+	hasFreshAvailabilitySnapshot(): boolean {
+		return this.availabilityInitialized && this.availabilityError === undefined;
+	}
+
 	hasAvailabilitySnapshot(): boolean {
 		return this.availabilityInitialized;
 	}
@@ -589,9 +594,6 @@ export class ModelRuntime implements Models {
 	}
 
 	async reloadConfig(): Promise<void> {
-		this.config = await ModelConfig.load(this.modelsPath);
-		this.configureRadiusProviders();
-		this.rebuildProviders();
 		await this.refresh({ allowNetwork: this.modelNetworkEnabled });
 	}
 

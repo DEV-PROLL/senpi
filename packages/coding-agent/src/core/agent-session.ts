@@ -116,7 +116,7 @@ import type {
 } from "./extensions/types.ts";
 import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
-import { getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
+import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
@@ -137,6 +137,7 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinking-levels.ts";
+import { resetTimings, time } from "./timings.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
@@ -4939,29 +4940,40 @@ export class AgentSession {
 	}
 
 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
+		resetTimings("reload");
 		const previousFlagValues = this._extensionRunner.getFlagValues();
 		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
+		time("shutdown", "reload");
 		await this.settingsManager.reload();
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
+		time("settings", "reload");
 		await this._modelRuntime.reloadConfig();
+		// Resolving both scopes from the completed refresh avoids two extra availability
+		// scans, but only a snapshot from a SUCCESSFUL refresh may be trusted: refresh()
+		// swallows availability errors, so a failed scan must fall back to the runtime and
+		// keep the previous refresh-and-surface-the-error behavior.
+		const refreshedModels: AvailableModelsSource = this._modelRuntime.hasFreshAvailabilitySnapshot()
+			? { getAvailable: async () => this._modelRuntime.getAvailableSnapshot() }
+			: this._modelRuntime;
 		this.setScopedModels(
 			await resolveModelScope(
 				getModelNarrowingPatterns({
 					legacyEnabledPatterns: this.settingsManager.getEnabledModels(),
 				}),
-				this._modelRuntime,
+				refreshedModels,
 			),
 		);
-		this.setFavoriteModels(
-			await resolveModelScope(this.settingsManager.getFavoriteModels() ?? [], this._modelRuntime),
-		);
-		await this._resourceLoader.reload();
+		this.setFavoriteModels(await resolveModelScope(this.settingsManager.getFavoriteModels() ?? [], refreshedModels));
+		time("models", "reload");
+		await this._resourceLoader.reload({ settingsAlreadyReloadedFor: this.settingsManager });
+		time("resources", "reload");
 		this._buildRuntime({
 			activeToolNames: this.getActiveToolNames(),
 			flagValues: previousFlagValues,
 			includeAllExtensionTools: true,
 		});
+		time("runtime", "reload");
 
 		const hasBindings =
 			this._extensionUIContext ||
@@ -4973,6 +4985,7 @@ export class AgentSession {
 			await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
 			await this.extendResourcesFromExtensions("reload");
 		}
+		time("lifecycle", "reload");
 	}
 
 	// =========================================================================

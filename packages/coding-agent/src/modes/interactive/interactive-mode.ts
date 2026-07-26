@@ -92,6 +92,7 @@ import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
+import { formatTimings, time } from "../../core/timings.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
@@ -6031,6 +6032,7 @@ export class InteractiveMode {
 			this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 			this.outputPad = this.settingsManager.getOutputPad();
 			this.rebuildChatFromMessages();
+			time("chatRebuild", "reload");
 			chatRestoredBeforeSessionStart = true;
 		};
 
@@ -6071,10 +6073,12 @@ export class InteractiveMode {
 			if (modelsJsonError) {
 				this.showError(`models.json error: ${modelsJsonError}`);
 			}
+			const reloadedMessage = savedImplicitProjectTrust
+				? "Reloaded keybindings, extensions, skills, prompts, themes, and context files; saved project trust"
+				: "Reloaded keybindings, extensions, skills, prompts, themes, and context files";
+			const reloadTimings = formatTimings("reload");
 			this.showStatus(
-				savedImplicitProjectTrust
-					? "Reloaded keybindings, extensions, skills, prompts, themes, and context files; saved project trust"
-					: "Reloaded keybindings, extensions, skills, prompts, themes, and context files",
+				reloadTimings === undefined ? reloadedMessage : `${reloadedMessage} | reload timings: ${reloadTimings}`,
 			);
 			dismissReloadBox(this.editor as Component);
 			reloadBoxDismissed = true;

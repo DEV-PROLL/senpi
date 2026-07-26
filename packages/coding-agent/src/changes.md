@@ -30,6 +30,28 @@
 
 # changes
 
+## Reload measurement and redundant-work removal (2026-07-26)
+
+- `/reload` records a `reload` timing namespace with one marker per phase
+  (`shutdown`, `settings`, `models`, `resources`, `runtime`, `chatRebuild`,
+  `lifecycle`). With `PI_TIMING=1` the breakdown is appended to the reload
+  status line; with it unset nothing is recorded.
+- Settings are read once per reload instead of twice.
+  `ResourceLoaderReloadOptions.settingsAlreadyReloadedFor` takes the
+  `SettingsManager` the caller just reloaded, and the loader skips its own
+  reload only when that is the very manager it owns AND project trust is not
+  being resolved, so trust-scoped values can never go stale.
+- `ModelRuntime.reloadConfig()` delegates to `refresh()` instead of repeating
+  the config load and provider rebuild that `refresh()` performs immediately
+  afterwards.
+- Both model-scope resolutions read the snapshot the reload refresh just
+  produced rather than each triggering another availability scan (3 scans -> 1).
+  The snapshot is trusted only via `hasFreshAvailabilitySnapshot()`; a failed
+  refresh falls back to the runtime so scan errors still surface.
+- `scripts/bench-reload.mjs` measures `DefaultResourceLoader.reload()` from
+  source through a subprocess probe (real jiti path), reporting cold-first and
+  warm p50/p95 across fresh processes.
+
 ## Multi-session RPC mode, session-owned MCP/config-reload state, and back-compat guarantee (2026-07-23)
 
 ### What changed
