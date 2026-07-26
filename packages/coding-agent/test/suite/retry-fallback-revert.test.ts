@@ -18,7 +18,9 @@ describe("retry fallback revert-to-primary", () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			fallbackNow: () => now,
-			settings: { retry: { enabled: true, baseDelayMs: 1, maxRetries: 0, fallbackChains: { [primary]: [fallback] } } },
+			settings: {
+				retry: { enabled: true, baseDelayMs: 1, maxRetries: 0, fallbackChains: { [primary]: [fallback] } },
+			},
 		});
 		harnesses.push(harness);
 		harness.setResponses([
@@ -143,7 +145,9 @@ describe("retry fallback revert-to-primary", () => {
 				{ id: "faux-2", reasoning: true },
 			],
 			fallbackNow: () => now,
-			settings: { retry: { enabled: true, baseDelayMs: 1, maxRetries: 0, fallbackChains: { [primary]: [fallback] } } },
+			settings: {
+				retry: { enabled: true, baseDelayMs: 1, maxRetries: 0, fallbackChains: { [primary]: [fallback] } },
+			},
 		});
 		harnesses.push(harness);
 		harness.setResponses([
@@ -215,14 +219,23 @@ describe("retry fallback revert-to-primary", () => {
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			fallbackNow: () => now,
 			settings: {
-				retry: { enabled: true, baseDelayMs: 200, maxRetries: 3, fallbackChains: { [primary]: [fallback] } },
+				retry: { enabled: true, baseDelayMs: 200, maxRetries: 2, fallbackChains: { [primary]: [fallback] } },
 			},
 		});
 		harnesses.push(harness);
-		harness.setResponses([overloaded(), overloaded(), fauxAssistantMessage("recovered with steering")]);
+		harness.setResponses([
+			overloaded(),
+			overloaded(),
+			overloaded(),
+			overloaded(),
+			fauxAssistantMessage("recovered with steering"),
+		]);
 		let steered = false;
 		harness.session.subscribe((event) => {
-			if (event.type === "auto_retry_start" && event.delayMs > 0 && !steered) {
+			// Steer only once a fallback is actually active, so the assertion cannot pass
+			// on a turn that never left the primary model.
+			const fallbackActive = harness.eventsOfType("retry_fallback_applied").length > 0;
+			if (event.type === "auto_retry_start" && event.delayMs > 0 && fallbackActive && !steered) {
 				steered = true;
 				void harness.session.steer("steer note");
 				now += 10 * 60_000;
@@ -231,7 +244,9 @@ describe("retry fallback revert-to-primary", () => {
 
 		await harness.session.prompt("flaky with steering");
 
-		const finalRequest = harness.faux.getCallLog()[2];
+		expect(harness.eventsOfType("retry_fallback_applied")).toHaveLength(1);
+		expect(steered).toBe(true);
+		const finalRequest = harness.faux.getCallLog().at(-1);
 		if (!finalRequest) throw new Error("missing final provider request");
 		const serialized = JSON.stringify(finalRequest.context.messages);
 		expect(serialized).toContain("steer note");
@@ -242,7 +257,9 @@ describe("retry fallback revert-to-primary", () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			fallbackNow: () => now,
-			settings: { retry: { enabled: true, baseDelayMs: 1, maxRetries: 0, fallbackChains: { [primary]: [fallback] } } },
+			settings: {
+				retry: { enabled: true, baseDelayMs: 1, maxRetries: 0, fallbackChains: { [primary]: [fallback] } },
+			},
 		});
 		harnesses.push(harness);
 		harness.setResponses([
