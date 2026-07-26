@@ -79,7 +79,9 @@ describe("retry fallback hardening", () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			api: "openai-responses",
-			settings: { retry: { enabled: true, baseDelayMs: 1, maxRetries: 0, fallbackChains: { [primary]: [fallback] } } },
+			settings: {
+				retry: { enabled: true, baseDelayMs: 1, maxRetries: 0, fallbackChains: { [primary]: [fallback] } },
+			},
 		});
 		harnesses.push(harness);
 		harness.setResponses([overloaded(), fauxAssistantMessage("fallback answer")]);
