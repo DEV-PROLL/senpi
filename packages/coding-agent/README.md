@@ -197,7 +197,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/reload` | Reload keybindings, extensions, skills, prompts, themes, and context files |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
-| `/quit` | Quit pi |
+| `/quit`, `/exit` | Quit pi |
 
 ### Keyboard Shortcuts
 
