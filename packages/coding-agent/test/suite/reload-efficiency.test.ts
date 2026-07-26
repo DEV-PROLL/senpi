@@ -10,6 +10,12 @@ import {
 	createAgentSessionServices,
 } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
+import type {
+	ExtensionAPI,
+	InlineExtension,
+	LoadExtensionsResult,
+	SessionExtensionsRemovedEvent,
+} from "../../src/core/extensions/types.ts";
 import { ModelConfig } from "../../src/core/model-config.ts";
 import { ModelRuntime } from "../../src/core/model-runtime.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
@@ -17,7 +23,12 @@ import { SettingsManager } from "../../src/core/settings-manager.ts";
 
 const cleanups: Array<() => void> = [];
 
-async function createReloadSession() {
+async function createReloadSession(
+	options: {
+		extensionFactories?: InlineExtension[];
+		extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
+	} = {},
+) {
 	const tempDir = join(tmpdir(), `pi-reload-eff-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	const agentDir = join(tempDir, "agent");
 	mkdirSync(agentDir, { recursive: true });
@@ -36,6 +47,7 @@ async function createReloadSession() {
 			agentDir,
 			modelRuntime,
 			resourceLoaderOptions: {
+				extensionsOverride: options.extensionsOverride,
 				extensionFactories: [
 					(pi) => {
 						pi.registerProvider(faux.getModel().provider, {
@@ -54,6 +66,7 @@ async function createReloadSession() {
 							})),
 						});
 					},
+					...(options.extensionFactories ?? []),
 				],
 			},
 		});
@@ -141,5 +154,38 @@ describe("reload does redundant work only once", () => {
 		await runtime.services.resourceLoader.reload({ settingsAlreadyReloadedFor: unrelatedManager });
 
 		expect(settingsReload).toHaveBeenCalledTimes(1);
+	});
+
+	it("notifies extensions removed from the rebuilt runner during reload", async () => {
+		const removedEvents: SessionExtensionsRemovedEvent[] = [];
+		let removeProbe = false;
+		const probePath = "<inline:reload-removal-probe>";
+		const { runtime } = await createReloadSession({
+			extensionFactories: [
+				{
+					name: "reload-removal-probe",
+					factory: (pi: ExtensionAPI) => {
+						pi.on("session_extensions_removed", (event: SessionExtensionsRemovedEvent) => {
+							removedEvents.push(event);
+						});
+					},
+				},
+			],
+			extensionsOverride: (base) =>
+				removeProbe
+					? { ...base, extensions: base.extensions.filter((extension) => extension.path !== probePath) }
+					: base,
+		});
+		removeProbe = true;
+
+		await runtime.session.reload();
+
+		expect(removedEvents).toEqual([
+			{
+				type: "session_extensions_removed",
+				reason: "reload",
+				removed: [{ path: probePath, resolvedPath: probePath }],
+			},
+		]);
 	});
 });

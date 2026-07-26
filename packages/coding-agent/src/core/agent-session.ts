@@ -4976,8 +4976,10 @@ export class AgentSession {
 
 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
 		resetTimings("reload");
-		const previousFlagValues = this._extensionRunner.getFlagValues();
-		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
+		const oldExtensionRunner = this._extensionRunner;
+		const oldExtensionIdentities = oldExtensionRunner.getExtensionIdentities();
+		const previousFlagValues = oldExtensionRunner.getFlagValues();
+		await emitSessionShutdownEvent(oldExtensionRunner, { type: "session_shutdown", reason: "reload" });
 		time("shutdown", "reload");
 		await this.settingsManager.reload();
 		this.syncQueueModesFromSettings();
@@ -5008,6 +5010,15 @@ export class AgentSession {
 			flagValues: previousFlagValues,
 			includeAllExtensionTools: true,
 		});
+		const newExtensionResolvedPaths = new Set(
+			this._extensionRunner.getExtensionIdentities().map((extension) => extension.resolvedPath),
+		);
+		const removed = oldExtensionIdentities.filter(
+			(extension) => !newExtensionResolvedPaths.has(extension.resolvedPath),
+		);
+		if (removed.length > 0) {
+			await oldExtensionRunner.emit({ type: "session_extensions_removed", reason: "reload", removed });
+		}
 		time("runtime", "reload");
 
 		const hasBindings =

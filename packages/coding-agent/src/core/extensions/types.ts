@@ -773,6 +773,13 @@ export interface SessionShutdownEvent {
 	targetSessionFile?: string;
 }
 
+/** Fired on the old extension runner after reload when one or more extensions are absent from the rebuilt runner. */
+export interface SessionExtensionsRemovedEvent {
+	type: "session_extensions_removed";
+	reason: "reload";
+	removed: Array<{ path: string; resolvedPath: string }>;
+}
+
 /** Preparation data for tree navigation */
 export interface TreePreparation {
 	targetId: string;
@@ -812,6 +819,7 @@ export type SessionEvent =
 	| SessionBeforeCompactEvent
 	| SessionCompactEvent
 	| SessionShutdownEvent
+	| SessionExtensionsRemovedEvent
 	| SessionBeforeTreeEvent
 	| SessionTreeEvent;
 
@@ -1401,6 +1409,7 @@ export interface ExtensionAPI {
 	): void;
 	on(event: "session_compact", handler: ExtensionHandler<SessionCompactEvent>): void;
 	on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownEvent>): void;
+	on(event: "session_extensions_removed", handler: ExtensionHandler<SessionExtensionsRemovedEvent>): void;
 	on(event: "session_before_tree", handler: ExtensionHandler<SessionBeforeTreeEvent, SessionBeforeTreeResult>): void;
 	on(event: "session_tree", handler: ExtensionHandler<SessionTreeEvent>): void;
 	on(event: "context", handler: ExtensionHandler<ContextEvent, ContextEventResult>): void;

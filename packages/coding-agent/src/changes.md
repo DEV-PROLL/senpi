@@ -21,6 +21,13 @@
 - Root cause of the omo `team_wait` starvation forensics: member self-poller injections via `pi.sendUserMessage(..., { deliverAs: "followUp" })` vanished without a trace when the fresh-prompt path threw, leaving no record in the session JSONL while RPC-path `steer`/`follow_up` commands (which bypass `prompt()`) landed normally.
 - Interactive `prompt()` behavior is unchanged: a rejected interactive prompt still drops the input and surfaces the error to the user (pinned by `test/suite/regressions/pre-prompt-compaction-no-continue.test.ts`).
 - Coverage: `test/suite/agent-session-extension-injection.test.ts` pins retention for followUp and steer injections, exact-once delivery after recovery through the post-run drain, and no double-queueing on the streaming accept path.
+
+## Reload-safe MCP preservation and extension-removal lifecycle event (2026-07-26)
+
+- `session_extensions_removed` is emitted on the old extension runner when a `/reload` or a session replacement (`/new`, `/resume`, `/fork`, import) rebuilds the extension set. Its payload is `{ type: "session_extensions_removed", reason: SessionShutdownEvent["reason"], removed: Array<{ path, resolvedPath }> }`, allowing an extension that did not survive the rebuild to release resources after the new settings and active builtin set are known.
+- Unchanged MCP servers now survive a classic `/reload`: the shared service reattaches and reconciles by config hash, preserving live connections while replacing changed servers and disposing removed ones. Provider-scoped MCP services still dispose on reload because their factory creates a replacement instance.
+- If the MCP builtin itself is disabled during a reload or replacement, its removal event disposes the preserved classic service so stdio children cannot leak. For an otherwise wedged server, use `/mcp reconnect <name>` to force a fresh connection.
+
 ## Same-model-first transient retries and capped server waits (2026-07-26)
 
 ### What changed
