@@ -13,6 +13,7 @@ import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { ModelConfig } from "../../src/core/model-config.ts";
 import { ModelRuntime } from "../../src/core/model-runtime.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
+import { SettingsManager } from "../../src/core/settings-manager.ts";
 
 const cleanups: Array<() => void> = [];
 
@@ -126,9 +127,19 @@ describe("reload does redundant work only once", () => {
 
 		await runtime.services.resourceLoader.reload({
 			resolveProjectTrust: async () => true,
-			settingsAlreadyReloaded: true,
+			settingsAlreadyReloadedFor: runtime.services.settingsManager,
 		});
 
 		expect(settingsReload).toHaveBeenCalledTimes(2);
+	});
+
+	it("still reloads settings when the caller reloaded a different settings manager", async () => {
+		const { runtime } = await createReloadSession();
+		const settingsReload = vi.spyOn(runtime.services.settingsManager, "reload");
+		const unrelatedManager = SettingsManager.inMemory();
+
+		await runtime.services.resourceLoader.reload({ settingsAlreadyReloadedFor: unrelatedManager });
+
+		expect(settingsReload).toHaveBeenCalledTimes(1);
 	});
 });

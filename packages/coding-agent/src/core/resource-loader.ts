@@ -51,11 +51,14 @@ export interface ResourceExtensionPaths {
 export interface ResourceLoaderReloadOptions {
 	resolveProjectTrust?: (input: { extensionsResult: LoadExtensionsResult }) => Promise<boolean>;
 	/**
-	 * Set by callers that already reloaded settings immediately before this call.
-	 * Ignored while project trust is being resolved: that path must re-read
-	 * settings after the trust flip so project-scoped values are never stale.
+	 * The SettingsManager the caller already reloaded immediately before this call.
+	 * The reload is skipped only when it is the very manager this loader owns, so a
+	 * caller holding a different manager (SDK callers may supply either
+	 * independently) can never suppress a reload it still needed. Ignored while
+	 * project trust is being resolved: that path must re-read settings after the
+	 * trust flip so project-scoped values are never stale.
 	 */
-	settingsAlreadyReloaded?: boolean;
+	settingsAlreadyReloadedFor?: SettingsManager;
 }
 
 export interface ResourceLoader {
@@ -501,7 +504,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 		}
 
 		// reload() preserves SettingsManager.projectTrusted and reloads settings for that trust state.
-		const settingsAreFresh = options?.settingsAlreadyReloaded === true && options?.resolveProjectTrust === undefined;
+		const settingsAreFresh =
+			options?.settingsAlreadyReloadedFor === this.settingsManager && options?.resolveProjectTrust === undefined;
 		if (!settingsAreFresh) {
 			await this.settingsManager.reload();
 		}
@@ -592,7 +596,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 			? this.mergePaths(cliEnabledSkills, this.additionalSkillPaths)
 			: this.mergePaths([...cliEnabledSkills, ...enabledSkills], this.additionalSkillPaths);
 
-		time("extensionsLoaded", "extensions");
 		this.lastSkillPaths = skillPaths;
 		this.updateSkillsFromPaths(skillPaths, metadataByPath);
 		time("skills", "extensions");

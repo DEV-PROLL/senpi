@@ -103,6 +103,6 @@ describe("reload phase timings", () => {
 		await runtime.session.reload();
 
 		const labels = getTimings("reload").map((entry) => entry.label);
-		expect(labels).toEqual(expect.arrayContaining(["settings", "models", "resources", "runtime", "lifecycle"]));
+		expect(labels).toEqual(["shutdown", "settings", "models", "resources", "runtime", "lifecycle"]);
 	});
 });

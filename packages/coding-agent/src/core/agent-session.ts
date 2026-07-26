@@ -4903,14 +4903,19 @@ export class AgentSession {
 		resetTimings("reload");
 		const previousFlagValues = this._extensionRunner.getFlagValues();
 		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
+		time("shutdown", "reload");
 		await this.settingsManager.reload();
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		time("settings", "reload");
 		await this._modelRuntime.reloadConfig();
-		const refreshedModels: AvailableModelsSource = {
-			getAvailable: async () => this._modelRuntime.getAvailableSnapshot(),
-		};
+		// Resolving both scopes from the completed refresh avoids two extra availability
+		// scans, but only a snapshot from a SUCCESSFUL refresh may be trusted: refresh()
+		// swallows availability errors, so a failed scan must fall back to the runtime and
+		// keep the previous refresh-and-surface-the-error behavior.
+		const refreshedModels: AvailableModelsSource = this._modelRuntime.hasFreshAvailabilitySnapshot()
+			? { getAvailable: async () => this._modelRuntime.getAvailableSnapshot() }
+			: this._modelRuntime;
 		this.setScopedModels(
 			await resolveModelScope(
 				getModelNarrowingPatterns({
@@ -4921,7 +4926,7 @@ export class AgentSession {
 		);
 		this.setFavoriteModels(await resolveModelScope(this.settingsManager.getFavoriteModels() ?? [], refreshedModels));
 		time("models", "reload");
-		await this._resourceLoader.reload({ settingsAlreadyReloaded: true });
+		await this._resourceLoader.reload({ settingsAlreadyReloadedFor: this.settingsManager });
 		time("resources", "reload");
 		this._buildRuntime({
 			activeToolNames: this.getActiveToolNames(),

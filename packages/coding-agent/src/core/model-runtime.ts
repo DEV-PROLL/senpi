@@ -379,6 +379,11 @@ export class ModelRuntime implements Models {
 		return this.snapshot.available;
 	}
 
+	/** True only when the most recent availability refresh completed without error. */
+	hasFreshAvailabilitySnapshot(): boolean {
+		return this.availabilityInitialized && this.availabilityError === undefined;
+	}
+
 	hasAvailabilitySnapshot(): boolean {
 		return this.availabilityInitialized;
 	}
