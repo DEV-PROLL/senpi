@@ -121,7 +121,14 @@ export class CompactionStatusIndicator extends StatusIndicator {
 		// Loader.render() prepends a spacer row; joining keeps this indicator a single row
 		// whether or not a preview is present, so the composer never shifts between states.
 		// Text pads rows to the full width, so trailing padding is stripped before measuring.
-		const status = super.render(width).join(" ").trimEnd();
+		let status = super.render(width).join(" ").trimEnd();
+		// On narrow terminals the reason-specific label can wrap even before any preview
+		// arrives, and head-truncating the joined rows would drop the cancellation hint.
+		// Collapse to the compact label whenever the full status cannot fit on one row.
+		if (visibleWidth(status) > width) {
+			this.setMessage(this.progressLabel);
+			status = super.render(width).join(" ").trimEnd();
+		}
 		if (!this.progressText) return [truncateToWidth(status, width)];
 		// The status label (with its cancellation hint) is allocated first; the preview only
 		// receives whatever width is left over instead of starving the hint out of the row.
