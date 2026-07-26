@@ -12,6 +12,11 @@ manual \`&\` backgrounding — use the built-in session tools:
 - \`bash_output({ bash_id, wait_for, filter, view })\` reads new output, or blocks until a
   \`wait_for\` regex matches / the session exits / the timeout elapses. Use \`view: "screen"\`
   for a rendered full-screen snapshot of TUIs.
+- \`monitor({ description, command, filter?, timeout_ms?, persistent? })\` starts a watcher in the
+  same \`bash_id\` namespace and injects coalesced matching stdout-line events while you keep
+  working. Emit only decision-relevant lines: filter noisy logs at the command source, peek with
+  \`bash_output\`, stop with \`kill_bash\`, and use \`monitor({ action: "rearm", bash_id })\` only after
+  a wake-budget pause.
 - \`bash_input({ bash_id, input, keys, submit })\` sends stdin or named keys (e.g.
   \`["ctrl+c"]\`, \`["enter"]\`) to steer a REPL or interrupt a process.
 - \`bash_resize({ bash_id, cols, rows })\` resizes the PTY so full-screen programs reflow.
