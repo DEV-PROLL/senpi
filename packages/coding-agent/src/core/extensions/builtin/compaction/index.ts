@@ -400,8 +400,21 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 		};
 	});
 
-	pi.on("model_select", () => {
+	pi.on("model_select", (event, ctx) => {
 		invalidateSpeculativeCompaction();
+		// Window shrink (e.g. 1M -> 256k): warm a speculative summary at switch
+		// time so the next turn's compaction starts hot instead of the first
+		// request overflowing against the smaller window and recovering after
+		// the provider error has already surfaced.
+		const previousWindow = event.previousModel?.contextWindow ?? 0;
+		const contextWindow = ctx.model?.contextWindow ?? 0;
+		if (previousWindow <= contextWindow) return;
+		const usage = ctx.getContextUsage();
+		if (!usage) return;
+		const settings = ctx.getCompactionSettings();
+		if (policy.shouldStartSpeculativeCompaction(usage, contextWindow, settings, state.lastYield ?? undefined)) {
+			startSpeculativeCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
+		}
 	});
 
 	pi.on("session_compact", async (event, ctx) => {
