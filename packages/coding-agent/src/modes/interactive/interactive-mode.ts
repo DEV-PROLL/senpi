@@ -96,7 +96,11 @@ import { formatTimings, time } from "../../core/timings.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
-import { isRecoverableInspectorVmImportError } from "../../inspector-policy.ts";
+import {
+	consumeEarlyInspectorVmImportRecoveries,
+	INSPECTOR_VM_IMPORT_WARNING,
+	isRecoverableInspectorVmImportError,
+} from "../../inspector-policy.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
@@ -4213,9 +4217,7 @@ export class InteractiveMode {
 			process.exit(1);
 		}
 		if (isRecoverableInspectorVmImportError(error, origin)) {
-			this.showWarning(
-				"Node Inspector dynamic import is unsupported; use require() or a target-side loader. Senpi kept running.",
-			);
+			this.showWarning(INSPECTOR_VM_IMPORT_WARNING);
 			return;
 		}
 		this.isShuttingDown = true;
@@ -4281,6 +4283,12 @@ export class InteractiveMode {
 			this.uncaughtCrash(error, origin);
 		process.prependListener("uncaughtException", uncaughtExceptionHandler);
 		this.signalCleanupHandlers.push(() => process.off("uncaughtException", uncaughtExceptionHandler));
+
+		// Surface Inspector rejections that the early bootstrap seam recovered before this
+		// handler (and the TUI warning surface) existed.
+		if (consumeEarlyInspectorVmImportRecoveries() > 0) {
+			this.showWarning(INSPECTOR_VM_IMPORT_WARNING);
+		}
 	}
 
 	private unregisterSignalHandlers(): void {

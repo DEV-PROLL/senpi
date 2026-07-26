@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { close as closeInspector, url as inspectorUrl, open as openInspector } from "node:inspector";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import { isRecoverableInspectorVmImportError } from "../../../src/inspector-policy.ts";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.ts";
 
 type UncaughtExceptionOrigin = "uncaughtException" | "unhandledRejection";
@@ -144,6 +145,58 @@ describe("Inspector VM dynamic import crash handling", () => {
 
 		expect(result.status).toBe(0);
 		expect(result.stdout.trim()).toBe("false");
+	});
+
+	test("recovers the exact Inspector rejection during early bootstrap before the TUI exists", () => {
+		const fixturePath = fileURLToPath(new URL("../../fixtures/inspector-early-recovery.ts", import.meta.url));
+		const result = spawnSync(process.execPath, ["--import", "tsx", fixturePath, "recoverable"], {
+			encoding: "utf8",
+			env: { ...process.env, SENPI_RECOVER_INSPECTOR_VM_IMPORT: "1" },
+			timeout: 30_000,
+		});
+
+		expect(result.status).toBe(0);
+		expect(result.stdout).toContain("recovered:1");
+	});
+
+	test("keeps non-matching bootstrap crashes fatal with the early seam installed", () => {
+		const fixturePath = fileURLToPath(new URL("../../fixtures/inspector-early-recovery.ts", import.meta.url));
+		const result = spawnSync(process.execPath, ["--import", "tsx", fixturePath, "fatal"], {
+			encoding: "utf8",
+			env: { ...process.env, SENPI_RECOVER_INSPECTOR_VM_IMPORT: "1" },
+			timeout: 30_000,
+		});
+
+		expect(result.status).toBe(1);
+		expect(result.stdout).not.toContain("recovered:");
+		expect(result.stderr).toContain("ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING");
+	});
+
+	test("classifies hostile rejection values without throwing", () => {
+		const openedInspector = inspectorUrl() === undefined;
+		if (openedInspector) openInspector(0, "127.0.0.1", false);
+
+		try {
+			const hostileHasTrap = new Proxy(
+				{},
+				{
+					has() {
+						throw new Error("hostile has trap");
+					},
+				},
+			);
+			const hostileGetter = {
+				get code(): never {
+					throw new Error("hostile code getter");
+				},
+				stack: "irrelevant",
+			};
+
+			expect(isRecoverableInspectorVmImportError(hostileHasTrap, "unhandledRejection")).toBe(false);
+			expect(isRecoverableInspectorVmImportError(hostileGetter, "unhandledRejection")).toBe(false);
+		} finally {
+			if (openedInspector) closeInspector();
+		}
 	});
 
 	test("keeps direct uncaught exceptions fatal with recovery enabled", () => {
