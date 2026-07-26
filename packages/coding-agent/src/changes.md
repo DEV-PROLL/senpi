@@ -15,6 +15,12 @@
 
 - LOW: additive seams only — the gate module, one conditional branch each in `args.ts` parse/help, the theme-fallback and `chrome` dispatch lines in `main.ts`, and the `grok-night`/`grok-day` registration in `theme.ts`.
 
+## Extension user-message injections are retained when the prompt path rejects (2026-07-26)
+
+- `core/agent-session.ts`: `sendUserMessage()` now tracks the prompt disposition. When `prompt()` rejects before the message reaches a queue or a turn (e.g. a required compaction that cannot complete, auth/model validation, or provider admission), the message is queued for later delivery (`deliverAs: "steer"` goes to the steering queue, otherwise the followUp queue) instead of being silently dropped. The rejection still propagates, so fire-and-forget extension bindings keep emitting their `send_user_message` error event.
+- Root cause of the omo `team_wait` starvation forensics: member self-poller injections via `pi.sendUserMessage(..., { deliverAs: "followUp" })` vanished without a trace when the fresh-prompt path threw, leaving no record in the session JSONL while RPC-path `steer`/`follow_up` commands (which bypass `prompt()`) landed normally.
+- Interactive `prompt()` behavior is unchanged: a rejected interactive prompt still drops the input and surfaces the error to the user (pinned by `test/suite/regressions/pre-prompt-compaction-no-continue.test.ts`).
+- Coverage: `test/suite/agent-session-extension-injection.test.ts` pins retention for followUp and steer injections, exact-once delivery after recovery through the post-run drain, and no double-queueing on the streaming accept path.
 ## Same-model-first transient retries and capped server waits (2026-07-26)
 
 ### What changed

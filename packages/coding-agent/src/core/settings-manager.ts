@@ -56,6 +56,11 @@ export interface TerminalSettings {
 	maxSessions?: number; // default: 32 (concurrent background sessions before LRU-exited pruning)
 	timeoutAction?: "background" | "kill"; // default: "background" (fate of a foreground timeout)
 	notify?: "wake" | "next-turn" | "off"; // default: "wake" (async completion wake behavior)
+	monitorCoalesceWindowMs?: number; // default: 2000 (event batching window)
+	monitorRateLimitMs?: number; // default: 5000 (minimum interval per monitor injection)
+	monitorMaxLinesPerInjection?: number; // default: 50 (bounded monitor event batch)
+	monitorMaxCharsPerInjection?: number; // default: 4096 (bounded monitor event batch)
+	monitorWakeBudget?: number; // default: 5 (consecutive monitor-only wake limit)
 }
 
 export interface ImageSettings {
