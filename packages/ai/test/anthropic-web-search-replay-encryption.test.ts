@@ -61,6 +61,13 @@ describe("Anthropic web search replay encryption", () => {
 			provider: "anthropic",
 			model: "claude-fable-5",
 			content: [
+				// Anthropic validates the pair inside one assistant message, so a
+				// faithful replay fixture carries the `server_tool_use` too.
+				{
+					type: "providerNative",
+					subtype: "server_tool_use",
+					raw: { type: "server_tool_use", id: "srvu_1", name: "web_search", input: { query: "example" } },
+				},
 				{
 					type: "providerNative",
 					subtype: "web_search_tool_result",
@@ -93,6 +100,7 @@ describe("Anthropic web search replay encryption", () => {
 
 		const assistantPayload = messages.find((message) => message.role === "assistant");
 		expect(assistantPayload?.content).toEqual([
+			{ type: "server_tool_use", id: "srvu_1", name: "web_search", input: { query: "example" } },
 			{
 				type: "web_search_tool_result",
 				tool_use_id: "srvu_1",
