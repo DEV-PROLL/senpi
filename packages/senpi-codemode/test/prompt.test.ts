@@ -109,6 +109,15 @@ describe("buildEvalPrompt", () => {
 		}
 	});
 
+	it("documents timeout detachment, busy-kernel discipline, and detached-cell controls", () => {
+		const prompt = fullPrompt({ py: true, js: true, rb: false, jl: false });
+
+		expect(prompt).toContain("`on_timeout`");
+		expect(prompt).toContain('eval({ action: "peek", cell_id })');
+		expect(prompt).toContain('eval({ action: "stop", cell_id })');
+		expect(prompt).toContain("Do not re-run a detached cell");
+	});
+
 	it("keeps eval-specific prompt guidelines stable", () => {
 		// Given: a registered eval tool with no active model id.
 		// When: its prompt metadata is built.

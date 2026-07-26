@@ -112,7 +112,11 @@ Fields:
 - \`code\` — cell body, verbatim. Newlines/quotes JSON-encoded; no fences, no headers.
 - \`title\` (optional) — short transcript label (e.g. \`"imports"\`).
 - \`timeout\` (optional) — seconds. Raise only for heavy compute or long{{#if spawns}} non-agent{{/if}} tool calls.
+- \`on_timeout\` (optional) — \`"detach"\` keeps pure computation running in interactive sessions (the default); \`"error"\` interrupts for deadline-sensitive work and is the print/json default.
 - \`reset\` (optional) — wipe this language's kernel first.{{#ifAll py js}} Per-language: a \`py\` reset never touches the JS VM.{{/ifAll}}
+- \`action\` (optional) — defaults to \`"run"\`. A detached cell returns its id: use \`eval({ action: "peek", cell_id })\` for buffered output/state or \`eval({ action: "stop", cell_id })\` to cancel it.
+
+A detached cell keeps its language kernel busy while it finishes. Do not re-run a detached cell: the same-language busy error names its cell id and output tail; another language can continue. Completion arrives as one notification with the final value/error and buffered output. Python stop interrupts while preserving kernel state; JavaScript stop restarts a fresh worker, so its VM state is lost.
 
 {{#if py}}Live event loop: use top-level \`await\` directly; \`asyncio.run(…)\` raises "cannot be called from a running event loop".{{/if}}
 {{#if js}}JS runs under Node.js worker: top-level \`await\`/\`return\` work; \`fetch\`/\`Buffer\` available.{{/if}}

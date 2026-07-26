@@ -54,6 +54,8 @@ class FakePi {
 		this.#active = new Set(names);
 	}
 
+	sendUserMessage(): void {}
+
 	async executeTool(_name: string, _params: unknown, options?: { readonly signal?: AbortSignal }): Promise<never> {
 		this.holdStarted.resolve();
 		const signal = options?.signal;
