@@ -58,7 +58,7 @@ describe("McpService session lifecycle", () => {
 		]);
 	});
 
-	it("preserves unchanged servers across reload", async () => {
+	it("disposes on reload and a subsequent session respawns the server", async () => {
 		const root = makeRoot("reload", cleanupTasks);
 		const counterFile = join(root.agentDir, "reload-spawns.txt");
 		setConfig(root, {
@@ -70,66 +70,14 @@ describe("McpService session lifecycle", () => {
 		await awaitMcpConnected(serviceBeforeReload, "reloadable");
 		const firstPid = requiredPid(serviceBeforeReload, "reloadable");
 		await serviceBeforeReload.handleSessionShutdown({ type: "session_shutdown", reason: "reload" });
-
-		const serviceAfterReload = getMcpService();
-		expect(serviceAfterReload).toBe(serviceBeforeReload);
-		expect(requiredPid(serviceAfterReload, "reloadable")).toBe(firstPid);
-		expect(await readCounter(counterFile)).toBe(1);
-
-		await attach(serviceAfterReload, root, "reload");
-		await awaitMcpConnected(serviceAfterReload, "reloadable");
-
-		expect(requiredPid(serviceAfterReload, "reloadable")).toBe(firstPid);
-		expect(await readCounter(counterFile)).toBe(1);
-		expect(serviceAfterReload.getConnection("reloadable")?.state).toBe("connected");
-		await assertAlive(firstPid);
-	});
-
-	it("keeps unchanged connection count and processes stable across consecutive reloads", async () => {
-		const root = makeRoot("reload-cycles", cleanupTasks);
-		const counterFile = join(root.agentDir, "reload-cycle-spawns.txt");
-		setConfig(root, {
-			reloadable: stdioServer(["--tools", "1", "--spawn-counter-file", counterFile]),
-		});
-		const service = getMcpService();
-
-		await attach(service, root, "startup");
-		await awaitMcpConnected(service, "reloadable");
-		const firstPid = requiredPid(service, "reloadable");
-
-		for (let cycle = 0; cycle < 3; cycle += 1) {
-			await service.handleSessionShutdown({ type: "session_shutdown", reason: "reload" });
-			expect(getMcpService()).toBe(service);
-			expect(service.getSnapshot().connectionCount).toBe(1);
-
-			await attach(service, root, "reload");
-			await awaitMcpConnected(service, "reloadable");
-			expect(requiredPid(service, "reloadable")).toBe(firstPid);
-			expect(service.getSnapshot().connectionCount).toBe(1);
-		}
-
-		expect(await readCounter(counterFile)).toBe(1);
-		await assertAlive(firstPid);
-	});
-
-	it("force-restarts a directly killed stdio server through reconnectServer", async () => {
-		const root = makeRoot("reconnect-killed", cleanupTasks);
-		const counterFile = join(root.agentDir, "reconnect-killed-spawns.txt");
-		setConfig(root, {
-			reconnectable: stdioServer(["--tools", "1", "--spawn-counter-file", counterFile]),
-		});
-		const service = getMcpService();
-
-		await attach(service, root, "startup");
-		await awaitMcpConnected(service, "reconnectable");
-		const firstPid = requiredPid(service, "reconnectable");
-		process.kill(firstPid);
 		await assertProcessDead(firstPid);
 
-		await service.reconnectServer("reconnectable");
-		await awaitMcpConnected(service, "reconnectable");
-		const secondPid = requiredPid(service, "reconnectable");
+		const serviceAfterReload = getMcpService();
+		await attach(serviceAfterReload, root, "reload");
+		await awaitMcpConnected(serviceAfterReload, "reloadable");
+		const secondPid = requiredPid(serviceAfterReload, "reloadable");
 
+		expect(serviceAfterReload).not.toBe(serviceBeforeReload);
 		expect(secondPid).not.toBe(firstPid);
 		expect(await readCounter(counterFile)).toBe(2);
 		await assertAlive(secondPid);
@@ -169,7 +117,7 @@ describe("McpService session lifecycle", () => {
 		await assertAlive(stablePidAfter);
 	});
 
-	it("does not spawn disabled or untrusted servers and disposes removed live servers on reload", async () => {
+	it("does not spawn disabled or untrusted servers and disposes removed live servers", async () => {
 		const root = makeRoot("blocked-removed", cleanupTasks);
 		const liveCounter = join(root.agentDir, "live-spawns.txt");
 		const disabledCounter = join(root.agentDir, "disabled-spawns.txt");
@@ -192,11 +140,10 @@ describe("McpService session lifecycle", () => {
 		expect(service.getConnection("disabled")).toBeUndefined();
 		expect(service.getConnection("untrusted")).toBeUndefined();
 
-		await service.handleSessionShutdown({ type: "session_shutdown", reason: "reload" });
 		setConfig(root, {
 			disabled: { ...stdioServer(["--spawn-counter-file", disabledCounter]), enabled: false },
 		});
-		await attach(service, root, "reload", false);
+		await attach(service, root, "new", false);
 
 		await assertProcessDead(livePid);
 		expect(service.getServerSnapshots().map((snapshot) => [snapshot.name, snapshot.configState])).toEqual([
@@ -288,7 +235,7 @@ describe("McpService session lifecycle", () => {
 		expect(await readCounter(counterFile)).toBe(1);
 	});
 
-	it("preserves an unchanged extension-declared server on reload", async () => {
+	it("respawns an extension-declared server on reload", async () => {
 		const root = makeRoot("ext-reload", cleanupTasks);
 		const counterFile = join(root.agentDir, "ext-reload-spawns.txt");
 		const fixture = stdioFixtureCommand();
@@ -311,20 +258,19 @@ describe("McpService session lifecycle", () => {
 		await awaitMcpConnected(serviceBeforeReload, "fixture");
 		const pid1 = requiredPid(serviceBeforeReload, "fixture");
 		await serviceBeforeReload.handleSessionShutdown({ type: "session_shutdown", reason: "reload" });
+		await assertProcessDead(pid1);
 
 		const serviceAfterReload = getMcpService();
-		expect(serviceAfterReload).toBe(serviceBeforeReload);
-		expect(requiredPid(serviceAfterReload, "fixture")).toBe(pid1);
-		expect(await readCounter(counterFile)).toBe(1);
-
 		await serviceAfterReload.attachSession({ type: "session_start", reason: "reload" }, ctx, fakePi(), {
 			agentDir: root.agentDir,
 		});
 		await awaitMcpConnected(serviceAfterReload, "fixture");
+		const pid2 = requiredPid(serviceAfterReload, "fixture");
 
-		expect(requiredPid(serviceAfterReload, "fixture")).toBe(pid1);
-		expect(await readCounter(counterFile)).toBe(1);
-		await assertAlive(pid1);
+		expect(serviceAfterReload).not.toBe(serviceBeforeReload);
+		expect(pid2).not.toBe(pid1);
+		expect(await readCounter(counterFile)).toBe(2);
+		await assertAlive(pid2);
 	});
 });
 

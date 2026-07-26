@@ -1,30 +1,5 @@
 # mcp Extension Changes
 
-## Preserve unchanged MCP connections across `/reload` (2026-07-26)
-
-### What changed
-- `service.ts`: `/reload` now preserves the live MCP service instead of
-  disposing every connection. On the re-attach, config-hash reconciliation
-  retains unchanged servers and disposes/recreates only changed or removed
-  servers.
-- `/mcp reconnect <name>` force-restarts a wedged server. Its recovery path is
-  covered by directly killing a stdio child and verifying that the command
-  creates a live replacement process.
-
-### Why
-- Reloading configuration should not make unchanged MCP servers pay the cost of
-  a fresh process spawn and protocol handshake. The existing config-hash
-  reconciliation is the correct ownership boundary for the changed and removed
-  server cases.
-
-### Why extension system couldn't handle this alone
-- The MCP builtin owns the singleton service lifecycle, its live child
-  processes, and config-hash reconciliation.
-
-### Expected merge conflict zones
-- LOW: `service.ts` shutdown predicate and lifecycle coverage in
-  `test/mcp/service-lifecycle.test.ts`.
-
 ## Raced background registration replays session state (2026-07-21)
 
 ### What changed

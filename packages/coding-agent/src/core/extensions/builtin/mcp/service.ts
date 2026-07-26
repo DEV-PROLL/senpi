@@ -724,7 +724,7 @@ export function getMcpService(): McpService {
 }
 
 export function shouldDisposeMcpService(reason: SessionShutdownEvent["reason"]): reason is McpDisposeReason {
-	return reason === "quit";
+	return reason === "quit" || reason === "reload";
 }
 
 async function disposeEntryConnection(entry: McpConnectionEntry): Promise<void> {
