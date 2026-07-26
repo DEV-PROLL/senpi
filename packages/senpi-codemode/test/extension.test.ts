@@ -6,7 +6,7 @@ import type { Api, Model } from "@earendil-works/pi-ai/compat";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { CodemodeSessionManager } from "../src/extension/session-manager.ts";
 import senpiCodemode, { type CodemodeExtensionAPI } from "../src/index.ts";
-import type { EvalKernelResult, EvalKernelRunInput } from "../src/tool/types.ts";
+import type { EvalKernelResult, EvalKernelRunInput, KernelInterruptHandle } from "../src/tool/types.ts";
 import { fakeExtensionContext } from "./eval/fakes.ts";
 
 interface RegisteredHandler {
@@ -19,6 +19,7 @@ class FakePi {
 	readonly handlers: RegisteredHandler[] = [];
 	readonly messages: string[] = [];
 	readonly deliveries: Array<{ readonly content: string; readonly deliverAs: "steer" | "followUp" | undefined }> = [];
+	readonly removedToolHints: Record<string, string> = {};
 	readonly #nextMessage = Promise.withResolvers<string>();
 	readonly activeTools = new Set<string>(["eval"]);
 	registeredTool: Parameters<CodemodeExtensionAPI["registerTool"]>[0] | undefined;
@@ -27,11 +28,21 @@ class FakePi {
 		this.activeTools.add(tool.name);
 		if (tool.name === "eval") this.registeredTool = tool;
 	}
+	registerRemovedToolHint(name: string, hint: string): void {
+		this.removedToolHints[name] = hint;
+	}
 	on(event: string, handler: RegisteredHandler["handler"]): void {
 		this.handlers.push({ event, handler });
 	}
 	getActiveTools(): string[] {
 		return [...this.activeTools];
+	}
+	getAllTools(): readonly { readonly name: string }[] {
+		return this.tools.map((name) => ({ name }));
+	}
+	setActiveTools(toolNames: string[]): void {
+		this.activeTools.clear();
+		for (const toolName of toolNames) this.activeTools.add(toolName);
 	}
 	async executeTool(): Promise<never> {
 		throw new Error("nested tool execution was not expected");
@@ -61,7 +72,7 @@ class DisposableManager implements CodemodeSessionManager {
 
 	async getKernel(): Promise<{
 		run(input: EvalKernelRunInput): Promise<EvalKernelResult>;
-		interrupt(reason?: string): Promise<void>;
+		interrupt(reason?: string): Promise<KernelInterruptHandle>;
 		deliverToolReply(): void;
 		reset(): Promise<void>;
 		close(): Promise<void>;
@@ -91,6 +102,7 @@ class DisposableManager implements CodemodeSessionManager {
 			interrupt: async (reason) => {
 				this.events.push("interrupt");
 				controller.abort(reason);
+				return { stateRetained: Promise.resolve(true) };
 			},
 			deliverToolReply: () => undefined,
 			reset: async () => undefined,
@@ -269,6 +281,32 @@ describe("senpi-codemode extension factory", () => {
 		}
 	});
 
+	it("registers only eval with the GPT dialect for GPT models", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "senpi-codemode-gpt-eval-"));
+		const pi = new FakePi();
+		const manager = new DisposableManager();
+		senpiCodemode(pi, { createSessionManager: () => manager });
+		const ctx = { ...extensionContext(cwd), model: fakeModel("gpt-5.6") };
+
+		try {
+			await emit(pi, "session_start", { reason: "startup" }, ctx);
+
+			const tool = pi.registeredTool;
+			if (!tool) throw new Error("eval tool was not registered");
+			expect([...new Set(pi.tools)]).toEqual(["eval"]);
+			expect(pi.activeTools).toEqual(new Set(["eval"]));
+			expect(pi.removedToolHints).toEqual({
+				exec: expect.stringContaining("use eval"),
+				wait: expect.stringContaining("eval"),
+			});
+			expect(tool.description).toContain("<gpt_eval_dialect>");
+			expect(tool.description).toContain("detach on timeout");
+		} finally {
+			await emit(pi, "session_shutdown", {}, ctx);
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("registers the model-tuned dialect at session start and re-registers on model_select", async () => {
 		// Given a session whose active model is a Claude family id
 		const cwd = await mkdtemp(join(tmpdir(), "senpi-codemode-modelselect-"));
@@ -295,10 +333,10 @@ describe("senpi-codemode extension factory", () => {
 			// When the model switches to an OpenAI family id
 			await emit(pi, "model_select", { model: fakeModel("gpt-5.6") }, ctx);
 
-			// Then eval is re-registered with the codex dialect
+			// Then eval is re-registered with the GPT dialect
 			const switched = pi.registeredTool;
 			if (!switched) throw new Error("eval tool was not re-registered");
-			expect(switched.description).toContain("Route multi-call steps through eval");
+			expect(switched.description).toContain("<gpt_eval_dialect>");
 			expect(switched.description).not.toContain("<eval_first_batching>");
 
 			// And a same-model reselection does not re-register

@@ -35,6 +35,40 @@
 - LOW: `utils/tool-call-id.ts`, the three adapter imports/call sites, and the thinking-config block of
   `api/anthropic-messages.ts` `buildParams()`.
 
+## 2026-07-26 - Repair unpaired Anthropic server-tool blocks and let the pairing 400 retry
+
+### What changed and why
+
+A session died permanently with a 400 `invalid_request_error` reading "`web_search` tool use with id
+`srvtoolu_...` was found without a corresponding `web_search_tool_result` block". The assistant turn had persisted two
+`server_tool_use` (`web_search`) provider-native blocks and no result blocks - the stream ended
+between the search call and its result - and every later request replayed the unpairable halves, so
+the session could never recover on its own.
+
+Anthropic validates that each `server_tool_use` is followed, inside the same assistant message, by
+its matching `*_tool_result`, and rejects the mirror case too (a result whose `server_tool_use` is
+missing).
+
+- `api/anthropic-messages.ts`: assistant conversion now repairs the pairing across the whole
+  conversation, not only inside the server-side-fallback boundary. `collectProviderNativeToolPairing`
+  walks the conversation in order, tracking which server-tool uses are still resumable: a use answered
+  by a result in its own or the next assistant message replays (the deferred-continuation shape the API
+  documents); a pending use survives only tool results, because user text, a tool result that registers
+  deferred tool names (whose references serialize sibling text after the results), or another
+  assistant turn all close the turn; and a blank user message closes nothing because it serializes to
+  nothing. Only the unpairable halves are dropped — a closed use and a result whose use is nowhere.
+  The predicate covers the `mcp_tool_use` shape for when those blocks become replayable. Paired blocks,
+  `fallback`, and `container_upload` replay byte-for-byte as before, so `encrypted_content` fidelity is
+  untouched.
+- `utils/retry.ts`: the pairing-error wording ("was found without a corresponding", anchored on the
+  opening backtick of the result block name) joins the retryable provider-error patterns.
+  The repaired history means the retried request is valid, so the session self-heals through the
+  existing retry path; if it keeps failing, the error now also reaches the model-fallback chain
+  instead of dead-ending the turn.
+- `test/anthropic-web-search-replay-encryption.test.ts`: the byte-fidelity fixture gained the
+  `server_tool_use` its result belongs to. The assertion is unchanged - the fixture was simply not a
+  shape Anthropic can accept.
+
 ## 2026-07-26 - Preserve persisted freeform identity when replaying OpenAI Responses calls (#256)
 
 ### What changed and why

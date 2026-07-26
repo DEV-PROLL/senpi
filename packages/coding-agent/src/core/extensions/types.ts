@@ -874,6 +874,10 @@ export interface AgentStartEvent {
 export interface AgentEndEvent {
 	type: "agent_end";
 	messages: AgentMessage[];
+	/** True when the agent run ended through an abort rather than normal completion. */
+	aborted?: boolean;
+	/** Present when the host can attribute the abort to a user action or internal operation. */
+	abortSource?: "user" | "system";
 }
 
 /** Fired after an agent run has fully settled and no automatic retry, compaction, or queued continuation will run. */
@@ -1435,6 +1439,9 @@ export interface ExtensionAPI {
 		tool: ToolDefinition<TParams, TDetails, TState>,
 	): void;
 
+	/** Register migration guidance returned when an intentionally removed tool is called. */
+	registerRemovedToolHint(name: string, hint: string): void;
+
 	/** Register an MCP server that the agent can use. Factory-time only. */
 	registerMcpServer(name: string, config: McpServerDeclaration): void;
 
@@ -1809,6 +1816,8 @@ export type SetActiveToolsHandler = (toolNames: string[]) => void;
 
 export type RefreshToolsHandler = () => void;
 
+export type RegisterRemovedToolHintHandler = (name: string, hint: string) => void;
+
 export type SetModelHandler = (model: Model<any>) => Promise<boolean>;
 
 export type GetThinkingLevelHandler = () => ThinkingLevel;
@@ -1866,6 +1875,8 @@ export interface ExtensionRuntimeState {
 	registerProvider: (name: string, config: ProviderConfig, extensionPath?: string) => void;
 	registerNativeProvider: (provider: Provider, extensionPath?: string) => void;
 	unregisterProvider: (name: string, extensionPath?: string) => void;
+	/** Forwards extension-registered migration guidance after the host binds actions. */
+	registerRemovedToolHint: RegisterRemovedToolHintHandler;
 }
 
 /**
@@ -1884,6 +1895,7 @@ export interface ExtensionActions {
 	getAllTools: GetAllToolsHandler;
 	setActiveTools: SetActiveToolsHandler;
 	refreshTools: RefreshToolsHandler;
+	registerRemovedToolHint: RegisterRemovedToolHintHandler;
 	getCommands: GetCommandsHandler;
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
@@ -1980,6 +1992,8 @@ export interface Extension {
 	sourceInfo: SourceInfo;
 	handlers: Map<string, HandlerFn[]>;
 	tools: Map<string, RegisteredTool>;
+	/** Optional for compatibility with extension records created before this additive registry. */
+	removedToolHints?: Map<string, string>;
 	messageRenderers: Map<string, MessageRenderer>;
 	entryRenderers?: Map<string, EntryRenderer>;
 	commands: Map<string, RegisteredCommand>;

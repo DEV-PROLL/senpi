@@ -272,6 +272,12 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	toolExecution?: ToolExecutionMode;
 
 	/**
+	 * Optional migration guidance for tool names intentionally removed by an extension.
+	 * The matching hint is appended to the normal unknown-tool error before hooks run.
+	 */
+	removedToolHints?: Record<string, string>;
+
+	/**
 	 * Called before a tool is executed, after arguments have been validated.
 	 *
 	 * Return `{ block: true }` to prevent execution. The loop emits an error tool result instead.

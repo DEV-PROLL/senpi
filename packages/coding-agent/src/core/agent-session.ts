@@ -585,6 +585,7 @@ export class AgentSession {
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _userAbortPromise: Promise<void> | undefined = undefined;
+	private _agentAbortSource: "user" | "system" | undefined = undefined;
 	private _suppressQueuedContinuationAfterUserAbort = false;
 	private _extensionEventSignal: AbortSignal | undefined = undefined;
 
@@ -1629,7 +1630,19 @@ export class AgentSession {
 			this._turnIndex = 0;
 			await this._extensionRunner.emit({ type: "agent_start" });
 		} else if (event.type === "agent_end") {
-			await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
+			const abortSource = this._agentAbortSource;
+			const aborted =
+				abortSource !== undefined || this._findLastAssistantInMessages(event.messages)?.stopReason === "aborted";
+			try {
+				await this._extensionRunner.emit({
+					type: "agent_end",
+					messages: event.messages,
+					...(aborted ? { aborted: true } : {}),
+					...(abortSource === undefined ? {} : { abortSource }),
+				});
+			} finally {
+				this._agentAbortSource = undefined;
+			}
 		} else if (event.type === "turn_start") {
 			const extensionEvent: TurnStartEvent = {
 				type: "turn_start",
@@ -2808,6 +2821,9 @@ export class AgentSession {
 	/**
 	 * Send a user message to the agent. Always triggers a turn.
 	 * When the agent is streaming, use deliverAs to specify how to queue the message.
+	 * If the prompt path rejects before the message reaches a queue or a turn
+	 * (e.g. a required compaction that cannot complete), the message is retained
+	 * in the steering/followUp queue for later delivery and the error still propagates.
 	 *
 	 * @param content User message content (string or content array)
 	 * @param options.deliverAs Delivery mode when streaming: "steer" or "followUp"
@@ -2849,6 +2865,7 @@ export class AgentSession {
 		// settles so callers observing session idle cannot race its provider turn.
 		const waitForExistingSessionWork = this._sessionWorkBarrier.hasActiveWork;
 		let finishSessionWork: (() => void) | undefined;
+		let disposition: PromptDisposition | undefined;
 		try {
 			// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
 			await this.prompt(text, {
@@ -2856,7 +2873,10 @@ export class AgentSession {
 				streamingBehavior: options?.deliverAs,
 				images,
 				source: "extension",
-				promptDisposition: () => resolveBindingPromptReadiness?.(),
+				promptDisposition: (nextDisposition) => {
+					disposition = nextDisposition;
+					resolveBindingPromptReadiness?.();
+				},
 				onSessionWorkReady: waitForExistingSessionWork
 					? () => {
 							finishSessionWork ??= this._sessionWorkBarrier.begin();
@@ -2864,6 +2884,17 @@ export class AgentSession {
 					: undefined,
 				sessionTitlePrompt: false,
 			});
+		} catch (error) {
+			// Extension bindings invoke this method fire-and-forget, so a rejection
+			// before prompt() accepted the message must not silently drop it.
+			if (disposition === undefined) {
+				if (options?.deliverAs === "steer") {
+					await this._queueSteer(text, images);
+				} else {
+					await this._queueFollowUp(text, images);
+				}
+			}
+			throw error;
 		} finally {
 			resolveBindingPromptReadiness?.();
 			finishSessionWork?.();
@@ -2914,7 +2945,7 @@ export class AgentSession {
 	 */
 	async abort(): Promise<void> {
 		this.abortCompaction();
-		await this._abortActiveAgentAndRetry();
+		await this._abortActiveAgentAndRetry("user");
 	}
 
 	async waitForIdle(): Promise<void> {
@@ -3355,7 +3386,7 @@ export class AgentSession {
 		admission.finishSessionWork();
 	}
 
-	private async _abortActiveAgentAndRetry(): Promise<void> {
+	private async _abortActiveAgentAndRetry(source: "user" | "system"): Promise<void> {
 		this.abortRetry();
 		this.abortBranchSummary();
 		if (this._userAbortPromise) {
@@ -3365,6 +3396,7 @@ export class AgentSession {
 		}
 		if (this.isStreaming) {
 			this._suppressQueuedContinuationAfterUserAbort = true;
+			this._agentAbortSource = source;
 		}
 
 		const abortPromise = (async () => {
@@ -3396,7 +3428,7 @@ export class AgentSession {
 			// Keep the session subscriber attached until the aborted run emits
 			// agent_end. That event clears the active-run and retry state that
 			// waitForIdle() depends on.
-			await this._abortActiveAgentAndRetry();
+			await this._abortActiveAgentAndRetry("system");
 			this._disconnectFromAgent();
 			disconnected = true;
 			this._emit({ type: "compaction_start", reason: "manual" });
@@ -4625,6 +4657,9 @@ export class AgentSession {
 				getAllTools: () => this.getAllTools(),
 				setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
 				refreshTools: () => this._refreshToolRegistry(),
+				registerRemovedToolHint: (name, hint) => {
+					this.agent.removedToolHints[name] = hint;
+				},
 				getCommands,
 				setModel: async (model) => {
 					if (!this._modelRuntime.hasConfiguredAuth(model.provider)) return false;
@@ -4704,7 +4739,7 @@ export class AgentSession {
 						let disconnected = false;
 
 						try {
-							await this._abortActiveAgentAndRetry();
+							await this._abortActiveAgentAndRetry("system");
 							this._disconnectFromAgent();
 							disconnected = true;
 							this._emit({ type: "compaction_start", reason: "extension" });
