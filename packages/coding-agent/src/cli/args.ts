@@ -7,7 +7,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR } from "../config.ts";
 import type { ExtensionFlag } from "../core/extensions/types.ts";
-import { isNeoEnabled } from "./neo/gate.ts";
+import { isGrokNeoEnabled } from "./grok-neo-gate.ts";
 
 export type Mode = "text" | "json" | "rpc";
 
@@ -49,20 +49,8 @@ export interface Args {
 	offline?: boolean;
 	verbose?: boolean;
 	projectTrustOverride?: boolean;
-	/** Launch the neo (Go-native) TUI instead of the classic TUI. */
-	neo?: boolean;
-	/** Force the neo per-instance stdio transport (implies neo). */
-	neoIsolated?: boolean;
-	/** Dev-only override path to the neo binary (hidden from help). */
-	neoBin?: string;
-	/**
-	 * Run the neo shared daemon, listening for JSONL RPC connections on the given
-	 * unix socket (POSIX) or named-pipe (Windows) path. Hidden from help — this is
-	 * an internal handoff target the neo client spawns, not a user-facing flag.
-	 */
-	neoListen?: string;
-	/** Self-register into the neo daemon registry when listening (daemon-internal). */
-	neoRegister?: boolean;
+	/** Launch the experimental grok interactive chrome. */
+	grokNeo?: boolean;
 	/** Serve independently routed plain-RPC sessions over one stdio process. */
 	multiSession?: boolean;
 	messages: string[];
@@ -78,8 +66,8 @@ export function isValidThinkingLevel(level: string): level is ThinkingLevel {
 	return VALID_THINKING_LEVELS.includes(level as ThinkingLevel);
 }
 
-export function parseArgs(args: string[], options: { neoEnabled?: boolean } = {}): Args {
-	const neoEnabled = options.neoEnabled ?? isNeoEnabled();
+export function parseArgs(args: string[], options: { grokNeoEnabled?: boolean } = {}): Args {
+	const grokNeoEnabled = options.grokNeoEnabled ?? isGrokNeoEnabled();
 	const result: Args = {
 		messages: [],
 		fileArgs: [],
@@ -202,17 +190,8 @@ export function parseArgs(args: string[], options: { neoEnabled?: boolean } = {}
 			result.projectTrustOverride = false;
 		} else if (arg === "--offline") {
 			result.offline = true;
-		} else if (neoEnabled && arg === "--neo") {
-			result.neo = true;
-		} else if (neoEnabled && arg === "--neo-isolated") {
-			result.neo = true;
-			result.neoIsolated = true;
-		} else if (neoEnabled && arg === "--neo-bin" && i + 1 < args.length) {
-			result.neoBin = args[++i];
-		} else if (neoEnabled && arg === "--listen" && i + 1 < args.length) {
-			result.neoListen = args[++i];
-		} else if (neoEnabled && arg === "--register") {
-			result.neoRegister = true;
+		} else if (grokNeoEnabled && arg === "--grok-neo") {
+			result.grokNeo = true;
 		} else if (arg === "--multi-session") {
 			result.multiSession = true;
 		} else if (arg.startsWith("@")) {
@@ -241,7 +220,7 @@ export function parseArgs(args: string[], options: { neoEnabled?: boolean } = {}
 	return result;
 }
 
-export function printHelp(extensionFlags?: ExtensionFlag[], neoEnabled = isNeoEnabled()): void {
+export function printHelp(extensionFlags?: ExtensionFlag[], grokNeoEnabled = isGrokNeoEnabled()): void {
 	const extensionFlagsText =
 		extensionFlags && extensionFlags.length > 0
 			? `\n${chalk.bold("Extension CLI Flags:")}\n${extensionFlags
@@ -252,11 +231,8 @@ export function printHelp(extensionFlags?: ExtensionFlag[], neoEnabled = isNeoEn
 					})
 					.join("\n")}\n`
 			: "";
-	const neoOptionsText = neoEnabled
-		? `  --neo                          Launch the neo (Go-native) TUI instead of the classic TUI
-                                 (piped stdin falls back to classic print mode)
-  --neo-isolated                 Like --neo, but use a per-instance backend (no shared daemon)
-`
+	const grokNeoOptionsText = grokNeoEnabled
+		? "  --grok-neo                     Launch the experimental grok interactive chrome\n"
 		: "";
 	console.log(`${chalk.bold(APP_NAME)} - AI coding assistant with read, bash, edit, write tools
 
@@ -309,7 +285,7 @@ ${chalk.bold("Options:")}
   --no-skills, -ns               Disable skills discovery and loading
   --prompt-template <path>       Load a prompt template file or directory (can be used multiple times)
   --no-prompt-templates, -np     Disable prompt template discovery and loading
-  --theme <path>                 Load a theme file or directory (can be used multiple times)
+  --theme <path>                 Register a theme file or directory (can be used multiple times; does not select it)
   --no-themes                    Disable theme discovery and loading
   --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
   --export <file>                Export session file to HTML and exit
@@ -318,7 +294,7 @@ ${chalk.bold("Options:")}
   --approve, -a                  Trust project-local files for this run
   --no-approve, -na              Ignore project-local files for this run
   --offline                      Disable startup network operations (same as PI_OFFLINE=1)
-${neoOptionsText}  --help, -h                     Show this help
+${grokNeoOptionsText}  --help, -h                     Show this help
   --version, -v                  Show version number
 
 Extensions can register additional flags (e.g., --plan from plan-mode extension).${extensionFlagsText}
