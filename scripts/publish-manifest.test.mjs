@@ -8,9 +8,9 @@ import { rewritePublishManifest } from "./publish-manifest.mjs";
 const publisherSource = readFileSync(new URL("./publish.mjs", import.meta.url), "utf8");
 
 describe("publish manifest rewrite", () => {
-	it("derives package directories from the declared repository root", () => {
-		assert.match(publisherSource, /pkg\.directory\.slice\(rootDir\.length \+ 1\)/);
-		assert.doesNotMatch(publisherSource, /repoRoot/);
+	it("passes repository-relative package directories directly", () => {
+		assert.match(publisherSource, /directory: pkg\.directory/);
+		assert.doesNotMatch(publisherSource, /repoRoot|rootDir/);
 	});
 
 	it("targets the Senpi fork for OIDC provenance", () => {

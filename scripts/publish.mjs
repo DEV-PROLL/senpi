@@ -73,7 +73,7 @@ function stagePublishDirectory(pkg) {
 	const manifestPath = join(directory, "package.json");
 	const manifest = readPackageJson(directory);
 	rewritePublishManifest(manifest, {
-		directory: pkg.directory.slice(rootDir.length + 1),
+		directory: pkg.directory,
 		name: pkg.name,
 	});
 	rewriteOwnedRegistryAliases(manifest);
