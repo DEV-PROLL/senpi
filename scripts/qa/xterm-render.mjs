@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// xterm-render.mjs — the neo TUI evidence harness CORE (plan task 2).
+// xterm-render.mjs — the TUI evidence harness CORE.
 //
-// It is the mandatory renderer behind the plan's EVIDENCE FORMAT RULE: every
-// TUI-visual claim in every neo todo is proven against a TRIPLET —
+// It is the mandatory renderer behind the EVIDENCE FORMAT RULE: every
+// TUI-visual claim is proven against a TRIPLET —
 //   (1) the raw capture `.ans` (tmux capture-pane -e / node-pty),
 //   (2) a self-contained HTML review page rendered here through @xterm/headless,
 //   (3) the extracted per-cell grid JSON (fg/bg/attrs/glyph per cell).
@@ -17,6 +17,11 @@
 //              Parse an .ans frame into a cell grid; emit grid JSON + HTML page.
 //   assert   <grid.json> --spec assertions.json
 //              Run grid assertions (cell color / glyph / region) against a grid.
+//   replay   <events.json> [--out-json f]
+//              Apply ordered write/resize events with retained scrollback and
+//              emit a parsed cell grid for each requested snapshot.
+//   raw-assert <in.ans> [--expect-clear-replay] [--replay-sentinel text]
+//              Check DECSET 2026 balance and (when requested) clear/replay shape.
 //   verify-manifest <manifest.json>
 //              FAIL when any registered claim is missing frames, missing a
 //              triplet leg, or has no grid-based assertion result.
@@ -98,11 +103,8 @@ function attrFlags(cell) {
  * Render an .ans byte string into a structured cell grid.
  * @returns {{cols:number, rows:number, cells:Array<Array<object>>}}
  */
-async function renderToGrid(ansText, cols, rows) {
-	const Terminal = await loadTerminal();
-	const term = new Terminal({ cols, rows, allowProposedApi: true, scrollback: 0 });
-	await new Promise((res) => term.write(ansText, res));
-
+function gridFromTerminal(term) {
+	const { cols, rows } = term;
 	const buf = term.buffer.active;
 	const cells = [];
 	// Reusable cell accessor avoids per-cell allocation in xterm.
@@ -132,8 +134,18 @@ async function renderToGrid(ansText, cols, rows) {
 		}
 		cells.push(row);
 	}
-	term.dispose();
 	return { cols, rows, cells };
+}
+
+async function renderToGrid(ansText, cols, rows) {
+	const Terminal = await loadTerminal();
+	const term = new Terminal({ cols, rows, allowProposedApi: true, scrollback: 0 });
+	try {
+		await new Promise((res) => term.write(ansText, res));
+		return gridFromTerminal(term);
+	} finally {
+		term.dispose();
+	}
 }
 
 function blankCell() {
@@ -154,6 +166,126 @@ function blankCell() {
 			strikethrough: false,
 		},
 	};
+}
+
+// --- ordered replay + raw-stream assertions --------------------------------
+
+const SYNC_BEGIN = "\x1b[?2026h";
+const SYNC_END = "\x1b[?2026l";
+const CLEAR_REPLAY_SEQUENCE = ["\x1b[2J", "\x1b[3J", "\x1b[H"];
+
+function positiveInteger(value, label) {
+	if (!Number.isInteger(value) || value <= 0) throw new HarnessError(`${label} must be a positive integer`, 2);
+	return value;
+}
+
+/**
+ * Apply a deterministic ordered terminal event list. `scrollback` is explicitly
+ * positive: replay QA must retain history rather than mask reflow with the
+ * legacy one-screen renderer. A snapshot is a complete, independent cell grid.
+ */
+async function replayToSnapshots(plan) {
+	if (!plan || typeof plan !== "object" || Array.isArray(plan)) throw new HarnessError("replay: event plan must be an object", 2);
+	const initialCols = positiveInteger(plan.cols, "replay.cols");
+	const initialRows = positiveInteger(plan.rows, "replay.rows");
+	const scrollback = positiveInteger(plan.scrollback ?? 1000, "replay.scrollback");
+	if (!Array.isArray(plan.events) || plan.events.length === 0) throw new HarnessError("replay.events must be a non-empty array", 2);
+
+	const Terminal = await loadTerminal();
+	const term = new Terminal({ cols: initialCols, rows: initialRows, allowProposedApi: true, scrollback });
+	const snapshots = [];
+	try {
+		for (let index = 0; index < plan.events.length; index += 1) {
+			const event = plan.events[index];
+			if (!event || typeof event !== "object" || Array.isArray(event)) {
+				throw new HarnessError(`replay.events[${index}] must be an object`, 2);
+			}
+			if (event.type === "write") {
+				if (typeof event.data !== "string") throw new HarnessError(`replay.events[${index}].data must be a string`, 2);
+				await new Promise((res) => term.write(event.data, res));
+			} else if (event.type === "resize") {
+				term.resize(positiveInteger(event.cols, `replay.events[${index}].cols`), positiveInteger(event.rows, `replay.events[${index}].rows`));
+			} else {
+				throw new HarnessError(`replay.events[${index}].type must be write or resize`, 2);
+			}
+
+			if (event.snapshot) {
+				const label = event.snapshot === true ? `event-${index + 1}` : event.snapshot;
+				if (typeof label !== "string" || label.length === 0) throw new HarnessError(`replay.events[${index}].snapshot must be true or a non-empty string`, 2);
+				snapshots.push({ order: snapshots.length + 1, eventIndex: index, eventType: event.type, label, grid: gridFromTerminal(term) });
+			}
+		}
+		return { initial: { cols: initialCols, rows: initialRows }, scrollback, snapshots };
+	} finally {
+		term.dispose();
+	}
+}
+
+function allTokenOffsets(raw, token) {
+	const offsets = [];
+	for (let at = raw.indexOf(token); at >= 0; at = raw.indexOf(token, at + token.length)) offsets.push(at);
+	return offsets;
+}
+
+function sequenceOffsets(raw, tokens) {
+	const offsets = [];
+	let after = 0;
+	for (const token of tokens) {
+		const offset = raw.indexOf(token, after);
+		if (offset < 0) return { pass: false, offsets };
+		offsets.push(offset);
+		after = offset + token.length;
+	}
+	return { pass: true, offsets };
+}
+
+/**
+ * Check raw terminal protocol facts before parsing into cells. The DECSET
+ * scanner rejects premature ends as well as nonzero final balance. When clear
+ * replay is required, screen clear, scrollback clear, and cursor-home must be
+ * ordered before the caller's replay sentinel (when supplied).
+ */
+function assertRawStream(raw, { expectClearReplay = false, replaySentinel, clearReplaySequence = CLEAR_REPLAY_SEQUENCE } = {}) {
+	if (typeof raw !== "string") throw new HarnessError("raw assertion requires a string stream", 2);
+	if (replaySentinel !== undefined && (typeof replaySentinel !== "string" || replaySentinel.length === 0)) {
+		throw new HarnessError("raw assertion replaySentinel must be a non-empty string", 2);
+	}
+	if (!Array.isArray(clearReplaySequence) || clearReplaySequence.some((token) => typeof token !== "string" || token.length === 0)) {
+		throw new HarnessError("raw assertion clearReplaySequence must be non-empty strings", 2);
+	}
+
+	const transitions = [];
+	for (const offset of allTokenOffsets(raw, SYNC_BEGIN)) transitions.push({ offset, kind: "begin" });
+	for (const offset of allTokenOffsets(raw, SYNC_END)) transitions.push({ offset, kind: "end" });
+	transitions.sort((a, b) => a.offset - b.offset);
+	let balance = 0;
+	let minimumBalance = 0;
+	for (const transition of transitions) {
+		balance += transition.kind === "begin" ? 1 : -1;
+		minimumBalance = Math.min(minimumBalance, balance);
+	}
+	const decset = {
+		begins: transitions.filter((transition) => transition.kind === "begin").length,
+		ends: transitions.filter((transition) => transition.kind === "end").length,
+		minimumBalance,
+		balanced: balance === 0 && minimumBalance >= 0,
+	};
+
+	const shape = sequenceOffsets(raw, clearReplaySequence);
+	const finalClearOffset = shape.offsets.at(-1);
+	const replayOffset = replaySentinel === undefined ? null : raw.indexOf(replaySentinel, (finalClearOffset ?? -1) + 1);
+	const replayAfterClear = replaySentinel === undefined ? true : replayOffset >= 0;
+	const clearReplay = {
+		required: expectClearReplay,
+		sequence: clearReplaySequence,
+		offsets: shape.offsets,
+		shape: shape.pass,
+		replaySentinel: replaySentinel ?? null,
+		replayOffset: replayOffset < 0 ? null : replayOffset,
+		replayAfterClear,
+		pass: !expectClearReplay || (shape.pass && replayAfterClear),
+	};
+	return { pass: decset.balanced && clearReplay.pass, decset, clearReplay };
 }
 
 // --- grid queries (assertion helpers) --------------------------------------
@@ -385,6 +517,32 @@ async function modeAssert(argv) {
 	return failed.length === 0 ? 0 : 1;
 }
 
+// --- modes: replay / raw-assert ---------------------------------------------
+
+async function modeReplay(argv) {
+	const { flags, positional } = parseFlags(argv);
+	const input = positional[0];
+	if (!input) throw new HarnessError("replay: missing <events.json>", 2);
+	const plan = JSON.parse(readText(input));
+	const replay = await replayToSnapshots(plan);
+	const output = JSON.stringify(replay, null, 2);
+	if (typeof flags["out-json"] === "string") writeFileEnsuring(flags["out-json"], output);
+	else process.stdout.write(`${output}\n`);
+	return 0;
+}
+
+async function modeRawAssert(argv) {
+	const { flags, positional } = parseFlags(argv);
+	const input = positional[0];
+	if (!input) throw new HarnessError("raw-assert: missing <in.ans>", 2);
+	const result = assertRawStream(readText(input), {
+		expectClearReplay: flags["expect-clear-replay"] === true,
+		replaySentinel: typeof flags["replay-sentinel"] === "string" ? flags["replay-sentinel"] : undefined,
+	});
+	process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+	return result.pass ? 0 : 1;
+}
+
 // --- mode: verify-manifest --------------------------------------------------
 
 /**
@@ -542,7 +700,43 @@ async function modeSelfTest() {
 		fail("corrupted-fixture-fails-loudly", { corruptedFg, note: "corrupted fixture unexpectedly still matched" });
 	}
 
-	// (3) verify-manifest self-tests, using tiny in-memory manifests written to
+	// (3) Replay must preserve a transcript across ordered write/resize events
+	// and expose an independent parsed cell grid at each requested snapshot.
+	const replay = await replayToSnapshots({
+		cols: 20,
+		rows: 4,
+		scrollback: 20,
+		events: [
+			{ type: "write", data: "REPLAY-TRANSCRIPT", snapshot: "wide" },
+			{ type: "resize", cols: 12, rows: 3, snapshot: "narrow" },
+		],
+	});
+	const wide = replay.snapshots[0];
+	const narrow = replay.snapshots[1];
+	if (
+		replay.scrollback > 0 &&
+		wide?.grid.cols === 20 &&
+		narrow?.grid.cols === 12 &&
+		narrow?.grid.rows === 3 &&
+		findGlyph(narrow.grid, "R") !== null
+	) {
+		pass("replay-ordered-write-resize-exposes-snapshot-grids", { snapshots: replay.snapshots.map((snapshot) => ({ label: snapshot.label, cols: snapshot.grid.cols, rows: snapshot.grid.rows })) });
+	} else {
+		fail("replay-ordered-write-resize-exposes-snapshot-grids", { replay });
+	}
+
+	// (4) Raw-stream checks must reject unbalanced DECSET 2026 and require the
+	// clear-screen + clear-scrollback + home replay shape when requested.
+	const replayRaw = `${SYNC_BEGIN}\x1b[2J\x1b[3J\x1b[HREPLAY-TRANSCRIPT${SYNC_END}`;
+	const rawGood = assertRawStream(replayRaw, { expectClearReplay: true, replaySentinel: "REPLAY-TRANSCRIPT" });
+	const rawBroken = assertRawStream(replayRaw.replace(SYNC_END, ""), { expectClearReplay: true, replaySentinel: "REPLAY-TRANSCRIPT" });
+	if (rawGood.pass && rawBroken.pass === false && rawBroken.decset.balanced === false) {
+		pass("raw-stream-decset-and-clear-replay-assertions", { rawGood, rawBroken });
+	} else {
+		fail("raw-stream-decset-and-clear-replay-assertions", { rawGood, rawBroken });
+	}
+
+	// (5) verify-manifest self-tests, using tiny in-memory manifests written to
 	// a temp dir alongside the fixture grids.
 	const tmpDir = join(fixtureDir, ".self-test-tmp");
 	mkdirSync(tmpDir, { recursive: true });
@@ -638,15 +832,21 @@ async function main() {
 			return modeRender(rest);
 		case "assert":
 			return modeAssert(rest);
+		case "replay":
+			return modeReplay(rest);
+		case "raw-assert":
+			return modeRawAssert(rest);
 		case "verify-manifest":
 			return modeVerifyManifest(rest);
 		case "self-test":
 			return modeSelfTest();
 		default:
 			process.stderr.write(
-				"usage: xterm-render.mjs <render|assert|verify-manifest|self-test> ...\n" +
+				"usage: xterm-render.mjs <render|assert|replay|raw-assert|verify-manifest|self-test> ...\n" +
 					"  render <in.ans> --cols N --rows M [--out-json f] [--out-html f] [--title t]\n" +
 					"  assert <grid.json> --spec assertions.json\n" +
+					"  replay <events.json> [--out-json f]\n" +
+					"  raw-assert <in.ans> [--expect-clear-replay] [--replay-sentinel text]\n" +
 					"  verify-manifest <manifest.json>\n" +
 					"  self-test\n",
 			);
@@ -666,4 +866,4 @@ main()
 	});
 
 // Exported for potential in-process reuse (Go tests shell out to the CLI).
-export { renderToGrid, runAssertion, verifyManifest, gridToHtml };
+export { assertRawStream, gridToHtml, renderToGrid, replayToSnapshots, runAssertion, verifyManifest };

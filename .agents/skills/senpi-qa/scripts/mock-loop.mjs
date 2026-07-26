@@ -16,6 +16,8 @@
  *   node mock-loop.mjs --self-test                       # all three APIs round-trip
  *   node mock-loop.mjs --self-test --api anthropic-messages
  *   node mock-loop.mjs --with-tool [--api ...]           # full loop: model -> bash -> final text
+ *   node mock-loop.mjs --with-tool --serve --serve-env /tmp/senpi-qa.env
+ *   node mock-loop.mjs --with-tool --serve --self-test   # HTTP scenario proof
  *   node mock-loop.mjs --with-reasoning [--slow] [--api ...]
  *   node mock-loop.mjs --with-reasoning --serve --serve-env /tmp/senpi-qa.env
  *   (the flag is --serve-env, NOT --env-file: Node treats --env-file as a native
@@ -59,6 +61,18 @@ import {
 	runTextToolLeakScenario,
 	TEXT_LEAK_APIS,
 } from "./lib/mock-loop-text-leak.mjs";
+
+const QA_TOOL_SERVE_ASSISTANT_MARKER = "SENPI-QA-TOOL-SERVE-ASSISTANT-24c7";
+const QA_TOOL_SERVE_RESULT_MARKER = "SENPI-QA-TOOL-SERVE-RESULT-24c7";
+const QA_TOOL_SERVE_FINAL_MARKER = "SENPI-QA-TOOL-SERVE-FINAL-24c7";
+
+function toolServeScriptedTurns() {
+	return [
+		{ text: QA_TOOL_SERVE_ASSISTANT_MARKER },
+		{ toolCalls: [{ name: "bash", args: { command: `printf '${QA_TOOL_SERVE_RESULT_MARKER}\\n'` } }] },
+		{ text: QA_TOOL_SERVE_FINAL_MARKER },
+	];
+}
 
 async function driveTurn({
 	apiName,
@@ -232,6 +246,101 @@ async function serveReasoning(apiName, envFile, slow) {
 	});
 }
 
+async function requestToolServeTurn(server, preset, messages) {
+	const headers = { "content-type": "application/json" };
+	if (preset.auth === "x-api-key") headers["x-api-key"] = preset.apiKey;
+	else headers.authorization = `Bearer ${preset.apiKey}`;
+	const response = await fetch(`${server.origin}${preset.path}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify({ model: preset.modelId, stream: true, messages }),
+	});
+	return { ok: response.ok, bytes: Buffer.from(await response.arrayBuffer()) };
+}
+
+/** Exercise the serve script over the same localhost HTTP boundary an interactive CLI uses. */
+async function checkToolServeScenario(apiName) {
+	const preset = API_PRESETS[apiName];
+	const server = await startFakeModelServer({ turns: toolServeScriptedTurns() });
+	try {
+		const first = await requestToolServeTurn(server, preset, [{ role: "user", content: "first interactive turn" }]);
+		const second = await requestToolServeTurn(server, preset, [{ role: "user", content: "please run the scripted tool" }]);
+		const third = await requestToolServeTurn(server, preset, [
+			{ role: "assistant", content: "tool call emitted" },
+			{ role: "tool", tool_call_id: "call_1", content: QA_TOOL_SERVE_RESULT_MARKER },
+		]);
+		const served =
+			first.ok &&
+			second.ok &&
+			third.ok &&
+			first.bytes.includes(Buffer.from(QA_TOOL_SERVE_ASSISTANT_MARKER)) &&
+			second.bytes.includes(Buffer.from('"bash"')) &&
+			third.bytes.includes(Buffer.from(QA_TOOL_SERVE_FINAL_MARKER)) &&
+			server.requests.length === 3 &&
+			server.requests[2].raw.includes(QA_TOOL_SERVE_RESULT_MARKER);
+		return { pass: served, detail: `requests=${server.requests.length} first=${first.ok} tool=${second.ok} final=${third.ok}` };
+	} finally {
+		await server.stop();
+	}
+}
+
+async function toolServeSelfTest(apiName) {
+	installCleanupHooks();
+	const checks = createChecks(`mock-loop.mjs --with-tool --serve --self-test (${apiName})`);
+	const guard = guardRealAuth();
+	const result = await checkToolServeScenario(apiName);
+	checks.ok(
+		"interactive tool serve scenario returns assistant text, tool call, tool result, and final text over HTTP",
+		result.pass,
+		result.detail,
+	);
+	checkRealAuthUnchanged(checks, guard);
+	process.exit(checks.finish() ? 0 : 1);
+}
+
+async function serveTool(apiName, envFile) {
+	const guard = guardRealAuth();
+	const box = makeSandbox(`mock-loop-serve-tool-${apiName}`);
+	let server;
+	try {
+		server = await startFakeModelServer({ turns: toolServeScriptedTurns() });
+		writeMockModelsJson(box.agentDir, server, apiName);
+		writeServeEnvFile(envFile, box);
+	} catch (error) {
+		if (server) await server.stop();
+		box.cleanup();
+		throw error;
+	}
+
+	const authDigest = guard.before ? `sha256=${guard.before.slice(0, 12)}...` : "sha256=absent";
+	process.stdout.write(`SENPI_QA_AUTH_GUARD=1 ${authDigest} path=${guard.path}\n`);
+	process.stdout.write(`SENPI_QA_SERVE_ENV_FILE=${envFile}\n`);
+	process.stdout.write("SENPI_QA_SERVE_SCENARIO=tool-call\n");
+	process.stdout.write(`SENPI_QA_TOOL_SERVE_ASSISTANT_MARKER=${QA_TOOL_SERVE_ASSISTANT_MARKER}\n`);
+	process.stdout.write(`SENPI_QA_TOOL_SERVE_RESULT_MARKER=${QA_TOOL_SERVE_RESULT_MARKER}\n`);
+	process.stdout.write(`SENPI_QA_TOOL_SERVE_FINAL_MARKER=${QA_TOOL_SERVE_FINAL_MARKER}\n`);
+	process.stdout.write("SENPI_QA_SERVE_READY=1\n");
+
+	let shutdown;
+	const stop = async () => {
+		if (!shutdown) {
+			shutdown = (async () => {
+				await server.stop();
+				box.cleanup();
+				guard.assertUnchanged();
+			})();
+		}
+		return shutdown;
+	};
+	await new Promise((resolve, reject) => {
+		const onSignal = () => {
+			void stop().then(resolve, reject);
+		};
+		process.once("SIGTERM", onSignal);
+		process.once("SIGINT", onSignal);
+	});
+}
+
 async function withMcpTool(apiName, toolName, toolArgs, evidenceSlug) {
 	assertMcpFixtureToolName(toolName);
 	const fixture = mcpFixtureForToolName(toolName);
@@ -314,16 +423,31 @@ if (argv[0] === "--self-test") {
 		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
 		process.exit(1);
 	});
-} else if (argv.includes("--serve")) {
-	const envFile = flagValue(argv, "--serve-env");
-	if (argv[0] !== "--with-reasoning" || !envFile) {
-		process.stderr.write("--serve requires --with-reasoning and --serve-env <path>\n");
-		process.exit(2);
-	}
-	serveReasoning(api || "openai-completions", envFile, argv.includes("--slow")).catch((e) => {
+} else if (argv[0] === "--with-tool" && argv.includes("--serve") && argv.includes("--self-test")) {
+	toolServeSelfTest(api || "openai-completions").catch((e) => {
 		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
 		process.exit(1);
 	});
+} else if (argv.includes("--serve")) {
+	const envFile = flagValue(argv, "--serve-env");
+	if (argv[0] === "--with-reasoning" && envFile) {
+		serveReasoning(api || "openai-completions", envFile, argv.includes("--slow")).catch((e) => {
+			process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+			process.exit(1);
+		});
+	} else if (argv[0] === "--with-tool" && envFile) {
+		serveTool(api || "openai-completions", envFile).catch((e) => {
+			process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+			process.exit(1);
+		});
+	} else if (argv[0] === "--with-tool") {
+		process.stderr.write("--serve requires --with-tool and --serve-env <path>\n");
+		process.exit(2);
+	} else {
+		// Preserve the established reasoning serve error for every prior invalid form.
+		process.stderr.write("--serve requires --with-reasoning and --serve-env <path>\n");
+		process.exit(2);
+	}
 } else if (argv[0] === "--with-reasoning") {
 	withReasoning(api || "openai-completions", argv.includes("--slow")).catch((e) => {
 		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
@@ -375,6 +499,8 @@ if (argv[0] === "--self-test") {
 			"senpi-qa Channel 3 — Mock loop (zero real API calls)",
 			"  node mock-loop.mjs --self-test [--api <name>]   round-trip 1 or all 3 wire formats",
 			"  node mock-loop.mjs --with-tool [--api <name>]   full loop with a bash tool call",
+			"  node mock-loop.mjs --with-tool --serve --serve-env <path> [--api <name>]",
+			"  node mock-loop.mjs --with-tool --serve --self-test [--api <name>]",
 			"  node mock-loop.mjs --with-reasoning [--slow] [--api <name>]",
 			"  node mock-loop.mjs --with-reasoning --serve --serve-env <path> [--slow] [--api <name>]",
 			"  node mock-loop.mjs --with-text-tool-leak --api <anthropic-messages|openai-completions>",
