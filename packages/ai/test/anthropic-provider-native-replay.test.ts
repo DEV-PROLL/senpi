@@ -1,3 +1,4 @@
+import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { getModel } from "../src/compat.ts";
 import "../src/providers/register-builtins.ts";
@@ -65,6 +66,7 @@ async function capturePayload(
 	model: Model<"anthropic-messages">,
 	messages: Context["messages"],
 	options?: SimpleStreamOptions,
+	contextExtras?: Partial<Context>,
 ): Promise<CapturedAnthropicPayload> {
 	let capturedPayload: CapturedAnthropicPayload | undefined;
 	const payloadCaptureModel: Model<"anthropic-messages"> = {
@@ -72,11 +74,11 @@ async function capturePayload(
 		baseUrl: "http://127.0.0.1:9",
 		// The localhost override only captures the payload; these tests exercise
 		// first-party replay semantics rather than endpoint capability detection.
-		compat: { ...model.compat, supportsWebSearch: true },
+		compat: { ...model.compat, supportsWebSearch: true, ...contextExtras?.compat },
 	};
 	const stream = streamSimple(
 		payloadCaptureModel,
-		{ messages },
+		{ ...contextExtras, messages },
 		{
 			...options,
 			apiKey: "fake-key",
@@ -598,9 +600,11 @@ describe("Anthropic provider-native replay", () => {
 		expect(closedAssistant?.content).not.toContainEqual(pendingUse);
 	});
 
-	// A tool result that registers deferred tool names serializes sibling text
-	// after the tool_result blocks, and text after the results closes the turn.
-	it("drops a pending server_tool_use when the tool result added deferred tool names", async () => {
+	// A tool result whose added names are NOT deferred emits no sibling text, so
+	// the wire turn stays resumable and the pending use must replay. When a name
+	// IS deferred, its reference serializes sibling text after the tool_result
+	// blocks — text after the results closes the turn and the use must drop.
+	it("mirrors the tool-reference wire shape when deciding closure for added tool names", async () => {
 		const model = getModel("anthropic", "claude-fable-5");
 		const pendingUse = {
 			type: "server_tool_use",
@@ -608,30 +612,58 @@ describe("Anthropic provider-native replay", () => {
 			name: "web_search",
 			input: { query: "a" },
 		};
-		const assistant = assistantMessage(
-			[
-				{ type: "toolCall", id: "toolu_task", name: "task", arguments: { prompt: "go" } },
-				{ type: "providerNative", subtype: "server_tool_use", raw: pendingUse },
-			],
-			{ stopReason: "toolUse", model: "claude-fable-5" },
-		);
+		const makeAssistant = () =>
+			assistantMessage(
+				[
+					{ type: "toolCall", id: "toolu_task", name: "task", arguments: { prompt: "go" } },
+					{ type: "providerNative", subtype: "server_tool_use", raw: pendingUse },
+				],
+				{ stopReason: "toolUse", model: "claude-fable-5" },
+			);
+		const makeToolResult = () => ({
+			role: "toolResult" as const,
+			toolCallId: "toolu_task",
+			toolName: "task",
+			content: [{ type: "text" as const, text: "out" }],
+			isError: false,
+			addedToolNames: ["deferred_tool"],
+			timestamp: 2,
+		});
+		// An immediate tool must exist alongside, or the deferred set is promoted
+		// to immediate wholesale and no reference ever emits.
+		const taskTool = {
+			name: "task",
+			description: "The already-loaded tool.",
+			parameters: Type.Object({}),
+		};
+		const deferredTool = {
+			name: "deferred_tool",
+			description: "A tool registered by the result.",
+			parameters: Type.Object({}),
+		};
 
-		const payload = await capturePayload(model, [
+		// Not deferred (no tool definition registered): plain tool_result, no closure.
+		const resumable = await capturePayload(model, [
 			{ role: "user", content: "hello", timestamp: 1 },
-			assistant,
-			{
-				role: "toolResult",
-				toolCallId: "toolu_task",
-				toolName: "task",
-				content: [{ type: "text", text: "out" }],
-				isError: false,
-				addedToolNames: ["deferred_tool"],
-				timestamp: 2,
-			},
+			makeAssistant(),
+			makeToolResult(),
 		]);
+		const resumableAssistant = resumable.messages?.find((message) => message.role === "assistant");
+		expect(resumableAssistant?.content).toContainEqual(pendingUse);
 
-		const assistantPayload = payload.messages?.find((message) => message.role === "assistant");
-		expect(assistantPayload?.content).not.toContainEqual(pendingUse);
+		// Deferred: the reference emits sibling text after the result, closing the turn.
+		const closed = await capturePayload(
+			model,
+			[{ role: "user", content: "hello", timestamp: 1 }, makeAssistant(), makeToolResult()],
+			undefined,
+			{ tools: [taskTool, deferredTool], compat: { supportsToolReferences: true } },
+		);
+		const closedAssistant = closed.messages?.find((message) => message.role === "assistant");
+		expect(closedAssistant?.content).not.toContainEqual(pendingUse);
+		const closedUser = (closed.messages ?? []).find(
+			(message) => message.role === "user" && Array.isArray(message.content),
+		);
+		expect(JSON.stringify(closedUser?.content)).toContain("tool_reference");
 	});
 
 	// User text between a deferred use and its late result killed the turn before

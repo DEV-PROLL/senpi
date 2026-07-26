@@ -548,6 +548,8 @@ function userMessageClosesServerTurn(message: UserMessage): boolean {
 function collectProviderNativeToolPairing(
 	messages: Message[],
 	model: Model<"anthropic-messages">,
+	deferredToolNames: ReadonlySet<string>,
+	normalizeToolName: (name: string) => string,
 ): ProviderNativeToolPairing {
 	const resolvedUseIds = new Set<string>();
 	const validResultIds = new Set<string>();
@@ -557,6 +559,7 @@ function collectProviderNativeToolPairing(
 	// user text, a tool result whose deferred-tool references serialize sibling
 	// text after the results, or another model's assistant — empties it.
 	let pendingUseIds = new Set<string>();
+	const loadedReferenceNames = new Set<string>();
 	for (const message of messages) {
 		if (message.role === "assistant") {
 			const priorUseIds = pendingUseIds;
@@ -582,7 +585,18 @@ function collectProviderNativeToolPairing(
 			continue;
 		}
 		if (message.role === "toolResult") {
-			if ((message.addedToolNames?.length ?? 0) > 0) pendingUseIds = new Set<string>();
+			// convertToolResult emits sibling text after the tool_result blocks only
+			// for names that survive the deferred/loaded filter, so only those names
+			// close the turn; a stale or already-loaded name leaves the result plain
+			// and the pending use resumable.
+			let emitsReferences = false;
+			for (const name of message.addedToolNames ?? []) {
+				const normalizedName = normalizeToolName(name);
+				if (!deferredToolNames.has(normalizedName) || loadedReferenceNames.has(normalizedName)) continue;
+				loadedReferenceNames.add(normalizedName);
+				emitsReferences = true;
+			}
+			if (emitsReferences) pendingUseIds = new Set<string>();
 			continue;
 		}
 		if (message.role === "user" && userMessageClosesServerTurn(message)) {
@@ -1920,7 +1934,12 @@ function convertMessages(
 	// assistant turn below; drop their tool_results in lockstep so none dangle.
 	const discardedFallbackToolCallIds = collectDiscardedFallbackToolCallIds(transformedMessages, model);
 	const rejectsNativeWebSearchReplay = !getAnthropicCompat(model).supportsWebSearch;
-	const providerNativeToolPairing = collectProviderNativeToolPairing(transformedMessages, model);
+	const providerNativeToolPairing = collectProviderNativeToolPairing(
+		transformedMessages,
+		model,
+		deferredToolNames,
+		normalizeToolName,
+	);
 
 	for (let i = 0; i < transformedMessages.length; i++) {
 		const msg = transformedMessages[i];
