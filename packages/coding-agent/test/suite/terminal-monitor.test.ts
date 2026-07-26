@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBuiltinParserRegistry } from "../../src/core/extensions/builtin/permission-system/parsers.ts";
 import { TerminalManager } from "../../src/core/extensions/builtin/terminal/manager.ts";
-import type { MonitorEvent, MonitorSummaryEvent } from "../../src/core/extensions/builtin/terminal/monitor-registry.ts";
+import {
+	type MonitorEvent,
+	MonitorRegistry,
+	type MonitorSummaryEvent,
+} from "../../src/core/extensions/builtin/terminal/monitor-registry.ts";
 import type { TerminalToolContext } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createKillBashTool } from "../../src/core/extensions/builtin/terminal/tools/kill-bash.ts";
 import { createMonitorTool } from "../../src/core/extensions/builtin/terminal/tools/monitor.ts";
@@ -145,6 +149,56 @@ describe("terminal monitor tool", () => {
 		const killed = await createKillBashTool(ctx).execute("kill-monitor", { bash_id: bashId });
 		expect(firstText(killed)).toContain(`Killed ${bashId}`);
 		expect(summaryEvent(await ended).summary).toContain("killed");
+	});
+
+	it("emits a final summary when a wake-budget-paused monitor exits", async () => {
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		const tool = createMonitorTool({ ...ctx, monitorRegistry: registry });
+		const ended = sink.waitFor((event) => event.type === "summary", "paused monitor completion");
+		const started = await tool.execute("monitor-paused-exit", { description: "paused exit", command: "sleep 30" });
+		const bashId = /ID: (bash_\d+)/.exec(firstText(started))?.[1];
+		if (!bashId) throw new Error("Monitor did not return a bash_id");
+
+		registry.pauseAll();
+		await createKillBashTool(ctx).execute("kill-paused", { bash_id: bashId });
+		expect(summaryEvent(await ended).summary).toContain("killed");
+	});
+
+	it("rearms a wake-budget-paused monitor and notifies the session delivery controller", async () => {
+		let rearmedId: string | undefined;
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		const tool = createMonitorTool({ ...ctx, monitorRegistry: registry, onMonitorRearmed: (id) => (rearmedId = id) });
+		const ended = sink.waitFor((event) => event.type === "summary", "rearmed monitor completion");
+		const started = await tool.execute("monitor-paused", { description: "paused", command: "sleep 30" });
+		const bashId = /ID: (bash_\d+)/.exec(firstText(started))?.[1];
+		if (!bashId) throw new Error("Monitor did not return a bash_id");
+
+		expect(registry.pauseAll()).toEqual([bashId]);
+		const rearmed = await tool.execute("monitor-resume", { action: "rearm", bash_id: bashId });
+		expect(firstText(rearmed)).toContain("re-armed");
+		expect(rearmedId).toBe(bashId);
+		await createKillBashTool(ctx).execute("kill-rearmed", { bash_id: bashId });
+		expect(summaryEvent(await ended).summary).toContain("killed");
+	});
+
+	it("resolves the session-scoped monitor registry when execution begins", async () => {
+		let registry = new MonitorRegistry(() => {});
+		const liveSink = new EventSink();
+		const tool = createMonitorTool({
+			...ctx,
+			get monitorRegistry() {
+				return registry;
+			},
+		});
+		registry = new MonitorRegistry((event) => liveSink.push(event));
+		const summary = liveSink.waitFor((event) => event.type === "summary", "session-scoped completion");
+
+		await tool.execute("monitor-session-registry", {
+			description: "session registry",
+			command: "printf 'CURRENT\\n'",
+		});
+
+		expect(summaryEvent(await summary).summary).toContain("completed");
 	});
 
 	it("uses the same bash permission class as command execution", () => {

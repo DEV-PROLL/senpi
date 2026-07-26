@@ -27,9 +27,26 @@ polling. Keeping monitor inside the terminal extension is required because its s
 session-scoped private state; a shared cross-tool registry would enlarge the fork surface without
 improving the handle contract (plan: `.omo/plans/eval-exec-merge-and-injection-wakeup.md`, todo 3).
 
+### Event delivery (2026-07-26)
+
+- `monitor-notify.ts` batches stdout events for two seconds and applies a per-monitor five-second
+  injection limit by default. One session queue coalesces simultaneous monitors, caps each message
+  at 50 lines / 4KB with a `bash_output` peek reminder for overflow, and bounds retained queue
+  state to that one capped batch.
+- The existing terminal notification guard and mode mapping are shared: `wake` steers,
+  `next-turn` follows up, `off` suppresses, and `print`/`json` plus sessions without a model never
+  inject or create an auth-less turn. Five monitor-only wakes add one pause notice to the fifth
+  injection and pause live watchers until `monitor({ action:"rearm", bash_id })` explicitly
+  resumes delivery.
+- `terminal.monitorCoalesceWindowMs`, `monitorRateLimitMs`, `monitorMaxLinesPerInjection`,
+  `monitorMaxCharsPerInjection`, and `monitorWakeBudget` tune the coalescing/rate/batch/budget
+  limits. Monitor calls render with their description or rearm handle, and the terminal prompt
+  teaches decision-relevant watcher output rather than noisy log forwarding.
+
 ### Expected merge conflict zones on next upstream sync
 
 - LOW: `extension.ts` terminal tool registration and session teardown.
+- LOW: `settings.ts` terminal notification settings shape.
 - LOW: `shared.ts` companion tool list and terminal tool constants.
 
 ## Payload-rich background completion notifications (2026-07-26)

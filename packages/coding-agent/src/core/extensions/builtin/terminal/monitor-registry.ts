@@ -117,7 +117,6 @@ export class MonitorRegistry {
 		record.unsubscribeOutput?.();
 		record.unsubscribeExit?.();
 		this.#records.delete(record.id);
-		if (record.paused) return;
 		const status = describeExit(record.runtime) ?? "exited";
 		const code = record.runtime.exitResult?.exitCode;
 		const codeText = code === null || code === undefined ? "" : ` (exit code ${code})`;

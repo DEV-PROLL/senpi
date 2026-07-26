@@ -2,6 +2,7 @@ import { type Static, Type } from "typebox";
 import { MonitorRegistry } from "../monitor-registry.ts";
 import { DEFAULT_COLS, DEFAULT_ROWS, TERMINAL_MONITOR_TOOL } from "../shared.ts";
 import { errorResult, type TerminalToolContext, type TerminalToolResult, textResult } from "./context.ts";
+import { renderMonitorCall } from "./render.ts";
 import { spawnCommandSession } from "./spawn.ts";
 
 export const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
@@ -53,10 +54,6 @@ function compileFilter(filter: string | undefined): RegExp | undefined {
 	return new RegExp(filter);
 }
 
-function monitorRegistry(ctx: TerminalToolContext): MonitorRegistry {
-	return ctx.monitorRegistry ?? new MonitorRegistry((event) => ctx.onMonitorEvent?.(event));
-}
-
 async function createMonitor(
 	ctx: TerminalToolContext,
 	registry: MonitorRegistry,
@@ -83,7 +80,13 @@ async function createMonitor(
 
 /** Build the PTY-backed monitor tool. Monitor handles share TerminalManager's bash_N namespace. */
 export function createMonitorTool(ctx: TerminalToolContext) {
-	const registry = monitorRegistry(ctx);
+	let fallbackRegistry: MonitorRegistry | undefined;
+	const getRegistry = (): MonitorRegistry => {
+		const sessionRegistry = ctx.monitorRegistry;
+		if (sessionRegistry) return sessionRegistry;
+		fallbackRegistry ??= new MonitorRegistry((event) => ctx.onMonitorEvent?.(event));
+		return fallbackRegistry;
+	};
 	return {
 		name: TERMINAL_MONITOR_TOOL,
 		label: "monitor",
@@ -94,6 +97,7 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 			"Use monitor only for decision-relevant lines; filter noisy output at the source when possible.",
 		],
 		parameters: monitorSchema,
+		renderCall: renderMonitorCall,
 		async execute(
 			_toolCallId: string,
 			input: MonitorInput,
@@ -101,10 +105,12 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 			_onUpdate?: undefined,
 			execCtx?: { cwd?: string },
 		): Promise<TerminalToolResult> {
+			const registry = getRegistry();
 			if (input.action === "rearm") {
 				const outcome = registry.rearm(input.bash_id);
 				if (outcome === "not_found") return errorResult(`No active monitor found with id: ${input.bash_id}`);
 				if (outcome === "not_paused") return textResult(`Monitor ${input.bash_id} is not paused; no action taken.`);
+				ctx.onMonitorRearmed?.(input.bash_id);
 				return textResult(`Monitor ${input.bash_id} re-armed.`);
 			}
 			return createMonitor(ctx, registry, input, execCtx);

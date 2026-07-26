@@ -5,7 +5,7 @@ import type { NotifyMode } from "./settings.ts";
 import { describeExit } from "./tools/spawn.ts";
 
 /** Modes that never wake the agent: one-shot, non-interactive runs. */
-const NON_INTERACTIVE_MODES = new Set(["print", "json"]);
+export const NON_INTERACTIVE_MODES = new Set(["print", "json"]);
 
 export interface TerminalNotifierDeps {
 	/** Deliver a user-visible completion message with the requested scheduling mode. */
@@ -16,6 +16,21 @@ export interface TerminalNotifierDeps {
 
 /** Max chars of sanitized final output embedded in a completion notification. */
 export const NOTICE_TAIL_MAX_CHARS = 2000;
+
+export interface TerminalNotificationDelivery {
+	readonly send: (content: string) => void;
+}
+
+/** Shared terminal-notification guard and notify-mode mapping. */
+export function getTerminalNotificationDelivery(deps: TerminalNotifierDeps): TerminalNotificationDelivery | undefined {
+	const mode = deps.getMode();
+	if (mode === "off") return undefined;
+	const ctx = deps.getContext();
+	if (!ctx || NON_INTERACTIVE_MODES.has(ctx.mode) || !ctx.model) return undefined;
+	return {
+		send: (content) => deps.sendUserMessage(content, { deliverAs: mode === "wake" ? "steer" : "followUp" }),
+	};
+}
 
 function buildNotice(id: string, runtime: TerminalRuntimeSession): string {
 	const status = describeExit(runtime) ?? "exited";
@@ -50,18 +65,11 @@ export class TerminalNotifier {
 	}
 
 	notifyCompletion(id: string, runtime: TerminalRuntimeSession): void {
-		const mode = this.deps.getMode();
-		if (mode === "off") return;
 		if (this.notified.has(id)) return;
-
-		const ctx = this.deps.getContext();
-		if (!ctx) return;
-		if (NON_INTERACTIVE_MODES.has(ctx.mode)) return;
-		if (!ctx.model) return;
+		const delivery = getTerminalNotificationDelivery(this.deps);
+		if (!delivery) return;
 
 		this.notified.add(id);
-		this.deps.sendUserMessage(buildNotice(id, runtime), {
-			deliverAs: mode === "wake" ? "steer" : "followUp",
-		});
+		delivery.send(buildNotice(id, runtime));
 	}
 }
