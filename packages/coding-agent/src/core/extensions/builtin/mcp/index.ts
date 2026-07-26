@@ -149,11 +149,10 @@ export function createMcpExtension(service: McpService, sessionOwned = true): Ex
 			wrapAsync(
 				"mcp.session_shutdown",
 				async (event) => {
-					await service.handleSessionShutdown(event);
-					// A classic extension instance can be reused by the test/legacy host
-					// after reload. Its singleton is intentionally refreshed for that next
-					// session; scoped factories keep their closed instance.
-					if (!sessionOwned && event.reason === "reload" && service.isDisposed()) service = getMcpService();
+					// A reload replaces provider-scoped extension factories, each of which owns
+					// a fresh service. Dispose that instance so its MCP child processes are not
+					// orphaned; the classic singleton survives reload and re-syncs on attach.
+					if (sessionOwned || event.reason !== "reload") await service.handleSessionShutdown(event);
 				},
 				sink,
 			),

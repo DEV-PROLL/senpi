@@ -30,6 +30,15 @@
 
 # changes
 
+## Classic MCP reload preservation (2026-07-26)
+
+- `/reload` preserves unchanged MCP servers only in the classic singleton path;
+  the following attach re-syncs configuration and retains the existing
+  connection. Provider-scoped multi-session MCP services still dispose on
+  reload because each re-executed extension factory creates a replacement
+  service, so preserving the old one would orphan its child processes.
+
+
 ## Reload measurement and redundant-work removal (2026-07-26)
 
 - `/reload` records a `reload` timing namespace with one marker per phase

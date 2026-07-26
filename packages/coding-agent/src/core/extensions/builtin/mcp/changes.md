@@ -1,5 +1,20 @@
 # mcp Extension Changes
 
+## Preserve classic MCP servers across reload (2026-07-26)
+
+### What changed
+- `index.ts`: the classic singleton MCP service now survives `/reload`; its next
+  `session_start` re-syncs the configuration, retaining unchanged connections
+  while replacing changed or removed servers. Provider-scoped (multi-session)
+  MCP services still dispose on reload.
+
+### Why
+- A classic reload no longer restarts unchanged stdio MCP servers. A
+  provider-scoped reload does dispose because the re-executed factory creates a
+  replacement service; leaving the previous instance alive would orphan its
+  child processes.
+
+
 ## Raced background registration replays session state (2026-07-21)
 
 ### What changed

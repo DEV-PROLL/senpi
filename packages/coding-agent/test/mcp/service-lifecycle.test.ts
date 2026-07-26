@@ -1,10 +1,14 @@
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ProviderScope, runWithProviderScope } from "@earendil-works/pi-ai/node/provider-scope";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import mcpExtension from "../../src/core/extensions/builtin/mcp/index.ts";
 import {
 	getMcpService,
+	McpService,
 	registerToolsPreservingActiveSet,
 	resetMcpServiceForTests,
 } from "../../src/core/extensions/builtin/mcp/service.ts";
+import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
 	assertAlive,
 	attach,
@@ -179,6 +183,30 @@ describe("McpService session lifecycle", () => {
 		]);
 	});
 
+	it("reconnects a directly killed stdio server without requiring reload", async () => {
+		const root = makeRoot("manual-reconnect", cleanupTasks);
+		const counterFile = join(root.agentDir, "manual-reconnect-spawns.txt");
+		setConfig(root, {
+			recoverable: stdioServer(["--tools", "1", "--spawn-counter-file", counterFile]),
+		});
+		const service = getMcpService();
+
+		await attach(service, root, "startup");
+		await awaitMcpConnected(service, "recoverable");
+		const firstPid = requiredPid(service, "recoverable");
+		expect(await readCounter(counterFile)).toBe(1);
+
+		process.kill(firstPid);
+		await assertProcessDead(firstPid);
+		await service.reconnectServer("recoverable");
+		await awaitMcpConnected(service, "recoverable");
+		const secondPid = requiredPid(service, "recoverable");
+
+		expect(secondPid).not.toBe(firstPid);
+		expect(await readCounter(counterFile)).toBe(2);
+		await assertAlive(secondPid);
+	});
+
 	it("disposes all live fixture processes on quit", async () => {
 		const root = makeRoot("quit", cleanupTasks);
 		const firstCounter = join(root.agentDir, "first-spawns.txt");
@@ -273,6 +301,119 @@ describe("McpService session lifecycle", () => {
 		await assertAlive(pid2);
 	});
 });
+
+describe("MCP extension reload lifecycle", () => {
+	it("keeps the classic singleton's unchanged stdio server through three reload cycles and disposes it on quit", async () => {
+		const root = makeRoot("classic-reload", cleanupTasks);
+		const counterFile = join(root.agentDir, "classic-reload-spawns.txt");
+		writeProjectConfig(root.cwd, {
+			reloadable: stdioServer(["--tools", "1", "--spawn-counter-file", counterFile]),
+		});
+		const runtime = createMcpExtensionTestRuntime();
+		const context = contextForRoot(root);
+		mcpExtension(runtime.pi);
+
+		await runtime.emit("session_start", { type: "session_start", reason: "startup" }, context);
+		const service = getMcpService();
+		await awaitMcpConnected(service, "reloadable");
+		const firstPid = requiredPid(service, "reloadable");
+		expect(await readCounter(counterFile)).toBe(1);
+
+		for (let cycle = 0; cycle < 3; cycle++) {
+			await runtime.emit("session_shutdown", { type: "session_shutdown", reason: "reload" }, context);
+
+			expect(service.isDisposed()).toBe(false);
+			expect(getMcpService()).toBe(service);
+			expect(requiredPid(service, "reloadable")).toBe(firstPid);
+			expect(service.getSnapshot().connectionCount).toBe(1);
+			expect(await readCounter(counterFile)).toBe(1);
+			await assertAlive(firstPid);
+
+			await runtime.emit("session_start", { type: "session_start", reason: "reload" }, context);
+			await awaitMcpConnected(service, "reloadable");
+			expect(requiredPid(service, "reloadable")).toBe(firstPid);
+			expect(service.getSnapshot().connectionCount).toBe(1);
+			expect(await readCounter(counterFile)).toBe(1);
+		}
+
+		await runtime.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, context);
+		expect(service.isDisposed()).toBe(true);
+		await assertProcessDead(firstPid);
+	});
+
+	it("disposes provider-scoped services and their stdio children on reload and quit", async () => {
+		for (const reason of ["reload", "quit"] as const) {
+			const root = makeRoot(`scoped-${reason}`, cleanupTasks);
+			const counterFile = join(root.agentDir, `scoped-${reason}-spawns.txt`);
+			writeProjectConfig(root.cwd, {
+				scoped: stdioServer(["--tools", "1", "--spawn-counter-file", counterFile]),
+			});
+			const scope = new ProviderScope();
+			const runtime = createMcpExtensionTestRuntime();
+			const context = contextForRoot(root);
+			const attachSpy = vi.spyOn(McpService.prototype, "attachSession");
+
+			try {
+				await runWithProviderScope(scope, async () => {
+					mcpExtension(runtime.pi);
+					await runtime.emit("session_start", { type: "session_start", reason: "startup" }, context);
+				});
+				const service = attachSpy.mock.instances[0] as McpService | undefined;
+				if (!service) throw new Error("provider-scoped MCP service did not attach");
+				await awaitMcpConnected(service, "scoped");
+				const pid = requiredPid(service, "scoped");
+				expect(await readCounter(counterFile)).toBe(1);
+
+				await runWithProviderScope(scope, () =>
+					runtime.emit("session_shutdown", { type: "session_shutdown", reason }, context),
+				);
+
+				expect(service.getSnapshot()).toMatchObject({
+					disposed: true,
+					disposeCount: 1,
+					lastDisposeReason: reason,
+					connectionCount: 0,
+				});
+				await assertProcessDead(pid);
+			} finally {
+				attachSpy.mockRestore();
+				scope.close();
+			}
+		}
+	});
+});
+
+interface McpExtensionTestRuntime {
+	pi: ExtensionAPI;
+	emit(event: string, payload: unknown, ctx: ExtensionContext): Promise<void>;
+}
+
+function createMcpExtensionTestRuntime(): McpExtensionTestRuntime {
+	type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
+	const handlers = new Map<string, Handler[]>();
+	const pi = fakePi() as unknown as {
+		on(event: string, handler: Handler): void;
+		registerCommand(...args: unknown[]): void;
+	};
+	pi.on = (event, handler) => {
+		const registered = handlers.get(event) ?? [];
+		registered.push(handler);
+		handlers.set(event, registered);
+	};
+	pi.registerCommand = () => {};
+	return {
+		pi: pi as ExtensionAPI,
+		async emit(event, payload, ctx): Promise<void> {
+			for (const handler of handlers.get(event) ?? []) {
+				await handler(payload, ctx);
+			}
+		},
+	};
+}
+
+function contextForRoot(root: { cwd: string }): ExtensionContext {
+	return { cwd: root.cwd, isProjectTrusted: () => true } as ExtensionContext;
+}
 
 describe("registerToolsPreservingActiveSet", () => {
 	it("restores the intended active tool set synchronously after auto-activating registration", () => {

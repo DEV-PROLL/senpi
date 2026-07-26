@@ -27,8 +27,8 @@ describe("mcp builtin extension load", () => {
 		expect(extension.handlers.get("session_shutdown")).toHaveLength(1);
 	});
 
-	it("retains the singleton across session switches and disposes only for quit or reload", async () => {
-		for (const reason of ["new", "resume", "fork"] as const) {
+	it("retains the classic singleton across session switches and reload, disposing only for quit", async () => {
+		for (const reason of ["new", "resume", "fork", "reload"] as const) {
 			const extension = await loadMcpBuiltinExtension();
 
 			await emitSessionStart(extension, "startup");
@@ -44,7 +44,7 @@ describe("mcp builtin extension load", () => {
 			resetMcpServiceForTests();
 		}
 
-		for (const reason of ["quit", "reload"] as const) {
+		for (const reason of ["quit"] as const) {
 			const extension = await loadMcpBuiltinExtension();
 
 			await emitSessionStart(extension, "startup");
@@ -65,7 +65,7 @@ describe("mcp builtin extension load", () => {
 		}
 	});
 
-	it("creates a usable singleton for a new session after reload disposal", async () => {
+	it("reuses the classic singleton for a new session after reload", async () => {
 		const extension = await loadMcpBuiltinExtension();
 
 		await emitSessionStart(extension, "startup");
@@ -73,22 +73,22 @@ describe("mcp builtin extension load", () => {
 		await emitSessionShutdown(extension, "reload");
 
 		expect(serviceBeforeReload.getSnapshot()).toMatchObject({
-			disposed: true,
-			disposeCount: 1,
-			lastDisposeReason: "reload",
-			hasSessionContext: false,
+			disposed: false,
+			disposeCount: 0,
+			lastDisposeReason: null,
+			hasSessionContext: true,
 		});
 
 		await emitSessionStart(extension, "reload");
 		const serviceAfterReload = getMcpService();
 
-		expect(serviceAfterReload).not.toBe(serviceBeforeReload);
+		expect(serviceAfterReload).toBe(serviceBeforeReload);
 		expect(serviceAfterReload.getSnapshot()).toMatchObject({
 			disposed: false,
 			disposeCount: 0,
 			lastDisposeReason: null,
 			lastSessionStartReason: "reload",
-			sessionStartCount: 1,
+			sessionStartCount: 2,
 			hasSessionContext: true,
 		});
 	});
