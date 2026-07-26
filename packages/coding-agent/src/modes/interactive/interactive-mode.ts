@@ -348,9 +348,9 @@ function hasDefaultModelProvider(providerId: string): providerId is keyof typeof
 	return providerId in defaultModelPerProvider;
 }
 
-// isApiKeyLoginProvider now lives in core/auth-providers.ts so the RPC login path
-// (neo) and the classic selectors share ONE source of truth. Re-exported here to
-// keep the existing public import (test/oauth-selector.test.ts) working, and used
+// isApiKeyLoginProvider now lives in core/auth-providers.ts so RPC clients and
+// the classic selectors share ONE source of truth. Re-exported here to keep the
+// existing public import (test/oauth-selector.test.ts) working, and used
 // locally by getLoginProviderOptions below.
 export { isApiKeyLoginProvider };
 

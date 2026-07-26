@@ -20,6 +20,21 @@
 
 # changes
 
+## Removed the legacy `--neo` Go TUI surface (2026-07-26)
+
+### What changed
+
+- Removed the Go TUI launcher, daemon dispatch, CLI flags, settings, documentation, build gate, and the retired Go package. The classic interactive and `--mode rpc` paths remain unchanged.
+- Migrated generic RPC authentication and connection-handler framing coverage into `test/suite/rpc-auth-and-connection-handler.test.ts` before deleting the legacy-specific suites.
+
+### Why
+
+- The legacy out-of-process TUI and its daemon are no longer part of the supported CLI surface.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: removal-only changes across fork-owned legacy surfaces.
+
 ## Multi-session RPC mode, session-owned MCP/config-reload state, and back-compat guarantee (2026-07-23)
 
 ### What changed
