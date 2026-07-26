@@ -12,8 +12,8 @@
  *
  * This is the single-connection stdio host. The RPC command loop, extension-UI
  * bridge, and event subscription live in `connection-handler.ts` so the same
- * logic can also serve one socket connection in the neo daemon. This file owns
- * exactly the process-level concerns that a per-connection handler must NOT
+ * logic can also serve a caller-owned RPC transport. This file owns exactly the
+ * process-level concerns that a per-connection handler must NOT
  * touch: stdout takeover, stdin wiring, signal handlers, and process exit.
  *
  * ── Multi-session mode (`--multi-session`) ─────────────────────────────────
@@ -100,9 +100,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	};
 
 	// Client capability flags reach this single-connection stdio host via the
-	// SENPI_RPC_CLIENT_CAPABILITIES env var (comma-separated). The neo daemon sets
-	// it when spawning a per-connection child from the handshake's capabilities; a
-	// plain stdio client that sets nothing gets byte-identical default behavior.
+	// SENPI_RPC_CLIENT_CAPABILITIES env var (comma-separated). A launcher can set
+	// it from a client handshake; a plain stdio client that sets nothing gets
+	// byte-identical default behavior.
 	const capabilities = parseClientCapabilities(process.env.SENPI_RPC_CLIENT_CAPABILITIES);
 	const handler = createRpcConnectionHandler(runtimeHost, sink, { capabilities });
 

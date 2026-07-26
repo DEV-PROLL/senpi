@@ -15,6 +15,8 @@ type ManagedCell = {
 	canDetach: boolean;
 	wasDetached: boolean;
 	kernel: EvalKernel | undefined;
+	/** Set after an interrupt-driven stop; undefined until the kernel reports its fate. */
+	stateRetained: boolean | undefined;
 	outputTail: (() => string) | undefined;
 	result: AgentToolResult<EvalToolDetails> | undefined;
 	notificationQueued: boolean;
@@ -27,6 +29,7 @@ export interface EvalDetachedCellSnapshot {
 	readonly state: EvalDetachedCellState;
 	readonly outputTail: string;
 	readonly result: AgentToolResult<EvalToolDetails> | undefined;
+	readonly stateRetained: boolean | undefined;
 }
 
 export interface EvalDetachedCellNotification {
@@ -78,6 +81,7 @@ export class EvalDetachedCellManager {
 			canDetach: false,
 			wasDetached: false,
 			kernel: undefined,
+			stateRetained: undefined,
 			outputTail: undefined,
 			result: undefined,
 			notificationQueued: false,
@@ -116,7 +120,10 @@ export class EvalDetachedCellManager {
 		const cell = this.#get(cellId);
 		if (cell.state === "detached" && this.#transition(cell, "cancelled")) {
 			const kernel = cell.kernel;
-			if (kernel !== undefined) await kernel.interrupt(reason);
+			if (kernel !== undefined) {
+				const handle = await kernel.interrupt(reason);
+				cell.stateRetained = await handle.stateRetained;
+			}
 		}
 		return this.#snapshot(cell);
 	}
@@ -220,6 +227,7 @@ export class EvalDetachedCellManager {
 			state: cell.state,
 			outputTail: cell.outputTail?.() ?? "",
 			result: cell.result,
+			stateRetained: cell.stateRetained,
 		};
 	}
 }

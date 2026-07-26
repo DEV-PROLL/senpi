@@ -335,7 +335,7 @@ describe("todo extension", () => {
 		// Then the result is an error and both memory and session state stay unchanged
 		const result = getLatestTodoResult(harness);
 		expect(result.content.some((content) => content.type === "text" && content.text.includes("Errors:"))).toBe(true);
-		expect(phasesFromResult(result)).toEqual([
+		expect(getLatestPhasesFromBranchEntries(harness.sessionManager.getBranch())).toEqual([
 			{ name: "Tasks", tasks: [{ content: "Stable task", status: "in_progress" }] },
 		]);
 		expect(

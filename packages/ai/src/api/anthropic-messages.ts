@@ -29,6 +29,7 @@ import type {
 	Tool,
 	ToolCall,
 	ToolResultMessage,
+	UserMessage,
 } from "../types.ts";
 import { isVideoMimeType } from "../types.ts";
 import { combineAbortSignals } from "../utils/abort-signals.ts";
@@ -505,6 +506,122 @@ function isAnthropicWebSearchReplayBlock(raw: unknown): boolean {
 	if (!isRecord(raw)) return false;
 	if (raw.type === "web_search_tool_result") return true;
 	return raw.type === "server_tool_use" && raw.name === "web_search";
+}
+
+// Anthropic validates server-tool pairing per request: a `server_tool_use` /
+// `mcp_tool_use` must be answered by its `*_tool_result`, and a result must
+// have its use — otherwise the API answers `400 ... \`web_search\` tool use
+// with id ... was found without a corresponding \`web_search_tool_result\`
+// block` and the session wedges, because history only grows.
+//
+// The pair may span two assistant messages. A mixed turn (a client `tool_use`
+// next to a `server_tool_use`, stop `tool_use`) returns with the server tool
+// deferred: the client answers with tool results, and the continuation
+// assistant message starts with the deferred result. Such a turn is LIVE while
+// only tool results follow it — dropping the pending use would stop the API
+// from running the deferred tool. A `pause_turn` turn replays the same way.
+//
+// The turn CLOSES — and a pending use becomes unpairable — when anything but
+// tool results follows it (a user text message tells the API the assistant
+// turn is over) or when a later assistant message exists without ever
+// answering it. Symmetrically, a result is valid when its use sits in the same
+// or an earlier assistant message (the deferred-continuation shape), and is
+// unpairable when its use is nowhere. Only the unpairable halves are dropped;
+// live turns and resolved pairs replay byte-for-byte.
+interface ProviderNativeToolPairing {
+	readonly resolvedUseIds: ReadonlySet<string>;
+	readonly liveUseIds: ReadonlySet<string>;
+	readonly validResultIds: ReadonlySet<string>;
+}
+
+// The user turn a pending server tool can survive is one that carries only
+// tool results. Anything else the wire would emit — real text, an image —
+// closes the assistant turn (the API then 400s the still-open use). A blank
+// message serializes to nothing, so it closes nothing.
+function userMessageClosesServerTurn(message: UserMessage): boolean {
+	if (typeof message.content === "string") return message.content.trim().length > 0;
+	return message.content.some(
+		(block) => (block.type === "text" && block.text.trim().length > 0) || block.type === "image",
+	);
+}
+
+function collectProviderNativeToolPairing(
+	messages: Message[],
+	model: Model<"anthropic-messages">,
+	deferredToolNames: ReadonlySet<string>,
+	normalizeToolName: (name: string) => string,
+	discardedFallbackToolCallIds: ReadonlySet<string>,
+): ProviderNativeToolPairing {
+	const resolvedUseIds = new Set<string>();
+	const validResultIds = new Set<string>();
+	// Uses whose turn can still be resumed. A same-model assistant resets the
+	// set: its own result blocks may answer the prior pending uses, and any use
+	// it leaves pending becomes the open set. Anything that closes the turn —
+	// user text, a tool result whose deferred-tool references serialize sibling
+	// text after the results, or another model's assistant — empties it.
+	let pendingUseIds = new Set<string>();
+	const loadedReferenceNames = new Set<string>();
+	for (const message of messages) {
+		if (message.role === "assistant") {
+			const priorUseIds = pendingUseIds;
+			pendingUseIds = new Set<string>();
+			if (!isSameAnthropicModel(message, model)) continue;
+			for (const block of message.content) {
+				if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
+				const raw = block.raw;
+				if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
+				if (isProviderNativeToolUseBlock(raw) && typeof raw.id === "string") pendingUseIds.add(raw.id);
+			}
+			for (const block of message.content) {
+				if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
+				const raw = block.raw;
+				if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
+				const toolUseId = raw.tool_use_id;
+				if (typeof toolUseId !== "string") continue;
+				if (priorUseIds.has(toolUseId) || pendingUseIds.has(toolUseId)) {
+					resolvedUseIds.add(toolUseId);
+					validResultIds.add(toolUseId);
+				}
+			}
+			continue;
+		}
+		if (message.role === "toolResult") {
+			// Conversion drops a discarded pre-fallback result without touching
+			// loadedToolNames, so it must not load the name here either.
+			if (discardedFallbackToolCallIds.has(message.toolCallId)) continue;
+			// convertToolResult emits sibling text after the tool_result blocks only
+			// for names that survive the deferred/loaded filter, so only those names
+			// close the turn; a stale or already-loaded name leaves the result plain
+			// and the pending use resumable.
+			let emitsReferences = false;
+			for (const name of message.addedToolNames ?? []) {
+				const normalizedName = normalizeToolName(name);
+				if (!deferredToolNames.has(normalizedName) || loadedReferenceNames.has(normalizedName)) continue;
+				loadedReferenceNames.add(normalizedName);
+				emitsReferences = true;
+			}
+			if (emitsReferences) pendingUseIds = new Set<string>();
+			continue;
+		}
+		if (message.role === "user" && userMessageClosesServerTurn(message)) {
+			pendingUseIds = new Set<string>();
+		}
+	}
+	// Whatever is still pending at the end of history belongs to the last
+	// assistant message and can still resume, so it is live rather than unpaired.
+	return { resolvedUseIds, liveUseIds: pendingUseIds, validResultIds };
+}
+
+// True for a server-tool block whose counterpart can never arrive: a use that
+// is neither answered nor resumable, or a result whose use is nowhere.
+// Blocks that pair nothing (`fallback`, `container_upload`) are never unpaired.
+function isUnpairedProviderNativeToolBlock(raw: unknown, pairing: ProviderNativeToolPairing): boolean {
+	if (!isRecord(raw)) return false;
+	if (isProviderNativeToolUseBlock(raw)) {
+		return typeof raw.id !== "string" || !(pairing.resolvedUseIds.has(raw.id) || pairing.liveUseIds.has(raw.id));
+	}
+	const toolUseId = raw.tool_use_id;
+	return typeof toolUseId === "string" && !pairing.validResultIds.has(toolUseId);
 }
 
 // tool_use ids referenced by server-tool result blocks in content[0, boundary).
@@ -1821,6 +1938,13 @@ function convertMessages(
 	// assistant turn below; drop their tool_results in lockstep so none dangle.
 	const discardedFallbackToolCallIds = collectDiscardedFallbackToolCallIds(transformedMessages, model);
 	const rejectsNativeWebSearchReplay = !getAnthropicCompat(model).supportsWebSearch;
+	const providerNativeToolPairing = collectProviderNativeToolPairing(
+		transformedMessages,
+		model,
+		deferredToolNames,
+		normalizeToolName,
+		discardedFallbackToolCallIds,
+	);
 
 	for (let i = 0; i < transformedMessages.length; i++) {
 		const msg = transformedMessages[i];
@@ -1952,7 +2076,8 @@ function convertMessages(
 					if (
 						isSameModel &&
 						isReplayableAnthropicProviderNativeBlock(block.raw) &&
-						!(rejectsNativeWebSearchReplay && isAnthropicWebSearchReplayBlock(block.raw))
+						!(rejectsNativeWebSearchReplay && isAnthropicWebSearchReplayBlock(block.raw)) &&
+						!isUnpairedProviderNativeToolBlock(block.raw, providerNativeToolPairing)
 					) {
 						blocks.push(block.raw);
 					}

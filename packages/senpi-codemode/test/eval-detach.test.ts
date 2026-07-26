@@ -150,6 +150,7 @@ describe("eval detached cells", () => {
 		const manager = new EvalDetachedCellManager({ notifier: recorder });
 		const py = new FakeKernel([{ type: "text", stream: "stdout", data: "x = 42\n" }]);
 		const js = new FakeKernel([]);
+		js.stateRetainedOnInterrupt = false;
 		const tool = createTool(manager, [
 			["py", py],
 			["js", js],
@@ -171,7 +172,7 @@ describe("eval detached cells", () => {
 			undefined,
 			interactiveContext(),
 		);
-		expect(textOf(stoppedPython)).toContain("Python kernel was interrupted; its existing variables are preserved.");
+		expect(textOf(stoppedPython)).toContain("remains running; its existing variables are preserved.");
 
 		await detach(tool, js, "js-detached");
 		const stoppedJavaScript = await tool.execute(
@@ -181,7 +182,8 @@ describe("eval detached cells", () => {
 			undefined,
 			interactiveContext(),
 		);
-		expect(textOf(stoppedJavaScript)).toContain("JavaScript worker was restarted; VM state was lost.");
+		expect(textOf(stoppedJavaScript)).toContain("was restarted");
+		expect(textOf(stoppedJavaScript)).toContain("lost");
 		await manager.flushNotifications();
 		expect(recorder.notices).toHaveLength(2);
 		expect(manager.busyFor("py")).toBeUndefined();

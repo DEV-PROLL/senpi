@@ -5,8 +5,8 @@
  * exactly one AgentSession runtime and speaks the JSONL RPC protocol over an
  * injected output sink and a caller-driven line feed. It knows nothing about
  * `process.stdout`, `process.stdin`, or process signals — those belong to the
- * host (classic single-connection stdio in `rpc-mode.ts`, or one socket
- * connection in the neo daemon).
+ * host (classic single-connection stdio in `rpc-mode.ts` or another transport
+ * adapter).
  *
  * Behaviour is byte-for-byte identical to the original `runRpcMode` command
  * loop: the same responses, the same event stream, the same extension-UI
@@ -55,7 +55,7 @@ export interface RpcConnectionOptions {
 /**
  * The output side of a connection. `writeRaw` receives already-serialized JSONL
  * text (LF-terminated). `waitForBackpressure` lets the host apply flow control
- * (stdout drain in classic mode, socket `drain` in the daemon).
+ * (stdout drain in classic mode, or the transport's own `drain` signal).
  */
 export interface RpcConnectionSink {
 	writeRaw(chunk: string): void;
@@ -283,7 +283,7 @@ export function createRpcConnectionHandler(
 			// undefined synchronously with NO wire message — byte-identical to the
 			// original behavior. ONLY when the client advertised the
 			// "custom_unsupported" capability do we emit an additive notice request
-			// (so neo can render a "requires the classic TUI" dialog) before
+			// so an opt-in client can render a "requires the classic TUI" dialog before
 			// returning undefined. The name is best-effort: ctx.ui.custom carries no
 			// extension identity, so a generic label is used.
 			const request = buildCustomUnsupportedRequest(clientCapabilities, DEFAULT_CUSTOM_EXTENSION_LABEL);
@@ -434,9 +434,9 @@ export function createRpcConnectionHandler(
 	 * URL-based happy path is surfaced over RPC: onAuth emits an auth_login_url
 	 * event; success/failure/cancel emit a single auth_login_end event. Callbacks
 	 * that need interactive mid-flow input (onPrompt/onSelect/onManualCodeInput)
-	 * are not answerable in the event-only model, so they reject cleanly — the
-	 * neo client uses the browser/callback-server completion path. Secrets are
-	 * never emitted: only the provider id, the auth URL, and a success flag (plus a
+	 * are not answerable in the event-only model, so they reject cleanly. Clients
+	 * use the browser/callback-server completion path. Secrets are never emitted:
+	 * only the provider id, the auth URL, and a success flag (plus a
 	 * non-secret error message) cross the wire.
 	 */
 	const startLogin = async (provider: string): Promise<void> => {
