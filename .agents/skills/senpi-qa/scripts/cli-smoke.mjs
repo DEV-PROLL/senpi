@@ -33,6 +33,26 @@ async function selfTest() {
 		`code=${helpWithRemovedFlagEnv.code}`,
 	);
 
+	const helpWithoutGrokNeo = await runCli(["--help"], {
+		...opts,
+		env: { ...box.env, SENPI_ENABLE_GROK_NEO: "" },
+	});
+	checks.ok(
+		"--help omits --grok-neo by default",
+		helpWithoutGrokNeo.code === 0 && !helpWithoutGrokNeo.stdout.includes("--grok-neo"),
+		`code=${helpWithoutGrokNeo.code}`,
+	);
+
+	const helpWithGrokNeo = await runCli(["--help"], {
+		...opts,
+		env: { ...box.env, SENPI_ENABLE_GROK_NEO: "1" },
+	});
+	checks.ok(
+		"--help lists --grok-neo when SENPI_ENABLE_GROK_NEO=1",
+		helpWithGrokNeo.code === 0 && helpWithGrokNeo.stdout.includes("--grok-neo"),
+		`code=${helpWithGrokNeo.code}`,
+	);
+
 	const version = await runCli(["--version"], opts);
 	checks.ok("--version prints a version", version.code === 0 && /\d+\.\d+/.test(version.stdout), version.stdout.trim());
 

@@ -426,6 +426,8 @@ export interface InteractiveModeOptions {
 	initialMessages?: string[];
 	/** Force verbose startup (overrides quietStartup setting) */
 	verbose?: boolean;
+	/** Select an experimental interactive chrome. */
+	chrome?: "grok";
 }
 
 export class InteractiveMode {
@@ -438,6 +440,7 @@ export class InteractiveMode {
 
 	private runtimeHost: AgentSessionRuntime;
 	private options: InteractiveModeOptions;
+	private chrome: InteractiveModeOptions["chrome"];
 	private ui: TUI;
 	private loadedResourcesContainer: Container;
 	private chatContainer: Container;
@@ -589,6 +592,7 @@ export class InteractiveMode {
 	constructor(runtimeHost: AgentSessionRuntime, options: InteractiveModeOptions = {}) {
 		this.runtimeHost = runtimeHost;
 		this.options = options;
+		this.chrome = options.chrome;
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
 			InteractiveMode.restoreCompactionEscapeOverride(this);

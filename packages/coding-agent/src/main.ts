@@ -495,6 +495,38 @@ export interface MainOptions {
 	extensionFactories?: InlineExtension[];
 }
 
+/**
+ * Supply grok-night as a non-persistent fallback until a user explicitly chooses
+ * a theme. Existing settings are always returned first.
+ */
+export function applyGrokNeoThemeFallback(settingsManager: SettingsManager): void {
+	if (settingsManager.getThemeSetting() !== undefined) return;
+
+	const getThemeSetting = settingsManager.getThemeSetting.bind(settingsManager);
+	const setTheme = settingsManager.setTheme.bind(settingsManager);
+	let fallbackActive = true;
+
+	settingsManager.getThemeSetting = () => getThemeSetting() ?? (fallbackActive ? "grok-night" : undefined);
+	settingsManager.setTheme = (theme) => {
+		fallbackActive = false;
+		setTheme(theme);
+	};
+}
+
+/** Run setup while preserving analytics but omitting its theme selection. */
+export async function runGrokNeoFirstTimeSetup(
+	settingsManager: SettingsManager,
+	showSetup: (settingsManager: SettingsManager) => Promise<void> = showFirstTimeSetup,
+): Promise<void> {
+	const setTheme = settingsManager.setTheme;
+	settingsManager.setTheme = () => {};
+	try {
+		await showSetup(settingsManager);
+	} finally {
+		settingsManager.setTheme = setTheme;
+	}
+}
+
 export async function main(args: string[], options?: MainOptions) {
 	resetTimings();
 	const extensionFactories = [...builtInExtensions, ...(options?.extensionFactories ?? [])];
@@ -622,7 +654,11 @@ export async function main(args: string[], options?: MainOptions) {
 	// Experimental first-time setup: theme choice and analytics opt-in.
 	// Runs before any runtime services are created so the chosen settings apply everywhere.
 	if (appMode === "interactive" && !parsed.help && parsed.listModels === undefined && shouldRunFirstTimeSetup()) {
-		await showFirstTimeSetup(startupSettingsManager);
+		if (parsed.grokNeo && startupSettingsManager.getThemeSetting() === undefined) {
+			await runGrokNeoFirstTimeSetup(startupSettingsManager);
+		} else {
+			await showFirstTimeSetup(startupSettingsManager);
+		}
 		time("firstTimeSetup");
 	}
 
@@ -860,6 +896,9 @@ export async function main(args: string[], options?: MainOptions) {
 		stdinContent,
 	);
 	time("prepareInitialMessage");
+	if (parsed.grokNeo && appMode === "interactive") {
+		applyGrokNeoThemeFallback(settingsManager);
+	}
 	initTheme(settingsManager.getTheme(), appMode === "interactive");
 	time("initTheme");
 
@@ -907,6 +946,7 @@ export async function main(args: string[], options?: MainOptions) {
 			initialTitlePrompt,
 			initialMessages: parsed.messages,
 			verbose: parsed.verbose,
+			chrome: parsed.grokNeo ? "grok" : undefined,
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();
