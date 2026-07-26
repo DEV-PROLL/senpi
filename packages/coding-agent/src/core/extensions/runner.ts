@@ -84,7 +84,6 @@ const RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS = [
 	"app.model.cycleForward",
 	"app.model.cycleBackward",
 	"app.model.select",
-	"app.sessions.observe",
 	"app.tools.expand",
 	"app.thinking.toggle",
 	"app.editor.external",
@@ -707,6 +706,10 @@ export class ExtensionRunner {
 			this.staleMessage = message;
 			this.runtime.invalidate(message);
 		}
+	}
+
+	get isActive(): boolean {
+		return this.staleMessage === undefined;
 	}
 
 	private assertActive(): void {

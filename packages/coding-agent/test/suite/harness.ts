@@ -18,7 +18,7 @@ import { registerFauxProvider, streamSimple } from "@earendil-works/pi-ai/compat
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
-import { convertToLlm } from "../../src/core/messages.ts";
+import { convertToLlmForTransport } from "../../src/core/messages.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
@@ -81,10 +81,12 @@ export interface HarnessOptions {
 	persistSession?: boolean;
 	autoTitleSessions?: boolean;
 	fallbackNow?: () => number;
+	transportImageBudget?: { budgetBytes: number; alwaysKeepNewest: number };
 	modelsJson?: Record<string, unknown>;
 }
 
 export interface Harness {
+	agent: Agent;
 	session: AgentSession;
 	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
@@ -169,18 +171,22 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 			systemPrompt: options.systemPrompt ?? "You are a test assistant.",
 			tools: [],
 		},
-		convertToLlm,
+		convertToLlm: (messages: AgentMessage[]) =>
+			convertToLlmForTransport(messages, {
+				blockImages: settingsManager.getBlockImages(),
+				...options.transportImageBudget,
+			}),
 		onPayload: async (payload) => {
 			options.onPayload?.(payload);
 			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("before_provider_request")) {
+			if (!runner?.isActive || !runner.hasHandlers("before_provider_request")) {
 				return payload;
 			}
 			return runner.emitBeforeProviderRequest(payload);
 		},
 		onResponse: async (response) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("after_provider_response")) {
+			if (!runner?.isActive || !runner.hasHandlers("after_provider_response")) {
 				return;
 			}
 			await runner.emit({
@@ -191,7 +197,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		},
 		transformContext: async (messages: AgentMessage[]) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner) return messages;
+			if (!runner?.isActive) return messages;
 			return runner.emitContext(messages);
 		},
 		prepareNextTurnWithContext: options.prepareNextTurnWithContext,
@@ -230,6 +236,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	});
 
 	return {
+		agent,
 		session,
 		sessionManager,
 		settingsManager,

@@ -257,7 +257,6 @@ func welcomeContent(keys *keybindings.Manager) shell.WelcomeContent {
 	return shell.WelcomeContent{
 		Title: appName,
 		Menu: []shell.MenuEntry{
-			{Label: "Resume session", Key: firstKey(keys, "app.sessions.observe")},
 			{Label: "Search history", Key: firstKey(keys, "app.history.search")},
 			{Label: "Quit", Key: firstKey(keys, "app.exit")},
 		},
