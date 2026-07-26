@@ -34,12 +34,13 @@ Colocated `*.test.mjs` files run via root `npm run test:scripts` (`node --test s
 
 - `local-release.mjs`: Smoke-test release to a temp directory. Doesn't push tags.
 
-- `publish.mjs`: Publishes the six registry dependencies in release order:
-  `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`,
-  `@earendil-works/pi-pty`, `@code-yeongyu/senpi-codemode`, and
-  `@code-yeongyu/senpi`. `@code-yeongyu/senpi-server` is `private: true` and
-  explicitly excluded. Bun resolves these dependency edges from npm rather than
-  consuming `bundleDependencies`, so the publisher must not omit any of them.
+- `publish.mjs`: Publishes six fork-owned packages in release order:
+  `@code-yeongyu/senpi-ai`, `@code-yeongyu/senpi-agent-core`,
+  `@code-yeongyu/senpi-tui`, `@code-yeongyu/senpi-pty`,
+  `@code-yeongyu/senpi-codemode`, and `@code-yeongyu/senpi`.
+  The four upstream-named source packages remain `private`; the publisher copies
+  each to a temporary manifest under the fork scope. `@code-yeongyu/senpi-server`
+  is `private: true` and explicitly excluded.
 
 - `build-binaries.sh`: Mirrors `.github/workflows/build-binaries.yml` for local
   cross-platform binary builds.
@@ -61,11 +62,11 @@ The publish tarball is fully self-contained: `copyPublishDependencies` stages th
 runtime closure from `publish-deps.lock.json` (all registry deps + transitives, not just the
 workspace closure) into `packages/coding-agent/node_modules`, and `stagePublishManifest`
 rewrites the publish manifest so `bundleDependencies` lists every platform-portable staged
-package while all `dependencies` edges (including the lockstep `^2026.x` workspace
-specs) stay intact. npm then needs no registry fetch at install time; Bun still resolves
-those edges through npm, so `publish.mjs` publishes every workspace dependency first. The
-previous partial bundle let arborist abort reify mid-flight and drop arbitrary registry deps
-(ERR_MODULE_NOT_FOUND).
+package while the original `dependencies` keys stay intact. Their staged specs point
+through npm aliases to the matching fork-owned `@code-yeongyu/senpi-*` package: npm still
+packs the original import paths, while Bun resolves only the fork-owned alias rather than
+fetching unavailable upstream lockstep versions. The previous partial bundle let arborist
+abort reify mid-flight and drop arbitrary registry deps (ERR_MODULE_NOT_FOUND).
 Staging dirties `packages/coding-agent/package.json`; restore it with `git checkout --`
 after packing/publishing.
 

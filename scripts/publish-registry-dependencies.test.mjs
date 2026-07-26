@@ -6,12 +6,19 @@ import { describe, it } from "node:test";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const PUBLISHED_RUNTIME_WORKSPACES = [
+const PRIVATE_UPSTREAM_WORKSPACES = [
 	{ packageJsonPath: "packages/ai/package.json", packageName: "@earendil-works/pi-ai" },
 	{ packageJsonPath: "packages/agent/package.json", packageName: "@earendil-works/pi-agent-core" },
 	{ packageJsonPath: "packages/tui/package.json", packageName: "@earendil-works/pi-tui" },
 	{ packageJsonPath: "packages/pty/package.json", packageName: "@earendil-works/pi-pty" },
-	{ packageJsonPath: "packages/senpi-codemode/package.json", packageName: "@code-yeongyu/senpi-codemode" },
+];
+const OWNED_REGISTRY_ALIASES = [
+	"@code-yeongyu/senpi-ai",
+	"@code-yeongyu/senpi-agent-core",
+	"@code-yeongyu/senpi-tui",
+	"@code-yeongyu/senpi-pty",
+	"@code-yeongyu/senpi-codemode",
+	"@code-yeongyu/senpi",
 ];
 
 function readJson(path) {
@@ -19,17 +26,17 @@ function readJson(path) {
 }
 
 describe("npm publish dependency graph", () => {
-	it("publishes every registry dependency required by the senpi package", () => {
-		// Given: Bun resolves dependency edges from the registry and does not consume npm's bundled dependencies.
+	it("keeps upstream workspaces private and publishes owned registry aliases", () => {
+		// Given: Bun resolves declared edges from the registry, but npm only packs the
+		// original import paths when their dependency keys remain in the manifest.
 		const publishScript = readFileSync(join(repoRoot, "scripts", "publish.mjs"), "utf8");
 
-		for (const workspace of PUBLISHED_RUNTIME_WORKSPACES) {
+		for (const workspace of PRIVATE_UPSTREAM_WORKSPACES) {
 			const manifest = readJson(join(repoRoot, workspace.packageJsonPath));
-
-			// Then: each direct runtime workspace can be published at its lockstep version...
-			assert.notEqual(manifest.private, true, `${workspace.packageName} must be publishable`);
-			// ...and the release publisher includes it before @code-yeongyu/senpi.
-			assert.match(publishScript, new RegExp(`name: "${workspace.packageName}"`));
+			assert.equal(manifest.private, true, `${workspace.packageName} must remain private`);
+		}
+		for (const packageName of OWNED_REGISTRY_ALIASES) {
+			assert.match(publishScript, new RegExp(`name: "${packageName}"`));
 		}
 	});
 });
