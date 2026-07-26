@@ -66,7 +66,7 @@ async function capturePayload(
 	model: Model<"anthropic-messages">,
 	messages: Context["messages"],
 	options?: SimpleStreamOptions,
-	contextExtras?: Partial<Context>,
+	contextExtras?: { tools?: Context["tools"]; modelCompat?: Model<"anthropic-messages">["compat"] },
 ): Promise<CapturedAnthropicPayload> {
 	let capturedPayload: CapturedAnthropicPayload | undefined;
 	const payloadCaptureModel: Model<"anthropic-messages"> = {
@@ -74,11 +74,11 @@ async function capturePayload(
 		baseUrl: "http://127.0.0.1:9",
 		// The localhost override only captures the payload; these tests exercise
 		// first-party replay semantics rather than endpoint capability detection.
-		compat: { ...model.compat, supportsWebSearch: true, ...contextExtras?.compat },
+		compat: { ...model.compat, supportsWebSearch: true, ...contextExtras?.modelCompat },
 	};
 	const stream = streamSimple(
 		payloadCaptureModel,
-		{ ...contextExtras, messages },
+		{ messages, tools: contextExtras?.tools },
 		{
 			...options,
 			apiKey: "fake-key",
@@ -656,7 +656,7 @@ describe("Anthropic provider-native replay", () => {
 			model,
 			[{ role: "user", content: "hello", timestamp: 1 }, makeAssistant(), makeToolResult()],
 			undefined,
-			{ tools: [taskTool, deferredTool], compat: { supportsToolReferences: true } },
+			{ tools: [taskTool, deferredTool], modelCompat: { supportsToolReferences: true } },
 		);
 		const closedAssistant = closed.messages?.find((message) => message.role === "assistant");
 		expect(closedAssistant?.content).not.toContainEqual(pendingUse);
