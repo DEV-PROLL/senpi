@@ -9,6 +9,7 @@ import {
 const exitedRuntime = {
 	exited: true,
 	exitResult: { exitCode: 0, timedOut: false, cancelled: false, signal: null, backend: "native" },
+	fullOutput: () => "done\n",
 } as unknown as TerminalRuntimeSession;
 
 type CapturedNotification = {
@@ -57,6 +58,49 @@ describe("terminal settings resolver", () => {
 		expect(resolved.maxSessions).toBe(32); // 0 is invalid → default
 		expect(resolved.notify).toBe("off");
 		expect(resolved.timeoutAction).toBe("background"); // invalid → default
+	});
+});
+
+describe("terminal notifier completion payload", () => {
+	const exitedWithOutput = (output: string, exitCode = 0) =>
+		({
+			exited: true,
+			exitResult: { exitCode, timedOut: false, cancelled: false, signal: null, backend: "native" },
+			fullOutput: () => output,
+		}) as unknown as TerminalRuntimeSession;
+
+	it("embeds the exit code and final output tail instead of a bash_output instruction", () => {
+		// Given: a finished background session that produced output.
+		const sink: CapturedNotification[] = [];
+		const notifier = makeNotifier({ sink, mode: "wake" });
+
+		// When: the completion notification fires.
+		notifier.notifyCompletion("bash_1", exitedWithOutput("A\nB\nLAST\n", 3));
+
+		// Then: the notice carries the exit code and the output tail, and never tells the
+		// agent to burn a follow-up bash_output call.
+		expect(sink).toHaveLength(1);
+		const content = sink[0]?.content ?? "";
+		expect(content).toContain("exit code 3");
+		expect(content).toContain("LAST");
+		expect(content).not.toContain("Use bash_output");
+	});
+
+	it("caps an oversized tail and notes the full history is still peekable", () => {
+		// Given: a finished session whose retained output far exceeds the notice budget.
+		const sink: CapturedNotification[] = [];
+		const notifier = makeNotifier({ sink, mode: "wake" });
+		const huge = `${"filler\n".repeat(1000)}TAIL_END\n`;
+
+		// When: the completion notification fires.
+		notifier.notifyCompletion("bash_1", exitedWithOutput(huge, 0));
+
+		// Then: the tail is bounded with a truncation note pointing at the peekable history.
+		const content = sink[0]?.content ?? "";
+		expect(content).toContain("TAIL_END");
+		expect(content).toContain("truncat");
+		expect(content.length).toBeLessThan(4000);
+		expect(content).not.toContain("Use bash_output");
 	});
 });
 

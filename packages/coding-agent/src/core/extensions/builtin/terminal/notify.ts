@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "../../types.ts";
+import { sanitizeTerminalOutput } from "./output-format.ts";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import type { NotifyMode } from "./settings.ts";
 import { describeExit } from "./tools/spawn.ts";
@@ -13,11 +14,24 @@ export interface TerminalNotifierDeps {
 	readonly getMode: () => NotifyMode;
 }
 
+/** Max chars of sanitized final output embedded in a completion notification. */
+export const NOTICE_TAIL_MAX_CHARS = 2000;
+
 function buildNotice(id: string, runtime: TerminalRuntimeSession): string {
 	const status = describeExit(runtime) ?? "exited";
 	const code = runtime.exitResult?.exitCode;
 	const codeText = code === null || code === undefined ? "" : ` (exit code ${code})`;
-	return `<system-reminder>Background terminal session ${id} finished: ${status}${codeText}. Use bash_output({ bash_id: "${id}" }) to read its output.</system-reminder>`;
+	const tail = sanitizeTerminalOutput(runtime.fullOutput()).trimEnd();
+	let tailSection = "";
+	if (tail.length > 0) {
+		const truncated = tail.length > NOTICE_TAIL_MAX_CHARS;
+		const shown = truncated ? tail.slice(tail.length - NOTICE_TAIL_MAX_CHARS) : tail;
+		const note = truncated
+			? `\n[Final output truncated to the last ${NOTICE_TAIL_MAX_CHARS} chars; the full history is still peekable.]`
+			: "";
+		tailSection = `\nFinal output:\n${shown}${note}`;
+	}
+	return `<system-reminder>Background terminal session ${id} finished: ${status}${codeText}.${tailSection}</system-reminder>`;
 }
 
 /**
