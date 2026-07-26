@@ -16,7 +16,7 @@ import { createKillBashTool } from "../../src/core/extensions/builtin/terminal/t
 import type { Harness } from "./harness.ts";
 import { createHarness } from "./harness.ts";
 
-const COMPANIONS = ["bash_output", "bash_input", "bash_resize", "kill_bash"];
+const COMPANIONS = ["bash_output", "bash_input", "bash_resize", "kill_bash", "monitor"];
 
 function firstText(result: { content: Array<{ type: string; text?: string }> }): string {
 	return result.content.find((block) => block.type === "text")?.text ?? "";
