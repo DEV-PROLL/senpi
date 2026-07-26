@@ -332,8 +332,10 @@ describe("eval renderer", () => {
 			.join("\n");
 
 		// Then
+		// The bound marker is folded into the omission summary line instead of rendering as its own row.
+		expect(text).toContain("26 earlier status events");
+		expect(text).not.toContain("status-events-omitted");
 		for (const summary of [
-			"status-events-omitted 26 earlier events omitted",
 			"cat 2 files · 9 chars",
 			"ls 3 entries",
 			"env set TOKEN=secret",

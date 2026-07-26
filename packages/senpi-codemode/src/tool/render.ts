@@ -423,8 +423,13 @@ function formatStatusEvent(event: EvalStatusEvent, theme: Theme | undefined): st
 }
 
 function renderStatusEvents(events: readonly EvalStatusEvent[], environment: RenderEnvironment): string[] {
-	const retained = environment.expanded ? events : events.slice(-STATUS_PREVIEW_COUNT);
-	const skipped = events.length - retained.length;
+	// A bounded history stores its exact omission count in a leading marker event; fold that
+	// count into the summary line so collapsing the preview can never understate omissions.
+	const first = events[0];
+	const omittedByBound = first?.op === "status-events-omitted" && typeof first.count === "number" ? first.count : 0;
+	const visible = omittedByBound > 0 ? events.slice(1) : events;
+	const retained = environment.expanded ? visible : visible.slice(-STATUS_PREVIEW_COUNT);
+	const skipped = visible.length - retained.length + omittedByBound;
 	const lines: string[] = [];
 	if (skipped > 0) lines.push(style(environment.theme, "dim", `├ … ${skipped} earlier status events`));
 	for (const [index, event] of retained.entries()) {
