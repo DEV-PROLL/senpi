@@ -33,7 +33,7 @@ persist an optional `tokenBudget` only as inert app-server wire-compatibility
 metadata. The builtin tools do not create or interpret it. There is no
 `budgetLimited`/`usageLimited` status, budget-limit continuation, or
 budget-driven status transition. `tokensUsed` and `timeUsedSeconds` remain
-display-only usage metrics. Status is exactly `active | paused | complete`.
+display-only usage metrics. Status is `active | paused | blocked | complete`; `blocked` carries `blockedReason`/`blockedAt` and suppresses continuations.
 
 ## PERSISTENCE
 
@@ -53,7 +53,7 @@ Do not return an `isError` property; it is ignored.
 
 | Task | File |
 |------|------|
-| Change a tool schema or description | `index.ts` `registerTool` |
+| Change a tool schema or description | `tool-registration.ts` |
 | Adjust status transitions / persistence | `store.ts` |
 | Tune the continuation prompt | `prompt.ts` |
 | Change the footer status text | `ui.ts` |
@@ -62,13 +62,15 @@ Do not return an `isError` property; it is ignored.
 
 ## CONVENTIONS
 
-- **Single goal per thread.** `create_goal` fails (throws) if one already exists;
-  use `update_goal` only to mark complete or blocked. `/ultragoal <objective>`
-  replaces with a UI confirm; `/goal` must remain the same-handler compatibility
-  alias.
-- **Long objectives are lossless.** The store may keep only an inline preview,
-  but the full objective spills to a deterministic sidecar file and is restored
-  before continuation prompts are built.
+- **Single goal per thread.** `create_goal` fails while an UNFINISHED goal exists;
+  over a `complete` goal it replaces, archiving the old goal to
+  `<threadId>.history.jsonl`. `update_goal` marks `complete` or `blocked` (blocked
+  requires a `reason`). `/ultragoal <objective>` replaces with a UI confirm;
+  `/goal` must remain the same-handler compatibility alias.
+- **Long objectives are lossless.** The store keeps only an inline preview capped
+  at `MAX_OBJECTIVE_LENGTH`; the full objective spills to a deterministic
+  sidecar file (`<threadId>.objective-full.txt`), and the preview ends with a
+  truncation marker naming that file so the agent can read the full text back.
 - **Continuation is evidence-driven.** Objectives with three or more distinct
   steps require durable todo decomposition; completion uses a prompt-to-artifact
   audit, and blocked status requires three consecutive turns of concrete evidence.
