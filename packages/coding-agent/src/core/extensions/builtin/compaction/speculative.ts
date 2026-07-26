@@ -106,6 +106,33 @@ function summaryMaxTokens(model: Model<any>, contextWindow: number): number {
 	return headroom;
 }
 
+/**
+ * Reasoning override for summarization requests. Compaction must be fast: a
+ * summarization request that inherits the provider's default reasoning mode
+ * burns its latency (and output budget) on invisible thinking before emitting
+ * the summary. Disable or minimize reasoning per wire family; adapters ignore
+ * options their provider does not support. Mirrors how OpenAI Codex keeps its
+ * compaction turn cheap.
+ */
+function summarizationReasoningOptions(model: Model<any>): Record<string, unknown> {
+	if (!model.reasoning) return {};
+	if (model.api === "anthropic-messages") return { thinkingEnabled: false };
+	const reasoningEffort = (["minimal", "low", "medium", "high"] as const).find(
+		(level) => model.thinkingLevelMap?.[level] !== null,
+	);
+	if (!reasoningEffort) return {};
+	switch (model.api) {
+		case "openai-responses":
+		case "openai-codex-responses":
+		case "azure-openai-responses":
+			return { reasoningEffort, reasoningSummary: null };
+		case "openai-completions":
+			return { reasoningEffort };
+		default:
+			return {};
+	}
+}
+
 function getSummaryText(message: Message): string {
 	const content = Array.isArray(message.content)
 		? message.content
@@ -176,6 +203,7 @@ async function generateSummaryMessage(options: {
 			},
 			maxTokens: summaryMaxTokens(options.snapshot.model, options.snapshot.contextWindow),
 			signal: requestController.signal,
+			...summarizationReasoningOptions(options.snapshot.model),
 		});
 		await consumeStreamWithIdleTimeout(responseStream, {
 			idleTimeoutMs: DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,

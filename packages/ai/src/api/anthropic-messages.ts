@@ -46,6 +46,7 @@ import {
 	parseStickyFallbackReceipt,
 	type ServerFallbackReceipt,
 } from "../utils/server-fallback-receipt.ts";
+import { normalizeToolCallId } from "../utils/tool-call-id.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
 
 import { resolveCloudflareBaseUrl } from "./cloudflare.ts";
@@ -1494,6 +1495,23 @@ function cannotDisableThinking(
 	return matchesModelMarker(model, DISABLED_THINKING_REJECTING_MODEL_MARKERS);
 }
 
+function disableThinkingForRequest(
+	params: MessageCreateParamsStreaming,
+	model: Model<"anthropic-messages">,
+	compat: { supportsDisabledThinking: boolean },
+): void {
+	// A degraded/disabled turn must not retain the caller's higher effort.
+	delete (params as { output_config?: unknown }).output_config;
+	if (cannotDisableThinking(model, compat)) {
+		delete params.thinking;
+		if (supportsAdaptiveThinking(model)) {
+			params.output_config = { effort: "low" } as NonNullable<MessageCreateParamsStreaming["output_config"]>;
+		}
+		return;
+	}
+	params.thinking = { type: "disabled" };
+}
+
 function supportsAdaptiveThinking(model: Model<"anthropic-messages">): boolean {
 	if (model.compat?.forceAdaptiveThinking !== undefined) {
 		return model.compat.forceAdaptiveThinking;
@@ -1833,19 +1851,19 @@ function buildParams(
 				} as MessageCreateParamsStreaming["thinking"];
 			}
 		} else if (options?.thinkingEnabled === false) {
-			if (cannotDisableThinking(model, compat)) {
-				// These families reject `thinking.type: "disabled"` with a 400 AND default to adaptive
-				// thinking when the field is absent, so omitting it silently bills full reasoning for a
-				// "thinking off" turn. The API exposes no true off switch here, so pin the cheapest
-				// effort: the request stays valid and reasoning stays at the documented minimum.
-				if (supportsAdaptiveThinking(model)) {
-					params.output_config = { effort: "low" } as NonNullable<MessageCreateParamsStreaming["output_config"]>;
-				}
-			} else {
-				params.thinking = { type: "disabled" };
-			}
+			// Some adaptive families reject `thinking.type: "disabled"` and default
+			// to reasoning when omitted. Keep their request valid at the cheapest
+			// legal effort; use an explicit disabled block everywhere else.
+			disableThinkingForRequest(params, model, compat);
 		}
 	}
+
+	// Anthropic rejects a thinking-enabled request whose final assistant turn
+	// contains tool_use but does not begin with a thinking block. Cross-model
+	// histories lose their signed thinking blocks (demoted to text or dropped),
+	// so degrade thinking for this request instead of failing every turn.
+	if (params.thinking && params.thinking.type !== "disabled" && finalAssistantTurnStartsWithToolUse(params.messages))
+		disableThinkingForRequest(params, model, compat);
 
 	if (options?.metadata) {
 		const userId = options.metadata.user_id;
@@ -1881,9 +1899,23 @@ function applyExtraBodyToAnthropicParams(
 	}
 }
 
-// Normalize tool call IDs to match Anthropic's required pattern and length
-function normalizeToolCallId(id: string): string {
-	return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+type AnthropicMessageParam = MessageCreateParamsStreaming["messages"][number];
+
+/**
+ * Whether the final assistant turn contains tool_use without a leading
+ * thinking/redacted_thinking block. Anthropic requires thinking-enabled
+ * requests to start that turn with a thinking block.
+ */
+function finalAssistantTurnStartsWithToolUse(messages: AnthropicMessageParam[]): boolean {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (message.role !== "assistant") continue;
+		if (!Array.isArray(message.content) || message.content.length === 0) return false;
+		const first = message.content[0];
+		if (first.type === "thinking" || first.type === "redacted_thinking") return false;
+		return message.content.some((block) => block.type === "tool_use");
+	}
+	return false;
 }
 
 function convertToolResult(

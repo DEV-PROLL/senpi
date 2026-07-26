@@ -454,7 +454,7 @@ function buildParams(
 		if (reasoningRequested) {
 			params.reasoning = {
 				effort: reasoningEffort as NonNullable<typeof params.reasoning>["effort"],
-				summary: options?.reasoningSummary || "auto",
+				...(options?.reasoningSummary === null ? {} : { summary: options?.reasoningSummary || "auto" }),
 			};
 			params.include = ["reasoning.encrypted_content"];
 		} else if (!reasoningUnavailable && model.provider !== "github-copilot" && model.thinkingLevelMap?.off !== null) {

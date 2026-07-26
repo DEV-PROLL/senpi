@@ -5,6 +5,7 @@
 import { type Content, FinishReason, FunctionCallingConfigMode, type Part } from "@google/genai";
 import type { Context, ImageContent, Model, ProviderNativeContent, StopReason, TextContent, Tool } from "../types.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { normalizeToolCallId } from "../utils/tool-call-id.ts";
 import { resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
 import { transformMessages } from "./transform-messages.ts";
 
@@ -95,12 +96,12 @@ export function convertMessages<T extends GoogleApiType>(
 	options: { preserveThinking?: boolean } = {},
 ): Content[] {
 	const contents: Content[] = [];
-	const normalizeToolCallId = (id: string): string => {
+	const normalizeId = (id: string): string => {
 		if (!requiresToolCallId(model.id)) return id;
-		return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+		return normalizeToolCallId(id);
 	};
 
-	const transformedMessages = transformMessages(context.messages, model, normalizeToolCallId, {
+	const transformedMessages = transformMessages(context.messages, model, normalizeId, {
 		preserveThinking: options.preserveThinking,
 	});
 

@@ -272,3 +272,74 @@ describe("bedrock convertMessages skips unknown content types", () => {
 		expect(p.messages).toHaveLength(0);
 	});
 });
+
+describe("Bedrock foreign tool call id normalization", () => {
+	it("never collides when truncating long foreign tool call ids sharing a 64-char prefix", async () => {
+		const sharedPrefix = `call_${"A".repeat(200)}`;
+		const now = Date.now();
+		const usage = {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const messages: Message[] = [
+			{ role: "user", content: "run tools", timestamp: now - 3000 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "toolCall", id: `${sharedPrefix}1111`, name: "bash", arguments: {} },
+					{ type: "toolCall", id: `${sharedPrefix}2222`, name: "read", arguments: {} },
+				],
+				api: "openai-completions",
+				provider: "moonshot",
+				model: "kimi-k2-6",
+				usage,
+				stopReason: "toolUse",
+				timestamp: now - 2000,
+			},
+			{
+				role: "toolResult",
+				toolCallId: `${sharedPrefix}1111`,
+				toolName: "bash",
+				content: [{ type: "text", text: "ok" }],
+				isError: false,
+				timestamp: now - 1000,
+			},
+			{
+				role: "toolResult",
+				toolCallId: `${sharedPrefix}2222`,
+				toolName: "read",
+				content: [{ type: "text", text: "ok" }],
+				isError: false,
+				timestamp: now - 1000,
+			},
+		];
+
+		const payload = await capturePayload({ messages });
+		const p = payload as {
+			messages: Array<{
+				role: string;
+				content: Array<{ toolUse?: { toolUseId?: string }; toolResult?: { toolUseId?: string } }>;
+			}>;
+		};
+		const toolUseIds = p.messages
+			.flatMap((message) => message.content)
+			.map((block) => block.toolUse?.toolUseId)
+			.filter((id): id is string => id !== undefined);
+		const toolResultIds = p.messages
+			.flatMap((message) => message.content)
+			.map((block) => block.toolResult?.toolUseId)
+			.filter((id): id is string => id !== undefined);
+
+		expect(toolUseIds).toHaveLength(2);
+		expect(new Set(toolUseIds).size).toBe(2);
+		expect(new Set(toolResultIds)).toEqual(new Set(toolUseIds));
+		for (const id of toolUseIds) {
+			expect(id.length).toBeLessThanOrEqual(64);
+			expect(id).toMatch(/^[a-zA-Z0-9_-]+$/);
+		}
+	});
+});

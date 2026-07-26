@@ -79,6 +79,23 @@ function parseTextSignature(
 	return { id: signature };
 }
 
+/**
+ * Parse a persisted reasoning-item signature, rejecting anything that is not a
+ * genuine Responses reasoning item. Foreign providers store non-JSON markers
+ * (Kimi's "reasoning_content") or opaque payloads (Anthropic signatures) in
+ * the same field; an unguarded JSON.parse turns a provenance mix-up into a
+ * client-side throw, and blindly pushing the parsed value leaks invalid items.
+ */
+function parseReasoningSignature(signature: string | undefined): ResponseReasoningItem | undefined {
+	if (!signature) return undefined;
+	try {
+		const parsed = JSON.parse(signature) as ResponseReasoningItem;
+		return parsed?.type === "reasoning" ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 type ToolResultOutputContent = Array<ResponseInputText | ResponseInputImage>;
 
 function convertToolResultOutput<TApi extends Api>(
@@ -297,34 +314,44 @@ export function convertResponsesMessages<TApi extends Api>(
 				assistantMsg.api === model.api;
 			let textBlockIndex = 0;
 
+			const pushAssistantText = (text: string, textSignature?: string): void => {
+				const parsedSignature = parseTextSignature(textSignature);
+				const fallbackMessageId =
+					textBlockIndex === 0 ? `msg_pi_${msgIndex}` : `msg_pi_${msgIndex}_${textBlockIndex}`;
+				textBlockIndex++;
+				// OpenAI requires id to be max 64 characters
+				let msgId = parsedSignature?.id;
+				if (!msgId) {
+					msgId = fallbackMessageId;
+				} else if (msgId.length > 64) {
+					msgId = `msg_${shortHash(msgId)}`;
+				}
+				output.push({
+					type: "message",
+					role: "assistant",
+					content: [{ type: "output_text", text: sanitizeSurrogates(text), annotations: [] }],
+					status: "completed",
+					id: msgId,
+					phase: parsedSignature?.phase,
+				} satisfies ResponseOutputMessage);
+			};
+
 			for (const block of msg.content) {
 				if (block.type === "thinking") {
-					if (block.thinkingSignature) {
-						const reasoningItem = JSON.parse(block.thinkingSignature) as ResponseReasoningItem;
+					const reasoningItem = parseReasoningSignature(block.thinkingSignature);
+					if (reasoningItem) {
 						output.push(reasoningItem);
+					} else if (block.thinkingSignature && block.thinking.trim() !== "") {
+						// A signed thinking block whose signature is not a real reasoning
+						// item (foreign provenance or corrupted state): demote to plain
+						// text, mirroring the cross-model policy in transformMessages.
+						pushAssistantText(block.thinking);
 					}
+					// Signed foreign blocks with no text are intentionally dropped.
 				} else if (block.type === "providerNative") {
 				} else if (block.type === "text") {
 					const textBlock = block as TextContent;
-					const parsedSignature = parseTextSignature(textBlock.textSignature);
-					const fallbackMessageId =
-						textBlockIndex === 0 ? `msg_pi_${msgIndex}` : `msg_pi_${msgIndex}_${textBlockIndex}`;
-					textBlockIndex++;
-					// OpenAI requires id to be max 64 characters
-					let msgId = parsedSignature?.id;
-					if (!msgId) {
-						msgId = fallbackMessageId;
-					} else if (msgId.length > 64) {
-						msgId = `msg_${shortHash(msgId)}`;
-					}
-					output.push({
-						type: "message",
-						role: "assistant",
-						content: [{ type: "output_text", text: sanitizeSurrogates(textBlock.text), annotations: [] }],
-						status: "completed",
-						id: msgId,
-						phase: parsedSignature?.phase,
-					} satisfies ResponseOutputMessage);
+					pushAssistantText(textBlock.text, textBlock.textSignature);
 				} else if (block.type === "toolCall") {
 					const toolCall = block as ToolCall;
 					const [callId, itemIdRaw] = toolCall.id.split("|");
@@ -668,8 +695,8 @@ export async function processResponsesStream<TApi extends Api>(
 			const block = reasoningBlocksById.get(item.id);
 			if (!block?.thinkingSignature) continue;
 
-			const storedItem = JSON.parse(block.thinkingSignature) as ResponseReasoningItem;
-			if (storedItem.encrypted_content) continue;
+			const storedItem = parseReasoningSignature(block.thinkingSignature);
+			if (!storedItem || storedItem.encrypted_content) continue;
 			block.thinkingSignature = JSON.stringify({
 				...storedItem,
 				encrypted_content: item.encrypted_content,

@@ -1,5 +1,40 @@
 # AI Source Changes
 
+## 2026-07-26 - Cross-model replay hardening (foreign signatures, id collisions, thinking turn shape)
+
+### What changed and why
+
+- `api/openai-responses-shared.ts`: `convertResponsesMessages()` and `backfillReasoningSignatures()` now parse
+  persisted reasoning signatures through a guarded `parseReasoningSignature()` that requires a JSON payload with
+  `type === "reasoning"`. Foreign providers store non-JSON markers (Kimi's `"reasoning_content"`) or opaque
+  payloads (Anthropic thinking signatures) in the same `thinkingSignature` field; when such a block reaches the
+  converter with same-model provenance (aliased/custom providers, corrupted session state), the previous
+  unguarded `JSON.parse` threw a client-side `SyntaxError` or leaked an invalid item to the API. Unparseable or
+  non-reasoning signatures now demote to plain assistant text (empty text is dropped), mirroring the cross-model
+  policy in `transformMessages`.
+- `utils/tool-call-id.ts`, `api/anthropic-messages.ts`, `api/bedrock-converse-stream.ts`, and
+  `api/google-shared.ts`: the Anthropic-compatible adapters now share one collision-safe id normalizer. Over-long
+  ids keep a readable prefix plus a `shortHash` of the full id instead of blind 64-char prefix truncation. OpenAI
+  Responses tool ids run 450+ chars, and two distinct ids sharing a 64-char prefix previously collapsed into
+  duplicate tool ids in Bedrock/Google even after the Anthropic Messages fix, corrupting tool-result pairing.
+- `api/anthropic-messages.ts` `buildParams()`: when a thinking-enabled request's final assistant turn contains
+  `tool_use` but no leading thinking block — the normal outcome of replaying Kimi/OpenAI history, whose thinking
+  demotes to text or drops — thinking is disabled for that request instead of failing with Anthropic's "final
+  assistant message must start with a thinking block" 400 on every turn. Adaptive families that reject
+  `thinking.type: "disabled"` use the existing valid fallback (`thinking` omitted plus
+  `output_config.effort: "low"`).
+- `../test/openai-responses-foreign-signature.test.ts`, `../test/anthropic-cross-model-history.test.ts`,
+  `../test/bedrock-convert-messages.test.ts`, and `../test/google-shared-tool-call-id.test.ts`: cover foreign
+  signature demotion, genuine reasoning-item replay, cross-adapter collision freedom, and both legal
+  thinking-degradation wire forms.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/openai-responses-shared.ts` thinking/text branches of `convertResponsesMessages()` (text emission
+  is now a shared `pushAssistantText` closure) and `backfillReasoningSignatures()`.
+- LOW: `utils/tool-call-id.ts`, the three adapter imports/call sites, and the thinking-config block of
+  `api/anthropic-messages.ts` `buildParams()`.
+
 ## 2026-07-26 - Retry transient Codex upstream websocket failures
 
 ### What changed and why
@@ -46,6 +81,36 @@ missing).
 - `test/anthropic-web-search-replay-encryption.test.ts`: the byte-fidelity fixture gained the
   `server_tool_use` its result belongs to. The assertion is unchanged - the fixture was simply not a
   shape Anthropic can accept.
+
+## 2026-07-26 - Preserve persisted freeform identity when replaying OpenAI Responses calls (#256)
+
+### What changed and why
+
+- `api/openai-responses-shared.ts`: custom Responses calls with no server item id now persist the shared
+  `CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL` (`"custom"`) and recover their `custom_tool_call` /
+  `custom_tool_call_output` wire types from that evidence. The recovery uses the existing freeform input
+  serializer, preserving raw `apply_patch` text during no-tool compaction and model/API replay. It never sends
+  the sentinel as an item `id`.
+- Active grammar metadata remains the higher-fidelity source when it is available: it continues to choose its
+  named input property and retain real custom-call ids, while a sentinel still removes the invalid synthetic id.
+- Focused AI and compaction wiremock tests pin raw-input round trips, matching custom result types, model-switch
+  preservation, grammar precedence, and the no-invalid-id guard.
+
+This deliberately diverges from upstream's #271 crash-only repair. That patch omitted the invalid sentinel id
+but downgraded a historical freeform call to JSON `function_call` when the current request had no tool definitions.
+Senpi's compaction path intentionally omits those definitions, so preserving the persisted freeform type is required
+for type fidelity and byte-identical patch replay.
+
+### Why extension system couldn't handle this
+
+The persisted tool-call identity is decoded while constructing the provider request in `packages/ai`; extensions only
+see the already-normalized context and cannot restore the Responses wire item type.
+
+### Expected merge conflict zones
+
+- HIGH: upstream owns `api/openai-responses-shared.ts`'s `convertResponsesMessages()` tool-call and tool-result
+  branches and rewrote the same hunk in #271. Future upstream syncs will collide here; retain sentinel recovery,
+  raw-input serialization, and the no-`custom`-id invariant when resolving.
 
 ## 2026-07-25 - Thinking-off actually disables reasoning; wire-exact effort ladders across adapters
 

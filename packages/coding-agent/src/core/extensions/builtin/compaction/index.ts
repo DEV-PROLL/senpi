@@ -419,8 +419,35 @@ export default function compactionExtension(
 		};
 	});
 
-	pi.on("model_select", () => {
-		invalidateSpeculativeCompaction();
+	pi.on("model_select", (event, ctx) => {
+		const jobModel = speculativeJob?.snapshot.model;
+		const selectedModel = ctx.model;
+		const alreadySpeculatingForSelectedModel =
+			jobModel !== undefined &&
+			selectedModel !== undefined &&
+			jobModel.api === selectedModel.api &&
+			jobModel.provider === selectedModel.provider &&
+			jobModel.id === selectedModel.id &&
+			jobModel.baseUrl === selectedModel.baseUrl &&
+			jobModel.contextWindow === selectedModel.contextWindow;
+		if (!alreadySpeculatingForSelectedModel) {
+			invalidateSpeculativeCompaction();
+		}
+		// Window shrink (e.g. 1M -> 256k): warm a speculative summary at switch
+		// time so the next turn's compaction starts hot instead of the first
+		// request overflowing against the smaller window and recovering after
+		// the provider error has already surfaced.
+		const previousWindow = event.previousModel?.contextWindow ?? 0;
+		const contextWindow = ctx.model?.contextWindow ?? 0;
+		if (previousWindow <= contextWindow) return;
+		// Usage is intentionally pre-switch accounting measured against the new,
+		// smaller window: this is the overflow risk the warm start must absorb.
+		const usage = ctx.getContextUsage();
+		if (!usage) return;
+		const settings = ctx.getCompactionSettings();
+		if (policy.shouldStartSpeculativeCompaction(usage, contextWindow, settings, state.lastYield ?? undefined)) {
+			startSpeculativeCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
+		}
 	});
 
 	pi.on("session_compact", async (event, ctx) => {
