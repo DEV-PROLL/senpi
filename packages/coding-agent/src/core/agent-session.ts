@@ -585,6 +585,7 @@ export class AgentSession {
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _userAbortPromise: Promise<void> | undefined = undefined;
+	private _agentAbortSource: "user" | "system" | undefined = undefined;
 	private _suppressQueuedContinuationAfterUserAbort = false;
 	private _extensionEventSignal: AbortSignal | undefined = undefined;
 
@@ -1629,7 +1630,19 @@ export class AgentSession {
 			this._turnIndex = 0;
 			await this._extensionRunner.emit({ type: "agent_start" });
 		} else if (event.type === "agent_end") {
-			await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
+			const abortSource = this._agentAbortSource;
+			const aborted =
+				abortSource !== undefined || this._findLastAssistantInMessages(event.messages)?.stopReason === "aborted";
+			try {
+				await this._extensionRunner.emit({
+					type: "agent_end",
+					messages: event.messages,
+					...(aborted ? { aborted: true } : {}),
+					...(abortSource === undefined ? {} : { abortSource }),
+				});
+			} finally {
+				this._agentAbortSource = undefined;
+			}
 		} else if (event.type === "turn_start") {
 			const extensionEvent: TurnStartEvent = {
 				type: "turn_start",
@@ -2914,7 +2927,7 @@ export class AgentSession {
 	 */
 	async abort(): Promise<void> {
 		this.abortCompaction();
-		await this._abortActiveAgentAndRetry();
+		await this._abortActiveAgentAndRetry("user");
 	}
 
 	async waitForIdle(): Promise<void> {
@@ -3355,7 +3368,7 @@ export class AgentSession {
 		admission.finishSessionWork();
 	}
 
-	private async _abortActiveAgentAndRetry(): Promise<void> {
+	private async _abortActiveAgentAndRetry(source: "user" | "system"): Promise<void> {
 		this.abortRetry();
 		this.abortBranchSummary();
 		if (this._userAbortPromise) {
@@ -3365,6 +3378,7 @@ export class AgentSession {
 		}
 		if (this.isStreaming) {
 			this._suppressQueuedContinuationAfterUserAbort = true;
+			this._agentAbortSource = source;
 		}
 
 		const abortPromise = (async () => {
@@ -3396,7 +3410,7 @@ export class AgentSession {
 			// Keep the session subscriber attached until the aborted run emits
 			// agent_end. That event clears the active-run and retry state that
 			// waitForIdle() depends on.
-			await this._abortActiveAgentAndRetry();
+			await this._abortActiveAgentAndRetry("system");
 			this._disconnectFromAgent();
 			disconnected = true;
 			this._emit({ type: "compaction_start", reason: "manual" });
@@ -4704,7 +4718,7 @@ export class AgentSession {
 						let disconnected = false;
 
 						try {
-							await this._abortActiveAgentAndRetry();
+							await this._abortActiveAgentAndRetry("system");
 							this._disconnectFromAgent();
 							disconnected = true;
 							this._emit({ type: "compaction_start", reason: "extension" });

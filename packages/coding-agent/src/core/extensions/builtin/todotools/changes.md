@@ -131,3 +131,19 @@
   `renderResult` call site).
 - LOW: the shared `modes/interactive/components/todo-strike.ts` module
   (fork-only).
+
+## Sync provenance: pi-todotools 0.2.0 (2026-07-26)
+
+### Source
+
+- Canonical source: `code-yeongyu/pi-todotools` 0.2.0, merged by
+  [pi-todotools PR #13](https://github.com/code-yeongyu/pi-todotools/pull/13).
+- Version metadata was regenerated through `sync-builtin-extensions.mjs`.
+
+### Diff result
+
+The functional state and operation logic matches the canonical phased port. The
+remaining differences are intentional senpi adaptations: the `senpi.todo-state`
+persistence key, TypeBox/internal imports, the `todowrite` builtin identity,
+`todo-sidebar` widget renderer and completion animation, and the `/todo`
+command suite. No behavior delta surfaced during the resync comparison.
