@@ -29,6 +29,7 @@ import type {
 	Tool,
 	ToolCall,
 	ToolResultMessage,
+	UserMessage,
 } from "../types.ts";
 import { isVideoMimeType } from "../types.ts";
 import { combineAbortSignals } from "../utils/abort-signals.ts";
@@ -533,69 +534,64 @@ interface ProviderNativeToolPairing {
 	readonly validResultIds: ReadonlySet<string>;
 }
 
+// The user turn a pending server tool can survive is one that carries only
+// tool results. Anything else the wire would emit — real text, an image —
+// closes the assistant turn (the API then 400s the still-open use). A blank
+// message serializes to nothing, so it closes nothing.
+function userMessageClosesServerTurn(message: UserMessage): boolean {
+	if (typeof message.content === "string") return message.content.trim().length > 0;
+	return message.content.some(
+		(block) => (block.type === "text" && block.text.trim().length > 0) || block.type === "image",
+	);
+}
+
 function collectProviderNativeToolPairing(
 	messages: Message[],
 	model: Model<"anthropic-messages">,
 ): ProviderNativeToolPairing {
-	const assistantMessages: AssistantMessage[] = [];
-	for (const message of messages) {
-		if (message.role === "assistant" && isSameAnthropicModel(message, model)) {
-			assistantMessages.push(message);
-		}
-	}
-
-	// Every use is resolved when its result sits in its own or a later assistant
-	// message; every result is valid when its use sits in its own or an earlier
-	// one. Deferred results start the continuation message, so the same message
-	// cannot hold both ends of a cross-message pair.
 	const resolvedUseIds = new Set<string>();
 	const validResultIds = new Set<string>();
-	const pendingBefore = new Set<string>();
-	for (const message of assistantMessages) {
-		const pendingHere = new Set<string>();
-		for (const block of message.content) {
-			if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
-			const raw = block.raw;
-			if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
-			if (isProviderNativeToolUseBlock(raw) && typeof raw.id === "string") pendingHere.add(raw.id);
-		}
-		for (const block of message.content) {
-			if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
-			const raw = block.raw;
-			if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
-			const toolUseId = raw.tool_use_id;
-			if (typeof toolUseId !== "string") continue;
-			if (pendingHere.has(toolUseId) || pendingBefore.has(toolUseId)) {
-				resolvedUseIds.add(toolUseId);
-				validResultIds.add(toolUseId);
-			}
-		}
-		for (const id of pendingHere) pendingBefore.add(id);
-	}
-
-	// A pending use stays live only while its turn can still be resumed: it
-	// belongs to the last same-model assistant message and nothing but tool
-	// results follows that message in the conversation.
-	const liveUseIds = new Set<string>();
-	const lastAssistant = assistantMessages[assistantMessages.length - 1];
-	if (lastAssistant !== undefined) {
-		let closesAfterLastAssistant = false;
-		for (let index = messages.indexOf(lastAssistant) + 1; index < messages.length; index++) {
-			const follower = messages[index];
-			if (follower.role === "toolResult") continue;
-			closesAfterLastAssistant = true;
-			break;
-		}
-		if (!closesAfterLastAssistant) {
-			for (const block of lastAssistant.content) {
+	// Uses whose turn can still be resumed. A same-model assistant resets the
+	// set: its own result blocks may answer the prior pending uses, and any use
+	// it leaves pending becomes the open set. Anything that closes the turn —
+	// user text, a tool result whose deferred-tool references serialize sibling
+	// text after the results, or another model's assistant — empties it.
+	let pendingUseIds = new Set<string>();
+	for (const message of messages) {
+		if (message.role === "assistant") {
+			const priorUseIds = pendingUseIds;
+			pendingUseIds = new Set<string>();
+			if (!isSameAnthropicModel(message, model)) continue;
+			for (const block of message.content) {
 				if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
 				const raw = block.raw;
 				if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
-				if (isProviderNativeToolUseBlock(raw) && typeof raw.id === "string") liveUseIds.add(raw.id);
+				if (isProviderNativeToolUseBlock(raw) && typeof raw.id === "string") pendingUseIds.add(raw.id);
 			}
+			for (const block of message.content) {
+				if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
+				const raw = block.raw;
+				if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
+				const toolUseId = raw.tool_use_id;
+				if (typeof toolUseId !== "string") continue;
+				if (priorUseIds.has(toolUseId) || pendingUseIds.has(toolUseId)) {
+					resolvedUseIds.add(toolUseId);
+					validResultIds.add(toolUseId);
+				}
+			}
+			continue;
+		}
+		if (message.role === "toolResult") {
+			if ((message.addedToolNames?.length ?? 0) > 0) pendingUseIds = new Set<string>();
+			continue;
+		}
+		if (message.role === "user" && userMessageClosesServerTurn(message)) {
+			pendingUseIds = new Set<string>();
 		}
 	}
-	return { resolvedUseIds, liveUseIds, validResultIds };
+	// Whatever is still pending at the end of history belongs to the last
+	// assistant message and can still resume, so it is live rather than unpaired.
+	return { resolvedUseIds, liveUseIds: pendingUseIds, validResultIds };
 }
 
 // True for a server-tool block whose counterpart can never arrive: a use that

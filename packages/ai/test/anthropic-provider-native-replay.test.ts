@@ -552,6 +552,141 @@ describe("Anthropic provider-native replay", () => {
 		]);
 	});
 
+	// A blank user message serializes to nothing, so it cannot close the turn on
+	// the wire; the pending use must stay live through it. Real text closes it.
+	it("keeps a pending server_tool_use across a blank user message but drops it after real text", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const pendingUse = {
+			type: "server_tool_use",
+			id: "srvtoolu_pending",
+			name: "web_search",
+			input: { query: "a" },
+		};
+		const makeAssistant = () =>
+			assistantMessage(
+				[
+					{ type: "toolCall", id: "toolu_task", name: "task", arguments: { prompt: "go" } },
+					{ type: "providerNative", subtype: "server_tool_use", raw: pendingUse },
+				],
+				{ stopReason: "toolUse", model: "claude-fable-5" },
+			);
+		const toolResult = {
+			role: "toolResult" as const,
+			toolCallId: "toolu_task",
+			toolName: "task",
+			content: [{ type: "text" as const, text: "out" }],
+			isError: false,
+			timestamp: 2,
+		};
+
+		const blank = await capturePayload(model, [
+			{ role: "user", content: "hello", timestamp: 1 },
+			makeAssistant(),
+			toolResult,
+			{ role: "user", content: "   ", timestamp: 3 },
+		]);
+		const blankAssistant = blank.messages?.find((message) => message.role === "assistant");
+		expect(blankAssistant?.content).toContainEqual(pendingUse);
+
+		const closed = await capturePayload(model, [
+			{ role: "user", content: "hello", timestamp: 1 },
+			makeAssistant(),
+			toolResult,
+			{ role: "user", content: "real steering text", timestamp: 3 },
+		]);
+		const closedAssistant = closed.messages?.find((message) => message.role === "assistant");
+		expect(closedAssistant?.content).not.toContainEqual(pendingUse);
+	});
+
+	// A tool result that registers deferred tool names serializes sibling text
+	// after the tool_result blocks, and text after the results closes the turn.
+	it("drops a pending server_tool_use when the tool result added deferred tool names", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const pendingUse = {
+			type: "server_tool_use",
+			id: "srvtoolu_pending",
+			name: "web_search",
+			input: { query: "a" },
+		};
+		const assistant = assistantMessage(
+			[
+				{ type: "toolCall", id: "toolu_task", name: "task", arguments: { prompt: "go" } },
+				{ type: "providerNative", subtype: "server_tool_use", raw: pendingUse },
+			],
+			{ stopReason: "toolUse", model: "claude-fable-5" },
+		);
+
+		const payload = await capturePayload(model, [
+			{ role: "user", content: "hello", timestamp: 1 },
+			assistant,
+			{
+				role: "toolResult",
+				toolCallId: "toolu_task",
+				toolName: "task",
+				content: [{ type: "text", text: "out" }],
+				isError: false,
+				addedToolNames: ["deferred_tool"],
+				timestamp: 2,
+			},
+		]);
+
+		const assistantPayload = payload.messages?.find((message) => message.role === "assistant");
+		expect(assistantPayload?.content).not.toContainEqual(pendingUse);
+	});
+
+	// User text between a deferred use and its late result killed the turn before
+	// the result could mean anything: both halves are unpairable on replay.
+	it("drops both halves when user text intervenes between a use and its late result", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const pendingUse = {
+			type: "server_tool_use",
+			id: "srvtoolu_pending",
+			name: "web_search",
+			input: { query: "a" },
+		};
+		const lateResult = {
+			type: "web_search_tool_result",
+			tool_use_id: "srvtoolu_pending",
+			content: [{ type: "web_search_result", title: "A", url: "https://a.example", encrypted_content: "enc" }],
+		};
+		const first = assistantMessage(
+			[
+				{ type: "toolCall", id: "toolu_task", name: "task", arguments: { prompt: "go" } },
+				{ type: "providerNative", subtype: "server_tool_use", raw: pendingUse },
+			],
+			{ stopReason: "toolUse", model: "claude-fable-5" },
+		);
+		const second = assistantMessage(
+			[
+				{ type: "providerNative", subtype: "web_search_tool_result", raw: lateResult },
+				{ type: "text", text: "late answer" },
+			],
+			{ stopReason: "stop", model: "claude-fable-5" },
+		);
+
+		const payload = await capturePayload(model, [
+			{ role: "user", content: "hello", timestamp: 1 },
+			first,
+			{
+				role: "toolResult",
+				toolCallId: "toolu_task",
+				toolName: "task",
+				content: [{ type: "text", text: "out" }],
+				isError: false,
+				timestamp: 2,
+			},
+			{ role: "user", content: "intervening steering text", timestamp: 3 },
+			second,
+			{ role: "user", content: "follow up", timestamp: 4 },
+		]);
+
+		const assistants = (payload.messages ?? []).filter((message) => message.role === "assistant");
+		expect(assistants[0]?.content).toEqual([
+			{ type: "tool_use", id: "toolu_task", name: "task", input: { prompt: "go" } },
+		]);
+		expect(assistants[1]?.content).toEqual([{ type: "text", text: "late answer" }]);
+	});
+
 	// The mirror image: a result block whose `server_tool_use` never made it into
 	// the persisted turn is equally unpairable, so it must be dropped while the
 	// paired blocks in the same message replay verbatim.

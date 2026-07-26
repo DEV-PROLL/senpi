@@ -16,13 +16,15 @@ missing).
 
 - `api/anthropic-messages.ts`: assistant conversion now repairs the pairing across the whole
   conversation, not only inside the server-side-fallback boundary. `collectProviderNativeToolPairing`
-  walks every same-model assistant message: a use answered by a result in its own or a later assistant
-  message replays (the deferred-continuation shape the API documents), a pending use in the last
-  assistant message stays live while only tool results follow it (so the API can still run the deferred
-  tool), and only the unpairable halves are dropped — a use whose turn was closed by a user message or
-  superseded by a later assistant turn, and a result whose use is nowhere. The predicate covers the
-  `mcp_tool_use` shape for when those blocks become replayable. Paired blocks, `fallback`, and
-  `container_upload` replay byte-for-byte as before, so `encrypted_content` fidelity is untouched.
+  walks the conversation in order, tracking which server-tool uses are still resumable: a use answered
+  by a result in its own or the next assistant message replays (the deferred-continuation shape the API
+  documents); a pending use survives only tool results, because user text, a tool result that registers
+  deferred tool names (whose references serialize sibling text after the results), or another
+  assistant turn all close the turn; and a blank user message closes nothing because it serializes to
+  nothing. Only the unpairable halves are dropped — a closed use and a result whose use is nowhere.
+  The predicate covers the `mcp_tool_use` shape for when those blocks become replayable. Paired blocks,
+  `fallback`, and `container_upload` replay byte-for-byte as before, so `encrypted_content` fidelity is
+  untouched.
 - `utils/retry.ts`: the pairing-error wording ("was found without a corresponding", anchored on the
   opening backtick of the result block name) joins the retryable provider-error patterns.
   The repaired history means the retried request is valid, so the session self-heals through the
