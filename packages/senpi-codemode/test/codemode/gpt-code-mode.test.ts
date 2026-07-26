@@ -54,6 +54,8 @@ class FakePi {
 		this.#activeTools = new Set(toolNames);
 	}
 
+	sendUserMessage(): void {}
+
 	async executeTool(
 		toolName: string,
 		params: unknown,
