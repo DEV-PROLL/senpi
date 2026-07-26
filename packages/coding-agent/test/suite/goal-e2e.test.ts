@@ -119,7 +119,7 @@ describe("goal extension end-to-end through the real AgentSession", () => {
 			});
 		});
 
-		await harness.session.prompt("/goal keep working until explicitly stopped");
+		await harness.session.prompt("/ultragoal keep working until explicitly stopped");
 		await retryEnded;
 
 		expect(goalContinuationEntries(harness)).toHaveLength(1);
@@ -162,7 +162,7 @@ describe("goal extension end-to-end through the real AgentSession", () => {
 			fauxAssistantMessage("should not run after abort"),
 		]);
 
-		const promptPromise = harness.session.prompt("/goal keep working until explicitly stopped");
+		const promptPromise = harness.session.prompt("/ultragoal keep working until explicitly stopped");
 		await waitForToolStart;
 		const continuationCountBeforeAbort = goalContinuationEntries(harness).length;
 		const abortPromise = harness.session.abort();

@@ -4,9 +4,9 @@ import { formatGoalForTool, goalStatusLabel } from "./format.ts";
 import { clearGoal, createGoal, readGoal, updateGoal } from "./store.ts";
 import type { Goal, GoalAccountingMode, GoalStoreRef } from "./types.ts";
 
-const GOAL_USAGE = "Usage: /goal <objective>";
-const GOAL_EMPTY_HINT = "No goal is currently set.";
-const REPLACE_GOAL_CHOICE = "Replace current goal";
+const GOAL_USAGE = "Usage: /ultragoal <objective>";
+const GOAL_EMPTY_HINT = "No ultragoal is currently set.";
+const REPLACE_GOAL_CHOICE = "Replace current ultragoal";
 const CANCEL_REPLACE_GOAL_CHOICE = "Cancel";
 
 export type GoalCommandRegistrationDeps = {
@@ -20,56 +20,64 @@ export type GoalCommandRegistrationDeps = {
 };
 
 export function registerGoalCommand(pi: ExtensionAPI, deps: GoalCommandRegistrationDeps): void {
-	pi.registerCommand("goal", {
-		description: "Set, inspect, pause, resume, or clear the persistent goal",
-		handler: async (rawArgs, ctx) => {
-			const command = parseGoalCommand(rawArgs);
-			try {
-				switch (command.kind) {
-					case "show": {
-						const goal = await readGoal(deps.goalStoreRef(ctx));
-						deps.refreshGoalUi(ctx, goal);
-						ctx.ui.notify(
-							goal === null ? `${GOAL_USAGE}\n${GOAL_EMPTY_HINT}` : formatGoalForTool(goal),
-							goal ? "info" : "warning",
-						);
-						return;
-					}
-					case "setObjective": {
-						await setGoalObjective(pi, ctx, command.objective, deps);
-						return;
-					}
-					case "setStatus": {
-						if (command.status === "paused") {
-							await deps.accountCurrentAgentTurn(ctx, "active");
-						}
-						const goal = await updateGoal(deps.goalStoreRef(ctx), { status: command.status }, "user");
-						if (goal.status === "active") {
-							deps.beginAgentGoalAccounting(goal);
-						} else {
-							deps.stopAgentGoalAccounting(goal.id);
-						}
-						deps.refreshGoalUi(ctx, goal);
-						ctx.ui.notify(`Goal ${goalStatusLabel(goal.status)}\n${formatGoalForTool(goal)}`, "info");
-						deps.queueGoalContinuation(pi, ctx, goal);
-						return;
-					}
-					case "clear": {
-						await deps.accountCurrentAgentTurn(ctx, "active");
-						const cleared = await clearGoal(deps.goalStoreRef(ctx));
-						deps.clearAgentGoalAccounting();
-						deps.refreshGoalUi(ctx, null);
-						ctx.ui.notify(
-							cleared ? "Goal cleared" : "No goal to clear\nThis thread does not currently have a goal.",
-							cleared ? "info" : "warning",
-						);
-						return;
-					}
+	const handler = async (rawArgs: string, ctx: ExtensionContext): Promise<void> => {
+		const command = parseGoalCommand(rawArgs);
+		try {
+			switch (command.kind) {
+				case "show": {
+					const goal = await readGoal(deps.goalStoreRef(ctx));
+					deps.refreshGoalUi(ctx, goal);
+					ctx.ui.notify(
+						goal === null ? `${GOAL_USAGE}\n${GOAL_EMPTY_HINT}` : formatGoalForTool(goal),
+						goal ? "info" : "warning",
+					);
+					return;
 				}
-			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				case "setObjective": {
+					await setGoalObjective(pi, ctx, command.objective, deps);
+					return;
+				}
+				case "setStatus": {
+					if (command.status === "paused") {
+						await deps.accountCurrentAgentTurn(ctx, "active");
+					}
+					const goal = await updateGoal(deps.goalStoreRef(ctx), { status: command.status }, "user");
+					if (goal.status === "active") {
+						deps.beginAgentGoalAccounting(goal);
+					} else {
+						deps.stopAgentGoalAccounting(goal.id);
+					}
+					deps.refreshGoalUi(ctx, goal);
+					ctx.ui.notify(`Ultragoal ${goalStatusLabel(goal.status)}\n${formatGoalForTool(goal)}`, "info");
+					deps.queueGoalContinuation(pi, ctx, goal);
+					return;
+				}
+				case "clear": {
+					await deps.accountCurrentAgentTurn(ctx, "active");
+					const cleared = await clearGoal(deps.goalStoreRef(ctx));
+					deps.clearAgentGoalAccounting();
+					deps.refreshGoalUi(ctx, null);
+					ctx.ui.notify(
+						cleared
+							? "Ultragoal cleared"
+							: "No ultragoal to clear\nThis thread does not currently have an ultragoal.",
+						cleared ? "info" : "warning",
+					);
+					return;
+				}
 			}
-		},
+		} catch (error) {
+			ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+		}
+	};
+
+	pi.registerCommand("ultragoal", {
+		description: "Set, inspect, pause, resume, or clear the persistent ultragoal",
+		handler,
+	});
+	pi.registerCommand("goal", {
+		description: "Compatibility alias for /ultragoal",
+		handler,
 	});
 }
 
@@ -92,13 +100,13 @@ async function setGoalObjective(
 	const goal = current === null ? await createGoal(ref, objective) : await updateGoal(ref, { objective }, "user");
 	if (goal.status === "active") deps.beginAgentGoalAccounting(goal);
 	deps.refreshGoalUi(ctx, goal);
-	ctx.ui.notify(`Goal ${goalStatusLabel(goal.status)}\n${formatGoalForTool(goal)}`, "info");
+	ctx.ui.notify(`Ultragoal ${goalStatusLabel(goal.status)}\n${formatGoalForTool(goal)}`, "info");
 	deps.queueGoalContinuation(pi, ctx, goal);
 }
 
 async function confirmReplaceGoal(ctx: ExtensionContext, objective: string): Promise<boolean> {
 	if (!ctx.hasUI) return true;
-	const choice = await ctx.ui.select(`Replace goal?\nNew objective: ${objective}`, [
+	const choice = await ctx.ui.select(`Replace ultragoal?\nNew objective: ${objective}`, [
 		REPLACE_GOAL_CHOICE,
 		CANCEL_REPLACE_GOAL_CHOICE,
 	]);
