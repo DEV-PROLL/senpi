@@ -72,23 +72,81 @@ describe("retry fallback engine", () => {
 		while (harnesses.length) harnesses.pop()?.cleanup();
 	});
 
-	it("switches immediately to a configured fallback and reports success", async () => {
+	it("retries the same model within budget instead of switching to the chain", async () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			settings: {
 				retry: {
 					enabled: true,
-					baseDelayMs: 100,
+					maxRetries: 3,
+					baseDelayMs: 1,
 					fallbackChains: { [primary]: [fallback] },
 				},
 			},
 		});
 		harnesses.push(harness);
 		harness.setResponses([
-			fauxAssistantMessage("", {
-				stopReason: "error",
-				errorMessage: "overloaded_error",
-			}),
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			fauxAssistantMessage("primary recovered"),
+		]);
+
+		await harness.session.prompt("hello");
+
+		expect(harness.eventsOfType("retry_fallback_applied")).toEqual([]);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toEqual([1, 2]);
+		expect(harness.eventsOfType("auto_retry_end").map((event) => event.success)).toEqual([true]);
+		expect(harness.faux.state.callCount).toBe(3);
+	});
+
+	it("switches to a configured fallback only after the same-model retry budget is spent", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 3,
+					baseDelayMs: 1,
+					fallbackChains: { [primary]: [fallback] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			fauxAssistantMessage("fallback answer"),
+		]);
+
+		await harness.session.prompt("hello");
+
+		// 1,2,4 = same-model exponential backoff; the trailing 0 is the fallback switch.
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toEqual([1, 2, 4, 0]);
+		expect(harness.eventsOfType("retry_fallback_applied")).toMatchObject([
+			{ from: primary, to: fallback, chainKey: primary, reason: "transient" },
+		]);
+		expect(harness.eventsOfType("retry_fallback_succeeded")).toMatchObject([{ model: fallback, chainKey: primary }]);
+		expect(harness.faux.state.callCount).toBe(5);
+		expect(harness.eventsOfType("agent_end").map((event) => event.willRetry)).toEqual([true, true, true, true, false]);
+	});
+
+	it("switches on the first transient error when no same-model retry budget exists", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 0,
+					baseDelayMs: 1,
+					fallbackChains: { [primary]: [fallback] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
 			fauxAssistantMessage("fallback answer"),
 		]);
 
@@ -96,13 +154,45 @@ describe("retry fallback engine", () => {
 
 		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toEqual([0]);
 		expect(harness.eventsOfType("retry_fallback_applied")).toMatchObject([
-			{ from: primary, to: fallback, chainKey: primary },
+			{ from: primary, to: fallback, chainKey: primary, reason: "transient" },
 		]);
-		expect(harness.eventsOfType("retry_fallback_succeeded")).toMatchObject([{ model: fallback, chainKey: primary }]);
 		expect(harness.faux.state.callCount).toBe(2);
-		expect(harness.eventsOfType("agent_end").map((event) => event.willRetry)).toEqual([true, false]);
 	});
 
+	it("spends a fresh retry budget on every rung of a fully failing chain", async () => {
+		const maxRetries = 2;
+		const chain = [fallback, "faux/faux-3"];
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }, { id: "faux-3" }],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries,
+					baseDelayMs: 1,
+					fallbackChains: { [primary]: chain },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses(
+			Array.from({ length: 12 }, () =>
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			),
+		);
+
+		await harness.session.prompt("hello");
+
+		// One leading primary call, then maxRetries same-model attempts per rung.
+		expect(harness.faux.state.callCount).toBe(1 + (chain.length + 1) * maxRetries);
+		expect(harness.eventsOfType("retry_fallback_applied").map((event) => event.to)).toEqual(chain);
+		expect(harness.eventsOfType("retry_fallback_exhausted").map((event) => event.chainKey)).toEqual([primary]);
+		expect(harness.eventsOfType("auto_retry_end").map((event) => event.success)).toEqual([false]);
+	});
+
+	// The tests below are about candidate selection, prompt/tool rebuild, compaction,
+	// request shape and cancellation - not switch timing. They pin `maxRetries: 0` so the
+	// chain still engages on the first transient error; the budget-exhaustion timing
+	// itself is covered by the tests above.
 	it("rebuilds model-scoped prompt and tools through an explicit fallback model_select", async () => {
 		const primaryPrivilegedTool: AgentTool = {
 			name: "primary_privileged",
@@ -123,7 +213,7 @@ describe("retry fallback engine", () => {
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			tools: [primaryPrivilegedTool, fallbackPresetTool],
 			initialActiveToolNames: ["primary_privileged"],
-			settings: { retry: { enabled: true, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } } },
+			settings: { retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } } },
 			extensionFactories: [
 				(pi) => {
 					pi.on("model_select", (event) => {
@@ -175,7 +265,7 @@ describe("retry fallback engine", () => {
 	it("invalidates an in-flight compaction when retry fallback changes the model", async () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
-			settings: { retry: { enabled: true, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } } },
+			settings: { retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } } },
 		});
 		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("seed")]);
@@ -227,7 +317,7 @@ describe("retry fallback engine", () => {
 			],
 			settings: {
 				compaction: { enabled: true, reserveTokens: 0, keepRecentTokens: 0 },
-				retry: { enabled: true, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } },
+				retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } },
 			},
 			extensionFactories: [
 				(pi) => {
@@ -339,6 +429,7 @@ describe("retry fallback engine", () => {
 			settings: {
 				compaction: { enabled: true, reserveTokens: 0, keepRecentTokens: 0 },
 				retry: {
+					maxRetries: 0,
 					enabled: true,
 					baseDelayMs: 1,
 					fallbackChains: { [primary]: [fallback] },
@@ -462,6 +553,7 @@ describe("retry fallback engine", () => {
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			settings: {
 				retry: {
+					maxRetries: 0,
 					enabled: true,
 					baseDelayMs: 1,
 					fallbackChains: { [primary]: [fallback] },
@@ -497,6 +589,7 @@ describe("retry fallback engine", () => {
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			settings: {
 				retry: {
+					maxRetries: 0,
 					enabled: true,
 					baseDelayMs: 100,
 					fallbackChains: { [primary]: [fallback] },

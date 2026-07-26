@@ -5131,12 +5131,11 @@ export class AgentSession {
 			return "not-handled";
 		}
 
-		if (!switchedFallback) {
-			switchedFallback = await this._retryFallback.tryFallback("transient", {
-				errorMessage,
-				retryAfterMs: providerDelayMs,
-			});
-		}
+		// Transient failures stay on the same model until the retry budget is spent;
+		// only the over-budget branch above switches the chain. Both branches that can
+		// reach this point with a fallback already applied (hard-error, refusal) set
+		// switchedFallback first and force providerDelayMs undefined, so no branch may
+		// be reordered to fall through here expecting an implicit switch.
 		const delayMs = switchedFallback ? 0 : (providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
 		// Prepare before auto_retry_start so an immediate Esc can cancel the retry sleep.
 		this._retryAbortController = new AbortController();
