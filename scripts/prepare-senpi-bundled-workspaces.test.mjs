@@ -175,7 +175,7 @@ describe("stagePublishManifest", () => {
 		assert.deepEqual(manifest.bundledDependencies, expected);
 	});
 
-	it("preserves all dependency edges, including the vendored ^2026.x workspace specs", () => {
+	it("keeps vendored import paths bundled while resolving them through owned registry aliases", () => {
 		// Given
 		tempDir = mkdtempSync(join(tmpdir(), "senpi-stage-edges-"));
 		writeCodingAgentManifest(tempDir);
@@ -184,13 +184,15 @@ describe("stagePublishManifest", () => {
 		// When
 		stagePublishManifest(tempDir);
 
-		// Then: no dependency edge is dropped or rewritten, and no local specs exist.
+		// Then: npm retains the original dependency key for bundle extraction, while Bun
+		// resolves the alias target from the fork-owned scope instead of upstream.
 		const manifest = readStagedManifest(tempDir);
 		assert.deepEqual(manifest.dependencies, {
-			"@earendil-works/pi-ai": "^2026.7.22",
+			"@earendil-works/pi-ai": "npm:@code-yeongyu/senpi-ai@^2026.7.22",
 			"cross-spawn": "7.0.6",
 		});
 		assert.deepEqual(manifest.optionalDependencies, { "@mariozechner/clipboard": "0.3.9" });
+		assert.ok(manifest.bundleDependencies.includes("@earendil-works/pi-ai"));
 		for (const spec of [...Object.values(manifest.dependencies), ...Object.values(manifest.optionalDependencies)]) {
 			assert.doesNotMatch(spec, /^(file|link|workspace):/);
 		}

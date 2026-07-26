@@ -47,6 +47,28 @@ const bundledWorkspaces = [
 	},
 ];
 const internalPackageNames = new Set(bundledWorkspaces.map((workspace) => workspace.packageName));
+export const ownedRegistryAliases = new Map([
+	["@earendil-works/pi-ai", "@code-yeongyu/senpi-ai"],
+	["@earendil-works/pi-agent-core", "@code-yeongyu/senpi-agent-core"],
+	["@earendil-works/pi-tui", "@code-yeongyu/senpi-tui"],
+	["@earendil-works/pi-pty", "@code-yeongyu/senpi-pty"],
+]);
+
+export function rewriteOwnedRegistryAliases(manifest) {
+	for (const dependencyField of ["dependencies", "optionalDependencies"]) {
+		const dependencies = manifest[dependencyField];
+		if (!dependencies) {
+			continue;
+		}
+		for (const [packageName, aliasName] of ownedRegistryAliases) {
+			const version = dependencies[packageName];
+			if (typeof version === "string" && !version.startsWith("npm:")) {
+				dependencies[packageName] = `npm:${aliasName}@${version}`;
+			}
+		}
+	}
+	return manifest;
+}
 
 function requiredFilesForWorkspace(workspace, nativeTargets) {
 	const requiredFiles = [...(workspace.requiredFiles ?? ["package.json", "dist/index.js"])];
@@ -181,6 +203,10 @@ export function stagePublishManifest(repoRoot) {
 	}
 
 	const bundlablePackageNames = bundlablePublishPackageNames(codingAgentNodeModules, stagedPackageNames);
+	// Keep the original dependency keys so npm packs the modules at the import paths
+	// the compiled source uses. Resolve those keys through fork-owned aliases instead
+	// of attempting to fetch lockstep versions from the upstream-owned namespace.
+	rewriteOwnedRegistryAliases(manifest);
 	manifest.bundleDependencies = bundlablePackageNames;
 	// npm accepts both spellings; the checked-in manifest carries both, so keep them in sync.
 	if (manifest.bundledDependencies !== undefined) {

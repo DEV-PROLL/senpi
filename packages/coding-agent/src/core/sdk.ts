@@ -9,7 +9,7 @@ import { AuthStorage } from "./auth-storage.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ServiceTier } from "./extensions/builtin/service-tier.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
-import { convertToLlm } from "./messages.ts";
+import { convertToLlmForTransport, TRANSPORT_IMAGE_BUDGET_BYTES } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
@@ -298,42 +298,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	let agent: Agent;
 
-	// Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
-	const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {
-		const converted = convertToLlm(messages);
-		// Check setting dynamically so mid-session changes take effect
-		if (!settingsManager.getBlockImages()) {
-			return converted;
-		}
-		// Filter out ImageContent from all messages, replacing with text placeholder
-		return converted.map((msg) => {
-			if (msg.role === "user" || msg.role === "toolResult") {
-				const content = msg.content;
-				if (Array.isArray(content)) {
-					const hasImages = content.some((c) => c.type === "image");
-					if (hasImages) {
-						const filteredContent = content
-							.map((c) =>
-								c.type === "image" ? { type: "text" as const, text: "Image reading is disabled." } : c,
-							)
-							.filter(
-								(c, i, arr) =>
-									// Dedupe consecutive "Image reading is disabled." texts
-									!(
-										c.type === "text" &&
-										c.text === "Image reading is disabled." &&
-										i > 0 &&
-										arr[i - 1].type === "text" &&
-										(arr[i - 1] as { type: "text"; text: string }).text === "Image reading is disabled."
-									),
-							);
-						return { ...msg, content: filteredContent };
-					}
-				}
-			}
-			return msg;
+	// Read blockImages per request so a mid-session settings change takes effect.
+	const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] =>
+		convertToLlmForTransport(messages, {
+			blockImages: settingsManager.getBlockImages(),
+			budgetBytes: TRANSPORT_IMAGE_BUDGET_BYTES,
+			alwaysKeepNewest: 1,
 		});
-	};
 
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
@@ -368,7 +339,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 						options?.sessionId,
 						requestHeaders,
 					);
-					return headerRunner?.hasHandlers("before_provider_headers")
+					return headerRunner?.isActive && headerRunner.hasHandlers("before_provider_headers")
 						? headerRunner.emitBeforeProviderHeaders(headers ?? {})
 						: (headers ?? {});
 				},
@@ -376,14 +347,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		onPayload: async (payload, _model, request) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("before_provider_request")) {
+			if (!runner?.isActive || !runner.hasHandlers("before_provider_request")) {
 				return payload;
 			}
 			return runner.emitBeforeProviderRequest(payload, undefined, request);
 		},
 		onResponse: async (response, _model) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("after_provider_response")) {
+			if (!runner?.isActive || !runner.hasHandlers("after_provider_response")) {
 				return;
 			}
 			await runner.emit({
@@ -395,7 +366,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner) return messages;
+			if (!runner?.isActive) return messages;
 			return runner.emitContext(messages);
 		},
 		steeringMode: settingsManager.getSteeringMode(),

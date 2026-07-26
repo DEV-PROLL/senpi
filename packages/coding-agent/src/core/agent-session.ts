@@ -510,6 +510,9 @@ function isSameOverflowSource(
 /** Thinking levels including native max (Opus 4.6 legacy / Opus 4.7 native). */
 const THINKING_LEVELS_WITH_MAX: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
+/** Caps explicit skill expansion so one prompt cannot consume unbounded context. */
+export const MAX_SKILL_EXPANSIONS_PER_PROMPT = 5;
+
 // ============================================================================
 // AgentSession Class
 // ============================================================================
@@ -2476,34 +2479,68 @@ export class AgentSession {
 	}
 
 	/**
-	 * Expand skill commands (/skill:name args) to their full content.
-	 * Returns the expanded text, or the original text if not a skill command or skill not found.
-	 * Emits errors via extension runner if file read fails.
+	 * Expand a leading run of skill commands (/skill:name /skill:other args) to their full content.
+	 * Returns the expanded text, or the original text if the first skill command is not found.
+	 * Emits errors via extension runner if file reads fail or the expansion cap is reached.
 	 */
 	private _expandSkillCommand(text: string): string {
 		if (!text.startsWith("/skill:")) return text;
 
-		const spaceIndex = text.indexOf(" ");
-		const skillName = spaceIndex === -1 ? text.slice(7) : text.slice(7, spaceIndex);
-		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1).trim();
+		const skills = this.resourceLoader.getSkills().skills;
+		const expandedSkillNames = new Set<string>();
+		const skillBlocks: string[] = [];
+		let tokenStart = 0;
 
-		const skill = this.resourceLoader.getSkills().skills.find((s) => s.name === skillName);
-		if (!skill) return text; // Unknown skill, pass through
+		while (tokenStart < text.length) {
+			let tokenEnd = tokenStart;
+			while (tokenEnd < text.length && !/\s/.test(text[tokenEnd]!)) {
+				tokenEnd += 1;
+			}
+			const token = text.slice(tokenStart, tokenEnd);
+			if (!token.startsWith("/skill:")) break;
 
-		try {
-			const content = readFileSync(skill.filePath, "utf-8");
-			const body = stripFrontmatter(content).trim();
-			const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
-			return args ? `${skillBlock}\n\n${args}` : skillBlock;
-		} catch (err) {
-			// Emit error like extension commands do
-			this._extensionRunner.emitError({
-				extensionPath: skill.filePath,
-				event: "skill_expansion",
-				error: err instanceof Error ? err.message : String(err),
-			});
-			return text; // Return original on error
+			const skillName = token.slice(7);
+			const skill = skills.find((candidate) => candidate.name === skillName);
+			if (!skill) break; // Unknown skills and everything after them remain literal text.
+
+			if (!expandedSkillNames.has(skill.name)) {
+				if (skillBlocks.length >= MAX_SKILL_EXPANSIONS_PER_PROMPT) {
+					this._extensionRunner.emitError({
+						extensionPath: "skill:expansion",
+						event: "skill_expansion",
+						error: `Expanded at most ${MAX_SKILL_EXPANSIONS_PER_PROMPT} skills; remaining skill commands were left as literal text.`,
+					});
+					break;
+				}
+
+				try {
+					const content = readFileSync(skill.filePath, "utf-8");
+					const body = stripFrontmatter(content).trim();
+					skillBlocks.push(
+						`<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`,
+					);
+					expandedSkillNames.add(skill.name);
+				} catch (err) {
+					this._extensionRunner.emitError({
+						extensionPath: skill.filePath,
+						event: "skill_expansion",
+						error: err instanceof Error ? err.message : String(err),
+					});
+					return text; // Return the original prompt when any skill file cannot be read.
+				}
+			}
+
+			tokenStart = tokenEnd;
+			while (tokenStart < text.length && /\s/.test(text[tokenStart]!)) {
+				tokenStart += 1;
+			}
 		}
+
+		if (skillBlocks.length === 0) return text;
+
+		const args = text.slice(tokenStart).trim();
+		const expandedSkills = skillBlocks.join("\n\n");
+		return args ? `${expandedSkills}\n\n${args}` : expandedSkills;
 	}
 
 	/**

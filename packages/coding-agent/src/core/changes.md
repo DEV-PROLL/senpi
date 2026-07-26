@@ -1,5 +1,43 @@
 # changes
 
+## Composable leading skill commands (2026-07-26)
+
+### What changed
+
+- `agent-session.ts`: `/skill:<name>` now accepts a leading whitespace-separated run of loaded skills, expanding each unique skill in written order before appending the remaining prompt text. Repeated skills expand only once, unknown skills stop the run and remain literal, and slash text outside that leading run is never interpreted as a skill command.
+- Explicit expansion is capped at `MAX_SKILL_EXPANSIONS_PER_PROMPT` (5). Commands beyond the cap remain literal and emit an existing `skill_expansion` error-channel notification, preventing a composed prompt from growing context without bound.
+- The shared expansion seam is called by `prompt()`, `steer()`, and `followUp()`, so queued and non-TUI/RPC prompt paths receive identical behavior.
+
+### Why extension system couldn't handle this alone
+
+Skill commands are resource-loader entries rather than extension commands, and their substitution happens in the private `AgentSession` prompt and queue boundary before the outbound user message is assembled.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` `_expandSkillCommand()` if upstream revises skill-command parsing.
+
+## Provider-bound inline image budget (2026-07-26)
+
+### What changed
+
+- `messages.ts`: added a transport-only 24 MiB inline image budget. Provider-bound conversion keeps the newest image
+  block, counts it against the budget, and replaces images older than the hard recency cutoff with a re-read
+  placeholder while preserving all text and leaving the persisted session untouched.
+- `sdk.ts`: routes the main agent loop through the shared transport conversion while preserving the dynamic
+  `images.blockImages` kill switch and its existing placeholder/deduplication behavior.
+- `test/suite/harness.ts`: uses the same transport conversion and accepts a small injectable image budget for
+  deterministic first-request integration coverage.
+
+### Why extension system couldn't handle this alone
+
+- Inline images must be bounded after session messages are converted but before every main-loop provider request,
+  including resumed sessions and provider fallbacks. That conversion boundary is owned by the core Agent wiring.
+
+### Expected merge conflict zones
+
+- MEDIUM: `sdk.ts` around the Agent `convertToLlm` wiring.
+- LOW: the transport helpers at the end of `messages.ts` and the Agent construction in `test/suite/harness.ts`.
+
 ## Thinking-level tier detection for Claude 5 families and GPT-5.6 (2026-07-25)
 
 ### What changed
