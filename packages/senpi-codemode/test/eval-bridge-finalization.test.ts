@@ -2,7 +2,7 @@ import type { AgentToolResult } from "@code-yeongyu/senpi";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostToKernelMessage, KernelToHostMessage } from "../src/bridge/protocol.ts";
 import { createEvalTool } from "../src/tool/eval-tool.ts";
-import type { EvalKernel, EvalKernelManager, EvalKernelRunInput, ExecuteTool } from "../src/tool/types.ts";
+import type { EvalKernel, EvalKernelManager, EvalKernelRunInput, ExecuteTool, KernelInterruptHandle } from "../src/tool/types.ts";
 import { Deferred, fakeExtensionContext } from "./eval/fakes.ts";
 
 type EvalResult = Extract<KernelToHostMessage, { type: "result" }>;
@@ -25,8 +25,9 @@ class BridgeKernel implements EvalKernel {
 		return await new Promise<EvalResult>(() => {});
 	}
 
-	async interrupt(reason?: string): Promise<void> {
+	async interrupt(reason?: string): Promise<KernelInterruptHandle> {
 		this.interrupts.push(reason);
+		return { stateRetained: Promise.resolve(true) };
 	}
 
 	deliverToolReply(message: Extract<HostToKernelMessage, { type: "tool-reply" }>): void {

@@ -77,11 +77,11 @@ export class FakeKernel implements EvalKernel {
 		return result;
 	}
 
-	async interrupt(reason?: string): Promise<void> {
+	async interrupt(reason?: string): Promise<KernelInterruptHandle> {
 		this.interrupts.push(reason);
 		const deferredRun = this.deferredRun;
 		const activeRun = this.runs.at(-1);
-		if (!deferredRun || !activeRun) return;
+		if (!deferredRun || !activeRun) return { stateRetained: Promise.resolve(true) };
 		this.deferredRun = undefined;
 		deferredRun.result.resolve({
 			type: "result",
@@ -90,6 +90,7 @@ export class FakeKernel implements EvalKernel {
 			error: { message: reason ?? "Eval interrupted" },
 			durationMs: 0,
 		});
+		return { stateRetained: Promise.resolve(true) };
 	}
 
 	deliverToolReply(message: unknown): void {
@@ -154,10 +155,11 @@ export class PendingInterruptKernel implements EvalKernel {
 		return await this.runResult.promise;
 	}
 
-	async interrupt(reason?: string): Promise<void> {
+	async interrupt(reason?: string): Promise<KernelInterruptHandle> {
 		this.interrupts.push(reason);
 		this.interruptStarted.resolve(undefined);
 		await this.interruptResult.promise;
+		return { stateRetained: Promise.resolve(true) };
 	}
 
 	deliverToolReply(): void {}
@@ -188,8 +190,9 @@ export class KernelOwnedTimeoutKernel implements EvalKernel {
 		});
 	}
 
-	async interrupt(reason?: string): Promise<void> {
+	async interrupt(reason?: string): Promise<KernelInterruptHandle> {
 		this.interrupts.push(reason);
+		return { stateRetained: Promise.resolve(true) };
 	}
 
 	deliverToolReply(): void {}
