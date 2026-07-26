@@ -44,6 +44,13 @@ describe("terminal settings resolver", () => {
 			maxSessions: 32,
 			timeoutAction: "background",
 			notify: "wake",
+			monitor: {
+				coalesceWindowMs: 2000,
+				rateLimitMs: 5000,
+				maxLinesPerInjection: 50,
+				maxCharsPerInjection: 4096,
+				wakeBudget: 5,
+			},
 		});
 	});
 
@@ -58,6 +65,24 @@ describe("terminal settings resolver", () => {
 		expect(resolved.maxSessions).toBe(32); // 0 is invalid → default
 		expect(resolved.notify).toBe("off");
 		expect(resolved.timeoutAction).toBe("background"); // invalid → default
+	});
+
+	it("resolves bounded monitor-delivery settings", () => {
+		const resolved = resolveTerminalSettings({
+			monitorCoalesceWindowMs: 1200,
+			monitorRateLimitMs: 7000,
+			monitorMaxLinesPerInjection: 75,
+			monitorMaxCharsPerInjection: 8000,
+			monitorWakeBudget: 9,
+		});
+		expect(resolved.monitor).toEqual({
+			coalesceWindowMs: 1200,
+			rateLimitMs: 7000,
+			maxLinesPerInjection: 75,
+			maxCharsPerInjection: 8000,
+			wakeBudget: 9,
+		});
+		expect(resolveTerminalSettings({ monitorMaxLinesPerInjection: 0 }).monitor.maxLinesPerInjection).toBe(50);
 	});
 });
 
