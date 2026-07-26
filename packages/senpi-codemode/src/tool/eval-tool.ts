@@ -8,7 +8,7 @@ import { buildEvalPrompt } from "../prompt/eval-prompt.ts";
 import { TIMEOUT_PAUSE_OP, TIMEOUT_RESUME_OP } from "../timeouts/bridge-timeout.ts";
 import { IdleTimeout, type IdleTimeoutOptions, type TimeoutPauseHandle } from "../timeouts/idle-timeout.ts";
 import { CellHandler, type CellState } from "./cell-handler.ts";
-import { interruptionStateNote } from "./interrupt-note.ts";
+import { describeTimeoutState, interruptionStateNote } from "./interrupt-note.ts";
 import { EvalDetachedCellManager, type EvalDetachedCellSnapshot } from "./detached-cell-manager.ts";
 import type { EvalImageResizer } from "./image.ts";
 import {
@@ -155,6 +155,9 @@ class CellExecution {
 		this.#abort(this.#callerSignal.reason);
 	};
 
+	/** Outcome of the most recent interrupt, when a kernel was interrupted. */
+	interruptStateRetained: Promise<boolean> | undefined;
+
 	#abort(reason: unknown): void {
 		if (!this.#active) return;
 		this.#active = false;
@@ -168,7 +171,10 @@ class CellExecution {
 		}
 		this.#interruptDeadline = setTimeout(() => this.#settleAbort(error), INTERRUPT_DELIVERY_GRACE_MS);
 		void Promise.resolve()
-			.then(async () => await kernel.interrupt(error.message))
+			.then(async () => {
+				const handle = await kernel.interrupt(error.message);
+				this.interruptStateRetained = handle.stateRetained;
+			})
 			.then(
 				() => this.#settleAbort(error),
 				(interruptError: unknown) => this.#settleAbort(interruptError),
@@ -362,6 +368,7 @@ async function executeCell(
 	} catch (error) {
 		if (handler && error instanceof Error && error.name === "CodemodeSessionDisposedError")
 			return await handler.finalizeCancellation(error);
+		if (error instanceof Error && error.name === "TimeoutError") throw await describeTimeoutState(error, execution);
 		throw error;
 	} finally {
 		state.active = false;
