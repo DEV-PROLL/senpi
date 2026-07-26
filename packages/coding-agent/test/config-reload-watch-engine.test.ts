@@ -353,7 +353,7 @@ describe("config reload watch engine", () => {
 		};
 
 		// Subscribe to the production FSWatcher event before arming the assertion write.
-		writeFileSync(watchReadyPath, "armed");
+		renameSync(watchReadyPath, `${watchReadyPath}.armed`);
 		await awaitChange(watcherReady, "readiness event");
 		writeFileSync(settingsPath, "after");
 		const result = await awaitChange(settingsChanged, "settings.json change");
