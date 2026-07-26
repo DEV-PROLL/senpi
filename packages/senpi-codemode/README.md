@@ -10,6 +10,10 @@ configuration, interpreter availability, and active task-tool names are known.
 
 - Persistent JavaScript, Python, Ruby, and Julia cells. State survives later
   cells in the same language until reset, restart, or session disposal.
+- Timeout detachment for interactive `eval`: long pure-compute cells return a
+  handle and continue in their existing kernel. Completion is injected with the
+  final value/error and buffered output; use `eval({ action: "peek"|"stop",
+  cell_id })` to inspect or terminate a detached cell.
 - Loopback, bearer-authenticated kernel bridge with bounded JSONL frames.
 - Structured status events for file operations, environment access, phases,
   bridge activity, and delegated task progress.
@@ -68,7 +72,7 @@ Configuration is loaded in this order:
 | Key | Default | Effect |
 | --- | --- | --- |
 | `languages` | `py`/`js` enabled; `rb`/`jl` disabled | Selects desired languages before interpreter detection. |
-| `cellTimeoutSeconds` | `30` | Idle timeout for one cell unless the call supplies `timeout`. |
+| `cellTimeoutSeconds` | `30` | Idle timeout for one cell unless the call supplies `timeout`; interactive calls detach by default and print/json calls error. |
 | `parallelPoolWidth` | `4` | Maximum concurrent `parallel()` thunks. |
 | `taskTools.task` | `"task"` | Registered tool name used by `agent()`. |
 | `taskTools.output` | `"task_output"` | Registered tool name used by `output()`. |
@@ -111,6 +115,22 @@ package. `agent()` delegates through the tool contract, so task-engine
 permissions, progress updates, and transcripts remain owned by that engine.
 `isolated`, `apply`, and `merge` are accepted for compatibility but emit a
 warning because this task-engine integration has no isolation model.
+
+## Detached cells
+
+`eval` accepts `on_timeout: "detach"|"error"`. The default is `"detach"` in
+interactive TUI, RPC, and app-server sessions; print and JSON one-shot runs
+default to `"error"` so their result is never silently detached. A detached
+cell keeps only its own language kernel busy. A new same-language call returns
+a busy error with its cell id and output tail; calls in other languages continue
+normally. Do not re-run the cell.
+
+Use `eval({ action: "peek", cell_id })` for its state and buffered output, or
+`eval({ action: "stop", cell_id })` to cancel it. Python stop interrupts the
+existing kernel and preserves variables. JavaScript stop kills and restarts its
+worker, so JavaScript VM state is lost. Detached completion messages state when
+kernel variables are available to the next eval cell; oversized buffered output
+is written under the session local root and referenced as `local://…`.
 
 ## Output and artifacts
 
