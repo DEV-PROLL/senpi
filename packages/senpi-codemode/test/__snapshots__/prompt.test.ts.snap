@@ -47,7 +47,7 @@ write(path, content) → str
 env(key?=None, value?=None) → str | None | dict
     No args → full env dict; one → value of \`key\`; two → set \`key=value\`, return value.
 output(*ids, format?="raw", offset?=None, limit?=None) → str | dict | list[dict]
-    Task/agent output by id. \`format\` selects full (\`"raw"\`) or trailing (\`"tail"\`) output.
+    Task/agent output by id. Reads immediately: running tasks return their status; \`format\` selects full (\`"raw"\`) or trailing (\`"tail"\`) output.
 tool.<name>(args) → unknown
     Invoke any session tool; \`args\` = its parameter object.
 completion(prompt, model?="default", system?=None, schema?=None) → str | dict

@@ -4625,6 +4625,9 @@ export class AgentSession {
 				getAllTools: () => this.getAllTools(),
 				setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
 				refreshTools: () => this._refreshToolRegistry(),
+				registerRemovedToolHint: (name, hint) => {
+					this.agent.removedToolHints[name] = hint;
+				},
 				getCommands,
 				setModel: async (model) => {
 					if (!this._modelRuntime.hasConfiguredAuth(model.provider)) return false;

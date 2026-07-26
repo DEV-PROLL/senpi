@@ -453,6 +453,7 @@ export class ExtensionRunner {
 		this.runtime.getAllTools = actions.getAllTools;
 		this.runtime.setActiveTools = actions.setActiveTools;
 		this.runtime.refreshTools = actions.refreshTools;
+		this.runtime.registerRemovedToolHint = actions.registerRemovedToolHint;
 		this.runtime.getCommands = actions.getCommands;
 		this.runtime.setModel = actions.setModel;
 		this.runtime.getThinkingLevel = actions.getThinkingLevel;
@@ -482,6 +483,12 @@ export class ExtensionRunner {
 		this.getSystemPromptFn = contextActions.getSystemPrompt;
 		this.getLoadedHookSourcesFn = contextActions.getLoadedHookSources;
 		this.getSystemPromptOptionsFn = contextActions.getSystemPromptOptions ?? (() => ({ cwd: this.cwd }));
+
+		for (const extension of this.extensions) {
+			for (const [name, hint] of extension.removedToolHints ?? []) {
+				actions.registerRemovedToolHint(name, hint);
+			}
+		}
 
 		// Flush provider registrations queued during extension loading, replaying the
 		// original call order so last-registration-wins holds across mixed
