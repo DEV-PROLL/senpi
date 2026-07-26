@@ -1,5 +1,35 @@
 # AI Source Changes
 
+## 2026-07-26 - Preserve persisted freeform identity when replaying OpenAI Responses calls (#256)
+
+### What changed and why
+
+- `api/openai-responses-shared.ts`: custom Responses calls with no server item id now persist the shared
+  `CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL` (`"custom"`) and recover their `custom_tool_call` /
+  `custom_tool_call_output` wire types from that evidence. The recovery uses the existing freeform input
+  serializer, preserving raw `apply_patch` text during no-tool compaction and model/API replay. It never sends
+  the sentinel as an item `id`.
+- Active grammar metadata remains the higher-fidelity source when it is available: it continues to choose its
+  named input property and retain real custom-call ids, while a sentinel still removes the invalid synthetic id.
+- Focused AI and compaction wiremock tests pin raw-input round trips, matching custom result types, model-switch
+  preservation, grammar precedence, and the no-invalid-id guard.
+
+This deliberately diverges from upstream's #271 crash-only repair. That patch omitted the invalid sentinel id
+but downgraded a historical freeform call to JSON `function_call` when the current request had no tool definitions.
+Senpi's compaction path intentionally omits those definitions, so preserving the persisted freeform type is required
+for type fidelity and byte-identical patch replay.
+
+### Why extension system couldn't handle this
+
+The persisted tool-call identity is decoded while constructing the provider request in `packages/ai`; extensions only
+see the already-normalized context and cannot restore the Responses wire item type.
+
+### Expected merge conflict zones
+
+- HIGH: upstream owns `api/openai-responses-shared.ts`'s `convertResponsesMessages()` tool-call and tool-result
+  branches and rewrote the same hunk in #271. Future upstream syncs will collide here; retain sentinel recovery,
+  raw-input serialization, and the no-`custom`-id invariant when resolving.
+
 ## 2026-07-25 - Thinking-off actually disables reasoning; wire-exact effort ladders across adapters
 
 ### What changed and why
