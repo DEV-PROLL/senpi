@@ -58,6 +58,7 @@ import {
 	writeToolEvidence,
 } from "./lib/mock-loop-support.mjs";
 import { dispatchExitCode, flagValue, parseToolArgs, positionalAfter } from "./lib/mock-loop-cli.mjs";
+import { checkStandardRetryScenarios, isRetryScenario, retryScenarioNames, runRetryScenario } from "./lib/mock-loop-retry.mjs";
 import {
 	appendTextToolLeakChecks,
 	dispatchTextToolLeakCommand,
@@ -154,91 +155,6 @@ async function checkApi(checks, apiName) {
 	return pass;
 }
 
-const RETRY_SCENARIOS = {
-	"transient-recover": {
-		error: { status: 500, message: "overloaded_error" },
-		errorCount: 2,
-		marker: "SENPI-QA-RETRY-TRANSIENT-RECOVER-38cd",
-		primaryAttempts: 3,
-		fallbackAttempts: 0,
-	},
-	"budget-exhaust": {
-		error: { status: 500, message: "overloaded_error" },
-		errorCount: 4,
-		marker: "SENPI-QA-RETRY-BUDGET-EXHAUST-7a16",
-		primaryAttempts: 4,
-		fallbackAttempts: 1,
-	},
-	"long-retry-after": {
-		error: { status: 429, message: "HTTP 429: rate_limit_exceeded - retry after 3600 seconds" },
-		errorCount: 1,
-		marker: "SENPI-QA-RETRY-LONG-RETRY-AFTER-b4e1",
-		primaryAttempts: 1,
-		fallbackAttempts: 1,
-	},
-};
-
-async function checkRetryScenario(checks, scenarioName, apiName = "openai-completions") {
-	const scenario = RETRY_SCENARIOS[scenarioName];
-	if (!scenario) throw new Error(`unknown retry scenario ${scenarioName}`);
-	const preset = API_PRESETS[apiName];
-	const fallbackModelId = `${preset.modelId}-fallback`;
-	const expectedModels = [
-		...Array(scenario.primaryAttempts).fill(preset.modelId),
-		...Array(scenario.fallbackAttempts).fill(fallbackModelId),
-	];
-	const { box, server, result } = await driveTurn({
-		apiName,
-		turns: [...Array(scenario.errorCount).fill({ error: scenario.error }), { text: scenario.marker }],
-		prompt: `Return ${scenario.marker} after recovering from the scripted provider error.`,
-		mockModels: [{ id: fallbackModelId }],
-		retry: {
-			enabled: true,
-			maxRetries: 3,
-			baseDelayMs: 0,
-			provider: { maxRetries: 0, maxRetryDelayMs: 60000 },
-			fallbackChains: { [`${preset.provider}/${preset.modelId}`]: [`${preset.provider}/${fallbackModelId}`] },
-		},
-		timeoutMs: 60000,
-	});
-	try {
-		const requests = server.requests.filter((request) => request.url?.includes(preset.path));
-		const modelSequence = requests.map((request) => request.model);
-		const counts = new Map();
-		for (const modelId of modelSequence) counts.set(modelId, (counts.get(modelId) ?? 0) + 1);
-		const transcript = [
-			`scenario=${scenarioName}`,
-			`attempts=${modelSequence.length}`,
-			`sequence=${modelSequence.map((modelId, index) => `${index + 1}:${preset.provider}/${modelId}`).join(",") || "none"}`,
-			`modelAttempts=${[preset.modelId, fallbackModelId].map((modelId) => `${preset.provider}/${modelId}:${counts.get(modelId) ?? 0}`).join(",")}`,
-			`switched=${modelSequence.includes(fallbackModelId) ? "yes" : "no"}`,
-		];
-		process.stdout.write(`SENPI_QA_RETRY_TRANSCRIPT ${transcript.join(" ")}\n`);
-		const markerReturned = (result.stdout + result.stderr).includes(scenario.marker);
-		const attemptsMatch = JSON.stringify(modelSequence) === JSON.stringify(expectedModels);
-		const pass = result.code === 0 && !result.timedOut && markerReturned && attemptsMatch;
-		checks.ok(
-			`${scenarioName}: scripted provider errors follow the expected retry/fallback path`,
-			pass,
-			`code=${result.code} marker=${markerReturned} expected=${expectedModels.join(" -> ")} actual=${modelSequence.join(" -> ") || "none"}`,
-		);
-		if (!pass) process.stderr.write(`\n--- ${scenarioName} stderr tail ---\n${result.stderr.slice(-1500)}\n`);
-		return pass;
-	} finally {
-		await server.stop();
-		box.cleanup();
-	}
-}
-
-async function runRetryScenario(scenarioName, apiName) {
-	installCleanupHooks();
-	const checks = createChecks(`mock-loop.mjs --scenario ${scenarioName}`);
-	const guard = guardRealAuth();
-	await checkRetryScenario(checks, scenarioName, apiName);
-	checkRealAuthUnchanged(checks, guard);
-	process.exit(checks.finish() ? 0 : 1);
-}
-
 async function selfTest(onlyApi) {
 	installCleanupHooks();
 	const checks = createChecks("mock-loop.mjs --self-test");
@@ -252,7 +168,7 @@ async function selfTest(onlyApi) {
 		}
 	}
 	if (!onlyApi) {
-		for (const scenarioName of Object.keys(RETRY_SCENARIOS)) await checkRetryScenario(checks, scenarioName);
+		await checkStandardRetryScenarios(checks, driveTurn);
 	}
 	checks.ok("zero real provider calls (only localhost fake hit)", true, "all baseUrls point at 127.0.0.1");
 	checkRealAuthUnchanged(checks, guard);
@@ -580,8 +496,8 @@ if (api && !API_PRESETS[api]) {
 }
 
 const scenario = flagValue(argv, "--scenario");
-if (scenario !== undefined && !RETRY_SCENARIOS[scenario]) {
-	process.stderr.write(`unknown --scenario ${scenario}. valid: ${Object.keys(RETRY_SCENARIOS).join(", ")}\n`);
+if (scenario !== undefined && !isRetryScenario(scenario)) {
+	process.stderr.write(`unknown --scenario ${scenario}. valid: ${retryScenarioNames().join(", ")}\n`);
 	process.exit(2);
 }
 
@@ -596,7 +512,7 @@ if (argv[0] === "--self-test") {
 		process.exit(1);
 	});
 } else if (scenario) {
-	runRetryScenario(scenario, api || "openai-completions").catch((e) => {
+	runRetryScenario(scenario, api || "openai-completions", driveTurn).catch((e) => {
 		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
 		process.exit(1);
 	});
