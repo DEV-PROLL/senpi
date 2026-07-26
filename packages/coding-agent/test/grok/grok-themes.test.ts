@@ -12,15 +12,15 @@
  *     named by §Palette inherits the corresponding dark/light value verbatim.
  */
 import * as fs from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DynamicBorder } from "../../src/modes/interactive/components/dynamic-border.ts";
 import {
 	getAvailableThemes,
 	getResolvedThemeColors,
 	getThemeByName,
 	getThemeExportColors,
-	initTheme,
 } from "../../src/modes/interactive/theme/theme.ts";
+import { fg, GROK_COLOR_MODES, initGrokTheme, resetGrokThemeCapabilities } from "./theme-assertions.ts";
 
 const themeDir = new URL("../../src/modes/interactive/theme/", import.meta.url);
 
@@ -93,71 +93,80 @@ const NIGHT_EXPORT_MAP: Record<string, string> = {
 	infoBg: "#242424", // surfaces.highlight — menu/selection band
 };
 
-describe("grok themes (plan G1)", () => {
-	it("registers grok-night and grok-day as builtin themes", () => {
-		const names = getAvailableThemes();
-		expect(names).toContain("grok-night");
-		expect(names).toContain("grok-day");
-	});
+for (const { label, trueColor } of GROK_COLOR_MODES) {
+	describe(`grok themes (plan G1, ${label})`, () => {
+		beforeEach(() => {
+			expect(initGrokTheme("grok-night", trueColor)).toBe(label);
+		});
 
-	it("loads both themes through the real loading path", () => {
-		expect(getThemeByName("grok-night")?.name).toBe("grok-night");
-		expect(getThemeByName("grok-day")?.name).toBe("grok-day");
-	});
+		afterEach(() => {
+			resetGrokThemeCapabilities();
+		});
+		it("registers grok-night and grok-day as builtin themes", () => {
+			const names = getAvailableThemes();
+			expect(names).toContain("grok-night");
+			expect(names).toContain("grok-day");
+		});
 
-	it("grok-night resolves every §Palette-named key to its exact plan hex", () => {
-		const resolved = getResolvedThemeColors("grok-night");
-		for (const [key, hex] of Object.entries(NIGHT_PALETTE_MAP)) {
-			expect(resolved[key], `grok-night ${key}`).toBe(hex);
-		}
-		expect(getThemeExportColors("grok-night")).toEqual(NIGHT_EXPORT_MAP);
-	});
+		it("loads both themes through the real loading path", () => {
+			expect(getThemeByName("grok-night")?.name).toBe("grok-night");
+			expect(getThemeByName("grok-day")?.name).toBe("grok-day");
+		});
 
-	it("grok-day resolves every §Palette-named key to its exact plan hex", () => {
-		const resolved = getResolvedThemeColors("grok-day");
-		for (const [key, hex] of Object.entries(DAY_PALETTE_MAP)) {
-			expect(resolved[key], `grok-day ${key}`).toBe(hex);
-		}
-	});
-
-	it("routes generic modal overlays through the normal border token", () => {
-		for (const themeName of ["grok-night", "grok-day"] as const) {
-			initTheme(themeName, false);
-			expect(getResolvedThemeColors(themeName).border, `${themeName} modal border`).toBe("#585858");
-			expect(new DynamicBorder().render(3)).toEqual(["\x1b[38;2;88;88;88m───\x1b[39m"]);
-		}
-	});
-
-	it("grok-night covers every dark.json key and inherits non-§Palette keys verbatim", () => {
-		const darkJson = readThemeJson("dark.json");
-		const nightJson = readThemeJson("grok-night.json");
-		// No missing keys versus dark.json.
-		expect(Object.keys(nightJson.colors).sort()).toEqual(Object.keys(darkJson.colors).sort());
-		// Keys not named by §Palette inherit the resolved dark.json value verbatim.
-		const darkResolved = getResolvedThemeColors("dark");
-		const nightResolved = getResolvedThemeColors("grok-night");
-		for (const key of Object.keys(darkJson.colors)) {
-			if (!(key in NIGHT_PALETTE_MAP)) {
-				expect(nightResolved[key], `grok-night inherits dark ${key}`).toBe(darkResolved[key]);
+		it("grok-night resolves every §Palette-named key to its exact plan hex", () => {
+			const resolved = getResolvedThemeColors("grok-night");
+			for (const [key, hex] of Object.entries(NIGHT_PALETTE_MAP)) {
+				expect(resolved[key], `grok-night ${key}`).toBe(hex);
 			}
-		}
-	});
+			expect(getThemeExportColors("grok-night")).toEqual(NIGHT_EXPORT_MAP);
+		});
 
-	it("grok-day covers every light.json key and inherits non-§Palette keys verbatim", () => {
-		const lightJson = readThemeJson("light.json");
-		const dayJson = readThemeJson("grok-day.json");
-		// No missing keys versus light.json.
-		expect(Object.keys(dayJson.colors).sort()).toEqual(Object.keys(lightJson.colors).sort());
-		// Keys not named by §Palette inherit the resolved light.json value verbatim.
-		const lightResolved = getResolvedThemeColors("light");
-		const dayResolved = getResolvedThemeColors("grok-day");
-		for (const key of Object.keys(lightJson.colors)) {
-			if (!(key in DAY_PALETTE_MAP)) {
-				expect(dayResolved[key], `grok-day inherits light ${key}`).toBe(lightResolved[key]);
+		it("grok-day resolves every §Palette-named key to its exact plan hex", () => {
+			const resolved = getResolvedThemeColors("grok-day");
+			for (const [key, hex] of Object.entries(DAY_PALETTE_MAP)) {
+				expect(resolved[key], `grok-day ${key}`).toBe(hex);
 			}
-		}
-		// Export backgrounds are not §Palette-named for day: inherit light verbatim.
-		const lightExport = getThemeExportColors("light");
-		expect(getThemeExportColors("grok-day")).toEqual(lightExport);
+		});
+
+		it("routes generic modal overlays through the normal border token", () => {
+			for (const themeName of ["grok-night", "grok-day"] as const) {
+				expect(initGrokTheme(themeName, trueColor)).toBe(label);
+				expect(getResolvedThemeColors(themeName).border, `${themeName} modal border`).toBe("#585858");
+				expect(new DynamicBorder().render(3)).toEqual([fg("border", "───")]);
+			}
+		});
+
+		it("grok-night covers every dark.json key and inherits non-§Palette keys verbatim", () => {
+			const darkJson = readThemeJson("dark.json");
+			const nightJson = readThemeJson("grok-night.json");
+			// No missing keys versus dark.json.
+			expect(Object.keys(nightJson.colors).sort()).toEqual(Object.keys(darkJson.colors).sort());
+			// Keys not named by §Palette inherit the resolved dark.json value verbatim.
+			const darkResolved = getResolvedThemeColors("dark");
+			const nightResolved = getResolvedThemeColors("grok-night");
+			for (const key of Object.keys(darkJson.colors)) {
+				if (!(key in NIGHT_PALETTE_MAP)) {
+					expect(nightResolved[key], `grok-night inherits dark ${key}`).toBe(darkResolved[key]);
+				}
+			}
+		});
+
+		it("grok-day covers every light.json key and inherits non-§Palette keys verbatim", () => {
+			const lightJson = readThemeJson("light.json");
+			const dayJson = readThemeJson("grok-day.json");
+			// No missing keys versus light.json.
+			expect(Object.keys(dayJson.colors).sort()).toEqual(Object.keys(lightJson.colors).sort());
+			// Keys not named by §Palette inherit the resolved light.json value verbatim.
+			const lightResolved = getResolvedThemeColors("light");
+			const dayResolved = getResolvedThemeColors("grok-day");
+			for (const key of Object.keys(lightJson.colors)) {
+				if (!(key in DAY_PALETTE_MAP)) {
+					expect(dayResolved[key], `grok-day inherits light ${key}`).toBe(lightResolved[key]);
+				}
+			}
+			// Export backgrounds are not §Palette-named for day: inherit light verbatim.
+			const lightExport = getThemeExportColors("light");
+			expect(getThemeExportColors("grok-day")).toEqual(lightExport);
+		});
 	});
-});
+}
