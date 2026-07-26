@@ -1,7 +1,7 @@
 # Codex app-server protocol
 
 This directory vendors the TypeScript protocol fixture from Codex git commit
-`0fb559f0f6e231a88ac02ea002d3ecd248e2b515` (author date 2026-07-18).
+`9fc715c0861c956c894a91890b78dc05b304ba29` (author date 2026-07-22).
 
 Generated source:
 
@@ -22,6 +22,16 @@ and author date:
 Do not hand-edit files under `generated/`. Update them with
 `packages/coding-agent/scripts/generate-app-server-protocol.sh` when the pinned
 Codex protocol version changes.
+
+The default test suite validates the recorded version and checked-in generated
+tree without consulting an ambient checkout. To opt into the byte-for-byte live
+checkout comparison, set `SENPI_CODEX_CHECKOUT` to a checkout already positioned
+at the pinned commit:
+
+```bash
+SENPI_CODEX_CHECKOUT=/path/to/codex npm test -- \
+  test/suite/app-server-protocol-pin.test.ts
+```
 
 The generated `.ts` files intentionally remain byte-for-byte identical to the
 research artifact. The extra `generated/package.json` file is a local build shim
