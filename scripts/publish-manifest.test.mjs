@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { rewritePublishManifest } from "./publish-manifest.mjs";
 
+const publisherSource = readFileSync(new URL("./publish.mjs", import.meta.url), "utf8");
+
 describe("publish manifest rewrite", () => {
+	it("derives package directories from the declared repository root", () => {
+		assert.match(publisherSource, /pkg\.directory\.slice\(rootDir\.length \+ 1\)/);
+		assert.doesNotMatch(publisherSource, /repoRoot/);
+	});
+
 	it("targets the Senpi fork for OIDC provenance", () => {
 		const manifest = {
 			name: "@earendil-works/pi-ai",
