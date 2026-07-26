@@ -30,6 +30,7 @@ export type TodoToolDetails = {
 	op?: TodoOperation;
 	phases: TodoPhase[];
 	storage: "session" | "memory";
+	corrections?: string[];
 	completedTasks?: TodoCompletionTransition[];
 };
 
