@@ -90,9 +90,14 @@ export interface EvalKernelRunInput {
 	readonly timeoutMs?: number;
 }
 
+export interface KernelInterruptHandle {
+	/** Resolves once the kernel knows whether user state survived the interrupt. */
+	readonly stateRetained: Promise<boolean>;
+}
+
 export interface EvalKernel {
 	run(input: EvalKernelRunInput): Promise<EvalKernelResult>;
-	interrupt(reason?: string): Promise<void>;
+	interrupt(reason?: string): Promise<KernelInterruptHandle>;
 	deliverToolReply(message: Extract<HostToKernelMessage, { type: "tool-reply" }>): void;
 	reset(): Promise<void>;
 	close(): Promise<void>;

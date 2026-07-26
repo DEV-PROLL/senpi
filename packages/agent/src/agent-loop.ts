@@ -961,10 +961,13 @@ async function prepareToolCall(
 
 	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
 	if (!tool) {
+		const hint = config.removedToolHints?.[toolCall.name];
 		return {
 			kind: "immediate",
 			toolCall,
-			result: createErrorToolResult(`Tool ${toolCall.name} not found`),
+			result: createErrorToolResult(
+				hint === undefined ? `Tool ${toolCall.name} not found` : `Tool ${toolCall.name} not found. ${hint}`,
+			),
 			isError: true,
 		};
 	}

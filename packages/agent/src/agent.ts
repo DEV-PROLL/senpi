@@ -119,6 +119,7 @@ export interface AgentOptions {
 	timeoutMs?: number;
 	maxRetryDelayMs?: number;
 	toolExecution?: ToolExecutionMode;
+	removedToolHints?: Record<string, string>;
 	abortServerSideFallback?: boolean;
 }
 
@@ -220,6 +221,8 @@ export class Agent {
 	public maxRetryDelayMs?: number;
 	/** Tool execution strategy for assistant messages that contain multiple tool calls. */
 	public toolExecution: ToolExecutionMode;
+	/** Migration guidance returned when a removed tool name is called. */
+	public removedToolHints: Record<string, string>;
 	/** Forwarded to the stream function; providers without server-side fallback ignore it. */
 	public abortServerSideFallback?: boolean;
 
@@ -245,6 +248,7 @@ export class Agent {
 		this.timeoutMs = runtimeOptions.timeoutMs;
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
+		this.removedToolHints = runtimeOptions.removedToolHints ?? {};
 		this.abortServerSideFallback = runtimeOptions.abortServerSideFallback;
 	}
 
@@ -501,6 +505,7 @@ export class Agent {
 			maxRetryDelayMs: this.maxRetryDelayMs,
 			abortServerSideFallback: this.abortServerSideFallback,
 			toolExecution: this.toolExecution,
+			removedToolHints: this.removedToolHints,
 			beforeToolCall: this.beforeToolCall,
 			afterToolCall: this.afterToolCall,
 			prepareNextTurn:

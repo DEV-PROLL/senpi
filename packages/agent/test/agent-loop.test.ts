@@ -1263,6 +1263,51 @@ describe("agentLoop with AgentMessage", () => {
 		expect(callIndex).toBe(2);
 	});
 
+	it("returns a registered removed-tool hint before extension hooks", async () => {
+		const beforeToolCall = vi.fn(async () => undefined);
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			beforeToolCall,
+			removedToolHints: {
+				exec: 'exec was removed; use eval({ language: "js", code }) instead.',
+			},
+		};
+		let callIndex = 0;
+		const stream = agentLoop([createUserMessage("run code")], context, config, undefined, () => {
+			const response = new MockAssistantStream();
+			queueMicrotask(() => {
+				response.push({
+					type: "done",
+					reason: callIndex === 0 ? "toolUse" : "stop",
+					message:
+						callIndex++ === 0
+							? createAssistantMessage(
+									[{ type: "toolCall", id: "removed-exec", name: "exec", arguments: {} }],
+									"toolUse",
+								)
+							: createAssistantMessage([{ type: "text", text: "done" }]),
+				});
+			});
+			return response;
+		});
+
+		for await (const _event of stream) {
+			// consume
+		}
+
+		const messages = await stream.result();
+		const result = messages.find(
+			(message): message is Extract<AgentMessage, { role: "toolResult" }> => message.role === "toolResult",
+		);
+		expect(result?.isError).toBe(true);
+		expect(result?.content).toEqual([
+			{ type: "text", text: 'Tool exec not found. exec was removed; use eval({ language: "js", code }) instead.' },
+		]);
+		expect(beforeToolCall).not.toHaveBeenCalled();
+	});
+
 	it("should execute mutated beforeToolCall args without revalidation", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		const executed: Array<string | number> = [];

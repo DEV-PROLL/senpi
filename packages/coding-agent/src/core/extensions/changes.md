@@ -1,5 +1,15 @@
 # Core Extensions Changes
 
+## 2026-07-26 - AgentEndEvent abort payload + goal resume at before_agent_start
+
+### What changed
+- `AgentEndEvent` gained optional `aborted?: boolean` and `abortSource?: "user" | "system"` (public API addition; goal builtin uses it to block active goals on user abort).
+- `builtin/goal` resumes a blocked goal inside `before_agent_start` (real-user-prompt-only event) instead of a sticky flag consumed at `agent_start`, removing the stale-flag race when final provider admission rejects a run.
+
+### Expected merge conflict zones
+- LOW: `types.ts` around the AgentEndEvent interface; `builtin/goal/index.ts` event handlers.
+
+
 ## 2026-07-25 - Config-reload skips routine cross-process settings changes
 
 ### What changed

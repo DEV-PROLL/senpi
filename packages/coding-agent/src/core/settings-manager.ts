@@ -56,6 +56,11 @@ export interface TerminalSettings {
 	maxSessions?: number; // default: 32 (concurrent background sessions before LRU-exited pruning)
 	timeoutAction?: "background" | "kill"; // default: "background" (fate of a foreground timeout)
 	notify?: "wake" | "next-turn" | "off"; // default: "wake" (async completion wake behavior)
+	monitorCoalesceWindowMs?: number; // default: 2000 (event batching window)
+	monitorRateLimitMs?: number; // default: 5000 (minimum interval per monitor injection)
+	monitorMaxLinesPerInjection?: number; // default: 50 (bounded monitor event batch)
+	monitorMaxCharsPerInjection?: number; // default: 4096 (bounded monitor event batch)
+	monitorWakeBudget?: number; // default: 5 (consecutive monitor-only wake limit)
 }
 
 export interface ImageSettings {
@@ -108,9 +113,6 @@ export type PackageSource =
 			themes?: string[];
 			hooks?: string[];
 	  };
-
-/** Default neo shared-daemon idle shutdown period: 30 minutes. */
-export const DEFAULT_NEO_DAEMON_IDLE_SHUTDOWN_MS = 30 * 60 * 1000;
 
 export interface Settings {
 	lastChangelogVersion?: string;
@@ -166,16 +168,6 @@ export interface Settings {
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Pi-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
-	neoDaemon?: NeoDaemonSettings; // neo (Go TUI) shared daemon tuning
-}
-
-export interface NeoDaemonSettings {
-	/**
-	 * Idle shutdown period for the neo shared daemon, in milliseconds. The daemon
-	 * exits after this long with zero connections. 0 disables idle shutdown.
-	 * Default: 30 minutes.
-	 */
-	idleShutdownMs?: number;
 }
 
 /**
@@ -1076,18 +1068,6 @@ export class SettingsManager {
 
 	getHttpIdleTimeoutMs(): number {
 		return parseTimeoutSetting(this.settings.httpIdleTimeoutMs, "httpIdleTimeoutMs") ?? DEFAULT_HTTP_IDLE_TIMEOUT_MS;
-	}
-
-	/**
-	 * Idle shutdown period (ms) for the neo shared daemon. Defaults to 30 minutes.
-	 * A value of 0 disables idle shutdown. Invalid values fall back to the default.
-	 */
-	getNeoDaemonIdleShutdownMs(): number {
-		const value = this.settings.neoDaemon?.idleShutdownMs;
-		if (value === undefined || !Number.isFinite(value) || value < 0) {
-			return DEFAULT_NEO_DAEMON_IDLE_SHUTDOWN_MS;
-		}
-		return Math.floor(value);
 	}
 
 	setHttpIdleTimeoutMs(timeoutMs: number): void {
