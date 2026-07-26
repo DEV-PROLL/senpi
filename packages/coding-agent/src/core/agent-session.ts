@@ -136,8 +136,8 @@ import { SessionWorkBarrier } from "./session-work-barrier.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
-import { resetTimings, time } from "./timings.ts";
 import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinking-levels.ts";
+import { resetTimings, time } from "./timings.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
@@ -4919,9 +4919,7 @@ export class AgentSession {
 				refreshedModels,
 			),
 		);
-		this.setFavoriteModels(
-			await resolveModelScope(this.settingsManager.getFavoriteModels() ?? [], refreshedModels),
-		);
+		this.setFavoriteModels(await resolveModelScope(this.settingsManager.getFavoriteModels() ?? [], refreshedModels));
 		time("models", "reload");
 		await this._resourceLoader.reload({ settingsAlreadyReloaded: true });
 		time("resources", "reload");

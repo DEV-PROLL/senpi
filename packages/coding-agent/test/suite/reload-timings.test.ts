@@ -63,6 +63,11 @@ describe("reload phase timings", () => {
 									id: registeredModel.id,
 									name: registeredModel.name,
 									api: registeredModel.api,
+									reasoning: registeredModel.reasoning,
+									input: registeredModel.input,
+									cost: registeredModel.cost,
+									contextWindow: registeredModel.contextWindow,
+									maxTokens: registeredModel.maxTokens,
 								})),
 							});
 						},

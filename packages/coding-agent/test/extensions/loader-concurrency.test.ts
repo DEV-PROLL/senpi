@@ -20,7 +20,9 @@ async function writeFixture(directory: string, name: string, source: string): Pr
 }
 
 afterEach(async () => {
-	await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+	await Promise.all(
+		temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+	);
 });
 
 describe("extension loader import concurrency", () => {
@@ -73,7 +75,11 @@ describe("extension loader import concurrency", () => {
 
 	it("preserves import and factory failure attribution", async () => {
 		const directory = await createFixtureDirectory();
-		const importFailurePath = await writeFixture(directory, "import-failure.ts", 'throw new Error("import fixture failure");\n');
+		const importFailurePath = await writeFixture(
+			directory,
+			"import-failure.ts",
+			'throw new Error("import fixture failure");\n',
+		);
 		const factoryFailurePath = await writeFixture(
 			directory,
 			"factory-failure.ts",
