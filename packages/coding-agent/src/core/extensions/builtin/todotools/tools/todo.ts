@@ -109,7 +109,10 @@ function renderCallLabel(params: TodoParams): string {
 			return `todo rm: ${sanitizeTodoText(params.task ?? params.phase ?? "all") || "all"}`;
 		case "view":
 			return "todo view";
-		default:
+		// Normalization can rescue a call that omitted `op`; label it generically until
+		// execute resolves the effective operation. Listing `undefined` explicitly (instead
+		// of `default`) keeps this switch exhaustive, so a new TodoOperation fails typecheck.
+		case undefined:
 			return "todo";
 	}
 }
@@ -194,16 +197,32 @@ function computeTouchedPhases(
 		if (activePhase) touched.add(activePhase.name);
 	}
 	for (const transition of completedTasks) touched.add(transition.phase);
-	if (operation === "init") {
-		for (const phase of phases) touched.add(phase.name);
-	} else {
-		if (args.phase) {
-			const phase = phases.find((candidate) => candidate.name === args.phase);
-			if (phase) touched.add(phase.name);
+	// Exhaustive over TodoOperation | undefined so adding an operation is a typecheck
+	// failure here rather than a silent fall-through into target-scoped highlighting.
+	switch (operation) {
+		case "init":
+			for (const phase of phases) touched.add(phase.name);
+			break;
+		case "start":
+		case "done":
+		case "drop":
+		case "rm":
+		case "append":
+		case "view":
+		case undefined: {
+			if (args.phase) {
+				const phase = phases.find((candidate) => candidate.name === args.phase);
+				if (phase) touched.add(phase.name);
+			}
+			if (args.task) {
+				const hit = findTaskByContent([...phases], args.task);
+				if (hit) touched.add(hit.phase.name);
+			}
+			break;
 		}
-		if (args.task) {
-			const hit = findTaskByContent([...phases], args.task);
-			if (hit) touched.add(hit.phase.name);
+		default: {
+			const _exhaustive: never = operation;
+			return touched.size > 0 ? touched : null;
 		}
 	}
 	return touched.size > 0 ? touched : null;
