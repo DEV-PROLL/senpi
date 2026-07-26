@@ -3788,14 +3788,6 @@ export class InteractiveMode {
 	 * If multiple status messages are emitted back-to-back (without anything else being added to the chat),
 	 * we update the previous status line instead of appending new ones to avoid log spam.
 	 */
-	private showReloadTimings(): void {
-		const summary = formatTimings("reload");
-		const breakdown = formatTimings("extensions");
-		if (summary === undefined) return;
-		this.showStatus(`reload timings: ${summary}`);
-		if (breakdown !== undefined) this.showStatus(`resource timings: ${breakdown}`);
-	}
-
 	private showStatus(message: string): void {
 		const children = this.chatContainer.children;
 		const last = children.length > 0 ? children[children.length - 1] : undefined;
@@ -6081,12 +6073,13 @@ export class InteractiveMode {
 			if (modelsJsonError) {
 				this.showError(`models.json error: ${modelsJsonError}`);
 			}
+			const reloadedMessage = savedImplicitProjectTrust
+				? "Reloaded keybindings, extensions, skills, prompts, themes, and context files; saved project trust"
+				: "Reloaded keybindings, extensions, skills, prompts, themes, and context files";
+			const reloadTimings = formatTimings("reload");
 			this.showStatus(
-				savedImplicitProjectTrust
-					? "Reloaded keybindings, extensions, skills, prompts, themes, and context files; saved project trust"
-					: "Reloaded keybindings, extensions, skills, prompts, themes, and context files",
+				reloadTimings === undefined ? reloadedMessage : `${reloadedMessage} | reload timings: ${reloadTimings}`,
 			);
-			this.showReloadTimings();
 			dismissReloadBox(this.editor as Component);
 			reloadBoxDismissed = true;
 		} catch (error) {
