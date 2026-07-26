@@ -46,6 +46,30 @@
 
 - LOW: `interactive-mode.ts` around `uncaughtCrash()` and `registerSignalHandlers()`.
 
+## bounded compaction progress row (2026-07-24)
+
+### What changed
+
+- `components/status-indicator.ts`: the combined compaction spinner, status, and streamed preview is truncated to the
+  actual terminal width. The status label (including its cancellation hint) is allocated first and the preview only
+  receives the leftover columns; when a preview appears, the reason-specific label collapses to the shortest form that
+  still shows the hint. The preview keeps the newest trailing columns of the accumulated summary, and the indicator is
+  a single row both before and after the first progress event.
+- `../../../test/interactive-mode-compaction.test.ts`: pins a hostile multiline, 600-column progress update to one
+  rendered row no wider than the requested terminal width, with the cancellation hint retained and the newest streamed
+  text (not the frozen opening words) visible.
+
+### Why
+
+- Long streamed summaries could wrap the otherwise single-row lifecycle indicator, push the composer upward, and make
+  previous output appear erased as the terminal viewport remapped. A fixed half-width preview reservation could also
+  starve the `esc to cancel` hint out of the row, head-first truncation froze the preview on the opening words of the
+  summary, and the empty-preview state rendered a second spacer row that shifted the composer when progress arrived.
+
+### Expected merge conflict zones
+
+- LOW: `components/status-indicator.ts` compaction progress rendering.
+
 ## accepted-only compaction queue transfer (2026-07-24)
 
 ### What changed

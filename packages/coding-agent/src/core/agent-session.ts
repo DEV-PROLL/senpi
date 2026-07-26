@@ -4358,12 +4358,20 @@ export class AgentSession {
 		this._claimCompactionController(autoCompactionController, "auto");
 		const endBeforeExecution = (): false => {
 			this._emit({ type: "compaction_start", reason });
-			if (reason === "overflow") this._overflowRecoveryAttempted = false;
+			if (reason === "overflow" && this._autoCompactionAbortController === autoCompactionController) {
+				this._overflowRecoveryAttempted = false;
+			}
+			// A synchronous compaction_start listener can supersede this controller with a new
+			// operation, which then owns its own start/end lifecycle; publishing another terminal
+			// event here would be stale. A listener can instead abort this very controller, and
+			// that still needs a terminal event: consumers open UI state on compaction_start and
+			// close it only on compaction_end.
+			if (this._autoCompactionAbortController !== autoCompactionController) return false;
 			this._emit({
 				type: "compaction_end",
 				reason,
 				result: undefined,
-				aborted: false,
+				aborted: autoCompactionController.signal.aborted,
 				willRetry: false,
 			});
 			return false;
