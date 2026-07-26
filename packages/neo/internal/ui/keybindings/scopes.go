@@ -21,7 +21,7 @@ var scopeActions = map[Scope][]string{
 		"app.interrupt", "app.clear", "app.exit", "app.suspend",
 		"app.thinking.cycle", "app.thinking.toggle",
 		"app.model.cycleForward", "app.model.cycleBackward", "app.model.select",
-		"app.history.search", "app.sessions.observe", "app.tools.expand",
+		"app.history.search", "app.tools.expand",
 		"app.session.toggleNamedFilter", "app.editor.external",
 		"app.message.followUp", "app.message.dequeue", "app.clipboard.pasteImage",
 		"app.session.new", "app.session.tree", "app.session.fork", "app.session.resume",

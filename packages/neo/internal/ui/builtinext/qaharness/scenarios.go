@@ -32,17 +32,6 @@ func userLine(text string, ts int64) string {
 	return string(b)
 }
 
-func assistantLine(text string, ts int64) string {
-	b, _ := json.Marshal(map[string]any{
-		"type": "message", "id": "a-" + strconv.FormatInt(ts, 10), "parentId": "p", "timestamp": iso(ts),
-		"message": map[string]any{
-			"role": "assistant", "model": "gpt-5",
-			"content": []any{map[string]any{"type": "text", "text": text}},
-		},
-	})
-	return string(b)
-}
-
 // seedTwoSessions writes two fixture session files under a temp sessions root and
 // returns the root. Prompts are seeded so history search finds matches across
 // BOTH sessions (the happy scenario).
@@ -102,59 +91,6 @@ func runHistory(th *theme.Theme, km *keybindings.Manager, width int, query strin
 	// happy scenario finds seeded history across BOTH fixture sessions.
 	fmt.Fprintf(os.Stderr, "history: %d prompts indexed across 2 sessions; %d match query %q\n",
 		len(entries), len(ov.FilteredEntries()), query)
-	emit(ov.Render(width))
-}
-
-func runObserver(th *theme.Theme, km *keybindings.Manager, width int) {
-	root, err := os.MkdirTemp("", "t14-observer-")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "tmp failed:", err)
-		os.Exit(1)
-	}
-	defer func() { _ = os.RemoveAll(root) }()
-	dir := filepath.Join(root, "--repo-live--")
-	_ = os.MkdirAll(dir, 0o755)
-	file := filepath.Join(dir, "20260520_live-session.jsonl")
-
-	// Initial content: header + one user prompt.
-	_ = os.WriteFile(file, []byte(strings.Join([]string{
-		sessionLine("live-session", "/repo/live", baseTime),
-		userLine("start the live run", baseTime+1_000),
-	}, "\n")+"\n"), 0o644)
-
-	tail := builtinext.NewSessionTail(file)
-	snap, err := tail.Load()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "load failed:", err)
-		os.Exit(1)
-	}
-	fmt.Fprintf(os.Stderr, "observer: initial entries=%d\n", len(snap.Entries))
-
-	// Simulate the file GROWING as a live session appends (the failure scenario:
-	// tail behavior, no crash).
-	f, _ := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0o644)
-	for i := 1; i <= 3; i++ {
-		ts := baseTime + int64(1_000+i*1_000)
-		_, _ = f.WriteString(assistantLine(fmt.Sprintf("progress step %d", i), ts) + "\n")
-	}
-	_ = f.Close()
-
-	snap2, err := tail.Load()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "reload after growth failed:", err)
-		os.Exit(1)
-	}
-	fmt.Fprintf(os.Stderr, "observer: after growth entries=%d grew=%v (no crash)\n", len(snap2.Entries), tail.Grew())
-
-	// Render the HUD viewer over the grown session so the frame proves the tailed
-	// transcript renders the appended entries.
-	sessions, _ := builtinext.ScanSessionHudEntries(root, file)
-	ov := builtinext.NewSessionHudOverlay(builtinext.SessionHudOptions{
-		Sessions: sessions, Theme: th, Keybindings: km,
-		Done: func() {}, RequestRender: func() {},
-	})
-	ov.HandleInput("\r") // open the viewer on the (only) session
-	ov.Refresh(width)
 	emit(ov.Render(width))
 }
 
