@@ -16,6 +16,36 @@
 
 - LOW: the `chrome` constructor option and the `this.chrome ?` branches in `interactive-mode.ts`; the `grok/` directory is additive.
 
+## Inspector VM-import rejection recovery (2026-07-24)
+
+### What changed
+
+- With `SENPI_RECOVER_INSPECTOR_VM_IMPORT=1` set at process start, interactive mode keeps running when an active Node
+  Inspector evaluation creates the exact `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` unhandled rejection from an
+  `<anonymous>` timer callback. Recovery remains disabled by default and is documented in
+  `../../../docs/environment-variables.md`.
+- The TUI shows guidance to use `require()` or a target-side loader.
+- `cli-main.ts` installs the recovery seam before the asynchronous bootstrap, so a rejection fired while paused at an
+  `--inspect-brk` breakpoint (before `registerSignalHandlers()` runs) is also recovered; the TUI warning is deferred
+  until the handler registration consumes the pending recovery count.
+- Crash-policy inspection is non-throwing: hostile rejection values with throwing `has` traps or `code`/`stack`
+  getters are classified as non-recoverable instead of terminating the process inside the uncaughtException handler.
+- Application-owned `evalmachine.<anonymous>` failures and every unrelated uncaught exception retain the existing
+  terminal restoration and exit-1 behavior.
+
+### Why
+
+- Node's Inspector evaluator does not provide a dynamic-import callback. A delayed `import()` from `node inspect exec`
+  previously surfaced as a process-wide uncaught exception and terminated an otherwise healthy debugging session.
+
+### Why extension system couldn't handle this
+
+- The rejection reaches the process-wide fatal handler before extension-level tool or event hooks can intercept it.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` around `uncaughtCrash()` and `registerSignalHandlers()`.
+
 ## bounded compaction progress row (2026-07-24)
 
 ### What changed
