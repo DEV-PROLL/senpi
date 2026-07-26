@@ -460,6 +460,133 @@ describe("AgentSession compaction characterization", () => {
 		expect(getStreamCallCount()).toBe(1);
 	});
 
+	it("balances auto-compaction events when there is nothing to prepare", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+
+		await runAutoCompaction(harness.session, "threshold", false);
+
+		const compactionEvents = harness.events.filter(
+			(event) => event.type === "compaction_start" || event.type === "compaction_end",
+		);
+		expect(compactionEvents).toEqual([
+			{ type: "compaction_start", reason: "threshold" },
+			expect.objectContaining({
+				type: "compaction_end",
+				reason: "threshold",
+				result: undefined,
+				aborted: false,
+				willRetry: false,
+			}),
+		]);
+	});
+
+	it("publishes an aborted preflight end after a start listener aborts auto-compaction", async () => {
+		const harness = await createHarness({ withConfiguredAuth: false });
+		harnesses.push(harness);
+		harness.session.subscribe((event) => {
+			if (event.type === "compaction_start" && event.reason === "threshold") {
+				harness.session.abortCompaction();
+			}
+		});
+
+		await runAutoCompaction(harness.session, "threshold", false);
+
+		// Consumers open UI state (progress indicator, Escape override) on compaction_start and
+		// close it only on compaction_end, so a same-controller abort must stay balanced.
+		expect(harness.eventsOfType("compaction_start")).toEqual([{ type: "compaction_start", reason: "threshold" }]);
+		expect(harness.eventsOfType("compaction_end")).toEqual([
+			expect.objectContaining({
+				type: "compaction_end",
+				reason: "threshold",
+				result: undefined,
+				aborted: true,
+				willRetry: false,
+			}),
+		]);
+	});
+
+	it("does not consume overflow recovery when a start listener aborts preflight auto-compaction", async () => {
+		const harness = await createHarness({ withConfiguredAuth: false });
+		harnesses.push(harness);
+		const timestamp = Date.now();
+		const firstOverflow = createAssistant(harness, {
+			stopReason: "error",
+			errorMessage: "prompt is too long",
+			timestamp,
+		});
+		const secondOverflow = createAssistant(harness, {
+			stopReason: "error",
+			errorMessage: "prompt is too long",
+			timestamp: timestamp + 1,
+		});
+		const userMessage = {
+			role: "user" as const,
+			content: [{ type: "text" as const, text: "continue" }],
+			timestamp: timestamp - 1,
+		};
+		harness.session.subscribe((event) => {
+			if (event.type === "compaction_start" && event.reason === "overflow") {
+				harness.session.abortCompaction();
+			}
+		});
+
+		harness.session.agent.state.messages = [userMessage, firstOverflow];
+		await checkCompaction(harness.session, firstOverflow);
+		harness.session.agent.state.messages = [userMessage, secondOverflow];
+		await checkCompaction(harness.session, secondOverflow);
+
+		const overflowStarts = harness.eventsOfType("compaction_start").filter((event) => event.reason === "overflow");
+		const overflowEnds = harness.eventsOfType("compaction_end").filter((event) => event.reason === "overflow");
+		expect(overflowStarts).toHaveLength(2);
+		expect(overflowEnds).toEqual([
+			expect.objectContaining({ result: undefined, aborted: true, willRetry: false }),
+			expect.objectContaining({ result: undefined, aborted: true, willRetry: false }),
+		]);
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(0);
+	});
+
+	it("retains overflow retry exhaustion when a start listener supersedes preflight auto-compaction", async () => {
+		const harness = await createHarness({ withConfiguredAuth: false });
+		harnesses.push(harness);
+		const timestamp = Date.now();
+		const firstOverflow = createAssistant(harness, {
+			stopReason: "error",
+			errorMessage: "prompt is too long",
+			timestamp,
+		});
+		const secondOverflow = createAssistant(harness, {
+			stopReason: "error",
+			errorMessage: "prompt is too long",
+			timestamp: timestamp + 1,
+		});
+		const userMessage = {
+			role: "user" as const,
+			content: [{ type: "text" as const, text: "continue" }],
+			timestamp: timestamp - 1,
+		};
+		let supersedingCompaction: Promise<void> | undefined;
+		harness.session.subscribe((event) => {
+			if (event.type === "compaction_start" && event.reason === "overflow" && !supersedingCompaction) {
+				supersedingCompaction = runAutoCompaction(harness.session, "threshold", false);
+			}
+		});
+
+		harness.session.agent.state.messages = [userMessage, firstOverflow];
+		await checkCompaction(harness.session, firstOverflow);
+		if (!supersedingCompaction) throw new Error("Expected the listener to supersede overflow compaction");
+		await supersedingCompaction;
+		harness.session.agent.state.messages = [userMessage, secondOverflow];
+		await checkCompaction(harness.session, secondOverflow);
+
+		const terminalOverflowFailures = harness
+			.eventsOfType("compaction_end")
+			.filter((event) =>
+				event.errorMessage?.startsWith("Context overflow recovery failed after one compact-and-retry attempt"),
+			);
+		expect(terminalOverflowFailures).toHaveLength(1);
+	});
+
 	it("does not emit compaction events for a normal response below the threshold", async () => {
 		// given
 		const harness = await createHarness({
@@ -1425,12 +1552,12 @@ describe("AgentSession compaction characterization", () => {
 		await checkCompaction(harness.session, secondOverflow);
 
 		const overflowStarts = harness.eventsOfType("compaction_start").filter((event) => event.reason === "overflow");
-		const terminalOverflowFailures = harness
-			.eventsOfType("compaction_end")
-			.filter((event) =>
-				event.errorMessage?.startsWith("Context overflow recovery failed after one compact-and-retry attempt"),
-			);
+		const overflowEnds = harness.eventsOfType("compaction_end").filter((event) => event.reason === "overflow");
+		const terminalOverflowFailures = overflowEnds.filter((event) =>
+			event.errorMessage?.startsWith("Context overflow recovery failed after one compact-and-retry attempt"),
+		);
 		expect(overflowStarts).toHaveLength(2);
+		expect(overflowEnds).toHaveLength(2);
 		expect(terminalOverflowFailures).toHaveLength(0);
 	});
 
