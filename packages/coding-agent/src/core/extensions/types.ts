@@ -874,6 +874,10 @@ export interface AgentStartEvent {
 export interface AgentEndEvent {
 	type: "agent_end";
 	messages: AgentMessage[];
+	/** True when the agent run ended through an abort rather than normal completion. */
+	aborted?: boolean;
+	/** Present when the host can attribute the abort to a user action or internal operation. */
+	abortSource?: "user" | "system";
 }
 
 /** Fired after an agent run has fully settled and no automatic retry, compaction, or queued continuation will run. */
