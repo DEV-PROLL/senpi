@@ -29,6 +29,8 @@ export class FakeKernel implements EvalKernel {
 	readonly interrupts: Array<string | undefined> = [];
 	resetCount = 0;
 	closeCount = 0;
+	/** Outcome reported by interrupt(); tests flip to false to simulate a killed kernel. */
+	stateRetainedOnInterrupt = true;
 	private readonly messages: KernelToHostMessage[];
 	private deferredRun: { readonly started: Deferred<void>; readonly result: Deferred<KernelResult> } | undefined;
 
@@ -90,7 +92,7 @@ export class FakeKernel implements EvalKernel {
 			error: { message: reason ?? "Eval interrupted" },
 			durationMs: 0,
 		});
-		return { stateRetained: Promise.resolve(true) };
+		return { stateRetained: Promise.resolve(this.stateRetainedOnInterrupt) };
 	}
 
 	deliverToolReply(message: unknown): void {

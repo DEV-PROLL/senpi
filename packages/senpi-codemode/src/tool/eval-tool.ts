@@ -8,6 +8,7 @@ import { buildEvalPrompt } from "../prompt/eval-prompt.ts";
 import { TIMEOUT_PAUSE_OP, TIMEOUT_RESUME_OP } from "../timeouts/bridge-timeout.ts";
 import { IdleTimeout, type IdleTimeoutOptions, type TimeoutPauseHandle } from "../timeouts/idle-timeout.ts";
 import { CellHandler, type CellState } from "./cell-handler.ts";
+import { interruptionStateNote } from "./interrupt-note.ts";
 import { EvalDetachedCellManager, type EvalDetachedCellSnapshot } from "./detached-cell-manager.ts";
 import type { EvalImageResizer } from "./image.ts";
 import {
@@ -445,11 +446,9 @@ function detachedResult(snapshot: EvalDetachedCellSnapshot, input: EvalToolInput
 
 function snapshotResult(snapshot: EvalDetachedCellSnapshot): AgentToolResult<EvalToolDetails> {
 	const terminationNote =
-		snapshot.state === "cancelled" && snapshot.language === "js"
-			? "JavaScript worker was restarted; VM state was lost."
-			: snapshot.state === "cancelled" && snapshot.language === "py"
-				? "Python kernel was interrupted; its existing variables are preserved."
-				: undefined;
+		snapshot.state === "cancelled"
+			? interruptionStateNote(snapshot.language, snapshot.stateRetained)
+			: undefined;
 	const text = [
 		`Eval cell ${snapshot.cellId} (${snapshot.language}) is ${snapshot.state}.`,
 		snapshot.outputTail.length === 0 ? "(no buffered output)" : snapshot.outputTail,
