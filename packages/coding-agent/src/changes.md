@@ -20,6 +20,14 @@
 
 # changes
 
+## MCP reload connection preservation and recovery (2026-07-26)
+
+- Unchanged MCP servers now survive `/reload`; re-attach uses config-hash
+  reconciliation to retain them while replacing changed servers and disposing
+  removed ones.
+- `/mcp reconnect <name>` force-restarts a wedged server, including a stdio
+  server whose child process has exited.
+
 ## Multi-session RPC mode, session-owned MCP/config-reload state, and back-compat guarantee (2026-07-23)
 
 ### What changed

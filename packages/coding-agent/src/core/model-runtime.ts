@@ -589,9 +589,6 @@ export class ModelRuntime implements Models {
 	}
 
 	async reloadConfig(): Promise<void> {
-		this.config = await ModelConfig.load(this.modelsPath);
-		this.configureRadiusProviders();
-		this.rebuildProviders();
 		await this.refresh({ allowNetwork: this.modelNetworkEnabled });
 	}
 

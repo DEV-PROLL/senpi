@@ -39,7 +39,7 @@ import { SettingsManager } from "./settings-manager.ts";
 import type { Skill } from "./skills.ts";
 import { loadSkills } from "./skills.ts";
 import { createSourceInfo, type SourceInfo } from "./source-info.ts";
-import { resetTimings } from "./timings.ts";
+import { resetTimings, time } from "./timings.ts";
 
 export interface ResourceExtensionPaths {
 	skillPaths?: Array<{ path: string; metadata: PathMetadata }>;
@@ -50,6 +50,12 @@ export interface ResourceExtensionPaths {
 
 export interface ResourceLoaderReloadOptions {
 	resolveProjectTrust?: (input: { extensionsResult: LoadExtensionsResult }) => Promise<boolean>;
+	/**
+	 * Set by callers that already reloaded settings immediately before this call.
+	 * Ignored while project trust is being resolved: that path must re-read
+	 * settings after the trust flip so project-scoped values are never stale.
+	 */
+	settingsAlreadyReloaded?: boolean;
 }
 
 export interface ResourceLoader {
@@ -495,11 +501,15 @@ export class DefaultResourceLoader implements ResourceLoader {
 		}
 
 		// reload() preserves SettingsManager.projectTrusted and reloads settings for that trust state.
-		await this.settingsManager.reload();
+		const settingsAreFresh = options?.settingsAlreadyReloaded === true && options?.resolveProjectTrust === undefined;
+		if (!settingsAreFresh) {
+			await this.settingsManager.reload();
+		}
 		const resolvedPaths = await this.packageManager.resolve();
 		const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
 			temporary: true,
 		});
+		time("packageResolve", "extensions");
 		const metadataByPath = new Map<string, PathMetadata>();
 
 		this.extensionSkillSourceInfos = new Map();
@@ -582,8 +592,10 @@ export class DefaultResourceLoader implements ResourceLoader {
 			? this.mergePaths(cliEnabledSkills, this.additionalSkillPaths)
 			: this.mergePaths([...cliEnabledSkills, ...enabledSkills], this.additionalSkillPaths);
 
+		time("extensionsLoaded", "extensions");
 		this.lastSkillPaths = skillPaths;
 		this.updateSkillsFromPaths(skillPaths, metadataByPath);
+		time("skills", "extensions");
 		for (const p of this.additionalSkillPaths) {
 			if (isLocalPath(p)) {
 				const resolved = this.resolveResourcePath(p);
@@ -599,6 +611,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		this.lastPromptPaths = promptPaths;
 		this.updatePromptsFromPaths(promptPaths, metadataByPath);
+		time("prompts", "extensions");
 		for (const p of this.additionalPromptTemplatePaths) {
 			if (isLocalPath(p)) {
 				const resolved = this.resolveResourcePath(p);
@@ -618,6 +631,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		this.lastThemePaths = themePaths;
 		this.updateThemesFromPaths(themePaths, metadataByPath);
+		time("themes", "extensions");
 		for (const p of this.additionalThemePaths) {
 			const resolved = this.resolveResourcePath(p);
 			if (!existsSync(resolved) && !this.themeDiagnostics.some((d) => d.path === resolved)) {
@@ -635,6 +649,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
+		time("contextFiles", "extensions");
 
 		// SYSTEM.md / APPEND_SYSTEM.md file discovery was intentionally removed; the explicit
 		// options are the only static prompt source (see packages/coding-agent/changes.md).
