@@ -440,6 +440,8 @@ export default function compactionExtension(
 		const previousWindow = event.previousModel?.contextWindow ?? 0;
 		const contextWindow = ctx.model?.contextWindow ?? 0;
 		if (previousWindow <= contextWindow) return;
+		// Usage is intentionally pre-switch accounting measured against the new,
+		// smaller window: this is the overflow risk the warm start must absorb.
 		const usage = ctx.getContextUsage();
 		if (!usage) return;
 		const settings = ctx.getCompactionSettings();

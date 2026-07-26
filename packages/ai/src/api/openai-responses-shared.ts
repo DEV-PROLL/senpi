@@ -347,6 +347,7 @@ export function convertResponsesMessages<TApi extends Api>(
 						// text, mirroring the cross-model policy in transformMessages.
 						pushAssistantText(block.thinking);
 					}
+					// Signed foreign blocks with no text are intentionally dropped.
 				} else if (block.type === "providerNative") {
 				} else if (block.type === "text") {
 					const textBlock = block as TextContent;

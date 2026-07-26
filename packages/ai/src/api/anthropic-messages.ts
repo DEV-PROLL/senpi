@@ -1500,6 +1500,7 @@ function disableThinkingForRequest(
 	model: Model<"anthropic-messages">,
 	compat: { supportsDisabledThinking: boolean },
 ): void {
+	// A degraded/disabled turn must not retain the caller's higher effort.
 	delete (params as { output_config?: unknown }).output_config;
 	if (cannotDisableThinking(model, compat)) {
 		delete params.thinking;
