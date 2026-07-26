@@ -11,6 +11,11 @@ import {
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
+import {
+	createTerminalFailureAssistantMessage,
+	normalizeTerminalAssistantMessage,
+	shouldTerminateAssistantTurn,
+} from "./assistant-terminal-state.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
@@ -151,15 +156,6 @@ function createAgentStream(): EventStream<AgentEvent, AgentMessage[]> {
 	);
 }
 
-const EMPTY_USAGE = {
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-	totalTokens: 0,
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-} satisfies AssistantMessage["usage"];
-
 class StreamIdleTimeoutError extends Error {
 	constructor(timeoutMs: number) {
 		super(`Idle timeout waiting for provider stream after ${timeoutMs}ms`);
@@ -230,7 +226,7 @@ async function runLoop(
 			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFunction);
 			newMessages.push(message);
 
-			if (message.stopReason === "error" || message.stopReason === "aborted") {
+			if (shouldTerminateAssistantTurn(message)) {
 				await emit({ type: "turn_end", message, toolResults: [] });
 				await emit({ type: "agent_end", messages: newMessages });
 				return;
@@ -692,49 +688,6 @@ type ExecutedToolCallBatch = {
 	messages: ToolResultMessage[];
 	terminate: boolean;
 };
-
-type TerminalAssistantMessageEvent = Extract<AssistantMessageEvent, { type: "done" | "error" }>;
-
-function createTerminalFailureAssistantMessage(
-	model: AgentLoopConfig["model"],
-	reason: Extract<AssistantMessage["stopReason"], "aborted" | "error">,
-	error: unknown,
-	partialMessage: AssistantMessage | null,
-): AssistantMessage {
-	const errorMessage = error instanceof Error ? error.message : String(error);
-	return {
-		role: "assistant",
-		content: partialMessage?.content ?? [{ type: "text", text: "" }],
-		api: partialMessage?.api ?? model.api,
-		provider: partialMessage?.provider ?? model.provider,
-		model: partialMessage?.model ?? model.id,
-		responseModel: partialMessage?.responseModel,
-		responseId: partialMessage?.responseId,
-		diagnostics: partialMessage?.diagnostics,
-		usage: partialMessage?.usage ?? EMPTY_USAGE,
-		stopReason: reason,
-		errorMessage: errorMessage || (reason === "aborted" ? "Request was aborted" : "Error"),
-		timestamp: partialMessage?.timestamp ?? Date.now(),
-	};
-}
-
-function normalizeTerminalAssistantMessage(
-	message: AssistantMessage,
-	event: TerminalAssistantMessageEvent,
-): AssistantMessage {
-	if (event.type === "done") {
-		return message;
-	}
-	const errorMessage = message.errorMessage ?? (event.reason === "aborted" ? "Request was aborted" : "Error");
-	if (message.stopReason === event.reason && message.errorMessage === errorMessage) {
-		return message;
-	}
-	return {
-		...message,
-		stopReason: event.reason,
-		errorMessage,
-	};
-}
 
 async function executeToolCallsSequential(
 	currentContext: AgentContext,
