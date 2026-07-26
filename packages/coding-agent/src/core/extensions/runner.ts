@@ -709,6 +709,10 @@ export class ExtensionRunner {
 		}
 	}
 
+	get isActive(): boolean {
+		return this.staleMessage === undefined;
+	}
+
 	private assertActive(): void {
 		if (this.staleMessage) {
 			throw new Error(this.staleMessage);

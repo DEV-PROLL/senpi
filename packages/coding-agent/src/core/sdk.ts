@@ -368,7 +368,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 						options?.sessionId,
 						requestHeaders,
 					);
-					return headerRunner?.hasHandlers("before_provider_headers")
+					return headerRunner?.isActive && headerRunner.hasHandlers("before_provider_headers")
 						? headerRunner.emitBeforeProviderHeaders(headers ?? {})
 						: (headers ?? {});
 				},
@@ -376,14 +376,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		onPayload: async (payload, _model, request) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("before_provider_request")) {
+			if (!runner?.isActive || !runner.hasHandlers("before_provider_request")) {
 				return payload;
 			}
 			return runner.emitBeforeProviderRequest(payload, undefined, request);
 		},
 		onResponse: async (response, _model) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("after_provider_response")) {
+			if (!runner?.isActive || !runner.hasHandlers("after_provider_response")) {
 				return;
 			}
 			await runner.emit({
@@ -395,7 +395,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner) return messages;
+			if (!runner?.isActive) return messages;
 			return runner.emitContext(messages);
 		},
 		steeringMode: settingsManager.getSteeringMode(),
