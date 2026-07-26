@@ -12,23 +12,28 @@
   unguarded `JSON.parse` threw a client-side `SyntaxError` or leaked an invalid item to the API. Unparseable or
   non-reasoning signatures now demote to plain assistant text (empty text is dropped), mirroring the cross-model
   policy in `transformMessages`.
-- `api/anthropic-messages.ts` `normalizeToolCallId()`: over-long ids keep a readable prefix plus a `shortHash` of
-  the full id instead of blind 64-char prefix truncation. OpenAI Responses tool ids run 450+ chars, and two
-  distinct ids sharing a 64-char prefix previously collapsed into duplicate `tool_use` ids (Anthropic rejects
-  non-unique ids) with corrupted tool-result pairing.
+- `utils/tool-call-id.ts`, `api/anthropic-messages.ts`, `api/bedrock-converse-stream.ts`, and
+  `api/google-shared.ts`: the Anthropic-compatible adapters now share one collision-safe id normalizer. Over-long
+  ids keep a readable prefix plus a `shortHash` of the full id instead of blind 64-char prefix truncation. OpenAI
+  Responses tool ids run 450+ chars, and two distinct ids sharing a 64-char prefix previously collapsed into
+  duplicate tool ids in Bedrock/Google even after the Anthropic Messages fix, corrupting tool-result pairing.
 - `api/anthropic-messages.ts` `buildParams()`: when a thinking-enabled request's final assistant turn contains
   `tool_use` but no leading thinking block — the normal outcome of replaying Kimi/OpenAI history, whose thinking
-  demotes to text or drops — thinking is degraded to `{ type: "disabled" }` for that request instead of failing
-  with Anthropic's "final assistant message must start with a thinking block" 400 on every turn.
-- `../test/openai-responses-foreign-signature.test.ts`, `../test/anthropic-cross-model-history.test.ts`: cover
-  Kimi/Anthropic signature demotion, genuine reasoning-item replay, long-id collision freedom, and the
-  thinking-degradation trigger and non-trigger.
+  demotes to text or drops — thinking is disabled for that request instead of failing with Anthropic's "final
+  assistant message must start with a thinking block" 400 on every turn. Adaptive families that reject
+  `thinking.type: "disabled"` use the existing valid fallback (`thinking` omitted plus
+  `output_config.effort: "low"`).
+- `../test/openai-responses-foreign-signature.test.ts`, `../test/anthropic-cross-model-history.test.ts`,
+  `../test/bedrock-convert-messages.test.ts`, and `../test/google-shared-tool-call-id.test.ts`: cover foreign
+  signature demotion, genuine reasoning-item replay, cross-adapter collision freedom, and both legal
+  thinking-degradation wire forms.
 
 ### Expected merge conflict zones
 
 - MEDIUM: `api/openai-responses-shared.ts` thinking/text branches of `convertResponsesMessages()` (text emission
   is now a shared `pushAssistantText` closure) and `backfillReasoningSignatures()`.
-- LOW: `api/anthropic-messages.ts` `normalizeToolCallId()` and the thinking-config block of `buildParams()`.
+- LOW: `utils/tool-call-id.ts`, the three adapter imports/call sites, and the thinking-config block of
+  `api/anthropic-messages.ts` `buildParams()`.
 
 ## 2026-07-26 - Preserve persisted freeform identity when replaying OpenAI Responses calls (#256)
 

@@ -598,12 +598,12 @@ function buildRequestBody(
 	if (reasoningEffort !== undefined && reasoningEffort !== null) {
 		body.reasoning = {
 			effort: reasoningEffort,
-			summary: options?.reasoningSummary ?? "auto",
+			summary: options?.reasoningSummary === null ? "off" : (options?.reasoningSummary ?? "auto"),
 		};
 	} else if (reasoningEffort === undefined && model.reasoning && model.thinkingLevelMap?.off !== null) {
 		body.reasoning = {
 			effort: model.thinkingLevelMap?.off ?? "none",
-			summary: options?.reasoningSummary ?? "auto",
+			summary: options?.reasoningSummary === null ? "off" : (options?.reasoningSummary ?? "auto"),
 		};
 	}
 

@@ -34,7 +34,6 @@ import { isVideoMimeType } from "../types.ts";
 import { combineAbortSignals } from "../utils/abort-signals.ts";
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
-import { shortHash } from "../utils/hash.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
@@ -46,6 +45,7 @@ import {
 	parseStickyFallbackReceipt,
 	type ServerFallbackReceipt,
 } from "../utils/server-fallback-receipt.ts";
+import { normalizeToolCallId } from "../utils/tool-call-id.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
 
 import { resolveCloudflareBaseUrl } from "./cloudflare.ts";
@@ -1378,6 +1378,22 @@ function cannotDisableThinking(
 	return matchesModelMarker(model, DISABLED_THINKING_REJECTING_MODEL_MARKERS);
 }
 
+function disableThinkingForRequest(
+	params: MessageCreateParamsStreaming,
+	model: Model<"anthropic-messages">,
+	compat: { supportsDisabledThinking: boolean },
+): void {
+	delete (params as { output_config?: unknown }).output_config;
+	if (cannotDisableThinking(model, compat)) {
+		delete params.thinking;
+		if (supportsAdaptiveThinking(model)) {
+			params.output_config = { effort: "low" } as NonNullable<MessageCreateParamsStreaming["output_config"]>;
+		}
+		return;
+	}
+	params.thinking = { type: "disabled" };
+}
+
 function supportsAdaptiveThinking(model: Model<"anthropic-messages">): boolean {
 	if (model.compat?.forceAdaptiveThinking !== undefined) {
 		return model.compat.forceAdaptiveThinking;
@@ -1717,17 +1733,10 @@ function buildParams(
 				} as MessageCreateParamsStreaming["thinking"];
 			}
 		} else if (options?.thinkingEnabled === false) {
-			if (cannotDisableThinking(model, compat)) {
-				// These families reject `thinking.type: "disabled"` with a 400 AND default to adaptive
-				// thinking when the field is absent, so omitting it silently bills full reasoning for a
-				// "thinking off" turn. The API exposes no true off switch here, so pin the cheapest
-				// effort: the request stays valid and reasoning stays at the documented minimum.
-				if (supportsAdaptiveThinking(model)) {
-					params.output_config = { effort: "low" } as NonNullable<MessageCreateParamsStreaming["output_config"]>;
-				}
-			} else {
-				params.thinking = { type: "disabled" };
-			}
+			// Some adaptive families reject `thinking.type: "disabled"` and default
+			// to reasoning when omitted. Keep their request valid at the cheapest
+			// legal effort; use an explicit disabled block everywhere else.
+			disableThinkingForRequest(params, model, compat);
 		}
 	}
 
@@ -1735,16 +1744,8 @@ function buildParams(
 	// contains tool_use but does not begin with a thinking block. Cross-model
 	// histories lose their signed thinking blocks (demoted to text or dropped),
 	// so degrade thinking for this request instead of failing every turn.
-	if (
-		params.thinking &&
-		params.thinking.type !== "disabled" &&
-		compat.supportsDisabledThinking &&
-		model.thinkingLevelMap?.off !== null &&
-		finalAssistantTurnStartsWithToolUse(params.messages)
-	) {
-		params.thinking = { type: "disabled" };
-		delete (params as { output_config?: unknown }).output_config;
-	}
+	if (params.thinking && params.thinking.type !== "disabled" && finalAssistantTurnStartsWithToolUse(params.messages))
+		disableThinkingForRequest(params, model, compat);
 
 	if (options?.metadata) {
 		const userId = options.metadata.user_id;
@@ -1778,16 +1779,6 @@ function applyExtraBodyToAnthropicParams(
 		if (ANTHROPIC_RESERVED_BODY_KEYS.has(key)) continue;
 		Object.defineProperty(params, key, { value, writable: true, enumerable: true, configurable: true });
 	}
-}
-
-// Normalize tool call IDs to match Anthropic's required pattern and length.
-// Long foreign ids (OpenAI Responses ids run 450+ chars) must not collide after
-// truncation, so over-long ids keep a readable prefix plus a hash of the full id.
-const TOOL_CALL_ID_MAX_LENGTH = 64;
-function normalizeToolCallId(id: string): string {
-	const sanitized = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-	if (sanitized.length <= TOOL_CALL_ID_MAX_LENGTH) return sanitized;
-	return `${sanitized.slice(0, TOOL_CALL_ID_MAX_LENGTH - 14)}_${shortHash(id)}`.slice(0, TOOL_CALL_ID_MAX_LENGTH);
 }
 
 type AnthropicMessageParam = MessageCreateParamsStreaming["messages"][number];

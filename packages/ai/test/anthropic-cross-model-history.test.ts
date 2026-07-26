@@ -4,6 +4,7 @@ import type { AssistantMessage, Context, Model, SimpleStreamOptions, ToolResultM
 
 interface AnthropicPayload {
 	thinking?: { type: string };
+	output_config?: { effort?: string };
 	messages: Array<{
 		role: string;
 		content: Array<{ type: string; id?: string }> | string;
@@ -139,6 +140,22 @@ describe("Anthropic cross-model history hardening", () => {
 
 		expect(payload.thinking?.type).toBe("disabled");
 		expect(assistantBlocks(payload).some((block) => block.type === "thinking")).toBe(false);
+	});
+
+	it("degrades to the lowest legal effort when thinking cannot be disabled", async () => {
+		// Claude Fable 5 rejects `thinking.type: "disabled"` outright, so a replayed
+		// foreign tool turn must fall back to the cheapest legal effort instead of
+		// failing every turn with a 400.
+		const fable = getModel("anthropic", "claude-fable-5");
+		const { assistant, results } = foreignToolTurn([{ id: "call_abc", name: "bash" }]);
+		const context: Context = {
+			messages: [{ role: "user", content: "run tools", timestamp: Date.now() - 3000 }, assistant, ...results],
+		};
+
+		const payload = await capturePayload(fable, context, { reasoning: "high" });
+
+		expect(payload.thinking).toBeUndefined();
+		expect(payload.output_config).toEqual({ effort: "low" });
 	});
 
 	it("keeps thinking enabled when the final turn does not require replayed thinking", async () => {
