@@ -3,6 +3,29 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## Payload-rich background completion notifications (2026-07-26)
+
+### What changed
+
+- `notify.ts` `buildNotice()`: the background-session completion notice now embeds the exit
+  status (unchanged) AND the final output tail (sanitized via `sanitizeTerminalOutput`,
+  tail-capped at `NOTICE_TAIL_MAX_CHARS` = 2000 chars, with a truncation note that the full
+  history is still peekable) INSTEAD of the old `Use bash_output({ bash_id: "..." }) to read
+  its output` instruction. Notify modes (`wake`/`next-turn`/`off`) and all guards
+  (non-interactive `print`/`json` suppression, no auth-less turn spin, once per session id)
+  are unchanged. `bash_output` itself is untouched.
+
+### Why
+
+Real session evidence: session `019f79b8-3bec` received the old reminder, dutifully called
+`bash_output`, and got `(no new output)` — a wasted round per background completion. The
+notification is authoritative; receiving it must make a follow-up read unnecessary
+(plan: `.omo/plans/eval-exec-merge-and-injection-wakeup.md`, todo 1 / lane S1).
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `notify.ts` `buildNotice()` body (single function; guards untouched).
+
 ## Model-facing output is sanitized and bounded (2026-07-21)
 
 ### What changed
