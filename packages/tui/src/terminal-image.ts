@@ -12,6 +12,15 @@ export interface TerminalCapabilities {
 	 * sequences must then be wrapped in tmux DCS passthrough envelopes.
 	 */
 	tmuxPassthrough?: boolean;
+	/**
+	 * True when Kitty images should be placed via Unicode placeholders
+	 * (virtual placements, `U=1`) instead of direct cursor-relative placement.
+	 * Placeholder cells are regular text, so tmux clips, scrolls, and moves
+	 * them correctly across pane splits and layout changes; direct placement
+	 * through passthrough draws at the outer terminal's cursor position and
+	 * breaks in split panes.
+	 */
+	kittyUnicodePlaceholders?: boolean;
 }
 
 export interface TmuxPassthroughState {
@@ -102,25 +111,32 @@ function probeTmuxPassthroughState(): TmuxPassthroughState {
 }
 
 /**
- * Heuristic for whether the terminal hosting the tmux client understands the
- * Kitty graphics protocol. Prefers tmux's `client_termname` (live, per-client)
- * and falls back to environment hints that leak through from the terminal
- * that started the tmux server.
+ * Heuristic for how the terminal hosting the tmux client supports the Kitty
+ * graphics protocol. Prefers tmux's `client_termname` (live, per-client) and
+ * falls back to environment hints that leak through from the terminal that
+ * started the tmux server.
+ *
+ * Returns "placeholder" for terminals implementing Unicode placeholders
+ * (kitty, Ghostty), "direct" for terminals that only support cursor-relative
+ * placement (WezTerm), and null when the outer terminal is unknown.
  */
-function outerTerminalSupportsKittyGraphics(clientTermname: string): boolean {
+function outerKittyGraphicsMode(clientTermname: string): "placeholder" | "direct" | null {
 	const outerTerm = clientTermname.toLowerCase();
-	if (outerTerm.includes("kitty") || outerTerm.includes("ghostty") || outerTerm.includes("wezterm")) {
-		return true;
-	}
 	const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
-	return Boolean(
-		process.env.KITTY_WINDOW_ID ||
-			process.env.GHOSTTY_RESOURCES_DIR ||
-			process.env.WEZTERM_PANE ||
-			termProgram === "kitty" ||
-			termProgram === "ghostty" ||
-			termProgram === "wezterm",
-	);
+	const placeholderCapable =
+		outerTerm.includes("kitty") ||
+		outerTerm.includes("ghostty") ||
+		Boolean(process.env.KITTY_WINDOW_ID || process.env.GHOSTTY_RESOURCES_DIR) ||
+		termProgram === "kitty" ||
+		termProgram === "ghostty";
+	if (placeholderCapable) {
+		return "placeholder";
+	}
+	const directOnly = outerTerm.includes("wezterm") || Boolean(process.env.WEZTERM_PANE) || termProgram === "wezterm";
+	if (directOnly) {
+		return "direct";
+	}
+	return null;
 }
 
 export function detectCapabilities(
@@ -140,8 +156,22 @@ export function detectCapabilities(
 	if (process.env.TMUX || term.startsWith("tmux")) {
 		const hyperlinks = tmuxForwardsHyperlink();
 		const passthrough = tmuxPassthroughState();
-		if (passthrough.allowPassthrough !== "off" && outerTerminalSupportsKittyGraphics(passthrough.clientTermname)) {
-			return { images: "kitty", trueColor: hasTrueColorHint, hyperlinks, tmuxPassthrough: true };
+		if (passthrough.allowPassthrough !== "off") {
+			const mode = outerKittyGraphicsMode(passthrough.clientTermname);
+			if (mode !== null) {
+				// Escape hatch: PI_TUI_TMUX_KITTY_PLACEMENT=placeholder|direct
+				// overrides the per-terminal placement heuristic.
+				const override = process.env.PI_TUI_TMUX_KITTY_PLACEMENT;
+				const placeholders =
+					override === "placeholder" ? true : override === "direct" ? false : mode === "placeholder";
+				return {
+					images: "kitty",
+					trueColor: hasTrueColorHint,
+					hyperlinks,
+					tmuxPassthrough: true,
+					kittyUnicodePlaceholders: placeholders,
+				};
+			}
 		}
 		return { images: null, trueColor: hasTrueColorHint, hyperlinks };
 	}
@@ -250,13 +280,20 @@ export function encodeKitty(
 		imageId?: number;
 		/** Whether Kitty should apply its default cursor movement after placement. Default: true. */
 		moveCursor?: boolean;
+		/**
+		 * Create a virtual placement (`U=1`) for Unicode placeholders instead of
+		 * placing the image at the cursor. The image is only shown where
+		 * placeholder cells (see {@link buildKittyPlaceholderRow}) are printed.
+		 */
+		virtual?: boolean;
 	} = {},
 ): string {
 	const CHUNK_SIZE = 4096;
 
 	const params: string[] = ["a=T", "f=100", "q=2"];
 
-	if (options.moveCursor === false) params.push("C=1");
+	if (options.virtual) params.push("U=1");
+	else if (options.moveCursor === false) params.push("C=1");
 	if (options.columns) params.push(`c=${options.columns}`);
 	if (options.rows) params.push(`r=${options.rows}`);
 	if (options.imageId) params.push(`i=${options.imageId}`);
@@ -293,6 +330,69 @@ export function encodeKitty(
 	}
 
 	return chunks.join("");
+}
+
+/**
+ * Placeholder codepoint for Kitty Unicode placements (U+10EEEE). Each cell of
+ * a virtual placement is this character with combining diacritics encoding the
+ * row/column and the foreground color encoding the image ID.
+ */
+const KITTY_PLACEHOLDER = String.fromCodePoint(0x10eeee);
+
+/**
+ * Row/column index diacritics from the Kitty graphics protocol
+ * (rowcolumn-diacritics.txt): diacritic at index N encodes row/column N.
+ */
+const KITTY_PLACEHOLDER_DIACRITICS: readonly number[] = [
+	0x0305, 0x030d, 0x030e, 0x0310, 0x0312, 0x033d, 0x033e, 0x033f, 0x0346, 0x034a, 0x034b, 0x034c, 0x0350, 0x0351,
+	0x0352, 0x0357, 0x035b, 0x0363, 0x0364, 0x0365, 0x0366, 0x0367, 0x0368, 0x0369, 0x036a, 0x036b, 0x036c, 0x036d,
+	0x036e, 0x036f, 0x0483, 0x0484, 0x0485, 0x0486, 0x0487, 0x0592, 0x0593, 0x0594, 0x0595, 0x0597, 0x0598, 0x0599,
+	0x059c, 0x059d, 0x059e, 0x059f, 0x05a0, 0x05a1, 0x05a8, 0x05a9, 0x05ab, 0x05ac, 0x05af, 0x05c4, 0x0610, 0x0611,
+	0x0612, 0x0613, 0x0614, 0x0615, 0x0616, 0x0617, 0x0657, 0x0658, 0x0659, 0x065a, 0x065b, 0x065d, 0x065e, 0x06d6,
+	0x06d7, 0x06d8, 0x06d9, 0x06da, 0x06db, 0x06dc, 0x06df, 0x06e0, 0x06e1, 0x06e2, 0x06e4, 0x06e7, 0x06e8, 0x06eb,
+	0x06ec, 0x0730, 0x0732, 0x0733, 0x0735, 0x0736, 0x073a, 0x073d, 0x073f, 0x0740, 0x0741, 0x0743, 0x0745, 0x0747,
+	0x0749, 0x074a, 0x07eb, 0x07ec, 0x07ed, 0x07ee, 0x07ef, 0x07f0, 0x07f1, 0x07f3, 0x0816, 0x0817, 0x0818, 0x0819,
+	0x081b, 0x081c, 0x081d, 0x081e, 0x081f, 0x0820, 0x0821, 0x0822, 0x0823, 0x0825, 0x0826, 0x0827, 0x0829, 0x082a,
+	0x082b, 0x082c, 0x082d, 0x0951, 0x0953, 0x0954, 0x0f82, 0x0f83, 0x0f86, 0x0f87, 0x135d, 0x135e, 0x135f, 0x17dd,
+	0x193a, 0x1a17, 0x1a75, 0x1a76, 0x1a77, 0x1a78, 0x1a79, 0x1a7a, 0x1a7b, 0x1a7c, 0x1b6b, 0x1b6d, 0x1b6e, 0x1b6f,
+	0x1b70, 0x1b71, 0x1b72, 0x1b73, 0x1cd0, 0x1cd1, 0x1cd2, 0x1cda, 0x1cdb, 0x1ce0, 0x1dc0, 0x1dc1, 0x1dc3, 0x1dc4,
+	0x1dc5, 0x1dc6, 0x1dc7, 0x1dc8, 0x1dc9, 0x1dcb, 0x1dcc, 0x1dd1, 0x1dd2, 0x1dd3, 0x1dd4, 0x1dd5, 0x1dd6, 0x1dd7,
+	0x1dd8, 0x1dd9, 0x1dda, 0x1ddb, 0x1ddc, 0x1ddd, 0x1dde, 0x1ddf, 0x1de0, 0x1de1, 0x1de2, 0x1de3, 0x1de4, 0x1de5,
+	0x1de6, 0x1dfe, 0x20d0, 0x20d1, 0x20d4, 0x20d5, 0x20d6, 0x20d7, 0x20db, 0x20dc, 0x20e1, 0x20e7, 0x20e9, 0x20f0,
+	0x2cef, 0x2cf0, 0x2cf1, 0x2de0, 0x2de1, 0x2de2, 0x2de3, 0x2de4, 0x2de5, 0x2de6, 0x2de7, 0x2de8, 0x2de9, 0x2dea,
+	0x2deb, 0x2dec, 0x2ded, 0x2dee, 0x2def, 0x2df0, 0x2df1, 0x2df2, 0x2df3, 0x2df4, 0x2df5, 0x2df6, 0x2df7, 0x2df8,
+	0x2df9, 0x2dfa, 0x2dfb, 0x2dfc, 0x2dfd, 0x2dfe, 0x2dff, 0xa66f, 0xa67c, 0xa67d, 0xa6f0, 0xa6f1, 0xa8e0, 0xa8e1,
+	0xa8e2, 0xa8e3, 0xa8e4, 0xa8e5, 0xa8e6, 0xa8e7, 0xa8e8, 0xa8e9, 0xa8ea, 0xa8eb, 0xa8ec, 0xa8ed, 0xa8ee, 0xa8ef,
+	0xa8f0, 0xa8f1, 0xaab0, 0xaab2, 0xaab3, 0xaab7, 0xaab8, 0xaabe, 0xaabf, 0xaac1, 0xfe20, 0xfe21, 0xfe22, 0xfe23,
+	0xfe24, 0xfe25, 0xfe26, 0x10a0f, 0x10a38, 0x1d185, 0x1d186, 0x1d187, 0x1d188, 0x1d189, 0x1d1aa, 0x1d1ab, 0x1d1ac,
+	0x1d1ad, 0x1d242, 0x1d243, 0x1d244,
+];
+
+/** Maximum rows/columns addressable by Kitty Unicode placeholder diacritics. */
+export const KITTY_PLACEHOLDER_MAX = KITTY_PLACEHOLDER_DIACRITICS.length;
+
+/**
+ * Build one row of Kitty Unicode placeholder cells for a virtual placement.
+ * The foreground color carries the low 24 bits of the image ID; the third
+ * diacritic carries the high byte when present. Placeholder cells are plain
+ * text (1 column each), so tmux and the TUI treat them like any other line.
+ */
+export function buildKittyPlaceholderRow(imageId: number, row: number, columns: number): string {
+	const rowDiacritic = String.fromCodePoint(KITTY_PLACEHOLDER_DIACRITICS[Math.min(row, KITTY_PLACEHOLDER_MAX - 1)]);
+	const idHighByte = (imageId >>> 24) & 0xff;
+	const idDiacritic = idHighByte > 0 ? String.fromCodePoint(KITTY_PLACEHOLDER_DIACRITICS[idHighByte]) : "";
+	const r = (imageId >>> 16) & 0xff;
+	const g = (imageId >>> 8) & 0xff;
+	const b = imageId & 0xff;
+
+	let cells = "";
+	for (let column = 0; column < columns; column++) {
+		const columnDiacritic = String.fromCodePoint(
+			KITTY_PLACEHOLDER_DIACRITICS[Math.min(column, KITTY_PLACEHOLDER_MAX - 1)],
+		);
+		cells += KITTY_PLACEHOLDER + rowDiacritic + columnDiacritic + idDiacritic;
+	}
+	return `\x1b[38;2;${r};${g};${b}m${cells}\x1b[39m`;
 }
 
 /**
@@ -514,7 +614,7 @@ export function renderImage(
 	base64Data: string,
 	imageDimensions: ImageDimensions,
 	options: ImageRenderOptions = {},
-): { sequence: string; rows: number; imageId?: number } | null {
+): { sequence: string; rows: number; imageId?: number; lines?: string[] } | null {
 	const caps = getCapabilities();
 
 	if (!caps.images) {
@@ -523,6 +623,22 @@ export function renderImage(
 
 	const maxWidth = options.maxWidthCells ?? 80;
 	const size = calculateImageCellSize(imageDimensions, maxWidth, options.maxHeightCells, getCellDimensions());
+
+	if (caps.images === "kitty" && caps.kittyUnicodePlaceholders) {
+		// Virtual placement: transmit once, then show the image with plain-text
+		// placeholder cells. Under tmux the placeholder cells move/clip with the
+		// pane, so split layouts render correctly.
+		const imageId = options.imageId ?? allocateImageId();
+		const columns = Math.min(size.columns, KITTY_PLACEHOLDER_MAX);
+		const rows = Math.min(size.rows, KITTY_PLACEHOLDER_MAX);
+		const sequence = encodeKitty(base64Data, { columns, rows, imageId, virtual: true });
+		const lines: string[] = [];
+		for (let row = 0; row < rows; row++) {
+			const placeholderRow = buildKittyPlaceholderRow(imageId, row, columns);
+			lines.push(row === 0 ? sequence + placeholderRow : placeholderRow);
+		}
+		return { sequence, rows, imageId, lines };
+	}
 
 	if (caps.images === "kitty") {
 		const sequence = encodeKitty(base64Data, {

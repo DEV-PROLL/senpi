@@ -12,6 +12,15 @@
 - `terminal-image.ts`: new exported `wrapTmuxPassthrough(sequence)` wraps a sequence in a tmux DCS envelope
   (`ESC Ptmux; … ESC \` with every payload ESC doubled). `encodeKitty` wraps each APC chunk individually and
   `deleteKittyImage`/`deleteAllKittyImages` wrap their delete commands when `tmuxPassthrough` is active.
+- `terminal-image.ts`: Kitty Unicode placeholder placement for split-safe tmux rendering. Direct passthrough
+  placement draws at the outer terminal's cursor and breaks in split panes, so placeholder-capable outer
+  terminals (kitty, Ghostty) get `kittyUnicodePlaceholders: true`: `encodeKitty` gains a `virtual` option
+  (`U=1` virtual placement), `buildKittyPlaceholderRow` emits U+10EEEE cells with row/column (and id
+  high-byte) diacritics plus the image id in the 24-bit foreground color, and `renderImage` returns per-row
+  `lines` (first line carries the wrapped transmission). Placeholder cells are plain 1-column text, so tmux
+  clips/scrolls/moves them with the pane. WezTerm (no placeholder support) stays on direct placement;
+  `PI_TUI_TMUX_KITTY_PLACEMENT=placeholder|direct` overrides the heuristic. The `Image` component uses
+  `result.lines` when present instead of one sequence line plus empty padding rows.
 - `utils.ts`: `extractAnsiCode` learned DCS sequences (`ESC P … ST`), skipping doubled-ESC pairs so the
   escaped inner ST does not terminate the envelope early. Wrapped image lines therefore keep
   `visibleWidth === 0` and stay compatible with the TUI's Kitty image-line bookkeeping (id/row extraction in
@@ -25,8 +34,9 @@ renderer emits.
 
 ### Expected merge conflict zones
 
-- MEDIUM: `terminal-image.ts` tmux branch of `detectCapabilities` and `encodeKitty` chunk assembly.
-- LOW: `utils.ts` `extractAnsiCode` escape-sequence branches.
+- MEDIUM: `terminal-image.ts` tmux branch of `detectCapabilities`, `encodeKitty` chunk assembly, and
+  `renderImage` kitty branches.
+- LOW: `utils.ts` `extractAnsiCode` escape-sequence branches; `components/image.ts` kitty line assembly.
 - LOW: `index.ts` terminal-image export list; `test/terminal-image.test.ts` tmux capability tests.
 
 ## 2026-07-26: composable leading skill autocomplete
