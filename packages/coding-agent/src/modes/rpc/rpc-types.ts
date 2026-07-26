@@ -17,9 +17,16 @@ import type { SourceInfo } from "../../core/source-info.ts";
 // RPC Commands (stdin)
 // ============================================================================
 
-export type RpcCommand =
+type RpcSessionCommand =
 	// Prompting
-	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
+	| {
+			id?: string;
+			type: "prompt";
+			message: string;
+			images?: ImageContent[];
+			streamingBehavior?: "steer" | "followUp";
+			thinkingLevel?: ThinkingLevel;
+	  }
 	| { id?: string; type: "steer"; message: string; images?: ImageContent[] }
 	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
 	| { id?: string; type: "abort" }
@@ -34,8 +41,9 @@ export type RpcCommand =
 	| { id?: string; type: "get_available_models" }
 
 	// Thinking
-	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
+	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel; scope?: "turn" }
 	| { id?: string; type: "cycle_thinking_level" }
+	| { id?: string; type: "get_available_thinking_levels" }
 
 	// Queue modes
 	| { id?: string; type: "set_steering_mode"; mode: "all" | "one-at-a-time" }
@@ -80,6 +88,41 @@ export type RpcCommand =
 	| { id?: string; type: "login_cancel"; provider: string }
 	| { id?: string; type: "login_api_key"; provider: string; key: string }
 	| { id?: string; type: "logout"; provider: string };
+
+/** Stable multi-session protocol error codes. */
+export const RPC_ERROR_UNKNOWN_SESSION = "unknown_session";
+export const RPC_ERROR_SESSION_CLOSING = "session_closing";
+export const RPC_ERROR_SESSION_PATH_IN_USE = "session_path_in_use";
+export const RPC_ERROR_MISSING_SESSION_ID = "missing_session_id";
+export const RPC_ERROR_MULTI_SESSION_DISABLED = "multi_session_disabled";
+export const RPC_ERROR_INVALID_PATH = "invalid_path";
+export const RPC_ERROR_OPEN_FAILED = "open_failed";
+
+export type RpcErrorCode =
+	| typeof RPC_ERROR_UNKNOWN_SESSION
+	| typeof RPC_ERROR_SESSION_CLOSING
+	| typeof RPC_ERROR_SESSION_PATH_IN_USE
+	| typeof RPC_ERROR_MISSING_SESSION_ID
+	| typeof RPC_ERROR_MULTI_SESSION_DISABLED
+	| typeof RPC_ERROR_INVALID_PATH
+	| typeof RPC_ERROR_OPEN_FAILED;
+
+/** Every established command accepts an additive routing envelope. */
+export type RpcCommand =
+	| (RpcSessionCommand & { sessionId?: string })
+	| { id?: string; type: "get_protocol_info" }
+	| {
+			id?: string;
+			type: "open_session";
+			sessionPath?: string;
+			cwd?: string;
+			provider?: string;
+			modelId?: string;
+			thinkingLevel?: ThinkingLevel;
+			permissionPreset?: string;
+	  }
+	| { id?: string; type: "close_session"; sessionId: string }
+	| { id?: string; type: "list_sessions" };
 
 // ============================================================================
 // Auth provider info (get_auth_providers response)
@@ -145,6 +188,37 @@ export interface RpcSessionState {
 
 // Success responses with data
 export type RpcResponse =
+	| {
+			id?: string;
+			type: "response";
+			command: "get_protocol_info";
+			success: true;
+			data: { protocolVersion: 1; capabilities: ["multi_session"]; mode: "classic" | "multi" };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "open_session";
+			success: true;
+			data: { sessionId: string; state: RpcSessionState };
+	  }
+	| { id?: string; type: "response"; command: "close_session"; success: true; data: Record<string, never> }
+	| {
+			id?: string;
+			type: "response";
+			command: "list_sessions";
+			success: true;
+			data: {
+				sessions: Array<{
+					sessionId: string;
+					durableSessionId?: string;
+					sessionPath?: string;
+					cwd: string;
+					name?: string;
+					status: "opening" | "open" | "closing" | "closed";
+				}>;
+			};
+	  }
 	// Prompting (async - events follow)
 	| { id?: string; type: "response"; command: "prompt"; success: true }
 	| { id?: string; type: "response"; command: "steer"; success: true }
@@ -175,7 +249,7 @@ export type RpcResponse =
 			type: "response";
 			command: "get_available_models";
 			success: true;
-			data: { models: Model<any>[] };
+			data: { models: Array<Model<any> & { supportedThinkingLevels: ThinkingLevel[] }> };
 	  }
 
 	// Thinking
@@ -186,6 +260,13 @@ export type RpcResponse =
 			command: "cycle_thinking_level";
 			success: true;
 			data: { level: ThinkingLevel } | null;
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_available_thinking_levels";
+			success: true;
+			data: { levels: ThinkingLevel[] };
 	  }
 
 	// Queue modes
@@ -326,3 +407,9 @@ export type RpcExtensionUIResponse =
 	| { type: "extension_ui_response"; id: string; value: string }
 	| { type: "extension_ui_response"; id: string; confirmed: boolean }
 	| { type: "extension_ui_response"; id: string; cancelled: true };
+
+/** Emitted when the effective session thinking level changes. */
+export interface RpcThinkingLevelChangedEvent {
+	type: "thinking_level_changed";
+	level: ThinkingLevel;
+}

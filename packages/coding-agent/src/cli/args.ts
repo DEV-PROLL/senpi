@@ -63,6 +63,8 @@ export interface Args {
 	neoListen?: string;
 	/** Self-register into the neo daemon registry when listening (daemon-internal). */
 	neoRegister?: boolean;
+	/** Serve independently routed plain-RPC sessions over one stdio process. */
+	multiSession?: boolean;
 	messages: string[];
 	fileArgs: string[];
 	/** Unknown flags (potentially extension flags) - map of flag name to value */
@@ -211,6 +213,8 @@ export function parseArgs(args: string[], options: { neoEnabled?: boolean } = {}
 			result.neoListen = args[++i];
 		} else if (neoEnabled && arg === "--register") {
 			result.neoRegister = true;
+		} else if (arg === "--multi-session") {
+			result.multiSession = true;
 		} else if (arg.startsWith("@")) {
 			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
 		} else if (arg.startsWith("--")) {
@@ -377,6 +381,7 @@ ${chalk.bold("Examples:")}
   ${APP_NAME} app-server --listen ws://127.0.0.1:18991
 
 ${chalk.bold("Environment Variables:")}
+  ANTHROPIC_AUTH_TOKEN             - Anthropic bearer auth token
   ANTHROPIC_API_KEY                - Anthropic Claude API key
   ANTHROPIC_OAUTH_TOKEN            - Anthropic OAuth token (alternative to API key)
   ANT_LING_API_KEY                 - Ant Ling API key
@@ -406,6 +411,8 @@ ${chalk.bold("Environment Variables:")}
   CLOUDFLARE_API_KEY               - Cloudflare API token (Workers AI and AI Gateway)
   CLOUDFLARE_ACCOUNT_ID            - Cloudflare account id (required for both)
   CLOUDFLARE_GATEWAY_ID            - Cloudflare AI Gateway slug (required for AI Gateway)
+  QWEN_TOKEN_PLAN_API_KEY          - Qwen Token Plan API key (international region)
+  QWEN_TOKEN_PLAN_CN_API_KEY       - Qwen Token Plan API key (China region)
   XIAOMI_API_KEY                   - Xiaomi MiMo API key (api.xiaomimimo.com billing)
   XIAOMI_TOKEN_PLAN_CN_API_KEY     - Xiaomi MiMo Token Plan API key (China region)
   XIAOMI_TOKEN_PLAN_AMS_API_KEY    - Xiaomi MiMo Token Plan API key (Amsterdam region)

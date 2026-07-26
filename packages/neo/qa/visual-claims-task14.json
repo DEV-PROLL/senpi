@@ -1,6 +1,6 @@
 {
   "$schema": "./visual-claims.schema.md",
-  "description": "Task-14 (native ports of the 5 builtin ctx.ui.custom extensions) visual-claims manifest. Registered as a SEPARATE per-task manifest (never appended into the shared visual-claims.json) to avoid the shared-file merge hazard while other Wave-2 tasks run in parallel. Each claim binds one feature's overlay frame as a complete triplet (.ans via tmux capture-pane -e in session ulw-qa-t14 + .html + cell-grid .json from qa/xterm-render.mjs) with grid-based assertions verifying layout + exact grok palette hexes (accent #7aa2f7, success #9ece6a, error #f7768e, warning #e0af68, muted #6c6c6c). The .ans files are real tmux captures of the internal/ui/builtinext/qaharness binary; line endings were normalized LF->CRLF to match the terminal stream xterm.js consumes. Triplet paths are relative to this file's directory (packages/neo/qa). Verify with: node packages/neo/qa/xterm-render.mjs verify-manifest packages/neo/qa/visual-claims-task14.json",
+  "description": "Task-14 (native ports of the 4 builtin ctx.ui.custom extensions) visual-claims manifest. Registered as a SEPARATE per-task manifest (never appended into the shared visual-claims.json) to avoid the shared-file merge hazard while other Wave-2 tasks run in parallel. Each claim binds one feature's overlay frame as a complete triplet (.ans via tmux capture-pane -e in session ulw-qa-t14 + .html + cell-grid .json from qa/xterm-render.mjs) with grid-based assertions verifying layout + exact grok palette hexes (accent #7aa2f7, success #9ece6a, error #f7768e, warning #e0af68, muted #6c6c6c). The .ans files are real tmux captures of the internal/ui/builtinext/qaharness binary; line endings were normalized LF->CRLF to match the terminal stream xterm.js consumes. Triplet paths are relative to this file's directory (packages/neo/qa). Verify with: node packages/neo/qa/xterm-render.mjs verify-manifest packages/neo/qa/visual-claims-task14.json",
   "claims": [
     {
       "id": "task-14-history-search-cross-session",
@@ -25,32 +25,6 @@
         { "id": "hist-search-prompt", "frame": "task14-history-120", "kind": "cell-glyph", "x": 0, "y": 1, "glyph": ">" },
         { "id": "hist-selected-cursor", "frame": "task14-history-120", "kind": "cell-glyph", "x": 0, "y": 2, "glyph": "❯" },
         { "id": "hist-bottom-rule", "frame": "task14-history-120", "kind": "cell-glyph", "x": 0, "y": 6, "glyph": "─" }
-      ]
-    },
-    {
-      "id": "task-14-session-observer-tail",
-      "task": 14,
-      "title": "session-observer (ctrl+s): the HUD viewer tails an actively-growing session file — title path/shortId, status line, the tailed transcript entries (3 appended progress steps), the accent-blue selection cursor, and the observe/close footer",
-      "requiredFrames": ["task14-observer-90"],
-      "frames": [
-        {
-          "id": "task14-observer-90",
-          "size": "90x24",
-          "state": "session-observer-viewer-tailing-grown-file",
-          "ans": "triplets/task14-observer-90.ans",
-          "html": "triplets/task14-observer-90.html",
-          "json": "triplets/task14-observer-90.json"
-        }
-      ],
-      "assertions": [
-        { "id": "obs-title-glyph", "frame": "task14-observer-90", "kind": "cell-glyph", "x": 1, "y": 0, "glyph": "S" },
-        { "id": "obs-title-accent", "frame": "task14-observer-90", "kind": "cell-fg", "x": 1, "y": 0, "hex": "#7aa2f7" },
-        { "id": "obs-cursor-glyph", "frame": "task14-observer-90", "kind": "cell-glyph", "x": 1, "y": 12, "glyph": "▶" },
-        { "id": "obs-cursor-accent", "frame": "task14-observer-90", "kind": "cell-fg", "x": 1, "y": 12, "hex": "#7aa2f7" },
-        { "id": "obs-response-label", "frame": "task14-observer-90", "kind": "cell-glyph", "x": 3, "y": 6, "glyph": "R" },
-        { "id": "obs-response-muted", "frame": "task14-observer-90", "kind": "cell-fg", "x": 3, "y": 6, "hex": "#6c6c6c" },
-        { "id": "obs-tailed-step3", "frame": "task14-observer-90", "kind": "cell-glyph", "x": 5, "y": 13, "glyph": "p" },
-        { "id": "obs-top-rule", "frame": "task14-observer-90", "kind": "cell-glyph", "x": 0, "y": 2, "glyph": "─" }
       ]
     },
     {

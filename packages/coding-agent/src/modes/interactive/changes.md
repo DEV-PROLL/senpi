@@ -1,5 +1,100 @@
 # changes
 
+## accepted-only compaction queue transfer (2026-07-24)
+
+### What changed
+
+- `interactive-mode.ts`: input queued while compaction owns the editor is automatically transferred only after an
+  accepted compaction result. Rejected, failed, or aborted compaction retains the input in the editor-owned queue
+  instead of resubmitting it through the unchanged required-compaction gate and recursively starting compaction.
+- Consecutive `compaction_start` events share one Escape override. The original editor handler is preserved through
+  supersession and restored exactly once on terminal cleanup, session rebind, invalidation, or TUI stop.
+- Compaction progress, errors, and summaries are stripped of terminal control sequences only when rendered. Persisted
+  summaries and provider/session content remain unchanged.
+- The shared compaction-summary component applies the same display-only sanitization, covering rebuilt chat and
+  reopened-session expansion in addition to live `compaction_end` rendering.
+- Provider-derived fallback exhaustion errors are sanitized at the shared `showError()` render boundary; raw retry
+  events and persisted/provider error content remain unchanged.
+
+### Why
+
+- Rejection and cancellation do not create a new admissible context. Automatically replaying the same prompt caused an
+  unbounded compaction-start/rejection/restore loop.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` `compaction_end` handling around `flushCompactionQueue()`.
+
+## per-section thinking duration headers (2026-07-22)
+
+### What changed
+
+- `components/assistant-message.ts`: consecutive thinking sections with `startedAt` timing now show an italic
+  `Thought: <duration>` header above visible reasoning, or replace the collapsed `Thinking...` label when reasoning is
+  hidden. Active timed sections keep the configured thinking label; untimed and all-empty legacy sections retain their
+  prior rendering.
+- `../../../test/assistant-message.test.ts`: covers finished, active, legacy, empty/redacted, custom-label, and
+  all-empty thinking-duration rendering states.
+- `../../../test/streaming-reveal.test.ts`: verifies partially revealed thinking blocks retain their timing metadata.
+
+### Why
+
+- Per-section elapsed time makes completed reasoning runs legible without exposing hidden reasoning or introducing a
+  live timer into the transcript.
+
+### Why extension system couldn't handle this
+
+- Thinking-section coalescing, hidden-label selection, streaming display slices, and transcript descriptor
+  reconciliation are private core renderer behavior; an extension cannot insert a stable header into that sequence or
+  preserve its metadata through the host-owned reveal path.
+
+### Expected merge conflict zones
+
+- LOW: `components/assistant-message.ts` around consecutive-thinking descriptor construction.
+- LOW: `changes.md` fork-entry prepend.
+
+## unified tool progress durations (2026-07-22)
+
+### What changed
+
+- `tool-progress.ts`: elapsed and maximum wait durations now share `formatWorkingElapsedSeconds()`, so progress rows use
+  one seconds/minutes/hours grammar (`4m 28s / max 5m 00s`) instead of mixing humanized elapsed time with raw maximum
+  seconds (`4m 28s / max 300s`).
+
+### Why
+
+- A single progress row should not force users to mentally convert the timeout while the elapsed side is already
+  human-readable.
+
+### Why extension system couldn't handle this
+
+- The progress suffix is composed by the built-in interactive tool renderer after extension result rendering.
+
+### Expected merge conflict zones
+
+- LOW: `tool-progress.ts` around the maximum-wait suffix.
+## braille tool progress spinner (2026-07-22)
+
+### What changed
+
+- `tool-progress.ts`: partial tool progress rows now use the same ten-frame braille spinner sequence as other Senpi
+  waiting surfaces instead of cycling directional triangles (`⏵`, `⏷`, `⏴`, `⏶`).
+
+### Why
+
+- Long-running task, team-wait, and terminal progress rows should read as active work rather than a rotating disclosure
+  marker. The existing 80ms component ticker already advances frames; the formatter now presents that animation with
+  standard terminal spinner glyphs.
+
+### Why extension system couldn't handle this
+
+- Generic partial-progress rows are composed by the built-in `ToolExecutionRenderer` after extension result renderers
+  run, so an individual tool extension cannot replace the host-owned progress prefix consistently.
+
+### Expected merge conflict zones
+
+- LOW: `tool-progress.ts` around `formatToolProgressLine()`.
+
 ## todo completion strike reveal (2026-07-21)
 
 ### What changed

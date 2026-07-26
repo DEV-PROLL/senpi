@@ -89,10 +89,10 @@ func expectedActionIDs() []string {
 		// tui.select.* (6)
 		"tui.select.up", "tui.select.down", "tui.select.pageUp", "tui.select.pageDown",
 		"tui.select.confirm", "tui.select.cancel",
-		// app.* (44)
+		// app.* (43)
 		"app.interrupt", "app.clear", "app.exit", "app.suspend", "app.thinking.cycle",
 		"app.model.cycleForward", "app.model.cycleBackward", "app.model.select",
-		"app.history.search", "app.sessions.observe", "app.tools.expand",
+		"app.history.search", "app.tools.expand",
 		"app.thinking.toggle", "app.session.toggleNamedFilter", "app.editor.external",
 		"app.message.followUp", "app.message.dequeue", "app.clipboard.pasteImage",
 		"app.session.new", "app.session.tree", "app.session.fork", "app.session.resume",
@@ -151,7 +151,6 @@ func TestRegistry_ExactDefaultBindings(t *testing.T) {
 		"app.model.cycleBackward":       {"shift+ctrl+p"},
 		"app.model.select":              {"ctrl+l"},
 		"app.history.search":            {"ctrl+r"},
-		"app.sessions.observe":          {"ctrl+s"},
 		"app.tools.expand":              {"ctrl+o"},
 		"app.thinking.toggle":           {"ctrl+t"},
 		"app.session.toggleNamedFilter": {"ctrl+n"},

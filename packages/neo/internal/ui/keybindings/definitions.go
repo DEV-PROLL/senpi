@@ -62,7 +62,6 @@ func appEntries() []defEntry {
 		{"app.model.cycleBackward", Definition{[]string{"shift+ctrl+p"}, "Cycle to previous model"}},
 		{"app.model.select", Definition{[]string{"ctrl+l"}, "Open model selector"}},
 		{"app.history.search", Definition{[]string{"ctrl+r"}, "Search prompt history across sessions"}},
-		{"app.sessions.observe", Definition{[]string{"ctrl+s"}, "Observe session transcripts"}},
 		{"app.tools.expand", Definition{[]string{"ctrl+o"}, "Toggle tool output"}},
 		{"app.thinking.toggle", Definition{[]string{"ctrl+t"}, "Toggle thinking blocks"}},
 		{"app.session.toggleNamedFilter", Definition{[]string{"ctrl+n"}, "Toggle named session filter"}},

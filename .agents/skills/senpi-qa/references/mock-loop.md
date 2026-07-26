@@ -62,6 +62,59 @@ take precedence for built-in providers and reach even the localhost fake.
 `--with-tool` scripts two turns (model → `bash` tool call → final text) to prove
 the full loop iterates. It passes `--approve` for project trust.
 
+### Retry and fallback scenarios
+
+`--scenario` provisions a primary `mock/mock-model`, a local fallback model,
+and isolated `settings.json` retry settings. Error turns are scripted as an
+exclusive turn object:
+
+```json
+{ "error": { "status": 500, "message": "overloaded_error" } }
+```
+
+The fake server returns that turn as a non-200 JSON provider error, not an SSE
+stream. Each command emits `SENPI_QA_RETRY_TRANSCRIPT`, including the ordered
+model request sequence, per-model attempt totals, and whether a switch occurred.
+
+```bash
+node .agents/skills/senpi-qa/scripts/mock-loop.mjs --scenario transient-recover
+node .agents/skills/senpi-qa/scripts/mock-loop.mjs --scenario budget-exhaust
+node .agents/skills/senpi-qa/scripts/mock-loop.mjs --scenario long-retry-after
+```
+
+- `transient-recover` sends two `500 overloaded_error` turns then succeeds: all
+  three requests must remain on the primary.
+- `budget-exhaust` sends four `500 overloaded_error` turns then succeeds: four
+  primary attempts consume the retry budget before the one fallback attempt.
+- `long-retry-after` sends one `429` with
+  `HTTP 429: rate_limit_exceeded - retry after 3600 seconds`: the next request
+  must immediately use the fallback, rather than wait an hour.
+
+The default `--self-test` runs these three scenarios end to end in addition to
+its API round-trips. `--self-test --api <name>` retains the API-specific
+round-trip coverage without rerunning the default retry scenarios.
+
+`--with-reasoning` scripts a thinking block before the final text in all three
+wire formats. The fake server records emitted deltas in a server-side stream log;
+the command fails unless the real CLI completes, returns
+`SENPI-QA-FINAL-MARKER-9d2c`, and that independent log reconstructs a reasoning
+body containing `SENPI-QA-REASONING-MARKER-7f3a`. `--slow` makes the reasoning
+body long, emits it in 12 chunks, and uses a 500ms inter-chunk delay so an abort
+or steering driver has a deterministic in-flight window.
+
+```bash
+node .agents/skills/senpi-qa/scripts/mock-loop.mjs \
+  --with-reasoning --api openai-responses
+```
+
+`--with-reasoning --serve --serve-env /tmp/senpi-qa.env` keeps that same
+reasoning-scripted server alive for an external TUI. Once the sandbox, localhost
+server, and `models.json` are ready, it prints `SENPI_QA_SERVE_READY=1`; the
+env file is sourceable and contains the isolated agent/session paths,
+`SENPI_QA_MODELS_JSON`, and explicitly blanked provider-key variables so ambient
+credentials cannot leak into the TUI. It prints an auth-guard receipt before the
+ready sentinel and shuts down the local server on `SIGTERM`.
+
 `--with-text-tool-leak` and `--with-truncated-text-tool-leak` exercise Claude
 XML recovery through the real source CLI for `anthropic-messages` and
 `openai-completions`:

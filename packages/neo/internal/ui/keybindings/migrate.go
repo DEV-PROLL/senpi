@@ -51,7 +51,6 @@ var keybindingNameMigrations = map[string]string{
 	"cycleModelForward":        "app.model.cycleForward",
 	"cycleModelBackward":       "app.model.cycleBackward",
 	"selectModel":              "app.model.select",
-	"observeSessions":          "app.sessions.observe",
 	"expandTools":              "app.tools.expand",
 	"toggleThinking":           "app.thinking.toggle",
 	"toggleSessionNamedFilter": "app.session.toggleNamedFilter",

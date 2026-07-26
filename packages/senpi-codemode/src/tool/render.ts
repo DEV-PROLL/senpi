@@ -26,6 +26,7 @@ import type {
 	EvalStatusEvent,
 	EvalToolDetails,
 	EvalToolInput,
+	EvalToolRequest,
 } from "./types.ts";
 
 type EvalToolDefinition = ToolDefinition<EvalInputSchema, EvalToolDetails>;
@@ -202,7 +203,7 @@ type CellBadges = { readonly reset: boolean; readonly timeout: number | undefine
 type PrefixStyle = { readonly prefix: string; readonly continuation: string; readonly color: ThemeColor };
 type DetailedRenderContext = {
 	readonly environment: RenderEnvironment;
-	readonly args: EvalToolInput;
+	readonly args: EvalToolRequest;
 	readonly showImageFallback: boolean;
 };
 
@@ -253,10 +254,14 @@ function cellPresentation(status: CellStatus, spinnerFrame: number | undefined):
 			return { label: "pending", icon: "○", color: "muted" };
 		case "running":
 			return { label: "running", icon: spinner(spinnerFrame), color: "warning" };
+		case "detached":
+			return { label: "detached", icon: "↗", color: "warning" };
 		case "complete":
 			return { label: "done", icon: "✓", color: "success" };
 		case "error":
 			return { label: "error", icon: "✗", color: "error" };
+		case "cancelled":
+			return { label: "cancelled", icon: "×", color: "error" };
 		default:
 			return assertNever(status);
 	}
@@ -613,9 +618,10 @@ function renderDetailedLines(
 	const lines: string[] = [];
 	const cells = details.cells ?? [];
 	for (const [index, cell] of cells.entries()) {
+		const run = isEvalRunInput(context.args) ? context.args : undefined;
 		const badges = {
-			reset: index === 0 && context.args.reset === true,
-			timeout: index === 0 ? context.args.timeout : undefined,
+			reset: index === 0 && run?.reset === true,
+			timeout: index === 0 ? run?.timeout : undefined,
 		};
 		appendLines(lines, renderCell(cell, context.environment, badges));
 		if (index < cells.length - 1) lines.push("");
@@ -666,6 +672,10 @@ function textOutput(result: AgentToolResult<EvalToolDetails>, showImageFallback:
 		}
 	}
 	return lines.join("\n");
+}
+
+function isEvalRunInput(args: EvalToolRequest): args is EvalToolInput {
+	return args.action !== "peek" && args.action !== "stop";
 }
 
 function toolCallRows(details: EvalToolDetails | undefined): ToolCallRow[] {
@@ -720,7 +730,7 @@ function resultMetadata(
 }
 
 export function renderEvalCall(
-	args: EvalToolInput,
+	args: EvalToolRequest,
 	theme: Theme | undefined,
 	context: RenderContext,
 ): EvalRenderComponent {
@@ -729,6 +739,10 @@ export function renderEvalCall(
 		// The result renderer owns the full pending -> running -> done frame once a result exists.
 		// Rendering the call frame too would stack a duplicate box, so yield to it here.
 		component.setBlocks([]);
+		return component;
+	}
+	if (!isEvalRunInput(args)) {
+		component.setBlocks([{ kind: "text", text: style(theme, "toolTitle", `eval ${args.action} ${args.cell_id}`) }]);
 		return component;
 	}
 	if (theme === undefined && context.spinnerFrame === undefined) {

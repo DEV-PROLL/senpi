@@ -1,4 +1,4 @@
-// Package builtinext holds native Go reimplementations of the five builtin
+// Package builtinext holds native Go reimplementations of the four builtin
 // ctx.ui.custom extensions the classic TUI ships:
 //
 //   - history-search (ctrl+r): cross-session prompt history via a store scan,
@@ -10,8 +10,6 @@
 //     .../builtin/diff.ts.
 //   - redraws debug (/tui): the TUI full-redraw stat. Port of .../builtin/
 //     redraws.ts.
-//   - session-observer (ctrl+s): a live transcript HUD that tails a growing
-//     session file. Port of .../builtin/session-observer/*.
 //
 // It also renders the third-party ctx.ui.custom notice dialog. VERIFIED classic
 // RPC-mode behavior (rpc-mode.ts:237-241): ctx.ui.custom returns undefined

@@ -16,12 +16,17 @@
  *   node mock-loop.mjs --self-test                       # all three APIs round-trip
  *   node mock-loop.mjs --self-test --api anthropic-messages
  *   node mock-loop.mjs --with-tool [--api ...]           # full loop: model -> bash -> final text
+ *   node mock-loop.mjs --with-reasoning [--slow] [--api ...]
+ *   node mock-loop.mjs --with-reasoning --serve --serve-env /tmp/senpi-qa.env
+ *   (the flag is --serve-env, NOT --env-file: Node treats --env-file as a native
+ *    startup flag and would try to load the path as a dotenv file before the script runs)
  *   node mock-loop.mjs --with-mcp-tool mcp_fx_tool_1 --tool-args '{"value":"ok"}'
+ *   node mock-loop.mjs --scenario transient-recover|budget-exhaust|long-retry-after
  *   node mock-loop.mjs --run "prompt" [--api ...] [--evidence SLUG]
  */
 
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
 	createChecks,
 	evidenceDir,
@@ -34,10 +39,14 @@ import { startFakeModelServer } from "./lib/fake-model-server.mjs";
 import {
 	ALL_APIS,
 	API_PRESETS,
+	PROVIDER_ENV_KEYS,
+	QA_FINAL_MARKER,
+	QA_REASONING_MARKER,
 	assertMcpFixtureToolName,
 	checkRealAuthUnchanged,
 	hermeticEnv,
 	mcpFixtureForToolName,
+	reasoningScriptedTurn,
 	safeErrorReason,
 	validateMcpFixtureToolResult,
 	writeMcpFixtureExtension,
@@ -60,12 +69,14 @@ async function driveTurn({
 	prepareSandbox,
 	timeoutMs = 90000,
 	modelOverrides,
+	mockModels,
+	retry,
 }) {
 	const p = API_PRESETS[apiName];
 	const box = makeSandbox(`mock-loop-${apiName}`);
 	const resolvedTurns = typeof turns === "function" ? turns(box) : turns;
 	const server = await startFakeModelServer({ turns: resolvedTurns });
-	writeMockModelsJson(box.agentDir, server, apiName, modelOverrides);
+	writeMockModelsJson(box.agentDir, server, apiName, modelOverrides, { models: mockModels, retry });
 	const prepared = prepareSandbox ? await prepareSandbox(box) : {};
 	const args = [
 		"--provider",
@@ -98,6 +109,91 @@ async function checkApi(checks, apiName) {
 	return pass;
 }
 
+const RETRY_SCENARIOS = {
+	"transient-recover": {
+		error: { status: 500, message: "overloaded_error" },
+		errorCount: 2,
+		marker: "SENPI-QA-RETRY-TRANSIENT-RECOVER-38cd",
+		primaryAttempts: 3,
+		fallbackAttempts: 0,
+	},
+	"budget-exhaust": {
+		error: { status: 500, message: "overloaded_error" },
+		errorCount: 4,
+		marker: "SENPI-QA-RETRY-BUDGET-EXHAUST-7a16",
+		primaryAttempts: 4,
+		fallbackAttempts: 1,
+	},
+	"long-retry-after": {
+		error: { status: 429, message: "HTTP 429: rate_limit_exceeded - retry after 3600 seconds" },
+		errorCount: 1,
+		marker: "SENPI-QA-RETRY-LONG-RETRY-AFTER-b4e1",
+		primaryAttempts: 1,
+		fallbackAttempts: 1,
+	},
+};
+
+async function checkRetryScenario(checks, scenarioName, apiName = "openai-completions") {
+	const scenario = RETRY_SCENARIOS[scenarioName];
+	if (!scenario) throw new Error(`unknown retry scenario ${scenarioName}`);
+	const preset = API_PRESETS[apiName];
+	const fallbackModelId = `${preset.modelId}-fallback`;
+	const expectedModels = [
+		...Array(scenario.primaryAttempts).fill(preset.modelId),
+		...Array(scenario.fallbackAttempts).fill(fallbackModelId),
+	];
+	const { box, server, result } = await driveTurn({
+		apiName,
+		turns: [...Array(scenario.errorCount).fill({ error: scenario.error }), { text: scenario.marker }],
+		prompt: `Return ${scenario.marker} after recovering from the scripted provider error.`,
+		mockModels: [{ id: fallbackModelId }],
+		retry: {
+			enabled: true,
+			maxRetries: 3,
+			baseDelayMs: 0,
+			provider: { maxRetries: 0, maxRetryDelayMs: 60000 },
+			fallbackChains: { [`${preset.provider}/${preset.modelId}`]: [`${preset.provider}/${fallbackModelId}`] },
+		},
+		timeoutMs: 60000,
+	});
+	try {
+		const requests = server.requests.filter((request) => request.url?.includes(preset.path));
+		const modelSequence = requests.map((request) => request.model);
+		const counts = new Map();
+		for (const modelId of modelSequence) counts.set(modelId, (counts.get(modelId) ?? 0) + 1);
+		const transcript = [
+			`scenario=${scenarioName}`,
+			`attempts=${modelSequence.length}`,
+			`sequence=${modelSequence.map((modelId, index) => `${index + 1}:${preset.provider}/${modelId}`).join(",") || "none"}`,
+			`modelAttempts=${[preset.modelId, fallbackModelId].map((modelId) => `${preset.provider}/${modelId}:${counts.get(modelId) ?? 0}`).join(",")}`,
+			`switched=${modelSequence.includes(fallbackModelId) ? "yes" : "no"}`,
+		];
+		process.stdout.write(`SENPI_QA_RETRY_TRANSCRIPT ${transcript.join(" ")}\n`);
+		const markerReturned = (result.stdout + result.stderr).includes(scenario.marker);
+		const attemptsMatch = JSON.stringify(modelSequence) === JSON.stringify(expectedModels);
+		const pass = result.code === 0 && !result.timedOut && markerReturned && attemptsMatch;
+		checks.ok(
+			`${scenarioName}: scripted provider errors follow the expected retry/fallback path`,
+			pass,
+			`code=${result.code} marker=${markerReturned} expected=${expectedModels.join(" -> ")} actual=${modelSequence.join(" -> ") || "none"}`,
+		);
+		if (!pass) process.stderr.write(`\n--- ${scenarioName} stderr tail ---\n${result.stderr.slice(-1500)}\n`);
+		return pass;
+	} finally {
+		await server.stop();
+		box.cleanup();
+	}
+}
+
+async function runRetryScenario(scenarioName, apiName) {
+	installCleanupHooks();
+	const checks = createChecks(`mock-loop.mjs --scenario ${scenarioName}`);
+	const guard = guardRealAuth();
+	await checkRetryScenario(checks, scenarioName, apiName);
+	checkRealAuthUnchanged(checks, guard);
+	process.exit(checks.finish() ? 0 : 1);
+}
+
 async function selfTest(onlyApi) {
 	installCleanupHooks();
 	const checks = createChecks("mock-loop.mjs --self-test");
@@ -109,6 +205,9 @@ async function selfTest(onlyApi) {
 			appendTextToolLeakChecks(checks, await runTextToolLeakScenario({ apiName: api, truncated: false, driveTurn }));
 			appendTextToolLeakChecks(checks, await runTextToolLeakScenario({ apiName: api, truncated: true, driveTurn }));
 		}
+	}
+	if (!onlyApi) {
+		for (const scenarioName of Object.keys(RETRY_SCENARIOS)) await checkRetryScenario(checks, scenarioName);
 	}
 	checks.ok("zero real provider calls (only localhost fake hit)", true, "all baseUrls point at 127.0.0.1");
 	checkRealAuthUnchanged(checks, guard);
@@ -128,6 +227,99 @@ async function withTool(apiName) {
 		toolArgs: { command: "echo TOOL-LOOP-OK-22b8" },
 		marker: "TOOL-LOOP-OK-22b8",
 		extraArgs: ["--approve"],
+	});
+}
+
+async function withReasoning(apiName, slow) {
+	installCleanupHooks();
+	const checks = createChecks(`mock-loop.mjs --with-reasoning${slow ? " --slow" : ""} (${apiName})`);
+	const guard = guardRealAuth();
+	const turn = reasoningScriptedTurn({ slow });
+	const { box, server, result } = await driveTurn({
+		apiName,
+		turns: [turn],
+		prompt: "Return the final marker after completing your reasoning.",
+		timeoutMs: slow ? 120000 : 90000,
+	});
+	const allOutput = result.stdout + result.stderr;
+	const reasoningDeltas = server.streamLog.filter((entry) => entry.kind === "reasoning_delta");
+	const streamedReasoning = reasoningDeltas.map((entry) => entry.delta).join("");
+	checks.ok("CLI completed the reasoning-first loop", result.code === 0 && !result.timedOut, `code=${result.code}`);
+	checks.ok("final assistant text returned", allOutput.includes(QA_FINAL_MARKER), QA_FINAL_MARKER);
+	checks.ok(
+		"server stream log recorded the scripted reasoning chunks",
+		reasoningDeltas.length >= 1 && streamedReasoning === turn.reasoning && streamedReasoning.includes(QA_REASONING_MARKER),
+		`chunks=${reasoningDeltas.length} marker=${streamedReasoning.includes(QA_REASONING_MARKER)}`,
+	);
+	checkRealAuthUnchanged(checks, guard);
+	if (result.timedOut || result.code !== 0) process.stderr.write(`\n--- stderr tail ---\n${result.stderr.slice(-1500)}\n`);
+	await server.stop();
+	box.cleanup();
+	process.exit(checks.finish() ? 0 : 1);
+}
+
+function shellQuote(value) {
+	return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function writeServeEnvFile(envFile, box) {
+	const env = hermeticEnv(box.env);
+	for (const key of PROVIDER_ENV_KEYS) env[key] = "";
+	env.SENPI_QA_MODELS_JSON = join(box.agentDir, "models.json");
+	const keys = [
+		"SENPI_CODING_AGENT_DIR",
+		"SENPI_CODING_AGENT_SESSION_DIR",
+		"PI_OFFLINE",
+		"PI_TELEMETRY",
+		"PAGER",
+		"GIT_PAGER",
+		"SENPI_QA_MODELS_JSON",
+		...PROVIDER_ENV_KEYS,
+	];
+	mkdirSync(dirname(envFile), { recursive: true });
+	writeFileSync(
+		envFile,
+		["# Generated by senpi-qa mock-loop --serve. Safe to source in an external TUI.", ...keys.map((key) => `export ${key}=${shellQuote(env[key] ?? "")}`), ""].join("\n"),
+	);
+}
+
+async function serveReasoning(apiName, envFile, slow) {
+	const guard = guardRealAuth();
+	const box = makeSandbox(`mock-loop-serve-${apiName}`);
+	let server;
+	try {
+		const turns = [reasoningScriptedTurn({ slow })];
+		server = await startFakeModelServer({ turns });
+		writeMockModelsJson(box.agentDir, server, apiName);
+		writeServeEnvFile(envFile, box);
+	} catch (error) {
+		if (server) await server.stop();
+		box.cleanup();
+		throw error;
+	}
+
+	const authDigest = guard.before ? `sha256=${guard.before.slice(0, 12)}...` : "sha256=absent";
+	process.stdout.write(`SENPI_QA_AUTH_GUARD=1 ${authDigest} path=${guard.path}\n`);
+	process.stdout.write(`SENPI_QA_SERVE_ENV_FILE=${envFile}\n`);
+	process.stdout.write("SENPI_QA_SERVE_READY=1\n");
+
+	let shutdown;
+	const stop = async () => {
+		if (!shutdown) {
+			shutdown = (async () => {
+				await server.stop();
+				box.cleanup();
+				guard.assertUnchanged();
+			})();
+		}
+		return shutdown;
+	};
+	await new Promise((resolve, reject) => {
+		const onSignal = () => {
+			void stop().then(resolve, reject);
+		};
+		process.once("SIGTERM", onSignal);
+		process.once("SIGINT", onSignal);
 	});
 }
 
@@ -208,8 +400,34 @@ if (api && !API_PRESETS[api]) {
 	process.exit(2);
 }
 
+const scenario = flagValue(argv, "--scenario");
+if (scenario !== undefined && !RETRY_SCENARIOS[scenario]) {
+	process.stderr.write(`unknown --scenario ${scenario}. valid: ${Object.keys(RETRY_SCENARIOS).join(", ")}\n`);
+	process.exit(2);
+}
+
 if (argv[0] === "--self-test") {
 	selfTest(api).catch((e) => {
+		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+		process.exit(1);
+	});
+} else if (scenario) {
+	runRetryScenario(scenario, api || "openai-completions").catch((e) => {
+		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+		process.exit(1);
+	});
+} else if (argv.includes("--serve")) {
+	const envFile = flagValue(argv, "--serve-env");
+	if (argv[0] !== "--with-reasoning" || !envFile) {
+		process.stderr.write("--serve requires --with-reasoning and --serve-env <path>\n");
+		process.exit(2);
+	}
+	serveReasoning(api || "openai-completions", envFile, argv.includes("--slow")).catch((e) => {
+		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+		process.exit(1);
+	});
+} else if (argv[0] === "--with-reasoning") {
+	withReasoning(api || "openai-completions", argv.includes("--slow")).catch((e) => {
 		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
 		process.exit(1);
 	});
@@ -259,9 +477,12 @@ if (argv[0] === "--self-test") {
 			"senpi-qa Channel 3 — Mock loop (zero real API calls)",
 			"  node mock-loop.mjs --self-test [--api <name>]   round-trip 1 or all 3 wire formats",
 			"  node mock-loop.mjs --with-tool [--api <name>]   full loop with a bash tool call",
+			"  node mock-loop.mjs --with-reasoning [--slow] [--api <name>]",
+			"  node mock-loop.mjs --with-reasoning --serve --serve-env <path> [--slow] [--api <name>]",
 			"  node mock-loop.mjs --with-text-tool-leak --api <anthropic-messages|openai-completions>",
 			"  node mock-loop.mjs --with-truncated-text-tool-leak --api <anthropic-messages|openai-completions>",
 			"  node mock-loop.mjs --with-mcp-tool <tool> [--tool-args JSON]",
+			"  node mock-loop.mjs --scenario <transient-recover|budget-exhaust|long-retry-after> [--api <name>]",
 			"  node mock-loop.mjs --run <prompt> [--api <name>]",
 			`  APIs: ${ALL_APIS.join(", ")}`,
 			"",

@@ -1,4 +1,114 @@
+## Same-model-first transient retries and capped server waits (2026-07-26)
+
+### What changed
+
+- Supersedes the 2026-07-20 entry's sentence "retryable transient failures now switch to a configured fallback ...": transient retryable failures (timeouts, overload, 429, 5xx, transport drops) now retry the same model on the existing exponential backoff until `retry.maxRetries` is spent; only then does the configured `retry.fallbackChains` chain engage, and each fallback candidate starts with a fresh retry budget.
+- `core/agent-session.ts`: `retry.provider.maxRetryDelayMs` (default 60000) now bounds the server-requested wait honored on the same model. Beyond the cap the fallback chain engages and the primary is suppressed for the requested duration; the turn fails with an informative error only when no chain candidate is available. Waits at or below the cap are honored as before.
+- `core/retry-fallback/cooldown.ts`: timeout and connection/transport errors now carry a 60-second selector cooldown instead of the five-minute unmatched default, so revert-to-primary is no longer blocked for five minutes after one network blip. Existing tiers keep precedence: quota/billing 30 minutes, rate-limit 30 seconds, capacity 45 seconds plus jitter, 5xx 20 seconds, and a provider retry-after hint always wins.
+- Unchanged: classifier-refusal fallback (immediate, pinned), hard-error fallback (quota/auth/model-not-found, immediate), and `retry.abortServerSideFallback` (default true) routing provider-side model substitution onto the configured chain.
+- Cost/latency: with `retry.maxRetries >= 1` a fully failing chain now costs up to `1 + (chainLength + 1) * maxRetries` provider calls plus per-rung backoff before the turn fails; with `maxRetries: 0` every failure switches immediately, costing `1 + chainLength` calls.
+
+## OMO local plugin remote-diff updater beta on bare `senpi update` (2026-07-26)
+
+- A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
+- The user's checkout receives ZERO git mutations: the hook performs one read-only `git fetch origin dev`, builds in a feature-owned persistent worktree under the agent directory, and atomically swaps the installed plugin directory by rename. No checkout/branch/commit/merge/reset/clean/stash/push ever touches the user's tree.
+- `SENPI_OMO_LOCAL_UPDATE=0` is a kill-switch that disables the hook entirely. All failures are non-fatal: the hook never throws and never sets `process.exitCode`; any error downgrades to a warning plus a manual-update hint so the `senpi` self-update proceeds untouched.
+- Removal is exactly three steps: delete `src/beta/omo-local-update.ts`; delete all `test/omo-local-update*` files; delete the two BETA-marked touch points (the import and the hook call) in `package-manager-cli.ts`.
+
+## App-server daemon launch diagnostics and hermetic lifecycle coverage (2026-07-24)
+
+- The daemon launcher now classifies websocket listener occupancy before spawn: a compatible app-server answers `initialize` and attaches, while any other TCP listener fails immediately with an `EADDRINUSE` diagnostic instead of consuming the child readiness budget. Child-process startup stderr still accompanies actual post-spawn failures, and each launch replaces stale diagnostics.
+- The real-CLI daemon lifecycle test isolates home/XDG state, verifies the pre-spawn occupied-port diagnostic and that it does not create a child stderr log, retries the bounded QA port pool, and awaits lock/process events rather than polling sleeps.
+
+## Manual compaction keeps agent lifecycle subscription through abort (2026-07-24)
+
+- `core/agent-session.ts`: manual or extension-initiated compaction claims its synchronous admission/barrier first,
+  then aborts and waits for the active agent run while still subscribed. The abort's `agent_end` now clears the
+  active-run and retry state before compaction disconnects for summary generation; all disconnected exits reconnect.
+- Regression: `test/suite/compaction-race.test.ts` covers compaction during a live provider stream and asserts the
+  aborted `agent_end` precedes compaction startup without deadlocking future prompts.
+
 # changes
+
+## Reload measurement and redundant-work removal (2026-07-26)
+
+- `/reload` records a `reload` timing namespace with one marker per phase
+  (`shutdown`, `settings`, `models`, `resources`, `runtime`, `chatRebuild`,
+  `lifecycle`). With `PI_TIMING=1` the breakdown is appended to the reload
+  status line; with it unset nothing is recorded.
+- Settings are read once per reload instead of twice.
+  `ResourceLoaderReloadOptions.settingsAlreadyReloadedFor` takes the
+  `SettingsManager` the caller just reloaded, and the loader skips its own
+  reload only when that is the very manager it owns AND project trust is not
+  being resolved, so trust-scoped values can never go stale.
+- `ModelRuntime.reloadConfig()` delegates to `refresh()` instead of repeating
+  the config load and provider rebuild that `refresh()` performs immediately
+  afterwards.
+- Both model-scope resolutions read the snapshot the reload refresh just
+  produced rather than each triggering another availability scan (3 scans -> 1).
+  The snapshot is trusted only via `hasFreshAvailabilitySnapshot()`; a failed
+  refresh falls back to the runtime so scan errors still surface.
+- `scripts/bench-reload.mjs` measures `DefaultResourceLoader.reload()` from
+  source through a subprocess probe (real jiti path), reporting cold-first and
+  warm p50/p95 across fresh processes.
+
+## Multi-session RPC mode, session-owned MCP/config-reload state, and back-compat guarantee (2026-07-23)
+
+### What changed
+
+- `src/modes/rpc/`: new `--multi-session` startup flag. `senpi --mode rpc --multi-session`
+  constructs NO default session (no default `AgentSessionRuntime`, no default extension/watcher load).
+  Mode is fixed at process start; there is no runtime transition. New modules: `session-registry.ts`,
+  `session-command-router.ts`, `session-binding.ts`, `multi-session-host.ts` (each ≤250 pure LOC).
+- Multi-session wire protocol per the D1 normative table (see `docs/rpc.md` → Multi-session mode, and
+  the `rpc-mode.ts` header doc block for the verbatim table): `get_protocol_info` (answered in BOTH
+  modes; side-effect-free; THE capability probe), `open_session` / `close_session` / `list_sessions`,
+  mandatory `sessionId` routing on session-scoped commands, `sessionId` tagging on all session-owned
+  output, stable error codes (`unknown_session`, `session_closing`, `session_path_in_use`,
+  `missing_session_id`, `multi_session_disabled`, `invalid_path`, `open_failed: <detail>`), identities
+  (D6: response-level `sessionId` = opaque routing handle, ephemeral per process epoch;
+  `state.sessionId` = durable JSONL identity), and the D9 ordering guarantee (strict FIFO per session,
+  one total stdout order, fair round-robin between sessions' queued complete records, NO cross-session
+  batch coalescing, starvation freedom NOT promised).
+- `src/core/extensions/builtin/mcp/` and `src/core/extensions/builtin/config-reload/`: in multi-session
+  mode each session OWNS its MCP service instance (extension factory closes over it; helpers take the
+  instance, never call the `getMcpService()` global getter), its elicitation/instructions/prompts state,
+  and its `reloadHandoff` keyed by the session handle. Classic single-session mode keeps the globals
+  (no behavior change).
+- Session-owned config-reload state: the fs-watcher reload chain
+  (`config-reload/index.ts` → `agent-session.ts:3807` `resetApiProviders()`) is scoped per session via
+  the pi-ai provider scope, so reloading session A cannot reset session B's providers.
+
+### Why
+
+- A single shared `senpi --mode rpc --multi-session` process serves all of a provider instance's
+  threads concurrently. Cross-session turns run concurrently; per-session turn serialization comes
+  from `AgentSession`. Session-scoped state (provider registry, MCP, config-reload) must be owned by
+  the session so one conversation can never corrupt another.
+
+### Back-compat guarantee
+
+- Classic single-session mode (`senpi --mode rpc`, no flag) is byte-identical to today. The ONLY
+  additive classic-mode behavior is that `get_protocol_info` is answered (side-effect-free). Existing
+  RPC tests, the classic-compat characterization pin suite, and the neo-daemon suites stay green
+  unchanged.
+
+### Explicit non-goal
+
+- Per-session AuthStorage / multi-tenant key isolation is NOT added inside the shared process. The
+  process is single-tenant; tenancy isolation remains the neo daemon's job (per-connection worker
+  model). The neo daemon's behavior and its header distrust rationale are unchanged.
+
+### Why extension system couldn't handle this
+
+- Session lifecycle, the multi-session host/router/registry, MCP service ownership, and config-reload
+  handoff are protocol and core-runtime infrastructure below the extension boundary.
+
+### Expected merge conflict zones on next upstream sync
+
+- HIGH: `src/modes/rpc/` (new multi-session modules + `rpc-mode.ts`/`connection-handler.ts` seams).
+- MEDIUM: `src/core/extensions/builtin/mcp/service.ts` global getter removal on the multi-session path.
+- LOW: `src/core/extensions/builtin/config-reload/index.ts` reloadHandoff keying.
 
 ## App-server web-search projection and cumulative turn diffs (2026-07-21)
 
@@ -459,3 +569,4 @@
 
 The retry budget, abortable retry sleep, provider continuation, and active model state all belong to `AgentSession`; an extension cannot safely replace a model inside that lifecycle without persisting it or rebuilding context.
 - Retry fallback revert-to-primary at turn boundaries: unpinned fallback state under the `cooldown-expiry` policy restores the original model once its selector cooldown lapses (checked at prompt entry and between the retry sleep and continuation), emits `retry_fallback_reverted`, preserves user thinking-level overrides, and is abandoned on manual `setModel`/`cycleModel` (which also abort a pending fallback retry sleep).
+- Server-side fallback aborts (2026-07-25): `retry.abortServerSideFallback` (default true) forwards `abortServerSideFallback` into provider stream options via a new `Agent` field and `createLoopConfig`. `AgentSession` translates the provider's `server_fallback_aborted` diagnostic into a session event of the same name carrying `from`/`to`/`chainConfigured`, emitted synchronously from `message_end` so it precedes refusal retry handling, and the existing refusal path then routes the turn onto the configured chain. `RetryFallbackController.hasConfiguredChain()` distinguishes "no chain configured" from "chain spent", because the no-chain refusal path emits no `retry_fallback_exhausted`. Interactive mode renders the abort and names `/fallback` when no chain exists.

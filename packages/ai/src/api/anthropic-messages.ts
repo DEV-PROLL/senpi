@@ -31,16 +31,25 @@ import type {
 	ToolResultMessage,
 } from "../types.ts";
 import { isVideoMimeType } from "../types.ts";
+import { combineAbortSignals } from "../utils/abort-signals.ts";
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { shortHash } from "../utils/hash.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
+import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import {
+	applyServerFallbackAbort,
+	parseServerFallbackReceipt,
+	parseStickyFallbackReceipt,
+	type ServerFallbackReceipt,
+} from "../utils/server-fallback-receipt.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
 
 import { resolveCloudflareBaseUrl } from "./cloudflare.ts";
+import { resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
 import {
 	ANTHROPIC_RESERVED_BODY_KEYS,
@@ -221,7 +230,35 @@ const FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 const COMPUTER_USE_BETA_PREFIX = "computer-use-";
 const NATIVE_COMPUTER_TOOL_TYPE = "computer_20250124";
-const ADAPTIVE_THINKING_MODEL_MARKERS = ["opus-4-6", "opus-4-7", "sonnet-4-6"] as const;
+const ADAPTIVE_THINKING_MODEL_MARKERS = [
+	"opus-4-6",
+	"opus-4-7",
+	"opus-4-8",
+	"opus-5",
+	"sonnet-4-6",
+	"sonnet-5",
+	"fable-5",
+	"mythos-5",
+] as const;
+/**
+ * Adaptive families that expose the real `xhigh` effort tier. Everything else on the
+ * adaptive ladder tops out at `max` (Opus/Sonnet 4.6 are four-tier: low/medium/high/max).
+ */
+const NATIVE_XHIGH_EFFORT_MODEL_MARKERS = [
+	"opus-4-7",
+	"opus-4-8",
+	"opus-5",
+	"sonnet-5",
+	"fable-5",
+	"mythos-5",
+] as const;
+/**
+ * Adaptive families that reject `thinking: {type: "disabled"}` outright (verified 400:
+ * `"thinking.type.disabled" is not supported for this model`). The generated catalog also encodes
+ * this as `compat.supportsDisabledThinking: false`, but `models.json` entries and third-party
+ * gateway rows carry no generated compat, so the family fact has to live here as well.
+ */
+const DISABLED_THINKING_REJECTING_MODEL_MARKERS = ["fable-5", "mythos-5"] as const;
 const CLAUDE_FABLE_OR_MYTHOS_MODEL_ID = /^claude-(?:fable|mythos)(?:-|$)/i;
 const UNSUPPORTED_NATIVE_COMPUTER_TOOL_MODEL_MARKERS = [
 	"opus-4-6",
@@ -278,6 +315,7 @@ function getAnthropicCompat(
 		allowEmptySignature: model.compat?.allowEmptySignature ?? false,
 		unsignedThinkingReplay:
 			model.compat?.unsignedThinkingReplay ?? (model.compat?.allowEmptySignature ? "empty-signature" : "text"),
+		supportsStrictTools: model.compat?.supportsStrictTools ?? false,
 		supportsToolReferences: model.compat?.supportsToolReferences ?? defaultSupportsToolReferences(model),
 		// Default: first-party Anthropic only. Anthropic-compatible providers
 		// (kimi-coding, fireworks, copilot, gateways) may execute the server-side
@@ -372,6 +410,10 @@ function mergeHeaders(...headerSources: (Record<string, string | null> | undefin
 		}
 	}
 	return merged;
+}
+
+function hasAuthorizationHeader(headers?: Record<string, string>): boolean {
+	return Object.keys(headers ?? {}).some((name) => name.toLowerCase() === "authorization");
 }
 
 interface ServerSentEvent {
@@ -939,6 +981,10 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 			timestamp: Date.now(),
 		};
 
+		const serverFallbackAbort = new AbortController();
+		let serverFallbackReceipt: ServerFallbackReceipt | undefined;
+		const combinedAbort = combineAbortSignals([options?.signal, serverFallbackAbort.signal]);
+		const requestSignal = combinedAbort.signal;
 		try {
 			let client: Anthropic;
 			let isOAuth: boolean;
@@ -948,7 +994,8 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				isOAuth = false;
 			} else {
 				const apiKey = options?.apiKey;
-				if (!apiKey) {
+				const optionsHeaders = providerHeadersToRecord(options?.headers);
+				if (!apiKey && !hasAuthorizationHeader(optionsHeaders)) {
 					throw new Error(`No API key for provider: ${model.provider}`);
 				}
 
@@ -973,7 +1020,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					apiKey,
 					options?.interleavedThinking ?? true,
 					shouldUseFineGrainedToolStreamingBeta(model, context),
-					providerHeadersToRecord(options?.headers),
+					optionsHeaders,
 					copilotDynamicHeaders,
 					cacheSessionId,
 					options?.env,
@@ -997,9 +1044,9 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				const payloadRequestMetadata = extractPayloadRequestMetadata(params);
 				params = payloadRequestMetadata.params;
 				const requestOptions = {
-					...(options?.signal ? { signal: options.signal } : {}),
+					...(requestSignal ? { signal: requestSignal } : {}),
 					...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
-					maxRetries: options?.maxRetries ?? 0,
+					maxRetries: 0,
 					...(payloadRequestMetadata.headers ? { headers: payloadRequestMetadata.headers } : {}),
 				};
 				try {
@@ -1016,19 +1063,25 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					throw error;
 				}
 			};
-			let request: { params: MessageCreateParamsStreaming; response: Response };
-			try {
-				request = await createRequest();
-			} catch (error) {
-				if (unsignedThinkingReplay !== "text" && isInvalidUnsignedThinkingSignatureError(error)) {
-					unsignedThinkingReplay = "text";
-					if (fallbackKey) unsignedThinkingTextReplayFallbacks.add(fallbackKey);
-					request = await createRequest();
-				} else {
-					throw error;
-				}
-			}
-			const { response } = request;
+			const { params: sentParams, response } = await retryProviderRequest(
+				async () => {
+					try {
+						return await createRequest();
+					} catch (error) {
+						if (unsignedThinkingReplay !== "text" && isInvalidUnsignedThinkingSignatureError(error)) {
+							unsignedThinkingReplay = "text";
+							if (fallbackKey) unsignedThinkingTextReplayFallbacks.add(fallbackKey);
+							return createRequest();
+						}
+						throw error;
+					}
+				},
+				{
+					maxRetries: options?.maxRetries,
+					maxRetryDelayMs: options?.maxRetryDelayMs,
+					signal: requestSignal,
+				},
+			);
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 
@@ -1039,7 +1092,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				| (ProviderNativeContent & { partialJson?: string; index?: number });
 			const blocks = output.content as Block[];
 
-			for await (const event of iterateAnthropicEvents(response, options?.signal)) {
+			for await (const event of iterateAnthropicEvents(response, requestSignal)) {
 				if (event.type === "message_start") {
 					output.responseId = event.message.id;
 					// Capture initial token usage from message_start event
@@ -1053,7 +1106,25 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					output.usage.totalTokens =
 						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 					calculateCost(model, output.usage);
+					const stickyReceipt =
+						options?.abortServerSideFallback === true
+							? parseStickyFallbackReceipt(event.message.usage, sentParams.model, event.message.model)
+							: undefined;
+					if (stickyReceipt !== undefined) {
+						serverFallbackReceipt = stickyReceipt;
+						serverFallbackAbort.abort();
+						break;
+					}
 				} else if (event.type === "content_block_start") {
+					const receipt =
+						options?.abortServerSideFallback === true
+							? parseServerFallbackReceipt(event.content_block)
+							: undefined;
+					if (receipt !== undefined) {
+						serverFallbackReceipt = receipt;
+						serverFallbackAbort.abort();
+						break;
+					}
 					if (event.content_block.type === "text") {
 						const block: Block = {
 							type: "text",
@@ -1239,13 +1310,19 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				throw new Error("Request was aborted");
 			}
 
+			if (serverFallbackReceipt !== undefined) {
+				applyServerFallbackAbort(output, serverFallbackReceipt);
+			}
+
 			if (output.stopReason === "aborted" || output.stopReason === "error") {
 				throw new Error(output.errorMessage || "An unknown error occurred");
 			}
 
+			combinedAbort.cleanup();
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
+			combinedAbort.cleanup();
 			for (const block of output.content) {
 				delete (block as { index?: number }).index;
 				// An aborted stream never reaches content_block_stop; keep whatever
@@ -1287,12 +1364,18 @@ function matchesModelMarker(
 	return candidates.some((candidate) => markers.some((marker) => candidate.includes(marker)));
 }
 
-function isOpus46(model: Pick<Model<"anthropic-messages">, "id" | "name">): boolean {
-	return matchesModelMarker(model, ["opus-4-6"]);
+function supportsNativeXhighEffort(model: Pick<Model<"anthropic-messages">, "id" | "name">): boolean {
+	return matchesModelMarker(model, NATIVE_XHIGH_EFFORT_MODEL_MARKERS);
 }
 
-function isOpus47(model: Pick<Model<"anthropic-messages">, "id" | "name">): boolean {
-	return matchesModelMarker(model, ["opus-4-7"]);
+/** True when the model cannot accept `thinking: {type: "disabled"}` on the wire. */
+function cannotDisableThinking(
+	model: Model<"anthropic-messages">,
+	compat: { supportsDisabledThinking: boolean },
+): boolean {
+	if (!compat.supportsDisabledThinking) return true;
+	if (model.thinkingLevelMap?.off === null) return true;
+	return matchesModelMarker(model, DISABLED_THINKING_REJECTING_MODEL_MARKERS);
 }
 
 function supportsAdaptiveThinking(model: Model<"anthropic-messages">): boolean {
@@ -1305,7 +1388,7 @@ function supportsAdaptiveThinking(model: Model<"anthropic-messages">): boolean {
 /**
  * Map ThinkingLevel to Anthropic effort levels for adaptive thinking.
  * Note: effort "max" is available on all adaptive-thinking Claude models, while native
- * "xhigh" is only available on Opus 4.7/4.8, Sonnet 5, and Fable 5.
+ * "xhigh" is only available on Opus 4.7/4.8, Opus 5, Sonnet 5, and Fable 5.
  */
 function mapThinkingLevelToEffort(
 	model: Model<"anthropic-messages">,
@@ -1323,12 +1406,11 @@ function mapThinkingLevelToEffort(
 		case "high":
 			return "high";
 		case "xhigh":
-			if (isOpus47(model)) return "xhigh";
-			if (isOpus46(model)) return "max";
-			return "high";
+			// Only called for adaptive models, so the floor is the adaptive ladder's top
+			// tier (`max`), never `high` — degrading xhigh to high silently under-thinks.
+			return supportsNativeXhighEffort(model) ? "xhigh" : "max";
 		case "max":
-			if (isOpus47(model) || isOpus46(model)) return "max";
-			return "high";
+			return "max";
 		default:
 			return "high";
 	}
@@ -1340,7 +1422,7 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
 	const apiKey = options?.apiKey;
-	if (!apiKey) {
+	if (!apiKey && !hasAuthorizationHeader(providerHeadersToRecord(options?.headers))) {
 		throw new Error(`No API key for provider: ${model.provider}`);
 	}
 
@@ -1385,7 +1467,7 @@ function isOAuthToken(apiKey: string): boolean {
 
 function createClient(
 	model: Model<"anthropic-messages">,
-	apiKey: string,
+	apiKey: string | undefined,
 	interleavedThinking: boolean,
 	useFineGrainedToolStreamingBeta: boolean,
 	optionsHeaders?: Record<string, string>,
@@ -1455,7 +1537,7 @@ function createClient(
 	}
 
 	// OAuth: Bearer auth, Claude Code identity headers
-	if (isOAuthToken(apiKey)) {
+	if (apiKey && isOAuthToken(apiKey)) {
 		const client = new Anthropic({
 			apiKey: null,
 			authToken: apiKey,
@@ -1484,7 +1566,7 @@ function createClient(
 	const sessionAffinityHeaders: Record<string, string | null> =
 		sessionId && getAnthropicCompat(model).sendSessionAffinityHeaders ? { "x-session-affinity": sessionId } : {};
 	const client = new Anthropic({
-		apiKey,
+		apiKey: apiKey ?? null,
 		authToken: null,
 		baseURL: model.baseUrl,
 		dangerouslyAllowBrowser: true,
@@ -1597,9 +1679,17 @@ function buildParams(
 				immediateTools,
 				isOAuthToken,
 				compat.supportsEagerToolInputStreaming,
+				compat.supportsStrictTools,
 				compat.supportsCacheControlOnTools ? cacheControl : undefined,
 			),
-			...convertTools(deferredTools, isOAuthToken, compat.supportsEagerToolInputStreaming, undefined, true),
+			...convertTools(
+				deferredTools,
+				isOAuthToken,
+				compat.supportsEagerToolInputStreaming,
+				compat.supportsStrictTools,
+				undefined,
+				true,
+			),
 		];
 	}
 
@@ -1626,12 +1716,18 @@ function buildParams(
 					display,
 				} as MessageCreateParamsStreaming["thinking"];
 			}
-		} else if (
-			options?.thinkingEnabled === false &&
-			compat.supportsDisabledThinking &&
-			model.thinkingLevelMap?.off !== null
-		) {
-			params.thinking = { type: "disabled" };
+		} else if (options?.thinkingEnabled === false) {
+			if (cannotDisableThinking(model, compat)) {
+				// These families reject `thinking.type: "disabled"` with a 400 AND default to adaptive
+				// thinking when the field is absent, so omitting it silently bills full reasoning for a
+				// "thinking off" turn. The API exposes no true off switch here, so pin the cheapest
+				// effort: the request stays valid and reasoning stays at the documented minimum.
+				if (supportsAdaptiveThinking(model)) {
+					params.output_config = { effort: "low" } as NonNullable<MessageCreateParamsStreaming["output_config"]>;
+				}
+			} else {
+				params.thinking = { type: "disabled" };
+			}
 		}
 	}
 
@@ -1974,23 +2070,34 @@ function convertTools(
 	tools: Tool[],
 	isOAuthToken: boolean,
 	supportsEagerToolInputStreaming: boolean,
+	supportsStrictTools: boolean,
 	cacheControl?: CacheControlEphemeral,
 	deferLoading = false,
 ): Anthropic.Messages.Tool[] {
 	if (!tools) return [];
 
 	return tools.map((tool, index) => {
+		const strict = resolveJsonSchemaStrictSampling(tool, supportsStrictTools);
 		const schema = tool.parameters as { properties?: unknown; required?: string[] };
+		const legacyInputSchema = {
+			type: "object" as const,
+			properties: schema.properties ?? {},
+			required: schema.required ?? [],
+		};
+		const inputSchema =
+			strict === true
+				? {
+						...(tool.parameters as Record<string, unknown>),
+						...legacyInputSchema,
+					}
+				: legacyInputSchema;
 
 		return {
 			name: isOAuthToken ? toClaudeCodeName(tool.name) : tool.name,
 			description: tool.description,
 			...(supportsEagerToolInputStreaming ? { eager_input_streaming: true } : {}),
-			input_schema: {
-				type: "object",
-				properties: schema.properties ?? {},
-				required: schema.required ?? [],
-			},
+			...(strict === true ? { strict: true } : {}),
+			input_schema: inputSchema,
 			...(deferLoading ? { defer_loading: true } : {}),
 			...(cacheControl && index === tools.length - 1 ? { cache_control: cacheControl } : {}),
 		};

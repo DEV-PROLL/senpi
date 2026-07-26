@@ -30,7 +30,7 @@ export interface BranchSummarySettings {
 export interface ProviderRetrySettings {
 	timeoutMs?: number; // SDK request timeout + agent stream idle timeout; defaults to httpIdleTimeoutMs
 	maxRetries?: number; // SDK/provider retry attempts
-	maxRetryDelayMs?: number; // default: 60000 (max server-requested delay before failing)
+	maxRetryDelayMs?: number; // default: 60000 (max server-requested delay honoured on the same model; beyond it the fallback chain engages)
 }
 
 export interface RetrySettings {
@@ -41,6 +41,7 @@ export interface RetrySettings {
 	modelFallback?: boolean; // default: true
 	fallbackChains?: Record<string, string[]>;
 	fallbackRevertPolicy?: "cooldown-expiry" | "never"; // default: "cooldown-expiry"
+	abortServerSideFallback?: boolean; // default: true
 }
 
 export interface TerminalSettings {
@@ -55,6 +56,11 @@ export interface TerminalSettings {
 	maxSessions?: number; // default: 32 (concurrent background sessions before LRU-exited pruning)
 	timeoutAction?: "background" | "kill"; // default: "background" (fate of a foreground timeout)
 	notify?: "wake" | "next-turn" | "off"; // default: "wake" (async completion wake behavior)
+	monitorCoalesceWindowMs?: number; // default: 2000 (event batching window)
+	monitorRateLimitMs?: number; // default: 5000 (minimum interval per monitor injection)
+	monitorMaxLinesPerInjection?: number; // default: 50 (bounded monitor event batch)
+	monitorMaxCharsPerInjection?: number; // default: 4096 (bounded monitor event batch)
+	monitorWakeBudget?: number; // default: 5 (consecutive monitor-only wake limit)
 }
 
 export interface ImageSettings {
@@ -973,6 +979,17 @@ export class SettingsManager {
 		};
 	}
 
+	/**
+	 * Abort a turn when the provider silently substitutes the requested model
+	 * after a classifier decline, so model choice stays with the configured
+	 * fallback chain instead of the provider. Defaults to enabled.
+	 */
+	getAbortServerSideFallback(): boolean {
+		return typeof this.settings.retry?.abortServerSideFallback === "boolean"
+			? this.settings.retry.abortServerSideFallback
+			: true;
+	}
+
 	/** Raw retry.fallbackChains value before sanitization, for startup validation warnings. */
 	getRawFallbackChains(): unknown {
 		return this.settings.retry?.fallbackChains;
@@ -1136,7 +1153,7 @@ export class SettingsManager {
 		return this.settings.showCacheMissNotices ?? false;
 	}
 
-	getExternalEditorCommand(): string | undefined {
+	getExternalEditorCommand(): string {
 		const configuredEditor = this.settings.externalEditor;
 		if (typeof configuredEditor === "string" && configuredEditor.trim() !== "") {
 			return configuredEditor;

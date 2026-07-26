@@ -30,6 +30,190 @@
   is now a shared `pushAssistantText` closure) and `backfillReasoningSignatures()`.
 - LOW: `api/anthropic-messages.ts` `normalizeToolCallId()` and the thinking-config block of `buildParams()`.
 
+## 2026-07-26 - Preserve persisted freeform identity when replaying OpenAI Responses calls (#256)
+
+### What changed and why
+
+- `api/openai-responses-shared.ts`: custom Responses calls with no server item id now persist the shared
+  `CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL` (`"custom"`) and recover their `custom_tool_call` /
+  `custom_tool_call_output` wire types from that evidence. The recovery uses the existing freeform input
+  serializer, preserving raw `apply_patch` text during no-tool compaction and model/API replay. It never sends
+  the sentinel as an item `id`.
+- Active grammar metadata remains the higher-fidelity source when it is available: it continues to choose its
+  named input property and retain real custom-call ids, while a sentinel still removes the invalid synthetic id.
+- Focused AI and compaction wiremock tests pin raw-input round trips, matching custom result types, model-switch
+  preservation, grammar precedence, and the no-invalid-id guard.
+
+This deliberately diverges from upstream's #271 crash-only repair. That patch omitted the invalid sentinel id
+but downgraded a historical freeform call to JSON `function_call` when the current request had no tool definitions.
+Senpi's compaction path intentionally omits those definitions, so preserving the persisted freeform type is required
+for type fidelity and byte-identical patch replay.
+
+### Why extension system couldn't handle this
+
+The persisted tool-call identity is decoded while constructing the provider request in `packages/ai`; extensions only
+see the already-normalized context and cannot restore the Responses wire item type.
+
+### Expected merge conflict zones
+
+- HIGH: upstream owns `api/openai-responses-shared.ts`'s `convertResponsesMessages()` tool-call and tool-result
+  branches and rewrote the same hunk in #271. Future upstream syncs will collide here; retain sentinel recovery,
+  raw-input serialization, and the no-`custom`-id invariant when resolving.
+
+## 2026-07-25 - Thinking-off actually disables reasoning; wire-exact effort ladders across adapters
+
+### What changed and why
+
+Turning thinking **off** silently kept paid reasoning on for several model families, and several
+effort ladders degraded a requested level to a weaker wire value. Both are fixed adapter-side; the
+generated catalog only gained one compat fact.
+
+Wire truth was established by probing the live Anthropic Messages endpoint before any edit
+(7 families x `thinking:{type:"disabled"}`, plus pin/display controls, `max_tokens: 16`):
+
+| probe | result |
+|---|---|
+| `thinking:{type:"disabled"}` on opus-4-6 / 4-7 / 4-8 / 5, sonnet-4-6 / 5 | **200** - true disable works, kept as-is |
+| `thinking:{type:"disabled"}` on `claude-fable-5` | **400** `"thinking.type.disabled" is not supported for this model. Thinking defaults to adaptive mode when not specified` |
+| no `thinking` + `output_config:{effort:"low"}` on fable-5 / opus-5 | **200** (with and without an effort beta header) |
+| `thinking:{type:"adaptive",display:"summarized"}` on opus-4-6 | **200** |
+
+- `api/anthropic-messages.ts`: the thinking-off branch no longer silently omits the thinking field
+  for adaptive families that reject `disabled`. Families that accept `disabled` keep sending it;
+  families that cannot (encoded as `compat.supportsDisabledThinking: false`) now send **no** thinking
+  block plus `output_config:{effort:"low"}`, because the API defaults to adaptive thinking when the
+  field is absent - previously "off" billed full reasoning.
+- `api/anthropic-messages.ts`: `ADAPTIVE_THINKING_MODEL_MARKERS` gained `opus-4-8`, `opus-5`,
+  `sonnet-5`, `fable-5`, so models without the `forceAdaptiveThinking` compat pin (custom
+  `models.json` entries, third-party gateways) get adaptive effort control instead of a
+  budget-token request. `mapThinkingLevelToEffort` now floors the extended levels at the adaptive
+  ladder's top tier via `NATIVE_XHIGH_EFFORT_MODEL_MARKERS`: `xhigh` -> native `xhigh` where the
+  family has it, otherwise `max`; `max` -> `max` always. It previously returned `high` for
+  everything except Opus 4.6/4.7, so a map-less Sonnet 4.6/5, Opus 4.8/5 or Fable 5 silently
+  under-thought at `high`.
+- `api/bedrock-converse-stream.ts`: `buildAdditionalModelRequestFields` returned `undefined` for a
+  thinking-off turn, which let every adaptive Claude family on Bedrock fall back to the adaptive
+  default. It now sends `thinking:{type:"disabled"}`, or `output_config:{effort:"low"}` for families
+  that reject `disabled`; budget-based Claude still sends nothing (extended thinking is opt-in
+  there). Its effort ladder got the same `xhigh`/`max` floor fix.
+- `api/anthropic-messages.ts`: the "cannot disable thinking" fact is owned by code as well as the
+  catalog (`DISABLED_THINKING_REJECTING_MODEL_MARKERS` + `cannotDisableThinking()`). `models.json`
+  entries and third-party gateway rows carry no generated compat, so a custom Fable/Mythos model
+  would otherwise take the `disabled` branch and get the probe-confirmed 400.
+- `api/bedrock-converse-stream.ts`: `supportsAdaptiveThinking` and `supportsNativeXhighEffort` now
+  include `opus-5`. Bedrock Opus 5 was classified as budget-based, so it sent
+  `thinking:{type:"enabled",budget_tokens}` instead of adaptive + `output_config.effort`, and a
+  thinking-off turn sent nothing at all and fell back to adaptive. It also gained the same
+  family-marker check so application inference profiles and custom Fable rows never receive
+  `disabled`.
+- `models.ts` `supportsXhigh`: recognizes `gpt-5.6`, `opus-5`, `sonnet-5` and `fable-5`.
+- `api/openai-completions.ts`: added the missing no-map fallback ladders (Kimi K3 `low/high/max`,
+  DeepSeek and GLM 5.2 `high/max`, OpenRouter DeepSeek `high`-only, MiMo `minimal->low` /
+  `xhigh->high`, Ollama `low/medium/high/max`) and made an explicit catalog `null` suppress the wire
+  effort instead of forwarding the raw requested value. Applied consistently to `streamSimple`, every
+  value-bearing `thinkingFormat` branch, and chat-template effort kwargs.
+- `api/openai-responses.ts`, `api/azure-openai-responses.ts`, `api/openai-codex-responses.ts`:
+  explicit `max: "max"` is preserved for GPT-5.6 instead of being clamped, an explicit
+  `thinkingLevelMap` `null` wins for direct adapter options (including summary-default resolution),
+  and Codex sends its catalog-directed off sentinel when agent-level off arrives as omitted reasoning.
+- `api/google-generative-ai.ts`, `api/google-vertex.ts`: a runtime thinking-off request fell through
+  to an *enabled* reasoning form (worst case `thinkingBudget: 24576` with `includeThoughts: true` on
+  Gemini 2.5 Flash). Both `streamSimple` paths now route off to the adapter's disabled form.
+  `api/mistral-conversations.ts` was audited and needed no change: off provably cannot reach the
+  `?? "high"` fallback.
+- `scripts/generate-models.ts`: Fable 5 on `anthropic-messages` is now encoded as
+  `compat.supportsDisabledThinking: false` instead of `thinkingLevelMap.off: null`. Both express
+  "never send `thinking.type: disabled`", but the compat form keeps `off` a **selectable** level, so
+  the UI can offer off and the provider pins the cheapest effort. Bedrock/Converse Fable rows keep
+  `off: null` unchanged. Regenerated data therefore differs only in those fable-5 rows (plus one
+  incidental OpenRouter price refresh).
+
+### Known limitation (deliberate)
+
+For Fable 5 the API exposes **no** true off switch: `thinking.type: "disabled"` is rejected and an
+absent thinking field means adaptive. `off` therefore maps to the cheapest adaptive effort rather
+than zero reasoning. That is strictly better than the alternatives - before this change `off` was
+hidden and the level clamped to the lowest selectable tier, which produced the *same* wire effort
+while labelling it `minimal`. The level stays labelled `off` because it is the cheapest reasoning the
+model can be asked for, and no other senpi surface can promise more.
+
+### Why extension system couldn't handle this
+
+The thinking-off wire shape, the effort ladder floors and the beta/compat gating all live inside the
+provider request builders in `packages/ai`, below any extension-visible surface.
+
+## 2026-07-23 - Session-scoped provider resolution via node-only AsyncLocalStorage subpath
+
+### What changed and why
+
+- New node-only subpath module `packages/ai/src/node/provider-scope.ts`, exported as
+  `@earendil-works/pi-ai/node/provider-scope`. It owns an `AsyncLocalStorage<ProviderScope>` plus
+  `runWithProviderScope` and `bindToProviderScope(fn)` (explicit callback binding for EventEmitter/
+  watcher callbacks, because EventEmitter does not propagate ALS from registration time).
+  `ProviderScope` carries `active|closed` state and a per-scope overlay `Map`.
+- `api-registry.ts` stays browser-neutral: a synchronous scope-accessor install hook (default: none)
+  lets the RPC host install a strict accessor. With no accessor installed, every classic path is
+  byte-identical (browser smoke pins this). The faux fast path (`getRegisteredFauxProvider` short-circuit
+  at `api-registry.ts:78-82`) consults the active scope first or is scope-keyed.
+- Scope-aware behavior for ALL registry operations: `getApiProvider`, `getApiProviders`,
+  `registerApiProvider`, `unregisterApiProviders`, `clearApiProviders`, `resetApiProviders`
+  (`compat.ts:143-147`). In an active scope, resolution = `session overlay → immutable builtin set` —
+  NEVER the mutable legacy global. After `close_session` the scope is closed and any lookup/mutation
+  through it throws (no silent fallback). Reaching provider lookup in multi-session mode with NO
+  active scope throws a diagnostic error (fail-loud, not fall-through).
+- The image-provider registry is scoped identically to the API-provider registry (same overlay →
+  immutable-builtins-only resolution, same closed-scope throws semantics).
+- Builtin identity semantics preserved: `getBuiltinProviderForModel` (`compat.ts:127-140,173`)
+  keeps reference-identity routing in `getBuiltinProviderForModel` / `builtinApiProviderInstances`
+  while a scope holds unrelated overlay entries.
+- Browser-safety approach: the synchronous scope-accessor install hook keeps `packages/ai` root and
+  compat exports browser-neutral; the only `node:async_hooks` import lives behind the node-only
+  subpath. Root/compat stay browser-safe; `npm run check:browser-smoke` stays green.
+
+### What future refactors must NOT break
+
+- Overlay → immutable-builtins-only resolution in an active scope; NEVER fall back to the mutable legacy
+  global in multi-session mode.
+- A closed scope must throw on any lookup/mutation (no silent fallback).
+- Builtin identity semantics (`builtinApiProviderInstances` reference-identity routing in
+  `getBuiltinProviderForModel`) must keep working while a scope holds unrelated overlay entries.
+- Root/compat exports must stay browser-safe: no `node:async_hooks` (or any node-only) import reachable
+  from root or compat; the scope accessor ships only from the node-only subpath.
+- No new dependencies (`node:async_hooks` is built-in).
+
+### Expected merge conflict zones
+
+- MEDIUM: `api-registry.ts` scope-accessor install hook + the faux fast-path short-circuit.
+- LOW: `compat.ts` builtin identity routing (additive guard only).
+
+## 2026-07-22 - Drop tool results of errored/aborted assistants in transformMessages
+
+### What changed and why
+
+- `api/transform-messages.ts`: the pairing pass now records the toolCall ids of every assistant it skips
+  because `stopReason === "error" | "aborted"` into `droppedCallIds` (mirroring the existing skip condition),
+  and the emit loop no longer emits a toolResult whose `toolCallId` is in that set — unless the id is also
+  declared by a kept assistant (`nextToolCallIndexById`), which still pairs through the normal windows.
+  Previously the errored assistant was dropped while its result (a real one, or a placeholder synthesized by
+  the compaction pipeline's `repairOrphanedToolResults`) survived, so the request carried a `role:"tool"`
+  message whose `tool_call_id` no assistant declared; strict providers (apitopia/kimi openai-completions)
+  reject it with `400 tool_call_id ... is not found`, permanently bricking compaction for the session.
+  True orphans (id declared nowhere) and results of kept assistants are unchanged, and kept assistants'
+  unanswered calls still get the synthetic "No result provided" result.
+- `utils/tool-pair-repair.ts`: `repairOrphanedToolResults` no longer synthesizes placeholder results for
+  toolCalls declared by errored/aborted assistants (defense in depth; those assistants are dropped by
+  `transformMessages` anyway). The coding-agent compaction copy received the identical guard; the two
+  files remain verbatim copies.
+- `../test/transform-messages-errored-tool-results.test.ts`: drop cases (errored + real result, aborted +
+  synthesized placeholder), preservation cases (kept pair, "No result provided" synthesis, true orphan
+  passthrough), and an id re-declared by a later kept assistant. `../test/tool-pair-repair.test.ts`: no
+  synthesis for errored/aborted assistants, synthesis kept for a kept re-declaration.
+
+### Expected merge conflict zones
+
+- LOW: `api/transform-messages.ts` second-pass pairing loop and toolResult emit branch;
+  `utils/tool-pair-repair.ts` dangling-call synthesis loop.
+
 ## 2026-07-21 - OpenAI Responses provider-native completion reconciliation
 
 ### What changed and why
@@ -570,3 +754,30 @@
 - `src/types.ts` `ThinkingLevel` union.
 - Each provider's `streamSimple<Provider>` reasoning mapping block.
 - `src/providers/simple-options.ts` exported reserved-key sets.
+
+## 2026-07-22 - Thinking content stream timing metadata
+
+### What changed and why
+
+- `ThinkingContent` now exposes optional `startedAt` and `endedAt` epoch-millisecond fields. The agent loop stamps these at provider stream-event receipt on a best-effort basis, allowing consumers to measure individual reasoning-block duration without changing provider event contracts.
+
+### Expected merge conflict zones
+
+- LOW: `src/types.ts` `ThinkingContent` interface.
+
+## Client abort on Anthropic server-side fallback receipts (2026-07-25)
+
+### What changed
+
+- `utils/server-fallback-receipt.ts`: new module parsing Anthropic's `fallback` content block and the `fallback_message` entry in `usage.iterations`, plus the refusal-shaped rewrite applied to an aborted turn.
+- `types.ts`: `StreamOptions.abortServerSideFallback` (opt-in), inherited by `SimpleStreamOptions` and `AnthropicOptions`; `api/simple-options.ts` forwards it through `buildBaseOptions`.
+- `api/anthropic-messages.ts`: a provider-local `AbortController`, merged with the caller signal through `combineAbortSignals`, is passed to the request and the SSE iterator. A receipt block or a `fallback_message` usage entry aborts it and finalizes the turn as `{stopReason:"error", stopDetails:{type:"refusal"}}` with empty content plus `server_fallback_aborted` and `billing_incomplete_after_client_abort` diagnostics. A caller abort is checked first and always wins.
+
+### Why the extension system couldn't handle this
+
+Detection has to happen inside the Anthropic SSE loop while the stream is still open; nothing outside the provider can stop reading a response mid-flight.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/anthropic-messages.ts` streaming event loop and request-option construction.
+- LOW: `types.ts` `StreamOptions`, `api/simple-options.ts` `buildBaseOptions` field list, `index.ts` export list.

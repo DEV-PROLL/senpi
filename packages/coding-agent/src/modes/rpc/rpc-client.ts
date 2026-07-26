@@ -44,6 +44,7 @@ export interface ModelInfo {
 	id: string;
 	contextWindow: number;
 	reasoning: boolean;
+	supportedThinkingLevels?: ThinkingLevel[];
 }
 
 export type RpcEventListener = (event: AgentSessionEvent) => void;
@@ -278,6 +279,14 @@ export class RpcClient {
 	async cycleThinkingLevel(): Promise<{ level: ThinkingLevel } | null> {
 		const response = await this.send({ type: "cycle_thinking_level" });
 		return this.getData(response);
+	}
+
+	/**
+	 * Get list of available thinking levels for the current model.
+	 */
+	async getAvailableThinkingLevels(): Promise<ThinkingLevel[]> {
+		const response = await this.send({ type: "get_available_thinking_levels" });
+		return this.getData<{ levels: ThinkingLevel[] }>(response).levels;
 	}
 
 	/**

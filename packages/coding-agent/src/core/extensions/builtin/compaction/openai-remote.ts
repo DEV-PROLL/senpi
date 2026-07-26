@@ -1,101 +1,66 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type {
-	Api,
-	AssistantMessage,
-	Context,
-	ImageContent,
-	Model,
-	SimpleStreamOptions,
-	TextContent,
-	ToolCall,
+import {
+	type Api,
+	type AssistantMessage,
+	type Context,
+	type ContextProvenance,
+	convertResponsesMessages,
+	getContextProvenance,
+	type Model,
+	type ProviderHeaders,
+	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { CompactionResult } from "../../../compaction/index.ts";
-import type { SessionEntry } from "../../../session-manager.ts";
-import type { ServiceTier, SessionBeforeCompactEvent } from "../../types.ts";
+import { convertToLlm } from "../../../messages.ts";
+import {
+	buildContextEntries,
+	buildSessionContext,
+	getSessionContextEntryId,
+	SESSION_CONTEXT_ENTRY_ID,
+	type SessionEntry,
+	sessionEntryToContextMessages,
+} from "../../../session-manager.ts";
+import type { ProviderRequestPreparation, ServiceTier, SessionBeforeCompactEvent } from "../../types.ts";
+import type {
+	OpenAiCompactBody,
+	OpenAiContextCompactionItem,
+	OpenAiContextCompactionTriggerItem,
+	OpenAiRemoteCompactionDetails,
+	OpenAiRemoteInputItem,
+	OpenAiRemoteTransport,
+} from "./openai-remote-convert.ts";
+import {
+	convertBranchEntries,
+	convertPendingMessages,
+	getOpenAiRemoteCompactionDetails,
+	isOpenAiContextCompactionItem,
+	isOpenAiRemoteCompactionOutputItem,
+	isRecord,
+	isRetainedRemoteOutputItem,
+	isRetainedResponsesStreamInputItem,
+	OPENAI_REMOTE_COMPACTION_SCHEMA,
+	providerNativeItem,
+} from "./openai-remote-convert.ts";
+import {
+	createOpenAiRemoteCompactionHeaders,
+	isOpenAiRemoteCompactionModel,
+	matchesOpenAiRemoteCompactionIdentity,
+	type OpenAiRemoteCompactionModel,
+	type OpenAiRemoteCompactionOrigin,
+	openAiRemoteCompactionEndpointPath,
+	openAiRemoteCompactionEndpointUrl,
+	openAiRemoteCompactionIdentity,
+	openAiRemoteCompactionOrigin,
+} from "./openai-remote-model.ts";
 
-export const OPENAI_REMOTE_COMPACTION_SCHEMA = "senpi.compaction.openai-remote.v1";
+export type {
+	OpenAiRemoteCompactionDetails,
+	OpenAiRemoteInputItem,
+} from "./openai-remote-convert.ts";
+export { getOpenAiRemoteCompactionDetails, OPENAI_REMOTE_COMPACTION_SCHEMA } from "./openai-remote-convert.ts";
+
 export const SENPI_COMPACTION_EVENT = "senpi:compaction";
-
-type OpenAiInputText = { type: "input_text"; text: string };
-type OpenAiInputImage = { type: "input_image"; detail: "auto"; image_url: string };
-type OpenAiInputContent = OpenAiInputText | OpenAiInputImage;
-type OpenAiOutputText = { type: "output_text"; text: string; annotations: [] };
-type OpenAiMessageInputItem = {
-	type?: "message";
-	id?: string;
-	role: "user" | "system" | "developer";
-	content: string | OpenAiInputContent[];
-	status?: "in_progress" | "completed" | "incomplete";
-};
-type OpenAiAssistantMessageItem = {
-	type: "message";
-	id: string;
-	role: "assistant";
-	status: "completed";
-	content: OpenAiOutputText[];
-	phase?: "commentary" | "final_answer";
-};
-type OpenAiFunctionCallItem = {
-	type: "function_call";
-	id?: string;
-	call_id: string;
-	name: string;
-	arguments: string;
-};
-type OpenAiFunctionCallOutputItem = {
-	type: "function_call_output";
-	call_id: string;
-	output: string;
-};
-type OpenAiRemoteTransport = "websocket" | "compact-endpoint";
-type OpenAiCompactionItem = {
-	type: "compaction";
-	encrypted_content: string;
-	id?: string | null;
-	created_by?: string;
-};
-type OpenAiContextCompactionItem = {
-	type: "context_compaction";
-	encrypted_content: string;
-	id?: string | null;
-	created_by?: string;
-};
-type OpenAiContextCompactionTriggerItem = {
-	type: "context_compaction";
-};
-type OpenAiProviderNativeItem = Record<string, unknown> & { type: string };
-export type OpenAiRemoteInputItem =
-	| OpenAiMessageInputItem
-	| OpenAiAssistantMessageItem
-	| OpenAiFunctionCallItem
-	| OpenAiFunctionCallOutputItem
-	| OpenAiCompactionItem
-	| OpenAiContextCompactionItem
-	| OpenAiProviderNativeItem;
-
-type OpenAiCompactBody = {
-	model: string;
-	input: OpenAiRemoteInputItem[];
-	instructions?: string;
-	prompt_cache_key?: string;
-	service_tier?: ServiceTier;
-};
-
-export type OpenAiRemoteCompactionDetails = {
-	schema: typeof OPENAI_REMOTE_COMPACTION_SCHEMA;
-	mode: "openai-remote";
-	provider: "openai";
-	api: "openai-responses";
-	transport: OpenAiRemoteTransport;
-	modelId: string;
-	responseId: string;
-	createdAt: number;
-	requestInputItemCount: number;
-	retainedInputItemCount: number;
-	replacementInput: OpenAiRemoteInputItem[];
-	usage?: Record<string, unknown>;
-};
 
 export type OpenAiRemoteCompactionRequest = {
 	body: OpenAiCompactBody;
@@ -125,7 +90,7 @@ type OpenAiResponsesStreamRunner = (
 	options: SimpleStreamOptions,
 ) => OpenAiResponsesStream;
 
-type OpenAiRemoteCompactionDependencies = {
+export type OpenAiRemoteCompactionDependencies = {
 	fetch?: typeof fetch;
 	now?: () => number;
 	remoteTimeoutMs?: number;
@@ -142,6 +107,7 @@ type OpenAiRemoteCompactionContext = {
 					apiKey?: string;
 					headers?: Record<string, string>;
 					extraBody?: Record<string, unknown>;
+					baseUrl?: string;
 					upstreamModelId?: string;
 					serviceTier?: ServiceTier;
 			  }
@@ -155,6 +121,7 @@ type OpenAiRemoteCompactionContext = {
 	sessionManager: {
 		getSessionId(): string;
 	};
+	prepareProviderRequest?(messages: AgentMessage[]): Promise<ProviderRequestPreparation>;
 };
 
 type OpenAiRemoteCompactionEvent =
@@ -199,40 +166,15 @@ type EmitCompactionEvent = (event: OpenAiRemoteCompactionEvent) => void;
 
 const OPENAI_REMOTE_COMPACTION_TIMEOUT_MS = 15_000;
 const REMOTE_COMPACTION_TIMEOUT_REASON = "remote-compaction-timeout";
+const INVALID_COMPACT_REQUEST_PAYLOAD_REASON = "invalid-compact-request-payload";
+const MISSING_REMOTE_REPLAY_ORIGIN_REASON = "missing-remote-replay-origin-provenance";
+const REMOTE_REPLAY_ORIGIN_MISMATCH_REASON = "remote-replay-origin-mismatch";
+const UNPROVEN_REMOTE_REPLAY_BOUNDARY_REASON = "unproven-remote-replay-boundary";
+const OPENAI_REMOTE_REPLAY_BOUNDARY_SCOPE = "openai-remote-replay";
+const OPENAI_RESPONSES_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseJsonRecord(value: string | undefined): Record<string, unknown> | undefined {
-	if (!value?.startsWith("{")) return undefined;
-	try {
-		const parsed: unknown = JSON.parse(value);
-		return isRecord(parsed) ? parsed : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-function parseTextSignature(
-	signature: string | undefined,
-): { id: string; phase?: "commentary" | "final_answer" } | undefined {
-	if (!signature) return undefined;
-	const parsed = parseJsonRecord(signature);
-	if (parsed?.v === 1 && typeof parsed.id === "string") {
-		if (parsed.phase === "commentary" || parsed.phase === "final_answer") {
-			return { id: parsed.id, phase: parsed.phase };
-		}
-		return { id: parsed.id };
-	}
-	return { id: signature };
-}
-
-function isOpenAiResponsesModel(model: Model<Api> | undefined): model is Model<"openai-responses"> {
-	return model?.provider === "openai" && model.api === "openai-responses";
-}
-
-function supportsOpenAiResponsesWebSocket(model: Model<"openai-responses">): boolean {
+function supportsOpenAiResponsesWebSocket(model: OpenAiRemoteCompactionModel): model is Model<"openai-responses"> {
+	if (model.provider !== "openai" || model.api !== "openai-responses") return false;
 	if (model.compat?.supportsWebSocket !== undefined) return model.compat.supportsWebSocket;
 	try {
 		return new URL(model.baseUrl || "https://api.openai.com/v1").hostname === "api.openai.com";
@@ -241,196 +183,20 @@ function supportsOpenAiResponsesWebSocket(model: Model<"openai-responses">): boo
 	}
 }
 
-function toolResultText(content: string | TextContent[] | (TextContent | ImageContent)[]): string | undefined {
-	if (typeof content === "string") return content;
-	const parts: string[] = [];
-	for (const block of content) {
-		if (block.type !== "text") return undefined;
-		parts.push(block.text);
-	}
-	return parts.join("\n");
-}
-
-function convertUserContent(content: string | (TextContent | ImageContent)[]): OpenAiInputContent[] {
-	if (typeof content === "string") return [{ type: "input_text", text: content }];
-	return content.map((block): OpenAiInputContent => {
-		if (block.type === "text") return { type: "input_text", text: block.text };
-		return {
-			type: "input_image",
-			detail: "auto",
-			image_url: `data:${block.mimeType};base64,${block.data}`,
-		};
-	});
-}
-
-function providerNativeItem(raw: unknown): OpenAiProviderNativeItem | undefined {
-	if (!isRecord(raw) || typeof raw.type !== "string") return undefined;
-	return { ...raw, type: raw.type };
-}
-
-function convertThinking(block: { thinkingSignature?: string }): OpenAiProviderNativeItem | undefined {
-	const parsed = parseJsonRecord(block.thinkingSignature);
-	if (parsed?.type !== "reasoning") return undefined;
-	return { ...parsed, type: "reasoning" };
-}
-
-function convertTextBlock(block: TextContent, messageIndex: number): OpenAiAssistantMessageItem {
-	const signature = parseTextSignature(block.textSignature);
-	const item = {
-		type: "message",
-		role: "assistant",
-		status: "completed",
-		id: signature?.id ?? `msg_${messageIndex}`,
-		content: [{ type: "output_text", text: block.text, annotations: [] }],
-		...(signature?.phase ? { phase: signature.phase } : {}),
-	} satisfies OpenAiAssistantMessageItem;
-	return item;
-}
-
-function convertToolCall(block: ToolCall): OpenAiFunctionCallItem {
-	const [callId = block.id, itemId] = block.id.split("|");
-	return {
-		type: "function_call",
-		// The Responses API rejects item ids not beginning with "fc"; custom tool
-		// calls carry the "<call_id>|custom" sentinel, not a server-issued id.
-		...(itemId?.startsWith("fc") ? { id: itemId } : {}),
-		call_id: callId,
-		name: block.name,
-		arguments: JSON.stringify(block.arguments ?? {}),
-	};
-}
-
-function isSameOpenAiResponsesAssistant(message: AssistantMessage): boolean {
-	return message.provider === "openai" && message.api === "openai-responses";
-}
-
-function convertAssistantMessage(message: AssistantMessage, messageIndex: number): OpenAiRemoteInputItem[] | undefined {
-	if (!isSameOpenAiResponsesAssistant(message)) return undefined;
-
-	const items: OpenAiRemoteInputItem[] = [];
-	for (const block of message.content) {
-		switch (block.type) {
-			case "text":
-				items.push(convertTextBlock(block, messageIndex));
-				break;
-			case "thinking": {
-				const reasoning = convertThinking(block);
-				if (!reasoning) return undefined;
-				items.push(reasoning);
-				break;
-			}
-			case "toolCall":
-				items.push(convertToolCall(block));
-				break;
-			case "providerNative": {
-				const item = providerNativeItem(block.raw);
-				if (!item) return undefined;
-				items.push(item);
-				break;
-			}
-		}
-	}
-	return items.length > 0 ? items : undefined;
-}
-
-function convertAgentMessage(message: AgentMessage, messageIndex: number): OpenAiRemoteInputItem[] | undefined {
-	switch (message.role) {
-		case "user":
-			return [{ role: "user", content: convertUserContent(message.content) }];
-		case "assistant":
-			return convertAssistantMessage(message, messageIndex);
-		case "toolResult": {
-			const [callId = message.toolCallId] = message.toolCallId.split("|");
-			const output = toolResultText(message.content);
-			if (output === undefined) return undefined;
-			return [{ type: "function_call_output", call_id: callId, output }];
-		}
-		case "bashExecution":
-		case "branchSummary":
-		case "compactionSummary":
-		case "custom":
-			return undefined;
-		default: {
-			const exhaustive: never = message;
-			return exhaustive;
-		}
-	}
-}
-
-function detailsFromEntry(entry: SessionEntry): OpenAiRemoteCompactionDetails | undefined {
-	if (entry.type !== "compaction") return undefined;
-	return getOpenAiRemoteCompactionDetails(entry.details);
-}
-
-export function getOpenAiRemoteCompactionDetails(value: unknown): OpenAiRemoteCompactionDetails | undefined {
-	if (!isRecord(value)) return undefined;
-	if (value.schema !== OPENAI_REMOTE_COMPACTION_SCHEMA || value.mode !== "openai-remote") return undefined;
-	if (value.provider !== "openai" || value.api !== "openai-responses") return undefined;
-	if (typeof value.modelId !== "string" || typeof value.responseId !== "string") return undefined;
-	if (typeof value.createdAt !== "number") return undefined;
-	if (typeof value.requestInputItemCount !== "number" || typeof value.retainedInputItemCount !== "number") {
-		return undefined;
-	}
-	if (!Array.isArray(value.replacementInput)) return undefined;
-	return {
-		schema: OPENAI_REMOTE_COMPACTION_SCHEMA,
-		mode: "openai-remote",
-		provider: "openai",
-		api: "openai-responses",
-		transport: value.transport === "websocket" ? "websocket" : "compact-endpoint",
-		modelId: value.modelId,
-		responseId: value.responseId,
-		createdAt: value.createdAt,
-		requestInputItemCount: value.requestInputItemCount,
-		retainedInputItemCount: value.retainedInputItemCount,
-		replacementInput: value.replacementInput.filter((item): item is OpenAiRemoteInputItem => isRecord(item)),
-		...(isRecord(value.usage) ? { usage: value.usage } : {}),
-	};
-}
-
-function convertBranchEntries(entries: SessionEntry[]): OpenAiRemoteInputItem[] | undefined {
-	const items: OpenAiRemoteInputItem[] = [];
-	let messageIndex = 0;
-	for (const entry of entries) {
-		switch (entry.type) {
-			case "message": {
-				const converted = convertAgentMessage(entry.message, messageIndex);
-				if (!converted) return undefined;
-				items.push(...converted);
-				messageIndex++;
-				break;
-			}
-			case "compaction": {
-				const details = detailsFromEntry(entry);
-				if (!details) return undefined;
-				items.push(...details.replacementInput);
-				break;
-			}
-			case "branch_summary":
-			case "custom_message":
-				return undefined;
-			case "thinking_level_change":
-			case "model_change":
-			case "custom":
-			case "label":
-			case "session_info":
-				break;
-		}
-	}
-	return items;
-}
-
 export function createOpenAiRemoteCompactionRequest(options: {
 	model: Model<Api> | undefined;
 	systemPrompt: string;
 	branchEntries: SessionEntry[];
+	messages?: AgentMessage[];
 	tokensBefore: number;
 	promptCacheKey?: string;
 	serviceTier?: ServiceTier;
 }): OpenAiRemoteCompactionRequest | undefined {
-	if (!isOpenAiResponsesModel(options.model)) return undefined;
-	const input = convertBranchEntries(options.branchEntries);
-	if (!input || input.length === 0) return undefined;
+	if (!isOpenAiRemoteCompactionModel(options.model)) return undefined;
+	const input = options.messages
+		? convertPendingMessages(options.messages, options.model)
+		: convertBranchEntries(options.branchEntries, options.model);
+	if (input.length === 0) return undefined;
 	return {
 		body: {
 			model: options.model.id,
@@ -444,44 +210,39 @@ export function createOpenAiRemoteCompactionRequest(options: {
 	};
 }
 
-function isOpenAiCompactionItem(item: OpenAiRemoteInputItem): item is OpenAiCompactionItem {
-	return item.type === "compaction" && typeof item.encrypted_content === "string";
-}
-
-function isOpenAiContextCompactionItem(item: OpenAiRemoteInputItem): item is OpenAiContextCompactionItem {
-	return item.type === "context_compaction" && typeof item.encrypted_content === "string";
-}
-
-function isOpenAiRemoteCompactionOutputItem(
-	item: OpenAiRemoteInputItem,
-): item is OpenAiCompactionItem | OpenAiContextCompactionItem {
-	return isOpenAiCompactionItem(item) || isOpenAiContextCompactionItem(item);
-}
-
-function isRetainedRemoteOutputItem(item: OpenAiRemoteInputItem): boolean {
-	if (isOpenAiRemoteCompactionOutputItem(item)) return true;
-	return item.type === "message" && (item.role === "user" || item.role === "system" || item.role === "developer");
-}
-
-function isRetainedResponsesStreamInputItem(item: OpenAiRemoteInputItem): boolean {
-	if (item.type === "message") return item.role === "user";
-	return "role" in item && item.role === "user";
-}
-
-function isOpenAiCompactedResponse(value: unknown): value is OpenAiCompactedResponse {
-	if (!isRecord(value)) return false;
-	if (value.object !== "response.compaction" || typeof value.id !== "string" || typeof value.created_at !== "number") {
-		return false;
+function parseOpenAiCompactedResponse(options: {
+	value: unknown;
+	model: OpenAiRemoteCompactionModel;
+	requestId: string;
+	now: () => number;
+}): OpenAiCompactedResponse | undefined {
+	if (!isRecord(options.value) || !Array.isArray(options.value.output)) return undefined;
+	if (options.model.api === "openai-responses") {
+		if (
+			options.value.object !== "response.compaction" ||
+			typeof options.value.id !== "string" ||
+			typeof options.value.created_at !== "number"
+		) {
+			return undefined;
+		}
 	}
-	return Array.isArray(value.output);
+	return {
+		id: typeof options.value.id === "string" ? options.value.id : `codex-compact:${options.requestId}`,
+		created_at:
+			typeof options.value.created_at === "number" ? options.value.created_at : Math.floor(options.now() / 1000),
+		object: "response.compaction",
+		output: options.value.output.filter((item): item is OpenAiRemoteInputItem => isRecord(item)),
+		...(isRecord(options.value.usage) ? { usage: options.value.usage } : {}),
+	};
 }
 
 export function buildOpenAiRemoteCompactionResult(options: {
-	model: Model<"openai-responses">;
+	model: OpenAiRemoteCompactionModel;
 	firstKeptEntryId: string;
 	tokensBefore: number;
 	requestInputItemCount: number;
 	response: OpenAiCompactedResponse;
+	origin?: OpenAiRemoteCompactionOrigin;
 }): OpenAiRemoteCompactionResult {
 	const replacementInput = options.response.output.filter(isRetainedRemoteOutputItem);
 	const compactionItem = replacementInput.find(isOpenAiRemoteCompactionOutputItem);
@@ -492,8 +253,7 @@ export function buildOpenAiRemoteCompactionResult(options: {
 	const details = {
 		schema: OPENAI_REMOTE_COMPACTION_SCHEMA,
 		mode: "openai-remote",
-		provider: "openai",
-		api: "openai-responses",
+		...openAiRemoteCompactionIdentity(options.model),
 		transport: "compact-endpoint",
 		modelId: options.model.id,
 		responseId: options.response.id,
@@ -501,33 +261,24 @@ export function buildOpenAiRemoteCompactionResult(options: {
 		requestInputItemCount: options.requestInputItemCount,
 		retainedInputItemCount: replacementInput.length,
 		replacementInput,
+		...(options.origin ? { origin: options.origin } : {}),
 		...(options.response.usage ? { usage: options.response.usage } : {}),
 	} satisfies OpenAiRemoteCompactionDetails;
+	const endpointPath =
+		options.model.api === "openai-codex-responses"
+			? `/${openAiRemoteCompactionEndpointPath(options.model)}`
+			: "/v1/responses/compact";
 
 	return {
 		summary: [
 			"OpenAI remote compaction checkpoint.",
-			`Native /v1/responses/compact replay is active for ${replacementInput.length.toLocaleString()} retained item(s).`,
+			`Native ${endpointPath} replay is active for ${replacementInput.length.toLocaleString()} retained item(s).`,
 			`Original OpenAI input items compacted: ${options.requestInputItemCount.toLocaleString()}.`,
 		].join("\n"),
 		firstKeptEntryId: options.firstKeptEntryId,
 		tokensBefore: options.tokensBefore,
 		details,
 	};
-}
-
-function compactEndpointUrl(model: Model<"openai-responses">): string {
-	const baseUrl = model.baseUrl || "https://api.openai.com/v1";
-	return new URL("responses/compact", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
-}
-
-function createHeaders(auth: { apiKey?: string; headers?: Record<string, string> }): Headers | undefined {
-	const headers = new Headers(auth.headers);
-	headers.set("content-type", "application/json");
-	if (!headers.has("authorization") && auth.apiKey) {
-		headers.set("authorization", `Bearer ${auth.apiKey}`);
-	}
-	return headers.has("authorization") ? headers : undefined;
 }
 
 async function runWithRemoteTimeout<T>(options: {
@@ -621,6 +372,7 @@ export function buildOpenAiResponsesStreamCompactionResult(options: {
 	requestInput: OpenAiRemoteInputItem[];
 	response: AssistantMessage;
 	now: () => number;
+	origin?: OpenAiRemoteCompactionOrigin;
 }): OpenAiRemoteCompactionResult {
 	const compactionItem = findResponsesStreamCompactionOutput(options.response);
 	if (!compactionItem) {
@@ -641,6 +393,7 @@ export function buildOpenAiResponsesStreamCompactionResult(options: {
 		requestInputItemCount: options.requestInput.length,
 		retainedInputItemCount: replacementInput.length,
 		replacementInput,
+		...(options.origin ? { origin: options.origin } : {}),
 		usage: usageRecordFromAssistant(options.response),
 	} satisfies OpenAiRemoteCompactionDetails;
 
@@ -665,6 +418,9 @@ async function runOpenAiResponsesStreamCompaction(options: {
 	signal: AbortSignal;
 	streamRunner: OpenAiResponsesStreamRunner;
 	systemPrompt: string;
+	headers?: ProviderHeaders;
+	providerRequest?: ProviderRequestPreparation;
+	origin: OpenAiRemoteCompactionOrigin;
 }): Promise<OpenAiRemoteCompactionResult | undefined> {
 	const stream = options.streamRunner(
 		options.model,
@@ -673,13 +429,19 @@ async function runOpenAiResponsesStreamCompaction(options: {
 			apiKey: options.auth.apiKey,
 			cacheRetention: "short",
 			extraBody: options.auth.extraBody,
-			headers: options.auth.headers,
-			onPayload: (payload) => {
+			headers: options.headers ?? options.auth.headers,
+			onPayload: async (payload) => {
 				const rewritten = createOpenAiResponsesStreamCompactionPayload(payload, options.request);
 				if (!isRecord(rewritten) || !Array.isArray(rewritten.input)) {
 					throw new Error("Unable to build OpenAI Responses stream compaction payload");
 				}
-				return rewritten;
+				const transformedPayload = options.providerRequest
+					? await options.providerRequest.transformPayload(rewritten)
+					: rewritten;
+				if (!isOpenAiCompactBody(transformedPayload)) {
+					throw new Error(INVALID_COMPACT_REQUEST_PAYLOAD_REASON);
+				}
+				return transformedPayload;
 			},
 			sessionId: options.request.body.prompt_cache_key,
 			signal: options.signal,
@@ -697,18 +459,21 @@ async function runOpenAiResponsesStreamCompaction(options: {
 		requestInput: options.request.body.input,
 		response,
 		now: options.now,
+		origin: options.origin,
 	});
 }
 
 async function runOpenAiCompactEndpointCompaction(options: {
 	fetchImpl: typeof fetch;
 	headers: Headers;
-	model: Model<"openai-responses">;
+	model: OpenAiRemoteCompactionModel;
 	request: OpenAiRemoteCompactionRequest;
 	requestId: string;
 	signal: AbortSignal;
 	firstKeptEntryId: string;
+	now: () => number;
 	emit?: EmitCompactionEvent;
+	origin: OpenAiRemoteCompactionOrigin;
 }): Promise<OpenAiRemoteCompactionResult | undefined> {
 	options.emit?.({
 		version: 1,
@@ -722,7 +487,7 @@ async function runOpenAiCompactEndpointCompaction(options: {
 
 	let response: Response;
 	try {
-		response = await options.fetchImpl(compactEndpointUrl(options.model), {
+		response = await options.fetchImpl(openAiRemoteCompactionEndpointUrl(options.model), {
 			method: "POST",
 			headers: options.headers,
 			body: JSON.stringify(options.request.body),
@@ -770,7 +535,13 @@ async function runOpenAiCompactEndpointCompaction(options: {
 		});
 		return undefined;
 	}
-	if (!isOpenAiCompactedResponse(payload)) {
+	const compactedResponse = parseOpenAiCompactedResponse({
+		value: payload,
+		model: options.model,
+		requestId: options.requestId,
+		now: options.now,
+	});
+	if (!compactedResponse) {
 		options.emit?.({
 			version: 1,
 			action: "remote_fallback",
@@ -790,7 +561,8 @@ async function runOpenAiCompactEndpointCompaction(options: {
 			firstKeptEntryId: options.firstKeptEntryId,
 			tokensBefore: options.request.tokensBefore,
 			requestInputItemCount: options.request.inputItemCount,
-			response: payload,
+			response: compactedResponse,
+			origin: options.origin,
 		});
 	} catch (error) {
 		options.emit?.({
@@ -810,11 +582,17 @@ async function runOpenAiCompactEndpointCompaction(options: {
 		route: "builtin.compaction.openai_remote",
 		requestId: options.requestId,
 		modelId: options.model.id,
-		responseId: payload.id,
+		responseId: compactedResponse.id,
 		retainedInputItemCount: result.details.retainedInputItemCount,
 		transport: "compact-endpoint",
 	});
 	return result;
+}
+
+function isOpenAiCompactBody(value: unknown): value is OpenAiCompactBody {
+	return (
+		isRecord(value) && typeof value.model === "string" && Array.isArray(value.input) && value.input.every(isRecord)
+	);
 }
 
 export async function runOpenAiRemoteCompaction(
@@ -824,7 +602,7 @@ export async function runOpenAiRemoteCompaction(
 	dependencies: OpenAiRemoteCompactionDependencies = {},
 ): Promise<OpenAiRemoteCompactionResult | undefined> {
 	const model = ctx.model;
-	if (!isOpenAiResponsesModel(model) || event.reason === "branch") {
+	if (!isOpenAiRemoteCompactionModel(model) || event.reason === "branch") {
 		emit?.({
 			version: 1,
 			action: "remote_fallback",
@@ -849,12 +627,21 @@ export async function runOpenAiRemoteCompaction(
 		return undefined;
 	}
 
-	const requestModel = auth.upstreamModelId ? { ...model, id: auth.upstreamModelId } : model;
+	const requestModel: OpenAiRemoteCompactionModel =
+		auth.upstreamModelId || auth.baseUrl
+			? {
+					...model,
+					...(auth.upstreamModelId ? { id: auth.upstreamModelId } : {}),
+					...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}),
+				}
+			: model;
 	const serviceTier = ctx.serviceTier ?? auth.serviceTier;
+	const providerRequest = await ctx.prepareProviderRequest?.(buildSessionContext(event.branchEntries).messages);
 	const request = createOpenAiRemoteCompactionRequest({
 		model: requestModel,
 		systemPrompt: ctx.getSystemPrompt(),
 		branchEntries: event.branchEntries,
+		messages: providerRequest?.messages,
 		tokensBefore: event.preparation.tokensBefore,
 		promptCacheKey: ctx.sessionManager.getSessionId(),
 		serviceTier,
@@ -866,13 +653,49 @@ export async function runOpenAiRemoteCompaction(
 			route: "builtin.compaction.openai_remote",
 			requestId: event.requestId,
 			modelId: model.id,
-			reason: "session-not-openai-native",
+			reason: "empty-compaction-input",
 		});
 		return undefined;
 	}
 	const remoteTimeoutMs = dependencies.remoteTimeoutMs ?? OPENAI_REMOTE_COMPACTION_TIMEOUT_MS;
+	// Normal provider requests transform configured headers before the Codex
+	// transport applies its canonical auth/account fields. Mirror that ordering
+	// so extension routing choices are retained but cannot impersonate another
+	// OAuth account on either the wire or persisted provenance.
+	const transformedHeaders = providerRequest
+		? await providerRequest.transformHeaders(auth.headers ?? {})
+		: auth.headers;
+	const requestHeaders = createOpenAiRemoteCompactionHeaders(
+		requestModel,
+		{ ...auth, headers: transformedHeaders },
+		request.body.prompt_cache_key,
+	);
+	if (!requestHeaders) {
+		emit?.({
+			version: 1,
+			action: "remote_fallback",
+			route: "builtin.compaction.openai_remote",
+			requestId: event.requestId,
+			modelId: model.id,
+			reason: "missing-openai-auth",
+		});
+		return undefined;
+	}
+	const origin = openAiRemoteCompactionOrigin(requestModel, requestHeaders);
+	if (!origin) {
+		emit?.({
+			version: 1,
+			action: "remote_fallback",
+			route: "builtin.compaction.openai_remote",
+			requestId: event.requestId,
+			modelId: requestModel.id,
+			reason: MISSING_REMOTE_REPLAY_ORIGIN_REASON,
+		});
+		return undefined;
+	}
 
 	if (supportsOpenAiResponsesWebSocket(requestModel)) {
+		const websocketHeaders = Object.fromEntries(requestHeaders.entries());
 		emit?.({
 			version: 1,
 			action: "remote_started",
@@ -908,6 +731,9 @@ export async function runOpenAiRemoteCompaction(
 							dependencies.streamRunner ??
 							((streamModel, context, options) => streamSimple(streamModel, context, options)),
 						systemPrompt: ctx.getSystemPrompt(),
+						headers: websocketHeaders,
+						providerRequest,
+						origin,
 					}),
 			});
 			if (result) {
@@ -946,18 +772,20 @@ export async function runOpenAiRemoteCompaction(
 		}
 	}
 
-	const headers = createHeaders(auth);
-	if (!headers) {
+	const transformedPayload = providerRequest ? await providerRequest.transformPayload(request.body) : request.body;
+	if (!isOpenAiCompactBody(transformedPayload)) {
 		emit?.({
 			version: 1,
 			action: "remote_fallback",
 			route: "builtin.compaction.openai_remote",
 			requestId: event.requestId,
-			modelId: model.id,
-			reason: "missing-openai-auth",
+			modelId: requestModel.id,
+			reason: INVALID_COMPACT_REQUEST_PAYLOAD_REASON,
+			transport: "compact-endpoint",
 		});
 		return undefined;
 	}
+	const transformedRequest = { ...request, body: transformedPayload };
 
 	return runWithRemoteTimeout({
 		signal: event.signal,
@@ -975,28 +803,50 @@ export async function runOpenAiRemoteCompaction(
 		run: (signal) =>
 			runOpenAiCompactEndpointCompaction({
 				fetchImpl: dependencies.fetch ?? fetch,
-				headers,
+				headers: requestHeaders,
 				model: requestModel,
-				request,
+				request: transformedRequest,
 				requestId: event.requestId,
 				signal,
 				firstKeptEntryId: event.preparation.firstKeptEntryId,
+				now: dependencies.now ?? Date.now,
 				emit,
+				origin,
 			}),
 	});
 }
 
 function latestRemoteCompaction(
 	entries: SessionEntry[],
-): { entryId: string; index: number; details: OpenAiRemoteCompactionDetails } | undefined {
+): { entryId: string; index: number; firstKeptEntryId: string; details: OpenAiRemoteCompactionDetails } | undefined {
 	for (let index = entries.length - 1; index >= 0; index--) {
 		const entry = entries[index];
 		if (entry?.type !== "compaction") continue;
 		const details = getOpenAiRemoteCompactionDetails(entry.details);
-		if (details) return { entryId: entry.id, index, details };
+		if (details) return { entryId: entry.id, index, firstKeptEntryId: entry.firstKeptEntryId, details };
 		return undefined;
 	}
 	return undefined;
+}
+
+type OpenAiRemoteReplayBoundary = ContextProvenance & {
+	scope: typeof OPENAI_REMOTE_REPLAY_BOUNDARY_SCOPE;
+	compactionEntryId: string;
+	ordinal: number;
+	expectedOrdinals: number[];
+	integrity?: string;
+};
+
+type RemoteCompactionCheckpoint = {
+	entryId: string;
+	index: number;
+	firstKeptEntryId: string;
+	details: OpenAiRemoteCompactionDetails;
+};
+
+function checkpointContextEntries(entries: SessionEntry[], remote: RemoteCompactionCheckpoint): SessionEntry[] {
+	const checkpointEntryIds = new Set(entries.slice(0, remote.index + 1).map((entry) => entry.id));
+	return buildContextEntries(entries).filter((entry) => checkpointEntryIds.has(entry.id));
 }
 
 function leadingPromptMessages(input: unknown): OpenAiRemoteInputItem[] {
@@ -1011,19 +861,177 @@ function leadingPromptMessages(input: unknown): OpenAiRemoteInputItem[] {
 	return result;
 }
 
+function replayBoundaryConversionOptions(model: Model<Api>): {
+	includeSystemPrompt?: boolean;
+	preserveTextSignatures?: boolean;
+} {
+	return model.api === "openai-codex-responses" ? { includeSystemPrompt: false, preserveTextSignatures: true } : {};
+}
+
+function isRemoteReplayBoundary(value: unknown): value is OpenAiRemoteReplayBoundary {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const boundary = value as Record<string, unknown>;
+	return (
+		boundary.scope === OPENAI_REMOTE_REPLAY_BOUNDARY_SCOPE &&
+		typeof boundary.compactionEntryId === "string" &&
+		typeof boundary.ordinal === "number" &&
+		Array.isArray(boundary.expectedOrdinals) &&
+		boundary.expectedOrdinals.every((ordinal) => typeof ordinal === "number") &&
+		typeof boundary.integrity === "string"
+	);
+}
+
+function replayBoundaryForInputItem(value: unknown): OpenAiRemoteReplayBoundary | undefined {
+	const provenance = getContextProvenance(value);
+	return isRemoteReplayBoundary(provenance) ? provenance : undefined;
+}
+
+function sameOrdinals(left: readonly number[], right: readonly number[]): boolean {
+	return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function emitReplayFallback(
+	emit: EmitCompactionEvent | undefined,
+	remote: RemoteCompactionCheckpoint,
+	modelId: string,
+	reason: string,
+): void {
+	emit?.({
+		version: 1,
+		action: "remote_fallback",
+		route: "builtin.compaction.openai_remote",
+		requestId: `replay:${remote.entryId}`,
+		modelId,
+		reason,
+	});
+}
+
+function matchingReplayOrigin(
+	persisted: OpenAiRemoteCompactionOrigin | undefined,
+	current: OpenAiRemoteCompactionOrigin | undefined,
+): boolean {
+	return (
+		persisted !== undefined &&
+		current !== undefined &&
+		persisted.endpoint === current.endpoint &&
+		persisted.trustDomain === current.trustDomain &&
+		persisted.authTenantFingerprint === current.authTenantFingerprint
+	);
+}
+
+/**
+ * Mark the exact checkpoint-owned messages before later context hooks run.
+ * The markers carry entry identity, not payload values; the Responses converter
+ * transports them as non-enumerable request-local metadata for final validation.
+ */
+export function markOpenAiRemoteReplayBoundary(
+	messages: AgentMessage[],
+	options: { model: Model<Api> | undefined; branchEntries: SessionEntry[] },
+): AgentMessage[] {
+	if (!isOpenAiRemoteCompactionModel(options.model)) return messages;
+	const remote = latestRemoteCompaction(options.branchEntries);
+	if (!remote?.details.origin || !matchesOpenAiRemoteCompactionIdentity(options.model, remote.details)) {
+		return messages;
+	}
+	const entryIds = checkpointContextEntries(options.branchEntries, remote)
+		.filter((entry) => sessionEntryToContextMessages(entry).length > 0)
+		.map((entry) => entry.id);
+	if (
+		entryIds.length === 0 ||
+		messages.length < entryIds.length ||
+		!entryIds.every((entryId, index) => {
+			const message = messages[index] as AgentMessage & { [SESSION_CONTEXT_ENTRY_ID]?: unknown };
+			return message?.[SESSION_CONTEXT_ENTRY_ID] === entryId || getSessionContextEntryId(message) === entryId;
+		})
+	) {
+		return messages;
+	}
+
+	const expectedOrdinals: number[] = [];
+	const marked = messages.map((message, index) => {
+		if (index >= entryIds.length) return message;
+		const boundary: OpenAiRemoteReplayBoundary = {
+			scope: OPENAI_REMOTE_REPLAY_BOUNDARY_SCOPE,
+			compactionEntryId: remote.entryId,
+			ordinal: index,
+			expectedOrdinals,
+		};
+		return Object.assign({}, message, { __piContextProvenance: boundary }) as AgentMessage;
+	});
+	const baseline = convertResponsesMessages(
+		options.model,
+		{ messages: convertToLlm(marked) },
+		OPENAI_RESPONSES_TOOL_CALL_PROVIDERS,
+		{ ...replayBoundaryConversionOptions(options.model), sealContextProvenance: true },
+	);
+	for (const item of baseline) {
+		const boundary = replayBoundaryForInputItem(item);
+		if (boundary?.compactionEntryId === remote.entryId) expectedOrdinals.push(boundary.ordinal);
+	}
+	return expectedOrdinals.length > 0 ? marked : messages;
+}
+
 export function rewriteOpenAiPayloadWithRemoteCompaction(
 	payload: unknown,
-	options: { model: Model<Api> | undefined; branchEntries: SessionEntry[] },
+	options: {
+		model: Model<Api> | undefined;
+		branchEntries: SessionEntry[];
+		origin?: OpenAiRemoteCompactionOrigin;
+	},
 	emit?: EmitCompactionEvent,
 ): unknown | undefined {
-	if (!isOpenAiResponsesModel(options.model) || !isRecord(payload)) return undefined;
+	if (!isOpenAiRemoteCompactionModel(options.model) || !isRecord(payload)) {
+		return undefined;
+	}
+	const payloadInput = payload.input;
+	if (!Array.isArray(payloadInput)) return undefined;
 	const remote = latestRemoteCompaction(options.branchEntries);
 	if (!remote) return undefined;
+	if (!matchesOpenAiRemoteCompactionIdentity(options.model, remote.details)) {
+		emitReplayFallback(emit, remote, options.model.id, "remote-replay-identity-mismatch");
+		return undefined;
+	}
+	if (!remote.details.origin || !options.origin) {
+		emitReplayFallback(emit, remote, options.model.id, MISSING_REMOTE_REPLAY_ORIGIN_REASON);
+		return undefined;
+	}
+	if (!matchingReplayOrigin(remote.details.origin, options.origin)) {
+		emitReplayFallback(emit, remote, options.model.id, REMOTE_REPLAY_ORIGIN_MISMATCH_REASON);
+		return undefined;
+	}
 
-	const postCompactionItems = convertBranchEntries(options.branchEntries.slice(remote.index + 1));
-	if (!postCompactionItems) return undefined;
+	const checkpointStart = leadingPromptMessages(payloadInput).length;
+	const allBoundaries = payloadInput
+		.map(replayBoundaryForInputItem)
+		.filter((boundary): boundary is OpenAiRemoteReplayBoundary => boundary?.compactionEntryId === remote.entryId);
+	const expectedOrdinals = allBoundaries[0]?.expectedOrdinals;
+	if (
+		!expectedOrdinals ||
+		expectedOrdinals.length === 0 ||
+		allBoundaries.length !== expectedOrdinals.length ||
+		payloadInput.length < checkpointStart + expectedOrdinals.length ||
+		!allBoundaries.every(
+			(boundary, index) =>
+				sameOrdinals(boundary.expectedOrdinals, expectedOrdinals) && boundary.ordinal === expectedOrdinals[index],
+		) ||
+		!expectedOrdinals.every((ordinal: number, index: number) => {
+			const boundary = replayBoundaryForInputItem(payloadInput[checkpointStart + index]);
+			return (
+				boundary?.compactionEntryId === remote.entryId &&
+				boundary.ordinal === ordinal &&
+				sameOrdinals(boundary.expectedOrdinals, expectedOrdinals)
+			);
+		})
+	) {
+		emitReplayFallback(emit, remote, options.model.id, UNPROVEN_REMOTE_REPLAY_BOUNDARY_REASON);
+		return undefined;
+	}
 
-	const input = [...leadingPromptMessages(payload.input), ...remote.details.replacementInput, ...postCompactionItems];
+	const input = [
+		...payloadInput.slice(0, checkpointStart).filter(isRecord),
+		...remote.details.replacementInput,
+		...payloadInput.slice(checkpointStart + expectedOrdinals.length).filter(isRecord),
+	];
 	emit?.({
 		version: 1,
 		action: "remote_payload_rewritten",

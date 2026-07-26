@@ -3,12 +3,12 @@ package builtinext
 // CommandOutcome is the decision a builtin extension's registerCommand handler
 // reaches before touching the UI: either open its overlay, or emit a single
 // notify() with a message + level. This is the native port of the decision
-// layer inside history-search/index.ts and session-observer/index.ts — the seam
-// the classic TS integration tests exercise (no session messages emitted; the
-// no-UI/empty paths notify instead of opening; the non-empty path opens exactly
-// once). Neo's app shell consumes an outcome to decide whether to push the
-// overlay or surface a status notice; the resolvers stay pure so the decision is
-// unit-testable without an interactive session.
+// layer inside history-search/index.ts — the seam the classic TS integration
+// tests exercise (no session messages emitted; the no-UI/empty paths notify
+// instead of opening; the non-empty path opens exactly once). Neo's app shell
+// consumes an outcome to decide whether to push the overlay or surface a status
+// notice; the resolvers stay pure so the decision is unit-testable without an
+// interactive session.
 type CommandOutcome struct {
 	// OpenOverlay is true when the handler should open its overlay/picker.
 	OpenOverlay bool
@@ -30,22 +30,6 @@ func ResolveHistoryCommandOutcome(hasUI bool, entries []HistoryEntry) CommandOut
 	}
 	if len(entries) == 0 {
 		return CommandOutcome{NotifyMessage: "No prompt history found", NotifyLevel: "info"}
-	}
-	return CommandOutcome{OpenOverlay: true}
-}
-
-// ResolveSessionsCommandOutcome mirrors session-observer/index.ts:12-34: with no
-// UI it notifies "No UI available"; with no discovered sessions it notifies "No
-// sessions found"; otherwise it opens the HUD picker (the classic
-// getCustomCallCount()===1 path). (The scan-error branch — "Failed to read
-// sessions: <msg>" — is surfaced by the caller when ScanSessionHudEntries
-// returns an error, before this resolver is reached.)
-func ResolveSessionsCommandOutcome(hasUI bool, sessions []SessionHudEntry) CommandOutcome {
-	if !hasUI {
-		return CommandOutcome{NotifyMessage: "No UI available", NotifyLevel: "info"}
-	}
-	if len(sessions) == 0 {
-		return CommandOutcome{NotifyMessage: "No sessions found", NotifyLevel: "info"}
 	}
 	return CommandOutcome{OpenOverlay: true}
 }

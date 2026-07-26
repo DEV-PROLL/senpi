@@ -1,13 +1,10 @@
-// Command qaharness is the manual-QA driver for the five native builtin
+// Command qaharness is the manual-QA driver for the four native builtin
 // ctx.ui.custom extension ports (plan task 14). It renders each feature's overlay
 // to stdout as a frame (\r\n line endings) so a tmux capture can produce the
-// xterm.js triplet, and drives the two verbatim QA scenarios:
+// xterm.js triplet, and drives the verbatim QA scenario:
 //
 //	history  - ctrl+r history search finding seeded prompts across two fixture
 //	           sessions (the happy scenario). --query filters live.
-//	observer - the session HUD viewer tailing an actively-growing session file
-//	           (the failure scenario): it appends to the file, reloads via the
-//	           tail, and prints the entry counts + a final frame with no crash.
 //	files    - the files browser picker (R/W/E glyphs).
 //	diff     - the diff picker (status column).
 //	redraws  - the /tui redraw-stat notice string.
@@ -62,8 +59,6 @@ func main() {
 	switch mode {
 	case "history":
 		runHistory(th, km, width, query)
-	case "observer":
-		runObserver(th, km, width)
 	case "files":
 		runFiles(th, km, width)
 	case "diff":

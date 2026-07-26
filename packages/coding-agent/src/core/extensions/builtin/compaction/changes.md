@@ -1,3 +1,35 @@
+## Canonical remote compaction provenance and route ownership (2026-07-24)
+
+- `openai-remote-model.ts`: provenance now hashes the normalized endpoint and every final header by default. The only excluded volatile transport headers are `content-length`, `user-agent`, `request-id`, `x-request-id`, and `x-client-request-id`; raw values are never persisted. This binds non-Codex checkpoints to authorization plus final tenant/workspace routing headers.
+- Codex checkpoints instead bind to the JWT-derived `chatgpt-account-id` and every other final non-volatile header, deliberately excluding only the rotating `authorization` bearer value. Codex remote compaction now applies normal Responses header ordering: extension header transforms first, then configured authorization/account, originator, user agent, beta, and session/cache-affinity fields.
+- `agent-session.ts`: each compaction execution now proves its explicit auto/manual route controller still owns the operation before beginning lifecycle state. An auto compaction superseded during async auth admission publishes no lifecycle events and cannot disturb the newer manual operation.
+- Regressions: `test/compaction/canonical-routes.test.ts`, `test/suite/regressions/issue-296-openai-codex-remote-compaction.test.ts`, and `test/suite/compaction-race.test.ts` cover header routing differences, refresh-stable Codex account provenance, canonical override repair, and auth-admission supersession.
+
+## Replay remote checkpoints from final context payloads (2026-07-24)
+
+- `openai-remote.ts`: replay proves the checkpoint boundary by projecting the compaction-aware session prefix through
+  the same OpenAI Responses converter used by the real provider request, then requiring the final payload prefix to
+  match item-for-item. It only replaces a proven prefix; a context hook that inserts, removes, reorders, or changes a
+  checkpoint item declines native replay and sends the final transformed full payload unchanged. The post-checkpoint
+  suffix, including the in-flight prompt, always comes directly from that final payload and is never reconstructed
+  from persisted raw messages.
+- `openai-remote.ts`: both the direct compact endpoint and WebSocket route validate the final
+  `before_provider_request` replacement as an OpenAI compact body. Invalid replacements emit
+  `remote_fallback` with `invalid-compact-request-payload` and are rejected before transport, never retried with the
+  pre-hook payload.
+- Regressions: `test/compaction/canonical-routes.test.ts` covers a context hook that changes prefix cardinality and
+  confirms final-payload fallback, while `test/compaction/openai-remote-compaction.test.ts` covers invalid downstream
+  compact request replacements, final-payload redaction, and native/mixed-history provenance. The Codex regression
+  exercises the same proven-prefix replay path.
+- Repeated checkpoints project their prefix through the same compaction-aware branch view as normal session context,
+  excluding superseded older summaries before canonical Responses conversion.
+- Non-remote summarization runs context hooks on raw `AgentMessage` values before `convertToLlm`, preserving
+  role/customType-based redaction contracts while leaving persisted messages byte-identical.
+- Remote checkpoint provenance now records normalized endpoint/trust-domain identity plus a SHA-256 fingerprint of the
+  effective auth tenant (never raw credentials). Legacy, cross-endpoint, or cross-tenant entries decline replay.
+- Replay boundaries require non-enumerable message/item provenance to survive the canonical context pipeline. Missing,
+  duplicated, reordered, reconstructed, or mutated provenance keeps the final transformed full payload unchanged.
+
 # Builtin compaction extension changes
 
 ## Reasoning-free summarization + shrink warm start (2026-07-26)
@@ -20,6 +52,117 @@
 
 Expected upstream conflict zones: `builtin/compaction/speculative.ts` around the stream options in
 `generateSummaryMessage`, and `builtin/compaction/index.ts` around the `model_select` handler.
+
+## Active-tool-only summarization requests (2026-07-23)
+
+- `index.ts`: direct local summarization requests now map the current active tool names to registered definitions.
+  Inactive registered tools, including inactive MCP catalog entries, no longer consume remote compaction payload
+  budget or appear as callable tools to the summarizer.
+- Applied speculative summaries carry their handler's feedback signal, allowing core to reject a superseded apply
+  before durable session mutation.
+
+Expected upstream conflict zones: `builtin/compaction/index.ts` tool snapshot construction and
+`builtin/compaction/speculative.ts` apply path.
+
+## Session-owned compaction completion state (2026-07-23)
+
+- AgentSession now records compaction as `idle`, `running`, `completed`, `failed`, or `aborted` with a monotonic
+  generation and operation identity.
+- Compaction snapshots the current AgentSession model at operation start. If main-thread retry fallback selected a
+  different model, that active model performs compaction; there is no compaction-specific fallback policy.
+- Extension feedback starts the same operation before summary generation and carries its abort signal through
+  progress, application, and terminal feedback.
+- Stale or duplicate terminal events cannot overwrite a newer compaction operation.
+- Durable append is guarded by the current operation and controller identity.
+- Required compaction remains fail-closed when generation or application fails, including provider-confirmed overflow
+  that the local token estimate places below the configured threshold; rejected recovery restores the overflow
+  context so a later prompt cannot bypass the same requirement.
+
+Expected upstream conflict zones: `agent-session.ts` around compaction execution, abort handling, and status access;
+`core/compaction/lifecycle.ts`.
+
+## Sanitize Anthropic tool pairs on direct summarization requests (2026-07-23)
+
+- `speculative.ts`: local compaction summarization now applies the existing Anthropic payload sanitizer at the direct
+  `stream()` boundary. Unlike normal agent turns, this side request does not run the extension runner's
+  `before_provider_request` hooks, so an orphan `tool_result` that survived message conversion previously reached
+  Anthropic unchanged and permanently rejected compaction for an over-limit session.
+- Regression: `test/compaction/anthropic-tool-pair-guard.test.ts` drives the real Anthropic wire adapter against a local
+  endpoint that rejects orphan results, proving the summarization request is valid before it leaves senpi.
+
+Expected upstream conflict zones: `builtin/compaction/speculative.ts` direct summary stream options.
+
+## Support native remote compaction for OpenAI Codex models (2026-07-23)
+
+- `openai-remote-model.ts`, `openai-remote-schema.ts`, `openai-remote.ts`, `openai-remote-convert.ts`,
+  `index.ts`: native remote compaction now treats `openai-codex` / `openai-codex-responses` as a supported
+  provider capability.
+  Codex compaction uses the ChatGPT backend's `/codex/responses/compact` route with OAuth Bearer auth,
+  the JWT-derived `chatgpt-account-id`, Codex session/window identity headers, the Responses beta flag,
+  and `originator: senpi`. The compact parser accepts Codex's output-only JSON response while retaining
+  strict direct-OpenAI response validation.
+- Codex OAuth remote compaction is restricted to the canonical ChatGPT origin and loopback QA/proxy
+  origins, preventing OAuth bearer tokens and conversation history from being sent to arbitrary remote
+  custom URLs. Persisted replacement history is replayed only when its provider/API identity exactly
+  matches the current model family.
+- Persisted remote-compaction details retain the paired provider/API identity so the next Codex request
+  replays the encrypted compaction item and in-flight prompt through the existing payload rewrite hook.
+  Direct `openai` / `openai-responses` endpoint and WebSocket behavior remains unchanged.
+- Regressions: `test/suite/regressions/issue-296-openai-codex-remote-compaction.test.ts` and
+  `test/suite/regressions/issue-296-openai-codex-remote-compaction-boundaries.test.ts`.
+
+## Preserve the in-flight prompt in remote-compaction payload replay (2026-07-22)
+
+- `index.ts`, `openai-remote.ts`, `openai-remote-convert.ts`: the `before_provider_request` replay after a
+  remote compaction rebuilt the payload from the persisted branch only. The in-flight user prompt is not yet
+  persisted at that point, so the replayed payload silently dropped it — the model never saw the first message
+  after a remote compaction. The `context` handler now stashes the not-yet-persisted tail messages
+  (`pendingProviderMessages`) and the rewrite appends their conversion after the branch-derived items.
+  Pre-existing on main; surfaced by the mixed-history e2e QA scenario.
+- Tests: `test/compaction/openai-remote-compaction.test.ts` (pending-prompt rewrite case) and
+  `.agents/skills/senpi-qa/scripts/compaction-remote-qa.mjs` (asserts the post-compaction payload carries the prompt).
+
+Expected upstream conflict zones: `builtin/compaction/index.ts` context/provider-request handlers,
+`builtin/compaction/openai-remote.ts` payload rewrite.
+
+## OpenAI remote compaction gated on provider capability, not history provenance (2026-07-22)
+
+- `openai-remote-convert.ts` (new, extracted from `openai-remote.ts`): the remote-compaction route no longer
+  requires the entire session branch to be OpenAI Responses-native. The route gate is now provider capability
+  only (current model is `provider "openai"` + `api "openai-responses"`, matching codex's
+  `supports_remote_compaction()`), and branch conversion is total: entries flow through the same
+  `sessionEntryToContextMessages` + `convertToLlm` pipeline the normal context path uses, so foreign-provider
+  assistant messages, bash executions, branch summaries, custom messages, and prior LOCAL compaction entries
+  degrade to their canonical text form instead of forcing a local-summarization fallback. Prior OpenAI remote
+  compaction entries still splice their native `replacementInput` in order.
+- Image-bearing tool results now mirror the Responses payload builder: structured `input_text`/`input_image`
+  parts for image-capable models, `(see attached image)` placeholder otherwise.
+- `rewriteOpenAiPayloadWithRemoteCompaction` no longer silently skips the rewrite when post-compaction history
+  is not OpenAI-native (previously the session then sent the full uncompacted context on the next turn).
+- The `session-not-openai-native` fallback reason is gone; request building can only decline on an empty input
+  (`empty-compaction-input`).
+- Tests: `test/compaction/openai-remote-compaction.test.ts` — degradation cases for mixed providers, bash
+  executions, local compaction entries, branch/custom entries, image tool results, a mixed-history remote run
+  through `runOpenAiRemoteCompaction`, and the post-compaction payload rewrite with a non-native tail.
+
+Expected upstream conflict zones: `builtin/compaction/openai-remote.ts` request building and payload rewrite;
+`builtin/compaction/openai-remote-convert.ts` (new file, no upstream counterpart).
+
+## Skip placeholder synthesis for errored/aborted assistants (2026-07-22)
+
+- `repair-tool-pairs.ts` no longer synthesizes placeholder tool results for toolCalls declared by
+  assistant messages with `stopReason "error" | "aborted"`. `transformMessages`
+  (`packages/ai/src/api/transform-messages.ts`) drops those assistants from every provider request, so a
+  synthesized placeholder became a `role:"tool"` message whose `tool_call_id` no assistant declared —
+  strict providers (apitopia/kimi openai-completions) answered `400 tool_call_id ... is not found` and the
+  session's compaction was permanently rejected. The primary fix lives in `transformMessages` (results of
+  dropped assistants are no longer emitted); this guard is defense in depth. The sibling copy
+  `packages/ai/src/utils/tool-pair-repair.ts` received the identical change; the files remain verbatim
+  copies, so the "duplicated verbatim" comments still hold.
+- Tests: `test/compaction/tool-pair-repair.test.ts` asserts no synthesis for errored/aborted assistants.
+
+Expected upstream conflict zones: `builtin/compaction/repair-tool-pairs.ts` dangling-call synthesis loop
+and the shared `packages/ai/src/utils/tool-pair-repair.ts` copy.
 
 ## Omit non-"fc" item ids in remote-compaction tool-call replay (2026-07-22)
 

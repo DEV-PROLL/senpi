@@ -1,14 +1,19 @@
 # @code-yeongyu/senpi-codemode
 
-`@code-yeongyu/senpi-codemode` is Senpi's source-only persistent-kernel
-`eval` extension. It registers `eval`, owns one persistent kernel per enabled
-language, and re-registers the tool at session start after configuration,
-interpreter availability, and active task-tool names are known.
+`@code-yeongyu/senpi-codemode` is Senpi's source-only Code Mode extension. It
+registers persistent-kernel `eval` for every eligible model and GPT-only
+`exec`/`wait` cells for bounded JavaScript orchestration. `eval` owns one
+persistent kernel per enabled language and re-registers at session start after
+configuration, interpreter availability, and active task-tool names are known.
 
 ## Capabilities
 
 - Persistent JavaScript, Python, Ruby, and Julia cells. State survives later
   cells in the same language until reset, restart, or session disposal.
+- Timeout detachment for interactive `eval`: long pure-compute cells return a
+  handle and continue in their existing kernel. Completion is injected with the
+  final value/error and buffered output; use `eval({ action: "peek"|"stop",
+  cell_id })` to inspect or terminate a detached cell.
 - Loopback, bearer-authenticated kernel bridge with bounded JSONL frames.
 - Structured status events for file operations, environment access, phases,
   bridge activity, and delegated task progress.
@@ -19,6 +24,8 @@ interpreter availability, and active task-tool names are known.
   fallbacks.
 - JavaScript import rewriting for supported local modules and package imports
   in the persistent Node.js worker.
+- GPT Code Mode `exec`/`wait` cells use fresh JavaScript workers, can compose
+  active tools through `tools.<name>(args)`, and never replace `eval`.
 
 ## Kernels
 
@@ -65,7 +72,7 @@ Configuration is loaded in this order:
 | Key | Default | Effect |
 | --- | --- | --- |
 | `languages` | `py`/`js` enabled; `rb`/`jl` disabled | Selects desired languages before interpreter detection. |
-| `cellTimeoutSeconds` | `30` | Idle timeout for one cell unless the call supplies `timeout`. |
+| `cellTimeoutSeconds` | `30` | Idle timeout for one cell unless the call supplies `timeout`; interactive calls detach by default and print/json calls error. |
 | `parallelPoolWidth` | `4` | Maximum concurrent `parallel()` thunks. |
 | `taskTools.task` | `"task"` | Registered tool name used by `agent()`. |
 | `taskTools.output` | `"task_output"` | Registered tool name used by `output()`. |
@@ -93,7 +100,7 @@ options object and asynchronous helpers are `await`-able.
 | `read(path, offset?, limit?)` | Reads text with 1-indexed line slicing. `local://` paths resolve under the session artifact root. |
 | `write(path, content)` | Creates parent directories and writes text. `local://` paths persist in the session artifact root. |
 | `env(key?, value?)` | Reads all kernel environment values, one value, or sets one value. |
-| `tool.<name>(args)` | Invokes an active Senpi tool through the normal `pi.executeTool` pipeline. |
+| `tool.<name>(args)` / `tools.<name>(args)` | Invokes an active Senpi tool through the normal `pi.executeTool` pipeline. `tools` is the GPT Code Mode spelling. |
 | `completion(prompt, model?, system?, schema?)` | Requests a one-shot host completion; `schema` asks the host to parse structured output. |
 | `agent(prompt, ...)` | Delegates to the configured active `taskTools.task` tool. Supports background handles and structured JSON results. |
 | `output(ids, format?, offset?, limit?)` | Delegates transcript retrieval to the configured active `taskTools.output` tool. |
@@ -108,6 +115,22 @@ package. `agent()` delegates through the tool contract, so task-engine
 permissions, progress updates, and transcripts remain owned by that engine.
 `isolated`, `apply`, and `merge` are accepted for compatibility but emit a
 warning because this task-engine integration has no isolation model.
+
+## Detached cells
+
+`eval` accepts `on_timeout: "detach"|"error"`. The default is `"detach"` in
+interactive TUI, RPC, and app-server sessions; print and JSON one-shot runs
+default to `"error"` so their result is never silently detached. A detached
+cell keeps only its own language kernel busy. A new same-language call returns
+a busy error with its cell id and output tail; calls in other languages continue
+normally. Do not re-run the cell.
+
+Use `eval({ action: "peek", cell_id })` for its state and buffered output, or
+`eval({ action: "stop", cell_id })` to cancel it. Python stop interrupts the
+existing kernel and preserves variables. JavaScript stop kills and restarts its
+worker, so JavaScript VM state is lost. Detached completion messages state when
+kernel variables are available to the next eval cell; oversized buffered output
+is written under the session local root and referenced as `local://…`.
 
 ## Output and artifacts
 
@@ -136,6 +159,12 @@ Session generations fence retired kernels and callbacks; each cell settles once
 across completion, errors, cancellation, timeout, bridge failure, or a kernel
 crash.
 
+GPT Code Mode is not an additional sandbox: it uses the same Node worker trust
+boundary as JavaScript `eval`. Its separate cell lifecycle exists so a yielded
+`exec` can be observed or terminated with `wait` without affecting persistent
+`eval` kernels. `eval`, `exec`, and `wait` are excluded from the nested tool
+namespace to prevent recursive Code Mode execution.
+
 ## Validation
 
 ```bash
@@ -148,5 +177,5 @@ npm run check
 
 Direct real-surface QA drivers live in `scripts/qa-*.ts`: kernel cells
 (`qa-py-cell.ts`, `qa-js-cell.ts`, `qa-rb-cell.ts`, `qa-jl-cell.ts`), end-to-end
-extension execution (`qa-e2e-eval.ts`), and renderer output
+extension execution (`qa-e2e-eval.ts`, `qa-gpt-code-mode.ts`), and renderer output
 (`qa-render-dump.ts`).

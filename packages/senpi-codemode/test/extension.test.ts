@@ -17,6 +17,9 @@ interface RegisteredHandler {
 class FakePi {
 	readonly tools: string[] = [];
 	readonly handlers: RegisteredHandler[] = [];
+	readonly messages: string[] = [];
+	readonly deliveries: Array<{ readonly content: string; readonly deliverAs: "steer" | "followUp" | undefined }> = [];
+	readonly #nextMessage = Promise.withResolvers<string>();
 	readonly activeTools = new Set<string>(["eval"]);
 	registeredTool: Parameters<CodemodeExtensionAPI["registerTool"]>[0] | undefined;
 	registerTool(tool: Parameters<CodemodeExtensionAPI["registerTool"]>[0]): void {
@@ -32,6 +35,14 @@ class FakePi {
 	}
 	async executeTool(): Promise<never> {
 		throw new Error("nested tool execution was not expected");
+	}
+	sendUserMessage(content: string, options?: { readonly deliverAs?: "steer" | "followUp" }): void {
+		this.messages.push(content);
+		this.deliveries.push({ content, deliverAs: options?.deliverAs });
+		this.#nextMessage.resolve(content);
+	}
+	nextMessage(): Promise<string> {
+		return this.#nextMessage.promise;
 	}
 }
 
@@ -144,7 +155,10 @@ async function emit(pi: FakePi, event: string, payload: unknown, ctx: ExtensionC
 }
 
 describe("senpi-codemode extension factory", () => {
-	afterEach(() => vi.clearAllMocks());
+	afterEach(() => {
+		vi.clearAllMocks();
+		vi.useRealTimers();
+	});
 
 	it("registers eval exactly once and has no module side effects", () => {
 		const pi = new FakePi();
@@ -367,6 +381,8 @@ describe("senpi-codemode extension factory", () => {
 });
 
 describe("senpi-codemode extension lifecycle", () => {
+	afterEach(() => vi.useRealTimers());
+
 	it("settles a mid-run cell as an error and rejects post-shutdown work", async () => {
 		const pi = new FakePi();
 		const manager = new DisposableManager();
@@ -385,6 +401,37 @@ describe("senpi-codemode extension lifecycle", () => {
 		).rejects.toMatchObject({ name: "CodemodeSessionDisposedError" });
 		expect([manager.disposeCount, manager.getKernelCount]).toEqual([1, 1]);
 		expect(manager.runControllers[0]?.signal.aborted).toBe(true);
+	});
+
+	it("injects one guarded interactive completion notification for a detached cell", async () => {
+		vi.useFakeTimers();
+		const pi = new FakePi();
+		const manager = new DisposableManager();
+		senpiCodemode(pi, { createSessionManager: () => manager });
+		const ctx = { ...extensionContext(), mode: "tui" as const, model: fakeModel("claude-opus-4-8") };
+		await emit(pi, "session_start", { reason: "startup" }, ctx);
+		const tool = pi.registeredTool;
+		if (!tool) throw new Error("eval tool was not registered");
+		const notification = pi.nextMessage();
+		const run = tool.execute(
+			"notified-detached",
+			{ language: "js", code: "await pending()", timeout: 1, on_timeout: "detach" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		await manager.runStarted.promise;
+		await vi.advanceTimersByTimeAsync(1_000);
+		await run;
+
+		manager.runControllers[0]?.abort(new Error("kernel crashed"));
+		const content = await notification;
+
+		expect(pi.deliveries).toEqual([{ content, deliverAs: "steer" }]);
+		expect(content).toContain("notified-detached");
+		expect(content).toContain("kernel disposed");
+		expect(content).toContain("Kernel state updated - variables are available to the next eval cell.");
+		await emit(pi, "session_shutdown", {}, ctx);
 	});
 
 	it("aborts and settles tracked eval work before disposing the session manager", async () => {

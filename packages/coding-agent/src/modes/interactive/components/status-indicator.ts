@@ -23,6 +23,10 @@ export class StatusIndicator extends Loader {
 	dispose(): void {
 		this.stop();
 	}
+
+	setProgressText(_progressText: string): void {
+		// Only compaction status renders progress.
+	}
 }
 
 export class WorkingStatusIndicator extends StatusIndicator {
@@ -73,6 +77,8 @@ export class RetryStatusIndicator extends StatusIndicator {
 export type CompactionStatusReason = "manual" | "threshold" | "overflow" | "pre_prompt" | "branch" | "extension";
 
 export class CompactionStatusIndicator extends StatusIndicator {
+	private progressText = "";
+
 	constructor(ui: TUI, reason: CompactionStatusReason) {
 		const cancelHint = `(${keyText("app.interrupt")} to cancel)`;
 		const label =
@@ -92,6 +98,16 @@ export class CompactionStatusIndicator extends StatusIndicator {
 			(text) => theme.fg("muted", text),
 			label,
 		);
+	}
+
+	setProgressText(progressText: string): void {
+		this.progressText = progressText;
+	}
+
+	override render(width: number): string[] {
+		const status = super.render(width).join(" ");
+		if (!this.progressText) return [status];
+		return [`${status} ${theme.fg("muted", this.progressText)}`];
 	}
 }
 
