@@ -27,7 +27,7 @@
 | 19 | `look-at` | `look-at/` | Vision-model delegation tool for media analysis when the active model cannot accept image input |
 | 20 | `nested-agents-md` | `nested-agents-md/` | Auto-injects nearby `AGENTS.md` + `/nested-agents`; vendored from `../pi-extensions/pi-nested-agents-md` |
 | 21 | `rules` | `rules/` | Rule-file discovery + `/rules`/`/reload-rules`; vendored from `../pi-extensions/pi-rules` |
-| 22 | `goal` | `goal/` | Sigrid-style Ultragoal workflow + `/ultragoal` (`/goal` alias); vendored from `../pi-extensions/pi-goal` |
+| 22 | `goal` | `goal/` | Budget-free goal tools + `/goal`; vendored from `../pi-extensions/pi-goal` |
 | 23 | `btw` | `btw/` | `/btw` side-question command that queries in parallel without touching the main session |
 | 24 | `config-reload` | `config-reload/` | Hash-gated watcher for trusted global/project config surfaces that defers a full session reload until idle and exposes the `config-watch:*` event protocol; registered after settings-dependent builtins so a reload rebuilds their resolved settings, and before final MCP observation |
 | 25 | `mcp` | `mcp/` | Built-in MCP client: `mcpServers` config, stdio/http transports, `/mcp` commands, tool exposure policy — see `mcp/changes.md` |
@@ -63,6 +63,6 @@ Plus bundled extension **codemode** (`@code-yeongyu/senpi-codemode`, resolved by
 
 - `permission-system/storage.ts` writes JSONL approval logs; don't change the line shape without a migration.
 - `compaction/restoration-tracker.ts` powers the post-compact context restoration feature — see `compaction/changes.md`.
-- `goal/elapsed-ticker.ts` drives the live 'Pursuing ultragoal...' footer refresh on a one-second cadence.
+- `goal/elapsed-ticker.ts` drives the live 'Pursuing goal...' footer refresh on a one-second cadence.
 - MCP search exposure tool is `tool_search` (mcp/expose/tool-search.ts). Do not reintroduce `mcp_search` references anywhere.
 - Prompt presets routinely append the shared `file-operations.ts` tuning block. Mirror this when adding GPT-5.x presets — see `prompt-preset/changes.md` 2026-05-07.

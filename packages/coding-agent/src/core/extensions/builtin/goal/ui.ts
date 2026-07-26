@@ -13,17 +13,17 @@ export function goalStatusText(goal: Goal, liveElapsedSeconds?: number): string 
 	switch (goal.status) {
 		case "active": {
 			if (liveElapsedSeconds !== undefined) {
-				return `Pursuing ultragoal (${formatGoalElapsedSeconds(liveElapsedSeconds)})`;
+				return `Pursuing goal (${formatGoalElapsedSeconds(liveElapsedSeconds)})`;
 			}
 			return goal.timeUsedSeconds > 0
-				? `Pursuing ultragoal (${formatGoalElapsedSeconds(goal.timeUsedSeconds)})`
-				: "Pursuing ultragoal";
+				? `Pursuing goal (${formatGoalElapsedSeconds(goal.timeUsedSeconds)})`
+				: "Pursuing goal";
 		}
 		case "paused":
-			return "Ultragoal paused (/ultragoal resume)";
+			return "Goal paused (/goal resume)";
 		case "blocked":
-			return goal.blockedReason ? `Ultragoal blocked: ${goal.blockedReason}` : "Ultragoal blocked";
+			return goal.blockedReason ? `Goal blocked: ${goal.blockedReason}` : "Goal blocked";
 		case "complete":
-			return "Ultragoal achieved";
+			return "Goal achieved";
 	}
 }

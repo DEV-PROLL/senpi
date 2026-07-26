@@ -1,21 +1,20 @@
 # builtin/goal
 
-Builtin extension #22. Persistent per-thread **Ultragoal** tracking, ported from the
+Builtin extension #16. Persistent per-thread **goal** tracking, ported from the
 standalone `pi-goal` extension with **zero dependency on it** and **budget-driven
 behavior fully removed**. Registers the codex-aligned `create_goal` /
-`update_goal` / `get_goal` tools plus the primary `/ultragoal` command and `/goal`
-compatibility alias, persists a single goal per thread to a JSON file, and
-re-engages the agent toward an active goal via structured hidden continuation
-prompts.
+`update_goal` / `get_goal` tools plus a `/goal` command, persists a single goal
+per thread to a JSON file, and re-engages the agent toward an active goal via
+hidden continuation prompts.
 
 ## FILES
 
 ```
 goal/
-├── index.ts          # Extension entry — tools + commands + session/agent lifecycle + usage accounting
+├── index.ts          # Extension entry — tools + /goal command + session/agent lifecycle + usage accounting
 ├── store.ts          # File persistence: read/write/create/update/clear/accountGoalUsage
 ├── types.ts          # Goal (+ inert tokenBudget compatibility metadata), GoalStatus, GoalFile, refs, snapshots
-├── validation.ts     # validateObjective (trim + inline spill threshold)
+├── validation.ts     # validateObjective (trim + max length)
 ├── continuation.ts   # shouldQueueGoalContinuation* gating predicates
 ├── prompt.ts         # buildContinuationPrompt (untrusted-objective + completion audit)
 ├── format.ts         # Tool/UI formatting + goalToolResponse snapshot
@@ -53,33 +52,25 @@ Do not return an `isError` property; it is ignored.
 
 | Task | File |
 |------|------|
-| Change a tool schema or description | `tool-registration.ts` |
+| Change a tool schema or description | `index.ts` `registerTool` |
 | Adjust status transitions / persistence | `store.ts` |
 | Tune the continuation prompt | `prompt.ts` |
 | Change the footer status text | `ui.ts` |
 | Change the live footer elapsed ticker | `elapsed-ticker.ts` (+ `refreshGoalUi` in `index.ts`) |
-| `/ultragoal` argument parsing | `command.ts` |
+| `/goal` argument parsing | `command.ts` |
 
 ## CONVENTIONS
 
 - **Single goal per thread.** `create_goal` fails while an UNFINISHED goal exists;
   over a `complete` goal it replaces, archiving the old goal to
   `<threadId>.history.jsonl`. `update_goal` marks `complete` or `blocked` (blocked
-  requires a `reason`). `/ultragoal <objective>` replaces with a UI confirm;
-  `/goal` must remain the same-handler compatibility alias.
-- **Long objectives are lossless.** The store keeps only an inline preview capped
-  at `MAX_OBJECTIVE_LENGTH`; the full objective spills to a deterministic
-  sidecar file (`<threadId>.objective-full.txt`), and the preview ends with a
-  truncation marker naming that file so the agent can read the full text back.
-- **Continuation is evidence-driven.** Objectives with three or more distinct
-  steps require durable todo decomposition; completion uses a prompt-to-artifact
-  audit, and blocked status requires three consecutive turns of concrete evidence.
+  requires a `reason`). `/goal <objective>` replaces with a UI confirm.
 - **Continuation is opt-in by state**: hidden prompts are queued only while a goal
   is `active`, idle, and there are no pending messages.
 - **Usage accounting is display-only**: `accountGoalUsage` increments
   `tokensUsed`/`timeUsedSeconds`; it never changes status.
 - **Live footer is ticker-driven**: `refreshGoalUi` (index.ts) drives
-  `GoalElapsedTicker` to refresh `Pursuing ultragoal (…)` once per second while a goal
+  `GoalElapsedTicker` to refresh `Pursuing goal (…)` once per second while a goal
   is `active` and its accounting window is open, so the footer advances live
   instead of freezing between `agent_end` accounting checkpoints. The ticker only
   runs when `ctx.hasUI` and is stopped on pause/complete/clear and session shutdown.
@@ -87,7 +78,6 @@ Do not return an `isError` property; it is ignored.
 ## NOTES
 
 - Tests: `test/suite/goal-store.test.ts`, `goal-modules.test.ts`,
-  `goal-extension.test.ts`, `goal-elapsed-ticker.test.ts`, `goal-e2e.test.ts`
-  (faux/mocked `pi`, temp-file store, no real APIs).
-- Registered as `goal` in `builtin/index.ts` `builtinExtensions`; inert until a goal
+  `goal-extension.test.ts`, `goal-elapsed-ticker.test.ts` (faux/mocked `pi`, temp-file store, no real APIs).
+- Registered last in `builtin/index.ts` `builtinExtensions`; inert until a goal
   is created.

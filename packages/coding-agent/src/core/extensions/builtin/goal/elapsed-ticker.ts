@@ -26,7 +26,7 @@ export function goalLiveElapsedSeconds(goal: Goal, measuredFromMilliseconds: num
 
 /**
  * Drives a once-per-second footer refresh while a goal is active so the
- * "Pursuing ultragoal (…)" elapsed time advances live instead of freezing between
+ * "Pursuing goal (…)" elapsed time advances live instead of freezing between
  * usage-accounting checkpoints. The interval is unref'd so it never keeps the
  * process alive.
  */
