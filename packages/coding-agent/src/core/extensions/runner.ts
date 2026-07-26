@@ -591,6 +591,10 @@ export class ExtensionRunner {
 		return this.extensions.map((e) => e.path);
 	}
 
+	getExtensionIdentities(): Array<{ path: string; resolvedPath: string }> {
+		return this.extensions.map(({ path, resolvedPath }) => ({ path, resolvedPath }));
+	}
+
 	/**
 	 * Get all registered tools from all extensions. The first registration within a source tier
 	 * wins, while a non-builtin extension may override a builtin extension tool.
