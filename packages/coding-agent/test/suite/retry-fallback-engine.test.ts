@@ -6,6 +6,8 @@ import { createHarness, type Harness } from "./harness.ts";
 
 const primary = "faux/faux-1";
 const fallback = "faux/faux-2";
+const codexUpstreamUnavailableMessage =
+	"Error: upstream_unavailable: Codex upstream websocket send failed via proxy endpoint unknown: ConnectionClosedOK";
 
 type EventTranscriptEntry =
 	| { type: "message_start" | "message_end"; role: string }
@@ -637,7 +639,7 @@ describe("retry fallback engine", () => {
 		harness.setResponses([
 			fauxAssistantMessage("", {
 				stopReason: "error",
-				errorMessage: "overloaded_error",
+				errorMessage: codexUpstreamUnavailableMessage,
 			}),
 			fauxAssistantMessage("recovered"),
 		]);
@@ -662,7 +664,7 @@ describe("retry fallback engine", () => {
 				attempt: 1,
 				maxAttempts: 3,
 				delayMs: 1,
-				errorMessage: "overloaded_error",
+				errorMessage: codexUpstreamUnavailableMessage,
 			},
 			{ type: "agent_start" },
 			{ type: "turn_start" },

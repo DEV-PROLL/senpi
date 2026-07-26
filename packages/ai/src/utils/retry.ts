@@ -55,6 +55,7 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"ENOTFOUND",
 	"EAI_AGAIN",
 	"upstream.?connect",
+	"upstream.?unavailable",
 	"reset before headers",
 	"socket hang up",
 	"socket connection was closed",
