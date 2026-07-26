@@ -3,6 +3,37 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## bash_output peek-only (2026-07-26)
+
+### What changed
+
+- `bash_output` is now a pure non-blocking peek: new output since the last read, the status
+  line, or `view:"screen"`. The `wait_for` blocking path (plus `block` and the wait
+  `timeout`) is removed from the tool and from `TerminalRuntimeSession` (waiter machinery,
+  `waitFor()`, exit-settling) — watchers subscribe through `onOutput` (the monitor path)
+  instead of blocking inside a read call.
+- `wait_for`, `block`, and `timeout` stay in the schema as deprecated ghost params: passing
+  any of them returns `BASH_OUTPUT_WAIT_REMOVED_GUIDANCE`, a one-line migration error that
+  redirects pattern watches to `monitor({command, filter})`, names the peek-or-relaunch
+  fallback for already-running sessions, and notes completion notifications carry the tail.
+- The terminal prompt section, `docs/terminal-tools.md`, the senpi-qa skill, and the
+  pty-drive self-test now teach the monitor/notification model; a repo consistency-gate
+  test (`test/prompt-surface-stale-wait-idioms.test.ts`) fails on any non-ghost `wait_for`
+  teaching in shipped prompt surfaces.
+
+### Why
+
+Corpus mining (875 sessions) showed 76% of `bash_output` calls were `wait_for` waits and
+30% were empty polls — the notification channel and the monitor tool already do that work.
+`bash_input`, `kill_bash`, `run_in_background`, and the notify pipeline are untouched
+(plan: `.omo/plans/eval-exec-merge-and-injection-wakeup.md`, todo 13).
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `tools/bash-output.ts` schema + execute path (fork-owned tool).
+- LOW: `runtime-session.ts` (fork-owned class; waiter removal is additive-safe upstream).
+- LOW: `prompt.ts` terminal prompt section.
+
 ## Monitor watcher sessions (2026-07-26)
 
 ### What changed

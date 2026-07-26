@@ -33,7 +33,6 @@ export const BACKGROUND_START_GRACE_MS = 250;
  * the agent blocked forever.
  */
 export const KILLED_SESSION_EXIT_GRACE_MS = 5000;
-export const DEFAULT_OUTPUT_WAIT_TIMEOUT_SECONDS = 30;
 
 /**
  * Non-interactive environment for foreground one-shot commands (codex-style):

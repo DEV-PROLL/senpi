@@ -37,8 +37,7 @@ export function renderBashOutputCall(
 	args: BashOutputInput,
 	theme: Parameters<NonNullable<BashOutputToolDefinition["renderCall"]>>[1],
 ): Text {
-	const waitFor = args.wait_for ? ` wait_for:/${args.wait_for}/` : "";
-	return new Text(theme.fg("toolTitle", theme.bold(`bash_output ${args.bash_id}${waitFor}`)), 0, 0);
+	return new Text(theme.fg("toolTitle", theme.bold(`bash_output ${args.bash_id}`)), 0, 0);
 }
 
 export function renderMonitorCall(
