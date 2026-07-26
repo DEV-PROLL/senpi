@@ -3,7 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { validateToolArguments, type Tool } from "@earendil-works/pi-ai";
+import { type Tool, validateToolArguments } from "@earendil-works/pi-ai";
 import type { Static } from "typebox";
 import { describe, expect, it } from "vitest";
 import {
@@ -13,7 +13,12 @@ import {
 	type TodoToolDetails,
 } from "../../src/core/extensions/builtin/todotools/state.ts";
 import { registerTodoTool, TODO_PARAMS_SCHEMA } from "../../src/core/extensions/builtin/todotools/tools/todo.ts";
-import type { AgentToolResult, ExtensionAPI, ExtensionContext, ToolDefinition } from "../../src/core/extensions/types.ts";
+import type {
+	AgentToolResult,
+	ExtensionAPI,
+	ExtensionContext,
+	ToolDefinition,
+} from "../../src/core/extensions/types.ts";
 
 type TodoParams = Static<typeof TODO_PARAMS_SCHEMA>;
 type RegisteredTodoTool = ToolDefinition<typeof TODO_PARAMS_SCHEMA, TodoToolDetails, unknown>;
@@ -191,7 +196,9 @@ describe("todo argument correction fixture replay", () => {
 			const text = resultText(result);
 
 			expect(result.details.op).toBe("init");
-			expect(text).toContain('[auto-corrected] "op" was missing; interpreted as "init" because "list" was provided.');
+			expect(text).toContain(
+				'[auto-corrected] "op" was missing; interpreted as "init" because "list" was provided.',
+			);
 			expect(text).toContain('Always pass op explicitly: {"op":"init","list":[...]}');
 			expect(captured.getCurrentPhases()).toEqual(expectedInitializedPhases(fixture.raw_args));
 			expect(captured.getAppendCalls()).toBe(1);
@@ -204,7 +211,9 @@ describe("todo argument correction fixture replay", () => {
 			const text = resultText(result);
 
 			expect(result.details.op).toBe("init");
-			expect(text).toContain('[auto-corrected] "op" was missing; interpreted as "init" because "items" was provided to an empty todo list.');
+			expect(text).toContain(
+				'[auto-corrected] "op" was missing; interpreted as "init" because "items" was provided to an empty todo list.',
+			);
 			expect(text).toContain('Always pass op explicitly: {"op":"init","items":[...]}');
 			expect(captured.getCurrentPhases()).toEqual(expectedInitializedPhases(fixture.raw_args));
 			expect(captured.getAppendCalls()).toBe(1);
@@ -219,7 +228,9 @@ describe("todo argument correction fixture replay", () => {
 
 			expect(result.details.op).toBe("append");
 			expect(text).toContain('[auto-corrected] "append" was used as an items alias and folded into "items".');
-			expect(captured.getCurrentPhases()).toEqual(expectedAliasedAppendState(fixture.starting_state, fixture.raw_args));
+			expect(captured.getCurrentPhases()).toEqual(
+				expectedAliasedAppendState(fixture.starting_state, fixture.raw_args),
+			);
 			expect(captured.getCurrentPhases()[0]?.tasks).toHaveLength(7);
 			expect(captured.getAppendCalls()).toBe(1);
 			return;
