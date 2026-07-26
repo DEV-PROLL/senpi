@@ -131,8 +131,8 @@ node .agents/skills/senpi-qa/scripts/cli-smoke.mjs --self-test
 
 Drives the real `@earendil-works/pi-pty` runtime that backs the built-in `terminal`
 tools (`bash` / `bash_output` / `bash_input` / `bash_resize` / `kill_bash`) through the
-canonical scenarios: background command + `wait_for`, stdin steering, screen snapshot +
-resize reflow, and registry teardown with no orphans. Uses native PTY when a host
+canonical scenarios: background command + monitor-style line watch and peek, stdin
+steering, screen snapshot + resize reflow, and registry teardown with no orphans. Uses native PTY when a host
 prebuild is present, else the pipe fallback (`--force-pipe` forces it).
 
 ```bash
@@ -152,7 +152,7 @@ node .agents/skills/senpi-qa/scripts/pty-drive.mjs --self-test --force-pipe
 | `scripts/mock-loop.mjs --with-mcp-tool <tool>` | full loop with a registered sandbox MCP stdio fixture proxy; fails if the requested `mcp_fx_tool_<n>` is not registered, invoked, and fed back to the model |
 | `scripts/tui-smoke.mjs --self-test` | TUI boots, renders, accepts a keystroke, tears down; auth unchanged |
 | `scripts/cli-smoke.mjs --self-test` | `--help`/`--version`/`--list-models` work offline; unknown flag reported; auth unchanged |
-| `scripts/pty-drive.mjs --self-test` | PTY runtime backing the `terminal` tools: background `wait_for`, stdin steering, screen snapshot + resize, registry teardown (no orphans); auth unchanged |
+| `scripts/pty-drive.mjs --self-test` | PTY runtime backing the `terminal` tools: background line watch + peek, stdin steering, screen snapshot + resize, registry teardown (no orphans); auth unchanged |
 
 Run the whole suite:
 
