@@ -51,6 +51,8 @@ async function collectEvents(streamResult: ReturnType<typeof stream>): Promise<A
 }
 
 const context: Context = { messages: [{ role: "user", content: "blocked", timestamp: 1 }] };
+const anthropicPolicyRefusal =
+	"This request triggered restrictions on violative cyber content and was blocked under Anthropic's Usage Policy. To learn more, see https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback.";
 
 describe("classifier stop details", () => {
 	it("maps Anthropic refusal and sensitive stops to typed error details", async () => {
@@ -89,16 +91,41 @@ describe("classifier stop details", () => {
 		expect(isClassifierRefusal(lengthLimited)).toBe(false);
 	});
 
-	it("recognizes only typed classifier errors", () => {
+	it("recognizes typed classifier details on error and tool-use stops", () => {
 		const classifierRefusal = fauxAssistantMessage("", { stopReason: "error", stopDetails: { type: "refusal" } });
 		const classifierSensitive = fauxAssistantMessage("", { stopReason: "error", stopDetails: { type: "sensitive" } });
+		const toolUseRefusal = fauxAssistantMessage("", {
+			stopReason: "toolUse",
+			errorMessage: anthropicPolicyRefusal,
+			stopDetails: { type: "refusal", explanation: anthropicPolicyRefusal },
+		});
 		const nonError = fauxAssistantMessage("", { stopDetails: { type: "refusal" } });
 		const absent = { ...classifierRefusal, stopDetails: undefined };
 
 		expect(isClassifierRefusal(classifierRefusal)).toBe(true);
 		expect(isClassifierRefusal(classifierSensitive)).toBe(true);
+		expect(isClassifierRefusal(toolUseRefusal)).toBe(true);
 		expect(isClassifierRefusal(nonError)).toBe(false);
 		expect(isClassifierRefusal(absent)).toBe(false);
+	});
+
+	it("recognizes the legacy Anthropic policy block when typed details are absent", () => {
+		const refusal = fauxAssistantMessage("", {
+			stopReason: "error",
+			errorMessage: `${anthropicPolicyRefusal} API integrators: you can reduce refusals for your users by configuring a fallback model.`,
+		});
+
+		expect(isClassifierRefusal(refusal)).toBe(true);
+	});
+
+	it("does not infer refusal from ordinary Anthropic policy documentation errors", () => {
+		const ordinaryPolicyError = fauxAssistantMessage("", {
+			stopReason: "error",
+			errorMessage:
+				"Provider configuration failed. Review Anthropic's Usage Policy at https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback.",
+		});
+
+		expect(isClassifierRefusal(ordinaryPolicyError)).toBe(false);
 	});
 
 	it("passes classifier details through faux error stream events and excludes them from retry", async () => {

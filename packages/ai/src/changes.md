@@ -1,5 +1,17 @@
 # AI Source Changes
 
+## 2026-07-27 - Treat Anthropic policy blocks as classifier refusals
+
+### What changed and why
+
+- `utils/stop-details.ts`: `isClassifierRefusal()` now accepts typed refusal/sensitive details on mixed
+  `toolUse` stops, matching Anthropic streams that finish with a policy block after emitting a tool call.
+- The same helper recognizes Anthropic's legacy policy-block error text when a gateway omits typed
+  `stopDetails`, while requiring the provider's full restrictions-and-Usage-Policy signature so ordinary
+  policy documentation errors remain non-refusals.
+- This routes both shapes through the existing immediate pinned model-fallback path instead of executing the
+  partial tool call or continuing on the refusing model.
+
 ## 2026-07-26 - Cross-model replay hardening (foreign signatures, id collisions, thinking turn shape)
 
 ### What changed and why
