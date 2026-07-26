@@ -28,6 +28,10 @@ export interface TmuxPassthroughState {
 	allowPassthrough: "off" | "on" | "all";
 	/** The outer terminal's TERM as reported by tmux (`client_termname`). */
 	clientTermname: string;
+	/** Client cell width in pixels (`client_cell_width`), when tmux knows it. */
+	cellWidthPx?: number;
+	/** Client cell height in pixels (`client_cell_height`), when tmux knows it. */
+	cellHeightPx?: number;
 }
 
 export interface CellDimensions {
@@ -88,22 +92,29 @@ function probeTmuxHyperlinks(): boolean {
  * Queries tmux for the effective `allow-passthrough` option of the current
  * pane (respecting pane/window overrides and inheritance) plus the outer
  * terminal's TERM. `allow-passthrough` exists since tmux 3.3; older servers
- * expand the format to an empty string, which maps to "off". On any error
- * fallbacks to passthrough disabled.
+ * expand the format to an empty string, which maps to "off". Also reports the
+ * client cell size in pixels: tmux does not answer `CSI 16 t`, so this is the
+ * only way to size images correctly under tmux. On any error fallbacks to
+ * passthrough disabled.
  */
 function probeTmuxPassthroughState(): TmuxPassthroughState {
 	try {
 		const pane = process.env.TMUX_PANE;
 		const target = pane && /^%\d+$/.test(pane) ? ` -t '${pane}'` : "";
-		const output = execSync(`tmux display-message -p${target} '#{allow-passthrough} #{client_termname}'`, {
+		const format = "#{allow-passthrough}|#{client_termname}|#{client_cell_width}|#{client_cell_height}";
+		const output = execSync(`tmux display-message -p${target} '${format}'`, {
 			encoding: "utf8",
 			timeout: 250,
 			stdio: ["ignore", "pipe", "ignore"],
 		});
-		const [allowPassthrough = "", clientTermname = ""] = output.trim().split(/\s+/);
+		const [allowPassthrough = "", clientTermname = "", cellWidth = "", cellHeight = ""] = output.trim().split("|");
+		const cellWidthPx = Number.parseInt(cellWidth, 10);
+		const cellHeightPx = Number.parseInt(cellHeight, 10);
 		return {
 			allowPassthrough: allowPassthrough === "on" || allowPassthrough === "all" ? allowPassthrough : "off",
-			clientTermname,
+			clientTermname: clientTermname.trim(),
+			cellWidthPx: Number.isFinite(cellWidthPx) && cellWidthPx > 0 ? cellWidthPx : undefined,
+			cellHeightPx: Number.isFinite(cellHeightPx) && cellHeightPx > 0 ? cellHeightPx : undefined,
 		};
 	} catch {
 		return { allowPassthrough: "off", clientTermname: "" };
@@ -164,6 +175,11 @@ export function detectCapabilities(
 				const override = process.env.PI_TUI_TMUX_KITTY_PLACEMENT;
 				const placeholders =
 					override === "placeholder" ? true : override === "direct" ? false : mode === "placeholder";
+				// tmux never answers the `CSI 16 t` cell-size query, so adopt the
+				// client cell size tmux reports to keep image aspect ratios correct.
+				if (passthrough.cellWidthPx && passthrough.cellHeightPx) {
+					setCellDimensions({ widthPx: passthrough.cellWidthPx, heightPx: passthrough.cellHeightPx });
+				}
 				return {
 					images: "kitty",
 					trueColor: hasTrueColorHint,

@@ -11,6 +11,7 @@ import {
 	deleteKittyImage,
 	detectCapabilities,
 	encodeKitty,
+	getCellDimensions,
 	hyperlink,
 	isImageLine,
 	renderImage,
@@ -369,6 +370,36 @@ describe("detectCapabilities", () => {
 				assert.strictEqual(caps.kittyUnicodePlaceholders, true);
 			},
 		);
+	});
+
+	it("adopts tmux-reported client cell size for image sizing", () => {
+		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			try {
+				const caps = detectCapabilities(
+					() => true,
+					() => ({
+						allowPassthrough: "on",
+						clientTermname: "xterm-ghostty",
+						cellWidthPx: 11,
+						cellHeightPx: 23,
+					}),
+				);
+				assert.strictEqual(caps.images, "kitty");
+				assert.deepStrictEqual(getCellDimensions(), { widthPx: 11, heightPx: 23 });
+			} finally {
+				setCellDimensions({ widthPx: 9, heightPx: 18 });
+			}
+		});
+	});
+
+	it("keeps default cell size when tmux does not report one", () => {
+		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			detectCapabilities(
+				() => true,
+				() => ({ allowPassthrough: "on", clientTermname: "xterm-ghostty" }),
+			);
+			assert.deepStrictEqual(getCellDimensions(), { widthPx: 9, heightPx: 18 });
+		});
 	});
 
 	it("enables Kitty images under tmux when passthrough is set to all", () => {

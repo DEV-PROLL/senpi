@@ -21,6 +21,9 @@
   clips/scrolls/moves them with the pane. WezTerm (no placeholder support) stays on direct placement;
   `PI_TUI_TMUX_KITTY_PLACEMENT=placeholder|direct` overrides the heuristic. The `Image` component uses
   `result.lines` when present instead of one sequence line plus empty padding rows.
+- `terminal-image.ts`: the tmux probe also reports `client_cell_width`/`client_cell_height`; when tmux images
+  are enabled the detected cell size is adopted via `setCellDimensions` because tmux never answers the
+  `CSI 16 t` cell-size query (verified against tmux 3.6), keeping image aspect ratios correct.
 - `utils.ts`: `extractAnsiCode` learned DCS sequences (`ESC P … ST`), skipping doubled-ESC pairs so the
   escaped inner ST does not terminate the envelope early. Wrapped image lines therefore keep
   `visibleWidth === 0` and stay compatible with the TUI's Kitty image-line bookkeeping (id/row extraction in
