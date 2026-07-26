@@ -85,6 +85,7 @@ export interface HarnessOptions {
 }
 
 export interface Harness {
+	agent: Agent;
 	session: AgentSession;
 	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
@@ -173,14 +174,14 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		onPayload: async (payload) => {
 			options.onPayload?.(payload);
 			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("before_provider_request")) {
+			if (!runner?.isActive || !runner.hasHandlers("before_provider_request")) {
 				return payload;
 			}
 			return runner.emitBeforeProviderRequest(payload);
 		},
 		onResponse: async (response) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("after_provider_response")) {
+			if (!runner?.isActive || !runner.hasHandlers("after_provider_response")) {
 				return;
 			}
 			await runner.emit({
@@ -191,7 +192,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		},
 		transformContext: async (messages: AgentMessage[]) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner) return messages;
+			if (!runner?.isActive) return messages;
 			return runner.emitContext(messages);
 		},
 		prepareNextTurnWithContext: options.prepareNextTurnWithContext,
@@ -230,6 +231,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	});
 
 	return {
+		agent,
 		session,
 		sessionManager,
 		settingsManager,
