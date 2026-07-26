@@ -776,7 +776,7 @@ export interface SessionShutdownEvent {
 /** Fired on the old extension runner after reload when one or more extensions are absent from the rebuilt runner. */
 export interface SessionExtensionsRemovedEvent {
 	type: "session_extensions_removed";
-	reason: "reload";
+	reason: SessionShutdownEvent["reason"];
 	removed: Array<{ path: string; resolvedPath: string }>;
 }
 

@@ -5005,21 +5005,27 @@ export class AgentSession {
 		time("models", "reload");
 		await this._resourceLoader.reload({ settingsAlreadyReloadedFor: this.settingsManager });
 		time("resources", "reload");
-		this._buildRuntime({
-			activeToolNames: this.getActiveToolNames(),
-			flagValues: previousFlagValues,
-			includeAllExtensionTools: true,
-		});
-		const newExtensionResolvedPaths = new Set(
-			this._extensionRunner.getExtensionIdentities().map((extension) => extension.resolvedPath),
-		);
-		const removed = oldExtensionIdentities.filter(
-			(extension) => !newExtensionResolvedPaths.has(extension.resolvedPath),
-		);
-		if (removed.length > 0) {
-			await oldExtensionRunner.emit({ type: "session_extensions_removed", reason: "reload", removed });
+		try {
+			this._buildRuntime({
+				activeToolNames: this.getActiveToolNames(),
+				flagValues: previousFlagValues,
+				includeAllExtensionTools: true,
+			});
+		} finally {
+			// An extension removed by this reload must be told even if the rebuild throws
+			// (e.g. _refreshToolRegistry rejecting an extension's tool metadata): the new
+			// runner is already installed without it, so nothing else would dispose it.
+			const newExtensionResolvedPaths = new Set(
+				this._extensionRunner.getExtensionIdentities().map((extension) => extension.resolvedPath),
+			);
+			const removed = oldExtensionIdentities.filter(
+				(extension) => !newExtensionResolvedPaths.has(extension.resolvedPath),
+			);
+			if (removed.length > 0) {
+				await oldExtensionRunner.emit({ type: "session_extensions_removed", reason: "reload", removed });
+			}
+			time("runtime", "reload");
 		}
-		time("runtime", "reload");
 
 		const hasBindings =
 			this._extensionUIContext ||
