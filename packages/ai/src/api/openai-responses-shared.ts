@@ -158,6 +158,8 @@ type ResponseCustomToolCallOutputItem = {
 
 type ResponseInputItem = OpenAIResponseInputItem | ResponseCustomToolCallItem | ResponseCustomToolCallOutputItem;
 
+export const CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL = "custom";
+
 type ResponseFunctionTool = Extract<OpenAITool, { type: "function" }>;
 
 function isResponseCustomToolCallItem(item: { type?: string }): item is ResponseCustomToolCallItem {
@@ -224,10 +226,13 @@ export function convertResponsesMessages<TApi extends Api>(
 	};
 
 	const normalizeToolCallId = (id: string, _targetModel: Model<TApi>, source: AssistantMessage): string => {
-		if (!allowedToolCallProviders.has(model.provider)) return normalizeIdPart(id);
 		if (!id.includes("|")) return normalizeIdPart(id);
 		const [callId, itemId] = id.split("|");
 		const normalizedCallId = normalizeIdPart(callId);
+		if (itemId === CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL) {
+			return `${normalizedCallId}|${CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL}`;
+		}
+		if (!allowedToolCallProviders.has(model.provider)) return normalizeIdPart(id);
 		const isForeignToolCall = source.provider !== model.provider || source.api !== model.api;
 		let normalizedItemId = isForeignToolCall ? buildForeignResponsesItemId(itemId) : normalizeIdPart(itemId);
 		// OpenAI Responses API requires item id to start with "fc"
@@ -324,8 +329,12 @@ export function convertResponsesMessages<TApi extends Api>(
 					const toolCall = block as ToolCall;
 					const [callId, itemIdRaw] = toolCall.id.split("|");
 					const customInputProperty = options?.grammarToolInputProperties?.get(toolCall.name);
-					const isFreeform = isFreeformToolName(toolCall.name, context.tools);
-					let itemId: string | undefined = itemIdRaw;
+					const isPersistedFreeform = itemIdRaw === CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL;
+					const isFreeform = isFreeformToolName(toolCall.name, context.tools) || isPersistedFreeform;
+					let itemId: string | undefined = isPersistedFreeform ? undefined : itemIdRaw;
+
+					// An active grammar declaration wins over sentinel recovery below: its
+					// named input property is richer than the persisted freeform fallback.
 
 					// For different-model messages, set id to undefined to avoid pairing validation.
 					// OpenAI tracks which fc_xxx IDs were paired with rs_xxx reasoning items.
@@ -342,7 +351,7 @@ export function convertResponsesMessages<TApi extends Api>(
 					if (customInputProperty !== undefined) {
 						output.push({
 							type: "custom_tool_call",
-							id: itemId,
+							...(itemId !== undefined ? { id: itemId } : {}),
 							call_id: callId,
 							name: toolCall.name,
 							input: sanitizeSurrogates(
@@ -370,9 +379,10 @@ export function convertResponsesMessages<TApi extends Api>(
 			if (output.length === 0) continue;
 			messages.push(...output.map((item) => withContextProvenance(item, msg, options?.sealContextProvenance)));
 		} else if (msg.role === "toolResult") {
-			const [callId] = msg.toolCallId.split("|");
+			const [callId, itemIdRaw] = msg.toolCallId.split("|");
 			const output = convertToolResultOutput(model, msg.content);
 			const customInputProperty = options?.grammarToolInputProperties?.get(msg.toolName);
+			const isPersistedFreeform = itemIdRaw === CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL;
 
 			if (customInputProperty !== undefined) {
 				messages.push(
@@ -386,7 +396,7 @@ export function convertResponsesMessages<TApi extends Api>(
 						options?.sealContextProvenance,
 					),
 				);
-			} else if (isFreeformToolName(msg.toolName, context.tools)) {
+			} else if (isFreeformToolName(msg.toolName, context.tools) || isPersistedFreeform) {
 				messages.push(
 					withContextProvenance(
 						{
@@ -614,7 +624,7 @@ export async function processResponsesStream<TApi extends Api>(
 			const input = item.input || "";
 			const block: StreamingToolCall = {
 				type: "toolCall",
-				id: `${item.call_id}|${item.id ?? "custom"}`,
+				id: `${item.call_id}|${item.id ?? CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL}`,
 				name: item.name,
 				arguments: { [inputProperty]: input },
 				customInput: {

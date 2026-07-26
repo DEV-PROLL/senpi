@@ -15,6 +15,15 @@
 
 - LOW: additive seams only — the gate module, one conditional branch each in `args.ts` parse/help, the theme-fallback and `chrome` dispatch lines in `main.ts`, and the `grok-night`/`grok-day` registration in `theme.ts`.
 
+## Same-model-first transient retries and capped server waits (2026-07-26)
+
+### What changed
+
+- Supersedes the 2026-07-20 entry's sentence "retryable transient failures now switch to a configured fallback ...": transient retryable failures (timeouts, overload, 429, 5xx, transport drops) now retry the same model on the existing exponential backoff until `retry.maxRetries` is spent; only then does the configured `retry.fallbackChains` chain engage, and each fallback candidate starts with a fresh retry budget.
+- `core/agent-session.ts`: `retry.provider.maxRetryDelayMs` (default 60000) now bounds the server-requested wait honored on the same model. Beyond the cap the fallback chain engages and the primary is suppressed for the requested duration; the turn fails with an informative error only when no chain candidate is available. Waits at or below the cap are honored as before.
+- `core/retry-fallback/cooldown.ts`: timeout and connection/transport errors now carry a 60-second selector cooldown instead of the five-minute unmatched default, so revert-to-primary is no longer blocked for five minutes after one network blip. Existing tiers keep precedence: quota/billing 30 minutes, rate-limit 30 seconds, capacity 45 seconds plus jitter, 5xx 20 seconds, and a provider retry-after hint always wins.
+- Unchanged: classifier-refusal fallback (immediate, pinned), hard-error fallback (quota/auth/model-not-found, immediate), and `retry.abortServerSideFallback` (default true) routing provider-side model substitution onto the configured chain.
+- Cost/latency: with `retry.maxRetries >= 1` a fully failing chain now costs up to `1 + (chainLength + 1) * maxRetries` provider calls plus per-rung backoff before the turn fails; with `maxRetries: 0` every failure switches immediately, costing `1 + chainLength` calls.
 ## OMO local plugin remote-diff updater beta on bare `senpi update` (2026-07-26)
 
 - A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
@@ -52,6 +61,27 @@
 
 - LOW: removal-only changes across fork-owned legacy surfaces.
 
+## Reload measurement and redundant-work removal (2026-07-26)
+
+- `/reload` records a `reload` timing namespace with one marker per phase
+  (`shutdown`, `settings`, `models`, `resources`, `runtime`, `chatRebuild`,
+  `lifecycle`). With `PI_TIMING=1` the breakdown is appended to the reload
+  status line; with it unset nothing is recorded.
+- Settings are read once per reload instead of twice.
+  `ResourceLoaderReloadOptions.settingsAlreadyReloadedFor` takes the
+  `SettingsManager` the caller just reloaded, and the loader skips its own
+  reload only when that is the very manager it owns AND project trust is not
+  being resolved, so trust-scoped values can never go stale.
+- `ModelRuntime.reloadConfig()` delegates to `refresh()` instead of repeating
+  the config load and provider rebuild that `refresh()` performs immediately
+  afterwards.
+- Both model-scope resolutions read the snapshot the reload refresh just
+  produced rather than each triggering another availability scan (3 scans -> 1).
+  The snapshot is trusted only via `hasFreshAvailabilitySnapshot()`; a failed
+  refresh falls back to the runtime so scan errors still surface.
+- `scripts/bench-reload.mjs` measures `DefaultResourceLoader.reload()` from
+  source through a subprocess probe (real jiti path), reporting cold-first and
+  warm p50/p95 across fresh processes.
 ## Multi-session RPC mode, session-owned MCP/config-reload state, and back-compat guarantee (2026-07-23)
 
 ### What changed

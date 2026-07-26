@@ -5,6 +5,7 @@ import { CodeModeSessionRuntime } from "./codemode/runtime.ts";
 import { type CodeModeTool, createCodeModeTools, isGptCodeModeModel } from "./codemode/tools.ts";
 import { type CompletionRequest, type CompletionResult, createCompletionHandler } from "./completion/handler.ts";
 import { defaultCodemodeSettings } from "./config/settings.ts";
+import { EvalNotifier } from "./extension/eval-notifier.ts";
 import {
 	createExecuteTool,
 	createRuntime,
@@ -13,6 +14,7 @@ import {
 } from "./extension/runtime-factory.ts";
 import type { CodemodeSessionManager, CreateCodemodeSessionManagerOptions } from "./extension/session-manager.ts";
 import { SessionManagerProxy } from "./extension/session-manager-proxy.ts";
+import { EvalDetachedCellManager } from "./tool/detached-cell-manager.ts";
 import { createEvalTool } from "./tool/eval-tool.ts";
 import { renderEvalCall, renderEvalResult } from "./tool/render.ts";
 
@@ -34,6 +36,7 @@ export interface CodemodeExtensionAPI {
 	getActiveTools(): string[];
 	setActiveTools?(toolNames: string[]): void | Promise<void>;
 	getAllTools?(): readonly { readonly name: string }[];
+	sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
 }
 
 export interface SenpiCodemodeOptions {
@@ -55,7 +58,18 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 	const renderers = { renderCall: renderEvalCall, renderResult: renderEvalResult };
 	let activeRuntime: (SessionRuntime & { readonly codeMode?: CodeModeSessionRuntime }) | undefined;
 	let activeModelId: string | undefined;
-	const registerEvalForRuntime = (runtime: SessionRuntime, modelId: string | undefined): void => {
+	let activeContext: ExtensionContext | undefined;
+	let activeCells: EvalDetachedCellManager | undefined;
+	const notifier = new EvalNotifier({
+		sendUserMessage: (content, notifyOptions) => pi.sendUserMessage(content, notifyOptions),
+		getContext: () => activeContext,
+		getMode: () => "wake",
+	});
+	const registerEvalForRuntime = (
+		runtime: SessionRuntime,
+		modelId: string | undefined,
+		cellManager: EvalDetachedCellManager,
+	): void => {
 		pi.registerTool(
 			createEvalTool({
 				enabledLanguages: runtime.enabledLanguages,
@@ -65,6 +79,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 				complete,
 				settings: runtime.settings,
 				artifactsDir: runtime.artifactsDir,
+				cellManager,
 				executionTracker: manager,
 				renderers,
 				spawns: runtime.spawns,
@@ -76,8 +91,12 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 	};
 	const dropRuntime = async (): Promise<void> => {
 		const codeMode = activeRuntime?.codeMode;
+		const cells = activeCells;
 		activeRuntime = undefined;
 		activeModelId = undefined;
+		activeCells = undefined;
+		await cells?.dispose();
+		activeContext = undefined;
 		await Promise.all([manager.dispose(), codeMode?.dispose()]);
 	};
 	const activateCodeModeTools = async (runtime: CodeModeSessionRuntime): Promise<void> => {
@@ -99,6 +118,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			executeTool: createExecuteTool(pi),
 			complete,
 			settings: defaultCodemodeSettings,
+			cellManager: new EvalDetachedCellManager({ notifier }),
 			executionTracker: manager,
 			renderers,
 			hostLine: hostLine(),
@@ -107,11 +127,18 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 
 	pi.on("session_start", async (event, ctx) => {
 		const previousCodeMode = activeRuntime?.codeMode;
+		const previousCells = activeCells;
+		activeCells = undefined;
+		await previousCells?.dispose();
 		const generation = manager.beginReplacement();
 		const runtime = await createRuntime(pi, ctx, event, complete, options);
 		const replaced = await manager.replace(generation, runtime.manager);
 		if (!replaced) return;
 		await previousCodeMode?.dispose();
+		notifier.reset();
+		activeContext = ctx;
+		const cellManager = new EvalDetachedCellManager({ artifactsDir: runtime.artifactsDir, notifier });
+		activeCells = cellManager;
 		const codeMode = isGptCodeModeModel(ctx.model?.id)
 			? new CodeModeSessionRuntime({
 					sessionId: runtime.sessionId,
@@ -122,20 +149,23 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			: undefined;
 		activeRuntime = { ...runtime, ...(codeMode === undefined ? {} : { codeMode }) };
 		activeModelId = ctx.model?.id;
-		registerEvalForRuntime(activeRuntime, activeModelId);
+		registerEvalForRuntime(activeRuntime, activeModelId, cellManager);
 		if (codeMode) await activateCodeModeTools(codeMode);
 		else await deactivateCodeModeTools();
 	});
 	pi.on("session_shutdown", async () => dropRuntime());
 	pi.on("session_before_switch", async () => dropRuntime());
 	pi.on("session_before_fork", async () => dropRuntime());
-	pi.on("model_select", async (event) => {
+	pi.on("model_select", async (event, ctx) => {
+		activeContext = ctx;
 		const runtime = activeRuntime;
 		if (runtime === undefined) return;
 		const modelId = modelIdFrom(event);
 		if (modelId === undefined || modelId === activeModelId) return;
 		activeModelId = modelId;
-		registerEvalForRuntime(runtime, modelId);
+		const cellManager = activeCells;
+		if (cellManager === undefined) return;
+		registerEvalForRuntime(runtime, modelId, cellManager);
 		if (!isGptCodeModeModel(modelId)) {
 			const { codeMode, ...nextRuntime } = runtime;
 			await codeMode?.dispose();

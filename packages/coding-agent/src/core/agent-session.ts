@@ -116,7 +116,7 @@ import type {
 } from "./extensions/types.ts";
 import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
-import { getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
+import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
@@ -137,6 +137,7 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinking-levels.ts";
+import { resetTimings, time } from "./timings.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
@@ -1357,7 +1358,10 @@ export class AgentSession {
 			return true;
 		}
 
-		return providerDelayMs <= this.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
+		if (providerDelayMs <= this.settingsManager.getProviderRetrySettings().maxRetryDelayMs) {
+			return true;
+		}
+		return this._retryFallback.canTryFallback();
 	}
 
 	private async _processAgentEvent(event: AgentEvent, signal: AbortSignal): Promise<void> {
@@ -4936,29 +4940,40 @@ export class AgentSession {
 	}
 
 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
+		resetTimings("reload");
 		const previousFlagValues = this._extensionRunner.getFlagValues();
 		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
+		time("shutdown", "reload");
 		await this.settingsManager.reload();
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
+		time("settings", "reload");
 		await this._modelRuntime.reloadConfig();
+		// Resolving both scopes from the completed refresh avoids two extra availability
+		// scans, but only a snapshot from a SUCCESSFUL refresh may be trusted: refresh()
+		// swallows availability errors, so a failed scan must fall back to the runtime and
+		// keep the previous refresh-and-surface-the-error behavior.
+		const refreshedModels: AvailableModelsSource = this._modelRuntime.hasFreshAvailabilitySnapshot()
+			? { getAvailable: async () => this._modelRuntime.getAvailableSnapshot() }
+			: this._modelRuntime;
 		this.setScopedModels(
 			await resolveModelScope(
 				getModelNarrowingPatterns({
 					legacyEnabledPatterns: this.settingsManager.getEnabledModels(),
 				}),
-				this._modelRuntime,
+				refreshedModels,
 			),
 		);
-		this.setFavoriteModels(
-			await resolveModelScope(this.settingsManager.getFavoriteModels() ?? [], this._modelRuntime),
-		);
-		await this._resourceLoader.reload();
+		this.setFavoriteModels(await resolveModelScope(this.settingsManager.getFavoriteModels() ?? [], refreshedModels));
+		time("models", "reload");
+		await this._resourceLoader.reload({ settingsAlreadyReloadedFor: this.settingsManager });
+		time("resources", "reload");
 		this._buildRuntime({
 			activeToolNames: this.getActiveToolNames(),
 			flagValues: previousFlagValues,
 			includeAllExtensionTools: true,
 		});
+		time("runtime", "reload");
 
 		const hasBindings =
 			this._extensionUIContext ||
@@ -4970,6 +4985,7 @@ export class AgentSession {
 			await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
 			await this.extendResourcesFromExtensions("reload");
 		}
+		time("lifecycle", "reload");
 	}
 
 	// =========================================================================
@@ -5157,23 +5173,37 @@ export class AgentSession {
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
 		const maxRetryDelayMs = this.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
 		if (providerDelayMs !== undefined && providerDelayMs > maxRetryDelayMs) {
-			this._emit({
-				type: "auto_retry_end",
-				success: false,
-				attempt: this._retryAttempt,
-				finalError: `Provider requested retry delay ${providerDelayMs}ms, exceeding configured maximum ${maxRetryDelayMs}ms`,
-			});
-			this._retryAttempt = 0;
-			this._resolveRetry();
-			return "not-handled";
+			// A wait this long means the model is unavailable rather than busy, so the
+			// configured chain beats failing the turn. The switch is gated: the over-budget
+			// branch above may have already switched on this same error, and hopping again
+			// here would skip that candidate's own retry budget.
+			if (!switchedFallback) {
+				switchedFallback = await this._retryFallback.tryFallback("transient", {
+					errorMessage,
+					retryAfterMs: providerDelayMs,
+				});
+				if (switchedFallback) {
+					this._retryAttempt = 1;
+				}
+			}
+			if (!switchedFallback) {
+				this._emit({
+					type: "auto_retry_end",
+					success: false,
+					attempt: this._retryAttempt,
+					finalError: `Provider requested retry delay ${providerDelayMs}ms, exceeding configured maximum ${maxRetryDelayMs}ms`,
+				});
+				this._retryAttempt = 0;
+				this._resolveRetry();
+				return "not-handled";
+			}
 		}
 
-		if (!switchedFallback) {
-			switchedFallback = await this._retryFallback.tryFallback("transient", {
-				errorMessage,
-				retryAfterMs: providerDelayMs,
-			});
-		}
+		// Transient failures stay on the same model until the retry budget is spent;
+		// only the over-budget branch above switches the chain. Both branches that can
+		// reach this point with a fallback already applied (hard-error, refusal) set
+		// switchedFallback first and force providerDelayMs undefined, so no branch may
+		// be reordered to fall through here expecting an implicit switch.
 		const delayMs = switchedFallback ? 0 : (providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
 		// Prepare before auto_retry_start so an immediate Esc can cancel the retry sleep.
 		this._retryAbortController = new AbortController();

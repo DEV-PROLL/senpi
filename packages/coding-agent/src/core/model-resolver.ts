@@ -12,7 +12,16 @@ import type { ServiceTier } from "./extensions/builtin/service-tier.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 
-type ModelScopeSource = ModelRuntime | ModelRegistry;
+/**
+ * Scope resolution only ever reads the available-model list, so a caller that
+ * already holds a settled availability snapshot can resolve against it instead
+ * of triggering another provider/credential scan.
+ */
+export interface AvailableModelsSource {
+	getAvailable(): Promise<readonly Model<Api>[]>;
+}
+
+type ModelScopeSource = ModelRuntime | ModelRegistry | AvailableModelsSource;
 
 /** Default model IDs for each known provider */
 export const defaultModelPerProvider: Record<KnownProvider, string> = {
