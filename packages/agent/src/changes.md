@@ -1,5 +1,16 @@
 # Changes
 
+## 2026-07-27 - End classifier-refused turns before tool execution
+
+### What changed and why
+
+- `assistant-terminal-state.ts` owns terminal assistant classification, including typed classifier refusals;
+  `agent-loop.ts` now consults it before any partial tool calls are executed. Anthropic can emit a tool call and
+  then finish the same stream with a refusal/sensitive stop; treating the message as ordinary `toolUse` previously
+  ran the refused call and continued on the same model.
+- The terminal `agent_end` lets the coding-agent retry/fallback controller immediately apply its configured pinned
+  refusal fallback.
+
 ## 2026-07-23 - Session-owned post-agent_end queue drain suppression
 
 ### What changed and why
