@@ -115,6 +115,32 @@ describe("Anthropic cross-model history hardening", () => {
 		expect(payload.thinking?.type).toBe("disabled");
 	});
 
+	it("degrades thinking when replaying a Codex reasoning tool turn", async () => {
+		const { assistant, results } = foreignToolTurn([{ id: "call_codex", name: "bash" }]);
+		const codexAssistant: AssistantMessage = {
+			...assistant,
+			api: "openai-responses",
+			provider: "openai-codex",
+			model: "gpt-5.5",
+			content: [
+				{
+					type: "thinking",
+					thinking: "inspect the repository",
+					thinkingSignature: JSON.stringify({ type: "reasoning", id: "rs_codex", summary: [] }),
+				},
+				...assistant.content,
+			],
+		};
+		const context: Context = {
+			messages: [{ role: "user", content: "run tools", timestamp: Date.now() - 3000 }, codexAssistant, ...results],
+		};
+
+		const payload = await capturePayload(model, context, { reasoning: "high" });
+
+		expect(payload.thinking?.type).toBe("disabled");
+		expect(assistantBlocks(payload).some((block) => block.type === "thinking")).toBe(false);
+	});
+
 	it("keeps thinking enabled when the final turn does not require replayed thinking", async () => {
 		const context: Context = {
 			messages: [{ role: "user", content: "hello", timestamp: Date.now() }],
