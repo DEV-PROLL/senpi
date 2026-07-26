@@ -6,7 +6,7 @@ import type { Api, Model } from "@earendil-works/pi-ai/compat";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { CodemodeSessionManager } from "../src/extension/session-manager.ts";
 import senpiCodemode, { type CodemodeExtensionAPI } from "../src/index.ts";
-import type { EvalKernelResult, EvalKernelRunInput } from "../src/tool/types.ts";
+import type { EvalKernelResult, EvalKernelRunInput, KernelInterruptHandle } from "../src/tool/types.ts";
 import { fakeExtensionContext } from "./eval/fakes.ts";
 
 interface RegisteredHandler {
@@ -72,7 +72,7 @@ class DisposableManager implements CodemodeSessionManager {
 
 	async getKernel(): Promise<{
 		run(input: EvalKernelRunInput): Promise<EvalKernelResult>;
-		interrupt(reason?: string): Promise<void>;
+		interrupt(reason?: string): Promise<KernelInterruptHandle>;
 		deliverToolReply(): void;
 		reset(): Promise<void>;
 		close(): Promise<void>;
@@ -102,6 +102,7 @@ class DisposableManager implements CodemodeSessionManager {
 			interrupt: async (reason) => {
 				this.events.push("interrupt");
 				controller.abort(reason);
+				return { stateRetained: Promise.resolve(true) };
 			},
 			deliverToolReply: () => undefined,
 			reset: async () => undefined,

@@ -10,6 +10,7 @@ import { IdleTimeout, type IdleTimeoutOptions, type TimeoutPauseHandle } from ".
 import { CellHandler, type CellState } from "./cell-handler.ts";
 import { EvalDetachedCellManager, type EvalDetachedCellSnapshot } from "./detached-cell-manager.ts";
 import type { EvalImageResizer } from "./image.ts";
+import { describeTimeoutState, interruptionStateNote } from "./interrupt-note.ts";
 import {
 	createEvalInputSchema,
 	type EnabledEvalLanguages,
@@ -154,6 +155,9 @@ class CellExecution {
 		this.#abort(this.#callerSignal.reason);
 	};
 
+	/** Outcome of the most recent interrupt, when a kernel was interrupted. */
+	interruptStateRetained: Promise<boolean> | undefined;
+
 	#abort(reason: unknown): void {
 		if (!this.#active) return;
 		this.#active = false;
@@ -167,7 +171,12 @@ class CellExecution {
 		}
 		this.#interruptDeadline = setTimeout(() => this.#settleAbort(error), INTERRUPT_DELIVERY_GRACE_MS);
 		void Promise.resolve()
-			.then(async () => await kernel.interrupt(error.message))
+			.then(async () => {
+				const handle = await kernel.interrupt(error.message);
+				// Kernels predating the interrupt-outcome contract resolve void; leave
+				// the outcome undefined so callers report an honest unknown state.
+				this.interruptStateRetained = handle?.stateRetained;
+			})
 			.then(
 				() => this.#settleAbort(error),
 				(interruptError: unknown) => this.#settleAbort(interruptError),
@@ -361,6 +370,7 @@ async function executeCell(
 	} catch (error) {
 		if (handler && error instanceof Error && error.name === "CodemodeSessionDisposedError")
 			return await handler.finalizeCancellation(error);
+		if (error instanceof Error && error.name === "TimeoutError") throw await describeTimeoutState(error, execution);
 		throw error;
 	} finally {
 		state.active = false;
@@ -445,11 +455,7 @@ function detachedResult(snapshot: EvalDetachedCellSnapshot, input: EvalToolInput
 
 function snapshotResult(snapshot: EvalDetachedCellSnapshot): AgentToolResult<EvalToolDetails> {
 	const terminationNote =
-		snapshot.state === "cancelled" && snapshot.language === "js"
-			? "JavaScript worker was restarted; VM state was lost."
-			: snapshot.state === "cancelled" && snapshot.language === "py"
-				? "Python kernel was interrupted; its existing variables are preserved."
-				: undefined;
+		snapshot.state === "cancelled" ? interruptionStateNote(snapshot.language, snapshot.stateRetained) : undefined;
 	const text = [
 		`Eval cell ${snapshot.cellId} (${snapshot.language}) is ${snapshot.state}.`,
 		snapshot.outputTail.length === 0 ? "(no buffered output)" : snapshot.outputTail,
