@@ -420,7 +420,19 @@ export default function compactionExtension(
 	});
 
 	pi.on("model_select", (event, ctx) => {
-		invalidateSpeculativeCompaction();
+		const jobModel = speculativeJob?.snapshot.model;
+		const selectedModel = ctx.model;
+		const alreadySpeculatingForSelectedModel =
+			jobModel !== undefined &&
+			selectedModel !== undefined &&
+			jobModel.api === selectedModel.api &&
+			jobModel.provider === selectedModel.provider &&
+			jobModel.id === selectedModel.id &&
+			jobModel.baseUrl === selectedModel.baseUrl &&
+			jobModel.contextWindow === selectedModel.contextWindow;
+		if (!alreadySpeculatingForSelectedModel) {
+			invalidateSpeculativeCompaction();
+		}
 		// Window shrink (e.g. 1M -> 256k): warm a speculative summary at switch
 		// time so the next turn's compaction starts hot instead of the first
 		// request overflowing against the smaller window and recovering after

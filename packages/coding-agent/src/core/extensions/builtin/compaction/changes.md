@@ -35,20 +35,23 @@
 ## Reasoning-free summarization + shrink warm start (2026-07-26)
 
 - `speculative.ts` `generateSummaryMessage` now merges `summarizationReasoningOptions(model)` into the stream
-  options: `thinkingEnabled: false` for anthropic-messages, `reasoningEffort: "minimal"` (+ `reasoningSummary:
-  null`) for the OpenAI Responses family, `reasoningEffort: "minimal"` for openai-completions. Summarization
-  requests previously inherited each provider's *default* reasoning mode, so the compaction turn burned its
-  latency and output budget on invisible thinking before emitting the summary — the dominant compaction slowdown
-  on reasoning models, and the root cause behind the 2026-07-21 empty-summary headroom fix. Adapters ignore
-  options their provider does not support, and non-reasoning models are untouched.
+  options: `thinkingEnabled: false` for anthropic-messages and the cheapest catalog-supported effort for the
+  OpenAI Responses/Completions families (minimal when legal, otherwise low/medium/high), with reasoning summaries
+  disabled for Responses. Summarization requests previously inherited each provider's *default* reasoning mode;
+  a hard-coded `minimal` also disappeared at adapter resolution on catalog rows where `minimal: null`, restoring
+  that default. Both cases burned latency and output budget on invisible thinking before emitting the summary.
+  Codex now sends `summary: "off"` while direct/Azure Responses omit the summary field; non-reasoning models are
+  untouched.
 - `index.ts` `model_select`: on a context-window shrink (e.g. 1M -> 256k) with usage already over the new
   window's speculative threshold, the handler now starts a speculative compaction at switch time. Previously
   nothing ran until the next turn, so the first request to the smaller-window model could overflow, surface the
   raw provider error, and only then recover. The warm-started job also lets the next turn's blocking compaction
   await a finished summary instead of generating one while the user waits.
-- Tests: `test/compaction/summarization-reasoning-options.test.ts` (per-API reasoning overrides reach the faux
-  provider) and `test/suite/model-shrink-speculative-warmstart.test.ts` (shrink over threshold starts a
-  speculative summary at switch time).
+- Duplicate `model_select` delivery for the same selected model reuses the in-flight/finished speculative job
+  instead of aborting it and launching a second summary.
+- Tests: `test/compaction/summarization-reasoning-options.test.ts` (per-API options),
+  `test/compaction/summarization-reasoning-payload.test.ts` (final OpenAI/Codex/Azure/Kimi payloads), and
+  `test/suite/model-shrink-speculative-warmstart.test.ts` (threshold start plus duplicate-event idempotency).
 
 Expected upstream conflict zones: `builtin/compaction/speculative.ts` around the stream options in
 `generateSummaryMessage`, and `builtin/compaction/index.ts` around the `model_select` handler.

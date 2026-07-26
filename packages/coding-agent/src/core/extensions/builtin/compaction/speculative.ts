@@ -116,15 +116,18 @@ function summaryMaxTokens(model: Model<any>, contextWindow: number): number {
  */
 function summarizationReasoningOptions(model: Model<any>): Record<string, unknown> {
 	if (!model.reasoning) return {};
+	if (model.api === "anthropic-messages") return { thinkingEnabled: false };
+	const reasoningEffort = (["minimal", "low", "medium", "high"] as const).find(
+		(level) => model.thinkingLevelMap?.[level] !== null,
+	);
+	if (!reasoningEffort) return {};
 	switch (model.api) {
-		case "anthropic-messages":
-			return { thinkingEnabled: false };
 		case "openai-responses":
 		case "openai-codex-responses":
 		case "azure-openai-responses":
-			return { reasoningEffort: "minimal", reasoningSummary: null };
+			return { reasoningEffort, reasoningSummary: null };
 		case "openai-completions":
-			return { reasoningEffort: "minimal" };
+			return { reasoningEffort };
 		default:
 			return {};
 	}

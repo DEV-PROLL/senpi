@@ -40,13 +40,16 @@ function seedSessionWithUsage(harness: Harness, inputTokens: number): void {
 	harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
 }
 
-function captureNextProviderContext(harness: Harness, timeoutMs = 5_000): Promise<Context> {
+function captureNextProviderContext(
+	harness: Harness,
+	timeoutMs = 5_000,
+): Promise<{ context: Context; signal: AbortSignal | undefined }> {
 	return new Promise((resolve, reject) => {
 		const timeout = setTimeout(() => reject(new Error("timed out waiting for provider call")), timeoutMs);
 		harness.faux.setResponses([
-			(context) => {
+			(context, options) => {
 				clearTimeout(timeout);
-				resolve(context);
+				resolve({ context, signal: options?.signal });
 				return fauxAssistantMessage("warm summary");
 			},
 		]);
@@ -70,7 +73,7 @@ describe("model window shrink speculative warm start", () => {
 
 		await harness.session.setModel(smallModel);
 
-		const summarizationContext = await providerCall;
+		const { context: summarizationContext, signal } = await providerCall;
 		const messages = summarizationContext.messages;
 		const lastMessage = messages[messages.length - 1];
 		const lastText =
@@ -81,5 +84,18 @@ describe("model window shrink speculative warm start", () => {
 						.join("\n")
 				: "";
 		expect(lastText).toContain("<summary>");
+
+		const bigModel = harness.getModel("faux-big");
+		if (!bigModel) throw new Error("faux-big not registered");
+		await harness.getExtensionRunner().emitModelSelect({
+			type: "model_select",
+			model: smallModel,
+			previousModel: bigModel,
+			source: "set",
+			systemPrompt: harness.session.systemPrompt,
+			systemPromptOptions: { cwd: harness.tempDir },
+		});
+		expect(signal?.aborted).toBe(false);
+		expect(harness.faux.state.callCount).toBe(1);
 	});
 });
