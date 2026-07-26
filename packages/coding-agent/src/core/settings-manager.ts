@@ -30,7 +30,7 @@ export interface BranchSummarySettings {
 export interface ProviderRetrySettings {
 	timeoutMs?: number; // SDK request timeout + agent stream idle timeout; defaults to httpIdleTimeoutMs
 	maxRetries?: number; // SDK/provider retry attempts
-	maxRetryDelayMs?: number; // default: 60000 (max server-requested delay before failing)
+	maxRetryDelayMs?: number; // default: 60000 (max server-requested delay honoured on the same model; beyond it the fallback chain engages)
 }
 
 export interface RetrySettings {

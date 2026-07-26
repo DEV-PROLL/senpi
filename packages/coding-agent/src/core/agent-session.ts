@@ -1354,7 +1354,10 @@ export class AgentSession {
 			return true;
 		}
 
-		return providerDelayMs <= this.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
+		if (providerDelayMs <= this.settingsManager.getProviderRetrySettings().maxRetryDelayMs) {
+			return true;
+		}
+		return this._retryFallback.canTryFallback();
 	}
 
 	private async _processAgentEvent(event: AgentEvent, signal: AbortSignal): Promise<void> {
@@ -5120,15 +5123,30 @@ export class AgentSession {
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
 		const maxRetryDelayMs = this.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
 		if (providerDelayMs !== undefined && providerDelayMs > maxRetryDelayMs) {
-			this._emit({
-				type: "auto_retry_end",
-				success: false,
-				attempt: this._retryAttempt,
-				finalError: `Provider requested retry delay ${providerDelayMs}ms, exceeding configured maximum ${maxRetryDelayMs}ms`,
-			});
-			this._retryAttempt = 0;
-			this._resolveRetry();
-			return "not-handled";
+			// A wait this long means the model is unavailable rather than busy, so the
+			// configured chain beats failing the turn. The switch is gated: the over-budget
+			// branch above may have already switched on this same error, and hopping again
+			// here would skip that candidate's own retry budget.
+			if (!switchedFallback) {
+				switchedFallback = await this._retryFallback.tryFallback("transient", {
+					errorMessage,
+					retryAfterMs: providerDelayMs,
+				});
+				if (switchedFallback) {
+					this._retryAttempt = 1;
+				}
+			}
+			if (!switchedFallback) {
+				this._emit({
+					type: "auto_retry_end",
+					success: false,
+					attempt: this._retryAttempt,
+					finalError: `Provider requested retry delay ${providerDelayMs}ms, exceeding configured maximum ${maxRetryDelayMs}ms`,
+				});
+				this._retryAttempt = 0;
+				this._resolveRetry();
+				return "not-handled";
+			}
 		}
 
 		// Transient failures stay on the same model until the retry budget is spent;
