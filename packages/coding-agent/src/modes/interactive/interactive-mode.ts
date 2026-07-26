@@ -3049,15 +3049,6 @@ export class InteractiveMode {
 				this.showError(`Failed to open history search: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		});
-		this.defaultEditor.onAction("app.sessions.observe", async () => {
-			try {
-				await this.session.prompt("/sessions");
-			} catch (error) {
-				this.showError(
-					`Failed to open session observer: ${error instanceof Error ? error.message : String(error)}`,
-				);
-			}
-		});
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.editor.external", () => void this.handleOpenExternalEditor());
@@ -6450,7 +6441,6 @@ export class InteractiveMode {
 		const cycleThinkingLevel = this.getAppKeyDisplay("app.thinking.cycle");
 		const cycleModelForward = this.getAppKeyDisplay("app.model.cycleForward");
 		const selectModel = this.getAppKeyDisplay("app.model.select");
-		const observeSessions = this.getAppKeyDisplay("app.sessions.observe");
 		const expandTools = this.getAppKeyDisplay("app.tools.expand");
 		const toggleThinking = this.getAppKeyDisplay("app.thinking.toggle");
 		const externalEditor = this.getAppKeyDisplay("app.editor.external");
@@ -6496,7 +6486,6 @@ export class InteractiveMode {
 | \`${cycleThinkingLevel}\` | Cycle thinking level |
 | \`${cycleModelForward}\` / \`${cycleModelBackward}\` | Cycle models |
 | \`${selectModel}\` | Open model selector |
-| \`${observeSessions}\` | Observe session transcripts |
 | \`${expandTools}\` | Toggle tool output expansion |
 | \`${toggleThinking}\` | Toggle thinking block visibility |
 | \`${externalEditor}\` | Edit message in external editor |
