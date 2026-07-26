@@ -7,6 +7,7 @@ export const TERMINAL_OUTPUT_TOOL = "bash_output";
 export const TERMINAL_KILL_TOOL = "kill_bash";
 export const TERMINAL_INPUT_TOOL = "bash_input";
 export const TERMINAL_RESIZE_TOOL = "bash_resize";
+export const TERMINAL_MONITOR_TOOL = "monitor";
 
 /** Companion tools that must never dangle without a live PTY `bash`. */
 export const TERMINAL_COMPANION_TOOLS = [
@@ -14,6 +15,7 @@ export const TERMINAL_COMPANION_TOOLS = [
 	TERMINAL_KILL_TOOL,
 	TERMINAL_INPUT_TOOL,
 	TERMINAL_RESIZE_TOOL,
+	TERMINAL_MONITOR_TOOL,
 ] as const;
 
 export const DEFAULT_COLS = 120;

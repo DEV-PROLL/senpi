@@ -3,6 +3,7 @@ import { SettingsManager } from "../../../settings-manager.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isAnthropicBashEnabled } from "../anthropic-bash/index.ts";
 import { TerminalManager } from "./manager.ts";
+import { MonitorRegistry } from "./monitor-registry.ts";
 import { TerminalNotifier } from "./notify.ts";
 import { TERMINAL_PROMPT_SECTION } from "./prompt.ts";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
@@ -14,11 +15,13 @@ import { createBashOutputTool } from "./tools/bash-output.ts";
 import { createBashResizeTool } from "./tools/bash-resize.ts";
 import type { TerminalToolContext } from "./tools/context.ts";
 import { createKillBashTool } from "./tools/kill-bash.ts";
+import { createMonitorTool } from "./tools/monitor.ts";
 
 interface TerminalExtensionState {
 	manager: TerminalManager | null;
 	settings: ResolvedTerminalSettings;
 	notifier: TerminalNotifier | null;
+	monitors: MonitorRegistry | null;
 	ctx: ExtensionContext | undefined;
 	shellPath: string | undefined;
 	steppedAside: boolean;
@@ -51,6 +54,10 @@ function buildToolContext(state: TerminalExtensionState): TerminalToolContext {
 		},
 		get defaultRows() {
 			return state.settings.defaultRows;
+		},
+		get monitorRegistry() {
+			state.monitors ??= new MonitorRegistry(() => {});
+			return state.monitors;
 		},
 		getEnv: () => getShellEnv(),
 		getSessionContext: () => state.ctx,
@@ -93,6 +100,7 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 		manager: null,
 		settings: TERMINAL_SETTINGS_DEFAULTS,
 		notifier: null,
+		monitors: null,
 		ctx: undefined,
 		shellPath: undefined,
 		steppedAside: false,
@@ -105,6 +113,7 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 	pi.registerTool(createBashInputTool(toolCtx));
 	pi.registerTool(createBashResizeTool(toolCtx));
 	pi.registerTool(createKillBashTool(toolCtx));
+	pi.registerTool(createMonitorTool(toolCtx));
 
 	pi.on("session_start", async (_event, ctx) => {
 		state.ctx = ctx;
@@ -116,6 +125,8 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 			getContext: () => state.ctx,
 			getMode: () => state.settings.notify,
 		});
+		state.monitors?.dispose();
+		state.monitors = null;
 		await state.manager?.teardown();
 		state.manager = new TerminalManager({
 			maxSessions: state.settings.maxSessions,
@@ -135,6 +146,8 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", async () => {
+		state.monitors?.dispose();
+		state.monitors = null;
 		await state.manager?.teardown();
 		state.manager = null;
 	});

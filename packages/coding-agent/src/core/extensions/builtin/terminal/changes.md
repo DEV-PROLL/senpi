@@ -3,6 +3,35 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## Monitor watcher sessions (2026-07-26)
+
+### What changed
+
+- Added the PTY-backed `monitor` terminal-extension tool. `monitor({ description, command,
+  filter?, timeout_ms?, persistent? })` starts through the existing `TerminalManager` and returns
+  its normal `bash_N` id immediately, so `bash_output` remains the bounded peek surface and
+  `kill_bash` terminates the same watcher process tree. `action:"rearm"` deliberately reports a
+  no-op for a live non-paused monitor; wake-budget pausing and rearming delivery land with the
+  notification layer.
+- `monitor-registry.ts` line-buffers terminal output with one bounded unfinished line per live
+  watcher, emits only complete stdout lines (optionally regex-filtered), and emits one final
+  completion/timeout/kill summary. The terminal runtime retains the bounded full output, so
+  filtered and overflow lines remain peekable.
+- The permission parser classifies monitor commands in the existing `bash` permission class,
+  preserving the same approval path as `bash` rather than creating a parallel executor policy.
+
+### Why
+
+Long-running builds, CI, and log tails should report decision-relevant state changes without
+polling. Keeping monitor inside the terminal extension is required because its session manager is
+session-scoped private state; a shared cross-tool registry would enlarge the fork surface without
+improving the handle contract (plan: `.omo/plans/eval-exec-merge-and-injection-wakeup.md`, todo 3).
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `extension.ts` terminal tool registration and session teardown.
+- LOW: `shared.ts` companion tool list and terminal tool constants.
+
 ## Payload-rich background completion notifications (2026-07-26)
 
 ### What changed
