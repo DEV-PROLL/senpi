@@ -84,6 +84,15 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"try your request again",
 	"please retry your request",
 
+	// Anthropic server-tool pairing rejections, e.g. "`web_search` tool use with id
+	// `srvtoolu_...` was found without a corresponding `web_search_tool_result`
+	// block". A stream that ended between a server tool use and its result leaves
+	// the unpairable half in history, and replaying it 400s every later request.
+	// The Anthropic request builder repairs the replayed history, so a retry sends
+	// a valid payload; keeping the class retryable is what lets retry and the model
+	// fallback chain unwedge such a session instead of dead-ending it.
+	"was found without a corresponding",
+
 	// gRPC based providers (e.g. NVIDIA NIM)
 	"ResourceExhausted",
 ]);

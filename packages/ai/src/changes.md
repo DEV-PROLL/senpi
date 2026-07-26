@@ -1,5 +1,33 @@
 # AI Source Changes
 
+## 2026-07-26 - Repair unpaired Anthropic server-tool blocks and let the pairing 400 retry
+
+### What changed and why
+
+A session died permanently with a 400 `invalid_request_error` reading "`web_search` tool use with id
+`srvtoolu_...` was found without a corresponding `web_search_tool_result` block". The assistant turn had persisted two
+`server_tool_use` (`web_search`) provider-native blocks and no result blocks - the stream ended
+between the search call and its result - and every later request replayed the unpairable halves, so
+the session could never recover on its own.
+
+Anthropic validates that each `server_tool_use` is followed, inside the same assistant message, by
+its matching `*_tool_result`, and rejects the mirror case too (a result whose `server_tool_use` is
+missing).
+
+- `api/anthropic-messages.ts`: assistant conversion now repairs the pairing for every turn, not only
+  inside the server-side-fallback boundary. `collectProviderNativeToolPairing` indexes the replayable
+  provider-native blocks of the message, and `isUnpairedProviderNativeToolBlock` drops a
+  `server_tool_use` / `mcp_tool_use` whose result is absent and a result block whose
+  `tool_use_id` is absent. Paired blocks, `fallback`, and `container_upload` replay byte-for-byte as
+  before, so `encrypted_content` fidelity is untouched.
+- `utils/retry.ts`: `was found without a corresponding` joins the retryable provider-error patterns.
+  The repaired history means the retried request is valid, so the session self-heals through the
+  existing retry path; if it keeps failing, the error now also reaches the model-fallback chain
+  instead of dead-ending the turn.
+- `test/anthropic-web-search-replay-encryption.test.ts`: the byte-fidelity fixture gained the
+  `server_tool_use` its result belongs to. The assertion is unchanged - the fixture was simply not a
+  shape Anthropic can accept.
+
 ## 2026-07-25 - Thinking-off actually disables reasoning; wire-exact effort ladders across adapters
 
 ### What changed and why

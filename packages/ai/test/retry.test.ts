@@ -12,6 +12,10 @@ const bunFetchSocketClosedMessage =
 const openAIResponsesEarlyEofMessage = "OpenAI Responses stream ended before a terminal response event";
 const wrappedDnsLookupError =
 	"The pending stream has been canceled (caused by: getaddrinfo ENOTFOUND bedrock-runtime.us-east-1.amazonaws.com)";
+const anthropicOrphanServerToolMessage =
+	'400 {"type":"error","error":{"type":"invalid_request_error","message":"messages.1: `web_search` tool use with id `srvtoolu_01Gchdhqw1UaCNUuVq2LhMH9` was found without a corresponding `web_search_tool_result` block"},"request_id":"req_011CdQL9JsEk5NWJxWQX4NiG"}';
+const anthropicInvalidMaxTokensMessage =
+	'400 {"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: must be greater than or equal to 1"}}';
 
 describe("provider retry classification", () => {
 	it("matches explicit provider retry guidance", () => {
@@ -68,6 +72,26 @@ describe("provider retry classification", () => {
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: openAIResponsesEarlyEofMessage }),
 			),
 		).toBe(true);
+	});
+
+	it("classifies Anthropic server-tool pairing 400s as retryable", () => {
+		// A turn that persisted a `server_tool_use` without its result makes every
+		// later request 400. The replayed history is repaired before the retried
+		// request is built, so the retry (and, if it keeps failing, the model
+		// fallback chain) is what unwedges the session instead of dead-ending it.
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: anthropicOrphanServerToolMessage }),
+			),
+		).toBe(true);
+	});
+
+	it("keeps unrelated invalid_request errors non-retryable", () => {
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: anthropicInvalidMaxTokensMessage }),
+			),
+		).toBe(false);
 	});
 
 	it("keeps provider limit errors non-retryable", () => {
