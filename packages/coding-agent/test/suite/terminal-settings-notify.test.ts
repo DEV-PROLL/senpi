@@ -91,11 +91,20 @@ describe("terminal notifier guards", () => {
 		expect(sink[0]?.options).toEqual({ deliverAs: "followUp" });
 	});
 
-	it("never wakes in one-shot print/json runs", () => {
-		const sink: CapturedNotification[] = [];
-		makeNotifier({ sink, ctxMode: "print" }).notifyCompletion("bash_1", exitedRuntime);
-		makeNotifier({ sink, ctxMode: "json" }).notifyCompletion("bash_2", exitedRuntime);
-		expect(sink).toHaveLength(0);
+	it("surfaces extension injections only in interactive modes", () => {
+		const modeMatrix = [
+			{ mode: "tui", surfaces: true },
+			{ mode: "rpc", surfaces: true },
+			{ mode: "app-server", surfaces: true },
+			{ mode: "print", surfaces: false },
+			{ mode: "json", surfaces: false },
+		] as const;
+
+		for (const { mode, surfaces } of modeMatrix) {
+			const sink: CapturedNotification[] = [];
+			makeNotifier({ sink, ctxMode: mode }).notifyCompletion(`bash_${mode}`, exitedRuntime);
+			expect(sink, mode).toHaveLength(surfaces ? 1 : 0);
+		}
 	});
 
 	it("suppresses when notify is off or no model is active", () => {
