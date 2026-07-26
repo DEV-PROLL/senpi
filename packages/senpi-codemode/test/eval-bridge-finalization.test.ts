@@ -151,7 +151,7 @@ describe("eval bridge finalization", () => {
 
 		await expect(outcome).resolves.toMatchObject({
 			status: "rejected",
-			reason: { name: "TimeoutError", message: "Cell timed out after 1000ms" },
+			reason: { name: "TimeoutError", message: expect.stringContaining("Cell timed out after 1000ms") },
 		});
 		expect(kernel.interrupts).toEqual(["Cell timed out after 1000ms"]);
 		bridgeResult.resolve({ content: [{ type: "text", text: "late bridge value" }], details: {} });

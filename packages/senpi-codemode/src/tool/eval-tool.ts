@@ -173,7 +173,9 @@ class CellExecution {
 		void Promise.resolve()
 			.then(async () => {
 				const handle = await kernel.interrupt(error.message);
-				this.interruptStateRetained = handle.stateRetained;
+				// Kernels predating the interrupt-outcome contract resolve void; leave
+				// the outcome undefined so callers report an honest unknown state.
+				this.interruptStateRetained = handle?.stateRetained;
 			})
 			.then(
 				() => this.#settleAbort(error),
