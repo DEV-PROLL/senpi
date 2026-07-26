@@ -2808,6 +2808,9 @@ export class AgentSession {
 	/**
 	 * Send a user message to the agent. Always triggers a turn.
 	 * When the agent is streaming, use deliverAs to specify how to queue the message.
+	 * If the prompt path rejects before the message reaches a queue or a turn
+	 * (e.g. a required compaction that cannot complete), the message is retained
+	 * in the steering/followUp queue for later delivery and the error still propagates.
 	 *
 	 * @param content User message content (string or content array)
 	 * @param options.deliverAs Delivery mode when streaming: "steer" or "followUp"
@@ -2849,6 +2852,7 @@ export class AgentSession {
 		// settles so callers observing session idle cannot race its provider turn.
 		const waitForExistingSessionWork = this._sessionWorkBarrier.hasActiveWork;
 		let finishSessionWork: (() => void) | undefined;
+		let disposition: PromptDisposition | undefined;
 		try {
 			// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
 			await this.prompt(text, {
@@ -2856,7 +2860,10 @@ export class AgentSession {
 				streamingBehavior: options?.deliverAs,
 				images,
 				source: "extension",
-				promptDisposition: () => resolveBindingPromptReadiness?.(),
+				promptDisposition: (nextDisposition) => {
+					disposition = nextDisposition;
+					resolveBindingPromptReadiness?.();
+				},
 				onSessionWorkReady: waitForExistingSessionWork
 					? () => {
 							finishSessionWork ??= this._sessionWorkBarrier.begin();
@@ -2864,6 +2871,17 @@ export class AgentSession {
 					: undefined,
 				sessionTitlePrompt: false,
 			});
+		} catch (error) {
+			// Extension bindings invoke this method fire-and-forget, so a rejection
+			// before prompt() accepted the message must not silently drop it.
+			if (disposition === undefined) {
+				if (options?.deliverAs === "steer") {
+					await this._queueSteer(text, images);
+				} else {
+					await this._queueFollowUp(text, images);
+				}
+			}
+			throw error;
 		} finally {
 			resolveBindingPromptReadiness?.();
 			finishSessionWork?.();
