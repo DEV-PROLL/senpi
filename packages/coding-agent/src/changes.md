@@ -1,15 +1,3 @@
-## Sigrid-style Ultragoal workflow (2026-07-26)
-
-- The existing builtin goal extension now exposes `/ultragoal` as its primary
-  command while retaining `/goal` as a backward-compatible alias.
-- Active objectives continue with durable todo decomposition, dependency-aware
-  execution, evidence checkpoints, a prompt-to-artifact completion audit, and a
-  three-turn blocked audit.
-- Long objective input is accepted without a misleading 4,000-character public
-  cap; the existing deterministic spill file preserves the complete text.
-- Persistence, goal tools, app-server wire shape, lifecycle continuation, and
-  usage accounting remain compatible.
-
 ## Experimental `--grok-neo` mode: env-gated grok chrome for the interactive loop (2026-07-26)
 
 ### What changed

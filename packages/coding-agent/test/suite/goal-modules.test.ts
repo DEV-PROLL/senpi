@@ -158,43 +158,37 @@ describe("goal formatting (budget-free)", () => {
 });
 
 describe("goal continuation prompt (budget-free)", () => {
-	it("embeds the objective, usage, and structured Ultragoal workflow without budget language", () => {
+	it("embeds the objective and usage, never budget language", () => {
 		const prompt = buildContinuationPrompt(
 			makeGoal({ objective: "Fix <bug> & ship", tokensUsed: 5, timeUsedSeconds: 12 }),
 		);
-		const sections = parsePromptSections(prompt);
 		expect(prompt).toContain("<untrusted_objective>");
 		expect(prompt).toContain("Fix &lt;bug&gt; &amp; ship");
 		expect(prompt).toContain("Usage so far:");
 		expect(prompt).toContain("Time spent pursuing goal: 12 seconds");
 		expect(prompt).toContain("Tokens used: 5");
-		expect(sections.get("Durable execution workflow")).toMatch(/\btodo\b/i);
-		expect(sections.get("Durable execution workflow")).toMatch(/dependency|evidence/i);
-		expect(sections.get("Prompt-to-artifact completion audit")).toMatch(/requirement|evidence/i);
-		expect(sections.get("Blocked audit")).toMatch(/three|3|consecutive/i);
 		expect(prompt.toLowerCase()).not.toContain("token budget");
 		expect(prompt.toLowerCase()).not.toContain("tokens remaining");
 		expect(prompt.toLowerCase()).not.toContain("budget_limited");
-		expect(prompt).not.toMatch(/`task`/);
 	});
 });
 
 describe("goal status UI", () => {
 	it("derives status text for each state", () => {
-		expect(goalStatusText(makeGoal({ status: "active", timeUsedSeconds: 0 }))).toBe("Pursuing ultragoal");
-		expect(goalStatusText(makeGoal({ status: "active", timeUsedSeconds: 65 }))).toBe("Pursuing ultragoal (1m)");
-		expect(goalStatusText(makeGoal({ status: "paused" }))).toBe("Ultragoal paused (/ultragoal resume)");
+		expect(goalStatusText(makeGoal({ status: "active", timeUsedSeconds: 0 }))).toBe("Pursuing goal");
+		expect(goalStatusText(makeGoal({ status: "active", timeUsedSeconds: 65 }))).toBe("Pursuing goal (1m)");
+		expect(goalStatusText(makeGoal({ status: "paused" }))).toBe("Goal paused (/goal resume)");
 		expect(goalStatusText(makeGoal({ status: "blocked", blockedReason: "Waiting for review", blockedAt: 1 }))).toBe(
-			"Ultragoal blocked: Waiting for review",
+			"Goal blocked: Waiting for review",
 		);
-		expect(goalStatusText(makeGoal({ status: "complete" }))).toBe("Ultragoal achieved");
+		expect(goalStatusText(makeGoal({ status: "complete" }))).toBe("Goal achieved");
 	});
 
 	it("renders live elapsed seconds for an active goal, ignoring it otherwise", () => {
-		expect(goalStatusText(makeGoal({ status: "active", timeUsedSeconds: 0 }), 0)).toBe("Pursuing ultragoal (0s)");
-		expect(goalStatusText(makeGoal({ status: "active", timeUsedSeconds: 5 }), 42)).toBe("Pursuing ultragoal (42s)");
-		expect(goalStatusText(makeGoal({ status: "paused" }), 99)).toBe("Ultragoal paused (/ultragoal resume)");
-		expect(goalStatusText(makeGoal({ status: "complete" }), 99)).toBe("Ultragoal achieved");
+		expect(goalStatusText(makeGoal({ status: "active", timeUsedSeconds: 0 }), 0)).toBe("Pursuing goal (0s)");
+		expect(goalStatusText(makeGoal({ status: "active", timeUsedSeconds: 5 }), 42)).toBe("Pursuing goal (42s)");
+		expect(goalStatusText(makeGoal({ status: "paused" }), 99)).toBe("Goal paused (/goal resume)");
+		expect(goalStatusText(makeGoal({ status: "complete" }), 99)).toBe("Goal achieved");
 	});
 
 	it("sets and clears the status segment, respecting hasUI", () => {
@@ -207,7 +201,7 @@ describe("goal status UI", () => {
 		updateGoalUi(ctx, makeGoal({ status: "active" }));
 		updateGoalUi(ctx, null);
 		expect(calls).toEqual([
-			{ key: STATUS_KEY, text: "Pursuing ultragoal" },
+			{ key: STATUS_KEY, text: "Pursuing goal" },
 			{ key: STATUS_KEY, text: undefined },
 		]);
 
@@ -220,19 +214,3 @@ describe("goal status UI", () => {
 		expect(noUiCalls).toHaveLength(0);
 	});
 });
-
-function parsePromptSections(prompt: string): Map<string, string> {
-	const sections = new Map<string, string>();
-	let heading: string | undefined;
-	for (const line of prompt.split("\n")) {
-		if (line.endsWith(":") && !line.startsWith("-")) {
-			heading = line.slice(0, -1);
-			sections.set(heading, "");
-			continue;
-		}
-		if (heading !== undefined) {
-			sections.set(heading, `${sections.get(heading) ?? ""}\n${line}`);
-		}
-	}
-	return sections;
-}
