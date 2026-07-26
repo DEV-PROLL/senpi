@@ -27,40 +27,27 @@ const markerTheme = {
 };
 
 const EXPECTED: Record<string, string[]> = {
-	"wideDescriptions": [
+	wideDescriptions: [
 		"<S>→ help                            Show help</S>",
-		"  quit<D>                            Exit the app</D>"
+		"  quit<D>                            Exit the app</D>",
 	],
-	"narrowWidth": [
-		"<S>→ help</S>",
-		"  quit"
-	],
-	"noDescriptions": [
-		"<S>→ alpha</S>",
-		"  beta"
-	],
-	"truncatedLongPrimary": [
+	narrowWidth: ["<S>→ help</S>", "  quit"],
+	noDescriptions: ["<S>→ alpha</S>", "  beta"],
+	truncatedLongPrimary: [
 		"<S>→ very-long-command-name-that-ne\u001b[0m  first</S>",
-		"  short<D>                           second</D>"
+		"  short<D>                           second</D>",
 	],
-	"cjkItems": [
+	cjkItems: [
 		"  日本語コマンド<D>                  説明テキスト</D>",
 		"<S>→ plain                           ascii desc</S>",
-		"  日本語コマンドがとても長い場合\u001b[0m<D>  long cjk</D>"
+		"  日本語コマンドがとても長い場合\u001b[0m<D>  long cjk</D>",
 	],
-	"scrollInfo": [
-		"  four",
-		"<S>→ five</S>",
-		"  six",
-		"<I>  (5/6)</I>"
-	],
-	"noMatch": [
-		"<N>  No matching commands</N>"
-	],
-	"truncatedDescription": [
+	scrollInfo: ["  four", "<S>→ five</S>", "  six", "<I>  (5/6)</I>"],
+	noMatch: ["<N>  No matching commands</N>"],
+	truncatedDescription: [
 		"<S>→ help                            Show the help \u001b[0m</S>",
-		"  quit<D>                            Exit the appli\u001b[0m</D>"
-	]
+		"  quit<D>                            Exit the appli\u001b[0m</D>",
+	],
 };
 
 describe("SelectList byte-identical characterization (pre-seam capture)", () => {
@@ -90,7 +77,10 @@ describe("SelectList byte-identical characterization (pre-seam capture)", () => 
 
 	it("renders rows without descriptions", () => {
 		const list = new SelectList(
-			[{ value: "alpha", label: "alpha" }, { value: "beta", label: "beta" }],
+			[
+				{ value: "alpha", label: "alpha" },
+				{ value: "beta", label: "beta" },
+			],
 			5,
 			markerTheme,
 		);

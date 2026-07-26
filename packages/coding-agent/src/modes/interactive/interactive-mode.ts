@@ -885,18 +885,21 @@ export class InteractiveMode {
 		// Keep loaded resources before chat so restored session messages never precede them.
 		if (this.chrome) {
 			this.renderWidgets(); // Initialize with default spacer
-			for (const component of this.chrome.arrangeRoot([
-				this.headerContainer,
-				this.loadedResourcesContainer,
-				this.chatContainer,
-				this.pendingMessagesContainer,
-				this.statusContainer,
-				this.hookStatusContainer,
-				this.widgetContainerAbove,
-				this.editorContainer,
-				this.widgetContainerBelow,
-				this.footer,
-			])) {
+			for (const component of this.chrome.arrangeRoot(
+				[
+					this.headerContainer,
+					this.loadedResourcesContainer,
+					this.chatContainer,
+					this.pendingMessagesContainer,
+					this.statusContainer,
+					this.hookStatusContainer,
+					this.widgetContainerAbove,
+					this.editorContainer,
+					this.widgetContainerBelow,
+					this.footer,
+				],
+				this.ui,
+			)) {
 				this.ui.addChild(component);
 			}
 		} else {
@@ -3006,10 +3009,7 @@ export class InteractiveMode {
 							return w ? { width: w } : undefined;
 						};
 						const overlayOptions = resolveOptions();
-						const handle = this.ui.showOverlay(
-							component,
-							this.chrome ? this.chrome.decorateOverlay(overlayOptions) : overlayOptions,
-						);
+						const handle = this.ui.showOverlay(component, overlayOptions);
 						// Expose handle to caller for visibility control
 						options?.onHandle?.(handle);
 					} else {

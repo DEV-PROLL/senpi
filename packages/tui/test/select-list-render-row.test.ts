@@ -20,9 +20,7 @@ describe("SelectList renderRow presentation seam", () => {
 			scrollInfo: (text) => `[I]${text}[/I]`,
 			noMatch: (text) => `[N]${text}[/N]`,
 			renderRow: ({ prefix, primary, description, isSelected }) =>
-				isSelected
-					? `[BG]${prefix}${primary}${description ?? ""}[/BG]`
-					: `${prefix}${primary}${description ?? ""}`,
+				isSelected ? `[BG]${prefix}${primary}${description ?? ""}[/BG]` : `${prefix}${primary}${description ?? ""}`,
 		};
 
 		const list = new SelectList(
