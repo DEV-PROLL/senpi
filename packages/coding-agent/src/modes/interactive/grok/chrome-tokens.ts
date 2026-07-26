@@ -11,6 +11,7 @@ export type ChromeTextStyle = (text: string) => string;
 export interface GrokChromeTokens {
 	readonly inputBorder: ChromeTextStyle;
 	readonly inputInterior: ChromeTextStyle;
+	readonly surface: ChromeTextStyle;
 	readonly cardBorder: ChromeTextStyle;
 	readonly modelLabel: ChromeTextStyle;
 	readonly cwd: ChromeTextStyle;
@@ -30,10 +31,13 @@ function backgroundFromThemeExport(hex: string): ChromeTextStyle | undefined {
 }
 
 export function getGrokChromeTokens(): GrokChromeTokens {
-	const panelBackground = getThemeExportColors().cardBg;
+	const themeExport = getThemeExportColors();
+	const panelBackground = themeExport.cardBg;
+	const pageBackground = themeExport.pageBg;
 	return {
 		inputBorder: (text) => theme.fg("border", text),
 		inputInterior: backgroundFromThemeExport(panelBackground ?? "") ?? ((text) => theme.bg("toolPendingBg", text)),
+		surface: backgroundFromThemeExport(pageBackground ?? "") ?? ((text) => text),
 		cardBorder: (text) => theme.fg("borderMuted", text),
 		modelLabel: (text) => theme.fg("thinkingText", text),
 		cwd: (text) => theme.fg("dim", text),

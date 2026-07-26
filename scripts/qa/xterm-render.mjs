@@ -107,9 +107,10 @@ function gridFromTerminal(term) {
 	const { cols, rows } = term;
 	const buf = term.buffer.active;
 	const cells = [];
+	const viewportTop = buf.baseY;
 	// Reusable cell accessor avoids per-cell allocation in xterm.
 	for (let y = 0; y < rows; y += 1) {
-		const line = buf.getLine(y);
+		const line = buf.getLine(viewportTop + y);
 		const row = [];
 		for (let x = 0; x < cols; x += 1) {
 			if (!line) {
@@ -707,7 +708,7 @@ async function modeSelfTest() {
 		rows: 4,
 		scrollback: 20,
 		events: [
-			{ type: "write", data: "REPLAY-TRANSCRIPT", snapshot: "wide" },
+			{ type: "write", data: `${"OLD-SCROLLBACK\n".repeat(8)}VISIBLE-TRANSCRIPT`, snapshot: "wide" },
 			{ type: "resize", cols: 12, rows: 3, snapshot: "narrow" },
 		],
 	});
@@ -718,7 +719,8 @@ async function modeSelfTest() {
 		wide?.grid.cols === 20 &&
 		narrow?.grid.cols === 12 &&
 		narrow?.grid.rows === 3 &&
-		findGlyph(narrow.grid, "R") !== null
+		findGlyph(wide.grid, "T") !== null &&
+		findGlyph(narrow.grid, "T") !== null
 	) {
 		pass("replay-ordered-write-resize-exposes-snapshot-grids", { snapshots: replay.snapshots.map((snapshot) => ({ label: snapshot.label, cols: snapshot.grid.cols, rows: snapshot.grid.rows })) });
 	} else {

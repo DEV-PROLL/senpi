@@ -48,6 +48,27 @@ export interface InteractiveChrome {
 	arrangeRoot(children: readonly Component[]): Component[];
 }
 
+class GrokFooterSurface implements Component {
+	private readonly content: Component;
+
+	constructor(content: Component) {
+		this.content = content;
+	}
+
+	invalidate(): void {
+		this.content.invalidate();
+	}
+
+	render(width: number): string[] {
+		const surface = getGrokChromeTokens().surface;
+		return this.content.render(width).map(surface);
+	}
+
+	dispose(): void {
+		this.content.dispose?.();
+	}
+}
+
 class GrokEditor extends CustomEditor {
 	private readonly card: GrokInputCard;
 
@@ -88,7 +109,7 @@ export class GrokChrome implements InteractiveChrome {
 		return {
 			borderColor: tokens.inputBorder,
 			selectList: {
-				selectedPrefix: (text) => tokens.primaryText(text),
+				selectedPrefix: (text) => theme.fg("accent", text),
 				selectedText: (text) => tokens.primaryText(text),
 				description: (text) => tokens.mutedText(text),
 				scrollInfo: (text) => tokens.mutedText(text),
@@ -122,9 +143,9 @@ export class GrokChrome implements InteractiveChrome {
 	}
 
 	decorateOverlay(options: OverlayOptions | undefined): OverlayOptions | undefined {
-		// Existing overlays own their geometry and border components. The grok
-		// policy deliberately preserves that geometry and lets active-theme tokens
-		// supply their surface colors; G6 adds a dedicated modal shell if needed.
+		// Existing overlays own their geometry and border components. Overlay options
+		// have no color field, so this mode seam preserves the caller's geometry and
+		// leaves border rendering to the active-theme component tokens.
 		return options;
 	}
 
@@ -134,6 +155,14 @@ export class GrokChrome implements InteractiveChrome {
 		// input card, widgets below it, and footer as the tail. As transcript output
 		// grows this tail is pushed to the terminal's lower edge deterministically.
 		const inputTailStart = Math.max(0, children.length - 3);
-		return [...children.slice(0, inputTailStart), new Spacer(1), ...children.slice(inputTailStart)];
+		const inputTail = children.slice(inputTailStart);
+		const footer = inputTail.at(-1);
+		if (!footer) return [...children.slice(0, inputTailStart), new Spacer(1), ...inputTail];
+		return [
+			...children.slice(0, inputTailStart),
+			new Spacer(1),
+			...inputTail.slice(0, -1),
+			new GrokFooterSurface(footer),
+		];
 	}
 }

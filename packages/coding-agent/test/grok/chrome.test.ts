@@ -42,6 +42,39 @@ describe("GrokChrome", () => {
 		expect(chrome.getEditorBorderColor({ isBashMode: false, thinkingLevel: "high" })("─")).toBe(fg("80;80;88", "─"));
 	});
 
+	it("styles selected slash prefixes and rows through the active grok theme", () => {
+		const chrome = new GrokChrome();
+		const selectList = chrome.getEditorTheme().selectList;
+
+		expect(selectList.selectedPrefix("→ ")).toBe(fg("122;162;247", "→ "));
+		expect(selectList.renderRow?.({
+			prefix: selectList.selectedPrefix("→ "),
+			primary: "/model",
+			description: "  Select model",
+			isSelected: true,
+		})).toBe(`\x1b[48;2;54;54;54m${fg("122;162;247", "→ ")}${fg("225;225;225", "/model")}${fg("108;108;108", "  Select model")}\x1b[49m`);
+
+		initTheme("grok-day", false);
+		const daySelectList = chrome.getEditorTheme().selectList;
+		expect(daySelectList.selectedPrefix("→ ")).toBe(fg("47;100;210", "→ "));
+		expect(daySelectList.renderRow?.({
+			prefix: daySelectList.selectedPrefix("→ "),
+			primary: "/model",
+			isSelected: true,
+		})).toBe(`\x1b[48;2;208;208;224m${fg("47;100;210", "→ ")}${fg("31;35;40", "/model")}\x1b[49m`);
+	});
+
+	it("renders the footer surface through the active grok theme", () => {
+		const chrome = new GrokChrome();
+		const footer = { render: () => ["footer"], invalidate: () => {} };
+		const nightFooter = chrome.arrangeRoot([footer]).at(-1);
+		expect(nightFooter?.render(80)).toEqual(["\x1b[48;2;20;20;20mfooter\x1b[49m"]);
+
+		initTheme("grok-day", false);
+		const dayFooter = chrome.arrangeRoot([footer]).at(-1);
+		expect(dayFooter?.render(80)).toEqual(["\x1b[48;2;248;248;248mfooter\x1b[49m"]);
+	});
+
 	it("wires the grok braille spinner into working indicators", () => {
 		const chrome = new GrokChrome();
 		const indicator = chrome.createWorkingIndicator(new TUI(new VirtualTerminal(80, 24)), "Working");
