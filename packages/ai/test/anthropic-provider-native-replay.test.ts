@@ -719,6 +719,81 @@ describe("Anthropic provider-native replay", () => {
 		expect(assistants[1]?.content).toEqual([{ type: "text", text: "late answer" }]);
 	});
 
+	// A discarded pre-fallback result emits nothing and loads nothing, so a later
+	// surviving result with the same deferred name still emits its reference —
+	// closing a pending server-tool turn after it.
+	it("does not let a discarded fallback result pre-load a deferred tool name", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const pendingUse = {
+			type: "server_tool_use",
+			id: "srvtoolu_pending",
+			name: "web_search",
+			input: { query: "a" },
+		};
+		const fallbackBlock = {
+			type: "fallback",
+			from: { model: "claude-fable-5" },
+			to: { model: "claude-opus-4-8" },
+			trigger: { type: "refusal", category: "cyber" },
+		};
+		const first = assistantMessage(
+			[
+				{ type: "toolCall", id: "toolu_pre", name: "pre_tool", arguments: {} },
+				{ type: "providerNative", subtype: "fallback", raw: fallbackBlock },
+				{ type: "thinking", thinking: "served", thinkingSignature: "sig_post" },
+			],
+			{ stopReason: "stop", model: "claude-fable-5" },
+		);
+		const second = assistantMessage(
+			[
+				{ type: "toolCall", id: "toolu_other", name: "other_tool", arguments: {} },
+				{ type: "providerNative", subtype: "server_tool_use", raw: pendingUse },
+			],
+			{ stopReason: "toolUse", model: "claude-fable-5" },
+		);
+		const tools = [
+			{ name: "pre_tool", description: "Used by the discarded call.", parameters: Type.Object({}) },
+			{ name: "other_tool", description: "Used by the surviving call.", parameters: Type.Object({}) },
+			{ name: "deferred_x", description: "Registered twice.", parameters: Type.Object({}) },
+		];
+
+		const payload = await capturePayload(
+			model,
+			[
+				{ role: "user", content: "hello", timestamp: 1 },
+				first,
+				{
+					role: "toolResult",
+					toolCallId: "toolu_pre",
+					toolName: "pre_tool",
+					content: [{ type: "text", text: "discarded" }],
+					isError: false,
+					addedToolNames: ["deferred_x"],
+					timestamp: 2,
+				},
+				second,
+				{
+					role: "toolResult",
+					toolCallId: "toolu_other",
+					toolName: "other_tool",
+					content: [{ type: "text", text: "surviving" }],
+					isError: false,
+					addedToolNames: ["deferred_x"],
+					timestamp: 3,
+				},
+			],
+			undefined,
+			{ tools, modelCompat: { supportsToolReferences: true } },
+		);
+
+		// The surviving result emits the reference (sibling text closes the turn),
+		// so the pending use of that turn must drop.
+		const assistants = (payload.messages ?? []).filter((message) => message.role === "assistant");
+		expect(assistants[1]?.content).toEqual([{ type: "tool_use", id: "toolu_other", name: "other_tool", input: {} }]);
+		const users = (payload.messages ?? []).filter((message) => message.role === "user");
+		expect(JSON.stringify(users.map((message) => message.content))).toContain("tool_reference");
+	});
+
 	// The mirror image: a result block whose `server_tool_use` never made it into
 	// the persisted turn is equally unpairable, so it must be dropped while the
 	// paired blocks in the same message replay verbatim.

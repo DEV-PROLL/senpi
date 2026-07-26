@@ -550,6 +550,7 @@ function collectProviderNativeToolPairing(
 	model: Model<"anthropic-messages">,
 	deferredToolNames: ReadonlySet<string>,
 	normalizeToolName: (name: string) => string,
+	discardedFallbackToolCallIds: ReadonlySet<string>,
 ): ProviderNativeToolPairing {
 	const resolvedUseIds = new Set<string>();
 	const validResultIds = new Set<string>();
@@ -585,6 +586,9 @@ function collectProviderNativeToolPairing(
 			continue;
 		}
 		if (message.role === "toolResult") {
+			// Conversion drops a discarded pre-fallback result without touching
+			// loadedToolNames, so it must not load the name here either.
+			if (discardedFallbackToolCallIds.has(message.toolCallId)) continue;
 			// convertToolResult emits sibling text after the tool_result blocks only
 			// for names that survive the deferred/loaded filter, so only those names
 			// close the turn; a stale or already-loaded name leaves the result plain
@@ -1939,6 +1943,7 @@ function convertMessages(
 		model,
 		deferredToolNames,
 		normalizeToolName,
+		discardedFallbackToolCallIds,
 	);
 
 	for (let i = 0; i < transformedMessages.length; i++) {
