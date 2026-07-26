@@ -29,6 +29,7 @@ export interface EvalDetachedCellSnapshot {
 	readonly state: EvalDetachedCellState;
 	readonly outputTail: string;
 	readonly result: AgentToolResult<EvalToolDetails> | undefined;
+	readonly stateRetained: boolean | undefined;
 }
 
 export interface EvalDetachedCellNotification {

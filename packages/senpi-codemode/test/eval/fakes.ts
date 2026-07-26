@@ -2,7 +2,7 @@ import { DEFAULT_COMPACTION_SETTINGS, type ExtensionContext } from "@code-yeongy
 import { createInMemoryExtensionSessionSettings } from "../../../coding-agent/test/helpers/extension-session-settings.ts";
 import type { KernelToHostMessage } from "../../src/bridge/protocol.ts";
 import type { EvalKernel, EvalKernelManager } from "../../src/tool/eval-tool.ts";
-import type { EvalKernelRunInput } from "../../src/tool/types.ts";
+import type { EvalKernelRunInput, KernelInterruptHandle } from "../../src/tool/types.ts";
 
 type KernelResult = Extract<KernelToHostMessage, { type: "result" }>;
 

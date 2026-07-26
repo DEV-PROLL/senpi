@@ -2,7 +2,13 @@ import type { AgentToolResult } from "@code-yeongyu/senpi";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostToKernelMessage, KernelToHostMessage } from "../src/bridge/protocol.ts";
 import { createEvalTool } from "../src/tool/eval-tool.ts";
-import type { EvalKernel, EvalKernelManager, EvalKernelRunInput, ExecuteTool, KernelInterruptHandle } from "../src/tool/types.ts";
+import type {
+	EvalKernel,
+	EvalKernelManager,
+	EvalKernelRunInput,
+	ExecuteTool,
+	KernelInterruptHandle,
+} from "../src/tool/types.ts";
 import { Deferred, fakeExtensionContext } from "./eval/fakes.ts";
 
 type EvalResult = Extract<KernelToHostMessage, { type: "result" }>;

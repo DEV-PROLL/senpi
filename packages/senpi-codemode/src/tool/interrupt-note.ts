@@ -32,7 +32,8 @@ export async function describeTimeoutState(
 	if (retained === undefined) error.message = fallbackTimeoutMessage(error.message);
 	else if (retained)
 		error.message = `${error.message} The kernel remains running; its existing variables are preserved.`;
-	else error.message = `${error.message} The kernel was unresponsive and restarted; variables from earlier cells are lost.`;
+	else
+		error.message = `${error.message} The kernel was unresponsive and restarted; variables from earlier cells are lost.`;
 	return error;
 }
 
@@ -49,13 +50,9 @@ const LANGUAGE_LABEL: Record<EvalLanguage, string> = {
  *
  * Returns undefined when there is nothing truthful to add (no interrupt ran).
  */
-export function interruptionStateNote(
-	language: EvalLanguage,
-	stateRetained: boolean | undefined,
-): string | undefined {
+export function interruptionStateNote(language: EvalLanguage, stateRetained: boolean | undefined): string | undefined {
 	if (stateRetained === undefined) return undefined;
 	const label = LANGUAGE_LABEL[language];
-	if (stateRetained)
-		return `${label} was interrupted and remains running; its existing variables are preserved.`;
+	if (stateRetained) return `${label} was interrupted and remains running; its existing variables are preserved.`;
 	return `${label} was unresponsive to interrupt and was restarted; variables from earlier cells are lost.`;
 }
