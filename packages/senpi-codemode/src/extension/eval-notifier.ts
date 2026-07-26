@@ -33,9 +33,8 @@ export class EvalNotifier implements EvalDetachedCellNotifier {
 		const pending = cells.filter((cell) => !this.#notified.has(cell.cellId));
 		if (pending.length === 0) return;
 		for (const cell of pending) this.#notified.add(cell.cellId);
-		this.#deps.sendUserMessage(
-			pending.map((cell) => cell.content).join("\n\n"),
-			{ deliverAs: mode === "wake" ? "steer" : "followUp" },
-		);
+		this.#deps.sendUserMessage(pending.map((cell) => cell.content).join("\n\n"), {
+			deliverAs: mode === "wake" ? "steer" : "followUp",
+		});
 	}
 }

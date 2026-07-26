@@ -109,7 +109,9 @@ describe("eval detached cells", () => {
 			}),
 		]);
 		expect(recorder.notices[0]?.content).toContain("42");
-		expect(recorder.notices[0]?.content).toContain("Kernel state updated - variables are available to the next eval cell.");
+		expect(recorder.notices[0]?.content).toContain(
+			"Kernel state updated - variables are available to the next eval cell.",
+		);
 		expect(manager.busyFor("js")).toBeUndefined();
 	});
 
@@ -126,7 +128,13 @@ describe("eval detached cells", () => {
 		await detach(tool, js, "busy-js");
 
 		await expect(
-			tool.execute("blocked-js", { language: "js", code: "sideEffect()" }, undefined, undefined, interactiveContext()),
+			tool.execute(
+				"blocked-js",
+				{ language: "js", code: "sideEffect()" },
+				undefined,
+				undefined,
+				interactiveContext(),
+			),
 		).rejects.toThrow(/busy running detached cell busy-js[\s\S]*still computing/u);
 		await expect(
 			tool.execute("py-cell", { language: "py", code: "answer = 42" }, undefined, undefined, interactiveContext()),
@@ -148,7 +156,13 @@ describe("eval detached cells", () => {
 		]);
 
 		await detach(tool, py, "py-detached", "py");
-		const peek = await tool.execute("peek-py", { action: "peek", cell_id: "py-detached" }, undefined, undefined, interactiveContext());
+		const peek = await tool.execute(
+			"peek-py",
+			{ action: "peek", cell_id: "py-detached" },
+			undefined,
+			undefined,
+			interactiveContext(),
+		);
 		expect(textOf(peek)).toContain("x = 42");
 		const stoppedPython = await tool.execute(
 			"stop-py",
@@ -224,7 +238,13 @@ describe("eval detached cells", () => {
 		const stopKernel = new FakeKernel([]);
 		const stopTool = createTool(stopManager, [["js", stopKernel]]);
 		await detach(stopTool, stopKernel, "stop-wins");
-		await stopTool.execute("stop", { action: "stop", cell_id: "stop-wins" }, undefined, undefined, interactiveContext());
+		await stopTool.execute(
+			"stop",
+			{ action: "stop", cell_id: "stop-wins" },
+			undefined,
+			undefined,
+			interactiveContext(),
+		);
 		stopKernel.emit(result("stop-wins", "late"));
 		await stopManager.flushNotifications();
 		expect(stopRecorder.notices).toHaveLength(1);

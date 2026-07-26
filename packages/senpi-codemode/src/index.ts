@@ -5,6 +5,7 @@ import { CodeModeSessionRuntime } from "./codemode/runtime.ts";
 import { type CodeModeTool, createCodeModeTools, isGptCodeModeModel } from "./codemode/tools.ts";
 import { type CompletionRequest, type CompletionResult, createCompletionHandler } from "./completion/handler.ts";
 import { defaultCodemodeSettings } from "./config/settings.ts";
+import { EvalNotifier } from "./extension/eval-notifier.ts";
 import {
 	createExecuteTool,
 	createRuntime,
@@ -12,7 +13,6 @@ import {
 	type SessionRuntime,
 } from "./extension/runtime-factory.ts";
 import type { CodemodeSessionManager, CreateCodemodeSessionManagerOptions } from "./extension/session-manager.ts";
-import { EvalNotifier } from "./extension/eval-notifier.ts";
 import { SessionManagerProxy } from "./extension/session-manager-proxy.ts";
 import { EvalDetachedCellManager } from "./tool/detached-cell-manager.ts";
 import { createEvalTool } from "./tool/eval-tool.ts";

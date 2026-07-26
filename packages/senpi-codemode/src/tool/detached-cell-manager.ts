@@ -136,7 +136,9 @@ export class EvalDetachedCellManager {
 
 	async dispose(): Promise<void> {
 		const detached = [...this.#detachedByLanguage.values()];
-		await Promise.allSettled(detached.map(async (cell) => await this.stop(cell.cellId, "Session ended; detached eval cell cancelled")));
+		await Promise.allSettled(
+			detached.map(async (cell) => await this.stop(cell.cellId, "Session ended; detached eval cell cancelled")),
+		);
 		await this.flushNotifications();
 	}
 
@@ -150,7 +152,8 @@ export class EvalDetachedCellManager {
 		cell.state = next;
 		if (next !== "running" && next !== "detached") cell.terminal.resolve(this.#snapshot(cell));
 		if (cell.wasDetached && next !== "detached") {
-			if (this.#detachedByLanguage.get(cell.input.language) === cell) this.#detachedByLanguage.delete(cell.input.language);
+			if (this.#detachedByLanguage.get(cell.input.language) === cell)
+				this.#detachedByLanguage.delete(cell.input.language);
 			this.#queueNotification(cell);
 		}
 		return true;
@@ -254,7 +257,10 @@ function errorResult(cell: ManagedCell, error: Error): AgentToolResult<EvalToolD
 function notificationBody(cell: EvalDetachedCellSnapshot): string {
 	const outcome = cell.state === "completed" ? "completed" : cell.state === "cancelled" ? "cancelled" : "failed";
 	const resultText =
-		cell.result?.content.filter((part) => part.type === "text").map((part) => part.text).join("\n") ?? cell.outputTail;
+		cell.result?.content
+			.filter((part) => part.type === "text")
+			.map((part) => part.text)
+			.join("\n") ?? cell.outputTail;
 	const stateNote =
 		cell.state === "cancelled" && cell.language === "js"
 			? "JavaScript worker was restarted; VM state was lost."
@@ -271,7 +277,10 @@ function notificationBody(cell: EvalDetachedCellSnapshot): string {
 function notificationPreview(cell: EvalDetachedCellSnapshot): string {
 	const outcome = cell.state === "completed" ? "completed" : cell.state === "cancelled" ? "cancelled" : "failed";
 	const resultText =
-		cell.result?.content.filter((part) => part.type === "text").map((part) => part.text).join("\n") ?? cell.outputTail;
+		cell.result?.content
+			.filter((part) => part.type === "text")
+			.map((part) => part.text)
+			.join("\n") ?? cell.outputTail;
 	const stateNote =
 		cell.state === "cancelled" && cell.language === "js"
 			? "JavaScript worker was restarted; VM state was lost."

@@ -1,5 +1,5 @@
 import type { AgentToolResult, AgentToolUpdateCallback } from "@code-yeongyu/senpi";
-import { Type, type TUnsafe } from "typebox";
+import { type TUnsafe, Type } from "typebox";
 import type { HostToKernelMessage, KernelToHostMessage } from "../bridge/protocol.ts";
 import type { TruncationMeta } from "../output/output-meta.ts";
 
@@ -34,7 +34,9 @@ const fullEvalInputSchema = Type.Object({
 			description: "Defaults to run. peek and stop require cell_id.",
 		}),
 	),
-	language: Type.Optional(Type.Union([Type.Literal("py"), Type.Literal("js"), Type.Literal("rb"), Type.Literal("jl")])),
+	language: Type.Optional(
+		Type.Union([Type.Literal("py"), Type.Literal("js"), Type.Literal("rb"), Type.Literal("jl")]),
+	),
 	code: Type.Optional(Type.String({ description: "Cell body, verbatim." })),
 	title: Type.Optional(Type.String({ description: "Short transcript label." })),
 	timeout: Type.Optional(Type.Number({ minimum: 1, description: "Timeout in seconds." })),
@@ -70,7 +72,8 @@ export function createEvalInputSchema(enabled: EnabledEvalLanguages): EvalInputS
 			timeout: Type.Optional(Type.Number({ minimum: 1, description: "Timeout in seconds." })),
 			on_timeout: Type.Optional(
 				Type.Union([Type.Literal("detach"), Type.Literal("error")], {
-					description: "Timeout behavior. Interactive sessions detach by default; print/json sessions error by default.",
+					description:
+						"Timeout behavior. Interactive sessions detach by default; print/json sessions error by default.",
 				}),
 			),
 			reset: Type.Optional(Type.Boolean({ description: "Reset this language kernel before running." })),

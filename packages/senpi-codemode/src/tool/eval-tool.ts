@@ -264,7 +264,6 @@ async function runEvalCell(
 		status: "pending",
 	};
 	const cell = cellManager.create(invocation.cellId, invocation.input);
-	let handler: CellHandler | undefined;
 	let execution: CellExecution;
 	execution = new CellExecution({
 		callerSignal: invocation.signal,
@@ -283,9 +282,16 @@ async function runEvalCell(
 			bridgeAbortController.abort(error);
 		},
 	});
-	const running = executeCell(options, invocation, cellManager, cell, state, execution, bridgeContext, bridgeAbortController, (value) => {
-		handler = value;
-	});
+	const running = executeCell(
+		options,
+		invocation,
+		cellManager,
+		cell,
+		state,
+		execution,
+		bridgeContext,
+		bridgeAbortController,
+	);
 	const finalized = running.then(
 		(result) => {
 			cellManager.complete(cell, result);
@@ -313,7 +319,6 @@ async function executeCell(
 	execution: CellExecution,
 	bridgeContext: ExtensionContext,
 	bridgeAbortController: AbortController,
-	setHandler: (handler: CellHandler) => void,
 ): Promise<AgentToolResult<EvalToolDetails>> {
 	let handler: CellHandler | undefined;
 	try {
@@ -345,7 +350,6 @@ async function executeCell(
 				: { artifactPath: join(options.artifactsDir, `eval-${randomUUID()}.log`) }),
 			...(options.imageResizer === undefined ? {} : { imageResizer: options.imageResizer }),
 		});
-		setHandler(handler);
 		cellManager.markRunning(cell, kernel, () => state.output);
 		if ("setContext" in options.kernelManager && typeof options.kernelManager.setContext === "function") {
 			options.kernelManager.setContext(bridgeContext);
@@ -374,7 +378,8 @@ function requestFrom(params: unknown): EvalToolRequest {
 			throw new TypeError(`eval action "${value.action}" requires cell_id`);
 		return { action: value.action, cell_id: value.cell_id };
 	}
-	if (value.action !== undefined && value.action !== "run") throw new TypeError(`Unknown eval action "${String(value.action)}"`);
+	if (value.action !== undefined && value.action !== "run")
+		throw new TypeError(`Unknown eval action "${String(value.action)}"`);
 	if (!isEvalLanguage(value.language)) throw new TypeError("eval run requires language");
 	if (typeof value.code !== "string") throw new TypeError("eval run requires code");
 	if (value.on_timeout !== undefined && value.on_timeout !== "detach" && value.on_timeout !== "error")
@@ -402,7 +407,8 @@ async function executeControl(
 	cellManager: EvalDetachedCellManager,
 	request: EvalControlInput,
 ): Promise<AgentToolResult<EvalToolDetails>> {
-	const snapshot = request.action === "stop" ? await cellManager.stop(request.cell_id) : cellManager.peek(request.cell_id);
+	const snapshot =
+		request.action === "stop" ? await cellManager.stop(request.cell_id) : cellManager.peek(request.cell_id);
 	return snapshotResult(snapshot);
 }
 
