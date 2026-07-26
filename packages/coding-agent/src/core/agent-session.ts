@@ -4329,12 +4329,17 @@ export class AgentSession {
 			if (reason === "overflow" && this._autoCompactionAbortController === autoCompactionController) {
 				this._overflowRecoveryAttempted = false;
 			}
-			if (!this._ownsCompactionController(autoCompactionController, "auto")) return false;
+			// A synchronous compaction_start listener can supersede this controller with a new
+			// operation, which then owns its own start/end lifecycle; publishing another terminal
+			// event here would be stale. A listener can instead abort this very controller, and
+			// that still needs a terminal event: consumers open UI state on compaction_start and
+			// close it only on compaction_end.
+			if (this._autoCompactionAbortController !== autoCompactionController) return false;
 			this._emit({
 				type: "compaction_end",
 				reason,
 				result: undefined,
-				aborted: false,
+				aborted: autoCompactionController.signal.aborted,
 				willRetry: false,
 			});
 			return false;

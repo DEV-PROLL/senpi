@@ -66,7 +66,9 @@ Skill commands are resource-loader entries rather than extension commands, and t
   operation begins. Feedback-only aborts publish one terminal event, and accepted completions publish their terminal
   event before `session_compact` handlers can begin a fresh operation.
 - Owned automatic compaction attempts publish balanced start/end events when execution cannot begin. Ownership is
-  rechecked after start so synchronous listener supersession cannot publish a stale terminal event.
+  rechecked after start: a synchronous listener that supersedes the controller with a new operation silences the stale
+  terminal event (the new owner publishes its own lifecycle), while a listener that aborts the same controller still
+  receives an `aborted` terminal event so UI state opened on `compaction_start` is always closed.
 - Durable append now rejects a generation whose message revision or agent-message snapshot changed during preparation
   or summary generation (`stale-revision`), preserving intervening context without duplicate replay.
 - Required compaction uses one provider-admission gate for normal prompts, extension-triggered turns, and every next

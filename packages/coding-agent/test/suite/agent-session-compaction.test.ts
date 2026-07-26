@@ -481,7 +481,7 @@ describe("AgentSession compaction characterization", () => {
 		]);
 	});
 
-	it("does not publish a stale preflight end after a start listener aborts auto-compaction", async () => {
+	it("publishes an aborted preflight end after a start listener aborts auto-compaction", async () => {
 		const harness = await createHarness({ withConfiguredAuth: false });
 		harnesses.push(harness);
 		harness.session.subscribe((event) => {
@@ -492,8 +492,18 @@ describe("AgentSession compaction characterization", () => {
 
 		await runAutoCompaction(harness.session, "threshold", false);
 
+		// Consumers open UI state (progress indicator, Escape override) on compaction_start and
+		// close it only on compaction_end, so a same-controller abort must stay balanced.
 		expect(harness.eventsOfType("compaction_start")).toEqual([{ type: "compaction_start", reason: "threshold" }]);
-		expect(harness.eventsOfType("compaction_end")).toHaveLength(0);
+		expect(harness.eventsOfType("compaction_end")).toEqual([
+			expect.objectContaining({
+				type: "compaction_end",
+				reason: "threshold",
+				result: undefined,
+				aborted: true,
+				willRetry: false,
+			}),
+		]);
 	});
 
 	it("does not consume overflow recovery when a start listener aborts preflight auto-compaction", async () => {
@@ -529,7 +539,10 @@ describe("AgentSession compaction characterization", () => {
 		const overflowStarts = harness.eventsOfType("compaction_start").filter((event) => event.reason === "overflow");
 		const overflowEnds = harness.eventsOfType("compaction_end").filter((event) => event.reason === "overflow");
 		expect(overflowStarts).toHaveLength(2);
-		expect(overflowEnds).toHaveLength(0);
+		expect(overflowEnds).toEqual([
+			expect.objectContaining({ result: undefined, aborted: true, willRetry: false }),
+			expect.objectContaining({ result: undefined, aborted: true, willRetry: false }),
+		]);
 		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(0);
 	});
 
