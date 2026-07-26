@@ -33,6 +33,7 @@ import type {
 import { isVideoMimeType } from "../types.ts";
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
+import { shortHash } from "../utils/hash.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
@@ -1634,6 +1635,21 @@ function buildParams(
 		}
 	}
 
+	// Anthropic rejects a thinking-enabled request whose final assistant turn
+	// contains tool_use but does not begin with a thinking block. Cross-model
+	// histories lose their signed thinking blocks (demoted to text or dropped),
+	// so degrade thinking for this request instead of failing every turn.
+	if (
+		params.thinking &&
+		params.thinking.type !== "disabled" &&
+		compat.supportsDisabledThinking &&
+		model.thinkingLevelMap?.off !== null &&
+		finalAssistantTurnStartsWithToolUse(params.messages)
+	) {
+		params.thinking = { type: "disabled" };
+		delete (params as { output_config?: unknown }).output_config;
+	}
+
 	if (options?.metadata) {
 		const userId = options.metadata.user_id;
 		if (typeof userId === "string") {
@@ -1668,9 +1684,33 @@ function applyExtraBodyToAnthropicParams(
 	}
 }
 
-// Normalize tool call IDs to match Anthropic's required pattern and length
+// Normalize tool call IDs to match Anthropic's required pattern and length.
+// Long foreign ids (OpenAI Responses ids run 450+ chars) must not collide after
+// truncation, so over-long ids keep a readable prefix plus a hash of the full id.
+const TOOL_CALL_ID_MAX_LENGTH = 64;
 function normalizeToolCallId(id: string): string {
-	return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+	const sanitized = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+	if (sanitized.length <= TOOL_CALL_ID_MAX_LENGTH) return sanitized;
+	return `${sanitized.slice(0, TOOL_CALL_ID_MAX_LENGTH - 14)}_${shortHash(id)}`.slice(0, TOOL_CALL_ID_MAX_LENGTH);
+}
+
+type AnthropicMessageParam = MessageCreateParamsStreaming["messages"][number];
+
+/**
+ * Whether the final assistant turn contains tool_use without a leading
+ * thinking/redacted_thinking block. Anthropic requires thinking-enabled
+ * requests to start that turn with a thinking block.
+ */
+function finalAssistantTurnStartsWithToolUse(messages: AnthropicMessageParam[]): boolean {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (message.role !== "assistant") continue;
+		if (!Array.isArray(message.content) || message.content.length === 0) return false;
+		const first = message.content[0];
+		if (first.type === "thinking" || first.type === "redacted_thinking") return false;
+		return message.content.some((block) => block.type === "tool_use");
+	}
+	return false;
 }
 
 function convertToolResult(

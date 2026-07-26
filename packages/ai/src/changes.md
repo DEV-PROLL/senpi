@@ -1,5 +1,35 @@
 # AI Source Changes
 
+## 2026-07-26 - Cross-model replay hardening (foreign signatures, id collisions, thinking turn shape)
+
+### What changed and why
+
+- `api/openai-responses-shared.ts`: `convertResponsesMessages()` and `backfillReasoningSignatures()` now parse
+  persisted reasoning signatures through a guarded `parseReasoningSignature()` that requires a JSON payload with
+  `type === "reasoning"`. Foreign providers store non-JSON markers (Kimi's `"reasoning_content"`) or opaque
+  payloads (Anthropic thinking signatures) in the same `thinkingSignature` field; when such a block reaches the
+  converter with same-model provenance (aliased/custom providers, corrupted session state), the previous
+  unguarded `JSON.parse` threw a client-side `SyntaxError` or leaked an invalid item to the API. Unparseable or
+  non-reasoning signatures now demote to plain assistant text (empty text is dropped), mirroring the cross-model
+  policy in `transformMessages`.
+- `api/anthropic-messages.ts` `normalizeToolCallId()`: over-long ids keep a readable prefix plus a `shortHash` of
+  the full id instead of blind 64-char prefix truncation. OpenAI Responses tool ids run 450+ chars, and two
+  distinct ids sharing a 64-char prefix previously collapsed into duplicate `tool_use` ids (Anthropic rejects
+  non-unique ids) with corrupted tool-result pairing.
+- `api/anthropic-messages.ts` `buildParams()`: when a thinking-enabled request's final assistant turn contains
+  `tool_use` but no leading thinking block — the normal outcome of replaying Kimi/OpenAI history, whose thinking
+  demotes to text or drops — thinking is degraded to `{ type: "disabled" }` for that request instead of failing
+  with Anthropic's "final assistant message must start with a thinking block" 400 on every turn.
+- `../test/openai-responses-foreign-signature.test.ts`, `../test/anthropic-cross-model-history.test.ts`: cover
+  Kimi/Anthropic signature demotion, genuine reasoning-item replay, long-id collision freedom, and the
+  thinking-degradation trigger and non-trigger.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/openai-responses-shared.ts` thinking/text branches of `convertResponsesMessages()` (text emission
+  is now a shared `pushAssistantText` closure) and `backfillReasoningSignatures()`.
+- LOW: `api/anthropic-messages.ts` `normalizeToolCallId()` and the thinking-config block of `buildParams()`.
+
 ## 2026-07-21 - OpenAI Responses provider-native completion reconciliation
 
 ### What changed and why
