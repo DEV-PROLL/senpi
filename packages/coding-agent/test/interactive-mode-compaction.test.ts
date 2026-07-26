@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Container, sanitizeTerminalLabel } from "@earendil-works/pi-tui";
+import { Container, sanitizeTerminalLabel, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { CompactionSummaryMessageComponent } from "../src/modes/interactive/components/compaction-summary-message.ts";
@@ -97,7 +97,7 @@ describe("InteractiveMode compaction events", () => {
 		fakeThis.autoCompactionLoader?.stop();
 	});
 
-	test("renders streamed compaction progress below the active loader", async () => {
+	test("bounds streamed compaction progress to the active status row", async () => {
 		const statusContainer = new Container();
 		const fakeThis = {
 			isInitialized: true,
@@ -130,15 +130,28 @@ describe("InteractiveMode compaction events", () => {
 			type: "compaction_start",
 			reason: "extension",
 		});
+
+		// Before any progress arrives the indicator must already be a single row so the
+		// composer does not shift when the preview appears.
+		const preProgressLines = statusContainer.children.flatMap((child) => child.render(40));
+		expect(preProgressLines).toHaveLength(1);
+
 		await handleEvent.call(fakeThis, {
 			type: "compaction_progress",
 			reason: "extension",
-			delta: "live summary chunk",
+			delta: `live\n${"summary chunk ".repeat(40)}`,
 		});
 
-		const rendered = stripAnsi(statusContainer.children.flatMap((child) => child.render(120)).join("\n"));
-		expect(rendered).toContain("Compacting context");
-		expect(rendered).toContain("live summary chunk");
+		const renderedLines = statusContainer.children.flatMap((child) => child.render(40));
+		const rendered = stripAnsi(renderedLines.join("\n"));
+		expect(renderedLines).toHaveLength(1);
+		expect(visibleWidth(renderedLines[0] ?? "")).toBeLessThanOrEqual(40);
+		expect(rendered).toContain("Compacting");
+		// The cancellation hint keeps priority over the streamed preview.
+		expect(rendered).toContain("to cancel");
+		// The preview shows the newest trailing columns, not the frozen opening words.
+		expect(rendered).toContain("chunk");
+		expect(rendered).not.toContain("live");
 
 		fakeThis.autoCompactionLoader?.stop();
 	});

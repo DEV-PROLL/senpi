@@ -82,6 +82,7 @@ These variables are read by Pi itself:
 | `PI_CACHE_RETENTION` | Set to `long` for extended provider prompt caching where supported |
 | `PI_SHARE_VIEWER_URL` | Override the base URL used by `/share` |
 | `PI_HARDWARE_CURSOR` | Set to `1` to show the hardware cursor; see [Terminal setup](terminal-setup.md) |
+| `SENPI_RECOVER_INSPECTOR_VM_IMPORT` | Set to `1` at process start to keep the TUI running when a Node Inspector (`node inspect` / `--inspect`) eval uses dynamic `import()`, which Node rejects with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`. Recovery applies only to that exact Inspector-originated rejection while an Inspector endpoint is active; all other uncaught errors remain fatal. Use `require()` or a target-side loader in Inspector evals instead |
 | `VISUAL`, `EDITOR` | External editor fallback when `externalEditor` is unset |
 | `HTTP_PROXY`, `HTTPS_PROXY` | Proxy outbound HTTP requests |
 

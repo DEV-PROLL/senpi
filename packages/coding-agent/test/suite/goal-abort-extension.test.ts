@@ -1,7 +1,7 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
-import { createGoal, readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
+import { createGoal, readGoal, updateGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import { goalStoreRef } from "../../src/core/extensions/builtin/goal/store-ref.ts";
 import type { GoalStatus } from "../../src/core/extensions/builtin/goal/types.ts";
 import { createHarness, type Harness } from "./harness.ts";
@@ -113,5 +113,34 @@ describe("goal abort lifecycle through the agent session", () => {
 		await harness.session.prompt("run normally");
 
 		expect(observed).toEqual([{ aborted: undefined, abortSource: undefined }]);
+		expect(observed).toEqual([{ aborted: undefined, abortSource: undefined }]);
+	});
+	it("resumes a blocked goal at before_agent_start and never via a continuation-style agent_start", async () => {
+		const statusesAtBeforeAgentStart: GoalStatus[] = [];
+		const harness = await createHarness({
+			persistSession: true,
+			extensionFactories: [
+				goalExtension,
+				(pi) => {
+					pi.on("before_agent_start", async (_event, ctx) => {
+						const goal = await readGoal(goalStoreRef(ctx.sessionManager, ctx.cwd));
+						if (goal) statusesAtBeforeAgentStart.push(goal.status);
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		await harness.session.bindExtensions({});
+		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
+		await createGoal(ref, "Wait for the user");
+		await updateGoal(ref, { status: "blocked", reason: "waiting on the user" });
+
+		harness.setResponses([fauxAssistantMessage("resumed and done")]);
+		await harness.session.prompt("user returns");
+
+		// The observation extension's before_agent_start runs AFTER goalExtension's (registration order),
+		// so it sees the post-resume status.
+		expect(statusesAtBeforeAgentStart).toEqual(["active"]);
+		expect((await readGoal(ref))?.status).toBe("active");
 	});
 });

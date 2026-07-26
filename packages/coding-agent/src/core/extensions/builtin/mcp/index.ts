@@ -16,6 +16,8 @@ import {
 } from "./skills.ts";
 import { reportMcpAsyncError, wrapAsync } from "./wrap.ts";
 
+const MCP_BUILTIN_EXTENSION_PATH = "<builtin:mcp>";
+
 export function createMcpExtension(service: McpService, sessionOwned = true): ExtensionFactory {
 	return (pi: ExtensionAPI): void => {
 		let attachPromise: Promise<void> | undefined;
@@ -149,11 +151,20 @@ export function createMcpExtension(service: McpService, sessionOwned = true): Ex
 			wrapAsync(
 				"mcp.session_shutdown",
 				async (event) => {
+					if (event.reason === "reload" && !sessionOwned) return;
 					await service.handleSessionShutdown(event);
-					// A classic extension instance can be reused by the test/legacy host
-					// after reload. Its singleton is intentionally refreshed for that next
-					// session; scoped factories keep their closed instance.
-					if (!sessionOwned && event.reason === "reload" && service.isDisposed()) service = getMcpService();
+				},
+				sink,
+			),
+		);
+		pi.on(
+			"session_extensions_removed",
+			wrapAsync(
+				"mcp.session_extensions_removed",
+				async (event) => {
+					if (event.removed.some((extension) => extension.path === MCP_BUILTIN_EXTENSION_PATH)) {
+						await service.dispose("reload");
+					}
 				},
 				sink,
 			),

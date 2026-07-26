@@ -16,6 +16,60 @@
 
 - LOW: the `chrome` constructor option and the `this.chrome ?` branches in `interactive-mode.ts`; the `grok/` directory is additive.
 
+## Inspector VM-import rejection recovery (2026-07-24)
+
+### What changed
+
+- With `SENPI_RECOVER_INSPECTOR_VM_IMPORT=1` set at process start, interactive mode keeps running when an active Node
+  Inspector evaluation creates the exact `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` unhandled rejection from an
+  `<anonymous>` timer callback. Recovery remains disabled by default and is documented in
+  `../../../docs/environment-variables.md`.
+- The TUI shows guidance to use `require()` or a target-side loader.
+- `cli-main.ts` installs the recovery seam before the asynchronous bootstrap, so a rejection fired while paused at an
+  `--inspect-brk` breakpoint (before `registerSignalHandlers()` runs) is also recovered; the TUI warning is deferred
+  until the handler registration consumes the pending recovery count.
+- Crash-policy inspection is non-throwing: hostile rejection values with throwing `has` traps or `code`/`stack`
+  getters are classified as non-recoverable instead of terminating the process inside the uncaughtException handler.
+- Application-owned `evalmachine.<anonymous>` failures and every unrelated uncaught exception retain the existing
+  terminal restoration and exit-1 behavior.
+
+### Why
+
+- Node's Inspector evaluator does not provide a dynamic-import callback. A delayed `import()` from `node inspect exec`
+  previously surfaced as a process-wide uncaught exception and terminated an otherwise healthy debugging session.
+
+### Why extension system couldn't handle this
+
+- The rejection reaches the process-wide fatal handler before extension-level tool or event hooks can intercept it.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` around `uncaughtCrash()` and `registerSignalHandlers()`.
+
+## bounded compaction progress row (2026-07-24)
+
+### What changed
+
+- `components/status-indicator.ts`: the combined compaction spinner, status, and streamed preview is truncated to the
+  actual terminal width. The status label (including its cancellation hint) is allocated first and the preview only
+  receives the leftover columns; when a preview appears, the reason-specific label collapses to the shortest form that
+  still shows the hint. The preview keeps the newest trailing columns of the accumulated summary, and the indicator is
+  a single row both before and after the first progress event.
+- `../../../test/interactive-mode-compaction.test.ts`: pins a hostile multiline, 600-column progress update to one
+  rendered row no wider than the requested terminal width, with the cancellation hint retained and the newest streamed
+  text (not the frozen opening words) visible.
+
+### Why
+
+- Long streamed summaries could wrap the otherwise single-row lifecycle indicator, push the composer upward, and make
+  previous output appear erased as the terminal viewport remapped. A fixed half-width preview reservation could also
+  starve the `esc to cancel` hint out of the row, head-first truncation froze the preview on the opening words of the
+  summary, and the empty-preview state rendered a second spacer row that shifted the composer when progress arrived.
+
+### Expected merge conflict zones
+
+- LOW: `components/status-indicator.ts` compaction progress rendering.
+
 ## accepted-only compaction queue transfer (2026-07-24)
 
 ### What changed

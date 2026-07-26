@@ -35,6 +35,19 @@
 - LOW: `utils/tool-call-id.ts`, the three adapter imports/call sites, and the thinking-config block of
   `api/anthropic-messages.ts` `buildParams()`.
 
+## 2026-07-26 - Retry transient Codex upstream websocket failures
+
+### What changed and why
+
+- `utils/retry.ts` classifies `upstream_unavailable` provider errors as transient so the existing bounded retry policy
+  retries Codex websocket proxy disconnects such as `ConnectionClosedOK`.
+- The retry classifier and coding-agent event-contract tests pin the exact reported error through the existing retry
+  lifecycle rather than introducing provider-specific retry behavior.
+
+### Expected merge conflict zones
+
+- LOW: `utils/retry.ts` transient transport error patterns.
+
 ## 2026-07-26 - Repair unpaired Anthropic server-tool blocks and let the pairing 400 retry
 
 ### What changed and why

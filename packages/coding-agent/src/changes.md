@@ -21,6 +21,13 @@
 - Root cause of the omo `team_wait` starvation forensics: member self-poller injections via `pi.sendUserMessage(..., { deliverAs: "followUp" })` vanished without a trace when the fresh-prompt path threw, leaving no record in the session JSONL while RPC-path `steer`/`follow_up` commands (which bypass `prompt()`) landed normally.
 - Interactive `prompt()` behavior is unchanged: a rejected interactive prompt still drops the input and surfaces the error to the user (pinned by `test/suite/regressions/pre-prompt-compaction-no-continue.test.ts`).
 - Coverage: `test/suite/agent-session-extension-injection.test.ts` pins retention for followUp and steer injections, exact-once delivery after recovery through the post-run drain, and no double-queueing on the streaming accept path.
+
+## Reload-safe MCP preservation and extension-removal lifecycle event (2026-07-26)
+
+- `session_extensions_removed` is emitted on the old extension runner when a `/reload` or a session replacement (`/new`, `/resume`, `/fork`, import) rebuilds the extension set. Its payload is `{ type: "session_extensions_removed", reason: SessionShutdownEvent["reason"], removed: Array<{ path, resolvedPath }> }`, allowing an extension that did not survive the rebuild to release resources after the new settings and active builtin set are known.
+- Unchanged MCP servers now survive a classic `/reload`: the shared service reattaches and reconciles by config hash, preserving live connections while replacing changed servers and disposing removed ones. Provider-scoped MCP services still dispose on reload because their factory creates a replacement instance.
+- If the MCP builtin itself is disabled during a reload or replacement, its removal event disposes the preserved classic service so stdio children cannot leak. For an otherwise wedged server, use `/mcp reconnect <name>` to force a fresh connection.
+
 ## Same-model-first transient retries and capped server waits (2026-07-26)
 
 ### What changed
@@ -66,6 +73,33 @@
 ### Expected merge conflict zones on next upstream sync
 
 - LOW: removal-only changes across fork-owned legacy surfaces.
+
+## Inspector handoff and VM-import crash isolation (2026-07-24)
+
+### What changed
+
+- The launcher closes an inherited startup Inspector endpoint immediately before spawning `cli-main`, allowing the
+  child process to bind the same configured endpoint instead of failing with `address already in use`.
+- With `SENPI_RECOVER_INSPECTOR_VM_IMPORT=1` set at process start, interactive mode recovers only the exact unhandled
+  Inspector-eval rejection produced when `import()` runs without a VM dynamic-import callback. Recovery is fail-closed
+  by default; application-owned VM failures and unrelated uncaught exceptions remain fatal.
+
+### Why
+
+- The launcher and child previously inherited one fixed Inspector port, so developers attached to the wrapper rather
+  than the TUI process. Running asynchronous `import()` in Node's Inspector VM then terminated the attached process.
+  Node exposes no non-spoofable Inspector provenance on the global exception, so continuing requires an explicit
+  developer opt-in rather than weakening the default fatal boundary.
+
+### Why extension system couldn't handle this
+
+- Inspector ownership is decided before extensions load, and process-wide uncaught-exception handling belongs to the
+  host's terminal-restoration boundary.
+
+### Expected merge conflict zones
+
+- LOW: `cli.ts` immediately before the `cli-main` spawn.
+- LOW: `modes/interactive/interactive-mode.ts` uncaught-exception handler.
 
 ## Reload measurement and redundant-work removal (2026-07-26)
 
