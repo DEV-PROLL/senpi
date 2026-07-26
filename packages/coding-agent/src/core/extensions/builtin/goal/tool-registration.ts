@@ -22,12 +22,11 @@ export function registerGoalTools(pi: ExtensionAPI, deps: GoalToolRegistrationDe
 		name: "create_goal",
 		label: "Create Goal",
 		description:
-			"Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks.\nObjectives are limited to 4,000 characters. For longer instructions, put the full objective in a file and refer to that file.\nReplaces the current goal when it is complete and archives it; fails if an unfinished goal exists.",
+			"Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks.\nLong objectives are accepted; the full text is saved automatically when it exceeds the inline store limit.\nReplaces the current goal when it is complete and archives it; fails if an unfinished goal exists.",
 		parameters: Type.Object(
 			{
 				objective: Type.String({
-					description:
-						"Required. The concrete objective to start pursuing. Limit: 4,000 characters. For longer instructions, put the full objective in a file and refer to that file.",
+					description: "Required objective. Long objective text is preserved automatically.",
 				}),
 			},
 			{ additionalProperties: false },

@@ -81,10 +81,12 @@ describe("goal extension contract (budget-free)", () => {
 		await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 	});
 
-	it("registers the three codex-aligned tools and the /goal command", () => {
+	it("registers the three codex-aligned tools and Ultragoal commands", () => {
 		const { tools, commands } = createGoalHarness();
 		expect([...tools.keys()].sort()).toEqual(["create_goal", "get_goal", "update_goal"]);
+		expect(commands.has("ultragoal")).toBe(true);
 		expect(commands.has("goal")).toBe(true);
+		expect(commands.get("ultragoal")?.handler).toBe(commands.get("goal")?.handler);
 	});
 
 	it("exposes a budget-free create_goal schema (objective only)", () => {
@@ -104,13 +106,13 @@ describe("goal extension contract (budget-free)", () => {
 		expect(serialized).not.toContain("budget");
 	});
 
-	it("exposes blocked updates with limit-aware goal guidance and no budget language", () => {
+	it("exposes blocked updates without a user-visible objective cap or budget language", () => {
 		const { tools } = createGoalHarness();
 		const create = tools.get("create_goal");
 		const update = tools.get("update_goal");
 		const serialized = JSON.stringify(update).toLowerCase();
-		expect(create?.description).toMatch(/4,000.*file/i);
-		expect(JSON.stringify(create?.parameters)).toMatch(/4,000.*file/i);
+		expect(create?.description).not.toMatch(/4,000|character limit/i);
+		expect(JSON.stringify(create?.parameters)).not.toMatch(/4,000|character limit/i);
 		expect(create?.description).toMatch(/complete.*archive.*unfinished/i);
 		expect(serialized).toContain("complete");
 		expect(serialized).toContain("blocked");
@@ -276,10 +278,10 @@ describe("goal extension contract (budget-free)", () => {
 		await tools.get("create_goal")?.execute("c1", { objective: "Ship it live" }, undefined, undefined, ctx);
 		// The ticker syncs immediately on the active goal, so the footer already
 		// carries the parenthesized live elapsed time rather than a frozen label.
-		expect(statuses.at(-1)).toBe("Pursuing goal (0s)");
+		expect(statuses.at(-1)).toBe("Pursuing ultragoal (0s)");
 
 		// Clearing stops the ticker interval and wipes the footer segment.
-		await commands.get("goal")?.handler("clear", ctx);
+		await commands.get("ultragoal")?.handler("clear", ctx);
 		expect(statuses.at(-1)).toBeUndefined();
 	});
 });

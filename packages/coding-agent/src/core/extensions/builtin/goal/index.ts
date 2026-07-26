@@ -12,7 +12,7 @@ import { TurnUsageTracker } from "./turn-usage.ts";
 import type { Goal, GoalAccountingMode, GoalStoreRef } from "./types.ts";
 import { updateGoalUi } from "./ui.ts";
 
-const RESUME_GOAL_CHOICE = "Resume goal";
+const RESUME_GOAL_CHOICE = "Resume ultragoal";
 const LEAVE_GOAL_PAUSED_CHOICE = "Leave paused";
 const STALE_EXTENSION_CONTEXT_ERROR_PREFIX = "This extension ctx is stale after session replacement or reload.";
 
@@ -149,7 +149,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			return false;
 		}
 
-		const choice = await ctx.ui.select(`Resume paused goal?\nGoal: ${goal.objective}`, [
+		const choice = await ctx.ui.select(`Resume paused ultragoal?\nObjective: ${goal.objective}`, [
 			RESUME_GOAL_CHOICE,
 			LEAVE_GOAL_PAUSED_CHOICE,
 		]);
@@ -158,7 +158,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		const resumed = await updateGoal(goalStoreRef(ctx), { status: "active" }, "user");
 		beginAgentGoalAccounting(resumed);
 		refreshGoalUi(ctx, resumed);
-		ctx.ui.notify(`Goal ${goalStatusLabel(resumed.status)}\n${formatGoalForTool(resumed)}`, "info");
+		ctx.ui.notify(`Ultragoal ${goalStatusLabel(resumed.status)}\n${formatGoalForTool(resumed)}`, "info");
 		queueGoalContinuation(pi, ctx, resumed);
 		return true;
 	}

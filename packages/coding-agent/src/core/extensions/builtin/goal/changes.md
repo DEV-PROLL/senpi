@@ -6,6 +6,30 @@ Persistent per-thread goal tracking as an in-tree builtin. Ports the standalone
 codex-aligned tool naming, and budget-driven behavior removed. An optional
 `tokenBudget` is retained only as inert persistence/wire compatibility metadata.
 
+## Sigrid-style Ultragoal workflow (2026-07-26)
+
+### What changed
+- `/ultragoal` is now the primary command; `/goal` remains a same-handler compatibility alias.
+- Continuation prompts require durable todo decomposition for objectives with at least three distinct steps,
+  dependency ordering, evidence checkpoints, full-objective reconstruction after compaction, and a
+  prompt-to-artifact completion audit.
+- Blocked status requires the same external condition to be confirmed across three consecutive Ultragoal turns,
+  with attempted approaches, concrete failures, and the required external action recorded.
+- User-facing status and command notifications use Ultragoal branding.
+- Tool descriptions no longer claim that objective input is capped at 4,000 characters; existing spill-file
+  persistence continues to preserve the full text automatically.
+
+### Why
+- Long, multi-turn work needs an explicit execution and verification discipline instead of a generic continuation
+  nudge. The existing goal state machine already owns persistence, app-server compatibility, usage accounting, and
+  lifecycle continuation, so strengthening it avoids a second competing state machine.
+
+### Expected merge conflict zones on next upstream sync
+- MEDIUM in `prompt.ts`, `command-registration.ts`, `tool-registration.ts`, and their focused tests if the
+  standalone `pi-goal` command or prompt text changes.
+- LOW in `ui.ts`, `index.ts`, `elapsed-ticker.ts`, public documentation, and builtin inventory text.
+- NONE in the persisted goal shape, app-server goal wire contract, lifecycle gating, or usage accounting.
+
 ## App-server token budget compatibility metadata (2026-07-19)
 
 ### What changed

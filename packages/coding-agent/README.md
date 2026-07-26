@@ -195,9 +195,18 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/import <file>` | Import and resume a session from a JSONL file |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
 | `/reload` | Reload keybindings, extensions, skills, prompts, themes, and context files |
+| `/ultragoal [objective|pause|resume|clear]` | Run or manage a persistent, evidence-driven objective (`/goal` is a compatibility alias) |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
 | `/quit`, `/exit` | Quit pi |
+
+`/ultragoal <objective>` keeps Senpi working toward one persistent objective across
+continuation turns and compaction. Multi-step objectives use the builtin todo
+workflow, dependency ordering, and evidence checkpoints; completion requires a
+prompt-to-artifact audit, while blocked status requires repeated concrete failure
+evidence. Objectives are persisted per thread, including long objective text.
+Use `/ultragoal` to inspect the current objective and `/ultragoal pause`,
+`/ultragoal resume`, or `/ultragoal clear` to control it.
 
 ### Keyboard Shortcuts
 
