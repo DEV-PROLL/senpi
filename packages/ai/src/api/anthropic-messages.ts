@@ -507,43 +507,107 @@ function isAnthropicWebSearchReplayBlock(raw: unknown): boolean {
 	return raw.type === "server_tool_use" && raw.name === "web_search";
 }
 
-// Anthropic pairs server-side tool blocks inside a single assistant message: a
-// `server_tool_use` must be followed by its `*_tool_result`, and a result must
-// have its use. A stream that ends early — an abort, a dropped connection, or a
-// proxy that forwards the use but not the result — persists only one half. Every
-// later request replays it, so the API answers `400 ... \`web_search\` tool use
+// Anthropic validates server-tool pairing per request: a `server_tool_use` /
+// `mcp_tool_use` must be answered by its `*_tool_result`, and a result must
+// have its use — otherwise the API answers `400 ... \`web_search\` tool use
 // with id ... was found without a corresponding \`web_search_tool_result\`
-// block` and the session is wedged for good, because history only grows. Ids are
-// collected from replayable blocks only: a result whose type never replays
-// cannot pair anything.
+// block` and the session wedges, because history only grows.
+//
+// The pair may span two assistant messages. A mixed turn (a client `tool_use`
+// next to a `server_tool_use`, stop `tool_use`) returns with the server tool
+// deferred: the client answers with tool results, and the continuation
+// assistant message starts with the deferred result. Such a turn is LIVE while
+// only tool results follow it — dropping the pending use would stop the API
+// from running the deferred tool. A `pause_turn` turn replays the same way.
+//
+// The turn CLOSES — and a pending use becomes unpairable — when anything but
+// tool results follows it (a user text message tells the API the assistant
+// turn is over) or when a later assistant message exists without ever
+// answering it. Symmetrically, a result is valid when its use sits in the same
+// or an earlier assistant message (the deferred-continuation shape), and is
+// unpairable when its use is nowhere. Only the unpairable halves are dropped;
+// live turns and resolved pairs replay byte-for-byte.
 interface ProviderNativeToolPairing {
-	readonly resultIds: ReadonlySet<string>;
-	readonly useIds: ReadonlySet<string>;
+	readonly resolvedUseIds: ReadonlySet<string>;
+	readonly liveUseIds: ReadonlySet<string>;
+	readonly validResultIds: ReadonlySet<string>;
 }
 
-function collectProviderNativeToolPairing(content: AssistantMessage["content"]): ProviderNativeToolPairing {
-	const resultIds = new Set<string>();
-	const useIds = new Set<string>();
-	for (const block of content) {
-		if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
-		const raw = block.raw;
-		if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
-		const toolUseId = raw.tool_use_id;
-		if (typeof toolUseId === "string") resultIds.add(toolUseId);
-		if (isProviderNativeToolUseBlock(raw) && typeof raw.id === "string") useIds.add(raw.id);
+function collectProviderNativeToolPairing(
+	messages: Message[],
+	model: Model<"anthropic-messages">,
+): ProviderNativeToolPairing {
+	const assistantMessages: AssistantMessage[] = [];
+	for (const message of messages) {
+		if (message.role === "assistant" && isSameAnthropicModel(message, model)) {
+			assistantMessages.push(message);
+		}
 	}
-	return { resultIds, useIds };
+
+	// Every use is resolved when its result sits in its own or a later assistant
+	// message; every result is valid when its use sits in its own or an earlier
+	// one. Deferred results start the continuation message, so the same message
+	// cannot hold both ends of a cross-message pair.
+	const resolvedUseIds = new Set<string>();
+	const validResultIds = new Set<string>();
+	const pendingBefore = new Set<string>();
+	for (const message of assistantMessages) {
+		const pendingHere = new Set<string>();
+		for (const block of message.content) {
+			if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
+			const raw = block.raw;
+			if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
+			if (isProviderNativeToolUseBlock(raw) && typeof raw.id === "string") pendingHere.add(raw.id);
+		}
+		for (const block of message.content) {
+			if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
+			const raw = block.raw;
+			if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
+			const toolUseId = raw.tool_use_id;
+			if (typeof toolUseId !== "string") continue;
+			if (pendingHere.has(toolUseId) || pendingBefore.has(toolUseId)) {
+				resolvedUseIds.add(toolUseId);
+				validResultIds.add(toolUseId);
+			}
+		}
+		for (const id of pendingHere) pendingBefore.add(id);
+	}
+
+	// A pending use stays live only while its turn can still be resumed: it
+	// belongs to the last same-model assistant message and nothing but tool
+	// results follows that message in the conversation.
+	const liveUseIds = new Set<string>();
+	const lastAssistant = assistantMessages[assistantMessages.length - 1];
+	if (lastAssistant !== undefined) {
+		let closesAfterLastAssistant = false;
+		for (let index = messages.indexOf(lastAssistant) + 1; index < messages.length; index++) {
+			const follower = messages[index];
+			if (follower.role === "toolResult") continue;
+			closesAfterLastAssistant = true;
+			break;
+		}
+		if (!closesAfterLastAssistant) {
+			for (const block of lastAssistant.content) {
+				if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
+				const raw = block.raw;
+				if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
+				if (isProviderNativeToolUseBlock(raw) && typeof raw.id === "string") liveUseIds.add(raw.id);
+			}
+		}
+	}
+	return { resolvedUseIds, liveUseIds, validResultIds };
 }
 
-// True for a server-tool block whose counterpart is missing from its message.
+// True for a server-tool block whose counterpart can never arrive: a use that
+// is neither answered nor resumable, or a result whose use is nowhere.
 // Blocks that pair nothing (`fallback`, `container_upload`) are never unpaired.
 function isUnpairedProviderNativeToolBlock(raw: unknown, pairing: ProviderNativeToolPairing): boolean {
 	if (!isRecord(raw)) return false;
 	if (isProviderNativeToolUseBlock(raw)) {
-		return typeof raw.id !== "string" || !pairing.resultIds.has(raw.id);
+		return typeof raw.id !== "string" || !(pairing.resolvedUseIds.has(raw.id) || pairing.liveUseIds.has(raw.id));
 	}
 	const toolUseId = raw.tool_use_id;
-	return typeof toolUseId === "string" && !pairing.useIds.has(toolUseId);
+	return typeof toolUseId === "string" && !pairing.validResultIds.has(toolUseId);
 }
 
 // tool_use ids referenced by server-tool result blocks in content[0, boundary).
@@ -1860,6 +1924,7 @@ function convertMessages(
 	// assistant turn below; drop their tool_results in lockstep so none dangle.
 	const discardedFallbackToolCallIds = collectDiscardedFallbackToolCallIds(transformedMessages, model);
 	const rejectsNativeWebSearchReplay = !getAnthropicCompat(model).supportsWebSearch;
+	const providerNativeToolPairing = collectProviderNativeToolPairing(transformedMessages, model);
 
 	for (let i = 0; i < transformedMessages.length; i++) {
 		const msg = transformedMessages[i];
@@ -1921,7 +1986,6 @@ function convertMessages(
 				fallbackBoundary >= 0
 					? pairedServerToolUseIdsBeforeBoundary(msg.content, fallbackBoundary)
 					: new Set<string>();
-			const providerNativeToolPairing = collectProviderNativeToolPairing(msg.content);
 
 			for (let blockIndex = 0; blockIndex < msg.content.length; blockIndex++) {
 				const block = msg.content[blockIndex];

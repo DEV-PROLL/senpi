@@ -14,13 +14,17 @@ Anthropic validates that each `server_tool_use` is followed, inside the same ass
 its matching `*_tool_result`, and rejects the mirror case too (a result whose `server_tool_use` is
 missing).
 
-- `api/anthropic-messages.ts`: assistant conversion now repairs the pairing for every turn, not only
-  inside the server-side-fallback boundary. `collectProviderNativeToolPairing` indexes the replayable
-  provider-native blocks of the message, and `isUnpairedProviderNativeToolBlock` drops a
-  `server_tool_use` / `mcp_tool_use` whose result is absent and a result block whose
-  `tool_use_id` is absent. Paired blocks, `fallback`, and `container_upload` replay byte-for-byte as
-  before, so `encrypted_content` fidelity is untouched.
-- `utils/retry.ts`: `was found without a corresponding` joins the retryable provider-error patterns.
+- `api/anthropic-messages.ts`: assistant conversion now repairs the pairing across the whole
+  conversation, not only inside the server-side-fallback boundary. `collectProviderNativeToolPairing`
+  walks every same-model assistant message: a use answered by a result in its own or a later assistant
+  message replays (the deferred-continuation shape the API documents), a pending use in the last
+  assistant message stays live while only tool results follow it (so the API can still run the deferred
+  tool), and only the unpairable halves are dropped — a use whose turn was closed by a user message or
+  superseded by a later assistant turn, and a result whose use is nowhere. The predicate covers the
+  `mcp_tool_use` shape for when those blocks become replayable. Paired blocks, `fallback`, and
+  `container_upload` replay byte-for-byte as before, so `encrypted_content` fidelity is untouched.
+- `utils/retry.ts`: the pairing-error wording ("was found without a corresponding", anchored on the
+  opening backtick of the result block name) joins the retryable provider-error patterns.
   The repaired history means the retried request is valid, so the session self-heals through the
   existing retry path; if it keeps failing, the error now also reaches the model-fallback chain
   instead of dead-ending the turn.

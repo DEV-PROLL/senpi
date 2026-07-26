@@ -400,12 +400,108 @@ describe("Anthropic provider-native replay", () => {
 		expect(assistantPayload?.content).toEqual([{ type: "text", text: "kept" }]);
 	});
 
-	// A provider or proxy can end a turn after streaming `server_tool_use` without
-	// ever streaming the matching `web_search_tool_result`. Replaying the unpaired
-	// block makes every later request fail with `400 ... web_search tool use with
-	// id ... was found without a corresponding web_search_tool_result block`, which
-	// wedges the session permanently because history only grows.
-	it("drops orphaned server_tool_use blocks left by an interrupted search", async () => {
+	// A mixed turn that stops for a client tool can leave `server_tool_use`
+	// blocks whose results the API delivers only after the client tool results
+	// come back. While only tool results follow, the turn is still resumable, so
+	// the pending uses must replay or the API never runs the deferred searches.
+	it("keeps pending server_tool_use blocks of a live mixed turn", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const pendingUse = {
+			type: "server_tool_use",
+			id: "srvtoolu_pending",
+			name: "web_search",
+			input: { query: "a" },
+		};
+		const assistant = assistantMessage(
+			[
+				{ type: "toolCall", id: "toolu_task", name: "task", arguments: { prompt: "go" } },
+				{ type: "providerNative", subtype: "server_tool_use", raw: pendingUse },
+			],
+			{ stopReason: "toolUse", model: "claude-fable-5" },
+		);
+
+		const payload = await capturePayload(model, [
+			{ role: "user", content: "hello", timestamp: 1 },
+			assistant,
+			{
+				role: "toolResult",
+				toolCallId: "toolu_task",
+				toolName: "task",
+				content: [{ type: "text", text: "out" }],
+				isError: false,
+				timestamp: 2,
+			},
+		]);
+
+		const assistantPayload = payload.messages?.find((message) => message.role === "assistant");
+		expect(assistantPayload?.content).toEqual([
+			{ type: "tool_use", id: "toolu_task", name: "task", input: { prompt: "go" } },
+			pendingUse,
+		]);
+	});
+
+	// The continuation the API promises for a deferred call: the NEXT assistant
+	// message starts with the result that answers the earlier `server_tool_use`.
+	// Both halves must replay — the use in the first message, the result in the
+	// second.
+	it("keeps both halves of a cross-message server-tool continuation", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const pendingUse = {
+			type: "server_tool_use",
+			id: "srvtoolu_pending",
+			name: "web_search",
+			input: { query: "a" },
+		};
+		const continuationResult = {
+			type: "web_search_tool_result",
+			tool_use_id: "srvtoolu_pending",
+			content: [{ type: "web_search_result", title: "A", url: "https://a.example", encrypted_content: "enc" }],
+		};
+		const first = assistantMessage(
+			[
+				{ type: "toolCall", id: "toolu_task", name: "task", arguments: { prompt: "go" } },
+				{ type: "providerNative", subtype: "server_tool_use", raw: pendingUse },
+			],
+			{ stopReason: "toolUse", model: "claude-fable-5" },
+		);
+		const second = assistantMessage(
+			[
+				{ type: "providerNative", subtype: "web_search_tool_result", raw: continuationResult },
+				{ type: "text", text: "search done" },
+			],
+			{ stopReason: "stop", model: "claude-fable-5" },
+		);
+
+		const payload = await capturePayload(model, [
+			{ role: "user", content: "hello", timestamp: 1 },
+			first,
+			{
+				role: "toolResult",
+				toolCallId: "toolu_task",
+				toolName: "task",
+				content: [{ type: "text", text: "out" }],
+				isError: false,
+				timestamp: 2,
+			},
+			second,
+			{ role: "user", content: "follow up", timestamp: 3 },
+		]);
+
+		const assistants = (payload.messages ?? []).filter((message) => message.role === "assistant");
+		expect(assistants[0]?.content).toEqual([
+			{ type: "tool_use", id: "toolu_task", name: "task", input: { prompt: "go" } },
+			pendingUse,
+		]);
+		expect(assistants[1]?.content).toEqual([continuationResult, { type: "text", text: "search done" }]);
+	});
+
+	// A user text message after the client tool results tells the API the
+	// assistant turn is over, so its `server_tool_use` blocks can never be
+	// answered. Replaying them makes every later request fail with
+	// `400 ... web_search tool use with id ... was found without a corresponding
+	// web_search_tool_result block`, which wedges the session permanently because
+	// history only grows. This is the shape of the production wedge.
+	it("drops server_tool_use blocks whose turn was closed by a later user message", async () => {
 		const model = getModel("anthropic", "claude-fable-5");
 		const assistant = assistantMessage(
 			[
@@ -446,6 +542,7 @@ describe("Anthropic provider-native replay", () => {
 				isError: false,
 				timestamp: 2,
 			},
+			{ role: "user", content: "steering text that closes the turn", timestamp: 3 },
 		]);
 
 		const assistantPayload = payload.messages?.find((message) => message.role === "assistant");
