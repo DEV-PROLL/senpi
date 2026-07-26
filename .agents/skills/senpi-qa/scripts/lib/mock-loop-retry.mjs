@@ -7,6 +7,7 @@ import {
 	API_PRESETS,
 	checkRealAuthUnchanged,
 } from "./mock-loop-support.mjs";
+import { runAnthropicPolicyRefusalScenario } from "./mock-loop-policy-refusal.mjs";
 
 const STANDARD_RETRY_SCENARIOS = {
 	"transient-recover": {
@@ -32,8 +33,10 @@ const STANDARD_RETRY_SCENARIOS = {
 	},
 };
 
+const POLICY_REFUSAL_SCENARIO = "anthropic-policy-refusal-fallback";
+
 export function retryScenarioNames() {
-	return Object.keys(STANDARD_RETRY_SCENARIOS);
+	return [...Object.keys(STANDARD_RETRY_SCENARIOS), POLICY_REFUSAL_SCENARIO];
 }
 
 export function isRetryScenario(name) {
@@ -46,7 +49,14 @@ export async function checkStandardRetryScenarios(checks, driveTurn) {
 	}
 }
 
-export async function runRetryScenario(scenarioName, apiName, driveTurn) {
+export async function runRetryScenario(scenarioName, apiName, driveTurn, evidenceSlug) {
+	if (scenarioName === POLICY_REFUSAL_SCENARIO) {
+		if (apiName !== "anthropic-messages") {
+			throw new Error(`${POLICY_REFUSAL_SCENARIO} requires --api anthropic-messages`);
+		}
+		await runAnthropicPolicyRefusalScenario(evidenceSlug);
+		return;
+	}
 	installCleanupHooks();
 	const checks = createChecks(`mock-loop.mjs --scenario ${scenarioName}`);
 	const guard = guardRealAuth();
