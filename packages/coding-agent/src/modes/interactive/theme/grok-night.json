@@ -20,14 +20,15 @@
 		"cyan": "#3a95ab",
 		"borderInput": "#505058",
 		"borderCard": "#333333",
+		"borderModal": "#585858",
 		"gnMagenta": "#bb9af7",
 		"gnCyan": "#73daca",
 		"gnFg": "#c0caf5"
 	},
 	"colors": {
 		"accent": "blue",
-		"border": "borderInput",
-		"borderAccent": "gnCyan",
+		"border": "borderModal",
+		"borderAccent": "borderInput",
 		"borderMuted": "borderCard",
 		"success": "green",
 		"error": "red",

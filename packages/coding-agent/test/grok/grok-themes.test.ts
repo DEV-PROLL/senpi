@@ -13,11 +13,13 @@
  */
 import * as fs from "node:fs";
 import { describe, expect, it } from "vitest";
+import { DynamicBorder } from "../../src/modes/interactive/components/dynamic-border.ts";
 import {
 	getAvailableThemes,
 	getResolvedThemeColors,
 	getThemeByName,
 	getThemeExportColors,
+	initTheme,
 } from "../../src/modes/interactive/theme/theme.ts";
 
 const themeDir = new URL("../../src/modes/interactive/theme/", import.meta.url);
@@ -36,13 +38,13 @@ const NIGHT_PALETTE_MAP: Record<string, string> = {
 	error: "#f7768e",
 	warning: "#e0af68",
 	mdLink: "#3a95ab", // accents.cyan — path-emphasis
-	// Grok Night block -> the six accent slots
+	// Grok Night block -> accent slots
 	accent: "#7aa2f7", // grokNight.blue
-	borderAccent: "#73daca", // grokNight.cyan
 	userMessageText: "#c0caf5", // grokNight.fg
 	customMessageLabel: "#bb9af7", // grokNight.magenta
-	// borders -> input/card border keys
-	border: "#505058", // borders.input
+	// borders -> modal/input/card border keys
+	border: "#585858", // borders.modal — generic modal/overlay border token
+	borderAccent: "#505058", // borders.input — grok input border token
 	borderMuted: "#333333", // borders.card
 	// text tiers -> fg hierarchy
 	text: "#e1e1e1", // text.primary
@@ -74,7 +76,8 @@ const NIGHT_PALETTE_MAP: Record<string, string> = {
 /** §Palette → ThemeColor mapping for grok-day: the Grok Day accent slots. */
 const DAY_PALETTE_MAP: Record<string, string> = {
 	accent: "#2F64D2", // grokDay.blue
-	border: "#2F64D2", // grokDay.blue (light's border is its blue accent)
+	border: "#585858", // borders.modal — generic modal/overlay border token
+	borderAccent: "#2F64D2", // grokDay.blue — grok input border token
 	success: "#0C947C", // grokDay.green
 	error: "#CD3048", // grokDay.red
 	mdCodeBlock: "#0C947C", // grokDay.green (light routes its green here)
@@ -114,6 +117,14 @@ describe("grok themes (plan G1)", () => {
 		const resolved = getResolvedThemeColors("grok-day");
 		for (const [key, hex] of Object.entries(DAY_PALETTE_MAP)) {
 			expect(resolved[key], `grok-day ${key}`).toBe(hex);
+		}
+	});
+
+	it("routes generic modal overlays through the normal border token", () => {
+		for (const themeName of ["grok-night", "grok-day"] as const) {
+			initTheme(themeName, false);
+			expect(getResolvedThemeColors(themeName).border, `${themeName} modal border`).toBe("#585858");
+			expect(new DynamicBorder().render(3)).toEqual(["\x1b[38;2;88;88;88m───\x1b[39m"]);
 		}
 	});
 

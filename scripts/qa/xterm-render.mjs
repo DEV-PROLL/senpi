@@ -173,7 +173,9 @@ function blankCell() {
 
 const SYNC_BEGIN = "\x1b[?2026h";
 const SYNC_END = "\x1b[?2026l";
-const CLEAR_REPLAY_SEQUENCE = ["\x1b[2J", "\x1b[3J", "\x1b[H"];
+// `TUI.fullRender()` emits clear-screen, cursor-home, then clear-scrollback.
+// Keep this in renderer order; do not infer a historical terminal sequence.
+const CLEAR_REPLAY_SEQUENCE = ["\x1b[2J", "\x1b[H", "\x1b[3J"];
 
 function positiveInteger(value, label) {
 	if (!Number.isInteger(value) || value <= 0) throw new HarnessError(`${label} must be a positive integer`, 2);
@@ -240,11 +242,26 @@ function sequenceOffsets(raw, tokens) {
 	return { pass: true, offsets };
 }
 
+/** Return complete DECSET 2026 frames without allowing token matches to cross frame boundaries. */
+function synchronizedFrames(raw) {
+	const frames = [];
+	for (let from = 0; ; ) {
+		const begin = raw.indexOf(SYNC_BEGIN, from);
+		if (begin < 0) break;
+		const end = raw.indexOf(SYNC_END, begin + SYNC_BEGIN.length);
+		if (end < 0) break;
+		const endExclusive = end + SYNC_END.length;
+		frames.push({ start: begin, end: endExclusive, data: raw.slice(begin, endExclusive) });
+		from = endExclusive;
+	}
+	return frames;
+}
+
 /**
  * Check raw terminal protocol facts before parsing into cells. The DECSET
- * scanner rejects premature ends as well as nonzero final balance. When clear
- * replay is required, screen clear, scrollback clear, and cursor-home must be
- * ordered before the caller's replay sentinel (when supplied).
+ * scanner rejects premature ends as well as nonzero final balance. Clear/replay
+ * expectations are evaluated inside one complete synchronized frame: a later
+ * frame can never lend a cursor-home or replay sentinel to an earlier clear.
  */
 function assertRawStream(raw, { expectClearReplay = false, replaySentinel, clearReplaySequence = CLEAR_REPLAY_SEQUENCE } = {}) {
 	if (typeof raw !== "string") throw new HarnessError("raw assertion requires a string stream", 2);
@@ -272,19 +289,31 @@ function assertRawStream(raw, { expectClearReplay = false, replaySentinel, clear
 		balanced: balance === 0 && minimumBalance >= 0,
 	};
 
-	const shape = sequenceOffsets(raw, clearReplaySequence);
-	const finalClearOffset = shape.offsets.at(-1);
-	const replayOffset = replaySentinel === undefined ? null : raw.indexOf(replaySentinel, (finalClearOffset ?? -1) + 1);
-	const replayAfterClear = replaySentinel === undefined ? true : replayOffset >= 0;
+	const frameResults = synchronizedFrames(raw).map((frame, index) => {
+		const shape = sequenceOffsets(frame.data, clearReplaySequence);
+		const finalClearOffset = shape.offsets.at(-1);
+		const replayOffset = replaySentinel === undefined ? null : frame.data.indexOf(replaySentinel, (finalClearOffset ?? -1) + 1);
+		const replayAfterClear = replaySentinel === undefined ? true : replayOffset >= 0;
+		return {
+			index,
+			start: frame.start,
+			end: frame.end,
+			offsets: shape.offsets.map((offset) => frame.start + offset),
+			shape: shape.pass,
+			replayOffset: replayOffset === null || replayOffset < 0 ? null : frame.start + replayOffset,
+			replayAfterClear,
+			pass: shape.pass && replayAfterClear,
+		};
+	});
+	const matchingFrames = frameResults.filter((frame) => frame.pass).map((frame) => frame.index);
 	const clearReplay = {
 		required: expectClearReplay,
 		sequence: clearReplaySequence,
-		offsets: shape.offsets,
-		shape: shape.pass,
 		replaySentinel: replaySentinel ?? null,
-		replayOffset: replayOffset < 0 ? null : replayOffset,
-		replayAfterClear,
-		pass: !expectClearReplay || (shape.pass && replayAfterClear),
+		frameCount: frameResults.length,
+		frames: frameResults,
+		matchingFrames,
+		pass: !expectClearReplay || matchingFrames.length > 0,
 	};
 	return { pass: decset.balanced && clearReplay.pass, decset, clearReplay };
 }
@@ -334,6 +363,16 @@ function findGlyph(grid, glyph) {
 	return null;
 }
 
+/** Find contiguous rendered text in a single terminal row. */
+function findText(grid, text) {
+	for (let y = 0; y < grid.rows; y += 1) {
+		const row = grid.cells[y].map((cell) => cell.glyph).join("");
+		const x = row.indexOf(text);
+		if (x >= 0) return { x, y };
+	}
+	return null;
+}
+
 /**
  * Execute one assertion object against a grid, returning a result record.
  * Supported assertion kinds:
@@ -341,6 +380,7 @@ function findGlyph(grid, glyph) {
  *   cell-bg    {x,y,hex}          bg truecolor hex equals
  *   cell-glyph {x,y,glyph}        glyph equals
  *   glyph-present {glyph}         glyph appears somewhere
+ *   text-present {text}           contiguous rendered text appears in one row
  *   region-fg-subset {x0,y0,x1,y1,palette:[hex...]}  every fg hex ∈ palette
  *   region-bg-subset {x0,y0,x1,y1,palette:[hex...]}  every bg hex ∈ palette
  *   region-no-truecolor {x0,y0,x1,y1}  no rgb cells (256/NO_COLOR proof)
@@ -366,6 +406,11 @@ function runAssertion(grid, a) {
 			case "glyph-present": {
 				const found = findGlyph(grid, a.glyph);
 				return { ...base, pass: found !== null, expected: a.glyph, got: found };
+			}
+			case "text-present": {
+				if (typeof a.text !== "string" || a.text.length === 0) return { ...base, pass: false, error: "text-present requires a non-empty text string" };
+				const found = findText(grid, a.text);
+				return { ...base, pass: found !== null, expected: a.text, got: found };
 			}
 			case "region-fg-subset":
 			case "region-bg-subset": {
@@ -701,6 +746,15 @@ async function modeSelfTest() {
 		fail("corrupted-fixture-fails-loudly", { corruptedFg, note: "corrupted fixture unexpectedly still matched" });
 	}
 
+	// Full text assertions prove a completed sentinel, not an incidental glyph.
+	const knownText = runAssertion(grid, { kind: "text-present", text: "◆ Run" });
+	const missingText = runAssertion(grid, { kind: "text-present", text: "◆ Missing" });
+	if (knownText.pass && missingText.pass === false) {
+		pass("text-present-requires-the-complete-rendered-sentinel", { knownText, missingText });
+	} else {
+		fail("text-present-requires-the-complete-rendered-sentinel", { knownText, missingText });
+	}
+
 	// (3) Replay must preserve a transcript across ordered write/resize events
 	// and expose an independent parsed cell grid at each requested snapshot.
 	const replay = await replayToSnapshots({
@@ -727,15 +781,17 @@ async function modeSelfTest() {
 		fail("replay-ordered-write-resize-exposes-snapshot-grids", { replay });
 	}
 
-	// (4) Raw-stream checks must reject unbalanced DECSET 2026 and require the
-	// clear-screen + clear-scrollback + home replay shape when requested.
-	const replayRaw = `${SYNC_BEGIN}\x1b[2J\x1b[3J\x1b[HREPLAY-TRANSCRIPT${SYNC_END}`;
+	// (4) Raw-stream checks must reject unbalanced DECSET 2026, use the
+	// renderer's 2J,H,3J sequence, and prohibit cross-frame token stitching.
+	const replayRaw = `${SYNC_BEGIN}\x1b[2J\x1b[H\x1b[3JREPLAY-TRANSCRIPT${SYNC_END}`;
 	const rawGood = assertRawStream(replayRaw, { expectClearReplay: true, replaySentinel: "REPLAY-TRANSCRIPT" });
 	const rawBroken = assertRawStream(replayRaw.replace(SYNC_END, ""), { expectClearReplay: true, replaySentinel: "REPLAY-TRANSCRIPT" });
-	if (rawGood.pass && rawBroken.pass === false && rawBroken.decset.balanced === false) {
-		pass("raw-stream-decset-and-clear-replay-assertions", { rawGood, rawBroken });
+	const crossFrameRaw = `${SYNC_BEGIN}\x1b[2J\x1b[H\x1b[3JFIRST_FRAME_WITHOUT_SENTINEL${SYNC_END}${SYNC_BEGIN}\x1b[HREPLAY-TRANSCRIPT${SYNC_END}`;
+	const rawCrossFrame = assertRawStream(crossFrameRaw, { expectClearReplay: true, replaySentinel: "REPLAY-TRANSCRIPT" });
+	if (rawGood.pass && rawBroken.pass === false && rawBroken.decset.balanced === false && rawCrossFrame.pass === false) {
+		pass("raw-stream-decset-and-frame-gated-clear-replay-assertions", { rawGood, rawBroken, rawCrossFrame });
 	} else {
-		fail("raw-stream-decset-and-clear-replay-assertions", { rawGood, rawBroken });
+		fail("raw-stream-decset-and-frame-gated-clear-replay-assertions", { rawGood, rawBroken, rawCrossFrame });
 	}
 
 	// (5) verify-manifest self-tests, using tiny in-memory manifests written to

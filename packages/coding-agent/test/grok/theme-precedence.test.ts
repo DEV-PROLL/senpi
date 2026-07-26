@@ -2,8 +2,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyGrokNeoThemeFallback, runGrokNeoFirstTimeSetup } from "../../src/main.ts";
+import { shouldRunFirstTimeSetup } from "../../src/cli/startup-ui.ts";
+import { APP_NAME, CONFIG_DIR_NAME, PACKAGE_NAME } from "../../src/config.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
+import { applyGrokNeoThemeFallback } from "../../src/main.ts";
 import { getResolvedThemeColors, initTheme } from "../../src/modes/interactive/theme/theme.ts";
 
 function activateTheme(settingsManager: SettingsManager): Record<string, string> {
@@ -55,17 +57,33 @@ describe("grok-neo theme precedence", () => {
 	});
 });
 
-describe("grok-neo first-time setup", () => {
-	it("persists analytics but not a setup theme on a fresh grok run", async () => {
-		const sandbox = mkdtempSync(join(tmpdir(), "senpi-grok-neo-setup-"));
+describe("grok-neo startup in the senpi distribution", () => {
+	it("does not enter first-time setup under the package's real identity", () => {
+		const sandbox = mkdtempSync(join(tmpdir(), "senpi-grok-neo-startup-"));
+		try {
+			expect({ packageName: PACKAGE_NAME, appName: APP_NAME, configDirName: CONFIG_DIR_NAME }).toEqual({
+				packageName: "@code-yeongyu/senpi",
+				appName: "senpi",
+				configDirName: ".senpi",
+			});
+			expect(shouldRunFirstTimeSetup(join(sandbox, "settings.json"))).toBe(false);
+		} finally {
+			rmSync(sandbox, { recursive: true, force: true });
+		}
+	});
+
+	it("activates grok-night in memory without persisting a fresh sandbox theme", async () => {
+		const sandbox = mkdtempSync(join(tmpdir(), "senpi-grok-neo-startup-"));
 		const agentDir = join(sandbox, "agent");
 		const settingsManager = SettingsManager.create(join(sandbox, "work"), agentDir);
 		try {
-			await runGrokNeoFirstTimeSetup(settingsManager, async (manager) => {
-				manager.setTheme("dark");
-				manager.setEnableAnalytics(true);
-				await manager.flush();
-			});
+			applyGrokNeoThemeFallback(settingsManager);
+
+			expect(settingsManager.getThemeSetting()).toBe("grok-night");
+			expect(activateTheme(settingsManager)).toEqual(getResolvedThemeColors("grok-night"));
+
+			settingsManager.setEnableAnalytics(true);
+			await settingsManager.flush();
 
 			const settings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"));
 			expect(settings).not.toHaveProperty("theme");

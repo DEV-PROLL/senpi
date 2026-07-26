@@ -301,6 +301,10 @@ export async function runScenario(rawScenario, { ptyModule } = {}) {
 	const stream = new RawStream(term);
 	const snapshots = [];
 	const events = [];
+	// `after` describes the state produced by the most recent triggering
+	// action. Passive `wait` snapshots must never widen this causal boundary:
+	// otherwise a later resize can reuse a marker from an older terminal state.
+	let stateStart = 0;
 	let cleanupReceipt;
 	let primaryError;
 	try {
@@ -317,11 +321,13 @@ export async function runScenario(rawScenario, { ptyModule } = {}) {
 			}
 			if (step.type === "input") {
 				if (typeof step.text !== "string") throw new DriveError(`${label}: text must be a string`);
+				const actionStart = stream.raw.length;
 				// The waiter is constructed before write(), preventing fast output races.
-				const wait = waitForContent(stream, step.waitFor, { timeoutMs, label, from: stream.raw.length });
+				const wait = waitForContent(stream, step.waitFor, { timeoutMs, label, from: actionStart });
 				term.write(step.text);
 				const observed = await wait;
-				events.push({ order: events.length + 1, type: "input", text: step.text, observed });
+				stateStart = actionStart;
+				events.push({ order: events.length + 1, type: "input", text: step.text, stateStart, observed });
 				if (step.snapshot) writeSnapshot(scenario.snapshotDir, snapshots, step.snapshot, stream, step.type);
 				continue;
 			}
@@ -331,7 +337,10 @@ export async function runScenario(rawScenario, { ptyModule } = {}) {
 					throw new DriveError(`${label}: cols and rows must be positive integers`);
 				}
 				// A resize is causally gated on content proving the preceding state.
-				const prior = await waitForContent(stream, step.after, { timeoutMs, label: `${label} prior-state sentinel` });
+				// Scope the sentinel to output from the action that created that state;
+				// never search the accumulated stream from offset zero.
+				const priorStateStart = stateStart;
+				const prior = await waitForContent(stream, step.after, { timeoutMs, label: `${label} prior-state sentinel`, from: priorStateStart });
 				const beforeResize = stream.raw.length;
 				// Subscribe before resize(), then accept only a complete next frame/marker.
 				const postResize = waitForPostResize(stream, {
@@ -342,7 +351,8 @@ export async function runScenario(rawScenario, { ptyModule } = {}) {
 				});
 				term.resize(step.cols, step.rows);
 				const observed = await postResize;
-				events.push({ order: events.length + 1, type: "resize", cols: step.cols, rows: step.rows, prior, observed });
+				stateStart = beforeResize;
+				events.push({ order: events.length + 1, type: "resize", cols: step.cols, rows: step.rows, priorStateStart, prior, observed });
 				if (step.snapshot) writeSnapshot(scenario.snapshotDir, snapshots, step.snapshot, stream, step.type);
 				continue;
 			}
@@ -369,7 +379,8 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", (data) => {
   if (data.includes("GO")) process.stdout.write(begin + "INPUT_ACCEPTED\n" + end);
 });
-process.on("SIGWINCH", () => process.stdout.write(begin + "RESIZE_FRAME\n" + end));
+let resizeCount = 0;
+process.on("SIGWINCH", () => process.stdout.write(begin + "RESIZE_FRAME_" + ++resizeCount + "\n" + end));
 `;
 }
 
@@ -411,6 +422,50 @@ async function selfTest() {
 			"teardown receipt confirms the PTY exited",
 			report.cleanupReceipt.killAttempted && report.cleanupReceipt.exited && !report.cleanupReceipt.timeout,
 			JSON.stringify(report.cleanupReceipt),
+		);
+
+		const twoResizeReport = await runScenario({
+			...scenario,
+			snapshotDir: join(root, "two-resize-captures"),
+			steps: [
+				{ type: "wait", sentinel: "FIXTURE_READY" },
+				{ type: "input", text: "GO\n", waitFor: "INPUT_ACCEPTED" },
+				{ type: "resize", after: "INPUT_ACCEPTED", cols: 80, rows: 24 },
+				{ type: "resize", after: "RESIZE_FRAME_1", cols: 120, rows: 36 },
+			],
+		});
+		const twoResizes = twoResizeReport.events.filter((event) => event.type === "resize");
+		checks.ok(
+			"second resize consumes a fresh marker from the first resize state",
+			twoResizes.length === 2 &&
+				twoResizes[0].prior.sentinel === "INPUT_ACCEPTED" &&
+				twoResizes[1].prior.sentinel === "RESIZE_FRAME_1" &&
+				twoResizes[1].prior.index > twoResizes[0].prior.index,
+			JSON.stringify(twoResizes.map((event) => ({ sentinel: event.prior.sentinel, index: event.prior.index, from: event.priorStateStart }))),
+		);
+
+		// Regression proof: a second resize cannot reuse a marker emitted only
+		// before the first resize. The fixture emits a complete frame on every
+		// resize, so this specifically catches stale-sentinel false passes.
+		let staleStateFailure;
+		try {
+			await runScenario({
+				...scenario,
+				snapshotDir: join(root, "stale-state-captures"),
+				steps: [
+					{ type: "wait", sentinel: "FIXTURE_READY" },
+					{ type: "input", text: "GO\n", waitFor: "INPUT_ACCEPTED" },
+					{ type: "resize", after: "INPUT_ACCEPTED", cols: 80, rows: 24 },
+					{ type: "resize", after: "INPUT_ACCEPTED", cols: 120, rows: 36, timeoutMs: 150 },
+				],
+			});
+		} catch (error) {
+			staleStateFailure = error;
+		}
+		checks.ok(
+			"stale pre-resize marker cannot gate a second resize",
+			staleStateFailure instanceof DriveError && /timed out/.test(staleStateFailure.message) && staleStateFailure.cleanupReceipt?.exited === true,
+			staleStateFailure ? staleStateFailure.message : "second resize unexpectedly accepted a stale marker",
 		);
 
 		// Mutation proof: replacing the required input sentinel must turn the run

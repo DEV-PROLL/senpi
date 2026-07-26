@@ -1,11 +1,4 @@
-import {
-	type Component,
-	type EditorOptions,
-	type EditorTheme,
-	type OverlayOptions,
-	Spacer,
-	type TUI,
-} from "@earendil-works/pi-tui";
+import type { Component, EditorOptions, EditorTheme, TUI } from "@earendil-works/pi-tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import type { WorkingIndicatorOptions } from "../../../core/extensions/index.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
@@ -44,8 +37,7 @@ export interface InteractiveChrome {
 	createWelcomeContent(appName: string, version: string): Component;
 	createWorkingIndicator(ui: TUI, message: string, indicator?: WorkingIndicatorOptions): WorkingStatusIndicator;
 	getEditorBorderColor(context: EditorBorderContext): (text: string) => string;
-	decorateOverlay(options: OverlayOptions | undefined): OverlayOptions | undefined;
-	arrangeRoot(children: readonly Component[]): Component[];
+	arrangeRoot(children: readonly Component[], ui?: TUI): Component[];
 }
 
 class GrokFooterSurface implements Component {
@@ -66,6 +58,25 @@ class GrokFooterSurface implements Component {
 
 	dispose(): void {
 		this.content.dispose?.();
+	}
+}
+
+class GrokRootSpacer implements Component {
+	private readonly ui: TUI;
+	private readonly content: readonly Component[];
+
+	constructor(ui: TUI, content: readonly Component[]) {
+		this.ui = ui;
+		this.content = content;
+	}
+
+	invalidate(): void {
+		// The spacer derives its height from the current terminal dimensions.
+	}
+
+	render(width: number): string[] {
+		const contentHeight = this.content.reduce((height, component) => height + component.render(width).length, 0);
+		return Array.from({ length: Math.max(0, this.ui.terminal.rows - contentHeight) }, () => "");
 	}
 }
 
@@ -142,27 +153,16 @@ export class GrokChrome implements InteractiveChrome {
 		return getGrokChromeTokens().inputBorder;
 	}
 
-	decorateOverlay(options: OverlayOptions | undefined): OverlayOptions | undefined {
-		// Existing overlays own their geometry and border components. Overlay options
-		// have no color field, so this mode seam preserves the caller's geometry and
-		// leaves border rendering to the active-theme component tokens.
-		return options;
-	}
-
-	arrangeRoot(children: readonly Component[]): Component[] {
-		// pi-tui concatenates root children; it has no absolute positioning. Keep
-		// transcript/status content first, insert one fixed spacer, then append the
-		// input card, widgets below it, and footer as the tail. As transcript output
-		// grows this tail is pushed to the terminal's lower edge deterministically.
+	arrangeRoot(children: readonly Component[], ui?: TUI): Component[] {
+		// pi-tui concatenates root children without a layout pass. Keep transcript
+		// content first and calculate the remaining rows at render time from the TUI's
+		// terminal height, so the input tail is truly bottom-anchored when it fits.
 		const inputTailStart = Math.max(0, children.length - 3);
+		const content = children.slice(0, inputTailStart);
 		const inputTail = children.slice(inputTailStart);
 		const footer = inputTail.at(-1);
-		if (!footer) return [...children.slice(0, inputTailStart), new Spacer(1), ...inputTail];
-		return [
-			...children.slice(0, inputTailStart),
-			new Spacer(1),
-			...inputTail.slice(0, -1),
-			new GrokFooterSurface(footer),
-		];
+		const tail = footer ? [...inputTail.slice(0, -1), new GrokFooterSurface(footer)] : [...inputTail];
+		const arranged = [...content, ...tail];
+		return ui ? [...content, new GrokRootSpacer(ui, arranged), ...tail] : arranged;
 	}
 }

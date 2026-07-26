@@ -4,13 +4,16 @@
 	"vars": {
 		"gdBlue": "#2F64D2",
 		"gdRed": "#CD3048",
-		"gdGreen": "#0C947C"
+		"gdGreen": "#0C947C",
+		"borderInput": "gdBlue",
+		"borderCard": "#b0b0b0",
+		"borderModal": "#585858"
 	},
 	"colors": {
 		"accent": "gdBlue",
-		"border": "gdBlue",
-		"borderAccent": "#5a8080",
-		"borderMuted": "#b0b0b0",
+		"border": "borderModal",
+		"borderAccent": "borderInput",
+		"borderMuted": "borderCard",
 		"success": "gdGreen",
 		"error": "gdRed",
 		"warning": "#9a7326",

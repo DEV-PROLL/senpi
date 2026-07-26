@@ -16,6 +16,10 @@ The classic TUI renders a bordered editor, a multi-line footer with token and co
 
 All chrome colours resolve through tokens backed by the active theme, so the chrome stays coherent with `grok-day` and with custom themes.
 
+### Overlay Policy
+
+Overlay options control placement, sizing, visibility, and focus; they do not carry presentation colours. Existing modal components render their own borders from the active theme. A modal using the standard `DynamicBorder` therefore inherits the active `border` token (`#585858` under `grok-night`); components that explicitly request an accent border keep that component-specific choice. The modal colour is supplied by the active theme, not by a grok overlay-options seam.
+
 ## Enabling the Mode
 
 The mode is gated behind an environment variable and is **off by default**:
@@ -50,9 +54,11 @@ Theme selection follows one precedence rule: **an existing settings theme always
 
 Once you select a theme it is persisted and takes precedence on every later launch.
 
+Modal and overlay components resolve their border through the normal theme `border` token. Both Grok themes map that token to the §Palette modal value, `#585858`; the input and card values remain available through the other schema border slots.
+
 Note that `--theme <path>` **registers** a theme file or directory as a resource; it does not select one. Selection always happens through `/settings` or `settings.json`.
 
-On first run, the grok first-time setup keeps the analytics opt-in but omits the theme picker, since the mode supplies its own fallback.
+Senpi is a rebranded distribution, so its first-time setup is intentionally unavailable: that flow only runs for the official Pi package/app/config identity. A fresh `--grok-neo` launch therefore reaches the normal in-memory `grok-night` fallback directly; it does not show a Grok-specific setup or persist a theme.
 
 ## Architecture: One Process
 

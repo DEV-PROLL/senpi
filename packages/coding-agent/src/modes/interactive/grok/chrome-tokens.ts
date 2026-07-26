@@ -35,7 +35,7 @@ export function getGrokChromeTokens(): GrokChromeTokens {
 	const panelBackground = themeExport.cardBg;
 	const pageBackground = themeExport.pageBg;
 	return {
-		inputBorder: (text) => theme.fg("border", text),
+		inputBorder: (text) => theme.fg("borderAccent", text),
 		inputInterior: backgroundFromThemeExport(panelBackground ?? "") ?? ((text) => theme.bg("toolPendingBg", text)),
 		surface: backgroundFromThemeExport(pageBackground ?? "") ?? ((text) => text),
 		cardBorder: (text) => theme.fg("borderMuted", text),

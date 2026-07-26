@@ -513,20 +513,6 @@ export function applyGrokNeoThemeFallback(settingsManager: SettingsManager): voi
 	};
 }
 
-/** Run setup while preserving analytics but omitting its theme selection. */
-export async function runGrokNeoFirstTimeSetup(
-	settingsManager: SettingsManager,
-	showSetup: (settingsManager: SettingsManager) => Promise<void> = showFirstTimeSetup,
-): Promise<void> {
-	const setTheme = settingsManager.setTheme;
-	settingsManager.setTheme = () => {};
-	try {
-		await showSetup(settingsManager);
-	} finally {
-		settingsManager.setTheme = setTheme;
-	}
-}
-
 export async function main(args: string[], options?: MainOptions) {
 	resetTimings();
 	const extensionFactories = [...builtInExtensions, ...(options?.extensionFactories ?? [])];
@@ -654,11 +640,7 @@ export async function main(args: string[], options?: MainOptions) {
 	// Experimental first-time setup: theme choice and analytics opt-in.
 	// Runs before any runtime services are created so the chosen settings apply everywhere.
 	if (appMode === "interactive" && !parsed.help && parsed.listModels === undefined && shouldRunFirstTimeSetup()) {
-		if (parsed.grokNeo && startupSettingsManager.getThemeSetting() === undefined) {
-			await runGrokNeoFirstTimeSetup(startupSettingsManager);
-		} else {
-			await showFirstTimeSetup(startupSettingsManager);
-		}
+		await showFirstTimeSetup(startupSettingsManager);
 		time("firstTimeSetup");
 	}
 

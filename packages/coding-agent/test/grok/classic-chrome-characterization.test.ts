@@ -2,7 +2,9 @@ import { Container, setCapabilities, TUI, visibleWidth } from "@earendil-works/p
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { VirtualTerminal } from "../../../tui/test/virtual-terminal.ts";
 import type { AgentSession } from "../../src/core/agent-session.ts";
+import type { AgentSessionRuntime } from "../../src/core/agent-session-runtime.ts";
 import type { ReadonlyFooterDataProvider } from "../../src/core/footer-data-provider.ts";
+import { CustomEditor } from "../../src/modes/interactive/components/custom-editor.ts";
 import { FooterComponent } from "../../src/modes/interactive/components/footer.ts";
 import { WorkingStatusIndicator } from "../../src/modes/interactive/components/status-indicator.ts";
 import { ToolExecutionComponent } from "../../src/modes/interactive/components/tool-execution.ts";
@@ -101,6 +103,29 @@ function createHeaderFixture(): HeaderFixture {
 	};
 }
 
+function createClassicRuntime(): AgentSessionRuntime {
+	return {
+		session: {
+			autoCompactionEnabled: true,
+			resourceLoader: { getThemes: () => ({ themes: [] }) },
+			sessionManager: { getCwd: () => process.cwd() },
+			settingsManager: {
+				getAutocompleteMaxVisible: () => 5,
+				getClearOnShrink: () => false,
+				getEditorPaddingX: () => 0,
+				getHideThinkingBlock: () => false,
+				getOutputPad: () => 1,
+				getShowHardwareCursor: () => false,
+				getSmoothStreaming: () => false,
+				getSmoothStreamingFps: () => 60,
+				getThemeSetting: () => "dark",
+			},
+		},
+		setBeforeSessionInvalidate: () => {},
+		setRebindSession: () => {},
+	} as unknown as AgentSessionRuntime;
+}
+
 function createFooterSession(): AgentSession {
 	return {
 		state: {
@@ -162,6 +187,34 @@ describe("classic chrome characterization", () => {
 			"",
 		].join("\n");
 		expect(rendered).toBe(expected);
+	});
+
+	it("keeps the classic root child ordering byte-identical", async () => {
+		const fixture = createHeaderFixture();
+		const init = InteractiveMode.prototype.init as unknown as (this: HeaderFixture) => Promise<void>;
+		await init.call(fixture);
+
+		expect(fixture.ui.children).toEqual([
+			fixture.headerContainer,
+			fixture.loadedResourcesContainer,
+			fixture.chatContainer,
+			fixture.pendingMessagesContainer,
+			fixture.statusContainer,
+			fixture.hookStatusContainer,
+			fixture.widgetContainerAbove,
+			fixture.editorContainer,
+			fixture.widgetContainerBelow,
+			fixture.footer,
+		]);
+	});
+
+	it("keeps the classic base editor construction byte-identical", () => {
+		const mode = new InteractiveMode(createClassicRuntime());
+		const editor = (mode as unknown as { defaultEditor: CustomEditor }).defaultEditor;
+
+		expect(editor).toBeInstanceOf(CustomEditor);
+		expect(editor.getPaddingX()).toBe(0);
+		expect(editor.borderColor("─")).toBe(fg("80;80;80", "─"));
 	});
 
 	it("keeps the built-in footer byte-identical", () => {
