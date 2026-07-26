@@ -100,6 +100,7 @@ export {
 	type ImageProtocol,
 	type ImageRenderOptions,
 	KITTY_PLACEHOLDER_MAX,
+	outerKittyGraphicsMode,
 	renderImage,
 	resetCapabilitiesCache,
 	setCapabilities,

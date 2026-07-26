@@ -131,7 +131,7 @@ function probeTmuxPassthroughState(): TmuxPassthroughState {
  * (kitty, Ghostty), "direct" for terminals that only support cursor-relative
  * placement (WezTerm), and null when the outer terminal is unknown.
  */
-function outerKittyGraphicsMode(clientTermname: string): "placeholder" | "direct" | null {
+export function outerKittyGraphicsMode(clientTermname: string): "placeholder" | "direct" | null {
 	const outerTerm = clientTermname.toLowerCase();
 	const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
 	const placeholderCapable =

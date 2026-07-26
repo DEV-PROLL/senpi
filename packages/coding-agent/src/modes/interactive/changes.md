@@ -1,5 +1,29 @@
 # changes
 
+## combined tmux setup warning with allow-passthrough guidance (2026-07-17)
+
+### What changed
+
+- `checkTmuxKeyboardSetup` became `checkTmuxSetup` and reports every missing recommended tmux setting in one
+  startup warning instead of one setting per restart. The message renders a copy-pasteable `~/.tmux.conf`
+  block with aligned reason comments.
+- New `tmux-setup.ts` owns the pure `buildTmuxSetupWarning` builder (unit-tested in
+  `test/tmux-setup.test.ts`): `set -g extended-keys on` (unless `on`/`always`),
+  `set -g extended-keys-format csi-u` (only when `xterm`), and `set -g allow-passthrough all` for inline
+  Kitty images. The passthrough recommendation only appears when images are not already flowing
+  (`getCapabilities().tmuxPassthrough !== true`) and the outer terminal can render Kitty graphics
+  (`outerKittyGraphicsMode` from pi-tui, fed by `#{client_termname}`); users who chose
+  `allow-passthrough on` are not nagged to switch to `all`.
+
+### Why
+
+- The tmux Kitty passthrough support in pi-tui needs `allow-passthrough`; the startup guidance is where users
+  discover tmux configuration, and the previous one-at-a-time flow forced repeated tmux restarts.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` `checkTmuxSetup` and its `run()` call site; `tmux-setup.ts` is additive.
+
 ## grok chrome seam for interactive mode (2026-07-26)
 
 ### What changed

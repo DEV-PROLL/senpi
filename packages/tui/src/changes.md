@@ -24,6 +24,8 @@
 - `terminal-image.ts`: the tmux probe also reports `client_cell_width`/`client_cell_height`; when tmux images
   are enabled the detected cell size is adopted via `setCellDimensions` because tmux never answers the
   `CSI 16 t` cell-size query (verified against tmux 3.6), keeping image aspect ratios correct.
+- `terminal-image.ts`/`index.ts`: `outerKittyGraphicsMode(clientTermname)` is exported so the coding-agent
+  startup guidance can decide whether recommending `allow-passthrough` is useful for the attached terminal.
 - `utils.ts`: `extractAnsiCode` learned DCS sequences (`ESC P … ST`), skipping doubled-ESC pairs so the
   escaped inner ST does not terminate the envelope early. Wrapped image lines therefore keep
   `visibleWidth === 0` and stay compatible with the TUI's Kitty image-line bookkeeping (id/row extraction in
