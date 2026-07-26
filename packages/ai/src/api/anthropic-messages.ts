@@ -507,6 +507,45 @@ function isAnthropicWebSearchReplayBlock(raw: unknown): boolean {
 	return raw.type === "server_tool_use" && raw.name === "web_search";
 }
 
+// Anthropic pairs server-side tool blocks inside a single assistant message: a
+// `server_tool_use` must be followed by its `*_tool_result`, and a result must
+// have its use. A stream that ends early — an abort, a dropped connection, or a
+// proxy that forwards the use but not the result — persists only one half. Every
+// later request replays it, so the API answers `400 ... \`web_search\` tool use
+// with id ... was found without a corresponding \`web_search_tool_result\`
+// block` and the session is wedged for good, because history only grows. Ids are
+// collected from replayable blocks only: a result whose type never replays
+// cannot pair anything.
+interface ProviderNativeToolPairing {
+	readonly resultIds: ReadonlySet<string>;
+	readonly useIds: ReadonlySet<string>;
+}
+
+function collectProviderNativeToolPairing(content: AssistantMessage["content"]): ProviderNativeToolPairing {
+	const resultIds = new Set<string>();
+	const useIds = new Set<string>();
+	for (const block of content) {
+		if (block.type !== "providerNative" || !isRecord(block.raw)) continue;
+		const raw = block.raw;
+		if (typeof raw.type !== "string" || !REPLAYABLE_ANTHROPIC_PROVIDER_NATIVE_TYPES.has(raw.type)) continue;
+		const toolUseId = raw.tool_use_id;
+		if (typeof toolUseId === "string") resultIds.add(toolUseId);
+		if (isProviderNativeToolUseBlock(raw) && typeof raw.id === "string") useIds.add(raw.id);
+	}
+	return { resultIds, useIds };
+}
+
+// True for a server-tool block whose counterpart is missing from its message.
+// Blocks that pair nothing (`fallback`, `container_upload`) are never unpaired.
+function isUnpairedProviderNativeToolBlock(raw: unknown, pairing: ProviderNativeToolPairing): boolean {
+	if (!isRecord(raw)) return false;
+	if (isProviderNativeToolUseBlock(raw)) {
+		return typeof raw.id !== "string" || !pairing.resultIds.has(raw.id);
+	}
+	const toolUseId = raw.tool_use_id;
+	return typeof toolUseId === "string" && !pairing.useIds.has(toolUseId);
+}
+
 // tool_use ids referenced by server-tool result blocks in content[0, boundary).
 // A pre-boundary `server_tool_use` whose id is absent here is unpaired — the
 // fallback interrupted the declined attempt before its result arrived — so
@@ -1882,6 +1921,7 @@ function convertMessages(
 				fallbackBoundary >= 0
 					? pairedServerToolUseIdsBeforeBoundary(msg.content, fallbackBoundary)
 					: new Set<string>();
+			const providerNativeToolPairing = collectProviderNativeToolPairing(msg.content);
 
 			for (let blockIndex = 0; blockIndex < msg.content.length; blockIndex++) {
 				const block = msg.content[blockIndex];
@@ -1952,7 +1992,8 @@ function convertMessages(
 					if (
 						isSameModel &&
 						isReplayableAnthropicProviderNativeBlock(block.raw) &&
-						!(rejectsNativeWebSearchReplay && isAnthropicWebSearchReplayBlock(block.raw))
+						!(rejectsNativeWebSearchReplay && isAnthropicWebSearchReplayBlock(block.raw)) &&
+						!isUnpairedProviderNativeToolBlock(block.raw, providerNativeToolPairing)
 					) {
 						blocks.push(block.raw);
 					}

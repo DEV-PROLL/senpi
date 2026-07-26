@@ -399,4 +399,95 @@ describe("Anthropic provider-native replay", () => {
 		const assistantPayload = payload.messages?.find((message) => message.role === "assistant");
 		expect(assistantPayload?.content).toEqual([{ type: "text", text: "kept" }]);
 	});
+
+	// A provider or proxy can end a turn after streaming `server_tool_use` without
+	// ever streaming the matching `web_search_tool_result`. Replaying the unpaired
+	// block makes every later request fail with `400 ... web_search tool use with
+	// id ... was found without a corresponding web_search_tool_result block`, which
+	// wedges the session permanently because history only grows.
+	it("drops orphaned server_tool_use blocks left by an interrupted search", async () => {
+		const model = getModel("anthropic", "claude-fable-5");
+		const assistant = assistantMessage(
+			[
+				{ type: "thinking", thinking: "planning", thinkingSignature: "sig_1" },
+				{ type: "toolCall", id: "toolu_task", name: "task", arguments: { prompt: "go" } },
+				{
+					type: "providerNative",
+					subtype: "server_tool_use",
+					raw: {
+						type: "server_tool_use",
+						id: "srvtoolu_orphan_1",
+						name: "web_search",
+						input: { query: "a" },
+					},
+				},
+				{
+					type: "providerNative",
+					subtype: "server_tool_use",
+					raw: {
+						type: "server_tool_use",
+						id: "srvtoolu_orphan_2",
+						name: "web_search",
+						input: { query: "b" },
+					},
+				},
+			],
+			{ stopReason: "toolUse", model: "claude-fable-5" },
+		);
+
+		const payload = await capturePayload(model, [
+			{ role: "user", content: "hello", timestamp: 1 },
+			assistant,
+			{
+				role: "toolResult",
+				toolCallId: "toolu_task",
+				toolName: "task",
+				content: [{ type: "text", text: "out" }],
+				isError: false,
+				timestamp: 2,
+			},
+		]);
+
+		const assistantPayload = payload.messages?.find((message) => message.role === "assistant");
+		expect(assistantPayload?.content).toEqual([
+			{ type: "thinking", thinking: "planning", signature: "sig_1" },
+			{ type: "tool_use", id: "toolu_task", name: "task", input: { prompt: "go" } },
+		]);
+	});
+
+	// The mirror image: a result block whose `server_tool_use` never made it into
+	// the persisted turn is equally unpairable, so it must be dropped while the
+	// paired blocks in the same message replay verbatim.
+	it("drops a server-tool result whose server_tool_use is missing and keeps the paired one", async () => {
+		const model = getModel("anthropic", "claude-haiku-4-5");
+		const pairedUse = { type: "server_tool_use", id: "srvu_paired", name: "web_search", input: { query: "a" } };
+		const pairedResult = {
+			type: "web_search_tool_result",
+			tool_use_id: "srvu_paired",
+			content: [{ type: "web_search_result", title: "A", url: "https://a.example", encrypted_content: "enc" }],
+		};
+		const orphanResult = {
+			type: "web_search_tool_result",
+			tool_use_id: "srvu_missing",
+			content: [{ type: "web_search_result", title: "B", url: "https://b.example", encrypted_content: "enc" }],
+		};
+		const assistant = assistantMessage(
+			[
+				{ type: "providerNative", subtype: "server_tool_use", raw: pairedUse },
+				{ type: "providerNative", subtype: "web_search_tool_result", raw: pairedResult },
+				{ type: "providerNative", subtype: "web_search_tool_result", raw: orphanResult },
+				{ type: "text", text: "kept" },
+			],
+			{ stopReason: "stop" },
+		);
+
+		const payload = await capturePayload(model, [
+			{ role: "user", content: "hello", timestamp: 1 },
+			assistant,
+			{ role: "user", content: "follow up", timestamp: 2 },
+		]);
+
+		const assistantPayload = payload.messages?.find((message) => message.role === "assistant");
+		expect(assistantPayload?.content).toEqual([pairedUse, pairedResult, { type: "text", text: "kept" }]);
+	});
 });
