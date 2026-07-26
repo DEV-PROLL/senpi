@@ -9,6 +9,7 @@ import {
 	prepareSenpiBundledWorkspaces,
 	rewriteOwnedRegistryAliases,
 } from "./prepare-senpi-bundled-workspaces.mjs";
+import { buildPublishArgs } from "./publish-command.mjs";
 
 // Source packages retain their upstream names and private guard. Each is published
 // from a temporary manifest under our scope, while every source import continues to
@@ -187,7 +188,7 @@ try {
 			continue;
 		}
 
-		run("npm", ["publish", "--access", "public", "--tag", "latest", "--provenance", "--ignore-scripts"], {
+		run("npm", buildPublishArgs({ githubActions: process.env.GITHUB_ACTIONS === "true" }), {
 			cwd: pkg.publishDirectory,
 		});
 		console.log();
