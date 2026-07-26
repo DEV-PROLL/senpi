@@ -1,5 +1,22 @@
 # Local fork changes
 
+## 2026-07-26 — Publish Bun-resolvable runtime workspace packages (#230)
+
+- Changed: `scripts/publish.mjs` now publishes `@earendil-works/pi-ai`,
+  `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`,
+  `@earendil-works/pi-pty`, and `@code-yeongyu/senpi-codemode` before
+  `@code-yeongyu/senpi`; the first four package manifests are no longer marked
+  `private`.
+- Why: Bun resolves every declared dependency from npm and ignores npm's
+  `bundleDependencies`. The senpi tarball includes all five workspace packages
+  for npm users, but Bun rejected the unavailable lockstep versions before it
+  could install the CLI.
+- What changed: Releases now publish the exact dependency graph that senpi
+  declares. The existing bundled tarball remains the npm-install fallback, and
+  `@code-yeongyu/senpi-server` remains private.
+- Merge-conflict risk: low. The publishing order in `scripts/publish.mjs` and
+  package manifest `private` fields are the only expected conflict zones.
+
 ## 2026-07-22 — app-server runtime import test without npm subprocess
 
 - Changed: `test/suite/app-server-protocol.test.ts` now executes its runtime `.js` import probe with

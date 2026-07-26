@@ -5,22 +5,22 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { assertSenpiPackedWorkspaceFiles, prepareSenpiBundledWorkspaces } from "./prepare-senpi-bundled-workspaces.mjs";
 
-// Only STANDALONE-published npm packages belong here. Excluded on purpose:
-//  - @code-yeongyu/senpi-server is `private: true` (never published).
-//  - @code-yeongyu/senpi-codemode ships via senpi's `bundleDependencies` (packed
-//    INTO the @code-yeongyu/senpi tarball), so consumers get it without a registry
-//    entry; publishing it standalone via OIDC trusted publishing fails E404 because
-//    it is a brand-new scoped package name OIDC cannot create.
-//  - @earendil-works/pi-storage-sqlite-node follows upstream's independent semver
-//    release line and is already published separately, so it is not part of the
-//    fork's CalVer lockstep release.
+// Every registry dependency of @code-yeongyu/senpi must be published here before
+// senpi itself. Bun resolves dependency edges from the registry and does not honor
+// npm bundleDependencies, so omitting any of these packages makes `bun add senpi`
+// fail even though npm can consume the bundled tarball.
+//
+// @code-yeongyu/senpi-server remains excluded because it is `private: true`, and
+// @earendil-works/pi-storage-sqlite-node keeps upstream's independent semver line.
 const packages = [
 	{ directory: "packages/ai", name: "@earendil-works/pi-ai" },
 	{ directory: "packages/agent", name: "@earendil-works/pi-agent-core" },
 	{ directory: "packages/tui", name: "@earendil-works/pi-tui" },
+	{ directory: "packages/pty", name: "@earendil-works/pi-pty" },
+	{ directory: "packages/senpi-codemode", name: "@code-yeongyu/senpi-codemode" },
 	{ directory: "packages/coding-agent", name: "@code-yeongyu/senpi" },
 ];
-const sourceOnlyPackages = new Set([]);
+const sourceOnlyPackages = new Set(["@code-yeongyu/senpi-codemode"]);
 
 const dryRun = process.argv.includes("--dry-run");
 const unknownArgs = process.argv.slice(2).filter((arg) => arg !== "--dry-run");
