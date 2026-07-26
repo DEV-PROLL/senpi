@@ -103,6 +103,8 @@ export {
 	setCapabilities,
 	setCellDimensions,
 	type TerminalCapabilities,
+	type TmuxPassthroughState,
+	wrapTmuxPassthrough,
 } from "./terminal-image.ts";
 export { imageFallback, sanitizeTerminalLabel } from "./terminal-text.ts";
 export {

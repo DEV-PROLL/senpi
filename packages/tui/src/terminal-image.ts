@@ -6,6 +6,19 @@ export interface TerminalCapabilities {
 	images: ImageProtocol;
 	trueColor: boolean;
 	hyperlinks: boolean;
+	/**
+	 * True when running inside tmux with `allow-passthrough` enabled and an
+	 * outer terminal that implements the Kitty graphics protocol. Kitty image
+	 * sequences must then be wrapped in tmux DCS passthrough envelopes.
+	 */
+	tmuxPassthrough?: boolean;
+}
+
+export interface TmuxPassthroughState {
+	/** Effective `allow-passthrough` value for the current pane. */
+	allowPassthrough: "off" | "on" | "all";
+	/** The outer terminal's TERM as reported by tmux (`client_termname`). */
+	clientTermname: string;
 }
 
 export interface CellDimensions {
@@ -62,7 +75,58 @@ function probeTmuxHyperlinks(): boolean {
 	}
 }
 
-export function detectCapabilities(tmuxForwardsHyperlink: () => boolean = probeTmuxHyperlinks): TerminalCapabilities {
+/**
+ * Queries tmux for the effective `allow-passthrough` option of the current
+ * pane (respecting pane/window overrides and inheritance) plus the outer
+ * terminal's TERM. `allow-passthrough` exists since tmux 3.3; older servers
+ * expand the format to an empty string, which maps to "off". On any error
+ * fallbacks to passthrough disabled.
+ */
+function probeTmuxPassthroughState(): TmuxPassthroughState {
+	try {
+		const pane = process.env.TMUX_PANE;
+		const target = pane && /^%\d+$/.test(pane) ? ` -t '${pane}'` : "";
+		const output = execSync(`tmux display-message -p${target} '#{allow-passthrough} #{client_termname}'`, {
+			encoding: "utf8",
+			timeout: 250,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const [allowPassthrough = "", clientTermname = ""] = output.trim().split(/\s+/);
+		return {
+			allowPassthrough: allowPassthrough === "on" || allowPassthrough === "all" ? allowPassthrough : "off",
+			clientTermname,
+		};
+	} catch {
+		return { allowPassthrough: "off", clientTermname: "" };
+	}
+}
+
+/**
+ * Heuristic for whether the terminal hosting the tmux client understands the
+ * Kitty graphics protocol. Prefers tmux's `client_termname` (live, per-client)
+ * and falls back to environment hints that leak through from the terminal
+ * that started the tmux server.
+ */
+function outerTerminalSupportsKittyGraphics(clientTermname: string): boolean {
+	const outerTerm = clientTermname.toLowerCase();
+	if (outerTerm.includes("kitty") || outerTerm.includes("ghostty") || outerTerm.includes("wezterm")) {
+		return true;
+	}
+	const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
+	return Boolean(
+		process.env.KITTY_WINDOW_ID ||
+			process.env.GHOSTTY_RESOURCES_DIR ||
+			process.env.WEZTERM_PANE ||
+			termProgram === "kitty" ||
+			termProgram === "ghostty" ||
+			termProgram === "wezterm",
+	);
+}
+
+export function detectCapabilities(
+	tmuxForwardsHyperlink: () => boolean = probeTmuxHyperlinks,
+	tmuxPassthroughState: () => TmuxPassthroughState = probeTmuxPassthroughState,
+): TerminalCapabilities {
 	const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
 	const terminalEmulator = process.env.TERMINAL_EMULATOR?.toLowerCase() || "";
 	const term = process.env.TERM?.toLowerCase() || "";
@@ -70,9 +134,16 @@ export function detectCapabilities(tmuxForwardsHyperlink: () => boolean = probeT
 	const hasTrueColorHint = colorTerm === "truecolor" || colorTerm === "24bit";
 
 	// Emit OSC 8 hyperlinks only when tmux confirms it forwards.
-	// Image protocols are unreliable under tmux, so leave `images: null`.
+	// Kitty graphics work under tmux only when the user opted into
+	// `allow-passthrough` and the outer terminal implements the protocol;
+	// otherwise leave `images: null`.
 	if (process.env.TMUX || term.startsWith("tmux")) {
-		return { images: null, trueColor: hasTrueColorHint, hyperlinks: tmuxForwardsHyperlink() };
+		const hyperlinks = tmuxForwardsHyperlink();
+		const passthrough = tmuxPassthroughState();
+		if (passthrough.allowPassthrough !== "off" && outerTerminalSupportsKittyGraphics(passthrough.clientTermname)) {
+			return { images: "kitty", trueColor: hasTrueColorHint, hyperlinks, tmuxPassthrough: true };
+		}
+		return { images: null, trueColor: hasTrueColorHint, hyperlinks };
 	}
 
 	// screen does not forward OSC 8 hyperlinks, so keep them off there.
@@ -143,6 +214,15 @@ export function setCapabilities(caps: TerminalCapabilities): void {
 const KITTY_PREFIX = "\x1b_G";
 const ITERM2_PREFIX = "\x1b]1337;File=";
 
+/**
+ * Wrap an escape sequence in a tmux DCS passthrough envelope so tmux forwards
+ * it verbatim to the outer terminal (requires `allow-passthrough`). Every ESC
+ * inside the payload must be doubled per the tmux protocol.
+ */
+export function wrapTmuxPassthrough(sequence: string): string {
+	return `\x1bPtmux;${sequence.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
+}
+
 export function isImageLine(line: string): boolean {
 	// Fast path: sequence at line start (single-row images)
 	if (line.startsWith(KITTY_PREFIX) || line.startsWith(ITERM2_PREFIX)) {
@@ -181,28 +261,35 @@ export function encodeKitty(
 	if (options.rows) params.push(`r=${options.rows}`);
 	if (options.imageId) params.push(`i=${options.imageId}`);
 
+	const chunks: string[] = [];
+
 	if (base64Data.length <= CHUNK_SIZE) {
-		return `\x1b_G${params.join(",")};${base64Data}\x1b\\`;
+		chunks.push(`\x1b_G${params.join(",")};${base64Data}\x1b\\`);
+	} else {
+		let offset = 0;
+		let isFirst = true;
+
+		while (offset < base64Data.length) {
+			const chunk = base64Data.slice(offset, offset + CHUNK_SIZE);
+			const isLast = offset + CHUNK_SIZE >= base64Data.length;
+
+			if (isFirst) {
+				chunks.push(`\x1b_G${params.join(",")},m=1;${chunk}\x1b\\`);
+				isFirst = false;
+			} else if (isLast) {
+				chunks.push(`\x1b_Gm=0;${chunk}\x1b\\`);
+			} else {
+				chunks.push(`\x1b_Gm=1;${chunk}\x1b\\`);
+			}
+
+			offset += CHUNK_SIZE;
+		}
 	}
 
-	const chunks: string[] = [];
-	let offset = 0;
-	let isFirst = true;
-
-	while (offset < base64Data.length) {
-		const chunk = base64Data.slice(offset, offset + CHUNK_SIZE);
-		const isLast = offset + CHUNK_SIZE >= base64Data.length;
-
-		if (isFirst) {
-			chunks.push(`\x1b_G${params.join(",")},m=1;${chunk}\x1b\\`);
-			isFirst = false;
-		} else if (isLast) {
-			chunks.push(`\x1b_Gm=0;${chunk}\x1b\\`);
-		} else {
-			chunks.push(`\x1b_Gm=1;${chunk}\x1b\\`);
-		}
-
-		offset += CHUNK_SIZE;
+	// Under tmux passthrough every APC chunk must be wrapped individually so
+	// tmux forwards each one as its own DCS envelope.
+	if (getCapabilities().tmuxPassthrough) {
+		return chunks.map(wrapTmuxPassthrough).join("");
 	}
 
 	return chunks.join("");
@@ -213,7 +300,8 @@ export function encodeKitty(
  * Uses uppercase 'I' to also free the image data.
  */
 export function deleteKittyImage(imageId: number): string {
-	return `\x1b_Ga=d,d=I,i=${imageId},q=2\x1b\\`;
+	const sequence = `\x1b_Ga=d,d=I,i=${imageId},q=2\x1b\\`;
+	return getCapabilities().tmuxPassthrough ? wrapTmuxPassthrough(sequence) : sequence;
 }
 
 /**
@@ -221,7 +309,8 @@ export function deleteKittyImage(imageId: number): string {
  * Uses uppercase 'A' to also free the image data.
  */
 export function deleteAllKittyImages(): string {
-	return "\x1b_Ga=d,d=A,q=2\x1b\\";
+	const sequence = "\x1b_Ga=d,d=A,q=2\x1b\\";
+	return getCapabilities().tmuxPassthrough ? wrapTmuxPassthrough(sequence) : sequence;
 }
 
 export function encodeITerm2(

@@ -1,5 +1,34 @@
 # TUI delta rendering fork changes
 
+## 2026-07-17: Kitty graphics through tmux passthrough
+
+### What changed
+
+- `terminal-image.ts`: `detectCapabilities` no longer hard-disables images under tmux. It probes the
+  effective `#{allow-passthrough}` value for the current pane (plus `#{client_termname}`) via
+  `tmux display-message -p`; when passthrough is `on`/`all` and the outer terminal implements the Kitty
+  graphics protocol (kitty/Ghostty/WezTerm via `client_termname` or leaked env hints), capabilities become
+  `images: "kitty", tmuxPassthrough: true`. Both probes are dependency-injectable for tests.
+- `terminal-image.ts`: new exported `wrapTmuxPassthrough(sequence)` wraps a sequence in a tmux DCS envelope
+  (`ESC Ptmux; … ESC \` with every payload ESC doubled). `encodeKitty` wraps each APC chunk individually and
+  `deleteKittyImage`/`deleteAllKittyImages` wrap their delete commands when `tmuxPassthrough` is active.
+- `utils.ts`: `extractAnsiCode` learned DCS sequences (`ESC P … ST`), skipping doubled-ESC pairs so the
+  escaped inner ST does not terminate the envelope early. Wrapped image lines therefore keep
+  `visibleWidth === 0` and stay compatible with the TUI's Kitty image-line bookkeeping (id/row extraction in
+  `tui.ts` uses `indexOf("\x1b_G")`, which still matches inside the doubled-ESC payload).
+
+### Why this cannot be expressed externally
+
+Image capability detection and Kitty sequence emission are `terminal-image.ts` internals consumed by the
+`Image` component and the `TUI` renderer's image deletion/diff paths; extensions cannot re-wrap sequences the
+renderer emits.
+
+### Expected merge conflict zones
+
+- MEDIUM: `terminal-image.ts` tmux branch of `detectCapabilities` and `encodeKitty` chunk assembly.
+- LOW: `utils.ts` `extractAnsiCode` escape-sequence branches.
+- LOW: `index.ts` terminal-image export list; `test/terminal-image.test.ts` tmux capability tests.
+
 ## 2026-07-26: composable leading skill autocomplete
 
 ### What changed
