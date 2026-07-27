@@ -177,6 +177,7 @@ export type AgentSessionEvent =
 	| Exclude<AgentEvent, { type: "agent_end" }>
 	| AgentSessionAgentEndEvent
 	| { type: "agent_settled" }
+	| { type: "session_abort" }
 	| { type: "continuation_error"; errorMessage: string }
 	| {
 			type: "queue_update";
@@ -2944,8 +2945,25 @@ export class AgentSession {
 	 * Abort current operation and wait for agent to become idle.
 	 */
 	async abort(): Promise<void> {
+		// Capture gap-state BEFORE _abortActiveAgentAndRetry resets retry/compaction state.
+		// Mid-run aborts (isStreaming) are delivered via agent_end (abortSource "user");
+		// purely-idle defensive aborts (e.g. RPC session close) must not fire session_abort.
+		// Mid-run abort (isStreaming with retryAttempt===0) is delivered via agent_end
+		// (abortSource "user"). The gap case is when no agent_end will fire to carry that:
+		// retry backoff (retryAttempt > 0 — the error agent_end already fired, and
+		// agent.abort() during backoff produces no new agent_end), compaction, or queued
+		// continuation, all outside an active LLM stream. Purely-idle defensive aborts
+		// (e.g. RPC session close on an idle session) must not fire session_abort.
+		const wasMidRun = this.isStreaming && this._retryAttempt === 0;
+		const hadGapWork =
+			this._retryAttempt > 0 || (!this.isStreaming && (this.isCompacting || this.pendingMessageCount > 0));
 		this.abortCompaction();
 		await this._abortActiveAgentAndRetry("user");
+		if (wasMidRun || !hadGapWork) return;
+		void this._extensionRunner
+			.emit({ type: "session_abort" })
+			.then(() => this._emit({ type: "session_abort" }))
+			.catch(() => undefined);
 	}
 
 	async waitForIdle(): Promise<void> {

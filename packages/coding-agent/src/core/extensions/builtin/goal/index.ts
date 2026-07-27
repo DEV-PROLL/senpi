@@ -136,6 +136,21 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 	});
 
+	pi.on("session_abort", async (_event, ctx) => {
+		const goal = await readGoal(goalStoreRef(ctx));
+		if (goal?.status !== "active") return;
+		const accounted = await accountCurrentAgentTurn(ctx, "active");
+		if (accounted?.status === "active") {
+			const blocked = await updateGoal(
+				goalStoreRef(ctx),
+				{ status: "blocked", reason: "user interrupted the turn" },
+				"model",
+			);
+			clearAgentGoalAccounting();
+			refreshGoalUiBestEffort(ctx, blocked);
+		}
+	});
+
 	pi.on("session_shutdown", async (_event, ctx) => {
 		if (agentGoalAccounting !== null) {
 			await accountCurrentAgentTurn(ctx, "active");

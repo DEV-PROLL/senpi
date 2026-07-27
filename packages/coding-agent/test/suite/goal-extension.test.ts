@@ -288,8 +288,6 @@ function textOf(result: { content?: Array<{ type: string; text?: string }> } | u
 	return result?.content?.find((part) => part.type === "text")?.text ?? "";
 }
 
-
-
 describe("goal extension reload does not auto-start a stopped agent", () => {
 	it("does not queue a continuation on session_start reason 'reload'", async () => {
 		const { tools, handlers, sent } = createGoalHarness();
@@ -321,6 +319,55 @@ describe("goal extension reload does not auto-start a stopped agent", () => {
 
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
+	});
+});
+
+describe("goal extension session_abort blocks an active goal outside an agent run", () => {
+	it("blocks an active goal when session_abort fires (abort during retry backoff or queued continuation)", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-session-abort-gap");
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+		// Simulate the gap case: agent_end fired earlier (error/retry), goal is still active,
+		// then user aborts outside an active run -> session_abort fires.
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantMessageWithStopReason("error")] },
+			ctx,
+		);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+
+		await runHandlers(handlers, "session_abort", { type: "session_abort" }, ctx);
+
+		const goal = await readGoal(storeRefFor(ctx));
+		expect(goal?.status).toBe("blocked");
+		expect(goal?.blockedReason).toBeTruthy();
+		expect(sent).toHaveLength(0);
+	});
+
+	it("does not block a goal that is already blocked or complete on session_abort", async () => {
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeCtx("thread-session-abort-already-blocked");
+		await tools.get("create_goal")?.execute("c1", { objective: "Done waiting" }, undefined, undefined, ctx);
+		await tools
+			.get("update_goal")
+			?.execute("u1", { status: "blocked", reason: "Already blocked" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_abort", { type: "session_abort" }, ctx);
+
+		const goal = await readGoal(storeRefFor(ctx));
+		expect(goal?.status).toBe("blocked");
+		expect(goal?.blockedReason).toBe("Already blocked");
+	});
+
+	it("does nothing on session_abort when there is no goal", async () => {
+		const { handlers } = createGoalHarness();
+		const ctx = await makeCtx("thread-session-abort-no-goal");
+
+		await runHandlers(handlers, "session_abort", { type: "session_abort" }, ctx);
+
+		expect(await readGoal(storeRefFor(ctx))).toBeNull();
 	});
 });
 
