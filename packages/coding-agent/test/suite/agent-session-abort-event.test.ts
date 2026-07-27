@@ -55,4 +55,13 @@ describe("AgentSession.abort() emits session_abort in the gap case", () => {
 		await promptPromise.catch(() => undefined);
 		expect(harness.eventsOfType("session_abort")).toHaveLength(0);
 	});
+
+	// C3-A: An actively streaming retry attempt (retryAttempt > 0 but _retryPromise === undefined)
+	// is mid-run — agent_end owns the abort signal. session_abort must NOT fire.
+	// This is verified by code inspection: wasMidRun = isStreaming && _retryPromise === undefined,
+	// which is true during active retry streaming. A reliable integration test cannot easily
+	// distinguish "in backoff" from "actively streaming retry" from outside the session
+	// (_retryPromise is private), so this case is covered by the mid-run test above
+	// (which proves isStreaming + no retry = no emit) and the retry-backoff test
+	// (which proves _retryPromise defined = emit).
 });

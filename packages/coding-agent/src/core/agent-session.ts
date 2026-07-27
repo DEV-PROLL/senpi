@@ -588,6 +588,8 @@ export class AgentSession {
 	private _userAbortPromise: Promise<void> | undefined = undefined;
 	private _agentAbortSource: "user" | "system" | undefined = undefined;
 	private _suppressQueuedContinuationAfterUserAbort = false;
+	/** Set when clearQueue() drains non-empty queues, so abort() can detect the gap even after queues are cleared. */
+	private _hadClearedQueuedMessages = false;
 	private _extensionEventSignal: AbortSignal | undefined = undefined;
 
 	// Bash execution state
@@ -2910,6 +2912,7 @@ export class AgentSession {
 	clearQueue(): { steering: string[]; followUp: string[] } {
 		const steering = [...this._steeringMessages];
 		const followUp = [...this._followUpMessages];
+		if (steering.length > 0 || followUp.length > 0) this._hadClearedQueuedMessages = true;
 		// Clear every queue synchronously. Deferred post-compaction messages are
 		// already represented in visible bookkeeping, so they must not be returned
 		// a second time or later resurrected into Agent's native queues.
@@ -2946,24 +2949,32 @@ export class AgentSession {
 	 */
 	async abort(): Promise<void> {
 		// Capture gap-state BEFORE _abortActiveAgentAndRetry resets retry/compaction state.
-		// Mid-run aborts (isStreaming) are delivered via agent_end (abortSource "user");
-		// purely-idle defensive aborts (e.g. RPC session close) must not fire session_abort.
-		// Mid-run abort (isStreaming with retryAttempt===0) is delivered via agent_end
-		// (abortSource "user"). The gap case is when no agent_end will fire to carry that:
-		// retry backoff (retryAttempt > 0 — the error agent_end already fired, and
-		// agent.abort() during backoff produces no new agent_end), compaction, or queued
-		// continuation, all outside an active LLM stream. Purely-idle defensive aborts
-		// (e.g. RPC session close on an idle session) must not fire session_abort.
-		const wasMidRun = this.isStreaming && this._retryAttempt === 0;
-		const hadGapWork =
-			this._retryAttempt > 0 || (!this.isStreaming && (this.isCompacting || this.pendingMessageCount > 0));
+		// A mid-run abort (actively streaming with no pending retry) is delivered via
+		// agent_end (abortSource "user") — no session_abort needed. The gap case is when
+		// no agent_end will fire to carry the abort signal:
+		//   - retry backoff (_retryPromise defined — the error agent_end already fired,
+		//     agent.abort() during backoff is a no-op, no new agent_end)
+		//   - compaction (!isStreaming && isCompacting)
+		//   - queued continuation that was already cleared by the caller (TUI clears queues
+		//     before calling abort, so pendingMessageCount is 0 but _hadClearedQueuedMessages
+		//     records that messages were present)
+		// Purely-idle defensive aborts (e.g. RPC session close on an idle session) must not
+		// fire session_abort.
+		const wasMidRun = this.isStreaming && this._retryPromise === undefined;
+		const hadRetryBackoff = this._retryPromise !== undefined;
+		const hadCompactionOrPending = !this.isStreaming && (this.isCompacting || this.pendingMessageCount > 0);
+		const hadClearedQueues = this._hadClearedQueuedMessages;
+		this._hadClearedQueuedMessages = false;
+		const shouldEmitAbort = !wasMidRun && (hadRetryBackoff || hadCompactionOrPending || hadClearedQueues);
 		this.abortCompaction();
 		await this._abortActiveAgentAndRetry("user");
-		if (wasMidRun || !hadGapWork) return;
-		void this._extensionRunner
-			.emit({ type: "session_abort" })
-			.then(() => this._emit({ type: "session_abort" }))
-			.catch(() => undefined);
+		if (!shouldEmitAbort) return;
+		try {
+			await this._extensionRunner.emit({ type: "session_abort" });
+			this._emit({ type: "session_abort" });
+		} catch {
+			// Extension runner may be torn down during RPC close — best-effort.
+		}
 	}
 
 	async waitForIdle(): Promise<void> {
