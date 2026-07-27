@@ -1876,7 +1876,12 @@ export class AgentSession {
 	): Promise<AgentToolResult<TDetails>> {
 		let activeTools = this.getActiveToolNames();
 		let tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
-		if (!tool && this._toolDefinitions.has(toolName) && this._activateLazyTool(toolName)) {
+		if (
+			!tool &&
+			options?.activateInactiveTool === true &&
+			this._toolDefinitions.has(toolName) &&
+			this._activateLazyTool(toolName)
+		) {
 			activeTools = this.getActiveToolNames();
 			tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
 		}

@@ -87,8 +87,10 @@ export async function createRuntime(
 }
 
 export function createExecuteTool(pi: CodemodeRuntimeAPI, activeTools?: ReadonlySet<string>): AgentExecuteTool {
+	// A cell names tools directly and cannot run tool_search first, so eval opts in to
+	// lazy activation. Eligibility still belongs to the extension that registered the tool.
 	const executeTool: AgentExecuteTool = (toolName, params, executeOptions) =>
-		pi.executeTool(toolName, params, executeOptions);
+		pi.executeTool(toolName, params, { ...executeOptions, activateInactiveTool: true });
 	return Object.assign(executeTool, {
 		isToolAvailable: (name: string): boolean => activeTools?.has(name) ?? pi.getActiveTools().includes(name),
 	});

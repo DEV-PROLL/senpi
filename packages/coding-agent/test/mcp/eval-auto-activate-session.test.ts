@@ -26,7 +26,7 @@ async function harnessWith(factory: (pi: ExtensionAPI) => void) {
 }
 
 describe("lazy tool activation through executeTool", () => {
-	it("activates an eligible inactive tool and runs it", async () => {
+	it("activates an eligible inactive tool for an opted-in caller", async () => {
 		const harness = await harnessWith((pi) => {
 			pi.registerTool(makeTool("mcp_fx_click"));
 			pi.registerLazyToolActivator((toolName) => {
@@ -40,10 +40,29 @@ describe("lazy tool activation through executeTool", () => {
 			harness.session.setActiveToolsByName(["read"]);
 			expect(harness.session.getActiveToolNames()).not.toContain("mcp_fx_click");
 
-			const result = await harness.api.executeTool("mcp_fx_click", {});
+			const result = await harness.api.executeTool("mcp_fx_click", {}, { activateInactiveTool: true });
 
 			expect(JSON.stringify(result.content)).toContain("mcp_fx_click-ran");
 			expect(harness.session.getActiveToolNames()).toContain("mcp_fx_click");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("keeps inactive_tool for an ordinary caller that did not opt in", async () => {
+		const harness = await harnessWith((pi) => {
+			pi.registerTool(makeTool("mcp_fx_click"));
+			pi.registerLazyToolActivator((toolName) => {
+				if (toolName !== "mcp_fx_click") return false;
+				pi.setActiveTools([...pi.getActiveTools(), toolName]);
+				return true;
+			});
+		});
+
+		try {
+			harness.session.setActiveToolsByName(["read"]);
+			await expect(harness.api.executeTool("mcp_fx_click", {})).rejects.toMatchObject({ code: "inactive_tool" });
+			expect(harness.session.getActiveToolNames()).not.toContain("mcp_fx_click");
 		} finally {
 			harness.cleanup();
 		}
@@ -57,7 +76,9 @@ describe("lazy tool activation through executeTool", () => {
 
 		try {
 			harness.session.setActiveToolsByName(["read"]);
-			await expect(harness.api.executeTool("gated_tool", {})).rejects.toMatchObject({ code: "inactive_tool" });
+			await expect(harness.api.executeTool("gated_tool", {}, { activateInactiveTool: true })).rejects.toMatchObject({
+				code: "inactive_tool",
+			});
 			expect(harness.session.getActiveToolNames()).not.toContain("gated_tool");
 		} finally {
 			harness.cleanup();
@@ -71,7 +92,9 @@ describe("lazy tool activation through executeTool", () => {
 
 		try {
 			harness.session.setActiveToolsByName(["read"]);
-			await expect(harness.api.executeTool("never_registered", {})).rejects.toMatchObject({ code: "unknown_tool" });
+			await expect(
+				harness.api.executeTool("never_registered", {}, { activateInactiveTool: true }),
+			).rejects.toMatchObject({ code: "unknown_tool" });
 			expect(harness.session.getActiveToolNames()).toEqual(["read"]);
 		} finally {
 			harness.cleanup();

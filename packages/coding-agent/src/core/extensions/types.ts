@@ -1800,6 +1800,13 @@ export type ExecuteToolUpdateCallback<T = unknown> = AgentToolUpdateCallback<T>;
 export interface ExecuteToolOptions<TDetails = unknown> {
 	signal?: AbortSignal;
 	onUpdate?: ExecuteToolUpdateCallback<TDetails>;
+	/**
+	 * Opt in to lazy activation: when the tool is registered but inactive, registered
+	 * activators may activate it instead of failing. Off by default so ordinary callers
+	 * keep the `inactive_tool` contract; code-mode sets it because a cell names tools
+	 * directly and cannot run tool_search first.
+	 */
+	activateInactiveTool?: boolean;
 }
 
 export type ExecuteToolResult<TDetails = unknown> = AgentToolResult<TDetails>;
