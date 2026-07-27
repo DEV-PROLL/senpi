@@ -19,8 +19,14 @@ afterEach(() => {
 	}
 });
 
-function createContext(registration: Registration): SpeculativeCompactionContext {
-	const model = registration.getModel();
+function createContext(
+	registration: Registration,
+	thinkingLevelMap?: NonNullable<SpeculativeCompactionContext["model"]>["thinkingLevelMap"],
+): SpeculativeCompactionContext {
+	const model = {
+		...registration.getModel(),
+		thinkingLevelMap,
+	};
 	const authStorage = AuthStorage.inMemory();
 	authStorage.setRuntimeApiKey(model.provider, "faux-key");
 	const modelRegistry = ModelRegistry.inMemory(authStorage);
@@ -79,11 +85,12 @@ function createContext(registration: Registration): SpeculativeCompactionContext
 async function captureSummarizationOptions(
 	api: string,
 	models: FauxModelDefinition[],
+	thinkingLevelMap?: NonNullable<SpeculativeCompactionContext["model"]>["thinkingLevelMap"],
 ): Promise<Record<string, unknown> | undefined> {
 	const registration = registerFauxProvider({ api, models });
 	registrations.push(registration);
 	registration.setResponses([fauxAssistantMessage("summary")]);
-	const context = createContext(registration);
+	const context = createContext(registration, thinkingLevelMap);
 	const snapshot = createSpeculativeCompactionSnapshot(context, { generation: 1 });
 	if (!snapshot) throw new Error("expected a compaction snapshot");
 	await runExtensionCompaction(context, snapshot);
@@ -106,14 +113,30 @@ describe("summarization reasoning overrides", () => {
 	});
 
 	it("minimizes reasoning for openai-responses summarization", async () => {
-		const options = await captureSummarizationOptions("openai-responses", [reasoningModel]);
-		expect(options?.reasoningEffort).toBe("minimal");
+		const options = await captureSummarizationOptions("openai-responses", [reasoningModel], {
+			minimal: "minimal",
+			low: "low",
+		});
+		expect(options?.reasoningEffort).toBe("low");
 		expect(options?.reasoningSummary).toBeNull();
 	});
 
 	it("minimizes reasoning for openai-completions summarization", async () => {
-		const options = await captureSummarizationOptions("openai-completions", [reasoningModel]);
-		expect(options?.reasoningEffort).toBe("minimal");
+		const options = await captureSummarizationOptions("openai-completions", [reasoningModel], {
+			minimal: "minimal",
+			low: "low",
+		});
+		expect(options?.reasoningEffort).toBe("low");
+	});
+
+	it("omits the override when no low-cost reasoning level is supported", async () => {
+		const options = await captureSummarizationOptions("openai-responses", [reasoningModel], {
+			low: null,
+			medium: null,
+			high: null,
+		});
+		expect(options?.reasoningEffort).toBeUndefined();
+		expect(options?.reasoningSummary).toBeUndefined();
 	});
 
 	it("leaves non-reasoning models untouched", async () => {
