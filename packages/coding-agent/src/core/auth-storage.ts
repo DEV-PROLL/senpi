@@ -195,6 +195,7 @@ export class InMemoryAuthStorageBackend implements AuthStorageBackend {
 export class AuthStorage implements CredentialStore {
 	private data: AuthStorageData = {};
 	private readonly runtimeOverrides = new Map<string, string>();
+	private readonly extensionOAuthProviders = new Map<string, OAuthAuth>();
 	private errors: Error[] = [];
 	private storage: AuthStorageBackend;
 
@@ -380,14 +381,31 @@ export class AuthStorage implements CredentialStore {
 		return getEnvApiKey(providerId);
 	}
 
+	registerOAuthProvider(providerId: string, oauth: OAuthAuth): void {
+		this.extensionOAuthProviders.set(providerId, oauth);
+	}
+
+	unregisterOAuthProvider(providerId: string): void {
+		this.extensionOAuthProviders.delete(providerId);
+	}
+
 	getOAuthProviders(): Array<{ id: string; name: string }> {
-		return builtinProviders().flatMap((provider) =>
-			provider.auth.oauth ? [{ id: provider.id, name: provider.auth.oauth.name }] : [],
+		const dynamic = [...this.extensionOAuthProviders.entries()].map(([id, oauth]) => ({
+			id,
+			name: oauth.name,
+		}));
+		const builtin = builtinProviders().flatMap((provider) =>
+			provider.auth.oauth && !this.extensionOAuthProviders.has(provider.id)
+				? [{ id: provider.id, name: provider.auth.oauth.name }]
+				: [],
 		);
+		return [...dynamic, ...builtin];
 	}
 
 	async login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<void> {
-		const oauth = builtinProviders().find((provider) => provider.id === providerId)?.auth.oauth;
+		const oauth =
+			this.extensionOAuthProviders.get(providerId) ??
+			builtinProviders().find((provider) => provider.id === providerId)?.auth.oauth;
 		if (!oauth) throw new Error(`Unknown OAuth provider: ${providerId}`);
 		const interaction: AuthInteraction = {
 			signal: callbacks.signal,

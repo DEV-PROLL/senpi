@@ -656,6 +656,9 @@ export class ModelRuntime implements Models {
 		}
 		this.extensionProviders.set(providerId, effective);
 		this.recomposeProvider(providerId);
+		const composedOAuth = this.models.getProvider(providerId)?.auth.oauth;
+		if (composedOAuth) this.credentials.registerOAuthProvider(providerId, composedOAuth);
+		else this.credentials.unregisterOAuthProvider(providerId);
 		this.updateModelSnapshot();
 		if (
 			this.snapshot.storedProviders.has(providerId) ||
@@ -684,6 +687,7 @@ export class ModelRuntime implements Models {
 		this.extensionProviders.delete(providerId);
 		this.nativeExtensionProviders.delete(providerId);
 		this.recomposeProvider(providerId);
+		this.credentials.unregisterOAuthProvider(providerId);
 		this.updateModelSnapshot();
 		void this.refresh({ allowNetwork: false });
 	}
