@@ -89,4 +89,39 @@ describe("config reload extension watch scope", () => {
 			expect(isLoadableExtensionEntry(root, join("goal", "no-session", "hash", "id.json"))).toBe(false);
 		});
 	});
+
+	describe("#given the manifest shape used by extension discovery", () => {
+		it("#then resolves dot-prefixed sibling entries", () => {
+			const root = extensionsRoot();
+			mkdirSync(join(root, "my-package"), { recursive: true });
+			writeFileSync(
+				join(root, "my-package", "package.json"),
+				JSON.stringify({ name: "my-package", pi: { extensions: ["./ext1.ts", "./ext2.ts"] } }),
+			);
+
+			expect(isLoadableExtensionEntry(root, join("my-package", "ext1.ts"))).toBe(true);
+			expect(isLoadableExtensionEntry(root, join("my-package", "ext2.ts"))).toBe(true);
+			expect(isLoadableExtensionEntry(root, join("my-package", "ext3.ts"))).toBe(false);
+		});
+
+		it("#then a manifest entry escaping its package is ignored", () => {
+			const root = extensionsRoot();
+			mkdirSync(join(root, "escaping"), { recursive: true });
+			writeFileSync(
+				join(root, "escaping", "package.json"),
+				JSON.stringify({ pi: { extensions: ["../../outside.js"] } }),
+			);
+
+			expect(isLoadableExtensionEntry(root, join("escaping", "..", "..", "outside.js"))).toBe(false);
+		});
+
+		it("#then a malformed manifest degrades without throwing", () => {
+			const root = extensionsRoot();
+			mkdirSync(join(root, "broken"), { recursive: true });
+			writeFileSync(join(root, "broken", "package.json"), "{ not json");
+
+			expect(isLoadableExtensionEntry(root, join("broken", "dist", "index.js"))).toBe(false);
+			expect(isLoadableExtensionEntry(root, join("broken", "package.json"))).toBe(true);
+		});
+	});
 });
