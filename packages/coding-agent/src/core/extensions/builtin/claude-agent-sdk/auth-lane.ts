@@ -4,6 +4,8 @@ import type { CredentialStore } from "@earendil-works/pi-ai";
 import { loadAnthropicOAuth } from "@earendil-works/pi-ai/oauth";
 import { getAgentDir } from "../../../../config.ts";
 import { AuthStorage } from "../../../auth-storage.ts";
+import { emitProviderAccountFailover, emitProviderAccountsChanged } from "./account-events.ts";
+import { CLAUDE_AGENT_SDK_PROVIDER_ID } from "./account-management.ts";
 import {
 	type AccountSlot,
 	type ClaudeAgentSdkCredential,
@@ -19,7 +21,8 @@ import { runFailover } from "./failover.ts";
 import type { Options, SDKMessage, SdkQuery } from "./sdk-boundary.ts";
 import type { ClaudeAgentSdkProviderSettings, ClaudeAgentSdkTokenInjection } from "./settings.ts";
 
-export const CLAUDE_AGENT_SDK_PROVIDER_ID = "claude-agent-sdk";
+export { CLAUDE_AGENT_SDK_PROVIDER_ID } from "./account-management.ts";
+
 const EXPIRING_WITHIN_MS = 5 * 60_000;
 const CLI_OAUTH_SCOPES = [
 	"org:create_api_key",
@@ -67,6 +70,8 @@ export type AuthenticatedQueryInput = {
 	buildOptions: (lane: ClaudeAgentSdkTokenInjection) => Options;
 	providerSettings: ClaudeAgentSdkProviderSettings;
 	sessionId?: string;
+	/** Request-scoped CLI pin; takes precedence over persistent settings and account pins. */
+	pinnedAccount?: string;
 	onQuery?: (query: ReturnType<SdkQuery>) => void;
 };
 
@@ -202,7 +207,7 @@ export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncG
 		selectFn: (accounts) =>
 			selectAccount(accounts, {
 				sessionId: input.sessionId,
-				pinnedAccount: pool.pinnedAccount,
+				pinnedAccount: input.pinnedAccount ?? pool.pinnedAccount,
 				now: activeBoundary.now(),
 			}),
 		runAttempt: async (slot) => {
@@ -218,5 +223,16 @@ export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncG
 		now: activeBoundary.now,
 		errorFromEvent: sdkFailure,
 		isVisibleDelta: visibleSdkMessage,
+		onFailover: ({ account, nextAccount, classification }) => {
+			emitProviderAccountsChanged(CLAUDE_AGENT_SDK_PROVIDER_ID);
+			if (nextAccount) {
+				emitProviderAccountFailover(
+					CLAUDE_AGENT_SDK_PROVIDER_ID,
+					account.name,
+					nextAccount.name,
+					classification.kind,
+				);
+			}
+		},
 	});
 }

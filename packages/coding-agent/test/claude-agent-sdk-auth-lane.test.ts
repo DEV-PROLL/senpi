@@ -9,6 +9,7 @@ import {
 	type Model,
 } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import { subscribeProviderAccountEvents } from "../src/core/extensions/builtin/claude-agent-sdk/account-events.ts";
 import {
 	type AccountSlot,
 	addAccount,
@@ -210,12 +211,24 @@ describe("Claude Agent SDK auth lanes", () => {
 		);
 		overrideAuthLaneBoundary({ refresher: async () => Promise.reject(new Error("invalid refresh")) });
 		overrideSdkBoundary({ query: queryCapturing(captured) });
+		const accountEvents: Array<Record<string, unknown>> = [];
+		const unsubscribe = subscribeProviderAccountEvents((event) => accountEvents.push(event));
 
-		const result = await streamClaudeAgentSdk(model, context).result();
+		try {
+			const result = await streamClaudeAgentSdk(model, context).result();
 
-		expect(result.content).toEqual([{ type: "text", text: "ok" }]);
-		expect(captured.map((options) => options.env?.CLAUDE_CODE_OAUTH_TOKEN)).toEqual(["valid-access"]);
-		const credential = (await store.read(providerId)) as ClaudeAgentSdkCredential;
-		expect(credential.accounts?.find((account) => account.name === "A")).toMatchObject({ blockReason: "auth_error" });
+			expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+			expect(captured.map((options) => options.env?.CLAUDE_CODE_OAUTH_TOKEN)).toEqual(["valid-access"]);
+			const credential = (await store.read(providerId)) as ClaudeAgentSdkCredential;
+			expect(credential.accounts?.find((account) => account.name === "A")).toMatchObject({
+				blockReason: "auth_error",
+			});
+			expect(accountEvents).toEqual([
+				{ type: "accounts_changed", provider: providerId },
+				{ type: "failover", provider: providerId, from: "A", to: "B", reason: "auth_error" },
+			]);
+		} finally {
+			unsubscribe();
+		}
 	});
 });

@@ -11,6 +11,7 @@ type RecordValue = Record<string, unknown>;
 
 export type FailoverEvent = {
 	account: AccountSlot;
+	nextAccount?: AccountSlot;
 	classification: SdkErrorClassification;
 	attempt: number;
 	visibleDeltaEmitted: boolean;
@@ -148,7 +149,19 @@ export async function* runFailover<TEvent>(options: FailoverOptions<TEvent>): As
 			const blocked = blockedAccount(account, classification, now(), attempt, baseBlockMs, error);
 			accounts = replaceAccount(accounts, blocked);
 			await persistBlock(options.store, options.providerId, blocked);
-			await options.onFailover?.({ account: blocked, classification, attempt: attempt + 1, visibleDeltaEmitted });
+			const event: FailoverEvent = {
+				account: blocked,
+				classification,
+				attempt: attempt + 1,
+				visibleDeltaEmitted,
+			};
+			try {
+				if (!visibleDeltaEmitted && attempt + 1 < accounts.length) {
+					event.nextAccount = options.selectFn(accounts);
+				}
+			} finally {
+				await options.onFailover?.(event);
+			}
 			if (visibleDeltaEmitted) throw classified;
 		}
 	}

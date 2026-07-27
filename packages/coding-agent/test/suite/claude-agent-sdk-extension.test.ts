@@ -16,6 +16,10 @@ function captureRegistration(): { registration: Registration } {
 		registerProvider: (name: string, config: ProviderConfigInput) => {
 			captured = { name, config };
 		},
+		registerCommand: (..._args: unknown[]) => {},
+		registerFlag: (..._args: unknown[]) => {},
+		getFlag: () => undefined,
+		on: (..._args: unknown[]) => {},
 	} as unknown as ExtensionAPI;
 	claudeAgentSdkExtension(pi);
 	if (!captured) throw new Error("extension did not register a provider");
@@ -23,7 +27,7 @@ function captureRegistration(): { registration: Registration } {
 }
 
 function fakeStreamSimple() {
-	return () => {
+	return (_model: Model<Api>, _context: Context) => {
 		const stream = createAssistantMessageEventStream();
 		stream.push({ type: "done", reason: "stop", message: undefined as never });
 		stream.end();

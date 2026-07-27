@@ -7,12 +7,13 @@ import {
 	parseStreamingJson,
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import { queryWithAuthLane } from "./auth-lane.ts";
+import { getSessionClaudeAccountPin } from "./account-command.ts";
 import { AllAccountsBlockedError } from "./affinity.ts";
-import { classifySdkError } from "./errors.ts";
-import { allAccountsBlockedGuidance, sdkErrorGuidance } from "./guidance.ts";
+import { queryWithAuthLane } from "./auth-lane.ts";
 import { buildCustomToolServers } from "./custom-tools.ts";
+import { classifySdkError } from "./errors.ts";
 import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable.ts";
+import { allAccountsBlockedGuidance, sdkErrorGuidance } from "./guidance.ts";
 import { buildClaudeAgentSdkQueryOptions } from "./options.ts";
 import { buildPromptBlocks, buildPromptStream } from "./prompt-bridge.ts";
 import { getSdkBoundary, type SdkQueryHandle } from "./sdk-boundary.ts";
@@ -80,6 +81,7 @@ export function streamClaudeAgentSdk(
 				query: getSdkBoundary().query,
 				providerSettings,
 				sessionId: options?.sessionId,
+				pinnedAccount: getSessionClaudeAccountPin(options?.sessionId),
 				onQuery: (query) => {
 					sdkQuery = query;
 					if (wasAborted) requestAbort();

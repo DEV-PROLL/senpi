@@ -210,6 +210,12 @@ export const SERVER_NOTIFICATION_METHODS = [
 	"windowsSandbox/setupCompleted",
 ] as const;
 
+// Senpi-only additions deliberately stay outside the pinned Codex arrays above.
+export const ADDITIVE_SERVER_NOTIFICATION_METHODS = [
+	"account/providerAccounts/failover",
+	"account/providerAccounts/updated",
+] as const;
+
 export const EXPERIMENTAL_SERVER_NOTIFICATION_METHODS = [
 	"process/exited",
 	"process/outputDelta",
