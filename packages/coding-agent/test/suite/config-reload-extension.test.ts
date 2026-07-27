@@ -1219,4 +1219,40 @@ describe("config reload builtin extension", () => {
 
 		expect(fixture.reload).not.toHaveBeenCalled();
 	});
+
+	it("reloads when a manifest-declared nested extension entry changes", async () => {
+		vi.useFakeTimers();
+		const agentDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-manifest-entry-"));
+		agentDirs.push(agentDir);
+		writeFileSync(join(agentDir, "settings.json"), '{"theme":"dark"}\n', "utf-8");
+		const packageDir = join(agentDir, "extensions", "my-ext");
+		const distDir = join(packageDir, "dist");
+		mkdirSync(distDir, { recursive: true });
+		writeFileSync(
+			join(packageDir, "package.json"),
+			`${JSON.stringify({ name: "my-ext", pi: { extensions: ["dist/index.js"] } })}\n`,
+			"utf-8",
+		);
+		const entryPath = join(distDir, "index.js");
+		writeFileSync(entryPath, "export default () => {};\n", "utf-8");
+
+		const watches = createWatchProbe();
+		const reload = vi.fn(async () => {});
+		const extension = createManualExtension(createEventBus());
+		configReloadExtension(extension.api, { agentDir, subscribe: watches.subscribe, logger: silentLogger() });
+		await invoke(
+			extension.handlers,
+			"session_start",
+			{ type: "session_start", reason: "startup" } satisfies SessionStartEvent,
+			fakeContext({ cwd: agentDir, requestReload: reload }),
+		);
+
+		writeFileSync(entryPath, "export default () => { /* changed */ };\n", "utf-8");
+		watches.emit(join(agentDir, "extensions"), join("my-ext", "dist", "index.js"));
+		await vi.advanceTimersByTimeAsync(200);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(reload).toHaveBeenCalledTimes(1);
+	});
 });

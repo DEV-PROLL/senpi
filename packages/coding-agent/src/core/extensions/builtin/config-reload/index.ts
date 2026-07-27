@@ -44,10 +44,12 @@ const CONFIG_FILE_NAMES = ["settings.json", "models.json", "keybindings.json"] a
 
 /**
  * The engine applies one predicate to both file gating and directory descent, so
- * this must admit immediate subdirectories in order to reach their entry files.
+ * this must admit scannable directories in order to reach their entry files.
  */
-const extensionWatchFilter = (relPath: string): boolean =>
-	isLoadableExtensionEntry(relPath) || isScannableExtensionDirectory(relPath);
+const extensionWatchFilter =
+	(extensionsDir: string) =>
+	(relPath: string): boolean =>
+		isLoadableExtensionEntry(extensionsDir, relPath) || isScannableExtensionDirectory(extensionsDir, relPath);
 
 type ConfigReloadWatchSettings = {
 	readonly settings?: boolean;
@@ -577,7 +579,8 @@ function buildWatchTargets(options: {
 		addBuiltinDirectory("builtin-global-prompts", resolve(agentDir, "prompts"));
 	}
 	if (settings.watch.extensions) {
-		addBuiltinDirectory("builtin-global-extensions", resolve(agentDir, "extensions"), extensionWatchFilter);
+		const globalExtensionsDir = resolve(agentDir, "extensions");
+		addBuiltinDirectory("builtin-global-extensions", globalExtensionsDir, extensionWatchFilter(globalExtensionsDir));
 	}
 	if (settings.watch.skills) {
 		for (const [index, skillPath] of options.skillPaths.entries()) {
@@ -615,7 +618,12 @@ function buildWatchTargets(options: {
 				addBuiltinDirectory("builtin-project-skills", resolve(projectDir, "skills"));
 			}
 			if (settings.watch.extensions) {
-				addBuiltinDirectory("builtin-project-extensions", resolve(projectDir, "extensions"), extensionWatchFilter);
+				const projectExtensionsDir = resolve(projectDir, "extensions");
+				addBuiltinDirectory(
+					"builtin-project-extensions",
+					projectExtensionsDir,
+					extensionWatchFilter(projectExtensionsDir),
+				);
 			}
 		}
 	}
