@@ -689,9 +689,11 @@ function externalTargetToWatchTarget(
 
 function literalFilterNames(filterGlobs: readonly string[] | undefined): string[] | undefined {
 	if (!filterGlobs) return undefined;
-	const literalNames = filterGlobs.filter(
-		(filterGlob) => !filterGlob.includes("*") && !filterGlob.includes("/") && !filterGlob.includes("\\\\"),
-	);
+	// A root-anchored glob names a literal path relative to the watch root, so
+	// strip the anchor before the separator check rejects it.
+	const literalNames = filterGlobs
+		.map((filterGlob) => (filterGlob.startsWith("/") ? filterGlob.slice(1) : filterGlob))
+		.filter((filterGlob) => !filterGlob.includes("*") && !filterGlob.includes("/") && !filterGlob.includes("\\\\"));
 	return literalNames.length > 0 ? literalNames : undefined;
 }
 

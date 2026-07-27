@@ -1181,4 +1181,42 @@ describe("config reload builtin extension", () => {
 
 		expect(reload).toHaveBeenCalledTimes(1);
 	});
+
+	it("detects an anchored external dot directory when it is created", async () => {
+		vi.useFakeTimers();
+		const fixture = await createFixture();
+		const ancestorDir = join(fixture.harness.tempDir, "anchored-ancestor");
+		mkdirSync(ancestorDir);
+		fixture.events.emit(CONFIG_WATCH_REGISTER, {
+			id: "omo-anchored",
+			displayName: ".omo anchored",
+			targets: [{ path: ancestorDir, kind: "dir", filterGlobs: ["/.omo"] }],
+		});
+		const omoDir = join(ancestorDir, ".omo");
+		mkdirSync(omoDir);
+
+		await settleChange(fixture, ancestorDir, ".omo");
+
+		expect(fixture.reload).toHaveBeenCalledTimes(1);
+		expect(fixture.notifications.some((message) => message.includes(omoDir))).toBe(true);
+	});
+
+	it("ignores unrelated nested dot directories under an anchored external target", async () => {
+		vi.useFakeTimers();
+		const fixture = await createFixture();
+		const ancestorDir = join(fixture.harness.tempDir, "anchored-scope");
+		const unrelatedDir = join(ancestorDir, "other-repo", "worktrees", "scratch");
+		mkdirSync(unrelatedDir, { recursive: true });
+		fixture.events.emit(CONFIG_WATCH_REGISTER, {
+			id: "omo-anchored-scope",
+			displayName: ".omo anchored scope",
+			targets: [{ path: ancestorDir, kind: "dir", filterGlobs: ["/.omo"] }],
+		});
+		fixture.reload.mockClear();
+
+		mkdirSync(join(unrelatedDir, ".omo"));
+		await settleChange(fixture, ancestorDir, join("other-repo", "worktrees", "scratch", ".omo"));
+
+		expect(fixture.reload).not.toHaveBeenCalled();
+	});
 });

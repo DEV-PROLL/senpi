@@ -121,6 +121,11 @@ export function isConfigWatchRejected(value: unknown): value is ConfigWatchRejec
 /**
  * Matches plain file names, path suffixes, and a leading-star suffix pattern.
  * This intentionally does not implement a full glob language.
+ *
+ * A leading `/` anchors the glob to the watch root, which is the only way to
+ * express "this immediate child" for a recursive target. Without it a bare
+ * `.omo` glob on an ancestor watch matches every `.omo` directory in the whole
+ * subtree.
  */
 export function matchesConfigWatchFilter(path: string, filterGlobs: readonly string[] | undefined): boolean {
 	if (filterGlobs === undefined || filterGlobs.length === 0) return true;
@@ -128,6 +133,7 @@ export function matchesConfigWatchFilter(path: string, filterGlobs: readonly str
 	const normalizedPath = path.replaceAll("\\", "/");
 	const basename = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
 	return filterGlobs.some((filterGlob) => {
+		if (filterGlob.startsWith("/")) return normalizedPath === filterGlob.slice(1);
 		if (filterGlob.startsWith("*")) return normalizedPath.endsWith(filterGlob.slice(1));
 		return basename === filterGlob || normalizedPath.endsWith(`/${filterGlob}`);
 	});
