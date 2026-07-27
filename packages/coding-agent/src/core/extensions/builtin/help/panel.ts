@@ -25,7 +25,8 @@ type HelpPanelOptions = {
 	};
 	readonly theme: Theme;
 	readonly keybindings: KeybindingsManager;
-	readonly done: (result: undefined) => void;
+	// biome-ignore lint/suspicious/noConfusingVoidType: custom<T> yields done: (result: T) => void; with T=void, done() takes no argument. Matches the API contract and the four existing custom<void> builtins (redraws, diff, files, btw).
+	readonly done: (result: void) => void;
 };
 
 function createMarkdownTheme(theme: Theme): MarkdownTheme {
