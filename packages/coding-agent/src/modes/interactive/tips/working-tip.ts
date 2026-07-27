@@ -16,6 +16,29 @@ export interface WorkingTipLine {
 	tipId: string;
 }
 
+/**
+ * Per-turn cache for the working-status tip.
+ *
+ * The tip is chosen once per turn and must survive the working indicator being
+ * hidden and reshown mid-turn; `resetForNewTurn()` is called only at a real turn
+ * boundary (agent_start).
+ */
+export class WorkingTipCache {
+	private cached: { value: WorkingTipLine | undefined } | undefined;
+
+	resetForNewTurn(): void {
+		this.cached = undefined;
+	}
+
+	resolve(compute: () => WorkingTipLine | undefined, onFirstResolve?: (tip: WorkingTipLine) => void): WorkingTipLine | undefined {
+		if (this.cached !== undefined) return this.cached.value;
+		const value = compute();
+		this.cached = { value };
+		if (value) onFirstResolve?.(value);
+		return value;
+	}
+}
+
 export function resolveWorkingTipLine(options: WorkingTipOptions): WorkingTipLine | undefined {
 	if (!options.tipsEnabled) return undefined;
 

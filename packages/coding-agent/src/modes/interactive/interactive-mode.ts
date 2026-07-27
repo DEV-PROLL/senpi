@@ -185,7 +185,7 @@ import { buildFavoriteCycleStatusMessage } from "./tips/favorite-messages.ts";
 import { recordTipShown } from "./tips/history-writer.ts";
 import { TIP_DEFINITIONS } from "./tips/registry.ts";
 import { resolveStartupTipLine } from "./tips/startup-tip.ts";
-import { resolveWorkingTipLine, type WorkingTipLine } from "./tips/working-tip.ts";
+import { resolveWorkingTipLine, WorkingTipCache, type WorkingTipLine } from "./tips/working-tip.ts";
 import { ToolArgsRevealController } from "./tool-args-reveal.ts";
 import { readToolProgress } from "./tool-progress.ts";
 import { ToolResultRevealController } from "./tool-result-reveal.ts";
