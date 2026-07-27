@@ -80,7 +80,8 @@
 		"undici": "8.5.0",
 		"ws": "8.21.0",
 		"yaml": "2.9.0",
-		"@anthropic-ai/claude-agent-sdk": "0.3.220"
+		"@anthropic-ai/claude-agent-sdk": "0.3.220",
+		"zod": "4.4.3"
 	},
 	"bundledDependencies": [
 		"@code-yeongyu/senpi-codemode",

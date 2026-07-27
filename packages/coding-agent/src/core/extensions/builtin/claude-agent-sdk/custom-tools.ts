@@ -1,4 +1,5 @@
 import type { Tool } from "@earendil-works/pi-ai";
+import { jsonSchemaToZodShape } from "./custom-tools-schema.ts";
 import { getSdkBoundary, type SdkBoundary } from "./sdk-boundary.ts";
 import { CUSTOM_TOOLS_MCP_SERVER_NAME, TOOL_EXECUTION_DENIED_MESSAGE } from "./tools.ts";
 
@@ -23,8 +24,7 @@ export function buildCustomToolServers(customTools: readonly Tool[]): Record<str
 		tools: customTools.map((tool) => ({
 			name: tool.name,
 			description: tool.description,
-			// The SDK accepts a raw Zod shape. {} avoids the zod-v4 peer at this boundary.
-			inputSchema: {},
+			inputSchema: jsonSchemaToZodShape(tool.parameters),
 			handler: denyCustomToolExecution,
 		})),
 	});
