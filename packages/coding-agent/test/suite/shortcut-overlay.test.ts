@@ -2,9 +2,34 @@ import { setKeybindings } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../../src/core/keybindings.ts";
 import { formatKeyText } from "../../src/modes/interactive/components/keybinding-hints.ts";
-import { ShortcutOverlay, shouldShowShortcutOverlay } from "../../src/modes/interactive/components/shortcut-overlay.ts";
+import {
+	classifyEditorInput,
+	ShortcutOverlay,
+	shouldShowShortcutOverlay,
+} from "../../src/modes/interactive/components/shortcut-overlay.ts";
 import { initTheme } from "../../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../src/utils/ansi.ts";
+
+describe("classifyEditorInput", () => {
+	it("classifies a signalled clipboard paste as paste even for a single character", () => {
+		// A bracketed paste of exactly "?" into an empty editor grows the text by one
+		// character, so length alone cannot distinguish it from typing.
+		expect(classifyEditorInput("", "?", true)).toBe("paste");
+	});
+
+	it("classifies a single typed character as typed", () => {
+		expect(classifyEditorInput("", "?", false)).toBe("typed");
+	});
+
+	it("classifies a multi-character jump as paste without an explicit signal", () => {
+		expect(classifyEditorInput("", "hello", false)).toBe("paste");
+	});
+
+	it("keeps the overlay closed for a pasted question mark end to end", () => {
+		const kind = classifyEditorInput("", "?", true);
+		expect(shouldShowShortcutOverlay("", "?", kind)).toBe(false);
+	});
+});
 
 describe("shouldShowShortcutOverlay", () => {
 	it("shows for a typed question mark in an empty editor", () => {

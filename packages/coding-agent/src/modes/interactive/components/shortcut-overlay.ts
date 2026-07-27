@@ -40,3 +40,20 @@ export function shouldShowShortcutOverlay(
 ): boolean {
 	return prevText === "" && nextText === "?" && inputKind === "typed";
 }
+
+/**
+ * Classify an editor change as paste or typed.
+ *
+ * The TUI editor exposes no per-change paste flag, so a clipboard paste is
+ * signalled out-of-band by `pasteSignalled` (set on the paste entry point).
+ * A multi-character jump is treated as a paste too, which catches bracketed
+ * pastes that never reach the clipboard handler.
+ */
+export function classifyEditorInput(
+	prevText: string,
+	nextText: string,
+	pasteSignalled: boolean,
+): "typed" | "paste" {
+	if (pasteSignalled) return "paste";
+	return nextText.length - prevText.length > 1 ? "paste" : "typed";
+}

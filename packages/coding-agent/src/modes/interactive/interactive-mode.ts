@@ -144,7 +144,7 @@ import {
 } from "./components/oauth-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
-import { ShortcutOverlay, shouldShowShortcutOverlay } from "./components/shortcut-overlay.ts";
+import { classifyEditorInput, ShortcutOverlay, shouldShowShortcutOverlay } from "./components/shortcut-overlay.ts";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.ts";
 import {
 	BranchSummaryStatusIndicator,
@@ -1368,8 +1368,7 @@ export class InteractiveMode {
 	private updateShortcutOverlay(nextText: string): void {
 		const previousText = this.lastEditorText;
 		this.lastEditorText = nextText;
-		const grewByPaste = this.lastInputWasPaste || nextText.length - previousText.length > 1;
-		const inputKind = grewByPaste ? "paste" : "typed";
+		const inputKind = classifyEditorInput(previousText, nextText, this.lastInputWasPaste);
 		this.lastInputWasPaste = false;
 
 		if (shouldShowShortcutOverlay(previousText, nextText, inputKind)) {
