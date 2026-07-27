@@ -77,7 +77,7 @@ describe("help builtin extension", () => {
 		const tui = fakeTui(500);
 		const keybindings = new KeybindingsManager();
 		let component: Component | undefined;
-		const custom = vi.fn(async (factory: HelpFactory) => {
+		const custom = vi.fn(async (factory: HelpFactory, _options?: { overlay?: boolean }) => {
 			component = await factory(tui, testTheme, keybindings, () => {});
 		});
 		const ctx = {

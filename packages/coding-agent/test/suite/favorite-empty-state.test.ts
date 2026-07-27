@@ -1,9 +1,9 @@
 import { getKeybindings, setKeybindings } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { KeybindingsManager } from "../../src/core/keybindings.ts";
+import { type KeybindingsConfig, KeybindingsManager } from "../../src/core/keybindings.ts";
 import { buildFavoriteCycleStatusMessage } from "../../src/modes/interactive/tips/favorite-messages.ts";
 
-function withKeybindings<T>(userBindings: Record<string, string>, run: () => T): T {
+function withKeybindings<T>(userBindings: KeybindingsConfig, run: () => T): T {
 	const previous = getKeybindings();
 	setKeybindings(new KeybindingsManager(userBindings));
 	try {
