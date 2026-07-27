@@ -454,6 +454,7 @@ export class ExtensionRunner {
 		this.runtime.setActiveTools = actions.setActiveTools;
 		this.runtime.refreshTools = actions.refreshTools;
 		this.runtime.registerRemovedToolHint = actions.registerRemovedToolHint;
+		this.runtime.registerLazyToolActivator = actions.registerLazyToolActivator;
 		this.runtime.getCommands = actions.getCommands;
 		this.runtime.setModel = actions.setModel;
 		this.runtime.getThinkingLevel = actions.getThinkingLevel;
@@ -487,6 +488,9 @@ export class ExtensionRunner {
 		for (const extension of this.extensions) {
 			for (const [name, hint] of extension.removedToolHints ?? []) {
 				actions.registerRemovedToolHint(name, hint);
+			}
+			for (const activator of extension.lazyToolActivators ?? []) {
+				actions.registerLazyToolActivator(activator);
 			}
 		}
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { AgentToolResult, AgentToolUpdateCallback, ExtensionContext, ToolDefinition } from "@code-yeongyu/senpi";
+import type { EvalSchemaToolInfo } from "../bridges/schema-bridge.ts";
 import type { CompletionRequest, CompletionResult } from "../completion/handler.ts";
 import { defaultCodemodeSettings, type ResolvedCodemodeSettings } from "../config/settings.ts";
 import type { EvalExecutionTracker } from "../extension/session-manager.ts";
@@ -37,6 +38,7 @@ export interface CreateEvalToolOptions {
 	readonly kernelManager: EvalKernelManager;
 	readonly cellTimeoutSeconds: number;
 	readonly executeTool: ExecuteTool;
+	readonly listTools?: () => readonly EvalSchemaToolInfo[];
 	readonly complete?: (request: CompletionRequest, ctx: ExtensionContext) => Promise<CompletionResult>;
 	readonly settings?: ResolvedCodemodeSettings;
 	readonly artifactsDir?: string;
@@ -351,6 +353,7 @@ async function executeCell(
 		execution.setKernel(kernel);
 		handler = new CellHandler(kernel, state, {
 			executeTool: options.executeTool,
+			...(options.listTools === undefined ? {} : { listTools: options.listTools }),
 			settings: options.settings ?? defaultCodemodeSettings,
 			...(options.complete === undefined ? {} : { complete: options.complete }),
 			ctx: bridgeContext,

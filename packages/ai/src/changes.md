@@ -1,5 +1,31 @@
 # AI Source Changes
 
+## 2026-07-27 - Retry Cloudflare 522 connection timeouts
+
+### What changed and why
+
+- `utils/retry.ts` adds `"522"` to the retryable provider-error patterns. Cloudflare surfaces an
+  origin that stopped responding as `Error: error code: 522` (Connection timed out); the message
+  matched no retryable pattern, so a transient gateway timeout dead-ended the turn instead of going
+  through the existing bounded retry policy like the other 5xx statuses (500/502/503/504/524).
+
+### Expected merge conflict zones
+
+- LOW: `utils/retry.ts` retryable provider-error status patterns.
+
+## 2026-07-27 - OAuth loader export for extension providers
+
+- `oauth.ts` now also exports `loadAnthropicOAuth` and `registerBundledOAuthFlowLoaders` from
+  `auth/oauth/load.ts` (bundler-safe variable-specifier dynamic import preserved), so coding-agent
+  extension providers can reuse the Anthropic PKCE machinery without reaching into package internals.
+
+## 2026-07-27 - Typed Responses remote-compaction capability
+
+- Extracted `OpenAIResponsesCompat` and `SessionAffinityFormat` from the oversized `types.ts` into
+  `openai-responses-compat.ts` while preserving their public exports.
+- Added `supportsRemoteCompactionV2` so verified OpenAI Responses proxies can explicitly advertise the native
+  `compaction_trigger` request contract. Unknown custom proxies remain disabled by default.
+
 ## 2026-07-27 - Treat Anthropic policy blocks as classifier refusals
 
 ### What changed and why
@@ -46,6 +72,19 @@
   is now a shared `pushAssistantText` closure) and `backfillReasoningSignatures()`.
 - LOW: `utils/tool-call-id.ts`, the three adapter imports/call sites, and the thinking-config block of
   `api/anthropic-messages.ts` `buildParams()`.
+
+## 2026-07-27 - Export string-based transient-error classifier
+
+### What changed and why
+
+- `utils/retry.ts` now exports `isRetryableErrorMessage(errorMessage: string)` and `isRetryableAssistantError`
+  delegates to it. Callers that hold a thrown `Error` instead of an `AssistantMessage` (the compaction
+  extension's blocking summarization path) need the same transient-vs-terminal classification to decide
+  between degrading gracefully and surfacing loudly. No pattern changes; classification behavior is identical.
+
+### Expected merge conflict zones
+
+- LOW: `utils/retry.ts` around `isRetryableAssistantError`.
 
 ## 2026-07-26 - Retry transient Codex upstream websocket failures
 

@@ -154,6 +154,11 @@ env(key?=None, value?=None) → str | None | dict
     Task/agent output by id. Reads immediately: running tasks return their status; \`format\` selects full (\`"raw"\`) or trailing (\`"tail"\`) output.
 {{/if}}tool.<name>(args) → unknown
     Invoke any session tool; \`args\` = its parameter object.
+tool_schema(name?) → dict
+    Parameter schema of a tool without calling it; omit \`name\` to list tool names.
+    Use it before calling a tool you have not called before — a failed call also
+    returns the expected parameters, so fix the args and retry in the next cell
+    instead of abandoning eval.
 completion(prompt, model?="default", system?=None, schema?=None) → str | dict
     Oneshot, stateless (no history/tools). \`model\`: \`"smol"\` fast | \`"default"\` session | \`"slow"\` most capable. \`schema\` (JSON-Schema) → structured output, parsed object.
 {{#if spawns}}agent(prompt, agent?="{{spawnDefaultAgent}}", model?=None, label?=None, schema?=None, handle?=False) → str | dict

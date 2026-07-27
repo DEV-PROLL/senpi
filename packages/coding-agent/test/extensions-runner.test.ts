@@ -118,6 +118,7 @@ describe("ExtensionRunner", () => {
 	});
 
 	const extensionActions: ExtensionActions = {
+		registerLazyToolActivator: () => {},
 		sendMessage: () => {},
 		sendUserMessage: () => {},
 		appendEntry: () => {},

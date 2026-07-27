@@ -94,7 +94,10 @@ describe("FooterComponent token formatting", () => {
 		// then
 		expect(rendered).toContain("↑49");
 		expect(rendered).toContain("↓6.8K");
-		expect(rendered).toContain("cache 1.5M/44K");
+		// Cache read/write totals were removed from the footer; only the hit rate stays.
+		expect(rendered).not.toContain("cache 1.5M/44K");
+		expect(rendered).not.toContain("cache ");
+		expect(rendered).toContain("CH97.1%");
 		expect(rendered).toContain("44K/800K (5.5%) (auto)");
 		expect(rendered).not.toContain("44,000/800,000");
 		expect(rendered).not.toContain("↓6,800");

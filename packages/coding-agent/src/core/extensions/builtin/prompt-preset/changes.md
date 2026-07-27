@@ -1,5 +1,27 @@
 # prompt-preset Extension Changes
 
+## Kimi K3 ambiguity reflect-then-ask gate (2026-07-27)
+
+### What changed
+
+- `kimi-k3.ts` Intent Gate: the trailing scope clause's weak ambiguity rule ("name an ambiguity and resolve it from available context when possible") was replaced by a full decision rule: reread the request once for ambiguity before the routing line; resolve what code, files, and conversation settle; silently fill trivial gaps any senior engineer would fill; when a material ambiguity survives (readings that produce different deliverables, a target the context cannot supply, or conflicting instructions), state the best reading, ask the one specific question that unblocks the work, and end the turn. Building on an invented assumption is classified as a defect, parallel to the existing acting-past-the-stop-condition defect framing.
+- `kimi-k3.ts` Style: the permission-begging ban now carves out the Intent Gate's clarifying question ("asking whether to do work the user already requested" stays banned), so the two rules cannot collide.
+- `test/suite/prompt-presets-kimi-k3.test.ts`: new structural case asserting section placement (the rule renders inside `## Intent Gate`), the context-first resolution order, the terminal ask condition, the assumption-is-defect classification, single render across the prompt, and the Style carve-out.
+
+### Why
+
+- Moonshot's K3 release notes (surfaced in the community model overview, huggingface.co/blog/ResterChed/kimi-k3-model-overview-mxfp4-quantization-open-wei) document "excessive proactiveness" as a known K3 limitation: in ambiguous scenarios K3 tends to act rather than ask for clarification - a trained MoE prior. The previous clause only said to resolve ambiguity "when possible" with no else-branch, so the trained prior filled the gap: fabricate an assumption and act.
+- K2-line prompting guidance says this family terminates loops on explicit conditions and responds to replacement behavior, not prohibitions. The new rule supplies both: a context-first resolution order and a terminal ask condition, phrased positively (no all-caps NEVER, which makes this family overthink).
+- Prompt-growth defense: the added sentences replace the weaker clause at the same location rather than appending a trailer; the growth (~65 words) is a category-C prior override - behavior the model cannot derive and actively resists - and nothing else in the core became deletable.
+
+### Why extension system couldn't handle this differently
+
+- The change lives entirely inside the builtin `prompt-preset` extension's K3 core; no core prompt code changed.
+
+### Expected merge conflict zones on next upstream sync
+
+- NONE expected: `kimi-k3.ts` and `prompt-presets-kimi-k3.test.ts` are fork-only files with no upstream counterparts.
+
 ## GPT-5.6 execution discipline: eval-first parallel orchestration, test-first, atomic commits, LSP routing (2026-07-25)
 
 ### What changed

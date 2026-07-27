@@ -1,5 +1,49 @@
 # Core Extensions Changes
 
+## 2026-07-27 - registerLazyToolActivator (on-demand activation of inactive tools)
+
+### What changed
+
+- `types.ts` exports `LazyToolActivator = (toolName: string) => boolean` and adds
+  `registerLazyToolActivator(activator)` to `ExtensionAPI`, `ExtensionActions`, and the runtime handler bag.
+- `agent-session.ts` `executeTool()`: when a name resolves to a registered-but-inactive tool, registered
+  activators run before the `inactive_tool` throw. An activator returning `true` means it has actually
+  activated the tool, and execution proceeds; `unknown_tool` is unaffected.
+- `loader.ts`/`runner.ts` stash activators on the extension and replay them after `bindCore()`, mirroring
+  `registerRemovedToolHint` — extension factories run before core is bound.
+- `builtin/mcp` registers an activator whose eligibility is the tier-B searchable catalog only, routed through
+  the existing tier-B `activate()` so stub-swap and name filtering keep their semantics.
+
+### Why extension system couldn't handle this alone
+
+- Only the session owns the active set and the `inactive_tool` decision; an extension cannot intercept it.
+  Eligibility, however, must stay with the registering extension: `_toolDefinitions` also contains
+  permission-denied tools, MCP `list_changed` additions held inactive as rug-pull defense, removed-tool
+  tombstones, and capability-gated tools (`look_at`, `read_video`). Core deliberately does not decide.
+
+### Expected merge conflict zones
+
+- LOW: additive handler entries in `types.ts`, `loader.ts`, `runner.ts`.
+- MEDIUM: the tool-resolution block at the top of `executeTool()` in `agent-session.ts`.
+
+## 2026-07-27 - RUNTIME_EXTENSION_PATH sentinel constant
+
+### What changed
+
+- `types.ts` exports `RUNTIME_EXTENSION_PATH = "<runtime>"`, the sentinel `extensionPath` used when the session
+  runtime itself (not a loaded extension) emits an error through the extension-error channel — e.g. failed
+  background session-title generation. `index.ts` re-exports it.
+- `agent-session.ts` and interactive mode consume the constant instead of repeating the string literal, so the
+  rendering contract ("runtime errors are not extension failures") has one owner.
+
+### Why extension system couldn't handle this alone
+
+- The sentinel is produced by core runtime paths and consumed by the TUI renderer; extensions never emit it.
+
+### Expected merge conflict zones
+
+- LOW: additive export above the `ExtensionError` interface in `types.ts`, and the value-export block in `index.ts`.
+
 ## 2026-07-26 - AgentEndEvent abort payload + goal resume at before_agent_start
 
 ### What changed

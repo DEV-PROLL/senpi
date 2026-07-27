@@ -122,6 +122,8 @@ When this value is anything other than `"auto"`, it overrides any model-level `p
 | `theme` | string | `"dark"` | Theme name (`"dark"`, `"light"`, or custom) |
 | `externalEditor` | string | `$VISUAL`, then `$EDITOR`, then Notepad on Windows or `nano` elsewhere | Command for Ctrl+G external editor; takes precedence over environment variables |
 | `quietStartup` | boolean | `false` | Hide startup header |
+| `tips` | boolean | `true` | Show the rotating startup and working-status tip lines |
+| `tipsHistory` | object | - | Internal record of which tips were shown last (managed automatically) |
 | `defaultProjectTrust` | string | `"ask"` | Fallback project trust behavior: `"ask"`, `"always"`, or `"never"`. Global setting only |
 | `collapseChangelog` | boolean | `false` | Show condensed changelog after updates |
 | `enableInstallTelemetry` | boolean | `true` | Send an anonymous install/update version ping after first install or changelog-detected updates. This does not control update checks |

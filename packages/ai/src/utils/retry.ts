@@ -33,6 +33,9 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"502",
 	"503",
 	"504",
+	// Cloudflare 522 (Connection timed out): origin stopped responding; transient
+	// like the other 5xx gateway statuses, surfaced as "Error: error code: 522".
+	"522",
 	"524",
 	"service.?unavailable",
 	"server.?error",
@@ -239,7 +242,17 @@ export function isRetryableAssistantError(message: AssistantMessage): boolean {
 	) {
 		return false;
 	}
-	const errorMessage = message.errorMessage;
+	return isRetryableErrorMessage(message.errorMessage);
+}
+
+/**
+ * Classifies a raw error-message string with the same transient-vs-terminal
+ * rules as {@link isRetryableAssistantError}, for callers that hold a thrown
+ * `Error` instead of an `AssistantMessage` (e.g. compaction summarization
+ * failures that must decide between degrading and surfacing loudly).
+ */
+export function isRetryableErrorMessage(errorMessage: string): boolean {
+	if (!errorMessage) return false;
 	if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage)) return false;
 	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
 }

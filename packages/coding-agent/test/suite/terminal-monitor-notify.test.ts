@@ -182,6 +182,9 @@ describe("terminal monitor event delivery", () => {
 
 	it("teaches watcher discipline in the terminal prompt", () => {
 		expect(TERMINAL_PROMPT_SECTION).toContain("monitor");
-		expect(TERMINAL_PROMPT_SECTION).toContain("decision-relevant");
+		// Discipline is the routing rule (waits are monitors, not poll loops) plus noise control,
+		// not any particular wording — assert the guidance, never a pinned sentence.
+		expect(TERMINAL_PROMPT_SECTION).toMatch(/never a foreground\s+sleep\/poll loop/);
+		expect(TERMINAL_PROMPT_SECTION).toMatch(/Filter noise at the command source/);
 	});
 });
