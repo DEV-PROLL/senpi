@@ -8,6 +8,9 @@ import {
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { queryWithAuthLane } from "./auth-lane.ts";
+import { AllAccountsBlockedError } from "./affinity.ts";
+import { classifySdkError } from "./errors.ts";
+import { allAccountsBlockedGuidance, sdkErrorGuidance } from "./guidance.ts";
 import { buildCustomToolServers } from "./custom-tools.ts";
 import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable.ts";
 import { buildClaudeAgentSdkQueryOptions } from "./options.ts";
@@ -204,7 +207,7 @@ export function streamClaudeAgentSdk(
 			}
 		} catch (error) {
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = errorMessage(error);
+			output.errorMessage = withAuthGuidance(error, errorMessage(error));
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 		} finally {
 			options?.signal?.removeEventListener("abort", onAbort);
@@ -213,4 +216,12 @@ export function streamClaudeAgentSdk(
 		}
 	})();
 	return stream;
+}
+
+function withAuthGuidance(error: unknown, message: string): string {
+	if (error instanceof AllAccountsBlockedError) {
+		return allAccountsBlockedGuidance(error.soonestUnblockAt);
+	}
+	const guidance = sdkErrorGuidance(classifySdkError(error).kind);
+	return guidance ? `${message}\n${guidance}` : message;
 }
