@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { getKeybindings, setKeybindings } from "@earendil-works/pi-tui";
+import { describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../../src/core/keybindings.ts";
 import { buildFavoriteCycleStatusMessage } from "../../src/modes/interactive/tips/favorite-messages.ts";
 
@@ -30,9 +30,8 @@ describe("buildFavoriteCycleStatusMessage", () => {
 	});
 
 	it("renders the model-selector and favorite-toggle keys live, not hardcoded defaults", () => {
-		const remapped = withKeybindings(
-			{ "app.model.select": "ctrl+y", "app.models.toggleFavorite": "ctrl+u" },
-			() => buildFavoriteCycleStatusMessage("empty"),
+		const remapped = withKeybindings({ "app.model.select": "ctrl+y", "app.models.toggleFavorite": "ctrl+u" }, () =>
+			buildFavoriteCycleStatusMessage("empty"),
 		);
 
 		expect(remapped).toContain("ctrl+y");

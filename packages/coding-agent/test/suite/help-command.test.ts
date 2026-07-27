@@ -2,12 +2,8 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import helpExtension from "../../src/core/extensions/builtin/help/index.ts";
 import { HELP_OVERLAY_MARGIN, HelpPanel } from "../../src/core/extensions/builtin/help/panel.ts";
+import type { ExtensionAPI, ExtensionCommandContext, RegisteredCommand } from "../../src/core/extensions/types.ts";
 import { KeybindingsManager } from "../../src/core/keybindings.ts";
-import type {
-	ExtensionAPI,
-	ExtensionCommandContext,
-	RegisteredCommand,
-} from "../../src/core/extensions/types.ts";
 import type { SlashCommandInfo } from "../../src/core/slash-commands.ts";
 import type { Theme } from "../../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../src/utils/ansi.ts";
@@ -21,7 +17,7 @@ type HelpFactory = (
 	tui: TUI,
 	theme: Theme,
 	keybindings: KeybindingsManager,
-	done: (result: void) => void,
+	done: (result: undefined) => void,
 ) => Component | Promise<Component>;
 
 function fakeTui(rows: number): TUI {
@@ -67,7 +63,10 @@ describe("help builtin extension", () => {
 		const harness = await createHarness({ extensionFactories: [helpExtension] });
 		harnesses.push(harness);
 
-		const command = harness.getExtensionRunner().getRegisteredCommands().find((item) => item.name === "help");
+		const command = harness
+			.getExtensionRunner()
+			.getRegisteredCommands()
+			.find((item) => item.name === "help");
 
 		expect(command?.invocationName).toBe("help");
 		expect(command?.description).toBe("Show usage, keybindings, and all commands");
@@ -102,9 +101,7 @@ describe("help builtin extension", () => {
 		const tui = fakeTui(8);
 		const done = vi.fn();
 		const panel = new HelpPanel({
-			markdown: ["## TOP", ...Array.from({ length: 20 }, (_, index) => `paragraph ${index + 1}`)].join(
-				"\n\n",
-			),
+			markdown: ["## TOP", ...Array.from({ length: 20 }, (_, index) => `paragraph ${index + 1}`)].join("\n\n"),
 			tui,
 			theme: testTheme,
 			keybindings: new KeybindingsManager(),

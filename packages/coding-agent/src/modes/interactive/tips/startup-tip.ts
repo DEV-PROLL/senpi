@@ -21,12 +21,13 @@ export function resolveStartupTipLine(options: StartupTipOptions): StartupTipLin
 	if (!options.tipsEnabled) return undefined;
 	if (options.quietStartup) return undefined;
 
-	const selectOptions = options.exclude
-		? { keys: options.keys, exclude: options.exclude }
-		: { keys: options.keys };
+	const selectOptions = options.exclude ? { keys: options.keys, exclude: options.exclude } : { keys: options.keys };
 	const tip = selectTip(options.definitions, options.history, options.now, selectOptions);
 	if (!tip) return undefined;
 
-	const body = tip.render(options.keys).replace(/\s*\n\s*/g, " ").trim();
+	const body = tip
+		.render(options.keys)
+		.replace(/\s*\n\s*/g, " ")
+		.trim();
 	return { line: `Tip: ${body}`, tipId: tip.id };
 }

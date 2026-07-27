@@ -25,6 +25,9 @@ export function resolveWorkingTipLine(options: WorkingTipOptions): WorkingTipLin
 	});
 	if (!tip) return undefined;
 
-	const body = tip.render(options.keys).replace(/\s*\n\s*/g, " ").trim();
+	const body = tip
+		.render(options.keys)
+		.replace(/\s*\n\s*/g, " ")
+		.trim();
 	return { line: `Tip: ${body}`, tipId: tip.id };
 }

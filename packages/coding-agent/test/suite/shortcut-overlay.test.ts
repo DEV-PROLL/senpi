@@ -1,11 +1,8 @@
 import { setKeybindings } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../../src/core/keybindings.ts";
-import {
-	ShortcutOverlay,
-	shouldShowShortcutOverlay,
-} from "../../src/modes/interactive/components/shortcut-overlay.ts";
 import { formatKeyText } from "../../src/modes/interactive/components/keybinding-hints.ts";
+import { ShortcutOverlay, shouldShowShortcutOverlay } from "../../src/modes/interactive/components/shortcut-overlay.ts";
 import { initTheme } from "../../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../src/utils/ansi.ts";
 

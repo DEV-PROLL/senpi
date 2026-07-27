@@ -47,9 +47,9 @@ import {
 	APP_TITLE,
 	CONFIG_DIR_NAME,
 	expandTildePath,
+	getAgentDir,
 	getAuthPath,
 	getDebugLogPath,
-	getAgentDir,
 	getDocsPath,
 	getShareViewerUrl,
 	VERSION,
@@ -144,6 +144,7 @@ import {
 } from "./components/oauth-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
+import { ShortcutOverlay, shouldShowShortcutOverlay } from "./components/shortcut-overlay.ts";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.ts";
 import {
 	BranchSummaryStatusIndicator,
@@ -162,15 +163,9 @@ import { formatExtensionErrorHeadline, sanitizeTuiErrorMessage } from "./extensi
 import { editFileInExternalEditor, editInExternalEditor } from "./external-editor.ts";
 import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./grok/chrome.ts";
 import { restoreInteractiveStderr, takeOverInteractiveStderr } from "./interactive-stderr-guard.ts";
-import { getModelSearchText } from "./model-search.ts";
 import { applyKeybindingsFileEdit, seedKeybindingsFile } from "./keybindings-command.ts";
+import { getModelSearchText } from "./model-search.ts";
 import { resolveStartupToolPaths } from "./startup-tools.ts";
-import { ShortcutOverlay, shouldShowShortcutOverlay } from "./components/shortcut-overlay.ts";
-import { buildFavoriteCycleStatusMessage } from "./tips/favorite-messages.ts";
-import { recordTipShown } from "./tips/history-writer.ts";
-import { TIP_DEFINITIONS } from "./tips/registry.ts";
-import { resolveStartupTipLine } from "./tips/startup-tip.ts";
-import { type WorkingTipLine, resolveWorkingTipLine } from "./tips/working-tip.ts";
 import { DEFAULT_SMOOTH_FPS, StreamingRevealController } from "./streaming-reveal.ts";
 import {
 	getAvailableThemes,
@@ -186,6 +181,11 @@ import {
 	theme,
 } from "./theme/theme.ts";
 import { InteractiveThemeController } from "./theme/theme-controller.ts";
+import { buildFavoriteCycleStatusMessage } from "./tips/favorite-messages.ts";
+import { recordTipShown } from "./tips/history-writer.ts";
+import { TIP_DEFINITIONS } from "./tips/registry.ts";
+import { resolveStartupTipLine } from "./tips/startup-tip.ts";
+import { resolveWorkingTipLine, type WorkingTipLine } from "./tips/working-tip.ts";
 import { ToolArgsRevealController } from "./tool-args-reveal.ts";
 import { readToolProgress } from "./tool-progress.ts";
 import { ToolResultRevealController } from "./tool-result-reveal.ts";

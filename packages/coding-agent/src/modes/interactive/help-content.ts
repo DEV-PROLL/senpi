@@ -53,10 +53,7 @@ function buildKeybindingTables(): string {
 
 export function buildHelpMarkdown(input: { extensionCommands: SlashCommandInfo[] }): string {
 	const commandDescriptionOverrides = new Map<string, string>([
-		[
-			"favorite-models",
-			`Manage favorite models for ${keyDisplayText("app.model.cycleForward")} cycling`,
-		],
+		["favorite-models", `Manage favorite models for ${keyDisplayText("app.model.cycleForward")} cycling`],
 	]);
 	const commandsByName = new Map<string, { name: string; description?: string }>();
 

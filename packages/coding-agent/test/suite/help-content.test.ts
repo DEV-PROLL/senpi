@@ -1,10 +1,6 @@
 import { setKeybindings } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-	KEYBINDINGS,
-	type Keybinding,
-	KeybindingsManager,
-} from "../../src/core/keybindings.ts";
+import { KEYBINDINGS, type Keybinding, KeybindingsManager } from "../../src/core/keybindings.ts";
 import { BUILTIN_SLASH_COMMANDS, type SlashCommandInfo } from "../../src/core/slash-commands.ts";
 import { keyDisplayText } from "../../src/modes/interactive/components/keybinding-hints.ts";
 import { buildHelpMarkdown } from "../../src/modes/interactive/help-content.ts";
@@ -109,9 +105,7 @@ describe("buildHelpMarkdown", () => {
 
 		expect(keybindings).toContain(`| \`${remappedThinkingKey}\` | Cycle thinking level |`);
 		expect(keybindings.toLowerCase()).not.toContain("shift+tab");
-		expect(commands).toContain(
-			`/favorite-models — Manage favorite models for ${remappedModelKey} cycling`,
-		);
+		expect(commands).toContain(`/favorite-models — Manage favorite models for ${remappedModelKey} cycling`);
 		expect(commands).not.toContain("Ctrl+P");
 	});
 

@@ -1,6 +1,12 @@
-import { type Component, type Focusable, Markdown, type MarkdownTheme, type OverlayOptions } from "@earendil-works/pi-tui";
-import type { KeybindingsManager } from "../../../keybindings.ts";
+import {
+	type Component,
+	type Focusable,
+	Markdown,
+	type MarkdownTheme,
+	type OverlayOptions,
+} from "@earendil-works/pi-tui";
 import type { Theme } from "../../../../modes/interactive/theme/theme.ts";
+import type { KeybindingsManager } from "../../../keybindings.ts";
 
 export const HELP_OVERLAY_MARGIN = 2;
 export const HELP_OVERLAY_OPTIONS = {
@@ -19,7 +25,7 @@ type HelpPanelOptions = {
 	};
 	readonly theme: Theme;
 	readonly keybindings: KeybindingsManager;
-	readonly done: (result: void) => void;
+	readonly done: (result: undefined) => void;
 };
 
 function createMarkdownTheme(theme: Theme): MarkdownTheme {

@@ -71,13 +71,11 @@ describe("SettingsManager tips settings", () => {
 		updateSettingsContentSnapshot(snapshots, settingsPath);
 
 		writeSettings({ theme: "dark", tipsHistory: { "welcome-tip": 1_700_000_100_000 } });
-		expect(
-			excludeRoutineOnlySettingsChanges([settingsPath], snapshots, agentDir, projectDir, logger),
-		).toEqual([]);
+		expect(excludeRoutineOnlySettingsChanges([settingsPath], snapshots, agentDir, projectDir, logger)).toEqual([]);
 
 		writeSettings({ theme: "light", tipsHistory: { "welcome-tip": 1_700_000_100_000 } });
-		expect(
-			excludeRoutineOnlySettingsChanges([settingsPath], snapshots, agentDir, projectDir, logger),
-		).toEqual([settingsPath]);
+		expect(excludeRoutineOnlySettingsChanges([settingsPath], snapshots, agentDir, projectDir, logger)).toEqual([
+			settingsPath,
+		]);
 	});
 });
