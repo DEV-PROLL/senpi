@@ -1065,6 +1065,7 @@ export async function compact(
 			transformContext,
 			retry,
 			callbacks,
+			sessionId,
 		);
 		summary = result.text;
 		summaryUsage = result.usage;
