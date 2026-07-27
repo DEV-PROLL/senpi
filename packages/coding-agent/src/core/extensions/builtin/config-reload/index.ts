@@ -7,6 +7,7 @@ import { ModelConfig } from "../../../model-config.ts";
 import { type Settings, SettingsManager, wasSelfWrite } from "../../../settings-manager.ts";
 import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "../../types.ts";
 import { isLoadableExtensionEntry, isScannableExtensionDirectory } from "./extension-watch-scope.ts";
+import { excludeGeneratedExtensionShims } from "./generated-shim-filter.ts";
 import { type ConfigReloadLogger, createConfigReloadLogger } from "./log.ts";
 import {
 	CONFIG_WATCH_CHANGED,
@@ -265,7 +266,11 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 			currentContext.cwd,
 			logger,
 		);
-		const groups = groupChangedPaths(significantPaths, activeTargets);
+		const configPaths = excludeGeneratedExtensionShims(significantPaths, agentDir);
+		for (const path of significantPaths) {
+			if (!configPaths.includes(path)) logger.debug("generated_shim_change_suppressed", { path });
+		}
+		const groups = groupChangedPaths(configPaths, activeTargets);
 		const rearmDirectoryWatch = change.created.some((path) =>
 			activeTargets.some((target) => target.rearmOnCreation === resolve(path)),
 		);

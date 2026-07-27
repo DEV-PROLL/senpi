@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -139,6 +139,21 @@ function isGeneratedGlobalDefaultExtensionShim(content: string): boolean {
 	return LEGACY_GENERATED_GLOBAL_EXTENSION_BANNERS.some((banner) => content.startsWith(banner));
 }
 
+/**
+ * The shim records an absolute path, and `getPackageDir()` derives from
+ * `import.meta.url`. A session launched through the npm bin symlink and one
+ * launched from the real checkout therefore spell the SAME build differently,
+ * so each rewrote the other's shim and every rewrite reloaded every other
+ * session. Canonicalizing collapses both spellings to one path.
+ */
+export function canonicalizeGlobalDefaultExtensionModulePath(modulePath: string): string {
+	try {
+		return realpathSync(modulePath);
+	} catch {
+		return modulePath;
+	}
+}
+
 function getGlobalDefaultExtensionModulePath(extensionId: (typeof globalDefaultExtensionIds)[number]): string {
 	const packageDir = getPackageDir();
 	const runningFromSource = fileURLToPath(import.meta.url).includes(`${sep}src${sep}core${sep}resource-loader.`);
@@ -146,9 +161,11 @@ function getGlobalDefaultExtensionModulePath(extensionId: (typeof globalDefaultE
 	const extensionFile = runningFromSource ? `${extensionId}.ts` : `${extensionId}.js`;
 	const packageDirIsSourceRootPath = join(packageDir, "core", "extensions", "builtin", extensionFile);
 	if (!runningFromSource && existsSync(packageDirIsSourceRootPath)) {
-		return packageDirIsSourceRootPath;
+		return canonicalizeGlobalDefaultExtensionModulePath(packageDirIsSourceRootPath);
 	}
-	return join(packageDir, sourceRoot, "core", "extensions", "builtin", extensionFile);
+	return canonicalizeGlobalDefaultExtensionModulePath(
+		join(packageDir, sourceRoot, "core", "extensions", "builtin", extensionFile),
+	);
 }
 
 function buildGlobalDefaultExtensionShim(modulePath: string): string {
