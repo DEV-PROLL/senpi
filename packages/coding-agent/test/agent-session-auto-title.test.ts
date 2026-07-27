@@ -11,6 +11,9 @@ import {
 } from "./agent-session-auto-title-helpers.ts";
 import { getAssistantTexts, type Harness } from "./suite/harness.ts";
 
+const RAW_OVERLOADED_ERROR =
+	'{"type":"error","error":{"details":null,"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011CdRmGPa88udPD5fc8dt8U"}';
+
 describe("agent session auto title", () => {
 	const harnesses: Harness[] = [];
 
@@ -115,6 +118,66 @@ describe("agent session auto title", () => {
 
 		expect(getAssistantTexts(harness)).toEqual(["turn complete"]);
 		await expect(titleError).resolves.toBe("title provider failed");
+		expect(harness.sessionManager.getSessionName()).toBeUndefined();
+	});
+
+	it("retries transient title-generation errors with the configured retry policy", async () => {
+		const harness = await createAutoTitleHarness({
+			settings: { retry: { maxRetries: 2, baseDelayMs: 1 } },
+		});
+		harnesses.push(harness);
+		const titleErrors: string[] = [];
+		harness.session.extensionRunner.onError((error) => {
+			if (error.event === "session_title_generation") {
+				titleErrors.push(error.error);
+			}
+		});
+		let titleAttempts = 0;
+		const titleOrTurn: FauxResponseFactory = (context) => {
+			const systemPrompt = Array.isArray(context.systemPrompt)
+				? context.systemPrompt.join("\n")
+				: (context.systemPrompt ?? "");
+			if (!systemPrompt.includes("<title>")) {
+				return fauxAssistantMessage("turn complete");
+			}
+			titleAttempts += 1;
+			if (titleAttempts === 1) {
+				return fauxAssistantMessage("", { stopReason: "error", errorMessage: RAW_OVERLOADED_ERROR });
+			}
+			return fauxAssistantMessage("<title>Fix OAuth Login</title>");
+		};
+		harness.setResponses([titleOrTurn, titleOrTurn, titleOrTurn]);
+
+		const sessionName = waitForSessionName(harness);
+		await harness.session.prompt("fix the OAuth login button on mobile");
+
+		await expect(sessionName).resolves.toBe("Fix OAuth Login");
+		expect(harness.sessionManager.getSessionName()).toBe("Fix OAuth Login");
+		expect(titleAttempts).toBe(2);
+		expect(titleErrors).toEqual([]);
+	});
+
+	it("reports a clean human-readable error once title retries are exhausted", async () => {
+		const harness = await createAutoTitleHarness({
+			settings: { retry: { maxRetries: 1, baseDelayMs: 1 } },
+		});
+		harnesses.push(harness);
+		const titleError = waitForTitleError(harness);
+		const titleOrTurn: FauxResponseFactory = (context) => {
+			const systemPrompt = Array.isArray(context.systemPrompt)
+				? context.systemPrompt.join("\n")
+				: (context.systemPrompt ?? "");
+			if (!systemPrompt.includes("<title>")) {
+				return fauxAssistantMessage("turn complete");
+			}
+			return fauxAssistantMessage("", { stopReason: "error", errorMessage: RAW_OVERLOADED_ERROR });
+		};
+		harness.setResponses([titleOrTurn, titleOrTurn, titleOrTurn]);
+
+		await harness.session.prompt("fix the OAuth login button on mobile");
+
+		await expect(titleError).resolves.toBe("Overloaded (overloaded_error, request req_011CdRmGPa88udPD5fc8dt8U)");
+		await waitForCallCount(harness, 3);
 		expect(harness.sessionManager.getSessionName()).toBeUndefined();
 	});
 

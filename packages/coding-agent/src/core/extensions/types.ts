@@ -2024,6 +2024,13 @@ export interface LoadExtensionsResult {
 // Extension Error
 // ============================================================================
 
+/**
+ * Sentinel `extensionPath` used when the session runtime itself (not a loaded
+ * extension) emits an error through the extension-error channel, e.g. failed
+ * background session-title generation.
+ */
+export const RUNTIME_EXTENSION_PATH = "<runtime>";
+
 export interface ExtensionError {
 	extensionPath: string;
 	event: string;

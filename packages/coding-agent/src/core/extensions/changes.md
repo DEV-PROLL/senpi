@@ -1,5 +1,23 @@
 # Core Extensions Changes
 
+## 2026-07-27 - RUNTIME_EXTENSION_PATH sentinel constant
+
+### What changed
+
+- `types.ts` exports `RUNTIME_EXTENSION_PATH = "<runtime>"`, the sentinel `extensionPath` used when the session
+  runtime itself (not a loaded extension) emits an error through the extension-error channel — e.g. failed
+  background session-title generation. `index.ts` re-exports it.
+- `agent-session.ts` and interactive mode consume the constant instead of repeating the string literal, so the
+  rendering contract ("runtime errors are not extension failures") has one owner.
+
+### Why extension system couldn't handle this alone
+
+- The sentinel is produced by core runtime paths and consumed by the TUI renderer; extensions never emit it.
+
+### Expected merge conflict zones
+
+- LOW: additive export above the `ExtensionError` interface in `types.ts`, and the value-export block in `index.ts`.
+
 ## 2026-07-26 - AgentEndEvent abort payload + goal resume at before_agent_start
 
 ### What changed
