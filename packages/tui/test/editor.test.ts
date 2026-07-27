@@ -3927,6 +3927,41 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getExpandedText(), `unrelated ${marker}`);
 		});
 
+		it("expands only canonical marker occurrences; same-id literals with other suffixes stay literal", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			const paste = bigPaste("alpha");
+			editor.handleInput(`\x1b[200~${paste}\x1b[201~`); // #1, 12 lines
+			const marker = editor.getText();
+
+			// Carry the real marker over AND introduce a same-id literal with a
+			// different suffix. Only the canonical occurrence may expand.
+			editor.setText(`${marker} literal [paste #1 +5 lines]`);
+			assert.strictEqual(editor.getExpandedText(), `${paste} literal [paste #1 +5 lines]`);
+
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, `${paste} literal [paste #1 +5 lines]`);
+		});
+
+		it("does not treat same-id non-canonical marker text as atomic", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`); // #1 live
+			const marker = editor.getText();
+			editor.setText(`${marker} [paste #1 +5 lines]`);
+
+			// Cursor at end; left arrow moves one grapheme ("]"), not one marker,
+			// because the trailing text is not the canonical marker for entry #1.
+			editor.handleInput("\x05"); // Ctrl+E (end of line)
+			const endCol = editor.getCursor().col;
+			editor.handleInput("\x1b[D"); // Left
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: endCol - 1 });
+		});
+
 		it("kill and yank keeps a paste marker expandable", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";

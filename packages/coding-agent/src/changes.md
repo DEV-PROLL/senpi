@@ -4,7 +4,8 @@
 - The companion tui change (`packages/tui/src/changes.md`, same date) makes `Editor.setText()` prune (exact canonical-marker match) instead of clear the paste registry, which fixes the remaining same-instance round-trips: `showExtensionCustom()` save/restore and `restoreQueuedMessagesToEditor()` / `abortAndFireQueuedMessages()` draft restoration. Those call sites are unchanged.
 - Symptom fixed: transcript/session showed only the `[paste #1 +18 lines]` placeholder as the user message after pasting, opening a dialog (or aborting with queued messages), and submitting.
 - `setCustomEditorComponent(undefined)` is now a draft no-op when the default editor is already active (e.g. `resetExtensionUI()` calls it unconditionally during extension resets): no hand-off happens, so no setText round-trip touches the user's draft.
-- Coverage: `test/interactive-mode-editor-paste-transfer.test.ts` drives the real `setCustomEditorComponent` (prototype + fakeThis pattern) with real tui editors: registry transfer to a paste-aware editor, expanded-text fallback for a plain `EditorComponent`, restore to the default editor, full plain-editor round-trip, and the same-instance no-op.
+- Details for the interactive hand-off live in `src/modes/interactive/changes.md` (same date).
+- Coverage: `test/suite/regressions/0000-editor-paste-marker-transfer.test.ts` drives the real `setCustomEditorComponent` (prototype + fakeThis pattern) with real tui editors: registry transfer to a paste-aware editor, expanded-text fallback for a plain `EditorComponent`, restore to the default editor, full plain-editor round-trip, and the same-instance no-op.
 
 ## Experimental `--grok-neo` mode: env-gated grok chrome for the interactive loop (2026-07-26)
 

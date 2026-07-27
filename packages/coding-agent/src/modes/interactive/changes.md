@@ -1,5 +1,22 @@
 # changes
 
+## Paste markers survive editor hand-off; unset is a same-instance no-op (2026-07-28)
+
+### What changed
+
+- `interactive-mode.ts` `setCustomEditorComponent()`: switching between the default and a custom editor now transfers raw text plus the paste registry snapshot when both editors implement the pi-tui paste-state API (`getPasteState`/`setPasteState`), so `[paste #N ...]` markers stay collapsed across the swap. Otherwise it falls back to the expanded text: `getExpandedText?.()`, or expansion from the snapshot via pi-tui's exported `expandPasteMarkers()` when the source implements `getPasteState` without `getExpandedText`, or the raw text when neither capability exists (markers were never expandable there).
+- `setCustomEditorComponent(undefined)` is a draft no-op when the default editor is already active (`resetExtensionUI()` calls it unconditionally during extension resets and session invalidation): no hand-off happens, so no setText round-trip touches the user's draft.
+- Previously the raw text alone was copied into the destination editor, whose empty registry turned live markers into dead literals — submit then sent the `[paste #N ...]` placeholder to the model instead of the pasted body.
+
+### Why
+
+- Companion to the pi-tui paste-registry fix (`packages/tui/src/changes.md`, same date). The hand-off is interactive-mode logic: only this layer knows both editor instances and their optional capabilities.
+
+### Expected merge conflict zones
+
+- LOW: `setCustomEditorComponent()` around the transfer helper and the factory/unset branches.
+- LOW: `packages/coding-agent/test/suite/regressions/0000-editor-paste-marker-transfer.test.ts` (drives the real method with real tui editors).
+
 ## grok chrome seam for interactive mode (2026-07-26)
 
 ### What changed

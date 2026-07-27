@@ -39,15 +39,16 @@ export interface EditorPasteState {
 
 /**
  * Expand paste markers in `text` using the given registry snapshot.
- * Suffix-lenient (`[paste #N]`, `[paste #N +M lines]`, `[paste #N M chars]`)
- * to mirror the editor's own submit-time expansion. Useful when transferring
- * text from an editor that exposes a paste snapshot but no expansion method.
+ * Only exact canonical marker occurrences (as produced at paste time) are
+ * expanded: same-id text with a different suffix, e.g. a literal
+ * `[paste #1 +5 lines]` typed or set programmatically while entry #1 stores
+ * a different body, stays literal. Useful when transferring text from an
+ * editor that exposes a paste snapshot but no expansion method.
  */
 export function expandPasteMarkers(text: string, state: EditorPasteState): string {
 	let result = text;
 	for (const [pasteId, pasteContent] of state.pastes) {
-		const markerRegex = new RegExp(`\\[paste #${pasteId}( (\\+\\d+ lines|\\d+ chars))?\\]`, "g");
-		result = result.replace(markerRegex, () => pasteContent);
+		result = result.split(formatPasteMarker(pasteId, pasteContent)).join(pasteContent);
 	}
 	return result;
 }
@@ -65,23 +66,24 @@ function isPasteMarker(segment: string): boolean {
  * within paste markers into single atomic segments.  This makes cursor
  * movement, deletion, word-wrap, etc. treat paste markers as single units.
  *
- * Only markers whose numeric ID exists in `validIds` are merged.
+ * Only exact canonical markers of live registry entries (`validMarkers`) are
+ * merged, mirroring expansion: marker-like text that will not expand is not
+ * treated atomically either.
  */
 function segmentWithMarkers(
 	text: string,
 	baseSegmenter: Intl.Segmenter,
-	validIds: Set<number>,
+	validMarkers: ReadonlySet<string>,
 ): Iterable<Intl.SegmentData> {
-	// Fast path: no paste markers in the text or no valid IDs.
-	if (validIds.size === 0 || !text.includes("[paste #")) {
+	// Fast path: no paste markers in the text or no valid markers.
+	if (validMarkers.size === 0 || !text.includes("[paste #")) {
 		return baseSegmenter.segment(text);
 	}
 
-	// Find all marker spans with valid IDs.
+	// Find all exact canonical marker spans.
 	const markers: Array<{ start: number; end: number }> = [];
 	for (const m of text.matchAll(PASTE_MARKER_REGEX)) {
-		const id = Number.parseInt(m[1]!, 10);
-		if (!validIds.has(id)) continue;
+		if (!validMarkers.has(m[0])) continue;
 		markers.push({ start: m.index, end: m.index + m[0].length });
 	}
 	if (markers.length === 0) {
@@ -448,14 +450,18 @@ export class Editor implements Component, Focusable {
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
 	}
 
-	/** Set of currently valid paste IDs, for marker-aware segmentation. */
-	private validPasteIds(): Set<number> {
-		return new Set(this.pastes.keys());
+	/** Set of canonical marker strings for live pastes, for marker-aware segmentation. */
+	private validPasteMarkers(): Set<string> {
+		const markers = new Set<string>();
+		for (const [id, content] of this.pastes) {
+			markers.add(formatPasteMarker(id, content));
+		}
+		return markers;
 	}
 
-	/** Segment text with paste-marker awareness, only merging markers with valid IDs. */
+	/** Segment text with paste-marker awareness, only merging exact canonical markers. */
 	private segment(text: string, mode: "word" | "grapheme"): Iterable<Intl.SegmentData> {
-		return segmentWithMarkers(text, mode === "word" ? wordSegmenter : graphemeSegmenter, this.validPasteIds());
+		return segmentWithMarkers(text, mode === "word" ? wordSegmenter : graphemeSegmenter, this.validPasteMarkers());
 	}
 
 	getPaddingX(): number {

@@ -1,11 +1,11 @@
 import { Editor, type EditorComponent, type EditorPasteState, setKeybindings } from "@earendil-works/pi-tui";
 import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
-import { Container, TUI } from "../../tui/src/tui.ts";
-import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
-import type { EditorFactory } from "../src/core/extensions/types.ts";
-import { KeybindingsManager } from "../src/core/keybindings.ts";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
-import { getEditorTheme, initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { Container, TUI } from "../../../../tui/src/tui.ts";
+import { VirtualTerminal } from "../../../../tui/test/virtual-terminal.ts";
+import type { EditorFactory } from "../../../src/core/extensions/types.ts";
+import { KeybindingsManager } from "../../../src/core/keybindings.ts";
+import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.ts";
+import { getEditorTheme, initTheme } from "../../../src/modes/interactive/theme/theme.ts";
 
 /**
  * Regression: switching editors (extension custom editor <-> default editor)
