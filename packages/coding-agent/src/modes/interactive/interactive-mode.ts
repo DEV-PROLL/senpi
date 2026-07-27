@@ -1351,9 +1351,15 @@ export class InteractiveMode {
 
 		const seeded = seedKeybindingsFile(configPath, this.keybindings);
 		const edit = await editFileInExternalEditor({ command: editorCommand, path: configPath });
-		if (edit.status === "failed") {
+		if (edit.status === "launch-failed") {
+			// The editor never ran, so a file we just seeded carries no user content.
 			if (seeded) fs.rmSync(configPath, { force: true });
 			this.showError(`Could not open ${configPath} with "${editorCommand}".`);
+			return;
+		}
+		if (edit.status === "exited") {
+			// The editor ran and may have written the file; keep whatever is on disk.
+			this.showError(`"${editorCommand}" exited with code ${edit.code}; keybindings were not reloaded.`);
 			return;
 		}
 

@@ -44,10 +44,12 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
 	}
 }
 
+export type EditFileResult = { status: "complete" } | { status: "exited"; code: number } | { status: "launch-failed" };
+
 export async function editFileInExternalEditor(options: {
 	command: string;
 	path: string;
-}): Promise<{ status: "complete" } | { status: "failed" }> {
+}): Promise<EditFileResult> {
 	const [editor, ...editorArgs] = options.command.split(" ");
 	const exitCode = await new Promise<number | null>((resolve) => {
 		const child = spawn(editor, [...editorArgs, options.path], {
@@ -58,5 +60,9 @@ export async function editFileInExternalEditor(options: {
 		child.on("close", (code) => resolve(code));
 	});
 
-	return exitCode === 0 ? { status: "complete" } : { status: "failed" };
+	// A spawn failure means the editor never ran, so a freshly seeded file is safe
+	// to remove. A nonzero exit means the editor DID run and may have written the
+	// file, so the caller must keep whatever is on disk.
+	if (exitCode === null) return { status: "launch-failed" };
+	return exitCode === 0 ? { status: "complete" } : { status: "exited", code: exitCode };
 }

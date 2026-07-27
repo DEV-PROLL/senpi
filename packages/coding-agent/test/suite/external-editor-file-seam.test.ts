@@ -60,7 +60,8 @@ process.exit(0);
 			path: targetPath,
 		});
 
-		expect(result).toEqual({ status: "failed" });
+		// The editor RAN and wrote the file, so callers must keep what is on disk.
+		expect(result).toEqual({ status: "exited", code: 7 });
 		expect(readFileSync(targetPath, "utf-8")).toBe("left by failing editor\n");
 	});
 
@@ -73,7 +74,8 @@ process.exit(0);
 				command: `senpi-editor-that-does-not-exist-${process.pid}`,
 				path: targetPath,
 			}),
-		).resolves.toEqual({ status: "failed" });
+		// The editor never launched, so callers may safely discard a file they seeded.
+		).resolves.toEqual({ status: "launch-failed" });
 	});
 
 	it("does not create the target file when the editor leaves it untouched", async () => {
