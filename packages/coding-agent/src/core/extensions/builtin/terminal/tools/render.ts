@@ -44,7 +44,10 @@ export function renderMonitorCall(
 	args: MonitorInput,
 	theme: Parameters<NonNullable<MonitorToolDefinition["renderCall"]>>[1],
 ): Text {
-	const label = args.action === "rearm" ? `monitor rearm ${args.bash_id}` : `monitor ${args.description}`;
+	const label =
+		args.action === "rearm"
+			? `monitor rearm ${args.bash_id ?? ""}`.trimEnd()
+			: `monitor ${args.description ?? args.command ?? ""}`.trimEnd();
 	return new Text(theme.fg("toolTitle", theme.bold(label)), 0, 0);
 }
 
