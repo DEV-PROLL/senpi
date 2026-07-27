@@ -2864,8 +2864,11 @@ export class InteractiveMode {
 	private setCustomEditorComponent(factory: EditorFactory | undefined): void {
 		this.editorComponentFactory = factory;
 
-		// Save text from current editor before switching
-		const currentText = this.editor.getText();
+		// Save text from current editor before switching. Use the expanded text
+		// so paste markers survive the transfer: the new editor instance has no
+		// paste registry, so a raw marker would become dead literal text and the
+		// pasted content would be silently lost on submit.
+		const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
 
 		this.editorContainer.clear();
 

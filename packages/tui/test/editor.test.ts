@@ -3836,6 +3836,73 @@ describe("Editor component", () => {
 			assert.strictEqual(submitted, paste);
 		});
 
+		it("setText round-trip preserves paste markers and registry (dialog save/restore)", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			const paste = bigPaste("alpha");
+			editor.handleInput(`\x1b[200~${paste}\x1b[201~`);
+
+			// Simulate dialog save/restore: getText() keeps the raw marker,
+			// setText() must not orphan it from the registry.
+			editor.setText(editor.getText());
+
+			assert.strictEqual(editor.getExpandedText(), paste);
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, paste);
+		});
+
+		it("setText with extra text keeps referenced paste markers live (queued-message restore)", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			const paste = bigPaste("alpha");
+			editor.handleInput(`\x1b[200~${paste}\x1b[201~`);
+			const draft = editor.getText();
+
+			// Simulate restoreQueuedMessagesToEditor combining queued text with the draft
+			editor.setText(`queued message\n\n${draft}`);
+
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, `queued message\n\n${paste}`);
+		});
+
+		it("setText prunes registry entries whose markers were removed", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			const pasteA = bigPaste("alpha");
+			const pasteB = bigPaste("beta");
+			editor.handleInput(`\x1b[200~${pasteA}\x1b[201~`); // #1 = A
+			editor.handleInput(" ");
+			editor.handleInput(`\x1b[200~${pasteB}\x1b[201~`); // #2 = B
+
+			const markers = [...editor.getText().matchAll(/\[paste #\d+ \+\d+ lines\]/g)].map((m) => m[0]);
+			assert.strictEqual(markers.length, 2);
+
+			// Keep only marker #2
+			editor.setText(markers[1]!);
+			assert.strictEqual(editor.getExpandedText(), pasteB);
+		});
+
+		it("setText with unrelated text clears the registry and resets numbering", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`); // #1
+			editor.setText("plain replacement");
+			assert.strictEqual(editor.getExpandedText(), "plain replacement");
+
+			// Numbering restarts at #1 for the next large paste
+			editor.setText("");
+			editor.handleInput(`\x1b[200~${bigPaste("beta")}\x1b[201~`);
+			assert.match(editor.getText(), /\[paste #1 \+\d+ lines\]/);
+		});
+
 		it("handles multiple paste markers in same line", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			pasteWithMarker(editor);

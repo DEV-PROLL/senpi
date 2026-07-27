@@ -1,3 +1,9 @@
+## Paste markers survive editor hand-off and setText round-trips (2026-07-28)
+
+- `modes/interactive/interactive-mode.ts` `setCustomEditorComponent()` now transfers `getExpandedText?.() ?? getText()` when switching between the default and a custom editor. The destination editor instance has no paste registry, so transferring the raw text turned live `[paste #N ...]` markers into dead literals and the pasted body was silently dropped from the submitted prompt.
+- The companion tui change (`packages/tui/src/changes.md`, same date) makes `Editor.setText()` prune instead of clear the paste registry, which fixes the remaining same-instance round-trips: `promptViaComponent()` save/restore and `restoreQueuedMessagesToEditor()` / `abortAndFireQueuedMessages()` draft restoration. Those call sites are unchanged.
+- Symptom fixed: transcript/session showed only the `[paste #1 +18 lines]` placeholder as the user message after pasting, opening a dialog (or aborting with queued messages), and submitting.
+
 ## Experimental `--grok-neo` mode: env-gated grok chrome for the interactive loop (2026-07-26)
 
 ### What changed

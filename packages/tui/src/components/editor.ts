@@ -1114,9 +1114,31 @@ export class Editor implements Component, Focusable {
 		if (this.getText() !== normalized) {
 			this.pushUndoSnapshot();
 		}
-		this.pastes.clear();
-		this.pasteCounter = 0;
+		this.prunePastes(normalized);
 		this.setTextInternal(normalized);
+	}
+
+	/**
+	 * Drop paste registry entries whose markers do not appear in the given text.
+	 * Keeps markers live across programmatic setText round-trips (e.g. dialog
+	 * save/restore or queued-message restore) so submit still expands them,
+	 * while releasing memory for pastes whose markers were replaced.
+	 */
+	private prunePastes(text: string): void {
+		if (this.pastes.size === 0) {
+			this.pasteCounter = 0;
+			return;
+		}
+		const referenced = new Set<number>();
+		if (text.includes("[paste #")) {
+			for (const match of text.matchAll(PASTE_MARKER_REGEX)) {
+				referenced.add(Number.parseInt(match[1]!, 10));
+			}
+		}
+		for (const id of this.pastes.keys()) {
+			if (!referenced.has(id)) this.pastes.delete(id);
+		}
+		if (this.pastes.size === 0) this.pasteCounter = 0;
 	}
 
 	/**
