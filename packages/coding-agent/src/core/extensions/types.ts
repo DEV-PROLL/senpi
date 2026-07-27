@@ -773,6 +773,11 @@ export interface SessionShutdownEvent {
 	targetSessionFile?: string;
 }
 
+/** Fired when the user aborts the session outside an active agent run (retry backoff, compaction, or queued continuation), stopping in-flight work without an agent_end that carries abortSource. Extensions that track run-progress state (e.g. goal) use this to mark their state as user-interrupted. */
+export interface SessionAbortEvent {
+	type: "session_abort";
+}
+
 /** Fired on the old extension runner when a reload or session replacement rebuilds the runner and one or more extensions are absent from it. */
 export interface SessionExtensionsRemovedEvent {
 	type: "session_extensions_removed";
@@ -819,6 +824,7 @@ export type SessionEvent =
 	| SessionBeforeCompactEvent
 	| SessionCompactEvent
 	| SessionShutdownEvent
+	| SessionAbortEvent
 	| SessionExtensionsRemovedEvent
 	| SessionBeforeTreeEvent
 	| SessionTreeEvent;
@@ -1409,6 +1415,7 @@ export interface ExtensionAPI {
 	): void;
 	on(event: "session_compact", handler: ExtensionHandler<SessionCompactEvent>): void;
 	on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownEvent>): void;
+	on(event: "session_abort", handler: ExtensionHandler<SessionAbortEvent>): void;
 	on(event: "session_extensions_removed", handler: ExtensionHandler<SessionExtensionsRemovedEvent>): void;
 	on(event: "session_before_tree", handler: ExtensionHandler<SessionBeforeTreeEvent, SessionBeforeTreeResult>): void;
 	on(event: "session_tree", handler: ExtensionHandler<SessionTreeEvent>): void;
