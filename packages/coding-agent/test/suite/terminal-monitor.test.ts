@@ -8,7 +8,11 @@ import {
 } from "../../src/core/extensions/builtin/terminal/monitor-registry.ts";
 import type { TerminalToolContext } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createKillBashTool } from "../../src/core/extensions/builtin/terminal/tools/kill-bash.ts";
-import { createMonitorTool } from "../../src/core/extensions/builtin/terminal/tools/monitor.ts";
+import {
+	createMonitorTool,
+	type MonitorInput,
+	monitorSchema,
+} from "../../src/core/extensions/builtin/terminal/tools/monitor.ts";
 
 function firstText(result: { content: Array<{ type: string; text?: string }> }): string {
 	return result.content.find((block) => block.type === "text")?.text ?? "";
@@ -69,6 +73,30 @@ describe("terminal monitor tool", () => {
 		await manager.teardown();
 		if (savedForcePipe === undefined) delete process.env.SENPI_PTY_FORCE_PIPE;
 		else process.env.SENPI_PTY_FORCE_PIPE = savedForcePipe;
+	});
+
+	it("exposes a flat object schema so providers' legacy object conversion keeps every field", () => {
+		const shape = monitorSchema as unknown as { type?: string; properties?: Record<string, unknown> };
+		expect(shape.type).toBe("object");
+		const properties = Object.keys(shape.properties ?? {});
+		for (const field of ["action", "description", "command", "filter", "timeout_ms", "persistent", "bash_id"]) {
+			expect(properties).toContain(field);
+		}
+	});
+
+	it("rejects a create call missing description and command instead of spawning", async () => {
+		const tool = createMonitorTool(ctx);
+		const result = await tool.execute("monitor-empty", {} as MonitorInput);
+		expect(result.isError).toBe(true);
+		expect(firstText(result)).toContain("description");
+		expect(firstText(result)).toContain("command");
+	});
+
+	it("rejects rearm without bash_id", async () => {
+		const tool = createMonitorTool(ctx);
+		const result = await tool.execute("monitor-rearm-missing", { action: "rearm" } as MonitorInput);
+		expect(result.isError).toBe(true);
+		expect(firstText(result)).toContain("bash_id");
 	});
 
 	it("returns a bash_id immediately and emits complete stdout lines in order before its summary", async () => {

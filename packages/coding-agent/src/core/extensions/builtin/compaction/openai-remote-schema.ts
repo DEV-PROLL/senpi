@@ -38,7 +38,7 @@ export type OpenAiFunctionCallOutputItem = {
 	call_id: string;
 	output: string | OpenAiInputContent[];
 };
-export type OpenAiRemoteTransport = "websocket" | "compact-endpoint";
+export type OpenAiRemoteTransport = "websocket" | "responses-v2" | "compact-endpoint";
 export type OpenAiCompactionItem = {
 	type: "compaction";
 	encrypted_content: string;
@@ -123,7 +123,8 @@ export function getOpenAiRemoteCompactionDetails(value: unknown): OpenAiRemoteCo
 		schema: OPENAI_REMOTE_COMPACTION_SCHEMA,
 		mode: "openai-remote",
 		...identity,
-		transport: value.transport === "websocket" ? "websocket" : "compact-endpoint",
+		transport:
+			value.transport === "websocket" || value.transport === "responses-v2" ? value.transport : "compact-endpoint",
 		modelId: value.modelId,
 		responseId: value.responseId,
 		createdAt: value.createdAt,

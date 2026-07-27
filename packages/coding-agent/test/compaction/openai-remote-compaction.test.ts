@@ -20,19 +20,7 @@ import {
 } from "../../src/core/messages.ts";
 import type { SessionEntry, SessionMessageEntry } from "../../src/core/session-manager.ts";
 import { createHarness } from "../suite/harness.ts";
-
-const OPENAI_MODEL = {
-	id: "gpt-5.4",
-	name: "GPT-5.4",
-	api: "openai-responses",
-	provider: "openai",
-	baseUrl: "https://api.openai.com/v1",
-	reasoning: true,
-	input: ["text", "image"],
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-	contextWindow: 200_000,
-	maxTokens: 16_384,
-} satisfies Model<"openai-responses">;
+import { OPENAI_NATIVE_LEGACY_MODEL as OPENAI_MODEL } from "./openai-remote-test-models.ts";
 
 function messageEntry(id: string, parentId: string | null, message: SessionMessageEntry["message"]): SessionEntry {
 	return {
@@ -456,7 +444,7 @@ describe("OpenAI remote compaction", () => {
 		const compactOnlyModel = {
 			...OPENAI_MODEL,
 			baseUrl: "https://ccapi.example.com/v1",
-			compat: { supportsWebSocket: false },
+			compat: { ...OPENAI_MODEL.compat, supportsWebSocket: false },
 		} satisfies Model<"openai-responses">;
 		const emitted: unknown[] = [];
 		const originalPayloads: unknown[] = [];
@@ -507,7 +495,7 @@ describe("OpenAI remote compaction", () => {
 		const compactOnlyModel = {
 			...OPENAI_MODEL,
 			baseUrl: "https://ccapi.example.com/v1",
-			compat: { supportsWebSocket: false },
+			compat: { ...OPENAI_MODEL.compat, supportsWebSocket: false },
 		} satisfies Model<"openai-responses">;
 		const ctx = {
 			model: compactOnlyModel,
@@ -808,7 +796,7 @@ describe("OpenAI remote compaction", () => {
 		const compactOnlyModel = {
 			...OPENAI_MODEL,
 			baseUrl: "https://ccapi.example.com/v1",
-			compat: { supportsWebSocket: false },
+			compat: { ...OPENAI_MODEL.compat, supportsWebSocket: false },
 		} satisfies Model<"openai-responses">;
 		const ctx = {
 			model: compactOnlyModel,
