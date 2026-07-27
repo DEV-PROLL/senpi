@@ -49,6 +49,7 @@ import {
 	expandTildePath,
 	getAuthPath,
 	getDebugLogPath,
+	getAgentDir,
 	getDocsPath,
 	getShareViewerUrl,
 	VERSION,
@@ -158,10 +159,11 @@ import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 import { formatExtensionErrorHeadline, sanitizeTuiErrorMessage } from "./extension-error-format.ts";
-import { editInExternalEditor } from "./external-editor.ts";
+import { editFileInExternalEditor, editInExternalEditor } from "./external-editor.ts";
 import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./grok/chrome.ts";
 import { restoreInteractiveStderr, takeOverInteractiveStderr } from "./interactive-stderr-guard.ts";
 import { getModelSearchText } from "./model-search.ts";
+import { applyKeybindingsFileEdit, seedKeybindingsFile } from "./keybindings-command.ts";
 import { resolveStartupToolPaths } from "./startup-tools.ts";
 import { ShortcutOverlay, shouldShowShortcutOverlay } from "./components/shortcut-overlay.ts";
 import { buildFavoriteCycleStatusMessage } from "./tips/favorite-messages.ts";
@@ -1336,6 +1338,30 @@ export class InteractiveMode {
 
 	private getStartupExpansionState(): boolean {
 		return this.options.verbose || this.toolOutputExpanded;
+	}
+
+	private async handleKeybindingsCommand(): Promise<void> {
+		const configPath = path.join(getAgentDir(), "keybindings.json");
+		const editorCommand = process.env["VISUAL"] || process.env["EDITOR"];
+		if (!editorCommand) {
+			this.showError(`Set $EDITOR or $VISUAL to edit ${configPath}.`);
+			return;
+		}
+
+		const seeded = seedKeybindingsFile(configPath, this.keybindings);
+		const edit = await editFileInExternalEditor({ command: editorCommand, path: configPath });
+		if (edit.status === "failed") {
+			if (seeded) fs.rmSync(configPath, { force: true });
+			this.showError(`Could not open ${configPath} with "${editorCommand}".`);
+			return;
+		}
+
+		const applied = applyKeybindingsFileEdit(configPath, this.keybindings);
+		if (applied.status === "invalid") {
+			this.showError(`Keybindings not reloaded - ${configPath} is not valid JSON: ${applied.message}`);
+			return;
+		}
+		this.showStatus("Keybindings reloaded");
 	}
 
 	private updateShortcutOverlay(nextText: string): void {
@@ -3291,6 +3317,11 @@ export class InteractiveMode {
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
+				return;
+			}
+			if (text === "/keybindings") {
+				this.editor.setText("");
+				await this.handleKeybindingsCommand();
 				return;
 			}
 			if (text === "/hotkeys") {
