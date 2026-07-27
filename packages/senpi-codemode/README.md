@@ -101,12 +101,18 @@ options object and asynchronous helpers are `await`-able.
 | `write(path, content)` | Creates parent directories and writes text. `local://` paths persist in the session artifact root. |
 | `env(key?, value?)` | Reads all kernel environment values, one value, or sets one value. |
 | `tool.<name>(args)` | Invokes an active Senpi tool through the normal `pi.executeTool` pipeline. |
+| `tool_schema(name?)` | Returns a tool's parameter schema without calling it; omit `name` to list tool names. |
 | `completion(prompt, model?, system?, schema?)` | Requests a one-shot host completion; `schema` asks the host to parse structured output. |
 | `agent(prompt, ...)` | Delegates to the configured active `taskTools.task` tool. Supports background handles and structured JSON results. |
 | `output(ids, format?, offset?, limit?)` | Delegates transcript retrieval to the configured active `taskTools.output` tool. |
 | `parallel(thunks)` | Runs thunks through the configured bounded pool while preserving input order. |
 | `pipeline(items, ...stages)` | Applies stages left to right with a barrier between stages. |
 | `log(message)` / `phase(title)` | Emits progress text and starts a status phase. |
+
+When a `tool.<name>()` call fails argument validation, the error delivered back
+into the cell carries the tool's expected parameters, so the cell can correct the
+arguments and retry instead of falling back to one-at-a-time tool calls.
+`tool_schema()` exposes the same catalog up front.
 
 `agent()` is available only when the configured task tool is active in the
 session. `output()` similarly requires the configured task-output tool and

@@ -23,19 +23,7 @@ import {
 	sessionEntryToContextMessages,
 } from "../../src/core/session-manager.ts";
 import { createHarness } from "../suite/harness.ts";
-
-const OPENAI_MODEL = {
-	id: "gpt-5.4",
-	name: "GPT-5.4",
-	api: "openai-responses",
-	provider: "openai",
-	baseUrl: "http://openai.test/v1",
-	reasoning: true,
-	input: ["text", "image"],
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-	contextWindow: 10_000,
-	maxTokens: 1_024,
-} satisfies Model<"openai-responses">;
+import { OPENAI_CANONICAL_LEGACY_MODEL as OPENAI_MODEL } from "./openai-remote-test-models.ts";
 
 afterEach(() => {
 	vi.unstubAllGlobals();

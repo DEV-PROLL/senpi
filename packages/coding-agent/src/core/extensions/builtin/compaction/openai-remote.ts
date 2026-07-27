@@ -53,6 +53,13 @@ import {
 	openAiRemoteCompactionIdentity,
 	openAiRemoteCompactionOrigin,
 } from "./openai-remote-model.ts";
+import {
+	attemptOpenAiResponsesV2Compaction,
+	supportsOpenAiResponsesRemoteCompactionV2,
+	supportsOpenAiResponsesWebSocket,
+	withRemoteCompactionV2Header,
+} from "./openai-remote-responses-v2.ts";
+import { runWithRemoteTimeout } from "./openai-remote-timeout.ts";
 
 export type {
 	OpenAiRemoteCompactionDetails,
@@ -173,16 +180,6 @@ const UNPROVEN_REMOTE_REPLAY_BOUNDARY_REASON = "unproven-remote-replay-boundary"
 const OPENAI_REMOTE_REPLAY_BOUNDARY_SCOPE = "openai-remote-replay";
 const OPENAI_RESPONSES_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 
-function supportsOpenAiResponsesWebSocket(model: OpenAiRemoteCompactionModel): model is Model<"openai-responses"> {
-	if (model.provider !== "openai" || model.api !== "openai-responses") return false;
-	if (model.compat?.supportsWebSocket !== undefined) return model.compat.supportsWebSocket;
-	try {
-		return new URL(model.baseUrl || "https://api.openai.com/v1").hostname === "api.openai.com";
-	} catch {
-		return false;
-	}
-}
-
 export function createOpenAiRemoteCompactionRequest(options: {
 	model: Model<Api> | undefined;
 	systemPrompt: string;
@@ -279,53 +276,6 @@ export function buildOpenAiRemoteCompactionResult(options: {
 		tokensBefore: options.tokensBefore,
 		details,
 	};
-}
-
-async function runWithRemoteTimeout<T>(options: {
-	signal: AbortSignal;
-	timeoutMs: number;
-	run: (signal: AbortSignal) => Promise<T>;
-	onTimeout: () => void;
-}): Promise<T | undefined> {
-	if (options.signal.aborted) {
-		throw new Error("Request was aborted");
-	}
-
-	const controller = new AbortController();
-	let timedOut = false;
-	const abortFromSource = () => controller.abort();
-	options.signal.addEventListener("abort", abortFromSource, { once: true });
-
-	let timeout: ReturnType<typeof setTimeout> | undefined;
-	const timeoutPromise = new Promise<"timeout">((resolve) => {
-		timeout = setTimeout(() => {
-			timedOut = true;
-			controller.abort();
-			resolve("timeout");
-		}, options.timeoutMs);
-		const unref = timeout.unref;
-		if (unref) unref.call(timeout);
-	});
-
-	const operation = options.run(controller.signal);
-	try {
-		const result = await Promise.race([operation, timeoutPromise]);
-		if (result === "timeout") {
-			options.onTimeout();
-			operation.catch(() => undefined);
-			return undefined;
-		}
-		return result;
-	} catch (error) {
-		if (timedOut && !options.signal.aborted) {
-			options.onTimeout();
-			return undefined;
-		}
-		throw error;
-	} finally {
-		if (timeout) clearTimeout(timeout);
-		options.signal.removeEventListener("abort", abortFromSource);
-	}
 }
 
 function createOpenAiResponsesStreamCompactionInput(request: OpenAiRemoteCompactionRequest): OpenAiRemoteInputItem[] {
@@ -692,6 +642,33 @@ export async function runOpenAiRemoteCompaction(
 			reason: MISSING_REMOTE_REPLAY_ORIGIN_REASON,
 		});
 		return undefined;
+	}
+
+	if (requestModel.api === "openai-responses") {
+		const responsesModel = requestModel as Model<"openai-responses">;
+		if (supportsOpenAiResponsesRemoteCompactionV2(responsesModel)) {
+			const responseHeaders = withRemoteCompactionV2Header(Object.fromEntries(requestHeaders.entries()));
+			const responseOrigin = openAiRemoteCompactionOrigin(responsesModel, responseHeaders);
+			if (!responseOrigin) return undefined;
+			const result = await attemptOpenAiResponsesV2Compaction({
+				auth,
+				emit,
+				event,
+				headers: responseHeaders,
+				model: responsesModel,
+				origin: responseOrigin,
+				providerRequest,
+				request,
+				requestId: event.requestId,
+				sessionId: ctx.sessionManager.getSessionId(),
+				stream:
+					dependencies.streamRunner ??
+					((streamModel, context, options) => streamSimple(streamModel, context, options)),
+				systemPrompt: ctx.getSystemPrompt(),
+				timeoutMs: remoteTimeoutMs,
+			});
+			if (result) return result;
+		}
 	}
 
 	if (supportsOpenAiResponsesWebSocket(requestModel)) {

@@ -33,6 +33,9 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"502",
 	"503",
 	"504",
+	// Cloudflare 522 (Connection timed out): origin stopped responding; transient
+	// like the other 5xx gateway statuses, surfaced as "Error: error code: 522".
+	"522",
 	"524",
 	"service.?unavailable",
 	"server.?error",

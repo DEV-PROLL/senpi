@@ -194,6 +194,12 @@ function completion(prompt::AbstractString; model="default", system=nothing, sch
     get(response, "text", response)
 end
 
+function tool_schema(name=nothing)
+    arguments = Dict{String, Any}()
+    name !== nothing && (arguments["name"] = string(name))
+    senpi_with_bridge_timeout_pause(() -> senpi_call_tool("__schema__", arguments))
+end
+
 function output(ids...; format="raw", offset=nothing, limit=nothing)
     isempty(ids) && error("At least one output ID is required")
     format in ("raw", "tail") || error("output() format must be 'raw' or 'tail'")

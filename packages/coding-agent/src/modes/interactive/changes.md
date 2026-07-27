@@ -20,6 +20,32 @@
 
 - `interactive-mode.ts` imports block, the startup banner assembly, the `defaultEditor.onChange` / `onSubmit` handlers, `showStatusIndicator`/`clearStatusIndicator`, and the slash-command text dispatch beside `/hotkeys` (five serialized edits).
 
+||||||| a4c5f9248
+## Footer cache segment removal and anchor-pinned layout (2026-07-27)
+
+### What changed
+
+- `components/footer-layout.ts` (new): pure width planning for the classic footer. `planFooterLayout()` picks the
+  richest layout that fits the terminal: full line, then middle segments elided right-most-first behind a single
+  dim "…" marker, then the pwd head-elided ("…/senpi"), then the whole left block head-elided, with the model
+  label truncated only as the last resort. `elideHead()` keeps the tail of a path, which carries the most
+  identifying information.
+- `components/footer.ts`: the `cache <read>/<write>` totals segment was removed (the `CH<x>%` cache-hit-rate
+  segment stays); rendering now builds plain/colored `FooterSegment` pairs and delegates fitting to
+  `planFooterLayout()`, so the model label and the pwd • branch • context-usage block stay visible at any width
+  instead of the right side being truncated away first.
+
+### Why
+
+- The cache read/write totals cost footer space out of proportion to their value, and the old truncation logic
+  sacrificed the right-side model label whenever the left overflowed — the two anchors users watch (context
+  usage, current model) were the first things to disappear on narrow terminals.
+
+### Expected merge conflict zones
+
+- MEDIUM: `components/footer.ts` `render()` was rewritten around `FooterSegment` pairs; upstream footer layout
+  changes will conflict textually. `components/footer-layout.ts` is additive.
+
 ## Runtime-error headline rendering (2026-07-27)
 
 ### What changed
