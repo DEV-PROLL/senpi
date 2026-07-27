@@ -1,5 +1,5 @@
 import { Editor, type EditorComponent, type EditorPasteState, setKeybindings } from "@earendil-works/pi-tui";
-import { beforeAll, beforeEach, describe, expect, test } from "vitest";
+import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { Container, TUI } from "../../tui/src/tui.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import type { EditorFactory } from "../src/core/extensions/types.ts";
@@ -150,6 +150,22 @@ describe("InteractiveMode.setCustomEditorComponent paste transfer", () => {
 
 		// Body was expanded on the way out and survives the way back
 		expect(fakeThis.defaultEditor.getText()).toBe(PASTE_BODY);
+	});
+
+	test("unset is a draft no-op when the default editor is already active (resetExtensionUI path)", () => {
+		const fakeThis = makeFakeThis();
+		fakeThis.defaultEditor.handleInput(BRACKETED_PASTE);
+		const markerText = fakeThis.defaultEditor.getText();
+		const setTextSpy = vi.spyOn(fakeThis.defaultEditor, "setText");
+
+		// No custom editor installed; resetExtensionUI() calls this unconditionally
+		callSetCustomEditorComponent(fakeThis, undefined);
+
+		expect(fakeThis.editor).toBe(fakeThis.defaultEditor);
+		// The draft is untouched: marker stays collapsed, no setText churn
+		expect(setTextSpy).not.toHaveBeenCalled();
+		expect(fakeThis.defaultEditor.getText()).toBe(markerText);
+		expect(fakeThis.defaultEditor.getExpandedText()).toBe(PASTE_BODY);
 	});
 
 	test("transferred paste state snapshots are content-exact (EditorPasteState contract)", () => {

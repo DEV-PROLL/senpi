@@ -2945,8 +2945,14 @@ export class InteractiveMode {
 
 			this.editor = newEditor;
 		} else {
-			// Restore default editor with text from custom editor
-			transferEditorText(this.defaultEditor);
+			// Restore default editor with text from custom editor. Skip the
+			// transfer when the default editor is already active (e.g.
+			// resetExtensionUI() calls this unconditionally): there is no
+			// hand-off, and a setText round-trip would be pure churn on the
+			// user's draft.
+			if (this.editor !== this.defaultEditor) {
+				transferEditorText(this.defaultEditor);
+			}
 			this.editor = this.defaultEditor;
 		}
 

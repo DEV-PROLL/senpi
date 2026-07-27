@@ -3908,6 +3908,42 @@ describe("Editor component", () => {
 			assert.strictEqual(editor2.getExpandedText(), paste);
 		});
 
+		it("setText does not revive a stale registry entry via coincidental exact marker text", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`); // #1, 12 lines
+			const marker = editor.getText();
+			assert.match(marker, /^\[paste #1 \+\d+ lines\]$/);
+
+			// Kill the marker line: text no longer references the paste, but the
+			// registry entry is intentionally kept alive for yank.
+			editor.handleInput("\x01"); // Ctrl+A (line start)
+			editor.handleInput("\x0b"); // Ctrl+K (kill to end of line)
+			assert.strictEqual(editor.getText(), "");
+
+			// Replacement text that happens to contain the exact canonical marker
+			// was NOT carried over from the previous draft: it must stay literal.
+			editor.setText(`unrelated ${marker}`);
+			assert.strictEqual(editor.getExpandedText(), `unrelated ${marker}`);
+		});
+
+		it("kill and yank keeps a paste marker expandable", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			const paste = bigPaste("alpha");
+			editor.handleInput(`\x1b[200~${paste}\x1b[201~`);
+			editor.handleInput("\x01"); // Ctrl+A
+			editor.handleInput("\x0b"); // Ctrl+K kills the marker line
+			assert.strictEqual(editor.getText(), "");
+			editor.handleInput("\x19"); // Ctrl+Y yanks it back
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, paste);
+		});
+
 		it("transfers paste registry to another editor instance via getPasteState/setPasteState", () => {
 			const source = new Editor(createTestTUI(), defaultEditorTheme);
 			const paste = bigPaste("alpha");

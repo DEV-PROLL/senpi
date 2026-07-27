@@ -1126,11 +1126,12 @@ export class Editor implements Component, Focusable {
 		this.lastAction = null;
 		this.exitHistoryBrowsing();
 		const normalized = this.normalizeText(text);
+		const previousText = this.getText();
 		// Push undo snapshot if content differs (makes programmatic changes undoable)
-		if (this.getText() !== normalized) {
+		if (previousText !== normalized) {
 			this.pushUndoSnapshot();
 		}
-		this.prunePastes(normalized);
+		this.prunePastes(normalized, previousText);
 		this.setTextInternal(normalized);
 	}
 
@@ -1142,14 +1143,23 @@ export class Editor implements Component, Focusable {
 	 * replaced. Matching is exact (the marker string is reconstructed from the
 	 * stored content), so unrelated text that merely looks like a marker cannot
 	 * accidentally revive a registry entry.
+	 *
+	 * When `previousText` is given (the setText provenance check), an entry
+	 * additionally survives only if its marker was already present in the
+	 * previous text — a genuine carried-over round-trip. Replacement text that
+	 * introduces a marker for a registry entry that was not live in the draft
+	 * (e.g. a stale entry whose marker was removed by kill-line) stays literal.
+	 * Explicit transfers use setPasteState(), which skips this check.
 	 */
-	private prunePastes(text: string): void {
+	private prunePastes(text: string, previousText?: string): void {
 		if (this.pastes.size === 0) {
 			this.pasteCounter = 0;
 			return;
 		}
 		for (const [id, content] of this.pastes) {
-			if (!text.includes(formatPasteMarker(id, content))) this.pastes.delete(id);
+			const marker = formatPasteMarker(id, content);
+			const carriedOver = previousText === undefined || previousText.includes(marker);
+			if (!carriedOver || !text.includes(marker)) this.pastes.delete(id);
 		}
 		if (this.pastes.size === 0) this.pasteCounter = 0;
 	}
