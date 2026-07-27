@@ -1,5 +1,18 @@
 # AI Source Changes
 
+## 2026-07-27 - Retry Cloudflare 522 connection timeouts
+
+### What changed and why
+
+- `utils/retry.ts` adds `"522"` to the retryable provider-error patterns. Cloudflare surfaces an
+  origin that stopped responding as `Error: error code: 522` (Connection timed out); the message
+  matched no retryable pattern, so a transient gateway timeout dead-ended the turn instead of going
+  through the existing bounded retry policy like the other 5xx statuses (500/502/503/504/524).
+
+### Expected merge conflict zones
+
+- LOW: `utils/retry.ts` retryable provider-error status patterns.
+
 ## 2026-07-27 - Treat Anthropic policy blocks as classifier refusals
 
 ### What changed and why

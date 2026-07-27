@@ -48,6 +48,22 @@ describe("provider retry classification", () => {
 		).toBe(true);
 	});
 
+	it("classifies Cloudflare 522 connection timeouts as retryable", () => {
+		// Cloudflare emits "Error: error code: 522" (Connection timed out) when the
+		// origin stops responding; like the other 5xx gateway statuses already in the
+		// pattern list, it is transient and must go through the bounded retry policy.
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Error: error code: 522" }),
+			),
+		).toBe(true);
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "522: Connection timed out" }),
+			),
+		).toBe(true);
+	});
+
 	it("matches Bun fetch socket drop wording", () => {
 		expect(
 			isRetryableAssistantError(
