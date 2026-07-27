@@ -43,3 +43,20 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
 		}
 	}
 }
+
+export async function editFileInExternalEditor(options: {
+	command: string;
+	path: string;
+}): Promise<{ status: "complete" } | { status: "failed" }> {
+	const [editor, ...editorArgs] = options.command.split(" ");
+	const exitCode = await new Promise<number | null>((resolve) => {
+		const child = spawn(editor, [...editorArgs, options.path], {
+			stdio: "inherit",
+			shell: process.platform === "win32",
+		});
+		child.on("error", () => resolve(null));
+		child.on("close", (code) => resolve(code));
+	});
+
+	return exitCode === 0 ? { status: "complete" } : { status: "failed" };
+}
