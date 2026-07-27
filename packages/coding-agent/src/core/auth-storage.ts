@@ -11,6 +11,7 @@ import type {
 	Credential,
 	CredentialInfo,
 	CredentialStore,
+	OAuthAuth,
 	OAuthCredential,
 	OAuthLoginCallbacks,
 } from "@earendil-works/pi-ai";
