@@ -71,7 +71,9 @@ describe("Claude Agent SDK failover", () => {
 				store,
 				providerId: "claude-agent-sdk",
 				now: () => now,
-				onFailover: (event) => failovers.push(`${event.account.name}:${event.classification.kind}`),
+				onFailover: (event) => {
+					failovers.push(`${event.account.name}:${event.classification.kind}`);
+				},
 			}),
 		);
 
@@ -92,15 +94,19 @@ describe("Claude Agent SDK failover", () => {
 			selectFn: (pool) => selectAccount(pool, { sessionId: "post-delta", now }),
 			runAttempt: async function* (slot) {
 				attempts.push(slot.name);
-				yield { type: "text_delta", delta: "partial" };
-				yield { type: "toolcall_delta", delta: '{"path":"x"}' };
+				const textDelta: AttemptEvent = { type: "text_delta", delta: "partial" };
+				const toolDelta: AttemptEvent = { type: "toolcall_delta", delta: '{"path":"x"}' };
+				yield textDelta;
+				yield toolDelta;
 				throw new Error("rate_limit");
 			},
 			classify: classifySdkError,
 			store,
 			providerId: "claude-agent-sdk",
 			now: () => now,
-			onFailover: (event) => failovers.push(event.account.name),
+			onFailover: (event) => {
+				failovers.push(event.account.name);
+			},
 		});
 		const emitted: AttemptEvent[] = [];
 		await expect(
@@ -132,7 +138,8 @@ describe("Claude Agent SDK failover", () => {
 			selectFn: (pool) => selectAccount(pool, { sessionId: "auth", now }),
 			runAttempt: async function* (slot) {
 				if (slot.name === accountPool[0]!.name) throw new Error("authentication_failed");
-				yield { type: "done", value: slot.name };
+				const done: AttemptEvent = { type: "done", value: slot.name };
+				yield done;
 			},
 			classify: classifySdkError,
 			store,

@@ -21,6 +21,12 @@ function makeStore(initial?: Credential): CredentialStore & { written: Credentia
 		async read() {
 			return current;
 		},
+		async list() {
+			return current ? [{ providerId: "claude-agent-sdk", type: current.type }] : [];
+		},
+		async delete() {
+			current = undefined;
+		},
 		async modify(_provider, fn) {
 			const next = await fn(current);
 			current = next;
@@ -101,7 +107,7 @@ describe("account slots", () => {
 		const slot = listAccounts(next as ClaudeAgentSdkCredential)[0];
 		expect(slot.access).toBe("aA-new");
 		expect(slot.refresh).toBe("rA-new");
-		const stored = (await store.read()) as ClaudeAgentSdkCredential;
+		const stored = (await store.read("claude-agent-sdk")) as ClaudeAgentSdkCredential;
 		expect(stored.access).toBe(SENTINEL_OAUTH_FIELDS.access);
 	});
 

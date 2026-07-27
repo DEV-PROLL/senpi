@@ -69,7 +69,10 @@ describe("Claude Agent SDK query options", () => {
 			preset: "claude_code",
 			append: expect.stringContaining("# CLAUDE.md\n\nUse the environment workspace."),
 		});
-		expect(queryOptions.systemPrompt?.append).toContain("<skill>deploy</skill>");
+		const prompt = queryOptions.systemPrompt;
+		expect(
+			typeof prompt === "object" && !Array.isArray(prompt) && prompt.type === "preset" ? prompt.append : undefined,
+		).toContain("<skill>deploy</skill>");
 		expect(queryOptions.settingSources).toEqual([]);
 		expect(queryOptions.extraArgs).toBeUndefined();
 	});
