@@ -35,7 +35,11 @@ const SCENARIOS = {
 	},
 	"claude-account": {
 		steps: [{ text: "/claude-account", key: "Enter" }],
-		assertions: [{ name: "account row", expected: "default" }, { name: "pin state", expected: "pinned" }],
+		assertions: [
+			{ name: "default account row", expected: "default | login" },
+			{ name: "second account row", expected: "work | import" },
+			{ name: "pin state", expected: "pinned" },
+		],
 	},
 };
 
@@ -128,6 +132,27 @@ function shq(value) {
 	return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
+function seedClaudeAccountScenario(box, scenario) {
+	if (scenario !== "claude-account") return;
+	writeFileSync(
+		join(box.agentDir, "auth.json"),
+		JSON.stringify({
+			"claude-agent-sdk": {
+				type: "oauth",
+				access: "claude-agent-sdk-managed",
+				refresh: "claude-agent-sdk-managed",
+				expires: 4_102_444_800_000,
+				accounts: [
+					{ name: "default", source: "login", access: "", refresh: "", expires: 4_102_444_800_000 },
+					{ name: "work", source: "import", access: "", refresh: "", expires: 4_102_444_800_000 },
+				],
+				pinned: "default",
+			},
+		}),
+		{ mode: 0o600 },
+	);
+}
+
 async function scenarioTmux(box, steps, expected) {
 	const root = repoRoot();
 	const session = `senpi-qa-scenario-${process.pid}`;
@@ -216,6 +241,7 @@ async function runScenario({ scenario, expected, driver, evidence }) {
 	const box = makeSandbox(`tui-scenario-${scenario}`);
 	let result;
 	try {
+		seedClaudeAccountScenario(box, scenario);
 		process.stdout.write(`driver: ${chosenDriver}\n`);
 		const steps = SCENARIOS[scenario].steps;
 		result = chosenDriver === "tmux" ? await scenarioTmux(box, steps, assertions.map((item) => item.expected)) : await scenarioPty(box, steps, assertions.map((item) => item.expected));
