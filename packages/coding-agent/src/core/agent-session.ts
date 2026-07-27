@@ -2960,8 +2960,8 @@ export class AgentSession {
 		//     records that messages were present)
 		// Purely-idle defensive aborts (e.g. RPC session close on an idle session) must not
 		// fire session_abort.
-		const wasMidRun = this.isStreaming && this._retryPromise === undefined;
-		const hadRetryBackoff = this._retryPromise !== undefined;
+		const wasMidRun = this.isStreaming && this._retryAbortController === undefined;
+		const hadRetryBackoff = this._retryAbortController !== undefined;
 		const hadCompactionOrPending = !this.isStreaming && (this.isCompacting || this.pendingMessageCount > 0);
 		const hadClearedQueues = this._hadClearedQueuedMessages;
 		this._hadClearedQueuedMessages = false;
