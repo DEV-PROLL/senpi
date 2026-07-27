@@ -4,9 +4,9 @@ import type { Api, Context, Model, SimpleStreamOptions, ThinkingBudgets, Thinkin
 import { CONFIG_DIR_NAME, getAgentDir } from "../../../../config.ts";
 import type { EffortLevel, Options, SettingSource, ThinkingConfig } from "./sdk-boundary.ts";
 import {
-	loadClaudeAgentSdkProviderSettingsFromDisk,
 	type ClaudeAgentSdkProviderSettings,
 	type ClaudeAgentSdkTokenInjection,
+	loadClaudeAgentSdkProviderSettingsFromDisk,
 } from "./settings.ts";
 import { BUILTIN_SDK_TOOLS, canUseTool } from "./tools.ts";
 
@@ -38,7 +38,14 @@ const ADAPTIVE_THINKING_MODEL_MARKERS = [
 	"mythos-5",
 ] as const;
 
-const NATIVE_XHIGH_EFFORT_MODEL_MARKERS = ["opus-4-7", "opus-4-8", "opus-5", "sonnet-5", "fable-5", "mythos-5"] as const;
+const NATIVE_XHIGH_EFFORT_MODEL_MARKERS = [
+	"opus-4-7",
+	"opus-4-8",
+	"opus-5",
+	"sonnet-5",
+	"fable-5",
+	"mythos-5",
+] as const;
 
 const DEFAULT_THINKING_BUDGETS: Required<ThinkingBudgets> = {
 	minimal: 2048,
@@ -167,8 +174,8 @@ export function buildClaudeAgentSdkQueryOptions(input: ClaudeAgentSdkQueryOption
 	const authLane = input.authLane ?? providerSettings.tokenInjection ?? "ambient";
 	const append = appendSystemPrompt
 		? [extractAgentsAppend(cwd), extractSkillsAppend(input.context.systemPrompt, cwd)].filter(
-			(part): part is string => part !== undefined,
-		)
+				(part): part is string => part !== undefined,
+			)
 		: [];
 	const strictMcpConfig = providerSettings.strictMcpConfig ?? !appendSystemPrompt;
 	const queryOptions: Options = {
