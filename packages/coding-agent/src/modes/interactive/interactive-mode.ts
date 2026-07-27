@@ -456,6 +456,7 @@ export class InteractiveMode {
 	private readonly sessionShownTipIds = new Set<string>();
 	private shortcutOverlay: ShortcutOverlay | undefined;
 	private lastEditorText = "";
+	private lastInputWasPaste = false;
 	private turnWorkingTip: { value: WorkingTipLine | undefined } | undefined;
 	private hookStatusContainer: Container;
 	private defaultEditor: CustomEditor;
@@ -1367,7 +1368,9 @@ export class InteractiveMode {
 	private updateShortcutOverlay(nextText: string): void {
 		const previousText = this.lastEditorText;
 		this.lastEditorText = nextText;
-		const inputKind = nextText.length - previousText.length > 1 ? "paste" : "typed";
+		const grewByPaste = this.lastInputWasPaste || nextText.length - previousText.length > 1;
+		const inputKind = grewByPaste ? "paste" : "typed";
+		this.lastInputWasPaste = false;
 
 		if (shouldShowShortcutOverlay(previousText, nextText, inputKind)) {
 			if (!this.shortcutOverlay) {
@@ -1390,7 +1393,8 @@ export class InteractiveMode {
 
 	private recordShownTip(tipId: string): void {
 		this.sessionShownTipIds.add(tipId);
-		this.settingsManager.setTipsHistory(recordTipShown(this.settingsManager.getTipsHistory(), tipId, Date.now()));
+		const next = recordTipShown(this.settingsManager.getTipsHistory(), tipId, Date.now());
+		this.settingsManager.setTipShown(tipId, next[tipId] ?? Date.now());
 	}
 
 	/**
@@ -2426,7 +2430,6 @@ export class InteractiveMode {
 		}
 		const hadActiveStatusIndicator = this.activeStatusIndicator !== undefined;
 		const isClearingWorking = this.activeStatusIndicator?.kind === "working";
-		if (isClearingWorking) this.turnWorkingTip = undefined;
 		this.activeStatusIndicator?.dispose();
 		this.activeStatusIndicator = undefined;
 		if (isClearingWorking) {
@@ -3231,7 +3234,14 @@ export class InteractiveMode {
 		// Handle clipboard paste (triggered on Ctrl+V). Images are attached by path;
 		// otherwise, paste plain text from the system clipboard.
 		this.defaultEditor.onPasteImage = () => {
+			this.lastInputWasPaste = true;
 			void this.handleClipboardPaste();
+		};
+
+		const previousEscapeHandler = this.defaultEditor.onEscape;
+		this.defaultEditor.onEscape = () => {
+			this.hideShortcutOverlay();
+			previousEscapeHandler?.();
 		};
 	}
 

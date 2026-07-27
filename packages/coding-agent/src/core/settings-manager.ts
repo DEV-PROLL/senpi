@@ -1205,6 +1205,14 @@ export class SettingsManager {
 		this.save();
 	}
 
+	setTipShown(tipId: string, timestamp: number): void {
+		const history = this.getTipsHistory();
+		history[tipId] = timestamp;
+		this.globalSettings.tipsHistory = history;
+		this.markModified("tipsHistory", tipId);
+		this.save();
+	}
+
 	getDefaultProjectTrust(): DefaultProjectTrust {
 		const value = this.globalSettings.defaultProjectTrust;
 		return value === "always" || value === "never" ? value : "ask";

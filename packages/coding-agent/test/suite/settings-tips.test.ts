@@ -53,6 +53,28 @@ describe("SettingsManager tips settings", () => {
 		expect(persisted.tipsHistory).toEqual(history);
 	});
 
+	it("merges concurrent tip records from separate managers without clobbering", async () => {
+		// Two sessions each record a different tip from the same starting snapshot.
+		// Per-id nested merging must preserve BOTH entries; a whole-field write would
+		// let the last writer erase the other session's tip.
+		writeSettings({ tipsHistory: { "existing-tip": 1_700_000_000_000 } });
+
+		const sessionA = SettingsManager.create(createProjectDir());
+		const sessionB = SettingsManager.create(createProjectDir());
+
+		sessionA.setTipShown("tip-from-a", 1_700_000_200_000);
+		sessionB.setTipShown("tip-from-b", 1_700_000_300_000);
+		await sessionA.flush();
+		await sessionB.flush();
+
+		const persisted = JSON.parse(readFileSync(settingsPath, "utf-8")) as {
+			tipsHistory?: Record<string, number>;
+		};
+		expect(persisted.tipsHistory?.["tip-from-a"]).toBe(1_700_000_200_000);
+		expect(persisted.tipsHistory?.["tip-from-b"]).toBe(1_700_000_300_000);
+		expect(persisted.tipsHistory?.["existing-tip"]).toBe(1_700_000_000_000);
+	});
+
 	it("falls back to an empty history for malformed persisted values", () => {
 		const projectDir = createProjectDir();
 		const malformedValues: readonly unknown[] = ["not-a-history", [], null];

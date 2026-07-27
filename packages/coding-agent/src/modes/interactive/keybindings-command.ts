@@ -1,14 +1,23 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { openSync, readFileSync, writeSync, closeSync } from "node:fs";
 import type { KeybindingsManager } from "../../core/keybindings.ts";
 
 export type KeybindingsEditResult = { status: "reloaded" } | { status: "invalid"; message: string };
 
 export function seedKeybindingsFile(configPath: string, keybindings: KeybindingsManager): boolean {
-	if (existsSync(configPath)) return false;
-
-	const tempPath = `${configPath}.tmp`;
-	writeFileSync(tempPath, `${JSON.stringify(keybindings.getEffectiveConfig(), null, 2)}\n`, "utf-8");
-	renameSync(tempPath, configPath);
+	let fd: number;
+	try {
+		// Exclusive create: fails with EEXIST if the file already exists, so a
+		// concurrently created config is never overwritten (no check-then-create window).
+		fd = openSync(configPath, "wx");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+		throw error;
+	}
+	try {
+		writeSync(fd, `${JSON.stringify(keybindings.getEffectiveConfig(), null, 2)}\n`);
+	} finally {
+		closeSync(fd);
+	}
 	return true;
 }
 
