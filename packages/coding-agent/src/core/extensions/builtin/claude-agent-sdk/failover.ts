@@ -113,7 +113,12 @@ async function persistBlock(store: CredentialStore, providerId: string, account:
 				},
 			};
 		}
-		return { ...credential, accounts: replaceAccount(credential.accounts ?? [], account) };
+		const accounts = (credential.accounts ?? []).map((existing) =>
+			existing.name === account.name
+				? { ...existing, blockedUntil: account.blockedUntil, blockReason: account.blockReason }
+				: existing,
+		);
+		return { ...credential, accounts };
 	});
 }
 

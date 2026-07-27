@@ -9,8 +9,8 @@ export type SdkErrorClassification = {
 
 const SDK_ERROR_CLASSIFICATIONS: Partial<Record<SDKAssistantMessageError, SdkErrorClassification>> = {
 	authentication_failed: { kind: "auth_error", retryable: true },
-	oauth_org_not_allowed: { kind: "org_not_allowed", retryable: false },
-	billing_error: { kind: "billing", retryable: false },
+	oauth_org_not_allowed: { kind: "org_not_allowed", retryable: true },
+	billing_error: { kind: "billing", retryable: true },
 	rate_limit: { kind: "rate_limit", retryable: true },
 	overloaded: { kind: "overloaded", retryable: true },
 	invalid_request: { kind: "other", retryable: false },

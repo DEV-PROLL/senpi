@@ -100,8 +100,16 @@ function managedEnvironment(): NodeJS.ProcessEnv {
 	};
 }
 
-function configureAuth(store: CredentialStore, environment: NodeJS.ProcessEnv, agentDir = temporaryDirectory()): void {
+function configureAuth(
+	store: CredentialStore,
+	environment: NodeJS.ProcessEnv,
+	agentDir = temporaryDirectory(),
+	tokenInjection?: string,
+): void {
 	process.env.SENPI_CODING_AGENT_DIR = agentDir;
+	if (tokenInjection) {
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ claudeAgentSdkProvider: { tokenInjection } }));
+	}
 	overrideAuthLaneBoundary({
 		createStore: () => store,
 		env: () => environment,
@@ -123,7 +131,7 @@ describe("Claude Agent SDK auth lanes", () => {
 	it("injects an OAuth slot and strips higher-precedence API-key sources", async () => {
 		const store = await storeWith(slot("default", "slot-access"));
 		const captured: Options[] = [];
-		configureAuth(store, managedEnvironment());
+		configureAuth(store, managedEnvironment(), undefined, "oauth-slots");
 		overrideSdkBoundary({ query: queryCapturing(captured) });
 
 		await streamClaudeAgentSdk(model, context).result();
@@ -154,7 +162,7 @@ describe("Claude Agent SDK auth lanes", () => {
 		const store = await storeWith(slot("default", "stale-access", Date.now() - 1));
 		const captured: Options[] = [];
 		let refreshes = 0;
-		configureAuth(store, managedEnvironment());
+		configureAuth(store, managedEnvironment(), undefined, "oauth-slots");
 		overrideAuthLaneBoundary({
 			refresher: async () => {
 				refreshes++;
@@ -205,7 +213,7 @@ describe("Claude Agent SDK auth lanes", () => {
 			slot("B", "valid-access", Date.now() + 60 * 60_000),
 		);
 		const captured: Options[] = [];
-		configureAuth(store, managedEnvironment());
+		configureAuth(store, managedEnvironment(), undefined, "oauth-slots");
 		await store.modify(providerId, async (current) =>
 			current?.type === "oauth" ? { ...current, pinned: "A" } : current,
 		);

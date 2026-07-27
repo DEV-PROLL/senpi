@@ -42,8 +42,8 @@ async function collect(iterable: AsyncIterable<AttemptEvent>): Promise<AttemptEv
 describe("Claude Agent SDK failover", () => {
 	it("classifies all SDK error values and HTTP 429/529 equivalents", () => {
 		expect(classifySdkError("authentication_failed")).toEqual({ kind: "auth_error", retryable: true });
-		expect(classifySdkError("oauth_org_not_allowed")).toEqual({ kind: "org_not_allowed", retryable: false });
-		expect(classifySdkError("billing_error")).toEqual({ kind: "billing", retryable: false });
+		expect(classifySdkError("oauth_org_not_allowed")).toEqual({ kind: "org_not_allowed", retryable: true });
+		expect(classifySdkError("billing_error")).toEqual({ kind: "billing", retryable: true });
 		expect(classifySdkError("rate_limit")).toEqual({ kind: "rate_limit", retryable: true });
 		expect(classifySdkError("overloaded")).toEqual({ kind: "overloaded", retryable: true });
 		expect(classifySdkError("invalid_request")).toEqual({ kind: "other", retryable: false });

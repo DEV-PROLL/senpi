@@ -8,6 +8,7 @@ import { emitProviderAccountFailover, emitProviderAccountsChanged } from "./acco
 import { CLAUDE_AGENT_SDK_PROVIDER_ID } from "./account-management.ts";
 import {
 	type AccountSlot,
+	assertValidAccountName,
 	type ClaudeAgentSdkCredential,
 	emptyCredential,
 	envSlotToken,
@@ -47,8 +48,13 @@ async function refreshWithAnthropicOAuth(refresh: string) {
 	return { access: credential.access, refresh: credential.refresh, expires: credential.expires };
 }
 
+let sharedStore: AuthStorage | undefined;
+
 const defaultBoundary: AuthLaneBoundary = {
-	createStore: () => AuthStorage.create(),
+	createStore: () => {
+		sharedStore ??= AuthStorage.create();
+		return sharedStore;
+	},
 	env: () => process.env,
 	getAgentDir,
 	now: () => Date.now(),
@@ -102,7 +108,8 @@ function managedEnvironment(parent: NodeJS.ProcessEnv): Record<string, string | 
 }
 
 function configDirectory(slot: AccountSlot): string {
-	return join(activeBoundary.getAgentDir(), "claude-agent-sdk-accounts", encodeURIComponent(slot.name));
+	assertValidAccountName(slot.name);
+	return join(activeBoundary.getAgentDir(), "claude-agent-sdk-accounts", slot.name);
 }
 
 function writeConfigCredentials(directory: string, slot: AccountSlot, access: string): void {
@@ -123,7 +130,7 @@ function writeConfigCredentials(directory: string, slot: AccountSlot, access: st
 }
 
 async function managedPool(settings: ClaudeAgentSdkProviderSettings): Promise<ManagedPool | undefined> {
-	const lane = settings.tokenInjection ?? "oauth-slots";
+	const lane = settings.tokenInjection ?? "ambient";
 	if (lane === "ambient") return undefined;
 	const store = activeBoundary.createStore();
 	let credential = await store.read(CLAUDE_AGENT_SDK_PROVIDER_ID);

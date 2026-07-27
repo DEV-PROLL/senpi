@@ -47,7 +47,18 @@ export function listAccounts(
 	return slots;
 }
 
+const ACCOUNT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+
+export function assertValidAccountName(name: string): void {
+	if (!ACCOUNT_NAME_PATTERN.test(name)) {
+		throw new Error(
+			`Invalid account name '${name}': use letters, digits, '-' or '_', starting with a letter or digit`,
+		);
+	}
+}
+
 export function addAccount(credential: ClaudeAgentSdkCredential, slot: AccountSlot): ClaudeAgentSdkCredential {
+	assertValidAccountName(slot.name);
 	if (storedSlots(credential).some((existing) => existing.name === slot.name)) {
 		throw new Error(`Account '${slot.name}' already exists`);
 	}
