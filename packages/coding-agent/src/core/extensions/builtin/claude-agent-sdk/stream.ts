@@ -70,6 +70,7 @@ export function streamClaudeAgentSdk(
 
 		try {
 			const resolvedTools = resolveSdkTools(context);
+			const affinityKey = options?.affinitySessionId ?? options?.sessionId;
 			const sessionKey = options?.sessionId ? toolWatch.sessionKey(options.sessionId) : undefined;
 			if (sessionKey) toolWatch.reconcileWithContext(sessionKey, context);
 			const toolWatchNote = toolWatch.buildPromptNote(sessionKey, context, resolvedTools.customToolNameToSdk);
@@ -80,7 +81,7 @@ export function streamClaudeAgentSdk(
 				prompt: buildPromptStream(buildPromptBlocks(context, resolvedTools.customToolNameToSdk, toolWatchNote)),
 				query: getSdkBoundary().query,
 				providerSettings,
-				sessionId: options?.sessionId,
+				sessionId: affinityKey,
 				pinnedAccount: getSessionClaudeAccountPin(options?.sessionId),
 				onQuery: (query) => {
 					sdkQuery = query;
@@ -192,6 +193,12 @@ export function streamClaudeAgentSdk(
 					}
 				} else if (message.type === "result" && message.subtype === "success" && !sawStreamEvent) {
 					output.content.push({ type: "text", text: message.result });
+				} else if (message.type === "result" && message.subtype !== "success") {
+					const reason =
+						"errors" in message && Array.isArray(message.errors) && message.errors.length > 0
+							? String(message.errors[0])
+							: `Claude Code ${message.subtype}`;
+					throw new Error(reason);
 				}
 				if (shouldStopEarly) break;
 			}

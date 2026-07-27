@@ -631,6 +631,7 @@ export async function completeSummarization(
 	const isolatedOptions: SimpleStreamOptions = {
 		...options,
 		cacheRetention: "none",
+		affinitySessionId: options.sessionId,
 		sessionId: uuidv7(),
 	};
 	const callerSignal = options.signal;

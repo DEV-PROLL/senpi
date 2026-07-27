@@ -21,16 +21,34 @@ function fakeFlow(credential: { access: string; refresh: string; expires: number
 const fresh = { access: "a1", refresh: "r1", expires: Date.now() + 60_000 };
 
 describe("claude-agent-sdk oauth login config", () => {
-	it("first login creates the default slot and imports the anthropic credential", async () => {
+	it("offers the existing anthropic credential as an import before a fresh login", async () => {
 		const config = createOAuthConfig({
 			readCurrent: async () => undefined,
 			readAnthropicCredential: async () => ({ access: "ia", refresh: "ir", expires: 1 }),
 			loginFlow: fakeFlow(fresh),
 		});
-		const credential = await config.login({});
-		const names = listAccounts(credential as never).map((slot) => slot.name);
-		expect(names).toEqual(["default", "imported-anthropic"]);
-		expect((credential as never as { type: string }).type).toBe("oauth");
+		const credential = await config.login({ onPrompt: async () => "y" });
+		const slots = listAccounts(credential as never);
+		expect(slots.map((slot) => slot.name)).toEqual(["imported-anthropic"]);
+		expect(slots[0]?.source).toBe("import");
+	});
+
+	it("declining the import falls through to a fresh login without the import slot", async () => {
+		const config = createOAuthConfig({
+			readCurrent: async () => undefined,
+			readAnthropicCredential: async () => ({ access: "ia", refresh: "ir", expires: 1 }),
+			loginFlow: fakeFlow(fresh),
+		});
+		const prompts: string[] = [];
+		const credential = await config.login({
+			onPrompt: async (prompt) => {
+				prompts.push(prompt.message);
+				return prompts.length === 1 ? "n" : "work";
+			},
+		});
+		const slots = listAccounts(credential as never);
+		expect(slots.map((slot) => slot.name)).toEqual(["default"]);
+		expect(slots.every((slot) => slot.source !== "import")).toBe(true);
 	});
 
 	it("second login adds a prompted account name without dropping slots", async () => {

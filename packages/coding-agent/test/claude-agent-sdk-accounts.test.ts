@@ -117,15 +117,19 @@ describe("account slots", () => {
 			addAccount(emptyCredential(), { ...slotA, expires: Date.now() - 1000 }),
 		);
 		let calls = 0;
+		let gate: (() => void) | undefined;
+		const barrier = new Promise<void>((resolve) => {
+			gate = resolve;
+		});
 		const refresher = async (refresh: string) => {
 			calls++;
-			await new Promise((r) => setTimeout(r, 20));
+			await barrier;
 			return { refresh, access: `a-${calls}`, expires: Date.now() + 60_000 };
 		};
-		await Promise.all([
-			refreshSlot(store, "claude-agent-sdk", "default", refresher),
-			refreshSlot(store, "claude-agent-sdk", "default", refresher),
-		]);
+		const first = refreshSlot(store, "claude-agent-sdk", "default", refresher);
+		const second = refreshSlot(store, "claude-agent-sdk", "default", refresher);
+		gate?.();
+		await Promise.all([first, second]);
 		expect(calls).toBe(1);
 	});
 });

@@ -58,6 +58,22 @@ export function createOAuthConfig(deps: {
 
 		async login(callbacks) {
 			const current = (await deps.readCurrent()) ?? emptyCredential();
+			const existing = listAccounts(current);
+			if (existing.length === 0 && deps.readAnthropicCredential && callbacks.onPrompt) {
+				const imported = await deps.readAnthropicCredential();
+				if (imported) {
+					const answer = (
+						await callbacks.onPrompt({
+							message: "An Anthropic OAuth login already exists. Import it instead of a new login? [y/N]",
+						})
+					)
+						.trim()
+						.toLowerCase();
+					if (answer === "y" || answer === "yes") {
+						return addAccount(current, toSlot(imported, "imported-anthropic", "import"));
+					}
+				}
+			}
 			const interaction: AuthInteraction = {
 				signal: callbacks.signal,
 				prompt: async (prompt) => {
@@ -72,17 +88,9 @@ export function createOAuthConfig(deps: {
 			const flow = deps.loginFlow ?? (await loadAnthropicOAuth());
 			const credential = await flow.login(interaction);
 
-			const existing = listAccounts(current);
-			const name = await promptAccountName(callbacks, existing);
-			let next = addAccount(current, toSlot(credential, name, "login"));
-
-			if (existing.length === 0 && deps.readAnthropicCredential) {
-				const imported = await deps.readAnthropicCredential();
-				if (imported) {
-					next = addAccount(next, toSlot(imported, "imported-anthropic", "import"));
-				}
-			}
-			return next;
+			const existingAfter = listAccounts(current);
+			const name = await promptAccountName(callbacks, existingAfter);
+			return addAccount(current, toSlot(credential, name, "login"));
 		},
 
 		async refreshToken(credentials) {
