@@ -2,6 +2,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
 	type AssistantMessage,
 	isContextOverflow,
+	isRetryableAssistantError,
 	type Message,
 	type Model,
 	type TextContent,
@@ -68,7 +69,7 @@ export interface SpeculativeCompactionSnapshot {
 	tools?: Tool[];
 }
 
-export type SpeculativeCompactionResult = ApplyCompactionResult | { applied: false; reason: "unavailable" };
+export type SpeculativeCompactionResult = ApplyCompactionResult | { applied: false; reason: "unavailable" | "failed" };
 
 function approxTokens(text: string): number {
 	return Math.ceil(text.length / 4);
@@ -79,6 +80,22 @@ function approxTokens(text: string): number {
  * user abort (which resolves `undefined`): callers surface `message` on the
  * manual route and degrade to "unavailable" on automatic routes.
  */
+/**
+ * Provider `error` stop during summarization, carrying the metadata-aware
+ * transient classification from the full assistant message. A refusal whose
+ * text happens to look retryable must still surface loudly; the message
+ * string alone cannot encode that.
+ */
+export class SummaryRequestError extends Error {
+	readonly transient: boolean;
+
+	constructor(message: string, transient: boolean) {
+		super(message);
+		this.name = "SummaryRequestError";
+		this.transient = transient;
+	}
+}
+
 export class SummaryGenerationError extends Error {
 	readonly kind: "auth" | "empty-summary";
 
@@ -468,7 +485,10 @@ export async function runExtensionCompaction(
 		if (isAssistantMessage(response) && response.stopReason === "error") {
 			// Surface the real provider failure instead of silently degrading
 			// into a generic "Compaction cancelled".
-			throw new Error(response.errorMessage || "Compaction summary request failed");
+			throw new SummaryRequestError(
+				response.errorMessage || "Compaction summary request failed",
+				isRetryableAssistantError(response),
+			);
 		}
 
 		const summary = getSummaryText(response);

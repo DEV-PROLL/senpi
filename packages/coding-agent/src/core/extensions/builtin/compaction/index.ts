@@ -44,6 +44,7 @@ import {
 	type SpeculativeCompactionResult,
 	type SpeculativeCompactionSnapshot,
 	SummaryGenerationError,
+	SummaryRequestError,
 } from "./speculative.ts";
 import { type CompactionExtensionState, createInitialState, resetTurnCounter } from "./state.ts";
 import * as todoBridge from "./todo-bridge.ts";
@@ -339,11 +340,14 @@ export default function compactionExtension(
 			// must not escape as extension errors: the runner would print a raw
 			// stack on top of the compaction_end message above, while the turn's
 			// own provider request surfaces the same outage once through the
-			// normal retry path. Count the failure so the circuit breaker halts
-			// repeated doomed attempts; everything else stays loud.
-			if (isRetryableErrorMessage(message)) {
+			// normal retry path. Provider `error` stops carry metadata-aware
+			// classification (a refusal with retryable-looking text stays loud);
+			// bare transport throws fall back to the message classifier. Count
+			// the failure so the circuit breaker halts repeated doomed attempts.
+			const transient = error instanceof SummaryRequestError ? error.transient : isRetryableErrorMessage(message);
+			if (transient) {
 				state = breaker.recordFailure(state, Date.now(), { route: "extension" });
-				return { applied: false, reason: "unavailable" };
+				return { applied: false, reason: "failed" };
 			}
 			throw error;
 		}
@@ -454,6 +458,7 @@ export default function compactionExtension(
 		// smaller window: this is the overflow risk the warm start must absorb.
 		const usage = ctx.getContextUsage();
 		if (!usage) return;
+		if (breaker.isTripped(state, Date.now())) return;
 		const settings = ctx.getCompactionSettings();
 		if (policy.shouldStartSpeculativeCompaction(usage, contextWindow, settings, state.lastYield ?? undefined)) {
 			startSpeculativeCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
