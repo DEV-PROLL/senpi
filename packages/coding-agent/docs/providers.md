@@ -34,6 +34,17 @@ Use `/logout` to clear credentials. Tokens are stored in `~/.pi/agent/auth.json`
 
 Anthropic subscription auth is active for Claude Pro/Max accounts. Third-party harness usage draws from [extra usage](https://claude.ai/settings/usage) and is billed per token, not against Claude plan limits.
 
+### Claude Agent SDK
+
+The `claude-agent-sdk` provider routes LLM calls through the official [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) - it spawns the real Claude Code engine - while senpi executes every tool itself. Subscription usage flows through Anthropic's official Claude Code surface.
+
+- Run `/login claude-agent-sdk` to sign in with your Claude Pro/Max subscription (PKCE, same OAuth client as the Claude Code CLI). An existing Anthropic OAuth credential is offered as an import.
+- Multiple accounts: each `/login claude-agent-sdk` adds another named account. `CLAUDE_CODE_OAUTH_TOKEN` (and `_2`..`_N`) are honored as read-only env accounts. `/claude-account` lists, adds, removes, and pins accounts; `--claude-account <name>` pins one for the session; `claudeAgentSdkProvider.pinnedAccount` pins one in settings.
+- Session affinity: one senpi session sticks to one account (rendezvous hashing), which keeps Anthropic's prompt cache warm - accounts never rotate mid-session except on automatic failover. Rate limits and auth errors block the account (with cooldown) and retry on the next account, before any visible output; once output has started, the error surfaces instead of replaying.
+- Ambient fallback: with no configured accounts the provider inherits the environment like the upstream extension (Claude Code CLI login or `ANTHROPIC_API_KEY`).
+- Settings (`claudeAgentSdkProvider`): `appendSystemPrompt`, `settingSources` (filesystem settings load only in the ambient lane, so they cannot override your selected account), `strictMcpConfig`, `pinnedAccount`, `tokenInjection` (`oauth-slots` | `config-dir` | `ambient`).
+- Account state is exposed to desktop/automation clients: RPC `get_provider_accounts`, `account_pin`, `account_remove` and the `auth_accounts_changed` / `account_failover` events, mirrored through the app-server protocol. Token material is never included.
+
 ### GitHub Copilot
 
 - Press Enter for github.com, or enter your GitHub Enterprise Server domain
