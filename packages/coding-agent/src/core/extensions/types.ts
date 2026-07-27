@@ -1458,6 +1458,15 @@ export interface ExtensionAPI {
 	/** Register migration guidance returned when an intentionally removed tool is called. */
 	registerRemovedToolHint(name: string, hint: string): void;
 
+	/**
+	 * Register a callback that may activate a registered-but-inactive tool on demand.
+	 * Called only when executeTool would otherwise fail with `inactive_tool`. Return
+	 * true only after the tool has actually been activated; returning false preserves
+	 * the `inactive_tool` error. Eligibility is owned by the registering extension so
+	 * permission-denied, tombstoned, and capability-gated tools stay inactive.
+	 */
+	registerLazyToolActivator(activator: LazyToolActivator): void;
+
 	/** Register an MCP server that the agent can use. Factory-time only. */
 	registerMcpServer(name: string, config: McpServerDeclaration): void;
 
@@ -1791,6 +1800,13 @@ export type ExecuteToolUpdateCallback<T = unknown> = AgentToolUpdateCallback<T>;
 export interface ExecuteToolOptions<TDetails = unknown> {
 	signal?: AbortSignal;
 	onUpdate?: ExecuteToolUpdateCallback<TDetails>;
+	/**
+	 * Opt in to lazy activation: when the tool is registered but inactive, registered
+	 * activators may activate it instead of failing. Off by default so ordinary callers
+	 * keep the `inactive_tool` contract; code-mode sets it because a cell names tools
+	 * directly and cannot run tool_search first.
+	 */
+	activateInactiveTool?: boolean;
 }
 
 export type ExecuteToolResult<TDetails = unknown> = AgentToolResult<TDetails>;
@@ -1816,6 +1832,10 @@ export type ExecuteToolHandler = <TDetails = unknown>(
 	params: unknown,
 	options?: ExecuteToolOptions<TDetails>,
 ) => Promise<ExecuteToolResult<TDetails>>;
+
+export type LazyToolActivator = (toolName: string) => boolean;
+
+export type RegisterLazyToolActivatorHandler = (activator: LazyToolActivator) => void;
 
 export type GetActiveToolsHandler = () => string[];
 
@@ -1912,6 +1932,7 @@ export interface ExtensionActions {
 	setActiveTools: SetActiveToolsHandler;
 	refreshTools: RefreshToolsHandler;
 	registerRemovedToolHint: RegisterRemovedToolHintHandler;
+	registerLazyToolActivator: RegisterLazyToolActivatorHandler;
 	getCommands: GetCommandsHandler;
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
@@ -2010,6 +2031,7 @@ export interface Extension {
 	tools: Map<string, RegisteredTool>;
 	/** Optional for compatibility with extension records created before this additive registry. */
 	removedToolHints?: Map<string, string>;
+	lazyToolActivators?: LazyToolActivator[];
 	messageRenderers: Map<string, MessageRenderer>;
 	entryRenderers?: Map<string, EntryRenderer>;
 	commands: Map<string, RegisteredCommand>;
