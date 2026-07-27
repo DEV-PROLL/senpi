@@ -1,5 +1,12 @@
 # AI Source Changes
 
+## 2026-07-27 - Typed Responses remote-compaction capability
+
+- Extracted `OpenAIResponsesCompat` and `SessionAffinityFormat` from the oversized `types.ts` into
+  `openai-responses-compat.ts` while preserving their public exports.
+- Added `supportsRemoteCompactionV2` so verified OpenAI Responses proxies can explicitly advertise the native
+  `compaction_trigger` request contract. Unknown custom proxies remain disabled by default.
+
 ## 2026-07-27 - Treat Anthropic policy blocks as classifier refusals
 
 ### What changed and why
