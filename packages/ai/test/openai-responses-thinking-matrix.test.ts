@@ -80,6 +80,35 @@ describe("OpenAI Responses thinking matrix", () => {
 		expect(payload).toMatchObject({ reasoning: { effort: "none", summary: "auto" } });
 	});
 
+	it("omits Codex reasoning summary when callers explicitly disable it", async () => {
+		const payload = await capturePayload((onPayload) =>
+			streamOpenAICodexResponses(getModel("openai-codex", "gpt-5.6-sol"), context, {
+				apiKey: "test-key",
+				transport: "sse",
+				reasoningEffort: "low",
+				reasoningSummary: null,
+				onPayload,
+			}),
+		);
+
+		expect(payload.reasoning).toBeDefined();
+		expect(payload.reasoning).not.toHaveProperty("summary");
+	});
+
+	it("omits Codex reasoning summary in the thinking-off fallback when callers disable it", async () => {
+		const payload = await capturePayload((onPayload) =>
+			streamOpenAICodexResponses(getModel("openai-codex", "gpt-5.6-sol"), context, {
+				apiKey: "test-key",
+				transport: "sse",
+				reasoningSummary: null,
+				onPayload,
+			}),
+		);
+
+		expect(payload.reasoning).toMatchObject({ effort: "none" });
+		expect(payload.reasoning).not.toHaveProperty("summary");
+	});
+
 	it("omits Codex reasoning when the catalog says thinking cannot be disabled", async () => {
 		const model = {
 			...getModel("openai-codex", "gpt-5.6-sol"),
