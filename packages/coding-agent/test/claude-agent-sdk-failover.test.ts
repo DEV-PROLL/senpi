@@ -9,7 +9,6 @@ import {
 import { rendezvousOrder, selectAccount } from "../src/core/extensions/builtin/claude-agent-sdk/affinity.ts";
 import { classifySdkError } from "../src/core/extensions/builtin/claude-agent-sdk/errors.ts";
 import { ClassifiedSdkError, runFailover } from "../src/core/extensions/builtin/claude-agent-sdk/failover.ts";
-import { z } from "zod";
 
 type AttemptEvent =
 	| { type: "text_delta"; delta: string }

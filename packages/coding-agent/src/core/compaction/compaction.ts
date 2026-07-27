@@ -738,6 +738,7 @@ export async function generateSummary(
 			transformContext,
 			retry,
 			callbacks,
+			sessionId,
 		)
 	).text;
 }
@@ -1022,6 +1023,7 @@ export async function compact(
 				transformContext,
 				retry,
 				callbacks,
+				sessionId,
 			);
 			historyText = historyResult.text;
 			historyUsage = historyResult.usage;
@@ -1040,6 +1042,7 @@ export async function compact(
 			transformContext,
 			retry,
 			callbacks,
+			sessionId,
 		);
 		// Merge into single summary
 		summary = `${historyText}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixResult.text}`;
@@ -1101,6 +1104,7 @@ async function generateTurnPrefixSummary(
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	sessionId?: string,
 ): Promise<{ text: string; usage: Usage }> {
 	const maxTokens = Math.min(
 		Math.floor(0.5 * reserveTokens),
@@ -1121,7 +1125,7 @@ async function generateTurnPrefixSummary(
 	const response = await completeSummarization(
 		model,
 		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-		createSummarizationOptions(model, maxTokens, apiKey, headers, env, signal, thinkingLevel, extraBody),
+		createSummarizationOptions(model, maxTokens, apiKey, headers, env, signal, thinkingLevel, extraBody, sessionId),
 		streamFn,
 		retry,
 		callbacks,
