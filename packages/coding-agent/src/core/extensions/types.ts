@@ -1458,6 +1458,15 @@ export interface ExtensionAPI {
 	/** Register migration guidance returned when an intentionally removed tool is called. */
 	registerRemovedToolHint(name: string, hint: string): void;
 
+	/**
+	 * Register a callback that may activate a registered-but-inactive tool on demand.
+	 * Called only when executeTool would otherwise fail with `inactive_tool`. Return
+	 * true only after the tool has actually been activated; returning false preserves
+	 * the `inactive_tool` error. Eligibility is owned by the registering extension so
+	 * permission-denied, tombstoned, and capability-gated tools stay inactive.
+	 */
+	registerLazyToolActivator(activator: LazyToolActivator): void;
+
 	/** Register an MCP server that the agent can use. Factory-time only. */
 	registerMcpServer(name: string, config: McpServerDeclaration): void;
 
@@ -1817,6 +1826,10 @@ export type ExecuteToolHandler = <TDetails = unknown>(
 	options?: ExecuteToolOptions<TDetails>,
 ) => Promise<ExecuteToolResult<TDetails>>;
 
+export type LazyToolActivator = (toolName: string) => boolean;
+
+export type RegisterLazyToolActivatorHandler = (activator: LazyToolActivator) => void;
+
 export type GetActiveToolsHandler = () => string[];
 
 /** Tool info with name, description, parameter schema, prompt guidelines, and source metadata. */
@@ -1912,6 +1925,7 @@ export interface ExtensionActions {
 	setActiveTools: SetActiveToolsHandler;
 	refreshTools: RefreshToolsHandler;
 	registerRemovedToolHint: RegisterRemovedToolHintHandler;
+	registerLazyToolActivator: RegisterLazyToolActivatorHandler;
 	getCommands: GetCommandsHandler;
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
@@ -2010,6 +2024,7 @@ export interface Extension {
 	tools: Map<string, RegisteredTool>;
 	/** Optional for compatibility with extension records created before this additive registry. */
 	removedToolHints?: Map<string, string>;
+	lazyToolActivators?: LazyToolActivator[];
 	messageRenderers: Map<string, MessageRenderer>;
 	entryRenderers?: Map<string, EntryRenderer>;
 	commands: Map<string, RegisteredCommand>;

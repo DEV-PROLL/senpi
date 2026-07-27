@@ -39,6 +39,7 @@ import type {
 	ExtensionAPI,
 	ExtensionFactory,
 	ExtensionRuntime,
+	LazyToolActivator,
 	LoadExtensionsResult,
 	MessageRenderer,
 	PendingProviderRegistration,
@@ -262,6 +263,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		// registerTool() is valid during extension load; refresh is only needed post-bind.
 		refreshTools: () => {},
 		registerRemovedToolHint: () => {},
+		registerLazyToolActivator: () => {},
 		getCommands: notInitialized,
 		setModel: () => Promise.reject(new Error("Extension runtime not initialized")),
 		getThinkingLevel: notInitialized,
@@ -349,6 +351,14 @@ function createExtensionAPI(
 				sourceInfo: extension.sourceInfo,
 			});
 			runtime.refreshTools();
+		},
+
+		registerLazyToolActivator(activator: LazyToolActivator): void {
+			runtime.assertActive();
+			const activators = extension.lazyToolActivators ?? [];
+			activators.push(activator);
+			extension.lazyToolActivators = activators;
+			runtime.registerLazyToolActivator(activator);
 		},
 
 		registerRemovedToolHint(name: string, hint: string): void {
@@ -578,6 +588,7 @@ function createExtension(extensionPath: string, resolvedPath: string, registrati
 		handlers: new Map(),
 		tools: new Map(),
 		removedToolHints: new Map(),
+		lazyToolActivators: [],
 		messageRenderers: new Map(),
 		entryRenderers: undefined,
 		commands: new Map(),
