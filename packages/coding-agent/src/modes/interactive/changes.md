@@ -1,5 +1,24 @@
 # changes
 
+## Adaptive smooth-streaming buffer (2026-07-27)
+
+### What changed
+
+- `streaming-reveal.ts`: smooth assistant output now waits for an 80ms startup buffer, estimates the provider's
+  grapheme arrival rate with an EWMA, and adjusts reveal speed between 45 and 240 graphemes per second while
+  preserving roughly 140ms of queued text. Fractional reveal progress keeps pacing consistent across 30–120 FPS.
+- `../../../test/streaming-reveal.test.ts`: pins the adaptive pacing constants, frame-rate independence, bounded
+  reveal speed, startup buffering, lifecycle flushes, and grapheme-safe incremental rendering.
+
+### Why
+
+- The previous fixed 267ms catch-up policy drained each provider burst completely, leaving visible pauses before
+  the next chunk. Keeping a small adaptive reserve trades an imperceptible startup delay for steadier output.
+
+### Expected merge conflict zones
+
+- LOW: the fork-only `streaming-reveal.ts` controller and its focused tests.
+
 ## Runtime-error headline rendering (2026-07-27)
 
 ### What changed

@@ -2,15 +2,19 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { getGraphemeSegmenter } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+	ARRIVAL_RATE_ALPHA,
 	BlockUnitCounter,
 	buildDisplayMessage,
 	CATCHUP_WINDOW_MS,
 	DEFAULT_SMOOTH_FPS,
+	INITIAL_BUFFER_MS,
+	MAX_REVEAL_UNITS_PER_SEC,
 	MAX_SMOOTH_FPS,
 	MIN_REVEAL_UNITS_PER_SEC,
 	MIN_SMOOTH_FPS,
 	nextStep,
 	StreamingRevealController,
+	TARGET_BUFFER_MS,
 	visibleUnits,
 } from "../src/modes/interactive/streaming-reveal.ts";
 
@@ -127,8 +131,12 @@ describe("BlockUnitCounter", () => {
 });
 
 describe("streaming reveal pure helpers", () => {
-	test("#given PR3 pacing constants #when imported #then pins the literal design contract", () => {
-		expect(MIN_REVEAL_UNITS_PER_SEC).toBe(90);
+	test("#given adaptive pacing constants #when imported #then pins the UX contract", () => {
+		expect(INITIAL_BUFFER_MS).toBe(80);
+		expect(TARGET_BUFFER_MS).toBe(140);
+		expect(MIN_REVEAL_UNITS_PER_SEC).toBe(45);
+		expect(MAX_REVEAL_UNITS_PER_SEC).toBe(240);
+		expect(ARRIVAL_RATE_ALPHA).toBe(0.25);
 		expect(CATCHUP_WINDOW_MS).toBe(267);
 		expect(MIN_SMOOTH_FPS).toBe(30);
 		expect(DEFAULT_SMOOTH_FPS).toBe(60);
@@ -179,33 +187,35 @@ describe("streaming reveal pure helpers", () => {
 		expect(block.endedAt).toBe(4_200);
 	});
 
-	test("#given a fixed backlog #when stepping at 30 60 and 120fps #then completion times stay within one 30fps tick", () => {
-		const revealTime = (fps: number): number => {
+	test("#given a fixed adaptive rate #when stepping at 30 60 and 120fps #then reveal distance is frame-rate independent", () => {
+		const revealDistance = (fps: number): number => {
 			const dt = 1000 / fps;
-			let backlog = 9;
-			let elapsed = 0;
-			while (backlog > 0) {
-				backlog -= nextStep(backlog, dt);
-				elapsed += dt;
+			let revealed = 0;
+			let carry = 0;
+			for (let tick = 0; tick < fps; tick++) {
+				carry += nextStep(1000 - revealed, dt, 90);
+				const wholeStep = Math.floor(carry);
+				carry -= wholeStep;
+				revealed += wholeStep;
 			}
-			return elapsed;
+			return revealed;
 		};
-		const times = [MIN_SMOOTH_FPS, DEFAULT_SMOOTH_FPS, MAX_SMOOTH_FPS].map(revealTime);
+		const distances = [MIN_SMOOTH_FPS, DEFAULT_SMOOTH_FPS, MAX_SMOOTH_FPS].map(revealDistance);
 
-		expect(Math.max(...times) - Math.min(...times)).toBeLessThanOrEqual(1000 / MIN_SMOOTH_FPS);
+		expect(Math.max(...distances) - Math.min(...distances)).toBeLessThanOrEqual(2);
 	});
 
-	test("#given floor catchup and jitter inputs #when choosing a step #then uses the exact time-based bounds", () => {
+	test("#given varying backlog and arrival rates #when choosing a step #then preserves a target buffer and bounded pace", () => {
 		const dt = 1000 / DEFAULT_SMOOTH_FPS;
-		const backlog = 1000;
-		const catchupStep = nextStep(backlog, dt);
+		const nearTarget = (90 * TARGET_BUFFER_MS) / 1000;
 
 		expect(nextStep(0, dt)).toBe(0);
-		expect(nextStep(10, 1000 / MIN_SMOOTH_FPS)).toBe(Math.round(MIN_REVEAL_UNITS_PER_SEC / MIN_SMOOTH_FPS));
-		expect((backlog / catchupStep) * dt).toBeLessThanOrEqual(CATCHUP_WINDOW_MS);
-		expect(nextStep(backlog, 0)).toBe(nextStep(backlog, 1));
-		expect(nextStep(backlog, 1000)).toBe(nextStep(backlog, 100));
-		expect(nextStep(backlog, 100)).toBe(375);
+		expect(nextStep(nearTarget, dt, 90)).toBeCloseTo((90 * dt) / 1000);
+		expect(nextStep(1000, dt, 90)).toBeCloseTo((MAX_REVEAL_UNITS_PER_SEC * dt) / 1000);
+		expect(nextStep(10, dt, 0)).toBeGreaterThanOrEqual((MIN_REVEAL_UNITS_PER_SEC * dt) / 1000);
+		expect(nextStep(10, dt, 1000)).toBeLessThanOrEqual((MAX_REVEAL_UNITS_PER_SEC * dt) / 1000);
+		expect(nextStep(1000, 0, 90)).toBe(nextStep(1000, 1, 90));
+		expect(nextStep(1000, 1000, 90)).toBe(nextStep(1000, 100, 90));
 	});
 });
 
@@ -222,6 +232,24 @@ describe("StreamingRevealController", () => {
 		controller.stop();
 	});
 
+	test("#given a provider burst #when the startup buffer is still filling #then text remains queued", () => {
+		vi.useFakeTimers();
+		let now = 0;
+		vi.spyOn(performance, "now").mockImplementation(() => now);
+		const { component, controller, requestRender } = makeController();
+		controller.begin(component, makeMessage([{ type: "text", text: "" }]));
+		controller.setTarget(makeMessage([{ type: "text", text: "a".repeat(40) }]));
+		const updatesBeforeTicks = component.messages.length;
+
+		for (let tick = 1; tick <= 4; tick++) {
+			now = tick * (1000 / DEFAULT_SMOOTH_FPS);
+			vi.advanceTimersByTime(17);
+		}
+
+		expect(component.messages).toHaveLength(updatesBeforeTicks);
+		expect(requestRender).not.toHaveBeenCalled();
+		controller.stop();
+	});
 	test("#given a growing target #when ticks advance #then rendered prefixes grow monotonically", () => {
 		vi.useFakeTimers();
 		let now = 0;
@@ -231,15 +259,15 @@ describe("StreamingRevealController", () => {
 		controller.setTarget(makeMessage([{ type: "text", text: "abcdefghijklmnopqrst" }]));
 		const beforeTicks = component.messages.length;
 
-		for (let tick = 1; tick <= 4; tick++) {
+		for (let tick = 1; tick <= 10; tick++) {
 			now = tick * (1000 / DEFAULT_SMOOTH_FPS);
 			vi.advanceTimersByTime(17);
 		}
 		const lengths = component.messages.slice(beforeTicks).map((message) => textAt(message).length);
 
-		expect(lengths).toHaveLength(4);
+		expect(lengths.length).toBeGreaterThanOrEqual(3);
 		expect(lengths.every((length, index) => index === 0 || length > lengths[index - 1]!)).toBe(true);
-		expect(requestRender).toHaveBeenCalledTimes(4);
+		expect(requestRender).toHaveBeenCalledTimes(lengths.length);
 		controller.stop();
 	});
 
@@ -283,13 +311,15 @@ describe("StreamingRevealController", () => {
 		vi.spyOn(performance, "now").mockImplementation(() => now);
 		const { component, controller } = makeController({ fps: () => MIN_SMOOTH_FPS });
 		controller.begin(component, makeMessage([{ type: "text", text: "" }]));
-		controller.setTarget(makeMessage([{ type: "text", text: "abcdefghi" }]));
-		now = 1000 / MIN_SMOOTH_FPS;
-		vi.advanceTimersByTime(34);
-		expect(textAt(latestMessage(component))).toBe("abc");
+		controller.setTarget(makeMessage([{ type: "text", text: "a".repeat(100) }]));
+		now = INITIAL_BUFFER_MS + 20;
+		vi.advanceTimersByTime(INITIAL_BUFFER_MS + 21);
+		const partialText = textAt(latestMessage(component));
+		expect(partialText.length).toBeGreaterThan(0);
+		expect(partialText.length).toBeLessThan(100);
 
 		const withTool = makeMessage([
-			{ type: "text", text: "abcdefghi" },
+			{ type: "text", text: "a".repeat(100) },
 			{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "README.md" } },
 		]);
 		controller.setTarget(withTool);
@@ -329,15 +359,16 @@ describe("StreamingRevealController", () => {
 				{ type: "text", text: "answer" },
 			]),
 		);
-		now = 1000 / MIN_SMOOTH_FPS;
-		vi.advanceTimersByTime(34);
-		expect(thinkingAt(latestMessage(component))).toBe("thi");
+		now = INITIAL_BUFFER_MS + 20;
+		vi.advanceTimersByTime(INITIAL_BUFFER_MS + 21);
+		const partialThinking = thinkingAt(latestMessage(component));
+		expect(partialThinking.length).toBeGreaterThan(0);
 
 		hidden = true;
 		controller.resyncVisibility();
 
 		expect(thinkingAt(latestMessage(component))).toBe("think");
-		expect(textAt(latestMessage(component), 1)).toBe("ans");
+		expect(textAt(latestMessage(component), 1)).toBe("answer");
 		controller.stop();
 	});
 

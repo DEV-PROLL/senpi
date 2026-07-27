@@ -2,8 +2,12 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { getGraphemeSegmenter } from "@earendil-works/pi-tui";
 import type { AssistantMessageComponent } from "./components/assistant-message.ts";
 
-export const MIN_REVEAL_UNITS_PER_SEC = 90;
+export const INITIAL_BUFFER_MS = 80;
+export const TARGET_BUFFER_MS = 140;
 export const CATCHUP_WINDOW_MS = 267;
+export const MIN_REVEAL_UNITS_PER_SEC = 45;
+export const MAX_REVEAL_UNITS_PER_SEC = 240;
+export const ARRIVAL_RATE_ALPHA = 0.25;
 export const MIN_SMOOTH_FPS = 30;
 export const MAX_SMOOTH_FPS = 120;
 export const DEFAULT_SMOOTH_FPS = 60;
@@ -166,12 +170,18 @@ export function buildDisplayMessage(
 	return { ...target, content };
 }
 
-export function nextStep(backlog: number, dtMs: number): number {
+export function nextStep(backlog: number, dtMs: number, arrivalRate = 90): number {
 	if (backlog <= 0) return 0;
 	const dt = Math.min(Math.max(dtMs, 1), 100);
-	const minStep = Math.max(1, Math.round((MIN_REVEAL_UNITS_PER_SEC * dt) / 1000));
-	const catchup = Math.ceil((backlog * dt) / CATCHUP_WINDOW_MS);
-	return Math.min(backlog, Math.max(minStep, catchup));
+	const boundedArrivalRate = Math.min(MAX_REVEAL_UNITS_PER_SEC, Math.max(MIN_REVEAL_UNITS_PER_SEC, arrivalRate));
+	const targetBacklog = (boundedArrivalRate * TARGET_BUFFER_MS) / 1000;
+	const backlogError = Math.max(0, backlog - targetBacklog);
+	const catchupRate = backlogError * (1000 / CATCHUP_WINDOW_MS);
+	const revealRate = Math.min(
+		MAX_REVEAL_UNITS_PER_SEC,
+		Math.max(MIN_REVEAL_UNITS_PER_SEC, boundedArrivalRate + catchupRate),
+	);
+	return Math.min(backlog, (revealRate * dt) / 1000);
 }
 
 export class StreamingRevealController {
@@ -189,6 +199,10 @@ export class StreamingRevealController {
 	#timerFps: number | undefined;
 	#revealed = 0;
 	#lastTickAt = 0;
+	#firstBufferedAt: number | undefined;
+	#lastTargetAt: number | undefined;
+	#arrivalRate = 90;
+	#stepCarry = 0;
 	#hideThinkingBlock = false;
 
 	constructor(options: StreamingRevealControllerOptions) {
@@ -203,12 +217,30 @@ export class StreamingRevealController {
 		this.#component = component;
 		this.#target = message;
 		this.#hideThinkingBlock = this.#getHideThinkingBlock();
+		if (this.#visibleUnits(message) > 0) {
+			const now = performance.now();
+			this.#firstBufferedAt = now;
+			this.#lastTargetAt = now;
+		}
 		this.#applyTarget();
 	}
 
 	setTarget(message: AssistantMessage): void {
+		const now = performance.now();
+		const previousUnits = this.#target ? this.#visibleUnits(this.#target) : 0;
 		this.#target = message;
 		this.#hideThinkingBlock = this.#getHideThinkingBlock();
+		const total = this.#visibleUnits(message);
+		const appended = Math.max(0, total - previousUnits);
+		if (appended > 0) {
+			if (this.#firstBufferedAt === undefined) this.#firstBufferedAt = now;
+			if (this.#lastTargetAt !== undefined && now > this.#lastTargetAt) {
+				const sampleRate = (appended * 1000) / (now - this.#lastTargetAt);
+				const boundedSample = Math.min(MAX_REVEAL_UNITS_PER_SEC, Math.max(MIN_REVEAL_UNITS_PER_SEC, sampleRate));
+				this.#arrivalRate += ARRIVAL_RATE_ALPHA * (boundedSample - this.#arrivalRate);
+			}
+			this.#lastTargetAt = now;
+		}
 		if (this.#component) this.#applyTarget();
 	}
 
@@ -226,6 +258,10 @@ export class StreamingRevealController {
 		this.#revealed = 0;
 		this.#lastTickAt = 0;
 		this.#unitCounter.reset();
+		this.#firstBufferedAt = undefined;
+		this.#lastTargetAt = undefined;
+		this.#arrivalRate = 90;
+		this.#stepCarry = 0;
 	}
 
 	#applyTarget(): void {
@@ -295,8 +331,14 @@ export class StreamingRevealController {
 			return;
 		}
 		const now = performance.now();
-		this.#revealed = Math.min(total, this.#revealed + nextStep(total - this.#revealed, now - this.#lastTickAt));
+		const dt = now - this.#lastTickAt;
 		this.#lastTickAt = now;
+		if (this.#firstBufferedAt !== undefined && now - this.#firstBufferedAt < INITIAL_BUFFER_MS) return;
+		this.#stepCarry += nextStep(total - this.#revealed, dt, this.#arrivalRate);
+		const wholeStep = Math.floor(this.#stepCarry);
+		if (wholeStep <= 0) return;
+		this.#stepCarry -= wholeStep;
+		this.#revealed = Math.min(total, this.#revealed + wholeStep);
 		this.#renderCurrent();
 		this.#requestRender();
 		if (this.#revealed >= total) this.#stopTimer();
