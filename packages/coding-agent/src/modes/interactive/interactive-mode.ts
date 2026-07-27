@@ -3495,6 +3495,8 @@ export class InteractiveMode {
 				this.clearPendingTools();
 				this.clearActiveToolExecutionStatus();
 				this.clearToolHookStatuses();
+				// Turn boundary: pick a fresh working tip next time the indicator shows.
+				this.turnWorkingTip = undefined;
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(true);
 				}

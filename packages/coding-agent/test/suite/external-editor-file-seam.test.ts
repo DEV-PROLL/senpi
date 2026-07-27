@@ -28,6 +28,11 @@ if (mode === "fail") {
 	process.exit(7);
 }
 
+if (mode === "signal") {
+	writeFileSync(filePath, "edited before signal\\n", "utf-8");
+	process.kill(process.pid, "SIGTERM");
+}
+
 process.exit(0);
 `,
 			"utf-8",
@@ -76,6 +81,22 @@ process.exit(0);
 			}),
 		// The editor never launched, so callers may safely discard a file they seeded.
 		).resolves.toEqual({ status: "launch-failed" });
+	});
+
+	it("reports a signal-killed editor as launched so seeded content is preserved", async () => {
+		// A process killed by a signal reports code === null on close, exactly like a
+		// spawn failure. It DID run and may have written the file, so it must not take
+		// the destructive launch-failed path.
+		const targetPath = join(directory, "keybindings.json");
+		writeFileSync(targetPath, "seeded\n", "utf-8");
+
+		const result = await editFileInExternalEditor({
+			command: `${process.execPath} ${editorPath} signal`,
+			path: targetPath,
+		});
+
+		expect(result.status).not.toBe("launch-failed");
+		expect(readFileSync(targetPath, "utf-8")).toBe("edited before signal\n");
 	});
 
 	it("does not create the target file when the editor leaves it untouched", async () => {

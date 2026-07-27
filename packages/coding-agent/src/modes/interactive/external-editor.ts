@@ -51,18 +51,22 @@ export async function editFileInExternalEditor(options: {
 	path: string;
 }): Promise<EditFileResult> {
 	const [editor, ...editorArgs] = options.command.split(" ");
-	const exitCode = await new Promise<number | null>((resolve) => {
+	// `close` reports code === null both for a signaled process and (historically)
+	// around spawn errors, so the `error` event is the ONLY reliable spawn-failure
+	// signal. Anything else means the editor actually launched.
+	const outcome = await new Promise<{ launched: false } | { launched: true; code: number | null }>((resolve) => {
 		const child = spawn(editor, [...editorArgs, options.path], {
 			stdio: "inherit",
 			shell: process.platform === "win32",
 		});
-		child.on("error", () => resolve(null));
-		child.on("close", (code) => resolve(code));
+		child.on("error", () => resolve({ launched: false }));
+		child.on("close", (code) => resolve({ launched: true, code }));
 	});
 
-	// A spawn failure means the editor never ran, so a freshly seeded file is safe
-	// to remove. A nonzero exit means the editor DID run and may have written the
-	// file, so the caller must keep whatever is on disk.
-	if (exitCode === null) return { status: "launch-failed" };
-	return exitCode === 0 ? { status: "complete" } : { status: "exited", code: exitCode };
+	// The editor never ran, so a freshly seeded file carries no user content and is
+	// safe to remove. Once it launched -- nonzero exit or killed by a signal -- it
+	// may have written the file, so the caller must keep whatever is on disk.
+	if (!outcome.launched) return { status: "launch-failed" };
+	if (outcome.code === 0) return { status: "complete" };
+	return { status: "exited", code: outcome.code ?? -1 };
 }
