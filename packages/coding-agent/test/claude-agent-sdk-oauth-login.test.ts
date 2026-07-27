@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import type { OAuthAuth } from "@earendil-works/pi-ai";
-import { SENTINEL_OAUTH_FIELDS, listAccounts } from "../src/core/extensions/builtin/claude-agent-sdk/accounts.ts";
+import { describe, expect, it } from "vitest";
+import { listAccounts, SENTINEL_OAUTH_FIELDS } from "../src/core/extensions/builtin/claude-agent-sdk/accounts.ts";
 import { createOAuthConfig } from "../src/core/extensions/builtin/claude-agent-sdk/oauth-login.ts";
 
 function fakeFlow(credential: { access: string; refresh: string; expires: number }): OAuthAuth {

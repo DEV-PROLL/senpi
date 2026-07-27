@@ -98,19 +98,21 @@ export function envSlotToken(env: (name: string) => string | undefined, slotName
 }
 
 export type SlotRefresher = (refreshToken: string) => Promise<{ refresh: string; access: string; expires: number }>;
+export type SlotExpirationCheck = (expires: number) => boolean;
 
 export async function refreshSlot(
 	store: CredentialStore,
 	providerId: string,
 	slotName: string,
 	refresher: SlotRefresher,
+	isExpiring: SlotExpirationCheck = (expires) => Date.now() >= expires,
 ): Promise<Credential | undefined> {
 	return store.modify(providerId, async (current) => {
 		if (current?.type !== "oauth") return undefined;
 		const credential = current as ClaudeAgentSdkCredential;
 		const slot = storedSlots(credential).find((candidate) => candidate.name === slotName);
 		if (!slot) return current;
-		if (Date.now() < slot.expires) return current;
+		if (!isExpiring(slot.expires)) return current;
 		const refreshed = await refresher(slot.refresh);
 		const accounts = storedSlots(credential).map((candidate) =>
 			candidate.name === slotName

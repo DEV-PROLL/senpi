@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	claudeCodeExecutableCandidates,
-	resolveClaudeCodeExecutable,
 	type ExecutableDeps,
+	resolveClaudeCodeExecutable,
 } from "../src/core/extensions/builtin/claude-agent-sdk/executable.ts";
 
 function makeDeps(overrides: Partial<ExecutableDeps>): ExecutableDeps {
@@ -101,8 +101,6 @@ describe("resolveClaudeCodeExecutable", () => {
 
 	it("throws guidance naming both remedies when nothing resolves", () => {
 		const deps = makeDeps({ platform: "linux", arch: "arm64" });
-		expect(() => resolveClaudeCodeExecutable(deps)).toThrowError(
-			/--omit=optional[\s\S]*CLAUDE_CODE_EXECUTABLE/,
-		);
+		expect(() => resolveClaudeCodeExecutable(deps)).toThrowError(/--omit=optional[\s\S]*CLAUDE_CODE_EXECUTABLE/);
 	});
 });

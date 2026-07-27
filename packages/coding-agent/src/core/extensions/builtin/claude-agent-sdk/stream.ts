@@ -7,11 +7,13 @@ import {
 	parseStreamingJson,
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
+import { queryWithAuthLane } from "./auth-lane.ts";
 import { buildCustomToolServers } from "./custom-tools.ts";
 import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable.ts";
 import { buildClaudeAgentSdkQueryOptions } from "./options.ts";
 import { buildPromptBlocks, buildPromptStream } from "./prompt-bridge.ts";
 import { getSdkBoundary, type SdkQueryHandle } from "./sdk-boundary.ts";
+import { loadClaudeAgentSdkProviderSettingsFromDisk } from "./settings.ts";
 import {
 	asRecord,
 	emptyOutput,
@@ -67,22 +69,34 @@ export function streamClaudeAgentSdk(
 			const sessionKey = options?.sessionId ? toolWatch.sessionKey(options.sessionId) : undefined;
 			if (sessionKey) toolWatch.reconcileWithContext(sessionKey, context);
 			const toolWatchNote = toolWatch.buildPromptNote(sessionKey, context, resolvedTools.customToolNameToSdk);
-			const queryOptions = buildClaudeAgentSdkQueryOptions({
-				model,
-				context,
-				streamOptions: options,
-				tools: resolvedTools.sdkTools,
-				pathToClaudeCodeExecutable: resolveClaudeCodeExecutable(defaultExecutableDeps()),
-			});
+			const providerSettings = loadClaudeAgentSdkProviderSettingsFromDisk(process.cwd());
 			const mcpServers = buildCustomToolServers(resolvedTools.customTools);
-			if (mcpServers) queryOptions.mcpServers = mcpServers;
-			sdkQuery = getSdkBoundary().query({
+			const executable = resolveClaudeCodeExecutable(defaultExecutableDeps());
+			const messages = queryWithAuthLane({
 				prompt: buildPromptStream(buildPromptBlocks(context, resolvedTools.customToolNameToSdk, toolWatchNote)),
-				options: queryOptions,
+				query: getSdkBoundary().query,
+				providerSettings,
+				sessionId: options?.sessionId,
+				onQuery: (query) => {
+					sdkQuery = query;
+					if (wasAborted) requestAbort();
+				},
+				buildOptions: (authLane) => {
+					const queryOptions = buildClaudeAgentSdkQueryOptions({
+						model,
+						context,
+						streamOptions: options,
+						providerSettings,
+						authLane,
+						tools: resolvedTools.sdkTools,
+						pathToClaudeCodeExecutable: executable,
+					});
+					if (mcpServers) queryOptions.mcpServers = mcpServers;
+					return queryOptions;
+				},
 			});
-			if (wasAborted) requestAbort();
 
-			for await (const message of sdkQuery) {
+			for await (const message of messages) {
 				if (!started) {
 					stream.push({ type: "start", partial: output });
 					started = true;

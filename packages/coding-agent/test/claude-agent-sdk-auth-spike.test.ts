@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 
 const SPIKE = join(__dirname, "../../../.agents/skills/senpi-qa/scripts/claude-agent-sdk-auth-spike.mjs");
 

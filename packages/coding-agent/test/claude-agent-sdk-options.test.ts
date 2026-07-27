@@ -1,14 +1,14 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
-import { SettingsManager, type Settings } from "../src/core/settings-manager.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	buildClaudeAgentSdkQueryOptions,
 	type ClaudeAgentSdkAuthLane,
 } from "../src/core/extensions/builtin/claude-agent-sdk/options.ts";
 import { loadClaudeAgentSdkProviderSettings } from "../src/core/extensions/builtin/claude-agent-sdk/settings.ts";
+import { type Settings, SettingsManager } from "../src/core/settings-manager.ts";
 
 const temporaryDirectories: string[] = [];
 

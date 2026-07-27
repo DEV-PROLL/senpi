@@ -1,5 +1,5 @@
 import { getAgentDir } from "../../../../config.ts";
-import { SettingsManager, type Settings } from "../../../settings-manager.ts";
+import { type Settings, SettingsManager } from "../../../settings-manager.ts";
 import type { SettingSource } from "./sdk-boundary.ts";
 
 export type ClaudeAgentSdkTokenInjection = "oauth-slots" | "config-dir" | "ambient";
@@ -38,7 +38,8 @@ function parseProviderSettings(value: unknown): ClaudeAgentSdkProviderSettings {
 		appendSystemPrompt: typeof value.appendSystemPrompt === "boolean" ? value.appendSystemPrompt : undefined,
 		settingSources: parseSettingSources(value.settingSources),
 		strictMcpConfig: typeof value.strictMcpConfig === "boolean" ? value.strictMcpConfig : undefined,
-		pinnedAccount: typeof value.pinnedAccount === "string" && value.pinnedAccount.length > 0 ? value.pinnedAccount : undefined,
+		pinnedAccount:
+			typeof value.pinnedAccount === "string" && value.pinnedAccount.length > 0 ? value.pinnedAccount : undefined,
 		tokenInjection: parseTokenInjection(value.tokenInjection),
 	};
 }

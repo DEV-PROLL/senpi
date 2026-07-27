@@ -1,12 +1,12 @@
+import { type Api, type Context, createAssistantMessageEventStream, type Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { createAssistantMessageEventStream, type Api, type Context, type Model } from "@earendil-works/pi-ai";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import claudeAgentSdkExtension, {
 	CLAUDE_AGENT_SDK_PROVIDER_ID,
 } from "../../src/core/extensions/builtin/claude-agent-sdk/index.ts";
 import type { ExtensionAPI } from "../../src/core/extensions/types.ts";
-import type { ProviderConfigInput } from "../../src/core/provider-composer.ts";
 import { ModelRuntime } from "../../src/core/model-runtime.ts";
+import type { ProviderConfigInput } from "../../src/core/provider-composer.ts";
 
 type Registration = { name: string; config: ProviderConfigInput };
 

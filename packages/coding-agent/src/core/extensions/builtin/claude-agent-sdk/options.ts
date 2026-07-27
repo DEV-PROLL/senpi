@@ -171,7 +171,7 @@ export function buildClaudeAgentSdkQueryOptions(input: ClaudeAgentSdkQueryOption
 	const cwd = input.cwd ?? process.cwd();
 	const providerSettings = input.providerSettings ?? loadClaudeAgentSdkProviderSettingsFromDisk(cwd);
 	const appendSystemPrompt = providerSettings.appendSystemPrompt !== false;
-	const authLane = input.authLane ?? providerSettings.tokenInjection ?? "ambient";
+	const authLane = input.authLane ?? providerSettings.tokenInjection ?? "oauth-slots";
 	const append = appendSystemPrompt
 		? [extractAgentsAppend(cwd), extractSkillsAppend(input.context.systemPrompt, cwd)].filter(
 				(part): part is string => part !== undefined,

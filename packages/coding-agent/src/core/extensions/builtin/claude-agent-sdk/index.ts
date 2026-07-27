@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getModels } from "@earendil-works/pi-ai/compat";
 import { getAgentDir } from "../../../../config.ts";
-import type { ExtensionAPI } from "../types.ts";
+import type { ExtensionAPI } from "../../types.ts";
 import type { ClaudeAgentSdkCredential } from "./accounts.ts";
 import { createOAuthConfig } from "./oauth-login.ts";
 import { streamClaudeAgentSdk } from "./stream.ts";

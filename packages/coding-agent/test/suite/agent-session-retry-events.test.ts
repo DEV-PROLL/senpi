@@ -251,10 +251,10 @@ describe("AgentSession retry and event characterization", () => {
 		const harness = await createHarness({ settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } } });
 		harnesses.push(harness);
 		harness.setResponses([
-			fauxAssistantMessage(
-				[{ type: "text", text: "partial" }, fauxToolCall("echo", { value: "once" })],
-				{ stopReason: "error", errorMessage: "senpi:no-turn-retry: rate_limit" },
-			),
+			fauxAssistantMessage([{ type: "text", text: "partial" }, fauxToolCall("echo", { value: "once" })], {
+				stopReason: "error",
+				errorMessage: "senpi:no-turn-retry: rate_limit",
+			}),
 			fauxAssistantMessage("must not run"),
 		]);
 
