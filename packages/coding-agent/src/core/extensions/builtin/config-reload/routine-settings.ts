@@ -15,6 +15,7 @@ const ROUTINE_SETTINGS_KEYS: ReadonlySet<string> = new Set([
 	"defaultProvider",
 	"defaultThinkingLevel",
 	"lastChangelogVersion",
+	"tipsHistory",
 ]);
 
 export function joinConfigDir(cwd: string): string {

@@ -133,6 +133,8 @@ export interface Settings {
 	externalEditor?: string; // Command for Ctrl+G external editor; takes precedence over VISUAL/EDITOR
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows); supports leading ~ expansion
 	quietStartup?: boolean;
+	tips?: boolean; // default: true
+	tipsHistory?: Record<string, number>; // tipId -> epoch ms last shown
 	defaultProjectTrust?: DefaultProjectTrust; // default: "ask"; global setting only
 	shellCommandPrefix?: string; // Prefix prepended to every bash command (e.g., "shopt -s expand_aliases" for alias support)
 	npmCommand?: string[]; // Command used for npm package lookup/install operations, argv-style (e.g., ["mise", "exec", "node@20", "--", "npm"])
@@ -1182,6 +1184,24 @@ export class SettingsManager {
 	setQuietStartup(quiet: boolean): void {
 		this.globalSettings.quietStartup = quiet;
 		this.markModified("quietStartup");
+		this.save();
+	}
+
+	getTipsEnabled(): boolean {
+		return this.settings.tips ?? true;
+	}
+
+	getTipsHistory(): Record<string, number> {
+		const history = this.settings.tipsHistory;
+		if (typeof history !== "object" || history === null || Array.isArray(history)) {
+			return {};
+		}
+		return { ...history };
+	}
+
+	setTipsHistory(history: Record<string, number>): void {
+		this.globalSettings.tipsHistory = history;
+		this.markModified("tipsHistory");
 		this.save();
 	}
 
