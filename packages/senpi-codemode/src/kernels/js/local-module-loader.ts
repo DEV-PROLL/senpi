@@ -4,6 +4,7 @@ import type { BridgeConnectionConfig } from "../../bridge/protocol.ts";
 import {
 	RESERVED_AGENT_TOOL,
 	RESERVED_OUTPUT_TOOL,
+	RESERVED_SCHEMA_TOOL,
 	TIMEOUT_PAUSE_OP,
 	TIMEOUT_RESUME_OP,
 } from "../../bridge/reserved.ts";
@@ -33,6 +34,7 @@ type RuntimeModuleContext = {
 	readonly cwdUrl: string;
 	readonly localRootUrls: Readonly<Record<string, string>>;
 	readonly reservedAgentTool: string;
+	readonly reservedSchemaTool: string;
 	readonly reservedOutputTool: string;
 	readonly timeoutPauseOp: string;
 	readonly timeoutResumeOp: string;
@@ -55,6 +57,7 @@ function runtimeContext(options: LocalModuleLoaderOptions): RuntimeModuleContext
 		localRootUrls: roots,
 		reservedAgentTool: RESERVED_AGENT_TOOL,
 		reservedOutputTool: RESERVED_OUTPUT_TOOL,
+		reservedSchemaTool: RESERVED_SCHEMA_TOOL,
 		timeoutPauseOp: TIMEOUT_PAUSE_OP,
 		timeoutResumeOp: TIMEOUT_RESUME_OP,
 	};
@@ -66,6 +69,7 @@ function loaderPrelude(context: RuntimeModuleContext): string {
 		`globalThis.__senpi_module_context__ = ${serialized};`,
 		"globalThis.__senpi_reserved_agent_tool__ = globalThis.__senpi_module_context__.reservedAgentTool;",
 		"globalThis.__senpi_reserved_output_tool__ = globalThis.__senpi_module_context__.reservedOutputTool;",
+		"globalThis.__senpi_reserved_schema_tool__ = globalThis.__senpi_module_context__.reservedSchemaTool;",
 		"globalThis.__senpi_timeout_pause_op__ = globalThis.__senpi_module_context__.timeoutPauseOp;",
 		"globalThis.__senpi_timeout_resume_op__ = globalThis.__senpi_module_context__.timeoutResumeOp;",
 		"globalThis.__senpi_import__ = async (source, options) => {",
