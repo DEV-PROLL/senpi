@@ -6,6 +6,7 @@ import { resolvePath } from "../../../../utils/paths.ts";
 import { ModelConfig } from "../../../model-config.ts";
 import { type Settings, SettingsManager, wasSelfWrite } from "../../../settings-manager.ts";
 import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "../../types.ts";
+import { isLoadableExtensionEntry, isScannableExtensionDirectory } from "./extension-watch-scope.ts";
 import { type ConfigReloadLogger, createConfigReloadLogger } from "./log.ts";
 import {
 	CONFIG_WATCH_CHANGED,
@@ -40,6 +41,15 @@ const BUILTIN_REGISTRATION_ID = "builtin";
 const DEFAULT_DEBOUNCE_MS = 200;
 const COMPACTION_RECHECK_MS = 250;
 const CONFIG_FILE_NAMES = ["settings.json", "models.json", "keybindings.json"] as const;
+
+/**
+ * The engine applies one predicate to both file gating and directory descent, so
+ * this must admit scannable directories in order to reach their entry files.
+ */
+const extensionWatchFilter =
+	(extensionsDir: string) =>
+	(relPath: string): boolean =>
+		isLoadableExtensionEntry(extensionsDir, relPath) || isScannableExtensionDirectory(extensionsDir, relPath);
 
 type ConfigReloadWatchSettings = {
 	readonly settings?: boolean;
@@ -530,10 +540,15 @@ function buildWatchTargets(options: {
 	const addBuiltin = (id: string, target: WatchTargetInput, rearmOnCreation?: string): void => {
 		targets.push({ registrationId: BUILTIN_REGISTRATION_ID, target: { ...target, id }, rearmOnCreation });
 	};
-	const addBuiltinDirectory = (id: string, path: string): void => {
+	const addBuiltinDirectory = (id: string, path: string, filter?: (relPath: string) => boolean): void => {
 		const resourcePath = resolve(path);
 		if (isExistingDirectory(resourcePath)) {
-			addBuiltin(id, { kind: "dir-recursive", path: resourcePath });
+			addBuiltin(
+				id,
+				filter
+					? { kind: "dir-recursive", path: resourcePath, filter }
+					: { kind: "dir-recursive", path: resourcePath },
+			);
 			return;
 		}
 		const watchPath = nearestExistingDirectory(dirname(resourcePath));
@@ -564,7 +579,8 @@ function buildWatchTargets(options: {
 		addBuiltinDirectory("builtin-global-prompts", resolve(agentDir, "prompts"));
 	}
 	if (settings.watch.extensions) {
-		addBuiltinDirectory("builtin-global-extensions", resolve(agentDir, "extensions"));
+		const globalExtensionsDir = resolve(agentDir, "extensions");
+		addBuiltinDirectory("builtin-global-extensions", globalExtensionsDir, extensionWatchFilter(globalExtensionsDir));
 	}
 	if (settings.watch.skills) {
 		for (const [index, skillPath] of options.skillPaths.entries()) {
@@ -602,7 +618,12 @@ function buildWatchTargets(options: {
 				addBuiltinDirectory("builtin-project-skills", resolve(projectDir, "skills"));
 			}
 			if (settings.watch.extensions) {
-				addBuiltinDirectory("builtin-project-extensions", resolve(projectDir, "extensions"));
+				const projectExtensionsDir = resolve(projectDir, "extensions");
+				addBuiltinDirectory(
+					"builtin-project-extensions",
+					projectExtensionsDir,
+					extensionWatchFilter(projectExtensionsDir),
+				);
 			}
 		}
 	}
@@ -676,9 +697,11 @@ function externalTargetToWatchTarget(
 
 function literalFilterNames(filterGlobs: readonly string[] | undefined): string[] | undefined {
 	if (!filterGlobs) return undefined;
-	const literalNames = filterGlobs.filter(
-		(filterGlob) => !filterGlob.includes("*") && !filterGlob.includes("/") && !filterGlob.includes("\\\\"),
-	);
+	// A root-anchored glob names a literal path relative to the watch root, so
+	// strip the anchor before the separator check rejects it.
+	const literalNames = filterGlobs
+		.map((filterGlob) => (filterGlob.startsWith("/") ? filterGlob.slice(1) : filterGlob))
+		.filter((filterGlob) => !filterGlob.includes("*") && !filterGlob.includes("/") && !filterGlob.includes("\\\\"));
 	return literalNames.length > 0 ? literalNames : undefined;
 }
 
