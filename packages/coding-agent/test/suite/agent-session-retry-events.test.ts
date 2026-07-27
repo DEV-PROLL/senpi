@@ -2,7 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
-import { createHarness, type Harness } from "./harness.ts";
+import { createHarness, getAssistantTexts, type Harness } from "./harness.ts";
 
 function normalizeEventOrder(events: Harness["events"]): string[] {
 	const normalized: string[] = [];
@@ -245,6 +245,27 @@ describe("AgentSession retry and event characterization", () => {
 
 		expect(harness.faux.state.callCount).toBe(1);
 		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
+	});
+
+	it("suppresses turn retry for a provider-marked rate limit after text and a tool call", async () => {
+		const harness = await createHarness({ settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } } });
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(
+				[{ type: "text", text: "partial" }, fauxToolCall("echo", { value: "once" })],
+				{ stopReason: "error", errorMessage: "senpi:no-turn-retry: rate_limit" },
+			),
+			fauxAssistantMessage("must not run"),
+		]);
+
+		await harness.session.prompt("test");
+
+		expect(harness.faux.state.callCount).toBe(1);
+		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
+		expect(harness.eventsOfType("message_update").map((event) => event.assistantMessageEvent.type)).toEqual(
+			expect.arrayContaining(["text_delta", "toolcall_delta"]),
+		);
+		expect(getAssistantTexts(harness)).toEqual(["partial"]);
 	});
 
 	it("cancels retry sleep when abortRetry is called", async () => {
