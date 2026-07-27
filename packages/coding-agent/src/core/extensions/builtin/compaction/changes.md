@@ -32,6 +32,38 @@
 
 # Builtin compaction extension changes
 
+## Degrade transient blocking-compaction failures instead of erroring the turn (2026-07-27)
+
+- `index.ts` `applyBlockingCompaction()`: when the summarization request fails with a transient
+  transport/provider error (classified by `isRetryableErrorMessage` from `@earendil-works/pi-ai`), the catch
+  no longer rethrows. It still ends compaction feedback with `Compaction failed: <message>`, then records a
+  circuit-breaker failure and returns `{ applied: false, reason: "unavailable" }`. Previously a network drop
+  during blocking compaction (`before_agent_start` hard-limit/proactive routes, degradation-monitor recovery)
+  escaped to the ExtensionRunner, which printed `Extension "<builtin:compaction>" error: Connection error.`
+  plus a raw stack on top of the compaction_end message - two surfaces for one outage - while the turn's own
+  provider request was about to report the same outage a third time through the normal retry path. Matches
+  Claude Code (swallow + consecutive-failure breaker), Codex (single structured error event, session stays
+  usable), and oh-my-pi (emit errorMessage, no rethrow). Non-transient failures (policy refusals, real bugs)
+  still rethrow; `SummaryGenerationError` and user-abort paths are unchanged.
+- `index.ts` `before_agent_start`: while the breaker cools down, the proactive blocking route and speculative
+  warm start are skipped so an offline session does not pay a doomed summarization request on every prompt.
+  The hard-limit emergency route still attempts unconditionally.
+- Review hardening: transient failures now return `{ applied: false, reason: "failed" }` (new
+  `SpeculativeCompactionResult` member) so `degradation-monitor.ts` can suppress the recovery notification
+  for a failure that already surfaced its own compaction_end errorMessage; `unavailable` results keep
+  notifying. The `model_select` window-shrink route also skips speculative warm starts while the breaker
+  cools down. Provider `error` stops throw `SummaryRequestError` carrying `isRetryableAssistantError`'s
+  metadata-aware verdict, so a refusal whose text looks retryable still surfaces loudly instead of being
+  string-classified as transient.
+- Tests: `test/compaction/blocking-compaction-network-degrade.test.ts` (transient degrade with a single clean
+  errorMessage surface, breaker skip during cooldown, non-transient loud rethrow pin, credential-failure
+  degrade pin) and `test/compaction/blocking-compaction-review-hardening.test.ts` (refusal metadata, breaker
+  gating of model_select warm starts, blocking abort/empty-summary pins, recovery-notification suppression),
+  sharing `test/helpers/blocking-compaction-harness.ts`.
+
+Expected upstream conflict zones: `builtin/compaction/index.ts` around the `applyBlockingCompaction` catch
+block and the `before_agent_start` route selection; LOW on `packages/ai/src/utils/retry.ts` exports.
+
 ## Reasoning-free summarization + shrink warm start (2026-07-26)
 
 - `speculative.ts` `generateSummaryMessage` now merges `summarizationReasoningOptions(model)` into the stream
