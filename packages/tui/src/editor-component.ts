@@ -1,4 +1,5 @@
 import type { AutocompleteProvider } from "./autocomplete.ts";
+import type { EditorPasteState } from "./components/editor.ts";
 import type { Component } from "./tui.ts";
 
 /**
@@ -51,6 +52,19 @@ export interface EditorComponent extends Component {
 	 * Falls back to getText() if not implemented.
 	 */
 	getExpandedText?(): string;
+
+	/**
+	 * Snapshot the paste-marker registry so collapsed markers can be
+	 * transferred to another editor instance alongside getText().
+	 */
+	getPasteState?(): EditorPasteState;
+
+	/**
+	 * Install a paste-marker registry snapshot taken from another editor
+	 * instance. Called after setText() with that editor's raw (marker) text.
+	 * When not implemented, callers must transfer the expanded text instead.
+	 */
+	setPasteState?(state: EditorPasteState): void;
 
 	// =========================================================================
 	// Autocomplete support (optional)

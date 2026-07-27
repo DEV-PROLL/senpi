@@ -1,20 +1,23 @@
 # TUI delta rendering fork changes
 
-## 2026-07-28: setText prunes instead of clearing the paste registry
+## 2026-07-28: setText prunes instead of clearing the paste registry; paste-state transfer API
 
 ### What changed
 
-- `components/editor.ts` `setText()` no longer unconditionally clears the large-paste registry. It now prunes only entries whose `[paste #N ...]` markers do not appear in the new text (and resets numbering when the registry empties). Markers that survive a programmatic `getText()` → `setText()` round-trip stay live: they remain atomic segments and still expand to the full pasted body on submit and in `getExpandedText()`.
+- `components/editor.ts` `setText()` no longer unconditionally clears the large-paste registry. It now prunes only entries whose markers do not appear in the new text (and resets numbering when the registry empties). Markers that survive a programmatic `getText()` → `setText()` round-trip stay live: they remain atomic segments and still expand to the full pasted body on submit and in `getExpandedText()`.
+- Pruning matches the exact canonical marker string reconstructed from the stored body via the shared `formatPasteMarker()` helper (also used at insert time), so arbitrary new text that merely looks like a live marker (`[paste #1 +5 lines]` with a mismatched suffix) cannot accidentally revive a registry entry and expand to unrelated content.
+- New `getPasteState()` / `setPasteState()` on `Editor` plus optional `getPasteState?`/`setPasteState?` on the `EditorComponent` interface (exported `EditorPasteState`): snapshots the registry for transfer between editor instances. `setPasteState()` raises the paste counter above transferred ids (no collisions) and prunes entries whose markers are absent from the current text.
 - Previously any `setText` round-trip (dialog save/restore, queued-message restore, editor hand-off) orphaned live markers into dead literal text, so submitting sent the literal `[paste #1 +18 lines]` placeholder to the model instead of the pasted content.
-- Tests: `test/editor.test.ts` "Paste marker atomic behavior" — round-trip preservation, queued-restore combination, selective pruning, and numbering reset.
+- Tests: `test/editor.test.ts` "Paste marker atomic behavior" — round-trip preservation, queued-restore combination, selective/exact pruning, coincidental-marker rejection, cross-instance transfer, counter collision safety, and numbering reset.
 
 ### Why this cannot be expressed externally
 
-The paste registry and marker segmentation are `Editor`-private state; consumers only see `getText()`/`setText()`/`getExpandedText()` and cannot preserve the registry across a round-trip themselves.
+The paste registry and marker segmentation are `Editor`-private state; consumers only see `getText()`/`setText()`/`getExpandedText()` and cannot preserve the registry across a round-trip themselves. Cross-instance transfer needs a first-class snapshot API for the same reason.
 
 ### Expected merge conflict zones
 
-- LOW: `components/editor.ts` `setText()` and the new `prunePastes()` helper.
+- LOW: `components/editor.ts` `setText()`, `prunePastes()`, `formatPasteMarker()`, `getPasteState()`/`setPasteState()`, and the handlePaste marker-insertion line.
+- LOW: `editor-component.ts` optional paste-state methods; `index.ts` `EditorPasteState` export.
 - LOW: `test/editor.test.ts` paste marker suite.
 
 ## 2026-07-26: composable leading skill autocomplete

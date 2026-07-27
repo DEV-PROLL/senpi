@@ -3890,6 +3890,67 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getExpandedText(), pasteB);
 		});
 
+		it("setText does not revive a registry entry from coincidental marker-like text", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`); // #1, 12 lines
+
+			// Same id, but the suffix does not match the stored content: this is
+			// arbitrary new text, not a round-trip of the live marker.
+			editor.setText("[paste #1 +5 lines]");
+			assert.strictEqual(editor.getExpandedText(), "[paste #1 +5 lines]");
+
+			// Only the exact canonical marker string keeps the entry alive.
+			const editor2 = new Editor(createTestTUI(), defaultEditorTheme);
+			const paste = bigPaste("beta");
+			editor2.handleInput(`\x1b[200~${paste}\x1b[201~`);
+			editor2.setText(editor2.getText());
+			assert.strictEqual(editor2.getExpandedText(), paste);
+		});
+
+		it("transfers paste registry to another editor instance via getPasteState/setPasteState", () => {
+			const source = new Editor(createTestTUI(), defaultEditorTheme);
+			const paste = bigPaste("alpha");
+			source.handleInput(`\x1b[200~${paste}\x1b[201~`);
+
+			const target = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			target.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			// Editor hand-off: raw text + registry snapshot
+			target.setText(source.getText());
+			target.setPasteState(source.getPasteState());
+
+			// Marker stays collapsed and atomic in the target editor
+			assert.match(target.getText(), /\[paste #1 \+\d+ lines\]/);
+			assert.strictEqual(target.getExpandedText(), paste);
+
+			// New pastes in the target cannot collide with transferred ids
+			target.handleInput(" ");
+			target.handleInput(`\x1b[200~${bigPaste("beta")}\x1b[201~`);
+			assert.match(target.getText(), /\[paste #2 \+\d+ lines\]/);
+
+			target.handleInput("\r");
+			assert.strictEqual(submitted, `${paste} ${bigPaste("beta")}`);
+		});
+
+		it("setPasteState drops entries whose markers are not in the current text", () => {
+			const source = new Editor(createTestTUI(), defaultEditorTheme);
+			source.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`);
+
+			const target = new Editor(createTestTUI(), defaultEditorTheme);
+			target.setText("no markers here");
+			target.setPasteState(source.getPasteState());
+
+			assert.strictEqual(target.getExpandedText(), "no markers here");
+			// Registry emptied, numbering restarts at #1
+			target.setText("");
+			target.handleInput(`\x1b[200~${bigPaste("beta")}\x1b[201~`);
+			assert.match(target.getText(), /\[paste #1 \+\d+ lines\]/);
+		});
+
 		it("setText with unrelated text clears the registry and resets numbering", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 

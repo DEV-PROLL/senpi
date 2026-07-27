@@ -2864,11 +2864,23 @@ export class InteractiveMode {
 	private setCustomEditorComponent(factory: EditorFactory | undefined): void {
 		this.editorComponentFactory = factory;
 
-		// Save text from current editor before switching. Use the expanded text
-		// so paste markers survive the transfer: the new editor instance has no
-		// paste registry, so a raw marker would become dead literal text and the
-		// pasted content would be silently lost on submit.
-		const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
+		// Save text from current editor before switching. Paste markers must not
+		// be transferred as raw text alone: the destination editor instance has no
+		// paste registry, so a bare marker would become dead literal text and the
+		// pasted content would be silently lost on submit. When both editors
+		// support the paste-state API, transfer the registry so markers stay
+		// collapsed; otherwise fall back to the expanded text.
+		const rawText = this.editor.getText();
+		const pasteState = this.editor.getPasteState?.();
+		const expandedText = this.editor.getExpandedText?.() ?? rawText;
+		const transferEditorText = (target: EditorComponent): void => {
+			if (pasteState && target.setPasteState) {
+				target.setText(rawText);
+				target.setPasteState(pasteState);
+			} else {
+				target.setText(expandedText);
+			}
+		};
 
 		this.editorContainer.clear();
 
@@ -2884,8 +2896,8 @@ export class InteractiveMode {
 			newEditor.onSubmit = this.defaultEditor.onSubmit;
 			newEditor.onChange = this.defaultEditor.onChange;
 
-			// Copy text from previous editor
-			newEditor.setText(currentText);
+			// Copy text (and any collapsed paste markers) from previous editor
+			transferEditorText(newEditor);
 
 			// Copy appearance settings if supported
 			if (newEditor.borderColor !== undefined) {
@@ -2934,7 +2946,7 @@ export class InteractiveMode {
 			this.editor = newEditor;
 		} else {
 			// Restore default editor with text from custom editor
-			this.defaultEditor.setText(currentText);
+			transferEditorText(this.defaultEditor);
 			this.editor = this.defaultEditor;
 		}
 

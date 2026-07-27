@@ -21,6 +21,22 @@ const wordSegmenter = getWordSegmenter();
 /** Regex matching paste markers like `[paste #1 +123 lines]` or `[paste #2 1234 chars]`. */
 const PASTE_MARKER_REGEX = /\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]/g;
 
+/**
+ * Canonical marker string for a stored paste. Must stay in sync with the
+ * marker inserted by handlePaste(): `[paste #N +M lines]` for pastes longer
+ * than 10 lines, `[paste #N M chars]` otherwise.
+ */
+function formatPasteMarker(id: number, content: string): string {
+	const lineCount = content.split("\n").length;
+	return lineCount > 10 ? `[paste #${id} +${lineCount} lines]` : `[paste #${id} ${content.length} chars]`;
+}
+
+/** Snapshot of an editor's large-paste registry, for transfer between editor instances. */
+export interface EditorPasteState {
+	pastes: ReadonlyMap<number, string>;
+	pasteCounter: number;
+}
+
 /** Non-global version for single-segment testing. */
 const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
 
@@ -1119,26 +1135,47 @@ export class Editor implements Component, Focusable {
 	}
 
 	/**
-	 * Drop paste registry entries whose markers do not appear in the given text.
-	 * Keeps markers live across programmatic setText round-trips (e.g. dialog
-	 * save/restore or queued-message restore) so submit still expands them,
-	 * while releasing memory for pastes whose markers were replaced.
+	 * Drop paste registry entries whose canonical markers do not appear in the
+	 * given text. Keeps markers live across programmatic setText round-trips
+	 * (e.g. dialog save/restore or queued-message restore) so submit still
+	 * expands them, while releasing memory for pastes whose markers were
+	 * replaced. Matching is exact (the marker string is reconstructed from the
+	 * stored content), so unrelated text that merely looks like a marker cannot
+	 * accidentally revive a registry entry.
 	 */
 	private prunePastes(text: string): void {
 		if (this.pastes.size === 0) {
 			this.pasteCounter = 0;
 			return;
 		}
-		const referenced = new Set<number>();
-		if (text.includes("[paste #")) {
-			for (const match of text.matchAll(PASTE_MARKER_REGEX)) {
-				referenced.add(Number.parseInt(match[1]!, 10));
-			}
-		}
-		for (const id of this.pastes.keys()) {
-			if (!referenced.has(id)) this.pastes.delete(id);
+		for (const [id, content] of this.pastes) {
+			if (!text.includes(formatPasteMarker(id, content))) this.pastes.delete(id);
 		}
 		if (this.pastes.size === 0) this.pasteCounter = 0;
+	}
+
+	/**
+	 * Snapshot the large-paste registry (marker id -> stored body) so it can be
+	 * transferred to another editor instance alongside getText().
+	 */
+	getPasteState(): EditorPasteState {
+		return { pastes: new Map(this.pastes), pasteCounter: this.pasteCounter };
+	}
+
+	/**
+	 * Install a paste registry snapshot taken from another editor instance.
+	 * Call after setText() with the source editor's raw text: entries whose
+	 * markers are not present in the current text are dropped, and the paste
+	 * counter is raised so future paste ids cannot collide.
+	 */
+	setPasteState(state: EditorPasteState): void {
+		this.pastes = new Map(state.pastes);
+		let maxId = 0;
+		for (const id of this.pastes.keys()) {
+			if (id > maxId) maxId = id;
+		}
+		this.pasteCounter = Math.max(state.pasteCounter, maxId);
+		this.prunePastes(this.getText());
 	}
 
 	/**
@@ -1323,11 +1360,7 @@ export class Editor implements Component, Focusable {
 			this.pastes.set(pasteId, filteredText);
 
 			// Insert marker like "[paste #1 +123 lines]" or "[paste #1 1234 chars]"
-			const marker =
-				pastedLines.length > 10
-					? `[paste #${pasteId} +${pastedLines.length} lines]`
-					: `[paste #${pasteId} ${totalChars} chars]`;
-			this.insertTextAtCursorInternal(marker);
+			this.insertTextAtCursorInternal(formatPasteMarker(pasteId, filteredText));
 			return;
 		}
 
