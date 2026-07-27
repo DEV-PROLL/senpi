@@ -1115,4 +1115,70 @@ describe("config reload builtin extension", () => {
 			}),
 		).toBe(true);
 	});
+
+	it("ignores extension runtime state writes under the watched extensions directory", async () => {
+		vi.useFakeTimers();
+		const agentDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-ext-state-"));
+		agentDirs.push(agentDir);
+		writeFileSync(join(agentDir, "settings.json"), '{"theme":"dark"}\n', "utf-8");
+		const extensionsDir = join(agentDir, "extensions");
+		mkdirSync(extensionsDir, { recursive: true });
+		writeFileSync(join(extensionsDir, "diff.js"), "export default () => {};\n", "utf-8");
+		const goalStateDir = join(extensionsDir, "goal", "no-session", "2fca6eb7d09fc68d11abc56e");
+		mkdirSync(goalStateDir, { recursive: true });
+		const goalStatePath = join(goalStateDir, "019fa192-1633-7803-9770-f2c76bd91ca3.json");
+		writeFileSync(goalStatePath, '{"status":"active"}\n', "utf-8");
+
+		const watches = createWatchProbe();
+		const reload = vi.fn(async () => {});
+		const extension = createManualExtension(createEventBus());
+		configReloadExtension(extension.api, { agentDir, subscribe: watches.subscribe, logger: silentLogger() });
+		await invoke(
+			extension.handlers,
+			"session_start",
+			{ type: "session_start", reason: "startup" } satisfies SessionStartEvent,
+			fakeContext({ cwd: agentDir, requestReload: reload }),
+		);
+
+		writeFileSync(goalStatePath, '{"status":"complete"}\n', "utf-8");
+		watches.emit(
+			extensionsDir,
+			join("goal", "no-session", "2fca6eb7d09fc68d11abc56e", "019fa192-1633-7803-9770-f2c76bd91ca3.json"),
+		);
+		await vi.advanceTimersByTimeAsync(200);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(reload).toHaveBeenCalledTimes(0);
+	});
+
+	it("still reloads when a real extension entry under the extensions directory changes", async () => {
+		vi.useFakeTimers();
+		const agentDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-ext-entry-"));
+		agentDirs.push(agentDir);
+		writeFileSync(join(agentDir, "settings.json"), '{"theme":"dark"}\n', "utf-8");
+		const extensionsDir = join(agentDir, "extensions");
+		mkdirSync(extensionsDir, { recursive: true });
+		const entryPath = join(extensionsDir, "diff.js");
+		writeFileSync(entryPath, "export default () => {};\n", "utf-8");
+
+		const watches = createWatchProbe();
+		const reload = vi.fn(async () => {});
+		const extension = createManualExtension(createEventBus());
+		configReloadExtension(extension.api, { agentDir, subscribe: watches.subscribe, logger: silentLogger() });
+		await invoke(
+			extension.handlers,
+			"session_start",
+			{ type: "session_start", reason: "startup" } satisfies SessionStartEvent,
+			fakeContext({ cwd: agentDir, requestReload: reload }),
+		);
+
+		writeFileSync(entryPath, "export default () => { /* changed */ };\n", "utf-8");
+		watches.emit(extensionsDir, "diff.js");
+		await vi.advanceTimersByTimeAsync(200);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(reload).toHaveBeenCalledTimes(1);
+	});
 });
