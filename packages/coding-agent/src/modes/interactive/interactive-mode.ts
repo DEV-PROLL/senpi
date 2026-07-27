@@ -184,6 +184,7 @@ import { InteractiveThemeController } from "./theme/theme-controller.ts";
 import { buildFavoriteCycleStatusMessage } from "./tips/favorite-messages.ts";
 import { recordTipShown } from "./tips/history-writer.ts";
 import { TIP_DEFINITIONS } from "./tips/registry.ts";
+import { appendStartupHeader } from "./tips/startup-header.ts";
 import { resolveStartupTipLine } from "./tips/startup-tip.ts";
 import { resolveWorkingTipLine, WorkingTipCache, type WorkingTipLine } from "./tips/working-tip.ts";
 import { ToolArgsRevealController } from "./tool-args-reveal.ts";
@@ -999,23 +1000,20 @@ export class InteractiveMode {
 			if (startupTip) {
 				this.recordShownTip(startupTip.tipId);
 			}
-			const tipLine = startupTip ? `\n${theme.fg("dim", startupTip.line)}` : "";
+			const tipLine = startupTip ? theme.fg("dim", startupTip.line) : undefined;
 			const onboarding = theme.fg(
 				"dim",
 				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
 			);
 			this.builtInHeader = new ExpandableText(
-				() => `${logo}\n${compactInstructions}\n${compactOnboarding}${tipLine}\n\n${onboarding}`,
-				() => `${logo}\n${expandedInstructions}${tipLine}\n\n${onboarding}`,
+				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
+				() => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
 				this.getStartupExpansionState(),
 				1,
 				0,
 			);
 
-			// Setup UI layout
-			this.headerContainer.addChild(new Spacer(1));
-			this.headerContainer.addChild(this.builtInHeader);
-			this.headerContainer.addChild(new Spacer(1));
+			appendStartupHeader(this.headerContainer, this.builtInHeader, tipLine);
 		} else {
 			// Minimal header when silenced
 			this.builtInHeader = new Text("", 0, 0);

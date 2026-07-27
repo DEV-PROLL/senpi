@@ -1,5 +1,16 @@
 # changes
 
+## Fix: the startup tip is destroyed by extension headers (2026-07-27)
+
+### What changed
+
+- `tips/startup-header.ts` (new): `appendStartupHeader()` attaches the built-in header and the startup tip to the header container as **separate children**.
+- `interactive-mode.ts`: the tip is no longer interpolated into the `ExpandableText` header closures.
+
+### Why
+
+`ui.setHeader()` replaces the built-in header component in place, and the builtin `prompt-preset` extension calls it on every `session_start`. Because the tip was part of the header's own text, that replacement silently discarded it: the tip resolved and was recorded into `tipsHistory`, but never reached the terminal. Keeping the tip as a sibling of the header makes it survive any extension header override.
+
 ## Feature discoverability: tips, `?` overlay, live favorite hints, `/keybindings` (2026-07-27)
 
 ### What changed
