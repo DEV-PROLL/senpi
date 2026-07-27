@@ -56,12 +56,18 @@ export interface EditorComponent extends Component {
 	/**
 	 * Snapshot the paste-marker registry so collapsed markers can be
 	 * transferred to another editor instance alongside getText().
+	 *
+	 * Paired contract: implement getPasteState and setPasteState together.
+	 * Callers only hand collapsed markers to an editor that can export them
+	 * again; an editor implementing setPasteState without getPasteState is
+	 * treated as paste-unaware and receives expanded text instead.
 	 */
 	getPasteState?(): EditorPasteState;
 
 	/**
 	 * Install a paste-marker registry snapshot taken from another editor
 	 * instance. Called after setText() with that editor's raw (marker) text.
+	 * Paired contract: implement together with getPasteState (see above).
 	 * When not implemented, callers must transfer the expanded text instead.
 	 */
 	setPasteState?(state: EditorPasteState): void;

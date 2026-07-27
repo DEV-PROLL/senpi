@@ -2658,7 +2658,7 @@ export class InteractiveMode {
 			custom: (factory, options) => this.showExtensionCustom(factory, options),
 			pasteToEditor: (text) => this.editor.handleInput(`\x1b[200~${text}\x1b[201~`),
 			setEditorText: (text) => this.editor.setText(text),
-			getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),
+			getEditorText: () => this.getExpandedEditorText(),
 			editor: (title, prefill) => this.showExtensionEditor(title, prefill),
 			addAutocompleteProvider: (factory) => {
 				this.autocompleteProviderWrappers.push(factory);
@@ -2859,6 +2859,19 @@ export class InteractiveMode {
 	}
 
 	/**
+	 * Full editor text with paste markers expanded. Prefers the editor's own
+	 * getExpandedText(); falls back to expanding from the paste snapshot when
+	 * only getPasteState() is implemented, then to the raw text (an editor
+	 * with neither capability never had expandable markers).
+	 */
+	private getExpandedEditorText(): string {
+		if (this.editor.getExpandedText) return this.editor.getExpandedText();
+		const state = this.editor.getPasteState?.();
+		const raw = this.editor.getText();
+		return state ? expandPasteMarkers(raw, state) : raw;
+	}
+
+	/**
 	 * Set a custom editor component from an extension.
 	 * Pass undefined to restore the default editor.
 	 */
@@ -2873,13 +2886,13 @@ export class InteractiveMode {
 		// collapsed; otherwise fall back to the expanded text.
 		const rawText = this.editor.getText();
 		const pasteState = this.editor.getPasteState?.();
-		// Prefer the editor's own expansion; when it only exposes a paste
-		// snapshot, expand from the snapshot so a target without setPasteState
-		// still receives the pasted bodies rather than dead markers.
-		const expandedText =
-			this.editor.getExpandedText?.() ?? (pasteState ? expandPasteMarkers(rawText, pasteState) : rawText);
+		const expandedText = this.getExpandedEditorText();
 		const transferEditorText = (target: EditorComponent): void => {
-			if (pasteState && target.setPasteState) {
+			// Only hand over collapsed markers to a target that can export them
+			// again later (getPasteState alongside setPasteState): otherwise a
+			// paste created inside that editor could not survive the next
+			// hand-off, so it must receive the expanded text instead.
+			if (pasteState && target.setPasteState && target.getPasteState) {
 				target.setText(rawText);
 				target.setPasteState(pasteState);
 			} else {
@@ -4419,7 +4432,7 @@ export class InteractiveMode {
 	}
 
 	private async handleFollowUp(): Promise<void> {
-		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
+		const text = this.getExpandedEditorText().trim();
 		if (!text) return;
 
 		// Queue input during compaction (extension commands execute immediately)
@@ -4550,7 +4563,7 @@ export class InteractiveMode {
 
 	private async handleOpenExternalEditor(): Promise<void> {
 		const editorCmd = this.settingsManager.getExternalEditorCommand();
-		const content = this.editor.getExpandedText?.() ?? this.editor.getText();
+		const content = this.getExpandedEditorText();
 		this.ui.stop();
 		restoreInteractiveStderr();
 		try {

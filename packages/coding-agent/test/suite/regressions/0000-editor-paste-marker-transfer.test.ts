@@ -23,19 +23,26 @@ type SetCustomEditorComponentThis = {
 	autocompleteProvider: undefined;
 	keybindings: KeybindingsManager;
 	ui: TUI;
+	getExpandedEditorText: () => string;
 };
+
+function prototypeMethod<T>(name: string): T {
+	const descriptor = Object.getOwnPropertyDescriptor(InteractiveMode.prototype, name);
+	const method = descriptor?.value as T | undefined;
+	if (!method) {
+		throw new Error(`${name} is missing`);
+	}
+	return method;
+}
 
 function callSetCustomEditorComponent(
 	fakeThis: SetCustomEditorComponentThis,
 	factory: EditorFactory | undefined,
 ): void {
-	const descriptor = Object.getOwnPropertyDescriptor(InteractiveMode.prototype, "setCustomEditorComponent");
-	const setCustomEditorComponent = descriptor?.value as
-		| ((this: SetCustomEditorComponentThis, factory: EditorFactory | undefined) => void)
-		| undefined;
-	if (!setCustomEditorComponent) {
-		throw new Error("setCustomEditorComponent is missing");
-	}
+	const setCustomEditorComponent =
+		prototypeMethod<(this: SetCustomEditorComponentThis, factory: EditorFactory | undefined) => void>(
+			"setCustomEditorComponent",
+		);
 	setCustomEditorComponent.call(fakeThis, factory);
 }
 
@@ -54,6 +61,7 @@ function makeFakeThis(): SetCustomEditorComponentThis {
 		autocompleteProvider: undefined,
 		keybindings: new KeybindingsManager(),
 		ui,
+		getExpandedEditorText: prototypeMethod<(this: SetCustomEditorComponentThis) => string>("getExpandedEditorText"),
 	};
 	fakeThis.editorContainer.addChild(defaultEditor);
 	return fakeThis;
@@ -175,6 +183,37 @@ describe("InteractiveMode.setCustomEditorComponent paste transfer", () => {
 		expect(fakeThis.editor).toBe(target);
 		expect(target.getText()).toBe(`before ${PASTE_BODY} after`);
 		expect(target.getText()).not.toContain("[paste #");
+	});
+
+	test("does not hand collapsed markers to a target that cannot export them (setPasteState without getPasteState)", () => {
+		const fakeThis = makeFakeThis();
+		fakeThis.defaultEditor.handleInput(BRACKETED_PASTE);
+
+		// Target claims setPasteState but cannot export its registry later:
+		// treating it as paste-aware would strand any paste made inside it.
+		const importOnly = Object.assign(new PlainEditorComponent(), {
+			setPasteState: (_state: EditorPasteState): void => {},
+		});
+		callSetCustomEditorComponent(fakeThis, () => importOnly);
+
+		expect(fakeThis.editor).toBe(importOnly);
+		expect(importOnly.getText()).toBe(PASTE_BODY);
+		expect(importOnly.getText()).not.toContain("[paste #");
+	});
+
+	test("full-text consumers expand from the snapshot when the editor lacks getExpandedText", () => {
+		const fakeThis = makeFakeThis();
+		const sourceState: EditorPasteState = {
+			pastes: new Map([[1, PASTE_BODY]]),
+			pasteCounter: 1,
+		};
+		const snapshotOnly = Object.assign(new PlainEditorComponent(), {
+			getPasteState: (): EditorPasteState => sourceState,
+		});
+		snapshotOnly.setText("before [paste #1 +18 lines] after");
+		fakeThis.editor = snapshotOnly;
+
+		expect(fakeThis.getExpandedEditorText.call(fakeThis)).toBe(`before ${PASTE_BODY} after`);
 	});
 
 	test("unset is a draft no-op when the default editor is already active (resetExtensionUI path)", () => {
