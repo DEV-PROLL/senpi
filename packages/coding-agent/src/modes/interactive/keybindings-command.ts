@@ -1,4 +1,4 @@
-import { openSync, readFileSync, writeSync, closeSync } from "node:fs";
+import { closeSync, openSync, readFileSync, writeSync } from "node:fs";
 import type { KeybindingsManager } from "../../core/keybindings.ts";
 
 export type KeybindingsEditResult = { status: "reloaded" } | { status: "invalid"; message: string };

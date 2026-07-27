@@ -457,7 +457,7 @@ export class InteractiveMode {
 	private shortcutOverlay: ShortcutOverlay | undefined;
 	private lastEditorText = "";
 	private lastInputWasPaste = false;
-	private turnWorkingTip: { value: WorkingTipLine | undefined } | undefined;
+	private readonly turnWorkingTip = new WorkingTipCache();
 	private hookStatusContainer: Container;
 	private defaultEditor: CustomEditor;
 	private editor: EditorComponent;
@@ -1343,7 +1343,7 @@ export class InteractiveMode {
 
 	private async handleKeybindingsCommand(): Promise<void> {
 		const configPath = path.join(getAgentDir(), "keybindings.json");
-		const editorCommand = process.env["VISUAL"] || process.env["EDITOR"];
+		const editorCommand = process.env.VISUAL || process.env.EDITOR;
 		if (!editorCommand) {
 			this.showError(`Set $EDITOR or $VISUAL to edit ${configPath}.`);
 			return;
@@ -2408,19 +2408,18 @@ export class InteractiveMode {
 	}
 
 	private resolveTurnWorkingTip(): WorkingTipLine | undefined {
-		if (this.turnWorkingTip !== undefined) return this.turnWorkingTip.value;
-
-		const resolved = resolveWorkingTipLine({
-			tipsEnabled: this.settingsManager.getTipsEnabled(),
-			history: this.settingsManager.getTipsHistory(),
-			sessionShownTipIds: this.sessionShownTipIds,
-			now: Date.now(),
-			definitions: TIP_DEFINITIONS,
-			keys: keyText,
-		});
-		this.turnWorkingTip = { value: resolved };
-		if (resolved) this.recordShownTip(resolved.tipId);
-		return resolved;
+		return this.turnWorkingTip.resolve(
+			() =>
+				resolveWorkingTipLine({
+					tipsEnabled: this.settingsManager.getTipsEnabled(),
+					history: this.settingsManager.getTipsHistory(),
+					sessionShownTipIds: this.sessionShownTipIds,
+					now: Date.now(),
+					definitions: TIP_DEFINITIONS,
+					keys: keyText,
+				}),
+			(tip) => this.recordShownTip(tip.tipId),
+		);
 	}
 
 	private updateWorkingIndicatorMessage(): void {
@@ -3496,7 +3495,7 @@ export class InteractiveMode {
 				this.clearActiveToolExecutionStatus();
 				this.clearToolHookStatuses();
 				// Turn boundary: pick a fresh working tip next time the indicator shows.
-				this.turnWorkingTip = undefined;
+				this.turnWorkingTip.resetForNewTurn();
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(true);
 				}

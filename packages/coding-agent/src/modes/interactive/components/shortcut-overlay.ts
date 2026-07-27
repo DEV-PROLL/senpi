@@ -49,11 +49,7 @@ export function shouldShowShortcutOverlay(
  * A multi-character jump is treated as a paste too, which catches bracketed
  * pastes that never reach the clipboard handler.
  */
-export function classifyEditorInput(
-	prevText: string,
-	nextText: string,
-	pasteSignalled: boolean,
-): "typed" | "paste" {
+export function classifyEditorInput(prevText: string, nextText: string, pasteSignalled: boolean): "typed" | "paste" {
 	if (pasteSignalled) return "paste";
 	return nextText.length - prevText.length > 1 ? "paste" : "typed";
 }

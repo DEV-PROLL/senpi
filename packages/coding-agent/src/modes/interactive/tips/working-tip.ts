@@ -30,7 +30,10 @@ export class WorkingTipCache {
 		this.cached = undefined;
 	}
 
-	resolve(compute: () => WorkingTipLine | undefined, onFirstResolve?: (tip: WorkingTipLine) => void): WorkingTipLine | undefined {
+	resolve(
+		compute: () => WorkingTipLine | undefined,
+		onFirstResolve?: (tip: WorkingTipLine) => void,
+	): WorkingTipLine | undefined {
 		if (this.cached !== undefined) return this.cached.value;
 		const value = compute();
 		this.cached = { value };

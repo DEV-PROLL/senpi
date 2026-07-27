@@ -46,10 +46,7 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
 
 export type EditFileResult = { status: "complete" } | { status: "exited"; code: number } | { status: "launch-failed" };
 
-export async function editFileInExternalEditor(options: {
-	command: string;
-	path: string;
-}): Promise<EditFileResult> {
+export async function editFileInExternalEditor(options: { command: string; path: string }): Promise<EditFileResult> {
 	const [editor, ...editorArgs] = options.command.split(" ");
 	// `close` reports code === null both for a signaled process and (historically)
 	// around spawn errors, so the `error` event is the ONLY reliable spawn-failure

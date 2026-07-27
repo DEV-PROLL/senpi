@@ -79,7 +79,7 @@ process.exit(0);
 				command: `senpi-editor-that-does-not-exist-${process.pid}`,
 				path: targetPath,
 			}),
-		// The editor never launched, so callers may safely discard a file they seeded.
+			// The editor never launched, so callers may safely discard a file they seeded.
 		).resolves.toEqual({ status: "launch-failed" });
 	});
 

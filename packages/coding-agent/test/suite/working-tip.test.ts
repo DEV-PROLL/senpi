@@ -53,12 +53,21 @@ describe("WorkingTipCache", () => {
 		const cache = new WorkingTipCache();
 		const recorded: string[] = [];
 
-		cache.resolve(() => tipA, (tip) => recorded.push(tip.tipId));
-		cache.resolve(() => tipA, (tip) => recorded.push(tip.tipId));
+		cache.resolve(
+			() => tipA,
+			(tip) => recorded.push(tip.tipId),
+		);
+		cache.resolve(
+			() => tipA,
+			(tip) => recorded.push(tip.tipId),
+		);
 		expect(recorded).toEqual(["a"]);
 
 		cache.resetForNewTurn();
-		cache.resolve(() => tipB, (tip) => recorded.push(tip.tipId));
+		cache.resolve(
+			() => tipB,
+			(tip) => recorded.push(tip.tipId),
+		);
 		expect(recorded).toEqual(["a", "b"]);
 	});
 });
