@@ -1957,17 +1957,17 @@ export class AgentSession {
 		};
 	}
 
+	/** Lets a registering extension activate its own inactive tool on demand; it owns eligibility. */
+	private _activateLazyTool(toolName: string): boolean {
+		return this._lazyToolActivators.some((activate) => activate(toolName));
+	}
+
 	/**
 	 * Set active tools by name.
 	 * Only tools in the registry can be enabled. Unknown tool names are ignored.
 	 * Also rebuilds the system prompt to reflect the new tool set.
 	 * Changes take effect on the next agent turn.
 	 */
-	/** Lets a registering extension activate its own inactive tool on demand; it owns eligibility. */
-	private _activateLazyTool(toolName: string): boolean {
-		return this._lazyToolActivators.some((activate) => activate(toolName));
-	}
-
 	setActiveToolsByName(toolNames: string[]): void {
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
