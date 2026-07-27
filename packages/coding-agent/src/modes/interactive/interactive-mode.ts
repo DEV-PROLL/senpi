@@ -168,6 +168,7 @@ import { buildFavoriteCycleStatusMessage } from "./tips/favorite-messages.ts";
 import { recordTipShown } from "./tips/history-writer.ts";
 import { TIP_DEFINITIONS } from "./tips/registry.ts";
 import { resolveStartupTipLine } from "./tips/startup-tip.ts";
+import { type WorkingTipLine, resolveWorkingTipLine } from "./tips/working-tip.ts";
 import { DEFAULT_SMOOTH_FPS, StreamingRevealController } from "./streaming-reveal.ts";
 import {
 	getAvailableThemes,
@@ -453,6 +454,7 @@ export class InteractiveMode {
 	private readonly sessionShownTipIds = new Set<string>();
 	private shortcutOverlay: ShortcutOverlay | undefined;
 	private lastEditorText = "";
+	private turnWorkingTip: { value: WorkingTipLine | undefined } | undefined;
 	private hookStatusContainer: Container;
 	private defaultEditor: CustomEditor;
 	private editor: EditorComponent;
@@ -2357,7 +2359,33 @@ export class InteractiveMode {
 		this.activeStatusIndicator?.dispose();
 		this.activeStatusIndicator = indicator;
 		this.statusContainer.clear();
-		this.statusContainer.addChild(indicator);
+
+		const workingTip = indicator.kind === "working" ? this.resolveTurnWorkingTip() : undefined;
+		if (!workingTip) {
+			this.statusContainer.addChild(indicator);
+			return;
+		}
+
+		const wrapper = new Container();
+		wrapper.addChild(indicator);
+		wrapper.addChild(new Text(theme.fg("dim", workingTip.line), 1, 0));
+		this.statusContainer.addChild(wrapper);
+	}
+
+	private resolveTurnWorkingTip(): WorkingTipLine | undefined {
+		if (this.turnWorkingTip !== undefined) return this.turnWorkingTip.value;
+
+		const resolved = resolveWorkingTipLine({
+			tipsEnabled: this.settingsManager.getTipsEnabled(),
+			history: this.settingsManager.getTipsHistory(),
+			sessionShownTipIds: this.sessionShownTipIds,
+			now: Date.now(),
+			definitions: TIP_DEFINITIONS,
+			keys: keyText,
+		});
+		this.turnWorkingTip = { value: resolved };
+		if (resolved) this.recordShownTip(resolved.tipId);
+		return resolved;
 	}
 
 	private updateWorkingIndicatorMessage(): void {
@@ -2372,6 +2400,7 @@ export class InteractiveMode {
 		}
 		const hadActiveStatusIndicator = this.activeStatusIndicator !== undefined;
 		const isClearingWorking = this.activeStatusIndicator?.kind === "working";
+		if (isClearingWorking) this.turnWorkingTip = undefined;
 		this.activeStatusIndicator?.dispose();
 		this.activeStatusIndicator = undefined;
 		if (isClearingWorking) {
