@@ -53,6 +53,16 @@ describe("claude-agent-sdk builtin provider", () => {
 		expect(ids.some((id) => id.startsWith(`${CLAUDE_AGENT_SDK_PROVIDER_ID}/`))).toBe(true);
 	});
 
+	it("login selector lists the provider as oauth after registration", async () => {
+		const { registration } = captureRegistration();
+		const storage = AuthStorage.inMemory();
+		await createRuntimeWithProvider(registration.config, storage);
+		expect(storage.getOAuthProviders()).toContainEqual({
+			id: CLAUDE_AGENT_SDK_PROVIDER_ID,
+			name: "Claude Agent SDK (Claude Pro/Max)",
+		});
+	});
+
 	it("preflight reaches streamSimple with zero stored credentials", async () => {
 		const { registration } = captureRegistration();
 		let called = false;
