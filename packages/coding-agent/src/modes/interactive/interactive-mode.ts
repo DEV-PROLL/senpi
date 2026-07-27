@@ -163,6 +163,11 @@ import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./gr
 import { restoreInteractiveStderr, takeOverInteractiveStderr } from "./interactive-stderr-guard.ts";
 import { getModelSearchText } from "./model-search.ts";
 import { resolveStartupToolPaths } from "./startup-tools.ts";
+import { ShortcutOverlay, shouldShowShortcutOverlay } from "./components/shortcut-overlay.ts";
+import { buildFavoriteCycleStatusMessage } from "./tips/favorite-messages.ts";
+import { recordTipShown } from "./tips/history-writer.ts";
+import { TIP_DEFINITIONS } from "./tips/registry.ts";
+import { resolveStartupTipLine } from "./tips/startup-tip.ts";
 import { DEFAULT_SMOOTH_FPS, StreamingRevealController } from "./streaming-reveal.ts";
 import {
 	getAvailableThemes,
@@ -445,6 +450,9 @@ export class InteractiveMode {
 	private chatContainer: Container;
 	private pendingMessagesContainer: Container;
 	private statusContainer: Container;
+	private readonly sessionShownTipIds = new Set<string>();
+	private shortcutOverlay: ShortcutOverlay | undefined;
+	private lastEditorText = "";
 	private hookStatusContainer: Container;
 	private defaultEditor: CustomEditor;
 	private editor: EditorComponent;
@@ -975,13 +983,25 @@ export class InteractiveMode {
 				"dim",
 				`Press ${keyText("app.tools.expand")} to show full startup help and loaded resources.`,
 			);
+			const startupTip = resolveStartupTipLine({
+				tipsEnabled: this.settingsManager.getTipsEnabled(),
+				quietStartup: this.settingsManager.getQuietStartup(),
+				history: this.settingsManager.getTipsHistory(),
+				now: Date.now(),
+				definitions: TIP_DEFINITIONS,
+				keys: keyText,
+			});
+			if (startupTip) {
+				this.recordShownTip(startupTip.tipId);
+			}
+			const tipLine = startupTip ? `\n${theme.fg("dim", startupTip.line)}` : "";
 			const onboarding = theme.fg(
 				"dim",
 				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
 			);
 			this.builtInHeader = new ExpandableText(
-				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
-				() => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
+				() => `${logo}\n${compactInstructions}\n${compactOnboarding}${tipLine}\n\n${onboarding}`,
+				() => `${logo}\n${expandedInstructions}${tipLine}\n\n${onboarding}`,
 				this.getStartupExpansionState(),
 				1,
 				0,
@@ -1314,6 +1334,35 @@ export class InteractiveMode {
 
 	private getStartupExpansionState(): boolean {
 		return this.options.verbose || this.toolOutputExpanded;
+	}
+
+	private updateShortcutOverlay(nextText: string): void {
+		const previousText = this.lastEditorText;
+		this.lastEditorText = nextText;
+		const inputKind = nextText.length - previousText.length > 1 ? "paste" : "typed";
+
+		if (shouldShowShortcutOverlay(previousText, nextText, inputKind)) {
+			if (!this.shortcutOverlay) {
+				this.shortcutOverlay = new ShortcutOverlay();
+				this.headerContainer.addChild(this.shortcutOverlay);
+				this.ui.requestRender();
+			}
+			return;
+		}
+
+		this.hideShortcutOverlay();
+	}
+
+	private hideShortcutOverlay(): void {
+		if (!this.shortcutOverlay) return;
+		this.headerContainer.removeChild(this.shortcutOverlay);
+		this.shortcutOverlay = undefined;
+		this.ui.requestRender();
+	}
+
+	private recordShownTip(tipId: string): void {
+		this.sessionShownTipIds.add(tipId);
+		this.settingsManager.setTipsHistory(recordTipShown(this.settingsManager.getTipsHistory(), tipId, Date.now()));
 	}
 
 	/**
@@ -3121,6 +3170,7 @@ export class InteractiveMode {
 			if (wasBashMode !== this.isBashMode) {
 				this.updateEditorBorderColor();
 			}
+			this.updateShortcutOverlay(text);
 		};
 
 		// Handle clipboard paste (triggered on Ctrl+V). Images are attached by path;
@@ -3157,6 +3207,8 @@ export class InteractiveMode {
 
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (text: string) => {
+			this.hideShortcutOverlay();
+			this.lastEditorText = "";
 			text = text.trim();
 			if (!text) return;
 
@@ -4462,8 +4514,8 @@ export class InteractiveMode {
 			if (result === undefined) {
 				const msg =
 					this.session.favoriteModels.length > 0
-						? "Only one favorite model available"
-						: "No favorite models configured. Add favoriteModels to settings.json or use /favorite-models and save.";
+						? buildFavoriteCycleStatusMessage("single")
+						: buildFavoriteCycleStatusMessage("empty");
 				this.showStatus(msg);
 			} else {
 				this.footer.invalidate();
