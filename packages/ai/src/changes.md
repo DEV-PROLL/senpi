@@ -47,6 +47,19 @@
 - LOW: `utils/tool-call-id.ts`, the three adapter imports/call sites, and the thinking-config block of
   `api/anthropic-messages.ts` `buildParams()`.
 
+## 2026-07-27 - Export string-based transient-error classifier
+
+### What changed and why
+
+- `utils/retry.ts` now exports `isRetryableErrorMessage(errorMessage: string)` and `isRetryableAssistantError`
+  delegates to it. Callers that hold a thrown `Error` instead of an `AssistantMessage` (the compaction
+  extension's blocking summarization path) need the same transient-vs-terminal classification to decide
+  between degrading gracefully and surfacing loudly. No pattern changes; classification behavior is identical.
+
+### Expected merge conflict zones
+
+- LOW: `utils/retry.ts` around `isRetryableAssistantError`.
+
 ## 2026-07-26 - Retry transient Codex upstream websocket failures
 
 ### What changed and why
