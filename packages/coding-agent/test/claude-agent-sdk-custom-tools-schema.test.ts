@@ -1,3 +1,4 @@
+import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { denyCustomToolExecution } from "../src/core/extensions/builtin/claude-agent-sdk/custom-tools.ts";
@@ -22,6 +23,18 @@ describe("jsonSchemaToZodShape", () => {
 		expect(object.safeParse({ path: "a", count: 2, mode: "fast", tags: ["x"] }).success).toBe(true);
 		expect(object.safeParse({ path: "a", count: 2, mode: "other" }).success).toBe(false);
 		expect(object.safeParse({ path: "a", count: 2, verbose: true }).success).toBe(true);
+	});
+
+	it("converts real TypeBox literal unions and const values", () => {
+		const schema = Type.Object({
+			action: Type.Union([Type.Literal("start"), Type.Literal("stop"), Type.Literal("status")]),
+			mode: Type.Literal("safe"),
+			note: Type.Optional(Type.String()),
+		});
+		const object = z.object(jsonSchemaToZodShape(schema));
+		expect(object.safeParse({ action: "start", mode: "safe" }).success).toBe(true);
+		expect(object.safeParse({ action: "delete", mode: "safe" }).success).toBe(false);
+		expect(object.safeParse({ action: "stop", mode: "yolo" }).success).toBe(false);
 	});
 
 	it("produces an empty shape for missing properties", () => {

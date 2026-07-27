@@ -6,12 +6,16 @@ type JsonSchema = {
 	required?: string[];
 	items?: JsonSchema;
 	enum?: Array<string | number | boolean>;
+	const?: string | number | boolean | null;
 	anyOf?: JsonSchema[];
 	oneOf?: JsonSchema[];
 	description?: string;
 };
 
 function schemaToZod(schema: JsonSchema): ZodTypeAny {
+	if (schema.const !== undefined) {
+		return schema.const === null ? z.null() : z.literal(schema.const);
+	}
 	if (schema.enum && schema.enum.length > 0) {
 		const values = schema.enum.filter((value): value is string | number | boolean =>
 			["string", "number", "boolean"].includes(typeof value),
@@ -41,6 +45,8 @@ function schemaToZod(schema: JsonSchema): ZodTypeAny {
 			return z.number().int();
 		case "boolean":
 			return z.boolean();
+		case "null":
+			return z.null();
 		case "array":
 			return z.array(schema.items ? schemaToZod(schema.items) : z.unknown());
 		case "object":

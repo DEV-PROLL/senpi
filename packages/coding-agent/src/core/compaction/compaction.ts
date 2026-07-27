@@ -604,8 +604,10 @@ function createSummarizationOptions(
 	signal: AbortSignal | undefined,
 	thinkingLevel: ThinkingLevel | undefined,
 	extraBody?: Record<string, unknown>,
+	sessionId?: string,
 ): SummarizationOptions {
 	const options: SummarizationOptions = { maxTokens, signal, apiKey, headers, env, extraBody };
+	if (sessionId) options.affinitySessionId = sessionId;
 	if (model.reasoning && thinkingLevel && thinkingLevel !== "off") {
 		options.reasoning = thinkingLevel;
 	}
@@ -631,7 +633,7 @@ export async function completeSummarization(
 	const isolatedOptions: SimpleStreamOptions = {
 		...options,
 		cacheRetention: "none",
-		affinitySessionId: options.sessionId,
+		affinitySessionId: options.affinitySessionId ?? options.sessionId,
 		sessionId: uuidv7(),
 	};
 	const callerSignal = options.signal;
@@ -717,6 +719,7 @@ export async function generateSummary(
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	sessionId?: string,
 ): Promise<string> {
 	return (
 		await generateSummaryWithUsage(
@@ -756,6 +759,7 @@ export async function generateSummaryWithUsage(
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	sessionId?: string,
 ): Promise<{ text: string; usage: Usage }> {
 	const maxTokens = Math.min(
 		Math.floor(0.8 * reserveTokens),
@@ -800,6 +804,7 @@ export async function generateSummaryWithUsage(
 		signal,
 		thinkingLevel,
 		extraBody,
+		sessionId,
 	);
 	const response = await completeSummarization(
 		model,
@@ -980,6 +985,7 @@ export async function compact(
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	sessionId?: string,
 ): Promise<CompactionResult> {
 	const {
 		firstKeptEntryId,

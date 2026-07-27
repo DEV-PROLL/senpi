@@ -9,6 +9,7 @@ import {
 import { rendezvousOrder, selectAccount } from "../src/core/extensions/builtin/claude-agent-sdk/affinity.ts";
 import { classifySdkError } from "../src/core/extensions/builtin/claude-agent-sdk/errors.ts";
 import { ClassifiedSdkError, runFailover } from "../src/core/extensions/builtin/claude-agent-sdk/failover.ts";
+import { z } from "zod";
 
 type AttemptEvent =
 	| { type: "text_delta"; delta: string }
@@ -129,6 +130,36 @@ describe("Claude Agent SDK failover", () => {
 		expect(credential.accounts?.find((account) => account.name === attempts[0])).toMatchObject({
 			blockReason: "rate_limit",
 		});
+	});
+
+	it("fails over on non-success result events before the first delta", async () => {
+		const store = await storeWithAccounts();
+		const attempts: string[] = [];
+		const emitted: AttemptEvent[] = [];
+		const stream = runFailover({
+			accounts: accountPool,
+			selectFn: (pool) => selectAccount(pool, { sessionId: "result-failover", now }),
+			runAttempt: async function* (slot) {
+				attempts.push(slot.name);
+				if (attempts.length === 1) {
+					const failure: AttemptEvent = { type: "done", value: "billing_error" };
+					yield failure;
+					return;
+				}
+				const done: AttemptEvent = { type: "done", value: slot.name };
+				yield done;
+			},
+			classify: classifySdkError,
+			store,
+			providerId: "claude-agent-sdk",
+			now: () => now,
+			errorFromEvent: (event) => (event.value === "billing_error" ? new Error("billing_error") : undefined),
+		});
+		for await (const event of stream) emitted.push(event);
+		expect(attempts.length).toBe(2);
+		expect(attempts[0]).not.toBe(attempts[1]);
+		const last: AttemptEvent = { type: "done", value: attempts[1]! };
+		expect(emitted.at(-1)).toEqual(last);
 	});
 
 	it("blocks authentication failures until re-login instead of assigning a time-based expiry", async () => {

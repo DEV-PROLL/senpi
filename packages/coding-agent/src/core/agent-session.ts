@@ -3750,6 +3750,7 @@ export class AgentSession {
 						this.agent.transformContext,
 						this.settingsManager.getRetrySettings(),
 						this._summarizationRetryCallbacks({ source: "compaction", reason: request.reason }),
+						this.sessionManager.getSessionId(),
 					);
 				}
 			}

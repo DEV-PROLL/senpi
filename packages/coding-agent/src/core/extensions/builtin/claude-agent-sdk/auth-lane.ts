@@ -48,13 +48,8 @@ async function refreshWithAnthropicOAuth(refresh: string) {
 	return { access: credential.access, refresh: credential.refresh, expires: credential.expires };
 }
 
-let sharedStore: AuthStorage | undefined;
-
 const defaultBoundary: AuthLaneBoundary = {
-	createStore: () => {
-		sharedStore ??= AuthStorage.create();
-		return sharedStore;
-	},
+	createStore: () => AuthStorage.create(),
 	env: () => process.env,
 	getAgentDir,
 	now: () => Date.now(),
@@ -184,7 +179,12 @@ async function prepareSlot(pool: ManagedPool, selected: AccountSlot): Promise<Re
 }
 
 function sdkFailure(message: SDKMessage): unknown | undefined {
-	return message.type === "assistant" && message.error ? message.error : undefined;
+	if (message.type === "assistant" && message.error) return message.error;
+	if (message.type === "result" && message.subtype !== "success") {
+		const errors = "errors" in message && Array.isArray(message.errors) ? (message.errors as unknown[]) : [];
+		return new Error(errors.length > 0 ? String(errors[0]) : `Claude Code ${message.subtype}`);
+	}
+	return undefined;
 }
 
 function visibleSdkMessage(message: SDKMessage): boolean {
