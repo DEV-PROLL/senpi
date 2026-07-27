@@ -2952,8 +2952,8 @@ export class AgentSession {
 		// A mid-run abort (actively streaming with no pending retry) is delivered via
 		// agent_end (abortSource "user") — no session_abort needed. The gap case is when
 		// no agent_end will fire to carry the abort signal:
-		//   - retry backoff (_retryPromise defined — the error agent_end already fired,
-		//     agent.abort() during backoff is a no-op, no new agent_end)
+		//   - retry backoff (_retryAbortController defined — the error agent_end already
+		//     fired, agent.abort() during backoff is a no-op, no new agent_end)
 		//   - compaction (!isStreaming && isCompacting)
 		//   - queued continuation that was already cleared by the caller (TUI clears queues
 		//     before calling abort, so pendingMessageCount is 0 but _hadClearedQueuedMessages
