@@ -1,5 +1,28 @@
 # changes
 
+## claude-agent-sdk provider with native multi-account OAuth (2026-07-27)
+
+### What changed
+
+- New builtin extension `core/extensions/builtin/claude-agent-sdk/`: routes LLM calls through the
+  official Claude Agent SDK (spawns the real Claude Code engine) while senpi executes all tools
+  (Claude Code tool use is denied; custom tools are exposed in-process as `mcp__custom-tools__*`).
+- Auth: `/login claude-agent-sdk` runs the existing Anthropic PKCE flow and stores multi-account
+  slots inside the provider credential (top-level fields are non-expiring sentinels; real refresh is
+  per-slot under the store lock). Import of an existing `anthropic` OAuth credential and
+  `CLAUDE_CODE_OAUTH_TOKEN(_N)` env accounts supported.
+- HRW session affinity (rendezvous hashing) pins each session to one account to preserve prompt
+  cache; mandatory failover on rate_limit/overloaded/auth errors only, stream-safe (no transparent
+  retry after the first visible delta) with an AgentSession `senpi:no-turn-retry:` marker suppressing
+  whole-turn replay of post-delta failures.
+- Surfaces: `/claude-account` command, `--claude-account` flag, RPC `get_provider_accounts` /
+  `account_pin` / `account_remove` plus `auth_accounts_changed` / `account_failover` events, and
+  actionable auth guidance. `AuthStorage` learned to enumerate extension-registered OAuth providers
+  (`registerOAuthProvider` bridge), synced from `ModelRuntime.registerProvider`.
+- Dependency: `@anthropic-ai/claude-agent-sdk` pinned `0.3.220`; `@anthropic-ai/sdk` stays `0.91.1`
+  via a root override (the `>=0.93.0` peer range breaks the browser build through node-builtin
+  imports in new credential modules).
+
 ## Session-title generation retry + humanized provider errors (2026-07-27)
 
 ### What changed

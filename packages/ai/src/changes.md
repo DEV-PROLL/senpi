@@ -13,6 +13,12 @@
 
 - LOW: `utils/retry.ts` retryable provider-error status patterns.
 
+## 2026-07-27 - OAuth loader export for extension providers
+
+- `oauth.ts` now also exports `loadAnthropicOAuth` and `registerBundledOAuthFlowLoaders` from
+  `auth/oauth/load.ts` (bundler-safe variable-specifier dynamic import preserved), so coding-agent
+  extension providers can reuse the Anthropic PKCE machinery without reaching into package internals.
+
 ## 2026-07-27 - Typed Responses remote-compaction capability
 
 - Extracted `OpenAIResponsesCompat` and `SessionAffinityFormat` from the oversized `types.ts` into

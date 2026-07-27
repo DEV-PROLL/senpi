@@ -1,5 +1,27 @@
 # changes
 
+## Claude Agent SDK provider-account RPC events (2026-07-27)
+
+### What changed
+
+- Added additive `get_provider_accounts`, `account_pin`, and `account_remove` commands. Account payloads expose only slot name, source, blocked state, and pin state; credential material never crosses RPC.
+- Added `auth_accounts_changed` and `account_failover` events. The failover engine remains UI-free and reports through its callback seam; the RPC connection subscribes to the provider-account event bus.
+- The app-server mirrors the surface with `account/providerAccounts/read`, `/pin`, and `/remove`, plus `account/providerAccounts/updated` and `/failover` notifications. These Senpi additions intentionally remain separate from the pinned Codex method catalog.
+
+### Why
+
+- The desktop app needs account-pool state and automatic failover visibility without reading auth storage or receiving subscription tokens.
+
+### Why extension system couldn't handle this
+
+- JSONL RPC command dispatch and app-server protocol registration are mode-owned transport surfaces. The desktop consumer contract at `../omo-desktop-app/packages/contracts/src/rpc.ts` is updated separately.
+
+### Expected merge conflict zones
+
+- MEDIUM: `connection-handler.ts` command dispatch and event subscriptions.
+- LOW: app-server account handlers and protocol facade additions.
+
+
 ## Removed legacy `--neo` daemon support while preserving RPC contracts (2026-07-26)
 
 ### What changed

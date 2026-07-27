@@ -1,3 +1,4 @@
+import type { ProviderAccountFailoverNotification, ProviderAccountsUpdatedNotification } from "./account.ts";
 import type { JsonValue } from "./base.ts";
 import type {
 	FuzzyFileSearchSessionCompletedNotification,
@@ -27,6 +28,8 @@ export type TurnDiffUpdatedNotification = {
 };
 
 export type AppServerPlanNotification =
+	| { readonly method: "account/providerAccounts/updated"; readonly params: ProviderAccountsUpdatedNotification }
+	| { readonly method: "account/providerAccounts/failover"; readonly params: ProviderAccountFailoverNotification }
 	| { readonly method: "thread/unarchived"; readonly params: ThreadUnarchivedNotification }
 	| { readonly method: "thread/goal/updated"; readonly params: ThreadGoalUpdatedNotification }
 	| { readonly method: "thread/goal/cleared"; readonly params: ThreadGoalClearedNotification }
