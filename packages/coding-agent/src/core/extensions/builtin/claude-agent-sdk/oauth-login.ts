@@ -1,12 +1,12 @@
 import type { AuthInteraction, OAuthAuth, OAuthCredentials } from "@earendil-works/pi-ai";
 import { loadAnthropicOAuth } from "@earendil-works/pi-ai/oauth";
 import {
-	addAccount,
-	emptyCredential,
-	SENTINEL_OAUTH_FIELDS,
-	listAccounts,
 	type AccountSlot,
+	addAccount,
 	type ClaudeAgentSdkCredential,
+	emptyCredential,
+	listAccounts,
+	SENTINEL_OAUTH_FIELDS,
 } from "./accounts.ts";
 
 export type OAuthLoginCallbacks = {
@@ -28,14 +28,15 @@ export type OAuthConfigShape = {
 
 export const CLAUDE_AGENT_SDK_OAUTH_NAME = "Claude Agent SDK (Claude Pro/Max)";
 
-function toSlot(credential: { access: string; refresh: string; expires: number }, name: string, source: AccountSlot["source"]): AccountSlot {
+function toSlot(
+	credential: { access: string; refresh: string; expires: number },
+	name: string,
+	source: AccountSlot["source"],
+): AccountSlot {
 	return { name, access: credential.access, refresh: credential.refresh, expires: credential.expires, source };
 }
 
-async function promptAccountName(
-	callbacks: OAuthLoginCallbacks,
-	existing: AccountSlot[],
-): Promise<string> {
+async function promptAccountName(callbacks: OAuthLoginCallbacks, existing: AccountSlot[]): Promise<string> {
 	if (existing.length === 0) return "default";
 	if (!callbacks.onPrompt) return `account-${existing.length + 1}`;
 	const answer = (
@@ -88,7 +89,7 @@ export function createOAuthConfig(deps: {
 			return credentials;
 		},
 
-		getApiKey(credentials) {
+		getApiKey(_credentials) {
 			return SENTINEL_OAUTH_FIELDS.access;
 		},
 	};

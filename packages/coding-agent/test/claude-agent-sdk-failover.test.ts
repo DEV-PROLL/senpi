@@ -130,8 +130,9 @@ describe("Claude Agent SDK failover", () => {
 		const stream = runFailover({
 			accounts: [accountPool[0]!],
 			selectFn: (pool) => selectAccount(pool, { sessionId: "auth", now }),
-			runAttempt: async function* () {
-				throw new Error("authentication_failed");
+			runAttempt: async function* (slot) {
+				if (slot.name === accountPool[0]!.name) throw new Error("authentication_failed");
+				yield { type: "done", value: slot.name };
 			},
 			classify: classifySdkError,
 			store,
