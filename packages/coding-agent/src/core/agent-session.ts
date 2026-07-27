@@ -114,6 +114,7 @@ import type {
 	CompactionRejectionCause,
 	ModelSelectSource,
 } from "./extensions/types.ts";
+import { RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
 import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
@@ -131,7 +132,7 @@ import {
 	getLatestCompactionEntry,
 	type SessionHeader,
 } from "./session-manager.ts";
-import { generateSessionTitle, shouldSkipSessionTitle } from "./session-title-generator.ts";
+import { generateSessionTitle, sessionTitleRetryPolicy, shouldSkipSessionTitle } from "./session-title-generator.ts";
 import { SessionWorkBarrier } from "./session-work-barrier.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
@@ -2630,6 +2631,7 @@ export class AgentSession {
 				auth,
 				sessionId: this.sessionId,
 				baseOptions: this._buildSessionTitleBaseOptions(),
+				retry: sessionTitleRetryPolicy(this.settingsManager.getRetrySettings()),
 				signal: abortController.signal,
 				streamFn: this.agent.streamFunction,
 			});
@@ -2645,7 +2647,7 @@ export class AgentSession {
 			}
 			const message = error instanceof Error ? error.message : String(error);
 			this._extensionRunner.emitError({
-				extensionPath: "<runtime>",
+				extensionPath: RUNTIME_EXTENSION_PATH,
 				event: "session_title_generation",
 				error: message,
 			});
@@ -4629,7 +4631,7 @@ export class AgentSession {
 				sendMessage: (message, options) => {
 					this.sendCustomMessage(message, options).catch((err) => {
 						runner.emitError({
-							extensionPath: "<runtime>",
+							extensionPath: RUNTIME_EXTENSION_PATH,
 							event: "send_message",
 							error: err instanceof Error ? err.message : String(err),
 						});
@@ -4638,7 +4640,7 @@ export class AgentSession {
 				sendUserMessage: (content, options) => {
 					this.sendUserMessage(content, options).catch((err) => {
 						runner.emitError({
-							extensionPath: "<runtime>",
+							extensionPath: RUNTIME_EXTENSION_PATH,
 							event: "send_user_message",
 							error: err instanceof Error ? err.message : String(err),
 						});

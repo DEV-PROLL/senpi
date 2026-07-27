@@ -1,5 +1,28 @@
 # changes
 
+## Runtime-error headline rendering (2026-07-27)
+
+### What changed
+
+- `extension-error-format.ts` (new): `formatExtensionErrorHeadline()` renders runtime-emitted errors
+  (`extensionPath === RUNTIME_EXTENSION_PATH`) as `Runtime error (<event>): <message>`; real extensions keep the
+  `Extension "<path>" error: <message>` framing.
+- `extension-error-format.ts` also owns `sanitizeTuiErrorMessage()`, moved out of `interactive-mode.ts`, and the
+  formatter applies it to the message, event name, and extension path. Provider error bodies are JSON-decoded
+  before rendering, so `\u001b` escapes that were previously inert become live OSC/CSI sequences on an
+  ANSI-preserving row; sanitizing inside the formatter means every consumer is protected by default.
+- `interactive-mode.ts`: `showExtensionError()` consumes the full error object and uses the shared formatter, and
+  imports the sanitizer from the format module instead of defining its own copy.
+
+### Why
+
+- Background session-title failures rendered as `Extension "<runtime>" error: {raw provider json}` — misattributed
+  to an extension and unreadable.
+
+### Expected merge conflict zones
+
+- LOW: `showExtensionError()` in `interactive-mode.ts`; the formatter module is additive.
+
 ## grok chrome seam for interactive mode (2026-07-26)
 
 ### What changed

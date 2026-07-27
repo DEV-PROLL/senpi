@@ -157,6 +157,7 @@ import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
+import { formatExtensionErrorHeadline, sanitizeTuiErrorMessage } from "./extension-error-format.ts";
 import { editInExternalEditor } from "./external-editor.ts";
 import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./grok/chrome.ts";
 import { restoreInteractiveStderr, takeOverInteractiveStderr } from "./interactive-stderr-guard.ts";
@@ -241,15 +242,6 @@ function formatToolHookTerminalTitle(event: ToolHookStatusStartEvent): string {
 	const hookName = sanitizeWorkingStatusPlainText(event.hookName) || "hook";
 	const statusMessage = sanitizeWorkingStatusPlainText(event.statusMessage);
 	return `${APP_TITLE} - ${hookName}: ${statusMessage}`;
-}
-
-function sanitizeTuiErrorMessage(value: string): string {
-	return value
-		.replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g, "")
-		.replace(/(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g, "")
-		.replace(/\r\n?/g, "\n")
-		.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")
-		.replace(/[ \t\f\v]+/g, " ");
 }
 
 type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }>;
@@ -1939,7 +1931,7 @@ export class InteractiveMode {
 				}
 			},
 			onError: (error) => {
-				this.showExtensionError(error.extensionPath, error.error, error.stack);
+				this.showExtensionError(error);
 			},
 		});
 
@@ -3036,13 +3028,18 @@ export class InteractiveMode {
 	/**
 	 * Show an extension error in the UI.
 	 */
-	private showExtensionError(extensionPath: string, error: string, stack?: string): void {
-		const errorMsg = `Extension "${extensionPath}" error: ${error}`;
+	private showExtensionError(error: {
+		readonly extensionPath: string;
+		readonly event?: string;
+		readonly error: string;
+		readonly stack?: string;
+	}): void {
+		const errorMsg = formatExtensionErrorHeadline(error);
 		const errorText = new Text(theme.fg("error", errorMsg), 1, 0);
 		this.chatContainer.addChild(errorText);
-		if (stack) {
+		if (error.stack) {
 			// Show stack trace in dim color, indented
-			const stackLines = stack
+			const stackLines = error.stack
 				.split("\n")
 				.slice(1) // Skip first line (duplicates error message)
 				.map((line) => theme.fg("dim", `  ${line.trim()}`))

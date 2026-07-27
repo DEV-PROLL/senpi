@@ -1,5 +1,32 @@
 # changes
 
+## Session-title generation retry + humanized provider errors (2026-07-27)
+
+### What changed
+
+- `session-title-generator.ts`: `generateSessionTitle()` accepts an optional `retry: RetryPolicy` and wraps the
+  title call in `retryAssistantCall`, mirroring `completeSummarization()`. A transient provider error (e.g. an
+  Anthropic 529 `overloaded_error` stream event) no longer fails title generation on the first attempt. Final
+  failures throw `humanizeProviderError(...)` output — a short human-readable line such as
+  `Overloaded (overloaded_error, request req_...)` — instead of the raw provider JSON body.
+- `session-title-generator.ts`: new `sessionTitleRetryPolicy()` narrows the user's `settings.retry` for this
+  cosmetic background call — `enabled` is preserved, `maxRetries` capped at 1 and `baseDelayMs` at 2000ms, and a
+  smaller configured budget is never inflated. The full agent-turn budget would keep hitting an already-overloaded
+  provider for ~14s while the user's real turn competes for the same capacity; a title that still fails is
+  regenerated at the next turn end anyway.
+- `agent-session.ts`: `_generateSessionTitle()` passes `sessionTitleRetryPolicy(settingsManager.getRetrySettings())`.
+  The runtime-emitted extension-error sites now use the shared `RUNTIME_EXTENSION_PATH` sentinel constant.
+
+### Why
+
+- A single transient 529 during background title generation surfaced as `Extension "<runtime>" error: {raw json}`
+  in the TUI and left the session untitled until the next turn end.
+
+### Expected merge conflict zones
+
+- LOW: `session-title-generator.ts` around `generateSessionTitle()`.
+- LOW: `agent-session.ts` `_generateSessionTitle()` and the `emitError` call sites.
+
 ## Composable leading skill commands (2026-07-26)
 
 ### What changed
