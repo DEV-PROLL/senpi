@@ -1,31 +1,10 @@
 import type { AssistantMessage, Context, ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { Base64ImageSource, ContentBlockParam, SDKUserMessage } from "./sdk-boundary.ts";
+import { mapPiToolNameToSdk } from "./tools.ts";
 
-const PI_TO_SDK_TOOL_NAME: Readonly<Record<string, string>> = {
-	read: "Read",
-	write: "Write",
-	edit: "Edit",
-	bash: "Bash",
-	grep: "Grep",
-	find: "Glob",
-	glob: "Glob",
-};
+export { mapPiToolNameToSdk } from "./tools.ts";
 
 type PromptContent = string | readonly (TextContent | ImageContent)[];
-
-function pascalCase(value: string): string {
-	return value
-		.split(/[^a-zA-Z0-9]+/)
-		.filter(Boolean)
-		.map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
-		.join("");
-}
-
-export function mapPiToolNameToSdk(name: string, customToolNameToSdk?: ReadonlyMap<string, string>): string {
-	const normalized = name.toLowerCase();
-	const custom = customToolNameToSdk?.get(name) ?? customToolNameToSdk?.get(normalized);
-	return custom ?? PI_TO_SDK_TOOL_NAME[normalized] ?? pascalCase(name);
-}
 
 export function contentToText(
 	content: AssistantMessage["content"],

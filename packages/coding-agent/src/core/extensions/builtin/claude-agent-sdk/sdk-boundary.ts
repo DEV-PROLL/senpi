@@ -1,8 +1,24 @@
-import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+	EffortLevel,
+	Options,
+	SDKMessage,
+	SDKUserMessage,
+	SettingSource,
+	ThinkingConfig,
+} from "@anthropic-ai/claude-agent-sdk";
 import { createSdkMcpServer, query } from "@anthropic-ai/claude-agent-sdk";
 import type { Base64ImageSource, ContentBlockParam } from "@anthropic-ai/sdk/resources";
 
-export type { Base64ImageSource, ContentBlockParam, Options, SDKMessage, SDKUserMessage };
+export type {
+	Base64ImageSource,
+	ContentBlockParam,
+	EffortLevel,
+	Options,
+	SDKMessage,
+	SDKUserMessage,
+	SettingSource,
+	ThinkingConfig,
+};
 
 export type SdkQueryInput = Parameters<typeof query>[0];
 export type SdkQueryHandle = AsyncIterable<SDKMessage> & {

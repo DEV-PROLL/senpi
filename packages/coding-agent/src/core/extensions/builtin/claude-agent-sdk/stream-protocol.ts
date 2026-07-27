@@ -1,16 +1,10 @@
 import { type Api, type AssistantMessage, calculateCost, type Model } from "@earendil-works/pi-ai";
+import { BUILTIN_SDK_TOOLS, mapSdkToolNameToPi, mapToolArgs, TOOL_EXECUTION_DENIED_MESSAGE } from "./tools.ts";
 
-const SDK_TO_PI_TOOL_NAME: Readonly<Record<string, string>> = {
-	read: "read",
-	write: "write",
-	edit: "edit",
-	bash: "bash",
-	grep: "grep",
-	glob: "find",
-};
-
-export const sdkTools = ["Read", "Write", "Edit", "Bash", "Grep", "Glob"];
-export const toolExecutionDeniedMessage = "Tool execution is unavailable in this environment.";
+/** @deprecated Resolve the active Context.tools allowlist through resolveSdkTools(). */
+export const sdkTools = [...BUILTIN_SDK_TOOLS];
+/** @deprecated Use TOOL_EXECUTION_DENIED_MESSAGE from tools.ts. */
+export const toolExecutionDeniedMessage = TOOL_EXECUTION_DENIED_MESSAGE;
 
 export type TextBlock = { type: "text"; text: string; index?: number };
 export type ThinkingBlock = { type: "thinking"; thinking: string; thinkingSignature: string; index?: number };
@@ -38,7 +32,7 @@ export function mapStopReason(reason: string | null | undefined): "stop" | "leng
 }
 
 export function mapToolName(name: string): string {
-	return SDK_TO_PI_TOOL_NAME[name.toLowerCase()] ?? name;
+	return mapSdkToolNameToPi(name);
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {
@@ -48,12 +42,7 @@ export function asRecord(value: unknown): Record<string, unknown> {
 }
 
 export function mapToolArguments(name: string, argumentsValue: Record<string, unknown>): Record<string, unknown> {
-	if (name !== "read") return argumentsValue;
-	return {
-		path: argumentsValue.file_path ?? argumentsValue.path,
-		offset: argumentsValue.offset,
-		limit: argumentsValue.limit,
-	};
+	return mapToolArgs(name, argumentsValue);
 }
 
 export function updateUsage(model: Model<Api>, output: AssistantMessage, usage: SdkUsage): void {

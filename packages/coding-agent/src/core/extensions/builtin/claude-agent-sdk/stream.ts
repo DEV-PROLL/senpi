@@ -7,24 +7,25 @@ import {
 	parseStreamingJson,
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
+import { buildCustomToolServers } from "./custom-tools.ts";
 import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable.ts";
+import { buildClaudeAgentSdkQueryOptions } from "./options.ts";
 import { buildPromptBlocks, buildPromptStream } from "./prompt-bridge.ts";
-import { getSdkBoundary, type Options, type SdkQueryHandle } from "./sdk-boundary.ts";
+import { getSdkBoundary, type SdkQueryHandle } from "./sdk-boundary.ts";
 import {
 	asRecord,
 	emptyOutput,
 	errorMessage,
 	mapStopReason,
 	mapToolArguments,
-	mapToolName,
 	type StreamBlock,
-	sdkTools,
 	type TextBlock,
 	type ThinkingBlock,
 	type ToolBlock,
-	toolExecutionDeniedMessage,
 	updateUsage,
 } from "./stream-protocol.ts";
+import { toolWatch } from "./tool-watch.ts";
+import { mapSdkToolNameToPi, resolveSdkTools } from "./tools.ts";
 
 export function streamClaudeAgentSdk(
 	model: Model<Api>,
@@ -62,17 +63,21 @@ export function streamClaudeAgentSdk(
 		else options?.signal?.addEventListener("abort", onAbort, { once: true });
 
 		try {
-			const queryOptions: Options = {
-				cwd: process.cwd(),
-				model: model.id,
-				tools: sdkTools,
-				permissionMode: "dontAsk",
-				includePartialMessages: true,
-				canUseTool: async () => ({ behavior: "deny", message: toolExecutionDeniedMessage }),
+			const resolvedTools = resolveSdkTools(context);
+			const sessionKey = options?.sessionId ? toolWatch.sessionKey(options.sessionId) : undefined;
+			if (sessionKey) toolWatch.reconcileWithContext(sessionKey, context);
+			const toolWatchNote = toolWatch.buildPromptNote(sessionKey, context, resolvedTools.customToolNameToSdk);
+			const queryOptions = buildClaudeAgentSdkQueryOptions({
+				model,
+				context,
+				streamOptions: options,
+				tools: resolvedTools.sdkTools,
 				pathToClaudeCodeExecutable: resolveClaudeCodeExecutable(defaultExecutableDeps()),
-			};
+			});
+			const mcpServers = buildCustomToolServers(resolvedTools.customTools);
+			if (mcpServers) queryOptions.mcpServers = mcpServers;
 			sdkQuery = getSdkBoundary().query({
-				prompt: buildPromptStream(buildPromptBlocks(context)),
+				prompt: buildPromptStream(buildPromptBlocks(context, resolvedTools.customToolNameToSdk, toolWatchNote)),
 				options: queryOptions,
 			});
 			if (wasAborted) requestAbort();
@@ -108,7 +113,7 @@ export function streamClaudeAgentSdk(
 							const block: ToolBlock = {
 								type: "toolCall",
 								id: event.content_block.id,
-								name: mapToolName(event.content_block.name),
+								name: mapSdkToolNameToPi(event.content_block.name, resolvedTools.customToolNameToPi),
 								arguments: asRecord(event.content_block.input),
 								partialJson: "",
 								index: event.index,
