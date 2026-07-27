@@ -43,7 +43,7 @@ const SCENARIOS = {
 	},
 };
 
-const tuiArgs = () => ["--no-context-files", "--no-skills", "--no-extensions", "--approve"];
+const tuiArgs = () => ["--no-context-files", "--no-skills", "--approve"];
 
 function parseArgs(argv) {
 	const options = { driver: "auto", expected: [] };
