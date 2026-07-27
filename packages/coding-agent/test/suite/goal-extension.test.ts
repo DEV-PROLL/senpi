@@ -288,6 +288,42 @@ function textOf(result: { content?: Array<{ type: string; text?: string }> } | u
 	return result?.content?.find((part) => part.type === "text")?.text ?? "";
 }
 
+
+
+describe("goal extension reload does not auto-start a stopped agent", () => {
+	it("does not queue a continuation on session_start reason 'reload'", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-reload-noop");
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+
+		expect(sent).toHaveLength(0);
+	});
+
+	it("still queues a continuation on session_start reason 'startup'", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-startup-cont");
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
+
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+	});
+
+	it("still queues a continuation on session_start reason 'resume'", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-resume-cont");
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "resume" }, ctx);
+
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+	});
+});
+
 async function runHandlers(
 	handlers: Map<string, Handler[]>,
 	event: string,

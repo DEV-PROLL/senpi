@@ -68,7 +68,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		if (await maybePromptResumePausedGoal(pi, ctx, event.reason, goal)) {
 			return;
 		}
-		if (goal) queueGoalContinuation(pi, ctx, goal);
+		// A config reload must not auto-start an agent that was stopped. Only a fresh
+		// startup or explicit resume may re-engage an active goal via a continuation.
+		if (goal && event.reason !== "reload") queueGoalContinuation(pi, ctx, goal);
 	});
 
 	pi.on("before_agent_start", async (_event, ctx) => {
