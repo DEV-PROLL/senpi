@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	chmodSync,
@@ -112,10 +112,23 @@ function makeOmoLayout(
 	return { repoRoot, pluginPath, agentDir };
 }
 
+/**
+ * A zombie has exited and holds no resources, but its pid entry survives until the
+ * parent reaps it, so `process.kill(pid, 0)` still succeeds. Killing a process tree
+ * therefore leaves a window where the reparented grandchild looks alive, which made
+ * the tree-kill proof below fail on slow runners. Windows has no zombies.
+ */
 function pidAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
-		return true;
+	} catch {
+		return false;
+	}
+	if (process.platform === "win32") return true;
+	try {
+		return !execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf-8" })
+			.trim()
+			.startsWith("Z");
 	} catch {
 		return false;
 	}
@@ -1092,5 +1105,52 @@ describe("runOmoLocalUpdateBeta orchestrator", () => {
 		expect(readStamp(agentDir)).toBeUndefined();
 		expect(existsSync(omoLocalUpdateLockPath(agentDir))).toBe(false);
 		expect(existsSync(omoLocalUpdateBuildWorktreePath(agentDir))).toBe(false);
+	});
+
+	it("does not report an unreaped zombie as alive", async () => {
+		if (process.platform === "win32") return;
+		// A perl parent forks a child that exits immediately, prints the child pid, releases
+		// fd 3, then sleeps WITHOUT reaping. EOF on fd 3 therefore proves the child exited AND
+		// the parent released its copy, so from that moment the child is a zombie until the
+		// parent is killed. Event-driven like the tree-kill proof: no sleeps, no polling.
+		const script =
+			'use POSIX (); my $pid = fork(); if ($pid == 0) { exit 0; } $| = 1; print "$pid\\n"; POSIX::close(3); sleep 30;';
+		const parent = spawn("perl", ["-e", script], { stdio: ["ignore", "pipe", "ignore", "pipe"] });
+		try {
+			let stdout = "";
+			const parentStdout = parent.stdout;
+			if (parentStdout === null) throw new Error("expected a readable stdout pipe");
+			parentStdout.on("data", (chunk) => {
+				stdout += String(chunk);
+			});
+			const zombieFd = parent.stdio[3];
+			if (zombieFd === null || zombieFd === undefined || typeof zombieFd === "number") {
+				throw new Error("expected a readable pipe on fd 3");
+			}
+			await new Promise<void>((resolveEof) => zombieFd.on("end", () => resolveEof()));
+
+			const zombiePid = Number(stdout.trim());
+			expect(Number.isInteger(zombiePid)).toBe(true);
+			expect(execFileSync("ps", ["-o", "stat=", "-p", String(zombiePid)], { encoding: "utf-8" }).trim()).toMatch(
+				/^Z/,
+			);
+
+			expect(pidAlive(zombiePid)).toBe(false);
+		} finally {
+			parent.kill("SIGKILL");
+		}
+	});
+
+	it("reports a running process as alive and a reaped pid as dead", async () => {
+		expect(pidAlive(process.pid)).toBe(true);
+
+		// Node reaps a child before emitting "exit", so once that fires the pid is fully gone
+		// rather than a zombie. Event-driven: the exit event is the signal, not a wait.
+		const shortLived = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+		const reapedPid = shortLived.pid;
+		if (reapedPid === undefined) throw new Error("expected a pid for the spawned process");
+		await new Promise<void>((resolveExit) => shortLived.on("exit", () => resolveExit()));
+
+		expect(pidAlive(reapedPid)).toBe(false);
 	});
 });
