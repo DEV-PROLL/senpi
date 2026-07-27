@@ -1,6 +1,7 @@
 import * as os from "node:os";
 import type { ExtensionContext } from "@code-yeongyu/senpi";
 import type { AgentExecuteTool } from "./bridges/agent-bridge.ts";
+import type { EvalSchemaToolInfo } from "./bridges/schema-bridge.ts";
 import { type CompletionRequest, type CompletionResult, createCompletionHandler } from "./completion/handler.ts";
 import { defaultCodemodeSettings } from "./config/settings.ts";
 import { EvalNotifier } from "./extension/eval-notifier.ts";
@@ -33,6 +34,7 @@ export interface CodemodeExtensionAPI {
 	on(event: CodemodeEvent, handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
 	executeTool: AgentExecuteTool;
 	getActiveTools(): string[];
+	getAllTools(): readonly EvalSchemaToolInfo[];
 	sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
 }
 
@@ -67,6 +69,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 				kernelManager: manager,
 				cellTimeoutSeconds: runtime.settings.cellTimeoutSeconds,
 				executeTool: runtime.executeTool,
+				listTools: () => pi.getAllTools(),
 				complete,
 				settings: runtime.settings,
 				artifactsDir: runtime.artifactsDir,
@@ -95,6 +98,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			kernelManager: manager,
 			cellTimeoutSeconds: defaultCodemodeSettings.cellTimeoutSeconds,
 			executeTool: createExecuteTool(pi),
+			listTools: () => pi.getAllTools(),
 			complete,
 			settings: defaultCodemodeSettings,
 			cellManager: new EvalDetachedCellManager({ notifier }),

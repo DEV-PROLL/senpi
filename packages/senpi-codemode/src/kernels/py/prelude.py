@@ -37,6 +37,7 @@ EMIT_LOCK = Lock()
 # Mirrors src/bridge/reserved.ts; this standalone subprocess asset cannot import TypeScript.
 RESERVED_AGENT_TOOL = "__agent__"
 RESERVED_OUTPUT_TOOL = "__output__"
+RESERVED_SCHEMA_TOOL = "__schema__"
 TIMEOUT_PAUSE_OP = "timeout-pause"
 TIMEOUT_RESUME_OP = "timeout-resume"
 
@@ -372,6 +373,14 @@ def completion(
     if "value" in response:
         return response["value"]
     return response.get("text", response)
+
+
+def tool_schema(name: str | None = None) -> Any:
+    args: dict[str, Any] = {} if name is None else {"name": name}
+    return bridge_post(
+        "/call",
+        {"callId": f"py-{uuid.uuid4()}", "toolName": RESERVED_SCHEMA_TOOL, "args": args},
+    )
 
 
 def output(
@@ -844,6 +853,7 @@ USER_NS.update(
         "completion": completion,
         "agent": agent,
         "output": output,
+        "tool_schema": tool_schema,
         "__senpi_magic": _magic,
         "__senpi_magic_cell": _magic_cell,
         "__senpi_shell": _shell,
