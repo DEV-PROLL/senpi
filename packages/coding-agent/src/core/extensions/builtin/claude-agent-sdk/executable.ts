@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { extractFromBunfs } from "@anthropic-ai/claude-agent-sdk/extract";
 
 export type ExecutableDeps = {
 	platform: string;
@@ -59,11 +60,16 @@ export function resolveClaudeCodeExecutable(deps: ExecutableDeps): string {
 
 let defaultRequire: ReturnType<typeof createRequire> | null = null;
 
+const isCompiledBunBinary =
+	import.meta.url.includes("$bunfs") || import.meta.url.includes("~BUN") || import.meta.url.includes("%7EBUN");
+
 export function defaultExecutableDeps(): ExecutableDeps {
 	return {
 		platform: process.platform,
 		arch: process.arch,
 		env: (name) => process.env[name],
+		isCompiledBun: () => isCompiledBunBinary,
+		extractFromBunfs,
 		resolve: (spec) => {
 			if (!defaultRequire) {
 				defaultRequire = createRequire(import.meta.resolve("@anthropic-ai/claude-agent-sdk"));
