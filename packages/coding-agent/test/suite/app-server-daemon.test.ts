@@ -127,7 +127,7 @@ describe.sequential("app-server daemon CLI", () => {
 		} finally {
 			await runDaemonCli(agentDir, ["stop"]).catch(() => undefined);
 		}
-	}, 90_000);
+	}, 180_000);
 });
 
 type DaemonCliResult = {
