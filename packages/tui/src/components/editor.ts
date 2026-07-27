@@ -37,6 +37,21 @@ export interface EditorPasteState {
 	pasteCounter: number;
 }
 
+/**
+ * Expand paste markers in `text` using the given registry snapshot.
+ * Suffix-lenient (`[paste #N]`, `[paste #N +M lines]`, `[paste #N M chars]`)
+ * to mirror the editor's own submit-time expansion. Useful when transferring
+ * text from an editor that exposes a paste snapshot but no expansion method.
+ */
+export function expandPasteMarkers(text: string, state: EditorPasteState): string {
+	let result = text;
+	for (const [pasteId, pasteContent] of state.pastes) {
+		const markerRegex = new RegExp(`\\[paste #${pasteId}( (\\+\\d+ lines|\\d+ chars))?\\]`, "g");
+		result = result.replace(markerRegex, () => pasteContent);
+	}
+	return result;
+}
+
 /** Non-global version for single-segment testing. */
 const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
 
@@ -1096,21 +1111,12 @@ export class Editor implements Component, Focusable {
 		return this.state.lines.join("\n");
 	}
 
-	private expandPasteMarkers(text: string): string {
-		let result = text;
-		for (const [pasteId, pasteContent] of this.pastes) {
-			const markerRegex = new RegExp(`\\[paste #${pasteId}( (\\+\\d+ lines|\\d+ chars))?\\]`, "g");
-			result = result.replace(markerRegex, () => pasteContent);
-		}
-		return result;
-	}
-
 	/**
 	 * Get text with paste markers expanded to their actual content.
 	 * Use this when you need the full content (e.g., for external editor).
 	 */
 	getExpandedText(): string {
-		return this.expandPasteMarkers(this.state.lines.join("\n"));
+		return expandPasteMarkers(this.state.lines.join("\n"), this.getPasteState());
 	}
 
 	getLines(): string[] {
@@ -1422,7 +1428,7 @@ export class Editor implements Component, Focusable {
 
 	private submitValue(): void {
 		this.cancelAutocomplete();
-		const result = this.expandPasteMarkers(this.state.lines.join("\n")).trim();
+		const result = expandPasteMarkers(this.state.lines.join("\n"), this.getPasteState()).trim();
 
 		this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
 		this.pastes.clear();

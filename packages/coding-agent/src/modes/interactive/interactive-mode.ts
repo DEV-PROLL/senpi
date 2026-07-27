@@ -25,6 +25,7 @@ import {
 	CombinedAutocompleteProvider,
 	type Component,
 	Container,
+	expandPasteMarkers,
 	fuzzyFilter,
 	getCapabilities,
 	hyperlink,
@@ -2872,7 +2873,11 @@ export class InteractiveMode {
 		// collapsed; otherwise fall back to the expanded text.
 		const rawText = this.editor.getText();
 		const pasteState = this.editor.getPasteState?.();
-		const expandedText = this.editor.getExpandedText?.() ?? rawText;
+		// Prefer the editor's own expansion; when it only exposes a paste
+		// snapshot, expand from the snapshot so a target without setPasteState
+		// still receives the pasted bodies rather than dead markers.
+		const expandedText =
+			this.editor.getExpandedText?.() ?? (pasteState ? expandPasteMarkers(rawText, pasteState) : rawText);
 		const transferEditorText = (target: EditorComponent): void => {
 			if (pasteState && target.setPasteState) {
 				target.setText(rawText);

@@ -152,6 +152,31 @@ describe("InteractiveMode.setCustomEditorComponent paste transfer", () => {
 		expect(fakeThis.defaultEditor.getText()).toBe(PASTE_BODY);
 	});
 
+	test("expands from the paste snapshot when the source lacks getExpandedText", () => {
+		const fakeThis = makeFakeThis();
+
+		// Source editor exposes a paste snapshot but no expansion method
+		// (getPasteState without getExpandedText / setPasteState).
+		const sourceState: EditorPasteState = {
+			pastes: new Map([[1, PASTE_BODY]]),
+			pasteCounter: 1,
+		};
+		const snapshotOnly = new PlainEditorComponent();
+		const snapshotSource = Object.assign(snapshotOnly, {
+			getPasteState: (): EditorPasteState => sourceState,
+		});
+		snapshotSource.setText("before [paste #1 +18 lines] after");
+		fakeThis.editor = snapshotSource;
+
+		// Target has no setPasteState: the fallback must expand from the snapshot
+		const target = new PlainEditorComponent();
+		callSetCustomEditorComponent(fakeThis, () => target);
+
+		expect(fakeThis.editor).toBe(target);
+		expect(target.getText()).toBe(`before ${PASTE_BODY} after`);
+		expect(target.getText()).not.toContain("[paste #");
+	});
+
 	test("unset is a draft no-op when the default editor is already active (resetExtensionUI path)", () => {
 		const fakeThis = makeFakeThis();
 		fakeThis.defaultEditor.handleInput(BRACKETED_PASTE);

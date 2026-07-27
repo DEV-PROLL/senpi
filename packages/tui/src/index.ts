@@ -11,7 +11,13 @@ export {
 // Components
 export { Box } from "./components/box.ts";
 export { CancellableLoader } from "./components/cancellable-loader.ts";
-export { Editor, type EditorOptions, type EditorPasteState, type EditorTheme } from "./components/editor.ts";
+export {
+	Editor,
+	type EditorOptions,
+	type EditorPasteState,
+	type EditorTheme,
+	expandPasteMarkers,
+} from "./components/editor.ts";
 export { Image, type ImageOptions, type ImageTheme } from "./components/image.ts";
 export { Input } from "./components/input.ts";
 export { Loader, type LoaderIndicatorOptions } from "./components/loader.ts";
