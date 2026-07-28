@@ -171,6 +171,32 @@ describe("goal continuation prompt (budget-free)", () => {
 		expect(prompt.toLowerCase()).not.toContain("tokens remaining");
 		expect(prompt.toLowerCase()).not.toContain("budget_limited");
 	});
+
+	it("carries a decisive completion audit that must flip to update_goal complete", () => {
+		const prompt = buildContinuationPrompt(makeGoal());
+		expect(prompt).toMatch(/completion audit/i);
+		expect(prompt).toMatch(/call update_goal with status "complete" in this same turn/i);
+		expect(prompt).toMatch(/leaving the goal active/i);
+		expect(prompt).toMatch(/todo task/i);
+		expect(prompt).toMatch(/completed or dropped/i);
+	});
+
+	it("carries a conservative blocked audit gated on a recurring, unmistakable impasse", () => {
+		const prompt = buildContinuationPrompt(makeGoal());
+		expect(prompt).toMatch(/blocked audit/i);
+		expect(prompt).toMatch(/unmistakably clear/i);
+		expect(prompt).toMatch(/three consecutive goal turns/i);
+		expect(prompt).toMatch(/hard, slow, uncertain/i);
+		expect(prompt).toMatch(/user input or an external-state change/i);
+	});
+
+	it("forbids ending a goal turn with narration instead of action or an update_goal call", () => {
+		const prompt = buildContinuationPrompt(makeGoal());
+		expect(prompt).toMatch(/exactly one/i);
+		expect(prompt).toMatch(/status report|done-claim/i);
+		expect(prompt).not.toMatch(/wait_for/);
+		expect(prompt).not.toMatch(/tmux/i);
+	});
 });
 
 describe("goal status UI", () => {

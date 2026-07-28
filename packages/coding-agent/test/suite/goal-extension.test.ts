@@ -134,6 +134,16 @@ describe("goal extension contract (budget-free)", () => {
 		expect(JSON.stringify(tools.get("get_goal")).toLowerCase()).not.toContain("budget");
 	});
 
+	it("documents the todo gate and decisive completion in the update_goal description", () => {
+		const { tools } = createGoalHarness();
+		const description = tools.get("update_goal")?.description ?? "";
+		expect(description).toMatch(/completion audit/i);
+		expect(description).toMatch(/todo/i);
+		expect(description).toMatch(/rejected while/i);
+		expect(description).toMatch(/same turn/i);
+		expect(description).toMatch(/unmistakably clear/i);
+	});
+
 	it("creates, reads, and completes a goal through the tools and file store", async () => {
 		const { tools } = createGoalHarness();
 		const ctx = await makeCtx();
