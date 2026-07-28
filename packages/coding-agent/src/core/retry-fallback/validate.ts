@@ -35,6 +35,7 @@ function validateThinkingLevel(
 
 /** Returns configuration warnings without changing malformed fallback-chain settings. */
 export function validateFallbackChains(chains: unknown, registry: FallbackModelRegistry): string[] {
+	if (chains === undefined) return [];
 	if (!isPlainObject(chains)) return ["Fallback chains must be a plain object."];
 
 	const warnings: string[] = [];

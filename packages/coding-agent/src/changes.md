@@ -1,3 +1,18 @@
+## Absent fallback chains no longer produce a startup warning (2026-07-28)
+
+### What changed
+
+- `core/retry-fallback/validate.ts`: `validateFallbackChains(undefined, registry)` now returns no warnings. Explicit malformed values such as `null` and arrays still produce `Fallback chains must be a plain object.`
+- Coverage: `test/suite/retry-fallback-validate.test.ts` pins the absent-setting case.
+
+### Why
+
+- `retry.fallbackChains` is optional. A fresh configuration without the setting previously emitted a misleading startup warning even though the user had not configured a malformed chain.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one early return in `validateFallbackChains`.
+
 ## Footer shows (OmO Native) when the local omo-senpi + senpi-task stack is installed (2026-07-28)
 
 ### What changed
