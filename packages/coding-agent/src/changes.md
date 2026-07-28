@@ -1,3 +1,27 @@
+## Catalog `-fast` variants resolve serviceTier/upstreamModelId without models.json entries (2026-07-28)
+
+### What changed
+
+- `core/provider-composer.ts` `resolveCompatibilityRequestConfig()`: `upstreamModelId` and
+  `serviceTier` now fall back to the catalog `Model`'s own optional fields
+  (`extensionModel ?? modelDefinition ?? model`), so generated catalog variants such as
+  `openai/gpt-5.5-fast` (upstreamModelId `gpt-5.5`, serviceTier `priority`) request the priority
+  tier and the upstream wire id with zero models.json configuration. Config and extension model
+  definitions keep precedence over catalog defaults.
+- Coverage: `test/model-runtime-catalog-service-tier.test.ts` pins the catalog fallback, the
+  models.json override path, and end-to-end resolution through `ModelRuntime` (offline).
+
+### Why
+
+- `-fast` pseudo-models previously worked only when hand-declared in models.json; the generated
+  OpenAI priority-tier variants (pi-ai `Model.upstreamModelId`/`serviceTier`) were inert without
+  this fallback, since the main request path reads both values exclusively through
+  `resolveCompatibilityRequestConfig()`.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: two-line `??` fallback change in `resolveCompatibilityRequestConfig()`.
+
 ## Cancellable `session_before_reload` veto blocks reload while extensions protect live work (2026-07-28)
 
 ### What changed
