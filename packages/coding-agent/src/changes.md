@@ -7,6 +7,34 @@
 - Details for the interactive hand-off live in `src/modes/interactive/changes.md` (same date).
 - Coverage: `test/suite/regressions/0000-editor-paste-marker-transfer.test.ts` drives the real `setCustomEditorComponent` (prototype + fakeThis pattern) with real tui editors: registry transfer to a paste-aware editor, expanded-text fallback for a plain `EditorComponent`, restore to the default editor, full plain-editor round-trip, and the same-instance no-op.
 
+## Prompt-cache-aware foreground tool budgets (2026-07-28)
+
+### What changed
+
+- `core/settings-manager.ts`: new `PromptCacheSettings` (`cacheAwareTimeouts?: boolean` default true,
+  `safetyBufferSeconds?: number` default 30) exposed as `Settings.promptCache`.
+- `core/prompt-cache-budget.ts` (new): `resolvePromptCacheSafeWaitSeconds(model, settings, env)` =
+  pi-ai's resolved cache TTL minus the safety buffer, or `undefined` when the feature is disabled, no model
+  is active, the TTL is unknown, or the buffer swallows the whole TTL. Also exports
+  `PROMPT_CACHE_SAFE_WAIT_ENV` and `DEFAULT_PROMPT_CACHE_SAFETY_BUFFER_SECONDS`.
+- `core/agent-session.ts`: `resolvePromptCacheSafeWaitSeconds()` recomputes from the LIVE current model, and
+  `syncPromptCacheSafeWaitEnv()` mirrors it into the advisory `PI_PROMPT_CACHE_SAFE_WAIT_SECONDS` env var
+  (deleted when no budget applies) on session start, reload, and every model select — so out-of-process
+  readers such as the omo `task` tool can size their own foreground waits.
+- The typed `ExtensionContext.getPromptCacheSafeWaitSeconds()` getter is documented in
+  `core/extensions/changes.md`.
+
+### Why
+
+- Blocking a foreground tool past the model's prompt-cache lifetime expires the cache and forces a full
+  re-read on the next request. Sizing the ceiling by the cache TTL keeps the cache warm, and the still-running
+  work is handed to a background session alive instead of being killed.
+
+### Behavior when no budget applies
+
+- Byte-identical to previous behavior: the injected bash default and recommended maximum keep their existing
+  values, the policy prompt is unchanged under strict string equality, and the env var is absent.
+
 ## Cancellable `session_before_reload` veto blocks reload while extensions protect live work (2026-07-28)
 
 ### What changed

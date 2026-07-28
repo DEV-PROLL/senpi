@@ -63,6 +63,11 @@ export interface TerminalSettings {
 	monitorWakeBudget?: number; // default: 5 (consecutive monitor-only wake limit)
 }
 
+export interface PromptCacheSettings {
+	cacheAwareTimeouts?: boolean; // default: true (size foreground tool waits by the model's prompt-cache TTL)
+	safetyBufferSeconds?: number; // default: 30 (headroom subtracted from the cache TTL)
+}
+
 export interface ImageSettings {
 	autoResize?: boolean; // default: true (resize images to 2000x2000 max for better model compatibility)
 	blockImages?: boolean; // default: false - when true, prevents all images from being sent to LLM providers
@@ -152,6 +157,7 @@ export interface Settings {
 	hooks?: string[];
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
 	terminal?: TerminalSettings;
+	promptCache?: PromptCacheSettings;
 	images?: ImageSettings;
 	lookAt?: LookAtSettings;
 	favoriteModels?: string[]; // Model patterns for Ctrl+P cycling (same format as --models CLI flag)

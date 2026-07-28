@@ -9,7 +9,6 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages.js";
 import { calculateCost } from "../models.ts";
 import type {
-	AnthropicMessagesCompat,
 	Api,
 	AssistantMessage,
 	AssistantStopDetails,
@@ -37,6 +36,7 @@ import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
+import { getAnthropicCompat, isAnthropicApiBaseUrl } from "../utils/prompt-cache-ttl.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
@@ -60,6 +60,8 @@ import {
 } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
 
+export { getAnthropicCompat } from "../utils/prompt-cache-ttl.ts";
+
 /**
  * Resolve cache retention preference.
  * Defaults to the provided fallback and uses PI_CACHE_RETENTION for backward compatibility.
@@ -79,14 +81,6 @@ function resolveCacheRetention(
 		return "short";
 	}
 	return fallback;
-}
-
-function isAnthropicApiBaseUrl(baseUrl: string): boolean {
-	try {
-		return new URL(baseUrl).hostname === "api.anthropic.com";
-	} catch {
-		return false;
-	}
 }
 
 function getCacheControl(
@@ -260,7 +254,6 @@ const NATIVE_XHIGH_EFFORT_MODEL_MARKERS = [
  * gateway rows carry no generated compat, so the family fact has to live here as well.
  */
 const DISABLED_THINKING_REJECTING_MODEL_MARKERS = ["fable-5", "mythos-5"] as const;
-const CLAUDE_FABLE_OR_MYTHOS_MODEL_ID = /^claude-(?:fable|mythos)(?:-|$)/i;
 const UNSUPPORTED_NATIVE_COMPUTER_TOOL_MODEL_MARKERS = [
 	"opus-4-6",
 	"opus-4.6",
@@ -292,53 +285,6 @@ function isInvalidUnsignedThinkingSignatureError(error: unknown): boolean {
 		error instanceof Error &&
 		/Invalid signature in thinking block/i.test(error.message)
 	);
-}
-
-function getAnthropicCompat(
-	model: Model<"anthropic-messages">,
-): Required<Omit<AnthropicMessagesCompat, "forceAdaptiveThinking">> {
-	// Auto-detect session affinity and cache control support from provider
-	const isFireworks = model.provider === "fireworks";
-	const isCloudflareAiGatewayAnthropic =
-		model.provider === "cloudflare-ai-gateway" && model.baseUrl.includes("anthropic");
-	const isXiaomi = model.provider === "xiaomi" || model.provider.startsWith("xiaomi-token-plan-");
-	return {
-		supportsEagerToolInputStreaming: model.compat?.supportsEagerToolInputStreaming ?? !isFireworks,
-		supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? !isFireworks,
-		sendSessionAffinityHeaders:
-			model.compat?.sendSessionAffinityHeaders ?? !!(isFireworks || isCloudflareAiGatewayAnthropic),
-		supportsCacheControlOnTools: model.compat?.supportsCacheControlOnTools ?? !isFireworks,
-		supportsDisabledThinking: model.compat?.supportsDisabledThinking ?? !isXiaomi,
-		supportsTemperature: model.compat?.supportsTemperature ?? true,
-		supportsToolChoice: model.compat?.supportsToolChoice ?? true,
-		supportsForcedToolChoice:
-			model.compat?.supportsForcedToolChoice ?? !CLAUDE_FABLE_OR_MYTHOS_MODEL_ID.test(model.id),
-		allowEmptySignature: model.compat?.allowEmptySignature ?? false,
-		unsignedThinkingReplay:
-			model.compat?.unsignedThinkingReplay ?? (model.compat?.allowEmptySignature ? "empty-signature" : "text"),
-		supportsStrictTools: model.compat?.supportsStrictTools ?? false,
-		supportsToolReferences: model.compat?.supportsToolReferences ?? defaultSupportsToolReferences(model),
-		// Default: first-party Anthropic only. Anthropic-compatible providers
-		// (kimi-coding, fireworks, copilot, gateways) may execute the server-side
-		// search but reject the replayed server_tool_use / web_search_tool_result
-		// blocks on the next request (kimi-coding 400s with `tool_call_id is not
-		// found`).
-		supportsWebSearch: model.compat?.supportsWebSearch ?? isAnthropicApiBaseUrl(model.baseUrl),
-	};
-}
-
-/**
- * Default for `supportsToolReferences`: first-party Anthropic models except
- * Haiku (rejects client-side tool_reference blocks) and models that predate
- * tool search (Claude 3.x, Opus/Sonnet 4.0, Opus 4.1).
- */
-function defaultSupportsToolReferences(model: Model<"anthropic-messages">): boolean {
-	if (model.provider !== "anthropic" || model.id.includes("haiku")) return false;
-	const version = model.id.match(/^claude-(?:opus|sonnet|fable)-(\d+)(?:-(\d+))?(?:-|$)/);
-	if (!version) return false;
-	const major = Number(version[1]);
-	const minor = version[2] && version[2].length < 8 ? Number(version[2]) : 0;
-	return major > 4 || (major === 4 && minor >= 5);
 }
 
 export interface AnthropicOptions extends StreamOptions {
