@@ -2,9 +2,11 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
 import { createHash, randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
+import { findNearestParentConfigDir } from "../nearest-parent-config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
@@ -287,10 +289,18 @@ export function __setSelfWriteTrackerClockForTests(clock: (() => number) | undef
 }
 
 /** Returns the absolute settings path for a filesystem-backed storage scope. */
-export function getSettingsPath(cwd: string, agentDir: string, scope: SettingsScope): string {
-	return scope === "global"
-		? join(resolvePath(agentDir), "settings.json")
-		: join(resolvePath(cwd), CONFIG_DIR_NAME, "settings.json");
+export function getSettingsPath(
+	cwd: string,
+	agentDir: string,
+	scope: SettingsScope,
+	homeDir: string = homedir(),
+): string {
+	if (scope === "global") {
+		return join(resolvePath(agentDir), "settings.json");
+	}
+	const resolvedCwd = resolvePath(cwd);
+	const projectConfigDir = findNearestParentConfigDir(resolvedCwd, homeDir, CONFIG_DIR_NAME);
+	return join(projectConfigDir ?? join(resolvedCwd, CONFIG_DIR_NAME), "settings.json");
 }
 
 /** Returns the stable virtual path used to identify in-memory settings storage writes. */
@@ -315,9 +325,9 @@ export class FileSettingsStorage implements SettingsStorage {
 	private globalSettingsPath: string;
 	private projectSettingsPath: string;
 
-	constructor(cwd: string, agentDir: string) {
-		this.globalSettingsPath = getSettingsPath(cwd, agentDir, "global");
-		this.projectSettingsPath = getSettingsPath(cwd, agentDir, "project");
+	constructor(cwd: string, agentDir: string, homeDir: string = homedir()) {
+		this.globalSettingsPath = getSettingsPath(cwd, agentDir, "global", homeDir);
+		this.projectSettingsPath = getSettingsPath(cwd, agentDir, "project", homeDir);
 	}
 
 	private acquireLockSyncWithRetry(path: string): () => void {

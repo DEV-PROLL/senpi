@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CONFIG_DIR_NAME } from "../src/config.ts";
@@ -15,7 +15,7 @@ import {
 } from "../src/core/settings-manager.ts";
 
 describe("SettingsManager", () => {
-	const testDir = join(process.cwd(), "test-settings-tmp");
+	const testDir = join(tmpdir(), `senpi-settings-${process.pid}`);
 	const agentDir = join(testDir, "agent");
 	const projectDir = join(testDir, "project");
 

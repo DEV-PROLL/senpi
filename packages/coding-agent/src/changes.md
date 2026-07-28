@@ -8,6 +8,21 @@
 - Coverage: `test/suite/regressions/0000-editor-paste-marker-transfer.test.ts` drives the real `setCustomEditorComponent` (prototype + fakeThis pattern) with real tui editors: registry transfer to a paste-aware editor, expanded-text fallback for a plain `EditorComponent`, restore to the default editor, full plain-editor round-trip, and the same-instance no-op.
 
 ## Cancellable `session_before_reload` veto blocks reload while extensions protect live work (2026-07-28)
+## Nearest-parent configuration discovery (2026-07-28)
+
+### What changed
+
+- `config.ts`: `getAgentDir()` now honors `SENPI_CODING_AGENT_DIR` first, otherwise finds the nearest ancestor with a real `.senpi/agent` directory before falling back to `~/.senpi/agent`. The exported `resolveAgentDir(cwd, homeDir, envDir)` makes the precedence contract deterministic for callers and tests.
+- `nearest-parent-config.ts`: centralizes the bounded upward walk for config directories. It excludes `$HOME` so global configuration remains the fallback layer and refuses symlinked `.senpi` directories.
+
+### Why
+
+- Starting senpi from a nested project directory previously ignored that project's config and always selected the home agent directory.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `config.ts` around `getAgentDir()`; the discovery helper is a focused fork-owned module.
+
 
 ### What changed
 
