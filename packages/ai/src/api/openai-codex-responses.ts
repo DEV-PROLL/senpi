@@ -89,9 +89,21 @@ const CODEX_RESPONSE_STATUSES = new Set<CodexResponseStatus>([
 // Types
 // ============================================================================
 
+type CodexReasoningSummary = "auto" | "concise" | "detailed";
+
+/** @deprecated Pass `null` to omit reasoning summaries. */
+type LegacyCodexReasoningSummaryOff = "off";
+
+/** @deprecated Pass `"auto"` to request the default reasoning summary. */
+type LegacyCodexReasoningSummaryOn = "on";
+
 export interface OpenAICodexResponsesOptions extends StreamOptions {
 	reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-	reasoningSummary?: "auto" | "concise" | "detailed" | "off" | "on" | null;
+	reasoningSummary?:
+		| CodexReasoningSummary
+		| LegacyCodexReasoningSummaryOff
+		| LegacyCodexReasoningSummaryOn
+		| null;
 	serviceTier?: ResponseCreateParamsStreaming["service_tier"];
 	textVerbosity?: "low" | "medium" | "high";
 	toolChoice?: "auto" | "none" | "required";
@@ -110,7 +122,7 @@ interface RequestBody {
 	tool_choice?: OpenAICodexResponsesOptions["toolChoice"];
 	parallel_tool_calls?: boolean;
 	temperature?: number;
-	reasoning?: { effort?: string; summary?: string };
+	reasoning?: { effort?: string; summary?: CodexReasoningSummary };
 	service_tier?: ResponseCreateParamsStreaming["service_tier"];
 	text?: { verbosity?: string };
 	include?: string[];
@@ -553,6 +565,7 @@ function buildRequestBody(
 	const supportsStrictMode = model.compat?.supportsStrictMode ?? true;
 	const supportsOpenAIGrammarTools = model.compat?.supportsOpenAIGrammarTools ?? false;
 	const toolPlacement = splitDeferredTools(context, model.compat?.supportsToolSearch ?? false);
+	const reasoningSummary = normalizeReasoningSummary(options?.reasoningSummary);
 	const messages = convertResponsesMessages(model, context, CODEX_TOOL_CALL_PROVIDERS, {
 		includeSystemPrompt: false,
 		preserveThinking: reasoningRequested,
@@ -598,18 +611,33 @@ function buildRequestBody(
 	if (reasoningEffort !== undefined && reasoningEffort !== null) {
 		body.reasoning = {
 			effort: reasoningEffort,
-			...(options?.reasoningSummary === null ? {} : { summary: options?.reasoningSummary ?? "auto" }),
+			...(reasoningSummary === undefined ? {} : { summary: reasoningSummary }),
 		};
 	} else if (reasoningEffort === undefined && model.reasoning && model.thinkingLevelMap?.off !== null) {
 		body.reasoning = {
 			effort: model.thinkingLevelMap?.off ?? "none",
-			...(options?.reasoningSummary === null ? {} : { summary: options?.reasoningSummary ?? "auto" }),
+			...(reasoningSummary === undefined ? {} : { summary: reasoningSummary }),
 		};
 	}
 
 	applyExtraBody(body, options?.extraBody, OPENAI_RESPONSES_RESERVED_BODY_KEYS);
 
 	return body;
+}
+
+function normalizeReasoningSummary(
+	reasoningSummary: OpenAICodexResponsesOptions["reasoningSummary"],
+): CodexReasoningSummary | undefined {
+	switch (reasoningSummary) {
+		case null:
+		case "off":
+			return undefined;
+		case undefined:
+		case "on":
+			return "auto";
+		default:
+			return reasoningSummary;
+	}
 }
 
 function getServiceTierCostMultiplier(

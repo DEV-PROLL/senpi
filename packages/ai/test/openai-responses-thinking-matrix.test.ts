@@ -80,33 +80,47 @@ describe("OpenAI Responses thinking matrix", () => {
 		expect(payload).toMatchObject({ reasoning: { effort: "none", summary: "auto" } });
 	});
 
-	it("omits Codex reasoning summary when callers explicitly disable it", async () => {
+	it.each([
+		["null", null, undefined],
+		["off", "off", undefined],
+		["on", "on", "auto"],
+		["auto", "auto", "auto"],
+	] as const)("normalizes Codex %s summary on the explicit-effort path", async (_, reasoningSummary, expectedSummary) => {
 		const payload = await capturePayload((onPayload) =>
 			streamOpenAICodexResponses(getModel("openai-codex", "gpt-5.6-sol"), context, {
 				apiKey: "test-key",
 				transport: "sse",
 				reasoningEffort: "low",
-				reasoningSummary: null,
+				reasoningSummary,
 				onPayload,
 			}),
 		);
 
-		expect(payload.reasoning).toBeDefined();
-		expect(payload.reasoning).not.toHaveProperty("summary");
+		expect(payload.reasoning).toEqual({
+			effort: "low",
+			...(expectedSummary ? { summary: expectedSummary } : {}),
+		});
 	});
 
-	it("omits Codex reasoning summary in the thinking-off fallback when callers disable it", async () => {
+	it.each([
+		["null", null, undefined],
+		["off", "off", undefined],
+		["on", "on", "auto"],
+		["auto", "auto", "auto"],
+	] as const)("normalizes Codex %s summary on the thinking-off fallback", async (_, reasoningSummary, expectedSummary) => {
 		const payload = await capturePayload((onPayload) =>
 			streamOpenAICodexResponses(getModel("openai-codex", "gpt-5.6-sol"), context, {
 				apiKey: "test-key",
 				transport: "sse",
-				reasoningSummary: null,
+				reasoningSummary,
 				onPayload,
 			}),
 		);
 
-		expect(payload.reasoning).toMatchObject({ effort: "none" });
-		expect(payload.reasoning).not.toHaveProperty("summary");
+		expect(payload.reasoning).toEqual({
+			effort: "none",
+			...(expectedSummary ? { summary: expectedSummary } : {}),
+		});
 	});
 
 	it("omits Codex reasoning when the catalog says thinking cannot be disabled", async () => {
