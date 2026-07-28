@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
 import { goalFilePath, readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "../../src/core/extensions/types.ts";
+import type { SessionEntry } from "../../src/core/session-manager.ts";
 
 type AnyTool = ToolDefinition<any, any, any>;
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
@@ -40,7 +41,7 @@ function createGoalHarness(): GoalHarness {
 
 const tempDirs: string[] = [];
 
-async function makeCtx(threadId = "thread-test"): Promise<ExtensionContext> {
+async function makeCtx(threadId = "thread-test", branchEntries: SessionEntry[] = []): Promise<ExtensionContext> {
 	const dir = await mkdtemp(join(tmpdir(), "senpi-goal-ext-"));
 	tempDirs.push(dir);
 	return {
@@ -53,8 +54,19 @@ async function makeCtx(threadId = "thread-test"): Promise<ExtensionContext> {
 			getSessionFile: () => join(dir, "session.jsonl"),
 			getSessionDir: () => dir,
 			getSessionId: () => threadId,
+			getBranch: () => branchEntries,
 		},
 	} as unknown as ExtensionContext;
+}
+
+function todoStateEntry(
+	phases: Array<{ name: string; tasks: Array<{ content: string; status: string }> }>,
+): SessionEntry {
+	return {
+		type: "custom",
+		customType: "senpi.todo-state",
+		data: { schema: "v2", phases },
+	} as unknown as SessionEntry;
 }
 
 async function makeUiCtx(
@@ -264,6 +276,80 @@ describe("goal extension contract (budget-free)", () => {
 		);
 
 		expect(sent).toHaveLength(0);
+	});
+
+	it("rejects update_goal complete while todo tasks remain open, naming them", async () => {
+		const { tools } = createGoalHarness();
+		const ctx = await makeCtx("thread-todo-open", [
+			todoStateEntry([
+				{
+					name: "Build",
+					tasks: [
+						{ content: "write tests", status: "completed" },
+						{ content: "ship the fix", status: "pending" },
+						{ content: "run QA", status: "in_progress" },
+					],
+				},
+			]),
+		]);
+		await tools.get("create_goal")?.execute("c1", { objective: "Ship gated" }, undefined, undefined, ctx);
+
+		await expect(
+			tools.get("update_goal")?.execute("u1", { status: "complete" }, undefined, undefined, ctx),
+		).rejects.toThrow(/open todo task/i);
+		await expect(
+			tools.get("update_goal")?.execute("u2", { status: "complete" }, undefined, undefined, ctx),
+		).rejects.toThrow(/"ship the fix", "run QA"/);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+	});
+
+	it("allows update_goal complete when every todo task is terminal", async () => {
+		const { tools } = createGoalHarness();
+		const ctx = await makeCtx("thread-todo-done", [
+			todoStateEntry([
+				{
+					name: "Build",
+					tasks: [
+						{ content: "write tests", status: "completed" },
+						{ content: "optional polish", status: "abandoned" },
+					],
+				},
+			]),
+		]);
+		await tools.get("create_goal")?.execute("c1", { objective: "Ship done" }, undefined, undefined, ctx);
+		await tools.get("update_goal")?.execute("u1", { status: "complete" }, undefined, undefined, ctx);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("complete");
+	});
+
+	it("allows update_goal complete when no todo list exists", async () => {
+		const { tools } = createGoalHarness();
+		const ctx = await makeCtx("thread-todo-none");
+		await tools.get("create_goal")?.execute("c1", { objective: "Ship untracked" }, undefined, undefined, ctx);
+		await tools.get("update_goal")?.execute("u1", { status: "complete" }, undefined, undefined, ctx);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("complete");
+	});
+
+	it("still allows update_goal blocked while todo tasks remain open", async () => {
+		const { tools } = createGoalHarness();
+		const ctx = await makeCtx("thread-todo-blocked", [
+			todoStateEntry([{ name: "Build", tasks: [{ content: "ship the fix", status: "pending" }] }]),
+		]);
+		await tools.get("create_goal")?.execute("c1", { objective: "Blockable" }, undefined, undefined, ctx);
+		await tools
+			.get("update_goal")
+			?.execute("u1", { status: "blocked", reason: "Waiting on an external decision" }, undefined, undefined, ctx);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("blocked");
+	});
+
+	it("gates on the latest todo state in the branch", async () => {
+		const { tools } = createGoalHarness();
+		const ctx = await makeCtx("thread-todo-latest", [
+			todoStateEntry([{ name: "Build", tasks: [{ content: "ship the fix", status: "pending" }] }]),
+			todoStateEntry([{ name: "Build", tasks: [{ content: "ship the fix", status: "completed" }] }]),
+		]);
+		await tools.get("create_goal")?.execute("c1", { objective: "Ship latest" }, undefined, undefined, ctx);
+		await tools.get("update_goal")?.execute("u1", { status: "complete" }, undefined, undefined, ctx);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("complete");
 	});
 
 	it("renders a live elapsed footer segment while a goal is actively pursued", async () => {

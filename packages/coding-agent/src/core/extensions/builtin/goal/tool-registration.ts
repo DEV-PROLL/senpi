@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { formatGoalToolResponse } from "./format.ts";
 import { createGoal, objectiveFullTextFileName, readGoal, updateGoal } from "./store.ts";
+import { openTodoCompletionError, openTodoTaskContents } from "./todo-gate.ts";
 import type { Goal, GoalAccountingMode, GoalStoreRef } from "./types.ts";
 import { MODEL_SETTABLE_GOAL_STATUS_VALUES } from "./types.ts";
 import { objectiveTruncationNotice, validateObjective } from "./validation.ts";
@@ -79,6 +80,10 @@ export function registerGoalTools(pi: ExtensionAPI, deps: GoalToolRegistrationDe
 			}
 			if (params.status === "complete" && params.reason !== undefined) {
 				throw new Error("reason must not be provided when status is complete");
+			}
+			if (params.status === "complete") {
+				const openTasks = openTodoTaskContents(ctx.sessionManager.getBranch());
+				if (openTasks.length > 0) throw new Error(openTodoCompletionError(openTasks));
 			}
 			await deps.accountCurrentAgentTurn(ctx, "active");
 			const goal = await updateGoal(
