@@ -1,5 +1,42 @@
 # changes
 
+## Claude Agent SDK provider-account RPC events (2026-07-27)
+
+### What changed
+
+- Added additive `get_provider_accounts`, `account_pin`, and `account_remove` commands. Account payloads expose only slot name, source, blocked state, and pin state; credential material never crosses RPC.
+- Added `auth_accounts_changed` and `account_failover` events. The failover engine remains UI-free and reports through its callback seam; the RPC connection subscribes to the provider-account event bus.
+- The app-server mirrors the surface with `account/providerAccounts/read`, `/pin`, and `/remove`, plus `account/providerAccounts/updated` and `/failover` notifications. These Senpi additions intentionally remain separate from the pinned Codex method catalog.
+
+### Why
+
+- The desktop app needs account-pool state and automatic failover visibility without reading auth storage or receiving subscription tokens.
+
+### Why extension system couldn't handle this
+
+- JSONL RPC command dispatch and app-server protocol registration are mode-owned transport surfaces. The desktop consumer contract at `../omo-desktop-app/packages/contracts/src/rpc.ts` is updated separately.
+
+### Expected merge conflict zones
+
+- MEDIUM: `connection-handler.ts` command dispatch and event subscriptions.
+- LOW: app-server account handlers and protocol facade additions.
+
+
+## Removed legacy `--neo` daemon support while preserving RPC contracts (2026-07-26)
+
+### What changed
+
+- Removed the legacy daemon, protocol, registry, child-worker, and runtime-option modules.
+- Retained the standard RPC connection handler and capability contract, with generic authentication and JSONL framing coverage migrated into the kept suite.
+
+### Why
+
+- The supported RPC surface is the standard `--mode rpc` host, not the retired Go TUI daemon.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: removal-only changes beside retained RPC infrastructure.
+
 ## Model-fallback event pass-through (2026-07-20)
 
 ### What changed
@@ -133,3 +170,21 @@ fork change here is a merge-conflict surface on upstream syncs.
 
 - MEDIUM: `rpc-mode.ts` event emission sites.
 - LOW: `jsonl.ts` write helpers; `event-output-buffer.ts` is fork-only.
+
+## Supported thinking levels and turn-scoped thinking controls (2026-07-22)
+
+### What changed
+
+- `get_available_models` now decorates every model with the core-authoritative `supportedThinkingLevels` list.
+- RPC `prompt` accepts `thinkingLevel` for immediate prompts and rejects queued level changes before queue mutation.
+- `set_thinking_level` accepts `scope: "turn"` for a session-only setting and returns an error unless the effective level exactly matches the request.
+- RPC contracts expose the `thinking_level_changed` event and the TypeScript client preserves model capability data when available.
+
+### Why extension system couldn't handle this
+
+- JSONL RPC command parsing, response assembly, and session event forwarding happen below the extension API.
+
+### Expected merge conflict zones
+
+- MEDIUM: `connection-handler.ts` command dispatch and `rpc-types.ts` response unions.
+- LOW: `rpc-client.ts` model metadata and `docs/rpc.md` protocol reference.

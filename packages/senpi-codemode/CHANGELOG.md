@@ -12,6 +12,103 @@
 
 ### Removed
 
+## [2026.7.26] - 2026-07-26
+
+### Breaking Changes
+
+- Remove the separate GPT-only `exec`/`wait` runtime; GPT models now compose active tools through the persistent `eval` surface.
+
+### Added
+
+- Detach interactive `eval` cells on timeout, inject completion notifications, and support `peek`/`stop` actions without blocking other language kernels.
+- Report whether Python kernel state survived an interrupt or timeout, with a real-surface QA driver covering the contract.
+
+### Changed
+
+- Bound each cell's retained status history and summarize omitted events ([#334](https://github.com/code-yeongyu/senpi/pull/334) by [@minpeter](https://github.com/minpeter)).
+- Make task-output lookups non-blocking and document detached-cell state, output, and artifact behavior.
+
+### Fixed
+
+- Preserve Python state when interruption succeeds, report truthful state when it does not, and tolerate kernels predating the interrupt-outcome contract.
+- Stop normal bridge-request completion from aborting still-running host tool calls.
+
+### Removed
+
+## [2026.7.25-2] - 2026-07-25
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.25] - 2026-07-25
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.24] - 2026-07-24
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.23] - 2026-07-23
+
+### Breaking Changes
+
+### Added
+
+- Added the GPT-only Code Mode runtime with `exec` and `wait` tools, plus model-aware GPT eval routing ([#301](https://github.com/code-yeongyu/senpi/pull/301)).
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.22-2] - 2026-07-22
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.22] - 2026-07-22
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [2026.7.20-2] - 2026-07-20
 
 ### Breaking Changes

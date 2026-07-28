@@ -9,14 +9,24 @@ manual \`&\` backgrounding — use the built-in session tools:
   \`bash_id\` immediately. Foreground calls still block and return output; their \`timeout\`
   (seconds) is a kill deadline. Background sessions ignore \`timeout\` and live until they
   exit or you call \`kill_bash\`.
-- \`bash_output({ bash_id, wait_for, filter, view })\` reads new output, or blocks until a
-  \`wait_for\` regex matches / the session exits / the timeout elapses. Use \`view: "screen"\`
-  for a rendered full-screen snapshot of TUIs.
+- \`bash_output({ bash_id, filter, view })\` peeks at a session without blocking: new output
+  since the last read, the status line, or a rendered full-screen snapshot of TUIs via
+  \`view: "screen"\`. Completion arrives as a notification carrying the exit code and output
+  tail — peeking is for steering, never for waiting.
+- \`monitor({ description, command, filter?, timeout_ms?, persistent? })\` subscribes you to a
+  command: its stdout lines arrive as injected events while you keep working. Any wait on
+  observable state (CI checks, builds, log patterns, deploys) is a monitor, never a foreground
+  sleep/poll loop. Shape the command by notifications needed: exit-on-condition for one
+  completion event; emit-per-occurrence (\`tail -f | grep --line-buffered\`, a polling loop
+  inside the command) for a stream. Filter noise at the command source, stop with \`kill_bash\`,
+  and use \`monitor({ action: "rearm", bash_id })\` only after a wake-budget pause.
 - \`bash_input({ bash_id, input, keys, submit })\` sends stdin or named keys (e.g.
   \`["ctrl+c"]\`, \`["enter"]\`) to steer a REPL or interrupt a process.
 - \`bash_resize({ bash_id, cols, rows })\` resizes the PTY so full-screen programs reflow.
 - \`kill_bash({ bash_id })\` (or \`{ all: true }\`) tears the session tree down with no orphans.
 
-Typical flow: start with \`run_in_background: true\`, subscribe via \`bash_output\` with
-\`wait_for\`, steer with \`bash_input\`, then \`kill_bash\` when done.
+Typical flow: start with \`run_in_background: true\`, watch for patterns with
+\`monitor({ command, filter })\`, peek with \`bash_output\`, steer with \`bash_input\`, then
+\`kill_bash\` when done. Completion notifications carry the exit code and output tail, so a
+follow-up read is only needed when the tail is not enough.
 `;

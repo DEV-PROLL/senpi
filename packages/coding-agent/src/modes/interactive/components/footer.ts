@@ -3,6 +3,7 @@ import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/p
 import type { AgentSession } from "../../../core/agent-session.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import { theme } from "../theme/theme.ts";
+import { type FooterSegment, planFooterLayout } from "./footer-layout.ts";
 
 /**
  * Sanitize text for display in a single-line status.
@@ -129,9 +130,11 @@ export class FooterComponent implements Component {
 					? formatTokens(Math.round((contextWindow * contextUsage.percent) / 100))
 					: "?";
 
-		// Build colored segments. Each segment carries its own theme color
-		// so the HUD stays readable at a glance instead of being one dim wash.
-		const sep = theme.fg("borderMuted", " • ");
+		// Segments in priority order: anchors (pwd, branch, context) and the model
+		// label always stay; middle stats elide from the right when space runs out.
+		// The width ladder itself lives in ./footer-layout.ts.
+		const separator = " • ";
+		const sepColored = theme.fg("borderMuted", separator);
 		const pwdRaw = formatCwdForFooter(
 			this.session.sessionManager.getCwd(),
 			process.env.HOME || process.env.USERPROFILE,
@@ -139,44 +142,25 @@ export class FooterComponent implements Component {
 		const branch = this.footerData.getGitBranch();
 		const sessionName = this.session.sessionManager.getSessionName();
 
-		const coloredSegments: string[] = [theme.fg("accent", pwdRaw)];
-		const plainSegments: string[] = [pwdRaw];
-		if (branch) {
-			coloredSegments.push(theme.fg("warning", branch));
-			plainSegments.push(branch);
-		}
-		if (sessionName) {
-			coloredSegments.push(theme.fg("muted", sessionName));
-			plainSegments.push(sessionName);
-		}
-		if (totalInput) {
-			const text = `↑${formatTokens(totalInput)}`;
-			coloredSegments.push(theme.fg("dim", text));
-			plainSegments.push(text);
-		}
-		if (totalOutput) {
-			const text = `↓${formatTokens(totalOutput)}`;
-			coloredSegments.push(theme.fg("dim", text));
-			plainSegments.push(text);
-		}
-		if (totalCacheRead || totalCacheWrite) {
-			const text = `cache ${formatTokens(totalCacheRead)}/${formatTokens(totalCacheWrite)}`;
-			coloredSegments.push(theme.fg("dim", text));
-			plainSegments.push(text);
-		}
+		const anchor: [FooterSegment, ...FooterSegment[]] = [{ plain: pwdRaw, colored: theme.fg("accent", pwdRaw) }];
+		if (branch) anchor.push({ plain: branch, colored: theme.fg("warning", branch) });
+
+		const dim = (plain: string): FooterSegment => ({ plain, colored: theme.fg("dim", plain) });
+		const middle: FooterSegment[] = [];
+		if (sessionName) middle.push({ plain: sessionName, colored: theme.fg("muted", sessionName) });
+		if (totalInput) middle.push(dim(`↑${formatTokens(totalInput)}`));
+		if (totalOutput) middle.push(dim(`↓${formatTokens(totalOutput)}`));
 		if ((totalCacheRead > 0 || totalCacheWrite > 0) && latestCacheHitRate !== undefined) {
-			const text = `CH${latestCacheHitRate.toFixed(1)}%`;
-			coloredSegments.push(theme.fg("dim", text));
-			plainSegments.push(text);
+			middle.push(dim(`CH${latestCacheHitRate.toFixed(1)}%`));
 		}
+
 		// Kimi Coding is subscription-backed despite using API-key authentication.
 		const usingSubscription = state.model
 			? state.model.provider === "kimi-coding" || this.session.modelRuntime.isUsingOAuth(state.model.provider)
 			: false;
 		if (totalCost || usingSubscription) {
 			const costStr = `$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`;
-			coloredSegments.push(theme.fg("success", costStr));
-			plainSegments.push(costStr);
+			middle.push({ plain: costStr, colored: theme.fg("success", costStr) });
 		}
 
 		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
@@ -190,60 +174,69 @@ export class FooterComponent implements Component {
 				: contextPercentValue > 70
 					? theme.fg("warning", ctxDisplay)
 					: theme.fg("muted", ctxDisplay);
-		coloredSegments.push(ctxColored);
-		plainSegments.push(ctxDisplay);
+		const tail: FooterSegment = { plain: ctxDisplay, colored: ctxColored };
 
-		const statsLeftPlain = plainSegments.join(" • ");
-		let statsLeft = coloredSegments.join(sep);
-		let statsLeftWidth = visibleWidth(statsLeftPlain);
-
-		// If statsLeft is too wide, truncate the plain version (color codes break truncation)
-		if (statsLeftWidth > width) {
-			const truncated = truncateToWidth(statsLeftPlain, width, "...");
-			statsLeft = theme.fg("muted", truncated);
-			statsLeftWidth = visibleWidth(truncated);
-		}
-
-		// Calculate available space for padding (minimum 2 spaces between stats and model)
-		const minPadding = 2;
-
-		// Add thinking level indicator if model supports reasoning
+		// Model label pinned to the right edge; the provider prefix stays only when
+		// the full line fits.
 		const modelName = state.model?.id || "no-model";
-		let rightSideWithoutProvider = modelName;
+		let minimalRight = modelName;
 		if (state.model?.reasoning) {
 			const thinkingLevel = state.thinkingLevel || "off";
-			rightSideWithoutProvider = thinkingLevel === "off" ? `${modelName}:off` : `${modelName}:${thinkingLevel}`;
+			minimalRight = thinkingLevel === "off" ? `${modelName}:off` : `${modelName}:${thinkingLevel}`;
+		}
+		const minimal: FooterSegment = { plain: minimalRight, colored: colorRightSide(minimalRight) };
+		const providerPrefix =
+			this.footerData.getAvailableProviderCount() > 1 && state.model ? `(${state.model.provider}) ` : "";
+		const full: FooterSegment | undefined = providerPrefix
+			? { plain: `${providerPrefix}${minimalRight}`, colored: colorRightSide(`${providerPrefix}${minimalRight}`) }
+			: undefined;
+
+		const marker: FooterSegment = { plain: "…", colored: theme.fg("dim", "…") };
+		const plan = planFooterLayout({
+			width,
+			anchor,
+			middle,
+			tail,
+			right: { minimal, full },
+			separator,
+			minPadding: 2,
+			ellipsisMarker: marker,
+		});
+
+		const joinSegments = (segments: readonly FooterSegment[]): { colored: string; width: number } => ({
+			colored: segments.map((segment) => segment.colored).join(sepColored),
+			width: visibleWidth(segments.map((segment) => segment.plain).join(separator)),
+		});
+
+		let left: { colored: string; width: number };
+		let right: FooterSegment;
+		if (plan.kind === "full") {
+			right = plan.useFullRight && full ? full : minimal;
+			left = joinSegments([...anchor, ...middle, tail]);
+		} else if (plan.kind === "middle-elided") {
+			right = minimal;
+			const segments = [...anchor, ...middle.slice(0, plan.keptMiddleCount)];
+			if (plan.showMarker) segments.push(marker);
+			segments.push(tail);
+			left = joinSegments(segments);
+		} else if (plan.kind === "pwd-elided") {
+			right = minimal;
+			left = joinSegments([
+				{ plain: plan.pwdPlain, colored: theme.fg("accent", plan.pwdPlain) },
+				...anchor.slice(1),
+				tail,
+			]);
+		} else if (plan.kind === "left-elided") {
+			right = minimal;
+			left = { colored: theme.fg("muted", plan.leftPlain), width: visibleWidth(plan.leftPlain) };
+		} else {
+			left = { colored: "", width: 0 };
+			right = { plain: plan.rightPlain, colored: colorRightSide(plan.rightPlain) };
 		}
 
-		// Prepend the provider in parentheses if there are multiple providers and there's enough room
-		let rightSidePlain = rightSideWithoutProvider;
-		if (this.footerData.getAvailableProviderCount() > 1 && state.model) {
-			const withProvider = `(${state.model.provider}) ${rightSideWithoutProvider}`;
-			if (statsLeftWidth + minPadding + visibleWidth(withProvider) <= width) {
-				rightSidePlain = withProvider;
-			}
-		}
-
-		const rightSideWidth = visibleWidth(rightSidePlain);
-		const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
-
-		let rightSideRendered = rightSidePlain;
-		let actualRightWidth = rightSideWidth;
-		if (totalNeeded > width) {
-			const availableForRight = width - statsLeftWidth - minPadding;
-			if (availableForRight > 0) {
-				rightSideRendered = truncateToWidth(rightSidePlain, availableForRight, "");
-				actualRightWidth = visibleWidth(rightSideRendered);
-			} else {
-				rightSideRendered = "";
-				actualRightWidth = 0;
-			}
-		}
-
-		// Color the right side: provider muted, model accent, thinking dim
-		const coloredRight = colorRightSide(rightSideRendered);
-		const padding = " ".repeat(Math.max(0, width - statsLeftWidth - actualRightWidth));
-		const lines = [statsLeft + padding + coloredRight];
+		const rightWidth = visibleWidth(right.plain);
+		const padding = " ".repeat(Math.max(0, width - left.width - rightWidth));
+		const lines = [left.colored + padding + right.colored];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();

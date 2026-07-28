@@ -160,3 +160,70 @@ codex-aligned tool naming, and budget-driven behavior removed. An optional
 - LOW: `builtin/index.ts` import block + `builtinExtensions` array if upstream
   reorders or adds builtins.
 - NONE for `extensions/types.ts` (untouched).
+
+## Sync from pi-goal 0.3.0 (2026-07-26)
+
+### Source
+
+- Canonical source: `code-yeongyu/pi-goal` 0.3.0, merged by
+  [pi-goal PR #1](https://github.com/code-yeongyu/pi-goal/pull/1).
+- Version metadata was regenerated through `sync-builtin-extensions.mjs`; this
+  builtin remains a manual-merge package because of senpi-only structure.
+
+### What changed
+
+- Imported the blocked lifecycle (`blockedReason`/`blockedAt`), model-only
+  blocked/complete transitions, and blocked continuation suppression.
+- `create_goal` now replaces a completed goal after JSONL archival; oversized
+  objectives are marker-budget truncated and preserve their full text in a
+  per-thread spill file.
+- Aligned tool schemas and guidance with the 4,000-character, complete-replace,
+  and blocked-audit contract while retaining budget-free behavior.
+
+### Senpi conflict zone: abort detection
+
+- Standalone pi-goal 0.3.0 captures `ctx.signal` and treats any aborted signal
+  as a user interruption. Senpi deliberately does not retain that heuristic:
+  todo 11 supplies an internal agent-end aborted flag so only a real user abort
+  blocks an active goal.
+- Follow up upstream: add an aborted flag and source to the published extension
+  API so standalone pi-goal can remove its `ctx.signal` heuristic too.
+
+### Expected merge conflict zones on the next sync
+
+- HIGH: `store.ts`/`persistence.ts` retain senpi's atomic writes and stale-brace
+  recovery while upstream owns the lifecycle persistence semantics.
+- MEDIUM: `index.ts`, `tool-registration.ts`, and `ui.ts` retain senpi's split
+  registration, elapsed ticker, and core abort-event integration.
+
+
+## Reload no longer auto-starts a stopped goal; gap-abort blocks active goal (2026-07-27)
+
+### What changed
+- `index.ts` session_start handler: `queueGoalContinuation` is now gated on `event.reason !== "reload"`.
+  A config reload emits `session_start` with reason `"reload"` (agent-session.ts reload()). Previously this
+  queued a hidden continuation prompt for any active goal, auto-starting an agent the user had stopped.
+  Now reload only reloads; startup/resume/new/fork keep existing continuation behavior.
+- `types.ts`: new `SessionAbortEvent` (`type: "session_abort"`) added to the `SessionEvent` union and
+  `ExtensionAPI.on()` overloads.
+- `agent-session.ts`: `abort()` now captures gap-state before `_abortActiveAgentAndRetry` resets retry
+  counters, and emits `session_abort` (via both `_extensionRunner.emit` and `this._emit`) when the gap case
+  is detected: `retryAttempt > 0` (retry backoff — the error agent_end already fired, agent.abort() is a no-op,
+  no new agent_end with abortSource "user" will reach extensions), or `!isStreaming && (isCompacting || pendingMessageCount > 0)`.
+  Mid-run aborts (`isStreaming && retryAttempt === 0`) are excluded — agent_end owns those. Purely-idle
+  defensive aborts (e.g. RPC session-registry closeMarked on an idle session) are excluded.
+- `index.ts` new `session_abort` handler: accounts the current agent turn (mode "active"), then if the goal
+  is still active, transitions it to `blocked` with reason `"user interrupted the turn"`, clears accounting,
+  and refreshes the UI.
+
+### Why
+- A user-abort that stops in-flight work outside an active LLM run (retry backoff, compaction, queued
+  continuation) left the goal `active` because `_agentAbortSource` is set only when `isStreaming`, and the
+  earlier error `agent_end` had no abortSource. The goal then auto-restarted on config reload (bug 1) or
+  session resume, contradicting the user's explicit stop.
+
+### Expected merge conflict zones on next upstream sync
+- LOW in `types.ts` around the `SessionEvent` union and `on()` overloads (additive).
+- LOW in `agent-session.ts` around `abort()` and the `AgentSessionEvent` union (additive).
+- LOW in `goal/index.ts` around the session_start handler and the new session_abort handler.
+

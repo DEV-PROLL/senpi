@@ -1,4 +1,5 @@
-import { type Api, getModels, getProviders, type Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { getModels, getProviders } from "@earendil-works/pi-ai/compat";
 import { describe, expect, it } from "vitest";
 import {
 	type PromptPresetSettings,
@@ -30,6 +31,11 @@ function getKimiK3CatalogModels(): Model<Api>[] {
 	return getProviders().flatMap((provider) => (getModels(provider) as Model<Api>[]).filter(hasKimiK3CatalogSignal));
 }
 
+function extractSection(prompt: string, heading: string): string {
+	const match = prompt.match(new RegExp(`## ${heading}\\n([\\s\\S]*?)(?=\\n## |$)`));
+	return match?.[1] ?? "";
+}
+
 describe("Kimi K3 prompt preset", () => {
 	it.each([
 		{ id: "k3", provider: "kimi-coding", api: "anthropic-messages" as const },
@@ -51,6 +57,7 @@ describe("Kimi K3 prompt preset", () => {
 		expect(preset?.prompt).toContain("You are senpi");
 		expect(preset?.prompt).toContain("## Intent Gate");
 		expect(preset?.prompt).toContain("running on Kimi K3");
+		expect(preset?.prompt).toContain("I'll stop when [the exact, observable condition that ends this turn]");
 		expect(preset?.prompt).toContain("evidence-first");
 		expect(preset?.prompt).toContain("skip filler verification language");
 		expect(preset?.prompt).toContain("a recommendation, not a survey");
@@ -134,6 +141,33 @@ describe("Kimi K3 prompt preset", () => {
 		// then
 		expect(preset?.name).toBe("kimi-k3");
 		expect(preset?.prompt).not.toContain("apply_patch");
+	});
+
+	it("routes surviving ambiguity to a clarifying question instead of an assumption", () => {
+		// given
+		const settings: PromptPresetSettings = { promptPreset: "auto" };
+		const model = createModel("kimi-k3", "moonshotai", "anthropic-messages");
+
+		// when
+		const preset = resolvePreset(model, settings);
+		const prompt = preset?.prompt ?? "";
+		const intentGate = extractSection(prompt, "Intent Gate");
+		const style = extractSection(prompt, "Style");
+
+		// then: the reflect-then-ask rule renders inside the Intent Gate, not elsewhere
+		expect(intentGate).toMatch(/reread the request once for ambiguity/i);
+		// resolution order: context first, trivial gaps filled silently
+		expect(intentGate).toMatch(/code, files, and conversation/i);
+		expect(intentGate).toMatch(/silently fill trivial gaps/i);
+		// terminal condition: surviving material ambiguity -> one specific question, end the turn
+		expect(intentGate).toMatch(/material ambiguity survives[\s\S]*?one specific question[\s\S]*?end the turn/i);
+		// acting on a fabricated assumption is classified as a defect
+		expect(intentGate).toMatch(/invented assumption[\s\S]*?defect/i);
+		// the ask rule is stated exactly once across the whole prompt
+		expect(prompt.match(/one specific question/g)).toHaveLength(1);
+		expect(prompt.match(/reread the request once for ambiguity/gi)).toHaveLength(1);
+		// the style permission-begging ban carves out the clarifying question
+		expect(style).toMatch(/clarifying question[\s\S]*?not permission-begging/i);
 	});
 
 	it("returns kimi-k3 preset for every Kimi K3 built-in catalog model", () => {

@@ -1,5 +1,63 @@
 # Local fork changes
 
+## 2026-07-26 — Resolve Bun dependencies through fork-owned aliases (#230)
+
+- Changed: `scripts/publish.mjs` stages the four upstream-named private source
+  packages as `@code-yeongyu/senpi-ai`, `@code-yeongyu/senpi-agent-core`,
+  `@code-yeongyu/senpi-tui`, and `@code-yeongyu/senpi-pty`, alongside
+  `@code-yeongyu/senpi-codemode` and `@code-yeongyu/senpi`. The source package
+  manifests retain `private: true` and their `@earendil-works/*` names.
+- Why: Bun resolves declared dependencies from npm and ignores npm's
+  `bundleDependencies`, while the upstream-owned `@earendil-works` namespace
+  neither grants this fork publish access nor contains the fork's lockstep
+  versions. Removing those dependency keys makes npm omit their bundled copies.
+- What changed: the staged senpi manifest preserves each original dependency
+  key so npm packs it at the source import path, but rewrites its spec to an
+  npm alias targeting the matching `@code-yeongyu/senpi-*` package. Bun fetches
+  only the owned alias; npm retains and resolves the bundled original package.
+  The code source imports stay unchanged, and `@code-yeongyu/senpi-server`
+  remains private.
+- Merge-conflict risk: low. `scripts/publish.mjs` temporary manifest staging
+  and `stagePublishManifest()` alias rewriting are the expected conflict zones.
+
+## 2026-07-22 — app-server runtime import test without npm subprocess
+
+- Changed: `test/suite/app-server-protocol.test.ts` now executes its runtime `.js` import probe with
+  `node --import tsx --eval` instead of `npx tsx -e`.
+- Why: npm configuration warnings are unrelated to the protocol import contract but are emitted on the spawned
+  subprocess stderr in CI, making the otherwise-successful test fail.
+- What changed: test runner invocation only; the imported module, assertions, and runtime behavior are unchanged.
+- Why the extension system could not handle this: this is hermetic package test infrastructure, not runtime extension
+  behavior.
+- Merge-conflict risk: low. The only conflict zone is the subprocess invocation in the focused protocol metadata test.
+
+## 2026-07-22 — Fully self-contained publish tarball (npm packaging MODULE_NOT_FOUND fix)
+
+- Changed:
+  - `scripts/prepare-senpi-bundled-workspaces.mjs`
+  - `scripts/prepare-senpi-bundled-workspaces.test.mjs`
+  - `scripts/prepare-senpi-bundled-workspaces.prepare.test.mjs`
+  - `scripts/publish.mjs`
+  - `scripts/AGENTS.md`
+- Why: fresh `npm i -g @code-yeongyu/senpi` (both 2026.7.20-2 and 2026.7.22) nondeterministically
+  dropped registry runtime deps (cross-spawn, which, @modelcontextprotocol/sdk), leaving the CLI
+  dead with ERR_MODULE_NOT_FOUND. The publish tarball vendored only the 5 bundled workspace
+  packages + their closure; npm arborist, forced to fetch the remaining 39 runtime deps from the
+  registry, could hit ETARGET on the registry-absent `^2026.x` workspace specs and abort reify
+  mid-flight, leaving a half-installed tree.
+- What changed: staging now vendors the ENTIRE runtime closure (all registry deps + transitives
+  from `publish-deps.lock.json`, as before via `copyPublishDependencies`) and
+  `stagePublishManifest` rewrites the publish manifest at staging time so `bundleDependencies`
+  (and the `bundledDependencies` alias) lists every staged package. All `dependencies` edges —
+  including the 5 `^2026.x` workspace specs — are preserved; with the complete bundle npm needs
+  no registry fetch at install time. `stagePublishManifest` also rejects `file:`/`link:`/
+  `workspace:` specs and any declared runtime dep missing from the staged node_modules.
+  `assertSenpiPackedWorkspaceFiles` gained a `runtimeDependencies` pack check (wired in
+  `scripts/publish.mjs`) so a tarball missing any vendored runtime dep fails before publish.
+  `publish-deps.lock.json` remains staging-only and is never shipped; no new lifecycle-script
+  dependencies were added.
+- Merge-conflict risk: low. Release tooling only; no runtime source touched.
+
 ## 2026-07-21 — Codex HEAD app-server parity documentation refresh
 
 - Changed:
@@ -35,7 +93,6 @@
 - Merge-conflict risk: low. The app-server tree and HEAD fixture are fork-only; on a future Codex pin, regenerate evidence
   first and then re-derive the handwritten facade.
 
-||||||| 9ee0c4a3e
 ## 2026-07-21 — config-reload settings-manager seam
 
 - Changed: `src/core/settings-manager.ts` tracks recent process-written settings content hashes by absolute path, with bounded, expiring, consume-on-match entries shared across settings-manager and storage instances.
@@ -256,3 +313,11 @@
   - Added `scripts/build-all.mjs`: PM-agnostic orchestrator that detects the parent package manager via `$npm_execpath` / `$npm_config_user_agent`, strips the known pnpm-only `npm_config_*` env keys before spawning children, and runs `<pm> run build` in each workspace in dependency order. The companion `scripts/run-web-ui-check.mjs` does the same for `packages/web-ui`'s `check`.
 - Why the extension system could not handle this: package-manager compatibility, install layout, root build orchestration, and postinstall approval lists are all controlled by package/workspace config files and spawn-time env, none of which a runtime extension can intercept.
 - Merge-conflict risk: low to medium per file. Expected conflict zones are the `dependencies`/`scripts` blocks of the five modified `package.json` files, the new settings and `packages` list in `pnpm-workspace.yaml`, and the orchestrator scripts. On the next upstream sync: (1) keep the fork's `scripts/build-all.mjs` and `scripts/run-web-ui-check.mjs`; (2) keep the `trustedDependencies` / `pnpm.onlyBuiltDependencies` entries in root `package.json`; (3) merge additional workspace packages upstream adds into `pnpm-workspace.yaml`; (4) keep the added direct deps in the five package.json files unless upstream inlines equivalent deps.
+
+## 2026-07-22 — RPC supported-thinking-level contract tests
+
+- Changed: added hermetic RPC coverage for synthetic reasoning, non-reasoning, and explicit `xhigh: null` model fixtures.
+- Why: RPC clients need a stable model-level capability contract before rendering thinking-level controls.
+- What changed: test-only package coverage; runtime seams are documented in the matching core and RPC change logs.
+- Why the extension system could not handle this: the RPC process, wire response, and model registry are package-owned surfaces.
+- Merge-conflict risk: low. The test file is fork-only.

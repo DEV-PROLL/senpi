@@ -23,6 +23,29 @@ export type AccountReadResponse = {
 	readonly requiresOpenaiAuth: boolean;
 };
 
+/** Additive Senpi provider-account surface; desktop consumers update separately. */
+export type ProviderAccountSource = "login" | "import" | "env";
+export type ProviderAccount = {
+	readonly name: string;
+	readonly source: ProviderAccountSource;
+	readonly blocked: boolean;
+	readonly pinned: boolean;
+};
+export type ProviderAccountsReadParams = { readonly provider: string };
+export type ProviderAccountsReadResponse = {
+	readonly provider: string;
+	readonly accounts: readonly ProviderAccount[];
+};
+export type ProviderAccountsPinParams = { readonly provider: string; readonly name: string | null };
+export type ProviderAccountsRemoveParams = { readonly provider: string; readonly name: string };
+export type ProviderAccountsUpdatedNotification = { readonly provider: string };
+export type ProviderAccountFailoverNotification = {
+	readonly provider: string;
+	readonly from: string;
+	readonly to: string;
+	readonly reason: string;
+};
+
 export type RateLimitWindow = {
 	readonly usedPercent: number;
 	readonly windowDurationMins: number | null;

@@ -1,7 +1,8 @@
+import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stream as streamAzureOpenAIResponses } from "../src/api/azure-openai-responses.ts";
 import { getModel } from "../src/compat.ts";
-import type { Context } from "../src/types.ts";
+import type { Context, Model } from "../src/types.ts";
 
 interface CapturedAzureClientOptions {
 	apiKey: string;
@@ -14,6 +15,7 @@ interface CapturedAzureClientOptions {
 interface CapturedAzureResponsesPayload {
 	prompt_cache_key?: string;
 	store?: boolean;
+	tools?: Array<{ strict?: boolean }>;
 }
 
 const azureMock = vi.hoisted(() => ({
@@ -155,6 +157,18 @@ describe("azure-openai-responses base URL normalization", () => {
 		expect(azureMock.lastParams?.prompt_cache_key).toBe("x".repeat(64));
 	});
 
+	it("omits prompt_cache_key when caching is disabled", async () => {
+		const model = getModel("azure-openai-responses", "gpt-4o-mini");
+		await streamAzureOpenAIResponses(model, context, {
+			apiKey: "test-api-key",
+			azureBaseUrl: "https://my-resource.openai.azure.com",
+			cacheRetention: "none",
+			sessionId: "cache-disabled-session",
+		}).result();
+
+		expect(azureMock.lastParams).not.toHaveProperty("prompt_cache_key");
+	});
+
 	it("disables server-side response storage", async () => {
 		const model = getModel("azure-openai-responses", "gpt-4o-mini");
 		await streamAzureOpenAIResponses(model, context, {
@@ -163,6 +177,32 @@ describe("azure-openai-responses base URL normalization", () => {
 		}).result();
 
 		expect(azureMock.lastParams?.store).toBe(false);
+	});
+
+	it("honors supportsStrictMode: false", async () => {
+		const baseModel = getModel("azure-openai-responses", "gpt-4o-mini");
+		const model: Model<"azure-openai-responses"> = {
+			...baseModel,
+			compat: { ...baseModel.compat, supportsStrictMode: false },
+		};
+
+		await streamAzureOpenAIResponses(
+			model,
+			{
+				...context,
+				tools: [
+					{
+						name: "preferred",
+						description: "Preferred constrained tool",
+						parameters: Type.Object({ value: Type.String() }),
+						constrainedSampling: { type: "json_schema", strict: "prefer" },
+					},
+				],
+			},
+			{ apiKey: "test-api-key", azureBaseUrl: "https://my-resource.openai.azure.com" },
+		).result();
+
+		expect(azureMock.lastParams?.tools?.[0]).not.toHaveProperty("strict");
 	});
 
 	it("builds correct default URL from AZURE_OPENAI_RESOURCE_NAME", async () => {

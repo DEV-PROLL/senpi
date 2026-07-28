@@ -11,7 +11,12 @@ import {
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
+import {
+	createTerminalFailureAssistantMessage,
+	normalizeTerminalAssistantMessage,
+	shouldTerminateAssistantTurn,
+} from "./assistant-terminal-state.ts";
+import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -34,8 +39,8 @@ export function agentLoop(
 	prompts: AgentMessage[],
 	context: AgentContext,
 	config: AgentLoopConfig,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
+	signal: AbortSignal | undefined,
+	streamFn: StreamFn,
 ): EventStream<AgentEvent, AgentMessage[]> {
 	const stream = createAgentStream();
 
@@ -66,8 +71,8 @@ export function agentLoop(
 export function agentLoopContinue(
 	context: AgentContext,
 	config: AgentLoopConfig,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
+	signal: AbortSignal | undefined,
+	streamFn: StreamFn,
 ): EventStream<AgentEvent, AgentMessage[]> {
 	if (context.messages.length === 0) {
 		throw new Error("Cannot continue: no messages in context");
@@ -99,8 +104,8 @@ export async function runAgentLoop(
 	context: AgentContext,
 	config: AgentLoopConfig,
 	emit: AgentEventSink,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
+	signal: AbortSignal | undefined,
+	streamFn: StreamFn,
 ): Promise<AgentMessage[]> {
 	const newMessages: AgentMessage[] = [...prompts];
 	const currentContext: AgentContext = {
@@ -115,7 +120,7 @@ export async function runAgentLoop(
 		await emit({ type: "message_end", message: prompt });
 	}
 
-	await runLoop(currentContext, newMessages, config, signal, emit, streamFn);
+	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
 	return newMessages;
 }
 
@@ -123,8 +128,8 @@ export async function runAgentLoopContinue(
 	context: AgentContext,
 	config: AgentLoopConfig,
 	emit: AgentEventSink,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
+	signal: AbortSignal | undefined,
+	streamFn: StreamFn,
 ): Promise<AgentMessage[]> {
 	if (context.messages.length === 0) {
 		throw new Error("Cannot continue: no messages in context");
@@ -140,7 +145,7 @@ export async function runAgentLoopContinue(
 	await emit({ type: "agent_start" });
 	await emit({ type: "turn_start" });
 
-	await runLoop(currentContext, newMessages, config, signal, emit, streamFn);
+	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
 	return newMessages;
 }
 
@@ -150,15 +155,6 @@ function createAgentStream(): EventStream<AgentEvent, AgentMessage[]> {
 		(event: AgentEvent) => (event.type === "agent_end" ? event.messages : []),
 	);
 }
-
-const EMPTY_USAGE = {
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-	totalTokens: 0,
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-} satisfies AssistantMessage["usage"];
 
 class StreamIdleTimeoutError extends Error {
 	constructor(timeoutMs: number) {
@@ -176,7 +172,7 @@ async function runLoop(
 	initialConfig: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
-	streamFn?: StreamFn,
+	streamFunction: StreamFn,
 ): Promise<void> {
 	let currentContext = initialContext;
 	let config = initialConfig;
@@ -227,10 +223,10 @@ async function runLoop(
 			}
 
 			// Stream assistant response
-			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);
+			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFunction);
 			newMessages.push(message);
 
-			if (message.stopReason === "error" || message.stopReason === "aborted") {
+			if (shouldTerminateAssistantTurn(message)) {
 				await emit({ type: "turn_end", message, toolResults: [] });
 				await emit({ type: "agent_end", messages: newMessages });
 				return;
@@ -373,10 +369,23 @@ async function streamAssistantResponse(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
-	streamFn?: StreamFn,
+	streamFunction: StreamFn,
 ): Promise<AssistantMessage> {
 	let partialMessage: AssistantMessage | null = null;
 	let addedPartial = false;
+	const thinkingTiming = new Map<number, { startedAt: number; endedAt?: number }>();
+
+	function propagateThinkingTiming(finalMessage: AssistantMessage): void {
+		for (const timing of thinkingTiming.values()) {
+			if (timing.endedAt === undefined) timing.endedAt = Date.now();
+		}
+		for (const [contentIndex, timing] of thinkingTiming) {
+			const block = finalMessage.content[contentIndex];
+			if (block?.type !== "thinking") continue;
+			block.startedAt = timing.startedAt;
+			block.endedAt = timing.endedAt;
+		}
+	}
 
 	// Dedicated controller for the provider request so the loop can tear the
 	// request down itself (idle timeout), not only when the caller aborts.
@@ -408,8 +417,6 @@ async function streamAssistantResponse(
 			messages: llmMessages,
 			tools: context.tools,
 		};
-
-		const streamFunction = streamFn || streamSimple;
 
 		// Resolve API key (important for expiring tokens)
 		const resolvedApiKey =
@@ -452,6 +459,23 @@ async function streamAssistantResponse(
 					case "toolcall_end":
 						if (partialMessage) {
 							partialMessage = event.partial;
+							if (
+								event.type === "thinking_start" ||
+								event.type === "thinking_delta" ||
+								event.type === "thinking_end"
+							) {
+								let timing = thinkingTiming.get(event.contentIndex);
+								if (event.type === "thinking_start" && timing === undefined) {
+									timing = { startedAt: Date.now() };
+									thinkingTiming.set(event.contentIndex, timing);
+								}
+								if (event.type === "thinking_end" && timing !== undefined) timing.endedAt = Date.now();
+								const block = partialMessage.content[event.contentIndex];
+								if (block?.type === "thinking" && timing !== undefined) {
+									block.startedAt = timing.startedAt;
+									if (timing.endedAt !== undefined) block.endedAt = timing.endedAt;
+								}
+							}
 							context.messages[context.messages.length - 1] = partialMessage;
 							await emit({
 								type: "message_update",
@@ -464,6 +488,7 @@ async function streamAssistantResponse(
 					case "done":
 					case "error": {
 						const finalMessage = normalizeTerminalAssistantMessage(await response.result(), event);
+						propagateThinkingTiming(finalMessage);
 						if (addedPartial) {
 							context.messages[context.messages.length - 1] = finalMessage;
 						} else {
@@ -482,6 +507,7 @@ async function streamAssistantResponse(
 		}
 
 		const finalMessage = await response.result();
+		propagateThinkingTiming(finalMessage);
 		if (addedPartial) {
 			context.messages[context.messages.length - 1] = finalMessage;
 		} else {
@@ -497,6 +523,7 @@ async function streamAssistantResponse(
 			error,
 			partialMessage,
 		);
+		propagateThinkingTiming(finalMessage);
 		if (addedPartial) {
 			context.messages[context.messages.length - 1] = finalMessage;
 		} else {
@@ -661,49 +688,6 @@ type ExecutedToolCallBatch = {
 	messages: ToolResultMessage[];
 	terminate: boolean;
 };
-
-type TerminalAssistantMessageEvent = Extract<AssistantMessageEvent, { type: "done" | "error" }>;
-
-function createTerminalFailureAssistantMessage(
-	model: AgentLoopConfig["model"],
-	reason: Extract<AssistantMessage["stopReason"], "aborted" | "error">,
-	error: unknown,
-	partialMessage: AssistantMessage | null,
-): AssistantMessage {
-	const errorMessage = error instanceof Error ? error.message : String(error);
-	return {
-		role: "assistant",
-		content: partialMessage?.content ?? [{ type: "text", text: "" }],
-		api: partialMessage?.api ?? model.api,
-		provider: partialMessage?.provider ?? model.provider,
-		model: partialMessage?.model ?? model.id,
-		responseModel: partialMessage?.responseModel,
-		responseId: partialMessage?.responseId,
-		diagnostics: partialMessage?.diagnostics,
-		usage: partialMessage?.usage ?? EMPTY_USAGE,
-		stopReason: reason,
-		errorMessage: errorMessage || (reason === "aborted" ? "Request was aborted" : "Error"),
-		timestamp: partialMessage?.timestamp ?? Date.now(),
-	};
-}
-
-function normalizeTerminalAssistantMessage(
-	message: AssistantMessage,
-	event: TerminalAssistantMessageEvent,
-): AssistantMessage {
-	if (event.type === "done") {
-		return message;
-	}
-	const errorMessage = message.errorMessage ?? (event.reason === "aborted" ? "Request was aborted" : "Error");
-	if (message.stopReason === event.reason && message.errorMessage === errorMessage) {
-		return message;
-	}
-	return {
-		...message,
-		stopReason: event.reason,
-		errorMessage,
-	};
-}
 
 async function executeToolCallsSequential(
 	currentContext: AgentContext,
@@ -930,10 +914,13 @@ async function prepareToolCall(
 
 	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
 	if (!tool) {
+		const hint = config.removedToolHints?.[toolCall.name];
 		return {
 			kind: "immediate",
 			toolCall,
-			result: createErrorToolResult(`Tool ${toolCall.name} not found`),
+			result: createErrorToolResult(
+				hint === undefined ? `Tool ${toolCall.name} not found` : `Tool ${toolCall.name} not found. ${hint}`,
+			),
 			isError: true,
 		};
 	}
@@ -1064,6 +1051,7 @@ async function finalizeExecutedToolCall(
 					...result,
 					content: afterResult.content ?? result.content,
 					details: afterResult.details ?? result.details,
+					usage: afterResult.usage ?? result.usage,
 					terminate: afterResult.terminate ?? result.terminate,
 				};
 				isError = afterResult.isError ?? isError;
@@ -1107,6 +1095,7 @@ function createToolResultMessage(finalized: FinalizedToolCallOutcome): ToolResul
 		// so the null never enters session history or provider payloads.
 		content: finalized.result.content ?? [],
 		details: finalized.result.details,
+		usage: finalized.result.usage,
 		...(finalized.result.addedToolNames?.length ? { addedToolNames: finalized.result.addedToolNames } : {}),
 		isError: finalized.isError,
 		timestamp: Date.now(),

@@ -12,6 +12,7 @@ import json
 import locale
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -36,6 +37,7 @@ EMIT_LOCK = Lock()
 # Mirrors src/bridge/reserved.ts; this standalone subprocess asset cannot import TypeScript.
 RESERVED_AGENT_TOOL = "__agent__"
 RESERVED_OUTPUT_TOOL = "__output__"
+RESERVED_SCHEMA_TOOL = "__schema__"
 TIMEOUT_PAUSE_OP = "timeout-pause"
 TIMEOUT_RESUME_OP = "timeout-resume"
 
@@ -371,6 +373,14 @@ def completion(
     if "value" in response:
         return response["value"]
     return response.get("text", response)
+
+
+def tool_schema(name: str | None = None) -> Any:
+    args: dict[str, Any] = {} if name is None else {"name": name}
+    return bridge_post(
+        "/call",
+        {"callId": f"py-{uuid.uuid4()}", "toolName": RESERVED_SCHEMA_TOOL, "args": args},
+    )
 
 
 def output(
@@ -843,6 +853,7 @@ USER_NS.update(
         "completion": completion,
         "agent": agent,
         "output": output,
+        "tool_schema": tool_schema,
         "__senpi_magic": _magic,
         "__senpi_magic_cell": _magic_cell,
         "__senpi_shell": _shell,
@@ -886,6 +897,9 @@ def run_cell(cell_id: str, code: str) -> None:
     start = time.monotonic()
     stdout = io.StringIO()
     stderr = io.StringIO()
+    # SIGINT must interrupt user code here; the idle baseline (set between
+    # cells) ignores it so a late signal cannot kill the stdin-read loop.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
     try:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             body, expression = compile_cell(code)
@@ -914,6 +928,8 @@ def run_cell(cell_id: str, code: str) -> None:
                 "durationMs": elapsed(start),
             }
         )
+    finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 def elapsed(start: float) -> int:
@@ -942,6 +958,7 @@ def handle(message: dict[str, Any]) -> bool:
 
 
 def main() -> None:
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     for raw in sys.stdin:
         try:
             if not handle(json.loads(raw)):

@@ -12,7 +12,15 @@ import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
-import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.ts";
+import type {
+	RpcAccountFailoverEvent,
+	RpcAuthAccountsChangedEvent,
+	RpcCommand,
+	RpcProviderAccount,
+	RpcResponse,
+	RpcSessionState,
+	RpcSlashCommand,
+} from "./rpc-types.ts";
 
 // ============================================================================
 // Types
@@ -44,9 +52,15 @@ export interface ModelInfo {
 	id: string;
 	contextWindow: number;
 	reasoning: boolean;
+	supportedThinkingLevels?: ThinkingLevel[];
 }
 
-export type RpcEventListener = (event: AgentSessionEvent) => void;
+export type RpcProviderAccountEvent = RpcAuthAccountsChangedEvent | RpcAccountFailoverEvent;
+export type RpcEventListener = (event: AgentSessionEvent | RpcProviderAccountEvent) => void;
+
+function isProviderAccountEvent(event: AgentSessionEvent | RpcProviderAccountEvent): event is RpcProviderAccountEvent {
+	return event.type === "auth_accounts_changed" || event.type === "account_failover";
+}
 
 // ============================================================================
 // RPC Client
@@ -281,6 +295,14 @@ export class RpcClient {
 	}
 
 	/**
+	 * Get list of available thinking levels for the current model.
+	 */
+	async getAvailableThinkingLevels(): Promise<ThinkingLevel[]> {
+		const response = await this.send({ type: "get_available_thinking_levels" });
+		return this.getData<{ levels: ThinkingLevel[] }>(response).levels;
+	}
+
+	/**
 	 * Set steering mode.
 	 */
 	async setSteeringMode(mode: "all" | "one-at-a-time"): Promise<void> {
@@ -436,6 +458,22 @@ export class RpcClient {
 		return this.getData<{ commands: RpcSlashCommand[] }>(response).commands;
 	}
 
+	/** List safe metadata for the named provider's configured account slots. */
+	async getProviderAccounts(provider: string): Promise<RpcProviderAccount[]> {
+		const response = await this.send({ type: "get_provider_accounts", provider });
+		return this.getData<{ accounts: RpcProviderAccount[] }>(response).accounts;
+	}
+
+	/** Pin a provider account for future session-affine requests, or clear the pin. */
+	async pinProviderAccount(provider: string, name: string | null): Promise<void> {
+		await this.send({ type: "account_pin", provider, name });
+	}
+
+	/** Remove a persisted provider account slot. Environment slots are read-only. */
+	async removeProviderAccount(provider: string, name: string): Promise<void> {
+		await this.send({ type: "account_remove", provider, name });
+	}
+
 	// =========================================================================
 	// Helpers
 	// =========================================================================
@@ -473,6 +511,7 @@ export class RpcClient {
 			}, timeout);
 
 			const unsubscribe = this.onEvent((event) => {
+				if (isProviderAccountEvent(event)) return;
 				events.push(event);
 				if (event.type === "agent_settled") {
 					clearTimeout(timer);

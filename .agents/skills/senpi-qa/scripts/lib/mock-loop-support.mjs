@@ -32,7 +32,22 @@ export const API_PRESETS = {
 
 export const ALL_APIS = Object.keys(API_PRESETS);
 
-const PROVIDER_ENV_KEYS = [
+export const QA_REASONING_MARKER = "SENPI-QA-REASONING-MARKER-7f3a";
+export const QA_FINAL_MARKER = "SENPI-QA-FINAL-MARKER-9d2c";
+
+/** Shared reasoning-first mock turn for loop, RPC, and external TUI QA. */
+export function reasoningScriptedTurn({ slow = false } = {}) {
+	return {
+		reasoning: slow
+			? `${QA_REASONING_MARKER} ${"Keep streaming deterministic reasoning for an abort window. ".repeat(36)}`
+			: `${QA_REASONING_MARKER} deterministic mock reasoning before the final answer.`,
+		text: QA_FINAL_MARKER,
+		chunks: slow ? 12 : 3,
+		chunkDelayMs: slow ? 500 : 0,
+	};
+}
+
+export const PROVIDER_ENV_KEYS = [
 	"ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "AZURE_OPENAI_API_KEY", "DEEPSEEK_API_KEY",
 	"NVIDIA_API_KEY", "GEMINI_API_KEY", "GOOGLE_CLOUD_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "XAI_API_KEY",
 	"FIREWORKS_API_KEY", "TOGETHER_API_KEY", "OPENROUTER_API_KEY", "AI_GATEWAY_API_KEY", "ZAI_API_KEY",
@@ -46,30 +61,53 @@ export function hermeticEnv(boxEnv) {
 	return env;
 }
 
-export function writeMockModelsJson(agentDir, server, apiName, modelOverrides = {}) {
+/**
+ * Register the primary preset model plus optional additional local mock models.
+ * Additional models share the local server and provider unless explicitly
+ * overridden. Supplying retry writes the isolated sandbox settings.json.
+ */
+export function writeMockModelsJson(agentDir, server, apiName, modelOverrides = {}, { models = [], retry } = {}) {
 	const preset = API_PRESETS[apiName];
 	const baseUrl = preset.baseUrl(server);
+	if (!Array.isArray(models)) {
+		throw new Error("mock models must be an array of additional model definitions");
+	}
+	const modelDefaults = {
+		baseUrl,
+		api: apiName,
+		contextWindow: 128000,
+		maxTokens: 4096,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	};
+	const additionalModels = models.map((model, index) => {
+		if (!model || typeof model !== "object" || Array.isArray(model) || typeof model.id !== "string" || !model.id) {
+			throw new Error(`mock models[${index}] must define a non-empty id`);
+		}
+		return { ...modelDefaults, ...model };
+	});
+	const configuredModels = [{ id: preset.modelId, ...modelDefaults, ...modelOverrides }, ...additionalModels];
+	const modelIds = new Set();
+	for (const model of configuredModels) {
+		if (modelIds.has(model.id)) throw new Error(`mock models must not repeat id ${model.id}`);
+		modelIds.add(model.id);
+	}
 	const config = {
 		providers: {
 			[preset.provider]: {
 				baseUrl,
 				apiKey: preset.apiKey,
 				api: apiName,
-				models: [
-					{
-						id: preset.modelId,
-						baseUrl,
-						api: apiName,
-						contextWindow: 128000,
-						maxTokens: 4096,
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-						...modelOverrides,
-					},
-				],
+				models: configuredModels,
 			},
 		},
 	};
 	writeFileSync(join(agentDir, "models.json"), JSON.stringify(config, null, 2));
+	if (retry !== undefined) {
+		if (!retry || typeof retry !== "object" || Array.isArray(retry)) {
+			throw new Error("mock retry settings must be an object");
+		}
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ retry }, null, 2));
+	}
 }
 
 export function assertMcpFixtureToolName(toolName) {

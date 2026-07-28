@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Tool } from "@earendil-works/pi-ai";
+import { isRetryableErrorMessage, type Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type { CompactionEntry } from "../../../session-manager.ts";
@@ -20,10 +20,17 @@ import {
 	resetOnSessionCompact,
 } from "./degradation-monitor.ts";
 import {
+	markOpenAiRemoteReplayBoundary,
+	type OpenAiRemoteCompactionDependencies,
 	rewriteOpenAiPayloadWithRemoteCompaction,
 	runOpenAiRemoteCompaction,
 	SENPI_COMPACTION_EVENT,
 } from "./openai-remote.ts";
+import {
+	createOpenAiRemoteCompactionHeaders,
+	isOpenAiRemoteCompactionModel,
+	openAiRemoteCompactionOrigin,
+} from "./openai-remote-model.ts";
 import * as cap from "./per-turn-cap.ts";
 import * as policy from "./policy.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
@@ -37,6 +44,7 @@ import {
 	type SpeculativeCompactionResult,
 	type SpeculativeCompactionSnapshot,
 	SummaryGenerationError,
+	SummaryRequestError,
 } from "./speculative.ts";
 import { type CompactionExtensionState, createInitialState, resetTurnCounter } from "./state.ts";
 import * as todoBridge from "./todo-bridge.ts";
@@ -56,10 +64,6 @@ interface PendingCompactionMetadata {
 
 function approxTokens(text: string): number {
 	return Math.ceil(text.length / 4);
-}
-
-function isOpenAiResponsesModel(model: ExtensionContext["model"]): boolean {
-	return model?.provider === "openai" && model.api === "openai-responses";
 }
 
 function estimatePendingPromptTokens(event: { prompt?: string; images?: readonly unknown[] }): number {
@@ -115,7 +119,7 @@ function endCompactionFeedback(
 	result: SpeculativeCompactionResult,
 ): void {
 	if (shouldEndFeedback(result)) {
-		ctx.endCompaction?.({ reason: "extension", aborted: signal?.aborted });
+		ctx.endCompaction?.({ reason: "extension", signal, aborted: signal?.aborted });
 	}
 }
 
@@ -148,7 +152,10 @@ function createBlockingRemoteCompactionEvent(
 	};
 }
 
-export default function compactionExtension(pi: ExtensionAPI): void {
+export default function compactionExtension(
+	pi: ExtensionAPI,
+	remoteCompactionDependencies: OpenAiRemoteCompactionDependencies = {},
+): void {
 	let state: CompactionExtensionState = createInitialState();
 	const degradationState = createDegradationMonitorState();
 	const restorationState = state.restoration ?? restoration.createRestorationTrackerState();
@@ -165,13 +172,13 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 	const pendingMetadata = new Map<string, PendingCompactionMetadata>();
 
 	function getSummarizationTools(): Tool[] {
-		if (typeof pi.getAllTools !== "function") return [];
+		if (typeof pi.getAllTools !== "function" || typeof pi.getActiveTools !== "function") return [];
 		try {
-			return pi.getAllTools().map((tool) => ({
-				name: tool.name,
-				description: tool.description,
-				parameters: tool.parameters,
-			}));
+			const definitionsByName = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
+			return pi.getActiveTools().flatMap((name) => {
+				const tool = definitionsByName.get(name);
+				return tool ? [{ name: tool.name, description: tool.description, parameters: tool.parameters }] : [];
+			});
 		} catch {
 			// Tool registry not bound yet (extension still loading); the summary
 			// request simply goes out without tool definitions.
@@ -226,7 +233,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 	): Promise<SpeculativeCompactionResult> {
 		let feedbackSignal = ctx.beginCompaction?.({ reason: "extension" });
 		try {
-			if (isOpenAiResponsesModel(ctx.model)) {
+			if (isOpenAiRemoteCompactionModel(ctx.model)) {
 				const remoteGeneration = speculativeGeneration + 1;
 				const remoteSnapshot = createSpeculativeCompactionSnapshot(ctx, {
 					generation: remoteGeneration,
@@ -238,6 +245,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 						ctx,
 						createBlockingRemoteCompactionEvent(ctx, remoteSnapshot, customInstructions, remoteSignal),
 						(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
+						remoteCompactionDependencies,
 					);
 					if (remoteCompaction) {
 						if (speculativeGeneration !== remoteGeneration - 1) {
@@ -253,6 +261,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 							remoteSnapshot,
 							() => speculativeGeneration,
 							remoteCompaction,
+							feedbackSignal,
 						);
 						endCompactionFeedback(ctx, feedbackSignal, result);
 						return result;
@@ -274,6 +283,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 					pendingJob.snapshot,
 					() => speculativeGeneration,
 					compaction,
+					feedbackSignal,
 				);
 				if (result.applied || result.reason === "stale") {
 					speculativeJob = undefined;
@@ -300,7 +310,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 			let compaction: CompactionResult | undefined;
 			try {
 				compaction = await runExtensionCompaction(ctx, snapshot, feedbackSignal, (delta) =>
-					ctx.updateCompaction?.({ reason: "extension", delta }),
+					ctx.updateCompaction?.({ reason: "extension", signal: feedbackSignal, delta }),
 				);
 			} catch (error) {
 				// Auto-path parity: summary-generation failures (missing credentials,
@@ -309,16 +319,36 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 				// the session_before_compact route.
 				if (!(error instanceof SummaryGenerationError)) throw error;
 			}
-			const result = await applyGeneratedCompaction(ctx, snapshot, () => speculativeGeneration, compaction);
+			const result = await applyGeneratedCompaction(
+				ctx,
+				snapshot,
+				() => speculativeGeneration,
+				compaction,
+				feedbackSignal,
+			);
 			endCompactionFeedback(ctx, feedbackSignal, result);
 			return result;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			ctx.endCompaction?.({
 				reason: "extension",
+				signal: feedbackSignal,
 				aborted: feedbackSignal?.aborted,
 				errorMessage: `Compaction failed: ${message}`,
 			});
+			// Transient transport failures (network drop, timeout, provider blip)
+			// must not escape as extension errors: the runner would print a raw
+			// stack on top of the compaction_end message above, while the turn's
+			// own provider request surfaces the same outage once through the
+			// normal retry path. Provider `error` stops carry metadata-aware
+			// classification (a refusal with retryable-looking text stays loud);
+			// bare transport throws fall back to the message classifier. Count
+			// the failure so the circuit breaker halts repeated doomed attempts.
+			const transient = error instanceof SummaryRequestError ? error.transient : isRetryableErrorMessage(message);
+			if (transient) {
+				state = breaker.recordFailure(state, Date.now(), { route: "extension" });
+				return { applied: false, reason: "failed" };
+			}
 			throw error;
 		}
 	}
@@ -347,8 +377,11 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 
 		const model = ctx.model;
 		if (!model) return undefined;
-		const remoteCompaction = await runOpenAiRemoteCompaction(ctx, event, (data) =>
-			pi.events.emit(SENPI_COMPACTION_EVENT, data),
+		const remoteCompaction = await runOpenAiRemoteCompaction(
+			ctx,
+			event,
+			(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
+			remoteCompactionDependencies,
 		);
 		if (remoteCompaction) {
 			return { compaction: remoteCompaction };
@@ -368,7 +401,7 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 		let compaction: CompactionResult | undefined;
 		try {
 			compaction = await runExtensionCompaction(ctx, snapshot, event.signal, (delta) =>
-				ctx.updateCompaction?.({ reason: event.reason, delta }),
+				ctx.updateCompaction?.({ reason: event.reason, signal: event.signal, delta }),
 			);
 		} catch (error) {
 			// Surface the real provider failure (e.g. a policy refusal or rate
@@ -400,8 +433,36 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 		};
 	});
 
-	pi.on("model_select", () => {
-		invalidateSpeculativeCompaction();
+	pi.on("model_select", (event, ctx) => {
+		const jobModel = speculativeJob?.snapshot.model;
+		const selectedModel = ctx.model;
+		const alreadySpeculatingForSelectedModel =
+			jobModel !== undefined &&
+			selectedModel !== undefined &&
+			jobModel.api === selectedModel.api &&
+			jobModel.provider === selectedModel.provider &&
+			jobModel.id === selectedModel.id &&
+			jobModel.baseUrl === selectedModel.baseUrl &&
+			jobModel.contextWindow === selectedModel.contextWindow;
+		if (!alreadySpeculatingForSelectedModel) {
+			invalidateSpeculativeCompaction();
+		}
+		// Window shrink (e.g. 1M -> 256k): warm a speculative summary at switch
+		// time so the next turn's compaction starts hot instead of the first
+		// request overflowing against the smaller window and recovering after
+		// the provider error has already surfaced.
+		const previousWindow = event.previousModel?.contextWindow ?? 0;
+		const contextWindow = ctx.model?.contextWindow ?? 0;
+		if (previousWindow <= contextWindow) return;
+		// Usage is intentionally pre-switch accounting measured against the new,
+		// smaller window: this is the overflow risk the warm start must absorb.
+		const usage = ctx.getContextUsage();
+		if (!usage) return;
+		if (breaker.isTripped(state, Date.now())) return;
+		const settings = ctx.getCompactionSettings();
+		if (policy.shouldStartSpeculativeCompaction(usage, contextWindow, settings, state.lastYield ?? undefined)) {
+			startSpeculativeCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
+		}
 	});
 
 	pi.on("session_compact", async (event, ctx) => {
@@ -452,14 +513,20 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 		const settings = ctx.getCompactionSettings();
 		const pendingPromptTokens = estimatePendingPromptTokens(event);
 		const usageWithPendingPrompt = usage ? withAdditionalTokens(usage, pendingPromptTokens) : undefined;
+		// Proactive routes back off while the breaker cools down after repeated
+		// failures (e.g. summarization attempts during a network outage); only
+		// the hard-limit emergency still tries unconditionally.
+		const breakerCoolingDown = breaker.isTripped(state, Date.now());
 		if (usage && policy.isAtHardLimit(usage, contextWindow, settings.reserveTokens, pendingPromptTokens)) {
 			await applyBlockingCompaction(ctx, EMERGENCY_COMPACTION_INSTRUCTIONS);
 		} else if (
+			!breakerCoolingDown &&
 			usageWithPendingPrompt &&
 			policy.shouldTriggerCompaction(usageWithPendingPrompt, contextWindow, settings, state.lastYield ?? undefined)
 		) {
 			await applyBlockingCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
 		} else if (
+			!breakerCoolingDown &&
 			usageWithPendingPrompt &&
 			policy.shouldStartSpeculativeCompaction(
 				usageWithPendingPrompt,
@@ -482,18 +549,41 @@ export default function compactionExtension(pi: ExtensionAPI): void {
 		const sourceMessages = shouldApplyContextReduction({
 			usageTokens: usage?.tokens ?? null,
 			contextWindow,
-			isProviderNativeCompactionPath: isOpenAiResponsesModel(ctx.model),
+			isProviderNativeCompactionPath: isOpenAiRemoteCompactionModel(ctx.model),
 		})
 			? reduceContextMessages(event.messages, BUILTIN_CONTEXT_REDUCTION_OPTIONS).messages
 			: event.messages;
 		const emergency = hardLimitEmergencyPrune(sourceMessages, promptContextWindow);
-		return { messages: repairOrphanedToolResults(convertToLlm(emergency.messages)) };
+		const marked = markOpenAiRemoteReplayBoundary(emergency.messages, {
+			model: ctx.model,
+			branchEntries: ctx.sessionManager.getBranch(),
+		});
+		return { messages: repairOrphanedToolResults(convertToLlm(marked)) };
 	});
 
-	pi.on("before_provider_request", (event, ctx) => {
+	pi.on("before_provider_request", async (event, ctx) => {
+		const model = event.model ?? ctx.model;
+		if (!isOpenAiRemoteCompactionModel(model)) return undefined;
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+		if (!auth.ok) return undefined;
+		const effectiveModel =
+			auth.upstreamModelId || auth.baseUrl
+				? {
+						...model,
+						...(auth.upstreamModelId ? { id: auth.upstreamModelId } : {}),
+						...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}),
+					}
+				: model;
+		const headers = createOpenAiRemoteCompactionHeaders(
+			effectiveModel,
+			{ ...auth, headers: event.headers ?? auth.headers },
+			ctx.sessionManager.getSessionId(),
+		);
+		if (!headers) return undefined;
+		const origin = openAiRemoteCompactionOrigin(effectiveModel, headers);
 		return rewriteOpenAiPayloadWithRemoteCompaction(
 			event.payload,
-			{ model: ctx.model, branchEntries: ctx.sessionManager.getBranch() },
+			{ model: effectiveModel, branchEntries: ctx.sessionManager.getBranch(), origin },
 			(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
 		);
 	});

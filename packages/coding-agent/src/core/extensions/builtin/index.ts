@@ -3,12 +3,14 @@ import anthropicBashExtension from "./anthropic-bash/index.ts";
 import anthropicWebSearchExtension from "./anthropic-web-search/index.ts";
 import bashTimeoutExtension from "./bash-timeout/index.ts";
 import btwExtension from "./btw/index.ts";
+import claudeAgentSdkExtension from "./claude-agent-sdk/index.ts";
 import compactionExtension from "./compaction/index.ts";
 import configReloadExtension from "./config-reload/index.ts";
 import diffExtension from "./diff.ts";
 import filesExtension from "./files.ts";
 import goalExtension from "./goal/index.ts";
 import gptApplyPatchExtension from "./gpt-apply-patch/index.ts";
+import helpExtension from "./help/index.ts";
 import historySearchExtension from "./history-search/index.ts";
 import hooksExtension from "./hooks/index.ts";
 import importReproExtension from "./import-repro.ts";
@@ -23,7 +25,6 @@ import promptUrlWidgetExtension from "./prompt-url-widget.ts";
 import redrawsExtension from "./redraws.ts";
 import piRulesExtension from "./rules/index.ts";
 import serviceTierExtension from "./service-tier.ts";
-import sessionObserverExtension from "./session-observer/index.ts";
 import terminalExtension from "./terminal/index.ts";
 import todowriteExtension from "./todotools/index.ts";
 import toolPairGuardExtension from "./tool-pair-guard/index.ts";
@@ -65,8 +66,8 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "tool-pair-guard", factory: toolPairGuardExtension },
 	{ id: "compaction", factory: compactionExtension },
 	{ id: "history-search", factory: historySearchExtension },
+	{ id: "help", factory: helpExtension },
 	{ id: "import-repro", factory: importReproExtension },
-	{ id: "session-observer", factory: sessionObserverExtension },
 	{ id: "websearch", factory: websearchExtension },
 	{ id: "webfetch", factory: webfetchExtension },
 	{ id: "video-in", factory: videoInExtension },
@@ -75,6 +76,7 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "rules", factory: piRulesExtension },
 	{ id: "goal", factory: goalExtension },
 	{ id: "btw", factory: btwExtension },
+	{ id: "claude-agent-sdk", factory: claudeAgentSdkExtension },
 	// Config reload follows settings-dependent builtins so reloads rebuild their resolved settings before MCP observes them.
 	{ id: "config-reload", factory: configReloadExtension },
 	// Keep MCP last so its eventual provider-payload tap observes all co-resident builtin mutations.

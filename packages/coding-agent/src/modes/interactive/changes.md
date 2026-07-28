@@ -1,5 +1,250 @@
 # changes
 
+## Fix: the startup tip is destroyed by extension headers (2026-07-27)
+
+### What changed
+
+- `tips/startup-header.ts` (new): `appendStartupHeader()` attaches the built-in header and the startup tip to the header container as **separate children**.
+- `interactive-mode.ts`: the tip is no longer interpolated into the `ExpandableText` header closures.
+
+### Why
+
+`ui.setHeader()` replaces the built-in header component in place, and the builtin `prompt-preset` extension calls it on every `session_start`. Because the tip was part of the header's own text, that replacement silently discarded it: the tip resolved and was recorded into `tipsHistory`, but never reached the terminal. Keeping the tip as a sibling of the header makes it survive any extension header override.
+
+## Feature discoverability: tips, `?` overlay, live favorite hints, `/keybindings` (2026-07-27)
+
+### What changed
+
+- `tips/registry.ts` (new): a `TIP_DEFINITIONS` catalog teaching existing senpi features and workflow skills (`ulw plan`, `$start-work`, `ulw`/`ulw loop`, `ulw-research`, `hyperplan`, `review work`). Each tip declares its `bindings` and renders through an injected key resolver, so displayed keys always reflect the user's live configuration.
+- `tips/scheduler.ts` (new): `selectTip()` picks the least-recently-shown eligible tip, honoring an injected key-availability resolver and a caller-owned exclusion set. `tips/history-writer.ts` (new): pure `recordTipShown()` merge with no module state; persistence is explicit via `settings-manager`.
+- `tips/startup-tip.ts` (new): `resolveStartupTipLine()` resolves one banner tip line, gated by the `tips` setting and `quietStartup`. `interactive-mode.ts` renders it in both compact and expanded startup variants and records it once through the shared writer with a per-session shown-set.
+- `tips/working-tip.ts` (new): `resolveWorkingTipLine()` resolves the tip under the working status. `interactive-mode.ts` wraps the indicator and tip in one Container so the single-child `statusContainer` contract holds, caches the pick per turn, excludes the banner tip, and resets on turn end.
+- `tips/favorite-messages.ts` (new): `buildFavoriteCycleStatusMessage()` renders the favorite-model empty/single states with live `app.model.select` / `app.models.toggleFavorite` keys instead of the previous hardcoded copy.
+- `components/shortcut-overlay.ts` (new): `ShortcutOverlay` plus the pure `shouldShowShortcutOverlay()` predicate. `interactive-mode.ts` mounts it only on a typed `?` in an empty editor (paste and non-empty text never trigger) and dismisses it on any further input or submit.
+- `keybindings-command.ts` (new): `seedKeybindingsFile()` writes the effective bindings when the config is missing, and `applyKeybindingsFileEdit()` reloads only valid JSON. `interactive-mode.ts` adds a `/keybindings` dispatch that opens the real config via the new `editFileInExternalEditor()` seam in `external-editor.ts` and reloads the live manager without restart.
+
+### Why
+
+- The product already cycles favorites, toggles thinking, and exposes dozens of shortcuts, but none of that was discoverable in-product; users (including the owner) did not know `Ctrl+F` toggles favorites or that a favorite cycle existed.
+
+### Merge-conflict zones
+
+- `interactive-mode.ts` imports block, the startup banner assembly, the `defaultEditor.onChange` / `onSubmit` handlers, `showStatusIndicator`/`clearStatusIndicator`, and the slash-command text dispatch beside `/hotkeys` (five serialized edits).
+
+||||||| a4c5f9248
+## Footer cache segment removal and anchor-pinned layout (2026-07-27)
+
+### What changed
+
+- `components/footer-layout.ts` (new): pure width planning for the classic footer. `planFooterLayout()` picks the
+  richest layout that fits the terminal: full line, then middle segments elided right-most-first behind a single
+  dim "…" marker, then the pwd head-elided ("…/senpi"), then the whole left block head-elided, with the model
+  label truncated only as the last resort. `elideHead()` keeps the tail of a path, which carries the most
+  identifying information.
+- `components/footer.ts`: the `cache <read>/<write>` totals segment was removed (the `CH<x>%` cache-hit-rate
+  segment stays); rendering now builds plain/colored `FooterSegment` pairs and delegates fitting to
+  `planFooterLayout()`, so the model label and the pwd • branch • context-usage block stay visible at any width
+  instead of the right side being truncated away first.
+
+### Why
+
+- The cache read/write totals cost footer space out of proportion to their value, and the old truncation logic
+  sacrificed the right-side model label whenever the left overflowed — the two anchors users watch (context
+  usage, current model) were the first things to disappear on narrow terminals.
+
+### Expected merge conflict zones
+
+- MEDIUM: `components/footer.ts` `render()` was rewritten around `FooterSegment` pairs; upstream footer layout
+  changes will conflict textually. `components/footer-layout.ts` is additive.
+
+## Runtime-error headline rendering (2026-07-27)
+
+### What changed
+
+- `extension-error-format.ts` (new): `formatExtensionErrorHeadline()` renders runtime-emitted errors
+  (`extensionPath === RUNTIME_EXTENSION_PATH`) as `Runtime error (<event>): <message>`; real extensions keep the
+  `Extension "<path>" error: <message>` framing.
+- `extension-error-format.ts` also owns `sanitizeTuiErrorMessage()`, moved out of `interactive-mode.ts`, and the
+  formatter applies it to the message, event name, and extension path. Provider error bodies are JSON-decoded
+  before rendering, so `\u001b` escapes that were previously inert become live OSC/CSI sequences on an
+  ANSI-preserving row; sanitizing inside the formatter means every consumer is protected by default.
+- `interactive-mode.ts`: `showExtensionError()` consumes the full error object and uses the shared formatter, and
+  imports the sanitizer from the format module instead of defining its own copy.
+
+### Why
+
+- Background session-title failures rendered as `Extension "<runtime>" error: {raw provider json}` — misattributed
+  to an extension and unreadable.
+
+### Expected merge conflict zones
+
+- LOW: `showExtensionError()` in `interactive-mode.ts`; the formatter module is additive.
+
+## grok chrome seam for interactive mode (2026-07-26)
+
+### What changed
+
+- `interactive-mode.ts`: new optional `chrome` seam. `chrome: "grok"` constructs the `GrokChrome` strategy (`grok/chrome.ts`), which owns the base editor (wrapped in the rounded `GrokInputCard`), the compact `GrokFooter` (model and cwd only), the `GrokWelcomeCard` startup content, the braille working indicator (`⠹`, accent-tinted), the editor theme and border colour, overlay decoration, and root arrangement. Extensions continue to own their editor factory; the default no-chrome path is unchanged.
+- `grok/tool-row.ts`: single-line tool presentation with a stable guide column (`┃` guide, `◆` marker), selected when the chrome's `toolPresentation` is `"grok"`.
+- `grok/palette.ts` + `grok/chrome-tokens.ts`: capture-measured hex constants and glyphs, with chrome tokens delegating to the active theme so `grok-day` and custom themes stay coherent.
+
+### Why
+
+- The experimental `--grok-neo` mode reuses the ordinary interactive loop; the seam injects presentation without forking interactive-mode logic.
+
+### Expected merge conflict zones
+
+- LOW: the `chrome` constructor option and the `this.chrome ?` branches in `interactive-mode.ts`; the `grok/` directory is additive.
+
+## Inspector VM-import rejection recovery (2026-07-24)
+
+### What changed
+
+- With `SENPI_RECOVER_INSPECTOR_VM_IMPORT=1` set at process start, interactive mode keeps running when an active Node
+  Inspector evaluation creates the exact `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` unhandled rejection from an
+  `<anonymous>` timer callback. Recovery remains disabled by default and is documented in
+  `../../../docs/environment-variables.md`.
+- The TUI shows guidance to use `require()` or a target-side loader.
+- `cli-main.ts` installs the recovery seam before the asynchronous bootstrap, so a rejection fired while paused at an
+  `--inspect-brk` breakpoint (before `registerSignalHandlers()` runs) is also recovered; the TUI warning is deferred
+  until the handler registration consumes the pending recovery count.
+- Crash-policy inspection is non-throwing: hostile rejection values with throwing `has` traps or `code`/`stack`
+  getters are classified as non-recoverable instead of terminating the process inside the uncaughtException handler.
+- Application-owned `evalmachine.<anonymous>` failures and every unrelated uncaught exception retain the existing
+  terminal restoration and exit-1 behavior.
+
+### Why
+
+- Node's Inspector evaluator does not provide a dynamic-import callback. A delayed `import()` from `node inspect exec`
+  previously surfaced as a process-wide uncaught exception and terminated an otherwise healthy debugging session.
+
+### Why extension system couldn't handle this
+
+- The rejection reaches the process-wide fatal handler before extension-level tool or event hooks can intercept it.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` around `uncaughtCrash()` and `registerSignalHandlers()`.
+
+## bounded compaction progress row (2026-07-24)
+
+### What changed
+
+- `components/status-indicator.ts`: the combined compaction spinner, status, and streamed preview is truncated to the
+  actual terminal width. The status label (including its cancellation hint) is allocated first and the preview only
+  receives the leftover columns; when a preview appears, the reason-specific label collapses to the shortest form that
+  still shows the hint. The preview keeps the newest trailing columns of the accumulated summary, and the indicator is
+  a single row both before and after the first progress event.
+- `../../../test/interactive-mode-compaction.test.ts`: pins a hostile multiline, 600-column progress update to one
+  rendered row no wider than the requested terminal width, with the cancellation hint retained and the newest streamed
+  text (not the frozen opening words) visible.
+
+### Why
+
+- Long streamed summaries could wrap the otherwise single-row lifecycle indicator, push the composer upward, and make
+  previous output appear erased as the terminal viewport remapped. A fixed half-width preview reservation could also
+  starve the `esc to cancel` hint out of the row, head-first truncation froze the preview on the opening words of the
+  summary, and the empty-preview state rendered a second spacer row that shifted the composer when progress arrived.
+
+### Expected merge conflict zones
+
+- LOW: `components/status-indicator.ts` compaction progress rendering.
+
+## accepted-only compaction queue transfer (2026-07-24)
+
+### What changed
+
+- `interactive-mode.ts`: input queued while compaction owns the editor is automatically transferred only after an
+  accepted compaction result. Rejected, failed, or aborted compaction retains the input in the editor-owned queue
+  instead of resubmitting it through the unchanged required-compaction gate and recursively starting compaction.
+- Consecutive `compaction_start` events share one Escape override. The original editor handler is preserved through
+  supersession and restored exactly once on terminal cleanup, session rebind, invalidation, or TUI stop.
+- Compaction progress, errors, and summaries are stripped of terminal control sequences only when rendered. Persisted
+  summaries and provider/session content remain unchanged.
+- The shared compaction-summary component applies the same display-only sanitization, covering rebuilt chat and
+  reopened-session expansion in addition to live `compaction_end` rendering.
+- Provider-derived fallback exhaustion errors are sanitized at the shared `showError()` render boundary; raw retry
+  events and persisted/provider error content remain unchanged.
+
+### Why
+
+- Rejection and cancellation do not create a new admissible context. Automatically replaying the same prompt caused an
+  unbounded compaction-start/rejection/restore loop.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` `compaction_end` handling around `flushCompactionQueue()`.
+
+## per-section thinking duration headers (2026-07-22)
+
+### What changed
+
+- `components/assistant-message.ts`: consecutive thinking sections with `startedAt` timing now show an italic
+  `Thought: <duration>` header above visible reasoning, or replace the collapsed `Thinking...` label when reasoning is
+  hidden. Active timed sections keep the configured thinking label; untimed and all-empty legacy sections retain their
+  prior rendering.
+- `../../../test/assistant-message.test.ts`: covers finished, active, legacy, empty/redacted, custom-label, and
+  all-empty thinking-duration rendering states.
+- `../../../test/streaming-reveal.test.ts`: verifies partially revealed thinking blocks retain their timing metadata.
+
+### Why
+
+- Per-section elapsed time makes completed reasoning runs legible without exposing hidden reasoning or introducing a
+  live timer into the transcript.
+
+### Why extension system couldn't handle this
+
+- Thinking-section coalescing, hidden-label selection, streaming display slices, and transcript descriptor
+  reconciliation are private core renderer behavior; an extension cannot insert a stable header into that sequence or
+  preserve its metadata through the host-owned reveal path.
+
+### Expected merge conflict zones
+
+- LOW: `components/assistant-message.ts` around consecutive-thinking descriptor construction.
+- LOW: `changes.md` fork-entry prepend.
+
+## unified tool progress durations (2026-07-22)
+
+### What changed
+
+- `tool-progress.ts`: elapsed and maximum wait durations now share `formatWorkingElapsedSeconds()`, so progress rows use
+  one seconds/minutes/hours grammar (`4m 28s / max 5m 00s`) instead of mixing humanized elapsed time with raw maximum
+  seconds (`4m 28s / max 300s`).
+
+### Why
+
+- A single progress row should not force users to mentally convert the timeout while the elapsed side is already
+  human-readable.
+
+### Why extension system couldn't handle this
+
+- The progress suffix is composed by the built-in interactive tool renderer after extension result rendering.
+
+### Expected merge conflict zones
+
+- LOW: `tool-progress.ts` around the maximum-wait suffix.
+## braille tool progress spinner (2026-07-22)
+
+### What changed
+
+- `tool-progress.ts`: partial tool progress rows now use the same ten-frame braille spinner sequence as other Senpi
+  waiting surfaces instead of cycling directional triangles (`⏵`, `⏷`, `⏴`, `⏶`).
+
+### Why
+
+- Long-running task, team-wait, and terminal progress rows should read as active work rather than a rotating disclosure
+  marker. The existing 80ms component ticker already advances frames; the formatter now presents that animation with
+  standard terminal spinner glyphs.
+
+### Why extension system couldn't handle this
+
+- Generic partial-progress rows are composed by the built-in `ToolExecutionRenderer` after extension result renderers
+  run, so an individual tool extension cannot replace the host-owned progress prefix consistently.
+
+### Expected merge conflict zones
+
+- LOW: `tool-progress.ts` around `formatToolProgressLine()`.
+
 ## todo completion strike reveal (2026-07-21)
 
 ### What changed

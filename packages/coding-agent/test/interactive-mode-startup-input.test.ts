@@ -19,7 +19,9 @@ type SubmitContext = {
 		prompt: (text: string, options?: unknown) => Promise<void>;
 	};
 	flushPendingBashComponents: () => void;
+	hideShortcutOverlay: () => void;
 	isExtensionCommand: (text: string) => boolean;
+	lastEditorText: string;
 	onInputCallback?: (text: string) => void;
 	pendingUserInputs: string[];
 };
@@ -34,7 +36,7 @@ type RunContext = {
 	version: string;
 	options: Record<string, never>;
 	session: {
-		modelRuntime: { getError: () => string | undefined };
+		modelRuntime: { getError: () => string | undefined; refresh: () => Promise<void> };
 		fallbackValidationWarnings: readonly string[];
 		prompt: (text: string, options?: unknown) => Promise<void>;
 	};
@@ -70,7 +72,9 @@ function createSubmitContext(): SubmitContext {
 			prompt: vi.fn(async () => {}),
 		},
 		flushPendingBashComponents: vi.fn(),
+		hideShortcutOverlay: vi.fn(),
 		isExtensionCommand: vi.fn(() => false),
+		lastEditorText: "",
 		pendingUserInputs: [],
 	};
 }
@@ -110,7 +114,7 @@ describe("InteractiveMode startup input", () => {
 			version: "test",
 			options: {},
 			session: {
-				modelRuntime: { getError: vi.fn(() => undefined) },
+				modelRuntime: { getError: vi.fn(() => undefined), refresh: vi.fn(async () => undefined) },
 				fallbackValidationWarnings: [],
 				prompt,
 			},

@@ -319,7 +319,7 @@ function main() {
 	if (args.dryRun) {
 		log(`dry-run complete; would have prepared v${version}`);
 	} else {
-		log(`prepared v${version}; CI publishing starts after the tag push`);
+		log(`prepared v${version}; publish with: gh workflow run publish-npm.yml -f version=${version} -f publish-only=true`);
 	}
 }
 

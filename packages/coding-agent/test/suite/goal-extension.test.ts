@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -104,12 +104,20 @@ describe("goal extension contract (budget-free)", () => {
 		expect(serialized).not.toContain("budget");
 	});
 
-	it("restricts update_goal to complete and drops budget language", () => {
+	it("exposes blocked updates with limit-aware goal guidance and no budget language", () => {
 		const { tools } = createGoalHarness();
+		const create = tools.get("create_goal");
 		const update = tools.get("update_goal");
 		const serialized = JSON.stringify(update).toLowerCase();
+		expect(create?.description).toMatch(/4,000.*file/i);
+		expect(JSON.stringify(create?.parameters)).toMatch(/4,000.*file/i);
+		expect(create?.description).toMatch(/complete.*archive.*unfinished/i);
 		expect(serialized).toContain("complete");
-		expect(serialized).not.toContain("blocked");
+		expect(serialized).toContain("blocked");
+		expect(serialized).toContain("reason");
+		expect(update?.description).toMatch(/3 consecutive goal turns/i);
+		expect(update?.description).toMatch(/fresh blocked audit after resume/i);
+		expect(update?.description).toMatch(/hard, slow, or uncertain/i);
 		expect(serialized).not.toContain("budget");
 		expect(JSON.stringify(tools.get("get_goal")).toLowerCase()).not.toContain("budget");
 	});
@@ -137,13 +145,72 @@ describe("goal extension contract (budget-free)", () => {
 		expect((await readGoal(ref))?.status).toBe("complete");
 	});
 
-	it("refuses a second create_goal while a goal exists", async () => {
+	it("replaces a completed goal through create_goal, archives it, and rejects unfinished goals", async () => {
 		const { tools } = createGoalHarness();
-		const ctx = await makeCtx();
+		const ctx = await makeCtx("thread/complete-create");
+		const ref = storeRefFor(ctx);
 		await tools.get("create_goal")?.execute("c1", { objective: "First" }, undefined, undefined, ctx);
+		await tools.get("update_goal")?.execute("u1", { status: "complete" }, undefined, undefined, ctx);
+
+		const replacement = await tools
+			.get("create_goal")
+			?.execute("c2", { objective: "Second" }, undefined, undefined, ctx);
+		expect(JSON.parse(textOf(replacement))).toMatchObject({ goal: { objective: "Second", status: "active" } });
+		const history = await readFile(join(ref.baseDir, `${encodeURIComponent(ref.threadId)}.history.jsonl`), "utf8");
+		expect(history.trim().split("\n")).toHaveLength(1);
+		expect(JSON.parse(history)).toMatchObject({ objective: "First", status: "complete" });
+
+		const unfinished = await makeCtx("thread-active-create");
+		await tools.get("create_goal")?.execute("c3", { objective: "Active" }, undefined, undefined, unfinished);
 		await expect(
-			tools.get("create_goal")?.execute("c2", { objective: "Second" }, undefined, undefined, ctx),
-		).rejects.toThrow("already has a goal");
+			tools.get("create_goal")?.execute("c4", { objective: "Replacement" }, undefined, undefined, unfinished),
+		).rejects.toThrow("unfinished goal");
+	});
+
+	it("spills an oversized objective with a marker-aware stored objective and notice", async () => {
+		const { tools } = createGoalHarness();
+		const ctx = await makeCtx("thread/oversized objective");
+		const ref = storeRefFor(ctx);
+		const objective = "x".repeat(4_200);
+
+		const result = await tools.get("create_goal")?.execute("c1", { objective }, undefined, undefined, ctx);
+		const goal = await readGoal(ref);
+		expect(textOf(result)).toContain("Objective was truncated; full objective saved to");
+		expect([...String(goal?.objective)].length).toBeLessThanOrEqual(4_000);
+		expect(goal?.objective).toContain("[truncated; full objective:");
+		expect(await readFile(join(ref.baseDir, `${encodeURIComponent(ref.threadId)}.objective-full.txt`), "utf8")).toBe(
+			objective,
+		);
+	});
+
+	it("requires a reason to block and suppresses continuation while blocked", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx();
+		await tools.get("create_goal")?.execute("c1", { objective: "Wait for a decision" }, undefined, undefined, ctx);
+		await expect(
+			tools.get("update_goal")?.execute("u1", { status: "blocked" }, undefined, undefined, ctx),
+		).rejects.toThrow("reason is required");
+		await expect(
+			tools
+				.get("update_goal")
+				?.execute("u2", { status: "complete", reason: "not allowed" }, undefined, undefined, ctx),
+		).rejects.toThrow("reason must not be provided");
+		await tools
+			.get("update_goal")
+			?.execute("u3", { status: "blocked", reason: "Waiting on a user decision" }, undefined, undefined, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantMessageWithStopReason("stop")] },
+			ctx,
+		);
+
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "Waiting on a user decision",
+			blockedAt: expect.any(Number),
+		});
+		expect(sent).toHaveLength(0);
 	});
 
 	it("queues a hidden continuation prompt after agent_end while a goal is active", async () => {
@@ -220,6 +287,89 @@ describe("goal extension contract (budget-free)", () => {
 function textOf(result: { content?: Array<{ type: string; text?: string }> } | undefined): string {
 	return result?.content?.find((part) => part.type === "text")?.text ?? "";
 }
+
+describe("goal extension reload does not auto-start a stopped agent", () => {
+	it("does not queue a continuation on session_start reason 'reload'", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-reload-noop");
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+
+		expect(sent).toHaveLength(0);
+	});
+
+	it("still queues a continuation on session_start reason 'startup'", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-startup-cont");
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
+
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+	});
+
+	it("still queues a continuation on session_start reason 'resume'", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-resume-cont");
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "resume" }, ctx);
+
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+	});
+});
+
+describe("goal extension session_abort blocks an active goal outside an agent run", () => {
+	it("blocks an active goal when session_abort fires (abort during retry backoff or queued continuation)", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-session-abort-gap");
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+		// Simulate the gap case: agent_end fired earlier (error/retry), goal is still active,
+		// then user aborts outside an active run -> session_abort fires.
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantMessageWithStopReason("error")] },
+			ctx,
+		);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+
+		await runHandlers(handlers, "session_abort", { type: "session_abort" }, ctx);
+
+		const goal = await readGoal(storeRefFor(ctx));
+		expect(goal?.status).toBe("blocked");
+		expect(goal?.blockedReason).toBeTruthy();
+		expect(sent).toHaveLength(0);
+	});
+
+	it("does not block a goal that is already blocked or complete on session_abort", async () => {
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeCtx("thread-session-abort-already-blocked");
+		await tools.get("create_goal")?.execute("c1", { objective: "Done waiting" }, undefined, undefined, ctx);
+		await tools
+			.get("update_goal")
+			?.execute("u1", { status: "blocked", reason: "Already blocked" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_abort", { type: "session_abort" }, ctx);
+
+		const goal = await readGoal(storeRefFor(ctx));
+		expect(goal?.status).toBe("blocked");
+		expect(goal?.blockedReason).toBe("Already blocked");
+	});
+
+	it("does nothing on session_abort when there is no goal", async () => {
+		const { handlers } = createGoalHarness();
+		const ctx = await makeCtx("thread-session-abort-no-goal");
+
+		await runHandlers(handlers, "session_abort", { type: "session_abort" }, ctx);
+
+		expect(await readGoal(storeRefFor(ctx))).toBeNull();
+	});
+});
 
 async function runHandlers(
 	handlers: Map<string, Handler[]>,

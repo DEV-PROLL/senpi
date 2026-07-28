@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -39,7 +39,7 @@ import { SettingsManager } from "./settings-manager.ts";
 import type { Skill } from "./skills.ts";
 import { loadSkills } from "./skills.ts";
 import { createSourceInfo, type SourceInfo } from "./source-info.ts";
-import { resetTimings } from "./timings.ts";
+import { resetTimings, time } from "./timings.ts";
 
 export interface ResourceExtensionPaths {
 	skillPaths?: Array<{ path: string; metadata: PathMetadata }>;
@@ -50,6 +50,15 @@ export interface ResourceExtensionPaths {
 
 export interface ResourceLoaderReloadOptions {
 	resolveProjectTrust?: (input: { extensionsResult: LoadExtensionsResult }) => Promise<boolean>;
+	/**
+	 * The SettingsManager the caller already reloaded immediately before this call.
+	 * The reload is skipped only when it is the very manager this loader owns, so a
+	 * caller holding a different manager (SDK callers may supply either
+	 * independently) can never suppress a reload it still needed. Ignored while
+	 * project trust is being resolved: that path must re-read settings after the
+	 * trust flip so project-scoped values are never stale.
+	 */
+	settingsAlreadyReloadedFor?: SettingsManager;
 }
 
 export interface ResourceLoader {
@@ -130,6 +139,21 @@ function isGeneratedGlobalDefaultExtensionShim(content: string): boolean {
 	return LEGACY_GENERATED_GLOBAL_EXTENSION_BANNERS.some((banner) => content.startsWith(banner));
 }
 
+/**
+ * The shim records an absolute path, and `getPackageDir()` derives from
+ * `import.meta.url`. A session launched through the npm bin symlink and one
+ * launched from the real checkout therefore spell the SAME build differently,
+ * so each rewrote the other's shim and every rewrite reloaded every other
+ * session. Canonicalizing collapses both spellings to one path.
+ */
+export function canonicalizeGlobalDefaultExtensionModulePath(modulePath: string): string {
+	try {
+		return realpathSync(modulePath);
+	} catch {
+		return modulePath;
+	}
+}
+
 function getGlobalDefaultExtensionModulePath(extensionId: (typeof globalDefaultExtensionIds)[number]): string {
 	const packageDir = getPackageDir();
 	const runningFromSource = fileURLToPath(import.meta.url).includes(`${sep}src${sep}core${sep}resource-loader.`);
@@ -137,9 +161,11 @@ function getGlobalDefaultExtensionModulePath(extensionId: (typeof globalDefaultE
 	const extensionFile = runningFromSource ? `${extensionId}.ts` : `${extensionId}.js`;
 	const packageDirIsSourceRootPath = join(packageDir, "core", "extensions", "builtin", extensionFile);
 	if (!runningFromSource && existsSync(packageDirIsSourceRootPath)) {
-		return packageDirIsSourceRootPath;
+		return canonicalizeGlobalDefaultExtensionModulePath(packageDirIsSourceRootPath);
 	}
-	return join(packageDir, sourceRoot, "core", "extensions", "builtin", extensionFile);
+	return canonicalizeGlobalDefaultExtensionModulePath(
+		join(packageDir, sourceRoot, "core", "extensions", "builtin", extensionFile),
+	);
 }
 
 function buildGlobalDefaultExtensionShim(modulePath: string): string {
@@ -192,6 +218,9 @@ function loadContextFileFromDir(dir: string): { path: string; content: string } 
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
 			try {
+				if (!statSync(filePath).isFile()) {
+					continue;
+				}
 				return {
 					path: filePath,
 					content: readFileSync(filePath, "utf-8"),
@@ -492,11 +521,16 @@ export class DefaultResourceLoader implements ResourceLoader {
 		}
 
 		// reload() preserves SettingsManager.projectTrusted and reloads settings for that trust state.
-		await this.settingsManager.reload();
+		const settingsAreFresh =
+			options?.settingsAlreadyReloadedFor === this.settingsManager && options?.resolveProjectTrust === undefined;
+		if (!settingsAreFresh) {
+			await this.settingsManager.reload();
+		}
 		const resolvedPaths = await this.packageManager.resolve();
 		const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
 			temporary: true,
 		});
+		time("packageResolve", "extensions");
 		const metadataByPath = new Map<string, PathMetadata>();
 
 		this.extensionSkillSourceInfos = new Map();
@@ -581,6 +615,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		this.lastSkillPaths = skillPaths;
 		this.updateSkillsFromPaths(skillPaths, metadataByPath);
+		time("skills", "extensions");
 		for (const p of this.additionalSkillPaths) {
 			if (isLocalPath(p)) {
 				const resolved = this.resolveResourcePath(p);
@@ -596,6 +631,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		this.lastPromptPaths = promptPaths;
 		this.updatePromptsFromPaths(promptPaths, metadataByPath);
+		time("prompts", "extensions");
 		for (const p of this.additionalPromptTemplatePaths) {
 			if (isLocalPath(p)) {
 				const resolved = this.resolveResourcePath(p);
@@ -615,6 +651,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		this.lastThemePaths = themePaths;
 		this.updateThemesFromPaths(themePaths, metadataByPath);
+		time("themes", "extensions");
 		for (const p of this.additionalThemePaths) {
 			const resolved = this.resolveResourcePath(p);
 			if (!existsSync(resolved) && !this.themeDiagnostics.some((d) => d.path === resolved)) {
@@ -632,6 +669,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
+		time("contextFiles", "extensions");
 
 		// SYSTEM.md / APPEND_SYSTEM.md file discovery was intentionally removed; the explicit
 		// options are the only static prompt source (see packages/coding-agent/changes.md).

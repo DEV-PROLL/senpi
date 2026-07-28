@@ -6,13 +6,17 @@ import { describe, expect, it } from "vitest";
 
 const protocolDir = join(process.cwd(), "src/modes/app-server/protocol");
 const generatedDir = join(protocolDir, "generated");
-const codexCheckoutDir = "/Users/yeongyu/local-workspaces/codex";
-const codexCheckoutGeneratedDir = join(codexCheckoutDir, "codex-rs/app-server-protocol/schema/typescript");
+const codexCheckoutDir = process.env.SENPI_CODEX_CHECKOUT;
+const codexCheckoutGeneratedDir =
+	codexCheckoutDir === undefined
+		? undefined
+		: join(codexCheckoutDir, "codex-rs/app-server-protocol/schema/typescript");
 const protocolVersionPath = join(protocolDir, "PROTOCOL_VERSION.txt");
 const generatorPath = join(process.cwd(), "scripts/generate-app-server-protocol.sh");
-const expectedSha = "0fb559f0f6e231a88ac02ea002d3ecd248e2b515";
-const expectedAuthorDate = "2026-07-18";
+const expectedSha = "9fc715c0861c956c894a91890b78dc05b304ba29";
+const expectedAuthorDate = "2026-07-22";
 const expectedVersion = `codex-git ${expectedSha} (${expectedAuthorDate})`;
+const hasCodexCheckout = codexCheckoutGeneratedDir !== undefined && existsSync(codexCheckoutGeneratedDir);
 
 function listFiles(dir: string): string[] {
 	return readdirSync(dir).flatMap((entry) => {
@@ -34,9 +38,13 @@ describe("app-server protocol pin", () => {
 		expect(version).toBe(expectedVersion);
 	});
 
-	it.skipIf(!existsSync(codexCheckoutGeneratedDir))("matches the pinned Codex checkout byte-for-byte", () => {
-		expect(gitOutput(["rev-parse", "HEAD"])).toBe(expectedSha);
-		expect(gitOutput(["show", "-s", "--format=%as", "HEAD"])).toBe(expectedAuthorDate);
+	it.skipIf(!hasCodexCheckout)("matches the pinned Codex checkout byte-for-byte", () => {
+		if (codexCheckoutDir === undefined || codexCheckoutGeneratedDir === undefined) {
+			throw new Error("SENPI_CODEX_CHECKOUT is required for the live protocol pin comparison");
+		}
+
+		expect(gitOutput(codexCheckoutDir, ["rev-parse", "HEAD"])).toBe(expectedSha);
+		expect(gitOutput(codexCheckoutDir, ["show", "-s", "--format=%as", "HEAD"])).toBe(expectedAuthorDate);
 
 		const actualFiles = relativeFiles(generatedDir).filter((path) => path !== "package.json");
 		const expectedFiles = relativeFiles(codexCheckoutGeneratedDir);
@@ -64,8 +72,8 @@ describe("app-server protocol pin", () => {
 	});
 });
 
-function gitOutput(args: readonly string[]): string {
-	const result = spawnSync("git", ["-C", codexCheckoutDir, ...args], { encoding: "utf8" });
+function gitOutput(checkoutDir: string, args: readonly string[]): string {
+	const result = spawnSync("git", ["-C", checkoutDir, ...args], { encoding: "utf8" });
 	expect(result.status).toBe(0);
 	return result.stdout.trim();
 }

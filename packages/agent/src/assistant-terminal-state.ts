@@ -1,0 +1,50 @@
+import { type AssistantMessage, type AssistantMessageEvent, isClassifierRefusal } from "@earendil-works/pi-ai";
+import type { AgentLoopConfig } from "./types.ts";
+
+const EMPTY_USAGE = {
+	input: 0,
+	output: 0,
+	cacheRead: 0,
+	cacheWrite: 0,
+	totalTokens: 0,
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} satisfies AssistantMessage["usage"];
+
+type TerminalAssistantMessageEvent = Extract<AssistantMessageEvent, { type: "done" | "error" }>;
+
+export function shouldTerminateAssistantTurn(message: AssistantMessage): boolean {
+	return message.stopReason === "error" || message.stopReason === "aborted" || isClassifierRefusal(message);
+}
+
+export function createTerminalFailureAssistantMessage(
+	model: AgentLoopConfig["model"],
+	reason: Extract<AssistantMessage["stopReason"], "aborted" | "error">,
+	error: unknown,
+	partialMessage: AssistantMessage | null,
+): AssistantMessage {
+	const errorMessage = error instanceof Error ? error.message : String(error);
+	return {
+		role: "assistant",
+		content: partialMessage?.content ?? [{ type: "text", text: "" }],
+		api: partialMessage?.api ?? model.api,
+		provider: partialMessage?.provider ?? model.provider,
+		model: partialMessage?.model ?? model.id,
+		responseModel: partialMessage?.responseModel,
+		responseId: partialMessage?.responseId,
+		diagnostics: partialMessage?.diagnostics,
+		usage: partialMessage?.usage ?? EMPTY_USAGE,
+		stopReason: reason,
+		errorMessage: errorMessage || (reason === "aborted" ? "Request was aborted" : "Error"),
+		timestamp: partialMessage?.timestamp ?? Date.now(),
+	};
+}
+
+export function normalizeTerminalAssistantMessage(
+	message: AssistantMessage,
+	event: TerminalAssistantMessageEvent,
+): AssistantMessage {
+	if (event.type === "done") return message;
+	const errorMessage = message.errorMessage ?? (event.reason === "aborted" ? "Request was aborted" : "Error");
+	if (message.stopReason === event.reason && message.errorMessage === errorMessage) return message;
+	return { ...message, stopReason: event.reason, errorMessage };
+}

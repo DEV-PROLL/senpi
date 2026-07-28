@@ -14,6 +14,11 @@ type AssistantUsage = {
 	cost: { total: number };
 };
 
+type FooterUsageEntry =
+	| { type: "message"; message: { role: "assistant" | "toolResult"; usage: AssistantUsage } }
+	| { type: "branch_summary"; usage: AssistantUsage }
+	| { type: "compaction"; usage: AssistantUsage };
+
 function createSession(options: {
 	sessionName: string;
 	modelId?: string;
@@ -21,20 +26,46 @@ function createSession(options: {
 	reasoning?: boolean;
 	thinkingLevel?: string;
 	usage?: AssistantUsage;
+	branchUsage?: AssistantUsage;
+	compactionUsage?: AssistantUsage;
+	toolUsage?: AssistantUsage;
 }): AgentSession {
 	const usage = options.usage;
-	const entries =
-		usage === undefined
-			? []
-			: [
-					{
-						type: "message",
-						message: {
-							role: "assistant",
-							usage,
-						},
-					},
-				];
+	const entries: FooterUsageEntry[] = [];
+
+	if (usage !== undefined) {
+		entries.push({
+			type: "message",
+			message: {
+				role: "assistant",
+				usage,
+			},
+		});
+	}
+
+	if (options.branchUsage !== undefined) {
+		entries.push({
+			type: "branch_summary",
+			usage: options.branchUsage,
+		});
+	}
+
+	if (options.compactionUsage !== undefined) {
+		entries.push({
+			type: "compaction",
+			usage: options.compactionUsage,
+		});
+	}
+
+	if (options.toolUsage !== undefined) {
+		entries.push({
+			type: "message",
+			message: {
+				role: "toolResult",
+				usage: options.toolUsage,
+			},
+		});
+	}
 
 	const session = {
 		state: {
@@ -58,16 +89,17 @@ function createSession(options: {
 					latestCacheHitRate: undefined as number | undefined,
 				};
 				for (const entry of entries) {
+					const usage = entry.type === "message" ? entry.message.usage : entry.usage;
+					totals.input += usage.input;
+					totals.output += usage.output;
+					totals.cacheRead += usage.cacheRead;
+					totals.cacheWrite += usage.cacheWrite;
+					totals.cost += usage.cost.total;
+
 					if (entry.type === "message" && entry.message.role === "assistant") {
-						totals.input += entry.message.usage.input;
-						totals.output += entry.message.usage.output;
-						totals.cacheRead += entry.message.usage.cacheRead;
-						totals.cacheWrite += entry.message.usage.cacheWrite;
-						totals.cost += entry.message.usage.cost.total;
-						const latestPromptTokens =
-							entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
+						const latestPromptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
 						totals.latestCacheHitRate =
-							latestPromptTokens > 0 ? (entry.message.usage.cacheRead / latestPromptTokens) * 100 : undefined;
+							latestPromptTokens > 0 ? (usage.cacheRead / latestPromptTokens) * 100 : undefined;
 					}
 				}
 				return totals;
@@ -149,6 +181,47 @@ describe("FooterComponent width handling", () => {
 		}
 	});
 
+	it("includes summary and tool result usage in the total cost", () => {
+		const session = createSession({
+			sessionName: "",
+			usage: {
+				input: 100,
+				output: 10,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: { total: 0.5 },
+			},
+			branchUsage: {
+				input: 20,
+				output: 5,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: { total: 0.25 },
+			},
+			compactionUsage: {
+				input: 5,
+				output: 2,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: { total: 0.125 },
+			},
+			toolUsage: {
+				input: 15,
+				output: 3,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: { total: 0.375 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const renderedFooter = footer
+			.render(120)
+			.map((line) => stripAnsi(line))
+			.join("\n");
+		expect(renderedFooter).toContain("$1.250");
+	});
+
 	it("shows the latest cache hit rate when cache usage is present", () => {
 		const session = createSession({
 			sessionName: "",
@@ -167,6 +240,9 @@ describe("FooterComponent width handling", () => {
 			.map((line) => stripAnsi(line))
 			.join("\n");
 		expect(renderedFooter).toContain("CH25.0%");
+		// The cache read/write totals segment was removed; only the hit rate remains.
+		expect(renderedFooter).not.toContain("cache 50/50");
+		expect(renderedFooter).not.toContain("cache ");
 	});
 
 	it("marks Kimi Coding costs as subscription estimates", () => {
@@ -190,5 +266,58 @@ describe("FooterComponent width handling", () => {
 			.map((line) => stripAnsi(line))
 			.join("\n");
 		expect(renderedFooter).toContain("$1.234 (sub)");
+	});
+
+	it("keeps the model label and context block visible at narrow widths", () => {
+		const width = 60;
+		const session = createSession({
+			sessionName: "deep-work-on-footer-layout",
+			modelId: "test-model",
+			reasoning: true,
+			thinkingLevel: "high",
+			usage: {
+				input: 12_345,
+				output: 6_789,
+				cacheRead: 50,
+				cacheWrite: 50,
+				cost: { total: 1.234 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(2));
+
+		const lines = footer.render(width);
+		const plain = lines.map((line) => stripAnsi(line)).join("\n");
+		for (const line of lines) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
+		expect(plain).toContain("test-model:high");
+		expect(plain).toContain("main");
+		expect(plain).toContain("(auto)");
+		expect(plain).toContain("…");
+	});
+
+	it("still renders the model label at very narrow widths", () => {
+		const width = 30;
+		const session = createSession({
+			sessionName: "deep-work-on-footer-layout",
+			modelId: "test-model",
+			reasoning: true,
+			thinkingLevel: "high",
+			usage: {
+				input: 12_345,
+				output: 6_789,
+				cacheRead: 50,
+				cacheWrite: 50,
+				cost: { total: 1.234 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(2));
+
+		const lines = footer.render(width);
+		const plain = lines.map((line) => stripAnsi(line)).join("\n");
+		for (const line of lines) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
+		expect(plain).toContain("test-model");
 	});
 });

@@ -1,10 +1,13 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { basename, dirname, relative, resolve, sep } from "node:path";
+import { bindToProviderScope } from "@earendil-works/pi-ai/node/provider-scope";
 import { CONFIG_DIR_NAME, getAgentDir } from "../../../../config.ts";
 import { resolvePath } from "../../../../utils/paths.ts";
 import { ModelConfig } from "../../../model-config.ts";
 import { type Settings, SettingsManager, wasSelfWrite } from "../../../settings-manager.ts";
 import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "../../types.ts";
+import { isLoadableExtensionEntry, isScannableExtensionDirectory } from "./extension-watch-scope.ts";
+import { excludeGeneratedExtensionShims } from "./generated-shim-filter.ts";
 import { type ConfigReloadLogger, createConfigReloadLogger } from "./log.ts";
 import {
 	CONFIG_WATCH_CHANGED,
@@ -20,6 +23,13 @@ import {
 	matchesConfigWatchFilter,
 } from "./protocol.ts";
 import {
+	excludeRoutineOnlySettingsChanges,
+	isSettingsPath,
+	joinConfigDir,
+	refreshSettingsContentSnapshots,
+	updateSettingsContentSnapshot,
+} from "./routine-settings.ts";
+import {
 	ConfigReloadWatchEngine,
 	createFsWatchEventSource,
 	type RealChange,
@@ -32,6 +42,15 @@ const BUILTIN_REGISTRATION_ID = "builtin";
 const DEFAULT_DEBOUNCE_MS = 200;
 const COMPACTION_RECHECK_MS = 250;
 const CONFIG_FILE_NAMES = ["settings.json", "models.json", "keybindings.json"] as const;
+
+/**
+ * The engine applies one predicate to both file gating and directory descent, so
+ * this must admit scannable directories in order to reach their entry files.
+ */
+const extensionWatchFilter =
+	(extensionsDir: string) =>
+	(relPath: string): boolean =>
+		isLoadableExtensionEntry(extensionsDir, relPath) || isScannableExtensionDirectory(extensionsDir, relPath);
 
 type ConfigReloadWatchSettings = {
 	readonly settings?: boolean;
@@ -81,11 +100,36 @@ type ReloadHandoff = {
 	readonly changes: readonly { readonly registrationId: string; readonly paths: readonly string[] }[];
 };
 
-/**
- * The builtin module is statically imported, so this survives replacement extension
- * factories during session.reload(). It closes the watcher-to-watcher race window.
- */
-let reloadHandoff: ReloadHandoff | undefined;
+/** Session-keyed handoffs survive replacement extension factories during reload. */
+export class ConfigReloadHandoffRegistry<T> {
+	readonly #handoffs = new Map<string, T>();
+
+	set(sessionHandle: string, handoff: T): void {
+		this.#handoffs.set(sessionHandle, handoff);
+	}
+
+	take(sessionHandle: string): T | undefined {
+		const handoff = this.#handoffs.get(sessionHandle);
+		this.#handoffs.delete(sessionHandle);
+		return handoff;
+	}
+
+	delete(sessionHandle: string): void {
+		this.#handoffs.delete(sessionHandle);
+	}
+}
+
+const reloadHandoffs = new ConfigReloadHandoffRegistry<ReloadHandoff>();
+
+function bindExternalCallback<TArgs extends unknown[], TResult>(
+	callback: (...args: TArgs) => TResult,
+): (...args: TArgs) => TResult {
+	try {
+		return bindToProviderScope(callback);
+	} catch {
+		return callback;
+	}
+}
 
 export interface ConfigReloadExtensionOptions {
 	readonly agentDir?: string;
@@ -103,10 +147,22 @@ export interface ConfigReloadExtensionOptions {
  * filesystem event source and agent directory.
  */
 export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExtensionOptions = {}): void {
+	const sessionOwned = (() => {
+		try {
+			bindToProviderScope(() => undefined);
+			return true;
+		} catch {
+			return false;
+		}
+	})();
+	const handoffKey = (ctx: ExtensionContext): string => (sessionOwned ? ctx.sessionManager.getSessionId() : "classic");
 	const agentDir = resolve(options.agentDir ?? getAgentDir());
 	const subscribe = options.subscribe ?? createFsWatchEventSource();
 	const logger = options.logger ?? createConfigReloadLogger(agentDir);
 	const registrations = new Map<string, ConfigWatchRegistration>();
+	const rejectedRegistrations = new Map<string, string>();
+	/** Last-seen settings.json contents per path; the diff base for routine-key classification. */
+	const settingsContents = new Map<string, string>();
 	const eventUnsubscribes: Array<() => void> = [];
 	const pending = new Map<string, PendingChange>();
 	let engine: ConfigReloadWatchEngine | undefined;
@@ -149,11 +205,22 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 
 	const handleRegistration = (payload: unknown): void => {
 		if (!isConfigWatchRegistration(payload)) return;
+		const fingerprint = registrationFingerprint(payload);
+		// A component may synchronously re-register from a CONFIG_WATCH_REJECTED
+		// listener (e.g. sticky-rejection recovery). Rejected registrations are
+		// never stored, so the identity guard below cannot break that recursion;
+		// ignoring an identical payload after one rejection does.
+		if (rejectedRegistrations.get(payload.id) === fingerprint) {
+			logger.debug("registration_rejection_suppressed", { registrationId: payload.id });
+			return;
+		}
 		const cwd = currentContext?.cwd ?? process.cwd();
 		if (registrationHasRestrictedTarget(payload, cwd, agentDir)) {
+			rejectedRegistrations.set(payload.id, fingerprint);
 			rejectRegistration(payload.id, ["Configuration watch target is restricted"]);
 			return;
 		}
+		rejectedRegistrations.delete(payload.id);
 
 		// A component may re-emit its unchanged registration when it receives the
 		// ready event from rebuildWatchers. Rebuilding for that same payload emits
@@ -169,6 +236,7 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 
 	const handleUnregistration = (payload: unknown): void => {
 		if (!isConfigWatchUnregistration(payload)) return;
+		rejectedRegistrations.delete(payload.id);
 		if (!registrations.delete(payload.id)) return;
 		pending.delete(payload.id);
 		logger.info("registration_removed", { id: payload.id });
@@ -179,34 +247,48 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 
 	const processChange = async (change: RealChange): Promise<void> => {
 		if (reloadInFlight || !currentContext) return;
-		const groups = groupChangedPaths(change.changedPaths, activeTargets);
+		// Suppression state (self-write consumption, routine-diff base) is per path,
+		// so it must be resolved before grouping: a path watched by several
+		// registrations would otherwise be classified once per group and reach the
+		// reload flow through the later group.
+		const watchedPaths = excludeSelfWrites(
+			change.changedPaths,
+			engine,
+			agentDir,
+			currentContext.cwd,
+			logger,
+			settingsContents,
+		);
+		const significantPaths = excludeRoutineOnlySettingsChanges(
+			watchedPaths,
+			settingsContents,
+			agentDir,
+			currentContext.cwd,
+			logger,
+		);
+		const configPaths = excludeGeneratedExtensionShims(significantPaths, agentDir);
+		for (const path of significantPaths) {
+			if (!configPaths.includes(path)) logger.debug("generated_shim_change_suppressed", { path });
+		}
+		const groups = groupChangedPaths(configPaths, activeTargets);
 		const rearmDirectoryWatch = change.created.some((path) =>
 			activeTargets.some((target) => target.rearmOnCreation === resolve(path)),
 		);
 		for (const [registrationId, paths] of groups) {
-			const watchedPaths = excludeSelfWrites(paths, engine, agentDir, currentContext.cwd, logger);
-			if (watchedPaths.length === 0) continue;
-
-			const errors = await validateChangedPaths(
-				registrationId,
-				watchedPaths,
-				registrations,
-				agentDir,
-				currentContext.cwd,
-			);
+			const errors = await validateChangedPaths(registrationId, paths, registrations, agentDir, currentContext.cwd);
 			if (errors.length > 0) {
-				rejectChange(currentContext, registrationId, watchedPaths, errors, logger, pi);
+				rejectChange(currentContext, registrationId, paths, errors, logger, pi);
 				continue;
 			}
 
-			addPending(pending, registrationId, watchedPaths);
+			addPending(pending, registrationId, paths);
 			const deferred = !canRequestReload(currentContext);
 			pi.events.emit(CONFIG_WATCH_CHANGED, {
 				registrationId,
-				paths: [...watchedPaths],
+				paths: [...paths],
 				deferred,
 			});
-			logger.info("change_detected", { registrationId, paths: watchedPaths, deferred });
+			logger.info("change_detected", { registrationId, paths, deferred });
 		}
 		if (rearmDirectoryWatch) rebuildWatchers(currentContext);
 		await flushPending();
@@ -245,11 +327,12 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 			debounceMs: settings.debounceMs,
 			clock: options.clock,
 			hashFile: options.hashFile,
-			onRealChange: enqueueChange,
-			onError: (error, path) => {
+			onRealChange: bindExternalCallback(enqueueChange),
+			onError: bindExternalCallback((error, path) => {
 				logger.error("watcher_error", { path, message: errorMessage(error) });
-			},
+			}),
 		});
+		refreshSettingsContentSnapshots(settingsContents, agentDir, ctx.cwd);
 		logger.info("watcher_started", { targetCount: activeTargets.length });
 		pi.events.emit(CONFIG_WATCH_READY, { enabled: true });
 	};
@@ -275,11 +358,11 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 		const paths = uniquePaths(changes.flatMap((change) => change.paths));
 		reloadInFlight = true;
 		tornDown = false;
-		reloadHandoff = {
+		reloadHandoffs.set(handoffKey(ctx), {
 			hashesAtRequest: engine?.getBaselineSnapshot() ?? new Map<string, string>(),
 			requestedAt: Date.now(),
 			changes,
-		};
+		});
 		ctx.ui.notify(`Hot-reloading: ${formatPaths(paths)}`, "info");
 		logger.info("reload_requested", { reason: "config changed", paths });
 
@@ -287,11 +370,11 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 			await ctx.requestReload();
 			if (!tornDown) {
 				reloadInFlight = false;
-				reloadHandoff = undefined;
+				reloadHandoffs.delete(handoffKey(ctx));
 			}
 		} catch (error) {
 			reloadInFlight = false;
-			reloadHandoff = undefined;
+			reloadHandoffs.delete(handoffKey(ctx));
 			logger.error("watcher_error", { path: "reload", message: errorMessage(error) });
 		}
 	};
@@ -306,9 +389,9 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 	};
 
 	const processReloadHandoff = async (event: SessionStartEvent, ctx: ExtensionContext): Promise<void> => {
-		if (event.reason !== "reload" || !reloadHandoff) return;
-		const handoff = reloadHandoff;
-		reloadHandoff = undefined;
+		if (event.reason !== "reload") return;
+		const handoff = reloadHandoffs.take(handoffKey(ctx));
+		if (!handoff) return;
 		const paths = uniquePaths(handoff.changes.flatMap((change) => change.paths));
 		for (const change of handoff.changes) {
 			pi.events.emit(CONFIG_WATCH_RELOADED, {
@@ -350,6 +433,7 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 		return { trusted: "undecided" };
 	});
 	pi.on("session_shutdown", (event) => {
+		const closingContext = currentContext;
 		tornDown = true;
 		started = false;
 		currentContext = undefined;
@@ -357,7 +441,7 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 		clearCompactionRecheck();
 		cleanupEventListeners();
 		pending.clear();
-		if (event.reason !== "reload") reloadHandoff = undefined;
+		if (event.reason !== "reload" && closingContext) reloadHandoffs.delete(handoffKey(closingContext));
 	});
 
 	function canRequestReload(ctx: ExtensionContext): boolean {
@@ -461,10 +545,15 @@ function buildWatchTargets(options: {
 	const addBuiltin = (id: string, target: WatchTargetInput, rearmOnCreation?: string): void => {
 		targets.push({ registrationId: BUILTIN_REGISTRATION_ID, target: { ...target, id }, rearmOnCreation });
 	};
-	const addBuiltinDirectory = (id: string, path: string): void => {
+	const addBuiltinDirectory = (id: string, path: string, filter?: (relPath: string) => boolean): void => {
 		const resourcePath = resolve(path);
 		if (isExistingDirectory(resourcePath)) {
-			addBuiltin(id, { kind: "dir-recursive", path: resourcePath });
+			addBuiltin(
+				id,
+				filter
+					? { kind: "dir-recursive", path: resourcePath, filter }
+					: { kind: "dir-recursive", path: resourcePath },
+			);
 			return;
 		}
 		const watchPath = nearestExistingDirectory(dirname(resourcePath));
@@ -495,7 +584,8 @@ function buildWatchTargets(options: {
 		addBuiltinDirectory("builtin-global-prompts", resolve(agentDir, "prompts"));
 	}
 	if (settings.watch.extensions) {
-		addBuiltinDirectory("builtin-global-extensions", resolve(agentDir, "extensions"));
+		const globalExtensionsDir = resolve(agentDir, "extensions");
+		addBuiltinDirectory("builtin-global-extensions", globalExtensionsDir, extensionWatchFilter(globalExtensionsDir));
 	}
 	if (settings.watch.skills) {
 		for (const [index, skillPath] of options.skillPaths.entries()) {
@@ -533,7 +623,12 @@ function buildWatchTargets(options: {
 				addBuiltinDirectory("builtin-project-skills", resolve(projectDir, "skills"));
 			}
 			if (settings.watch.extensions) {
-				addBuiltinDirectory("builtin-project-extensions", resolve(projectDir, "extensions"));
+				const projectExtensionsDir = resolve(projectDir, "extensions");
+				addBuiltinDirectory(
+					"builtin-project-extensions",
+					projectExtensionsDir,
+					extensionWatchFilter(projectExtensionsDir),
+				);
 			}
 		}
 	}
@@ -607,9 +702,11 @@ function externalTargetToWatchTarget(
 
 function literalFilterNames(filterGlobs: readonly string[] | undefined): string[] | undefined {
 	if (!filterGlobs) return undefined;
-	const literalNames = filterGlobs.filter(
-		(filterGlob) => !filterGlob.includes("*") && !filterGlob.includes("/") && !filterGlob.includes("\\\\"),
-	);
+	// A root-anchored glob names a literal path relative to the watch root, so
+	// strip the anchor before the separator check rejects it.
+	const literalNames = filterGlobs
+		.map((filterGlob) => (filterGlob.startsWith("/") ? filterGlob.slice(1) : filterGlob))
+		.filter((filterGlob) => !filterGlob.includes("*") && !filterGlob.includes("/") && !filterGlob.includes("\\\\"));
 	return literalNames.length > 0 ? literalNames : undefined;
 }
 
@@ -652,6 +749,7 @@ function excludeSelfWrites(
 	agentDir: string,
 	cwd: string,
 	logger: ConfigReloadLogger,
+	settingsContents: Map<string, string>,
 ): string[] {
 	const snapshot = engine?.getBaselineSnapshot();
 	return paths.filter((path) => {
@@ -659,6 +757,9 @@ function excludeSelfWrites(
 		const hash = snapshot?.get(path);
 		if (hash === undefined || !wasSelfWrite(path, hash)) return true;
 		logger.debug("self_write_suppressed", { path });
+		// Advance the routine-diff base so a later external change is not
+		// polluted by this session's own just-applied write.
+		updateSettingsContentSnapshot(settingsContents, path);
 		return false;
 	});
 }
@@ -734,6 +835,19 @@ function validateKeybindingsFile(path: string): string | undefined {
 	}
 }
 
+function registrationFingerprint(registration: ConfigWatchRegistration): string {
+	return JSON.stringify({
+		id: registration.id,
+		displayName: registration.displayName,
+		targets: registration.targets.map((target) => ({
+			path: target.path,
+			kind: target.kind,
+			filterGlobs: target.filterGlobs ?? null,
+		})),
+		hasValidate: registration.validate !== undefined,
+	});
+}
+
 function registrationHasRestrictedTarget(
 	registration: ConfigWatchRegistration,
 	cwd: string,
@@ -776,17 +890,6 @@ function compareSnapshots(previous: ReadonlyMap<string, string>, next: ReadonlyM
 
 function uniquePaths(paths: readonly string[]): string[] {
 	return [...new Set(paths)].sort();
-}
-
-function joinConfigDir(cwd: string): string {
-	return resolve(cwd, CONFIG_DIR_NAME);
-}
-
-function isSettingsPath(path: string, agentDir: string, cwd: string): boolean {
-	return (
-		resolve(path) === resolve(agentDir, "settings.json") ||
-		resolve(path) === resolve(joinConfigDir(cwd), "settings.json")
-	);
 }
 
 function isWithin(path: string, root: string): boolean {

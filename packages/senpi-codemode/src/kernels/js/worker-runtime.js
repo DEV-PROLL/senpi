@@ -50,6 +50,7 @@ export class JsWorkerRuntime {
 		globalThis.read = async (path, options, ...rest) => await this.#read(path, helperOptions("read", options, rest));
 		globalThis.write = async (path, content) => await this.#write(path, content);
 		globalThis.output = async (...args) => await this.#output(args);
+		globalThis.tool_schema = async name => await this.#toolSchema(name);
 		globalThis.agent = async (prompt, options, ...rest) => await this.#agent(prompt, options, rest);
 		globalThis.parallel = async thunks => await this.#parallel(thunks);
 		globalThis.pipeline = async (items, ...stages) => await this.#pipeline(items, stages);
@@ -63,6 +64,7 @@ export class JsWorkerRuntime {
 				},
 			},
 		);
+		globalThis.tools = globalThis.tool;
 		const originalLog = console.log.bind(console);
 		const originalError = console.error.bind(console);
 		const originalStdoutWrite = process.stdout.write;
@@ -247,6 +249,11 @@ export class JsWorkerRuntime {
 			if (details[key] !== undefined) node[key] = details[key];
 		}
 		return node;
+	}
+
+	async #toolSchema(name) {
+		const args = name === undefined || name === null ? {} : { name: String(name) };
+		return await this.#callTool(reservedTool("__senpi_reserved_schema_tool__", "tool_schema"), args);
 	}
 
 	async #callTool(toolName, args) {

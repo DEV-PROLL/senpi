@@ -5,8 +5,8 @@
  * exactly one AgentSession runtime and speaks the JSONL RPC protocol over an
  * injected output sink and a caller-driven line feed. It knows nothing about
  * `process.stdout`, `process.stdin`, or process signals — those belong to the
- * host (classic single-connection stdio in `rpc-mode.ts`, or one socket
- * connection in the neo daemon).
+ * host (classic single-connection stdio in `rpc-mode.ts` or another transport
+ * adapter).
  *
  * Behaviour is byte-for-byte identical to the original `runRpcMode` command
  * loop: the same responses, the same event stream, the same extension-UI
@@ -19,12 +19,23 @@ import * as crypto from "node:crypto";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
+import {
+	emitProviderAccountsChanged,
+	subscribeProviderAccountEvents,
+} from "../../core/extensions/builtin/claude-agent-sdk/account-events.ts";
+import {
+	CLAUDE_AGENT_SDK_PROVIDER_ID,
+	getProviderAccounts,
+	pinProviderAccount,
+	removeProviderAccount,
+} from "../../core/extensions/builtin/claude-agent-sdk/account-management.ts";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
+import { getSupportedThinkingLevels } from "../../core/thinking-levels.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
 import { buildCustomUnsupportedRequest, DEFAULT_CUSTOM_EXTENSION_LABEL } from "./custom-capability.ts";
 import { createRpcEventOutputBuffer } from "./event-output-buffer.ts";
@@ -37,17 +48,24 @@ import type {
 	RpcSessionState,
 	RpcSlashCommand,
 } from "./rpc-types.ts";
+import { SessionExtensionUiRequests } from "./session-extension-ui-requests.ts";
 
 /** Additive per-connection options. Absent = classic default (byte-identical). */
 export interface RpcConnectionOptions {
 	/** Client capability flags from the handshake (e.g. custom_unsupported opt-in). */
 	capabilities?: readonly string[];
+	/** Called instead of requesting process shutdown for a session-owned binding. */
+	shutdownHandler?: () => void;
+	/** Session registries own runtime disposal themselves. */
+	disposeRuntime?: boolean;
+	/** Multi-session routing handle. Absent preserves classic wire output exactly. */
+	sessionId?: string;
 }
 
 /**
  * The output side of a connection. `writeRaw` receives already-serialized JSONL
  * text (LF-terminated). `waitForBackpressure` lets the host apply flow control
- * (stdout drain in classic mode, socket `drain` in the daemon).
+ * (stdout drain in classic mode, or the transport's own `drain` signal).
  */
 export interface RpcConnectionSink {
 	writeRaw(chunk: string): void;
@@ -84,18 +102,35 @@ export function createRpcConnectionHandler(
 	options: RpcConnectionOptions = {},
 ): RpcConnectionHandler {
 	const clientCapabilities = options.capabilities;
+	const routingSessionId = options.sessionId;
 	let session = runtimeHost.session;
 	let unsubscribe: (() => void) | undefined;
 	let unsubscribeBackpressure: (() => void) | undefined;
 	const eventOutput = createRpcEventOutputBuffer(sink.writeRaw);
 
+	const tagSessionRecord = <T extends object>(value: T): T | (T & { sessionId: string }) =>
+		routingSessionId === undefined ? value : { ...value, sessionId: routingSessionId };
+
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
-		eventOutput.writeImmediate(obj);
+		eventOutput.writeImmediate(tagSessionRecord(obj));
 	};
 
 	const outputEvent = (event: object) => {
-		eventOutput.enqueueEvent(event);
+		eventOutput.enqueueEvent(tagSessionRecord(event));
 	};
+	const unsubscribeProviderAccountEvents = subscribeProviderAccountEvents((event) => {
+		if (event.type === "accounts_changed") {
+			outputEvent({ type: "auth_accounts_changed", provider: event.provider });
+			return;
+		}
+		outputEvent({
+			type: "account_failover",
+			provider: event.provider,
+			from: event.from,
+			to: event.to,
+			reason: event.reason,
+		});
+	});
 
 	const waitForRpcBackpressure = async (): Promise<void> => {
 		eventOutput.flushEvents();
@@ -118,10 +153,7 @@ export function createRpcConnectionHandler(
 	};
 
 	// Pending extension UI requests waiting for response
-	const pendingExtensionRequests = new Map<
-		string,
-		{ resolve: (value: RpcExtensionUIResponse) => void; reject: (error: Error) => void }
-	>();
+	const pendingExtensionRequests = new SessionExtensionUiRequests();
 
 	let shutdownRequested = false;
 
@@ -274,7 +306,7 @@ export function createRpcConnectionHandler(
 			// undefined synchronously with NO wire message — byte-identical to the
 			// original behavior. ONLY when the client advertised the
 			// "custom_unsupported" capability do we emit an additive notice request
-			// (so neo can render a "requires the classic TUI" dialog) before
+			// so an opt-in client can render a "requires the classic TUI" dialog before
 			// returning undefined. The name is best-effort: ctx.ui.custom carries no
 			// extension identity, so a generic label is used.
 			const request = buildCustomUnsupportedRequest(clientCapabilities, DEFAULT_CUSTOM_EXTENSION_LABEL);
@@ -397,7 +429,11 @@ export function createRpcConnectionHandler(
 				},
 			},
 			shutdownHandler: () => {
-				shutdownRequested = true;
+				if (options.shutdownHandler) {
+					options.shutdownHandler();
+				} else {
+					shutdownRequested = true;
+				}
 			},
 			onError: (err) => {
 				output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
@@ -421,9 +457,9 @@ export function createRpcConnectionHandler(
 	 * URL-based happy path is surfaced over RPC: onAuth emits an auth_login_url
 	 * event; success/failure/cancel emit a single auth_login_end event. Callbacks
 	 * that need interactive mid-flow input (onPrompt/onSelect/onManualCodeInput)
-	 * are not answerable in the event-only model, so they reject cleanly — the
-	 * neo client uses the browser/callback-server completion path. Secrets are
-	 * never emitted: only the provider id, the auth URL, and a success flag (plus a
+	 * are not answerable in the event-only model, so they reject cleanly. Clients
+	 * use the browser/callback-server completion path. Secrets are never emitted:
+	 * only the provider id, the auth URL, and a success flag (plus a
 	 * non-secret error message) cross the wire.
 	 */
 	const startLogin = async (provider: string): Promise<void> => {
@@ -450,6 +486,7 @@ export function createRpcConnectionHandler(
 				signal: controller.signal,
 			});
 			session.modelRegistry.refresh();
+			if (provider === CLAUDE_AGENT_SDK_PROVIDER_ID) emitProviderAccountsChanged(provider);
 			outputEvent({ type: "auth_login_end", provider, success: true });
 		} catch (loginError: unknown) {
 			const message = loginError instanceof Error ? loginError.message : String(loginError);
@@ -466,11 +503,29 @@ export function createRpcConnectionHandler(
 		const id = command.id;
 
 		switch (command.type) {
+			case "get_protocol_info":
+				return {
+					id,
+					type: "response",
+					command: "get_protocol_info",
+					success: true,
+					data: { protocolVersion: 1, capabilities: ["multi_session"], mode: "classic" },
+				};
+			case "open_session":
+				return error(id, "open_session", "multi_session_disabled");
+
 			// =================================================================
 			// Prompting
 			// =================================================================
 
 			case "prompt": {
+				if (command.thinkingLevel !== undefined && session.isStreaming && command.streamingBehavior !== undefined) {
+					return error(
+						id,
+						"prompt",
+						"Cannot set thinkingLevel on a queued prompt; set it after the current turn completes.",
+					);
+				}
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
 				let preflightSucceeded = false;
@@ -478,6 +533,7 @@ export function createRpcConnectionHandler(
 					.prompt(command.message, {
 						images: command.images,
 						streamingBehavior: command.streamingBehavior,
+						thinkingLevel: command.thinkingLevel,
 						source: "rpc",
 						preflightResult: (didSucceed) => {
 							if (didSucceed) {
@@ -564,7 +620,12 @@ export function createRpcConnectionHandler(
 
 			case "get_available_models": {
 				const models = await session.modelRegistry.getAvailable();
-				return success(id, "get_available_models", { models });
+				return success(id, "get_available_models", {
+					models: models.map((model) => ({
+						...model,
+						supportedThinkingLevels: getSupportedThinkingLevels(model),
+					})),
+				});
 			}
 
 			// =================================================================
@@ -572,7 +633,18 @@ export function createRpcConnectionHandler(
 			// =================================================================
 
 			case "set_thinking_level": {
-				session.setThinkingLevel(command.level);
+				if (command.scope === "turn") {
+					session.setSessionThinkingLevel(command.level);
+					if (session.thinkingLevel !== command.level) {
+						return error(
+							id,
+							"set_thinking_level",
+							`Thinking level ${command.level} is not supported by the active model.`,
+						);
+					}
+				} else {
+					session.setThinkingLevel(command.level);
+				}
 				return success(id, "set_thinking_level");
 			}
 
@@ -583,6 +655,11 @@ export function createRpcConnectionHandler(
 				}
 				return success(id, "cycle_thinking_level", { level });
 			}
+
+			case "get_available_thinking_levels":
+				return success(id, "get_available_thinking_levels", {
+					levels: session.getAvailableThinkingLevels(),
+				});
 
 			// =================================================================
 			// Queue Modes
@@ -810,6 +887,21 @@ export function createRpcConnectionHandler(
 				return success(id, "logout");
 			}
 
+			case "get_provider_accounts": {
+				const accounts = getProviderAccounts(session.modelRegistry.authStorage, command.provider);
+				return success(id, "get_provider_accounts", { accounts });
+			}
+
+			case "account_pin": {
+				await pinProviderAccount(session.modelRegistry.authStorage, command.provider, command.name);
+				return success(id, "account_pin");
+			}
+
+			case "account_remove": {
+				await removeProviderAccount(session.modelRegistry.authStorage, command.provider, command.name);
+				return success(id, "account_remove");
+			}
+
 			default: {
 				const unknownCommand = command as { type: string };
 				return error(id, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
@@ -841,10 +933,10 @@ export function createRpcConnectionHandler(
 			parsed.type === "extension_ui_response"
 		) {
 			const response = parsed as RpcExtensionUIResponse;
-			const pending = pendingExtensionRequests.get(response.id);
-			if (pending) {
-				pendingExtensionRequests.delete(response.id);
-				pending.resolve(response);
+			if (!pendingExtensionRequests.resolve(response) && routingSessionId !== undefined) {
+				// This binding owns exactly one session's request map. A response not
+				// requested here is a routed protocol error, never a cross-session match.
+				output(error(undefined, "extension_ui_response", "unknown_extension_ui_request"));
 			}
 			return;
 		}
@@ -869,11 +961,15 @@ export function createRpcConnectionHandler(
 	};
 
 	const dispose = async (): Promise<void> => {
+		pendingExtensionRequests.close();
+		unsubscribeProviderAccountEvents();
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
 		unsubscribe = undefined;
 		unsubscribeBackpressure = undefined;
-		await runtimeHost.dispose();
+		if (options.disposeRuntime !== false) {
+			await runtimeHost.dispose();
+		}
 	};
 
 	// Perform the initial bind synchronously-scheduled so the handler is ready
