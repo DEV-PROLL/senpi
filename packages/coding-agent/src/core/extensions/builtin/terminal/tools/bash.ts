@@ -11,6 +11,7 @@ import {
 	TERMINAL_BASH_TOOL,
 } from "../shared.ts";
 import { errorResult, type TerminalToolContext, type TerminalToolResult, textResult } from "./context.ts";
+import { createForegroundDetachGate } from "./foreground-detach.ts";
 import { describeExit, spawnCommandSession } from "./spawn.ts";
 
 export const ptyBashSchema = Type.Object({
@@ -171,6 +172,46 @@ function raceExitWithKillGrace(
 	});
 }
 
+function resolveAutoDetachDelayMs(ctx: TerminalToolContext, input: PtyBashInput): number | undefined {
+	if (ctx.timeoutAction === "kill") return undefined;
+	const budgetSeconds = ctx.getSessionContext?.()?.getPromptCacheSafeWaitSeconds?.();
+	if (budgetSeconds === undefined || !Number.isFinite(budgetSeconds)) return undefined;
+	const timeoutSeconds = input.timeout !== undefined && Number.isFinite(input.timeout) ? input.timeout : Infinity;
+	if (timeoutSeconds <= budgetSeconds) return undefined;
+	return Math.max(0, Math.trunc(budgetSeconds * 1000));
+}
+
+function scheduleDetachedSweep(
+	ctx: TerminalToolContext,
+	id: string,
+	runtime: TerminalRuntimeSession,
+	timeoutMs: number | undefined,
+	startedAt: number,
+): void {
+	if (timeoutMs === undefined) return;
+	const deadlineMs = timeoutMs + KILLED_SESSION_EXIT_GRACE_MS;
+	if (!Number.isFinite(deadlineMs) || deadlineMs > MAX_TIMEOUT_MS || runtime.exited) return;
+
+	const remainingMs = Math.max(0, deadlineMs - (Date.now() - startedAt));
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let unsubscribeExit: (() => void) | undefined;
+	const clearSweep = () => {
+		if (timer !== undefined) clearTimeout(timer);
+		timer = undefined;
+		unsubscribeExit?.();
+		unsubscribeExit = undefined;
+	};
+	unsubscribeExit = runtime.session.onExit(clearSweep);
+	if (runtime.exited) {
+		clearSweep();
+		return;
+	}
+	timer = setTimeout(() => {
+		clearSweep();
+		if (!runtime.exited) void ctx.manager.stop(id).catch(() => {});
+	}, remainingMs);
+}
+
 async function runForeground(
 	ctx: TerminalToolContext,
 	input: PtyBashInput,
@@ -201,22 +242,76 @@ async function runForeground(
 	onUpdate?.({ content: [], details: undefined });
 	const unsubscribeOutput = onUpdate ? runtime.onOutput(() => updateEmitter?.schedule()) : undefined;
 
-	// Interrupt means "stop now": SIGKILL the whole process group in one shot.
-	// kill() is one-shot idempotent, so a gentle SIGTERM first would block any
-	// escalation, and a SIGTERM-ignoring command would pin the agent forever.
-	const onAbort = () => runtime.session.kill("SIGKILL");
-	if (signal) {
-		if (signal.aborted) onAbort();
-		else signal.addEventListener("abort", onAbort, { once: true });
+	const detachDelayMs = resolveAutoDetachDelayMs(ctx, input);
+	let outcome: ForegroundWaitOutcome | "detached";
+	if (detachDelayMs === undefined) {
+		// Interrupt means "stop now": SIGKILL the whole process group in one shot.
+		// kill() is one-shot idempotent, so a gentle SIGTERM first would block any
+		// escalation, and a SIGTERM-ignoring command would pin the agent forever.
+		const onAbort = () => runtime.session.kill("SIGKILL");
+		if (signal) {
+			if (signal.aborted) onAbort();
+			else signal.addEventListener("abort", onAbort, { once: true });
+		}
+		try {
+			outcome = await raceExitWithKillGrace(runtime, signal, timeoutMs);
+		} finally {
+			signal?.removeEventListener("abort", onAbort);
+			unsubscribeOutput?.();
+			updateEmitter?.flush();
+			updateEmitter?.dispose();
+		}
+	} else {
+		const abortGate = new AbortController();
+		const onAbort = () => {
+			runtime.session.kill("SIGKILL");
+			abortGate.abort();
+		};
+		if (signal) {
+			if (signal.aborted) onAbort();
+			else signal.addEventListener("abort", onAbort, { once: true });
+		}
+		const detachGate = createForegroundDetachGate({
+			runtime,
+			signal,
+			delayMs: detachDelayMs,
+			removeAbortListener: () => signal?.removeEventListener("abort", onAbort),
+		});
+		try {
+			outcome = await Promise.race([
+				raceExitWithKillGrace(runtime, abortGate.signal, timeoutMs),
+				detachGate.detached.then(() => "detached" as const),
+			]);
+		} finally {
+			detachGate.cancel();
+			signal?.removeEventListener("abort", onAbort);
+			unsubscribeOutput?.();
+			updateEmitter?.flush();
+			updateEmitter?.dispose();
+		}
 	}
-	let outcome: ForegroundWaitOutcome;
-	try {
-		outcome = await raceExitWithKillGrace(runtime, signal, timeoutMs);
-	} finally {
-		signal?.removeEventListener("abort", onAbort);
-		unsubscribeOutput?.();
-		updateEmitter?.flush();
-		updateEmitter?.dispose();
+
+	if (outcome === "detached") {
+		scheduleDetachedSweep(ctx, id, runtime, timeoutMs, startedAt);
+		if (ctx.onBackgroundExit) runtime.session.onExit(() => ctx.onBackgroundExit?.(id, runtime));
+		const delta = runtime.readDelta();
+		const partialOutput = formatTerminalToolOutput(delta.text).text || "(no output yet)";
+		const timeoutNote =
+			input.timeout !== undefined && Number.isFinite(input.timeout)
+				? `not killed; the original ${input.timeout}s timeout still applies`
+				: "not killed; it will run until exit or kill_bash";
+		return textResult(
+			`Command is still running; auto-detached to background with ID: ${id} (${timeoutNote}).\n\nPartial output:\n${partialOutput}\n\nContinue other work; completion will be reported automatically with exit status and output tail. Use bash_output({ bash_id: \"${id}\" }) only to peek at new output. monitor cannot attach to this session; use it for future event-driven launches. Use kill_bash({ bash_id: \"${id}\" }) to stop this session.`,
+			{
+				details: {
+					bash_id: id,
+					background: true,
+					auto_detached: true,
+					status: "running",
+					...(delta.droppedChars > 0 ? { droppedChars: delta.droppedChars } : {}),
+				},
+			},
+		);
 	}
 
 	if (outcome !== "exited") {
