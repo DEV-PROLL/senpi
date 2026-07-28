@@ -7,6 +7,21 @@
 - Details for the interactive hand-off live in `src/modes/interactive/changes.md` (same date).
 - Coverage: `test/suite/regressions/0000-editor-paste-marker-transfer.test.ts` drives the real `setCustomEditorComponent` (prototype + fakeThis pattern) with real tui editors: registry transfer to a paste-aware editor, expanded-text fallback for a plain `EditorComponent`, restore to the default editor, full plain-editor round-trip, and the same-instance no-op.
 
+## Multi-session RPC host initializes the theme before serving sessions (2026-07-28)
+
+### What changed
+
+- `main.ts`: the `--mode rpc --multi-session` branch now calls `initTheme(startupSettingsManager.getTheme(), false)` immediately before `runMultiSessionHost(...)`. The host returns `Promise<never>`, so the pre-existing `initTheme()` call further down `main()` is unreachable on this path and the theme proxy stayed uninitialized for the whole host lifetime.
+- Regression: `test/suite/regressions/0000-multi-session-theme-init.test.ts` spawns the real CLI in multi-session mode with a global extension that touches `theme` at load time and opens a session; pre-fix the extension load crashes with "Theme not initialized. Call initTheme() first." (surfaced by embedders such as T3 Code as transcript errors), post-fix the probe loads and the transcript stays clean.
+
+### Why
+
+- Extensions load per `open_session` inside the multi-session host, and any extension (or render helper) that reads the `theme` proxy crashed the session with "Theme not initialized". An extension cannot fix this ordering itself: the theme must be initialized by the host bootstrap before extension code runs, so this is a core `main.ts` fix.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one additive call (plus comment) inside the multi-session dispatch branch in `main.ts`; upstream edits to that branch will conflict trivially.
+
 ## Experimental `--grok-neo` mode: env-gated grok chrome for the interactive loop (2026-07-26)
 
 ### What changed

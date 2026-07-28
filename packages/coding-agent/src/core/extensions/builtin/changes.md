@@ -1,5 +1,17 @@
 # Builtin extensions changes
 
+## bash-timeout: beyond-max routing to run_in_background + monitor (2026-07-28)
+
+- `bash-timeout/timeout.ts` `buildBashTimeoutPrompt()`: the beyond-max bullet no longer teaches
+  "run them in the background via tmux or a similar mechanism" — it now routes to
+  `run_in_background: true` with the decisive output watched via `monitor`. The old advice
+  directly contradicted TERMINAL_PROMPT_SECTION ("do NOT use tmux"), which is appended to the
+  same system prompt immediately after this section (builtin #11 → #12), and contradictions
+  destabilize instruction following more than missing detail.
+- `test/suite/bash-timeout-extension.test.ts`: the "references tmux as the escape hatch" pin is
+  replaced by the new contract (run_in_background + monitor present, tmux absent).
+- Expected merge conflict zones: LOW — fork-owned `timeout.ts` prompt string and its test.
+
 ## Remove the /sessions session-observer HUD (2026-07-26)
 
 - Deleted the `session-observer/` builtin (11 files: `index`, `loader`, `overlay`, `overlay-format`, `scanner`, `text`, `transcript`, `transcript-entries`, `transcript-format`, `types`) and its three vitest suites (`session-observer-picker`, `session-observer-overlay`, `session-observer-scanner`).

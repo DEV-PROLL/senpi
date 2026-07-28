@@ -285,7 +285,7 @@ export function createPtyBashTool(ctx: TerminalToolContext) {
 		name: TERMINAL_BASH_TOOL,
 		label: "bash",
 		description:
-			"Execute a shell command in a persistent PTY-backed session. Set run_in_background:true for long-lived or interactive sessions; steer them with bash_input, snapshot with bash_output, tear down with kill_bash. Foreground timeout is a kill deadline in seconds.",
+			"Execute a shell command in a persistent PTY-backed session. Set run_in_background:true for long-lived or interactive sessions; steer them with bash_input, snapshot with bash_output, tear down with kill_bash. To wait on observable state (a build finishing, a server coming up, a log line), never run sleep or poll loops — subscribe with the monitor tool instead. Foreground timeout is a kill deadline in seconds.",
 		promptSnippet: "Run shell commands; run_in_background:true for long-lived/interactive PTY sessions",
 		promptGuidelines: ["Inspect PI_* environment variables for current model and session details."],
 		parameters: ptyBashSchema,
