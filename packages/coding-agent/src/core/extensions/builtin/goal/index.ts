@@ -80,6 +80,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		// Resuming a blocked goal here, instead of deferring to agent_start via a sticky
 		// flag, means a rejected run cannot leak a stale resume signal to a later
 		// continuation-style turn that starts the agent without a preceding user prompt.
+		monitorContinuation.noteUserPrompt();
 		const goal = await readGoal(goalStoreRef(ctx));
 		if (goal?.status === "blocked") {
 			const resumed = await updateGoal(goalStoreRef(ctx), { status: "active" }, "user");

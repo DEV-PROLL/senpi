@@ -68,7 +68,10 @@ export class EvalDetachedCellManager {
 
 	create(cellId: string, input: EvalToolInput): ManagedCell {
 		const existing = this.#cells.get(cellId);
-		if (existing !== undefined) throw new Error(`Eval cell ${cellId} is already managed`);
+		if (existing !== undefined) {
+			if (existing.state === "running" || existing.state === "detached") throw activeCellReuseError(existing);
+			this.#cells.delete(cellId);
+		}
 		const spillPath =
 			this.#artifactsDir === undefined
 				? undefined
@@ -230,6 +233,12 @@ export class EvalDetachedCellManager {
 			stateRetained: cell.stateRetained,
 		};
 	}
+}
+
+function activeCellReuseError(cell: ManagedCell): Error {
+	return new Error(
+		`Eval cell ${cell.cellId} from a previous call is still ${cell.state} in the ${cell.input.language} kernel. Use eval({ action: "peek", cell_id: "${cell.cellId}" }) to read it or eval({ action: "stop", cell_id: "${cell.cellId}" }) to end it before its id can be reused.`,
+	);
 }
 
 function allowsTransition(from: EvalDetachedCellState, to: EvalDetachedCellState): boolean {
