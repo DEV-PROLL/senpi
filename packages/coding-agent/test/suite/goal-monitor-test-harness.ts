@@ -96,6 +96,7 @@ export async function makeGoalContext(
 			getSessionFile: () => join(dir, "session.jsonl"),
 			getSessionDir: () => dir,
 			getSessionId: () => threadId,
+			getBranch: () => [],
 		},
 	} as unknown as ExtensionContext;
 }

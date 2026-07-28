@@ -66,7 +66,10 @@ function buildToolContext(pi: ExtensionAPI, state: TerminalExtensionState): Term
 			state.monitors ??= new MonitorRegistry((event) => state.monitorNotifier?.notifyEvent(event), {
 				onChange: (snapshot) => {
 					state.ctx?.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot));
-					pi.events.emit(TERMINAL_MONITOR_STATE_EVENT, { activeCount: snapshot.length });
+					const events = pi.events;
+					if (events !== undefined) {
+						events.emit(TERMINAL_MONITOR_STATE_EVENT, { activeCount: snapshot.length });
+					}
 				},
 			});
 			return state.monitors;
