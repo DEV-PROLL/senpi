@@ -41,6 +41,7 @@ describe("SettingsManager retry fallback settings", () => {
 			modelFallback: true,
 			chains: {},
 			revertPolicy: "cooldown-expiry",
+			billingErrorPolicy: "fallback",
 		});
 
 		writeFileSync(
@@ -50,6 +51,7 @@ describe("SettingsManager retry fallback settings", () => {
 					modelFallback: "enabled",
 					fallbackChains: "not a chain map",
 					fallbackRevertPolicy: "later",
+					billingErrorPolicy: "permanent",
 				},
 			}),
 		);
@@ -58,6 +60,7 @@ describe("SettingsManager retry fallback settings", () => {
 			modelFallback: true,
 			chains: {},
 			revertPolicy: "cooldown-expiry",
+			billingErrorPolicy: "fallback",
 		});
 	});
 
@@ -66,6 +69,7 @@ describe("SettingsManager retry fallback settings", () => {
 		const manager = SettingsManager.create(projectDir, agentDir);
 		manager.setModelFallbackEnabled(false);
 		manager.setFallbackRevertPolicy("never");
+		manager.setBillingErrorPolicy("swap");
 		manager.setFallbackChain("anthropic/claude-fable-5", ["ccapi/kimi-k3:max"]);
 		await manager.flush();
 
@@ -74,6 +78,7 @@ describe("SettingsManager retry fallback settings", () => {
 			modelFallback: false,
 			chains: { "anthropic/claude-fable-5": ["ccapi/kimi-k3:max"] },
 			revertPolicy: "never",
+			billingErrorPolicy: "swap",
 		});
 
 		reloaded.removeFallbackChain("missing/model");
@@ -94,6 +99,7 @@ describe("SettingsManager retry fallback settings", () => {
 					modelFallback: false,
 					fallbackChains: { "anthropic/primary": ["ccapi/global"] },
 					fallbackRevertPolicy: "never",
+					billingErrorPolicy: "swap",
 				},
 			}),
 		);
@@ -107,6 +113,9 @@ describe("SettingsManager retry fallback settings", () => {
 			modelFallback: false,
 			chains: { "anthropic/project": ["ccapi/project"] },
 			revertPolicy: "never",
+			// Project retry settings replace scalars only when present; an unset
+			// project billingErrorPolicy inherits the global "swap".
+			billingErrorPolicy: "swap",
 		});
 		expect(readFileSync(join(projectSettingsDir, "settings.json"), "utf-8")).toContain("anthropic/project");
 	});
