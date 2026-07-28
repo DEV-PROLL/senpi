@@ -38,22 +38,22 @@ function createFooterData(omoNative: boolean): ReadonlyFooterDataProvider {
 	};
 }
 
-describe("FooterComponent (OmO Native) indicator", () => {
+describe("FooterComponent (🏴‍☠️ OmO Native) indicator", () => {
 	beforeAll(() => {
 		initTheme(undefined, false);
 	});
 
-	it("prepends (OmO Native) as the leftmost segment when isOmoNative is true", () => {
+	it("prepends (🏴‍☠️ OmO Native) as the leftmost segment when isOmoNative is true", () => {
 		const footer = new FooterComponent(createSession(), createFooterData(true));
 		const lines = footer.render(120);
 		const firstLine = lines[0] ?? "";
-		expect(stripAnsi(firstLine).startsWith("(OmO Native)")).toBe(true);
+		expect(stripAnsi(firstLine).startsWith("(🏴‍☠️ OmO Native)")).toBe(true);
 	});
 
-	it("omits (OmO Native) when isOmoNative is false", () => {
+	it("omits (🏴‍☠️ OmO Native) when isOmoNative is false", () => {
 		const footer = new FooterComponent(createSession(), createFooterData(false));
 		const lines = footer.render(120);
 		const firstLine = lines[0] ?? "";
-		expect(stripAnsi(firstLine).includes("(OmO Native)")).toBe(false);
+		expect(stripAnsi(firstLine).includes("(🏴‍☠️ OmO Native)")).toBe(false);
 	});
 });

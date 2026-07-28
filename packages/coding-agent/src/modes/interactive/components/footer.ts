@@ -143,7 +143,7 @@ export class FooterComponent implements Component {
 		const sessionName = this.session.sessionManager.getSessionName();
 
 		const omoNativeBadge: FooterSegment | undefined = this.footerData.isOmoNative()
-			? { plain: "(OmO Native)", colored: theme.fg("success", "(OmO Native)") }
+			? { plain: "(🏴‍☠️ OmO Native)", colored: theme.fg("success", "(🏴‍☠️ OmO Native)") }
 			: undefined;
 
 		const anchor: [FooterSegment, ...FooterSegment[]] = [{ plain: pwdRaw, colored: theme.fg("accent", pwdRaw) }];
