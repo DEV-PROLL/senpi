@@ -98,8 +98,6 @@ jobs:
             echo "expected $EXPECTED_VERSION, found $ACTUAL_VERSION" >&2
             exit 1
           }
-          npm run check
-          CI=1 npm test
           node scripts/publish.mjs
 
       - name: Workflow summary

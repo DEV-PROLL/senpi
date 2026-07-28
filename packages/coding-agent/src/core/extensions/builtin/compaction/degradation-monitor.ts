@@ -119,8 +119,12 @@ export async function handleMessageEnd(
 	state.recoveryAttempts += 1;
 	state.noTextCounter = 0;
 
-	await context.applyCompaction({ customInstructions: RECOVERY_INSTRUCTIONS });
-	context.notify(RECOVERY_NOTIFICATION);
+	const result = await context.applyCompaction({ customInstructions: RECOVERY_INSTRUCTIONS });
+	// A "failed" result already surfaced its own compaction_end errorMessage;
+	// notifying again would stack a second surface on the same failure.
+	if (result.applied || result.reason !== "failed") {
+		context.notify(RECOVERY_NOTIFICATION);
+	}
 }
 
 export function handleTurnEnd(state: DegradationMonitorState): void {

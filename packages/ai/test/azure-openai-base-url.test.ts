@@ -157,6 +157,18 @@ describe("azure-openai-responses base URL normalization", () => {
 		expect(azureMock.lastParams?.prompt_cache_key).toBe("x".repeat(64));
 	});
 
+	it("omits prompt_cache_key when caching is disabled", async () => {
+		const model = getModel("azure-openai-responses", "gpt-4o-mini");
+		await streamAzureOpenAIResponses(model, context, {
+			apiKey: "test-api-key",
+			azureBaseUrl: "https://my-resource.openai.azure.com",
+			cacheRetention: "none",
+			sessionId: "cache-disabled-session",
+		}).result();
+
+		expect(azureMock.lastParams).not.toHaveProperty("prompt_cache_key");
+	});
+
 	it("disables server-side response storage", async () => {
 		const model = getModel("azure-openai-responses", "gpt-4o-mini");
 		await streamAzureOpenAIResponses(model, context, {

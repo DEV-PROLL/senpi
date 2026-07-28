@@ -12,6 +12,22 @@
 
 ### Removed
 
+## [2026.7.26] - 2026-07-26
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Expanded timeout-output and classifier-refusal regression coverage around terminal agent-loop behavior.
+
+### Fixed
+
+- End classifier-refused assistant turns before executing any partial tool calls, allowing the host to apply its refusal fallback policy safely.
+
+### Removed
+
 ## [2026.7.25-2] - 2026-07-25
 
 ### Breaking Changes

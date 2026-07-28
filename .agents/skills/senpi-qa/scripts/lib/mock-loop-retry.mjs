@@ -1,5 +1,8 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
 	createChecks,
+	evidenceDir,
 	guardRealAuth,
 	installCleanupHooks,
 } from "./common.mjs";
@@ -8,6 +11,9 @@ import {
 	checkRealAuthUnchanged,
 } from "./mock-loop-support.mjs";
 import { runAnthropicPolicyRefusalScenario } from "./mock-loop-policy-refusal.mjs";
+
+const OPENAI_SERVER_ERROR_MESSAGE =
+	"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID e4026cfc-c6b6-414a-8a21-c03a6adf0336 in your message.";
 
 const STANDARD_RETRY_SCENARIOS = {
 	"transient-recover": {
@@ -21,6 +27,14 @@ const STANDARD_RETRY_SCENARIOS = {
 		error: { status: 500, message: "overloaded_error" },
 		errorCount: 4,
 		marker: "SENPI-QA-RETRY-BUDGET-EXHAUST-7a16",
+		primaryAttempts: 4,
+		fallbackAttempts: 1,
+	},
+	"server-error-fallback": {
+		apiName: "openai-responses",
+		error: { status: 500, message: OPENAI_SERVER_ERROR_MESSAGE },
+		errorCount: 4,
+		marker: "SENPI-QA-RETRY-SERVER-ERROR-FALLBACK-e402",
 		primaryAttempts: 4,
 		fallbackAttempts: 1,
 	},
@@ -45,7 +59,8 @@ export function isRetryScenario(name) {
 
 export async function checkStandardRetryScenarios(checks, driveTurn) {
 	for (const scenarioName of Object.keys(STANDARD_RETRY_SCENARIOS)) {
-		await checkStandardRetryScenario(checks, scenarioName, "openai-completions", driveTurn);
+		const scenario = STANDARD_RETRY_SCENARIOS[scenarioName];
+		await checkStandardRetryScenario(checks, scenarioName, scenario.apiName ?? "openai-completions", driveTurn);
 	}
 }
 
@@ -60,12 +75,12 @@ export async function runRetryScenario(scenarioName, apiName, driveTurn, evidenc
 	installCleanupHooks();
 	const checks = createChecks(`mock-loop.mjs --scenario ${scenarioName}`);
 	const guard = guardRealAuth();
-	await checkStandardRetryScenario(checks, scenarioName, apiName, driveTurn);
+	await checkStandardRetryScenario(checks, scenarioName, apiName, driveTurn, evidenceSlug);
 	checkRealAuthUnchanged(checks, guard);
 	process.exit(checks.finish() ? 0 : 1);
 }
 
-async function checkStandardRetryScenario(checks, scenarioName, apiName, driveTurn) {
+async function checkStandardRetryScenario(checks, scenarioName, apiName, driveTurn, evidenceSlug) {
 	const scenario = STANDARD_RETRY_SCENARIOS[scenarioName];
 	if (!scenario) throw new Error(`unknown retry scenario ${scenarioName}`);
 	const preset = API_PRESETS[apiName];
@@ -104,6 +119,26 @@ async function checkStandardRetryScenario(checks, scenarioName, apiName, driveTu
 		const markerReturned = `${result.stdout}${result.stderr}`.includes(scenario.marker);
 		const attemptsMatch = JSON.stringify(modelSequence) === JSON.stringify(expectedModels);
 		const pass = result.code === 0 && !result.timedOut && markerReturned && attemptsMatch;
+		if (evidenceSlug) {
+			const dir = evidenceDir(evidenceSlug);
+			writeFileSync(
+				join(dir, "retry-transcript.json"),
+				`${JSON.stringify(
+					{
+						scenario: scenarioName,
+						api: apiName,
+						attempts: modelSequence.length,
+						sequence: modelSequence.map((modelId) => `${preset.provider}/${modelId}`),
+						modelAttempts: Object.fromEntries(counts),
+						switched: modelSequence.includes(fallbackModelId),
+						markerReturned,
+						exitCode: result.code,
+					},
+					null,
+					2,
+				)}\n`,
+			);
+		}
 		checks.ok(
 			`${scenarioName}: scripted provider errors follow the expected retry/fallback path`,
 			pass,

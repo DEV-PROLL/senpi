@@ -87,6 +87,10 @@ describe("local release package list", () => {
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line));
+		const testIndex = npmCalls.findIndex((call) => call.args.join(" ") === "test");
+		const lastBuildIndex = npmCalls.findLastIndex((call) => call.args.join(" ") === "run build");
+		assert.ok(testIndex > lastBuildIndex, "expected local-release to build every package before running tests");
+		assert.equal(npmCalls[testIndex]?.ci, "1", "expected local-release tests to use deterministic CI concurrency");
 		assert.ok(
 			npmCalls.some((call) => call.cwd.endsWith(ptyDirectorySuffix) && call.args.join(" ") === "run build"),
 			"expected local-release to build packages/pty",
@@ -114,7 +118,7 @@ function writeFakeNpm(path) {
 			'import { join } from "node:path";',
 			"const args = process.argv.slice(2);",
 			"if (process.env.SENPI_FAKE_NPM_LOG) {",
-			"  writeFileSync(process.env.SENPI_FAKE_NPM_LOG, `${JSON.stringify({ cwd: process.cwd(), args })}\\n`, { flag: 'a' });",
+			"  writeFileSync(process.env.SENPI_FAKE_NPM_LOG, `${JSON.stringify({ cwd: process.cwd(), args, ci: process.env.CI })}\\n`, { flag: 'a' });",
 			"}",
 			"if (args[0] === 'pack') {",
 			"  const destination = args[args.indexOf('--pack-destination') + 1];",

@@ -3,9 +3,11 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { commandExists, run } from "./local-release-runner.mjs";
 import { prepareSenpiBundledWorkspaces } from "./prepare-senpi-bundled-workspaces.mjs";
+
+export { run } from "./local-release-runner.mjs";
 
 const packages = [
 	{ directory: "packages/ai", name: "@earendil-works/pi-ai" },
@@ -17,8 +19,6 @@ const packages = [
 	{ directory: "packages/server", name: "@code-yeongyu/senpi-server" },
 ];
 const packageCliCommand = "senpi";
-const captureMaxBufferBytes = 64 * 1024 * 1024;
-
 function printUsage() {
 	console.log(`Usage: node scripts/local-release.mjs [options]
 
@@ -29,7 +29,7 @@ Options:
   --out <dir>          Output directory. Defaults to a new directory under ${tmpdir()}
   --force              Remove --out first if it already exists
   --skip-check         Do not run npm run check before building
-  --skip-test          Do not run npm test before building
+  --skip-test          Do not run npm test after building
   --skip-install       Only create tarballs; do not create isolated installs
   --skip-bun-install   Do not create the isolated Bun install
   --help               Show this help
@@ -87,29 +87,8 @@ function parseArgs() {
 	return options;
 }
 
-export function run(command, args, options = {}) {
-	console.log(`$ ${[command, ...args].join(" ")}`);
-	const result = spawnSync(command, args, {
-		cwd: options.cwd,
-		encoding: "utf8",
-		maxBuffer: options.capture ? captureMaxBufferBytes : undefined,
-		shell: process.platform === "win32",
-		stdio: options.capture ? ["inherit", "pipe", "inherit"] : "inherit",
-	});
-
-	if (result.status !== 0) {
-		throw new Error(`Command failed: ${[command, ...args].join(" ")}`);
-	}
-
-	return result.stdout ?? "";
-}
-
 function readPackageJson(directory) {
 	return JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
-}
-
-function commandExists(command) {
-	return spawnSync(command, ["--version"], { stdio: "ignore" }).status === 0;
 }
 
 function isInsidePath(child, parent) {
@@ -226,13 +205,13 @@ function main() {
 		run("npm", ["run", "check"], { cwd: repoRoot });
 	}
 
-	if (!options.skipTest) {
-		run("npm", ["test"], { cwd: repoRoot });
-	}
-
 	for (const pkg of packages) {
 		run("npm", ["run", "clean"], { cwd: pkg.directory });
 		run("npm", ["run", "build"], { cwd: pkg.directory });
+	}
+
+	if (!options.skipTest) {
+		run("npm", ["test"], { cwd: repoRoot, env: { CI: "1" } });
 	}
 
 	prepareSenpiBundledWorkspaces(repoRoot);

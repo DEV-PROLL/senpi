@@ -211,9 +211,7 @@ export class AgentSessionRuntime {
 		if (!pending) return;
 		const newRunner = this.session.extensionRunner;
 		if (typeof newRunner.getExtensionIdentities !== "function") return;
-		const newResolvedPaths = new Set(
-			newRunner.getExtensionIdentities().map((extension) => extension.resolvedPath),
-		);
+		const newResolvedPaths = new Set(newRunner.getExtensionIdentities().map((extension) => extension.resolvedPath));
 		const removed = pending.oldIdentities.filter((extension) => !newResolvedPaths.has(extension.resolvedPath));
 		if (removed.length === 0) return;
 		await pending.oldRunner.emit({ type: "session_extensions_removed", reason: pending.reason, removed });

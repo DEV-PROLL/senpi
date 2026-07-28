@@ -76,17 +76,18 @@ function shouldStepAside(ctx: ExtensionContext | undefined): boolean {
 
 /**
  * Keep the tool surface consistent with anthropic-bash. When native Anthropic bash is active,
- * the PTY companions are deactivated so none dangle without a usable persistent `bash` (the
- * function `bash` is stripped + replaced by native bash in the provider payload). Otherwise the
- * PTY `bash` + companions are (re)activated. Re-evaluated on session_start AND model_select.
+ * the provider replaces the PTY `bash` function, but the companions stay active because `monitor`
+ * creates its own PTY session and bash_output/input/resize/kill operate on that shared registry.
+ * Otherwise the PTY `bash` + companions are (re)activated. Re-evaluated on session_start AND
+ * model_select.
  */
 function syncToolset(pi: ExtensionAPI, state: TerminalExtensionState): void {
 	const stepAside = shouldStepAside(state.ctx);
 	const active = new Set(pi.getActiveTools());
 	if (stepAside) {
-		for (const companion of TERMINAL_COMPANION_TOOLS) active.delete(companion);
+		for (const companion of TERMINAL_COMPANION_TOOLS) active.add(companion);
 		if (!state.noticeShown) {
-			state.ctx?.ui.notify("native Anthropic bash active — persistent terminal sessions disabled", "info");
+			state.ctx?.ui.notify("native Anthropic bash active — monitor sessions remain available", "info");
 			state.noticeShown = true;
 		}
 	} else {

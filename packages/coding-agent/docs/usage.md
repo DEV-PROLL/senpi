@@ -27,6 +27,8 @@ The editor can be replaced temporarily by built-in UI such as `/settings` or by 
 | Shell command | `!command` runs and sends output to the model |
 | Hidden shell command | `!!command` runs without sending output to the model |
 | External editor | Ctrl+G opens `externalEditor`, `$VISUAL`, `$EDITOR`, Notepad on Windows, or `nano` elsewhere |
+| Shortcut overlay | Type `?` on an empty editor to show a dismissible shortcut grid |
+| Startup tips | A rotating `Tip:` line in the startup banner and under the working status teaches features; disable with `"tips": false` |
 
 See [Keybindings](keybindings.md) for all shortcuts and customization.
 
@@ -56,6 +58,8 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/share` | Upload as private GitHub gist with shareable HTML link |
 | `/reload` | Reload keybindings, extensions, skills, prompts, themes, and context files |
 | `/hotkeys` | Show all keyboard shortcuts |
+| `/help` | Getting-started primer, live keybindings, and all commands in a scrollable overlay |
+| `/keybindings` | Open your `keybindings.json` in `$EDITOR` (seeded with current bindings when missing) and reload it live |
 | `/changelog` | Display version history |
 | `/quit`, `/exit` | Quit pi |
 

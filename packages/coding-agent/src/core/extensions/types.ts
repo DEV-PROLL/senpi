@@ -773,6 +773,11 @@ export interface SessionShutdownEvent {
 	targetSessionFile?: string;
 }
 
+/** Fired when the user aborts the session outside an active agent run (retry backoff, compaction, or queued continuation), stopping in-flight work without an agent_end that carries abortSource. Extensions that track run-progress state (e.g. goal) use this to mark their state as user-interrupted. */
+export interface SessionAbortEvent {
+	type: "session_abort";
+}
+
 /** Fired on the old extension runner when a reload or session replacement rebuilds the runner and one or more extensions are absent from it. */
 export interface SessionExtensionsRemovedEvent {
 	type: "session_extensions_removed";
@@ -819,6 +824,7 @@ export type SessionEvent =
 	| SessionBeforeCompactEvent
 	| SessionCompactEvent
 	| SessionShutdownEvent
+	| SessionAbortEvent
 	| SessionExtensionsRemovedEvent
 	| SessionBeforeTreeEvent
 	| SessionTreeEvent;
@@ -1409,6 +1415,7 @@ export interface ExtensionAPI {
 	): void;
 	on(event: "session_compact", handler: ExtensionHandler<SessionCompactEvent>): void;
 	on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownEvent>): void;
+	on(event: "session_abort", handler: ExtensionHandler<SessionAbortEvent>): void;
 	on(event: "session_extensions_removed", handler: ExtensionHandler<SessionExtensionsRemovedEvent>): void;
 	on(event: "session_before_tree", handler: ExtensionHandler<SessionBeforeTreeEvent, SessionBeforeTreeResult>): void;
 	on(event: "session_tree", handler: ExtensionHandler<SessionTreeEvent>): void;
@@ -1450,6 +1457,15 @@ export interface ExtensionAPI {
 
 	/** Register migration guidance returned when an intentionally removed tool is called. */
 	registerRemovedToolHint(name: string, hint: string): void;
+
+	/**
+	 * Register a callback that may activate a registered-but-inactive tool on demand.
+	 * Called only when executeTool would otherwise fail with `inactive_tool`. Return
+	 * true only after the tool has actually been activated; returning false preserves
+	 * the `inactive_tool` error. Eligibility is owned by the registering extension so
+	 * permission-denied, tombstoned, and capability-gated tools stay inactive.
+	 */
+	registerLazyToolActivator(activator: LazyToolActivator): void;
 
 	/** Register an MCP server that the agent can use. Factory-time only. */
 	registerMcpServer(name: string, config: McpServerDeclaration): void;
@@ -1784,6 +1800,13 @@ export type ExecuteToolUpdateCallback<T = unknown> = AgentToolUpdateCallback<T>;
 export interface ExecuteToolOptions<TDetails = unknown> {
 	signal?: AbortSignal;
 	onUpdate?: ExecuteToolUpdateCallback<TDetails>;
+	/**
+	 * Opt in to lazy activation: when the tool is registered but inactive, registered
+	 * activators may activate it instead of failing. Off by default so ordinary callers
+	 * keep the `inactive_tool` contract; code-mode sets it because a cell names tools
+	 * directly and cannot run tool_search first.
+	 */
+	activateInactiveTool?: boolean;
 }
 
 export type ExecuteToolResult<TDetails = unknown> = AgentToolResult<TDetails>;
@@ -1809,6 +1832,10 @@ export type ExecuteToolHandler = <TDetails = unknown>(
 	params: unknown,
 	options?: ExecuteToolOptions<TDetails>,
 ) => Promise<ExecuteToolResult<TDetails>>;
+
+export type LazyToolActivator = (toolName: string) => boolean;
+
+export type RegisterLazyToolActivatorHandler = (activator: LazyToolActivator) => void;
 
 export type GetActiveToolsHandler = () => string[];
 
@@ -1905,6 +1932,7 @@ export interface ExtensionActions {
 	setActiveTools: SetActiveToolsHandler;
 	refreshTools: RefreshToolsHandler;
 	registerRemovedToolHint: RegisterRemovedToolHintHandler;
+	registerLazyToolActivator: RegisterLazyToolActivatorHandler;
 	getCommands: GetCommandsHandler;
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
@@ -2003,6 +2031,7 @@ export interface Extension {
 	tools: Map<string, RegisteredTool>;
 	/** Optional for compatibility with extension records created before this additive registry. */
 	removedToolHints?: Map<string, string>;
+	lazyToolActivators?: LazyToolActivator[];
 	messageRenderers: Map<string, MessageRenderer>;
 	entryRenderers?: Map<string, EntryRenderer>;
 	commands: Map<string, RegisteredCommand>;
@@ -2023,6 +2052,13 @@ export interface LoadExtensionsResult {
 // ============================================================================
 // Extension Error
 // ============================================================================
+
+/**
+ * Sentinel `extensionPath` used when the session runtime itself (not a loaded
+ * extension) emits an error through the extension-error channel, e.g. failed
+ * background session-title generation.
+ */
+export const RUNTIME_EXTENSION_PATH = "<runtime>";
 
 export interface ExtensionError {
 	extensionPath: string;

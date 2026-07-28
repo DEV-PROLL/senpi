@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
+import { CLAUDE_AGENT_SDK_PROVIDER_ID } from "../../src/core/extensions/builtin/claude-agent-sdk/index.ts";
 import { ModelRegistry } from "../../src/core/model-registry.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
@@ -182,6 +183,68 @@ describe("RPC auth and connection handler contracts", () => {
 		const anthropic = data.providers.find((provider) => provider.id === "anthropic");
 		expect(anthropic).toMatchObject({ authType: "oauth", name: expect.any(String) });
 		expect(anthropic?.status).toMatchObject({ configured: expect.any(Boolean) });
+		await handler.dispose();
+	});
+
+	it("round-trips provider accounts and emits a safe change event after a scripted OAuth add", async () => {
+		const collected = makeSink();
+		const harness = makeHarness(tempDir);
+		cleanup = harness.cleanup;
+		harness.authStorage.registerOAuthProvider(CLAUDE_AGENT_SDK_PROVIDER_ID, {
+			name: "Scripted OAuth",
+			async login() {
+				return {
+					type: "oauth",
+					access: "claude-agent-sdk-managed",
+					refresh: "claude-agent-sdk-managed",
+					expires: 4_102_444_800_000,
+					accounts: [
+						{
+							name: "default",
+							source: "login",
+							access: "sk-ant-scripted-access",
+							refresh: "scripted-refresh",
+							expires: 4_102_444_800_000,
+						},
+					],
+				};
+			},
+			async refresh(credentials) {
+				return credentials;
+			},
+			async toAuth(credentials) {
+				return { apiKey: credentials.access };
+			},
+		});
+		const handler = createRpcConnectionHandler(harness.runtimeHost, collected.sink);
+		const changed = collected.waitFor((message) => message.type === "auth_accounts_changed");
+
+		await handler.handleInputLine(
+			JSON.stringify({ id: "add", type: "login_start", provider: CLAUDE_AGENT_SDK_PROVIDER_ID }),
+		);
+		await collected.waitFor((message) => message.type === "auth_login_end" && message.success === true);
+		expect(await changed).toEqual({ type: "auth_accounts_changed", provider: CLAUDE_AGENT_SDK_PROVIDER_ID });
+
+		await handler.handleInputLine(
+			JSON.stringify({ id: "unknown-provider", type: "get_provider_accounts", provider: "unknown-provider" }),
+		);
+		expect(await collected.waitFor((message) => message.id === "unknown-provider")).toMatchObject({
+			success: false,
+			error: "Provider account management is unavailable for: unknown-provider",
+		});
+
+		await handler.handleInputLine(
+			JSON.stringify({ id: "accounts", type: "get_provider_accounts", provider: CLAUDE_AGENT_SDK_PROVIDER_ID }),
+		);
+		expect(await collected.waitFor((message) => message.id === "accounts")).toMatchObject({
+			type: "response",
+			command: "get_provider_accounts",
+			success: true,
+			data: {
+				accounts: [{ name: "default", source: "login", blocked: false, pinned: false }],
+			},
+		});
+		expect(JSON.stringify(collected.messages())).not.toMatch(/sk-ant/);
 		await handler.dispose();
 	});
 

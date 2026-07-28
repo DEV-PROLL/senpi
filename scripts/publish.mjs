@@ -9,6 +9,8 @@ import {
 	prepareSenpiBundledWorkspaces,
 	rewriteOwnedRegistryAliases,
 } from "./prepare-senpi-bundled-workspaces.mjs";
+import { buildPublishArgs } from "./publish-command.mjs";
+import { rewritePublishManifest } from "./publish-manifest.mjs";
 
 // Source packages retain their upstream names and private guard. Each is published
 // from a temporary manifest under our scope, while every source import continues to
@@ -70,8 +72,10 @@ function stagePublishDirectory(pkg) {
 	cpSync(pkg.directory, directory, { recursive: true });
 	const manifestPath = join(directory, "package.json");
 	const manifest = readPackageJson(directory);
-	manifest.name = pkg.name;
-	delete manifest.private;
+	rewritePublishManifest(manifest, {
+		directory: pkg.directory,
+		name: pkg.name,
+	});
 	rewriteOwnedRegistryAliases(manifest);
 	writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
 	temporaryPublishDirectories.push(temporaryRoot);
@@ -187,7 +191,7 @@ try {
 			continue;
 		}
 
-		run("npm", ["publish", "--access", "public", "--tag", "latest", "--provenance", "--ignore-scripts"], {
+		run("npm", buildPublishArgs({ githubActions: process.env.GITHUB_ACTIONS === "true" }), {
 			cwd: pkg.publishDirectory,
 		});
 		console.log();

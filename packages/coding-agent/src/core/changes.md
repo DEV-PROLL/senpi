@@ -1,5 +1,55 @@
 # changes
 
+## claude-agent-sdk provider with native multi-account OAuth (2026-07-27)
+
+### What changed
+
+- New builtin extension `core/extensions/builtin/claude-agent-sdk/`: routes LLM calls through the
+  official Claude Agent SDK (spawns the real Claude Code engine) while senpi executes all tools
+  (Claude Code tool use is denied; custom tools are exposed in-process as `mcp__custom-tools__*`).
+- Auth: `/login claude-agent-sdk` runs the existing Anthropic PKCE flow and stores multi-account
+  slots inside the provider credential (top-level fields are non-expiring sentinels; real refresh is
+  per-slot under the store lock). Import of an existing `anthropic` OAuth credential and
+  `CLAUDE_CODE_OAUTH_TOKEN(_N)` env accounts supported.
+- HRW session affinity (rendezvous hashing) pins each session to one account to preserve prompt
+  cache; mandatory failover on rate_limit/overloaded/auth errors only, stream-safe (no transparent
+  retry after the first visible delta) with an AgentSession `senpi:no-turn-retry:` marker suppressing
+  whole-turn replay of post-delta failures.
+- Surfaces: `/claude-account` command, `--claude-account` flag, RPC `get_provider_accounts` /
+  `account_pin` / `account_remove` plus `auth_accounts_changed` / `account_failover` events, and
+  actionable auth guidance. `AuthStorage` learned to enumerate extension-registered OAuth providers
+  (`registerOAuthProvider` bridge), synced from `ModelRuntime.registerProvider`.
+- Dependency: `@anthropic-ai/claude-agent-sdk` pinned `0.3.220`; `@anthropic-ai/sdk` stays `0.91.1`
+  via a root override (the `>=0.93.0` peer range breaks the browser build through node-builtin
+  imports in new credential modules).
+
+## Session-title generation retry + humanized provider errors (2026-07-27)
+
+### What changed
+
+- `session-title-generator.ts`: `generateSessionTitle()` accepts an optional `retry: RetryPolicy` and wraps the
+  title call in `retryAssistantCall`, mirroring `completeSummarization()`. A transient provider error (e.g. an
+  Anthropic 529 `overloaded_error` stream event) no longer fails title generation on the first attempt. Final
+  failures throw `humanizeProviderError(...)` output — a short human-readable line such as
+  `Overloaded (overloaded_error, request req_...)` — instead of the raw provider JSON body.
+- `session-title-generator.ts`: new `sessionTitleRetryPolicy()` narrows the user's `settings.retry` for this
+  cosmetic background call — `enabled` is preserved, `maxRetries` capped at 1 and `baseDelayMs` at 2000ms, and a
+  smaller configured budget is never inflated. The full agent-turn budget would keep hitting an already-overloaded
+  provider for ~14s while the user's real turn competes for the same capacity; a title that still fails is
+  regenerated at the next turn end anyway.
+- `agent-session.ts`: `_generateSessionTitle()` passes `sessionTitleRetryPolicy(settingsManager.getRetrySettings())`.
+  The runtime-emitted extension-error sites now use the shared `RUNTIME_EXTENSION_PATH` sentinel constant.
+
+### Why
+
+- A single transient 529 during background title generation surfaced as `Extension "<runtime>" error: {raw json}`
+  in the TUI and left the session untitled until the next turn end.
+
+### Expected merge conflict zones
+
+- LOW: `session-title-generator.ts` around `generateSessionTitle()`.
+- LOW: `agent-session.ts` `_generateSessionTitle()` and the `emitError` call sites.
+
 ## Composable leading skill commands (2026-07-26)
 
 ### What changed

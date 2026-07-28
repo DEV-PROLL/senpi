@@ -52,19 +52,19 @@ describe("terminal builtin extension — tool surface & mutual exclusion", () =>
 		for (const companion of COMPANIONS) expect(active).toContain(companion);
 	});
 
-	it("steps aside — companions absent — when native Anthropic bash is active", async () => {
+	it("keeps monitor companions active when native Anthropic bash replaces PTY bash", async () => {
 		process.env.PI_ANTHROPIC_BASH = "1";
 		const harness = await anthropicHarness();
 		await harness.session.bindExtensions({});
 		const active = harness.session.getActiveToolNames();
-		for (const companion of COMPANIONS) expect(active).not.toContain(companion);
+		for (const companion of COMPANIONS) expect(active).toContain(companion);
 	});
 
 	it("re-activates companions when native Anthropic bash is disabled on model switch", async () => {
 		process.env.PI_ANTHROPIC_BASH = "1";
 		const harness = await anthropicHarness();
 		await harness.session.bindExtensions({});
-		expect(harness.session.getActiveToolNames()).not.toContain("bash_output");
+		expect(harness.session.getActiveToolNames()).toContain("bash_output");
 
 		delete process.env.PI_ANTHROPIC_BASH;
 		await harness.session.setModel(harness.getModel("claude-test-2")!);

@@ -1,6 +1,10 @@
 import { arch, platform, release, type } from "node:os";
 import type { ClientInfo, InitializeCapabilities, InitializeParams, InitializeResponse } from "../protocol/index.ts";
-import { EXPERIMENTAL_SERVER_NOTIFICATION_METHODS, SERVER_NOTIFICATION_METHODS } from "../protocol/methods.ts";
+import {
+	ADDITIVE_SERVER_NOTIFICATION_METHODS,
+	EXPERIMENTAL_SERVER_NOTIFICATION_METHODS,
+	SERVER_NOTIFICATION_METHODS,
+} from "../protocol/methods.ts";
 import { populateOutboundNotificationEnvelope, type RpcEnvelope, type RpcNotification } from "../rpc/envelope.ts";
 import type { RegistryConnection, ConnectionCapabilities as RegistryConnectionCapabilities } from "../rpc/registry.ts";
 
@@ -50,7 +54,7 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
 	requestAttestation: false,
 };
 
-const SERVER_NOTIFICATIONS = new Set<string>(SERVER_NOTIFICATION_METHODS);
+const SERVER_NOTIFICATIONS = new Set<string>([...SERVER_NOTIFICATION_METHODS, ...ADDITIVE_SERVER_NOTIFICATION_METHODS]);
 const EXPERIMENTAL_SERVER_NOTIFICATIONS = new Set<string>(EXPERIMENTAL_SERVER_NOTIFICATION_METHODS);
 
 export class ManagedConnection implements Connection {

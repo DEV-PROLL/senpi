@@ -9,10 +9,12 @@ import type { OpenAICompletionsOptions } from "./api/openai-completions.ts";
 import type { OpenAIResponsesOptions } from "./api/openai-responses.ts";
 import type { PiMessagesOptions } from "./api/pi-messages.ts";
 import type { Model } from "./model.ts";
+import type { SessionAffinityFormat } from "./openai-responses-compat.ts";
 import type { AssistantMessageDiagnostic } from "./utils/diagnostics.ts";
 import type { AssistantMessageEventStream } from "./utils/event-stream.ts";
 
 export type { Model } from "./model.ts";
+export type { OpenAIResponsesCompat, SessionAffinityFormat } from "./openai-responses-compat.ts";
 export type { AssistantMessageEventStream } from "./utils/event-stream.ts";
 
 export type KnownApi =
@@ -109,8 +111,6 @@ export type Transport = "sse" | "websocket" | "websocket-cached" | "auto";
 /** Provider-scoped environment overrides. Values take precedence over process.env. */
 export type ProviderEnv = Record<string, string>;
 export type ProviderHeaders = Record<string, string | null>;
-export type SessionAffinityFormat = "openai" | "openai-nosession" | "openrouter";
-
 /** Effective model and fully transformed headers for a request payload hook. */
 export type ProviderRequestMetadata = {
 	model: Model<Api>;
@@ -136,6 +136,12 @@ export interface StreamOptions {
 	 */
 	abortServerSideFallback?: boolean;
 	apiKey?: string;
+	/**
+	 * Stable identity of the originating session for account-affinity providers,
+	 * preserved across auxiliary calls that replace `sessionId` (for example
+	 * compaction). Providers without account affinity ignore this.
+	 */
+	affinitySessionId?: string;
 	/**
 	 * Preferred transport for providers that support multiple transports.
 	 * Providers that do not support this option ignore it.
@@ -650,28 +656,6 @@ export interface OpenAICompletionsCompat {
 	sessionAffinityFormat?: SessionAffinityFormat;
 	/** Whether the provider supports long prompt cache retention (`prompt_cache_retention: "24h"` or Anthropic-style `cache_control.ttl: "1h"`, depending on format). Default: true. */
 	supportsLongCacheRetention?: boolean;
-}
-
-/** Compatibility settings for OpenAI Responses APIs. */
-export interface OpenAIResponsesCompat {
-	/** Whether the provider supports the `developer` role (vs `system`). Default: true. */
-	supportsDeveloperRole?: boolean;
-	/** Session-affinity header format: `openai` sends `session_id` and `x-client-request-id`; `openai-nosession` sends `x-client-request-id`; `openrouter` sends `x-session-id`. Does not affect the `prompt_cache_key` body param, which is governed by cache retention. Default: auto-detected. */
-	sessionAffinityFormat?: SessionAffinityFormat;
-	/** Whether the provider supports `prompt_cache_retention: "24h"`. Default: true. */
-	supportsLongCacheRetention?: boolean;
-	/** Whether the provider supports the OpenAI Responses WebSocket transport. Default: true for api.openai.com only. */
-	supportsWebSocket?: boolean;
-	/** Whether the provider supports the OpenAI Responses native `web_search_preview` tool. Default: true for api.openai.com only. */
-	supportsWebSearchPreview?: boolean;
-	/** Whether the provider supports strict JSON-schema function tools. Defaults are API-specific; generated OpenAI models enable it explicitly. */
-	supportsStrictMode?: boolean;
-	/** Whether to emit OpenAI custom tools with Lark/regex grammar formats. When false, grammar-constrained tools fall back to normal function tools. Default: false; the generated model catalog enables it for capable models. */
-	supportsOpenAIGrammarTools?: boolean;
-	/** Whether the model supports client-executed tool search for deferred tools. Default: false. */
-	supportsToolSearch?: boolean;
-	/** Whether the model accepts `prompt_cache_options` (OpenAI GPT-5.6+ explicit prompt caching). Older OpenAI models reject the parameter. Default: false. */
-	supportsExplicitPromptCacheMode?: boolean;
 }
 
 /** Compatibility settings for Anthropic Messages-compatible APIs. */

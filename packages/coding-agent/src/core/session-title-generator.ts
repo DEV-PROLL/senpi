@@ -7,7 +7,7 @@ import type {
 	SimpleStreamOptions,
 	TextContent,
 } from "@earendil-works/pi-ai/compat";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { completeSimple, type RetryPolicy, retryAssistantCall } from "@earendil-works/pi-ai/compat";
 
 interface SessionTitleAuth {
 	readonly apiKey?: string;
@@ -24,6 +24,7 @@ interface GenerateSessionTitleOptions {
 	readonly baseOptions?: SimpleStreamOptions;
 	readonly signal?: AbortSignal;
 	readonly streamFn?: StreamFn;
+	readonly retry?: RetryPolicy;
 }
 
 const TITLE_SYSTEM_PROMPT = `Generate a concise title for this coding-agent session.
@@ -51,6 +52,27 @@ const LOW_SIGNAL_PROMPTS = new Set([
 	"nope",
 ]);
 
+const MAX_TITLE_RETRIES = 1;
+const MAX_TITLE_RETRY_DELAY_MS = 2000;
+
+/**
+ * Narrow the user's retry budget for cosmetic background title generation.
+ *
+ * A title is not worth the full agent-turn budget: the default policy would
+ * keep hitting an already-overloaded provider for ~14s while the user's real
+ * turn competes for the same capacity, and a custom `baseDelayMs` could stall
+ * it far longer. One retry recovers the common single-blip case; a title that
+ * still fails is regenerated at the next turn end anyway. `enabled` stays the
+ * user's call, and a smaller configured budget is never inflated.
+ */
+export function sessionTitleRetryPolicy(settings: RetryPolicy): RetryPolicy {
+	return {
+		enabled: settings.enabled,
+		maxRetries: Math.min(settings.maxRetries, MAX_TITLE_RETRIES),
+		baseDelayMs: Math.min(settings.baseDelayMs, MAX_TITLE_RETRY_DELAY_MS),
+	};
+}
+
 export function shouldSkipSessionTitle(text: string): boolean {
 	const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
 	if (normalized.length === 0) return true;
@@ -63,14 +85,22 @@ export async function generateSessionTitle(options: GenerateSessionTitleOptions)
 		return undefined;
 	}
 
-	const response = await completeTitle(
-		options.model,
-		buildTitleContext(options.firstPrompt),
-		buildTitleOptions(options),
-		options.streamFn,
+	// Titles are cosmetic background work: honor the caller's retry policy so a
+	// single transient provider error (e.g. a 529 overloaded stream) does not
+	// surface as a scary runtime error. Mirrors completeSummarization().
+	const response = await retryAssistantCall(
+		() =>
+			completeTitle(
+				options.model,
+				buildTitleContext(options.firstPrompt),
+				buildTitleOptions(options),
+				options.streamFn,
+			),
+		options.retry,
+		options.signal,
 	);
 	if (response.stopReason === "error") {
-		throw new Error(response.errorMessage ?? "Session title generation failed");
+		throw new Error(humanizeProviderError(response.errorMessage ?? "Session title generation failed"));
 	}
 	return parseSessionTitle(response);
 }
@@ -142,6 +172,62 @@ function parseSessionTitle(message: AssistantMessage): string | undefined {
 		return undefined;
 	}
 	return title;
+}
+
+/**
+ * Reduce a raw provider error payload (e.g. an Anthropic `{"type":"error",...}`
+ * body, optionally prefixed with an HTTP status code) to a short human-readable
+ * line while keeping the error type and request id for follow-up. Non-JSON and
+ * unrecognized payloads pass through unchanged.
+ */
+export function humanizeProviderError(raw: string): string {
+	// `formatProviderError` (packages/ai/src/utils/error-body.ts) emits
+	// `<status>: <body>` or `<prefix> (<status>): <body>`; Anthropic SSE error
+	// events arrive as the bare JSON body.
+	const statusPrefix = raw.trim().match(/^(?:.*?\((\d{3})\)|(\d{3}))\s*:\s*(?=\{)/);
+	const status = statusPrefix?.[1] ?? statusPrefix?.[2];
+	const bodyText = statusPrefix ? raw.trim().slice(statusPrefix[0].length) : raw.trim();
+	if (!bodyText.startsWith("{")) {
+		return raw;
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(bodyText);
+	} catch {
+		return raw;
+	}
+	const body = asRecord(parsed);
+	if (!body) {
+		return raw;
+	}
+	const nested = asRecord(body.error);
+	const message = asNonEmptyString(nested?.message) ?? asNonEmptyString(body.message) ?? asNonEmptyString(body.error);
+	if (message === undefined) {
+		return raw;
+	}
+	const details: string[] = [];
+	const errorType = asNonEmptyString(nested?.type) ?? asNonEmptyString(body.type);
+	if (errorType && errorType !== "error") {
+		details.push(errorType);
+	}
+	if (status) {
+		details.push(`HTTP ${status}`);
+	}
+	const requestId = asNonEmptyString(body.request_id);
+	if (requestId) {
+		details.push(`request ${requestId}`);
+	}
+	return details.length > 0 ? `${message} (${details.join(", ")})` : message;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function sanitizeTitle(text: string): string {

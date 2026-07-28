@@ -12,6 +12,25 @@
 
 ### Removed
 
+## [2026.7.26] - 2026-07-26
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Retry transient Codex `upstream_unavailable` websocket failures through the existing bounded retry policy ([#330](https://github.com/code-yeongyu/senpi/pull/330) by [@minpeter](https://github.com/minpeter)).
+
+### Fixed
+
+- Preserve persisted OpenAI Responses freeform custom-tool calls and raw inputs across compaction and model replay without emitting synthetic item IDs ([#256](https://github.com/code-yeongyu/senpi/pull/256) by [@ThewindMom](https://github.com/ThewindMom)).
+- Repair incomplete Anthropic server-tool histories before replay and allow pairing failures to reach retry and configured model fallback.
+- Harden cross-model history replay against foreign reasoning signatures, colliding long tool-call IDs, and Anthropic thinking-shape requirements ([#380](https://github.com/code-yeongyu/senpi/pull/380) by [@realsigridjin](https://github.com/realsigridjin)).
+- Treat typed and legacy Anthropic policy blocks as classifier refusals so partial tool calls are not executed and pinned fallback can engage.
+
+### Removed
+
 ## [2026.7.25-2] - 2026-07-25
 
 ### Breaking Changes

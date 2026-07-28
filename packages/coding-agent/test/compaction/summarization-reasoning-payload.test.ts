@@ -107,7 +107,7 @@ const payloadCases = [
 			...getModel("azure-openai-responses", "gpt-5.4"),
 			baseUrl: "https://test-resource.openai.azure.com/openai/v1",
 		},
-		effort: "minimal",
+		effort: "low",
 		summary: undefined,
 	},
 ] as const;

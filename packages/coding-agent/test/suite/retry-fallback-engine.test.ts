@@ -131,7 +131,13 @@ describe("retry fallback engine", () => {
 		]);
 		expect(harness.eventsOfType("retry_fallback_succeeded")).toMatchObject([{ model: fallback, chainKey: primary }]);
 		expect(harness.faux.state.callCount).toBe(5);
-		expect(harness.eventsOfType("agent_end").map((event) => event.willRetry)).toEqual([true, true, true, true, false]);
+		expect(harness.eventsOfType("agent_end").map((event) => event.willRetry)).toEqual([
+			true,
+			true,
+			true,
+			true,
+			false,
+		]);
 	});
 
 	it("switches on the first transient error when no same-model retry budget exists", async () => {
@@ -215,7 +221,9 @@ describe("retry fallback engine", () => {
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			tools: [primaryPrivilegedTool, fallbackPresetTool],
 			initialActiveToolNames: ["primary_privileged"],
-			settings: { retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } } },
+			settings: {
+				retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } },
+			},
 			extensionFactories: [
 				(pi) => {
 					pi.on("model_select", (event) => {
@@ -267,7 +275,9 @@ describe("retry fallback engine", () => {
 	it("invalidates an in-flight compaction when retry fallback changes the model", async () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
-			settings: { retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } } },
+			settings: {
+				retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } },
+			},
 		});
 		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("seed")]);
