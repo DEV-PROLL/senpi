@@ -385,6 +385,7 @@ export class ExtensionRunner {
 		reserveTokens: 16384,
 		keepRecentTokens: 20000,
 	});
+	private getPromptCacheSafeWaitSecondsFn: () => number | undefined = () => undefined;
 	private getLookAtSettingsFn: ExtensionContextActions["getLookAtSettings"] = () => ({
 		enabled: true,
 		models: undefined,
@@ -483,6 +484,9 @@ export class ExtensionRunner {
 		this.shutdownHandler = contextActions.shutdown;
 		this.getContextUsageFn = contextActions.getContextUsage;
 		this.getCompactionSettingsFn = contextActions.getCompactionSettings;
+		if (contextActions.getPromptCacheSafeWaitSeconds)
+			if (contextActions.getPromptCacheSafeWaitSeconds)
+				this.getPromptCacheSafeWaitSecondsFn = contextActions.getPromptCacheSafeWaitSeconds;
 		this.getLookAtSettingsFn = contextActions.getLookAtSettings;
 		this.getImageSettingsFn = contextActions.getImageSettings;
 		this.sessionSettingsFn = contextActions.sessionSettings;
@@ -1013,6 +1017,10 @@ export class ExtensionRunner {
 			getCompactionSettings: () => {
 				runner.assertActive();
 				return runner.getCompactionSettingsFn();
+			},
+			getPromptCacheSafeWaitSeconds: () => {
+				runner.assertActive();
+				return runner.getPromptCacheSafeWaitSecondsFn();
 			},
 			getLookAtSettings: () => {
 				runner.assertActive();
