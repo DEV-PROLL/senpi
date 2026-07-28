@@ -19,6 +19,17 @@ export type MonitorEvent = MonitorLineEvent | MonitorSummaryEvent;
 
 export type MonitorRearmResult = "rearmed" | "not_paused" | "not_found";
 
+export interface MonitorSnapshotEntry {
+	readonly id: string;
+	readonly description: string;
+	readonly paused: boolean;
+}
+
+export interface MonitorRegistryOptions {
+	/** Observes every registry transition (register/pause/rearm/settle/dispose) with the live snapshot. */
+	readonly onChange?: (snapshot: readonly MonitorSnapshotEntry[]) => void;
+}
+
 export interface RegisterMonitorOptions {
 	readonly id: string;
 	readonly description: string;
@@ -46,9 +57,19 @@ interface MonitorRecord {
 export class MonitorRegistry {
 	readonly #records = new Map<string, MonitorRecord>();
 	readonly #emit: (event: MonitorEvent) => void;
+	readonly #onChange: ((snapshot: readonly MonitorSnapshotEntry[]) => void) | undefined;
 
-	constructor(emit: (event: MonitorEvent) => void) {
+	constructor(emit: (event: MonitorEvent) => void, options?: MonitorRegistryOptions) {
 		this.#emit = emit;
+		this.#onChange = options?.onChange;
+	}
+
+	snapshot(): readonly MonitorSnapshotEntry[] {
+		return [...this.#records.values()].map((record) => ({
+			id: record.id,
+			description: record.description,
+			paused: record.paused,
+		}));
 	}
 
 	register(options: RegisterMonitorOptions): void {
@@ -64,6 +85,7 @@ export class MonitorRegistry {
 			unsubscribeExit: undefined,
 		};
 		this.#records.set(record.id, record);
+		this.#notifyChange();
 
 		// Runtime output is already bounded. Read what was produced before monitor registration,
 		// then subscribe synchronously so a fast watcher cannot lose its first line.
@@ -80,6 +102,7 @@ export class MonitorRegistry {
 			record.paused = true;
 			paused.push(record.id);
 		}
+		if (paused.length > 0) this.#notifyChange();
 		return paused;
 	}
 
@@ -88,12 +111,18 @@ export class MonitorRegistry {
 		if (!record) return "not_found";
 		if (!record.paused) return "not_paused";
 		record.paused = false;
+		this.#notifyChange();
 		return "rearmed";
 	}
 
 	dispose(): void {
 		for (const record of this.#records.values()) this.#disposeRecord(record);
 		this.#records.clear();
+		this.#notifyChange();
+	}
+
+	#notifyChange(): void {
+		this.#onChange?.(this.snapshot());
 	}
 
 	#consume(record: MonitorRecord, chunk: string): void {
@@ -117,6 +146,7 @@ export class MonitorRegistry {
 		record.unsubscribeOutput?.();
 		record.unsubscribeExit?.();
 		this.#records.delete(record.id);
+		this.#notifyChange();
 		const status = describeExit(record.runtime) ?? "exited";
 		const code = record.runtime.exitResult?.exitCode;
 		const codeText = code === null || code === undefined ? "" : ` (exit code ${code})`;
