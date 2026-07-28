@@ -87,7 +87,13 @@ type RpcSessionCommand =
 	| { id?: string; type: "login_start"; provider: string }
 	| { id?: string; type: "login_cancel"; provider: string }
 	| { id?: string; type: "login_api_key"; provider: string; key: string }
-	| { id?: string; type: "logout"; provider: string };
+	| { id?: string; type: "logout"; provider: string }
+
+	// Provider accounts (task 13) are additive. The desktop consumer contract
+	// lives in ../omo-desktop-app/packages/contracts/src/rpc.ts and is updated separately.
+	| { id?: string; type: "get_provider_accounts"; provider: string }
+	| { id?: string; type: "account_pin"; provider: string; name: string | null }
+	| { id?: string; type: "account_remove"; provider: string; name: string };
 
 /** Stable multi-session protocol error codes. */
 export const RPC_ERROR_UNKNOWN_SESSION = "unknown_session";
@@ -145,6 +151,14 @@ export interface RpcAuthStatus {
 	configured: boolean;
 	source?: "stored" | "runtime" | "environment" | "fallback" | "models_json_key" | "models_json_command";
 	label?: string;
+}
+
+/** Account-slot metadata safe to send to desktop clients. */
+export interface RpcProviderAccount {
+	name: string;
+	source: "login" | "import" | "env";
+	blocked: boolean;
+	pinned: boolean;
 }
 
 // ============================================================================
@@ -347,6 +361,15 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "login_cancel"; success: true }
 	| { id?: string; type: "response"; command: "login_api_key"; success: true }
 	| { id?: string; type: "response"; command: "logout"; success: true }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_provider_accounts";
+			success: true;
+			data: { accounts: RpcProviderAccount[] };
+	  }
+	| { id?: string; type: "response"; command: "account_pin"; success: true }
+	| { id?: string; type: "response"; command: "account_remove"; success: true }
 
 	// Error response (any command can fail)
 	| { id?: string; type: "response"; command: string; success: false; error: string };
@@ -412,4 +435,19 @@ export type RpcExtensionUIResponse =
 export interface RpcThinkingLevelChangedEvent {
 	type: "thinking_level_changed";
 	level: ThinkingLevel;
+}
+
+/** Emitted after an account is added, removed, pinned, or blocked by refresh failure. */
+export interface RpcAuthAccountsChangedEvent {
+	type: "auth_accounts_changed";
+	provider: string;
+}
+
+/** Emitted when the SDK failover engine advances to a different account slot. */
+export interface RpcAccountFailoverEvent {
+	type: "account_failover";
+	provider: string;
+	from: string;
+	to: string;
+	reason: string;
 }

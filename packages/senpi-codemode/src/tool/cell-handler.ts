@@ -1,8 +1,9 @@
 import type { AgentToolResult, AgentToolUpdateCallback, ExtensionContext } from "@code-yeongyu/senpi";
 import type { KernelToHostMessage } from "../bridge/protocol.ts";
-import { RESERVED_AGENT_TOOL, RESERVED_OUTPUT_TOOL } from "../bridge/reserved.ts";
-import { type AgentExecuteTool, runEvalAgent } from "../bridges/agent-bridge.ts";
-import { runEvalOutput } from "../bridges/output-bridge.ts";
+import type { AgentExecuteTool } from "../bridges/agent-bridge.ts";
+import { isReservedToolName, runReservedTool } from "../bridges/reserved-dispatch.ts";
+import type { EvalSchemaToolInfo } from "../bridges/schema-bridge.ts";
+import { appendSchemaHint } from "../bridges/schema-hint.ts";
 import type { CompletionRequest, CompletionResult } from "../completion/handler.ts";
 import { handleCompletionToolCall } from "../completion/tool-bridge.ts";
 import type { ResolvedCodemodeSettings } from "../config/settings.ts";
@@ -36,6 +37,7 @@ export interface CellState {
 
 export interface CellBridgeRuntime {
 	readonly executeTool: AgentExecuteTool;
+	readonly listTools?: () => readonly EvalSchemaToolInfo[];
 	readonly settings: ResolvedCodemodeSettings;
 	readonly complete?: (request: CompletionRequest, ctx: ExtensionContext) => Promise<CompletionResult>;
 	readonly ctx: ExtensionContext;
@@ -151,25 +153,17 @@ export class CellHandler {
 			});
 			return;
 		}
-		if (message.toolName === RESERVED_AGENT_TOOL) {
+		if (isReservedToolName(message.toolName)) {
 			await this.#deliverToolReply(message, async () => ({
-				value: await runEvalAgent(message.args, {
+				value: await runReservedTool(message.toolName, {
 					callId: message.callId,
-					taskToolName: this.#runtime.settings.taskTools.task,
+					args: message.args,
 					executeTool: this.#runtime.executeTool,
+					taskToolName: this.#runtime.settings.taskTools.task,
+					taskOutputToolName: this.#runtime.settings.taskTools.output,
+					listTools: this.#runtime.listTools,
 					signal: this.#state.signal,
 					emitStatus: (event) => this.#recordStatus(event),
-				}),
-				toolCallOk: true,
-			}));
-			return;
-		}
-		if (message.toolName === RESERVED_OUTPUT_TOOL) {
-			await this.#deliverToolReply(message, async () => ({
-				value: await runEvalOutput(message.args, {
-					taskOutputToolName: this.#runtime.settings.taskTools.output,
-					executeTool: this.#runtime.executeTool,
-					signal: this.#state.signal,
 					marshalToolResult,
 				}),
 				toolCallOk: true,
@@ -210,7 +204,11 @@ export class CellHandler {
 			this.#kernel.deliverToolReply({ type: "tool-reply", callId: message.callId, ok: true, value: reply.value });
 		} catch (error) {
 			if (!this.#state.active) return;
-			const text = error instanceof Error ? error.message : String(error);
+			const text = appendSchemaHint(
+				error instanceof Error ? error.message : String(error),
+				message.toolName,
+				this.#toolParameters(message.toolName),
+			);
 			this.#state.toolCalls.push({ name: message.toolName, ok: false, error: text });
 			this.#kernel.deliverToolReply({
 				type: "tool-reply",
@@ -220,6 +218,10 @@ export class CellHandler {
 			});
 		}
 		this.#emitUpdate(false);
+	}
+
+	#toolParameters(toolName: string): unknown {
+		return this.#runtime.listTools?.().find((tool) => tool.name === toolName)?.parameters;
 	}
 
 	#recordStatus(event: EvalStatusEvent): void {

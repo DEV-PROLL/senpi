@@ -3,6 +3,28 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## Monitor flat schema + subscribe-not-poll prompt (2026-07-27)
+
+### What changed
+
+- `monitorSchema` is now a single flat `Type.Object` (action via a string enum; description,
+  command, filter, timeout_ms, persistent, bash_id all optional at schema level). Branch
+  requirements moved to runtime: create requires description+command, rearm requires bash_id,
+  each returning a clear `errorResult` instead of relying on schema-union validation.
+- Why: several provider payload paths rebuild tool schemas from top-level `properties` only
+  (Anthropic's legacy input_schema conversion in packages/ai `convertTools`), so the previous
+  top-level `Type.Union` reached Claude as an EMPTY schema — the model saw a parameterless
+  `monitor` tool and fell back to foreground sleep/poll loops.
+- Tool description, promptSnippet, promptGuidelines, and the `prompt.ts` monitor bullet were
+  rewritten to event-subscription framing (subscribe-not-poll, command shaped by notification
+  count), referencing Claude Code's Monitor tool prompt but far shorter.
+- `renderMonitorCall` falls back to command/empty when the now-optional description is absent.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `tools/monitor.ts` (fork-owned tool), `tools/render.ts` label line, `prompt.ts` monitor
+  bullet, `test/suite/terminal-monitor.test.ts` new schema/validation cases.
+
 ## bash_output peek-only (2026-07-26)
 
 ### What changed

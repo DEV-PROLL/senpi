@@ -25,7 +25,7 @@
  *   (the flag is --serve-env, NOT --env-file: Node treats --env-file as a native
  *    startup flag and would try to load the path as a dotenv file before the script runs)
  *   node mock-loop.mjs --with-mcp-tool mcp_fx_tool_1 --tool-args '{"value":"ok"}'
- *   node mock-loop.mjs --scenario transient-recover|budget-exhaust|long-retry-after|anthropic-policy-refusal-fallback
+ *   node mock-loop.mjs --scenario transient-recover|budget-exhaust|server-error-fallback|long-retry-after|anthropic-policy-refusal-fallback
  *   node mock-loop.mjs --run "prompt" [--api ...] [--evidence SLUG]
  */
 
@@ -594,7 +594,7 @@ if (argv[0] === "--self-test") {
 			"  node mock-loop.mjs --with-text-tool-leak --api <anthropic-messages|openai-completions>",
 			"  node mock-loop.mjs --with-truncated-text-tool-leak --api <anthropic-messages|openai-completions>",
 			"  node mock-loop.mjs --with-mcp-tool <tool> [--tool-args JSON]",
-			"  node mock-loop.mjs --scenario <transient-recover|budget-exhaust|long-retry-after|anthropic-policy-refusal-fallback> [--api <name>]",
+			"  node mock-loop.mjs --scenario <transient-recover|budget-exhaust|server-error-fallback|long-retry-after|anthropic-policy-refusal-fallback> [--api <name>]",
 			"  node mock-loop.mjs --run <prompt> [--api <name>]",
 			`  APIs: ${ALL_APIS.join(", ")}`,
 			"",

@@ -1,3 +1,15 @@
+## Explicit Responses v2 compaction for verified proxies (2026-07-27)
+
+- `openai-remote-model.ts`: official OpenAI remains eligible by default; custom `openai-responses` providers require `compat.supportsRemoteCompactionV2: true`. Persisted checkpoint identity now retains the exact custom provider id instead of coercing it to `openai`.
+- `openai-remote-responses-v2.ts`: native compaction sends a standard Responses request with a `compaction_trigger` input item and the `remote_compaction_v2` beta capability header. A returned native `compaction` item becomes the durable checkpoint replacement.
+- Existing WebSocket, legacy compact-endpoint, and local-summary paths remain ordered fallbacks. Endpoint and auth-tenant provenance checks remain mandatory for replay.
+
+## Portable low-cost reasoning for compaction summaries (2026-07-27)
+
+- `speculative.ts`: compaction summarization now starts at `low` instead of forcing `minimal`. Some OpenAI-compatible gateways expose stale or narrower capability metadata and reject `minimal` even when the local model map advertises it; `low` is the lowest portable effort across those endpoints.
+- The selector still falls upward through `medium` and `high`, respects explicit `null` unsupported entries, disables Anthropic thinking, and omits the override when no low-cost level is available.
+- Regression coverage exercises OpenAI Responses and Completions models that advertise both `minimal` and `low`, plus a model with every low-cost level explicitly disabled.
+
 ## Canonical remote compaction provenance and route ownership (2026-07-24)
 
 - `openai-remote-model.ts`: provenance now hashes the normalized endpoint and every final header by default. The only excluded volatile transport headers are `content-length`, `user-agent`, `request-id`, `x-request-id`, and `x-client-request-id`; raw values are never persisted. This binds non-Codex checkpoints to authorization plus final tenant/workspace routing headers.

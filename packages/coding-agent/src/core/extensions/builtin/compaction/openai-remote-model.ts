@@ -5,7 +5,7 @@ import { type Api, extractOpenAiCodexAccountId, type Model } from "@earendil-wor
 export type OpenAiRemoteCompactionModel = Model<"openai-responses"> | Model<"openai-codex-responses">;
 
 export type OpenAiRemoteCompactionIdentity =
-	| { provider: "openai"; api: "openai-responses" }
+	| { provider: string; api: "openai-responses" }
 	| { provider: "openai-codex"; api: "openai-codex-responses" };
 
 /** Non-secret remote state ownership persisted with a native checkpoint. */
@@ -50,7 +50,7 @@ export function parseOpenAiRemoteCompactionIdentity(
 	provider: unknown,
 	api: unknown,
 ): OpenAiRemoteCompactionIdentity | undefined {
-	if (provider === "openai" && api === "openai-responses") {
+	if (typeof provider === "string" && provider.length > 0 && api === "openai-responses") {
 		return { provider, api };
 	}
 	if (provider === "openai-codex" && api === "openai-codex-responses") {
@@ -62,6 +62,10 @@ export function parseOpenAiRemoteCompactionIdentity(
 export function isOpenAiRemoteCompactionModel(model: Model<Api> | undefined): model is OpenAiRemoteCompactionModel {
 	const identity = parseOpenAiRemoteCompactionIdentity(model?.provider, model?.api);
 	if (!identity || !model) return false;
+	if (model.api === "openai-responses" && model.provider !== "openai") {
+		const compat = model.compat as Model<"openai-responses">["compat"] | undefined;
+		if (compat?.supportsRemoteCompactionV2 !== true) return false;
+	}
 	return identity.api !== "openai-codex-responses" || isTrustedOpenAiCodexBaseUrl(model.baseUrl);
 }
 
@@ -75,7 +79,7 @@ export function matchesOpenAiRemoteCompactionIdentity(
 export function openAiRemoteCompactionIdentity(model: OpenAiRemoteCompactionModel): OpenAiRemoteCompactionIdentity {
 	return model.api === "openai-codex-responses"
 		? { provider: "openai-codex", api: "openai-codex-responses" }
-		: { provider: "openai", api: "openai-responses" };
+		: { provider: model.provider, api: "openai-responses" };
 }
 
 export function openAiRemoteCompactionEndpointPath(model: OpenAiRemoteCompactionModel): string {

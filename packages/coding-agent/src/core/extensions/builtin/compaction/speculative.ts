@@ -134,7 +134,7 @@ function summaryMaxTokens(model: Model<any>, contextWindow: number): number {
 function summarizationReasoningOptions(model: Model<any>): Record<string, unknown> {
 	if (!model.reasoning) return {};
 	if (model.api === "anthropic-messages") return { thinkingEnabled: false };
-	const reasoningEffort = (["minimal", "low", "medium", "high"] as const).find(
+	const reasoningEffort = (["low", "medium", "high"] as const).find(
 		(level) => model.thinkingLevelMap?.[level] !== null,
 	);
 	if (!reasoningEffort) return {};

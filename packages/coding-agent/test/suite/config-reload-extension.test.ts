@@ -1115,4 +1115,144 @@ describe("config reload builtin extension", () => {
 			}),
 		).toBe(true);
 	});
+
+	it("ignores extension runtime state writes under the watched extensions directory", async () => {
+		vi.useFakeTimers();
+		const agentDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-ext-state-"));
+		agentDirs.push(agentDir);
+		writeFileSync(join(agentDir, "settings.json"), '{"theme":"dark"}\n', "utf-8");
+		const extensionsDir = join(agentDir, "extensions");
+		mkdirSync(extensionsDir, { recursive: true });
+		writeFileSync(join(extensionsDir, "diff.js"), "export default () => {};\n", "utf-8");
+		const goalStateDir = join(extensionsDir, "goal", "no-session", "2fca6eb7d09fc68d11abc56e");
+		mkdirSync(goalStateDir, { recursive: true });
+		const goalStatePath = join(goalStateDir, "019fa192-1633-7803-9770-f2c76bd91ca3.json");
+		writeFileSync(goalStatePath, '{"status":"active"}\n', "utf-8");
+
+		const watches = createWatchProbe();
+		const reload = vi.fn(async () => {});
+		const extension = createManualExtension(createEventBus());
+		configReloadExtension(extension.api, { agentDir, subscribe: watches.subscribe, logger: silentLogger() });
+		await invoke(
+			extension.handlers,
+			"session_start",
+			{ type: "session_start", reason: "startup" } satisfies SessionStartEvent,
+			fakeContext({ cwd: agentDir, requestReload: reload }),
+		);
+
+		writeFileSync(goalStatePath, '{"status":"complete"}\n', "utf-8");
+		watches.emit(
+			extensionsDir,
+			join("goal", "no-session", "2fca6eb7d09fc68d11abc56e", "019fa192-1633-7803-9770-f2c76bd91ca3.json"),
+		);
+		await vi.advanceTimersByTimeAsync(200);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(reload).toHaveBeenCalledTimes(0);
+	});
+
+	it("still reloads when a real extension entry under the extensions directory changes", async () => {
+		vi.useFakeTimers();
+		const agentDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-ext-entry-"));
+		agentDirs.push(agentDir);
+		writeFileSync(join(agentDir, "settings.json"), '{"theme":"dark"}\n', "utf-8");
+		const extensionsDir = join(agentDir, "extensions");
+		mkdirSync(extensionsDir, { recursive: true });
+		const entryPath = join(extensionsDir, "diff.js");
+		writeFileSync(entryPath, "export default () => {};\n", "utf-8");
+
+		const watches = createWatchProbe();
+		const reload = vi.fn(async () => {});
+		const extension = createManualExtension(createEventBus());
+		configReloadExtension(extension.api, { agentDir, subscribe: watches.subscribe, logger: silentLogger() });
+		await invoke(
+			extension.handlers,
+			"session_start",
+			{ type: "session_start", reason: "startup" } satisfies SessionStartEvent,
+			fakeContext({ cwd: agentDir, requestReload: reload }),
+		);
+
+		writeFileSync(entryPath, "export default () => { /* changed */ };\n", "utf-8");
+		watches.emit(extensionsDir, "diff.js");
+		await vi.advanceTimersByTimeAsync(200);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(reload).toHaveBeenCalledTimes(1);
+	});
+
+	it("detects an anchored external dot directory when it is created", async () => {
+		vi.useFakeTimers();
+		const fixture = await createFixture();
+		const ancestorDir = join(fixture.harness.tempDir, "anchored-ancestor");
+		mkdirSync(ancestorDir);
+		fixture.events.emit(CONFIG_WATCH_REGISTER, {
+			id: "omo-anchored",
+			displayName: ".omo anchored",
+			targets: [{ path: ancestorDir, kind: "dir", filterGlobs: ["/.omo"] }],
+		});
+		const omoDir = join(ancestorDir, ".omo");
+		mkdirSync(omoDir);
+
+		await settleChange(fixture, ancestorDir, ".omo");
+
+		expect(fixture.reload).toHaveBeenCalledTimes(1);
+		expect(fixture.notifications.some((message) => message.includes(omoDir))).toBe(true);
+	});
+
+	it("ignores unrelated nested dot directories under an anchored external target", async () => {
+		vi.useFakeTimers();
+		const fixture = await createFixture();
+		const ancestorDir = join(fixture.harness.tempDir, "anchored-scope");
+		const unrelatedDir = join(ancestorDir, "other-repo", "worktrees", "scratch");
+		mkdirSync(unrelatedDir, { recursive: true });
+		fixture.events.emit(CONFIG_WATCH_REGISTER, {
+			id: "omo-anchored-scope",
+			displayName: ".omo anchored scope",
+			targets: [{ path: ancestorDir, kind: "dir", filterGlobs: ["/.omo"] }],
+		});
+		fixture.reload.mockClear();
+
+		mkdirSync(join(unrelatedDir, ".omo"));
+		await settleChange(fixture, ancestorDir, join("other-repo", "worktrees", "scratch", ".omo"));
+
+		expect(fixture.reload).not.toHaveBeenCalled();
+	});
+
+	it("reloads when a manifest-declared nested extension entry changes", async () => {
+		vi.useFakeTimers();
+		const agentDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-manifest-entry-"));
+		agentDirs.push(agentDir);
+		writeFileSync(join(agentDir, "settings.json"), '{"theme":"dark"}\n', "utf-8");
+		const packageDir = join(agentDir, "extensions", "my-ext");
+		const distDir = join(packageDir, "dist");
+		mkdirSync(distDir, { recursive: true });
+		writeFileSync(
+			join(packageDir, "package.json"),
+			`${JSON.stringify({ name: "my-ext", pi: { extensions: ["dist/index.js"] } })}\n`,
+			"utf-8",
+		);
+		const entryPath = join(distDir, "index.js");
+		writeFileSync(entryPath, "export default () => {};\n", "utf-8");
+
+		const watches = createWatchProbe();
+		const reload = vi.fn(async () => {});
+		const extension = createManualExtension(createEventBus());
+		configReloadExtension(extension.api, { agentDir, subscribe: watches.subscribe, logger: silentLogger() });
+		await invoke(
+			extension.handlers,
+			"session_start",
+			{ type: "session_start", reason: "startup" } satisfies SessionStartEvent,
+			fakeContext({ cwd: agentDir, requestReload: reload }),
+		);
+
+		writeFileSync(entryPath, "export default () => { /* changed */ };\n", "utf-8");
+		watches.emit(join(agentDir, "extensions"), join("my-ext", "dist", "index.js"));
+		await vi.advanceTimersByTimeAsync(200);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(reload).toHaveBeenCalledTimes(1);
+	});
 });

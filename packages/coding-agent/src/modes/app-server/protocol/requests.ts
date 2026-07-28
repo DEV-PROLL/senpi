@@ -1,4 +1,11 @@
-import type { AccountRateLimitsReadParams, AccountReadParams, AccountUsageReadParams } from "./account.ts";
+import type {
+	AccountRateLimitsReadParams,
+	AccountReadParams,
+	AccountUsageReadParams,
+	ProviderAccountsPinParams,
+	ProviderAccountsReadParams,
+	ProviderAccountsRemoveParams,
+} from "./account.ts";
 import type { InitializeParams, JsonValue, RequestId } from "./base.ts";
 import type {
 	ExperimentalFeatureListParams,
@@ -56,6 +63,21 @@ export type ServerRequestMethod = (typeof SERVER_REQUEST_METHODS)[number];
 export type ClientRequest =
 	| { readonly method: "initialize"; readonly id: RequestId; readonly params: InitializeParams }
 	| { readonly method: "account/read"; readonly id: RequestId; readonly params: AccountReadParams }
+	| {
+			readonly method: "account/providerAccounts/read";
+			readonly id: RequestId;
+			readonly params: ProviderAccountsReadParams;
+	  }
+	| {
+			readonly method: "account/providerAccounts/pin";
+			readonly id: RequestId;
+			readonly params: ProviderAccountsPinParams;
+	  }
+	| {
+			readonly method: "account/providerAccounts/remove";
+			readonly id: RequestId;
+			readonly params: ProviderAccountsRemoveParams;
+	  }
 	| {
 			readonly method: "account/rateLimits/read";
 			readonly id: RequestId;

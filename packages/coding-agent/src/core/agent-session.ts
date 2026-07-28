@@ -112,6 +112,7 @@ import type {
 	ApplyCompactionResult,
 	CompactionReason,
 	CompactionRejectionCause,
+	LazyToolActivator,
 	ModelSelectSource,
 } from "./extensions/types.ts";
 import { RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
@@ -143,6 +144,8 @@ import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts"
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
+
+const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
 
 // ============================================================================
 // Skill Block Parsing
@@ -627,6 +630,7 @@ export class AgentSession {
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
+	private _lazyToolActivators: LazyToolActivator[] = [];
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
@@ -1872,8 +1876,17 @@ export class AgentSession {
 		params: unknown,
 		options?: ExecuteToolOptions<TDetails>,
 	): Promise<AgentToolResult<TDetails>> {
-		const activeTools = this.getActiveToolNames();
-		const tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		let activeTools = this.getActiveToolNames();
+		let tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		if (
+			!tool &&
+			options?.activateInactiveTool === true &&
+			this._toolDefinitions.has(toolName) &&
+			this._activateLazyTool(toolName)
+		) {
+			activeTools = this.getActiveToolNames();
+			tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		}
 		if (!tool) {
 			const knownToolNames = new Set(this._toolDefinitions.keys());
 			const code = knownToolNames.has(toolName) ? "inactive_tool" : "unknown_tool";
@@ -1944,6 +1957,11 @@ export class AgentSession {
 			details: (hookResult.details ?? result.details) as TDetails,
 			terminate: result.terminate,
 		};
+	}
+
+	/** Lets a registering extension activate its own inactive tool on demand; it owns eligibility. */
+	private _activateLazyTool(toolName: string): boolean {
+		return this._lazyToolActivators.some((activate) => activate(toolName));
 	}
 
 	/**
@@ -3732,6 +3750,7 @@ export class AgentSession {
 						this.agent.transformContext,
 						this.settingsManager.getRetrySettings(),
 						this._summarizationRetryCallbacks({ source: "compaction", reason: request.reason }),
+						this.sessionManager.getSessionId(),
 					);
 				}
 			}
@@ -4699,6 +4718,9 @@ export class AgentSession {
 				registerRemovedToolHint: (name, hint) => {
 					this.agent.removedToolHints[name] = hint;
 				},
+				registerLazyToolActivator: (activator) => {
+					this._lazyToolActivators.push(activator);
+				},
 				getCommands,
 				setModel: async (model) => {
 					if (!this._modelRuntime.hasConfiguredAuth(model.provider)) return false;
@@ -5088,6 +5110,9 @@ export class AgentSession {
 	 * Context overflow errors are NOT retryable (handled by compaction instead).
 	 */
 	private _isRetryableError(message: AssistantMessage): boolean {
+		// Providers mark post-delta failures to prevent replaying visible text/tool calls.
+		if (message.errorMessage?.startsWith(TURN_RETRY_SUPPRESSION_PREFIX)) return false;
+
 		// Context overflow is handled by compaction, not retry.
 		if (isContextOverflow(message, this.model?.contextWindow ?? 0)) return false;
 
@@ -5103,6 +5128,7 @@ export class AgentSession {
 
 	private _isHardErrorFallbackEligible(message: AssistantMessage): boolean {
 		return (
+			!message.errorMessage?.startsWith(TURN_RETRY_SUPPRESSION_PREFIX) &&
 			message.stopReason === "error" &&
 			!isContextOverflow(message, this.model?.contextWindow ?? 0) &&
 			!isClassifierRefusal(message) &&
