@@ -10,8 +10,8 @@ codex-aligned tool naming, and budget-driven behavior removed. An optional
 
 ### What changed
 - `GoalElapsedTicker` remembers the last rendered `formatGoalElapsedSeconds()` label and does not call `setStatus`
-  again until that visible label changes. `stop()` clears the memoized label so the next goal/session sync always
-  renders immediately.
+  again until that visible label changes. `sync()` clears the memo before its promised immediate render, so switching
+  active goals or snapshots still repaints even when their formatted elapsed labels match; `stop()` also clears it.
 - The ticker still samples once per second. Seconds remain live below one minute; minute/hour/day labels refresh at
   their actual display boundary instead of repainting identical text every second.
 
@@ -21,7 +21,7 @@ codex-aligned tool naming, and budget-driven behavior removed. An optional
   the cost of large resumed histories.
 
 ### Expected merge conflict zones on next upstream sync
-- LOW in `elapsed-ticker.ts` around `tick()` and lifecycle reset.
+- LOW in `elapsed-ticker.ts` around `sync()`, `tick()`, and lifecycle reset.
 - LOW in `goal-elapsed-ticker.test.ts` around fake-timer render expectations.
 
 ## App-server token budget compatibility metadata (2026-07-19)

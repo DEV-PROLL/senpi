@@ -57,6 +57,7 @@ export class GoalElapsedTicker {
 		this.ctx = ctx;
 		this.goal = goal;
 		this.measuredFromMilliseconds = measuredFromMilliseconds;
+		this.lastRenderedElapsedLabel = undefined;
 		this.tick();
 		if (this.intervalId !== undefined) return;
 		const handle = setInterval(() => this.tick(), GOAL_ELAPSED_TICK_INTERVAL_MS);

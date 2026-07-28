@@ -89,6 +89,19 @@ describe("GoalElapsedTicker", () => {
 		ticker.stop();
 	});
 
+	it("renders immediately when re-syncing a different goal with the same elapsed label", () => {
+		vi.useFakeTimers();
+		const renderedGoalIds: string[] = [];
+		const ticker = new GoalElapsedTicker({ render: (_ctx, goal) => renderedGoalIds.push(goal.id) });
+		const measuredFrom = Date.now();
+
+		ticker.sync(fakeCtx, makeGoal({ id: "goal-a", timeUsedSeconds: 3600 }), measuredFrom);
+		ticker.sync(fakeCtx, makeGoal({ id: "goal-b", timeUsedSeconds: 3600 }), measuredFrom);
+
+		expect(renderedGoalIds).toEqual(["goal-a", "goal-b"]);
+		ticker.stop();
+	});
+
 	it("re-syncing the same goal keeps a single interval and refreshes the goal snapshot", () => {
 		vi.useFakeTimers();
 		const setIntervalSpy = vi.spyOn(globalThis, "setInterval");

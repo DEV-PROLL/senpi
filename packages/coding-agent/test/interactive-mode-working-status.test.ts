@@ -32,10 +32,10 @@ describe("formatWorkingElapsedSeconds", () => {
 });
 
 describe("largeSessionWorkingStatusInterval", () => {
-	test("preserves smooth animation for small sessions and throttles large histories", () => {
-		expect(largeSessionWorkingStatusInterval(999, 32)).toBe(32);
-		expect(largeSessionWorkingStatusInterval(1000, 32)).toBe(60_000);
-		expect(largeSessionWorkingStatusInterval(10_000, 600)).toBe(60_000);
+	test("preserves small-session animation and applies each large-session cadence", () => {
+		expect(largeSessionWorkingStatusInterval(999, 32, 1_000)).toBe(32);
+		expect(largeSessionWorkingStatusInterval(1000, 32, 1_000)).toBe(1_000);
+		expect(largeSessionWorkingStatusInterval(10_000, 600, 60_000)).toBe(60_000);
 	});
 });
 
