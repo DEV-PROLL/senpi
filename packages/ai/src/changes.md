@@ -21,6 +21,37 @@
 - LOW: the request creation/retry block in `api/openai-completions.ts`.
 - LOW: shared provider retry classification and stream-prefetch helper in `utils/provider-retry.ts`.
 
+
+## 2026-07-28 - OpenAI catalog gains `-fast` Priority-processing variants
+
+### What changed and why
+
+- `scripts/generate-models.ts`: new `OPENAI_PRIORITY_TIER_MODEL_IDS` (the OpenAI pricing page's
+  Priority table: gpt-5.6-sol/terra/luna, gpt-5.5, gpt-5.4(+mini), gpt-5.2, gpt-5.1, gpt-5(+mini),
+  gpt-4.1 family, gpt-4o family, o3, o4-mini) plus an emission pass that clones each eligible
+  `openai` provider model into `<id>-fast` with `upstreamModelId` set to the base id and
+  `serviceTier: "priority"`. Emission runs after metadata application so variants clone fully
+  processed base models, and is scoped to the direct OpenAI provider (Azure clones and
+  `openai-codex` are intentionally excluded).
+- `src/model.ts`: `Model` gains optional `upstreamModelId` and `serviceTier` so catalog entries
+  can carry the alias/tier defaults that previously only models.json or extension model
+  definitions could express. This removes the need to hand-maintain `-fast` pseudo-models in
+  models.json for stock OpenAI models.
+- Variant `cost` rates intentionally equal the base model's: `api/openai-responses.ts`
+  `applyServiceTierPricing()` multiplies usage cost by the service-tier multiplier (2x, 2.5x for
+  gpt-5.5) at request time, so raised catalog rates would double-count. The request path rewrites
+  the wire id to `upstreamModelId`, preserving the multiplier's `model.id === "gpt-5.5"` branch.
+- Regenerated catalog: 18 `openai` `-fast` variants added; other provider shards carry routine
+  upstream models.dev/OpenRouter drift (e.g. nvidia +14/-2, fireworks +/-2) from regeneration.
+- `../test/openai-fast-models.test.ts`: pins variant presence/eligibility, cloned fields, base
+  cost rates, non-recursion, and Azure/Codex exclusion.
+
+### Expected merge conflict zones
+
+- LOW: additive set + emission block in `scripts/generate-models.ts`; additive optional fields on
+  `Model` in `src/model.ts`; regenerated `src/providers/data/*` shards (regenerate on conflict).
+
+
 ## 2026-07-27 - Codex reasoning summary null omits the field instead of sending "off"
 
 ### What changed and why
