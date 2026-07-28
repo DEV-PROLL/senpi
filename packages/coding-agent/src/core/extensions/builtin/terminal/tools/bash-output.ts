@@ -6,18 +6,6 @@ import { errorResult, type TerminalToolContext, type TerminalToolResult, textRes
 import { renderBashOutputCall, renderBashOutputResult } from "./render.ts";
 import { describeExit } from "./spawn.ts";
 
-/**
- * Migration guidance returned when a caller passes one of the removed blocking
- * params (`wait_for`, `block`, `timeout`). The params stay in the schema as
- * deprecated ghosts so stale callers get this redirect instead of a generic
- * validation error; the blocking semantics themselves are gone.
- */
-export const BASH_OUTPUT_WAIT_REMOVED_GUIDANCE =
-	"wait_for removed - launch pattern watches through monitor({command, filter}); for an already-running session, peek with bash_output or kill_bash and relaunch under monitor; completion notifications carry the tail";
-
-const GHOST_PARAM_DESCRIPTION =
-	"Removed: bash_output no longer blocks. Passing this returns migration guidance pointing at monitor + completion notifications.";
-
 export const bashOutputSchema = Type.Object({
 	bash_id: Type.String({ description: "Session id returned by a run_in_background bash call." }),
 	filter: Type.Optional(Type.String({ description: "Only return output lines matching this regex." })),
@@ -26,9 +14,6 @@ export const bashOutputSchema = Type.Object({
 			description: "'log' returns new raw output (default); 'screen' returns the rendered xterm grid.",
 		}),
 	),
-	wait_for: Type.Optional(Type.String({ description: GHOST_PARAM_DESCRIPTION })),
-	block: Type.Optional(Type.Boolean({ description: GHOST_PARAM_DESCRIPTION })),
-	timeout: Type.Optional(Type.Number({ description: GHOST_PARAM_DESCRIPTION })),
 });
 
 export type BashOutputInput = Static<typeof bashOutputSchema>;
@@ -67,10 +52,6 @@ export function createBashOutputTool(ctx: TerminalToolContext) {
 		async execute(_toolCallId: string, input: BashOutputInput): Promise<TerminalToolResult> {
 			const runtime = ctx.manager.get(input.bash_id);
 			if (!runtime) return errorResult(`No terminal session found with id: ${input.bash_id}`);
-
-			if (input.wait_for !== undefined || input.block !== undefined || input.timeout !== undefined) {
-				return errorResult(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE);
-			}
 
 			if (input.view === "screen") {
 				return textResult(`${statusLine(runtime)}\n${screenView(runtime)}`);
