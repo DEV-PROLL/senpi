@@ -17,12 +17,39 @@ export class StreamIdleTimeoutError extends Error {
 	}
 }
 
+/**
+ * A stream that keeps trickling events never trips the idle watchdog, yet the
+ * summarization it feeds is serialized on the session's agent-event queue: a
+ * slow-but-alive request holds tool results at the batch barrier and keeps typed
+ * input queued until the user aborts. The wall-clock budget bounds that class.
+ */
+export class StreamDurationBudgetError extends Error {
+	readonly maxDurationMs: number;
+	constructor(maxDurationMs: number) {
+		super(
+			`Summarization stream exceeded its ${maxDurationMs}ms wall-clock budget; treating the request as too slow to keep the session waiting`,
+		);
+		this.name = "StreamDurationBudgetError";
+		this.maxDurationMs = maxDurationMs;
+	}
+}
+
 /** Matches the agent stream idle-timeout default (`httpIdleTimeoutMs`). */
 export const DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS = 300_000;
+
+/**
+ * Total time one summarization attempt may hold the session. Well above healthy
+ * summarizations (tens of seconds) and below the idle budget, so a live-but-slow
+ * provider fails fast enough to keep the session interactive. Retries apply this
+ * budget per attempt.
+ */
+export const DEFAULT_SUMMARIZATION_MAX_DURATION_MS = 120_000;
 
 export interface ConsumeStreamWithIdleTimeoutOptions<T> {
 	/** Silence budget per read; the timer resets on every event. */
 	readonly idleTimeoutMs: number;
+	/** Total wall-clock budget for the whole stream; omit to leave it unbounded. */
+	readonly maxDurationMs?: number;
 	/** Tear down the underlying request (abort the request-local controller). */
 	readonly abort: () => void;
 	readonly onEvent?: (event: T) => void;
@@ -31,6 +58,7 @@ export interface ConsumeStreamWithIdleTimeoutOptions<T> {
 }
 
 const IDLE_TRIP = "idle-trip" as const;
+const BUDGET_TRIP = "budget-trip" as const;
 const CALLER_ABORTED = "caller-aborted" as const;
 
 /**
@@ -43,14 +71,26 @@ export async function consumeStreamWithIdleTimeout<T>(
 	options: ConsumeStreamWithIdleTimeoutOptions<T>,
 ): Promise<void> {
 	const iterator = stream[Symbol.asyncIterator]();
-	const { idleTimeoutMs, abort, onEvent, signal } = options;
+	const { idleTimeoutMs, maxDurationMs, abort, onEvent, signal } = options;
 	let removeAbortListener: (() => void) | undefined;
 	let callerAbortPromise: Promise<typeof CALLER_ABORTED> | undefined;
+	if (signal?.aborted) {
+		void iterator.return?.();
+		return;
+	}
+	// One absolute deadline for the whole stream, not a per-read budget. Created
+	// only after the already-aborted early return so no timer is ever leaked.
+	let budgetPromise: Promise<typeof BUDGET_TRIP> | undefined;
+	let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+	let budgetMs = 0;
+	if (maxDurationMs !== undefined) {
+		budgetMs = maxDurationMs;
+		const { promise, resolve } = Promise.withResolvers<typeof BUDGET_TRIP>();
+		budgetTimer = setTimeout(() => resolve(BUDGET_TRIP), budgetMs);
+		budgetTimer.unref?.();
+		budgetPromise = promise;
+	}
 	if (signal !== undefined) {
-		if (signal.aborted) {
-			void iterator.return?.();
-			return;
-		}
 		const { promise, resolve } = Promise.withResolvers<typeof CALLER_ABORTED>();
 		const onAbort = () => resolve(CALLER_ABORTED);
 		signal.addEventListener("abort", onAbort, { once: true });
@@ -62,12 +102,12 @@ export async function consumeStreamWithIdleTimeout<T>(
 			const { promise: idlePromise, resolve: resolveIdle } = Promise.withResolvers<typeof IDLE_TRIP>();
 			const timer = setTimeout(() => resolveIdle(IDLE_TRIP), idleTimeoutMs);
 			timer.unref?.();
-			const contenders: Array<Promise<IteratorResult<T> | typeof IDLE_TRIP | typeof CALLER_ABORTED>> = [
-				iterator.next(),
-				idlePromise,
-			];
+			const contenders: Array<
+				Promise<IteratorResult<T> | typeof IDLE_TRIP | typeof BUDGET_TRIP | typeof CALLER_ABORTED>
+			> = [iterator.next(), idlePromise];
 			if (callerAbortPromise) contenders.push(callerAbortPromise);
-			let result: IteratorResult<T> | typeof IDLE_TRIP | typeof CALLER_ABORTED;
+			if (budgetPromise) contenders.push(budgetPromise);
+			let result: IteratorResult<T> | typeof IDLE_TRIP | typeof BUDGET_TRIP | typeof CALLER_ABORTED;
 			try {
 				result = await Promise.race(contenders);
 			} finally {
@@ -78,6 +118,11 @@ export async function consumeStreamWithIdleTimeout<T>(
 				void iterator.return?.();
 				throw new StreamIdleTimeoutError(idleTimeoutMs);
 			}
+			if (result === BUDGET_TRIP) {
+				abort();
+				void iterator.return?.();
+				throw new StreamDurationBudgetError(budgetMs);
+			}
 			if (result === CALLER_ABORTED) {
 				void iterator.return?.();
 				return;
@@ -87,5 +132,6 @@ export async function consumeStreamWithIdleTimeout<T>(
 		}
 	} finally {
 		removeAbortListener?.();
+		if (budgetTimer !== undefined) clearTimeout(budgetTimer);
 	}
 }
