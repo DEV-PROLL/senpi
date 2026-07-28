@@ -3,6 +3,33 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## Wait-discipline routing: bash surface redirect + guidance dedup (2026-07-28)
+
+### What changed
+
+- `tools/bash.ts`: the PTY `bash` tool description now carries the wait redirect — waiting on
+  observable state (a build finishing, a server coming up, a log line) is never a sleep/poll
+  loop; subscribe with the `monitor` tool instead. The bash surface is where a model actually
+  types `sleep 30`, and cross-tool routing in the misused tool's description follows the same
+  pattern as the grep→rg snippet rule (`test/bash-prompt-snippet.test.ts`). The upstream core
+  bash (`src/core/tools/bash.ts`) is deliberately untouched: its toolset has no monitor, and
+  guidance must never name a tool the toolset lacks.
+- `tools/monitor.ts`: promptGuidelines collapsed to the single when-to-use decision rule. The
+  command-shaping sentence duplicated the TERMINAL_PROMPT_SECTION bullet near-verbatim; each
+  aspect is now stated once (decision rule → Tool Guidelines; mechanics → terminal section;
+  redirect → bash schema; long-run routing → bash-timeout policy).
+- `prompt.ts`: the monitor bullet dropped its embedded when-to-use sentence (kept as the monitor
+  tool's guideline) and keeps the subscribe framing plus shaping/filtering/rearm mechanics.
+- `test/prompt-surface-stale-wait-idioms.test.ts`: the consistency gate now also loads the PTY
+  bash description and the bash-timeout prompt section as surfaces; new gates assert the bash
+  description routes waits to monitor, and that no agent-facing terminal surface teaches tmux as
+  the backgrounding mechanism (negative guidance like "do NOT use tmux" stays allowed).
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `tools/bash.ts` description string, `tools/monitor.ts` promptGuidelines, `prompt.ts`
+  monitor bullet, gate-test surface list (all fork-owned).
+
 ## Monitor flat schema + subscribe-not-poll prompt (2026-07-27)
 
 ### What changed

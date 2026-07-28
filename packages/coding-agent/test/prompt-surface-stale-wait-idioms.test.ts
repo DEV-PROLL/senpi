@@ -2,7 +2,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+	buildBashTimeoutPrompt,
+	resolveBashTimeoutDefaults,
+} from "../src/core/extensions/builtin/bash-timeout/timeout.ts";
 import { TERMINAL_PROMPT_SECTION } from "../src/core/extensions/builtin/terminal/prompt.ts";
+import { createPtyBashTool } from "../src/core/extensions/builtin/terminal/tools/bash.ts";
 import {
 	BASH_OUTPUT_WAIT_REMOVED_GUIDANCE,
 	createBashOutputTool,
@@ -23,22 +28,42 @@ const CODING_AGENT_ROOT = join(REPO_ROOT, "packages", "coding-agent");
 /** Lines mentioning wait_for are allowed only when they are removal guidance. */
 const GHOST_GUIDANCE_MARKER = /removed|no longer/i;
 
+/** Lines mentioning tmux are allowed only when they steer away from it. */
+const NEGATIVE_GUIDANCE_MARKER = /do not|don't|never/i;
+
 function surfaceLines(name: string, text: string): Array<{ name: string; line: number; text: string }> {
 	return text.split("\n").map((line, index) => ({ name, line: index + 1, text: line }));
 }
 
-function loadSurfaces(): Array<{ name: string; line: number; text: string }> {
-	const stubCtx = {
+function stubTerminalCtx(): TerminalToolContext {
+	return {
 		manager: { get: () => undefined },
 		cwd: process.cwd(),
 		defaultCols: 120,
 		defaultRows: 40,
 		getEnv: () => process.env,
 	} as unknown as TerminalToolContext;
+}
+
+/** The prompt surfaces the model actually sees (system-prompt sections + tool schemas). */
+function agentFacingSurfaces(): Array<{ name: string; line: number; text: string }> {
+	const stubCtx = stubTerminalCtx();
+	return [
+		...surfaceLines("terminal/prompt.ts TERMINAL_PROMPT_SECTION", TERMINAL_PROMPT_SECTION),
+		...surfaceLines("bash-timeout prompt section", buildBashTimeoutPrompt(resolveBashTimeoutDefaults({}))),
+		...surfaceLines("terminal bash tool description", createPtyBashTool(stubCtx).description),
+		...surfaceLines("bash_output tool description", createBashOutputTool(stubCtx).description),
+	];
+}
+
+function loadSurfaces(): Array<{ name: string; line: number; text: string }> {
+	const stubCtx = stubTerminalCtx();
 	const bashOutput = createBashOutputTool(stubCtx);
 
 	return [
 		...surfaceLines("terminal/prompt.ts TERMINAL_PROMPT_SECTION", TERMINAL_PROMPT_SECTION),
+		...surfaceLines("bash-timeout prompt section", buildBashTimeoutPrompt(resolveBashTimeoutDefaults({}))),
+		...surfaceLines("terminal bash tool description", createPtyBashTool(stubCtx).description),
 		...surfaceLines("bash_output tool description", bashOutput.description),
 		...surfaceLines("bash_output promptSnippet", bashOutput.promptSnippet ?? ""),
 		...surfaceLines(
@@ -69,15 +94,23 @@ describe("stale wait-idiom consistency gate", () => {
 		expect(TERMINAL_PROMPT_SECTION).not.toContain("wait_for");
 	});
 
+	it("the bash tool surface routes waits to the monitor tool", () => {
+		const bash = createPtyBashTool(stubTerminalCtx());
+		expect(bash.description).toContain("monitor");
+	});
+
+	it("no agent-facing terminal surface teaches tmux as the backgrounding mechanism", () => {
+		const violations = agentFacingSurfaces().filter(
+			({ text }) => /tmux/i.test(text) && !NEGATIVE_GUIDANCE_MARKER.test(text),
+		);
+		expect(
+			violations.map(({ name, line, text }) => `${name}:${line}: ${text.trim()}`),
+			"tmux taught as a backgrounding/wait mechanism outside negative guidance",
+		).toEqual([]);
+	});
+
 	it("the bash_output tool surface no longer advertises blocking", () => {
-		const stubCtx = {
-			manager: { get: () => undefined },
-			cwd: process.cwd(),
-			defaultCols: 120,
-			defaultRows: 40,
-			getEnv: () => process.env,
-		} as unknown as TerminalToolContext;
-		const bashOutput = createBashOutputTool(stubCtx);
+		const bashOutput = createBashOutputTool(stubTerminalCtx());
 		expect(bashOutput.description.toLowerCase()).not.toContain("block until");
 		expect(bashOutput.description).not.toContain("wait_for");
 		expect(bashOutput.promptSnippet ?? "").not.toContain("wait_for");

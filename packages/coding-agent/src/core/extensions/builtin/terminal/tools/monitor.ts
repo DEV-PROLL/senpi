@@ -115,7 +115,6 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 		promptSnippet: "Subscribe to a command's stdout lines as injected events instead of polling",
 		promptGuidelines: [
 			"Waiting on observable state (CI checks, builds, log patterns, deploys) means a monitor, never a foreground sleep/poll loop.",
-			"Shape the command by notifications needed: exit-on-condition for one completion event; emit-per-occurrence (`tail -f | grep --line-buffered`, a polling loop inside the command) for a stream. Filter noise at the source.",
 		],
 		parameters: monitorSchema,
 		renderCall: renderMonitorCall,
