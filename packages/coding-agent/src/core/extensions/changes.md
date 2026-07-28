@@ -1,5 +1,34 @@
 # Core Extensions Changes
 
+## 2026-07-28 - session_before_reload (cancellable reload veto)
+
+### What changed
+
+- `types.ts` adds `SessionBeforeReloadEvent` (`{ type: "session_before_reload" }`) to the `SessionEvent` union,
+  `SessionBeforeReloadResult` (`{ cancel?: boolean; reason?: string }`), and the matching `pi.on` overload.
+- `runner.ts` routes the event through the existing session-before machinery: `SessionBeforeEvent` /
+  `SessionBeforeEventResult` unions, the `RunnerEmitResult` mapping, and `isSessionBeforeEvent`, so the first
+  handler returning `cancel: true` short-circuits exactly like `session_before_switch`.
+- `agent-session.ts` `reload()` now returns `{ cancelled: boolean; reason?: string }` and consults the new
+  `checkReloadVeto()` before `emitSessionShutdownEvent`: a cancelling extension prevents the entire reload
+  (no shutdown, no settings/models/resources reload, no runtime rebuild) on every path — `/reload`,
+  `ctx.reload()`, the builtin config-reload hot path, and direct SDK/rpc/print callers.
+- Interactive mode pre-checks the veto in `handleReloadCommand` and shows the `reason` as a warning without
+  flashing the reload box; it also honors a cancelled result from `reload()` itself (race window).
+
+### Why extension system couldn't handle this alone
+
+- Only the session owns the reload teardown ordering; an extension cannot intercept `session_shutdown`
+  emission or refuse it. Extensions that own long-lived work (e.g. running background subagents in
+  omo-senpi's task runtime) were killed mid-flight by any reload. The veto gives the owning extension a
+  cancellable checkpoint, mirroring the established `session_before_switch`/`fork`/`compact` family.
+
+### Expected merge conflict zones
+
+- LOW: additive event/result/overload entries in `types.ts` and the union/mapping lines in `runner.ts`.
+- MEDIUM: the head of `reload()` in `agent-session.ts` (return-type change plus early return); upstream
+  edits to the reload sequence will conflict there and must keep the veto check first.
+
 ## 2026-07-27 - registerLazyToolActivator (on-demand activation of inactive tools)
 
 ### What changed

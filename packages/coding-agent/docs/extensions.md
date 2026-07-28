@@ -354,6 +354,12 @@ user sends another prompt ◄─────────────────
   ├─► session_start { reason: "fork", previousSessionFile }
   └─► resources_discover { reason: "startup" }
 
+/reload or ctx.reload() (config hot-reload included)
+  ├─► session_before_reload (can cancel — blocks the whole reload)
+  ├─► session_shutdown { reason: "reload" }
+  ├─► session_start { reason: "reload" }
+  └─► resources_discover { reason: "reload" }
+
 /name or pi.setSessionName()
   └─► session_info_changed
 
@@ -476,6 +482,23 @@ pi.on("session_before_fork", async (event, ctx) => {
 
 After a successful fork or clone, pi emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "fork"` and `previousSessionFile`.
 Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `session_start`.
+
+#### session_before_reload
+
+Fired before a full session reload (`/reload`, `ctx.reload()`, or the config hot-reload path) tears down and rebuilds the extension runtime. Cancelling prevents the reload entirely: no `session_shutdown` is emitted, nothing is reloaded, and interactive hosts show `reason` as a warning.
+
+```typescript
+pi.on("session_before_reload", () => {
+  if (backgroundWorkers.size > 0) {
+    return {
+      cancel: true,
+      reason: `${backgroundWorkers.size} background worker(s) still running - wait or cancel them before reloading.`,
+    };
+  }
+});
+```
+
+Use this to protect state a reload would destroy — for example running background children owned by the extension runtime. Keep handlers fast and side-effect free; hosts may consult the veto more than once per reload attempt.
 
 #### session_before_compact / session_compact
 

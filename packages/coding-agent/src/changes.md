@@ -1,3 +1,28 @@
+## Cancellable `session_before_reload` veto blocks reload while extensions protect live work (2026-07-28)
+
+### What changed
+
+- New cancellable extension event `session_before_reload` (`core/extensions/types.ts`, routed through the
+  existing session-before machinery in `core/extensions/runner.ts`). `AgentSession.reload()`
+  (`core/agent-session.ts`) now returns `{ cancelled: boolean; reason?: string }` and consults the new
+  `checkReloadVeto()` BEFORE emitting `session_shutdown`, so a cancelling extension prevents the entire
+  teardown on every reload path (`/reload`, `ctx.reload()`, config hot-reload, direct SDK/rpc/print calls).
+- Interactive `/reload` pre-checks the veto and surfaces the extension's `reason` as a warning
+  (`modes/interactive/interactive-mode.ts`). Docs: `docs/extensions.md` event flow + `#session_before_reload`.
+- Coverage: `test/suite/session-before-reload.test.ts` pins veto-aborts-before-shutdown, normal reload
+  passthrough, and the side-effect-free `checkReloadVeto()` probe.
+
+### Why
+
+- A reload tears down the extension runtime; extensions running background subagents (omo-senpi task
+  runtime) had their children killed mid-flight by `/reload` or a config hot-reload. Only the session owns
+  the teardown ordering, so the veto checkpoint must live in core, mirroring `session_before_switch`.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: additive event plumbing in `extensions/types.ts` / `extensions/runner.ts`; MEDIUM: head of
+  `reload()` in `agent-session.ts` (early-return veto + return-type change).
+
 ## Multi-session RPC host initializes the theme before serving sessions (2026-07-28)
 
 ### What changed

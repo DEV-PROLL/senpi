@@ -1,5 +1,20 @@
 # changes
 
+## /reload honors the session_before_reload extension veto (2026-07-28)
+
+### What changed
+
+- `interactive-mode.ts` `handleReloadCommand()`: before building the reload box, the handler calls
+  `session.checkReloadVeto()`; when an extension cancels (`session_before_reload` returning
+  `cancel: true`), the command shows the extension's `reason` as a warning and returns — no reload box,
+  no focus steal, no teardown. A cancelled result from `session.reload()` itself (late veto) dismisses
+  the box back to the previous editor and shows the same warning.
+
+### Why
+
+- Reload destroys the extension runtime; extensions owning live background work (running subagents in
+  omo-senpi) need a way to block it. The streaming/compaction guards already set the warning precedent.
+
 ## Fix: the startup tip is destroyed by extension headers (2026-07-27)
 
 ### What changed
