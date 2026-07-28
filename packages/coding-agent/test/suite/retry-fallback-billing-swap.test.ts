@@ -60,7 +60,11 @@ describe("retry fallback billing swap", () => {
 		let now = 0;
 		const harness = await createChainHarness(() => now);
 		harnesses.push(harness);
-		harness.setResponses([hardError(), fauxAssistantMessage("fallback answer"), fauxAssistantMessage("primary back")]);
+		harness.setResponses([
+			hardError(),
+			fauxAssistantMessage("fallback answer"),
+			fauxAssistantMessage("primary back"),
+		]);
 
 		await harness.session.prompt("first");
 
@@ -79,7 +83,11 @@ describe("retry fallback billing swap", () => {
 describe("isBillingErrorMessage", () => {
 	it.each([
 		["anthropic credit balance 400", creditBalanceError, true],
-		["openai insufficient_quota 429", "429 {\"error\":{\"type\":\"insufficient_quota\",\"message\":\"You exceeded your current quota\"}}", true],
+		[
+			"openai insufficient_quota 429",
+			'429 {"error":{"type":"insufficient_quota","message":"You exceeded your current quota"}}',
+			true,
+		],
 		["bare insufficient_quota", "billing error: insufficient_quota", true],
 		["purchase credits", "Please purchase credits to continue using this API", true],
 		["overloaded", "overloaded_error", false],
