@@ -71,6 +71,18 @@ of settled history.
 
 `ui.setHeader()` replaces the built-in header component in place, and the builtin `prompt-preset` extension calls it on every `session_start`. Because the tip was part of the header's own text, that replacement silently discarded it: the tip resolved and was recorded into `tipsHistory`, but never reached the terminal. Keeping the tip as a sibling of the header makes it survive any extension header override.
 
+## Tips cover the whole feature surface, and command tips are gated (2026-07-28)
+
+### What changed
+
+- `tips/catalog/` (new): the tip catalog is split by domain into `model-tips.ts`, `input-tips.ts`, `session-tips.ts`, `workspace-tips.ts`, `settings-tips.ts`, `cli-tips.ts`, and `subagent-tips.ts`, with the shared `TipDefinition` in `catalog/types.ts`. `tips/registry.ts` is now a barrel that concatenates them, so `TIP_DEFINITIONS` and `TipDefinition` keep their import paths.
+- The catalog grew from 25 to 70 tips: model fallback chains and `/fallback`, `/login`, `--models` scoping, `thinkingBudgets`, `promptPreset`, `@` file references, Tab path completion, the `?` overlay, steering vs follow-up delivery, `escape` restoring the queue, `/clone`, `-c`/`-r`, `/name`, `/session`, `/export`, `/share`, `/compact`, auto-compaction, AGENTS.md context loading, `/skill:name` and prompt templates, `/files`, `/diff`, `/todo`, `/goal`, `/btw`, `/lookat`, `/mcp`, `/rules`, `/hooks`, `/websearch`, settings locations, `permissionPreset`, `packages`, custom themes, `/reload`, `/trust`, the `tips` toggle, print mode, tool allow/deny flags, subagent categories, `/tasks`, `~/.omo/omo.jsonc`, and teams.
+- `TipDefinition.requiresCommand` (new): a tip that teaches an extension-provided command names it, and `selectTip()` skips that tip when the injected `hasCommand` resolver reports the command is not registered. `interactive-mode.ts` injects `hasRegisteredCommand()` (backed by `extensionRunner.getCommand()`) into both the startup and working tip resolvers.
+
+### Why
+
+The tip line was teaching a small slice of the product while most of the surface - retry fallback chains, session branching, permissions, subagent categories, the omo config file - stayed invisible. Gating by registered command keeps that breadth honest: builtin extensions can be disabled and the omo workflow tips only apply when the omo plugin is loaded, so those tips no longer advertise commands the session cannot run.
+
 ## Feature discoverability: tips, `?` overlay, live favorite hints, `/keybindings` (2026-07-27)
 
 ### What changed

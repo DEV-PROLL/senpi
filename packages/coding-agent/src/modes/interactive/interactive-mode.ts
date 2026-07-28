@@ -1002,6 +1002,7 @@ export class InteractiveMode {
 				now: Date.now(),
 				definitions: TIP_DEFINITIONS,
 				keys: keyText,
+				hasCommand: (command) => this.hasRegisteredCommand(command),
 			});
 			if (startupTip) {
 				this.recordShownTip(startupTip.tipId);
@@ -1046,7 +1047,7 @@ export class InteractiveMode {
 		});
 
 		// Initialize available provider count for footer display
-		await this.updateAvailableProviderCount();
+		this.updateAvailableProviderCount();
 	}
 
 	/**
@@ -1084,7 +1085,10 @@ export class InteractiveMode {
 		if (!process.env.PI_OFFLINE) {
 			void this.session.modelRuntime
 				.refresh()
-				.then(() => this.updateAvailableProviderCount())
+				.then(() => {
+					this.updateAvailableProviderCount();
+					this.ui.requestRender();
+				})
 				.catch(() => {});
 		}
 
@@ -2076,7 +2080,7 @@ export class InteractiveMode {
 			await this.bindCurrentSessionExtensions();
 			this.subscribeToAgent();
 		}
-		await this.updateAvailableProviderCount();
+		this.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
 	}
@@ -2442,6 +2446,7 @@ export class InteractiveMode {
 					now: Date.now(),
 					definitions: TIP_DEFINITIONS,
 					keys: keyText,
+					hasCommand: (command) => this.hasRegisteredCommand(command),
 				}),
 			(tip) => this.recordShownTip(tip.tipId),
 		);
@@ -4887,6 +4892,10 @@ export class InteractiveMode {
 		this.showStatus("Queued message for after compaction");
 	}
 
+	private hasRegisteredCommand(command: string): boolean {
+		return !!this.session.extensionRunner.getCommand(command);
+	}
+
 	private isExtensionCommand(text: string): boolean {
 		if (!text.startsWith("/")) return false;
 
@@ -5328,10 +5337,13 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	/** Update the footer's available provider count from current model candidates */
-	private async updateAvailableProviderCount(): Promise<void> {
-		const models = await this.getModelCandidates();
-		const uniqueProviders = new Set(models.map((m) => m.provider));
+	/** Update the footer's available provider count from the current snapshot without refreshing catalogs. */
+	private updateAvailableProviderCount(): void {
+		const models =
+			this.session.scopedModels.length > 0
+				? this.session.scopedModels.map((scoped) => scoped.model)
+				: this.session.modelRuntime.getAvailableSnapshot();
+		const uniqueProviders = new Set(models.map((model) => model.provider));
 		this.footerDataProvider.setAvailableProviderCount(uniqueProviders.size);
 	}
 
@@ -5973,7 +5985,7 @@ export class InteractiveMode {
 
 					try {
 						await this.session.modelRuntime.logout(providerOption.id);
-						await this.updateAvailableProviderCount();
+						this.updateAvailableProviderCount();
 						const message =
 							providerOption.authType === "oauth"
 								? `Logged out of ${providerOption.name}`
@@ -6029,7 +6041,7 @@ export class InteractiveMode {
 			}
 		}
 
-		await this.updateAvailableProviderCount();
+		this.updateAvailableProviderCount();
 		this.footer.invalidate();
 		this.updateEditorBorderColor();
 		if (selectedModel) {

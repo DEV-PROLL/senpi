@@ -40,7 +40,12 @@ export interface FooterLayoutInput {
  */
 export type FooterLayout =
 	| { readonly kind: "full"; readonly useFullRight: boolean }
-	| { readonly kind: "middle-elided"; readonly keptMiddleCount: number; readonly showMarker: boolean }
+	| {
+			readonly kind: "middle-elided";
+			readonly keptMiddleCount: number;
+			readonly showMarker: boolean;
+			readonly useFullRight: boolean;
+	  }
 	| { readonly kind: "pwd-elided"; readonly pwdPlain: string }
 	| { readonly kind: "left-elided"; readonly leftPlain: string }
 	| { readonly kind: "right-truncated"; readonly rightPlain: string };
@@ -87,20 +92,38 @@ export function elideHead(text: string, maxWidth: number): string {
 export function planFooterLayout(input: FooterLayoutInput): FooterLayout {
 	const { anchor, middle, tail, right } = input;
 	const fullLeft = [...anchor, ...middle, tail];
-	if (right.full !== undefined && fits(fullLeft, right.full, input)) {
-		return { kind: "full", useFullRight: true };
+
+	// The provider-prefixed label outranks the optional middle stats: try to
+	// keep the full label at the richest elision rung that still fits.
+	if (right.full !== undefined) {
+		if (fits(fullLeft, right.full, input)) {
+			return { kind: "full", useFullRight: true };
+		}
+		for (let kept = middle.length - 1; kept >= 0; kept--) {
+			const candidate = [...anchor, ...middle.slice(0, kept), input.ellipsisMarker, tail];
+			if (fits(candidate, right.full, input)) {
+				return { kind: "middle-elided", keptMiddleCount: kept, showMarker: true, useFullRight: true };
+			}
+		}
+		const emptyMiddle = [...anchor, tail];
+		if (fits(emptyMiddle, right.full, input)) {
+			return { kind: "middle-elided", keptMiddleCount: 0, showMarker: false, useFullRight: true };
+		}
 	}
+
+	// Full label cannot fit even with every middle segment dropped; fall back
+	// to the bare model label using the original minimal-only ladder.
 	if (fits(fullLeft, right.minimal, input)) {
 		return { kind: "full", useFullRight: false };
 	}
 	for (let kept = middle.length - 1; kept >= 0; kept--) {
 		const candidate = [...anchor, ...middle.slice(0, kept), input.ellipsisMarker, tail];
 		if (fits(candidate, right.minimal, input)) {
-			return { kind: "middle-elided", keptMiddleCount: kept, showMarker: true };
+			return { kind: "middle-elided", keptMiddleCount: kept, showMarker: true, useFullRight: false };
 		}
 	}
 	if (fits([...anchor, tail], right.minimal, input)) {
-		return { kind: "middle-elided", keptMiddleCount: 0, showMarker: false };
+		return { kind: "middle-elided", keptMiddleCount: 0, showMarker: false, useFullRight: false };
 	}
 	const [, ...anchorRest] = anchor;
 	const restWidth = segmentsWidth([...anchorRest, tail], input.separator) + visibleWidth(input.separator);

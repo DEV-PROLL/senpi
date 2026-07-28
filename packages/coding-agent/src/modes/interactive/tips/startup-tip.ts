@@ -9,6 +9,7 @@ export interface StartupTipOptions {
 	now: number;
 	definitions: readonly TipDefinition[];
 	keys: (binding: Keybinding) => string;
+	hasCommand?: (command: string) => boolean;
 	exclude?: ReadonlySet<string>;
 }
 
@@ -21,7 +22,11 @@ export function resolveStartupTipLine(options: StartupTipOptions): StartupTipLin
 	if (!options.tipsEnabled) return undefined;
 	if (options.quietStartup) return undefined;
 
-	const selectOptions = options.exclude ? { keys: options.keys, exclude: options.exclude } : { keys: options.keys };
+	const selectOptions = {
+		keys: options.keys,
+		...(options.hasCommand ? { hasCommand: options.hasCommand } : {}),
+		...(options.exclude ? { exclude: options.exclude } : {}),
+	};
 	const tip = selectTip(options.definitions, options.history, options.now, selectOptions);
 	if (!tip) return undefined;
 

@@ -1,3 +1,19 @@
+## Provider-qualified fallback selectors resolve inside their own provider (2026-07-28)
+
+### What changed
+
+- `core/retry-fallback/chains.ts`: `parseFallbackSelector` now filters the lookup list to the explicitly requested provider before calling `parseModelPattern`. Previously the id pattern was resolved globally, so a foreign id containing the pattern won over the requested provider's exact id: `anthropic/claude-opus-5:xhigh` fuzzy-matched Bedrock's `us.anthropic.claude-opus-5`, failed the provider check, and produced the spurious startup warning `Fallback chain entry ... is not a valid or known model selector.` (The ambiguity arises whenever two configured providers carry the same bare id, e.g. `anthropic` + `anthropic-api`, which makes the bare-id exact match ambiguous and drops resolution into partial matching.)
+- Coverage: `test/suite/retry-fallback-chains.test.ts` pins in-provider resolution when `anthropic`, `anthropic-api`, and `amazon-bedrock` all carry colliding `claude-opus-5` ids, with and without a thinking-level suffix.
+
+### Why
+
+- A selector with an explicit provider can only ever resolve inside that provider (the post-check rejected cross-provider results), so global resolution could only turn valid selectors into spurious warnings; scoping converts those failures into the correct in-provider match.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one scoped-lookup block inside `parseFallbackSelector` in `chains.ts`; upstream edits to selector parsing will conflict trivially.
+
+
 ## Paste markers survive editor hand-off and setText round-trips (2026-07-28)
 
 - `modes/interactive/interactive-mode.ts` `setCustomEditorComponent()` now transfers editor content safely when switching between the default and a custom editor: if both editors support the paste-state API (`getPasteState`/`setPasteState` from pi-tui), the raw text plus the registry snapshot are transferred so `[paste #N ...]` markers stay collapsed; otherwise it falls back to the expanded text — `getExpandedText?.()`, or expansion from the paste snapshot via the exported `expandPasteMarkers()` when the source implements `getPasteState` without `getExpandedText`, or the raw text when neither capability exists. Previously the raw text alone was copied into a fresh editor with no registry, turning live markers into dead literals and silently dropping the pasted body from the submitted prompt.
