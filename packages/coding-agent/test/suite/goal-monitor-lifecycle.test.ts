@@ -96,4 +96,18 @@ describe("goal monitor continuation lifecycle", () => {
 
 		expect(harness.sent).toHaveLength(0);
 	});
+
+	it("disposes the delayed continuation on session reload", async () => {
+		vi.useFakeTimers();
+		const { harness, ctx } = await createActiveMonitorHarness("thread-monitor-reload");
+		const baselineTimerCount = vi.getTimerCount();
+		await endCleanTurn(harness, ctx);
+		expect(vi.getTimerCount()).toBe(baselineTimerCount + 1);
+
+		await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+
+		expect(vi.getTimerCount()).toBe(baselineTimerCount);
+		await vi.advanceTimersByTimeAsync(240_000);
+		expect(harness.sent).toHaveLength(0);
+	});
 });
