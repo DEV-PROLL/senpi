@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import type { TerminalManager } from "../../src/core/extensions/builtin/terminal/manager.ts";
 import type { TerminalRuntimeSession } from "../../src/core/extensions/builtin/terminal/runtime-session.ts";
 import { createPtyBashTool } from "../../src/core/extensions/builtin/terminal/tools/bash.ts";
 import { createBashOutputTool } from "../../src/core/extensions/builtin/terminal/tools/bash-output.ts";
-import type { TerminalToolContext, TerminalToolResult } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
+import type {
+	TerminalToolContext,
+	TerminalToolResult,
+} from "../../src/core/extensions/builtin/terminal/tools/context.ts";
+import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 
 const spawned = vi.hoisted(() => ({
 	nextId: 0,
@@ -14,7 +17,9 @@ const spawned = vi.hoisted(() => ({
 }));
 
 vi.mock("../../src/core/extensions/builtin/terminal/tools/spawn.ts", () => ({
-	describeExit: (runtime: { exitResult: { exitCode: number | null; timedOut: boolean; cancelled: boolean } | null }) => {
+	describeExit: (runtime: {
+		exitResult: { exitCode: number | null; timedOut: boolean; cancelled: boolean } | null;
+	}) => {
 		const exit = runtime.exitResult;
 		if (!exit) return null;
 		if (exit.timedOut) return "timed_out";
@@ -235,8 +240,7 @@ describe("terminal bash foreground cache-deadline auto-detach", () => {
 			content: [
 				{
 					type: "text",
-					text:
-						"Command is still running; auto-detached to background with ID: bash_1 (not killed; the original 10s timeout still applies).\n\nPartial output:\nREADY\n\nContinue other work; completion will be reported automatically with exit status and output tail. Use bash_output({ bash_id: \"bash_1\" }) only to peek at new output. monitor cannot attach to this session; use it for future event-driven launches. Use kill_bash({ bash_id: \"bash_1\" }) to stop this session.",
+					text: 'Command is still running; auto-detached to background with ID: bash_1 (not killed; the original 10s timeout still applies).\n\nPartial output:\nREADY\n\nContinue other work; completion will be reported automatically with exit status and output tail. Use bash_output({ bash_id: "bash_1" }) only to peek at new output. monitor cannot attach to this session; use it for future event-driven launches. Use kill_bash({ bash_id: "bash_1" }) to stop this session.',
 				},
 			],
 			details: { bash_id: "bash_1", background: true, auto_detached: true, status: "running", droppedChars: 3 },
@@ -259,7 +263,7 @@ describe("terminal bash foreground cache-deadline auto-detach", () => {
 
 		const detached = await execution;
 		expect(firstText(detached)).toBe(
-			"Command is still running; auto-detached to background with ID: bash_1 (not killed; it will run until exit or kill_bash).\n\nPartial output:\nBEFORE\n\nContinue other work; completion will be reported automatically with exit status and output tail. Use bash_output({ bash_id: \"bash_1\" }) only to peek at new output. monitor cannot attach to this session; use it for future event-driven launches. Use kill_bash({ bash_id: \"bash_1\" }) to stop this session.",
+			'Command is still running; auto-detached to background with ID: bash_1 (not killed; it will run until exit or kill_bash).\n\nPartial output:\nBEFORE\n\nContinue other work; completion will be reported automatically with exit status and output tail. Use bash_output({ bash_id: "bash_1" }) only to peek at new output. monitor cannot attach to this session; use it for future event-driven launches. Use kill_bash({ bash_id: "bash_1" }) to stop this session.',
 		);
 		expect(runtime.readDeltaCalls).toBe(1);
 

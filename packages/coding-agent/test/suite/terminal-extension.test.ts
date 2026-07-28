@@ -1,6 +1,5 @@
 import { TerminalSession } from "@earendil-works/pi-pty";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import { createBuiltinParserRegistry } from "../../src/core/extensions/builtin/permission-system/parsers.ts";
 import registerTerminalExtension from "../../src/core/extensions/builtin/terminal/index.ts";
 import { TerminalManager } from "../../src/core/extensions/builtin/terminal/manager.ts";
@@ -9,8 +8,12 @@ import { createPtyBashTool } from "../../src/core/extensions/builtin/terminal/to
 import { createBashInputTool } from "../../src/core/extensions/builtin/terminal/tools/bash-input.ts";
 import { createBashOutputTool } from "../../src/core/extensions/builtin/terminal/tools/bash-output.ts";
 import { createBashResizeTool } from "../../src/core/extensions/builtin/terminal/tools/bash-resize.ts";
-import type { TerminalToolContext, TerminalToolResult } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
+import type {
+	TerminalToolContext,
+	TerminalToolResult,
+} from "../../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createKillBashTool } from "../../src/core/extensions/builtin/terminal/tools/kill-bash.ts";
+import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import type { Harness } from "./harness.ts";
 import { createHarness } from "./harness.ts";
 
@@ -321,7 +324,8 @@ describe("terminal extension auto-detach wiring", () => {
 		let output = "";
 		let consumed = 0;
 		let exited = false;
-		let exitResult: { exitCode: number | null; timedOut: boolean; cancelled: boolean; signal: string | null } | null = null;
+		let exitResult: { exitCode: number | null; timedOut: boolean; cancelled: boolean; signal: string | null } | null =
+			null;
 		let resolveExit!: () => void;
 		const waitExit = new Promise<void>((resolve) => {
 			resolveExit = resolve;

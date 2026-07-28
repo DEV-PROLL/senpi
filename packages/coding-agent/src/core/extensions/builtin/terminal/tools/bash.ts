@@ -301,7 +301,7 @@ async function runForeground(
 				? `not killed; the original ${input.timeout}s timeout still applies`
 				: "not killed; it will run until exit or kill_bash";
 		return textResult(
-			`Command is still running; auto-detached to background with ID: ${id} (${timeoutNote}).\n\nPartial output:\n${partialOutput}\n\nContinue other work; completion will be reported automatically with exit status and output tail. Use bash_output({ bash_id: \"${id}\" }) only to peek at new output. monitor cannot attach to this session; use it for future event-driven launches. Use kill_bash({ bash_id: \"${id}\" }) to stop this session.`,
+			`Command is still running; auto-detached to background with ID: ${id} (${timeoutNote}).\n\nPartial output:\n${partialOutput}\n\nContinue other work; completion will be reported automatically with exit status and output tail. Use bash_output({ bash_id: "${id}" }) only to peek at new output. monitor cannot attach to this session; use it for future event-driven launches. Use kill_bash({ bash_id: "${id}" }) to stop this session.`,
 			{
 				details: {
 					bash_id: id,
