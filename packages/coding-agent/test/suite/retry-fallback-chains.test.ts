@@ -53,6 +53,25 @@ describe("fallback chain selectors", () => {
 		});
 	});
 
+	it("resolves a provider-qualified selector inside its own provider when other providers carry colliding ids", () => {
+		const sonnet = getModel("anthropic", "claude-sonnet-4-5");
+		const collidingModels = [
+			{ ...sonnet, id: "claude-opus-5" },
+			{ ...sonnet, provider: "anthropic-api", id: "claude-opus-5" },
+			{ ...sonnet, provider: "amazon-bedrock", id: "us.anthropic.claude-opus-5" },
+		];
+
+		expect(parseFallbackSelector("anthropic/claude-opus-5:xhigh", collidingModels)).toMatchObject({
+			provider: "anthropic",
+			id: "claude-opus-5",
+			thinkingLevel: "xhigh",
+		});
+		expect(parseFallbackSelector("anthropic/claude-opus-5", collidingModels)).toMatchObject({
+			provider: "anthropic",
+			id: "claude-opus-5",
+		});
+	});
+
 	it("rejects malformed, partial, role, wildcard, unknown, and unsupported selectors", () => {
 		for (const selector of ["", "gpt-5.4", "default", "openai/*", "openai/gpt-5.4:invalid", "missing/gpt-5.4"])
 			expect(parseFallbackSelector(selector, models)).toBeUndefined();
