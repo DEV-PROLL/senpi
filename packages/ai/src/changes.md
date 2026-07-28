@@ -1,5 +1,33 @@
 # AI Source Changes
 
+## 2026-07-27 - Codex reasoning summary null omits the field instead of sending "off"
+
+### What changed and why
+
+- `api/openai-codex-responses.ts` `buildRequestBody()` and the internal
+  `api/openai-codex-responses/reasoning.ts` normalizer: `reasoningSummary: null` now omits the `summary`
+  field from `body.reasoning` instead of sending the literal string `"off"`. The Codex backend's
+  `ReasoningSummaryParam` accepts only `concise`, `detailed`, and `auto`, so every request carrying
+  `reasoningSummary: null` failed with a 400 `invalid_enum_value`. The coding-agent builtin compaction
+  (`summarizationReasoningOptions()`) passes exactly that value to keep summarization turns cheap, which
+  made compaction unusable on Codex models. The adapter now also preserves the shipped legacy union while
+  normalizing `"off"` to omission and `"on"` to `"auto"`. These semantics match the sibling adapters and
+  the official OpenAI Codex CLI reference client, whose `ReasoningSummary::None` is encoded as an absent
+  `summary` field for both ordinary and compaction requests. Current upstream pi-mono instead maps null to
+  `"auto"`, so this fork intentionally follows the official Codex wire contract rather than claiming
+  upstream parity.
+- An extension cannot fix this: the invalid value is produced inside the wire adapter's request builder,
+  below every extension hook.
+- `../test/openai-responses-thinking-matrix.test.ts`: pins both `buildRequestBody()` branches — explicit
+  `reasoningEffort` and the thinking-off fallback — across null, legacy `"off"` / `"on"`, and `"auto"`.
+
+### Expected merge conflict zones
+
+- LOW: `api/openai-codex-responses.ts` `buildRequestBody()` reasoning block and the internal
+  `api/openai-codex-responses/reasoning.ts` normalizer. Upstream writes
+  `summary: options.reasoningSummary ?? "auto"` without the null branch; a clean upstream touch of these
+  two object literals should resolve by keeping the null-omit spread.
+
 ## 2026-07-27 - Retry Cloudflare 522 connection timeouts
 
 ### What changed and why
