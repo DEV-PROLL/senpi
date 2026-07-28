@@ -19,6 +19,7 @@ import {
 	JSON_TREE_SCALAR_LEN_EXPANDED,
 	renderJsonTreeLines,
 } from "./json-tree.ts";
+import { codePointPrefix, formatDuration } from "./tool-widgets.ts";
 import type {
 	EvalCellResult,
 	EvalInputSchema,
@@ -114,18 +115,6 @@ function style(theme: Theme | undefined, color: ThemeColor, text: string): strin
 
 function appendLines(target: string[], source: readonly string[]): void {
 	for (const line of source) target.push(line);
-}
-
-function codePointPrefix(text: string, maxCodePoints: number): string {
-	let end = 0;
-	for (let count = 0; count < maxCodePoints && end < text.length; count += 1) {
-		const firstCodeUnit = text.charCodeAt(end);
-		const secondCodeUnit = text.charCodeAt(end + 1);
-		const isSurrogatePair =
-			firstCodeUnit >= 0xd800 && firstCodeUnit <= 0xdbff && secondCodeUnit >= 0xdc00 && secondCodeUnit <= 0xdfff;
-		end += isSurrogatePair ? 2 : 1;
-	}
-	return text.slice(0, end);
 }
 
 function renderAllVisualLines(text: string, width: number): string[] {
@@ -230,18 +219,6 @@ function highlightedCode(code: string, language: EvalLanguage, theme: Theme | un
 	const normalizedCode = code.trim().length > 0 ? code : "...";
 	const lines = highlightCode(normalizedCode, languageForHighlighter(language));
 	return (theme === undefined ? lines.map((line) => line.replace(/\u001b\[[0-9;]*m/gu, "")) : lines).join("\n");
-}
-
-function formatDuration(milliseconds: number): string {
-	const totalSeconds = Math.floor(Math.max(0, milliseconds) / 1_000);
-	if (totalSeconds < 1) return "<1s";
-	const seconds = totalSeconds % 60;
-	const totalMinutes = Math.floor(totalSeconds / 60);
-	if (totalMinutes < 1) return `${seconds}s`;
-	const minutes = totalMinutes % 60;
-	const hours = Math.floor(totalMinutes / 60);
-	if (hours < 1) return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
-	return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 }
 
 function spinner(frame: number | undefined): string {
