@@ -125,6 +125,7 @@ function createClassicRuntime(): AgentSessionRuntime {
 				getEditorPaddingX: () => 0,
 				getHideThinkingBlock: () => false,
 				getOutputPad: () => 1,
+				getPackages: () => [],
 				getShowHardwareCursor: () => false,
 				getSmoothStreaming: () => false,
 				getSmoothStreamingFps: () => 60,
@@ -156,6 +157,7 @@ const footerData: ReadonlyFooterDataProvider = {
 	getGitBranch: () => null,
 	getExtensionStatuses: () => new Map(),
 	getAvailableProviderCount: () => 0,
+	isOmoNative: () => false,
 	onBranchChange: () => () => {},
 };
 

@@ -1,3 +1,22 @@
+## Footer shows (OmO Native) when the local omo-senpi + senpi-task stack is installed (2026-07-28)
+
+### What changed
+
+- `core/omo-native-detect.ts` (new): `detectOmoNativeInstall(packages, agentDir)` — sync, dependency-free detection of the "OMO Native" local install. A settings `packages` entry that is a local path resolving to a dir whose package.json name is `@code-yeongyu/omo-senpi`, whose derived repo root (`pluginPath/../../..`) contains both workspace packages `@oh-my-opencode/omo-senpi` and `@oh-my-opencode/senpi-task`. Mirrors gates 1 and 2 of the beta `detectOmoLocalInstall` (beta/omo-local-update.ts), dropping gate 3 (the `git rev-parse --show-toplevel` integrity check) so it stays sync and cheap for footer rendering; the beta module's export policy forbids importing its helpers into production core.
+- `core/footer-data-provider.ts`: `FooterDataProvider` gains `setOmoNative(boolean)` / `isOmoNative()` (field-backed, matching the existing `availableProviderCount` injection pattern) and `isOmoNative` is exposed on `ReadonlyFooterDataProvider`.
+- `modes/interactive/interactive-mode.ts`: after constructing the provider, calls `setOmoNative(detectOmoNativeInstall(this.settingsManager.getPackages(), getAgentDir()))`.
+- Coverage: `test/omo-native-detect.test.ts` pins happy + edge cases; `test/omo-native-footer.test.ts` pins the rendered segment; `test/footer-width.test.ts`, `test/grok/footer.test.ts`, `test/grok/classic-chrome-characterization.test.ts` updated for the new `isOmoNative` Pick member.
+
+### Why
+
+- A senpi session backed by the local OMO source checkout (omo-senpi + senpi-task workspace packages installed as a local-path package) is the "OMO Native" configuration; surfacing it in the footer makes the active stack visible at a glance, mirroring the detection already used by the beta `senpi update` local-update flow.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `core/footer-data-provider.ts` around the `availableProviderCount` field and the `ReadonlyFooterDataProvider` Pick (additive).
+- LOW: `modes/interactive/interactive-mode.ts` around the `FooterDataProvider` construction site.
+- NEW file `core/omo-native-detect.ts` — no upstream counterpart, no conflict.
+
 ## Provider-qualified fallback selectors resolve inside their own provider (2026-07-28)
 
 ### What changed

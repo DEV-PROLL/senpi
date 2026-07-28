@@ -1,5 +1,21 @@
 # changes
 
+## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
+
+### What changed
+
+- `components/footer.ts`: `render()` prepends an `(OmO Native)` anchor segment (colored `success`) as the leftmost footer element when `footerData.isOmoNative()` returns true, before pwd and branch. The badge participates in the existing width-elision ladder as an anchor (never dropped, only elided with pwd when space is exhausted).
+- The badge is fed by `FooterDataProvider.isOmoNative()`, set once at startup by `interactive-mode.ts` from `detectOmoNativeInstall()` (see root `src/changes.md`).
+- Coverage: `test/omo-native-footer.test.ts` asserts the segment is the leftmost rendered text when active and absent when inactive.
+
+### Why
+
+- Makes the OMO native install state visible in the bottom-left footer without a separate status line.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer.ts` around the anchor segment construction.
+
 ## Large resumed sessions use event-driven Working updates (2026-07-28)
 
 ### What changed
