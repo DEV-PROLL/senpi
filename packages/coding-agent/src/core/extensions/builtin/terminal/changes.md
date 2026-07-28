@@ -19,6 +19,29 @@ The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`
 
 - LOW: fork-owned terminal notification delivery wiring and app-server extension-turn bootstrap.
 
+## Cache-aware foreground timeout promotion (2026-07-28)
+
+### What changed
+
+- `TerminalToolContext.timeoutAction` now receives the resolved terminal setting from
+  `extension.ts`; the previously declared `terminal.timeoutAction` setting is implemented.
+- Foreground `bash` calls whose native timeout exceeds the live prompt-cache-safe wait budget
+  auto-detach at that budget when `timeoutAction` is `background`. The original native timeout
+  remains authoritative, and a bounded post-timeout sweep preserves the existing teardown path.
+- Detach consumes the output delta once, wires the normal background completion notifier, and
+  returns the persistent `bash_N` handle with instructions for output and termination.
+
+### Why
+
+A foreground wait beyond the prompt-cache-safe deadline risks invalidating the prompt cache.
+Promotion preserves the command and its original kill deadline while returning control to the
+agent before that cache deadline. `timeoutAction: "kill"`, absent cache budgets, and timeouts at
+or below the budget retain their existing foreground behavior.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `tools/bash.ts` foreground lifecycle and `extension.ts` tool-context getters.
+
 ## Footer status for active monitors (2026-07-28)
 
 ### What changed

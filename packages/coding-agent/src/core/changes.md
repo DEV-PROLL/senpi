@@ -1,5 +1,20 @@
 # changes
 
+## Nearest-parent project settings discovery (2026-07-28)
+
+### What changed
+
+- `settings-manager.ts`: project settings now resolve from the nearest ancestor containing a real `.senpi` directory, rather than only from the exact cwd. If none exists, the legacy `<cwd>/.senpi/settings.json` path remains the write/read target.
+- Global settings remain loaded before project settings, so project values continue to override the selected agent-directory settings layer.
+
+### Why
+
+- Invoking senpi below a project root silently skipped that root's `.senpi/settings.json`.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `getSettingsPath()` in `settings-manager.ts`.
+
 ## claude-agent-sdk provider with native multi-account OAuth (2026-07-27)
 
 ### What changed

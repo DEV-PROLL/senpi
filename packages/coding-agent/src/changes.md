@@ -1,4 +1,80 @@
+## Paste markers survive editor hand-off and setText round-trips (2026-07-28)
+
+- `modes/interactive/interactive-mode.ts` `setCustomEditorComponent()` now transfers editor content safely when switching between the default and a custom editor: if both editors support the paste-state API (`getPasteState`/`setPasteState` from pi-tui), the raw text plus the registry snapshot are transferred so `[paste #N ...]` markers stay collapsed; otherwise it falls back to the expanded text — `getExpandedText?.()`, or expansion from the paste snapshot via the exported `expandPasteMarkers()` when the source implements `getPasteState` without `getExpandedText`, or the raw text when neither capability exists. Previously the raw text alone was copied into a fresh editor with no registry, turning live markers into dead literals and silently dropping the pasted body from the submitted prompt.
+- The companion tui change (`packages/tui/src/changes.md`, same date) makes `Editor.setText()` prune (exact canonical-marker match) instead of clear the paste registry, which fixes the remaining same-instance round-trips: `showExtensionCustom()` save/restore and `restoreQueuedMessagesToEditor()` / `abortAndFireQueuedMessages()` draft restoration. Those call sites are unchanged.
+- Symptom fixed: transcript/session showed only the `[paste #1 +18 lines]` placeholder as the user message after pasting, opening a dialog (or aborting with queued messages), and submitting.
+- `setCustomEditorComponent(undefined)` is now a draft no-op when the default editor is already active (e.g. `resetExtensionUI()` calls it unconditionally during extension resets): no hand-off happens, so no setText round-trip touches the user's draft.
+- Details for the interactive hand-off live in `src/modes/interactive/changes.md` (same date).
+- Coverage: `test/suite/regressions/0000-editor-paste-marker-transfer.test.ts` drives the real `setCustomEditorComponent` (prototype + fakeThis pattern) with real tui editors: registry transfer to a paste-aware editor, expanded-text fallback for a plain `EditorComponent`, restore to the default editor, full plain-editor round-trip, and the same-instance no-op.
+
+## Prompt-cache-aware foreground tool budgets (2026-07-28)
+
+### What changed
+
+- `core/settings-manager.ts`: new `PromptCacheSettings` (`cacheAwareTimeouts?: boolean` default true,
+  `safetyBufferSeconds?: number` default 30) exposed as `Settings.promptCache`.
+- `core/prompt-cache-budget.ts` (new): `resolvePromptCacheSafeWaitSeconds(model, settings, env)` =
+  pi-ai's resolved cache TTL minus the safety buffer, or `undefined` when the feature is disabled, no model
+  is active, the TTL is unknown, or the buffer swallows the whole TTL. Also exports
+  `PROMPT_CACHE_SAFE_WAIT_ENV` and `DEFAULT_PROMPT_CACHE_SAFETY_BUFFER_SECONDS`.
+- `core/agent-session.ts`: `resolvePromptCacheSafeWaitSeconds()` recomputes from the LIVE current model, and
+  `syncPromptCacheSafeWaitEnv()` mirrors it into the advisory `PI_PROMPT_CACHE_SAFE_WAIT_SECONDS` env var
+  (deleted when no budget applies) on session start, reload, and every model select — so out-of-process
+  readers such as the omo `task` tool can size their own foreground waits.
+- The typed `ExtensionContext.getPromptCacheSafeWaitSeconds()` getter is documented in
+  `core/extensions/changes.md`.
+
+### Why
+
+- Blocking a foreground tool past the model's prompt-cache lifetime expires the cache and forces a full
+  re-read on the next request. Sizing the ceiling by the cache TTL keeps the cache warm, and the still-running
+  work is handed to a background session alive instead of being killed.
+
+### Behavior when no budget applies
+
+- Byte-identical to previous behavior: the injected bash default and recommended maximum keep their existing
+  values, the policy prompt is unchanged under strict string equality, and the env var is absent.
+
+## Catalog `-fast` variants resolve serviceTier/upstreamModelId without models.json entries (2026-07-28)
+
+### What changed
+
+- `core/provider-composer.ts` `resolveCompatibilityRequestConfig()`: `upstreamModelId` and
+  `serviceTier` now fall back to the catalog `Model`'s own optional fields
+  (`extensionModel ?? modelDefinition ?? model`), so generated catalog variants such as
+  `openai/gpt-5.5-fast` (upstreamModelId `gpt-5.5`, serviceTier `priority`) request the priority
+  tier and the upstream wire id with zero models.json configuration. Config and extension model
+  definitions keep precedence over catalog defaults.
+- Coverage: `test/model-runtime-catalog-service-tier.test.ts` pins the catalog fallback, the
+  models.json override path, and end-to-end resolution through `ModelRuntime` (offline).
+
+### Why
+
+- `-fast` pseudo-models previously worked only when hand-declared in models.json; the generated
+  OpenAI priority-tier variants (pi-ai `Model.upstreamModelId`/`serviceTier`) were inert without
+  this fallback, since the main request path reads both values exclusively through
+  `resolveCompatibilityRequestConfig()`.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: two-line `??` fallback change in `resolveCompatibilityRequestConfig()`.
+
 ## Cancellable `session_before_reload` veto blocks reload while extensions protect live work (2026-07-28)
+## Nearest-parent configuration discovery (2026-07-28)
+
+### What changed
+
+- `config.ts`: `getAgentDir()` now honors `SENPI_CODING_AGENT_DIR` first, otherwise finds the nearest ancestor with a real `.senpi/agent` directory before falling back to `~/.senpi/agent`. The exported `resolveAgentDir(cwd, homeDir, envDir)` makes the precedence contract deterministic for callers and tests.
+- `nearest-parent-config.ts`: centralizes the bounded upward walk for config directories. It excludes `$HOME` so global configuration remains the fallback layer and refuses symlinked `.senpi` directories.
+
+### Why
+
+- Starting senpi from a nested project directory previously ignored that project's config and always selected the home agent directory.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `config.ts` around `getAgentDir()`; the discovery helper is a focused fork-owned module.
+
 
 ### What changed
 

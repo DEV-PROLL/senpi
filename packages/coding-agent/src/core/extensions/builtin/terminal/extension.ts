@@ -58,6 +58,9 @@ function buildToolContext(state: TerminalExtensionState): TerminalToolContext {
 		get defaultRows() {
 			return state.settings.defaultRows;
 		},
+		get timeoutAction() {
+			return state.settings.timeoutAction;
+		},
 		get monitorRegistry() {
 			state.monitors ??= new MonitorRegistry((event) => state.monitorNotifier?.notifyEvent(event), {
 				onChange: (snapshot) => state.ctx?.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot)),

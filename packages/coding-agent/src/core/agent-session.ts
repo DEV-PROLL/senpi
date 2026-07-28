@@ -120,6 +120,7 @@ import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMes
 import { ModelRegistry } from "./model-registry.ts";
 import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
+import { PROMPT_CACHE_SAFE_WAIT_ENV, resolvePromptCacheSafeWaitSeconds } from "./prompt-cache-budget.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { RetryFallbackController } from "./retry-fallback/controller.ts";
@@ -3013,6 +3014,7 @@ export class AgentSession {
 		previousModel: Model<any> | undefined,
 		source: ModelSelectSource,
 	): Promise<SystemPromptChangeEvent | undefined> {
+		this.syncPromptCacheSafeWaitEnv();
 		if (!this._modelSelectionChangesContext(previousModel, nextModel)) return undefined;
 		const result = await this._extensionRunner.emitModelSelect({
 			type: "model_select",
@@ -4554,6 +4556,7 @@ export class AgentSession {
 			}
 
 			this._applyExtensionBindings(this._extensionRunner);
+			this.syncPromptCacheSafeWaitEnv();
 			await this._extensionRunner.emit(this._sessionStartEvent);
 			await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 		} finally {
@@ -4750,6 +4753,7 @@ export class AgentSession {
 				},
 				getContextUsage: () => this.getContextUsage(),
 				getCompactionSettings: () => this.settingsManager.getCompactionSettings(),
+				getPromptCacheSafeWaitSeconds: () => this.resolvePromptCacheSafeWaitSeconds(),
 				getLookAtSettings: () => {
 					const global = this.settingsManager.getGlobalSettings().lookAt;
 					const project = this.settingsManager.getProjectSettings().lookAt;
@@ -5102,6 +5106,7 @@ export class AgentSession {
 			this._extensionErrorListener;
 		if (hasBindings) {
 			await options?.beforeSessionStart?.();
+			this.syncPromptCacheSafeWaitEnv();
 			await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
 			await this.extendResourcesFromExtensions("reload");
 		}
@@ -5883,6 +5888,27 @@ export class AgentSession {
 			cost: usageTotals.cost,
 			contextUsage: this.getContextUsage(),
 		};
+	}
+
+	/**
+	 * Cache-safe foreground wait budget for the LIVE current model. Recomputed on
+	 * every call so a model switch takes effect immediately.
+	 */
+	resolvePromptCacheSafeWaitSeconds(): number | undefined {
+		const global = this.settingsManager.getGlobalSettings().promptCache;
+		const project = this.settingsManager.getProjectSettings().promptCache;
+		const merged = global || project ? { ...global, ...project } : undefined;
+		return resolvePromptCacheSafeWaitSeconds(this.model, merged, process.env);
+	}
+
+	/**
+	 * Mirror the budget into the advisory env var read by out-of-process tools.
+	 * Last writer wins across in-process sessions; consumers treat it as a hint.
+	 */
+	syncPromptCacheSafeWaitEnv(): void {
+		const budget = this.resolvePromptCacheSafeWaitSeconds();
+		if (budget === undefined) delete process.env[PROMPT_CACHE_SAFE_WAIT_ENV];
+		else process.env[PROMPT_CACHE_SAFE_WAIT_ENV] = String(budget);
 	}
 
 	getContextUsage(): ContextUsage | undefined {

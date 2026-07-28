@@ -1,4 +1,5 @@
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
+const DIGITALOCEAN_STREAM_FAILURE_MESSAGE = "Upstream error from DigitalOcean: stream failed";
 
 interface ProviderRetryOptions {
 	maxRetries?: number;
@@ -12,7 +13,9 @@ interface ProviderError extends Error {
 }
 
 function isProviderError(error: unknown): error is ProviderError {
-	if (!(error instanceof Error) || !("status" in error) || !("headers" in error)) return false;
+	if (!(error instanceof Error)) return false;
+	if (error.message === DIGITALOCEAN_STREAM_FAILURE_MESSAGE) return true;
+	if (!("status" in error) || !("headers" in error)) return false;
 	return (
 		(error.status === undefined || typeof error.status === "number") &&
 		(error.headers === undefined || error.headers instanceof Headers)
@@ -122,4 +125,54 @@ export async function retryProviderRequest<T>(
 			await abortableSleep(getRetryDelayMs(error, retryIndex, options.maxRetryDelayMs), options.signal);
 		}
 	}
+}
+
+interface ProviderStreamAttempt<TChunk, TMetadata> {
+	stream: AsyncIterable<TChunk>;
+	metadata: TMetadata;
+}
+
+async function* replayPrefetchedStream<TChunk>(
+	first: IteratorResult<TChunk>,
+	iterator: AsyncIterator<TChunk>,
+): AsyncGenerator<TChunk> {
+	if (first.done) return;
+	let completed = false;
+	let providerFailed = false;
+	try {
+		yield first.value;
+		for (;;) {
+			let next: IteratorResult<TChunk>;
+			try {
+				next = await iterator.next();
+			} catch (error) {
+				providerFailed = true;
+				throw error;
+			}
+			if (next.done) {
+				completed = true;
+				return;
+			}
+			yield next.value;
+		}
+	} finally {
+		if (!completed && !providerFailed) {
+			await iterator.return?.();
+		}
+	}
+}
+
+export async function retryProviderStreamRequest<TChunk, TMetadata>(
+	request: () => Promise<ProviderStreamAttempt<TChunk, TMetadata>>,
+	options: ProviderRetryOptions = {},
+): Promise<ProviderStreamAttempt<TChunk, TMetadata>> {
+	return retryProviderRequest(async () => {
+		const attempt = await request();
+		const iterator = attempt.stream[Symbol.asyncIterator]();
+		const first = await iterator.next();
+		return {
+			stream: replayPrefetchedStream(first, iterator),
+			metadata: attempt.metadata,
+		};
+	}, options);
 }

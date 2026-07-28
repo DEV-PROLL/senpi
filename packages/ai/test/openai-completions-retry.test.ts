@@ -2,9 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stream as streamOpenAICompletions } from "../src/api/openai-completions.ts";
 import type { Context, Model } from "../src/types.ts";
 
+type StreamBehavior =
+	| { readonly kind: "success"; readonly text?: string }
+	| { readonly kind: "error"; readonly error: Error; readonly afterChunks: 0 | 1 };
+
 const mockState = vi.hoisted(() => ({
 	requestOptions: [] as unknown[],
 	requestErrors: [] as Error[],
+	streamBehaviors: [] as StreamBehavior[],
 }));
 
 vi.mock("openai", () => {
@@ -13,12 +18,24 @@ vi.mock("openai", () => {
 			completions: {
 				create: (_params: unknown, options: unknown) => {
 					mockState.requestOptions.push(options);
+					const behavior = mockState.streamBehaviors.shift();
 					const stream = {
 						async *[Symbol.asyncIterator]() {
+							if (behavior?.kind === "error" && behavior.afterChunks === 0) {
+								throw behavior.error;
+							}
 							yield {
 								id: "chatcmpl-test",
-								choices: [{ index: 0, delta: { content: "ok" } }],
+								choices: [
+									{
+										index: 0,
+										delta: { content: behavior?.kind === "success" ? (behavior.text ?? "ok") : "ok" },
+									},
+								],
 							};
+							if (behavior?.kind === "error" && behavior.afterChunks === 1) {
+								throw behavior.error;
+							}
 							yield {
 								id: "chatcmpl-test",
 								choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
@@ -78,6 +95,7 @@ describe("openai-completions provider retries", () => {
 	beforeEach(() => {
 		mockState.requestOptions = [];
 		mockState.requestErrors = [];
+		mockState.streamBehaviors = [];
 	});
 
 	afterEach(() => {
@@ -135,5 +153,78 @@ describe("openai-completions provider retries", () => {
 		expect(result.errorMessage).toContain("Server requested 277403s retry delay (max: 1s)");
 		expect(result.errorMessage).toContain("rate limited");
 		expect(mockState.requestOptions).toEqual([expect.objectContaining({ maxRetries: 0 })]);
+	});
+
+	it("retries the observed DigitalOcean failure before the first stream chunk", async () => {
+		vi.useFakeTimers();
+		mockState.streamBehaviors = [
+			{
+				kind: "error",
+				afterChunks: 0,
+				error: new Error("Upstream error from DigitalOcean: stream failed"),
+			},
+			{ kind: "success", text: "recovered" },
+		];
+
+		const result = consume({ maxRetries: 1 });
+		await vi.advanceTimersByTimeAsync(500);
+		const message = await result;
+
+		expect(message.stopReason).toBe("stop");
+		expect(message.content).toEqual([{ type: "text", text: "recovered" }]);
+		expect(mockState.requestOptions).toHaveLength(2);
+	});
+
+	it("bounds retries for repeated pre-chunk stream failures", async () => {
+		vi.useFakeTimers();
+		const streamFailure = () => new Error("Upstream error from DigitalOcean: stream failed");
+		mockState.streamBehaviors = [
+			{ kind: "error", afterChunks: 0, error: streamFailure() },
+			{ kind: "error", afterChunks: 0, error: streamFailure() },
+		];
+
+		const result = consume({ maxRetries: 1 });
+		await vi.advanceTimersByTimeAsync(500);
+		const message = await result;
+
+		expect(message.stopReason).toBe("error");
+		expect(message.errorMessage).toContain("Upstream error from DigitalOcean: stream failed");
+		expect(mockState.requestOptions).toHaveLength(2);
+	});
+
+	it("does not retry non-retryable pre-chunk stream failures", async () => {
+		mockState.streamBehaviors = [
+			{
+				kind: "error",
+				afterChunks: 0,
+				error: Object.assign(new Error("invalid request"), {
+					status: 400,
+					headers: new Headers(),
+				}),
+			},
+		];
+
+		const message = await consume({ maxRetries: 2, maxRetryDelayMs: 100 });
+
+		expect(message.stopReason).toBe("error");
+		expect(message.errorMessage).toContain("invalid request");
+		expect(mockState.requestOptions).toHaveLength(1);
+	});
+
+	it("does not retry after the first stream chunk", async () => {
+		mockState.streamBehaviors = [
+			{
+				kind: "error",
+				afterChunks: 1,
+				error: new Error("Upstream error from DigitalOcean: stream failed"),
+			},
+			{ kind: "success", text: "duplicate" },
+		];
+
+		const message = await consume({ maxRetries: 2, maxRetryDelayMs: 100 });
+
+		expect(message.stopReason).toBe("error");
+		expect(message.content).toEqual([{ type: "text", text: "ok" }]);
+		expect(mockState.requestOptions).toHaveLength(1);
 	});
 });

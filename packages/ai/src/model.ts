@@ -30,6 +30,13 @@ export interface Model<TApi extends Api> {
 	headers?: Record<string, string>;
 	/** Default prompt-cache retention preference when the request omits one. */
 	cacheRetention?: CacheRetention;
+	/**
+	 * Upstream model id sent on the wire when it differs from the catalog id
+	 * (for example `-fast` priority-tier variants aliasing their base model).
+	 */
+	upstreamModelId?: string;
+	/** Service tier requested by default for this model (for example `-fast` variants). */
+	serviceTier?: "auto" | "flex" | "priority";
 	/** Whether to recover supported text-encoded tool calls from assistant text. */
 	recoverTextToolCalls?: boolean;
 	/** Compatibility overrides for OpenAI-compatible APIs. If not set, auto-detected from baseUrl. */

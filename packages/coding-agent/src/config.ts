@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readFileSync, realpathSync } from "f
 import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
 import { fileURLToPath } from "url";
+import { findNearestParentConfigDir } from "./nearest-parent-config.ts";
 import { spawnProcessSync } from "./utils/child-process.ts";
 import { normalizePath } from "./utils/paths.ts";
 
@@ -511,13 +512,18 @@ export function getShareViewerUrl(gistId: string): string {
 // User Config Paths (~/.senpi/agent/*)
 // =============================================================================
 
+/** Resolve the agent config directory from an explicit environment. */
+export function resolveAgentDir(cwd: string, homeDir: string, envDir?: string): string {
+	if (envDir) {
+		return normalizePath(envDir, { homeDir });
+	}
+	const projectConfigDir = findNearestParentConfigDir(cwd, homeDir, CONFIG_DIR_NAME, "agent");
+	return projectConfigDir ? join(projectConfigDir, "agent") : join(homeDir, CONFIG_DIR_NAME, "agent");
+}
+
 /** Get the agent config directory (e.g., ~/.senpi/agent/) */
 export function getAgentDir(): string {
-	const envDir = process.env[ENV_AGENT_DIR];
-	if (envDir) {
-		return expandTildePath(envDir);
-	}
-	return join(homedir(), CONFIG_DIR_NAME, "agent");
+	return resolveAgentDir(process.cwd(), homedir(), process.env[ENV_AGENT_DIR]);
 }
 
 /** Get path to user's custom themes directory */

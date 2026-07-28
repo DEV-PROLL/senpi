@@ -20,6 +20,7 @@ import {
 import {
 	consumeStreamWithIdleTimeout,
 	DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,
+	DEFAULT_SUMMARIZATION_MAX_DURATION_MS,
 } from "../../../compaction/stream-watchdog.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type { ModelRegistry } from "../../../model-registry.ts";
@@ -34,6 +35,12 @@ import * as truncation from "./tool-truncation.ts";
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const COMPACTION_BUDGET_RATIO = 0.6;
 const EMERGENCY_CONTEXT_TARGET_RATIO = 0.95;
+// Hysteresis: the emergency prune engages at EMERGENCY_CONTEXT_TARGET_RATIO but only
+// releases once the context falls below this lower ratio. A single threshold makes a
+// session parked near the limit alternate between the pruned and un-pruned history on
+// consecutive requests; because pruning rewrites old tool results, every alternation
+// invalidates the provider prompt-cache prefix and re-bills the whole conversation.
+const EMERGENCY_CONTEXT_RELEASE_RATIO = 0.85;
 const SUMMARY_TOKEN_HEADROOM = 32_768;
 const SUMMARY_CONTEXT_WINDOW_RESERVE_RATIO = 0.5;
 const SUMMARY_SCHEMA = "senpi.compaction.summary.v1";
@@ -224,6 +231,7 @@ async function generateSummaryMessage(options: {
 		});
 		await consumeStreamWithIdleTimeout(responseStream, {
 			idleTimeoutMs: DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,
+			maxDurationMs: DEFAULT_SUMMARIZATION_MAX_DURATION_MS,
 			abort: () => requestController.abort(),
 			signal: options.signal,
 			onEvent: (event) => {
@@ -357,15 +365,38 @@ function estimateTotalTokens(messages: AgentMessage[]): number {
 	return total;
 }
 
+/**
+ * Sticky engage/release state for {@link hardLimitEmergencyPrune}. Callers that
+ * issue many requests for one session share a single latch so the emitted context
+ * shape stays stable while the estimate hovers around the engage threshold.
+ */
+export interface EmergencyPruneLatch {
+	engaged: boolean;
+}
+
+export function createEmergencyPruneLatch(): EmergencyPruneLatch {
+	return { engaged: false };
+}
+
 export function hardLimitEmergencyPrune(
 	messages: AgentMessage[],
 	contextWindow: number,
+	latch?: EmergencyPruneLatch,
 ): {
 	messages: AgentMessage[];
 	needsAggressiveCompaction: boolean;
 } {
 	const targetTokens = Math.floor(contextWindow * EMERGENCY_CONTEXT_TARGET_RATIO);
-	if (estimateTotalTokens(messages) <= targetTokens) {
+	const releaseTokens = Math.floor(contextWindow * EMERGENCY_CONTEXT_RELEASE_RATIO);
+	const totalTokens = estimateTotalTokens(messages);
+	// Without a latch this keeps the historical single-threshold behaviour.
+	const engaged = latch
+		? latch.engaged
+			? totalTokens > releaseTokens
+			: totalTokens > targetTokens
+		: totalTokens > targetTokens;
+	if (latch) latch.engaged = engaged;
+	if (!engaged) {
 		return { messages, needsAggressiveCompaction: false };
 	}
 	const noLlmPruned = truncateContextMessages(pruneToolResults(messages, contextWindow));

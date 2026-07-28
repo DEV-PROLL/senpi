@@ -1,3 +1,43 @@
+# Builtin compaction extension changes
+
+## Degrade wall-clock budget trips like stalled streams (2026-07-28)
+
+### What changed
+
+- `transient-failure.ts` (new): `isTransientSummarizationFailure()` owns the degrade-vs-surface decision.
+  Watchdog trips (`StreamDurationBudgetError`, `StreamIdleTimeoutError`) always degrade; `SummaryRequestError`
+  keeps its metadata-aware verdict; everything else falls back to `isRetryableErrorMessage`.
+- `index.ts` `applyBlockingCompaction()`: uses that predicate instead of the inline classification, so a
+  summarization that blows its wall-clock budget records a circuit-breaker failure and returns
+  `{ applied: false, reason: "failed" }` rather than escaping to the ExtensionRunner as a raw stack on top of the
+  `compaction_end` message the user already saw.
+- Behavior change for the pre-existing stall path: `StreamIdleTimeoutError` now degrades the same way. Its message
+  ("Summarization stream stalled: ... treating the request as dead") matches none of the transient patterns in
+  `isRetryableErrorMessage`, so before this change a stalled summarization rethrew loudly - the exact double-surface
+  the 2026-07-27 transient-degrade entry removed for network drops. Both watchdog trips are infrastructure slowness
+  and are pinned as transient in `test/compaction/summarization-budget-degrade.test.ts`.
+- `speculative.ts`: the speculative request path applies `DEFAULT_SUMMARIZATION_MAX_DURATION_MS`, so a warm-start
+  summary that a blocking route later awaits cannot pin the session either.
+
+### Why
+
+- Without the budget the freeze class described in `core/compaction/changes.md` (2026-07-28) reached the session
+  queue; with it, the trip has to land in the same quiet degrade path the transient-transport work established, or
+  the fix would trade a freeze for a loud extension error.
+
+### Also in this change
+
+- `index.ts`: a blocking route that inherits a speculative job whose summary failed now degrades through the shared
+  watchdog-failure path on that job instead of discarding it and paying for a second full-budget request. The job
+  keeps its settled failure next to its result promise, so the double deadline the reviewer flagged cannot recur.
+- `test/compaction/speculative-budget-handoff.test.ts`: pins the no-second-request guarantee end to end (fails as
+  `SummaryRequestError: No more faux responses queued` from `applyBlockingCompaction` when the handoff is reverted).
+
+### Expected merge conflict zones
+
+- LOW: `index.ts` around the `applyBlockingCompaction()` catch classification.
+- LOW: `speculative.ts` around the `consumeStreamWithIdleTimeout` options.
+
 ## Explicit Responses v2 compaction for verified proxies (2026-07-27)
 
 - `openai-remote-model.ts`: official OpenAI remains eligible by default; custom `openai-responses` providers require `compat.supportsRemoteCompactionV2: true`. Persisted checkpoint identity now retains the exact custom provider id instead of coercing it to `openai`.
@@ -41,8 +81,6 @@
   effective auth tenant (never raw credentials). Legacy, cross-endpoint, or cross-tenant entries decline replay.
 - Replay boundaries require non-enumerable message/item provenance to survive the canonical context pipeline. Missing,
   duplicated, reordered, reconstructed, or mutated provenance keeps the final transformed full payload unchanged.
-
-# Builtin compaction extension changes
 
 ## Degrade transient blocking-compaction failures instead of erroring the turn (2026-07-27)
 
@@ -454,3 +492,27 @@ Expected upstream conflict zones: `builtin/compaction/index.ts` around `applyBlo
 - Extension system is sufficient because the feature only needs tool-call observation, compaction lifecycle events, and custom-message injection.
 
 Expected upstream conflict zones: `builtin/compaction/index.ts`, `builtin/compaction/state.ts`, and `core/compaction/compaction.ts` if upstream changes compaction settings or extension hook wiring.
+
+## 2026-07-28 - Emergency-prune hysteresis (prompt-cache thrash)
+
+### What changed
+- `speculative.ts`: added `EMERGENCY_CONTEXT_RELEASE_RATIO` (0.85) alongside the existing
+  `EMERGENCY_CONTEXT_TARGET_RATIO` (0.95), plus `EmergencyPruneLatch` / `createEmergencyPruneLatch()`.
+  `hardLimitEmergencyPrune(messages, contextWindow, latch?)` now takes an optional latch: once the prune
+  engages it stays engaged until the estimate falls below the release ratio. Called without a latch the
+  function keeps its exact previous single-threshold behaviour, so existing callers and tests are unaffected.
+- `index.ts`: the compaction extension owns one latch per instance (per session) and passes it at the
+  `context` hook call site.
+
+### Why
+A session parked near the emergency threshold alternated between the pruned and un-pruned history on
+consecutive requests. Because pruning rewrites old tool results, every alternation changed the message
+prefix and invalidated the provider prompt cache. Measured on a real session (`quotio-openai/gpt-5.6-sol-fast`,
+372k context): `cacheRead` collapsed from ~263,000 to the 39,424-token head on 23 turns in 13 minutes,
+re-billing ~226K tokens per turn at $10/M instead of $1/M — about $44 wasted in a single session. A sibling
+session on the same gateway and model in the same minutes had zero misses, isolating this to the prune toggle.
+
+### Scope
+Only *when* the prune disengages changes; what gets pruned and the `needsAggressiveCompaction` signal are
+untouched. Expected upstream conflict zones: `builtin/compaction/speculative.ts` around
+`hardLimitEmergencyPrune`, and `builtin/compaction/index.ts` around the `context` hook.

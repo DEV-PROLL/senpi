@@ -313,6 +313,21 @@ When unset, senpi leaves provider payloads unchanged. This setting currently app
 | `images.autoResize` | boolean | `true` | Resize images to 2000x2000 max |
 | `images.blockImages` | boolean | `false` | Block all images from being sent to LLM |
 
+### Prompt Cache
+
+Sizes how long foreground tools may block on the active model's prompt-cache lifetime, so a long
+`bash` call never straddles cache expiry and forces a full re-read. When the model's cache TTL is
+unknown (e.g. Google models) or caching is off, no budget applies and timeout behavior is unchanged.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `promptCache.cacheAwareTimeouts` | boolean | `true` | Cap foreground tool waits at the model's prompt-cache TTL minus the safety buffer; `false` restores the fixed legacy ceilings |
+| `promptCache.safetyBufferSeconds` | number | `30` | Headroom subtracted from the cache TTL (a 5m TTL yields a 270s ceiling). If it consumes the whole TTL, no budget applies |
+
+A foreground `bash` command still running at the budget is handed to a live background session
+instead of being killed; its explicit `timeout` remains the kill deadline. See
+`terminal.timeoutAction` to switch that hand-off back to a kill.
+
 ### Shell
 
 | Setting | Type | Default | Description |
