@@ -198,6 +198,7 @@ import {
 	formatActiveToolWorkingLabel,
 	formatToolHookStatusMessageFrame,
 	formatWorkingStatusMessageFrame,
+	largeSessionWorkingStatusInterval,
 	sanitizeWorkingStatusPlainText,
 	type WorkingStatusRgbColor,
 } from "./working-status.ts";
@@ -2366,10 +2367,14 @@ export class InteractiveMode {
 	}
 
 	private getWorkingIndicatorOptions(): LoaderIndicatorOptions {
+		const sessionEntryCount = this.sessionManager.getEntries().length;
 		return (
 			this.workingIndicatorOptions ?? {
 				frames: theme.getColorMode() === "truecolor" ? ["•"] : [theme.fg("accent", "•"), theme.fg("muted", "◦")],
-				intervalMs: DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS,
+				intervalMs: largeSessionWorkingStatusInterval(
+					sessionEntryCount,
+					DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS,
+				),
 				indicatorFormatter:
 					theme.getColorMode() === "truecolor"
 						? (frame, elapsedMs) => formatWorkingStatusShimmerText(frame, elapsedMs)
@@ -2388,7 +2393,10 @@ export class InteractiveMode {
 							suffix: (text) => theme.fg("dim", text),
 						},
 					),
-				messageIntervalMs: DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS,
+				messageIntervalMs: largeSessionWorkingStatusInterval(
+					sessionEntryCount,
+					DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS,
+				),
 			}
 		);
 	}

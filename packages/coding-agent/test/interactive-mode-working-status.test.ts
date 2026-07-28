@@ -8,6 +8,7 @@ import {
 	formatWorkingElapsedSeconds,
 	formatWorkingStatusMessage,
 	formatWorkingStatusMessageFrame,
+	largeSessionWorkingStatusInterval,
 } from "../src/modes/interactive/working-status.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
@@ -27,6 +28,14 @@ describe("formatWorkingElapsedSeconds", () => {
 		expect(formatWorkingElapsedSeconds(427)).toBe("7m 07s");
 		expect(formatWorkingElapsedSeconds(3600)).toBe("1h 00m 00s");
 		expect(formatWorkingElapsedSeconds(3667)).toBe("1h 01m 07s");
+	});
+});
+
+describe("largeSessionWorkingStatusInterval", () => {
+	test("preserves smooth animation for small sessions and throttles large histories", () => {
+		expect(largeSessionWorkingStatusInterval(999, 32)).toBe(32);
+		expect(largeSessionWorkingStatusInterval(1000, 32)).toBe(60_000);
+		expect(largeSessionWorkingStatusInterval(10_000, 600)).toBe(60_000);
 	});
 });
 

@@ -157,6 +157,7 @@ export { visibleWidth };
 
 const renderErrorLoggedClasses = new Set<string>();
 let renderErrorLogWrites = 0;
+let renderDiagnosticLineScans = 0;
 const DIAGNOSTIC_LOG_MODE = 0o600;
 const VIEWPORT_RENDER_OVERSCAN = 16;
 // Keep scroll-region wins cheap when a few visible rows mutate during append streaming.
@@ -176,6 +177,13 @@ export function __renderErrorLogStats(): { writes: number } | undefined {
 		return undefined;
 	}
 	return { writes: renderErrorLogWrites };
+}
+
+export function __renderDiagnosticStats(): { linesScanned: number } | undefined {
+	if (process.env.PI_TUI_TEST_SEAMS !== "1") {
+		return undefined;
+	}
+	return { linesScanned: renderDiagnosticLineScans };
 }
 
 export function __viewportRenderStats(): ViewportRenderStats | undefined {
@@ -245,6 +253,24 @@ function writeRenderDiagnosticBestEffort(logPath: string, data: string): boolean
 		}
 		throw error;
 	}
+}
+
+function formatOverWideRenderDiagnostic(
+	lines: readonly string[],
+	terminalWidth: number,
+	lineIndex: number,
+	lineWidth: number,
+): string {
+	renderDiagnosticLineScans += lines.length;
+	return [
+		`Crash at ${new Date().toISOString()}`,
+		`Terminal width: ${terminalWidth}`,
+		`Line ${lineIndex} visible width: ${lineWidth}`,
+		"",
+		"=== All rendered lines ===",
+		...lines.map((line, index) => `[${index}] (w=${visibleWidth(line)}) ${line}`),
+		"",
+	].join("\n");
 }
 
 function chmodDiagnosticLogBestEffort(logPath: string): void {
@@ -2195,39 +2221,31 @@ export class TUI extends Container {
 			buffer += `\x1b[2K${TUI.SEGMENT_RESET}`; // Clear current line
 			const lineWidth = visibleWidth(line);
 			if (!isImage && lineWidth > width) {
-				// Log all lines to crash file for debugging
 				const crashLogPath = path.join(os.homedir(), ".senpi", "agent", "senpi-crash.log");
-				const crashData = [
-					`Crash at ${new Date().toISOString()}`,
-					`Terminal width: ${width}`,
-					`Line ${i} visible width: ${lineWidth}`,
-					"",
-					"=== All rendered lines ===",
-					...newLines.map((l, idx) => `[${idx}] (w=${visibleWidth(l)}) ${l}`),
-					"",
-				].join("\n");
-				if (process.env.PI_TUI_STRICT_RENDER === "1") {
-					const crashDumpWritten = writeRenderDiagnosticBestEffort(crashLogPath, crashData);
+				const strictRender = process.env.PI_TUI_STRICT_RENDER === "1";
+				if (strictRender || !this.overWideCrashDumpWritten) {
+					const crashData = formatOverWideRenderDiagnostic(newLines, width, i, lineWidth);
+					if (!strictRender) {
+						writeRenderDiagnosticBestEffort(crashLogPath, crashData);
+						this.overWideCrashDumpWritten = true;
+					} else {
+						const crashDumpWritten = writeRenderDiagnosticBestEffort(crashLogPath, crashData);
 
-					// Clean up terminal state before throwing
-					this.stop();
+						// Clean up terminal state before throwing
+						this.stop();
 
-					const errorMsg = [
-						`Rendered line ${i} exceeds terminal width (${lineWidth} > ${width}).`,
-						"",
-						"This is likely caused by a custom TUI component not truncating its output.",
-						"Use visibleWidth() to measure and truncateToWidth() to truncate lines.",
-						"",
-						crashDumpWritten
-							? `Debug log written to: ${crashLogPath}`
-							: `Debug log could not be written to: ${crashLogPath}`,
-					].join("\n");
-					throw new Error(errorMsg);
-				}
-
-				if (!this.overWideCrashDumpWritten) {
-					writeRenderDiagnosticBestEffort(crashLogPath, crashData);
-					this.overWideCrashDumpWritten = true;
+						const errorMsg = [
+							`Rendered line ${i} exceeds terminal width (${lineWidth} > ${width}).`,
+							"",
+							"This is likely caused by a custom TUI component not truncating its output.",
+							"Use visibleWidth() to measure and truncateToWidth() to truncate lines.",
+							"",
+							crashDumpWritten
+								? `Debug log written to: ${crashLogPath}`
+								: `Debug log could not be written to: ${crashLogPath}`,
+						].join("\n");
+						throw new Error(errorMsg);
+					}
 				}
 				const truncatedLine = sliceByColumn(line, 0, width, true) + TUI.SEGMENT_RESET;
 				newLines[i] = truncatedLine;

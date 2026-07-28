@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "../../types.ts";
+import { formatGoalElapsedSeconds } from "./format.ts";
 import type { Goal } from "./types.ts";
 
 /** Footer live-elapsed refresh cadence while a goal is actively pursued. */
@@ -37,6 +38,7 @@ export class GoalElapsedTicker {
 	private ctx: ExtensionContext | undefined;
 	private goal: Goal | undefined;
 	private measuredFromMilliseconds = 0;
+	private lastRenderedElapsedLabel: string | undefined;
 
 	constructor(options: GoalElapsedTickerOptions) {
 		this.render = options.render;
@@ -70,10 +72,15 @@ export class GoalElapsedTicker {
 		}
 		this.ctx = undefined;
 		this.goal = undefined;
+		this.lastRenderedElapsedLabel = undefined;
 	}
 
 	private tick(): void {
 		if (this.ctx === undefined || this.goal === undefined) return;
-		this.render(this.ctx, this.goal, goalLiveElapsedSeconds(this.goal, this.measuredFromMilliseconds, this.now()));
+		const liveElapsedSeconds = goalLiveElapsedSeconds(this.goal, this.measuredFromMilliseconds, this.now());
+		const elapsedLabel = formatGoalElapsedSeconds(liveElapsedSeconds);
+		if (elapsedLabel === this.lastRenderedElapsedLabel) return;
+		this.lastRenderedElapsedLabel = elapsedLabel;
+		this.render(this.ctx, this.goal, liveElapsedSeconds);
 	}
 }

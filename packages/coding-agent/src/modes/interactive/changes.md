@@ -1,5 +1,29 @@
 # changes
 
+## Large resumed sessions use event-driven Working updates (2026-07-28)
+
+### What changed
+
+- `working-status.ts` adds `largeSessionWorkingStatusInterval()`: sessions below 1,000 persisted entries retain the
+  existing 32 ms message shimmer and 600 ms indicator cadence, while larger histories use a 60 second periodic
+  fallback.
+- `interactive-mode.ts` applies that policy to both default Working timers. Tool, stream, status, and message events
+  still request immediate renders, so large sessions remain live without continuously repainting an unchanged
+  transcript.
+- `test/interactive-mode-working-status.test.ts` locks both sides of the threshold and both default cadences.
+
+### Why
+
+Each animation tick asks the TUI to render the complete component tree. That is cheap for ordinary sessions but can
+become continuous CPU work after resuming a multi-thousand-entry transcript. The long fallback preserves elapsed
+status and animation recovery while making real session events, rather than decorative shimmer frames, drive normal
+updates for large histories.
+
+### Expected merge conflict zones
+
+- LOW: `working-status.ts` around animation timing helpers.
+- LOW: `interactive-mode.ts` around `getWorkingIndicatorOptions()`.
+
 ## Paste markers survive editor hand-off; unset is a same-instance no-op (2026-07-28)
 
 ### What changed

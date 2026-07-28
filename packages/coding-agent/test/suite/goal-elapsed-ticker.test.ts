@@ -76,6 +76,19 @@ describe("GoalElapsedTicker", () => {
 		expect(renders).toEqual([10, 11, 12, 13]);
 	});
 
+	it("skips ticks that do not change the formatted elapsed label", () => {
+		vi.useFakeTimers();
+		const renders: number[] = [];
+		const ticker = new GoalElapsedTicker({ render: (_ctx, _goal, live) => renders.push(live) });
+		const measuredFrom = Date.now();
+
+		ticker.sync(fakeCtx, makeGoal({ timeUsedSeconds: 3600 }), measuredFrom);
+		vi.advanceTimersByTime(5000);
+
+		expect(renders).toEqual([3600]);
+		ticker.stop();
+	});
+
 	it("re-syncing the same goal keeps a single interval and refreshes the goal snapshot", () => {
 		vi.useFakeTimers();
 		const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
