@@ -99,7 +99,6 @@ function attachDebugger(url: string, sockets: WebSocket[], states: InspectorStat
 		}
 		if (message.id === 3) {
 			state.resumed = true;
-			socket.close();
 		}
 	});
 	socket.addEventListener("error", () => {
@@ -130,6 +129,11 @@ function driveRun(child: ChildProcessByStdio<null, Readable, Readable>): Promise
 				if (url === undefined || attached.has(url)) continue;
 				attached.add(url);
 				attachDebugger(url, sockets, states);
+			}
+			if (stderr.includes("Waiting for the debugger to disconnect")) {
+				for (const socket of sockets) {
+					if (socket.readyState === WebSocket.OPEN) socket.close();
+				}
 			}
 		});
 		child.once("error", (error) => {
