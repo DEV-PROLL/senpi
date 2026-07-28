@@ -404,14 +404,17 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 					throw error;
 				}
 			};
-			const { stream: openaiStream, metadata: response } = await retryProviderStreamRequest(
+			const { stream: openaiStream } = await retryProviderStreamRequest(
 				async () => {
 					const { data, response } = await createRequest();
+					await options?.onResponse?.(
+						{ status: response.status, headers: headersToRecord(response.headers) },
+						model,
+					);
 					return { stream: data, metadata: response };
 				},
 				{ maxRetries: options?.maxRetries, maxRetryDelayMs: options?.maxRetryDelayMs, signal: options?.signal },
 			);
-			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 
 			interface StreamingToolCallBlock extends ToolCall {
