@@ -43,6 +43,7 @@ export interface RetrySettings {
 	modelFallback?: boolean; // default: true
 	fallbackChains?: Record<string, string[]>;
 	fallbackRevertPolicy?: "cooldown-expiry" | "never"; // default: "cooldown-expiry"
+	billingErrorPolicy?: "fallback" | "swap"; // default: "fallback" (temporary, revertable); "swap" pins the fallback as the session model
 	abortServerSideFallback?: boolean; // default: true
 }
 
@@ -1004,6 +1005,7 @@ export class SettingsManager {
 		modelFallback: boolean;
 		chains: Readonly<Record<string, readonly string[]>>;
 		revertPolicy: "cooldown-expiry" | "never";
+		billingErrorPolicy: "fallback" | "swap";
 	} {
 		const fallbackChains = this.settings.retry?.fallbackChains;
 		const chains: Record<string, readonly string[]> = {};
@@ -1015,6 +1017,7 @@ export class SettingsManager {
 							typeof this.settings.retry?.modelFallback === "boolean" ? this.settings.retry.modelFallback : true,
 						chains: {},
 						revertPolicy: this.settings.retry?.fallbackRevertPolicy === "never" ? "never" : "cooldown-expiry",
+						billingErrorPolicy: this.settings.retry?.billingErrorPolicy === "swap" ? "swap" : "fallback",
 					};
 				}
 				chains[key] = [...entries];
@@ -1025,6 +1028,7 @@ export class SettingsManager {
 				typeof this.settings.retry?.modelFallback === "boolean" ? this.settings.retry.modelFallback : true,
 			chains,
 			revertPolicy: this.settings.retry?.fallbackRevertPolicy === "never" ? "never" : "cooldown-expiry",
+			billingErrorPolicy: this.settings.retry?.billingErrorPolicy === "swap" ? "swap" : "fallback",
 		};
 	}
 
@@ -1067,6 +1071,15 @@ export class SettingsManager {
 		}
 		this.globalSettings.retry.fallbackRevertPolicy = policy;
 		this.markModified("retry", "fallbackRevertPolicy");
+		this.save();
+	}
+
+	setBillingErrorPolicy(policy: "fallback" | "swap"): void {
+		if (!this.globalSettings.retry) {
+			this.globalSettings.retry = {};
+		}
+		this.globalSettings.retry.billingErrorPolicy = policy;
+		this.markModified("retry", "billingErrorPolicy");
 		this.save();
 	}
 

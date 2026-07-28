@@ -123,6 +123,7 @@ import type { ModelRuntime } from "./model-runtime.ts";
 import { PROMPT_CACHE_SAFE_WAIT_ENV, resolvePromptCacheSafeWaitSeconds } from "./prompt-cache-budget.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import { isBillingErrorMessage } from "./retry-fallback/billing.ts";
 import { RetryFallbackController } from "./retry-fallback/controller.ts";
 import { SelectorCooldowns } from "./retry-fallback/cooldown.ts";
 import { createFallbackLogger } from "./retry-fallback/log.ts";
@@ -214,7 +215,7 @@ export type AgentSessionEvent =
 			from: string;
 			to: string;
 			chainKey: string;
-			reason: "transient" | "refusal" | "hard-error";
+			reason: "transient" | "refusal" | "hard-error" | "billing";
 	  }
 	| { type: "retry_fallback_succeeded"; model: string; chainKey: string }
 	| { type: "retry_fallback_reverted"; from: string; to: string }
@@ -5262,7 +5263,14 @@ export class AgentSession {
 		let switchedFallback = false;
 		if (hardErrorFallback) {
 			// A non-retryable provider failure must never replay on the same model.
-			switchedFallback = await this._retryFallback.tryFallback("hard-error", { errorMessage });
+			// Billing-class failures never recover on this account, so under the swap
+			// policy the fallback switch pins as the session model instead of reverting.
+			const reason =
+				this.settingsManager.getRetryFallbackSettings().billingErrorPolicy === "swap" &&
+				isBillingErrorMessage(errorMessage)
+					? "billing"
+					: "hard-error";
+			switchedFallback = await this._retryFallback.tryFallback(reason, { errorMessage });
 			if (!switchedFallback) {
 				this._resolveRetry();
 				return "not-handled";
