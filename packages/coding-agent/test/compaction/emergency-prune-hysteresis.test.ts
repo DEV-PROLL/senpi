@@ -105,10 +105,11 @@ describe("emergency prune hysteresis", () => {
 	});
 
 	it("releases the latch once the context drops well below the engage threshold", () => {
-		// Given a latch that has already engaged on an oversized context.
+		// Given a latch already engaged on an oversized context.
 		const contextWindow = 5_000;
 		const latch = createEmergencyPruneLatch();
 		hardLimitEmergencyPrune(buildHistory(0), contextWindow, latch);
+		expect(latch.engaged).toBe(true);
 
 		// When a compaction shrinks the history far below the release threshold.
 		const smallHistory: AgentMessage[] = [
@@ -119,8 +120,27 @@ describe("emergency prune hysteresis", () => {
 		];
 		const result = hardLimitEmergencyPrune(smallHistory, contextWindow, latch);
 
-		// Then the messages pass through untouched again.
+		// Then the latch actually disengages -- asserting only on the returned messages
+		// would pass even if the latch stayed stuck, because pruning a small history is
+		// a no-op. The latch state is what proves a shrunken context is not pinned in
+		// pruned form forever.
+		expect(latch.engaged).toBe(false);
 		expect(result.needsAggressiveCompaction).toBe(false);
 		expect(serializeShape(result.messages)).toBe(serializeShape(smallHistory));
+	});
+
+	it("keeps a still-large context pruned while it sits inside the hysteresis band", () => {
+		// Given an engaged latch.
+		const contextWindow = 5_000;
+		const latch = createEmergencyPruneLatch();
+		hardLimitEmergencyPrune(buildHistory(0), contextWindow, latch);
+
+		// When the context is still above the release threshold, the latch must hold,
+		// so the shape stays pruned rather than snapping back and busting the cache.
+		const banded = hardLimitEmergencyPrune(buildHistory(0), contextWindow, latch);
+
+		// Then it is still engaged.
+		expect(latch.engaged).toBe(true);
+		expect(serializeShape(banded.messages)).not.toBe(serializeShape(buildHistory(0)));
 	});
 });
