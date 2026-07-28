@@ -160,6 +160,7 @@ import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
+import { expandEditorSubmission, transferEditorContent } from "./editor-paste-transfer.ts";
 import { formatExtensionErrorHeadline, sanitizeTuiErrorMessage } from "./extension-error-format.ts";
 import { editFileInExternalEditor, editInExternalEditor } from "./external-editor.ts";
 import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./grok/chrome.ts";
@@ -2766,7 +2767,7 @@ export class InteractiveMode {
 			custom: (factory, options) => this.showExtensionCustom(factory, options),
 			pasteToEditor: (text) => this.editor.handleInput(`\x1b[200~${text}\x1b[201~`),
 			setEditorText: (text) => this.editor.setText(text),
-			getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),
+			getEditorText: () => this.getExpandedEditorText(),
 			editor: (title, prefill) => this.showExtensionEditor(title, prefill),
 			addAutocompleteProvider: (factory) => {
 				this.autocompleteProviderWrappers.push(factory);
@@ -2967,15 +2968,29 @@ export class InteractiveMode {
 	}
 
 	/**
+	 * Full editor text with paste markers expanded. Prefers the editor's own
+	 * getExpandedText(); falls back to expanding from the paste snapshot when
+	 * only getPasteState() is implemented, then to the raw text (an editor
+	 * with neither capability never had expandable markers).
+	 */
+	private getExpandedEditorText(): string {
+		return expandEditorSubmission(this.editor, this.editor.getText());
+	}
+
+	/**
 	 * Set a custom editor component from an extension.
 	 * Pass undefined to restore the default editor.
 	 */
 	private setCustomEditorComponent(factory: EditorFactory | undefined): void {
 		this.editorComponentFactory = factory;
+		if (!factory && this.editor === this.defaultEditor) return;
 
-		// Save text from current editor before switching
-		const currentText = this.editor.getText();
-
+		// Save text from current editor before switching. Paste markers must not
+		// be transferred as raw text alone: the destination editor instance has no
+		// paste registry, so a bare marker would become dead literal text and the
+		// pasted content would be silently lost on submit. When both editors
+		// support the paste-state API, transfer the registry so markers stay
+		// collapsed; otherwise fall back to the expanded text.
 		this.editorContainer.clear();
 
 		if (factory) {
@@ -2987,11 +3002,13 @@ export class InteractiveMode {
 			);
 
 			// Wire up callbacks from the default editor
-			newEditor.onSubmit = this.defaultEditor.onSubmit;
+			newEditor.onSubmit = (text) => {
+				this.defaultEditor.onSubmit?.(expandEditorSubmission(newEditor, text));
+			};
 			newEditor.onChange = this.defaultEditor.onChange;
 
-			// Copy text from previous editor
-			newEditor.setText(currentText);
+			// Copy text (and any collapsed paste markers) from previous editor
+			transferEditorContent(this.editor, newEditor);
 
 			// Copy appearance settings if supported
 			if (newEditor.borderColor !== undefined) {
@@ -3039,8 +3056,14 @@ export class InteractiveMode {
 
 			this.editor = newEditor;
 		} else {
-			// Restore default editor with text from custom editor
-			this.defaultEditor.setText(currentText);
+			// Restore default editor with text from custom editor. Skip the
+			// transfer when the default editor is already active (e.g.
+			// resetExtensionUI() calls this unconditionally): there is no
+			// hand-off, and a setText round-trip would be pure churn on the
+			// user's draft.
+			if (this.editor !== this.defaultEditor) {
+				transferEditorContent(this.editor, this.defaultEditor);
+			}
 			this.editor = this.defaultEditor;
 		}
 
@@ -4524,7 +4547,7 @@ export class InteractiveMode {
 	}
 
 	private async handleFollowUp(): Promise<void> {
-		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
+		const text = this.getExpandedEditorText().trim();
 		if (!text) return;
 
 		// Queue input during compaction (extension commands execute immediately)
@@ -4655,7 +4678,7 @@ export class InteractiveMode {
 
 	private async handleOpenExternalEditor(): Promise<void> {
 		const editorCmd = this.settingsManager.getExternalEditorCommand();
-		const content = this.editor.getExpandedText?.() ?? this.editor.getText();
+		const content = this.getExpandedEditorText();
 		this.ui.stop();
 		restoreInteractiveStderr();
 		try {

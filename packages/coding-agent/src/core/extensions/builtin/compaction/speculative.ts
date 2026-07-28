@@ -20,6 +20,7 @@ import {
 import {
 	consumeStreamWithIdleTimeout,
 	DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,
+	DEFAULT_SUMMARIZATION_MAX_DURATION_MS,
 } from "../../../compaction/stream-watchdog.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type { ModelRegistry } from "../../../model-registry.ts";
@@ -224,6 +225,7 @@ async function generateSummaryMessage(options: {
 		});
 		await consumeStreamWithIdleTimeout(responseStream, {
 			idleTimeoutMs: DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,
+			maxDurationMs: DEFAULT_SUMMARIZATION_MAX_DURATION_MS,
 			abort: () => requestController.abort(),
 			signal: options.signal,
 			onEvent: (event) => {

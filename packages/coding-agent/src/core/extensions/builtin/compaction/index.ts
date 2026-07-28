@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { isRetryableErrorMessage, type Tool } from "@earendil-works/pi-ai";
+import type { Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type { CompactionEntry } from "../../../session-manager.ts";
@@ -44,10 +44,10 @@ import {
 	type SpeculativeCompactionResult,
 	type SpeculativeCompactionSnapshot,
 	SummaryGenerationError,
-	SummaryRequestError,
 } from "./speculative.ts";
 import { type CompactionExtensionState, createInitialState, resetTurnCounter } from "./state.ts";
 import * as todoBridge from "./todo-bridge.ts";
+import { isTransientSummarizationFailure } from "./transient-failure.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const EMERGENCY_COMPACTION_INSTRUCTIONS =
@@ -167,6 +167,9 @@ export default function compactionExtension(
 				snapshot: SpeculativeCompactionSnapshot;
 				controller: AbortController;
 				promise: Promise<CompactionResult | undefined>;
+				// Settled failure, preserved so a blocking route that inherits this job can
+				// degrade on a watchdog trip instead of starting a second full-budget request.
+				failure: Promise<Error | undefined>;
 		  }
 		| undefined;
 	const pendingMetadata = new Map<string, PendingCompactionMetadata>();
@@ -203,8 +206,13 @@ export default function compactionExtension(
 		if (!snapshot) return;
 
 		const controller = new AbortController();
-		const promise = runExtensionCompaction(ctx, snapshot, controller.signal).catch(() => undefined);
-		speculativeJob = { generation, snapshot, controller, promise };
+		const settled = runExtensionCompaction(ctx, snapshot, controller.signal).then(
+			(result) => ({ result, error: undefined }),
+			(error: unknown) => ({ result: undefined, error: error instanceof Error ? error : new Error(String(error)) }),
+		);
+		const promise = settled.then(({ result }) => result);
+		const failure = settled.then(({ error }) => error);
+		speculativeJob = { generation, snapshot, controller, promise, failure };
 	}
 
 	function capturePendingMetadata(requestId: string, ctx: ExtensionContext): void {
@@ -273,10 +281,29 @@ export default function compactionExtension(
 			if (pendingJob) {
 				const unlinkAbort = linkAbortSignal(feedbackSignal, pendingJob.controller);
 				let compaction: CompactionResult | undefined;
+				let inheritedFailure: Error | undefined;
 				try {
 					compaction = await pendingJob.promise;
+					inheritedFailure = await pendingJob.failure;
 				} finally {
 					unlinkAbort();
+				}
+				// A speculative job that tripped the wall-clock budget already spent a full
+				// summarization deadline. Starting a second full-budget blocking request here
+				// would hold the session for another whole budget and recreate the freeze this
+				// work removes, so degrade through the shared watchdog-failure path instead.
+				if (inheritedFailure !== undefined) {
+					speculativeJob = undefined;
+					if (isTransientSummarizationFailure(inheritedFailure, inheritedFailure.message)) {
+						ctx.endCompaction?.({
+							reason: "extension",
+							signal: feedbackSignal,
+							aborted: feedbackSignal?.aborted,
+							errorMessage: `Compaction failed: ${inheritedFailure.message}`,
+						});
+						state = breaker.recordFailure(state, Date.now(), { route: "extension" });
+						return { applied: false, reason: "failed" };
+					}
 				}
 				const result = await applyGeneratedCompaction(
 					ctx,
@@ -342,9 +369,11 @@ export default function compactionExtension(
 			// own provider request surfaces the same outage once through the
 			// normal retry path. Provider `error` stops carry metadata-aware
 			// classification (a refusal with retryable-looking text stays loud);
-			// bare transport throws fall back to the message classifier. Count
-			// the failure so the circuit breaker halts repeated doomed attempts.
-			const transient = error instanceof SummaryRequestError ? error.transient : isRetryableErrorMessage(message);
+			// bare transport throws fall back to the message classifier. A watchdog
+			// trip (stalled stream, or one that outlived its wall-clock budget) is
+			// infrastructure slowness and always degrades. Count the failure so the
+			// circuit breaker halts repeated doomed attempts.
+			const transient = isTransientSummarizationFailure(error, message);
 			if (transient) {
 				state = breaker.recordFailure(state, Date.now(), { route: "extension" });
 				return { applied: false, reason: "failed" };

@@ -3836,6 +3836,205 @@ describe("Editor component", () => {
 			assert.strictEqual(submitted, paste);
 		});
 
+		it("setText round-trip preserves paste markers and registry (dialog save/restore)", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			const paste = bigPaste("alpha");
+			editor.handleInput(`\x1b[200~${paste}\x1b[201~`);
+
+			// Simulate dialog save/restore: getText() keeps the raw marker,
+			// setText() must not orphan it from the registry.
+			editor.setText(editor.getText());
+
+			assert.strictEqual(editor.getExpandedText(), paste);
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, paste);
+		});
+
+		it("setText with extra text keeps referenced paste markers live (queued-message restore)", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			const paste = bigPaste("alpha");
+			editor.handleInput(`\x1b[200~${paste}\x1b[201~`);
+			const draft = editor.getText();
+
+			// Simulate restoreQueuedMessagesToEditor combining queued text with the draft
+			editor.setText(`queued message\n\n${draft}`);
+
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, `queued message\n\n${paste}`);
+		});
+
+		it("setText prunes registry entries whose markers were removed", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			const pasteA = bigPaste("alpha");
+			const pasteB = bigPaste("beta");
+			editor.handleInput(`\x1b[200~${pasteA}\x1b[201~`); // #1 = A
+			editor.handleInput(" ");
+			editor.handleInput(`\x1b[200~${pasteB}\x1b[201~`); // #2 = B
+
+			const markers = [...editor.getText().matchAll(/\[paste #\d+ \+\d+ lines\]/g)].map((m) => m[0]);
+			assert.strictEqual(markers.length, 2);
+
+			// Keep only marker #2
+			editor.setText(markers[1]!);
+			assert.strictEqual(editor.getExpandedText(), pasteB);
+		});
+
+		it("setText does not revive a registry entry from coincidental marker-like text", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`); // #1, 12 lines
+
+			// Same id, but the suffix does not match the stored content: this is
+			// arbitrary new text, not a round-trip of the live marker.
+			editor.setText("[paste #1 +5 lines]");
+			assert.strictEqual(editor.getExpandedText(), "[paste #1 +5 lines]");
+
+			// Only the exact canonical marker string keeps the entry alive.
+			const editor2 = new Editor(createTestTUI(), defaultEditorTheme);
+			const paste = bigPaste("beta");
+			editor2.handleInput(`\x1b[200~${paste}\x1b[201~`);
+			editor2.setText(editor2.getText());
+			assert.strictEqual(editor2.getExpandedText(), paste);
+		});
+
+		it("setText does not revive a stale registry entry via coincidental exact marker text", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`); // #1, 12 lines
+			const marker = editor.getText();
+			assert.match(marker, /^\[paste #1 \+\d+ lines\]$/);
+
+			// Kill the marker line: text no longer references the paste, but the
+			// registry entry is intentionally kept alive for yank.
+			editor.handleInput("\x01"); // Ctrl+A (line start)
+			editor.handleInput("\x0b"); // Ctrl+K (kill to end of line)
+			assert.strictEqual(editor.getText(), "");
+
+			// Replacement text that happens to contain the exact canonical marker
+			// was NOT carried over from the previous draft: it must stay literal.
+			editor.setText(`unrelated ${marker}`);
+			assert.strictEqual(editor.getExpandedText(), `unrelated ${marker}`);
+		});
+
+		it("expands only canonical marker occurrences; same-id literals with other suffixes stay literal", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			const paste = bigPaste("alpha");
+			editor.handleInput(`\x1b[200~${paste}\x1b[201~`); // #1, 12 lines
+			const marker = editor.getText();
+
+			// Carry the real marker over AND introduce a same-id literal with a
+			// different suffix. Only the canonical occurrence may expand.
+			editor.setText(`${marker} literal [paste #1 +5 lines]`);
+			assert.strictEqual(editor.getExpandedText(), `${paste} literal [paste #1 +5 lines]`);
+
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, `${paste} literal [paste #1 +5 lines]`);
+		});
+
+		it("does not treat same-id non-canonical marker text as atomic", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`); // #1 live
+			const marker = editor.getText();
+			editor.setText(`${marker} [paste #1 +5 lines]`);
+
+			// Cursor at end; left arrow moves one grapheme ("]"), not one marker,
+			// because the trailing text is not the canonical marker for entry #1.
+			editor.handleInput("\x05"); // Ctrl+E (end of line)
+			const endCol = editor.getCursor().col;
+			editor.handleInput("\x1b[D"); // Left
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: endCol - 1 });
+		});
+
+		it("kill and yank keeps a paste marker expandable", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			const paste = bigPaste("alpha");
+			editor.handleInput(`\x1b[200~${paste}\x1b[201~`);
+			editor.handleInput("\x01"); // Ctrl+A
+			editor.handleInput("\x0b"); // Ctrl+K kills the marker line
+			assert.strictEqual(editor.getText(), "");
+			editor.handleInput("\x19"); // Ctrl+Y yanks it back
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, paste);
+		});
+
+		it("transfers paste registry to another editor instance via getPasteState/setPasteState", () => {
+			const source = new Editor(createTestTUI(), defaultEditorTheme);
+			const paste = bigPaste("alpha");
+			source.handleInput(`\x1b[200~${paste}\x1b[201~`);
+
+			const target = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = "";
+			target.onSubmit = (t) => {
+				submitted = t;
+			};
+
+			// Editor hand-off: raw text + registry snapshot
+			target.setText(source.getText());
+			target.setPasteState(source.getPasteState());
+
+			// Marker stays collapsed and atomic in the target editor
+			assert.match(target.getText(), /\[paste #1 \+\d+ lines\]/);
+			assert.strictEqual(target.getExpandedText(), paste);
+
+			// New pastes in the target cannot collide with transferred ids
+			target.handleInput(" ");
+			target.handleInput(`\x1b[200~${bigPaste("beta")}\x1b[201~`);
+			assert.match(target.getText(), /\[paste #2 \+\d+ lines\]/);
+
+			target.handleInput("\r");
+			assert.strictEqual(submitted, `${paste} ${bigPaste("beta")}`);
+		});
+
+		it("setPasteState drops entries whose markers are not in the current text", () => {
+			const source = new Editor(createTestTUI(), defaultEditorTheme);
+			source.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`);
+
+			const target = new Editor(createTestTUI(), defaultEditorTheme);
+			target.setText("no markers here");
+			target.setPasteState(source.getPasteState());
+
+			assert.strictEqual(target.getExpandedText(), "no markers here");
+			// Registry emptied, numbering restarts at #1
+			target.setText("");
+			target.handleInput(`\x1b[200~${bigPaste("beta")}\x1b[201~`);
+			assert.match(target.getText(), /\[paste #1 \+\d+ lines\]/);
+		});
+
+		it("setText with unrelated text clears the registry and resets numbering", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.handleInput(`\x1b[200~${bigPaste("alpha")}\x1b[201~`); // #1
+			editor.setText("plain replacement");
+			assert.strictEqual(editor.getExpandedText(), "plain replacement");
+
+			// Numbering restarts at #1 for the next large paste
+			editor.setText("");
+			editor.handleInput(`\x1b[200~${bigPaste("beta")}\x1b[201~`);
+			assert.match(editor.getText(), /\[paste #1 \+\d+ lines\]/);
+		});
+
 		it("handles multiple paste markers in same line", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			pasteWithMarker(editor);

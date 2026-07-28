@@ -1,3 +1,12 @@
+## Paste markers survive editor hand-off and setText round-trips (2026-07-28)
+
+- `modes/interactive/interactive-mode.ts` `setCustomEditorComponent()` now transfers editor content safely when switching between the default and a custom editor: if both editors support the paste-state API (`getPasteState`/`setPasteState` from pi-tui), the raw text plus the registry snapshot are transferred so `[paste #N ...]` markers stay collapsed; otherwise it falls back to the expanded text — `getExpandedText?.()`, or expansion from the paste snapshot via the exported `expandPasteMarkers()` when the source implements `getPasteState` without `getExpandedText`, or the raw text when neither capability exists. Previously the raw text alone was copied into a fresh editor with no registry, turning live markers into dead literals and silently dropping the pasted body from the submitted prompt.
+- The companion tui change (`packages/tui/src/changes.md`, same date) makes `Editor.setText()` prune (exact canonical-marker match) instead of clear the paste registry, which fixes the remaining same-instance round-trips: `showExtensionCustom()` save/restore and `restoreQueuedMessagesToEditor()` / `abortAndFireQueuedMessages()` draft restoration. Those call sites are unchanged.
+- Symptom fixed: transcript/session showed only the `[paste #1 +18 lines]` placeholder as the user message after pasting, opening a dialog (or aborting with queued messages), and submitting.
+- `setCustomEditorComponent(undefined)` is now a draft no-op when the default editor is already active (e.g. `resetExtensionUI()` calls it unconditionally during extension resets): no hand-off happens, so no setText round-trip touches the user's draft.
+- Details for the interactive hand-off live in `src/modes/interactive/changes.md` (same date).
+- Coverage: `test/suite/regressions/0000-editor-paste-marker-transfer.test.ts` drives the real `setCustomEditorComponent` (prototype + fakeThis pattern) with real tui editors: registry transfer to a paste-aware editor, expanded-text fallback for a plain `EditorComponent`, restore to the default editor, full plain-editor round-trip, and the same-instance no-op.
+
 ## Prompt-cache-aware foreground tool budgets (2026-07-28)
 
 ### What changed
@@ -25,7 +34,6 @@
 
 - Byte-identical to previous behavior: the injected bash default and recommended maximum keep their existing
   values, the policy prompt is unchanged under strict string equality, and the env var is absent.
-
 
 ## Cancellable `session_before_reload` veto blocks reload while extensions protect live work (2026-07-28)
 
