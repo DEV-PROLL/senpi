@@ -6,6 +6,32 @@ Persistent per-thread goal tracking as an in-tree builtin. Ports the standalone
 codex-aligned tool naming, and budget-driven behavior removed. An optional
 `tokenBudget` is retained only as inert persistence/wire compatibility metadata.
 
+## Four-minute continuation cadence while monitors are live (2026-07-28)
+
+### What changed
+- New `monitor-continuation.ts` owns monitor-aware goal continuation timing. A clean
+  `agent_end` still queues immediately when no terminal monitor is live; while one
+  or more monitors are live, it schedules one continuation for 240 seconds later.
+- Repeated clean turns share one timer. Monitor settlement, goal pause/block/complete,
+  pending messages at the boundary, session reload, and session shutdown cancel or
+  suppress stale delayed work.
+- Scheduling emits `goal_continuation_scheduled` on `pi.events` and calls
+  `ctx.ui.notify`, so the classic TUI and RPC `extension_ui_request{method:"notify"}`
+  clients receive the same informational notice.
+
+### Why
+- Monitor-driven work already wakes the session when decisive output arrives. Queuing
+  a goal continuation after every clean turn created tight agent loops while the
+  monitor was still waiting; a four-minute cadence keeps the goal alive without
+  repeatedly consuming turns.
+
+### Expected merge conflict zones on next upstream sync
+- MEDIUM in `index.ts` around `session_start`, `agent_end`, `refreshGoalUi`, and
+  `session_shutdown` lifecycle wiring.
+- LOW in the new `monitor-continuation.ts`; the standalone `pi-goal` package has no
+  terminal monitor integration today.
+- NONE in persistence, tool schemas, status transitions, or public extension types.
+
 ## App-server token budget compatibility metadata (2026-07-19)
 
 ### What changed
