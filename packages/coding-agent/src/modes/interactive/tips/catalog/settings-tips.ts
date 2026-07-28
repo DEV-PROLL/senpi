@@ -5,7 +5,7 @@ export const SETTINGS_TIPS = [
 		id: "settings-locations",
 		bindings: [],
 		render: () =>
-			"Use /settings for common options; the rest live in ~/.senpi/agent/settings.json, with .senpi/settings.json overriding per project.",
+			"Use /settings for common options; the rest live in settings.json, with .senpi/settings.json overriding per project.",
 	},
 	{
 		id: "permission-preset",

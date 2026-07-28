@@ -48,7 +48,7 @@ export const MODEL_TIPS = [
 		id: "fallback-chains-setting",
 		bindings: [],
 		render: () =>
-			"retry.fallbackChains in settings.json maps one model to ordered fallbacks, so a failed turn retries on the next model instead of stopping.",
+			"retry.fallbackChains in settings.json maps a model to ordered fallbacks, so a failed turn retries on the next one.",
 	},
 	{
 		id: "fallback-command",

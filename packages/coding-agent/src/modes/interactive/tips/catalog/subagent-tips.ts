@@ -43,7 +43,7 @@ export const SUBAGENT_TIPS = [
 		bindings: [],
 		requiresCommand: "tasks",
 		render: () =>
-			"Delegate with a category - quick, deep, ultrabrain, architect, artistry, git, writing, visual-engineering - and each one runs on its own model.",
+			"Delegate by category - quick, deep, ultrabrain, architect, artistry, git, writing - each runs on its own model.",
 	},
 	{
 		id: "subagent-commands",
