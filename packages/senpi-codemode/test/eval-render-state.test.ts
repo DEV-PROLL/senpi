@@ -5,6 +5,7 @@ import type { EvalToolDetails } from "../src/tool/types.ts";
 import {
 	callContext,
 	evalResult,
+	evalResultWithEmptyDetails,
 	evalResultWithOmittedDetails,
 	renderLines,
 	resultContext,
@@ -81,6 +82,25 @@ describe("eval renderer state", () => {
 
 		// Then
 		expect(renderLines(component).join("\n")).not.toContain("took");
+	});
+
+	it("Given a host error result with empty details when rendered then no undefined duration is shown", () => {
+		// Given
+		const givenResult = evalResultWithEmptyDetails("Eval cell eval:0 is already managed");
+
+		// When
+		const component = renderEvalResult(
+			givenResult,
+			{ expanded: false, isPartial: false },
+			undefined,
+			resultContext({ isError: true }),
+		);
+
+		// Then
+		const text = renderLines(component).join("\n");
+		expect.soft(text).not.toContain("took undefinedms");
+		expect.soft(text).toContain("error");
+		expect(text).toContain("already managed");
 	});
 
 	it("Given empty text output when rendered then no-output marker is shown", () => {
