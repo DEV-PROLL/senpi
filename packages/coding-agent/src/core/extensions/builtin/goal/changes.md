@@ -1,5 +1,30 @@
 # goal Extension Changes
 
+## Monitor-wait continuation stall check (2026-07-28)
+
+### What changed
+
+- `monitor-continuation.ts` counts consecutive monitor-wait continuations per goal
+  (`GOAL_MONITOR_STALL_THRESHOLD = 3`). From the third consecutive delayed continuation
+  fired while monitors stayed active, the hidden continuation prompt is prefixed with a
+  `<goal_monitor_stall_check>` block (`buildMonitorStallNotice` in `prompt.ts`) telling
+  the agent the repeated wait looks abnormal and to actively inspect the monitored state
+  (bash_output, process health, kill_bash + alternate approach, or the blocked audit)
+  before waiting again. A `goal_monitor_continuation_stall` event is emitted and a UI
+  notice shown when the check is injected.
+- The streak resets on every signal that breaks the unattended wait loop: monitor
+  completion (`terminal_monitor_state` activeCount 0), a real user prompt
+  (`before_agent_start` via the new `noteUserPrompt()`), the goal leaving `active` or
+  being replaced (goal id change), the immediate no-monitor continuation path, session
+  start, and dispose.
+- Coverage: `test/suite/goal-monitor-stall.test.ts` (threshold + all reset paths).
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `monitor-continuation.ts` around `#continueIfEligible` and the monitor-state
+  subscription.
+- LOW in `prompt.ts` (appended exported builder) and `index.ts` `before_agent_start`.
+
 ## Blank reasons treated as omitted for update_goal complete (2026-07-28)
 
 ### What changed
