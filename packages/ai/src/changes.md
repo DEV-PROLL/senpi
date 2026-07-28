@@ -4,7 +4,8 @@
 
 ### What changed and why
 
-- `api/openai-codex-responses.ts` `buildRequestBody()`: `reasoningSummary: null` now omits the `summary`
+- `api/openai-codex-responses.ts` `buildRequestBody()` and the internal
+  `api/openai-codex-responses/reasoning.ts` normalizer: `reasoningSummary: null` now omits the `summary`
   field from `body.reasoning` instead of sending the literal string `"off"`. The Codex backend's
   `ReasoningSummaryParam` accepts only `concise`, `detailed`, and `auto`, so every request carrying
   `reasoningSummary: null` failed with a 400 `invalid_enum_value`. The coding-agent builtin compaction
@@ -22,7 +23,8 @@
 
 ### Expected merge conflict zones
 
-- LOW: `api/openai-codex-responses.ts` `buildRequestBody()` reasoning block. Upstream writes
+- LOW: `api/openai-codex-responses.ts` `buildRequestBody()` reasoning block and the internal
+  `api/openai-codex-responses/reasoning.ts` normalizer. Upstream writes
   `summary: options.reasoningSummary ?? "auto"` without the null branch; a clean upstream touch of these
   two object literals should resolve by keeping the null-omit spread.
 
