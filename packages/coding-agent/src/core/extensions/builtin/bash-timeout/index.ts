@@ -25,7 +25,7 @@ export default function bashTimeoutExtension(pi: ExtensionAPI): void {
 
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "bash") return;
-		effective = resolveEffectiveBashTimeouts(baseDefaults, ctx.getPromptCacheSafeWaitSeconds?.());
+		effective = resolveEffectiveBashTimeouts(baseDefaults, ctx?.getPromptCacheSafeWaitSeconds?.());
 		const input = event.input as BashToolInputLike;
 		const updated = applyBashTimeout(input, effective);
 		if (updated !== input) {
@@ -35,7 +35,7 @@ export default function bashTimeoutExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		effective = resolveEffectiveBashTimeouts(baseDefaults, ctx.getPromptCacheSafeWaitSeconds?.());
+		effective = resolveEffectiveBashTimeouts(baseDefaults, ctx?.getPromptCacheSafeWaitSeconds?.());
 		return { systemPrompt: `${event.systemPrompt}${buildBashTimeoutPrompt(effective)}` };
 	});
 }
