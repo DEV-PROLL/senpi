@@ -37,6 +37,7 @@ import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
 import * as restoration from "./restoration-tracker.ts";
 import {
 	applyGeneratedCompaction,
+	createEmergencyPruneLatch,
 	createSpeculativeCompactionSnapshot,
 	getPromptVariant,
 	hardLimitEmergencyPrune,
@@ -157,6 +158,10 @@ export default function compactionExtension(
 	remoteCompactionDependencies: OpenAiRemoteCompactionDependencies = {},
 ): void {
 	let state: CompactionExtensionState = createInitialState();
+	// One latch per session: keeps the emergency prune engaged until the context
+	// falls clear of the threshold, so consecutive requests keep a byte-identical
+	// cacheable prefix instead of alternating and re-billing the whole prompt.
+	const emergencyPruneLatch = createEmergencyPruneLatch();
 	const degradationState = createDegradationMonitorState();
 	const restorationState = state.restoration ?? restoration.createRestorationTrackerState();
 	state = { ...state, restoration: restorationState };
@@ -582,7 +587,7 @@ export default function compactionExtension(
 		})
 			? reduceContextMessages(event.messages, BUILTIN_CONTEXT_REDUCTION_OPTIONS).messages
 			: event.messages;
-		const emergency = hardLimitEmergencyPrune(sourceMessages, promptContextWindow);
+		const emergency = hardLimitEmergencyPrune(sourceMessages, promptContextWindow, emergencyPruneLatch);
 		const marked = markOpenAiRemoteReplayBoundary(emergency.messages, {
 			model: ctx.model,
 			branchEntries: ctx.sessionManager.getBranch(),
