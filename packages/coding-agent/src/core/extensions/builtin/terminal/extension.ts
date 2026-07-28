@@ -5,6 +5,7 @@ import { isAnthropicBashEnabled } from "../anthropic-bash/index.ts";
 import { TerminalManager } from "./manager.ts";
 import { MonitorNotifier } from "./monitor-notify.ts";
 import { MonitorRegistry } from "./monitor-registry.ts";
+import { formatMonitorStatus, MONITOR_STATUS_KEY } from "./monitor-status.ts";
 import { TerminalNotifier } from "./notify.ts";
 import { TERMINAL_PROMPT_SECTION } from "./prompt.ts";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
@@ -58,7 +59,9 @@ function buildToolContext(state: TerminalExtensionState): TerminalToolContext {
 			return state.settings.defaultRows;
 		},
 		get monitorRegistry() {
-			state.monitors ??= new MonitorRegistry((event) => state.monitorNotifier?.notifyEvent(event));
+			state.monitors ??= new MonitorRegistry((event) => state.monitorNotifier?.notifyEvent(event), {
+				onChange: (snapshot) => state.ctx?.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot)),
+			});
 			return state.monitors;
 		},
 		getEnv: () => getShellEnv(),

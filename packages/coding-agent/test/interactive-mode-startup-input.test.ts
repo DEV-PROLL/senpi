@@ -41,7 +41,7 @@ type RunContext = {
 		prompt: (text: string, options?: unknown) => Promise<void>;
 	};
 	checkForPackageUpdates: () => Promise<string[]>;
-	checkTmuxKeyboardSetup: () => Promise<string | undefined>;
+	checkTmuxSetup: () => Promise<string | undefined>;
 	maybeWarnAboutAnthropicSubscriptionAuth: () => Promise<void>;
 	getUserInput: () => Promise<string>;
 	showNewVersionNotification: (version: string) => void;
@@ -119,7 +119,7 @@ describe("InteractiveMode startup input", () => {
 				prompt,
 			},
 			checkForPackageUpdates: vi.fn(async (): Promise<string[]> => []),
-			checkTmuxKeyboardSetup: vi.fn(async () => undefined),
+			checkTmuxSetup: vi.fn(async () => undefined),
 			maybeWarnAboutAnthropicSubscriptionAuth: vi.fn(async () => {}),
 			getUserInput,
 			showNewVersionNotification: vi.fn(),

@@ -86,6 +86,7 @@ export {
 // Terminal image support
 export {
 	allocateImageId,
+	buildKittyPlaceholderRow,
 	type CellDimensions,
 	deleteAllKittyImages,
 	deleteKittyImage,
@@ -103,11 +104,15 @@ export {
 	type ImageDimensions,
 	type ImageProtocol,
 	type ImageRenderOptions,
+	KITTY_PLACEHOLDER_MAX,
+	outerKittyGraphicsMode,
 	renderImage,
 	resetCapabilitiesCache,
 	setCapabilities,
 	setCellDimensions,
 	type TerminalCapabilities,
+	type TmuxPassthroughState,
+	wrapTmuxPassthrough,
 } from "./terminal-image.ts";
 export { imageFallback, sanitizeTerminalLabel } from "./terminal-text.ts";
 export {

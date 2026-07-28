@@ -3,6 +3,34 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## Footer status for active monitors (2026-07-28)
+
+### What changed
+
+- `monitor-registry.ts`: `MonitorRegistry` accepts optional `MonitorRegistryOptions.onChange`, fired
+  with a `snapshot()` (`{id, description, paused}[]`) on register, pauseAll (when any paused),
+  rearm, settle, and dispose. `snapshot()` is public.
+- `monitor-status.ts` (new): `formatMonitorStatus(snapshot)` — undefined when nothing is watched
+  (clears the footer status), `watching <desc>` for one, `watching N: <d1>, <d2>` elided to a
+  48-char cap for many, `(paused)` / `(k paused)` markers. `MONITOR_STATUS_KEY = "monitors"`.
+- `extension.ts`: the session monitor registry is created with an onChange that publishes
+  `ctx.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot))` — the goal-builtin
+  footer-status pattern. Non-interactive modes no-op via the optional ctx; settle/shutdown
+  dispose clears the status.
+- `test/suite/terminal-monitor-footer.test.ts` (new): formatter cases, registry transition
+  notifications (register/pause/rearm/settle/dispose with real pipe-forced sessions), and
+  extension wiring (fake pi + ui.setStatus spy, real monitor tool execution).
+
+### Why extension system could handle this
+
+- Entirely extension-owned: `ctx.ui.setStatus` is the established footer surface
+  (goal/websearch/webfetch precedent); no core or footer-layout changes.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: fork-owned `monitor-registry.ts` constructor/notify points, `extension.ts`
+  monitorRegistry getter, new `monitor-status.ts`.
+
 ## Wait-discipline routing: bash surface redirect + guidance dedup (2026-07-28)
 
 ### What changed

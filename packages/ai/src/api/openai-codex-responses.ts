@@ -49,6 +49,7 @@ import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
 import { extractOpenAiCodexAccountId } from "../utils/openai-codex-auth.ts";
 import { uuidv7 } from "../utils/uuid.ts";
 import { createGrammarToolInputProperties } from "./constrained-sampling.ts";
+import { buildCodexReasoning, type CodexReasoningSummaryInput } from "./openai-codex-responses/reasoning.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
 import {
@@ -91,7 +92,7 @@ const CODEX_RESPONSE_STATUSES = new Set<CodexResponseStatus>([
 
 export interface OpenAICodexResponsesOptions extends StreamOptions {
 	reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-	reasoningSummary?: "auto" | "concise" | "detailed" | "off" | "on" | null;
+	reasoningSummary?: CodexReasoningSummaryInput;
 	serviceTier?: ResponseCreateParamsStreaming["service_tier"];
 	textVerbosity?: "low" | "medium" | "high";
 	toolChoice?: "auto" | "none" | "required";
@@ -110,7 +111,7 @@ interface RequestBody {
 	tool_choice?: OpenAICodexResponsesOptions["toolChoice"];
 	parallel_tool_calls?: boolean;
 	temperature?: number;
-	reasoning?: { effort?: string; summary?: string };
+	reasoning?: ReturnType<typeof buildCodexReasoning>;
 	service_tier?: ResponseCreateParamsStreaming["service_tier"];
 	text?: { verbosity?: string };
 	include?: string[];
@@ -595,17 +596,13 @@ function buildRequestBody(
 		});
 	}
 
-	if (reasoningEffort !== undefined && reasoningEffort !== null) {
-		body.reasoning = {
-			effort: reasoningEffort,
-			summary: options?.reasoningSummary === null ? "off" : (options?.reasoningSummary ?? "auto"),
-		};
-	} else if (reasoningEffort === undefined && model.reasoning && model.thinkingLevelMap?.off !== null) {
-		body.reasoning = {
-			effort: model.thinkingLevelMap?.off ?? "none",
-			summary: options?.reasoningSummary === null ? "off" : (options?.reasoningSummary ?? "auto"),
-		};
-	}
+	const reasoning = buildCodexReasoning(
+		reasoningEffort,
+		options?.reasoningSummary,
+		model.reasoning,
+		model.thinkingLevelMap?.off,
+	);
+	if (reasoning) body.reasoning = reasoning;
 
 	applyExtraBody(body, options?.extraBody, OPENAI_RESPONSES_RESERVED_BODY_KEYS);
 

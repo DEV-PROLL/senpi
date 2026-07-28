@@ -31,6 +31,7 @@ import {
 	type LoaderIndicatorOptions,
 	Markdown,
 	matchesKey,
+	outerKittyGraphicsMode,
 	ProcessTerminal,
 	Spacer,
 	sanitizeTerminalLabel,
@@ -188,6 +189,7 @@ import { TIP_DEFINITIONS } from "./tips/registry.ts";
 import { appendStartupHeader } from "./tips/startup-header.ts";
 import { resolveStartupTipLine } from "./tips/startup-tip.ts";
 import { resolveWorkingTipLine, WorkingTipCache, type WorkingTipLine } from "./tips/working-tip.ts";
+import { buildTmuxSetupWarning } from "./tmux-setup.ts";
 import { ToolArgsRevealController } from "./tool-args-reveal.ts";
 import { readToolProgress } from "./tool-progress.ts";
 import { ToolResultRevealController } from "./tool-result-reveal.ts";
@@ -1105,8 +1107,8 @@ export class InteractiveMode {
 				}
 			});
 
-		// Check tmux keyboard setup asynchronously
-		this.checkTmuxKeyboardSetup().then((warning) => {
+		// Check tmux setup asynchronously
+		this.checkTmuxSetup().then((warning) => {
 			if (warning) {
 				this.showWarning(warning);
 			}
@@ -1181,12 +1183,12 @@ export class InteractiveMode {
 		return [];
 	}
 
-	private async checkTmuxKeyboardSetup(): Promise<string | undefined> {
+	private async checkTmuxSetup(): Promise<string | undefined> {
 		if (!process.env.TMUX) return undefined;
 
-		const runTmuxShow = (option: string): Promise<string | undefined> => {
+		const runTmux = (args: string[]): Promise<string | undefined> => {
 			return new Promise((resolve) => {
-				const proc = spawn("tmux", ["show", "-gv", option], {
+				const proc = spawn("tmux", args, {
 					stdio: ["ignore", "pipe", "ignore"],
 				});
 				let stdout = "";
@@ -1209,23 +1211,28 @@ export class InteractiveMode {
 			});
 		};
 
-		const [extendedKeys, extendedKeysFormat] = await Promise.all([
-			runTmuxShow("extended-keys"),
-			runTmuxShow("extended-keys-format"),
-		]);
+		const [extendedKeys, extendedKeysFormat, clientTermname, allowPassthrough, focusEvents, version] =
+			await Promise.all([
+				runTmux(["show", "-gv", "extended-keys"]),
+				runTmux(["show", "-gv", "extended-keys-format"]),
+				runTmux(["display-message", "-p", "#{client_termname}"]),
+				runTmux(["show", "-gv", "allow-passthrough"]),
+				runTmux(["show", "-gv", "focus-events"]),
+				runTmux(["display-message", "-p", "#{version}"]),
+			]);
 
 		// If we couldn't query tmux (timeout, sandbox, etc.), don't warn
 		if (extendedKeys === undefined) return undefined;
 
-		if (extendedKeys !== "on" && extendedKeys !== "always") {
-			return "tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.";
-		}
-
-		if (extendedKeysFormat === "xterm") {
-			return "tmux extended-keys-format is xterm. Pi works best with csi-u. Add `set -g extended-keys-format csi-u` to ~/.tmux.conf and restart tmux.";
-		}
-
-		return undefined;
+		return buildTmuxSetupWarning({
+			extendedKeys,
+			extendedKeysFormat,
+			imagesEnabled: getCapabilities().tmuxPassthrough === true,
+			outerKittyCapable: outerKittyGraphicsMode(clientTermname ?? "") !== null,
+			allowPassthrough,
+			focusEvents,
+			version,
+		});
 	}
 
 	/**
