@@ -1,5 +1,29 @@
 # AI Source Changes
 
+## 2026-07-28 - Demote unavailable Anthropic tool references instead of failing the request
+
+### What changed and why
+
+- `api/anthropic-messages.ts` gains a final payload pass, `demoteUnavailableToolReferences()`, applied after
+  `sanitizeUnsupportedNativeTools()` on every request. Anthropic rejects a request whose message history references
+  a tool that is neither defined in `tools` nor discovered through a `tool_reference` block in the same request
+  (`400 invalid_request_error: Tool reference '<name>' not found in available tools`). Sessions outlive their
+  tools: an MCP server can be absent after a `senpi --session` resume, an extension can stop registering a tool,
+  or an `onPayload` hook can strip a definition while the history still carries the call.
+- The pass collects defined tool names and names discovered via `tool_reference` blocks (including replayed
+  server-side tool-search results), then demotes offending `tool_use` blocks to plain text, demotes their
+  `tool_result` blocks in lockstep (preserving the original result text), and strips `tool_reference` entries
+  whose definition vanished — so neither the original 400 nor an orphan-pairing 400 can occur.
+- `../test/anthropic-tool-reference-integrity.test.ts` drives the full request path offline through a fake
+  Anthropic client: single and mixed-turn demotion, still-available tools kept intact, deferred
+  `tool_reference` discovery kept intact, and dangling-reference stripping after a payload hook removes a
+  definition.
+
+### Expected merge conflict zones
+
+- LOW: the request-finalization chain inside `createRequest()` in `api/anthropic-messages.ts`.
+- LOW: new unexported helpers near the other payload sanitizers in `api/anthropic-messages.ts`.
+
 ## 2026-07-28 - Retry OpenAI-compatible stream failures before the first chunk
 
 ### What changed and why
