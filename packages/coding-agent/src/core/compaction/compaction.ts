@@ -24,7 +24,11 @@ import {
 	type SessionEntry,
 	sessionEntryToContextMessages,
 } from "../session-manager.ts";
-import { consumeStreamWithIdleTimeout, DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS } from "./stream-watchdog.ts";
+import {
+	consumeStreamWithIdleTimeout,
+	DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,
+	DEFAULT_SUMMARIZATION_MAX_DURATION_MS,
+} from "./stream-watchdog.ts";
 import {
 	computeFileLists,
 	contentTextForSummary,
@@ -653,6 +657,7 @@ export async function completeSummarization(
 				: streamSimple(model, context, requestOptions);
 			await consumeStreamWithIdleTimeout(responseStream, {
 				idleTimeoutMs: DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,
+				maxDurationMs: DEFAULT_SUMMARIZATION_MAX_DURATION_MS,
 				abort: () => requestController.abort(),
 				signal: callerSignal,
 			});

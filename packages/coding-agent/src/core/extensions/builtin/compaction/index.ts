@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { isRetryableErrorMessage, type Tool } from "@earendil-works/pi-ai";
+import type { Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type { CompactionEntry } from "../../../session-manager.ts";
@@ -44,10 +44,10 @@ import {
 	type SpeculativeCompactionResult,
 	type SpeculativeCompactionSnapshot,
 	SummaryGenerationError,
-	SummaryRequestError,
 } from "./speculative.ts";
 import { type CompactionExtensionState, createInitialState, resetTurnCounter } from "./state.ts";
 import * as todoBridge from "./todo-bridge.ts";
+import { isTransientSummarizationFailure } from "./transient-failure.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const EMERGENCY_COMPACTION_INSTRUCTIONS =
@@ -342,9 +342,11 @@ export default function compactionExtension(
 			// own provider request surfaces the same outage once through the
 			// normal retry path. Provider `error` stops carry metadata-aware
 			// classification (a refusal with retryable-looking text stays loud);
-			// bare transport throws fall back to the message classifier. Count
-			// the failure so the circuit breaker halts repeated doomed attempts.
-			const transient = error instanceof SummaryRequestError ? error.transient : isRetryableErrorMessage(message);
+			// bare transport throws fall back to the message classifier. A watchdog
+			// trip (stalled stream, or one that outlived its wall-clock budget) is
+			// infrastructure slowness and always degrades. Count the failure so the
+			// circuit breaker halts repeated doomed attempts.
+			const transient = isTransientSummarizationFailure(error, message);
 			if (transient) {
 				state = breaker.recordFailure(state, Date.now(), { route: "extension" });
 				return { applied: false, reason: "failed" };

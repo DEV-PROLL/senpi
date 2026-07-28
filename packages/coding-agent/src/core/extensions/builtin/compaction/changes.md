@@ -1,3 +1,30 @@
+# Builtin compaction extension changes
+
+## Degrade wall-clock budget trips like stalled streams (2026-07-28)
+
+### What changed
+
+- `transient-failure.ts` (new): `isTransientSummarizationFailure()` owns the degrade-vs-surface decision.
+  Watchdog trips (`StreamDurationBudgetError`, `StreamIdleTimeoutError`) always degrade; `SummaryRequestError`
+  keeps its metadata-aware verdict; everything else falls back to `isRetryableErrorMessage`.
+- `index.ts` `applyBlockingCompaction()`: uses that predicate instead of the inline classification, so a
+  summarization that blows its wall-clock budget records a circuit-breaker failure and returns
+  `{ applied: false, reason: "failed" }` rather than escaping to the ExtensionRunner as a raw stack on top of the
+  `compaction_end` message the user already saw.
+- `speculative.ts`: the speculative request path applies `DEFAULT_SUMMARIZATION_MAX_DURATION_MS`, so a warm-start
+  summary that a blocking route later awaits cannot pin the session either.
+
+### Why
+
+- Without the budget the freeze class described in `core/compaction/changes.md` (2026-07-28) reached the session
+  queue; with it, the trip has to land in the same quiet degrade path the transient-transport work established, or
+  the fix would trade a freeze for a loud extension error.
+
+### Expected merge conflict zones
+
+- LOW: `index.ts` around the `applyBlockingCompaction()` catch classification.
+- LOW: `speculative.ts` around the `consumeStreamWithIdleTimeout` options.
+
 ## Explicit Responses v2 compaction for verified proxies (2026-07-27)
 
 - `openai-remote-model.ts`: official OpenAI remains eligible by default; custom `openai-responses` providers require `compat.supportsRemoteCompactionV2: true`. Persisted checkpoint identity now retains the exact custom provider id instead of coercing it to `openai`.
@@ -41,8 +68,6 @@
   effective auth tenant (never raw credentials). Legacy, cross-endpoint, or cross-tenant entries decline replay.
 - Replay boundaries require non-enumerable message/item provenance to survive the canonical context pipeline. Missing,
   duplicated, reordered, reconstructed, or mutated provenance keeps the final transformed full payload unchanged.
-
-# Builtin compaction extension changes
 
 ## Degrade transient blocking-compaction failures instead of erroring the turn (2026-07-27)
 
