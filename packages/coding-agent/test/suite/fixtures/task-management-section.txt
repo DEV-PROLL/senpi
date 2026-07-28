@@ -29,7 +29,7 @@ Example: {"op":"init","list":[{"phase":"Setup","items":["Survey code","Write tes
 - **Phase name**: short noun phrase (e.g. Foundation, Auth, Verification). Unique identifier. NEVER prefix 1., A), Phase 1:.
 
 ## Rules
-- Mark tasks done immediately after finishing. Complete phases in order.
+- Mark tasks done immediately after finishing, then re-check the list against the newest user message. Complete phases in order.
 - NEVER make a todo call your turn's only tool call — batch it with the real work: init with the first reads/edits, each done/start with the next action. Solo todo turns waste a round trip.
 - Blocked? append a task to the active phase, or drop.
 - Keep task/phase strings stable once introduced.
@@ -39,7 +39,7 @@ Example: {"op":"init","list":[{"phase":"Setup","items":["Survey code","Write tes
 - Task requires 3+ distinct steps
 - User explicitly requests one
 - User provides a set of tasks
-- New instructions arrive mid-task — capture before proceeding
+- New instructions arrive mid-task — reconcile before acting: keep what they don't conflict with, amend what they contradict, append what they add; replace only on explicit redirect
 
 <critical>
 User hands you a multi-step plan — phased todo, numbered/bulleted checklist, or "N bugs/items/tasks":

@@ -1,5 +1,50 @@
 # changes.md — ai
 
+## Browser-safe prompt-cache TTL resolver (2026-07-28)
+
+### What changed
+
+- `src/utils/prompt-cache-ttl.ts` (new): `resolvePromptCacheTtlSeconds(model, env?) -> number | undefined`
+  plus `PROMPT_CACHE_TTL_SHORT_SECONDS` (300) / `PROMPT_CACHE_TTL_LONG_SECONDS` (3600). It mirrors EACH
+  target API's own `resolveCacheRetention` precedence verbatim rather than inventing a unified one:
+  anthropic-messages falls back to `"long"` and honors the bare `process.env.PI_CACHE_RETENTION`
+  set-but-not-long branch; openai-completions / openai-responses / bedrock fall back to `"short"`;
+  pi-messages returns `undefined` (backend default). Retention `"none"` and every API with unknown cache
+  semantics (google, mistral, pi-messages, unknown) resolve to `undefined`.
+- The pure compat predicates the resolver needs moved INTO that browser-safe utility and the API modules now
+  import them from there and re-export for their existing consumers: `getAnthropicCompat` +
+  `isAnthropicApiBaseUrl` (from `src/api/anthropic-messages.ts`), the resolved-compat getter (from
+  `src/api/openai-completions.ts`), and `supportsPromptCaching` (from `src/api/bedrock-converse-stream.ts`).
+- `src/index.ts` exports the new module from the browser-safe root surface.
+
+### Why
+
+- senpi sizes how long its `bash` tool and omo's `task` tool may block in the foreground on the active model's
+  prompt-cache lifetime. That lifetime is already decided per provider inside this package, so one shared
+  resolver here is the single source of truth instead of a table duplicated in every consumer.
+
+### Why the compat predicates had to move rather than be imported
+
+- The root surface is browser-safe. Importing `supportsPromptCaching` directly from
+  `src/api/bedrock-converse-stream.ts` pulled the AWS SDK (`@smithy/node-http-handler`, `agent-base`,
+  `http-proxy-agent`) into the browser bundle and broke `npm run check:browser-smoke` with 18 unresolved
+  `node:*` errors. Moving the pure predicates into the utility and re-exporting from the API modules keeps
+  one definition with no divergence risk, and keeps the root import graph free of Node-only dependencies.
+
+### Modified upstream files
+
+- `src/api/anthropic-messages.ts`
+- `src/api/bedrock-converse-stream.ts`
+- `src/api/openai-completions.ts`
+- `src/index.ts`
+
+### Expected merge conflict zones
+
+- MEDIUM: each API module's `resolveCacheRetention` / compat-getter region, where the local definition became
+  an import + re-export. If upstream edits those predicates, port the edit into
+  `src/utils/prompt-cache-ttl.ts` so the resolver and the adapters stay in agreement.
+
+
 ## Cover Claude Opus 5 in Anthropic adaptive-thinking metadata (2026-07-25)
 
 ### What changed

@@ -1,6 +1,7 @@
 import type { TerminalManager } from "../manager.ts";
 import type { MonitorEvent, MonitorRegistry } from "../monitor-registry.ts";
 import type { TerminalRuntimeSession } from "../runtime-session.ts";
+import type { TimeoutAction } from "../settings.ts";
 
 /** Shared dependencies handed to every terminal tool factory. */
 export interface TerminalToolContext {
@@ -10,6 +11,8 @@ export interface TerminalToolContext {
 	readonly shellPath?: string;
 	readonly defaultCols: number;
 	readonly defaultRows: number;
+	/** Configured foreground deadline behavior; omitted direct contexts default to background. */
+	readonly timeoutAction?: TimeoutAction;
 	/** Resolve the environment for spawned sessions (mirrors core bash `getShellEnv`). */
 	readonly getEnv: () => NodeJS.ProcessEnv;
 	/**

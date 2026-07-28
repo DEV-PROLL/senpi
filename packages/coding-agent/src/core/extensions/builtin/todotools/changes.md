@@ -1,5 +1,21 @@
 # todotools Fork Tracker
 
+## 2026-07-28 - Preserve open todo work across new instructions
+
+### What changed
+
+- Rewrote the existing completion and mid-task instruction guidance so agents
+  immediately reconcile the current list with the newest user message after
+  completion, preserve non-conflicting open work, amend contradictions, and
+  append additions. Full reinitialization remains reserved for an explicit
+  replacement or redirect.
+
+### Expected merge conflict zones
+
+- LOW: `prompt.ts` and the task-management fixture when reconciling fork-local
+  prompt guidance with upstream todotools changes.
+
+
 ## 2026-07-19 - Port oh-my-pi's phased todo tool
 
 ### Source

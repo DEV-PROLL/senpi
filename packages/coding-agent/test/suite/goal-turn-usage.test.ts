@@ -48,6 +48,7 @@ async function makeCtx(threadId = "thread-usage"): Promise<ExtensionContext> {
 			getSessionFile: () => join(dir, "session.jsonl"),
 			getSessionDir: () => dir,
 			getSessionId: () => threadId,
+			getBranch: () => [],
 		},
 	} as unknown as ExtensionContext;
 }
