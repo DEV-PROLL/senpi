@@ -5035,7 +5035,14 @@ export class AgentSession {
 		});
 	}
 
-	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
+	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<{
+		cancelled: boolean;
+		reason?: string;
+	}> {
+		const veto = await this.checkReloadVeto();
+		if (veto.cancelled) {
+			return veto;
+		}
 		resetTimings("reload");
 		const oldExtensionRunner = this._extensionRunner;
 		const oldExtensionIdentities = oldExtensionRunner.getExtensionIdentities();
@@ -5099,6 +5106,25 @@ export class AgentSession {
 			await this.extendResourcesFromExtensions("reload");
 		}
 		time("lifecycle", "reload");
+		return { cancelled: false };
+	}
+
+	/**
+	 * Ask extensions whether a full session reload may proceed by emitting the
+	 * cancellable `session_before_reload` event. `reload()` always consults this
+	 * gate itself, so a cancelling extension prevents the teardown on every
+	 * reload path; interactive hosts may additionally pre-check it to warn
+	 * without starting their reload UI.
+	 */
+	async checkReloadVeto(): Promise<{ cancelled: boolean; reason?: string }> {
+		if (!this._extensionRunner.hasHandlers("session_before_reload")) {
+			return { cancelled: false };
+		}
+		const result = await this._extensionRunner.emit({ type: "session_before_reload" });
+		if (result?.cancel !== true) {
+			return { cancelled: false };
+		}
+		return result.reason === undefined ? { cancelled: true } : { cancelled: true, reason: result.reason };
 	}
 
 	// =========================================================================

@@ -89,7 +89,8 @@ type ReloadCommandContext = {
 	session: {
 		isStreaming: boolean;
 		isCompacting: boolean;
-		reload: (options?: { beforeSessionStart?: () => void | Promise<void> }) => Promise<void>;
+		reload: (options?: { beforeSessionStart?: () => void | Promise<void> }) => Promise<{ cancelled: boolean; reason?: string }>;
+		checkReloadVeto: () => Promise<{ cancelled: boolean; reason?: string }>;
 		resourceLoader: { getThemes: () => { themes: [] } };
 		extensionRunner: unknown;
 		modelRegistry: { getError: () => string | undefined };
@@ -160,7 +161,9 @@ function createReloadCommandContext(overrides: ReloadCommandContextOverrides = {
 			isCompacting: false,
 			reload: async (options) => {
 				await options?.beforeSessionStart?.();
+				return { cancelled: false };
 			},
+			checkReloadVeto: async () => ({ cancelled: false }),
 			resourceLoader: { getThemes: () => ({ themes: [] }) },
 			extensionRunner: {},
 			modelRegistry: { getError: () => undefined },
@@ -455,6 +458,7 @@ describe("regression #5943: session_start transient UI", () => {
 					events.push("reload");
 					await options?.beforeSessionStart?.();
 					events.push(`start:${context.hideThinkingBlock}`);
+					return { cancelled: false };
 				},
 			},
 			rebuildChatFromMessages: () => {
@@ -489,6 +493,7 @@ describe("regression #5943: session_start transient UI", () => {
 					await options?.beforeSessionStart?.();
 					markReloadWaiting();
 					await reloadFinished;
+					return { cancelled: false };
 				},
 			},
 			ui: {
