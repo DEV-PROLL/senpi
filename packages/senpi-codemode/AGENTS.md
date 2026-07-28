@@ -46,6 +46,8 @@ test/                            Vitest contracts and the omp parity ledger
   notices contain plain absolute paths, not a custom URI scheme.
 - Status events stay structured from kernel protocol through `EvalToolDetails`
   and render output. Preserve agent-progress coalescing semantics.
+- Nested tool-call rendering is bounded and rendering-only: no session messages,
+  no extension events, and no toggle.
 - Optional interpreters are capability gaps, not installation failures;
   JavaScript remains available on supported Node versions.
 - This package targets Node 24 or newer. Do not introduce Bun-only APIs,
