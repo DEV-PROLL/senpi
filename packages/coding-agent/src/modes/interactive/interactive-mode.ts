@@ -88,6 +88,7 @@ import {
 	resolveModelScope,
 	type ScopedModel,
 } from "../../core/model-resolver.ts";
+import { detectOmoNativeInstall } from "../../core/omo-native-detect.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
@@ -671,6 +672,7 @@ export class InteractiveMode {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
+		this.footerDataProvider.setOmoNative(detectOmoNativeInstall(this.settingsManager.getPackages(), getAgentDir()));
 		this.footer = this.chrome
 			? this.chrome.createFooter(this.session, this.footerDataProvider)
 			: new FooterComponent(this.session, this.footerDataProvider);
