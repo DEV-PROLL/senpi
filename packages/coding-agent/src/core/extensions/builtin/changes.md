@@ -1,5 +1,17 @@
 # Builtin extensions changes
 
+## terminal + goal: monitor liveness event contract (2026-07-28)
+
+- New `monitor-state-event.ts` defines the internal `terminal_monitor_state` pi-event
+  payload (`activeCount`).
+- The terminal extension publishes the live registry count on every existing
+  `MonitorRegistry.onChange` transition (register, pause/rearm snapshot change,
+  settle, dispose) while preserving the monitor footer update.
+- The goal builtin consumes this internal event to select immediate versus delayed
+  continuation policy; no public `ExtensionContext` or RPC protocol type changed.
+- Expected merge conflict zones: LOW in `terminal/extension.ts` around the monitor
+  registry `onChange` callback; NONE in `extensions/types.ts`.
+
 ## bash-timeout: beyond-max routing to run_in_background + monitor (2026-07-28)
 
 - `bash-timeout/timeout.ts` `buildBashTimeoutPrompt()`: the beyond-max bullet no longer teaches

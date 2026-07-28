@@ -2,6 +2,7 @@ import { getShellEnv } from "../../../../utils/shell.ts";
 import { SettingsManager } from "../../../settings-manager.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isAnthropicBashEnabled } from "../anthropic-bash/index.ts";
+import { TERMINAL_MONITOR_STATE_EVENT } from "../monitor-state-event.ts";
 import { TerminalManager } from "./manager.ts";
 import { MonitorNotifier } from "./monitor-notify.ts";
 import { MonitorRegistry } from "./monitor-registry.ts";
@@ -31,7 +32,7 @@ interface TerminalExtensionState {
 	noticeShown: boolean;
 }
 
-function buildToolContext(state: TerminalExtensionState): TerminalToolContext {
+function buildToolContext(pi: ExtensionAPI, state: TerminalExtensionState): TerminalToolContext {
 	const requireManager = (): TerminalManager => {
 		// Lazily create a manager so the tool works even when invoked directly (e.g. via the
 		// SDK) before `session_start` initializes one. `session_start` replaces it with a
@@ -63,7 +64,13 @@ function buildToolContext(state: TerminalExtensionState): TerminalToolContext {
 		},
 		get monitorRegistry() {
 			state.monitors ??= new MonitorRegistry((event) => state.monitorNotifier?.notifyEvent(event), {
-				onChange: (snapshot) => state.ctx?.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot)),
+				onChange: (snapshot) => {
+					state.ctx?.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot));
+					const events = pi.events;
+					if (events !== undefined) {
+						events.emit(TERMINAL_MONITOR_STATE_EVENT, { activeCount: snapshot.length });
+					}
+				},
 			});
 			return state.monitors;
 		},
@@ -117,7 +124,7 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 		steppedAside: false,
 		noticeShown: false,
 	};
-	const toolCtx = buildToolContext(state);
+	const toolCtx = buildToolContext(pi, state);
 
 	pi.registerTool(createPtyBashTool(toolCtx));
 	pi.registerTool(createBashOutputTool(toolCtx));
@@ -132,13 +139,13 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 		state.settings = loadTerminalSettings(settingsManager);
 		state.shellPath = settingsManager.getShellPath();
 		state.notifier = new TerminalNotifier({
-			sendUserMessage: (content, options) => pi.sendUserMessage(content, options),
+			sendMessage: (message, options) => pi.sendMessage(message, options),
 			getContext: () => state.ctx,
 			getMode: () => state.settings.notify,
 		});
 		state.monitorNotifier?.dispose();
 		state.monitorNotifier = new MonitorNotifier({
-			sendUserMessage: (content, options) => pi.sendUserMessage(content, options),
+			sendMessage: (message, options) => pi.sendMessage(message, options),
 			getContext: () => state.ctx,
 			getMode: () => state.settings.notify,
 			getSettings: () => state.settings.monitor,

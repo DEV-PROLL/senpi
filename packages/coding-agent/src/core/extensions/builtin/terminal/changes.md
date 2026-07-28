@@ -3,6 +3,22 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## Hidden agent wake notifications (2026-07-28)
+
+### What changed
+
+- Terminal completion and monitor-event notifications now use `display:false` custom messages
+  with `triggerTurn:true`, preserving idle wake and streaming steer/follow-up behavior without
+  rendering synthetic `<system-reminder>` blocks as user input.
+- Monitor events use `senpi-monitor:notification`; background terminal completion notices use
+  `senpi-terminal:notification`.
+- App-server extension turns may bootstrap from a custom-message wake, but custom wakes do not
+  emit a visible `userMessage` item.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: fork-owned terminal notification delivery wiring and app-server extension-turn bootstrap.
+
 ## Cache-aware foreground timeout promotion (2026-07-28)
 
 ### What changed

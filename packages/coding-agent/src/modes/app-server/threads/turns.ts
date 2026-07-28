@@ -338,7 +338,12 @@ class TurnEngine<Entry extends TurnEngineThreadEntry> {
 		event: TurnEngineSessionEvent,
 	): { readonly turnId: string; readonly startedAt: string } | null {
 		const sessionEvent = event as AgentSessionEvent;
-		if (sessionEvent.type !== "message_start" || sessionEvent.message.role !== "user") {
+		const userMessage =
+			sessionEvent.type === "message_start" && sessionEvent.message.role === "user"
+				? buildExtensionUserMessage(sessionEvent.message)
+				: null;
+		const isAgentStart = sessionEvent.type === "agent_start";
+		if (userMessage === null && !isAgentStart) {
 			return null;
 		}
 
@@ -346,7 +351,6 @@ class TurnEngine<Entry extends TurnEngineThreadEntry> {
 		const startedAtMs = Date.now();
 		const startedAt = new Date(startedAtMs).toISOString();
 		const turn = buildTurn(turnId, "inProgress", startedAtMs, null, []);
-		const userMessage = buildExtensionUserMessage(sessionEvent.message);
 		entry.activeTurn = { turnId, startedAt };
 		entry.status = "active";
 		entry.updatedAt = startedAt;
@@ -365,7 +369,9 @@ class TurnEngine<Entry extends TurnEngineThreadEntry> {
 			params: { threadId, status: { type: "active", activeFlags: [] } },
 		});
 		this.emitToThread(threadId, { method: "turn/started", params: { threadId, turn } });
-		this.emitUserMessage(threadId, turnId, startedAtMs, userMessage);
+		if (userMessage) {
+			this.emitUserMessage(threadId, turnId, startedAtMs, userMessage);
+		}
 		return entry.activeTurn;
 	}
 
