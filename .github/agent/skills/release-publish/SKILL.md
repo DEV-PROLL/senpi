@@ -32,7 +32,7 @@ Run `scripts/release.mjs` from a clean `main` checkout.
 - [ ] Use a clean dedicated clone if the main checkout has foreign state.
 - [ ] Never clean, stash, or otherwise disturb other people's work.
 - [ ] Use the protected-main path when needed; `UPSTREAM_AUTOMATION_TOKEN` exists for authenticated protected-main pushes.
-- [ ] Do not use the publish-only workflow for a normal release.
+- [ ] Known broken today: the tag pipeline's `publish-npm` job fails its OIDC publish with npm PUT 404 (observed on v2026.7.28-2 AND v2026.7.28-3, 2026-07-28): the job carries `environment: npm-publish`, whose OIDC subject does not match the npm trusted-publisher registration. Until the registration accepts the environment subject (or the environment is removed from the job), publish through `gh workflow run publish-npm.yml -f version=<v> -f publish-only=true` — the proven-working route used for v2026.7.28, -2, and -3.
 - [ ] Do not rerun `scripts/release.mjs` after the tag has been pushed.
 - [ ] If checks fail before the tag push, fix first, then re-release from the beginning.
 - [ ] Treat `E404` noise for `@code-yeongyu/senpi-orchestrator` as non-fatal.
@@ -68,7 +68,7 @@ These are separate controls and must not be conflated:
 ## Hazards and hard rules
 
 - Protected-main push failures are expected if the token path is wrong; use `UPSTREAM_AUTOMATION_TOKEN` for the authenticated release push path.
-- Never use `.github/workflows/publish-npm.yml` as the normal release route; it is publish-only and bypasses the approval gate and tag/ref binding.
+- The tag pipeline's environment-gated `publish-npm` job currently 404s on OIDC (see Pre-flight checklist); `.github/workflows/publish-npm.yml` publish-only is the working publish route until the npm trusted-publisher registration accepts the `npm-publish` environment subject. Re-check after any npm-side config change.
 - Never rerun `scripts/release.mjs` after the tag is pushed. If publishing fails, recover from the existing tag workflow.
 - If a check or test fails before the tag push, stop and fix the issue, then re-release. Do not try to salvage a bad release by continuing past the failure.
 - `E404` noise for `@code-yeongyu/senpi-orchestrator` is not a release failure.
