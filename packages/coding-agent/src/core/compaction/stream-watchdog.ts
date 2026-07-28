@@ -74,7 +74,12 @@ export async function consumeStreamWithIdleTimeout<T>(
 	const { idleTimeoutMs, maxDurationMs, abort, onEvent, signal } = options;
 	let removeAbortListener: (() => void) | undefined;
 	let callerAbortPromise: Promise<typeof CALLER_ABORTED> | undefined;
-	// One absolute deadline for the whole stream, not a per-read budget.
+	if (signal?.aborted) {
+		void iterator.return?.();
+		return;
+	}
+	// One absolute deadline for the whole stream, not a per-read budget. Created
+	// only after the already-aborted early return so no timer is ever leaked.
 	let budgetPromise: Promise<typeof BUDGET_TRIP> | undefined;
 	let budgetTimer: ReturnType<typeof setTimeout> | undefined;
 	let budgetMs = 0;
@@ -86,10 +91,6 @@ export async function consumeStreamWithIdleTimeout<T>(
 		budgetPromise = promise;
 	}
 	if (signal !== undefined) {
-		if (signal.aborted) {
-			void iterator.return?.();
-			return;
-		}
 		const { promise, resolve } = Promise.withResolvers<typeof CALLER_ABORTED>();
 		const onAbort = () => resolve(CALLER_ABORTED);
 		signal.addEventListener("abort", onAbort, { once: true });
