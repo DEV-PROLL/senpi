@@ -131,9 +131,11 @@ describe("buildBashTimeoutPrompt", () => {
 		expect(prompt).toMatch(/explicit `timeout`/i);
 	});
 
-	it("references tmux as the escape hatch for very long workloads", () => {
+	it("routes beyond-max workloads to background sessions and monitor, not tmux", () => {
 		const prompt = buildBashTimeoutPrompt({ defaultSeconds: 120, maxSeconds: 600 });
 
-		expect(prompt).toContain("tmux");
+		expect(prompt).toContain("run_in_background");
+		expect(prompt).toContain("monitor");
+		expect(prompt).not.toContain("tmux");
 	});
 });
