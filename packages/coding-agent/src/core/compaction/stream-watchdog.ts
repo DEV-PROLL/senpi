@@ -67,15 +67,14 @@ const CALLER_ABORTED = "caller-aborted" as const;
  * stream's own abort outcome, never masked as an idle timeout.
  */
 export async function consumeStreamWithIdleTimeout<T>(
-	stream: AsyncIterable<T>,
+	stream: AsyncIterable<T> | PromiseLike<AsyncIterable<T>>,
 	options: ConsumeStreamWithIdleTimeoutOptions<T>,
 ): Promise<void> {
-	const iterator = stream[Symbol.asyncIterator]();
 	const { idleTimeoutMs, maxDurationMs, abort, onEvent, signal } = options;
+	let iterator: AsyncIterator<T> | undefined;
 	let removeAbortListener: (() => void) | undefined;
 	let callerAbortPromise: Promise<typeof CALLER_ABORTED> | undefined;
 	if (signal?.aborted) {
-		void iterator.return?.();
 		return;
 	}
 	// One absolute deadline for the whole stream, not a per-read budget. Created
@@ -98,6 +97,25 @@ export async function consumeStreamWithIdleTimeout<T>(
 		callerAbortPromise = promise;
 	}
 	try {
+		let resolvedStream: AsyncIterable<T>;
+		if (Symbol.asyncIterator in stream) {
+			resolvedStream = stream;
+		} else {
+			const streamContenders: Array<Promise<AsyncIterable<T> | typeof BUDGET_TRIP | typeof CALLER_ABORTED>> = [
+				Promise.resolve(stream),
+			];
+			if (callerAbortPromise) streamContenders.push(callerAbortPromise);
+			if (budgetPromise) streamContenders.push(budgetPromise);
+			const resolution = await Promise.race(streamContenders);
+			if (resolution === BUDGET_TRIP) {
+				abort();
+				throw new StreamDurationBudgetError(budgetMs);
+			}
+			if (resolution === CALLER_ABORTED) return;
+			resolvedStream = resolution;
+		}
+		iterator = resolvedStream[Symbol.asyncIterator]();
+
 		while (true) {
 			const { promise: idlePromise, resolve: resolveIdle } = Promise.withResolvers<typeof IDLE_TRIP>();
 			const timer = setTimeout(() => resolveIdle(IDLE_TRIP), idleTimeoutMs);
@@ -115,16 +133,16 @@ export async function consumeStreamWithIdleTimeout<T>(
 			}
 			if (result === IDLE_TRIP) {
 				abort();
-				void iterator.return?.();
+				void iterator?.return?.();
 				throw new StreamIdleTimeoutError(idleTimeoutMs);
 			}
 			if (result === BUDGET_TRIP) {
 				abort();
-				void iterator.return?.();
+				void iterator?.return?.();
 				throw new StreamDurationBudgetError(budgetMs);
 			}
 			if (result === CALLER_ABORTED) {
-				void iterator.return?.();
+				void iterator?.return?.();
 				return;
 			}
 			if (result.done) return;

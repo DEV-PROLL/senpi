@@ -652,16 +652,16 @@ export async function completeSummarization(
 		}
 		try {
 			const requestOptions = { ...isolatedOptions, signal: requestController.signal };
-			const responseStream = streamFn
-				? await streamFn(model, context, requestOptions)
-				: streamSimple(model, context, requestOptions);
+			const responseStream = Promise.resolve(
+				streamFn ? streamFn(model, context, requestOptions) : streamSimple(model, context, requestOptions),
+			);
 			await consumeStreamWithIdleTimeout(responseStream, {
 				idleTimeoutMs: DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,
 				maxDurationMs: DEFAULT_SUMMARIZATION_MAX_DURATION_MS,
 				abort: () => requestController.abort(),
 				signal: callerSignal,
 			});
-			return await responseStream.result();
+			return await (await responseStream).result();
 		} finally {
 			if (callerSignal) callerSignal.removeEventListener("abort", onCallerAbort);
 		}
