@@ -1,5 +1,27 @@
 # changes.md — compaction
 
+## Wall-clock budget includes provider stream acquisition (2026-07-28)
+
+### What changed
+
+- `stream-watchdog.ts`: `consumeStreamWithIdleTimeout()` now accepts a promised stream and starts its absolute
+  duration budget before waiting for that promise to resolve.
+- `compaction.ts`: `completeSummarization()` passes the provider stream promise directly into the watchdog instead of
+  awaiting connection setup outside the protected interval.
+
+### Why
+
+- A provider adapter that never returned its event stream left compaction permanently stuck before either the idle or
+  wall-clock watchdog existed. The request-local abort controller and normal compaction failure cleanup now run after
+  the same 120s bound whether the provider stalls before or after stream creation.
+- Session `019fa809-5ef4-7db3-bdc3-048da7e0fd9d` exposed the user-visible failure mode: the TUI stayed in compaction
+  long enough to appear permanently frozen while provider-side summarization work held the session lifecycle open.
+
+### Expected merge conflict zones
+
+- LOW: `stream-watchdog.ts` around promised-stream acquisition.
+- LOW: `compaction.ts` around the `completeSummarization()` stream setup.
+
 ## Wall-clock budget for summarization streams (2026-07-28)
 
 ### What changed
