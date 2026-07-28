@@ -81,6 +81,15 @@ or below the budget retain their existing foreground behavior.
 - `monitor-status.ts` (new): `formatMonitorStatus(snapshot)` — undefined when nothing is watched
   (clears the footer status), `watching <desc>` for one, `watching N: <d1>, <d2>` elided to a
   48-char cap for many, `(paused)` / `(k paused)` markers. `MONITOR_STATUS_KEY = "monitors"`.
+
+### Count-forward visibility rework (2026-07-28)
+
+- `formatMonitorStatus` now leads with the `◉` watch glyph (session-selector glyph family) so the
+  status is visually distinct from other extension statuses, and packs whole descriptions instead
+  of mid-word elision: `◉ watching <desc>` for one, `◉ watching N: <d1>, <d2> +k more` for many.
+  The monitor count and the `(paused)` / `(k paused)` suffix always survive truncation; only the
+  description list shrinks (whole-name packing first, single-name `…` truncation as last resort).
+  48-char cap unchanged. Tests updated in `test/suite/terminal-monitor-footer.test.ts`.
 - `extension.ts`: the session monitor registry is created with an onChange that publishes
   `ctx.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot))` — the goal-builtin
   footer-status pattern. Non-interactive modes no-op via the optional ctx; settle/shutdown
