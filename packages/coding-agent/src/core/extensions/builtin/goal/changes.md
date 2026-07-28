@@ -1,5 +1,19 @@
 # goal Extension Changes
 
+## Continuity across newer user instructions (2026-07-28)
+
+### What changed
+
+- Rewrote the existing continuation prompt guidance so a newer user message
+  amends only the active objective's conflicting parts and preserves
+  non-conflicting work. An explicit replacement or redirect remains a full
+  objective override.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `prompt.ts` if the standalone goal continuation wording changes.
+
+
 ## Overview
 Persistent per-thread goal tracking as an in-tree builtin. Ports the standalone
 `pi-goal` extension into senpi with no dependency on it, file-based persistence,
