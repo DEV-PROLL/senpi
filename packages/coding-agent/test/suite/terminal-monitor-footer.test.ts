@@ -34,29 +34,48 @@ describe("formatMonitorStatus", () => {
 		expect(formatMonitorStatus([])).toBeUndefined();
 	});
 
-	it("names the single watched thing", () => {
-		const text = formatMonitorStatus([entry("bash_1", "errors in deploy.log")]);
-		expect(text).toContain("errors in deploy.log");
-		expect(text).toContain("watching");
+	it("marks the single watched thing with the watch glyph and its full description", () => {
+		expect(formatMonitorStatus([entry("bash_1", "errors in deploy.log")])).toBe("◉ watching errors in deploy.log");
 	});
 
-	it("shows the count and elides long lists to a hard cap", () => {
+	it("lists every description when they all fit", () => {
+		const text = formatMonitorStatus([entry("bash_1", "deploy errors"), entry("bash_2", "webpack rebuild")]);
+		expect(text).toBe("◉ watching 2: deploy errors, webpack rebuild");
+	});
+
+	it("keeps whole names and folds the overflow into a +N more counter", () => {
 		const text = formatMonitorStatus([
 			entry("bash_1", "errors in deploy.log"),
 			entry("bash_2", "integration test output on ci runner four"),
 			entry("bash_3", "webpack rebuild"),
 		]);
-		expect(text).toBeDefined();
-		expect(text).toContain("3");
+		expect(text).toBe("◉ watching 3: errors in deploy.log +2 more");
 		expect((text ?? "").length).toBeLessThanOrEqual(48);
-		expect(text).toContain("…");
 	});
 
-	it("marks paused watches", () => {
+	it("never truncates away the count when the first name alone overflows", () => {
+		const text = formatMonitorStatus([
+			entry("bash_1", "a".repeat(60)),
+			entry("bash_2", "b"),
+			entry("bash_3", "c"),
+			entry("bash_4", "d"),
+		]);
+		expect(text).toContain("watching 4:");
+		expect(text).toContain("+3 more");
+		expect(text).toContain("…");
+		expect((text ?? "").length).toBeLessThanOrEqual(48);
+	});
+
+	it("marks paused watches and keeps the marker through truncation", () => {
 		const all = formatMonitorStatus([entry("bash_1", "a", true), entry("bash_2", "b", true)]);
-		expect(all).toContain("paused");
-		const some = formatMonitorStatus([entry("bash_1", "a", true), entry("bash_2", "b")]);
-		expect(some).toContain("1 paused");
+		expect(all).toBe("◉ watching 2: a, b (paused)");
+		const some = formatMonitorStatus([
+			entry("bash_1", "errors in deploy.log", true),
+			entry("bash_2", "integration test output on ci runner four"),
+			entry("bash_3", "webpack rebuild"),
+		]);
+		expect(some).toContain("(1 paused)");
+		expect((some ?? "").length).toBeLessThanOrEqual(48);
 	});
 });
 
