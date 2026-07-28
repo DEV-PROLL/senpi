@@ -96,3 +96,10 @@ export function evalResultWithOmittedDetails(text: string): AgentToolResult<Eval
 	Reflect.deleteProperty(result, "details");
 	return result;
 }
+
+/** Mirrors host-generated error results whose details payload is an empty object. */
+export function evalResultWithEmptyDetails(text: string): AgentToolResult<EvalToolDetails> {
+	const result = evalResult({ language: "js", durationMs: 0, toolCalls: [], truncated: false }, text);
+	for (const key of Object.keys(result.details)) Reflect.deleteProperty(result.details, key);
+	return result;
+}

@@ -732,7 +732,7 @@ function resultMetadata(
 ): RenderBlock[] {
 	const metadata: string[] = [];
 	if (details?.phase) metadata.push(`phase ${details.phase}`);
-	if (!options.isPartial && details) metadata.push(`took ${details.durationMs}ms`);
+	if (!options.isPartial && typeof details?.durationMs === "number") metadata.push(`took ${details.durationMs}ms`);
 	if (metadata.length === 0) return [];
 	return [{ kind: "text", text: style(theme, "muted", metadata.join(" | ")) }];
 }
