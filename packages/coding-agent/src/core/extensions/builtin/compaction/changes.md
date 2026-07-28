@@ -492,3 +492,27 @@ Expected upstream conflict zones: `builtin/compaction/index.ts` around `applyBlo
 - Extension system is sufficient because the feature only needs tool-call observation, compaction lifecycle events, and custom-message injection.
 
 Expected upstream conflict zones: `builtin/compaction/index.ts`, `builtin/compaction/state.ts`, and `core/compaction/compaction.ts` if upstream changes compaction settings or extension hook wiring.
+
+## 2026-07-28 - Emergency-prune hysteresis (prompt-cache thrash)
+
+### What changed
+- `speculative.ts`: added `EMERGENCY_CONTEXT_RELEASE_RATIO` (0.85) alongside the existing
+  `EMERGENCY_CONTEXT_TARGET_RATIO` (0.95), plus `EmergencyPruneLatch` / `createEmergencyPruneLatch()`.
+  `hardLimitEmergencyPrune(messages, contextWindow, latch?)` now takes an optional latch: once the prune
+  engages it stays engaged until the estimate falls below the release ratio. Called without a latch the
+  function keeps its exact previous single-threshold behaviour, so existing callers and tests are unaffected.
+- `index.ts`: the compaction extension owns one latch per instance (per session) and passes it at the
+  `context` hook call site.
+
+### Why
+A session parked near the emergency threshold alternated between the pruned and un-pruned history on
+consecutive requests. Because pruning rewrites old tool results, every alternation changed the message
+prefix and invalidated the provider prompt cache. Measured on a real session (`quotio-openai/gpt-5.6-sol-fast`,
+372k context): `cacheRead` collapsed from ~263,000 to the 39,424-token head on 23 turns in 13 minutes,
+re-billing ~226K tokens per turn at $10/M instead of $1/M — about $44 wasted in a single session. A sibling
+session on the same gateway and model in the same minutes had zero misses, isolating this to the prune toggle.
+
+### Scope
+Only *when* the prune disengages changes; what gets pruned and the `needsAggressiveCompaction` signal are
+untouched. Expected upstream conflict zones: `builtin/compaction/speculative.ts` around
+`hardLimitEmergencyPrune`, and `builtin/compaction/index.ts` around the `context` hook.
