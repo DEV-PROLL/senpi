@@ -20,10 +20,16 @@ The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`
   redirect → bash schema; long-run routing → bash-timeout policy).
 - `prompt.ts`: the monitor bullet dropped its embedded when-to-use sentence (kept as the monitor
   tool's guideline) and keeps the subscribe framing plus shaping/filtering/rearm mechanics.
-- `test/prompt-surface-stale-wait-idioms.test.ts`: the consistency gate now also loads the PTY
-  bash description and the bash-timeout prompt section as surfaces; new gates assert the bash
-  description routes waits to monitor, and that no agent-facing terminal surface teaches tmux as
-  the backgrounding mechanism (negative guidance like "do NOT use tmux" stays allowed).
+- `test/prompt-surface-stale-wait-idioms.test.ts`: the consistency gate now enumerates every
+  registered terminal tool surface (description + promptSnippet + promptGuidelines of bash,
+  bash_output, monitor, bash_input, bash_resize, kill_bash) plus the bash-timeout prompt
+  section; new gates assert the bash description routes waits to monitor, and that no
+  agent-facing terminal surface teaches tmux as the backgrounding mechanism — a tmux mention is
+  allowed only when the negation targets tmux itself ("do NOT use tmux"), so "use tmux; never
+  X" cannot slip through.
+- `test/suite/terminal-monitor-notify.test.ts`: the watcher-discipline case now asserts the
+  routing rule at its owning surface (the monitor tool's promptGuidelines) instead of
+  TERMINAL_PROMPT_SECTION, and the noise-control match is wrap-tolerant.
 
 ### Expected merge conflict zones on next upstream sync
 
