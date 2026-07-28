@@ -10,6 +10,9 @@
 
 ### Fixed
 
+- Start a fresh eval cell when a caller reuses the ID of a terminal cell, preventing completed or failed results from being replayed as though new code had executed ([#439](https://github.com/code-yeongyu/senpi/pull/439)).
+- Omit the eval `took` duration when timing metadata is unavailable, avoiding misleading zero-duration status output for detached or restored cell results ([#439](https://github.com/code-yeongyu/senpi/pull/439)).
+
 ### Removed
 
 ## [2026.7.28] - 2026-07-28

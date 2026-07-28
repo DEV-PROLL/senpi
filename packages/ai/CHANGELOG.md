@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Preserve Anthropic request integrity when conversation history contains tool-result references whose original tool-use blocks are no longer available: orphaned references are demoted to ordinary text instead of sending an invalid payload that Anthropic rejects ([#437](https://github.com/code-yeongyu/senpi/pull/437)).
+
 ### Removed
 
 ## [2026.7.28] - 2026-07-28

@@ -4,13 +4,26 @@
 
 ### New Features
 
+- **Self-correcting goal continuations** — Detect goals that repeatedly wake only to wait on the same active monitors, then require an explicit process-health and blocked-state audit before another wait cycle ([#443](https://github.com/code-yeongyu/senpi/pull/443)).
+- **Clearer live monitor status** — Show monitor activity with a forward count and visible glyph so users can recognize active background subscriptions at a glance ([#441](https://github.com/code-yeongyu/senpi/pull/441)).
+- **Leaner Grok 4.5 execution prompt** — Reduce redundant CEO-core instructions while preserving the intent gate, autonomous delivery contract, verification discipline, and stop conditions ([#442](https://github.com/code-yeongyu/senpi/pull/442)).
+
 ### Breaking Changes
 
 ### Added
 
+- Add a goal-continuation stall check after three consecutive monitor-driven wakeups, including reset behavior for user input, monitor completion, goal replacement, and session lifecycle changes ([#443](https://github.com/code-yeongyu/senpi/pull/443)).
+
 ### Changed
 
+- Render the interactive monitor footer with a count-forward label and activity glyph for faster recognition in narrow and busy terminal layouts ([#441](https://github.com/code-yeongyu/senpi/pull/441)).
+- Diet the Grok 4.5 CEO prompt preset by removing duplicated instructions without weakening its outcome-first execution, manual-QA, failure-recovery, and binding stop contracts ([#442](https://github.com/code-yeongyu/senpi/pull/442)).
+
 ### Fixed
+
+- Preserve Anthropic conversations with compacted or otherwise missing tool-use blocks by demoting orphaned tool-result references before request submission ([#437](https://github.com/code-yeongyu/senpi/pull/437)).
+- Treat blank, whitespace-only, and null `update_goal` reasons as omitted when completing a goal, while continuing to reject non-empty completion reasons and requiring a meaningful blocked reason ([#440](https://github.com/code-yeongyu/senpi/pull/440)).
+- Execute a new eval cell when a terminal cell ID is reused and suppress unavailable timing metadata, preventing stale result replay and misleading duration output ([#439](https://github.com/code-yeongyu/senpi/pull/439)).
 
 ### Removed
 
