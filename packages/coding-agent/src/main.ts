@@ -833,6 +833,12 @@ export async function main(args: string[], options?: MainOptions) {
 	};
 	time("createRuntime");
 	if (appMode === "rpc" && parsed.multiSession) {
+		// The multi-session host never returns, so the initTheme() call further down
+		// is unreachable on this path. Extensions loaded per open_session (and any
+		// tool render helper) read the theme proxy and would otherwise crash with
+		// "Theme not initialized. Call initTheme() first." (surfaced in embedders
+		// like T3 Code as transcript errors).
+		initTheme(startupSettingsManager.getTheme(), false);
 		printTimings();
 		await runMultiSessionHost({
 			agentDir,
