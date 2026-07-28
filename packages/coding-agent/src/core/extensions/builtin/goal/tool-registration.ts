@@ -74,11 +74,11 @@ export function registerGoalTools(pi: ExtensionAPI, deps: GoalToolRegistrationDe
 			{ additionalProperties: false },
 		),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const reason = params.reason?.trim();
+			const reason = typeof params.reason === "string" ? params.reason.trim() : undefined;
 			if (params.status === "blocked" && (reason === undefined || reason.length === 0)) {
 				throw new Error("reason is required when status is blocked");
 			}
-			if (params.status === "complete" && params.reason !== undefined) {
+			if (params.status === "complete" && reason !== undefined && reason.length > 0) {
 				throw new Error("reason must not be provided when status is complete");
 			}
 			if (params.status === "complete") {
