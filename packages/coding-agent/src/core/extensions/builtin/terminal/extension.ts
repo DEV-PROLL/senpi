@@ -132,13 +132,13 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 		state.settings = loadTerminalSettings(settingsManager);
 		state.shellPath = settingsManager.getShellPath();
 		state.notifier = new TerminalNotifier({
-			sendUserMessage: (content, options) => pi.sendUserMessage(content, options),
+			sendMessage: (message, options) => pi.sendMessage(message, options),
 			getContext: () => state.ctx,
 			getMode: () => state.settings.notify,
 		});
 		state.monitorNotifier?.dispose();
 		state.monitorNotifier = new MonitorNotifier({
-			sendUserMessage: (content, options) => pi.sendUserMessage(content, options),
+			sendMessage: (message, options) => pi.sendMessage(message, options),
 			getContext: () => state.ctx,
 			getMode: () => state.settings.notify,
 			getSettings: () => state.settings.monitor,

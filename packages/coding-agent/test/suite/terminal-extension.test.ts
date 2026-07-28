@@ -376,7 +376,11 @@ describe("terminal extension auto-detach wiring", () => {
 		type Tool = { name: string; execute: (...args: never[]) => Promise<unknown> };
 		const handlers = new Map<string, Handler[]>();
 		const tools = new Map<string, Tool>();
-		const notices: string[] = [];
+		const notices: Array<{
+			message: { customType: string; content: string; display: boolean };
+			options: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" };
+		}> = [];
+		const userMessages: string[] = [];
 		let activeTools: string[] = [];
 		const fakePi = {
 			registerTool: (tool: Tool) => tools.set(tool.name, tool),
@@ -385,7 +389,11 @@ describe("terminal extension auto-detach wiring", () => {
 				registered.push(handler);
 				handlers.set(event, registered);
 			},
-			sendUserMessage: (content: string) => notices.push(content),
+			sendMessage: (
+				message: { customType: string; content: string; display: boolean },
+				options: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
+			) => notices.push({ message, options }),
+			sendUserMessage: (content: string) => userMessages.push(content),
 			getActiveTools: () => activeTools,
 			setActiveTools: (next: string[]) => {
 				activeTools = next;
@@ -441,8 +449,14 @@ describe("terminal extension auto-detach wiring", () => {
 		const killed = await kill.execute("kill", { bash_id: "bash_1" });
 		expect(firstText(killed)).toBe("Killed bash_1.");
 		expect(notices).toHaveLength(1);
-		expect(notices[0]).toContain("Background terminal session bash_1 finished: killed");
-		expect(notices[0]).toContain("AFTER");
+		expect(notices[0]?.message).toMatchObject({
+			customType: "senpi-terminal:notification",
+			display: false,
+		});
+		expect(notices[0]?.message.content).toContain("Background terminal session bash_1 finished: killed");
+		expect(notices[0]?.message.content).toContain("AFTER");
+		expect(notices[0]?.options).toEqual({ triggerTurn: true, deliverAs: "steer" });
+		expect(userMessages).toEqual([]);
 
 		for (const handler of handlers.get("session_shutdown") ?? []) await handler({}, ctx);
 	});

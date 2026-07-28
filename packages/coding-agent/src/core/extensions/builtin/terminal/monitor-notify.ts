@@ -6,6 +6,7 @@ import type { MonitorDeliverySettings } from "./settings.ts";
 const SYSTEM_REMINDER_OPEN = "<system-reminder>";
 const SYSTEM_REMINDER_CLOSE = "</system-reminder>";
 const QUEUE_OVERHEAD_CHARS = 512;
+const MONITOR_NOTIFICATION_CUSTOM_TYPE = "senpi-monitor:notification";
 
 export interface MonitorNotificationScheduler {
 	now(): number;
@@ -94,7 +95,7 @@ export class MonitorNotifier {
 
 	notifyEvent(event: MonitorEvent): void {
 		if (this.#wakeBudgetPaused) return;
-		if (!getTerminalNotificationDelivery(this.#deps)) return;
+		if (!getTerminalNotificationDelivery(this.#deps, MONITOR_NOTIFICATION_CUSTOM_TYPE)) return;
 		const settings = resolveSettings(this.#deps.getSettings());
 		const rendered = `Monitor event(${event.description}): ${eventBody(event)}`;
 		const queueLimit = Math.max(1, settings.maxCharsPerInjection - QUEUE_OVERHEAD_CHARS);
@@ -149,7 +150,7 @@ export class MonitorNotifier {
 			this.dispose();
 			return;
 		}
-		const delivery = getTerminalNotificationDelivery(this.#deps);
+		const delivery = getTerminalNotificationDelivery(this.#deps, MONITOR_NOTIFICATION_CUSTOM_TYPE);
 		if (!delivery) {
 			this.dispose();
 			return;

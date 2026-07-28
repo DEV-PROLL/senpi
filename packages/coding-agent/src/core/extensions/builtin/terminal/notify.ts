@@ -6,10 +6,14 @@ import { describeExit } from "./tools/spawn.ts";
 
 /** Modes that never wake the agent: one-shot, non-interactive runs. */
 export const NON_INTERACTIVE_MODES = new Set(["print", "json"]);
+export const TERMINAL_NOTIFICATION_CUSTOM_TYPE = "senpi-terminal:notification";
 
 export interface TerminalNotifierDeps {
-	/** Deliver a user-visible completion message with the requested scheduling mode. */
-	readonly sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void;
+	/** Deliver a model-visible notification without rendering synthetic user input. */
+	readonly sendMessage: (
+		message: { customType: string; content: string; display: boolean },
+		options: { triggerTurn: boolean; deliverAs: "steer" | "followUp" },
+	) => void;
 	readonly getContext: () => ExtensionContext | undefined;
 	readonly getMode: () => NotifyMode;
 }
@@ -22,13 +26,20 @@ export interface TerminalNotificationDelivery {
 }
 
 /** Shared terminal-notification guard and notify-mode mapping. */
-export function getTerminalNotificationDelivery(deps: TerminalNotifierDeps): TerminalNotificationDelivery | undefined {
+export function getTerminalNotificationDelivery(
+	deps: TerminalNotifierDeps,
+	customType = TERMINAL_NOTIFICATION_CUSTOM_TYPE,
+): TerminalNotificationDelivery | undefined {
 	const mode = deps.getMode();
 	if (mode === "off") return undefined;
 	const ctx = deps.getContext();
 	if (!ctx || NON_INTERACTIVE_MODES.has(ctx.mode) || !ctx.model) return undefined;
 	return {
-		send: (content) => deps.sendUserMessage(content, { deliverAs: mode === "wake" ? "steer" : "followUp" }),
+		send: (content) =>
+			deps.sendMessage(
+				{ customType, content, display: false },
+				{ triggerTurn: true, deliverAs: mode === "wake" ? "steer" : "followUp" },
+			),
 	};
 }
 
