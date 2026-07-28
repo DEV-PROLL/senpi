@@ -19,6 +19,16 @@ import * as crypto from "node:crypto";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
+import {
+	emitProviderAccountsChanged,
+	subscribeProviderAccountEvents,
+} from "../../core/extensions/builtin/claude-agent-sdk/account-events.ts";
+import {
+	CLAUDE_AGENT_SDK_PROVIDER_ID,
+	getProviderAccounts,
+	pinProviderAccount,
+	removeProviderAccount,
+} from "../../core/extensions/builtin/claude-agent-sdk/account-management.ts";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -108,6 +118,19 @@ export function createRpcConnectionHandler(
 	const outputEvent = (event: object) => {
 		eventOutput.enqueueEvent(tagSessionRecord(event));
 	};
+	const unsubscribeProviderAccountEvents = subscribeProviderAccountEvents((event) => {
+		if (event.type === "accounts_changed") {
+			outputEvent({ type: "auth_accounts_changed", provider: event.provider });
+			return;
+		}
+		outputEvent({
+			type: "account_failover",
+			provider: event.provider,
+			from: event.from,
+			to: event.to,
+			reason: event.reason,
+		});
+	});
 
 	const waitForRpcBackpressure = async (): Promise<void> => {
 		eventOutput.flushEvents();
@@ -463,6 +486,7 @@ export function createRpcConnectionHandler(
 				signal: controller.signal,
 			});
 			session.modelRegistry.refresh();
+			if (provider === CLAUDE_AGENT_SDK_PROVIDER_ID) emitProviderAccountsChanged(provider);
 			outputEvent({ type: "auth_login_end", provider, success: true });
 		} catch (loginError: unknown) {
 			const message = loginError instanceof Error ? loginError.message : String(loginError);
@@ -863,6 +887,21 @@ export function createRpcConnectionHandler(
 				return success(id, "logout");
 			}
 
+			case "get_provider_accounts": {
+				const accounts = getProviderAccounts(session.modelRegistry.authStorage, command.provider);
+				return success(id, "get_provider_accounts", { accounts });
+			}
+
+			case "account_pin": {
+				await pinProviderAccount(session.modelRegistry.authStorage, command.provider, command.name);
+				return success(id, "account_pin");
+			}
+
+			case "account_remove": {
+				await removeProviderAccount(session.modelRegistry.authStorage, command.provider, command.name);
+				return success(id, "account_remove");
+			}
+
 			default: {
 				const unknownCommand = command as { type: string };
 				return error(id, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
@@ -923,6 +962,7 @@ export function createRpcConnectionHandler(
 
 	const dispose = async (): Promise<void> => {
 		pendingExtensionRequests.close();
+		unsubscribeProviderAccountEvents();
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
 		unsubscribe = undefined;

@@ -5,6 +5,7 @@ require "uri"
 
 SENPI_RESERVED_AGENT_TOOL = "__agent__"
 SENPI_RESERVED_OUTPUT_TOOL = "__output__"
+SENPI_RESERVED_SCHEMA_TOOL = "__schema__"
 SENPI_INTERNAL_URL = Regexp.new("\\A([a-z][a-z0-9+.\\-]*)://(.*)\\z", Regexp::IGNORECASE)
 
 def __senpi_status_enabled?
@@ -185,6 +186,11 @@ def completion(prompt, model: "default", system: nil, schema: nil, **kwargs)
   return result["value"] if result.key?("value")
 
   result.fetch("text", result)
+end
+
+def tool_schema(name = nil)
+  args = name.nil? ? {} : { "name" => name.to_s }
+  __senpi_call_tool(SENPI_RESERVED_SCHEMA_TOOL, args)
 end
 
 def output(*ids, format: "raw", offset: nil, limit: nil)

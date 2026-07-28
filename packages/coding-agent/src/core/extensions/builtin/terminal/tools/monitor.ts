@@ -1,3 +1,4 @@
+import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import { MonitorRegistry } from "../monitor-registry.ts";
 import { DEFAULT_COLS, DEFAULT_ROWS, TERMINAL_MONITOR_TOOL } from "../shared.ts";
@@ -8,14 +9,30 @@ import { spawnCommandSession } from "./spawn.ts";
 export const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 export const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 
-const createMonitorSchema = Type.Object({
-	action: Type.Optional(Type.Literal("create")),
-	description: Type.String({
-		minLength: 1,
-		maxLength: 200,
-		description: "Short label for the watcher and its decision-relevant events.",
-	}),
-	command: Type.String({ description: "Shell command to run and watch in a PTY-backed monitor session." }),
+/**
+ * One flat object schema, no top-level union: several provider payload paths
+ * (e.g. Anthropic's legacy input_schema conversion) rebuild tool schemas from
+ * top-level `properties` only, so a root anyOf would reach the model as an
+ * empty schema. Branch requirements are enforced at runtime in `execute`.
+ */
+export const monitorSchema = Type.Object({
+	action: Type.Optional(
+		StringEnum(["create", "rearm"] as const, {
+			description: "Defaults to create. rearm resumes a monitor paused by the wake budget.",
+		}),
+	),
+	description: Type.Optional(
+		Type.String({
+			minLength: 1,
+			maxLength: 200,
+			description: "Create (required): specific label shown with every event, e.g. 'errors in deploy.log'.",
+		}),
+	),
+	command: Type.Optional(
+		Type.String({
+			description: "Create (required): shell command to run and watch in a PTY-backed monitor session.",
+		}),
+	),
 	filter: Type.Optional(Type.String({ description: "Only stdout lines matching this regex become monitor events." })),
 	timeout_ms: Type.Optional(
 		Type.Number({
@@ -27,17 +44,20 @@ const createMonitorSchema = Type.Object({
 	persistent: Type.Optional(
 		Type.Boolean({ description: "Keep watching until the command exits or kill_bash stops its bash_id." }),
 	),
+	bash_id: Type.Optional(Type.String({ description: "Rearm (required): paused monitor bash_id to resume." })),
 });
-
-const rearmMonitorSchema = Type.Object({
-	action: Type.Literal("rearm"),
-	bash_id: Type.String({ description: "Paused monitor bash_id to resume after a wake-budget pause." }),
-});
-
-export const monitorSchema = Type.Union([createMonitorSchema, rearmMonitorSchema]);
 export type MonitorInput = Static<typeof monitorSchema>;
 
-type MonitorCreateInput = Static<typeof createMonitorSchema>;
+type MonitorCreateInput = MonitorInput & { description: string; command: string };
+
+function isCreateInput(input: MonitorInput): input is MonitorCreateInput {
+	return (
+		typeof input.description === "string" &&
+		input.description.length > 0 &&
+		typeof input.command === "string" &&
+		input.command.length > 0
+	);
+}
 
 function resolveDimension(value: number | undefined, fallback: number): number {
 	if (value === undefined || !Number.isFinite(value) || value < 1) return fallback;
@@ -91,10 +111,11 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 		name: TERMINAL_MONITOR_TOOL,
 		label: "monitor",
 		description:
-			"Watch a background shell command and emit decision-relevant stdout-line events. Returns a bash_id immediately; peek with bash_output or stop with kill_bash.",
-		promptSnippet: "Watch a long-running command; monitor emits matching stdout lines as events",
+			"Subscribe to events from a command instead of polling for them: each stdout line arrives as an injected event while you keep working. Returns a bash_id immediately; peek with bash_output, stop with kill_bash.",
+		promptSnippet: "Subscribe to a command's stdout lines as injected events instead of polling",
 		promptGuidelines: [
-			"Use monitor only for decision-relevant lines; filter noisy output at the source when possible.",
+			"Waiting on observable state (CI checks, builds, log patterns, deploys) means a monitor, never a foreground sleep/poll loop.",
+			"Shape the command by notifications needed: exit-on-condition for one completion event; emit-per-occurrence (`tail -f | grep --line-buffered`, a polling loop inside the command) for a stream. Filter noise at the source.",
 		],
 		parameters: monitorSchema,
 		renderCall: renderMonitorCall,
@@ -107,11 +128,16 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 		): Promise<TerminalToolResult> {
 			const registry = getRegistry();
 			if (input.action === "rearm") {
-				const outcome = registry.rearm(input.bash_id);
-				if (outcome === "not_found") return errorResult(`No active monitor found with id: ${input.bash_id}`);
-				if (outcome === "not_paused") return textResult(`Monitor ${input.bash_id} is not paused; no action taken.`);
-				ctx.onMonitorRearmed?.(input.bash_id);
-				return textResult(`Monitor ${input.bash_id} re-armed.`);
+				const bashId = input.bash_id;
+				if (bashId === undefined || bashId.length === 0) return errorResult("monitor rearm requires bash_id.");
+				const outcome = registry.rearm(bashId);
+				if (outcome === "not_found") return errorResult(`No active monitor found with id: ${bashId}`);
+				if (outcome === "not_paused") return textResult(`Monitor ${bashId} is not paused; no action taken.`);
+				ctx.onMonitorRearmed?.(bashId);
+				return textResult(`Monitor ${bashId} re-armed.`);
+			}
+			if (!isCreateInput(input)) {
+				return errorResult("monitor requires description and command to start a watcher.");
 			}
 			return createMonitor(ctx, registry, input, execCtx);
 		},

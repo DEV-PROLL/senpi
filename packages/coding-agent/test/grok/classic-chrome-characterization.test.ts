@@ -18,7 +18,12 @@ type HeaderFixture = {
 	fdPath: string | undefined;
 	session: { scopedModels: unknown[] };
 	options: { verbose: boolean };
-	settingsManager: { getQuietStartup(): boolean };
+	settingsManager: {
+		getQuietStartup(): boolean;
+		getTipsEnabled(): boolean;
+		getTipsHistory(): Record<string, number>;
+		setTipShown(tipId: string, timestamp: number): void;
+	};
 	keybindings: unknown;
 	ui: Container & {
 		setFocus(): void;
@@ -75,7 +80,12 @@ function createHeaderFixture(): HeaderFixture {
 		fdPath: undefined,
 		session: { scopedModels: [] },
 		options: { verbose: true },
-		settingsManager: { getQuietStartup: () => false },
+		settingsManager: {
+			getQuietStartup: () => false,
+			getTipsEnabled: () => false,
+			getTipsHistory: () => ({}),
+			setTipShown: () => {},
+		},
 		keybindings: {},
 		ui,
 		headerContainer: new Container(),

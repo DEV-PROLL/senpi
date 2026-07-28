@@ -48,6 +48,7 @@ import {
 	APP_TITLE,
 	CONFIG_DIR_NAME,
 	expandTildePath,
+	getAgentDir,
 	getAuthPath,
 	getDebugLogPath,
 	getDocsPath,
@@ -144,6 +145,7 @@ import {
 } from "./components/oauth-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
+import { classifyEditorInput, ShortcutOverlay, shouldShowShortcutOverlay } from "./components/shortcut-overlay.ts";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.ts";
 import {
 	BranchSummaryStatusIndicator,
@@ -158,9 +160,11 @@ import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
-import { editInExternalEditor } from "./external-editor.ts";
+import { formatExtensionErrorHeadline, sanitizeTuiErrorMessage } from "./extension-error-format.ts";
+import { editFileInExternalEditor, editInExternalEditor } from "./external-editor.ts";
 import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./grok/chrome.ts";
 import { restoreInteractiveStderr, takeOverInteractiveStderr } from "./interactive-stderr-guard.ts";
+import { applyKeybindingsFileEdit, seedKeybindingsFile } from "./keybindings-command.ts";
 import { getModelSearchText } from "./model-search.ts";
 import { resolveStartupToolPaths } from "./startup-tools.ts";
 import { DEFAULT_SMOOTH_FPS, StreamingRevealController } from "./streaming-reveal.ts";
@@ -178,6 +182,12 @@ import {
 	theme,
 } from "./theme/theme.ts";
 import { InteractiveThemeController } from "./theme/theme-controller.ts";
+import { buildFavoriteCycleStatusMessage } from "./tips/favorite-messages.ts";
+import { recordTipShown } from "./tips/history-writer.ts";
+import { TIP_DEFINITIONS } from "./tips/registry.ts";
+import { appendStartupHeader } from "./tips/startup-header.ts";
+import { resolveStartupTipLine } from "./tips/startup-tip.ts";
+import { resolveWorkingTipLine, WorkingTipCache, type WorkingTipLine } from "./tips/working-tip.ts";
 import { buildTmuxSetupWarning } from "./tmux-setup.ts";
 import { ToolArgsRevealController } from "./tool-args-reveal.ts";
 import { readToolProgress } from "./tool-progress.ts";
@@ -243,15 +253,6 @@ function formatToolHookTerminalTitle(event: ToolHookStatusStartEvent): string {
 	const hookName = sanitizeWorkingStatusPlainText(event.hookName) || "hook";
 	const statusMessage = sanitizeWorkingStatusPlainText(event.statusMessage);
 	return `${APP_TITLE} - ${hookName}: ${statusMessage}`;
-}
-
-function sanitizeTuiErrorMessage(value: string): string {
-	return value
-		.replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g, "")
-		.replace(/(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g, "")
-		.replace(/\r\n?/g, "\n")
-		.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")
-		.replace(/[ \t\f\v]+/g, " ");
 }
 
 type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }>;
@@ -455,6 +456,11 @@ export class InteractiveMode {
 	private chatContainer: Container;
 	private pendingMessagesContainer: Container;
 	private statusContainer: Container;
+	private readonly sessionShownTipIds = new Set<string>();
+	private shortcutOverlay: ShortcutOverlay | undefined;
+	private lastEditorText = "";
+	private lastInputWasPaste = false;
+	private readonly turnWorkingTip = new WorkingTipCache();
 	private hookStatusContainer: Container;
 	private defaultEditor: CustomEditor;
 	private editor: EditorComponent;
@@ -985,6 +991,18 @@ export class InteractiveMode {
 				"dim",
 				`Press ${keyText("app.tools.expand")} to show full startup help and loaded resources.`,
 			);
+			const startupTip = resolveStartupTipLine({
+				tipsEnabled: this.settingsManager.getTipsEnabled(),
+				quietStartup: this.settingsManager.getQuietStartup(),
+				history: this.settingsManager.getTipsHistory(),
+				now: Date.now(),
+				definitions: TIP_DEFINITIONS,
+				keys: keyText,
+			});
+			if (startupTip) {
+				this.recordShownTip(startupTip.tipId);
+			}
+			const tipLine = startupTip ? theme.fg("dim", startupTip.line) : undefined;
 			const onboarding = theme.fg(
 				"dim",
 				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
@@ -997,10 +1015,7 @@ export class InteractiveMode {
 				0,
 			);
 
-			// Setup UI layout
-			this.headerContainer.addChild(new Spacer(1));
-			this.headerContainer.addChild(this.builtInHeader);
-			this.headerContainer.addChild(new Spacer(1));
+			appendStartupHeader(this.headerContainer, this.builtInHeader, tipLine);
 		} else {
 			// Minimal header when silenced
 			this.builtInHeader = new Text("", 0, 0);
@@ -1322,6 +1337,67 @@ export class InteractiveMode {
 
 	private getStartupExpansionState(): boolean {
 		return this.options.verbose || this.toolOutputExpanded;
+	}
+
+	private async handleKeybindingsCommand(): Promise<void> {
+		const configPath = path.join(getAgentDir(), "keybindings.json");
+		const editorCommand = process.env.VISUAL || process.env.EDITOR;
+		if (!editorCommand) {
+			this.showError(`Set $EDITOR or $VISUAL to edit ${configPath}.`);
+			return;
+		}
+
+		const seeded = seedKeybindingsFile(configPath, this.keybindings);
+		const edit = await editFileInExternalEditor({ command: editorCommand, path: configPath });
+		if (edit.status === "launch-failed") {
+			// The editor never ran, so a file we just seeded carries no user content.
+			if (seeded) fs.rmSync(configPath, { force: true });
+			this.showError(`Could not open ${configPath} with "${editorCommand}".`);
+			return;
+		}
+		if (edit.status === "exited") {
+			// The editor ran and may have written the file; keep whatever is on disk.
+			this.showError(`"${editorCommand}" exited with code ${edit.code}; keybindings were not reloaded.`);
+			return;
+		}
+
+		const applied = applyKeybindingsFileEdit(configPath, this.keybindings);
+		if (applied.status === "invalid") {
+			this.showError(`Keybindings not reloaded - ${configPath} is not valid JSON: ${applied.message}`);
+			return;
+		}
+		this.showStatus("Keybindings reloaded");
+	}
+
+	private updateShortcutOverlay(nextText: string): void {
+		const previousText = this.lastEditorText;
+		this.lastEditorText = nextText;
+		const inputKind = classifyEditorInput(previousText, nextText, this.lastInputWasPaste);
+		this.lastInputWasPaste = false;
+
+		if (shouldShowShortcutOverlay(previousText, nextText, inputKind)) {
+			if (!this.shortcutOverlay) {
+				this.shortcutOverlay = new ShortcutOverlay();
+				this.headerContainer.addChild(this.shortcutOverlay);
+				this.ui.requestRender();
+			}
+			return;
+		}
+
+		this.hideShortcutOverlay();
+	}
+
+	private hideShortcutOverlay(): void {
+		if (!this.shortcutOverlay) return;
+		this.headerContainer.removeChild(this.shortcutOverlay);
+		this.shortcutOverlay = undefined;
+		this.ui.requestRender();
+	}
+
+	private recordShownTip(tipId: string): void {
+		this.sessionShownTipIds.add(tipId);
+		const next = recordTipShown(this.settingsManager.getTipsHistory(), tipId, Date.now());
+		this.settingsManager.setTipShown(tipId, next[tipId] ?? Date.now());
 	}
 
 	/**
@@ -1939,7 +2015,7 @@ export class InteractiveMode {
 				}
 			},
 			onError: (error) => {
-				this.showExtensionError(error.extensionPath, error.error, error.stack);
+				this.showExtensionError(error);
 			},
 		});
 
@@ -2316,7 +2392,32 @@ export class InteractiveMode {
 		this.activeStatusIndicator?.dispose();
 		this.activeStatusIndicator = indicator;
 		this.statusContainer.clear();
-		this.statusContainer.addChild(indicator);
+
+		const workingTip = indicator.kind === "working" ? this.resolveTurnWorkingTip() : undefined;
+		if (!workingTip) {
+			this.statusContainer.addChild(indicator);
+			return;
+		}
+
+		const wrapper = new Container();
+		wrapper.addChild(indicator);
+		wrapper.addChild(new Text(theme.fg("dim", workingTip.line), 1, 0));
+		this.statusContainer.addChild(wrapper);
+	}
+
+	private resolveTurnWorkingTip(): WorkingTipLine | undefined {
+		return this.turnWorkingTip.resolve(
+			() =>
+				resolveWorkingTipLine({
+					tipsEnabled: this.settingsManager.getTipsEnabled(),
+					history: this.settingsManager.getTipsHistory(),
+					sessionShownTipIds: this.sessionShownTipIds,
+					now: Date.now(),
+					definitions: TIP_DEFINITIONS,
+					keys: keyText,
+				}),
+			(tip) => this.recordShownTip(tip.tipId),
+		);
 	}
 
 	private updateWorkingIndicatorMessage(): void {
@@ -3036,13 +3137,18 @@ export class InteractiveMode {
 	/**
 	 * Show an extension error in the UI.
 	 */
-	private showExtensionError(extensionPath: string, error: string, stack?: string): void {
-		const errorMsg = `Extension "${extensionPath}" error: ${error}`;
+	private showExtensionError(error: {
+		readonly extensionPath: string;
+		readonly event?: string;
+		readonly error: string;
+		readonly stack?: string;
+	}): void {
+		const errorMsg = formatExtensionErrorHeadline(error);
 		const errorText = new Text(theme.fg("error", errorMsg), 1, 0);
 		this.chatContainer.addChild(errorText);
-		if (stack) {
+		if (error.stack) {
 			// Show stack trace in dim color, indented
-			const stackLines = stack
+			const stackLines = error.stack
 				.split("\n")
 				.slice(1) // Skip first line (duplicates error message)
 				.map((line) => theme.fg("dim", `  ${line.trim()}`))
@@ -3124,12 +3230,20 @@ export class InteractiveMode {
 			if (wasBashMode !== this.isBashMode) {
 				this.updateEditorBorderColor();
 			}
+			this.updateShortcutOverlay(text);
 		};
 
 		// Handle clipboard paste (triggered on Ctrl+V). Images are attached by path;
 		// otherwise, paste plain text from the system clipboard.
 		this.defaultEditor.onPasteImage = () => {
+			this.lastInputWasPaste = true;
 			void this.handleClipboardPaste();
+		};
+
+		const previousEscapeHandler = this.defaultEditor.onEscape;
+		this.defaultEditor.onEscape = () => {
+			this.hideShortcutOverlay();
+			previousEscapeHandler?.();
 		};
 	}
 
@@ -3160,6 +3274,8 @@ export class InteractiveMode {
 
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (text: string) => {
+			this.hideShortcutOverlay();
+			this.lastEditorText = "";
 			text = text.trim();
 			if (!text) return;
 
@@ -3213,6 +3329,11 @@ export class InteractiveMode {
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
+				return;
+			}
+			if (text === "/keybindings") {
+				this.editor.setText("");
+				await this.handleKeybindingsCommand();
 				return;
 			}
 			if (text === "/hotkeys") {
@@ -3371,6 +3492,8 @@ export class InteractiveMode {
 				this.clearPendingTools();
 				this.clearActiveToolExecutionStatus();
 				this.clearToolHookStatuses();
+				// Turn boundary: pick a fresh working tip next time the indicator shows.
+				this.turnWorkingTip.resetForNewTurn();
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(true);
 				}
@@ -4465,8 +4588,8 @@ export class InteractiveMode {
 			if (result === undefined) {
 				const msg =
 					this.session.favoriteModels.length > 0
-						? "Only one favorite model available"
-						: "No favorite models configured. Add favoriteModels to settings.json or use /favorite-models and save.";
+						? buildFavoriteCycleStatusMessage("single")
+						: buildFavoriteCycleStatusMessage("empty");
 				this.showStatus(msg);
 			} else {
 				this.footer.invalidate();

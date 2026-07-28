@@ -110,7 +110,7 @@ export interface EvalKernelManager {
 export type ExecuteTool = (
 	toolName: string,
 	params: unknown,
-	options?: { signal?: AbortSignal; onUpdate?: AgentToolUpdateCallback<unknown> },
+	options?: { signal?: AbortSignal; onUpdate?: AgentToolUpdateCallback<unknown>; activateInactiveTool?: boolean },
 ) => Promise<AgentToolResult<unknown>>;
 
 export interface EvalToolCallSummary {

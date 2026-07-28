@@ -112,8 +112,10 @@ import type {
 	ApplyCompactionResult,
 	CompactionReason,
 	CompactionRejectionCause,
+	LazyToolActivator,
 	ModelSelectSource,
 } from "./extensions/types.ts";
+import { RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
 import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
@@ -131,7 +133,7 @@ import {
 	getLatestCompactionEntry,
 	type SessionHeader,
 } from "./session-manager.ts";
-import { generateSessionTitle, shouldSkipSessionTitle } from "./session-title-generator.ts";
+import { generateSessionTitle, sessionTitleRetryPolicy, shouldSkipSessionTitle } from "./session-title-generator.ts";
 import { SessionWorkBarrier } from "./session-work-barrier.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
@@ -142,6 +144,8 @@ import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts"
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
+
+const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
 
 // ============================================================================
 // Skill Block Parsing
@@ -177,6 +181,7 @@ export type AgentSessionEvent =
 	| Exclude<AgentEvent, { type: "agent_end" }>
 	| AgentSessionAgentEndEvent
 	| { type: "agent_settled" }
+	| { type: "session_abort" }
 	| { type: "continuation_error"; errorMessage: string }
 	| {
 			type: "queue_update";
@@ -587,6 +592,8 @@ export class AgentSession {
 	private _userAbortPromise: Promise<void> | undefined = undefined;
 	private _agentAbortSource: "user" | "system" | undefined = undefined;
 	private _suppressQueuedContinuationAfterUserAbort = false;
+	/** Set when clearQueue() drains non-empty queues, so abort() can detect the gap even after queues are cleared. */
+	private _hadClearedQueuedMessages = false;
 	private _extensionEventSignal: AbortSignal | undefined = undefined;
 
 	// Bash execution state
@@ -623,6 +630,7 @@ export class AgentSession {
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
+	private _lazyToolActivators: LazyToolActivator[] = [];
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
@@ -1868,8 +1876,17 @@ export class AgentSession {
 		params: unknown,
 		options?: ExecuteToolOptions<TDetails>,
 	): Promise<AgentToolResult<TDetails>> {
-		const activeTools = this.getActiveToolNames();
-		const tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		let activeTools = this.getActiveToolNames();
+		let tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		if (
+			!tool &&
+			options?.activateInactiveTool === true &&
+			this._toolDefinitions.has(toolName) &&
+			this._activateLazyTool(toolName)
+		) {
+			activeTools = this.getActiveToolNames();
+			tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		}
 		if (!tool) {
 			const knownToolNames = new Set(this._toolDefinitions.keys());
 			const code = knownToolNames.has(toolName) ? "inactive_tool" : "unknown_tool";
@@ -1940,6 +1957,11 @@ export class AgentSession {
 			details: (hookResult.details ?? result.details) as TDetails,
 			terminate: result.terminate,
 		};
+	}
+
+	/** Lets a registering extension activate its own inactive tool on demand; it owns eligibility. */
+	private _activateLazyTool(toolName: string): boolean {
+		return this._lazyToolActivators.some((activate) => activate(toolName));
 	}
 
 	/**
@@ -2630,6 +2652,7 @@ export class AgentSession {
 				auth,
 				sessionId: this.sessionId,
 				baseOptions: this._buildSessionTitleBaseOptions(),
+				retry: sessionTitleRetryPolicy(this.settingsManager.getRetrySettings()),
 				signal: abortController.signal,
 				streamFn: this.agent.streamFunction,
 			});
@@ -2645,7 +2668,7 @@ export class AgentSession {
 			}
 			const message = error instanceof Error ? error.message : String(error);
 			this._extensionRunner.emitError({
-				extensionPath: "<runtime>",
+				extensionPath: RUNTIME_EXTENSION_PATH,
 				event: "session_title_generation",
 				error: message,
 			});
@@ -2909,6 +2932,7 @@ export class AgentSession {
 	clearQueue(): { steering: string[]; followUp: string[] } {
 		const steering = [...this._steeringMessages];
 		const followUp = [...this._followUpMessages];
+		if (steering.length > 0 || followUp.length > 0) this._hadClearedQueuedMessages = true;
 		// Clear every queue synchronously. Deferred post-compaction messages are
 		// already represented in visible bookkeeping, so they must not be returned
 		// a second time or later resurrected into Agent's native queues.
@@ -2944,8 +2968,33 @@ export class AgentSession {
 	 * Abort current operation and wait for agent to become idle.
 	 */
 	async abort(): Promise<void> {
+		// Capture gap-state BEFORE _abortActiveAgentAndRetry resets retry/compaction state.
+		// A mid-run abort (actively streaming with no pending retry) is delivered via
+		// agent_end (abortSource "user") — no session_abort needed. The gap case is when
+		// no agent_end will fire to carry the abort signal:
+		//   - retry backoff (_retryAbortController defined — the error agent_end already
+		//     fired, agent.abort() during backoff is a no-op, no new agent_end)
+		//   - compaction (!isStreaming && isCompacting)
+		//   - queued continuation that was already cleared by the caller (TUI clears queues
+		//     before calling abort, so pendingMessageCount is 0 but _hadClearedQueuedMessages
+		//     records that messages were present)
+		// Purely-idle defensive aborts (e.g. RPC session close on an idle session) must not
+		// fire session_abort.
+		const wasMidRun = this.isStreaming && this._retryAbortController === undefined;
+		const hadRetryBackoff = this._retryAbortController !== undefined;
+		const hadCompactionOrPending = !this.isStreaming && (this.isCompacting || this.pendingMessageCount > 0);
+		const hadClearedQueues = this._hadClearedQueuedMessages;
+		this._hadClearedQueuedMessages = false;
+		const shouldEmitAbort = !wasMidRun && (hadRetryBackoff || hadCompactionOrPending || hadClearedQueues);
 		this.abortCompaction();
 		await this._abortActiveAgentAndRetry("user");
+		if (!shouldEmitAbort) return;
+		try {
+			await this._extensionRunner.emit({ type: "session_abort" });
+			this._emit({ type: "session_abort" });
+		} catch {
+			// Extension runner may be torn down during RPC close — best-effort.
+		}
 	}
 
 	async waitForIdle(): Promise<void> {
@@ -3701,6 +3750,7 @@ export class AgentSession {
 						this.agent.transformContext,
 						this.settingsManager.getRetrySettings(),
 						this._summarizationRetryCallbacks({ source: "compaction", reason: request.reason }),
+						this.sessionManager.getSessionId(),
 					);
 				}
 			}
@@ -4629,7 +4679,7 @@ export class AgentSession {
 				sendMessage: (message, options) => {
 					this.sendCustomMessage(message, options).catch((err) => {
 						runner.emitError({
-							extensionPath: "<runtime>",
+							extensionPath: RUNTIME_EXTENSION_PATH,
 							event: "send_message",
 							error: err instanceof Error ? err.message : String(err),
 						});
@@ -4638,7 +4688,7 @@ export class AgentSession {
 				sendUserMessage: (content, options) => {
 					this.sendUserMessage(content, options).catch((err) => {
 						runner.emitError({
-							extensionPath: "<runtime>",
+							extensionPath: RUNTIME_EXTENSION_PATH,
 							event: "send_user_message",
 							error: err instanceof Error ? err.message : String(err),
 						});
@@ -4667,6 +4717,9 @@ export class AgentSession {
 				refreshTools: () => this._refreshToolRegistry(),
 				registerRemovedToolHint: (name, hint) => {
 					this.agent.removedToolHints[name] = hint;
+				},
+				registerLazyToolActivator: (activator) => {
+					this._lazyToolActivators.push(activator);
 				},
 				getCommands,
 				setModel: async (model) => {
@@ -5057,6 +5110,9 @@ export class AgentSession {
 	 * Context overflow errors are NOT retryable (handled by compaction instead).
 	 */
 	private _isRetryableError(message: AssistantMessage): boolean {
+		// Providers mark post-delta failures to prevent replaying visible text/tool calls.
+		if (message.errorMessage?.startsWith(TURN_RETRY_SUPPRESSION_PREFIX)) return false;
+
 		// Context overflow is handled by compaction, not retry.
 		if (isContextOverflow(message, this.model?.contextWindow ?? 0)) return false;
 
@@ -5072,6 +5128,7 @@ export class AgentSession {
 
 	private _isHardErrorFallbackEligible(message: AssistantMessage): boolean {
 		return (
+			!message.errorMessage?.startsWith(TURN_RETRY_SUPPRESSION_PREFIX) &&
 			message.stopReason === "error" &&
 			!isContextOverflow(message, this.model?.contextWindow ?? 0) &&
 			!isClassifierRefusal(message) &&

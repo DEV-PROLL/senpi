@@ -1,4 +1,17 @@
-import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
+import type { Credential, CredentialInfo, CredentialStore, OAuthAuth } from "@earendil-works/pi-ai";
+
+type ExtensionOAuthRegistry = {
+	registerOAuthProvider(providerId: string, oauth: OAuthAuth): void;
+	unregisterOAuthProvider(providerId: string): void;
+};
+
+function asExtensionOAuthRegistry(store: CredentialStore): ExtensionOAuthRegistry | undefined {
+	const candidate = store as CredentialStore & Partial<ExtensionOAuthRegistry>;
+	return typeof candidate.registerOAuthProvider === "function" &&
+		typeof candidate.unregisterOAuthProvider === "function"
+		? (candidate as ExtensionOAuthRegistry)
+		: undefined;
+}
 
 /** Async credential store overlay for non-persistent runtime API keys. */
 export class RuntimeCredentials implements CredentialStore {
@@ -7,6 +20,14 @@ export class RuntimeCredentials implements CredentialStore {
 
 	constructor(store: CredentialStore) {
 		this.store = store;
+	}
+
+	registerOAuthProvider(providerId: string, oauth: OAuthAuth): void {
+		asExtensionOAuthRegistry(this.store)?.registerOAuthProvider(providerId, oauth);
+	}
+
+	unregisterOAuthProvider(providerId: string): void {
+		asExtensionOAuthRegistry(this.store)?.unregisterOAuthProvider(providerId);
 	}
 
 	setRuntimeApiKey(providerId: string, apiKey: string): void {

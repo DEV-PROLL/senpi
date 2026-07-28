@@ -240,6 +240,9 @@ describe("FooterComponent width handling", () => {
 			.map((line) => stripAnsi(line))
 			.join("\n");
 		expect(renderedFooter).toContain("CH25.0%");
+		// The cache read/write totals segment was removed; only the hit rate remains.
+		expect(renderedFooter).not.toContain("cache 50/50");
+		expect(renderedFooter).not.toContain("cache ");
 	});
 
 	it("marks Kimi Coding costs as subscription estimates", () => {
@@ -263,5 +266,58 @@ describe("FooterComponent width handling", () => {
 			.map((line) => stripAnsi(line))
 			.join("\n");
 		expect(renderedFooter).toContain("$1.234 (sub)");
+	});
+
+	it("keeps the model label and context block visible at narrow widths", () => {
+		const width = 60;
+		const session = createSession({
+			sessionName: "deep-work-on-footer-layout",
+			modelId: "test-model",
+			reasoning: true,
+			thinkingLevel: "high",
+			usage: {
+				input: 12_345,
+				output: 6_789,
+				cacheRead: 50,
+				cacheWrite: 50,
+				cost: { total: 1.234 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(2));
+
+		const lines = footer.render(width);
+		const plain = lines.map((line) => stripAnsi(line)).join("\n");
+		for (const line of lines) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
+		expect(plain).toContain("test-model:high");
+		expect(plain).toContain("main");
+		expect(plain).toContain("(auto)");
+		expect(plain).toContain("…");
+	});
+
+	it("still renders the model label at very narrow widths", () => {
+		const width = 30;
+		const session = createSession({
+			sessionName: "deep-work-on-footer-layout",
+			modelId: "test-model",
+			reasoning: true,
+			thinkingLevel: "high",
+			usage: {
+				input: 12_345,
+				output: 6_789,
+				cacheRead: 50,
+				cacheWrite: 50,
+				cost: { total: 1.234 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(2));
+
+		const lines = footer.render(width);
+		const plain = lines.map((line) => stripAnsi(line)).join("\n");
+		for (const line of lines) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
+		expect(plain).toContain("test-model");
 	});
 });

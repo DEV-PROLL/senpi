@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Tool } from "@earendil-works/pi-ai";
+import { isRetryableErrorMessage, type Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type { CompactionEntry } from "../../../session-manager.ts";
@@ -44,6 +44,7 @@ import {
 	type SpeculativeCompactionResult,
 	type SpeculativeCompactionSnapshot,
 	SummaryGenerationError,
+	SummaryRequestError,
 } from "./speculative.ts";
 import { type CompactionExtensionState, createInitialState, resetTurnCounter } from "./state.ts";
 import * as todoBridge from "./todo-bridge.ts";
@@ -335,6 +336,19 @@ export default function compactionExtension(
 				aborted: feedbackSignal?.aborted,
 				errorMessage: `Compaction failed: ${message}`,
 			});
+			// Transient transport failures (network drop, timeout, provider blip)
+			// must not escape as extension errors: the runner would print a raw
+			// stack on top of the compaction_end message above, while the turn's
+			// own provider request surfaces the same outage once through the
+			// normal retry path. Provider `error` stops carry metadata-aware
+			// classification (a refusal with retryable-looking text stays loud);
+			// bare transport throws fall back to the message classifier. Count
+			// the failure so the circuit breaker halts repeated doomed attempts.
+			const transient = error instanceof SummaryRequestError ? error.transient : isRetryableErrorMessage(message);
+			if (transient) {
+				state = breaker.recordFailure(state, Date.now(), { route: "extension" });
+				return { applied: false, reason: "failed" };
+			}
 			throw error;
 		}
 	}
@@ -444,6 +458,7 @@ export default function compactionExtension(
 		// smaller window: this is the overflow risk the warm start must absorb.
 		const usage = ctx.getContextUsage();
 		if (!usage) return;
+		if (breaker.isTripped(state, Date.now())) return;
 		const settings = ctx.getCompactionSettings();
 		if (policy.shouldStartSpeculativeCompaction(usage, contextWindow, settings, state.lastYield ?? undefined)) {
 			startSpeculativeCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
@@ -498,14 +513,20 @@ export default function compactionExtension(
 		const settings = ctx.getCompactionSettings();
 		const pendingPromptTokens = estimatePendingPromptTokens(event);
 		const usageWithPendingPrompt = usage ? withAdditionalTokens(usage, pendingPromptTokens) : undefined;
+		// Proactive routes back off while the breaker cools down after repeated
+		// failures (e.g. summarization attempts during a network outage); only
+		// the hard-limit emergency still tries unconditionally.
+		const breakerCoolingDown = breaker.isTripped(state, Date.now());
 		if (usage && policy.isAtHardLimit(usage, contextWindow, settings.reserveTokens, pendingPromptTokens)) {
 			await applyBlockingCompaction(ctx, EMERGENCY_COMPACTION_INSTRUCTIONS);
 		} else if (
+			!breakerCoolingDown &&
 			usageWithPendingPrompt &&
 			policy.shouldTriggerCompaction(usageWithPendingPrompt, contextWindow, settings, state.lastYield ?? undefined)
 		) {
 			await applyBlockingCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
 		} else if (
+			!breakerCoolingDown &&
 			usageWithPendingPrompt &&
 			policy.shouldStartSpeculativeCompaction(
 				usageWithPendingPrompt,

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getAgentDir, VERSION } from "../../../config.ts";
+import { subscribeProviderAccountEvents } from "../../../core/extensions/builtin/claude-agent-sdk/account-events.ts";
 import {
 	type ClassifiedIncoming,
 	populateNotificationEnvelope,
@@ -10,7 +11,7 @@ import {
 import { alreadyInitializedError, invalidParamsError, invalidRequestError } from "../rpc/errors.ts";
 import { createRegistry, type MethodRegistration, type MethodRegistry } from "../rpc/registry.ts";
 import type { ThreadRegistry } from "../threads/registry.ts";
-import { registerAppServerAccountMethods } from "./account.ts";
+import { providerAccountEventNotification, registerAppServerAccountMethods } from "./account.ts";
 import { registerAppServerCatalogMethods } from "./catalogs.ts";
 import { registerAppServerConfigMethods } from "./config.ts";
 import {
@@ -50,6 +51,7 @@ export class ServerCore {
 	private readonly version: string;
 	private readonly now: () => number;
 	private readonly activeDispatch = new AsyncLocalStorage<DeferredDispatch>();
+	private unsubscribeProviderAccountEvents: (() => void) | undefined;
 
 	constructor(options: ServerCoreOptions = {}) {
 		this.registry = options.registry ?? createRegistry();
@@ -81,11 +83,16 @@ export class ServerCore {
 	addConnection(input: ConnectionInput): Connection {
 		const connection = createConnection(input);
 		this.connections.set(connection.id, connection);
+		this.subscribeToProviderAccountEvents();
 		return connection;
 	}
 
 	removeConnection(id: ConnectionId): void {
 		this.connections.delete(id);
+		if (this.connections.size === 0) {
+			this.unsubscribeProviderAccountEvents?.();
+			this.unsubscribeProviderAccountEvents = undefined;
+		}
 	}
 
 	getConnection(id: ConnectionId): Connection | undefined {
@@ -147,6 +154,19 @@ export class ServerCore {
 			}
 		}
 		return delivered;
+	}
+
+	private subscribeToProviderAccountEvents(): void {
+		if (this.unsubscribeProviderAccountEvents) return;
+		this.unsubscribeProviderAccountEvents = subscribeProviderAccountEvents((event) => {
+			const notification = providerAccountEventNotification(event);
+			const send = async (): Promise<void> => {
+				await this.broadcastNotification(notification);
+			};
+			const dispatch = this.activeDispatch.getStore();
+			if (dispatch && this.deferUntilResponded(dispatch.connectionId, send)) return;
+			void send();
+		});
 	}
 
 	private async respondToRequest(connection: Connection, request: RpcRequest): Promise<void> {

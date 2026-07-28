@@ -232,6 +232,19 @@ The `api` field determines which streaming implementation is used:
 | `google-vertex` | Google Vertex AI API |
 | `bedrock-converse-stream` | Amazon Bedrock Converse API |
 
+Custom `openai-responses` proxies are not assumed to support native remote compaction. If the
+endpoint implements Responses remote compaction v2, opt in explicitly:
+
+```typescript
+compat: {
+  supportsRemoteCompactionV2: true
+}
+```
+
+When enabled, compaction uses a normal Responses request with a native `compaction_trigger`.
+The proxy must preserve native `compaction` output items. Failed remote attempts still fall
+back through the existing compact-endpoint and local summarization paths.
+
 Most OpenAI-compatible providers work with `openai-completions`. Use model-level `thinkingLevelMap` for model-specific thinking levels, and `compat` for provider quirks. The `xhigh` and `max` levels are opt-in, require non-null map entries, and may be separated by unsupported holes:
 
 ```typescript

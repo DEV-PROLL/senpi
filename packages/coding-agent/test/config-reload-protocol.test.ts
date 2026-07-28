@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -83,6 +84,25 @@ describe("config-watch protocol", () => {
 			changed: "config-watch:changed",
 			reloaded: "config-watch:reloaded",
 			rejected: "config-watch:rejected",
+		});
+	});
+
+	describe("#given a root-anchored filter glob", () => {
+		it("#then matches only the immediate child of the watch root", () => {
+			expect(matchesConfigWatchFilter(".omo", ["/.omo"])).toBe(true);
+			expect(matchesConfigWatchFilter(join("nested", ".omo"), ["/.omo"])).toBe(false);
+			expect(matchesConfigWatchFilter(join("a", "b", ".omo"), ["/.omo"])).toBe(false);
+		});
+
+		it("#then matches a nested path anchored at the watch root", () => {
+			expect(matchesConfigWatchFilter(join(".omo", "omo.jsonc"), ["/.omo/omo.jsonc"])).toBe(true);
+			expect(matchesConfigWatchFilter(join("worktree", ".omo", "omo.jsonc"), ["/.omo/omo.jsonc"])).toBe(false);
+		});
+
+		it("#then leaves unanchored suffix matching unchanged", () => {
+			expect(matchesConfigWatchFilter(join("nested", ".omo"), [".omo"])).toBe(true);
+			expect(matchesConfigWatchFilter("settings.json", ["settings.json"])).toBe(true);
+			expect(matchesConfigWatchFilter("theme.js", ["*.js"])).toBe(true);
 		});
 	});
 });

@@ -146,6 +146,22 @@ function createQaExecuteTool(options: QaOptions): OutputExecuteTool {
 	});
 }
 
+const QA_TOOL_CATALOG = [
+	{
+		name: "slow_fake",
+		description: "QA fixture tool.",
+		parameters: {
+			type: "object",
+			properties: {
+				steps: { type: "array", description: "Steps to run in order.", items: { type: "object" } },
+				app: { type: "string", description: "Target application." },
+			},
+			required: ["steps"],
+		},
+	},
+	{ name: "task_output", description: "QA transcript fixture.", parameters: { type: "object", properties: {} } },
+] as const;
+
 async function runQa(options: QaOptions): Promise<void> {
 	let dispatch: ((message: KernelToHostMessage) => void) | undefined;
 	const kernel = new JavaScriptKernel({
@@ -192,6 +208,7 @@ async function runQa(options: QaOptions): Promise<void> {
 		kernelManager,
 		cellTimeoutSeconds: options.timeoutSeconds,
 		executeTool,
+		listTools: () => QA_TOOL_CATALOG,
 	});
 	try {
 		for (const [index, code] of options.codes.entries()) {

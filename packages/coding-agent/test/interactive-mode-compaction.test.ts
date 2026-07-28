@@ -539,6 +539,9 @@ describe("InteractiveMode compaction events", () => {
 			showUserMessageSelector: vi.fn(),
 			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
 			settingsManager: { getShowTerminalProgress: () => false, getDoubleEscapeAction: () => "none" },
+			turnWorkingTip: { resetForNewTurn: vi.fn(), resolve: vi.fn() },
+			hideShortcutOverlay: vi.fn(),
+			lastEditorText: "",
 			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() }, onDebug: undefined as unknown },
 		};
 
