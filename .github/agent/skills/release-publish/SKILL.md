@@ -72,6 +72,8 @@ These are separate controls and must not be conflated:
 - Never rerun `scripts/release.mjs` after the tag is pushed. If publishing fails, recover from the existing tag workflow.
 - If a check or test fails before the tag push, stop and fix the issue, then re-release. Do not try to salvage a bad release by continuing past the failure.
 - `E404` noise for `@code-yeongyu/senpi-orchestrator` is not a release failure.
+- **An npm PUT 404 during `npm publish` can be a false negative**: the publish may have landed anyway (observed live on 2026-07-28 with `@code-yeongyu/senpi@2026.7.28-2` — the job failed but the version exists). ALWAYS verify with `npm view <pkg> versions --json` before treating a publish error as real, before rerunning anything, and before declaring a release failed.
+- A failed `publish-npm` job skips `publish-github-release` and triggers the draft-cleanup path; check `gh release view v<version>` before recovering — the release may already be live. Recover only through the existing tag workflow, never by rerunning `release.mjs`.
 - If the main checkout has foreign state, use a clean dedicated clone/worktree. Never clean or stash someone else's work.
 
 ## Release notes provenance
