@@ -93,13 +93,11 @@ const payloadCases = [
 		name: "OpenAI Responses",
 		model: { ...getModel("openai", "gpt-5.4"), baseUrl: "http://127.0.0.1:9" },
 		effort: "low",
-		summary: undefined,
 	},
 	{
 		name: "Codex Responses",
 		model: { ...getModel("openai-codex", "gpt-5.4"), baseUrl: "http://127.0.0.1:9" },
 		effort: "low",
-		summary: "off",
 	},
 	{
 		name: "Azure Responses",
@@ -108,19 +106,18 @@ const payloadCases = [
 			baseUrl: "https://test-resource.openai.azure.com/openai/v1",
 		},
 		effort: "low",
-		summary: undefined,
 	},
 ] as const;
 
 describe("compaction summarization provider payloads", () => {
-	it.each(payloadCases)("uses the cheapest legal effort without a summary for $name", async ({
-		model,
-		effort,
-		summary,
-	}) => {
+	// Every Responses-family adapter must omit `reasoning.summary` when compaction
+	// asks for no summary. The Codex backend rejects a string sentinel such as
+	// "off" with `[ReasoningSummaryParam] [invalid_enum_value]`, which aborted
+	// compaction outright (issue #415).
+	it.each(payloadCases)("uses the cheapest legal effort without a summary for $name", async ({ model, effort }) => {
 		const payload = await captureSummaryPayload(model);
 		expect(payload.reasoning?.effort).toBe(effort);
-		expect(payload.reasoning?.summary).toBe(summary);
+		expect(payload.reasoning).not.toHaveProperty("summary");
 	});
 
 	it("uses low reasoning for Kimi when its catalog rejects minimal", async () => {
