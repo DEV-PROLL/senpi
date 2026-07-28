@@ -38,6 +38,20 @@ export function buildContinuationPrompt(goal: Goal): string {
 	].join("\n");
 }
 
+export function buildMonitorStallNotice(consecutiveContinuations: number): string {
+	return [
+		"<goal_monitor_stall_check>",
+		`System check: this is monitor-wait goal continuation #${consecutiveContinuations} in a row. The same monitor(s) stayed active across ${consecutiveContinuations} consecutive continuation turns with no new user input and no monitor completion. The current situation is likely abnormal - a stalled or dead wait.`,
+		"Before waiting on the monitors again, actively investigate:",
+		"- Inspect the monitored sessions' output now (bash_output) and verify the watched condition can still occur.",
+		"- Check whether the underlying process is hung, exited silently, or waiting on input; restart or replace it if so.",
+		"- If the wait target is wrong or no longer needed, kill the monitor (kill_bash) and pursue the goal another way.",
+		"- If the goal truly cannot progress, run the blocked audit instead of waiting again.",
+		"Do not end this turn with only another passive wait.",
+		"</goal_monitor_stall_check>",
+	].join("\n");
+}
+
 function escapeXmlText(value: string): string {
 	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
