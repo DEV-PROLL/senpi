@@ -4,13 +4,19 @@
 
 ### New Features
 
+- **Eval tool-call widgets** — Tools invoked from eval cells render inside the eval widget with their real call shapes (bash/read/write/grep/find/ls), truthful success/error status, duration, and compact sanitized previews; edit and non-core tools show a sanitized fallback row ([#444](https://github.com/code-yeongyu/senpi/pull/444)).
+
 ### Breaking Changes
 
 ### Added
 
+- Add nested real-tool-shape widgets for eval sub-tool calls with bounded captured arguments (30 enriched calls per cell, 4096-character serialized args budget) ([#444](https://github.com/code-yeongyu/senpi/pull/444)).
+
 ### Changed
 
 ### Fixed
+
+- Mark thrown tool results as errors in `executeTool` details so error-aware consumers see truthful failure status ([#444](https://github.com/code-yeongyu/senpi/pull/444)).
 
 ### Removed
 

@@ -6,6 +6,8 @@
 
 ### Added
 
+- Add nested tool-call widgets that render the real call shape of tools invoked from eval cells, with truthful status, duration, and sanitized previews ([#444](https://github.com/code-yeongyu/senpi/pull/444)).
+
 ### Changed
 
 ### Fixed
