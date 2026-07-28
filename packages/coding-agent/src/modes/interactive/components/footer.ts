@@ -214,7 +214,7 @@ export class FooterComponent implements Component {
 			right = plan.useFullRight && full ? full : minimal;
 			left = joinSegments([...anchor, ...middle, tail]);
 		} else if (plan.kind === "middle-elided") {
-			right = minimal;
+			right = plan.useFullRight && full ? full : minimal;
 			const segments = [...anchor, ...middle.slice(0, plan.keptMiddleCount)];
 			if (plan.showMarker) segments.push(marker);
 			segments.push(tail);

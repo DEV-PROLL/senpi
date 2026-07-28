@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.ts";
 import { FooterComponent, formatCwdForFooter } from "../src/modes/interactive/components/footer.ts";
+import { type FooterSegment, planFooterLayout } from "../src/modes/interactive/components/footer-layout.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
@@ -319,5 +320,81 @@ describe("FooterComponent width handling", () => {
 			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 		}
 		expect(plain).toContain("test-model");
+	});
+
+	it("renders the provider prefix when more than one provider is available", () => {
+		const width = 200;
+		const session = createSession({
+			sessionName: "session-name",
+			modelId: "test-model",
+			provider: "test",
+			reasoning: true,
+			thinkingLevel: "high",
+			usage: {
+				input: 100,
+				output: 10,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: { total: 1.234 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(2));
+
+		const lines = footer.render(width);
+		const plain = lines.map((line) => stripAnsi(line)).join("\n");
+		for (const line of lines) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
+		expect(plain).toContain("(test) test-model:high");
+	});
+});
+
+function seg(plain: string): FooterSegment {
+	return { plain, colored: plain };
+}
+
+describe("planFooterLayout provider priority", () => {
+	const anchor: [FooterSegment, ...FooterSegment[]] = [seg("~/local-workspaces/senpi"), seg("main")];
+	const middle = [seg("session-name"), seg("↑1.2M"), seg("↓45K"), seg("CH92.3%"), seg("$12.345")];
+	const tail = seg("120K/1M (12.0%) (auto)");
+	const right = {
+		minimal: seg("claude-opus-5:low"),
+		full: seg("(anthropic) claude-opus-5:low"),
+	};
+	const separator = " • ";
+	const ellipsisMarker = seg("…");
+	const baseInput = {
+		anchor,
+		middle,
+		tail,
+		right,
+		separator,
+		minPadding: 2,
+		ellipsisMarker,
+	};
+
+	it("keeps the provider prefix once a middle stat has to elide", () => {
+		const plan = planFooterLayout({ ...baseInput, width: 124 });
+		expect(plan.kind).toBe("middle-elided");
+		if (plan.kind !== "middle-elided") throw new Error("unexpected plan");
+		expect(plan.keptMiddleCount).toBe(3);
+		expect(plan.showMarker).toBe(true);
+		expect(plan.useFullRight).toBe(true);
+	});
+
+	it("falls back to the bare model label when even empty middle cannot fit the full label", () => {
+		const plan = planFooterLayout({ ...baseInput, width: 75 });
+		expect(plan.kind).toBe("middle-elided");
+		if (plan.kind !== "middle-elided") throw new Error("unexpected plan");
+		expect(plan.keptMiddleCount).toBe(0);
+		expect(plan.showMarker).toBe(false);
+		expect(plan.useFullRight).toBe(false);
+	});
+
+	it("keeps the existing pwd-elided and anchor/tail guarantees untouched", () => {
+		const plan = planFooterLayout({ ...baseInput, width: 60 });
+		expect(plan.kind).toBe("pwd-elided");
+		if (plan.kind !== "pwd-elided") throw new Error("unexpected plan");
+		expect(plan.pwdPlain.length).toBeGreaterThan(0);
 	});
 });
