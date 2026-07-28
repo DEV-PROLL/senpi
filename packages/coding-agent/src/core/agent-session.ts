@@ -1944,7 +1944,7 @@ export class AgentSession {
 		} catch (err) {
 			result = {
 				content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-				details: {},
+				details: { isError: true },
 			};
 			isError = true;
 		}

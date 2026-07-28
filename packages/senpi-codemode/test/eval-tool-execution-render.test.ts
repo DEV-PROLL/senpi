@@ -97,3 +97,57 @@ describe("eval ToolExecutionComponent lifecycle", () => {
 		component.stopAnimation();
 	});
 });
+
+function nestedWidgetResult(): ExecResult {
+	const details: EvalToolDetails = {
+		language: "py",
+		languages: ["py"],
+		durationMs: 12,
+		toolCalls: [
+			{
+				name: "read",
+				ok: true,
+				callId: "read-1",
+				args: { path: "/tmp/config.json" },
+				durationMs: 12,
+				resultPreview: "loaded configuration",
+			},
+		],
+		truncated: false,
+		phase: "complete",
+		cells: [{ index: 0, code: CODE, language: "py", output: OUTPUT, status: "complete", durationMs: 12 }],
+	};
+	const agentResult: AgentToolResult<EvalToolDetails> = { content: [{ type: "text", text: OUTPUT }], details };
+	return { ...agentResult, isError: false };
+}
+
+describe("nested tool-call widgets in ToolExecutionComponent", () => {
+	beforeAll(() => {
+		initTheme();
+	});
+
+	it("nested widgets: single box", async () => {
+		const { TUI } = await import("@earendil-works/pi-tui");
+		const { VirtualTerminal } = await import("../../tui/test/virtual-terminal.ts");
+		const ui = new TUI(new VirtualTerminal(80, 24));
+		const component = new ToolExecutionComponent(
+			"eval",
+			"eval-nested-read",
+			{ language: "py", code: CODE },
+			{},
+			evalToolDef(),
+			ui,
+			"/tmp",
+		);
+		component.setArgsComplete();
+		component.markExecutionStarted();
+		component.updateResult(nestedWidgetResult(), false);
+
+		const lines = component.render(80);
+		const output = stripAnsi(lines.join("\n"));
+		expect(countBoxes(lines)).toBe(1);
+		expect(output).toContain("config.json");
+
+		component.stopAnimation();
+	});
+});

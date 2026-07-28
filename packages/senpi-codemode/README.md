@@ -185,3 +185,18 @@ Direct real-surface QA drivers live in `scripts/qa-*.ts`: kernel cells
 (`qa-py-cell.ts`, `qa-js-cell.ts`, `qa-rb-cell.ts`, `qa-jl-cell.ts`), end-to-end
 extension execution (`qa-e2e-eval.ts`), and renderer output
 (`qa-render-dump.ts`).
+
+### Nested tool-call widgets
+
+When an eval cell invokes `tool.<name>(...)`, the result panel can render a
+nested widget for the invoked tool. The widget captures bounded args, duration,
+and a sanitized 160 code points result preview; the rendering path is
+always-on and does not depend on any toggle or session flag.
+
+The capture budget is fixed at 30 enriched calls per cell, with a 4096-character
+serialized args budget. Previews are capped at 160 code points, and collapsed
+widgets stay within the 8 lines collapsed widget budget.
+
+Entries without args — including old sessions, reserved/completion rows, and
+calls past the cap — render as plain rows. Edit renders a fallback row by
+design, even when its args are present.

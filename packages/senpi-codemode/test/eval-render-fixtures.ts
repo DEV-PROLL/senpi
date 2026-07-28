@@ -96,6 +96,12 @@ export function evalResultWithOmittedDetails(text: string): AgentToolResult<Eval
 	Reflect.deleteProperty(result, "details");
 	return result;
 }
+export function evalResultWithNestedToolCalls(
+	toolCalls: EvalToolDetails["toolCalls"],
+	text = "complete",
+): AgentToolResult<EvalToolDetails> {
+	return evalResult({ language: "js", durationMs: 0, toolCalls, truncated: false }, text);
+}
 
 /** Mirrors host-generated error results whose details payload is an empty object. */
 export function evalResultWithEmptyDetails(text: string): AgentToolResult<EvalToolDetails> {
