@@ -1002,6 +1002,7 @@ export class InteractiveMode {
 				now: Date.now(),
 				definitions: TIP_DEFINITIONS,
 				keys: keyText,
+				hasCommand: (command) => this.hasRegisteredCommand(command),
 			});
 			if (startupTip) {
 				this.recordShownTip(startupTip.tipId);
@@ -2445,6 +2446,7 @@ export class InteractiveMode {
 					now: Date.now(),
 					definitions: TIP_DEFINITIONS,
 					keys: keyText,
+					hasCommand: (command) => this.hasRegisteredCommand(command),
 				}),
 			(tip) => this.recordShownTip(tip.tipId),
 		);
@@ -4888,6 +4890,10 @@ export class InteractiveMode {
 		this.editor.setText("");
 		this.updatePendingMessagesDisplay();
 		this.showStatus("Queued message for after compaction");
+	}
+
+	private hasRegisteredCommand(command: string): boolean {
+		return !!this.session.extensionRunner.getCommand(command);
 	}
 
 	private isExtensionCommand(text: string): boolean {
