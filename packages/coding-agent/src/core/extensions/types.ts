@@ -709,6 +709,17 @@ export interface SessionBeforeForkEvent {
 	position: "before" | "at";
 }
 
+/**
+ * Fired before a full session reload (`/reload`, `ctx.reload()`, or the
+ * config-reload hot path) tears down and rebuilds the extension runtime.
+ * Cancelling prevents the reload entirely: no `session_shutdown` is emitted and
+ * no resources are reloaded. Use this to protect work that a reload would
+ * destroy (e.g. running background children owned by the extension runtime).
+ */
+export interface SessionBeforeReloadEvent {
+	type: "session_before_reload";
+}
+
 /** Fired before context compaction (can be cancelled or customized) */
 export interface SessionBeforeCompactEvent {
 	type: "session_before_compact";
@@ -821,6 +832,7 @@ export type SessionEvent =
 	| SessionInfoChangedEvent
 	| SessionBeforeSwitchEvent
 	| SessionBeforeForkEvent
+	| SessionBeforeReloadEvent
 	| SessionBeforeCompactEvent
 	| SessionCompactEvent
 	| SessionShutdownEvent
@@ -1307,6 +1319,16 @@ export interface SessionBeforeForkResult {
 	skipConversationRestore?: boolean;
 }
 
+export interface SessionBeforeReloadResult {
+	cancel?: boolean;
+	/**
+	 * Short human-readable reason shown by hosts when the reload is blocked.
+	 * Prefer an actionable sentence ("2 subagents still running: a, b - wait or
+	 * cancel them before reloading").
+	 */
+	reason?: string;
+}
+
 export interface SessionBeforeCompactResult {
 	cancel?: boolean;
 	compaction?: CompactionResult;
@@ -1409,6 +1431,10 @@ export interface ExtensionAPI {
 		handler: ExtensionHandler<SessionBeforeSwitchEvent, SessionBeforeSwitchResult>,
 	): void;
 	on(event: "session_before_fork", handler: ExtensionHandler<SessionBeforeForkEvent, SessionBeforeForkResult>): void;
+	on(
+		event: "session_before_reload",
+		handler: ExtensionHandler<SessionBeforeReloadEvent, SessionBeforeReloadResult>,
+	): void;
 	on(
 		event: "session_before_compact",
 		handler: ExtensionHandler<SessionBeforeCompactEvent, SessionBeforeCompactResult>,

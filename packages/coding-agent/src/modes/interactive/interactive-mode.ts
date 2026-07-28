@@ -6198,6 +6198,14 @@ export class InteractiveMode {
 			this.showWarning("Wait for compaction to finish before reloading.");
 			return;
 		}
+		// Pre-check the extension veto (session_before_reload) so a blocked reload
+		// warns without flashing the reload box or stealing editor focus. reload()
+		// re-checks internally, so the race window below is still covered.
+		const veto = await this.session.checkReloadVeto();
+		if (veto.cancelled) {
+			this.showWarning(veto.reason ?? "Reload blocked by an extension.");
+			return;
+		}
 
 		this.resetExtensionUI();
 
@@ -6243,7 +6251,13 @@ export class InteractiveMode {
 		};
 
 		try {
-			await this.session.reload({ beforeSessionStart: restoreChatBeforeSessionStart });
+			const reloadResult = await this.session.reload({ beforeSessionStart: restoreChatBeforeSessionStart });
+			if (reloadResult.cancelled) {
+				dismissReloadBox(previousEditor as Component);
+				reloadBoxDismissed = true;
+				this.showWarning(reloadResult.reason ?? "Reload blocked by an extension.");
+				return;
+			}
 			restoreChatBeforeSessionStart();
 			configureHttpDispatcher(this.settingsManager.getHttpIdleTimeoutMs());
 			this.keybindings.reload();
