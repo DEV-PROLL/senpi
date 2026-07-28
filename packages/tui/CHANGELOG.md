@@ -6,9 +6,16 @@
 
 ### Added
 
+- Render Kitty graphics through tmux passthrough with split-safe Unicode placeholders and tmux-reported cell sizing ([#389](https://github.com/code-yeongyu/senpi/pull/389) by [@minpeter](https://github.com/minpeter)).
+
 ### Changed
 
+- Pace high-frequency large-session rendering with separate immediate and deferred synchronization paths.
+
 ### Fixed
+
+- Preserve paste-marker provenance and expansion across editor transfers, `setText()` round-trips, deletion, undo, and full-text consumers ([#411](https://github.com/code-yeongyu/senpi/pull/411) by [@minpeter](https://github.com/minpeter)).
+- Prevent large sessions from entering repeated synchronous render loops while still honoring immediate render requests ([#424](https://github.com/code-yeongyu/senpi/pull/424) by [@sigridjineth](https://github.com/sigridjineth)).
 
 ### Removed
 

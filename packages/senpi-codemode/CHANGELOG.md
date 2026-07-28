@@ -6,7 +6,11 @@
 
 ### Added
 
+- Add `tool_schema()` and return parameter schemas from failed eval tool calls so cells can inspect and self-correct tool invocations ([#407](https://github.com/code-yeongyu/senpi/pull/407)).
+
 ### Changed
+
+- Allow eval cells and extensions to activate named searchable tools lazily on the calling surface without globally widening the active tool set ([#408](https://github.com/code-yeongyu/senpi/pull/408)).
 
 ### Fixed
 

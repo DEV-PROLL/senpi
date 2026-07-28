@@ -6,9 +6,17 @@
 
 ### Added
 
+- Add OpenAI `-fast` catalog variants that request priority service tier while preserving the upstream model identity ([#420](https://github.com/code-yeongyu/senpi/pull/420)).
+
 ### Changed
 
+- Retry provider streams that fail before producing output, preserving callback ordering and allowing the normal bounded fallback policy to recover ([#421](https://github.com/code-yeongyu/senpi/pull/421)).
+
 ### Fixed
+
+- Retry Cloudflare 522 connection-timeout responses as transient provider failures ([#404](https://github.com/code-yeongyu/senpi/pull/404)).
+- Normalize legacy Codex reasoning-summary settings and omit unsupported summary values that caused OpenAI Responses and compaction requests to fail ([#412](https://github.com/code-yeongyu/senpi/pull/412) by [@DevNewbie1826](https://github.com/DevNewbie1826), [#416](https://github.com/code-yeongyu/senpi/pull/416)).
+- Honor explicitly disabled Azure prompt caching instead of re-enabling it during request construction.
 
 ### Removed
 

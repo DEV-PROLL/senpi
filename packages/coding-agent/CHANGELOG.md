@@ -4,13 +4,56 @@
 
 ### New Features
 
+- **Claude Agent SDK provider** — Sign in through native OAuth, import existing Claude credentials, pin accounts, fail over across multiple accounts with session affinity, and use in-process MCP/custom tools through the built-in provider ([#409](https://github.com/code-yeongyu/senpi/pull/409)).
+- **Self-teaching interactive UI** — Discover commands, keybindings, favorites, settings, and tool workflows through startup tips, working tips, `/help`, `/keybindings`, the shortcut overlay, and expanded feature coverage ([#405](https://github.com/code-yeongyu/senpi/pull/405)).
+- **Cache-aware long-running tools** — Foreground bash calls respect prompt-cache budgets, auto-detach at the safe deadline, and direct users to background sessions plus monitor subscriptions rather than fixed waits ([#422](https://github.com/code-yeongyu/senpi/pull/422)).
+- **Durable goal execution** — Goal completion is gated on finished todos, blocked/completed audits are decisive, todo continuity survives follow-up turns, and monitor-aware continuation avoids needless wakeups ([#427](https://github.com/code-yeongyu/senpi/pull/427), [#428](https://github.com/code-yeongyu/senpi/pull/428), [#430](https://github.com/code-yeongyu/senpi/pull/430)).
+- **Billing-aware model failover** — Billing and quota failures can permanently pin the configured fallback as the active session model instead of repeatedly returning to an exhausted provider ([#431](https://github.com/code-yeongyu/senpi/pull/431), [#434](https://github.com/code-yeongyu/senpi/pull/434)).
+
 ### Breaking Changes
 
 ### Added
 
+- Add a built-in Claude Agent SDK provider with OAuth login/import, account listing and pinning, HRW session affinity, automatic account failover, custom-tool mapping, and in-process MCP execution ([#409](https://github.com/code-yeongyu/senpi/pull/409)).
+- Add rotating startup and working tips, `/help`, `/keybindings`, a keyboard-shortcut overlay, external-editor support, favorite-model guidance, and settings to control tip presentation ([#405](https://github.com/code-yeongyu/senpi/pull/405)).
+- Add cache-aware foreground bash timeout budgets and auto-detach behavior with completion notifications ([#422](https://github.com/code-yeongyu/senpi/pull/422)).
+- Discover project configuration from the nearest parent directory instead of requiring the working directory to be the project root ([#423](https://github.com/code-yeongyu/senpi/pull/423)).
+- Add a cancellable `session_before_reload` extension event so extensions can veto reload before session state is replaced ([#418](https://github.com/code-yeongyu/senpi/pull/418)).
+- Show active monitor count in the interactive footer and show a pirate `(🏴‍☠️ OmO Native)` badge when the native omo-senpi plus senpi-task stack is installed ([#417](https://github.com/code-yeongyu/senpi/pull/417), [#438](https://github.com/code-yeongyu/senpi/pull/438)).
+- Add OpenAI `-fast` priority-tier model variants to the default catalog ([#420](https://github.com/code-yeongyu/senpi/pull/420)).
+- Add a Kimi K3 ambiguity preset that reflects before asking a focused clarification question ([#390](https://github.com/code-yeongyu/senpi/pull/390)).
+- Render Kitty graphics through tmux passthrough with split-safe placement ([#389](https://github.com/code-yeongyu/senpi/pull/389) by [@minpeter](https://github.com/minpeter)).
+- Add `tool_schema()` and self-correcting eval tool-schema feedback ([#407](https://github.com/code-yeongyu/senpi/pull/407)).
+
 ### Changed
 
+- Permanently switch the session model after configured billing-class fallback, including unconditional pinning for billing errors ([#431](https://github.com/code-yeongyu/senpi/pull/431), [#434](https://github.com/code-yeongyu/senpi/pull/434)).
+- Keep emergency compaction pruning engaged with hysteresis so repeated threshold crossings do not destroy the prompt cache ([#425](https://github.com/code-yeongyu/senpi/pull/425)).
+- Bound compaction and summarization stream acquisition with wall-clock budgets, then degrade eligible transient failures without issuing a duplicate request ([#419](https://github.com/code-yeongyu/senpi/pull/419), [#436](https://github.com/code-yeongyu/senpi/pull/436)).
+- Support OpenAI Responses remote compaction v2 and provider-native compaction capability routing ([#403](https://github.com/code-yeongyu/senpi/pull/403)).
+- Smooth streamed response pacing while keeping the final response immediate ([#396](https://github.com/code-yeongyu/senpi/pull/396) by [@changeroa](https://github.com/changeroa)).
+- Pin footer anchors, prioritize the provider prefix, restore immediate provider counts, and remove the cache-total segment so narrow layouts remain useful ([#406](https://github.com/code-yeongyu/senpi/pull/406)).
+- Lazily activate searchable MCP/eval tools only for the surface that requested them ([#408](https://github.com/code-yeongyu/senpi/pull/408)).
+- Route long waits to background sessions and monitor subscriptions, removing stale tmux and `bash_output` wait guidance ([#413](https://github.com/code-yeongyu/senpi/pull/413), [#435](https://github.com/code-yeongyu/senpi/pull/435)).
+- Hide internal terminal wake notifications while preserving the event that resumes the agent loop ([#429](https://github.com/code-yeongyu/senpi/pull/429)).
+
 ### Fixed
+
+- Do not warn when optional `retry.fallbackChains` is absent; explicit malformed values still produce configuration warnings.
+- Resolve provider-qualified fallback selectors within the selected provider rather than treating them as global model globs.
+- Retry pre-output provider stream failures and Cloudflare 522 responses through the bounded retry/fallback policy ([#404](https://github.com/code-yeongyu/senpi/pull/404), [#421](https://github.com/code-yeongyu/senpi/pull/421)).
+- Omit unsupported Codex reasoning-summary payloads and preserve session affinity through every compaction and summarization path ([#412](https://github.com/code-yeongyu/senpi/pull/412) by [@DevNewbie1826](https://github.com/DevNewbie1826), [#416](https://github.com/code-yeongyu/senpi/pull/416)).
+- Avoid unsupported minimal reasoning during compaction ([#398](https://github.com/code-yeongyu/senpi/pull/398)).
+- Degrade transient blocking-compaction failures cleanly instead of aborting the active session ([#391](https://github.com/code-yeongyu/senpi/pull/391)).
+- Keep the startup tip visible when extensions install a custom header ([#410](https://github.com/code-yeongyu/senpi/pull/410)).
+- Initialize themes before starting the multi-session RPC host ([#414](https://github.com/code-yeongyu/senpi/pull/414)).
+- Stop config reload loops caused by the global default extension shim, watch only loadable extension entries, and ignore unrelated runtime-state subtrees ([#397](https://github.com/code-yeongyu/senpi/pull/397), [#400](https://github.com/code-yeongyu/senpi/pull/400)).
+- Prevent zombie processes from being counted as live during process-tree teardown verification ([#402](https://github.com/code-yeongyu/senpi/pull/402)).
+- Keep monitor tools available with native bash and flatten the monitor schema so Anthropic payloads retain every field ([#393](https://github.com/code-yeongyu/senpi/pull/393), [#401](https://github.com/code-yeongyu/senpi/pull/401)).
+- Retry transient session-title generation failures and sanitize runtime-error presentation ([#394](https://github.com/code-yeongyu/senpi/pull/394)).
+- Stop reload from auto-starting a stopped agent and block an active goal when the user aborts outside an agent run ([#395](https://github.com/code-yeongyu/senpi/pull/395)).
+- Preserve todo continuity, enforce open-todo completion gates, and clean up monitor-aware goal continuation after reload ([#427](https://github.com/code-yeongyu/senpi/pull/427), [#428](https://github.com/code-yeongyu/senpi/pull/428), [#430](https://github.com/code-yeongyu/senpi/pull/430)).
+- Preserve paste-marker expansion across editor transfers and prevent repeated render loops in large sessions ([#411](https://github.com/code-yeongyu/senpi/pull/411) by [@minpeter](https://github.com/minpeter), [#424](https://github.com/code-yeongyu/senpi/pull/424) by [@sigridjineth](https://github.com/sigridjineth)).
 
 ### Removed
 
