@@ -593,8 +593,8 @@ export function resolveCompatibilityRequestConfig(
 	return {
 		headers: model.headers || configured ? { ...model.headers, ...configured } : undefined,
 		extraBody: Object.keys(configuredExtraBody).length > 0 ? configuredExtraBody : undefined,
-		upstreamModelId: extensionModel?.upstreamModelId ?? modelDefinition?.upstreamModelId,
-		serviceTier: extensionModel?.serviceTier ?? modelDefinition?.serviceTier,
+		upstreamModelId: extensionModel?.upstreamModelId ?? modelDefinition?.upstreamModelId ?? model.upstreamModelId,
+		serviceTier: extensionModel?.serviceTier ?? modelDefinition?.serviceTier ?? model.serviceTier,
 		authHeader: extension?.authHeader ?? config?.authHeader ?? false,
 	};
 }

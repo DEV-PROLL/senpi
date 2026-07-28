@@ -375,6 +375,28 @@ const OPENAI_RESPONSES_NONE_REASONING_MODELS = new Set([
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",
 ]);
+// OpenAI models with Priority processing support, per the OpenAI pricing page's
+// Priority table. `-fast` catalog variants are generated for exactly this set.
+const OPENAI_PRIORITY_TIER_MODEL_IDS = new Set([
+	"gpt-5.6-sol",
+	"gpt-5.6-terra",
+	"gpt-5.6-luna",
+	"gpt-5.5",
+	"gpt-5.4",
+	"gpt-5.4-mini",
+	"gpt-5.2",
+	"gpt-5.1",
+	"gpt-5",
+	"gpt-5-mini",
+	"gpt-4.1",
+	"gpt-4.1-mini",
+	"gpt-4.1-nano",
+	"gpt-4o",
+	"gpt-4o-2024-05-13",
+	"gpt-4o-mini",
+	"o3",
+	"o4-mini",
+]);
 const XAI_RESPONSES_MODEL_ID = "grok-4.5";
 const XAI_BUILTIN_EXCLUDED_MODEL_IDS = new Set([
 	"grok-3",
@@ -2804,6 +2826,24 @@ async function generateModels() {
 		applyOpenAIToolSearchMetadata(model);
 		applyOpenAIExplicitPromptCacheMetadata(model);
 	}
+
+	// Emit after metadata application so variants clone fully processed base models.
+	// Cost rates stay at base values: the openai-responses adapter multiplies usage
+	// cost by the service-tier multiplier at request time, so raised catalog rates
+	// would double-count. Scoped to the direct OpenAI provider; Azure clones and the
+	// Codex backend are intentionally excluded.
+	const openAiFastVariants: Model<Api>[] = [];
+	for (const model of allModels) {
+		if (model.provider !== "openai" || !OPENAI_PRIORITY_TIER_MODEL_IDS.has(model.id)) continue;
+		openAiFastVariants.push({
+			...model,
+			id: `${model.id}-fast`,
+			name: `${model.name} Fast`,
+			upstreamModelId: model.id,
+			serviceTier: "priority",
+		});
+	}
+	allModels.push(...openAiFastVariants);
 
 	// Group by provider and deduplicate by model ID
 	const providers: Record<string, Record<string, Model<any>>> = {};
