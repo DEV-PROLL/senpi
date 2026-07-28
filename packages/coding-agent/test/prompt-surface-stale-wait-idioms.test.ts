@@ -120,9 +120,7 @@ describe("stale wait-idiom consistency gate", () => {
 	});
 
 	it("no agent-facing terminal surface teaches tmux as the backgrounding mechanism", () => {
-		const violations = agentFacingSurfaces().filter(
-			({ text }) => /tmux/i.test(text) && !TMUX_NEGATION.test(text),
-		);
+		const violations = agentFacingSurfaces().filter(({ text }) => /tmux/i.test(text) && !TMUX_NEGATION.test(text));
 		expect(
 			violations.map(({ name, line, text }) => `${name}:${line}: ${text.trim()}`),
 			"tmux taught as a backgrounding/wait mechanism outside negative guidance",
