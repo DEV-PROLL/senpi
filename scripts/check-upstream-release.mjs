@@ -23,9 +23,12 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 
 const UPSTREAM_REPO = "badlogic/pi-mono";
-const UPSTREAM_REMOTE_URL = `https://github.com/${UPSTREAM_REPO}.git`;
-const UPSTREAM_MAIN_REF = "refs/remotes/pi-mono/main";
+const DEFAULT_UPSTREAM_REMOTE_URL = `https://github.com/${UPSTREAM_REPO}.git`;
 const PIN_PATH = ".github/upstream.json";
+
+function upstreamRemoteUrl() {
+	return process.env.SENPI_UPSTREAM_REMOTE_URL || DEFAULT_UPSTREAM_REMOTE_URL;
+}
 
 function log(message) {
 	process.stderr.write(`[check-upstream] ${message}\n`);
@@ -44,7 +47,7 @@ function tryRun(bin, args) {
 }
 
 function hasGh() {
-	return tryRun("gh", ["--version"]).ok;
+	return !process.env.SENPI_UPSTREAM_REMOTE_URL && tryRun("gh", ["--version"]).ok;
 }
 
 function latestUpstreamReleaseTag() {
@@ -56,7 +59,7 @@ function latestUpstreamReleaseTag() {
 		log("gh releases/latest unavailable; falling back to remote tags");
 	}
 
-	const lsRemote = run("git", ["ls-remote", "--tags", "--refs", UPSTREAM_REMOTE_URL, "v*"]);
+	const lsRemote = run("git", ["ls-remote", "--tags", "--refs", upstreamRemoteUrl(), "v*"]);
 	const tags = lsRemote
 		.split("\n")
 		.filter(Boolean)
@@ -81,28 +84,42 @@ function compareSemver(a, b) {
 }
 
 function resolveTagSha(tag) {
-	// Fetch the tag so the commit object exists locally for the ancestry check.
-	const fetch = tryRun("git", [
+	const remoteUrl = upstreamRemoteUrl();
+	const refs = run("git", [
+		"ls-remote",
+		"--tags",
+		remoteUrl,
+		`refs/tags/${tag}`,
+		`refs/tags/${tag}^{}`,
+	])
+		.split("\n")
+		.filter(Boolean);
+	const peeled = refs.find((line) => line.endsWith(`refs/tags/${tag}^{}`));
+	const direct = refs.find((line) => line.endsWith(`refs/tags/${tag}`));
+	const sha = (peeled ?? direct)?.split(/\s+/, 1)[0];
+	if (!sha) {
+		throw new Error(`upstream tag ${tag} could not be resolved`);
+	}
+
+	run("git", [
 		"fetch",
 		"--quiet",
-		UPSTREAM_REMOTE_URL,
 		"--no-tags",
-		`+refs/tags/${tag}:refs/upstream-tags/${tag}`,
+		"--no-write-fetch-head",
+		remoteUrl,
+		`refs/tags/${tag}`,
 	]);
-	if (!fetch.ok) {
-		// Fall back to a full tag fetch.
-		tryRun("git", ["fetch", "--quiet", "--tags", UPSTREAM_REMOTE_URL]);
-	}
-	const peeled = tryRun("git", ["rev-parse", `refs/upstream-tags/${tag}^{commit}`]);
-	if (peeled.ok && peeled.stdout) {
-		return peeled.stdout;
-	}
-	return run("git", ["rev-parse", `${tag}^{commit}`]);
+	run("git", ["cat-file", "-e", `${sha}^{commit}`]);
+	return sha;
 }
 
 function resolveUpstreamHeadSha() {
-	run("git", ["fetch", "--quiet", UPSTREAM_REMOTE_URL, `+refs/heads/main:${UPSTREAM_MAIN_REF}`]);
-	return run("git", ["rev-parse", UPSTREAM_MAIN_REF]);
+	const output = run("git", ["ls-remote", upstreamRemoteUrl(), "refs/heads/main"]);
+	const sha = output.split(/\s+/, 1)[0];
+	if (!/^[0-9a-f]{40}$/i.test(sha)) {
+		throw new Error("upstream main could not be resolved");
+	}
+	return sha;
 }
 
 function currentPinTag() {
