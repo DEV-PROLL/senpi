@@ -1,5 +1,26 @@
 # AI Source Changes
 
+## 2026-07-28 - Retry OpenAI-compatible stream failures before the first chunk
+
+### What changed and why
+
+- `utils/provider-retry.ts` now prefetches the first SDK stream result inside the existing bounded, abortable provider
+  retry policy. A retry creates a fresh request only when stream consumption fails before any wire chunk can reach
+  the public event stream.
+- `api/openai-completions.ts` uses that prefetch wrapper for OpenAI-compatible providers. Once the first chunk exists,
+  the stream is replayed exactly once and any later failure remains terminal, preventing duplicated text or tool
+  effects.
+- The exact property-less gateway error `Upstream error from DigitalOcean: stream failed` is recognized as transient;
+  arbitrary property-less errors remain non-retryable.
+- `../test/openai-completions-retry.test.ts` covers recovery, retry exhaustion, non-retryable failures, and the
+  post-first-chunk no-retry boundary. The isolated mock-loop driver
+  `.agents/skills/senpi-qa/scripts/mock-loop-stream-retry.mjs` proves the same behavior through the real source CLI.
+
+### Expected merge conflict zones
+
+- LOW: the request creation/retry block in `api/openai-completions.ts`.
+- LOW: shared provider retry classification and stream-prefetch helper in `utils/provider-retry.ts`.
+
 ## 2026-07-27 - Codex reasoning summary null omits the field instead of sending "off"
 
 ### What changed and why

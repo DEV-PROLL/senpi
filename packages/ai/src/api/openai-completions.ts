@@ -40,7 +40,7 @@ import { shortHash } from "../utils/hash.ts";
 import { headersToRecord } from "../utils/headers.ts";
 import { parseStreamingJson } from "../utils/json-parse.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
-import { retryProviderRequest } from "../utils/provider-retry.ts";
+import { retryProviderStreamRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
 import {
@@ -404,11 +404,13 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 					throw error;
 				}
 			};
-			const { data: openaiStream, response } = await retryProviderRequest(createRequest, {
-				maxRetries: options?.maxRetries,
-				maxRetryDelayMs: options?.maxRetryDelayMs,
-				signal: options?.signal,
-			});
+			const { stream: openaiStream, metadata: response } = await retryProviderStreamRequest(
+				async () => {
+					const { data, response } = await createRequest();
+					return { stream: data, metadata: response };
+				},
+				{ maxRetries: options?.maxRetries, maxRetryDelayMs: options?.maxRetryDelayMs, signal: options?.signal },
+			);
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 

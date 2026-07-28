@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { retryProviderRequest } from "../src/utils/provider-retry.ts";
+import { retryProviderRequest, retryProviderStreamRequest } from "../src/utils/provider-retry.ts";
 
 function providerError(status: number | undefined, headers?: Record<string, string>): Error {
 	return Object.assign(new Error(`Provider error: ${status}`), {
@@ -77,5 +77,27 @@ describe("provider request retries", () => {
 		await expect(result).rejects.toMatchObject({ name: "AbortError" });
 		expect(request).toHaveBeenCalledTimes(1);
 		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("forwards early consumer cancellation to the provider stream", async () => {
+		const closeStream = vi.fn(async () => ({ done: true as const, value: undefined }));
+		const iterator: AsyncIterator<string> = {
+			next: vi.fn(async () => ({ done: false as const, value: "first" })),
+			return: closeStream,
+		};
+		const attempt = await retryProviderStreamRequest(
+			async () => ({
+				stream: { [Symbol.asyncIterator]: () => iterator },
+				metadata: "response",
+			}),
+			{ maxRetries: 1 },
+		);
+
+		for await (const chunk of attempt.stream) {
+			expect(chunk).toBe("first");
+			break;
+		}
+
+		expect(closeStream).toHaveBeenCalledTimes(1);
 	});
 });
