@@ -19,7 +19,7 @@ import {
 	JSON_TREE_SCALAR_LEN_EXPANDED,
 	renderJsonTreeLines,
 } from "./json-tree.ts";
-import { codePointPrefix, formatDuration } from "./tool-widgets.ts";
+import { codePointPrefix, formatDuration, renderToolCallWidget } from "./tool-widgets.ts";
 import type {
 	EvalCellResult,
 	EvalInputSchema,
@@ -672,6 +672,46 @@ function toolCallRows(details: EvalToolDetails | undefined): ToolCallRow[] {
 	});
 }
 
+function nestedToolCallBlock(
+	details: EvalToolDetails | undefined,
+	theme: Theme | undefined,
+	cwd: string,
+	expanded: boolean,
+): RenderBlock | undefined {
+	const toolCalls = details?.toolCalls;
+	if (theme === undefined || toolCalls === undefined || !toolCalls.some((call) => call.args !== undefined)) {
+		return undefined;
+	}
+	const legacyRows = toolCallRows(details);
+	return {
+		kind: "dynamic",
+		render: (width) => {
+			const retainedCalls = expanded ? toolCalls : toolCalls.slice(-TOOL_CALL_PREVIEW_COUNT);
+			const retainedRows = expanded ? legacyRows : legacyRows.slice(-TOOL_CALL_PREVIEW_COUNT);
+			const skippedCount = toolCalls.length - retainedCalls.length;
+			const toolCallNoun = skippedCount === 1 ? "call" : "calls";
+			const lines =
+				expanded || skippedCount === 0
+					? []
+					: renderAllVisualLines(style(theme, "muted", `${skippedCount} earlier tool ${toolCallNoun}`), width);
+			const legacyBlock: Extract<RenderBlock, { kind: "toolCalls" }> = {
+				kind: "toolCalls",
+				calls: retainedRows,
+				expanded,
+				theme,
+			};
+			for (const [index, call] of retainedCalls.entries()) {
+				if (call.args !== undefined) {
+					appendLines(lines, renderToolCallWidget(call, { cwd, theme, expanded, width }));
+				} else {
+					appendLines(lines, renderToolCall(retainedRows[index], legacyBlock, width));
+				}
+			}
+			return lines;
+		},
+	};
+}
+
 function resultStatus(
 	details: EvalToolDetails | undefined,
 	options: ToolRenderResultOptions,
@@ -801,7 +841,9 @@ export function renderEvalResult(
 			},
 		];
 		const calls = toolCallRows(details);
-		if (calls.length > 0) blocks.push({ kind: "blank" }, { kind: "toolCalls", calls, expanded, theme });
+		const nestedCalls = nestedToolCallBlock(details, theme, context.cwd, expanded);
+		if (calls.length > 0)
+			blocks.push({ kind: "blank" }, nestedCalls ?? { kind: "toolCalls", calls, expanded, theme });
 		component.setBlocks(blocks);
 		return component;
 	}
@@ -865,7 +907,8 @@ export function renderEvalResult(
 		);
 	}
 	const calls = toolCallRows(details);
-	if (calls.length > 0) blocks.push({ kind: "blank" }, { kind: "toolCalls", calls, expanded, theme });
+	const nestedCalls = nestedToolCallBlock(details, theme, context.cwd, expanded);
+	if (calls.length > 0) blocks.push({ kind: "blank" }, nestedCalls ?? { kind: "toolCalls", calls, expanded, theme });
 	if (details?.notice !== undefined)
 		blocks.push({ kind: "blank" }, { kind: "text", text: style(theme, "dim", details.notice) });
 	const warning = formatTruncationWarning(details?.meta) ?? (details?.truncated ? "[eval output truncated]" : null);
