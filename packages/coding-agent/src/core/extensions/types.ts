@@ -410,6 +410,12 @@ export interface ExtensionContext {
 	getContextUsage(): ContextUsage | undefined;
 	/** Get resolved compaction settings from global/project/user overrides. */
 	getCompactionSettings(): CompactionPreparation["settings"];
+	/**
+	 * Longest a tool may block in the foreground before the active model's prompt
+	 * cache expires, or `undefined` when no cache-derived budget applies. Reads the
+	 * LIVE current model, so callers must not snapshot the value.
+	 */
+	getPromptCacheSafeWaitSeconds?(): number | undefined;
 	/** Get resolved look-at settings from global/project/user overrides. */
 	getLookAtSettings(): { enabled: boolean; models: string[] | undefined };
 	/** Get resolved image settings from global/project/user overrides. */
@@ -1981,6 +1987,7 @@ export interface ExtensionContextActions {
 	shutdown: () => void;
 	getContextUsage: () => ContextUsage | undefined;
 	getCompactionSettings: () => CompactionPreparation["settings"];
+	getPromptCacheSafeWaitSeconds?: () => number | undefined;
 	getLookAtSettings: () => { enabled: boolean; models: string[] | undefined };
 	getImageSettings: () => { autoResize: boolean; blockImages: boolean };
 	sessionSettings: ExtensionSessionSettings;

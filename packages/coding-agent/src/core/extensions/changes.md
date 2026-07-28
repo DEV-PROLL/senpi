@@ -1,5 +1,35 @@
 # Core Extensions Changes
 
+## 2026-07-28 - Prompt-cache safe-wait budget on ExtensionContext
+
+### What changed and why
+
+- Added `ExtensionContext.getPromptCacheSafeWaitSeconds(): number | undefined`, the longest an extension-owned tool may block in the foreground before the active model's prompt cache expires. It is the model's cache TTL (resolved by `pi-ai`'s `resolvePromptCacheTtlSeconds`) minus a configurable safety buffer (`promptCache.safetyBufferSeconds`, default 30), and `undefined` whenever no cache-derived budget applies — unknown TTL, caching off, feature disabled, or the buffer swallowing the whole TTL.
+- Consumers: the builtin `bash-timeout` extension caps its recommended maximum at this budget, and the builtin `terminal` extension uses it as the foreground auto-detach deadline. Both fall back to byte-identical legacy behavior when the getter returns `undefined`.
+- The getter reads the LIVE current model on every call, so a `/model` switch takes effect immediately; callers must not snapshot it.
+
+### Why the extension system couldn't handle this alone
+
+Prompt-cache TTL is decided per provider inside `pi-ai`, and the resolved model plus the `promptCache` settings block live in the session core. Extensions have no access to either, so the budget must cross the boundary as a typed context getter.
+
+### Files modified
+
+- `types.ts` (`ExtensionContext`, `ExtensionContextActions`)
+- `runner.ts` (default stub, `bindCore` assignment, context exposure)
+- `../agent-session.ts` (binding + `resolvePromptCacheSafeWaitSeconds()` / `syncPromptCacheSafeWaitEnv()`)
+- `../../modes/interactive/interactive-mode.ts` (binding)
+- `../prompt-cache-budget.ts` (new), `../settings-manager.ts` (`PromptCacheSettings`)
+
+### Expected merge conflict zones on next upstream sync
+
+- HIGH: `types.ts` around the `ExtensionContext` getter block and the `ExtensionContextActions` mirror — the new member sits beside `getCompactionSettings` / `getLookAtSettings`. Resolution: keep the additive getter in both places.
+- MEDIUM: `runner.ts` context-action plumbing (three sites) and the `agent-session.ts` / `interactive-mode.ts` `contextActions` object literals.
+
+### Migration notes
+
+Hosts that construct `ExtensionContextActions` themselves must supply `getPromptCacheSafeWaitSeconds`; returning `() => undefined` preserves pre-existing behavior exactly.
+
+
 ## 2026-07-28 - session_before_reload (cancellable reload veto)
 
 ### What changed

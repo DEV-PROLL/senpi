@@ -2141,6 +2141,7 @@ export class InteractiveMode {
 			},
 			getContextUsage: () => this.session.getContextUsage(),
 			getCompactionSettings: () => this.settingsManager.getCompactionSettings(),
+			getPromptCacheSafeWaitSeconds: () => this.session.resolvePromptCacheSafeWaitSeconds(),
 			getLookAtSettings: () => {
 				const global = this.settingsManager.getGlobalSettings().lookAt;
 				const project = this.settingsManager.getProjectSettings().lookAt;
