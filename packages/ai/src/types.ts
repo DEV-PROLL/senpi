@@ -137,6 +137,12 @@ export interface StreamOptions {
 	abortServerSideFallback?: boolean;
 	apiKey?: string;
 	/**
+	 * Stable identity of the originating session for account-affinity providers,
+	 * preserved across auxiliary calls that replace `sessionId` (for example
+	 * compaction). Providers without account affinity ignore this.
+	 */
+	affinitySessionId?: string;
+	/**
 	 * Preferred transport for providers that support multiple transports.
 	 * Providers that do not support this option ignore it.
 	 */

@@ -145,6 +145,8 @@ import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
+const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
+
 // ============================================================================
 // Skill Block Parsing
 // ============================================================================
@@ -3748,6 +3750,7 @@ export class AgentSession {
 						this.agent.transformContext,
 						this.settingsManager.getRetrySettings(),
 						this._summarizationRetryCallbacks({ source: "compaction", reason: request.reason }),
+						this.sessionManager.getSessionId(),
 					);
 				}
 			}
@@ -5107,6 +5110,9 @@ export class AgentSession {
 	 * Context overflow errors are NOT retryable (handled by compaction instead).
 	 */
 	private _isRetryableError(message: AssistantMessage): boolean {
+		// Providers mark post-delta failures to prevent replaying visible text/tool calls.
+		if (message.errorMessage?.startsWith(TURN_RETRY_SUPPRESSION_PREFIX)) return false;
+
 		// Context overflow is handled by compaction, not retry.
 		if (isContextOverflow(message, this.model?.contextWindow ?? 0)) return false;
 
@@ -5122,6 +5128,7 @@ export class AgentSession {
 
 	private _isHardErrorFallbackEligible(message: AssistantMessage): boolean {
 		return (
+			!message.errorMessage?.startsWith(TURN_RETRY_SUPPRESSION_PREFIX) &&
 			message.stopReason === "error" &&
 			!isContextOverflow(message, this.model?.contextWindow ?? 0) &&
 			!isClassifierRefusal(message) &&
