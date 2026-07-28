@@ -337,37 +337,37 @@ describe("detectCapabilities", () => {
 		});
 	});
 
-	it("uses direct placement under tmux for WezTerm (no Unicode placeholder support)", () => {
+	it("keeps direct WezTerm placement disabled under tmux", () => {
 		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
 			const caps = detectCapabilities(
 				() => true,
 				() => ({ allowPassthrough: "on", clientTermname: "wezterm" }),
 			);
-			assert.strictEqual(caps.images, "kitty");
-			assert.strictEqual(caps.tmuxPassthrough, true);
-			assert.strictEqual(caps.kittyUnicodePlaceholders, false);
+			assert.strictEqual(caps.images, null);
+			assert.strictEqual(caps.tmuxPassthrough, undefined);
 		});
 	});
 
-	it("honors PI_TUI_TMUX_KITTY_PLACEMENT placement overrides", () => {
+	it("honors only explicit safe terminal identity overrides", () => {
 		withEnv(
-			{ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color", PI_TUI_TMUX_KITTY_PLACEMENT: "direct" },
+			{ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color", PI_TUI_TMUX_KITTY_TERMINAL: "kitty" },
 			() => {
 				const caps = detectCapabilities(
 					() => true,
-					() => ({ allowPassthrough: "on", clientTermname: "xterm-ghostty" }),
+					() => ({ allowPassthrough: "on", clientTermname: "xterm-256color" }),
 				);
-				assert.strictEqual(caps.kittyUnicodePlaceholders, false);
+				assert.strictEqual(caps.images, "kitty");
+				assert.strictEqual(caps.kittyUnicodePlaceholders, true);
 			},
 		);
 		withEnv(
-			{ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color", PI_TUI_TMUX_KITTY_PLACEMENT: "placeholder" },
+			{ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color", PI_TUI_TMUX_KITTY_TERMINAL: "wezterm" },
 			() => {
 				const caps = detectCapabilities(
 					() => true,
-					() => ({ allowPassthrough: "on", clientTermname: "wezterm" }),
+					() => ({ allowPassthrough: "on", clientTermname: "xterm-256color" }),
 				);
-				assert.strictEqual(caps.kittyUnicodePlaceholders, true);
+				assert.strictEqual(caps.images, null);
 			},
 		);
 	});
@@ -434,7 +434,7 @@ describe("detectCapabilities", () => {
 		});
 	});
 
-	it("falls back to environment hints when tmux reports a generic client_termname", () => {
+	it("does not trust stale environment hints for a generic live tmux client", () => {
 		withEnv(
 			{
 				TMUX: "/tmp/tmux-1000/default,1234,0",
@@ -446,9 +446,8 @@ describe("detectCapabilities", () => {
 					() => true,
 					() => ({ allowPassthrough: "on", clientTermname: "xterm-256color" }),
 				);
-				assert.strictEqual(caps.images, "kitty");
-				assert.strictEqual(caps.tmuxPassthrough, true);
-				assert.strictEqual(caps.kittyUnicodePlaceholders, true);
+				assert.strictEqual(caps.images, null);
+				assert.strictEqual(caps.tmuxPassthrough, undefined);
 			},
 		);
 	});

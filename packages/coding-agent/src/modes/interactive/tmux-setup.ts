@@ -15,6 +15,9 @@ export interface TmuxSetupCheck {
 	imagesEnabled: boolean;
 	/** Whether the terminal hosting the tmux client can render Kitty graphics. */
 	outerKittyCapable: boolean;
+	allowPassthrough?: string;
+	focusEvents?: string;
+	version?: string;
 }
 
 interface TmuxRecommendation {
@@ -44,10 +47,28 @@ export function buildTmuxSetupWarning(check: TmuxSetupCheck): string | undefined
 	// graphics. Users who deliberately chose `allow-passthrough on` already
 	// have working images and are not nagged to switch to `all`.
 	if (!check.imagesEnabled && check.outerKittyCapable) {
-		recommendations.push({
-			setting: "set -g allow-passthrough all",
-			reason: "inline images (Kitty graphics)",
-		});
+		const versionMatch = check.version?.match(/^(\d+)\.(\d+)/);
+		const major = Number(versionMatch?.[1] ?? 0);
+		const minor = Number(versionMatch?.[2] ?? 0);
+		if (check.version && (major < 3 || (major === 3 && minor < 3))) {
+			recommendations.push({
+				setting: `upgrade tmux (current ${check.version})`,
+				reason: "inline images need tmux >= 3.3",
+			});
+		} else {
+			if (!["1", "on", "all"].includes(check.allowPassthrough ?? "")) {
+				recommendations.push({
+					setting: "set -g allow-passthrough on",
+					reason: "inline images (Kitty graphics)",
+				});
+			}
+			if (!["1", "on"].includes(check.focusEvents ?? "")) {
+				recommendations.push({
+					setting: "set -g focus-events on",
+					reason: "repaint images after pane activation",
+				});
+			}
+		}
 	}
 
 	if (recommendations.length === 0) {

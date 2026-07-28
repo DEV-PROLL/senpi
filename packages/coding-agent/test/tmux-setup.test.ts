@@ -25,7 +25,8 @@ describe("buildTmuxSetupWarning", () => {
 		expect(warning).toContain("Add to ~/.tmux.conf and restart tmux:");
 		expect(warning).toContain("set -g extended-keys on");
 		expect(warning).toContain("set -g extended-keys-format csi-u");
-		expect(warning).toContain("set -g allow-passthrough all");
+		expect(warning).toContain("set -g allow-passthrough on");
+		expect(warning).toContain("set -g focus-events on");
 	});
 
 	it("accepts extended-keys always", () => {
@@ -71,7 +72,7 @@ describe("buildTmuxSetupWarning", () => {
 		expect(warning).not.toContain("allow-passthrough");
 	});
 
-	it("recommends only allow-passthrough when the keyboard is already configured", () => {
+	it("recommends passthrough and focus events when the keyboard is already configured", () => {
 		const warning = buildTmuxSetupWarning({
 			extendedKeys: "on",
 			extendedKeysFormat: "csi-u",
@@ -79,7 +80,8 @@ describe("buildTmuxSetupWarning", () => {
 			outerKittyCapable: true,
 		});
 		expect(warning).toBeDefined();
-		expect(warning).toContain("set -g allow-passthrough all");
+		expect(warning).toContain("set -g allow-passthrough on");
+		expect(warning).toContain("set -g focus-events on");
 		expect(warning).not.toContain("extended-keys");
 	});
 
@@ -91,7 +93,7 @@ describe("buildTmuxSetupWarning", () => {
 			outerKittyCapable: true,
 		});
 		const lines = (warning ?? "").split("\n").filter((line) => line.startsWith("  set -g"));
-		expect(lines).toHaveLength(3);
+		expect(lines).toHaveLength(4);
 		const commentColumns = new Set(lines.map((line) => line.indexOf("#")));
 		expect(commentColumns.size).toBe(1);
 	});

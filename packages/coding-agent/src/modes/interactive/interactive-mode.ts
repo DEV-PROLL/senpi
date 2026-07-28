@@ -1210,11 +1210,15 @@ export class InteractiveMode {
 			});
 		};
 
-		const [extendedKeys, extendedKeysFormat, clientTermname] = await Promise.all([
-			runTmux(["show", "-gv", "extended-keys"]),
-			runTmux(["show", "-gv", "extended-keys-format"]),
-			runTmux(["display-message", "-p", "#{client_termname}"]),
-		]);
+		const [extendedKeys, extendedKeysFormat, clientTermname, allowPassthrough, focusEvents, version] =
+			await Promise.all([
+				runTmux(["show", "-gv", "extended-keys"]),
+				runTmux(["show", "-gv", "extended-keys-format"]),
+				runTmux(["display-message", "-p", "#{client_termname}"]),
+				runTmux(["show", "-gv", "allow-passthrough"]),
+				runTmux(["show", "-gv", "focus-events"]),
+				runTmux(["display-message", "-p", "#{version}"]),
+			]);
 
 		// If we couldn't query tmux (timeout, sandbox, etc.), don't warn
 		if (extendedKeys === undefined) return undefined;
@@ -1224,6 +1228,9 @@ export class InteractiveMode {
 			extendedKeysFormat,
 			imagesEnabled: getCapabilities().tmuxPassthrough === true,
 			outerKittyCapable: outerKittyGraphicsMode(clientTermname ?? "") !== null,
+			allowPassthrough,
+			focusEvents,
+			version,
 		});
 	}
 
