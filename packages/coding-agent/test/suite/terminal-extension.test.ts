@@ -1,5 +1,6 @@
 import { TerminalSession } from "@earendil-works/pi-pty";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import { createBuiltinParserRegistry } from "../../src/core/extensions/builtin/permission-system/parsers.ts";
 import registerTerminalExtension from "../../src/core/extensions/builtin/terminal/index.ts";
 import { TerminalManager } from "../../src/core/extensions/builtin/terminal/manager.ts";
@@ -8,10 +9,29 @@ import { createPtyBashTool } from "../../src/core/extensions/builtin/terminal/to
 import { createBashInputTool } from "../../src/core/extensions/builtin/terminal/tools/bash-input.ts";
 import { createBashOutputTool } from "../../src/core/extensions/builtin/terminal/tools/bash-output.ts";
 import { createBashResizeTool } from "../../src/core/extensions/builtin/terminal/tools/bash-resize.ts";
-import type { TerminalToolContext } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
+import type { TerminalToolContext, TerminalToolResult } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createKillBashTool } from "../../src/core/extensions/builtin/terminal/tools/kill-bash.ts";
 import type { Harness } from "./harness.ts";
 import { createHarness } from "./harness.ts";
+
+const autoDetachSpawn = vi.hoisted(() => ({
+	enabled: false,
+	spawn: undefined as ((...args: unknown[]) => unknown) | undefined,
+}));
+
+vi.mock("../../src/core/extensions/builtin/terminal/tools/spawn.ts", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../../src/core/extensions/builtin/terminal/tools/spawn.ts")>();
+	return {
+		...original,
+		spawnCommandSession: (...args: unknown[]) => {
+			if (!autoDetachSpawn.enabled) {
+				return original.spawnCommandSession(...(args as Parameters<typeof original.spawnCommandSession>));
+			}
+			if (!autoDetachSpawn.spawn) throw new Error("Auto-detach spawn was not configured");
+			return autoDetachSpawn.spawn(...args);
+		},
+	};
+});
 
 const COMPANIONS = ["bash_output", "bash_input", "bash_resize", "kill_bash", "monitor"];
 
@@ -286,5 +306,140 @@ describe("terminal builtin extension — bash_output robustness", () => {
 		const statusCheck = await output.execute("call-status-after-ghost", { bash_id: bashId });
 		expect(firstText(statusCheck)).toContain("status: running");
 		await manager.stop(bashId);
+	});
+});
+
+describe("terminal extension auto-detach wiring", () => {
+	afterEach(() => {
+		autoDetachSpawn.enabled = false;
+		autoDetachSpawn.spawn = undefined;
+		vi.useRealTimers();
+	});
+
+	it("promotes READY at the live cache deadline, preserves delta continuity, and notifies exactly once on kill", async () => {
+		vi.useFakeTimers();
+		let output = "";
+		let consumed = 0;
+		let exited = false;
+		let exitResult: { exitCode: number | null; timedOut: boolean; cancelled: boolean; signal: string | null } | null = null;
+		let resolveExit!: () => void;
+		const waitExit = new Promise<void>((resolve) => {
+			resolveExit = resolve;
+		});
+		const exitListeners = new Set<() => void>();
+		const outputListeners = new Set<(chunk: string) => void>();
+		const runtime = {
+			get exited() {
+				return exited;
+			},
+			get exitResult() {
+				return exitResult;
+			},
+			session: {
+				kill: vi.fn(),
+				waitExit: () => waitExit,
+				onExit: (listener: () => void) => {
+					if (exited) queueMicrotask(listener);
+					else exitListeners.add(listener);
+					return () => exitListeners.delete(listener);
+				},
+			},
+			onOutput: (listener: (chunk: string) => void) => {
+				outputListeners.add(listener);
+				return () => outputListeners.delete(listener);
+			},
+			fullOutput: () => output,
+			readDelta: () => {
+				const text = output.slice(consumed);
+				consumed = output.length;
+				return { text, droppedChars: 0 };
+			},
+		};
+		const emit = (text: string) => {
+			output += text;
+			for (const listener of outputListeners) listener(text);
+		};
+		const exit = () => {
+			if (exited) return;
+			exited = true;
+			exitResult = { exitCode: null, timedOut: false, cancelled: true, signal: "SIGKILL" };
+			for (const listener of exitListeners) listener();
+			exitListeners.clear();
+			resolveExit();
+		};
+
+		type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
+		type Tool = { name: string; execute: (...args: never[]) => Promise<unknown> };
+		const handlers = new Map<string, Handler[]>();
+		const tools = new Map<string, Tool>();
+		const notices: string[] = [];
+		let activeTools: string[] = [];
+		const fakePi = {
+			registerTool: (tool: Tool) => tools.set(tool.name, tool),
+			on: (event: string, handler: Handler) => {
+				const registered = handlers.get(event) ?? [];
+				registered.push(handler);
+				handlers.set(event, registered);
+			},
+			sendUserMessage: (content: string) => notices.push(content),
+			getActiveTools: () => activeTools,
+			setActiveTools: (next: string[]) => {
+				activeTools = next;
+			},
+		} as unknown as ExtensionAPI;
+		autoDetachSpawn.enabled = true;
+		autoDetachSpawn.spawn = (toolContext: unknown) => {
+			const manager = (toolContext as TerminalToolContext).manager;
+			vi.spyOn(manager, "get").mockReturnValue(runtime as unknown as TerminalRuntimeSession);
+			vi.spyOn(manager, "stop").mockImplementation(async () => {
+				exit();
+				return true;
+			});
+			return { id: "bash_1", runtime };
+		};
+		registerTerminalExtension(fakePi);
+
+		const ctx = {
+			cwd: process.cwd(),
+			mode: "tui",
+			model: { id: "fixture", api: "anthropic-messages" },
+			getPromptCacheSafeWaitSeconds: () => 5,
+			ui: { notify: () => {}, setStatus: () => {} },
+		} as unknown as ExtensionContext;
+		for (const handler of handlers.get("session_start") ?? []) await handler({}, ctx);
+
+		const bash = tools.get("bash") as unknown as {
+			execute: (id: string, input: { command: string; timeout: number }) => Promise<TerminalToolResult>;
+		};
+		const bashOutput = tools.get("bash_output") as unknown as {
+			execute: (id: string, input: { bash_id: string }) => Promise<TerminalToolResult>;
+		};
+		const kill = tools.get("kill_bash") as unknown as {
+			execute: (id: string, input: { bash_id: string }) => Promise<TerminalToolResult>;
+		};
+		const execution = bash.execute("foreground", { command: "fixture", timeout: 10 });
+		await Promise.resolve();
+		await Promise.resolve();
+		emit("READY\n");
+		await vi.advanceTimersByTimeAsync(5_000);
+
+		const detached = await execution;
+		expect(firstText(detached)).toContain("auto-detached to background with ID: bash_1");
+		expect(firstText(detached)).toContain("Partial output:\nREADY");
+		expect(exited).toBe(false);
+
+		emit("AFTER\n");
+		const peek = await bashOutput.execute("peek", { bash_id: "bash_1" });
+		expect(firstText(peek)).toBe("status: running\nAFTER");
+		expect(firstText(peek)).not.toContain("READY");
+		expect(firstText(peek)).not.toContain("auto-detached");
+
+		const killed = await kill.execute("kill", { bash_id: "bash_1" });
+		expect(firstText(killed)).toBe("Killed bash_1.");
+		expect(notices).toHaveLength(1);
+		expect(notices[0]).toContain("Background terminal session bash_1 finished: killed");
+		expect(notices[0]).toContain("AFTER");
+
+		for (const handler of handlers.get("session_shutdown") ?? []) await handler({}, ctx);
 	});
 });
