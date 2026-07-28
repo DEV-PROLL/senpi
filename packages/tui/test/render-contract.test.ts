@@ -109,6 +109,14 @@ function renderErrorStats(): { readonly writes: number } {
 	throw new Error("render error log stats seam must be enabled");
 }
 
+function renderDiagnosticStats(): { readonly linesScanned: number } {
+	const stats = tuiModule.__renderDiagnosticStats?.();
+	if (stats !== undefined) {
+		return stats;
+	}
+	throw new Error("render diagnostic stats seam must be enabled");
+}
+
 describe("TUI render contract", () => {
 	it("renders fallback for a throwing component when debug logging cannot write", async () => {
 		await withEnv({ HOME: "/dev/null", [STRICT_ENV]: undefined, PI_TUI_TEST_SEAMS: "1" }, async () => {
@@ -213,15 +221,19 @@ describe("TUI render contract", () => {
 				component.line = "short";
 				tui.addChild(component);
 				await driveRender(tui, terminal);
+				const scansBeforeOverWideFrame = renderDiagnosticStats().linesScanned;
 
 				component.line = "x".repeat(30);
 				await driveRender(tui, terminal);
+				const scansAfterFirstOverWideFrame = renderDiagnosticStats().linesScanned;
 				const crashLogPath = path.join(home, ".senpi", "agent", "senpi-crash.log");
 				assert.ok(fs.existsSync(crashLogPath));
+				assert.ok(scansAfterFirstOverWideFrame - scansBeforeOverWideFrame > 0);
 				fs.chmodSync(crashLogPath, 0o444);
 
 				component.line = "y".repeat(30);
 				await driveRender(tui, terminal);
+				assert.strictEqual(renderDiagnosticStats().linesScanned, scansAfterFirstOverWideFrame);
 				assert.ok(terminal.getViewport()[0]?.includes("y".repeat(12)));
 				tui.stop();
 			});

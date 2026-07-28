@@ -1,5 +1,28 @@
 # TUI delta rendering fork changes
 
+## 2026-07-28: over-wide diagnostics stop rescanning settled large histories
+
+### What changed
+
+- `tui.ts` now formats the full over-wide render diagnostic only when strict mode needs it or before the first
+  release-mode crash dump. Later over-wide release frames still truncate safely, but no longer map every rendered
+  line through `visibleWidth()` after the one-shot dump has already been written.
+- `__renderDiagnosticStats()` exposes diagnostic line-scan counts only under `PI_TUI_TEST_SEAMS=1`.
+- `test/render-contract.test.ts` proves the first over-wide release frame scans diagnostic input and a second frame
+  neither writes nor rescans the transcript.
+
+### Why
+
+The existing `overWideCrashDumpWritten` guard covered only the filesystem write. Building `crashData` happened before
+that guard, so an animated row could rescan a large resumed transcript on every frame even though no second dump was
+possible. Before the companion coding-agent throttle, a 34 MB session's 32 ms Working shimmer turned that
+diagnostic work into a continuous CPU loop.
+
+### Expected merge conflict zones
+
+- LOW: `tui.ts` around release-mode over-wide truncation and crash diagnostics.
+- LOW: `test/render-contract.test.ts` over-wide release behavior.
+
 ## 2026-07-28: setText prunes instead of clearing the paste registry; paste-state transfer API
 
 ### What changed

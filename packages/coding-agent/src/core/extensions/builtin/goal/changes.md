@@ -20,6 +20,24 @@ Persistent per-thread goal tracking as an in-tree builtin. Ports the standalone
 codex-aligned tool naming, and budget-driven behavior removed. An optional
 `tokenBudget` is retained only as inert persistence/wire compatibility metadata.
 
+## Elapsed ticker skips unchanged footer labels (2026-07-28)
+
+### What changed
+- `GoalElapsedTicker` remembers the last rendered `formatGoalElapsedSeconds()` label and does not call `setStatus`
+  again until that visible label changes. `sync()` clears the memo before its promised immediate render, so switching
+  active goals or snapshots still repaints even when their formatted elapsed labels match; `stop()` also clears it.
+- The ticker still samples once per second. Seconds remain live below one minute; minute/hour/day labels refresh at
+  their actual display boundary instead of repainting identical text every second.
+
+### Why
+- After one minute, `formatGoalElapsedSeconds()` intentionally omits seconds. The previous ticker nevertheless
+  requested a full TUI render every second, producing up to 59 redundant renders per visible minute and compounding
+  the cost of large resumed histories.
+
+### Expected merge conflict zones on next upstream sync
+- LOW in `elapsed-ticker.ts` around `sync()`, `tick()`, and lifecycle reset.
+- LOW in `goal-elapsed-ticker.test.ts` around fake-timer render expectations.
+
 ## Decisive completion/blocked audits + todo completion gate (2026-07-28)
 
 ### What changed

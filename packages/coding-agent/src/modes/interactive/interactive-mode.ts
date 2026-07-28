@@ -198,6 +198,7 @@ import {
 	formatActiveToolWorkingLabel,
 	formatToolHookStatusMessageFrame,
 	formatWorkingStatusMessageFrame,
+	largeSessionWorkingStatusInterval,
 	sanitizeWorkingStatusPlainText,
 	type WorkingStatusRgbColor,
 } from "./working-status.ts";
@@ -265,6 +266,8 @@ function isCustomSessionEntry(item: RenderSessionItem): item is Extract<SessionE
 const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
 const DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS = 600;
 const DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS = 32;
+const LARGE_SESSION_WORKING_STATUS_REFRESH_INTERVAL_MS = 60_000;
+const LARGE_SESSION_WORKING_STATUS_MESSAGE_INTERVAL_MS = 1_000;
 const FALLBACK_STATUS_KEY = "fallback";
 const RGB_FOREGROUND_PATTERN = /\x1b\[38;2;(\d+);(\d+);(\d+)m/;
 
@@ -2200,9 +2203,14 @@ export class InteractiveMode {
 		if (this.hookStatusIntervalId) {
 			return;
 		}
+		const intervalMs = largeSessionWorkingStatusInterval(
+			this.sessionManager.getEntries().length,
+			DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS,
+			LARGE_SESSION_WORKING_STATUS_MESSAGE_INTERVAL_MS,
+		);
 		this.hookStatusIntervalId = setInterval(() => {
 			this.refreshToolHookStatuses();
-		}, DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS);
+		}, intervalMs);
 		this.hookStatusIntervalId.unref();
 	}
 
@@ -2367,31 +2375,41 @@ export class InteractiveMode {
 	}
 
 	private getWorkingIndicatorOptions(): LoaderIndicatorOptions {
-		return (
-			this.workingIndicatorOptions ?? {
-				frames: theme.getColorMode() === "truecolor" ? ["•"] : [theme.fg("accent", "•"), theme.fg("muted", "◦")],
-				intervalMs: DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS,
-				indicatorFormatter:
-					theme.getColorMode() === "truecolor"
-						? (frame, elapsedMs) => formatWorkingStatusShimmerText(frame, elapsedMs)
-						: undefined,
-				messageFormatter: (message, animationElapsedMs) =>
-					formatWorkingStatusMessageFrame(
-						message,
-						this.getWorkingElapsedSeconds(),
-						keyText("app.interrupt"),
-						animationElapsedMs,
-						{
-							base: (text) => theme.fg("dim", text),
-							glow: (text) => theme.fg("text", text),
-							highlight: (text) => theme.bold(theme.fg("text", text)),
-							shimmer: formatWorkingStatusShimmerText,
-							suffix: (text) => theme.fg("dim", text),
-						},
-					),
-				messageIntervalMs: DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS,
-			}
-		);
+		if (this.workingIndicatorOptions !== undefined) {
+			return this.workingIndicatorOptions;
+		}
+		const sessionEntryCount = this.sessionManager.getEntries().length;
+		return {
+			frames: theme.getColorMode() === "truecolor" ? ["•"] : [theme.fg("accent", "•"), theme.fg("muted", "◦")],
+			intervalMs: largeSessionWorkingStatusInterval(
+				sessionEntryCount,
+				DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS,
+				LARGE_SESSION_WORKING_STATUS_REFRESH_INTERVAL_MS,
+			),
+			indicatorFormatter:
+				theme.getColorMode() === "truecolor"
+					? (frame, elapsedMs) => formatWorkingStatusShimmerText(frame, elapsedMs)
+					: undefined,
+			messageFormatter: (message, animationElapsedMs) =>
+				formatWorkingStatusMessageFrame(
+					message,
+					this.getWorkingElapsedSeconds(),
+					keyText("app.interrupt"),
+					animationElapsedMs,
+					{
+						base: (text) => theme.fg("dim", text),
+						glow: (text) => theme.fg("text", text),
+						highlight: (text) => theme.bold(theme.fg("text", text)),
+						shimmer: formatWorkingStatusShimmerText,
+						suffix: (text) => theme.fg("dim", text),
+					},
+				),
+			messageIntervalMs: largeSessionWorkingStatusInterval(
+				sessionEntryCount,
+				DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS,
+				LARGE_SESSION_WORKING_STATUS_MESSAGE_INTERVAL_MS,
+			),
+		};
 	}
 
 	private showStatusIndicator(indicator: StatusIndicator): void {
