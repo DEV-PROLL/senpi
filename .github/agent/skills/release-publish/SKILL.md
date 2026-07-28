@@ -97,4 +97,5 @@ These are separate controls and must not be conflated:
 
 - The canonical release path is `scripts/release.mjs` from clean `main`.
 - The approval checkpoint is mandatory for the normal tag-driven release.
-- The publish-only workflow exists for special cases, not normal releases.
+- Publishing today goes through the `publish-npm.yml` publish-only dispatch (see the known-broken note above), NOT the tag pipeline's environment-gated job.
+- If the tag pipeline's `publish-npm` fails after `stage-github-release` succeeded, the cleanup path deletes the draft release; the build assets survive as the run's `release-assets-v<tag>` artifact — re-create the release with `gh release create <tag> --verify-tag --draft --title <tag> --notes-file RELEASE_NOTES.md <assets>` and publish with `gh release edit <tag> --draft=false` after verifying `npm view` shows every package.
