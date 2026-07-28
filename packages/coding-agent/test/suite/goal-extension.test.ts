@@ -235,6 +235,34 @@ describe("goal extension contract (budget-free)", () => {
 		expect(sent).toHaveLength(0);
 	});
 
+	it("treats an empty, whitespace-only, or null reason as omitted when completing a goal", async () => {
+		for (const reason of ["", "   ", null]) {
+			const { tools } = createGoalHarness();
+			const ctx = await makeCtx(`thread/blank-reason-${String(reason)}`);
+			const ref = storeRefFor(ctx);
+			await tools
+				.get("create_goal")
+				?.execute("c1", { objective: "Complete despite sloppy args" }, undefined, undefined, ctx);
+
+			await tools.get("update_goal")?.execute("u1", { status: "complete", reason }, undefined, undefined, ctx);
+
+			expect((await readGoal(ref))?.status).toBe("complete");
+		}
+	});
+
+	it("still rejects blocking with a blank reason", async () => {
+		const { tools } = createGoalHarness();
+		const ctx = await makeCtx("thread/blank-reason-blocked");
+		await tools
+			.get("create_goal")
+			?.execute("c1", { objective: "Block with blank reason" }, undefined, undefined, ctx);
+
+		await expect(
+			tools.get("update_goal")?.execute("u1", { status: "blocked", reason: "  " }, undefined, undefined, ctx),
+		).rejects.toThrow("reason is required");
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+	});
+
 	it("queues a hidden continuation prompt after agent_end while a goal is active", async () => {
 		const { tools, handlers, sent } = createGoalHarness();
 		const ctx = await makeCtx();

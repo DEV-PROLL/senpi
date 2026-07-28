@@ -1,5 +1,20 @@
 # goal Extension Changes
 
+## Blank reasons treated as omitted for update_goal complete (2026-07-28)
+
+### What changed
+
+- `tool-registration.ts` normalizes `reason` at the model boundary (trim, non-string
+  treated as absent) before validating. An empty, whitespace-only, or null `reason`
+  no longer triggers "reason must not be provided when status is complete" — strict
+  tool-calling providers that serialize omitted optional strings as `""`/`null`
+  previously hit that rejection on every retry and spun. A non-empty reason remains
+  rejected for `complete`; `blocked` still requires a non-blank reason.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `tool-registration.ts` around the update_goal execute validation.
+
 ## Continuity across newer user instructions (2026-07-28)
 
 ### What changed
