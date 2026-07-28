@@ -1,10 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { registerGoalCommand } from "./command-registration.ts";
-import { shouldQueueGoalContinuationAfterAgentEnd } from "./continuation.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
-import { isResumeOfPausedGoal, queueGoalContinuation, queueHiddenGoalPrompt } from "./lifecycle-helpers.ts";
-import { buildContinuationPrompt } from "./prompt.ts";
+import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
+import { MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
 import { accountGoalUsage, readGoal, updateGoal } from "./store.ts";
 import { goalStoreRef as buildGoalStoreRef } from "./store-ref.ts";
 import { registerGoalTools } from "./tool-registration.ts";
@@ -27,6 +26,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	let blockedThisTurnGoalId: string | null = null;
 	let completedThisTurnGoalId: string | null = null;
 	const turnUsage = new TurnUsageTracker();
+	const monitorContinuation = new MonitorAwareGoalContinuation(pi);
 
 	const goalTicker = new GoalElapsedTicker({
 		render: (renderCtx, renderGoal, live) => {
@@ -58,6 +58,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", async (event, ctx) => {
+		monitorContinuation.start(ctx);
 		const goal = await readGoal(goalStoreRef(ctx));
 		if (goal?.status === "active") {
 			beginAgentGoalAccounting(goal);
@@ -127,13 +128,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			clearAgentGoalAccounting();
 		}
 		refreshGoalUiBestEffort(ctx, goal);
-		if (
-			goal?.status === "active" &&
-			!event.aborted &&
-			shouldQueueGoalContinuationAfterAgentEnd(goal, ctx.hasPendingMessages(), event.messages)
-		) {
-			queueHiddenGoalPrompt(pi, buildContinuationPrompt(goal));
-		}
+		monitorContinuation.afterAgentEnd({
+			ctx,
+			goal,
+			messages: event.messages,
+			aborted: event.aborted === true,
+		});
 	});
 
 	pi.on("session_abort", async (_event, ctx) => {
@@ -157,6 +157,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 		clearAgentGoalAccounting();
 		goalTicker.stop();
+		monitorContinuation.dispose();
 	});
 
 	async function maybePromptResumePausedGoal(
@@ -219,6 +220,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	}
 
 	function refreshGoalUi(ctx: ExtensionContext, goal: Goal | null): void {
+		monitorContinuation.syncGoal(goal);
 		const accounting = agentGoalAccounting;
 		if (ctx.hasUI && goal?.status === "active" && accounting?.goalId === goal.id) {
 			goalTicker.sync(ctx, goal, accounting.measuredFromMilliseconds);
