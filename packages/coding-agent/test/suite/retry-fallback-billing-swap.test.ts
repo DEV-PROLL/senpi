@@ -7,7 +7,7 @@ const primary = "faux/faux-1";
 const fallback = "faux/faux-2";
 
 // Verbatim provider error captured from a real session (2026-07-28, anthropic-api
-// claude-fable-5): the class this feature targets.
+// claude-fable-5): the billing class this behavior targets.
 const creditBalanceError =
 	'400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."},"request_id":"req_011CdUDPLwbT8EDXCxMJBvQy"}';
 const terminalNonBillingError = "Error: provider rejected the request permanently";
@@ -15,18 +15,12 @@ const terminalNonBillingError = "Error: provider rejected the request permanentl
 const billingError = () => fauxAssistantMessage("", { stopReason: "error", errorMessage: creditBalanceError });
 const hardError = () => fauxAssistantMessage("", { stopReason: "error", errorMessage: terminalNonBillingError });
 
-function createSwapHarness(now: () => number): Promise<Harness> {
+function createChainHarness(now: () => number): Promise<Harness> {
 	return createHarness({
 		models: [{ id: "faux-1" }, { id: "faux-2" }],
 		fallbackNow: now,
 		settings: {
-			retry: {
-				enabled: true,
-				maxRetries: 0,
-				baseDelayMs: 1,
-				fallbackChains: { [primary]: [fallback] },
-				billingErrorPolicy: "swap",
-			},
+			retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } },
 		},
 	});
 }
@@ -37,9 +31,9 @@ describe("retry fallback billing swap", () => {
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
 	});
 
-	it("swap mode: a credit-balance error pins the fallback as the session model", async () => {
+	it("pins a credit-balance fallback as the session model for the rest of the session", async () => {
 		let now = 0;
-		const harness = await createSwapHarness(() => now);
+		const harness = await createChainHarness(() => now);
 		harnesses.push(harness);
 		harness.setResponses([
 			billingError(),
@@ -53,7 +47,7 @@ describe("retry fallback billing swap", () => {
 		expect(harness.eventsOfType("retry_fallback_applied").map((event) => event.reason)).toEqual(["billing"]);
 
 		// Far past the 30-minute billing cooldown: a temporary fallback would revert
-		// here; the swap must hold the fallback model for the rest of the session.
+		// here; the pinned swap must hold the fallback model for the rest of the session.
 		now += 31 * 60_000;
 		await harness.session.prompt("second");
 
@@ -62,9 +56,9 @@ describe("retry fallback billing swap", () => {
 		expect(harness.faux.getCallLog().map((call) => call.modelId)).toEqual(["faux-1", "faux-2", "faux-2"]);
 	});
 
-	it("swap mode: a non-billing hard error stays a temporary, revertable fallback", async () => {
+	it("keeps a non-billing hard error temporary and revertable", async () => {
 		let now = 0;
-		const harness = await createSwapHarness(() => now);
+		const harness = await createChainHarness(() => now);
 		harnesses.push(harness);
 		harness.setResponses([hardError(), fauxAssistantMessage("fallback answer"), fauxAssistantMessage("primary back")]);
 
@@ -75,29 +69,6 @@ describe("retry fallback billing swap", () => {
 		// Unclassified errors earn the default 5-minute cooldown; after it expires the
 		// unpinned hard-error fallback reverts exactly as before.
 		now += 6 * 60_000;
-		await harness.session.prompt("second");
-
-		expect(harness.eventsOfType("retry_fallback_reverted")).toHaveLength(1);
-		expect(harness.session.model?.id).toBe("faux-1");
-	});
-
-	it("default mode: a credit-balance error keeps the temporary hard-error behavior", async () => {
-		let now = 0;
-		const harness = await createHarness({
-			models: [{ id: "faux-1" }, { id: "faux-2" }],
-			fallbackNow: () => now,
-			settings: {
-				retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } },
-			},
-		});
-		harnesses.push(harness);
-		harness.setResponses([billingError(), fauxAssistantMessage("fallback answer"), fauxAssistantMessage("primary back")]);
-
-		await harness.session.prompt("first");
-
-		expect(harness.eventsOfType("retry_fallback_applied").map((event) => event.reason)).toEqual(["hard-error"]);
-
-		now += 31 * 60_000;
 		await harness.session.prompt("second");
 
 		expect(harness.eventsOfType("retry_fallback_reverted")).toHaveLength(1);

@@ -1,11 +1,11 @@
 # Local fork changes
 
-## 2026-07-28 — Permanent session model swap for billing-class provider errors
+## 2026-07-28 — Billing-class provider errors always pin the session model swap
 
-- Changed: new `retry.billingErrorPolicy` setting (`"fallback"` default, `"swap"` opt-in). In swap mode, billing-class failures (credit balance, insufficient quota) engage the fallback chain with a new pinned `"billing"` reason: the candidate becomes the session model for the rest of the session and never auto-reverts. Files: `src/core/retry-fallback/billing.ts` (new classifier), `src/core/retry-fallback/controller.ts` (billing reason pins and notes the cooldown), `src/core/agent-session.ts` (classifies hard-error-eligible failures), `src/core/settings-manager.ts` (setting parse + setter).
-- Why: a credit-exhausted account never recovers within a session, but the existing hard-error fallback reverted to the dead model after the 30-minute billing cooldown, killing later turns. Observed in a real session (anthropic-api claude-fable-5, 2026-07-28): the turn died with a 400 "credit balance is too low".
-- Coverage: `test/suite/retry-fallback-billing-swap.test.ts` (swap pins and holds past the cooldown, non-billing hard errors stay temporary, default mode unchanged, classifier table) and `test/settings-manager-retry-fallback.test.ts` (parse/round-trip).
-- Merge-conflict risk: low. Additive union members and one engagement branch; the controller's reason handling and the settings getter are the expected conflict zones.
+- Changed: billing-class failures (credit balance, insufficient quota) engage the fallback chain with the pinned `"billing"` reason unconditionally — the candidate becomes the session model for the rest of the session and never auto-reverts. Files: `src/core/retry-fallback/billing.ts` (classifier), `src/core/retry-fallback/controller.ts` (billing reason pins and notes the cooldown), `src/core/agent-session.ts` (classifies hard-error-eligible failures). Non-billing hard errors keep the temporary, revertable switch. Supersedes the opt-in `retry.billingErrorPolicy` variant of the same change; the setting no longer exists.
+- Why: a credit-exhausted account never recovers within a session, but the ordinary hard-error fallback reverted to the dead model after the 30-minute billing cooldown, killing later turns. Observed in a real session (anthropic-api claude-fable-5, 2026-07-28): the turn died with a 400 "credit balance is too low".
+- Coverage: `test/suite/retry-fallback-billing-swap.test.ts` (billing errors pin and hold past the cooldown with default settings, non-billing hard errors stay temporary, classifier table) and `test/suite/retry-fallback-hard-error.test.ts` (insufficient-quota fixture now reports the billing reason).
+- Merge-conflict risk: low. Additive union members and one engagement branch; the controller's reason handling is the expected conflict zone.
 
 ## 2026-07-26 — Resolve Bun dependencies through fork-owned aliases (#230)
 

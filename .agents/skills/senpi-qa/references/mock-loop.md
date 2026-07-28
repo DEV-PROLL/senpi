@@ -89,6 +89,12 @@ node .agents/skills/senpi-qa/scripts/mock-loop.mjs --scenario long-retry-after
 - `long-retry-after` sends one `429` with
   `HTTP 429: rate_limit_exceeded - retry after 3600 seconds`: the next request
   must immediately use the fallback, rather than wait an hour.
+- `billing-swap` sends one `400` carrying the verbatim Anthropic
+  credit-balance payload: billing-class failures pin the fallback as the
+  session model, so the primary fails once and the turn completes on the
+  fallback model. (The swap's no-revert semantics are temporal and covered by
+  `test/suite/retry-fallback-billing-swap.test.ts`; this scenario proves the
+  real-CLI wiring with the real-world payload.)
 
 The default `--self-test` runs these three scenarios end to end in addition to
 its API round-trips. `--self-test --api <name>` retains the API-specific

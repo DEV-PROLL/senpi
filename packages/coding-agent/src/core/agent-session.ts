@@ -5263,13 +5263,9 @@ export class AgentSession {
 		let switchedFallback = false;
 		if (hardErrorFallback) {
 			// A non-retryable provider failure must never replay on the same model.
-			// Billing-class failures never recover on this account, so under the swap
-			// policy the fallback switch pins as the session model instead of reverting.
-			const reason =
-				this.settingsManager.getRetryFallbackSettings().billingErrorPolicy === "swap" &&
-				isBillingErrorMessage(errorMessage)
-					? "billing"
-					: "hard-error";
+			// Billing-class failures never recover on this account, so the fallback
+			// switch pins as the session model instead of reverting after the cooldown.
+			const reason = isBillingErrorMessage(errorMessage) ? "billing" : "hard-error";
 			switchedFallback = await this._retryFallback.tryFallback(reason, { errorMessage });
 			if (!switchedFallback) {
 				this._resolveRetry();

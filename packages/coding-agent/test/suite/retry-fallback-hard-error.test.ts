@@ -52,7 +52,7 @@ describe("retry fallback hard errors", () => {
 					if (event.type === "auto_retry_start") return `${event.type}:${event.delayMs}`;
 					return event.type;
 				}),
-		).toEqual(["retry_fallback_applied:hard-error", "auto_retry_start:0", "retry_fallback_succeeded"]);
+		).toEqual(["retry_fallback_applied:billing", "auto_retry_start:0", "retry_fallback_succeeded"]);
 		expect(cooldownsFor(harness).isSuppressed(primary)).toBe(true);
 	});
 
