@@ -1,5 +1,30 @@
 # changes.md — compaction
 
+## Wall-clock budget for summarization streams (2026-07-28)
+
+### What changed
+
+- `stream-watchdog.ts`: `consumeStreamWithIdleTimeout()` accepts an optional `maxDurationMs` and throws the new
+  `StreamDurationBudgetError` when one stream outlives it. The budget is a single absolute deadline for the whole
+  stream, not a per-read timer, and it is cleared alongside the idle timer. Caller aborts still win over the budget.
+- `DEFAULT_SUMMARIZATION_MAX_DURATION_MS` = 120s, applied by `compaction.ts` `completeSummarization()` and the
+  extension's `speculative.ts` request path. `retryAssistantCall` applies it per attempt.
+
+### Why
+
+- The idle watchdog only catches a *silent* connection. A summarization stream that keeps trickling events stays
+  under the 300s idle budget indefinitely, and that work is serialized on `AgentSession`'s agent-event queue, which
+  `beforeToolCall` waits on before every tool prepare. A live-but-slow summarization therefore froze a whole session:
+  tool results withheld at the parallel-batch barrier, typed input queued, TUI stuck on "Working", recoverable only by
+  ESC (which releases compaction before the run signal in `_abortActiveAgentAndRetry`).
+- Observed in a real session: two freezes of 241s and 208s, both under the idle cap, on a session whose earlier
+  auto-compaction had already blocked the same queue for 44s.
+
+### Expected merge conflict zones
+
+- LOW: `stream-watchdog.ts` around the contender race in `consumeStreamWithIdleTimeout()`.
+- LOW: `compaction.ts` around the `consumeStreamWithIdleTimeout` call in `completeSummarization()`.
+
 ## Lifecycle ownership and required-admission safety (2026-07-23)
 
 ### What changed

@@ -1,3 +1,43 @@
+# Builtin compaction extension changes
+
+## Degrade wall-clock budget trips like stalled streams (2026-07-28)
+
+### What changed
+
+- `transient-failure.ts` (new): `isTransientSummarizationFailure()` owns the degrade-vs-surface decision.
+  Watchdog trips (`StreamDurationBudgetError`, `StreamIdleTimeoutError`) always degrade; `SummaryRequestError`
+  keeps its metadata-aware verdict; everything else falls back to `isRetryableErrorMessage`.
+- `index.ts` `applyBlockingCompaction()`: uses that predicate instead of the inline classification, so a
+  summarization that blows its wall-clock budget records a circuit-breaker failure and returns
+  `{ applied: false, reason: "failed" }` rather than escaping to the ExtensionRunner as a raw stack on top of the
+  `compaction_end` message the user already saw.
+- Behavior change for the pre-existing stall path: `StreamIdleTimeoutError` now degrades the same way. Its message
+  ("Summarization stream stalled: ... treating the request as dead") matches none of the transient patterns in
+  `isRetryableErrorMessage`, so before this change a stalled summarization rethrew loudly - the exact double-surface
+  the 2026-07-27 transient-degrade entry removed for network drops. Both watchdog trips are infrastructure slowness
+  and are pinned as transient in `test/compaction/summarization-budget-degrade.test.ts`.
+- `speculative.ts`: the speculative request path applies `DEFAULT_SUMMARIZATION_MAX_DURATION_MS`, so a warm-start
+  summary that a blocking route later awaits cannot pin the session either.
+
+### Why
+
+- Without the budget the freeze class described in `core/compaction/changes.md` (2026-07-28) reached the session
+  queue; with it, the trip has to land in the same quiet degrade path the transient-transport work established, or
+  the fix would trade a freeze for a loud extension error.
+
+### Also in this change
+
+- `index.ts`: a blocking route that inherits a speculative job whose summary failed now degrades through the shared
+  watchdog-failure path on that job instead of discarding it and paying for a second full-budget request. The job
+  keeps its settled failure next to its result promise, so the double deadline the reviewer flagged cannot recur.
+- `test/compaction/speculative-budget-handoff.test.ts`: pins the no-second-request guarantee end to end (fails as
+  `SummaryRequestError: No more faux responses queued` from `applyBlockingCompaction` when the handoff is reverted).
+
+### Expected merge conflict zones
+
+- LOW: `index.ts` around the `applyBlockingCompaction()` catch classification.
+- LOW: `speculative.ts` around the `consumeStreamWithIdleTimeout` options.
+
 ## Explicit Responses v2 compaction for verified proxies (2026-07-27)
 
 - `openai-remote-model.ts`: official OpenAI remains eligible by default; custom `openai-responses` providers require `compat.supportsRemoteCompactionV2: true`. Persisted checkpoint identity now retains the exact custom provider id instead of coercing it to `openai`.
@@ -41,8 +81,6 @@
   effective auth tenant (never raw credentials). Legacy, cross-endpoint, or cross-tenant entries decline replay.
 - Replay boundaries require non-enumerable message/item provenance to survive the canonical context pipeline. Missing,
   duplicated, reordered, reconstructed, or mutated provenance keeps the final transformed full payload unchanged.
-
-# Builtin compaction extension changes
 
 ## Degrade transient blocking-compaction failures instead of erroring the turn (2026-07-27)
 

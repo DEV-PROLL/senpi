@@ -11,7 +11,11 @@ export {
 // Components
 export { Box } from "./components/box.ts";
 export { CancellableLoader } from "./components/cancellable-loader.ts";
-export { Editor, type EditorOptions, type EditorTheme } from "./components/editor.ts";
+export {
+	Editor,
+	type EditorOptions,
+	type EditorTheme,
+} from "./components/editor.ts";
 export { Image, type ImageOptions, type ImageTheme } from "./components/image.ts";
 export { Input } from "./components/input.ts";
 export { Loader, type LoaderIndicatorOptions } from "./components/loader.ts";
@@ -67,6 +71,7 @@ export {
 	parseKey,
 	setKittyProtocolActive,
 } from "./keys.ts";
+export { type EditorPasteState, expandPasteMarkers } from "./paste-markers.ts";
 // Input buffering for batch splitting
 export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.ts";
 // Terminal interface and implementations
