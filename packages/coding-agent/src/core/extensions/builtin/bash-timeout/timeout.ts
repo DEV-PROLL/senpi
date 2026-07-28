@@ -65,7 +65,7 @@ export function resolveEffectiveBashTimeouts(
 export function buildBashTimeoutPrompt(defaults: EffectiveBashTimeouts): string {
 	const minutes = (seconds: number): string => (seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds}s`);
 	const maxReason = defaults.cacheCapped
-		? ` This ceiling is the prompt cache lifetime of the active model minus a safety buffer: blocking past it expires the cache and forces a full re-read on the next request. A foreground command still running at that point is handed to a background session alive instead of being killed.`
+		? ` This ceiling is the prompt cache lifetime of the active model minus a safety buffer: blocking past it expires the cache and forces a full re-read on the next request. A foreground command still running at that point is handed to a background session alive instead of being killed; those sessions stay live, so stop the ones you no longer need with \`kill_bash\`.`
 		: "";
 	return `\n## Bash Tool Timeout Policy\n\nThe \`bash\` tool enforces timeouts even when you omit the \`timeout\` parameter:\n\n- Default timeout: ${defaults.defaultSeconds}s (${minutes(defaults.defaultSeconds)}). Applied automatically when you do not set \`timeout\`.\n- Recommended maximum timeout: ${defaults.maxSeconds}s (${minutes(defaults.maxSeconds)}).${maxReason} Explicit \`timeout\` values are preserved because different hosts may use different timeout units.\n- For long-running commands (builds, installs, test suites), set an explicit \`timeout\` that fits the workload. Do not assume commands run forever.\n- For commands that legitimately need to run beyond the recommended maximum, start them with \`run_in_background: true\` and watch the decisive output with \`monitor\` instead of raising the timeout.\n`;
 }

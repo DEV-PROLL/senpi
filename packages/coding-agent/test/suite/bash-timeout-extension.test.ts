@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import bashTimeoutExtension from "../../src/core/extensions/builtin/bash-timeout/index.ts";
 import {
 	applyBashTimeout,
 	BASH_DEFAULT_TIMEOUT_SECONDS,
@@ -215,5 +216,51 @@ describe("buildBashTimeoutPrompt cache awareness", () => {
 
 	it("still accepts the legacy two-field defaults shape", () => {
 		expect(buildBashTimeoutPrompt({ defaultSeconds: 120, maxSeconds: 600 })).toBe(LEGACY_PROMPT);
+	});
+});
+
+describe("bashTimeoutExtension with native Anthropic bash active", () => {
+	it("keeps the legacy policy when the PTY bash tool has stepped aside", async () => {
+		const previous = process.env.PI_ANTHROPIC_BASH;
+		process.env.PI_ANTHROPIC_BASH = "1";
+		try {
+			const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
+			const pi = {
+				on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+					handlers.set(name, handler);
+				},
+			};
+			bashTimeoutExtension(pi as never);
+
+			const ctx = {
+				model: { api: "anthropic-messages" },
+				getPromptCacheSafeWaitSeconds: () => 270,
+			};
+			const result = (await handlers.get("before_agent_start")?.({ systemPrompt: "BASE" }, ctx)) as {
+				systemPrompt: string;
+			};
+
+			expect(result.systemPrompt).toBe(`BASE${buildBashTimeoutPrompt({ defaultSeconds: 120, maxSeconds: 600 })}`);
+		} finally {
+			if (previous === undefined) delete process.env.PI_ANTHROPIC_BASH;
+			else process.env.PI_ANTHROPIC_BASH = previous;
+		}
+	});
+
+	it("still caps the ceiling when native Anthropic bash is not active", async () => {
+		const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
+		const pi = {
+			on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+				handlers.set(name, handler);
+			},
+		};
+		bashTimeoutExtension(pi as never);
+
+		const ctx = { model: { api: "anthropic-messages" }, getPromptCacheSafeWaitSeconds: () => 270 };
+		const result = (await handlers.get("before_agent_start")?.({ systemPrompt: "BASE" }, ctx)) as {
+			systemPrompt: string;
+		};
+
+		expect(result.systemPrompt).toContain("270s");
 	});
 });
