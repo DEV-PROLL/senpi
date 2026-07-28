@@ -87,7 +87,12 @@ export class Image implements Component {
 					this.imageId = result.imageId;
 				}
 
-				if (caps.images === "kitty") {
+				if (caps.images === "kitty" && result.lines) {
+					// Unicode placeholder placement (tmux passthrough): each row is a
+					// real text line of placeholder cells; the first row also carries
+					// the virtual-placement transmission.
+					lines = result.lines;
+				} else if (caps.images === "kitty") {
 					// For Kitty: C=1 prevents cursor movement.
 					// Don't need the cursor movement.
 					lines = [result.sequence];

@@ -386,6 +386,25 @@ export function extractAnsiCode(str: string, pos: number): { code: string; lengt
 		return null;
 	}
 
+	// DCS sequence: ESC P ... ST (ESC \)
+	// Used for tmux passthrough (ESC P tmux; ... ESC \) whose payload doubles
+	// every ESC; skip doubled-ESC pairs so an escaped ST inside the payload
+	// does not terminate the outer sequence early.
+	if (next === "P") {
+		let j = pos + 2;
+		while (j < str.length) {
+			if (str[j] === "\x1b") {
+				if (str[j + 1] === "\\") return { code: str.substring(pos, j + 2), length: j + 2 - pos };
+				if (str[j + 1] === "\x1b") {
+					j += 2;
+					continue;
+				}
+			}
+			j++;
+		}
+		return null;
+	}
+
 	// APC sequence: ESC _ ... BEL or ESC _ ... ST (ESC \)
 	// Used for cursor marker and application-specific commands
 	if (next === "_") {

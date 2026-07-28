@@ -6,17 +6,22 @@ import assert from "node:assert";
 import { describe, it } from "node:test";
 import { Image } from "../src/components/image.ts";
 import {
+	buildKittyPlaceholderRow,
 	deleteAllKittyImages,
 	deleteKittyImage,
 	detectCapabilities,
 	encodeKitty,
+	getCellDimensions,
 	hyperlink,
 	isImageLine,
 	renderImage,
 	resetCapabilitiesCache,
 	setCapabilities,
 	setCellDimensions,
+	type TmuxPassthroughState,
+	wrapTmuxPassthrough,
 } from "../src/terminal-image.ts";
+import { visibleWidth } from "../src/utils.ts";
 
 const ENV_KEYS = [
 	"TERM",
@@ -24,6 +29,7 @@ const ENV_KEYS = [
 	"TERMINAL_EMULATOR",
 	"COLORTERM",
 	"TMUX",
+	"TMUX_PANE",
 	"KITTY_WINDOW_ID",
 	"GHOSTTY_RESOURCES_DIR",
 	"WEZTERM_PANE",
@@ -32,7 +38,10 @@ const ENV_KEYS = [
 	"CMUX_WORKSPACE_ID",
 	"WARP_SESSION_ID",
 	"WARP_TERMINAL_SESSION_UUID",
+	"PI_TUI_TMUX_KITTY_PLACEMENT",
 ] as const;
+
+const tmuxPassthroughOff = (): TmuxPassthroughState => ({ allowPassthrough: "off", clientTermname: "" });
 
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void): void {
 	const saved: Record<string, string | undefined> = {};
@@ -211,7 +220,7 @@ describe("detectCapabilities", () => {
 
 	it("enables hyperlinks under tmux when the client forwards them", () => {
 		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM_PROGRAM: "ghostty" }, () => {
-			const caps = detectCapabilities(() => true);
+			const caps = detectCapabilities(() => true, tmuxPassthroughOff);
 			assert.strictEqual(caps.hyperlinks, true);
 			assert.strictEqual(caps.images, null);
 		});
@@ -219,7 +228,7 @@ describe("detectCapabilities", () => {
 
 	it("disables hyperlinks under tmux when the client does not forward them", () => {
 		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM_PROGRAM: "ghostty" }, () => {
-			const caps = detectCapabilities(() => false);
+			const caps = detectCapabilities(() => false, tmuxPassthroughOff);
 			assert.strictEqual(caps.hyperlinks, false);
 			assert.strictEqual(caps.images, null);
 		});
@@ -227,11 +236,11 @@ describe("detectCapabilities", () => {
 
 	it("checks tmux capability when TERM starts with 'tmux'", () => {
 		withEnv({ TERM: "tmux-256color", TERM_PROGRAM: "iterm.app" }, () => {
-			const caps = detectCapabilities(() => true);
+			const caps = detectCapabilities(() => true, tmuxPassthroughOff);
 			assert.strictEqual(caps.hyperlinks, true);
 			assert.strictEqual(caps.images, null);
 
-			const caps2 = detectCapabilities(() => false);
+			const caps2 = detectCapabilities(() => false, tmuxPassthroughOff);
 			assert.strictEqual(caps2.hyperlinks, false);
 		});
 	});
@@ -308,9 +317,137 @@ describe("detectCapabilities", () => {
 				TERM: "tmux-256color",
 			},
 			() => {
-				const caps = detectCapabilities(() => true);
+				const caps = detectCapabilities(() => true, tmuxPassthroughOff);
 				assert.strictEqual(caps.images, null);
 				assert.strictEqual(caps.hyperlinks, true);
+			},
+		);
+	});
+
+	it("enables Kitty images under tmux when passthrough is on and the outer terminal supports them", () => {
+		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			const caps = detectCapabilities(
+				() => true,
+				() => ({ allowPassthrough: "on", clientTermname: "xterm-ghostty" }),
+			);
+			assert.strictEqual(caps.images, "kitty");
+			assert.strictEqual(caps.tmuxPassthrough, true);
+			assert.strictEqual(caps.kittyUnicodePlaceholders, true);
+			assert.strictEqual(caps.hyperlinks, true);
+		});
+	});
+
+	it("keeps direct WezTerm placement disabled under tmux", () => {
+		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			const caps = detectCapabilities(
+				() => true,
+				() => ({ allowPassthrough: "on", clientTermname: "wezterm" }),
+			);
+			assert.strictEqual(caps.images, null);
+			assert.strictEqual(caps.tmuxPassthrough, undefined);
+		});
+	});
+
+	it("honors only explicit safe terminal identity overrides", () => {
+		withEnv(
+			{ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color", PI_TUI_TMUX_KITTY_TERMINAL: "kitty" },
+			() => {
+				const caps = detectCapabilities(
+					() => true,
+					() => ({ allowPassthrough: "on", clientTermname: "xterm-256color" }),
+				);
+				assert.strictEqual(caps.images, "kitty");
+				assert.strictEqual(caps.kittyUnicodePlaceholders, true);
+			},
+		);
+		withEnv(
+			{ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color", PI_TUI_TMUX_KITTY_TERMINAL: "wezterm" },
+			() => {
+				const caps = detectCapabilities(
+					() => true,
+					() => ({ allowPassthrough: "on", clientTermname: "xterm-256color" }),
+				);
+				assert.strictEqual(caps.images, null);
+			},
+		);
+	});
+
+	it("adopts tmux-reported client cell size for image sizing", () => {
+		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			try {
+				const caps = detectCapabilities(
+					() => true,
+					() => ({
+						allowPassthrough: "on",
+						clientTermname: "xterm-ghostty",
+						cellWidthPx: 11,
+						cellHeightPx: 23,
+					}),
+				);
+				assert.strictEqual(caps.images, "kitty");
+				assert.deepStrictEqual(getCellDimensions(), { widthPx: 11, heightPx: 23 });
+			} finally {
+				setCellDimensions({ widthPx: 9, heightPx: 18 });
+			}
+		});
+	});
+
+	it("keeps default cell size when tmux does not report one", () => {
+		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			detectCapabilities(
+				() => true,
+				() => ({ allowPassthrough: "on", clientTermname: "xterm-ghostty" }),
+			);
+			assert.deepStrictEqual(getCellDimensions(), { widthPx: 9, heightPx: 18 });
+		});
+	});
+
+	it("enables Kitty images under tmux when passthrough is set to all", () => {
+		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			const caps = detectCapabilities(
+				() => false,
+				() => ({ allowPassthrough: "all", clientTermname: "xterm-kitty" }),
+			);
+			assert.strictEqual(caps.images, "kitty");
+			assert.strictEqual(caps.tmuxPassthrough, true);
+		});
+	});
+
+	it("keeps images disabled under tmux when passthrough is off", () => {
+		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			const caps = detectCapabilities(
+				() => true,
+				() => ({ allowPassthrough: "off", clientTermname: "xterm-ghostty" }),
+			);
+			assert.strictEqual(caps.images, null);
+			assert.strictEqual(caps.tmuxPassthrough, undefined);
+		});
+	});
+
+	it("keeps images disabled under tmux passthrough when the outer terminal is unknown", () => {
+		withEnv({ TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			const caps = detectCapabilities(
+				() => true,
+				() => ({ allowPassthrough: "on", clientTermname: "xterm-256color" }),
+			);
+			assert.strictEqual(caps.images, null);
+		});
+	});
+
+	it("does not trust stale environment hints for a generic live tmux client", () => {
+		withEnv(
+			{
+				TMUX: "/tmp/tmux-1000/default,1234,0",
+				TERM: "tmux-256color",
+				GHOSTTY_RESOURCES_DIR: "/usr/share/ghostty",
+			},
+			() => {
+				const caps = detectCapabilities(
+					() => true,
+					() => ({ allowPassthrough: "on", clientTermname: "xterm-256color" }),
+				);
+				assert.strictEqual(caps.images, null);
+				assert.strictEqual(caps.tmuxPassthrough, undefined);
 			},
 		);
 	});
@@ -349,7 +486,7 @@ describe("detectCapabilities", () => {
 
 	it("does not inherit Windows Terminal truecolor through tmux", () => {
 		withEnv({ WT_SESSION: "session", TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
-			const caps = detectCapabilities(() => false);
+			const caps = detectCapabilities(() => false, tmuxPassthroughOff);
 			assert.strictEqual(caps.trueColor, false);
 			assert.strictEqual(caps.hyperlinks, false);
 			assert.strictEqual(caps.images, null);
@@ -358,7 +495,7 @@ describe("detectCapabilities", () => {
 
 	it("trusts explicit truecolor hints through tmux", () => {
 		withEnv({ COLORTERM: "truecolor", TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
-			const caps = detectCapabilities(() => false);
+			const caps = detectCapabilities(() => false, tmuxPassthroughOff);
 			assert.strictEqual(caps.trueColor, true);
 			assert.strictEqual(caps.hyperlinks, false);
 			assert.strictEqual(caps.images, null);
@@ -368,13 +505,23 @@ describe("detectCapabilities", () => {
 
 describe("Kitty image cursor movement", () => {
 	it("can request no terminal-side cursor movement", () => {
-		const sequence = encodeKitty("AAAA", { columns: 2, rows: 2, moveCursor: false });
-		assert.ok(sequence.startsWith("\x1b_Ga=T,f=100,q=2,C=1,c=2,r=2;"));
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		try {
+			const sequence = encodeKitty("AAAA", { columns: 2, rows: 2, moveCursor: false });
+			assert.ok(sequence.startsWith("\x1b_Ga=T,f=100,q=2,C=1,c=2,r=2;"));
+		} finally {
+			resetCapabilitiesCache();
+		}
 	});
 
 	it("suppresses Kitty replies for delete commands", () => {
-		assert.strictEqual(deleteKittyImage(42), "\x1b_Ga=d,d=I,i=42,q=2\x1b\\");
-		assert.strictEqual(deleteAllKittyImages(), "\x1b_Ga=d,d=A,q=2\x1b\\");
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		try {
+			assert.strictEqual(deleteKittyImage(42), "\x1b_Ga=d,d=I,i=42,q=2\x1b\\");
+			assert.strictEqual(deleteAllKittyImages(), "\x1b_Ga=d,d=A,q=2\x1b\\");
+		} finally {
+			resetCapabilitiesCache();
+		}
 	});
 
 	it("preserves renderImage's default terminal-side cursor movement", () => {
@@ -458,6 +605,162 @@ describe("Kitty image cursor movement", () => {
 			assert.ok(lines[0].includes(`,i=${imageId}`));
 			assert.ok(lines[0].endsWith("\x1b\\"));
 			assert.deepStrictEqual(lines.slice(1, lines.length), [""]);
+		} finally {
+			resetCapabilitiesCache();
+			setCellDimensions({ widthPx: 9, heightPx: 18 });
+		}
+	});
+});
+
+describe("tmux passthrough", () => {
+	const passthroughCaps = {
+		images: "kitty",
+		trueColor: true,
+		hyperlinks: true,
+		tmuxPassthrough: true,
+	} as const;
+
+	it("wraps a sequence in a tmux DCS envelope and doubles embedded escapes", () => {
+		const wrapped = wrapTmuxPassthrough("\x1b_Ga=T;AAAA\x1b\\");
+		assert.strictEqual(wrapped, "\x1bPtmux;\x1b\x1b_Ga=T;AAAA\x1b\x1b\\\x1b\\");
+	});
+
+	it("wraps single-chunk Kitty sequences when tmux passthrough is active", () => {
+		setCapabilities({ ...passthroughCaps });
+		try {
+			const sequence = encodeKitty("AAAA", { columns: 2, rows: 2, imageId: 7 });
+			assert.ok(sequence.startsWith("\x1bPtmux;\x1b\x1b_Ga=T,f=100,q=2,c=2,r=2,i=7;AAAA"));
+			assert.ok(sequence.endsWith("\x1b\x1b\\\x1b\\"));
+		} finally {
+			resetCapabilitiesCache();
+		}
+	});
+
+	it("wraps every Kitty chunk in its own passthrough envelope", () => {
+		setCapabilities({ ...passthroughCaps });
+		try {
+			const base64Data = "A".repeat(4096 * 2 + 10);
+			const sequence = encodeKitty(base64Data, { columns: 2, rows: 2 });
+			const envelopes = sequence.split("\x1bPtmux;").filter((part) => part.length > 0);
+			assert.strictEqual(envelopes.length, 3);
+			for (const envelope of envelopes) {
+				assert.ok(envelope.startsWith("\x1b\x1b_G"));
+				assert.ok(envelope.endsWith("\x1b\x1b\\\x1b\\"));
+			}
+			// The unwrapped payload must reassemble into the plain chunked form.
+			resetCapabilitiesCache();
+			setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+			const plain = encodeKitty(base64Data, { columns: 2, rows: 2 });
+			const unwrapped = envelopes.map((envelope) => envelope.slice(0, -2).replaceAll("\x1b\x1b", "\x1b")).join("");
+			assert.strictEqual(unwrapped, plain);
+		} finally {
+			resetCapabilitiesCache();
+		}
+	});
+
+	it("wraps Kitty delete commands when tmux passthrough is active", () => {
+		setCapabilities({ ...passthroughCaps });
+		try {
+			assert.strictEqual(deleteKittyImage(42), "\x1bPtmux;\x1b\x1b_Ga=d,d=I,i=42,q=2\x1b\x1b\\\x1b\\");
+			assert.strictEqual(deleteAllKittyImages(), "\x1bPtmux;\x1b\x1b_Ga=d,d=A,q=2\x1b\x1b\\\x1b\\");
+		} finally {
+			resetCapabilitiesCache();
+		}
+	});
+
+	it("encodes virtual placements with U=1 instead of cursor placement", () => {
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		try {
+			const sequence = encodeKitty("AAAA", { columns: 2, rows: 2, imageId: 7, virtual: true });
+			assert.ok(sequence.startsWith("\x1b_Ga=T,f=100,q=2,U=1,c=2,r=2,i=7;"));
+			assert.ok(!sequence.includes(",C=1"));
+		} finally {
+			resetCapabilitiesCache();
+		}
+	});
+
+	it("builds placeholder rows with row/column diacritics and the id in the foreground color", () => {
+		const row = buildKittyPlaceholderRow(7, 0, 2);
+		const cell = (column: number) =>
+			String.fromCodePoint(0x10eeee) + String.fromCodePoint(0x0305) + String.fromCodePoint([0x0305, 0x030d][column]);
+		assert.strictEqual(row, `\x1b[38;2;0;0;7m${cell(0)}${cell(1)}\x1b[39m`);
+		assert.strictEqual(visibleWidth(row), 2);
+	});
+
+	it("adds the id high-byte diacritic for image ids above 24 bits", () => {
+		const imageId = 0x02000003;
+		const row = buildKittyPlaceholderRow(imageId, 0, 1);
+		assert.ok(row.startsWith("\x1b[38;2;0;0;3m"));
+		const expectedCell =
+			String.fromCodePoint(0x10eeee) +
+			String.fromCodePoint(0x0305) +
+			String.fromCodePoint(0x0305) +
+			String.fromCodePoint(0x030e); // diacritic index 2 carries the high byte
+		assert.ok(row.includes(expectedCell));
+		assert.strictEqual(visibleWidth(row), 1);
+	});
+
+	it("renders placeholder lines when kittyUnicodePlaceholders is active", () => {
+		setCapabilities({ ...passthroughCaps, kittyUnicodePlaceholders: true });
+		setCellDimensions({ widthPx: 10, heightPx: 10 });
+		try {
+			const result = renderImage("AAAA", { widthPx: 20, heightPx: 20 }, { maxWidthCells: 2, imageId: 7 });
+			assert.ok(result);
+			assert.ok(result.lines);
+			assert.strictEqual(result.lines.length, 2);
+			assert.strictEqual(result.rows, 2);
+			assert.strictEqual(result.imageId, 7);
+			// First line carries the wrapped virtual transmission plus placeholders.
+			assert.ok(result.lines[0].startsWith("\x1bPtmux;\x1b\x1b_Ga=T,f=100,q=2,U=1,c=2,r=2,i=7;"));
+			assert.strictEqual(isImageLine(result.lines[0]), true);
+			assert.strictEqual(visibleWidth(result.lines[0]), 2);
+			// Subsequent lines are plain placeholder text.
+			assert.strictEqual(isImageLine(result.lines[1]), false);
+			assert.strictEqual(visibleWidth(result.lines[1]), 2);
+		} finally {
+			resetCapabilitiesCache();
+			setCellDimensions({ widthPx: 9, heightPx: 18 });
+		}
+	});
+
+	it("Image component emits placeholder rows instead of empty padding lines", () => {
+		setCapabilities({ ...passthroughCaps, kittyUnicodePlaceholders: true });
+		setCellDimensions({ widthPx: 10, heightPx: 10 });
+		try {
+			const image = new Image(
+				"AAAA",
+				"image/png",
+				{ fallbackColor: (value) => value },
+				{ maxWidthCells: 2 },
+				{ widthPx: 20, heightPx: 20 },
+			);
+			const lines = image.render(4);
+			assert.strictEqual(lines.length, 2);
+			assert.ok(lines[0].startsWith("\x1bPtmux;\x1b\x1b_G"));
+			assert.ok(lines[0].includes(`i=${image.getImageId()}`));
+			assert.strictEqual(visibleWidth(lines[1]), 2);
+			assert.notStrictEqual(lines[1], "");
+		} finally {
+			resetCapabilitiesCache();
+			setCellDimensions({ widthPx: 9, heightPx: 18 });
+		}
+	});
+
+	it("keeps wrapped image lines detectable and invisible to width accounting", () => {
+		setCapabilities({ ...passthroughCaps });
+		setCellDimensions({ widthPx: 10, heightPx: 10 });
+		try {
+			const image = new Image(
+				"AAAA",
+				"image/png",
+				{ fallbackColor: (value) => value },
+				{ maxWidthCells: 2 },
+				{ widthPx: 20, heightPx: 20 },
+			);
+			const lines = image.render(4);
+			assert.ok(lines[0].startsWith("\x1bPtmux;\x1b\x1b_G"));
+			assert.strictEqual(isImageLine(lines[0]), true);
+			assert.strictEqual(visibleWidth(lines[0]), 0);
 		} finally {
 			resetCapabilitiesCache();
 			setCellDimensions({ widthPx: 9, heightPx: 18 });

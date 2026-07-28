@@ -16,7 +16,14 @@ import {
 	type RgbColor,
 	type TerminalColorScheme,
 } from "./terminal-colors.ts";
-import { deleteKittyImage, getCapabilities, isImageLine, setCellDimensions } from "./terminal-image.ts";
+import {
+	deleteKittyImage,
+	getCapabilities,
+	isImageLine,
+	resetCapabilitiesCache,
+	setCellDimensions,
+} from "./terminal-image.ts";
+import { consumeTmuxFocusEvent, DISABLE_FOCUS_REPORTING, ENABLE_FOCUS_REPORTING } from "./tmux-focus.ts";
 import { extractSegments, normalizeTerminalOutput, sliceByColumn, sliceWithWidth, visibleWidth } from "./utils.ts";
 
 const KITTY_SEQUENCE_PREFIX = "\x1b_G";
@@ -821,6 +828,7 @@ export class TUI extends Container {
 			(data) => this.handleInput(data),
 			() => this.requestRender(),
 		);
+		if (process.env.TMUX) this.terminal.write(ENABLE_FOCUS_REPORTING);
 		this.#setCursorVisibility(false);
 		if (this.terminalColorSchemeNotificationsEnabled) {
 			this.terminal.write("\x1b[?2031h");
@@ -894,6 +902,7 @@ export class TUI extends Container {
 
 		this.#lastCursorVisibility = undefined;
 		this.#setCursorVisibility(true);
+		if (process.env.TMUX) this.terminal.write(DISABLE_FOCUS_REPORTING);
 		this.terminal.stop();
 		this.#lastCursorVisibility = undefined;
 		this.previousLines = [];
@@ -1002,6 +1011,14 @@ export class TUI extends Container {
 	}
 
 	private handleInput(data: string): void {
+		const focus = consumeTmuxFocusEvent(data);
+		if (focus.event !== null) {
+			resetCapabilitiesCache();
+			this.invalidate();
+			this.requestRender(true);
+			if (focus.data.length === 0) return;
+			data = focus.data;
+		}
 		if (this.consumeOsc11BackgroundResponse(data)) {
 			return;
 		}
@@ -1722,7 +1739,10 @@ export class TUI extends Container {
 		overlayWidth: number,
 		totalWidth: number,
 	): string {
-		if (isImageLine(baseLine)) return baseLine;
+		if (isImageLine(baseLine) && visibleWidth(baseLine) === 0) return baseLine;
+		const placeholderIndex = baseLine.indexOf("\u{10eeee}");
+		const protocolEnd = placeholderIndex === -1 ? -1 : baseLine.lastIndexOf("\x1b\\", placeholderIndex);
+		const protocolPrefix = protocolEnd === -1 ? "" : baseLine.slice(0, protocolEnd + 2);
 
 		// Single pass through baseLine extracts both before and after segments
 		const afterStart = startCol + overlayWidth;
@@ -1759,10 +1779,10 @@ export class TUI extends Container {
 		// - Edge cases in segment extraction
 		const resultWidth = visibleWidth(result);
 		if (resultWidth <= totalWidth) {
-			return result;
+			return protocolPrefix + result;
 		}
 		// Truncate with strict=true to ensure we don't exceed totalWidth
-		return sliceByColumn(result, 0, totalWidth, true);
+		return protocolPrefix + sliceByColumn(result, 0, totalWidth, true);
 	}
 
 	/**
