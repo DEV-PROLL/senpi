@@ -25,7 +25,6 @@ import {
 	CombinedAutocompleteProvider,
 	type Component,
 	Container,
-	expandPasteMarkers,
 	fuzzyFilter,
 	getCapabilities,
 	hyperlink,
@@ -160,6 +159,7 @@ import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
+import { expandEditorSubmission, transferEditorContent } from "./editor-paste-transfer.ts";
 import { formatExtensionErrorHeadline, sanitizeTuiErrorMessage } from "./extension-error-format.ts";
 import { editFileInExternalEditor, editInExternalEditor } from "./external-editor.ts";
 import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./grok/chrome.ts";
@@ -2966,10 +2966,7 @@ export class InteractiveMode {
 	 * with neither capability never had expandable markers).
 	 */
 	private getExpandedEditorText(): string {
-		if (this.editor.getExpandedText) return this.editor.getExpandedText();
-		const state = this.editor.getPasteState?.();
-		const raw = this.editor.getText();
-		return state ? expandPasteMarkers(raw, state) : raw;
+		return expandEditorSubmission(this.editor, this.editor.getText());
 	}
 
 	/**
@@ -2978,6 +2975,7 @@ export class InteractiveMode {
 	 */
 	private setCustomEditorComponent(factory: EditorFactory | undefined): void {
 		this.editorComponentFactory = factory;
+		if (!factory && this.editor === this.defaultEditor) return;
 
 		// Save text from current editor before switching. Paste markers must not
 		// be transferred as raw text alone: the destination editor instance has no
@@ -2985,22 +2983,6 @@ export class InteractiveMode {
 		// pasted content would be silently lost on submit. When both editors
 		// support the paste-state API, transfer the registry so markers stay
 		// collapsed; otherwise fall back to the expanded text.
-		const rawText = this.editor.getText();
-		const pasteState = this.editor.getPasteState?.();
-		const expandedText = this.getExpandedEditorText();
-		const transferEditorText = (target: EditorComponent): void => {
-			// Only hand over collapsed markers to a target that can export them
-			// again later (getPasteState alongside setPasteState): otherwise a
-			// paste created inside that editor could not survive the next
-			// hand-off, so it must receive the expanded text instead.
-			if (pasteState && target.setPasteState && target.getPasteState) {
-				target.setText(rawText);
-				target.setPasteState(pasteState);
-			} else {
-				target.setText(expandedText);
-			}
-		};
-
 		this.editorContainer.clear();
 
 		if (factory) {
@@ -3012,11 +2994,13 @@ export class InteractiveMode {
 			);
 
 			// Wire up callbacks from the default editor
-			newEditor.onSubmit = this.defaultEditor.onSubmit;
+			newEditor.onSubmit = (text) => {
+				this.defaultEditor.onSubmit?.(expandEditorSubmission(newEditor, text));
+			};
 			newEditor.onChange = this.defaultEditor.onChange;
 
 			// Copy text (and any collapsed paste markers) from previous editor
-			transferEditorText(newEditor);
+			transferEditorContent(this.editor, newEditor);
 
 			// Copy appearance settings if supported
 			if (newEditor.borderColor !== undefined) {
@@ -3070,7 +3054,7 @@ export class InteractiveMode {
 			// hand-off, and a setText round-trip would be pure churn on the
 			// user's draft.
 			if (this.editor !== this.defaultEditor) {
-				transferEditorText(this.defaultEditor);
+				transferEditorContent(this.editor, this.defaultEditor);
 			}
 			this.editor = this.defaultEditor;
 		}

@@ -14,9 +14,7 @@ export { CancellableLoader } from "./components/cancellable-loader.ts";
 export {
 	Editor,
 	type EditorOptions,
-	type EditorPasteState,
 	type EditorTheme,
-	expandPasteMarkers,
 } from "./components/editor.ts";
 export { Image, type ImageOptions, type ImageTheme } from "./components/image.ts";
 export { Input } from "./components/input.ts";
@@ -73,6 +71,7 @@ export {
 	parseKey,
 	setKittyProtocolActive,
 } from "./keys.ts";
+export { type EditorPasteState, expandPasteMarkers } from "./paste-markers.ts";
 // Input buffering for batch splitting
 export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.ts";
 // Terminal interface and implementations

@@ -1,5 +1,5 @@
 import type { AutocompleteProvider } from "./autocomplete.ts";
-import type { EditorPasteState } from "./components/editor.ts";
+import type { EditorPasteState } from "./paste-markers.ts";
 import type { Component } from "./tui.ts";
 
 /**

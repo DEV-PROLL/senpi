@@ -2,6 +2,13 @@ import type { AutocompleteProvider, AutocompleteSuggestions } from "../autocompl
 import { getKeybindings } from "../keybindings.ts";
 import { decodePrintableKey, matchesKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
+import {
+	type EditorPasteState,
+	isPasteMarker,
+	PasteMarkerRegistry,
+	pasteMarkerId,
+	segmentWithPasteMarkers,
+} from "../paste-markers.ts";
 import { type Component, CURSOR_MARKER, type Focusable, type TUI } from "../tui.ts";
 import { UndoStack } from "../undo-stack.ts";
 import {
@@ -17,111 +24,6 @@ import { SelectList, type SelectListLayoutOptions, type SelectListTheme } from "
 
 const graphemeSegmenter = getGraphemeSegmenter();
 const wordSegmenter = getWordSegmenter();
-
-/** Regex matching paste markers like `[paste #1 +123 lines]` or `[paste #2 1234 chars]`. */
-const PASTE_MARKER_REGEX = /\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]/g;
-
-/**
- * Canonical marker string for a stored paste. Must stay in sync with the
- * marker inserted by handlePaste(): `[paste #N +M lines]` for pastes longer
- * than 10 lines, `[paste #N M chars]` otherwise.
- */
-function formatPasteMarker(id: number, content: string): string {
-	const lineCount = content.split("\n").length;
-	return lineCount > 10 ? `[paste #${id} +${lineCount} lines]` : `[paste #${id} ${content.length} chars]`;
-}
-
-/** Snapshot of an editor's large-paste registry, for transfer between editor instances. */
-export interface EditorPasteState {
-	pastes: ReadonlyMap<number, string>;
-	pasteCounter: number;
-}
-
-/**
- * Expand paste markers in `text` using the given registry snapshot.
- * Only exact canonical marker occurrences (as produced at paste time) are
- * expanded: same-id text with a different suffix, e.g. a literal
- * `[paste #1 +5 lines]` typed or set programmatically while entry #1 stores
- * a different body, stays literal. Useful when transferring text from an
- * editor that exposes a paste snapshot but no expansion method.
- */
-export function expandPasteMarkers(text: string, state: EditorPasteState): string {
-	let result = text;
-	for (const [pasteId, pasteContent] of state.pastes) {
-		result = result.split(formatPasteMarker(pasteId, pasteContent)).join(pasteContent);
-	}
-	return result;
-}
-
-/** Non-global version for single-segment testing. */
-const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
-
-/** Check if a segment is a paste marker (i.e. was merged by segmentWithMarkers). */
-function isPasteMarker(segment: string): boolean {
-	return segment.length >= 10 && PASTE_MARKER_SINGLE.test(segment);
-}
-
-/**
- * A segmenter that wraps Intl.Segmenter and merges graphemes that fall
- * within paste markers into single atomic segments.  This makes cursor
- * movement, deletion, word-wrap, etc. treat paste markers as single units.
- *
- * Only exact canonical markers of live registry entries (`validMarkers`) are
- * merged, mirroring expansion: marker-like text that will not expand is not
- * treated atomically either.
- */
-function segmentWithMarkers(
-	text: string,
-	baseSegmenter: Intl.Segmenter,
-	validMarkers: ReadonlySet<string>,
-): Iterable<Intl.SegmentData> {
-	// Fast path: no paste markers in the text or no valid markers.
-	if (validMarkers.size === 0 || !text.includes("[paste #")) {
-		return baseSegmenter.segment(text);
-	}
-
-	// Find all exact canonical marker spans.
-	const markers: Array<{ start: number; end: number }> = [];
-	for (const m of text.matchAll(PASTE_MARKER_REGEX)) {
-		if (!validMarkers.has(m[0])) continue;
-		markers.push({ start: m.index, end: m.index + m[0].length });
-	}
-	if (markers.length === 0) {
-		return baseSegmenter.segment(text);
-	}
-
-	// Build merged segment list.
-	const baseSegments = baseSegmenter.segment(text);
-	const result: Intl.SegmentData[] = [];
-	let markerIdx = 0;
-
-	for (const seg of baseSegments) {
-		// Skip past markers that are entirely before this segment.
-		while (markerIdx < markers.length && markers[markerIdx]!.end <= seg.index) {
-			markerIdx++;
-		}
-
-		const marker = markerIdx < markers.length ? markers[markerIdx]! : null;
-
-		if (marker && seg.index >= marker.start && seg.index < marker.end) {
-			// This segment falls inside a marker.
-			// If this is the first segment of the marker, emit a merged segment.
-			if (seg.index === marker.start) {
-				const markerText = text.slice(marker.start, marker.end);
-				result.push({
-					segment: markerText,
-					index: marker.start,
-					input: text,
-				});
-			}
-			// Otherwise skip (already merged into the first segment).
-		} else {
-			result.push(seg);
-		}
-	}
-
-	return result;
-}
 
 /**
  * Represents a chunk of text for word-wrap layout.
@@ -306,8 +208,7 @@ interface EditorState {
 /** Undo snapshot: editor text state plus the paste registry. */
 interface EditorSnapshot {
 	state: EditorState;
-	pastes: Map<number, string>;
-	pasteCounter: number;
+	pasteState: EditorPasteState;
 }
 
 interface LayoutLine {
@@ -403,8 +304,7 @@ export class Editor implements Component, Focusable {
 	private autocompleteRequestId: number = 0;
 
 	// Paste tracking for large pastes
-	private pastes: Map<number, string> = new Map();
-	private pasteCounter: number = 0;
+	private pasteMarkers = new PasteMarkerRegistry();
 
 	// Bracketed paste mode buffering
 	private pasteBuffer: string = "";
@@ -450,18 +350,20 @@ export class Editor implements Component, Focusable {
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
 	}
 
-	/** Set of canonical marker strings for live pastes, for marker-aware segmentation. */
-	private validPasteMarkers(): Set<string> {
-		const markers = new Set<string>();
-		for (const [id, content] of this.pastes) {
-			markers.add(formatPasteMarker(id, content));
-		}
-		return markers;
-	}
-
 	/** Segment text with paste-marker awareness, only merging exact canonical markers. */
 	private segment(text: string, mode: "word" | "grapheme"): Iterable<Intl.SegmentData> {
-		return segmentWithMarkers(text, mode === "word" ? wordSegmenter : graphemeSegmenter, this.validPasteMarkers());
+		return segmentWithPasteMarkers(
+			text,
+			mode === "word" ? wordSegmenter : graphemeSegmenter,
+			this.pasteMarkers.authorizedMarkers(text),
+		);
+	}
+
+	private removePasteMarker(id: number): boolean {
+		const removal = this.pasteMarkers.remove(id, this.getText());
+		if (!removal.removed) return false;
+		this.state.lines = removal.text.split("\n");
+		return true;
 	}
 
 	getPaddingX(): number {
@@ -1122,7 +1024,7 @@ export class Editor implements Component, Focusable {
 	 * Use this when you need the full content (e.g., for external editor).
 	 */
 	getExpandedText(): string {
-		return expandPasteMarkers(this.state.lines.join("\n"), this.getPasteState());
+		return this.pasteMarkers.expand(this.state.lines.join("\n"));
 	}
 
 	getLines(): string[] {
@@ -1143,37 +1045,8 @@ export class Editor implements Component, Focusable {
 		if (previousText !== normalized) {
 			this.pushUndoSnapshot();
 		}
-		this.prunePastes(normalized, previousText);
+		this.pasteMarkers.prune(normalized, previousText);
 		this.setTextInternal(normalized);
-	}
-
-	/**
-	 * Drop paste registry entries whose canonical markers do not appear in the
-	 * given text. Keeps markers live across programmatic setText round-trips
-	 * (e.g. dialog save/restore or queued-message restore) so submit still
-	 * expands them, while releasing memory for pastes whose markers were
-	 * replaced. Matching is exact (the marker string is reconstructed from the
-	 * stored content), so unrelated text that merely looks like a marker cannot
-	 * accidentally revive a registry entry.
-	 *
-	 * When `previousText` is given (the setText provenance check), an entry
-	 * additionally survives only if its marker was already present in the
-	 * previous text — a genuine carried-over round-trip. Replacement text that
-	 * introduces a marker for a registry entry that was not live in the draft
-	 * (e.g. a stale entry whose marker was removed by kill-line) stays literal.
-	 * Explicit transfers use setPasteState(), which skips this check.
-	 */
-	private prunePastes(text: string, previousText?: string): void {
-		if (this.pastes.size === 0) {
-			this.pasteCounter = 0;
-			return;
-		}
-		for (const [id, content] of this.pastes) {
-			const marker = formatPasteMarker(id, content);
-			const carriedOver = previousText === undefined || previousText.includes(marker);
-			if (!carriedOver || !text.includes(marker)) this.pastes.delete(id);
-		}
-		if (this.pastes.size === 0) this.pasteCounter = 0;
 	}
 
 	/**
@@ -1181,7 +1054,7 @@ export class Editor implements Component, Focusable {
 	 * transferred to another editor instance alongside getText().
 	 */
 	getPasteState(): EditorPasteState {
-		return { pastes: new Map(this.pastes), pasteCounter: this.pasteCounter };
+		return this.pasteMarkers.snapshot();
 	}
 
 	/**
@@ -1191,13 +1064,7 @@ export class Editor implements Component, Focusable {
 	 * counter is raised so future paste ids cannot collide.
 	 */
 	setPasteState(state: EditorPasteState): void {
-		this.pastes = new Map(state.pastes);
-		let maxId = 0;
-		for (const id of this.pastes.keys()) {
-			if (id > maxId) maxId = id;
-		}
-		this.pasteCounter = Math.max(state.pasteCounter, maxId);
-		this.prunePastes(this.getText());
+		this.pasteMarkers.install(state, this.getText());
 	}
 
 	/**
@@ -1376,13 +1243,8 @@ export class Editor implements Component, Focusable {
 		// Check if this is a large paste (> 10 lines or > 1000 characters)
 		const totalChars = filteredText.length;
 		if (pastedLines.length > 10 || totalChars > 1000) {
-			// Store the paste and insert a marker
-			this.pasteCounter++;
-			const pasteId = this.pasteCounter;
-			this.pastes.set(pasteId, filteredText);
-
-			// Insert marker like "[paste #1 +123 lines]" or "[paste #1 1234 chars]"
-			this.insertTextAtCursorInternal(formatPasteMarker(pasteId, filteredText));
+			const marker = this.pasteMarkers.add(filteredText, pastedLines.length, totalChars);
+			this.insertTextAtCursorInternal(marker);
 			return;
 		}
 
@@ -1434,11 +1296,10 @@ export class Editor implements Component, Focusable {
 
 	private submitValue(): void {
 		this.cancelAutocomplete();
-		const result = expandPasteMarkers(this.state.lines.join("\n"), this.getPasteState()).trim();
+		const result = this.pasteMarkers.expand(this.state.lines.join("\n")).trim();
 
 		this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
-		this.pastes.clear();
-		this.pasteCounter = 0;
+		this.pasteMarkers.clear();
 		this.exitHistoryBrowsing();
 		this.scrollOffset = 0;
 		this.undoStack.clear();
@@ -1463,40 +1324,17 @@ export class Editor implements Component, Focusable {
 			const graphemes = [...this.segment(beforeCursor, "grapheme")];
 			const lastGrapheme = graphemes[graphemes.length - 1];
 			const graphemeLength = lastGrapheme ? lastGrapheme.segment.length : 1;
-			const isPastedSegmented = PASTE_MARKER_SINGLE.exec(lastGrapheme.segment);
-
-			if (isPastedSegmented) {
-				// This contains the id part e.g 4 from [paste #4 +123 lines]
-				const targetId = Number(isPastedSegmented[1]);
-				this.pastes.delete(targetId);
-				this.pasteCounter--;
-
-				// Shift registry entries down in ascending id order, independent
-				// of marker order in the text ([paste #3] becomes [paste #2] when
-				// [paste #1] is removed).
-				const higherIds = [...this.pastes.keys()].filter((id) => id > targetId).sort((a, b) => a - b);
-				for (const id of higherIds) {
-					this.pastes.set(id - 1, this.pastes.get(id)!);
-					this.pastes.delete(id);
-				}
-
-				// Renumber markers with ids greater than the removed one.
-				this.state.lines = this.state.lines.map((line) =>
-					line.replace(PASTE_MARKER_REGEX, (fullMatch, idGroup, suffixGroup) => {
-						const x = Number(idGroup);
-						if (x <= targetId) return fullMatch;
-						return `[paste #${x - 1}${suffixGroup}]`;
-					}),
-				);
+			const targetId = pasteMarkerId(lastGrapheme?.segment ?? "");
+			if (targetId !== undefined) {
+				this.removePasteMarker(targetId);
+				this.setCursorCol(Math.max(0, this.state.cursorCol - graphemeLength));
+			} else {
+				line = this.state.lines[this.state.cursorLine] || "";
+				const before = line.slice(0, this.state.cursorCol - graphemeLength);
+				const after = line.slice(this.state.cursorCol);
+				this.state.lines[this.state.cursorLine] = before + after;
+				this.setCursorCol(this.state.cursorCol - graphemeLength);
 			}
-
-			line = this.state.lines[this.state.cursorLine] || "";
-
-			const before = line.slice(0, this.state.cursorCol - graphemeLength);
-			const after = line.slice(this.state.cursorCol);
-
-			this.state.lines[this.state.cursorLine] = before + after;
-			this.setCursorCol(this.state.cursorCol - graphemeLength);
 		} else if (this.state.cursorLine > 0) {
 			this.pushUndoSnapshot();
 
@@ -1862,6 +1700,13 @@ export class Editor implements Component, Focusable {
 			// Find the first grapheme at cursor
 			const graphemes = [...this.segment(afterCursor, "grapheme")];
 			const firstGrapheme = graphemes[0];
+			const markerId =
+				firstGrapheme && isPasteMarker(firstGrapheme.segment) ? pasteMarkerId(firstGrapheme.segment) : undefined;
+			if (markerId !== undefined) {
+				this.removePasteMarker(markerId);
+				this.onChange?.(this.getText());
+				return;
+			}
 			const graphemeLength = firstGrapheme ? firstGrapheme.segment.length : 1;
 
 			const before = currentLine.slice(0, this.state.cursorCol);
@@ -2185,7 +2030,10 @@ export class Editor implements Component, Focusable {
 	}
 
 	private pushUndoSnapshot(): void {
-		this.undoStack.push({ state: this.state, pastes: this.pastes, pasteCounter: this.pasteCounter });
+		this.undoStack.push({
+			state: this.state,
+			pasteState: this.pasteMarkers.snapshot(),
+		});
 	}
 
 	private undo(): void {
@@ -2193,8 +2041,7 @@ export class Editor implements Component, Focusable {
 		const snapshot = this.undoStack.pop();
 		if (!snapshot) return;
 		Object.assign(this.state, snapshot.state);
-		this.pastes = snapshot.pastes;
-		this.pasteCounter = snapshot.pasteCounter;
+		this.pasteMarkers.restore(snapshot.pasteState);
 		this.lastAction = null;
 		this.preferredVisualCol = null;
 		if (this.onChange) {
