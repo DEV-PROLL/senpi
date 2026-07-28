@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { formatGoalToolResponse } from "./format.ts";
 import { createGoal, objectiveFullTextFileName, readGoal, updateGoal } from "./store.ts";
+import { openTodoCompletionError, openTodoTaskContents } from "./todo-gate.ts";
 import type { Goal, GoalAccountingMode, GoalStoreRef } from "./types.ts";
 import { MODEL_SETTABLE_GOAL_STATUS_VALUES } from "./types.ts";
 import { objectiveTruncationNotice, validateObjective } from "./validation.ts";
@@ -57,7 +58,7 @@ export function registerGoalTools(pi: ExtensionAPI, deps: GoalToolRegistrationDe
 		name: "update_goal",
 		label: "Update Goal",
 		description:
-			"Update the existing goal.\nSet status to `complete` only when the objective has actually been achieved and no required work remains. Do not mark a goal complete merely because you are stopping work.\nSet status to `blocked` only after the same blocking condition recurs for at least 3 consecutive goal turns. After resuming, begin a fresh blocked audit after resume. Never mark a goal blocked merely because the work is hard, slow, or uncertain.\nA non-empty reason is required when blocking; reason must not be provided when completing.\nYou cannot use this tool to pause or resume a goal; those status changes are controlled by the user or system.\nWhen marking the goal achieved with status `complete`, report the final elapsed time and token usage from the tool result to the user.",
+			"Update the existing goal.\nSet status to `complete` only when the completion audit proves the objective has actually been achieved and no required work remains. Completion is rejected while the todo list has open tasks: finish or drop them first. When the audit passes, call this tool in that same turn instead of repeating that the work is done. Do not mark a goal complete merely because you are stopping work.\nSet status to `blocked` only at a true impasse: ask yourself whether the blocking condition is unmistakably clear, and require it to recur for at least 3 consecutive goal turns before blocking. If the user resumes a blocked goal, start a fresh blocked audit after resume. Never mark a goal blocked merely because the work is hard, slow, or uncertain.\nA non-empty reason is required when blocking; reason must not be provided when completing.\nYou cannot use this tool to pause or resume a goal; those status changes are controlled by the user or system.\nWhen marking the goal achieved with status `complete`, report the final elapsed time and token usage from the tool result to the user.",
 		parameters: Type.Object(
 			{
 				status: Type.Union(
@@ -79,6 +80,10 @@ export function registerGoalTools(pi: ExtensionAPI, deps: GoalToolRegistrationDe
 			}
 			if (params.status === "complete" && params.reason !== undefined) {
 				throw new Error("reason must not be provided when status is complete");
+			}
+			if (params.status === "complete") {
+				const openTasks = openTodoTaskContents(ctx.sessionManager.getBranch());
+				if (openTasks.length > 0) throw new Error(openTodoCompletionError(openTasks));
 			}
 			await deps.accountCurrentAgentTurn(ctx, "active");
 			const goal = await updateGoal(
