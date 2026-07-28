@@ -26,6 +26,20 @@
 - Added `supportsRemoteCompactionV2` so verified OpenAI Responses proxies can explicitly advertise the native
   `compaction_trigger` request contract. Unknown custom proxies remain disabled by default.
 
+## 2026-07-27 - Honor disabled Azure Responses prompt caching
+
+### What changed and why
+
+- `api/azure-openai-responses.ts`: requests with `cacheRetention: "none"` now omit `prompt_cache_key`,
+  matching the OpenAI Responses adapter instead of silently enabling Azure prompt-cache affinity from the
+  session id.
+- `../test/azure-openai-base-url.test.ts`: pins both the existing 64-character cache-key clamp and the
+  disabled-cache omission path.
+
+### Expected merge conflict zones
+
+- LOW: `api/azure-openai-responses.ts` request payload construction.
+
 ## 2026-07-27 - Treat Anthropic policy blocks as classifier refusals
 
 ### What changed and why
