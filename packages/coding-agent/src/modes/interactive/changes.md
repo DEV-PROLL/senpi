@@ -60,20 +60,29 @@
 
 ### What changed
 
-- `streaming-reveal.ts`: smooth assistant output now waits for an 80ms startup buffer, estimates the provider's
-  grapheme arrival rate with an EWMA, and adjusts reveal speed between 45 and 240 graphemes per second while
-  preserving roughly 140ms of queued text. Fractional reveal progress keeps pacing consistent across 30–120 FPS.
-- `../../../test/streaming-reveal.test.ts`: pins the adaptive pacing constants, frame-rate independence, bounded
-  reveal speed, startup buffering, lifecycle flushes, and grapheme-safe incremental rendering.
+- `streaming-reveal.ts`, `streaming-reveal-pacing.ts`, and `streaming-reveal-content.ts`: smooth assistant output
+  waits for an 80ms startup buffer, estimates the provider's grapheme arrival rate with an EWMA, and follows that
+  learned base rate without a hard ceiling. Individual outlier samples are limited to four times the prior
+  estimate, extra catch-up is bounded independently, and signed backlog correction converges toward roughly
+  140ms of queued text across provider chunk cadences.
+- Fully drained bursts reset fractional progress so a later chunk cannot inherit reveal budget from an earlier
+  burst. Streaming tool arguments retain one-code-unit progress and parse in bounded 64-unit batches, preserving
+  surrogate pairs while sharing the assistant pacing helper.
+- `../../../test/streaming-reveal-{content,pacing}.test.ts`, `../../../test/streaming-reveal.test.ts`, and
+  `../../../test/helpers/streaming-reveal.ts`: split grapheme, pacing, and controller coverage into focused modules
+  and exercise timed 45/90/180/240/500-unit-per-second arrivals, multiple cadences, sustained fast streams,
+  convergence and final-tail bounds, lifecycle flushes, and drained-burst carry reset.
 
 ### Why
 
-- The previous fixed 267ms catch-up policy drained each provider burst completely, leaving visible pauses before
-  the next chunk. Keeping a small adaptive reserve trades an imperceptible startup delay for steadier output.
+- The previous fixed 267ms catch-up policy drained each provider burst completely, while the first adaptive
+  implementation capped the total reveal rate at 240 graphemes per second. Providers above that rate accumulated
+  an unbounded tail that snapped onscreen at `message_end`; separating the learned base rate from bounded
+  correction keeps immediate completion flushes small without delaying lifecycle events.
 
 ### Expected merge conflict zones
 
-- LOW: the fork-only `streaming-reveal.ts` controller and its focused tests.
+- LOW: the fork-only streaming reveal modules, focused tests, and the shared pacing call in `tool-args-reveal.ts`.
 
 ## Runtime-error headline rendering (2026-07-27)
 

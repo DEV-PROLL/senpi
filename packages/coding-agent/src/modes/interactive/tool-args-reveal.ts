@@ -165,15 +165,16 @@ export class ToolArgsRevealController {
 		for (const state of this.#states.values()) {
 			const backlog = state.target.length - state.revealed;
 			if (backlog <= 0) continue;
-			const step = nextStep(backlog, now - state.lastTickAt);
-			state.revealed = advancePastSurrogateBoundary(
-				state.target,
-				Math.min(state.target.length, state.revealed + step),
-			);
+			const step = Math.max(1, nextStep(backlog, now - state.lastTickAt));
+			state.revealed = Math.min(state.target.length, state.revealed + step);
 			state.lastTickAt = now;
 			if (state.revealed - state.rendered < MIN_TOOL_ARGS_PARSE_DELTA) continue;
-			state.component.updateArgs(parseStreamingJson(state.target.slice(0, state.revealed)));
-			state.rendered = state.revealed;
+			const renderEnd = advancePastSurrogateBoundary(
+				state.target,
+				Math.min(state.target.length, state.rendered + MIN_TOOL_ARGS_PARSE_DELTA),
+			);
+			state.component.updateArgs(parseStreamingJson(state.target.slice(0, renderEnd)));
+			state.rendered = renderEnd;
 			rendered = true;
 		}
 		if (rendered) this.#requestRender();

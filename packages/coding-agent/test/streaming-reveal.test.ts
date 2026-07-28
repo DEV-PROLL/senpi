@@ -1,222 +1,23 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { getGraphemeSegmenter } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
-	ARRIVAL_RATE_ALPHA,
-	BlockUnitCounter,
-	buildDisplayMessage,
-	CATCHUP_WINDOW_MS,
 	DEFAULT_SMOOTH_FPS,
 	INITIAL_BUFFER_MS,
-	MAX_REVEAL_UNITS_PER_SEC,
 	MAX_SMOOTH_FPS,
-	MIN_REVEAL_UNITS_PER_SEC,
 	MIN_SMOOTH_FPS,
 	nextStep,
-	StreamingRevealController,
-	TARGET_BUFFER_MS,
-	visibleUnits,
 } from "../src/modes/interactive/streaming-reveal.ts";
-
-function makeMessage(
-	content: AssistantMessage["content"],
-	overrides: Partial<Pick<AssistantMessage, "errorMessage" | "stopReason">> = {},
-): AssistantMessage {
-	return {
-		role: "assistant",
-		content,
-		api: "openai-responses",
-		provider: "openai",
-		model: "test-model",
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: overrides.stopReason ?? "stop",
-		errorMessage: overrides.errorMessage,
-		timestamp: 0,
-	};
-}
-
-function fullSlice(text: string, units: number): string {
-	if (units <= 0) return "";
-	const segments = [...getGraphemeSegmenter().segment(text)];
-	const segment = segments[Math.floor(units) - 1];
-	return segment === undefined ? text : text.slice(0, segment.index + segment.segment.length);
-}
-
-function textAt(message: AssistantMessage, index = 0): string {
-	const block = message.content[index];
-	if (block?.type !== "text") throw new TypeError(`Expected text block at index ${index}`);
-	return block.text;
-}
-
-function thinkingAt(message: AssistantMessage, index = 0): string {
-	const block = message.content[index];
-	if (block?.type !== "thinking") throw new TypeError(`Expected thinking block at index ${index}`);
-	return block.thinking;
-}
-
-class RecordingComponent {
-	readonly messages: AssistantMessage[] = [];
-
-	updateContent(message: AssistantMessage): void {
-		this.messages.push(message);
-	}
-}
-
-function latestMessage(component: RecordingComponent): AssistantMessage {
-	const message = component.messages.at(-1);
-	if (!message) throw new Error("Expected at least one rendered message");
-	return message;
-}
-
-type ControllerHarness = {
-	readonly component: RecordingComponent;
-	readonly controller: StreamingRevealController;
-	readonly requestRender: ReturnType<typeof vi.fn>;
-};
-
-function makeController(
-	options: {
-		readonly fps?: () => number;
-		readonly hideThinking?: () => boolean;
-		readonly smooth?: () => boolean;
-	} = {},
-): ControllerHarness {
-	const component = new RecordingComponent();
-	const requestRender = vi.fn();
-	const controller = new StreamingRevealController({
-		getSmoothStreaming: options.smooth ?? (() => true),
-		getSmoothStreamingFps: options.fps ?? (() => DEFAULT_SMOOTH_FPS),
-		getHideThinkingBlock: options.hideThinking ?? (() => false),
-		requestRender,
-	});
-	return { component, controller, requestRender };
-}
+import {
+	latestMessage,
+	makeController,
+	makeMessage,
+	RecordingComponent,
+	textAt,
+	thinkingAt,
+} from "./helpers/streaming-reveal.ts";
 
 afterEach(() => {
 	vi.restoreAllMocks();
 	vi.useRealTimers();
-});
-
-describe("BlockUnitCounter", () => {
-	test.each([
-		["ASCII", ["a", "ab", "abc"]],
-		["Korean", ["한", "한글", "한글날"]],
-		["emoji ZWJ", ["👨", "👨‍👩", "👨‍👩‍👧", "👨‍👩‍👧‍👦", "👨‍👩‍👧‍👦!"]],
-		["combining marks", ["e", "e\u0301", "e\u0301x", "e\u0301x\u0323"]],
-	] as const)("#given an append-only %s stream #when counting and slicing deltas #then matches a full grapheme recount", (_name, sequence) => {
-		const counter = new BlockUnitCounter();
-		for (const text of sequence) {
-			const fullCount = [...getGraphemeSegmenter().segment(text)].length;
-			expect(counter.count(0, text)).toBe(fullCount);
-			for (let units = 0; units <= fullCount + 1; units++) {
-				expect(counter.slice(0, text, units)).toBe(fullSlice(text, units));
-			}
-		}
-	});
-
-	test("#given a cached short suffix #when text appends #then slices the new grapheme through the fast path", () => {
-		const counter = new BlockUnitCounter();
-
-		expect(counter.slice(0, "a", 2)).toBe("a");
-		expect(counter.slice(0, "ab", 2)).toBe("ab");
-		expect(counter.slice(1, "abc", 1.2)).toBe("a");
-	});
-});
-
-describe("streaming reveal pure helpers", () => {
-	test("#given adaptive pacing constants #when imported #then pins the UX contract", () => {
-		expect(INITIAL_BUFFER_MS).toBe(80);
-		expect(TARGET_BUFFER_MS).toBe(140);
-		expect(MIN_REVEAL_UNITS_PER_SEC).toBe(45);
-		expect(MAX_REVEAL_UNITS_PER_SEC).toBe(240);
-		expect(ARRIVAL_RATE_ALPHA).toBe(0.25);
-		expect(CATCHUP_WINDOW_MS).toBe(267);
-		expect(MIN_SMOOTH_FPS).toBe(30);
-		expect(DEFAULT_SMOOTH_FPS).toBe(60);
-		expect(MAX_SMOOTH_FPS).toBe(120);
-	});
-
-	test("#given mixed ordered blocks #when slicing visible units #then preserves raw thinking and passthrough blocks", () => {
-		const family = "👨‍👩‍👧‍👦";
-		const thinking = { type: "thinking" as const, thinking: "한글" };
-		const providerNative = { type: "providerNative" as const, subtype: "status", raw: { state: "running" } };
-		const toolCall = {
-			type: "toolCall" as const,
-			id: "call-1",
-			name: "read",
-			arguments: { path: "README.md" },
-		};
-		const target = makeMessage([
-			{ type: "text", text: "A" },
-			thinking,
-			providerNative,
-			{ type: "text", text: `${family}B` },
-			toolCall,
-		]);
-
-		const visible = buildDisplayMessage(target, 4, false);
-		const hidden = buildDisplayMessage(target, 2, true);
-
-		expect(visibleUnits(target, false)).toBe(5);
-		expect(thinkingAt(visible, 1)).toBe("한글");
-		expect(textAt(visible, 3)).toBe(family);
-		expect(visible.content[2]).toBe(providerNative);
-		expect(visible.content[4]).toBe(toolCall);
-		expect(visibleUnits(target, true)).toBe(3);
-		expect(hidden.content[1]).toBe(thinking);
-		expect(textAt(hidden, 3)).toBe(family);
-		expect(textAt(target, 3)).toBe(`${family}B`);
-	});
-
-	test("#given a partially revealed timed Thought block #when building its display message #then preserves timing fields", () => {
-		const target = makeMessage([{ type: "thinking", thinking: "reasoning", startedAt: 1_000, endedAt: 4_200 }]);
-
-		const display = buildDisplayMessage(target, 3, false);
-		const block = display.content[0];
-		if (block?.type !== "thinking") throw new TypeError("Expected a thinking block");
-
-		expect(block.thinking).toBe("rea");
-		expect(block.startedAt).toBe(1_000);
-		expect(block.endedAt).toBe(4_200);
-	});
-
-	test("#given a fixed adaptive rate #when stepping at 30 60 and 120fps #then reveal distance is frame-rate independent", () => {
-		const revealDistance = (fps: number): number => {
-			const dt = 1000 / fps;
-			let revealed = 0;
-			let carry = 0;
-			for (let tick = 0; tick < fps; tick++) {
-				carry += nextStep(1000 - revealed, dt, 90);
-				const wholeStep = Math.floor(carry);
-				carry -= wholeStep;
-				revealed += wholeStep;
-			}
-			return revealed;
-		};
-		const distances = [MIN_SMOOTH_FPS, DEFAULT_SMOOTH_FPS, MAX_SMOOTH_FPS].map(revealDistance);
-
-		expect(Math.max(...distances) - Math.min(...distances)).toBeLessThanOrEqual(2);
-	});
-
-	test("#given varying backlog and arrival rates #when choosing a step #then preserves a target buffer and bounded pace", () => {
-		const dt = 1000 / DEFAULT_SMOOTH_FPS;
-		const nearTarget = (90 * TARGET_BUFFER_MS) / 1000;
-
-		expect(nextStep(0, dt)).toBe(0);
-		expect(nextStep(nearTarget, dt, 90)).toBeCloseTo((90 * dt) / 1000);
-		expect(nextStep(1000, dt, 90)).toBeCloseTo((MAX_REVEAL_UNITS_PER_SEC * dt) / 1000);
-		expect(nextStep(10, dt, 0)).toBeGreaterThanOrEqual((MIN_REVEAL_UNITS_PER_SEC * dt) / 1000);
-		expect(nextStep(10, dt, 1000)).toBeLessThanOrEqual((MAX_REVEAL_UNITS_PER_SEC * dt) / 1000);
-		expect(nextStep(1000, 0, 90)).toBe(nextStep(1000, 1, 90));
-		expect(nextStep(1000, 1000, 90)).toBe(nextStep(1000, 100, 90));
-	});
 });
 
 describe("StreamingRevealController", () => {
@@ -250,6 +51,7 @@ describe("StreamingRevealController", () => {
 		expect(requestRender).not.toHaveBeenCalled();
 		controller.stop();
 	});
+
 	test("#given a growing target #when ticks advance #then rendered prefixes grow monotonically", () => {
 		vi.useFakeTimers();
 		let now = 0;
@@ -387,6 +189,28 @@ describe("StreamingRevealController", () => {
 		expect(setIntervalSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 1000 / DEFAULT_SMOOTH_FPS);
 		expect(setIntervalSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 1000 / MAX_SMOOTH_FPS);
 		expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+		controller.stop();
+	});
+
+	test("#given a fully drained burst #when a later burst starts #then fractional progress does not leak across the gap", () => {
+		vi.useFakeTimers();
+		const frameMs = 1000 / MAX_SMOOTH_FPS;
+		let now = 0;
+		vi.spyOn(performance, "now").mockImplementation(() => now);
+		const { component, controller } = makeController({ fps: () => MAX_SMOOTH_FPS });
+		controller.begin(component, makeMessage([{ type: "text", text: "abc" }]));
+
+		for (let frame = 1; frame <= 17; frame++) {
+			now = frame * frameMs;
+			vi.advanceTimersByTime(9);
+		}
+		expect(textAt(latestMessage(component))).toBe("abc");
+
+		controller.setTarget(makeMessage([{ type: "text", text: "abcdefghijklm" }]));
+		now = 18 * frameMs;
+		vi.advanceTimersByTime(9);
+
+		expect(textAt(latestMessage(component))).toBe("abc");
 		controller.stop();
 	});
 
