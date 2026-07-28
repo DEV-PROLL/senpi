@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentToolUpdateCallback, ExtensionAPI, ExtensionContext, ExtensionFactory } from "../src/index.ts";
 import { createHarness } from "./suite/harness.ts";
 
+vi.mock("@code-yeongyu/senpi", async () => await import("../src/index.ts"));
+const { marshalToolResult } = await import("../../senpi-codemode/src/tool/image.ts");
+
 function createExecuteToolHarness(factory: (pi: ExtensionAPI) => void) {
 	let api: ExtensionAPI | undefined;
 	const extensionFactories: ExtensionFactory[] = [
@@ -44,6 +47,47 @@ describe("pi.executeTool", () => {
 				toolName: "inactive_ext",
 				activeTools: ["read"],
 			});
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("thrown tool: preserves error details while normal results remain unchanged", async () => {
+		const harness = await createExecuteToolHarness((pi) => {
+			pi.registerTool({
+				name: "throwing_ext",
+				label: "Throwing",
+				description: "Throws during execution",
+				parameters: Type.Object({}),
+				execute: async () => {
+					throw new Error("boom");
+				},
+			});
+			pi.registerTool({
+				name: "normal_ext",
+				label: "Normal",
+				description: "Returns a normal result",
+				parameters: Type.Object({}),
+				execute: async () => ({
+					content: [{ type: "text", text: "normal" }],
+					details: { unchanged: true },
+				}),
+			});
+		});
+
+		try {
+			const thrownResult = await harness.api.executeTool("throwing_ext", {});
+			expect(thrownResult.content[0]).toEqual({ type: "text", text: "boom" });
+			expect(thrownResult.details).toEqual({ isError: true });
+			expect(marshalToolResult(thrownResult)).toEqual({
+				text: "boom",
+				details: { isError: true },
+				images: [],
+				hasError: true,
+			});
+
+			const normalResult = await harness.api.executeTool("normal_ext", {});
+			expect(normalResult.details).toEqual({ unchanged: true });
 		} finally {
 			harness.cleanup();
 		}
