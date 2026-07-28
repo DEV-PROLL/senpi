@@ -3,6 +3,35 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## bash_output ghost wait_for params removed (2026-07-28)
+
+### What changed
+
+- `bash_output` no longer exposes the `wait_for`, `block`, and `timeout` params,
+  and the `BASH_OUTPUT_WAIT_REMOVED_GUIDANCE` migration string and
+  `GHOST_PARAM_DESCRIPTION` were removed from `tools/bash-output.ts`.
+- `BashOutputInput` is now exactly `{ bash_id, filter?, view? }`; any caller still
+  sending the removed params gets a generic schema-validation error instead of
+  the migration text.
+- Tests that pinned the ghost guidance were removed:
+  - `test/bash-output-peek.test.ts` `describe("bash_output removed blocking params")` block.
+  - `test/suite/terminal-extension.test.ts` `it("wait_for ghost param returns migration guidance …")`.
+  - `test/prompt-surface-stale-wait-idioms.test.ts` `it("the ghost guidance exists …")`.
+- The negative guards in `prompt-surface-stale-wait-idioms.test.ts` (no surface
+  teaches `wait_for` / `block until` / tmux backgrounding) stay in place.
+
+### Why
+
+The ghost params kept the removed `wait_for` idiom visible to the model in the
+schema, so it kept being called and returning the guidance text — the migration
+message never stopped appearing. Dropping the params from the schema removes the
+mention entirely; the monitor/notification model in `terminal/prompt.ts` and
+`docs/terminal-tools.md` is already the single taught path.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: fork-owned `bash_output` schema and the removed ghost-param tests.
+
 ## Hidden agent wake notifications (2026-07-28)
 
 ### What changed

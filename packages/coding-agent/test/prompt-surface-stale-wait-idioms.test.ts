@@ -9,10 +9,7 @@ import {
 import { TERMINAL_PROMPT_SECTION } from "../src/core/extensions/builtin/terminal/prompt.ts";
 import { createPtyBashTool } from "../src/core/extensions/builtin/terminal/tools/bash.ts";
 import { createBashInputTool } from "../src/core/extensions/builtin/terminal/tools/bash-input.ts";
-import {
-	BASH_OUTPUT_WAIT_REMOVED_GUIDANCE,
-	createBashOutputTool,
-} from "../src/core/extensions/builtin/terminal/tools/bash-output.ts";
+import { createBashOutputTool } from "../src/core/extensions/builtin/terminal/tools/bash-output.ts";
 import { createBashResizeTool } from "../src/core/extensions/builtin/terminal/tools/bash-resize.ts";
 import type { TerminalToolContext } from "../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createKillBashTool } from "../src/core/extensions/builtin/terminal/tools/kill-bash.ts";
@@ -132,10 +129,5 @@ describe("stale wait-idiom consistency gate", () => {
 		expect(bashOutput.description.toLowerCase()).not.toContain("block until");
 		expect(bashOutput.description).not.toContain("wait_for");
 		expect(bashOutput.promptSnippet ?? "").not.toContain("wait_for");
-	});
-
-	it("the ghost guidance exists so removed-param callers are redirected to monitor", () => {
-		expect(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE).toContain("wait_for removed");
-		expect(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE).toContain("monitor(");
 	});
 });

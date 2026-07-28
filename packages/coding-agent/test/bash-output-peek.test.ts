@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
-import {
-	BASH_OUTPUT_WAIT_REMOVED_GUIDANCE,
-	bashOutputSchema,
-	createBashOutputTool,
-} from "../src/core/extensions/builtin/terminal/tools/bash-output.ts";
+import { createBashOutputTool } from "../src/core/extensions/builtin/terminal/tools/bash-output.ts";
 import type { TerminalToolContext } from "../src/core/extensions/builtin/terminal/tools/context.ts";
 
 /**
- * bash_output is a pure non-blocking peek: it never waits for output, and the
- * removed blocking params (wait_for / block / timeout) survive only as ghost
- * params that return migration guidance pointing at monitor + notifications.
+ * bash_output is a pure non-blocking peek: it returns the latest delta, the
+ * status line, or a rendered screen snapshot without ever waiting.
  */
 class FakeRuntime {
 	exited = false;
@@ -105,46 +100,5 @@ describe("bash_output peek", () => {
 			new Promise((_, reject) => setTimeout(() => reject(new Error("peek blocked for over 1s")), 1000)),
 		]);
 		expect(firstText(result as Awaited<typeof execution>)).toContain("status: running");
-	});
-});
-
-describe("bash_output removed blocking params", () => {
-	it("wait_for returns ghost guidance naming monitor", async () => {
-		const tool = createFixture(new FakeRuntime());
-		const result = await tool.execute("call-8", { bash_id: "bash-1", wait_for: "DONE" });
-		expect(result.isError).toBe(true);
-		const text = firstText(result);
-		expect(text).toBe(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE);
-		expect(text).toContain("wait_for removed");
-		expect(text).toContain("monitor(");
-	});
-
-	it("a blocking timeout returns the same ghost guidance", async () => {
-		const tool = createFixture(new FakeRuntime());
-		const result = await tool.execute("call-9", { bash_id: "bash-1", timeout: 30 });
-		expect(result.isError).toBe(true);
-		expect(firstText(result)).toBe(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE);
-	});
-
-	it("block returns the same ghost guidance", async () => {
-		const tool = createFixture(new FakeRuntime());
-		const result = await tool.execute("call-10", { bash_id: "bash-1", block: true });
-		expect(result.isError).toBe(true);
-		expect(firstText(result)).toBe(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE);
-	});
-
-	it("guidance covers the monitor launch pattern, the already-running fallback, and the notification tail", () => {
-		expect(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE).toContain("monitor({command, filter})");
-		expect(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE).toContain("already-running");
-		expect(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE).toContain("kill_bash");
-		expect(BASH_OUTPUT_WAIT_REMOVED_GUIDANCE).toContain("notifications carry the tail");
-	});
-
-	it("keeps the removed params in the schema only as deprecated ghosts", () => {
-		const properties = bashOutputSchema.properties as Record<string, { description?: string }>;
-		for (const key of ["wait_for", "block", "timeout"]) {
-			expect(Object.hasOwn(properties, key), `schema keeps ghost param ${key}`).toBe(true);
-			expect(properties[key]?.description?.toLowerCase()).toContain("removed");
-		}
 	});
 });

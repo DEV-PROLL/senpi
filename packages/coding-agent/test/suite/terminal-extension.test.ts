@@ -271,45 +271,6 @@ describe("terminal builtin extension — bash_output robustness", () => {
 		expect(firstText(statusCheck)).toContain("status: running");
 		await manager.stop(bashId);
 	});
-
-	it("wait_for ghost param returns migration guidance naming monitor without blocking", async () => {
-		const bash = createPtyBashTool(ctx);
-		const output = createBashOutputTool(ctx);
-		const started = await bash.execute("call-bg-ghost", { command: "sleep 30", run_in_background: true }, undefined);
-		const bashId = /ID: (bash_\d+)/.exec(firstText(started))?.[1];
-		if (!bashId) throw new Error("Background bash did not return an id");
-
-		const ghostPromise = output.execute("call-ghost-wait", {
-			bash_id: bashId,
-			wait_for: "NEVER_MATCHES_THIS_PATTERN_XYZ",
-			timeout: 10,
-		});
-		const ghostCompleted = new Promise<Awaited<typeof ghostPromise>>((resolve, reject) => {
-			const timeout = setTimeout(() => reject(new Error("ghost-param call blocked for over 1 second")), 1000);
-			ghostPromise.then(
-				(value) => {
-					clearTimeout(timeout);
-					resolve(value);
-				},
-				(error: unknown) => {
-					clearTimeout(timeout);
-					reject(error);
-				},
-			);
-		});
-
-		const result = await ghostCompleted;
-		expect(result.isError).toBe(true);
-		const text = firstText(result);
-		expect(text).toContain("wait_for removed");
-		expect(text).toContain("monitor(");
-		expect(text).toContain("kill_bash");
-
-		// The session is untouched: peek still works and kill tears it down.
-		const statusCheck = await output.execute("call-status-after-ghost", { bash_id: bashId });
-		expect(firstText(statusCheck)).toContain("status: running");
-		await manager.stop(bashId);
-	});
 });
 
 describe("terminal extension auto-detach wiring", () => {
