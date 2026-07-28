@@ -300,7 +300,7 @@ describe("app-server turn engine", () => {
 			type: "message_update",
 			message,
 			assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: message },
-		} as { type: string });
+		} as unknown as { type: string });
 		entry.session.emit({
 			type: "message_update",
 			message,
@@ -364,6 +364,60 @@ describe("app-server turn engine", () => {
 		expect(turnLog.readTurns("thread-a")[0]?.items).toMatchObject([
 			{ type: "userMessage", clientId: null, content: [{ type: "text", text: "extension wakeup" }] },
 		]);
+	});
+
+	it("tracks an extension-origin hidden custom wake without exposing a user item", async () => {
+		const { engine, store, notifications, turnLog } = createHarness();
+		const entry = store.add("thread-a");
+		engine.observeThread("thread-a");
+
+		entry.session.emit({
+			type: "message_start",
+			message: {
+				role: "custom",
+				customType: "senpi-monitor:notification",
+				content: "<system-reminder>Monitor event(build): READY</system-reminder>",
+				display: false,
+			},
+		} as unknown as { type: string });
+		entry.session.emit({ type: "agent_start" });
+		entry.session.emitAgentEnd();
+		await entry.taskQueue;
+
+		expect(notifications.map((notification) => notification.method)).toEqual([
+			"thread/status/changed",
+			"turn/started",
+			"thread/status/changed",
+			"turn/completed",
+		]);
+		const started = notifications.find((notification) => notification.method === "turn/started");
+		const completed = notifications.find((notification) => notification.method === "turn/completed");
+		expect(started?.params).toMatchObject({ threadId: "thread-a", turn: { status: "inProgress" } });
+		expect(completed?.params).toMatchObject({
+			threadId: "thread-a",
+			turn: { id: (started?.params as { turn: { id: string } }).turn.id, status: "completed" },
+		});
+		expect(turnLog.readTurns("thread-a")[0]?.items).toEqual([]);
+	});
+
+	it("ignores a persistence-only custom message when no agent turn starts", async () => {
+		const { engine, store, notifications, turnLog } = createHarness();
+		const entry = store.add("thread-a");
+		engine.observeThread("thread-a");
+		const message = {
+			role: "custom",
+			customType: "session-hook",
+			content: "persist this context without starting a turn",
+			display: false,
+		};
+
+		entry.session.emit({ type: "message_start", message } as unknown as { type: string });
+		entry.session.emit({ type: "message_end", message } as unknown as { type: string });
+		await entry.taskQueue;
+
+		expect(notifications).toEqual([]);
+		expect(entry.status).toBe("idle");
+		expect(turnLog.readTurns("thread-a")).toEqual([]);
 	});
 
 	it("closes dangling tool items before turn/completed when execution never finished", async () => {

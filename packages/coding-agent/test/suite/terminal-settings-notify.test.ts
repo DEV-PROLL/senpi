@@ -13,8 +13,8 @@ const exitedRuntime = {
 } as unknown as TerminalRuntimeSession;
 
 type CapturedNotification = {
-	readonly content: string;
-	readonly options: Parameters<TerminalNotifierDeps["sendUserMessage"]>[1];
+	readonly message: Parameters<TerminalNotifierDeps["sendMessage"]>[0];
+	readonly options: Parameters<TerminalNotifierDeps["sendMessage"]>[1];
 };
 
 function makeNotifier(overrides: {
@@ -24,7 +24,7 @@ function makeNotifier(overrides: {
 	sink: CapturedNotification[];
 }) {
 	return new TerminalNotifier({
-		sendUserMessage: (content, options) => overrides.sink.push({ content, options }),
+		sendMessage: (message, options) => overrides.sink.push({ message, options }),
 		getMode: () => overrides.mode ?? "wake",
 		getContext: () =>
 			({
@@ -105,7 +105,7 @@ describe("terminal notifier completion payload", () => {
 		// Then: the notice carries the exit code and the output tail, and never tells the
 		// agent to burn a follow-up bash_output call.
 		expect(sink).toHaveLength(1);
-		const content = sink[0]?.content ?? "";
+		const content = sink[0]?.message.content ?? "";
 		expect(content).toContain("exit code 3");
 		expect(content).toContain("LAST");
 		expect(content).not.toContain("Use bash_output");
@@ -121,7 +121,7 @@ describe("terminal notifier completion payload", () => {
 		notifier.notifyCompletion("bash_1", exitedWithOutput(huge, 0));
 
 		// Then: the tail is bounded with a truncation note pointing at the peekable history.
-		const content = sink[0]?.content ?? "";
+		const content = sink[0]?.message.content ?? "";
 		expect(content).toContain("TAIL_END");
 		expect(content).toContain("truncat");
 		expect(content.length).toBeLessThan(4000);
@@ -141,9 +141,13 @@ describe("terminal notifier guards", () => {
 
 		// Then: one steering notification carries the completion notice.
 		expect(sink).toHaveLength(1);
-		expect(sink[0]?.content).toContain("bash_1");
-		expect(sink[0]?.content).toContain("<system-reminder>");
-		expect(sink[0]?.options).toEqual({ deliverAs: "steer" });
+		expect(sink[0]?.message).toEqual({
+			customType: "senpi-terminal:notification",
+			content: expect.stringContaining("bash_1"),
+			display: false,
+		});
+		expect(sink[0]?.message.content).toContain("<system-reminder>");
+		expect(sink[0]?.options).toEqual({ triggerTurn: true, deliverAs: "steer" });
 	});
 
 	it("queues next-turn completion as a follow-up", () => {
@@ -156,8 +160,8 @@ describe("terminal notifier guards", () => {
 
 		// Then: the notice is queued as a follow-up message.
 		expect(sink).toHaveLength(1);
-		expect(sink[0]?.content).toContain("bash_1");
-		expect(sink[0]?.options).toEqual({ deliverAs: "followUp" });
+		expect(sink[0]?.message.content).toContain("bash_1");
+		expect(sink[0]?.options).toEqual({ triggerTurn: true, deliverAs: "followUp" });
 	});
 
 	it("surfaces extension injections only in interactive modes", () => {
