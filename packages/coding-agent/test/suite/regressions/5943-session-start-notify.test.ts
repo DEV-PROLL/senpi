@@ -89,7 +89,9 @@ type ReloadCommandContext = {
 	session: {
 		isStreaming: boolean;
 		isCompacting: boolean;
-		reload: (options?: { beforeSessionStart?: () => void | Promise<void> }) => Promise<{ cancelled: boolean; reason?: string }>;
+		reload: (options?: {
+			beforeSessionStart?: () => void | Promise<void>;
+		}) => Promise<{ cancelled: boolean; reason?: string }>;
 		checkReloadVeto: () => Promise<{ cancelled: boolean; reason?: string }>;
 		resourceLoader: { getThemes: () => { themes: [] } };
 		extensionRunner: unknown;
