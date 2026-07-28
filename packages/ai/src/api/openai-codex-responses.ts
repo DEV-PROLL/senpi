@@ -99,11 +99,7 @@ type LegacyCodexReasoningSummaryOn = "on";
 
 export interface OpenAICodexResponsesOptions extends StreamOptions {
 	reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-	reasoningSummary?:
-		| CodexReasoningSummary
-		| LegacyCodexReasoningSummaryOff
-		| LegacyCodexReasoningSummaryOn
-		| null;
+	reasoningSummary?: CodexReasoningSummary | LegacyCodexReasoningSummaryOff | LegacyCodexReasoningSummaryOn | null;
 	serviceTier?: ResponseCreateParamsStreaming["service_tier"];
 	textVerbosity?: "low" | "medium" | "high";
 	toolChoice?: "auto" | "none" | "required";
