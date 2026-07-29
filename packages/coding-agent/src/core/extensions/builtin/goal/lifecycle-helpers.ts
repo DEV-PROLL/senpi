@@ -1,9 +1,8 @@
+import { GOAL_CONTINUATION_MESSAGE_TYPE } from "../../../messages.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { shouldQueueGoalContinuationWhenIdle } from "./continuation.ts";
 import { buildContinuationPrompt } from "./prompt.ts";
 import type { Goal } from "./types.ts";
-
-const GOAL_CONTINUATION_MESSAGE_TYPE = "goal-continuation";
 
 export function isResumeOfPausedGoal(
 	ctx: ExtensionContext,
