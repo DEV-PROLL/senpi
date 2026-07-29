@@ -32,10 +32,11 @@ import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import chalk from "chalk";
 import type { PackageSource } from "../core/settings-manager.ts";
-import { computeBuildInputsHashFromLsTree } from "./omo-local-update-fingerprint.ts";
 import { spawnProcess, waitForChildProcess } from "../utils/child-process.ts";
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { killProcessTree } from "../utils/shell.ts";
+import { computeBuildInputsHashFromLsTree } from "./omo-local-update-fingerprint.ts";
+import { defaultSpawnWorker, type OmoLocalSpawnWorker } from "./omo-local-update-worker.ts";
 
 /** Result of one spawned command, with output captured and timeout enforced. */
 export interface OmoLocalRunResult {
@@ -774,6 +775,10 @@ export interface RunOmoLocalUpdateBetaOptions {
 	force?: boolean;
 	log?: (message: string) => void;
 	run?: OmoLocalRun;
+	/** "build" (default) runs the full update inline; "dispatch" hands a needed rebuild to a detached worker. */
+	mode?: "build" | "dispatch";
+	/** exported-for-tests seam over the detached worker spawn used by "dispatch". */
+	spawnWorker?: OmoLocalSpawnWorker;
 }
 
 /**
@@ -783,7 +788,11 @@ export interface RunOmoLocalUpdateBetaOptions {
  * atomic lock acquisition (held through fetch, worktree, build, swap, stamp AND notify;
  * owner-checked unlink in `finally`) -> computeRemoteState (ONE read-only fetch + frozen
  * rev-parse reads of origin/dev) -> skip decision BEFORE any worktree op, install, or
- * write -> ensureBuildWorktree (feature-owned persistent worktree, reuse-or-recreate) ->
+ * write (skip on matching sha OR matching build-input fingerprint) -> in "dispatch" mode
+ * (bare `senpi update` foreground, unless SENPI_OMO_LOCAL_UPDATE_SYNC=1) a needed rebuild
+ * is handed to a detached worker spawn (omo-local-update-worker.ts) and the hook returns ->
+ * otherwise ("build": the default and the worker path) ensureBuildWorktree
+ * (feature-owned persistent worktree, reuse-or-recreate) ->
  * `bun install` (600s, cwd = build worktree) -> `bun run build:senpi-plugin` (900s, cwd =
  * build worktree) -> completeness check in the WORKTREE plugin dir -> atomic swap of the
  * install target -> writeStamp (inventory from the NEW plugin dir) -> notify (green line
@@ -802,6 +811,8 @@ export async function runOmoLocalUpdateBeta(options: RunOmoLocalUpdateBetaOption
 			console.log(message);
 		});
 	const run = options.run ?? defaultRun;
+	const dispatchRequested =
+		(options.mode ?? "build") === "dispatch" && options.env.SENPI_OMO_LOCAL_UPDATE_SYNC !== "1";
 	let repoRoot: string | undefined;
 	try {
 		if (isKillSwitched(options.env)) {
@@ -848,6 +859,31 @@ export async function runOmoLocalUpdateBeta(options: RunOmoLocalUpdateBetaOption
 								`OMO local plugins already match origin/dev @${shortSkip} (build inputs unchanged); skipping rebuild.`,
 							),
 				);
+				return;
+			}
+
+			// Dispatch: hand the rebuild to a detached worker so the foreground never blocks on
+			// the 30s+ install/build. The lock is released BEFORE the spawn (release is
+			// owner-checked, so the finally re-release no-ops) or the worker's own lock
+			// acquisition would race the still-live foreground pid and give up.
+			if (dispatchRequested) {
+				releaseOmoLocalLock(lock);
+				const spawnWorker = options.spawnWorker ?? defaultSpawnWorker;
+				const spawned = spawnWorker({ agentDir: options.agentDir, force: options.force ?? false });
+				if (spawned.ok) {
+					log(
+						chalk.dim(
+							`Updating OMO local plugins in background: origin/dev @${remoteState.sha.slice(0, 7)} - ${remoteState.subject} (log: ${spawned.logPath})`,
+						),
+					);
+				} else {
+					log(chalk.yellow(`OMO local plugin background update could not start: ${spawned.message}`));
+					log(
+						chalk.dim(
+							"Run `senpi update` again, or set SENPI_OMO_LOCAL_UPDATE_SYNC=1 to update in the foreground.",
+						),
+					);
+				}
 				return;
 			}
 

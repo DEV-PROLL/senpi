@@ -33,7 +33,16 @@ describe("build-input fingerprint", () => {
 		for (const excluded of ["docs", ".github", "README.md", "README.ko.md", "assets", "CHANGELOG.md", ".agents"]) {
 			expect(isBuildInputRootPath(excluded)).toBe(false);
 		}
-		for (const included of ["packages", "script", "scripts", "package.json", "bun.lock", "postinstall.mjs", ".gitmodules", "unknown-dir"]) {
+		for (const included of [
+			"packages",
+			"script",
+			"scripts",
+			"package.json",
+			"bun.lock",
+			"postinstall.mjs",
+			".gitmodules",
+			"unknown-dir",
+		]) {
 			expect(isBuildInputRootPath(included)).toBe(true);
 		}
 	});
