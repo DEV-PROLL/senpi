@@ -17,8 +17,13 @@ import { listModels } from "./cli/list-models.ts";
 import { listTips } from "./cli/list-tips.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
+import {
+	createStartupLoadingIndicator,
+	pauseIndicatorDuringPrompts,
+	shouldShowStartupLoadingIndicator,
+} from "./cli/startup-loading-indicator.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
+import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -707,6 +712,25 @@ export async function main(args: string[], options?: MainOptions) {
 		parsed.help || parsed.listModels !== undefined || parsed.listTips ? "print" : toProjectTrustMode(appMode);
 	const projectTrustByCwd = new Map<string, boolean>();
 
+	// Immediate feedback while the heavy runtime (extensions, models, trust) is
+	// created; without it the terminal stays blank and looks stuck (codex-style
+	// UI-first startup). Stopped before any other surface writes to stdout.
+	const startupLoadingIndicator = createStartupLoadingIndicator({
+		writer: (chunk) => process.stdout.write(chunk),
+		isTTY: process.stdout.isTTY === true,
+		label: `Loading ${APP_NAME}`,
+	});
+	if (
+		shouldShowStartupLoadingIndicator({
+			appMode,
+			stdoutIsTTY: process.stdout.isTTY === true,
+			helpRequested: parsed.help === true,
+		})
+	) {
+		startupLoadingIndicator.start();
+		startupLoadingIndicator.setPhase("extensions & models");
+	}
+
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 		cwd,
 		agentDir,
@@ -743,12 +767,15 @@ export async function main(args: string[], options?: MainOptions) {
 								extensionsResult,
 								projectTrustContext:
 									projectTrustContext ??
-									createProjectTrustContext({
-										cwd,
-										mode: isInitialRuntime ? trustPromptMode : toProjectTrustMode(appMode),
-										settingsManager: startupSettingsManager,
-										hasUI: isInitialRuntime && trustPromptMode === "interactive",
-									}),
+									pauseIndicatorDuringPrompts(
+										createProjectTrustContext({
+											cwd,
+											mode: isInitialRuntime ? trustPromptMode : toProjectTrustMode(appMode),
+											settingsManager: startupSettingsManager,
+											hasUI: isInitialRuntime && trustPromptMode === "interactive",
+										}),
+										startupLoadingIndicator,
+									),
 								onExtensionError: (message) => projectTrustDiagnostics.push({ type: "warning", message }),
 							});
 							projectTrustByCwd.set(cwd, trusted);
@@ -826,6 +853,9 @@ export async function main(args: string[], options?: MainOptions) {
 			}
 		}
 
+		if (isInitialRuntime) {
+			startupLoadingIndicator.setPhase("opening session");
+		}
 		const created = await createAgentSessionFromServices({
 			services,
 			sessionManager,
@@ -872,6 +902,8 @@ export async function main(args: string[], options?: MainOptions) {
 		cwd: sessionManager.getCwd(),
 		agentDir,
 		sessionManager,
+	}).finally(() => {
+		startupLoadingIndicator.stop();
 	});
 	time("createAgentSessionRuntime");
 	const { services, session, modelFallbackMessage } = runtime;

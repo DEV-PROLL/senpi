@@ -1,3 +1,32 @@
+## Interactive startup loading indicator (2026-07-29)
+
+### What changed
+
+- New `cli/startup-loading-indicator.ts`: single-line dim ANSI spinner (`⠋ Loading senpi… <phase>`) with a
+  120ms grace delay (fast startups stay flash-free), phase updates, pause/resume, and an idempotent `stop()`
+  that clears the line and restores the cursor (also via a `process` exit hook). It engages only when
+  `appMode === "interactive"`, stdout is a TTY, and `--help` was not requested.
+- `main.ts` starts the indicator before `createAgentSessionRuntime` — the extensions/models/trust window that
+  previously rendered nothing — switches the phase to `opening session` before the initial session is created,
+  and stops it in a `.finally` before any other stdout writer (TUI, help, diagnostics) takes over.
+- Mid-load project-trust prompts (`createProjectTrustContext` `ui.select`/`confirm`/`input`) are wrapped by
+  `pauseIndicatorDuringPrompts`, so the trust selector TUI never fights the spinner for the terminal.
+- Coverage: `test/startup-loading-indicator.test.ts` (grace delay, frame animation, phase updates,
+  pause/resume, stop idempotency, TTY/help gating, prompt-pause wrapping).
+
+### Why
+
+- Interactive startup completed the entire heavy runtime creation before the TUI existed, leaving the terminal
+  blank and apparently stuck (QA repro: ~23s of empty screen with a slow-loading extension). Codex's TUI
+  addresses the same window by rendering a dim placeholder header until the session is configured
+  (`codex-rs/tui` chatwidget); this is the minimal-conflict equivalent for senpi's pre-TUI bootstrap window.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: the import block and indicator wiring around `createAgentSessionRuntime` in `main.ts`; the module itself
+  has no upstream counterpart.
+- LOW: the `projectTrustContext` fallback wrap inside `createRuntime`.
+
 ## Availability-aware default Fable fallback chain (2026-07-29)
 
 ### What changed
