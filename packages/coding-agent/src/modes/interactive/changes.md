@@ -8,7 +8,8 @@
 - `tips/registry.ts`: `TIP_DEFINITIONS` now concatenates `...ETHOS_TIPS` after `SUBAGENT_TIPS`.
 - The two command-referencing tips (`ethos.ulw-plan-sage`, `ethos.ulw-loop-shallow`) declare `requiresCommand: "tasks"`, so they only surface when the omo plugin's `tasks` command is registered - matching the `workflow-skills.*` tips in `subagent-tips.ts`. The eight pure manifesto tips (including the monitor/cache bragging tips) are keyless and ungated.
 - Three additional tips brag about the harness's monitor tool (subscribe to stdout, never sleep), the prompt-cache budget (never block past cache TTL), and the live cache-hit rate in the footer. All three are keyless and ungated.
-- Coverage: `test/suite/ethos-tips.test.ts` pins the ten ids, the verbatim approved English copy, the `tasks` gating, and the unbound/ungated manifesto set.
+- Three more tips brag about multimodal vision (the agent sees screenshots, PDFs, diagrams), Claude Code OAuth multi-account (switch logins, not env vars), and the agent-SDK foundation (no ToS gray zone, no ban anxiety). All three are keyless and ungated.
+- Coverage: `test/suite/ethos-tips.test.ts` pins the thirteen ids, the verbatim approved English copy, the `tasks` gating, and the unbound/ungated manifesto set.
 
 ### Why
 

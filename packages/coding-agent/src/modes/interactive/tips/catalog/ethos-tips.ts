@@ -62,4 +62,22 @@ export const ETHOS_TIPS = [
 		render: () =>
 			"Live cache-hit rate in the footer, plus a running tab of misses, idle gaps, and model swaps. I can point at the exact moment cache broke and why. Watching tokens you never re-pay stack up? Smug doesn't cover it.",
 	},
+	{
+		id: "ethos.multimodal-vision",
+		bindings: [],
+		render: () =>
+			"Drop a screenshot, a PDF, a crusty whiteboard photo... senpi actually sees it, reads it, reasons about it. Your agent has eyes now. *Yes, really.*",
+	},
+	{
+		id: "ethos.oauth-multi-account",
+		bindings: [],
+		render: () =>
+			"Hit a rate limit, switch accounts. Wrong org, switch again. senpi treats your Claude logins like a roster, not a single lifeline. *Env vars could never.*",
+	},
+	{
+		id: "ethos.agent-sdk-foundation",
+		bindings: [],
+		render: () =>
+			'Built on the official agent SDK, speaking the protocol natively. No reverse-engineered wrapper, no ToS gray zone, no "will I get banned for this" anxiety. *Sleep easy, ship loud.*',
+	},
 ] satisfies readonly TipDefinition[];

@@ -12,6 +12,9 @@ const ETHOS_IDS = [
 	"ethos.monitor-subscribe",
 	"ethos.cache-budget",
 	"ethos.cache-hit-rate",
+	"ethos.multimodal-vision",
+	"ethos.oauth-multi-account",
+	"ethos.agent-sdk-foundation",
 ] as const;
 
 const noopKeys = (): string => "";
@@ -58,6 +61,15 @@ describe("ethos tips", () => {
 		expect(byId.get("ethos.cache-hit-rate")).toBe(
 			"Live cache-hit rate in the footer, plus a running tab of misses, idle gaps, and model swaps. I can point at the exact moment cache broke and why. Watching tokens you never re-pay stack up? Smug doesn't cover it.",
 		);
+		expect(byId.get("ethos.multimodal-vision")).toBe(
+			"Drop a screenshot, a PDF, a crusty whiteboard photo... senpi actually sees it, reads it, reasons about it. Your agent has eyes now. *Yes, really.*",
+		);
+		expect(byId.get("ethos.oauth-multi-account")).toBe(
+			"Hit a rate limit, switch accounts. Wrong org, switch again. senpi treats your Claude logins like a roster, not a single lifeline. *Env vars could never.*",
+		);
+		expect(byId.get("ethos.agent-sdk-foundation")).toBe(
+			'Built on the official agent SDK, speaking the protocol natively. No reverse-engineered wrapper, no ToS gray zone, no "will I get banned for this" anxiety. *Sleep easy, ship loud.*',
+		);
 	});
 
 	it("gates the ulw command tips on the tasks command", () => {
@@ -79,6 +91,9 @@ describe("ethos tips", () => {
 			"ethos.monitor-subscribe",
 			"ethos.cache-budget",
 			"ethos.cache-hit-rate",
+			"ethos.multimodal-vision",
+			"ethos.oauth-multi-account",
+			"ethos.agent-sdk-foundation",
 		] as const) {
 			const tip = byId.get(id);
 			expect(tip?.bindings, id).toEqual([]);
