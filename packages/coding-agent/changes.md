@@ -1,5 +1,13 @@
 # Local fork changes
 
+## 2026-07-29 — Consumer-resolved Claude Agent SDK sidecars (#446)
+
+- Changed: publish-manifest staging now promotes a bundled package's complete platform-specific optional dependency family into the root `@code-yeongyu/senpi` manifest while continuing to exclude the publish runner's materialized native package from `bundleDependencies`.
+- Why: the universal npm tarball bundled `@anthropic-ai/claude-agent-sdk-linux-x64` from the Linux publish runner. npm did not re-resolve the bundled SDK's nested optional dependencies on install, so Apple Silicon consumers received no `darwin-arm64` Claude executable and the provider failed before authentication.
+- What changed: extracted publish-manifest construction into `scripts/prepare-senpi-publish-manifest.mjs`, kept workspace staging and pack checks in `prepare-senpi-bundled-workspaces.mjs`, split the oversized packaging test suite by responsibility, and added issue #446 plus unreadable-manifest RED→GREEN coverage. A real local release installed only `claude-agent-sdk-darwin-arm64` on this Mac and resolved its `claude` binary with `CLAUDE_CODE_EXECUTABLE` unset.
+- Why the extension system could not handle this: npm dependency bundling and consumer-side optional dependency resolution happen before the Senpi runtime and extension loader start.
+- Merge-conflict risk: low. Expected conflict zones are publish-manifest staging and the colocated packaging tests; runtime provider code is unchanged.
+
 ## 2026-07-29 — OpenAI Codex usage extension example
 
 - Changed: added a standalone `examples/extensions/openai-codex-usage/` example that resolves Senpi-managed Codex OAuth, fetches the remaining five-hour and weekly limits, and publishes them through `ctx.ui.setStatus()`. Missing windows render as unavailable; sanitized HTTP/network/parse failures replace stale values with an unavailable status. The poller is single-flight, abortable, and cleared on model changes, shutdown, or `/usage`.
