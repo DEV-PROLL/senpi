@@ -1,5 +1,20 @@
 # changes
 
+## Footer hides low cache hit rates (2026-07-29)
+
+### What changed
+
+- `components/footer.ts`: the cache-hit segment is omitted when the latest hit rate is below 10%; rates at 10% and above continue to render.
+- Coverage: `test/footer-token-format.test.ts` pins the 9.9% hidden case and the 10% boundary.
+
+### Why
+
+- Very low hit rates add a footer block without providing useful cache-health signal.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer.ts` around optional middle-stat construction.
+
 ## Long footer paths yield before cache and cost stats (2026-07-29)
 
 ### What changed
