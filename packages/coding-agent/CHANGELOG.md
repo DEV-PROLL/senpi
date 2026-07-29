@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Strip publish-runner-native optional packages before packing the universal Senpi tarball while preserving npm's consumer-platform sidecar selection contract ([#446](https://github.com/code-yeongyu/senpi/issues/446)).
+
 ### Removed
 
 ## [2026.7.29-3] - 2026-07-29
