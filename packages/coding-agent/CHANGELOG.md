@@ -4,13 +4,54 @@
 
 ### New Features
 
+- **Compaction observability and intent retention** — Stamp summaries with their route origin, log bounded structured compaction decisions with rotation and optional debug mirroring, count structurally ineffective or would-overflow attempts toward the per-turn cap, and preserve a sanitized task-intent anchor through summary generation ([#485](https://github.com/code-yeongyu/senpi/pull/485)).
+- **Native Kimi K3 tool recovery** — Understand Kimi’s XTML tool-call protocol directly and recover leaked XTML blocks in normal mode so gateway formatting defects become executable calls instead of visible channel-marker noise or dead turns ([#465](https://github.com/code-yeongyu/senpi/pull/465)).
+- **Session-scoped Codex fast mode** — Add `/fast` for OpenAI Codex sessions, switching between a model and its compatible priority-service-tier sibling without changing saved defaults or unrelated OpenAI API service-tier behavior ([#448](https://github.com/code-yeongyu/senpi/pull/448) by [@stevenahhh](https://github.com/stevenahhh)).
+- **Recommended model startup policy** — Select an authenticated recommended model when ordinary default resolution lands off-list, preserve explicit CLI/scoped selections, expose warnings and settings controls, and allow disabling the behavior with `--no-recommended-models` ([#466](https://github.com/code-yeongyu/senpi/pull/466)).
+- **Goal continuation guardrails** — Bound automatic continuation streaks, detect stale progress and no-tool stalls, suppress consumed continuation prompts from context, delay continuation after real user input, give length stops one recovery attempt, and visibly block runaway or terminally failed goals instead of silently spending unbounded turns ([#476](https://github.com/code-yeongyu/senpi/pull/476)).
+- **Goal cache-warm visibility** — Explain monitor-delayed goal continuations in the TUI, estimate retained cached tokens and cold-read savings, persist themed cache-warm transcript entries, and publish typed scheduled/resumed events for RPC and desktop clients ([#460](https://github.com/code-yeongyu/senpi/pull/460)).
+- **Immediate interactive startup feedback** — Show a delayed, phase-aware ANSI loading indicator during heavy extension/model/session bootstrap, pause it around trust prompts, and cleanly hand terminal ownership to the real TUI when startup completes ([#475](https://github.com/code-yeongyu/senpi/pull/475)).
+- **Discoverable tip catalog** — Add fork-ethos tips, place a give-me-tips pointer beneath startup and working tips, and expose the complete per-user catalog as JSON through `senpi --list-tips` ([#455](https://github.com/code-yeongyu/senpi/pull/455), [#464](https://github.com/code-yeongyu/senpi/pull/464)).
+- **Codex usage extension example** — Add an opt-in extension that displays remaining five-hour and weekly ChatGPT Codex limits through extension footer status, using Senpi-managed OAuth, abortable single-flight polling, redirect rejection, and `/usage` lifecycle cleanup ([#469](https://github.com/code-yeongyu/senpi/pull/469) by [@stevenahhh](https://github.com/stevenahhh)).
+- **Terminal Unicode math** — Render common inline and display LaTeX as width-stable Unicode while leaving unmatched delimiters, code, and unknown commands intact ([#449](https://github.com/code-yeongyu/senpi/pull/449) by [@minpeter](https://github.com/minpeter)).
+- **Visible detached eval work** — Surface live detached eval cells beside monitor statuses in the interactive footer until their completion notifications arrive ([#483](https://github.com/code-yeongyu/senpi/pull/483)).
+- **Safer source-run diagnostics** — Warn when a TypeScript-from-source invocation resolves to the real `~/.senpi/agent` without an explicit isolated `SENPI_CODING_AGENT_DIR`, while keeping installed and Bun-binary runs silent ([#482](https://github.com/code-yeongyu/senpi/pull/482)).
+
 ### Breaking Changes
 
 ### Added
 
+- Add structured compaction decision logging, route-origin and structural-yield metadata, ineffective-attempt accounting, and sanitized task-intent extraction to the builtin compaction pipeline ([#485](https://github.com/code-yeongyu/senpi/pull/485)).
+- Add `kimi-xtml` model-runtime support and Kimi-family normal-mode text-tool recovery ([#465](https://github.com/code-yeongyu/senpi/pull/465)).
+- Add `/fast`, the `recommended-models` builtin, `--no-recommended-models`, and session-scoped model/thinking setters so headless automatic choices do not overwrite global defaults ([#448](https://github.com/code-yeongyu/senpi/pull/448) by [@stevenahhh](https://github.com/stevenahhh), [#466](https://github.com/code-yeongyu/senpi/pull/466), [#473](https://github.com/code-yeongyu/senpi/pull/473)).
+- Add `retry.provider.streamStartTimeoutMs`, defaulting to 90 seconds and bounded by the provider idle timeout, with `0` disabling the first-event guard ([#451](https://github.com/code-yeongyu/senpi/pull/451)).
+- Add typed goal continuation scheduling/resume cache metadata, durable `goal-cache-warmup` entries, and themed transcript rendering for cache-warm events ([#460](https://github.com/code-yeongyu/senpi/pull/460)).
+- Add `senpi --list-tips`, a give-me-tips pointer under visible tips, and seven fork-ethos tips with command-aware gating ([#455](https://github.com/code-yeongyu/senpi/pull/455), [#464](https://github.com/code-yeongyu/senpi/pull/464)).
+- Add a standalone OpenAI Codex usage extension example that publishes extension status without coupling to the built-in footer ([#469](https://github.com/code-yeongyu/senpi/pull/469) by [@stevenahhh](https://github.com/stevenahhh)).
+
 ### Changed
 
+- Keep the active todo frontier visible inside the fixed 10-line sidebar by anchoring long phases on current work, retaining up to two preceding tasks, filling remaining rows with upcoming work, and showing truthful earlier/later omission counts ([#450](https://github.com/code-yeongyu/senpi/pull/450) by [@minpeter](https://github.com/minpeter)).
+- Shorten long working-directory paths before dropping footer telemetry so context/cache/cost/model information remains visible, while preserving badges and provider/model priority at narrow widths ([#456](https://github.com/code-yeongyu/senpi/pull/456)).
+- Remove cumulative input/output token totals from the footer while retaining context-window usage, cache hit rate, cost, session, path, branch, model, and extension statuses ([#461](https://github.com/code-yeongyu/senpi/pull/461)).
+- Highlight active monitor and detached-eval footer statuses with the current theme’s selected background in interactive mode while preserving plain status strings for RPC, print, JSON, and app-server consumers ([#457](https://github.com/code-yeongyu/senpi/pull/457), [#483](https://github.com/code-yeongyu/senpi/pull/483)).
+- Make `senpi update` compare an OMO plugin build-input fingerprint instead of rebuilding for unrelated monorepo changes, and dispatch required rebuilds to a detached worker so normal updates return after the fast fetch/compare path ([#452](https://github.com/code-yeongyu/senpi/pull/452)).
+- Modernize direct dependencies across the CLI and bundled workspaces, regenerate publish/install locks, and retain exact older versions where TypeScript 7, newer Anthropic SDK browser imports, or newer OpenAI client behavior would violate current build/runtime contracts ([#486](https://github.com/code-yeongyu/senpi/pull/486)).
+
 ### Fixed
+
+- Treat Anthropic `credits_required` responses as permanent billing failures: skip futile same-model retries, select the billing fallback immediately, place the failed provider in the billing cooldown bucket, and pin the replacement instead of reverting into an exhausted account ([#484](https://github.com/code-yeongyu/senpi/pull/484)).
+- Escalate repeated zero-event provider stalls through progressively bounded same-model probes and the configured fallback chain instead of replaying the identical large request for the full idle timeout on every attempt ([#453](https://github.com/code-yeongyu/senpi/pull/453)).
+- Preserve steering and follow-up input across provider idle retries, cap only retry continuations at 30 seconds, restore ordinary timeout settings afterward, and retain queued input when a stalled retry terminates ([#458](https://github.com/code-yeongyu/senpi/pull/458) by [@realsigridjin](https://github.com/realsigridjin)).
+- Fail requests that receive no first provider event within the stream-start budget with a retryable, model-attributed diagnostic, aborting the dead request so retry and model fallback can proceed promptly ([#451](https://github.com/code-yeongyu/senpi/pull/451)).
+- Recognize headers-only custom providers as configured, preventing misleading “No API key found” failures when authentication is intentionally supplied through request headers ([#472](https://github.com/code-yeongyu/senpi/pull/472) by [@eddieparc](https://github.com/eddieparc)).
+- Preserve background terminal sessions, monitor subscriptions, buffered events, completion notifications, and footer watch status across `/reload`; continue to tear them down on quit, new, resume, and fork boundaries ([#463](https://github.com/code-yeongyu/senpi/pull/463)).
+- Route Python and other subprocess-kernel `agent()`, `output()`, and `tool_schema()` calls through Code Mode’s reserved bridge handler, and skip the agent event-queue wait for reentrant eval bridge calls to eliminate the Windows-amplified deadlock reported in #470/#471 ([#462](https://github.com/code-yeongyu/senpi/pull/462), [#478](https://github.com/code-yeongyu/senpi/pull/478)).
+- Defer extension-vetoed hot reloads silently with one reason-specific notice and a bounded recheck, then perform the pending reload exactly once when the veto clears ([#474](https://github.com/code-yeongyu/senpi/pull/474)).
+- Keep recommended-model automatic switches session-scoped in print, RPC, and JSON modes so background/headless sessions cannot overwrite the user’s saved provider, model, or thinking-level defaults; interactive selections remain sticky ([#473](https://github.com/code-yeongyu/senpi/pull/473)).
+- Acquire settings locks for first-file creation, re-check the winning file under lock, and re-run merges before writing so concurrent initial settings updates cannot overwrite one another; pure missing-file reads remain side-effect free ([#481](https://github.com/code-yeongyu/senpi/pull/481)).
+- Inject a once-per-turn reminder when todo initialization/appends create open work without a live goal, distinguishing absent and completed/stale goals while leaving active, paused, and blocked goals alone ([#479](https://github.com/code-yeongyu/senpi/pull/479)).
+- Ship an availability-aware default fallback chain for Claude Fable 5 through Kimi K3, Claude Opus 5, and Claude Opus 4.8 while preserving every explicit user-authored chain, including an intentionally empty map ([#459](https://github.com/code-yeongyu/senpi/pull/459)).
 
 ### Removed
 

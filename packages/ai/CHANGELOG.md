@@ -6,9 +6,19 @@
 
 ### Added
 
+- Added the native `kimi-xtml` text tool-call protocol for Kimi K3, including typed argument coercion, chunk-safe streaming, incomplete-call finalization, and normal-mode recovery that turns leaked XTML channel blocks into executable tool calls while removing protocol markers from visible assistant text ([#465](https://github.com/code-yeongyu/senpi/pull/465)).
+
 ### Changed
 
+- Modernized the provider and parsing dependency stack, including Google GenAI 2.x, Mistral 2.x, current AWS Bedrock/Smithy clients, TypeBox 1.3, Diff 9, Chalk 6, Highlight.js 11, Babel parser 8, Undici 8, and related validated transitive tooling; retained older TypeScript, Anthropic SDK, and OpenAI SDK lines where newer releases break required compiler, browser-bundle, or provider contracts ([#486](https://github.com/code-yeongyu/senpi/pull/486)).
+
 ### Fixed
+
+- Treat Anthropic `credits_required` and “credits are required” responses as non-retryable billing failures, avoiding repeated requests against an exhausted account and allowing the coding agent to pin a configured fallback immediately ([#484](https://github.com/code-yeongyu/senpi/pull/484)).
+- Classify zero-event provider-stream stalls separately from ordinary transient failures so the coding agent can apply bounded stall escalation instead of replaying a dead upstream with the full idle timeout on every retry ([#453](https://github.com/code-yeongyu/senpi/pull/453)).
+- Preserve steering and follow-up input across provider idle-timeout retries, cap only the retry continuation’s idle wait at 30 seconds, and restore the configured timeout for later ordinary turns ([#458](https://github.com/code-yeongyu/senpi/pull/458) by [@realsigridjin](https://github.com/realsigridjin)).
+- Treat provider configurations whose authentication is fully supplied through custom headers as configured, while leaving `authHeader` and genuinely unauthenticated configurations unchanged ([#472](https://github.com/code-yeongyu/senpi/pull/472) by [@eddieparc](https://github.com/eddieparc)).
+- Abort provider requests that emit no first stream event within the new stream-start timeout, producing a retryable diagnostic and tearing down the dead request without waiting for the longer in-stream idle timeout ([#451](https://github.com/code-yeongyu/senpi/pull/451)).
 
 ### Removed
 

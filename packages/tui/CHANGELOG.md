@@ -6,7 +6,11 @@
 
 ### Added
 
+- Render inline and display LaTeX delimiters as width-stable terminal Unicode, covering common operators, Greek letters, relations, roots, fractions, and sub/superscripts while preserving unmatched delimiters, code spans/fences, and unknown command groups without new runtime dependencies ([#449](https://github.com/code-yeongyu/senpi/pull/449) by [@minpeter](https://github.com/minpeter)).
+
 ### Changed
+
+- Modernized validated Markdown, highlighting, icon, test, and build dependencies while preserving the differential renderer’s terminal-width and browser compatibility contracts ([#486](https://github.com/code-yeongyu/senpi/pull/486)).
 
 ### Fixed
 
