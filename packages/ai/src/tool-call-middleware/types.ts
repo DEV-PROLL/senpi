@@ -9,6 +9,7 @@ import type { ImageContent, TextContent, Tool } from "../types.ts";
  * - "gemma4-delimiter": Gemma 4 specific delimiter format
  * - "anthropic-xml": Legacy Anthropic invoke/parameter XML format
  * - "antml": ANTML function_calls/invoke format with Claude-Code-style failure tolerance
+ * - "kimi-xtml": Kimi K3 XTML channel format (<|open|>/<|close|>/<|sep|> markers)
  */
 export type ToolCallFormat =
 	| "hermes"
@@ -17,7 +18,8 @@ export type ToolCallFormat =
 	| "yaml-xml"
 	| "gemma4-delimiter"
 	| "anthropic-xml"
-	| "antml";
+	| "antml"
+	| "kimi-xtml";
 
 /**
  * Content type for tool results (text or image)

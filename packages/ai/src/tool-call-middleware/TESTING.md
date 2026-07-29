@@ -289,3 +289,15 @@ Look for the `toolCallFormat` field in the output. Valid values are:
 | Gemma4 | openrouter-gemma | google/gemma-4-31b-it | `senpi --provider openrouter-gemma --model "google/gemma-4-31b-it" -p "Run date command"` |
 | Anthropic XML | custom OpenAI-compatible provider | compatible text-tool model | `senpi --provider <provider> --model <model> -p "Use Bash to run printf anthropic-xml-ok"` |
 | ANTML | custom OpenAI-compatible provider | compatible text-tool model | `senpi --provider <provider> --model <model> -p "Use Bash to run printf antml-ok"` |
+
+### 7. Kimi XTML Protocol (Kimi K3 Models)
+
+The Kimi XTML format mirrors Kimi K3's native channel syntax (`<|open|>...<|sep|>` / `<|close|>...<|sep|>` markers wrapping tools/call/argument channels).
+
+Add an OpenAI-compatible custom model with `"toolCallFormat": "kimi-xtml"`, then run:
+
+```bash
+senpi --provider <kimi-provider> --model "kimi-k3" -p "List TypeScript files"
+```
+
+Look for `<|open|>tools<|sep|><|open|>call tool="..." index="1"<|sep|>` blocks in the model output; argument values are typed via `key="..." type="string|number|boolean|object|array"` attributes (object/array values are strict JSON).
