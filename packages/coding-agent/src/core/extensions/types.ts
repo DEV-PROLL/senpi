@@ -405,6 +405,13 @@ export interface ExtensionContext {
 	requestReload?(): Promise<void>;
 	/** Whether session compaction or branch summarization is currently running. */
 	isCompacting?(): boolean;
+	/**
+	 * Ask extensions whether a full session reload may proceed (the cancellable
+	 * `session_before_reload` gate) WITHOUT starting a reload. Hosts with a
+	 * reload veto gate expose this so watchers can defer quietly instead of
+	 * triggering a reload that would be blocked and re-warned on every retry.
+	 */
+	checkReloadVeto?(): Promise<ReloadVetoDecision>;
 	/** Gracefully shutdown pi and exit. Available in all contexts. */
 	shutdown(): void;
 	/** Get current context usage for the active model. */
@@ -1338,6 +1345,13 @@ export interface SessionBeforeReloadResult {
 	reason?: string;
 }
 
+/** Outcome of probing the `session_before_reload` gate without reloading. */
+export interface ReloadVetoDecision {
+	cancelled: boolean;
+	/** Human-readable veto reason forwarded from the cancelling extension. */
+	reason?: string;
+}
+
 export interface SessionBeforeCompactResult {
 	cancel?: boolean;
 	compaction?: CompactionResult;
@@ -1987,6 +2001,7 @@ export interface ExtensionContextActions {
 	abort: () => void;
 	hasPendingMessages: () => boolean;
 	isCompacting: () => boolean;
+	checkReloadVeto?: () => Promise<ReloadVetoDecision>;
 	shutdown: () => void;
 	getContextUsage: () => ContextUsage | undefined;
 	getCompactionSettings: () => CompactionPreparation["settings"];
