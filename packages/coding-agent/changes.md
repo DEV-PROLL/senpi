@@ -1,5 +1,12 @@
 # Local fork changes
 
+## 2026-07-29 — OpenAI Codex usage extension example
+
+- Changed: added a standalone `examples/extensions/openai-codex-usage/` example that resolves Senpi-managed Codex OAuth, fetches the remaining five-hour and weekly limits, and publishes them through `ctx.ui.setStatus()`. Missing windows render as unavailable; sanitized HTTP/network/parse failures replace stale values with an unavailable status. The poller is single-flight, abortable, and cleared on model changes, shutdown, or `/usage`.
+- Why: users can see provider limits with the built-in footer or any custom footer that consumes extension statuses, without coupling usage retrieval to one footer implementation or presenting unknown/stale percentages as current.
+- Extension boundary: the example uses public model-registry, lifecycle, command, and status APIs; no core footer or authentication source changes are required. Deterministic fake-API and fake-timer tests cover toggle, model-change, abort, scheduled polling, and shutdown cleanup.
+- Merge-conflict risk: low. The change adds an isolated example directory, one test, one catalog row, documentation, and this record.
+
 ## 2026-07-28 — Billing-class provider errors always pin the session model swap
 
 - Changed: billing-class failures (credit balance, insufficient quota) engage the fallback chain with the pinned `"billing"` reason unconditionally — the candidate becomes the session model for the rest of the session and never auto-reverts. Files: `src/core/retry-fallback/billing.ts` (classifier), `src/core/retry-fallback/controller.ts` (billing reason pins and notes the cooldown), `src/core/agent-session.ts` (classifies hard-error-eligible failures). Non-billing hard errors keep the temporary, revertable switch. Supersedes the opt-in `retry.billingErrorPolicy` variant of the same change; the setting no longer exists.
