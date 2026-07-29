@@ -1,5 +1,42 @@
 # AI Source Changes
 
+## 2026-07-29 - Preserve invoke-recovery protocol provenance
+
+### What changed and why
+
+- `wrapStreamWithInvokeRecovery()` accepts typed recovery options carrying both the parser factory and the protocol
+  identity. The previous parser-only argument selected Kimi XTML correctly but lost that provenance in shared
+  diagnostics and recovered tool-call IDs.
+- Successful Kimi recovery now reports `protocol: "kimi-xtml"` and allocates `recovered-kimi-xtml-*` IDs. Invalid
+  content/native event order and collision failures use the same protocol identity instead of always claiming
+  `antml`.
+- The default and legacy parser-function call forms remain ANTML-compatible, preserving existing Claude/default
+  recovery diagnostics and IDs.
+- Coverage: the shared wrapper pins Kimi failure diagnostics, and the coding-agent runtime boundary pins successful
+  Kimi diagnostics plus recovered IDs.
+
+### Expected merge conflict zones
+
+- MEDIUM: invoke-recovery wrapper, diagnostic, failure, and native projection constructor signatures.
+
+## 2026-07-29 - Serialize OpenAI completion content block events
+
+### What changed and why
+
+- `api/openai-completions.ts` now closes the active thinking, text, or native tool-call block before starting the
+  next block. The adapter previously accumulated every block and emitted all `*_end` events only after the wire
+  stream finished, producing overlapping canonical lifecycles such as `thinking_start -> text_start` and
+  `text_start -> toolcall_start`.
+- The invoke-recovery wrapper correctly rejects overlapping canonical content lifecycles. Kimi K3 exposed the
+  adapter bug when a normal response streamed reasoning, visible text, and native tool calls in sequence, causing
+  the user-facing terminal error `Invalid assistant content event order`.
+- Coverage: `test/openai-completions-stream-lifecycle.test.ts` drives a real local SSE endpoint through reasoning,
+  text, and a native tool call and pins the sequential start/delta/end event order.
+
+### Expected merge conflict zones
+
+- LOW: the block lifecycle helpers inside `api/openai-completions.ts`.
+
 ## 2026-07-29 - Support static credential headers without a synthetic API key
 
 ### What changed and why

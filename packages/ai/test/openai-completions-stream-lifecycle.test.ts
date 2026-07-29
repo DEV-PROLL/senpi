@@ -1,4 +1,5 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
+import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { getModel, streamSimple } from "../src/compat.ts";
 import type { Context, Model } from "../src/types.ts";
@@ -77,6 +78,71 @@ describe("OpenAI completions stream lifecycle", () => {
 		expect(response.errorMessage).toBe("Stream ended without finish_reason");
 		expect(response.content).toEqual([
 			{ type: "thinking", thinking: "partial", thinkingSignature: "reasoning_content" },
+		]);
+	});
+
+	it("ends each content block before starting the next block type", async () => {
+		// Given
+		const baseUrl = await startServer((response) => {
+			response.writeHead(200, { "content-type": "text/event-stream" });
+			for (const delta of [
+				{ reasoning_content: "thought" },
+				{ content: "answer" },
+				{
+					tool_calls: [
+						{
+							index: 0,
+							id: "call-1",
+							type: "function",
+							function: { name: "echo", arguments: '{"text":"ok"}' },
+						},
+					],
+				},
+			]) {
+				response.write(
+					`data: ${JSON.stringify({
+						id: "chatcmpl-content-order",
+						choices: [{ index: 0, delta, finish_reason: null }],
+					})}\n\n`,
+				);
+			}
+			response.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-content-order",
+					choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+				})}\n\n`,
+			);
+			response.end("data: [DONE]\n\n");
+		});
+		const context: Context = {
+			messages: [{ role: "user", content: "Think, answer, then call echo", timestamp: Date.now() }],
+			tools: [
+				{
+					name: "echo",
+					description: "Echo text",
+					parameters: Type.Object({ text: Type.String() }),
+				},
+			],
+		};
+
+		// When
+		const response = streamSimple(testModel(baseUrl), context, { apiKey: "test", maxRetries: 0 });
+		const eventTypes: string[] = [];
+		for await (const event of response) eventTypes.push(event.type);
+
+		// Then
+		expect(eventTypes).toEqual([
+			"start",
+			"thinking_start",
+			"thinking_delta",
+			"thinking_end",
+			"text_start",
+			"text_delta",
+			"text_end",
+			"toolcall_start",
+			"toolcall_delta",
+			"toolcall_end",
+			"done",
 		]);
 	});
 });

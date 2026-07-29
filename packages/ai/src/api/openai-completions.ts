@@ -421,6 +421,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 
 			let textBlock: TextContent | null = null;
 			let thinkingBlock: ThinkingContent | null = null;
+			let activeBlock: StreamingBlock | null = null;
 			let hasFinishReason = false;
 			const toolCallBlocksByIndex = new Map<number, StreamingToolCallBlock>();
 			const toolCallBlocksById = new Map<string, StreamingToolCallBlock>();
@@ -495,22 +496,33 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 					});
 				}
 			};
+			const finishActiveBlock = () => {
+				if (!activeBlock) return;
+				finishBlock(activeBlock);
+				activeBlock = null;
+			};
 			const ensureTextBlock = () => {
 				if (!textBlock) {
+					finishActiveBlock();
+					thinkingBlock = null;
 					textBlock = { type: "text", text: "" };
 					blocks.push(textBlock);
+					activeBlock = textBlock;
 					stream.push({ type: "text_start", contentIndex: getContentIndex(textBlock), partial: output });
 				}
 				return textBlock;
 			};
 			const ensureThinkingBlock = (thinkingSignature: string) => {
 				if (!thinkingBlock) {
+					finishActiveBlock();
+					textBlock = null;
 					thinkingBlock = {
 						type: "thinking",
 						thinking: "",
 						thinkingSignature,
 					};
 					blocks.push(thinkingBlock);
+					activeBlock = thinkingBlock;
 					stream.push({ type: "thinking_start", contentIndex: getContentIndex(thinkingBlock), partial: output });
 				}
 				return thinkingBlock;
@@ -533,6 +545,9 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 					block = toolCallBlocksById.get(toolCall.id);
 				}
 				if (!block) {
+					finishActiveBlock();
+					textBlock = null;
+					thinkingBlock = null;
 					// Note: the "input" fallback here should/must not be taken.  in case the LLM makes up
 					// a tool we don't knwo about, we at least have a place to stash our stuff.
 					const customInputProperty = toolCall.custom
@@ -557,6 +572,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 						toolCallBlocksById.set(toolCall.id, block);
 					}
 					blocks.push(block);
+					activeBlock = block;
 					stream.push({
 						type: "toolcall_start",
 						contentIndex: getContentIndex(block),
@@ -714,9 +730,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				}
 			}
 
-			for (const block of blocks) {
-				finishBlock(block);
-			}
+			finishActiveBlock();
 			if (options?.signal?.aborted) {
 				throw new Error("Request was aborted");
 			}
