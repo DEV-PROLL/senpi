@@ -11,7 +11,12 @@ import {
 	formatTokensCompact,
 	goalToolResponse,
 } from "../../src/core/extensions/builtin/goal/format.ts";
-import { buildContinuationPrompt } from "../../src/core/extensions/builtin/goal/prompt.ts";
+import {
+	buildContinuationPrompt,
+	buildGoalStallNotice,
+	buildMonitorStallNotice,
+	buildTruncationRecoveryPrompt,
+} from "../../src/core/extensions/builtin/goal/prompt.ts";
 import type { Goal } from "../../src/core/extensions/builtin/goal/types.ts";
 import { goalStatusText, STATUS_KEY, updateGoalUi } from "../../src/core/extensions/builtin/goal/ui.ts";
 
@@ -196,6 +201,53 @@ describe("goal continuation prompt (budget-free)", () => {
 		expect(prompt).toMatch(/status report|done-claim/i);
 		expect(prompt).not.toMatch(/wait_for/);
 		expect(prompt).not.toMatch(/tmux/i);
+	});
+});
+
+describe("goal truncation recovery prompt", () => {
+	it("stays short and re-injects no objective text or audit blocks", () => {
+		const prompt = buildTruncationRecoveryPrompt();
+		expect(prompt.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(120);
+		expect(prompt).not.toContain("<untrusted_objective>");
+		expect(prompt.toLowerCase()).not.toContain("objective");
+		expect(prompt.toLowerCase()).not.toContain("audit");
+	});
+
+	it("tells the model to continue from the cut point without restarting or restating", () => {
+		const prompt = buildTruncationRecoveryPrompt();
+		expect(prompt).toMatch(/output[- ]token limit|token limit/i);
+		expect(prompt).toMatch(/continue/i);
+		expect(prompt).toMatch(/do not restart|not restart|without restarting/i);
+		expect(prompt).toMatch(/restate/i);
+	});
+});
+
+describe("goal stall notice", () => {
+	it("emits generic toolless-stall bullets when no monitors are active", () => {
+		const notice = buildGoalStallNotice(3, { monitorsActive: false });
+		expect(notice).toContain("<goal_monitor_stall_check>");
+		expect(notice).toContain("</goal_monitor_stall_check>");
+		expect(notice).toContain("3");
+		expect(notice).not.toContain("bash_output");
+		expect(notice).not.toContain("kill_bash");
+		expect(notice).toMatch(/todo list/i);
+		expect(notice).toMatch(/concrete action/i);
+		expect(notice).toMatch(/blocked audit/i);
+		expect(notice).toMatch(/do not end/i);
+	});
+
+	it("keeps the monitor-investigation bullets while monitors are active", () => {
+		const notice = buildGoalStallNotice(4, { monitorsActive: true });
+		expect(notice).toContain("<goal_monitor_stall_check>");
+		expect(notice).toContain("bash_output");
+		expect(notice).toContain("kill_bash");
+		expect(notice).toContain("4");
+	});
+
+	it("keeps buildMonitorStallNotice as a legacy wrapper over the generalized notice", () => {
+		const legacy = buildMonitorStallNotice(5);
+		expect(legacy).toContain("<goal_monitor_stall_check>");
+		expect(legacy).toBe(buildGoalStallNotice(5, { monitorsActive: true }));
 	});
 });
 
