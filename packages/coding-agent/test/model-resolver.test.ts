@@ -736,4 +736,71 @@ describe("default model selection", () => {
 		expect(result.model?.provider).toBe("spark-two");
 		expect(result.model?.id).toBe("deepseek-v4-flash");
 	});
+
+	test("#given each initial selection branch #when resolving #then it returns the winning provenance", async () => {
+		const openAiDefault: Model<"anthropic-messages"> = {
+			id: "gpt-5.5",
+			name: "GPT 5.5",
+			api: "anthropic-messages",
+			provider: "openai",
+			baseUrl: "https://api.openai.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.1 },
+			contextWindow: 128000,
+			maxTokens: 8192,
+		};
+		const custom: Model<"anthropic-messages"> = {
+			...openAiDefault,
+			id: "custom-model",
+			provider: "custom",
+		};
+		const runtime = {
+			getModels: () => [openAiDefault, custom],
+			getModel: (provider: string, modelId: string) =>
+				[openAiDefault, custom].find((candidate) => candidate.provider === provider && candidate.id === modelId),
+			hasConfiguredAuth: () => true,
+			getAvailable: async () => [openAiDefault, custom],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRuntime"];
+
+		const cli = await findInitialModel({
+			cliProvider: "openai",
+			cliModel: "gpt-5.5",
+			scopedModels: [],
+			isContinuing: false,
+			modelRuntime: runtime,
+		});
+		const scoped = await findInitialModel({
+			scopedModels: [{ model: custom }],
+			isContinuing: false,
+			modelRuntime: runtime,
+		});
+		const settings = await findInitialModel({
+			scopedModels: [],
+			isContinuing: false,
+			defaultProvider: "custom",
+			defaultModelId: "custom-model",
+			modelRuntime: runtime,
+		});
+		const providerDefault = await findInitialModel({
+			scopedModels: [],
+			isContinuing: false,
+			modelRuntime: runtime,
+		});
+		const firstAvailableRuntime = {
+			...runtime,
+			getAvailable: async () => [custom],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRuntime"];
+		const firstAvailable = await findInitialModel({
+			scopedModels: [],
+			isContinuing: false,
+			modelRuntime: firstAvailableRuntime,
+		});
+
+		expect(cli.provenance).toBe("cli");
+		expect(scoped.provenance).toBe("scoped");
+		expect(settings.provenance).toBe("settings");
+		expect(providerDefault.provenance).toBe("provider-default");
+		expect(firstAvailable.provenance).toBe("first-available");
+	});
 });

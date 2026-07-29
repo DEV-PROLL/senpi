@@ -2,19 +2,28 @@ import { join } from "node:path";
 import type { ExtensionContext } from "@code-yeongyu/senpi";
 import { type BridgeServerHandle, startBridgeServer } from "../bridge/http-server.ts";
 import type { KernelToHostMessage } from "../bridge/protocol.ts";
+import { isReservedToolName, runReservedTool } from "../bridges/reserved-dispatch.ts";
+import type { EvalSchemaToolInfo } from "../bridges/schema-bridge.ts";
 import type { CompletionRequest, CompletionResult } from "../completion/handler.ts";
-import type { CodemodeSettings } from "../config/settings.ts";
+import { type CodemodeSettings, defaultCodemodeSettings } from "../config/settings.ts";
 import type { InterpreterAvailability } from "../interpreters/detect.ts";
 import { JuliaKernel } from "../kernels/jl/kernel.ts";
 import { JavaScriptKernel } from "../kernels/js/context-manager.ts";
 import { PythonKernel } from "../kernels/py/kernel.ts";
 import { RubyKernel } from "../kernels/rb/kernel.ts";
+import { marshalToolResult } from "../tool/image.ts";
 import type { EvalKernel, EvalKernelManager, EvalLanguage, ExecuteTool } from "../tool/types.ts";
 
 export interface CodemodeSessionManager extends EvalKernelManager {
 	dispose(): Promise<void>;
 	complete(request: CompletionRequest, ctx: ExtensionContext): Promise<CompletionResult>;
 	setContext?(ctx: ExtensionContext): void;
+	bridgeEndpoint?(): BridgeEndpoint;
+}
+
+export interface BridgeEndpoint {
+	readonly port: number;
+	readonly token: string;
 }
 
 export interface EvalExecutionTracker {
@@ -32,6 +41,7 @@ export interface CreateCodemodeSessionManagerOptions {
 	/** Session-adjacent directory used for persisted eval artifacts. */
 	readonly artifactsDir?: string;
 	readonly executeTool: ExecuteTool;
+	readonly listTools?: () => readonly EvalSchemaToolInfo[];
 	readonly complete: (request: CompletionRequest, ctx: ExtensionContext) => Promise<CompletionResult>;
 }
 
@@ -75,11 +85,31 @@ class DefaultCodemodeSessionManager implements CodemodeSessionManager {
 
 	async start(): Promise<void> {
 		this.#bridge = await startBridgeServer({
-			onCall: async (request) =>
-				this.#options.executeTool(request.toolName, request.args, { signal: request.signal }),
+			onCall: async (request) => await this.#call(request),
 			onEmit: async () => undefined,
 			onCompletion: async (request) =>
 				this.#options.complete({ prompt: request.prompt, opts: request.opts }, this.#contextFor(request.signal)),
+		});
+	}
+
+	// Subprocess kernels (py/rb/jl) reach the host only through this route, so reserved
+	// helper names must dispatch exactly as the in-process JS path does in tool/cell-handler.ts.
+	// Forwarding them to executeTool made agent() fail with "Unknown tool __agent__".
+	async #call(request: { toolName: string; args: unknown; callId: string; signal: AbortSignal }): Promise<unknown> {
+		if (!isReservedToolName(request.toolName)) {
+			return await this.#options.executeTool(request.toolName, request.args, { signal: request.signal });
+		}
+		const taskTools = this.#options.settings.taskTools ?? defaultCodemodeSettings.taskTools;
+		return await runReservedTool(request.toolName, {
+			callId: request.callId,
+			args: request.args,
+			executeTool: this.#options.executeTool,
+			taskToolName: taskTools.task,
+			taskOutputToolName: taskTools.output,
+			listTools: this.#options.listTools,
+			signal: request.signal,
+			emitStatus: () => {},
+			marshalToolResult,
 		});
 	}
 
@@ -107,6 +137,12 @@ class DefaultCodemodeSessionManager implements CodemodeSessionManager {
 
 	async complete(request: CompletionRequest, ctx: ExtensionContext): Promise<CompletionResult> {
 		return await this.#options.complete(request, ctx);
+	}
+
+	bridgeEndpoint(): BridgeEndpoint {
+		const bridge = this.#bridge;
+		if (!bridge) throw new Error("codemode bridge server is not running");
+		return { port: bridge.port, token: bridge.token };
 	}
 
 	setContext(ctx: ExtensionContext): void {

@@ -1,5 +1,77 @@
 # changes
 
+## Ethos tips: tool-call repair now names Kimi K3 (2026-07-29)
+
+### What changed
+
+- `tips/catalog/ethos-tips.ts`: the `ethos.tool-call-repair` copy now covers Kimi K3 alongside Claude - "claude's sloppy invokes, kimi k3's leaked XTML channels, all of it" - matching the new normal-mode XTML recovery in `packages/ai` (Kimi models get the same leaked tool-call auto-correction Claude has).
+- Coverage: `test/suite/ethos-tips.test.ts` pin updated verbatim.
+
+### Why
+
+- The repair tip only described the Claude/antml case. With XTML recovery shipped for Kimi models, the brag undersells the feature.
+
+### Expected merge conflict zones
+
+- LOW: single render string in `ethos-tips.ts` and its verbatim pin.
+
+## Footer omits cumulative input and output counters (2026-07-29)
+
+### What changed
+
+- `components/footer.ts` no longer adds the cumulative `↑<input>` and `↓<output>` token segments to the interactive footer.
+- Context-window usage, cache-hit rate, session name, cost, model, working directory, branch, and extension statuses remain unchanged.
+- Coverage: `test/footer-token-format.test.ts` asserts that the usage arrows are absent while the neighboring cache-hit and context details still render.
+
+### Why
+
+- The cumulative input/output counters add visual noise to the always-visible footer without helping the active context decision; the context-window segment remains the relevant token signal.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer.ts` around the optional middle-stat segment construction.
+
+## Tip lines point at the give-me-tips skill (2026-07-29)
+
+### What changed
+
+- `tips/startup-tip.ts` and `tips/working-tip.ts`: the resolved `line` now carries a second pointer
+  line - `↳ Want the full story on any tip? Ask about it — the give-me-tips skill has the tour.` -
+  appended under the byte-identical `Tip: ${body}` first line. Both render sites draw the tip as a
+  single `Text` component, so the pointer lands directly below the tip row.
+- Coverage: `test/suite/startup-tip.test.ts` and `test/suite/working-tip.test.ts` pin the two-line
+  shape and the `give-me-tips` literal.
+
+### Why
+
+- A one-line tip cannot tell the whole story; the pointer teaches users that the give-me-tips skill
+  can expand any tip on ask.
+
+### Expected merge conflict zones
+
+- LOW: the `line` template in both resolvers.
+
+## Ethos tips: the fork's voice in the tip rotation (2026-07-29)
+
+### What changed
+
+- `tips/catalog/ethos-tips.ts` (new): a `ETHOS_TIPS` catalog of seven manifesto tips framing how `@code-yeongyu/senpi` is tuned - system-prompt discipline for `gpt-5.6-sol`, tools that stay out of the way, spending tokens to buy time, and pointers to `ulw-plan` on `fable-5 xhigh` and the `ulw loop`.
+- `tips/registry.ts`: `TIP_DEFINITIONS` now concatenates `...ETHOS_TIPS` after `SUBAGENT_TIPS`.
+- The two command-referencing tips (`ethos.ulw-plan-sage`, `ethos.ulw-loop-shallow`) declare `requiresCommand: "tasks"`, so they only surface when the omo plugin's `tasks` command is registered - matching the `workflow-skills.*` tips in `subagent-tips.ts`. The eight pure manifesto tips (including the monitor/cache bragging tips) are keyless and ungated.
+- Three additional tips brag about the harness's monitor tool (subscribe to stdout, never sleep), the prompt-cache budget (never block past cache TTL), and the live cache-hit rate in the footer. All three are keyless and ungated.
+- Three more tips brag about multimodal vision (the agent sees screenshots, PDFs, diagrams), Claude Code OAuth multi-account (switch logins, not env vars), and the agent-SDK foundation (no ToS gray zone, no ban anxiety). All three are keyless and ungated.
+- One tip brags about the tool-call repair middleware (malformed antml:invoke calls are intercepted, corrected, and salvaged instead of failing the turn). Keyless and ungated.
+- Coverage: `test/suite/ethos-tips.test.ts` pins the fourteen ids, the verbatim approved English copy, the `tasks` gating, and the unbound/ungated manifesto set.
+
+### Why
+
+- The tip line taught mechanics and commands but had no voice for the fork's tuning philosophy. These tips surface the system-prompt-tuning claim (a 5-minute job takes 5 minutes, a 12-hour job takes 12), the anti-tool-study stance, and the spend-tokens-for-time trade, which are the fork's reason for existing.
+- Gating the ulw command tips on `tasks` preserves the existing honesty invariant: never advertise commands the session cannot run.
+
+### Expected merge conflict zones
+
+- LOW: `tips/registry.ts` import block and the `TIP_DEFINITIONS` concatenation tail.
+
 ## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
 
 ### What changed

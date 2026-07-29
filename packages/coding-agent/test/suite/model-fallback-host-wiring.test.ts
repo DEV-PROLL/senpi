@@ -18,6 +18,25 @@ describe("model fallback host wiring", () => {
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
 	});
 
+	it("uses the first available candidate from the shipped Fable 5 chain", async () => {
+		const harness = await createHarness({
+			provider: "anthropic",
+			models: [{ id: "claude-fable-5" }, { id: "claude-opus-5" }, { id: "claude-opus-4-8" }],
+			settings: { retry: { enabled: true, baseDelayMs: 1, maxRetries: 0 } },
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			fauxAssistantMessage("recovered"),
+		]);
+
+		await harness.session.prompt("use the default Fable fallback chain");
+
+		expect(harness.eventsOfType("retry_fallback_applied")).toMatchObject([
+			{ from: "anthropic/claude-fable-5", to: "anthropic/claude-opus-5" },
+		]);
+	});
+
 	it("makes a quick-set chain visible to the running retry engine", async () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
@@ -27,7 +46,7 @@ describe("model fallback host wiring", () => {
 		harnesses.push(harness);
 		const context = harness.getExtensionRunner().createCommandContext();
 
-		expect(harness.settingsManager.getRetryFallbackSettings().chains).toEqual({});
+		expect(harness.settingsManager.getRawFallbackChains()).toBeUndefined();
 		await getFallbackCommand(harness).handler(`${primary} ${fallback}`, context);
 		expect(harness.settingsManager.getRetryFallbackSettings().chains).toEqual({ [primary]: [fallback] });
 
