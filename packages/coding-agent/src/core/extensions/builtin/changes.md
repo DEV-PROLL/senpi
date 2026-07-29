@@ -1,5 +1,24 @@
 # Builtin extensions changes
 
+## service-tier: add `/fast` for OpenAI Codex (2026-07-29)
+
+- `service-tier.ts` registers `/fast` only for the `openai-codex` provider.
+  Enabling resolves the active model's compatible `-fast` catalog sibling,
+  switches the current session to it, and derives priority mode from that
+  selected model's `upstreamModelId` plus `serviceTier` metadata.
+- Disabling restores the compatible base catalog model. `session_start` also
+  restores the base model when a session opens on a fast variant, so the command
+  remains session-scoped and never rewrites persisted model defaults.
+- Models without a compatible priority variant and non-Codex providers receive
+  clear no-op notifications.
+- The shared service-tier payload injector now covers
+  `openai-codex-responses`; explicit payload tiers remain authoritative.
+- `test/suite/service-tier-extension.test.ts` covers session reset, both model
+  switches, upstream request model plus priority tier, provider/model gating,
+  non-Codex payloads, and explicit-tier preservation.
+- Expected merge conflict zones: MEDIUM in `service-tier.ts` around the command
+  and `before_provider_request` handler.
+
 ## terminal + goal: monitor liveness event contract (2026-07-28)
 
 - New `monitor-state-event.ts` defines the internal `terminal_monitor_state` pi-event

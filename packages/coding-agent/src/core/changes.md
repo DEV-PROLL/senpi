@@ -1,5 +1,30 @@
 # changes
 
+## Codex fast-variant service-tier metadata lookup (2026-07-29)
+
+### What changed
+
+- `model-registry.ts` now exposes a selected model's configured `serviceTier`
+  synchronously, alongside the existing `getUpstreamModelId()` lookup.
+- The builtin `/fast` command uses both values to accept only catalog siblings
+  that send the same upstream model with `service_tier: "priority"`.
+
+### Why
+
+- A `-fast` suffix alone is not proof that a model supports priority
+  processing. The command must validate the request metadata already resolved
+  by the model registry before switching the session.
+
+### Why extension system couldn't handle this alone
+
+- Compatibility request metadata is composed inside `ModelRuntime`; extensions
+  can inspect the registry but could not synchronously read its resolved
+  per-model service tier.
+
+### Expected merge conflict zones
+
+- LOW: the request-metadata accessors in `model-registry.ts`.
+
 ## Settings withLock first-write TOCTOU fix (2026-07-29)
 
 ### What changed
