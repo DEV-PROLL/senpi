@@ -29,6 +29,33 @@
 - LOW: additive `core/provider-header-auth.ts`, `core/provider-api-key-auth.ts`, and focused regression coverage.
 - MEDIUM: `core/provider-composer.ts` auth composition and status projection.
 
+## Anthropic credits_required 429 pins the billing fallback (2026-07-29)
+
+### What changed
+
+- `core/retry-fallback/billing.ts`: `BILLING_ERROR_PATTERN` now matches Anthropic Console credit exhaustion —
+  the 429 `rate_limit_error` whose details carry `error_code: credits_required` ("Usage credits are required
+  for this model."). The hard-error fallback branch classifies the shape as `billing` instead of `hard-error`.
+- `core/retry-fallback/cooldown.ts`: the 30-minute billing suppression bucket covers the same wording instead
+  of the 30-second rate-limit bucket that let cooldown-expiry resurrect the dead model.
+- Coverage: `test/suite/retry-fallback-billing-swap.test.ts` (pinned swap + classifier rows),
+  `test/suite/retry-fallback-cooldown.test.ts` (duration rows); channel-3 real-CLI proof
+  `.agents/skills/senpi-qa/scripts/mock-loop-credits-fallback.mjs` (one primary request, `reason: "billing"`
+  in fallback.log, final marker streamed by the fallback model).
+
+### Why
+
+- Incident session `019fac55-3531-7d35-92f1-2d740b659c3c` (2026-07-29): `anthropic/claude-fable-5` answered
+  429 credits_required. The switch to `apitopia/kimi-k3-unlocked` fired as `transient`, the 30-second cooldown
+  expired, and cooldown-expiry reverted the session into the billing-dead fable-5; the chain then thrashed
+  fable-5 → kimi-k3 → opus-5 → opus-4-8 → fable-5 until the session was abandoned. Billing-class failures
+  never recover on the same account, so the fallback for one must pin from the first failure.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one regex each in `core/retry-fallback/billing.ts` and `core/retry-fallback/cooldown.ts`; both modules
+  are fork-local.
+
 ## From-source real-config warning (2026-07-29)
 
 ### What changed
