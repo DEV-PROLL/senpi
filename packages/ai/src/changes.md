@@ -1,5 +1,33 @@
 # AI Source Changes
 
+## 2026-07-29 - Support static credential headers without a synthetic API key
+
+### What changed and why
+
+- `auth/headers.ts` defines the narrow, case-insensitive credential-header contract shared by auth discovery and
+  request adapters. Standard authorization, API-key, API-token, auth-token, access-token, and client-secret header
+  names count only when their effective value contains credential material; metadata such as `User-Agent`,
+  request ids, and trace tokens does not.
+- `api/openai-client-auth.ts` lets OpenAI-compatible adapters initialize from credential-bearing headers when
+  `ModelAuth.apiKey` is absent. Header-only clients suppress the SDK's default `Authorization: Bearer ...` header
+  unless an explicit Authorization or the existing Cloudflare AI Gateway authorization path owns that behavior.
+- `api/openai-completions.ts` and `api/openai-responses.ts` use the shared client-auth resolver for HTTP and
+  Responses WebSocket requests, so `x-api-key` and equivalent static credentials work without an invented bearer
+  token.
+
+### Coverage
+
+- `test/auth-headers.test.ts` covers recognized names, metadata rejection, case-insensitive overrides, and empty
+  authorization schemes.
+- `test/openai-header-auth.test.ts` exercises real OpenAI-compatible request construction for Completions and
+  Responses and proves metadata-only headers fail before any request is issued.
+
+### Expected merge conflict zones
+
+- LOW: additive auth/header helpers and root export.
+- MEDIUM: the duplicated OpenAI client-auth setup removed from `api/openai-completions.ts` and
+  `api/openai-responses.ts`.
+
 ## 2026-07-28 - Demote unavailable Anthropic tool references instead of failing the request
 
 ### What changed and why

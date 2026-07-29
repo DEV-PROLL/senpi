@@ -60,6 +60,7 @@ import {
 	resolveJsonSchemaStrictSampling,
 } from "./constrained-sampling.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
+import { resolveOpenAIClientAuth } from "./openai-client-auth.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import {
 	applyExtraBody,
@@ -196,21 +197,6 @@ function resolveReasoningEffort(
  * This is needed because Anthropic (via proxy) requires the tools param
  * to be present when messages include tool_calls or tool role messages.
  */
-function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
-	if (!headers) return false;
-	const expected = name.toLowerCase();
-	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === expected && value !== null && value.trim().length > 0) return true;
-	}
-	return false;
-}
-
-function getClientApiKey(provider: string, apiKey: string | undefined, headers: ProviderHeaders | undefined): string {
-	if (apiKey) return apiKey;
-	if (hasHeader(headers, "authorization") || hasHeader(headers, "cf-aig-authorization")) return "unused";
-	throw new Error(`No API key for provider: ${provider}`);
-}
-
 function hasToolHistory(messages: Message[]): boolean {
 	for (const msg of messages) {
 		if (msg.role === "toolResult") {
@@ -366,7 +352,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 		};
 
 		try {
-			const apiKey = getClientApiKey(model.provider, options?.apiKey, options?.headers);
+			const clientAuth = resolveOpenAIClientAuth(model.provider, options?.apiKey, options?.headers);
 			const compat = getCompat(model);
 			const grammarToolInputProperties = createGrammarToolInputProperties(
 				context.tools,
@@ -374,7 +360,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			);
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention ?? model.cacheRetention, options?.env);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
-			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId, compat);
+			const client = createClient(model, context, clientAuth.apiKey, clientAuth.headers, cacheSessionId, compat);
 			let params = buildParams(model, context, options, compat, cacheRetention, grammarToolInputProperties);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
@@ -778,7 +764,7 @@ export const streamSimple: StreamFunction<"openai-completions", SimpleStreamOpti
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	getClientApiKey(model.provider, options?.apiKey, options?.headers);
+	resolveOpenAIClientAuth(model.provider, options?.apiKey, options?.headers);
 
 	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const compat = getCompat(model);

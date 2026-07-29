@@ -1,5 +1,22 @@
 # changes
 
+## Credential-header auth status sources (2026-07-29)
+
+### What changed
+
+- `rpc-types.ts` mirrors the new `models_json_headers` and `extension_headers` auth-status sources emitted by the
+  model runtime. `get_auth_providers` can now distinguish static header credentials from API-key values without
+  exposing any credential material.
+
+### Why
+
+- The RPC status type must remain structurally identical to the core auth status returned by
+  `getProviderAuthStatus()`; otherwise header-auth providers type-check in core but fail response assembly.
+
+### Expected merge conflict zones
+
+- LOW: additive string literals in `RpcAuthStatus.source`.
+
 ## Claude Agent SDK provider-account RPC events (2026-07-27)
 
 ### What changed
