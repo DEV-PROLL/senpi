@@ -27,11 +27,17 @@
   next block. The adapter previously accumulated every block and emitted all `*_end` events only after the wire
   stream finished, producing overlapping canonical lifecycles such as `thinking_start -> text_start` and
   `text_start -> toolcall_start`.
+- Providers that put text, reasoning, and parallel tool-call deltas in the same chunk keep their established
+  single-block aggregation. The adapter defers that mixed chunk's content events and replays text, thinking, and
+  each tool call as complete sequential lifecycles, avoiding duplicate text/thinking starts without restoring
+  overlapping events.
 - The invoke-recovery wrapper correctly rejects overlapping canonical content lifecycles. Kimi K3 exposed the
   adapter bug when a normal response streamed reasoning, visible text, and native tool calls in sequence, causing
   the user-facing terminal error `Invalid assistant content event order`.
 - Coverage: `test/openai-completions-stream-lifecycle.test.ts` drives a real local SSE endpoint through reasoning,
   text, and a native tool call and pins the sequential start/delta/end event order.
+  `test/openai-completions-tool-choice.test.ts` pins mixed text/reasoning/parallel-tool aggregation and sequential
+  event replay.
 
 ### Expected merge conflict zones
 
