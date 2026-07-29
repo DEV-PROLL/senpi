@@ -34,6 +34,8 @@ function createGoalHarness(): GoalHarness {
 			handlers.set(event, list);
 		},
 		sendMessage: (message: SentMessage["message"], options: unknown) => sent.push({ message, options }),
+		registerEntryRenderer: () => {},
+		appendEntry: () => {},
 	} as unknown as ExtensionAPI;
 	goalExtension(pi);
 	return { tools, commands, handlers, sent };

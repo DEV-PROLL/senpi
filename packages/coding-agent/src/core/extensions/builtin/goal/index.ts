@@ -1,6 +1,8 @@
 import { GOAL_CONTINUATION_MESSAGE_TYPE } from "../../../messages.ts";
 import type { SessionEntry } from "../../../session-manager.ts";
 import type { AgentEndEvent, ExtensionAPI, ExtensionContext } from "../../types.ts";
+import { GOAL_CACHE_WARMUP_ENTRY_TYPE } from "./cache-warm.ts";
+import { renderGoalCacheWarmupEntry } from "./cache-warm-renderer.ts";
 import { registerGoalCommand } from "./command-registration.ts";
 import { GOAL_CONTINUATION_CAP } from "./continuation.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
@@ -49,6 +51,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerEntryRenderer(GOAL_CACHE_WARMUP_ENTRY_TYPE, renderGoalCacheWarmupEntry);
 	registerGoalTools(pi, {
 		goalStoreRef: (ctx) => buildGoalStoreRef(ctx.sessionManager, ctx.cwd),
 		accountCurrentAgentTurn,

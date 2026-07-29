@@ -2,7 +2,16 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isTerminalMonitorStateEvent, TERMINAL_MONITOR_STATE_EVENT } from "../monitor-state-event.ts";
 import {
+	buildCacheWarmResumedNotice,
+	buildCacheWarmScheduledNotice,
+	estimateCacheWarmMetrics,
+	GOAL_CACHE_WARMUP_ENTRY_TYPE,
+	type GoalCacheWarmMetrics,
+	type GoalCacheWarmupEntryData,
+} from "./cache-warm.ts";
+import {
 	evaluateGoalContinuation,
+	GOAL_STALL_TOOLLESS_THRESHOLD,
 	GOAL_USER_GRACE_DELAY_MS,
 	type GoalContinuationInput,
 	type GoalContinuationPath,
@@ -16,11 +25,14 @@ import {
 	lastAssistantText,
 } from "./lifecycle-helpers.ts";
 import { buildContinuationPrompt, buildGoalStallNotice, buildTruncationRecoveryPrompt } from "./prompt.ts";
-import type { Goal } from "./types.ts";
+import { collectAssistantUsage } from "./turn-usage.ts";
+import type { Goal, TokenUsageSnapshot } from "./types.ts";
 
 export const GOAL_MONITOR_CONTINUATION_DELAY_MS = 240_000;
 export const GOAL_CONTINUATION_SCHEDULED_EVENT = "goal_continuation_scheduled";
+export const GOAL_CONTINUATION_RESUMED_EVENT = "goal_continuation_resumed";
 export const GOAL_MONITOR_CONTINUATION_NOTICE = "Goal continuation scheduled in 4 minutes while a monitor is active.";
+export const GOAL_MONITOR_STALL_THRESHOLD = GOAL_STALL_TOOLLESS_THRESHOLD;
 export const GOAL_MONITOR_STALL_EVENT = "goal_monitor_continuation_stall";
 
 interface AgentEndOptions {
@@ -31,6 +43,11 @@ interface AgentEndOptions {
 
 type ContinuingGoalContinuationVerdict = Extract<GoalContinuationVerdict, { kind: "continue" }>;
 type DelayedContinuationKind = "monitor" | "userGrace";
+
+type GoalContinuationAdmission = {
+	readonly goal: Goal;
+	readonly admitted: boolean;
+};
 
 export class MonitorAwareGoalContinuation {
 	readonly #pi: ExtensionAPI;
@@ -48,6 +65,9 @@ export class MonitorAwareGoalContinuation {
 	#toollessContinuationStreak = 0;
 	#toollessStreakGoalId: string | null = null;
 	#endedTurnWasUserInitiated = false;
+	#lastTurnUsage: TokenUsageSnapshot | undefined;
+	#scheduledAtMs: number | undefined;
+	#scheduledCache: GoalCacheWarmMetrics | undefined;
 
 	constructor(
 		pi: ExtensionAPI,
@@ -84,6 +104,7 @@ export class MonitorAwareGoalContinuation {
 		this.#ctx = options.ctx;
 		this.#goal = options.goal;
 		this.#lastAgentEndMessages = options.messages;
+		this.#lastTurnUsage = collectAssistantUsage([...options.messages]);
 		this.#resetLengthRecoveryAfterCleanStop(options.goal, options.messages);
 		this.#recordAssistantOutput(options.messages);
 		if (options.goal?.status !== "active") {
@@ -104,7 +125,8 @@ export class MonitorAwareGoalContinuation {
 
 		if (this.#activeMonitorCount === 0) {
 			this.#cancelTimer();
-			return this.#admitAndQueue(options.ctx, options.goal, "immediate", options.messages);
+			const admission = await this.#admitAndQueue(options.ctx, options.goal, "immediate", options.messages);
+			return admission.goal;
 		}
 		this.#schedule(options.goal, "monitor");
 		return options.goal;
@@ -146,12 +168,28 @@ export class MonitorAwareGoalContinuation {
 		if (this.#timer !== undefined) return;
 		const delayMs = kind === "monitor" ? GOAL_MONITOR_CONTINUATION_DELAY_MS : GOAL_USER_GRACE_DELAY_MS;
 		if (kind === "monitor") {
-			if (this.#ctx?.hasUI) this.#ctx.ui.notify(GOAL_MONITOR_CONTINUATION_NOTICE, "info");
+			const cache = estimateCacheWarmMetrics(this.#ctx?.model, process.env, this.#lastTurnUsage);
+			this.#scheduledCache = cache;
+			this.#scheduledAtMs = Date.now();
+			if (this.#ctx?.hasUI) {
+				this.#ctx.ui.notify(buildCacheWarmScheduledNotice(delayMs, this.#activeMonitorCount, cache), "info");
+			}
 			this.#pi.events?.emit(GOAL_CONTINUATION_SCHEDULED_EVENT, {
 				goalId: goal.id,
 				delayMs,
 				activeMonitorCount: this.#activeMonitorCount,
+				cache,
 			});
+			this.#appendWarmupEntry({
+				phase: "scheduled",
+				goalId: goal.id,
+				delayMs,
+				activeMonitorCount: this.#activeMonitorCount,
+				...(cache !== undefined ? { cache } : {}),
+			});
+		} else {
+			this.#scheduledAtMs = undefined;
+			this.#scheduledCache = undefined;
 		}
 		this.#scheduledContinuationKind = kind;
 		this.#timer = setTimeout(() => {
@@ -167,16 +205,40 @@ export class MonitorAwareGoalContinuation {
 	async #continueIfEligible(kind: DelayedContinuationKind): Promise<void> {
 		this.#timer = undefined;
 		this.#scheduledContinuationKind = undefined;
+		const delayMs = kind === "monitor" ? GOAL_MONITOR_CONTINUATION_DELAY_MS : GOAL_USER_GRACE_DELAY_MS;
+		const waitedMs = this.#scheduledAtMs === undefined ? delayMs : Math.max(0, Date.now() - this.#scheduledAtMs);
+		const cache = this.#scheduledCache;
+		this.#scheduledAtMs = undefined;
+		this.#scheduledCache = undefined;
 		const ctx = this.#ctx;
 		const goal = this.#goal;
 		if (ctx === undefined || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
 		if (kind === "monitor" && this.#activeMonitorCount === 0) return;
-		await this.#admitAndQueue(
+		const admission = await this.#admitAndQueue(
 			ctx,
 			goal,
 			kind === "monitor" ? "monitorDelayed" : "userGrace",
 			this.#lastAgentEndMessages,
 		);
+		if (kind !== "monitor" || !admission.admitted) return;
+		this.#pi.events?.emit(GOAL_CONTINUATION_RESUMED_EVENT, {
+			goalId: goal.id,
+			delayMs,
+			waitedMs,
+			activeMonitorCount: this.#activeMonitorCount,
+			cache,
+		});
+		this.#appendWarmupEntry({
+			phase: "resumed",
+			goalId: goal.id,
+			delayMs,
+			waitedMs,
+			activeMonitorCount: this.#activeMonitorCount,
+			...(cache !== undefined ? { cache } : {}),
+		});
+		if (ctx.hasUI) {
+			ctx.ui.notify(buildCacheWarmResumedNotice(waitedMs, this.#activeMonitorCount, cache), "info");
+		}
 	}
 
 	async #admitAndQueue(
@@ -184,7 +246,7 @@ export class MonitorAwareGoalContinuation {
 		goal: Goal,
 		path: GoalContinuationPath,
 		messages: readonly AgentMessage[],
-	): Promise<Goal> {
+	): Promise<GoalContinuationAdmission> {
 		const input = this.#buildVerdictInput(ctx, goal, path, messages);
 		const verdict = evaluateGoalContinuation({ goal, ...input });
 		const admittedGoal = await admitAndQueueGoalContinuation(this.#pi, ctx, goal, {
@@ -200,7 +262,11 @@ export class MonitorAwareGoalContinuation {
 			this.#cancelTimer();
 			this.#resetToollessContinuationStreak();
 		}
-		return admittedGoal;
+		return { goal: admittedGoal, admitted: verdict.kind === "continue" };
+	}
+
+	#appendWarmupEntry(data: GoalCacheWarmupEntryData): void {
+		this.#pi.appendEntry?.<GoalCacheWarmupEntryData>(GOAL_CACHE_WARMUP_ENTRY_TYPE, data);
 	}
 
 	#buildVerdictInput(
@@ -283,6 +349,8 @@ export class MonitorAwareGoalContinuation {
 	}
 
 	#cancelTimer(): void {
+		this.#scheduledAtMs = undefined;
+		this.#scheduledCache = undefined;
 		if (this.#timer !== undefined) clearTimeout(this.#timer);
 		this.#timer = undefined;
 		this.#scheduledContinuationKind = undefined;

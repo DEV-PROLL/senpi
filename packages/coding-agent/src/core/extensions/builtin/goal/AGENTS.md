@@ -20,6 +20,8 @@ goal/
 ├── format.ts         # Tool/UI formatting + goalToolResponse snapshot
 ├── command.ts        # parseGoalCommand (show|pause|resume|clear|setObjective)
 ├── ui.ts             # ctx.ui.setStatus footer segment for the active goal
+├── cache-warm.ts     # Cache-warm metrics estimator + scheduled/resumed notices + goal-cache-warmup entry contract
+├── cache-warm-renderer.ts # TUI entry renderer for goal-cache-warmup custom entries
 ├── elapsed-ticker.ts # GoalElapsedTicker + goalLiveElapsedSeconds (live footer refresh)
 ├── errors.ts         # Goal{AlreadyExists,NotFound}/store error classes
 └── changes.md        # Fork tracker (port + budget behavior removal + wire compatibility)

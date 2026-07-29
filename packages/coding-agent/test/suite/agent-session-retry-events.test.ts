@@ -146,11 +146,15 @@ describe("AgentSession retry and event characterization", () => {
 		harnesses.push(harness);
 		let firstCallStarted!: () => void;
 		let releaseTimeout!: () => void;
+		let steeringCallStarted!: () => void;
 		const sawFirstCall = new Promise<void>((resolve) => {
 			firstCallStarted = resolve;
 		});
 		const timeoutReady = new Promise<void>((resolve) => {
 			releaseTimeout = resolve;
+		});
+		const sawSteeringCall = new Promise<void>((resolve) => {
+			steeringCallStarted = resolve;
 		});
 		harness.setResponses([
 			async () => {
@@ -159,6 +163,10 @@ describe("AgentSession retry and event characterization", () => {
 				return fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "Request timed out." });
 			},
 			fauxAssistantMessage("recovered after timeout"),
+			async () => {
+				steeringCallStarted();
+				return fauxAssistantMessage("recovered queued steering");
+			},
 		]);
 
 		// when
@@ -167,15 +175,29 @@ describe("AgentSession retry and event characterization", () => {
 		await harness.session.steer(".");
 		releaseTimeout();
 		await promptPromise;
+		await sawSteeringCall;
 
 		// then
-		expect(harness.faux.state.callCount).toBe(2);
+		expect(harness.faux.state.callCount).toBe(3);
 		expect(harness.eventsOfType("auto_retry_start").map((event) => event.errorMessage)).toEqual([
 			"Request timed out.",
 		]);
 		const secondCall = harness.faux.getCallLog()[1];
+		const thirdCall = harness.faux.getCallLog()[2];
 		expect(
 			secondCall.context.messages
+				.filter((message) => message.role === "user")
+				.map((message) =>
+					typeof message.content === "string"
+						? message.content
+						: message.content
+								.filter((content) => content.type === "text")
+								.map((content) => content.text)
+								.join("\n"),
+				),
+		).not.toContain(".");
+		expect(
+			thirdCall.context.messages
 				.filter((message) => message.role === "user")
 				.map((message) =>
 					typeof message.content === "string"
@@ -209,6 +231,40 @@ describe("AgentSession retry and event characterization", () => {
 		expect(harness.eventsOfType("agent_end").map((event) => event.willRetry)).toEqual([true, true, false]);
 		expect(harness.faux.state.callCount).toBe(3);
 		expect(harness.session.isRetrying).toBe(false);
+	});
+
+	it("exhausts the retry budget across consecutive aborted transport timeouts", async () => {
+		const harness = await createHarness({
+			settings: { retry: { enabled: true, maxRetries: 2, baseDelayMs: 0 } },
+		});
+		harnesses.push(harness);
+		let queuedSteering: Promise<void> | undefined;
+		harness.session.subscribe((event) => {
+			if (event.type === "auto_retry_start" && queuedSteering === undefined) {
+				queuedSteering = harness.session.steer("retain after retry exhaustion");
+			}
+		});
+		const abortedTimeout = () =>
+			fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "Request timed out." });
+		harness.setResponses([
+			abortedTimeout(),
+			abortedTimeout(),
+			abortedTimeout(),
+			fauxAssistantMessage("must not run"),
+			fauxAssistantMessage("queued input must not run"),
+		]);
+
+		await harness.session.prompt("test");
+		await queuedSteering;
+
+		expect(harness.faux.state.callCount).toBe(3);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.attempt)).toEqual([1, 2]);
+		expect(harness.eventsOfType("auto_retry_end")).toMatchObject([
+			{ success: false, attempt: 2, finalError: "Request timed out." },
+		]);
+		expect(harness.eventsOfType("auto_retry_end").some((event) => event.success)).toBe(false);
+		expect(harness.session.getSteeringMessages()).toEqual(["retain after retry exhaustion"]);
+		expect(harness.session.agent.hasQueuedMessages()).toBe(true);
 	});
 
 	it("prompt waits for retry completion even when assistant message_end handling is delayed", async () => {

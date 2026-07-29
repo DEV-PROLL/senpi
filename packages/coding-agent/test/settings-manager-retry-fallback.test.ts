@@ -24,6 +24,14 @@ afterEach(() => {
 });
 
 describe("SettingsManager retry fallback settings", () => {
+	const defaultChains = {
+		"anthropic/claude-fable-5": [
+			"apitopia/kimi-k3-unlocked:max",
+			"anthropic/claude-opus-5:xhigh",
+			"anthropic/claude-opus-4-8:xhigh",
+		],
+	};
+
 	it("defaults abortServerSideFallback to true and round-trips an explicit false", () => {
 		const { agentDir, projectDir } = createPaths();
 		expect(SettingsManager.create(projectDir, agentDir).getAbortServerSideFallback()).toBe(true);
@@ -39,7 +47,7 @@ describe("SettingsManager retry fallback settings", () => {
 		const { agentDir, projectDir } = createPaths();
 		expect(SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings()).toEqual({
 			modelFallback: true,
-			chains: {},
+			chains: defaultChains,
 			revertPolicy: "cooldown-expiry",
 		});
 
@@ -56,7 +64,7 @@ describe("SettingsManager retry fallback settings", () => {
 
 		expect(SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings()).toEqual({
 			modelFallback: true,
-			chains: {},
+			chains: defaultChains,
 			revertPolicy: "cooldown-expiry",
 		});
 	});

@@ -1,3 +1,32 @@
+## Availability-aware default Fable fallback chain (2026-07-29)
+
+### What changed
+
+- `core/retry-fallback/settings.ts` now owns retry setting types and normalization, including the shipped default
+  `anthropic/claude-fable-5` chain:
+  `apitopia/kimi-k3-unlocked:max` -> `anthropic/claude-opus-5:xhigh` ->
+  `anthropic/claude-opus-4-8:xhigh`.
+- The default applies only when `retry.fallbackChains` is absent or malformed. Explicit chain maps, including
+  an explicitly empty map, remain authoritative.
+- `core/retry-fallback/chains.ts` and the model-fallback builtin omit unavailable models and remove chains with
+  no usable candidates, so runtime selection and `/fallback` display agree.
+- Existing defaults remain enabled: model fallback on, server-side fallback abort on, and cooldown-expiry revert.
+- Coverage: `test/settings-manager-retry-fallback.test.ts`,
+  `test/suite/model-fallback-command.test.ts`, and `test/suite/model-fallback-host-wiring.test.ts`.
+
+### Why
+
+- A fresh Senpi install previously aborted provider-side fallback by default but had no client chain, producing a
+  dead-end warning. Shipping the preferred chain makes that default policy actionable while keeping optional model
+  providers safe: missing models are skipped rather than warned about or selected.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: retry settings imports and delegation in `core/settings-manager.ts`; the new retry settings module has no
+  upstream counterpart.
+- LOW: canonical chain construction in `core/retry-fallback/chains.ts`.
+- LOW: registry-aware loading in `core/extensions/builtin/model-fallback/`.
+
 ## Stream-start timeout wiring and unregistered-api error context (2026-07-29)
 
 ### What changed
@@ -25,6 +54,39 @@
 
 - LOW: one settings getter + one field in `ProviderRetrySettings`; one error message in
   `composeModelProvider`; one option in the `Agent` construction in `core/sdk.ts`.
+
+## Provider idle retries preserve user input and use a bounded retry budget (2026-07-29)
+
+### What changed
+
+- `core/agent-session.ts`: retries triggered by the shared anchored provider-timeout classifier defer queued steering
+  and follow-up input from the retry's first provider request. This covers the two agent-loop stream watchdog messages
+  and exact transport-level `Request timed out` variants without matching incidental command, MCP, or extension text.
+- `core/settings-manager.ts`: `retry.provider.streamRetryTimeoutMs` configures the first-request retry liveness cap
+  (default 30 seconds; `0` disables). The retry clamps only enabled idle/start guards, so it never re-enables an
+  explicitly disabled guard. Both timeout bounds return to their configured values for later provider requests.
+- The retry start bound is capped as well as the provider request option, while the configured idle timeout resumes
+  after the first event so healthy reasoning gaps are not limited to 30 seconds.
+- Consecutive transport timeouts reported with `stopReason: "aborted"` keep consuming the same retry counter. Only a
+  genuinely successful assistant response resets the budget or emits `auto_retry_end { success: true }`.
+- Retry continuations use the session-work barrier and revalidate atomically with the scheduled-continuation path.
+  Accepted recompaction stays queue-first while retaining timeout options; reconstructed failed assistant tails are
+  retired before continuation. A concurrent low-level `Agent.prompt()` is treated as a benign takeover, and session
+  settlement is never emitted while Agent core is still streaming.
+- Coverage: `test/suite/regressions/provider-idle-recovery.test.ts` pins exact request text/order, configurable timeout
+  sequences, disabled guards, negative classifier shapes, and a real no-first-event stream expiry at the cap;
+  `test/settings-manager.test.ts` pins setting defaults and `0` semantics.
+
+### Why
+
+- A silent provider stream previously consumed user steering into another full-length retry. Repeated 300-second
+  retries made the session look stuck and could leave the user's `continue` adjacent to an error instead of a real
+  answer.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `core/agent-session.ts` retry-controller continuation options and scheduled-continuation admission.
+- LOW: `core/settings-manager.ts` provider retry settings and timeout getters.
 
 ## Absent fallback chains no longer produce a startup warning (2026-07-28)
 

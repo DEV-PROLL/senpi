@@ -57,5 +57,6 @@ export function resolveWorkingTipLine(options: WorkingTipOptions): WorkingTipLin
 		.render(options.keys)
 		.replace(/\s*\n\s*/g, " ")
 		.trim();
-	return { line: `Tip: ${body}`, tipId: tip.id };
+	const pointer = "↳ Want the full story on any tip? Ask about it — the give-me-tips skill has the tour.";
+	return { line: `Tip: ${body}\n${pointer}`, tipId: tip.id };
 }

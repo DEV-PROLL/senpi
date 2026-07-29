@@ -213,10 +213,16 @@ Set `PI_SKIP_VERSION_CHECK=1` to disable the senpi version update check. Use `--
 | `retry.fallbackRevertPolicy` | `"cooldown-expiry"` \| `"never"` | `"cooldown-expiry"` | Automatic primary-model restoration policy |
 | `retry.abortServerSideFallback` | boolean | `true` | Abort a turn when the provider substitutes a different model after a classifier decline |
 | `retry.provider.timeoutMs` | number | `300000` | Provider/SDK request timeout and stream idle timeout in milliseconds |
+| `retry.provider.streamStartTimeoutMs` | number | `90000` | Maximum wait for the first provider stream event; `0` disables |
+| `retry.provider.streamRetryTimeoutMs` | number | `30000` | First-request liveness cap after a known provider stream/transport timeout; `0` disables the cap |
 | `retry.provider.maxRetries` | number | `0` | Provider/SDK retry attempts |
 | `retry.provider.maxRetryDelayMs` | number | `60000` | Max server-requested delay honored on the same model before the fallback chain engages (60s) |
 
 A server-requested retry delay at or below `retry.provider.maxRetryDelayMs` is honored on the same model. A longer delay means the model is unavailable rather than busy, so Senpi engages the configured fallback chain instead of waiting, suppressing the primary for the requested duration; the turn fails with an informative error only when no chain candidate can take over.
+
+After an exact provider stream/transport timeout, `retry.provider.streamRetryTimeoutMs` caps the retry's first
+provider request and defers queued user input from that request. The cap applies only to stream guards that are
+already enabled, never turns a disabled guard back on, and restores configured timeouts for later requests.
 
 Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before senpi sees them, which may block the agent until the provider quota resets in some circumstances.
 
@@ -228,6 +234,8 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
     "baseDelayMs": 2000,
     "provider": {
       "timeoutMs": 3600000,
+      "streamStartTimeoutMs": 90000,
+      "streamRetryTimeoutMs": 30000,
       "maxRetries": 0,
       "maxRetryDelayMs": 60000
     }

@@ -3,13 +3,18 @@ import { SettingsManager } from "../../../settings-manager.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isAnthropicBashEnabled } from "../anthropic-bash/index.ts";
 import { TERMINAL_MONITOR_STATE_EVENT } from "../monitor-state-event.ts";
-import { TerminalManager } from "./manager.ts";
 import { MonitorNotifier } from "./monitor-notify.ts";
-import { MonitorRegistry } from "./monitor-registry.ts";
 import { formatMonitorStatus, MONITOR_STATUS_KEY } from "./monitor-status.ts";
 import { TerminalNotifier } from "./notify.ts";
 import { TERMINAL_PROMPT_SECTION } from "./prompt.ts";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
+import {
+	claimParkedBundle,
+	parkBundle,
+	type TerminalEventSinks,
+	TerminalSessionBundle,
+	teardownParkedBundle,
+} from "./session-bundle.ts";
 import { loadTerminalSettings, type ResolvedTerminalSettings, TERMINAL_SETTINGS_DEFAULTS } from "./settings.ts";
 import { TERMINAL_BASH_TOOL, TERMINAL_COMPANION_TOOLS } from "./shared.ts";
 import { createPtyBashTool } from "./tools/bash.ts";
@@ -21,31 +26,61 @@ import { createKillBashTool } from "./tools/kill-bash.ts";
 import { createMonitorTool } from "./tools/monitor.ts";
 
 interface TerminalExtensionState {
-	manager: TerminalManager | null;
+	bundle: TerminalSessionBundle | null;
 	settings: ResolvedTerminalSettings;
 	notifier: TerminalNotifier | null;
 	monitorNotifier: MonitorNotifier | null;
-	monitors: MonitorRegistry | null;
 	ctx: ExtensionContext | undefined;
 	shellPath: string | undefined;
 	steppedAside: boolean;
 	noticeShown: boolean;
 }
 
+/** Tests and SDK callers may hand partial contexts without a session manager. */
+function sessionKeyOf(ctx: ExtensionContext | undefined): string | undefined {
+	return ctx?.sessionManager?.getSessionId?.();
+}
+
+function createBundle(state: TerminalExtensionState): TerminalSessionBundle {
+	return new TerminalSessionBundle({
+		maxSessions: state.settings.maxSessions,
+		scrollback: state.settings.scrollback,
+	});
+}
+
+/** Sinks read the live instance state at call time, so notifier swaps need no re-bind. */
+function bundleSinks(pi: ExtensionAPI, state: TerminalExtensionState): TerminalEventSinks {
+	return {
+		onMonitorEvent: (event) => state.monitorNotifier?.notifyEvent(event),
+		onMonitorState: (snapshot) => {
+			const ctx = state.ctx;
+			const status = formatMonitorStatus(snapshot);
+			ctx?.ui.setStatus(
+				MONITOR_STATUS_KEY,
+				status === undefined || ctx.mode !== "tui"
+					? status
+					: ctx.ui.theme.bg("selectedBg", ctx.ui.theme.fg("text", status)),
+			);
+			pi.events?.emit(TERMINAL_MONITOR_STATE_EVENT, { activeCount: snapshot.length });
+		},
+		onBackgroundExit: (id, runtime) => state.notifier?.notifyCompletion(id, runtime),
+	};
+}
+
 function buildToolContext(pi: ExtensionAPI, state: TerminalExtensionState): TerminalToolContext {
-	const requireManager = (): TerminalManager => {
-		// Lazily create a manager so the tool works even when invoked directly (e.g. via the
+	const requireBundle = (): TerminalSessionBundle => {
+		// Lazily create a bundle so the tools work even when invoked directly (e.g. via the
 		// SDK) before `session_start` initializes one. `session_start` replaces it with a
-		// settings-configured manager and tears down any earlier one.
-		state.manager ??= new TerminalManager({
-			maxSessions: state.settings.maxSessions,
-			scrollback: state.settings.scrollback,
-		});
-		return state.manager;
+		// settings-configured bundle and tears down any earlier one.
+		if (!state.bundle) {
+			state.bundle = createBundle(state);
+			state.bundle.bind(bundleSinks(pi, state));
+		}
+		return state.bundle;
 	};
 	return {
 		get manager() {
-			return requireManager();
+			return requireBundle().manager;
 		},
 		get cwd() {
 			return state.ctx?.cwd ?? process.cwd();
@@ -63,21 +98,14 @@ function buildToolContext(pi: ExtensionAPI, state: TerminalExtensionState): Term
 			return state.settings.timeoutAction;
 		},
 		get monitorRegistry() {
-			state.monitors ??= new MonitorRegistry((event) => state.monitorNotifier?.notifyEvent(event), {
-				onChange: (snapshot) => {
-					state.ctx?.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot));
-					const events = pi.events;
-					if (events !== undefined) {
-						events.emit(TERMINAL_MONITOR_STATE_EVENT, { activeCount: snapshot.length });
-					}
-				},
-			});
-			return state.monitors;
+			return requireBundle().monitors;
 		},
 		getEnv: () => getShellEnv(),
 		getSessionContext: () => state.ctx,
+		// Exit listeners registered before a reload reach the post-reload owner through the
+		// shared bundle, so this must dispatch via the bundle, never the instance notifier.
 		onBackgroundExit: (id: string, runtime: TerminalRuntimeSession) => {
-			state.notifier?.notifyCompletion(id, runtime);
+			state.bundle?.notifyBackgroundExit(id, runtime);
 		},
 		onMonitorRearmed: (id: string) => state.monitorNotifier?.rearm(id),
 	};
@@ -114,11 +142,10 @@ function syncToolset(pi: ExtensionAPI, state: TerminalExtensionState): void {
 
 export function registerTerminalExtension(pi: ExtensionAPI): void {
 	const state: TerminalExtensionState = {
-		manager: null,
+		bundle: null,
 		settings: TERMINAL_SETTINGS_DEFAULTS,
 		notifier: null,
 		monitorNotifier: null,
-		monitors: null,
 		ctx: undefined,
 		shellPath: undefined,
 		steppedAside: false,
@@ -133,7 +160,7 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 	pi.registerTool(createKillBashTool(toolCtx));
 	pi.registerTool(createMonitorTool(toolCtx));
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		state.ctx = ctx;
 		const settingsManager = SettingsManager.create(ctx.cwd);
 		state.settings = loadTerminalSettings(settingsManager);
@@ -149,15 +176,22 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 			getContext: () => state.ctx,
 			getMode: () => state.settings.notify,
 			getSettings: () => state.settings.monitor,
-			pauseMonitors: () => state.monitors?.pauseAll() ?? [],
+			pauseMonitors: () => state.bundle?.monitors.pauseAll() ?? [],
 		});
-		state.monitors?.dispose();
-		state.monitors = null;
-		await state.manager?.teardown();
-		state.manager = new TerminalManager({
-			maxSessions: state.settings.maxSessions,
-			scrollback: state.settings.scrollback,
-		});
+		const sessionKey = sessionKeyOf(ctx);
+		if (event.reason === "reload") {
+			const claimed = sessionKey === undefined ? undefined : claimParkedBundle(sessionKey);
+			if (claimed) {
+				await state.bundle?.teardown();
+				state.bundle = claimed;
+			}
+		} else {
+			if (sessionKey !== undefined) await teardownParkedBundle(sessionKey);
+			await state.bundle?.teardown();
+			state.bundle = createBundle(state);
+		}
+		state.bundle ??= createBundle(state);
+		state.bundle.bind(bundleSinks(pi, state));
 		syncToolset(pi, state);
 	});
 
@@ -179,13 +213,22 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 		return { systemPrompt: `${event.systemPrompt}\n${TERMINAL_PROMPT_SECTION}` };
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (event, ctx) => {
 		state.monitorNotifier?.dispose();
 		state.monitorNotifier = null;
-		state.monitors?.dispose();
-		state.monitors = null;
-		await state.manager?.teardown();
-		state.manager = null;
+		state.notifier = null;
+		const sessionKey = sessionKeyOf(ctx) ?? sessionKeyOf(state.ctx);
+		if (event.reason === "reload" && state.bundle && sessionKey !== undefined) {
+			// Keep state.bundle referenced: exit listeners captured by this instance's tool
+			// context still route through the shared bundle after the new owner claims it.
+			state.bundle.park();
+			await parkBundle(sessionKey, state.bundle);
+			return;
+		}
+		const bundle = state.bundle;
+		state.bundle = null;
+		await bundle?.teardown();
+		if (sessionKey !== undefined) await teardownParkedBundle(sessionKey);
 	});
 }
 
