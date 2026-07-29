@@ -52,6 +52,7 @@ export async function createGoal(ref: GoalStoreRef, objective: string, tokenBudg
 		status: "active",
 		tokensUsed: 0,
 		timeUsedSeconds: 0,
+		consecutiveContinuations: 0,
 		createdAt: now,
 		updatedAt: now,
 		lastStartedAt: now,
@@ -88,6 +89,7 @@ export async function updateGoal(
 			status,
 			tokensUsed: 0,
 			timeUsedSeconds: 0,
+			consecutiveContinuations: 0,
 			createdAt: now,
 			updatedAt: now,
 			...(tokenBudget === undefined ? {} : { tokenBudget }),
@@ -106,6 +108,10 @@ export async function updateGoal(
 		update.reason,
 		now,
 	);
+	if (next.status !== current.status) {
+		next.consecutiveContinuations = 0;
+		delete next.lastContinuationSignature;
+	}
 	if (tokenBudget === undefined) delete next.tokenBudget;
 	else next.tokenBudget = tokenBudget;
 	if (validatedObjective?.truncated) await writeFullObjectiveText(ref, update.objective ?? "");
@@ -148,6 +154,27 @@ export async function accountGoalUsage(
 		timeUsedSeconds: goal.timeUsedSeconds + Math.max(0, Math.trunc(elapsedSeconds)),
 		updatedAt: nextUpdatedAt(goal.updatedAt),
 	};
+	await writeGoal(ref, next);
+	return next;
+}
+
+export async function recordContinuationDelivered(ref: GoalStoreRef, signature: string): Promise<Goal | null> {
+	const goal = await readGoal(ref);
+	if (!goal) return goal;
+	const next: Goal = {
+		...goal,
+		consecutiveContinuations: (goal.consecutiveContinuations ?? 0) + 1,
+		lastContinuationSignature: signature,
+	};
+	await writeGoal(ref, next);
+	return next;
+}
+
+export async function resetContinuationStreak(ref: GoalStoreRef): Promise<Goal | null> {
+	const goal = await readGoal(ref);
+	if (!goal) return goal;
+	const next: Goal = { ...goal, consecutiveContinuations: 0 };
+	delete next.lastContinuationSignature;
 	await writeGoal(ref, next);
 	return next;
 }

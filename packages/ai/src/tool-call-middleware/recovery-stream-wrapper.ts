@@ -1,4 +1,6 @@
 import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Tool } from "../types.ts";
+import type { RecoveryStreamParser } from "./protocols/anthropic-xml/recovery-stream.ts";
+import { createAntmlInvokeRecoveryStreamParser } from "./protocols/antml/recovery-stream.ts";
 import { type RecoveryContentKind, RecoveryContentLifecycle } from "./recovery-content-lifecycle.ts";
 import { RecoveryAssistantMessageEventStream } from "./recovery-event-stream.ts";
 import { RecoveryNativeProjection } from "./recovery-native-projection.ts";
@@ -10,6 +12,7 @@ import { StreamMessageProjection } from "./stream-wrapper-shared.ts";
 export function wrapStreamWithInvokeRecovery(
 	innerStream: AssistantMessageEventStream,
 	tools: readonly Tool[],
+	createParser: (tools: readonly Tool[]) => RecoveryStreamParser = createAntmlInvokeRecoveryStreamParser,
 ): AssistantMessageEventStream {
 	const outerStream = new RecoveryAssistantMessageEventStream();
 
@@ -120,7 +123,13 @@ export function wrapStreamWithInvokeRecovery(
 						if (!canStart(event.partial, event.contentIndex, "text")) return;
 						if (!prepareContentEvent(event.partial, event.contentIndex) || !projection || !nativeProjection)
 							return;
-						const nextText = new RecoveryTextProjection(tools, projection, nativeProjection, event.contentIndex);
+						const nextText = new RecoveryTextProjection(
+							tools,
+							projection,
+							nativeProjection,
+							event.contentIndex,
+							createParser,
+						);
 						if (!nextText.start(event.partial)) {
 							terminateForFailure(event.partial, "invalid_native_event_order");
 							return;

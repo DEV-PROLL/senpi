@@ -35,6 +35,8 @@ import type { PackageSource } from "../core/settings-manager.ts";
 import { spawnProcess, waitForChildProcess } from "../utils/child-process.ts";
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { killProcessTree } from "../utils/shell.ts";
+import { computeBuildInputsHashFromLsTree } from "./omo-local-update-fingerprint.ts";
+import { defaultSpawnWorker, type OmoLocalSpawnWorker } from "./omo-local-update-worker.ts";
 
 /** Result of one spawned command, with output captured and timeout enforced. */
 export interface OmoLocalRunResult {
@@ -212,6 +214,8 @@ export interface OmoLocalUpdateStamp {
 	omoSenpiTree: string;
 	/** `git rev-parse origin/dev:packages/senpi-task` at install time. */
 	senpiTaskTree: string;
+	/** Build-input fingerprint of origin/dev at install time (see omo-local-update-fingerprint.ts). */
+	buildInputsHash: string;
 	installedAt: string;
 	/** Post-install inventory: relative paths of every installed artifact present at stamp time. */
 	artifacts: string[];
@@ -233,6 +237,7 @@ export function readStamp(agentDir: string): OmoLocalUpdateStamp | undefined {
 		sha?: unknown;
 		omoSenpiTree?: unknown;
 		senpiTaskTree?: unknown;
+		buildInputsHash?: unknown;
 		installedAt?: unknown;
 		artifacts?: unknown;
 	};
@@ -241,6 +246,7 @@ export function readStamp(agentDir: string): OmoLocalUpdateStamp | undefined {
 		typeof candidate.sha !== "string" ||
 		typeof candidate.omoSenpiTree !== "string" ||
 		typeof candidate.senpiTaskTree !== "string" ||
+		typeof candidate.buildInputsHash !== "string" ||
 		typeof candidate.installedAt !== "string" ||
 		!Array.isArray(candidate.artifacts)
 	) {
@@ -258,6 +264,7 @@ export function readStamp(agentDir: string): OmoLocalUpdateStamp | undefined {
 		sha: candidate.sha,
 		omoSenpiTree: candidate.omoSenpiTree,
 		senpiTaskTree: candidate.senpiTaskTree,
+		buildInputsHash: candidate.buildInputsHash,
 		installedAt: candidate.installedAt,
 		artifacts,
 	};
@@ -274,6 +281,7 @@ export interface ShouldSkipUpdateOptions {
 	stamp: OmoLocalUpdateStamp | undefined;
 	repoRoot: string;
 	remoteSha: string;
+	remoteBuildInputsHash: string;
 	/** True only when every path recorded in stamp.artifacts still exists on disk. */
 	stampArtifactsExist: boolean;
 	force: boolean;
@@ -283,9 +291,10 @@ export interface ShouldSkipUpdateOptions {
  * exported for tests only
  *
  * Skip decision (taken BEFORE any worktree op, install, or write): skip only when the stamp
- * belongs to this repo root, was installed at the frozen remote sha, recorded a non-empty
- * artifact inventory, and every inventoried path still exists. A repoRoot mismatch always
- * updates; an empty/absent inventory never skips; force always updates.
+ * belongs to this repo root, matches the frozen remote by sha OR by build-input fingerprint
+ * (a moved sha whose build inputs are untouched cannot change the built plugin), recorded a
+ * non-empty artifact inventory, and every inventoried path still exists. A repoRoot mismatch
+ * always updates; an empty/absent inventory never skips; force always updates.
  */
 export function shouldSkipUpdate(options: ShouldSkipUpdateOptions): boolean {
 	if (options.force) {
@@ -298,7 +307,7 @@ export function shouldSkipUpdate(options: ShouldSkipUpdateOptions): boolean {
 	if (stamp.repoRoot !== options.repoRoot) {
 		return false;
 	}
-	if (stamp.sha !== options.remoteSha) {
+	if (stamp.sha !== options.remoteSha && stamp.buildInputsHash !== options.remoteBuildInputsHash) {
 		return false;
 	}
 	if (stamp.artifacts.length === 0) {
@@ -343,6 +352,7 @@ export interface OmoRemoteState {
 	subject: string;
 	omoSenpiTree: string;
 	senpiTaskTree: string;
+	buildInputsHash: string;
 }
 
 /** exported for tests only */
@@ -384,7 +394,8 @@ export async function computeRemoteState(options: ComputeRemoteStateOptions): Pr
 	const subject = await requireOk(["log", "-1", "--format=%s", "origin/dev"]);
 	const omoSenpiTree = await requireOk(["rev-parse", "origin/dev:packages/omo-senpi"]);
 	const senpiTaskTree = await requireOk(["rev-parse", "origin/dev:packages/senpi-task"]);
-	return { sha, subject, omoSenpiTree, senpiTaskTree };
+	const buildInputsHash = computeBuildInputsHashFromLsTree(await requireOk(["ls-tree", "-z", "origin/dev"]));
+	return { sha, subject, omoSenpiTree, senpiTaskTree, buildInputsHash };
 }
 
 /** exported for tests only */
@@ -764,6 +775,10 @@ export interface RunOmoLocalUpdateBetaOptions {
 	force?: boolean;
 	log?: (message: string) => void;
 	run?: OmoLocalRun;
+	/** "build" (default) runs the full update inline; "dispatch" hands a needed rebuild to a detached worker. */
+	mode?: "build" | "dispatch";
+	/** exported-for-tests seam over the detached worker spawn used by "dispatch". */
+	spawnWorker?: OmoLocalSpawnWorker;
 }
 
 /**
@@ -773,7 +788,11 @@ export interface RunOmoLocalUpdateBetaOptions {
  * atomic lock acquisition (held through fetch, worktree, build, swap, stamp AND notify;
  * owner-checked unlink in `finally`) -> computeRemoteState (ONE read-only fetch + frozen
  * rev-parse reads of origin/dev) -> skip decision BEFORE any worktree op, install, or
- * write -> ensureBuildWorktree (feature-owned persistent worktree, reuse-or-recreate) ->
+ * write (skip on matching sha OR matching build-input fingerprint) -> in "dispatch" mode
+ * (bare `senpi update` foreground, unless SENPI_OMO_LOCAL_UPDATE_SYNC=1) a needed rebuild
+ * is handed to a detached worker spawn (omo-local-update-worker.ts) and the hook returns ->
+ * otherwise ("build": the default and the worker path) ensureBuildWorktree
+ * (feature-owned persistent worktree, reuse-or-recreate) ->
  * `bun install` (600s, cwd = build worktree) -> `bun run build:senpi-plugin` (900s, cwd =
  * build worktree) -> completeness check in the WORKTREE plugin dir -> atomic swap of the
  * install target -> writeStamp (inventory from the NEW plugin dir) -> notify (green line
@@ -792,6 +811,8 @@ export async function runOmoLocalUpdateBeta(options: RunOmoLocalUpdateBetaOption
 			console.log(message);
 		});
 	const run = options.run ?? defaultRun;
+	const dispatchRequested =
+		(options.mode ?? "build") === "dispatch" && options.env.SENPI_OMO_LOCAL_UPDATE_SYNC !== "1";
 	let repoRoot: string | undefined;
 	try {
 		if (isKillSwitched(options.env)) {
@@ -825,13 +846,44 @@ export async function runOmoLocalUpdateBeta(options: RunOmoLocalUpdateBetaOption
 					stamp,
 					repoRoot,
 					remoteSha: remoteState.sha,
+					remoteBuildInputsHash: remoteState.buildInputsHash,
 					stampArtifactsExist,
 					force: options.force ?? false,
 				})
 			) {
+				const shortSkip = remoteState.sha.slice(0, 7);
 				log(
-					chalk.dim(`OMO local plugins already at origin/dev @${remoteState.sha.slice(0, 7)}; skipping rebuild.`),
+					stamp?.sha === remoteState.sha
+						? chalk.dim(`OMO local plugins already at origin/dev @${shortSkip}; skipping rebuild.`)
+						: chalk.dim(
+								`OMO local plugins already match origin/dev @${shortSkip} (build inputs unchanged); skipping rebuild.`,
+							),
 				);
+				return;
+			}
+
+			// Dispatch: hand the rebuild to a detached worker so the foreground never blocks on
+			// the 30s+ install/build. The lock is released BEFORE the spawn (release is
+			// owner-checked, so the finally re-release no-ops) or the worker's own lock
+			// acquisition would race the still-live foreground pid and give up.
+			if (dispatchRequested) {
+				releaseOmoLocalLock(lock);
+				const spawnWorker = options.spawnWorker ?? defaultSpawnWorker;
+				const spawned = spawnWorker({ agentDir: options.agentDir, force: options.force ?? false });
+				if (spawned.ok) {
+					log(
+						chalk.dim(
+							`Updating OMO local plugins in background: origin/dev @${remoteState.sha.slice(0, 7)} - ${remoteState.subject} (log: ${spawned.logPath})`,
+						),
+					);
+				} else {
+					log(chalk.yellow(`OMO local plugin background update could not start: ${spawned.message}`));
+					log(
+						chalk.dim(
+							"Run `senpi update` again, or set SENPI_OMO_LOCAL_UPDATE_SYNC=1 to update in the foreground.",
+						),
+					);
+				}
 				return;
 			}
 
@@ -874,6 +926,7 @@ export async function runOmoLocalUpdateBeta(options: RunOmoLocalUpdateBetaOption
 				sha: remoteState.sha,
 				omoSenpiTree: remoteState.omoSenpiTree,
 				senpiTaskTree: remoteState.senpiTaskTree,
+				buildInputsHash: remoteState.buildInputsHash,
 				installedAt: new Date().toISOString(),
 				artifacts: collectArtifactInventory(pluginPath),
 			});

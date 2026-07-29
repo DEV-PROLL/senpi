@@ -21,6 +21,10 @@ Background sessions are NEVER killed by `timeout` (they live until they exit or 
 call `kill_bash`), even though the bash-timeout extension injects a default `timeout`
 into every `bash` call. Foreground calls behave like the classic `bash` tool.
 
+Background sessions and monitors also survive a session reload (`/reload`): existing
+`bash_N` ids stay addressable, watchers keep injecting events, and completion
+notifications keep arriving. Quitting or switching sessions still tears everything down.
+
 Typical flow: start with `run_in_background: true`, watch for patterns with `monitor`,
 peek with `bash_output`, steer with `bash_input`, then `kill_bash` when done. Completion
 arrives as a notification carrying the exit code and output tail, so a follow-up

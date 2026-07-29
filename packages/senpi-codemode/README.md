@@ -133,6 +133,10 @@ cell keeps only its own language kernel busy. A new same-language call returns
 a busy error with its cell id and output tail; calls in other languages continue
 normally. Do not re-run the cell.
 
+While any cell is detached, the interactive footer shows a highlighted
+`↗ <language> · <title>` status on the extension status line (the cell id when
+the call had no title), clearing as soon as the last detached cell settles.
+
 Use `eval({ action: "peek", cell_id })` for its state and buffered output, or
 `eval({ action: "stop", cell_id })` to cancel it. Python stop interrupts the
 existing kernel and preserves variables. JavaScript stop kills and restarts its

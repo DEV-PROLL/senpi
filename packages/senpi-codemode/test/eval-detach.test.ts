@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentToolResult } from "@code-yeongyu/senpi";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EvalDetachedCellManager, type EvalDetachedCellNotification } from "../src/tool/detached-cell-manager.ts";
+import {
+	EvalDetachedCellManager,
+	type EvalDetachedCellNotification,
+	type EvalDetachedCellStatusEntry,
+} from "../src/tool/detached-cell-manager.ts";
 import { createEvalTool } from "../src/tool/eval-tool.ts";
 import { errorResult, FakeKernel, FakeManager, fakeExtensionContext, result } from "./eval/fakes.ts";
 
@@ -290,5 +294,118 @@ describe("eval detached cells", () => {
 		expect(recorder.notices[0]?.content).toContain("kernel crashed");
 		expect(recorder.notices[0]?.content).toContain("local://detached-eval-crashed-detached.log");
 		expect(existsSync(join(artifactsDir, "local", "detached-eval-crashed-detached.log"))).toBe(true);
+	});
+});
+
+describe("eval detached cell status emissions", () => {
+	function statusRecorder(): {
+		readonly emissions: EvalDetachedCellStatusEntry[][];
+		readonly onStatusChange: (entries: readonly EvalDetachedCellStatusEntry[]) => void;
+	} {
+		const emissions: EvalDetachedCellStatusEntry[][] = [];
+		return { emissions, onStatusChange: (entries) => emissions.push([...entries]) };
+	}
+
+	async function detachTitled(
+		tool: ReturnType<typeof createTool>,
+		kernel: FakeKernel,
+		cellId: string,
+		title: string,
+		language: "js" | "py" = "js",
+	): Promise<void> {
+		const started = kernel.deferNextRun();
+		const execution = tool.execute(
+			cellId,
+			{ language, code: "await forever", title, on_timeout: "detach" },
+			undefined,
+			undefined,
+			interactiveContext(),
+		);
+		await started;
+		await vi.advanceTimersByTimeAsync(1_000);
+		await execution;
+	}
+
+	it("emits the detached cell on detach and an empty list once it completes", async () => {
+		vi.useFakeTimers();
+		const status = statusRecorder();
+		const manager = new EvalDetachedCellManager({
+			notifier: new NotificationRecorder(),
+			onStatusChange: status.onStatusChange,
+		});
+		const kernel = new FakeKernel([]);
+		const tool = createTool(manager, [["js", kernel]]);
+
+		await detachTitled(tool, kernel, "status-cell", "numpy feather rerun");
+
+		expect(status.emissions).toEqual([[{ cellId: "status-cell", language: "js", title: "numpy feather rerun" }]]);
+
+		kernel.completeDeferredRun(result("status-cell", "42"));
+		await manager.waitForTerminal("status-cell");
+
+		expect(status.emissions.at(-1)).toEqual([]);
+		await manager.flushNotifications();
+	});
+
+	it("keeps the remaining detached cells listed when one of several is stopped", async () => {
+		vi.useFakeTimers();
+		const status = statusRecorder();
+		const manager = new EvalDetachedCellManager({
+			notifier: new NotificationRecorder(),
+			onStatusChange: status.onStatusChange,
+		});
+		const js = new FakeKernel([]);
+		const py = new FakeKernel([]);
+		const tool = createTool(manager, [
+			["js", js],
+			["py", py],
+		]);
+
+		await detachTitled(tool, js, "js-cell", "bundle build", "js");
+		await detachTitled(tool, py, "py-cell", "strip repairs", "py");
+
+		expect(status.emissions.at(-1)).toEqual([
+			{ cellId: "js-cell", language: "js", title: "bundle build" },
+			{ cellId: "py-cell", language: "py", title: "strip repairs" },
+		]);
+
+		await manager.stop("js-cell");
+
+		expect(status.emissions.at(-1)).toEqual([{ cellId: "py-cell", language: "py", title: "strip repairs" }]);
+		await manager.stop("py-cell");
+		await manager.flushNotifications();
+	});
+
+	it("omits the title when the cell had none and stays silent for cells that never detach", async () => {
+		vi.useFakeTimers();
+		const status = statusRecorder();
+		const manager = new EvalDetachedCellManager({
+			notifier: new NotificationRecorder(),
+			onStatusChange: status.onStatusChange,
+		});
+		const kernel = new FakeKernel([result("plain-cell", "1")]);
+		const tool = createTool(manager, [["js", kernel]]);
+
+		await tool.execute("plain-cell", { language: "js", code: "1" }, undefined, undefined, interactiveContext());
+
+		expect(status.emissions).toEqual([]);
+
+		const detachedKernel = new FakeKernel([]);
+		const detachedTool = createTool(manager, [["js", detachedKernel]]);
+		const started = detachedKernel.deferNextRun();
+		const execution = detachedTool.execute(
+			"untitled-cell",
+			{ language: "js", code: "await forever", on_timeout: "detach" },
+			undefined,
+			undefined,
+			interactiveContext(),
+		);
+		await started;
+		await vi.advanceTimersByTimeAsync(1_000);
+		await execution;
+
+		expect(status.emissions).toEqual([[{ cellId: "untitled-cell", language: "js" }]]);
+		await manager.stop("untitled-cell");
+		await manager.flushNotifications();
 	});
 });

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "../src/providers/faux.ts";
-import { isRetryableAssistantError, type RetryPolicy, retryAssistantCall } from "../src/utils/retry.ts";
+import {
+	isProviderStreamStallError,
+	isProviderTimeoutError,
+	isRetryableAssistantError,
+	type RetryPolicy,
+	retryAssistantCall,
+} from "../src/utils/retry.ts";
 
 const openAIExplicitRetryMessage =
 	"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID req_******** in your message.";
@@ -67,6 +73,41 @@ describe("provider retry classification", () => {
 		).toBe(false);
 	});
 
+	it.each([
+		["Idle timeout waiting for provider stream after 300000ms", true, true],
+		["Provider stream start timed out after 90000ms", true, true],
+		["Request timed out.", false, true],
+		["Request timed out", false, true],
+		["Command timed out after 30000ms", false, false],
+		["MCP server example timed out", false, false],
+		["extension timed out", false, false],
+	] as const)("classifies provider timeout provenance without matching incidental text: %s", (errorMessage, expectedStall, expectedTimeout) => {
+		const message = fauxAssistantMessage("", { stopReason: "error", errorMessage });
+		expect(isProviderStreamStallError(message)).toBe(expectedStall);
+		expect(isProviderTimeoutError(message)).toBe(expectedTimeout);
+	});
+
+	it("recognizes aborted transport timeouts but not unrelated aborted work", () => {
+		expect(
+			isProviderTimeoutError(
+				fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "Request timed out." }),
+			),
+		).toBe(true);
+		expect(
+			isProviderTimeoutError(
+				fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "Command timed out after 30000ms" }),
+			),
+		).toBe(false);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "aborted",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(false);
+	});
+
 	it("classifies the observed OpenAI server_error as retryable", () => {
 		expect(
 			isRetryableAssistantError(
@@ -105,6 +146,41 @@ describe("provider retry classification", () => {
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: codexUpstreamUnavailableMessage }),
 			),
 		).toBe(true);
+	});
+
+	it("classifies zero-event stream idle timeouts as provider stream stalls", () => {
+		// Stall retries replay the identical payload against a provider that
+		// already sat silent for the whole idle budget, so agent-session uses
+		// this class to escalate repeated stalls to the fallback chain.
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Provider stream start timed out after 90000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Request timed out." }),
+			),
+		).toBe(false);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "aborted",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(false);
 	});
 
 	it("classifies agent-loop stream idle timeouts as retryable", () => {

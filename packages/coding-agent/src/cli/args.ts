@@ -46,6 +46,7 @@ export interface Args {
 	noThemes?: boolean;
 	noContextFiles?: boolean;
 	listModels?: string | true;
+	listTips?: boolean;
 	offline?: boolean;
 	verbose?: boolean;
 	projectTrustOverride?: boolean;
@@ -182,6 +183,8 @@ export function parseArgs(args: string[], options: { grokNeoEnabled?: boolean } 
 			} else {
 				result.listModels = true;
 			}
+		} else if (arg === "--list-tips") {
+			result.listTips = true;
 		} else if (arg === "--verbose") {
 			result.verbose = true;
 		} else if (arg === "--approve" || arg === "-a") {
@@ -290,6 +293,7 @@ ${chalk.bold("Options:")}
   --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
+  --list-tips                    List all tips as JSON
   --verbose                      Force verbose startup (overrides quietStartup setting)
   --approve, -a                  Trust project-local files for this run
   --no-approve, -na              Ignore project-local files for this run

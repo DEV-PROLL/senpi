@@ -20,6 +20,8 @@ goal/
 ├── format.ts         # Tool/UI formatting + goalToolResponse snapshot
 ├── command.ts        # parseGoalCommand (show|pause|resume|clear|setObjective)
 ├── ui.ts             # ctx.ui.setStatus footer segment for the active goal
+├── cache-warm.ts     # Cache-warm metrics estimator + scheduled/resumed notices + goal-cache-warmup entry contract
+├── cache-warm-renderer.ts # TUI entry renderer for goal-cache-warmup custom entries
 ├── elapsed-ticker.ts # GoalElapsedTicker + goalLiveElapsedSeconds (live footer refresh)
 ├── errors.ts         # Goal{AlreadyExists,NotFound}/store error classes
 └── changes.md        # Fork tracker (port + budget behavior removal + wire compatibility)
@@ -33,6 +35,20 @@ metadata. The builtin tools do not create or interpret it. There is no
 `budgetLimited`/`usageLimited` status, budget-limit continuation, or
 budget-driven status transition. `tokensUsed` and `timeUsedSeconds` remain
 display-only usage metrics. Status is `active | paused | blocked | complete`; `blocked` carries `blockedReason`/`blockedAt` and suppresses continuations.
+
+## CONTINUATION POLICY
+
+Continuation admission is guarded by a persisted consecutive-continuation cap of 8,
+a stale-signature check on immediate re-entry, and a single-flight latch so only one
+hidden continuation can be queued at a time. The stall notice is goal-wide: from the
+3rd consecutive toolless continuation turn it prefixes the prompt with `<goal_stall_check>`
+and switches between monitor-flavored bullets while monitors are active and generic
+recovery bullets otherwise. A real user prompt imposes a 60s grace window before
+resuming, a `length` stop gets exactly one minimal truncation recovery before the goal
+blocks on repetition, terminal provider errors block the goal only when `AgentEndEvent.willRetry`
+is false, and resumed sessions with 8+ trailing historical continuation entries suppress
+session-start auto-resume. `tokenBudget` remains inert compatibility metadata only; this
+policy is budget-free by design.
 
 ## PERSISTENCE
 

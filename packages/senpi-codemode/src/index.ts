@@ -5,6 +5,7 @@ import type { EvalSchemaToolInfo } from "./bridges/schema-bridge.ts";
 import { type CompletionRequest, type CompletionResult, createCompletionHandler } from "./completion/handler.ts";
 import { defaultCodemodeSettings } from "./config/settings.ts";
 import { EvalNotifier } from "./extension/eval-notifier.ts";
+import { EVAL_CELLS_STATUS_KEY, formatEvalCellStatus } from "./extension/eval-status.ts";
 import {
 	createExecuteTool,
 	createRuntime,
@@ -13,7 +14,7 @@ import {
 } from "./extension/runtime-factory.ts";
 import type { CodemodeSessionManager, CreateCodemodeSessionManagerOptions } from "./extension/session-manager.ts";
 import { SessionManagerProxy } from "./extension/session-manager-proxy.ts";
-import { EvalDetachedCellManager } from "./tool/detached-cell-manager.ts";
+import { EvalDetachedCellManager, type EvalDetachedCellStatusEntry } from "./tool/detached-cell-manager.ts";
 import { createEvalTool } from "./tool/eval-tool.ts";
 import { renderEvalCall, renderEvalResult } from "./tool/render.ts";
 
@@ -58,6 +59,18 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 		getContext: () => activeContext,
 		getMode: () => "wake",
 	});
+	const showDetachedCells = (entries: readonly EvalDetachedCellStatusEntry[]): void => {
+		const ctx = activeContext;
+		if (ctx?.ui?.setStatus === undefined) return;
+		const status = formatEvalCellStatus(entries);
+		const theme = ctx.ui.theme;
+		ctx.ui.setStatus(
+			EVAL_CELLS_STATUS_KEY,
+			status === undefined || ctx.mode !== "tui" || theme === undefined
+				? status
+				: theme.bg("selectedBg", theme.fg("text", status)),
+		);
+	};
 	const registerEvalForRuntime = (
 		runtime: SessionRuntime,
 		modelId: string | undefined,
@@ -101,7 +114,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			listTools: () => pi.getAllTools(),
 			complete,
 			settings: defaultCodemodeSettings,
-			cellManager: new EvalDetachedCellManager({ notifier }),
+			cellManager: new EvalDetachedCellManager({ notifier, onStatusChange: showDetachedCells }),
 			executionTracker: manager,
 			renderers,
 			hostLine: hostLine(),
@@ -126,7 +139,11 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 		if (!replaced) return;
 		notifier.reset();
 		activeContext = ctx;
-		const cellManager = new EvalDetachedCellManager({ artifactsDir: runtime.artifactsDir, notifier });
+		const cellManager = new EvalDetachedCellManager({
+			artifactsDir: runtime.artifactsDir,
+			notifier,
+			onStatusChange: showDetachedCells,
+		});
 		activeCells = cellManager;
 		activeRuntime = runtime;
 		activeModelId = ctx.model?.id;

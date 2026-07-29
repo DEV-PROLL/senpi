@@ -1,5 +1,81 @@
 # Core Extensions Changes
 
+## 2026-07-29 - Reload veto probe on ExtensionContext + quiet config-reload deferral
+
+### What changed and why
+
+- Added `ExtensionContext.checkReloadVeto(): Promise<ReloadVetoDecision>` (optional) and the matching optional `ExtensionContextActions.checkReloadVeto`. It probes the cancellable `session_before_reload` gate WITHOUT starting a reload; `AgentSession` supplies it from its existing `checkReloadVeto()`, so every host mode (TUI, RPC, print) exposes it automatically.
+- The `config-reload` builtin now probes this gate in `flushPending` before announcing a reload. A vetoed hot-reload (e.g. an extension guarding running subagents) keeps its pending changes, logs `reload_deferred`, shows at most ONE `Hot-reload deferred: <reason>` notice per distinct reason, and retries on later idle edges plus a 1s veto recheck clock. Previously every idle edge re-emitted the `Hot-reloading:` notice plus the host's veto warning, spamming the TUI for as long as the veto held. The `Hot-reloading:`/`Hot-reloaded:` notices now appear only when the reload actually proceeds. New module `builtin/config-reload/reload-deferral.ts` owns the once-per-reason notice state; `builtin/config-reload/log.ts` gained the `reload_deferred` event.
+
+### Why the extension system couldn't handle this alone
+
+Only the session core can consult `session_before_reload` without side effects; the host `requestReload` action both warns and reloads. Watching extensions need the quiet probe as a typed context accessor to distinguish "defer silently" from "reload now".
+
+### Files modified
+
+- `types.ts` (`ExtensionContext.checkReloadVeto`, `ExtensionContextActions.checkReloadVeto`, `ReloadVetoDecision`)
+- `runner.ts` (probe promotion into event contexts)
+- `../agent-session.ts` (`_bindExtensionCore` supplies the probe)
+- `builtin/config-reload/index.ts`, `builtin/config-reload/reload-deferral.ts` (new), `builtin/config-reload/log.ts`
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `types.ts` around `ExtensionContext.isCompacting`/`requestReload` and `ExtensionContextActions`; retain the optional `checkReloadVeto` members and `ReloadVetoDecision`.
+- LOW: `runner.ts` `bindCore` context-action copies and the `createContext` getters; keep the `checkReloadVeto` getter beside `requestReload`.
+- LOW: `builtin/config-reload/index.ts` `flushPending`; the veto probe must stay before the `Hot-reloading:` notify and `requestReload` call.
+
+
+
+## 2026-07-29 - Session-scoped model APIs; headless recommended-model switch no longer persists
+
+### What changed and why
+
+- `ExtensionAPI` gains `setSessionModel(model)` and `setSessionThinkingLevel(level)`: session-scoped counterparts of `setModel`/`setThinkingLevel`. They change the active session model/thinking level (still recorded in session history) without rewriting the user's persisted `defaultProvider`/`defaultModel`/`defaultThinkingLevel`.
+- The `recommended-models` builtin persists its automatic startup switch only in interactive (`tui`) mode. Headless modes (`print`, `rpc`, `json`) switch session-scoped, so background/child sessions no longer rewrite the user's real `~/.senpi/agent/settings.json` defaults on every start. Observed in the field: concurrent headless sessions with differing provider auth repeatedly overwrote the user's saved defaults minutes after the user restored them.
+
+### Why the extension system couldn't handle this alone
+
+`AgentSession.setSessionModel`/`setSessionThinkingLevel` already existed but were not exposed through the extension runtime, so extensions could only make persisting switches.
+
+### Files modified
+
+- `types.ts` (`ExtensionAPI`, `ExtensionActions`)
+- `loader.ts`, `runner.ts` (runtime stubs, facade, action binding)
+- `../agent-session.ts` (action wiring to the existing session-scoped setters)
+- `builtin/recommended-models/index.ts` (mode-scoped persistence)
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `types.ts` around the Model/Thinking Level API block; retain both session-scoped methods.
+- LOW: `runner.ts` action copy block and `loader.ts` runtime stub/facade lists; keep the session-scoped entries.
+
+
+
+## 2026-07-29 - Initial model provenance on session_start
+
+### What changed and why
+
+- `SessionStartEvent` now carries optional `initialModelProvenance`, identifying the branch that selected a freshly resolved startup model: `cli`, `scoped`, `settings`, `provider-default`, or `first-available`.
+- `findInitialModel()` produces this provenance and the SDK forwards it when it resolves the startup model. CLI and scoped selections supplied by `main.ts` carry their explicit provenance too.
+- The new `recommended-models` builtin uses this field to limit automatic default-model selection to settings/provider-default/first-available startup paths, preserving explicit CLI and scoped selections.
+
+### Why the extension system couldn't handle this alone
+
+The extension runs after the core resolver has selected the startup model. Without the resolver branch crossing the existing `session_start` boundary, it cannot distinguish a saved default from an explicit CLI or scoped selection.
+
+### Files modified
+
+- `types.ts` (`SessionStartEvent`)
+- `../model-resolver.ts`, `../sdk.ts`, `../../main.ts` (provenance production and forwarding)
+- `builtin/recommended-models/index.ts` (consumer)
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `types.ts` around `SessionStartEvent`; retain the optional `initialModelProvenance` field.
+- MEDIUM: `../sdk.ts` startup-model resolution and session-start event assembly; preserve provenance when the SDK resolves the initial model.
+
+
+
 ## 2026-07-28 - Prompt-cache safe-wait budget on ExtensionContext
 
 ### What changed and why

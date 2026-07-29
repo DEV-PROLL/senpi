@@ -49,10 +49,12 @@ export * from "./session-resources.ts";
 export {
 	getProtocol,
 	getToolCallFormat,
+	hasKimiTextToolCallRecovery,
 	shouldRecoverTextToolCalls,
 	transformContext,
 	wrapStreamWithToolCallMiddleware,
 } from "./tool-call-middleware/index.ts";
+export { createXtmlRecoveryStreamParser } from "./tool-call-middleware/protocols/kimi-xtml/recovery-stream.ts";
 export { wrapStreamWithInvokeRecovery } from "./tool-call-middleware/recovery-stream-wrapper.ts";
 export * from "./types.ts";
 export * from "./utils/diagnostics.ts";
