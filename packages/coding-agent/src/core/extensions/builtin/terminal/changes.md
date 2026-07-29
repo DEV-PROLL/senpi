@@ -3,6 +3,45 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## Background sessions and monitors survive session reload (2026-07-29)
+
+### What changed
+
+- `session-bundle.ts` (new): `TerminalSessionBundle` owns the long-lived per-session runtime
+  (the `TerminalManager` plus the `MonitorRegistry`) and routes monitor events, monitor-state
+  snapshots, and background-exit notifications through mutable sinks the current extension
+  instance binds. A module-level parked map (`parkBundle`/`claimParkedBundle`/
+  `teardownParkedBundle`, keyed by `ctx.sessionManager.getSessionId()`, at most one parked
+  bundle per session) hands the bundle across the extension-runner replacement a reload performs.
+- `extension.ts`: `session_shutdown` with `reason:"reload"` parks the bundle instead of tearing
+  it down; every other reason (`quit`/`new`/`resume`/`fork`) keeps the full teardown AND sweeps
+  any stale parked bundle. `session_start` with `reason:"reload"` claims the parked bundle,
+  re-binds sinks to the new instance's notifiers, re-publishes the `monitors` footer status, and
+  flushes events buffered during the reload window (bounded: 100 monitor events, 32 exits);
+  other reasons keep today's fresh-bundle behavior. `onBackgroundExit` now dispatches through
+  the bundle so exit listeners registered before a reload reach the post-reload notifier.
+- Result: after `/reload`, existing `bash_N` ids remain addressable (`bash_output`,
+  `bash_input`, `kill_bash`), monitors keep injecting events, and background completion
+  notifications reach the new runner instead of dying with the old one. Previously reload
+  tree-killed every background session and orphaned every watcher the model knew about.
+- Known bounds: terminal `maxSessions`/`scrollback` setting changes apply to bundles created
+  after a non-reload session start (a preserved bundle keeps its construction-time caps); a
+  headless host that skips `session_start` after reload leaves the bundle parked until the next
+  real shutdown sweep.
+- Tests: `test/suite/terminal-reload-survival.test.ts` (monitor survival + footer re-publish,
+  background-session id survival via screen peek, post-reload completion-notification routing,
+  quit-teardown characterization pin).
+
+### Why
+
+Observed live: a reload during an active `gh pr checks --watch` monitor orphaned the watcher
+(process kept running, session lost the subscription, footer went blank, all bash ids dangled).
+Waiting state parked behind a reload must keep waiting, cleanly.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: fork-owned `extension.ts` session lifecycle handlers and the new `session-bundle.ts`.
+
 ## Theme-aware active-monitor footer (2026-07-29)
 
 ### What changed
