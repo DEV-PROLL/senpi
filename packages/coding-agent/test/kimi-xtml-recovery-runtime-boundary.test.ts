@@ -63,7 +63,7 @@ function leakingStream(selected: Model<Api>, text: string): AssistantStream {
 		stream.push({ type: "text_delta", contentIndex: 0, delta: text.slice(0, mid), partial });
 		partial.content = [{ type: "text", text }];
 		stream.push({ type: "text_delta", contentIndex: 0, delta: text.slice(mid), partial });
-		stream.push({ type: "text_end", contentIndex: 0, partial });
+		stream.push({ type: "text_end", contentIndex: 0, content: text, partial });
 		const message = blankMessage(selected);
 		message.content = [{ type: "text", text }];
 		stream.push({ type: "done", reason: "stop", message });
