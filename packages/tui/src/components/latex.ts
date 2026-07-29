@@ -199,7 +199,8 @@ class LatexParser {
 		if (!/[A-Za-z]/.test(first)) {
 			this.index += 1;
 			if ("_^{}[]()$%&#".includes(first)) return first;
-			if (",;:!".includes(first)) return " ";
+			if (first === "!") return "";
+			if (",;:".includes(first)) return " ";
 			return `\\${first}`;
 		}
 

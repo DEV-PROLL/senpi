@@ -80,19 +80,26 @@ function findMalformedInlineSpan(src: string, open: "\\(" | "\\[", close: "\\)" 
 	if (!src.startsWith(open)) return undefined;
 	const scanEnd = Math.min(src.length, open.length + MAX_LATEX_FORMULA_LENGTH + 1);
 	let competingOpener = false;
+	let depth = 1;
 	for (let index = open.length; index < scanEnd; index += 1) {
-		if (src[index] === "\n" || src[index] === "`") return undefined;
+		if (src[index] === "\n" || src[index] === "`") {
+			return competingOpener ? src.slice(0, index) : undefined;
+		}
 		if (src.startsWith(open, index)) {
 			competingOpener = true;
+			depth += 1;
 			index += open.length - 1;
 			continue;
 		}
 		if (src.startsWith(close, index)) {
-			return competingOpener ? src.slice(0, index + close.length) : undefined;
+			depth -= 1;
+			if (depth === 0) return competingOpener ? src.slice(0, index + close.length) : undefined;
+			index += close.length - 1;
+			continue;
 		}
 		if (src[index] === "\\") index += 1;
 	}
-	return undefined;
+	return competingOpener ? src.slice(0, scanEnd) : undefined;
 }
 
 function findBlockMath(
@@ -179,11 +186,35 @@ const inlineMathTokenizer: TokenizerExtension = {
 		const repeatedBrackets = repeatedMalformedOpeners(src, "\\[");
 		if (repeatedBrackets) return createLatexToken("latex_literal", repeatedBrackets, repeatedBrackets);
 		const parens = findInlineMath(src, "\\(", "\\)");
-		if (parens) return createLatexToken("latex_inline", parens.raw, parens.text);
+		if (parens) {
+			const previous = previousRawCharacter(tokens);
+			const next = firstCharacter(src.slice(parens.raw.length));
+			if (
+				(previous === undefined || !WORD_CHARACTER_REGEX.test(previous)) &&
+				(next === undefined || !WORD_CHARACTER_REGEX.test(next))
+			) {
+				return createLatexToken("latex_inline", parens.raw, parens.text);
+			}
+			return undefined;
+		}
 		const brackets = findInlineMath(src, "\\[", "\\]");
-		if (brackets) return createLatexToken("latex_inline", brackets.raw, brackets.text);
+		if (brackets) {
+			const previous = previousRawCharacter(tokens);
+			const next = firstCharacter(src.slice(brackets.raw.length));
+			if (
+				(previous === undefined || !WORD_CHARACTER_REGEX.test(previous)) &&
+				(next === undefined || !WORD_CHARACTER_REGEX.test(next))
+			) {
+				return createLatexToken("latex_inline", brackets.raw, brackets.text);
+			}
+			return undefined;
+		}
 		const literal = /^(?:\\\(|\\\)|\\\[|\\\])/.exec(src);
-		return literal ? createLatexToken("latex_literal", literal[0], literal[0]) : undefined;
+		if (!literal) return undefined;
+		const previous = previousRawCharacter(tokens);
+		return previous !== undefined && WORD_CHARACTER_REGEX.test(previous)
+			? undefined
+			: createLatexToken("latex_literal", literal[0], literal[0]);
 	},
 };
 

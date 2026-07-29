@@ -1551,6 +1551,8 @@ bar`,
 					"Before \\[unfinished before `\\]` after",
 					"Before \\(unfinished before `\\)` after",
 					"Nested \\(outer \\(inner\\) remains literal",
+					"Nested siblings \\(outer \\(a\\) and \\(b\\)\\) remain literal",
+					"Escaped identifier punctuation: array\\[0\\] and call\\(arg\\)",
 				].join("\n"),
 				0,
 				0,
@@ -1564,6 +1566,18 @@ bar`,
 			assert.ok(rendered.includes("Before \\[unfinished before \\] after"), rendered);
 			assert.ok(rendered.includes("Before \\(unfinished before \\) after"), rendered);
 			assert.ok(rendered.includes("Nested \\(outer \\(inner\\) remains literal"), rendered);
+			assert.ok(rendered.includes("Nested siblings \\(outer \\(a\\) and \\(b\\)\\) remain literal"), rendered);
+			assert.ok(rendered.includes("Escaped identifier punctuation: array[0] and call(arg)"), rendered);
+		});
+
+		it("LaTeX preserves separated malformed openers", () => {
+			const malformed = "\\(a".repeat(2000);
+			const markdown = new Markdown(malformed, 0, 0, defaultMarkdownTheme);
+			const rendered = markdown
+				.render(7000)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+			assert.strictEqual(rendered, malformed);
 		});
 
 		it("LaTeX converts nested structures and preserves command distinctions", () => {
@@ -1579,6 +1593,7 @@ bar`,
 			assert.strictEqual(latexToUnicode("\\frac {a}{b}"), "(a)⁄(b)");
 			assert.strictEqual(latexToUnicode("\\sqrt {x}"), "√(x)");
 			assert.strictEqual(latexToUnicode("\\text {한}"), "한");
+			assert.strictEqual(latexToUnicode("f\\!(x)"), "f(x)");
 			assert.strictEqual(latexToUnicode("a+{b}"), "a+b");
 			assert.strictEqual(latexToUnicode("\\foo{bar}"), "\\foo{bar}");
 		});
