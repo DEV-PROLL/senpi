@@ -47,6 +47,7 @@ import {
 	cleanupSessionResources,
 	isClassifierRefusal,
 	isContextOverflow,
+	isProviderStreamStallError,
 	isProviderTimeoutError,
 	isRetryableAssistantError,
 	modelsAreEqual,
@@ -591,6 +592,7 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
+	private _consecutiveProviderStreamStalls = 0;
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _userAbortPromise: Promise<void> | undefined = undefined;
@@ -5347,8 +5349,21 @@ export class AgentSession {
 			}
 			this._retryAttempt++;
 		} else {
+			if (this._retryAttempt === 0) {
+				this._consecutiveProviderStreamStalls = 0;
+			}
+			// A provider-stream stall means the request was accepted but delivered
+			// zero events for the whole idle budget. Replaying the identical payload
+			// against a hung provider burns that full budget again per attempt
+			// ((1 + maxRetries) * httpIdleTimeoutMs of opaque dead air), so a second
+			// consecutive stall escalates to the fallback chain immediately. Fast
+			// non-stall failures in between reset the streak and keep the normal
+			// same-model recovery semantics.
+			const stallError = isProviderStreamStallError(message);
+			const escalateAfterRepeatedStall = stallError && this._consecutiveProviderStreamStalls > 0;
+			this._consecutiveProviderStreamStalls = stallError ? this._consecutiveProviderStreamStalls + 1 : 0;
 			this._retryAttempt++;
-			if (this._retryAttempt > settings.maxRetries) {
+			if (this._retryAttempt > settings.maxRetries || escalateAfterRepeatedStall) {
 				switchedFallback = await this._retryFallback.tryFallback("transient", {
 					errorMessage,
 					retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
@@ -5376,6 +5391,10 @@ export class AgentSession {
 					return "not-handled";
 				}
 			}
+		}
+
+		if (switchedFallback) {
+			this._consecutiveProviderStreamStalls = 0;
 		}
 
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
