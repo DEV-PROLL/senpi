@@ -80,4 +80,10 @@ export const ETHOS_TIPS = [
 		render: () =>
 			'Built on the official agent SDK, speaking the protocol natively. No reverse-engineered wrapper, no ToS gray zone, no "will I get banned for this" anxiety. *Sleep easy, ship loud.*',
 	},
+	{
+		id: "ethos.tool-call-repair",
+		bindings: [],
+		render: () =>
+			"senpi catches malformed tool calls on the wire, fixes them, and salvages the turn. Other harnesses retry the whole thing and bill you for the privilege. *table stakes, honestly*",
+	},
 ] satisfies readonly TipDefinition[];
