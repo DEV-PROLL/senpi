@@ -557,7 +557,9 @@ export class ModelRuntime implements Models {
 				? wrapStreamWithInvokeRecovery(
 						inner,
 						context.tools,
-						hasKimiTextToolCallRecovery(model) ? createXtmlRecoveryStreamParser : undefined,
+						hasKimiTextToolCallRecovery(model)
+							? { createParser: createXtmlRecoveryStreamParser, protocol: "kimi-xtml" }
+							: undefined,
 					)
 				: inner;
 		});
@@ -582,7 +584,9 @@ export class ModelRuntime implements Models {
 				? wrapStreamWithInvokeRecovery(
 						inner,
 						context.tools,
-						hasKimiTextToolCallRecovery(model) ? createXtmlRecoveryStreamParser : undefined,
+						hasKimiTextToolCallRecovery(model)
+							? { createParser: createXtmlRecoveryStreamParser, protocol: "kimi-xtml" }
+							: undefined,
 					)
 				: inner;
 		});

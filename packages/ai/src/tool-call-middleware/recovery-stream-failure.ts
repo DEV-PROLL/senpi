@@ -1,5 +1,6 @@
 import type { AssistantMessage, AssistantMessageEventStream } from "../types.ts";
 import type { StreamMessageProjection } from "./stream-wrapper-shared.ts";
+import type { ToolCallFormat } from "./types.ts";
 
 export type RecoveryStreamFailure = "collision" | "invalid_content_event_order" | "invalid_native_event_order";
 
@@ -25,9 +26,13 @@ const failureDetails: Record<RecoveryStreamFailure, { diagnosticType: string; er
 export function terminateRecoveryStreamForFailure(
 	stream: AssistantMessageEventStream,
 	projection: StreamMessageProjection,
-	source: AssistantMessage,
-	failure: RecoveryStreamFailure,
+	options: {
+		source: AssistantMessage;
+		failure: RecoveryStreamFailure;
+		protocol: ToolCallFormat;
+	},
 ): void {
+	const { source, failure, protocol } = options;
 	const details = failureDetails[failure];
 	projection.sync(source);
 	const message = projection.finalize(source, false);
@@ -39,7 +44,7 @@ export function terminateRecoveryStreamForFailure(
 		{
 			type: details.diagnosticType,
 			timestamp: Date.now(),
-			details: { protocol: "antml", status: details.status },
+			details: { protocol, status: details.status },
 		},
 	];
 	stream.push({ type: "error", reason: "error", error: message });
