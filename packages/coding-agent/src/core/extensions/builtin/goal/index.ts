@@ -8,6 +8,7 @@ import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers
 import { MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
 import { accountGoalUsage, readGoal, updateGoal } from "./store.ts";
 import { goalStoreRef as buildGoalStoreRef } from "./store-ref.ts";
+import { staleGoalTodoReminder, todoResultAddsOpenTasks } from "./todo-gate.ts";
 import { registerGoalTools } from "./tool-registration.ts";
 import { TurnUsageTracker } from "./turn-usage.ts";
 import type { Goal, GoalAccountingMode, GoalStoreRef } from "./types.ts";
@@ -24,6 +25,7 @@ type AgentGoalAccounting = {
 
 export default function goalExtension(pi: ExtensionAPI): void {
 	let agentTurnInProgress = false;
+	let staleGoalReminderSentThisTurn = false;
 	let agentGoalAccounting: AgentGoalAccounting | null = null;
 	let blockedThisTurnGoalId: string | null = null;
 	let completedThisTurnGoalId: string | null = null;
@@ -89,6 +91,22 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			const resumed = await updateGoal(goalStoreRef(ctx), { status: "active" }, "user");
 			refreshGoalUi(ctx, resumed);
 		}
+	});
+
+	pi.on("turn_start", async () => {
+		staleGoalReminderSentThisTurn = false;
+	});
+
+	// When the model starts tracking new open todo work while the thread has no
+	// goal (or only a stale, already-complete one), append a system reminder to
+	// the todo result so the model registers the goal when the work warrants it.
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.toolName !== "todo" || event.isError || staleGoalReminderSentThisTurn) return undefined;
+		if (!todoResultAddsOpenTasks(event.details)) return undefined;
+		const reminder = staleGoalTodoReminder(await readGoal(goalStoreRef(ctx)));
+		if (reminder === undefined) return undefined;
+		staleGoalReminderSentThisTurn = true;
+		return { content: [...event.content, { type: "text" as const, text: reminder }] };
 	});
 
 	pi.on("agent_start", async (_event, ctx) => {
