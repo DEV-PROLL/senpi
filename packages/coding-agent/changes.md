@@ -1,5 +1,13 @@
 # Local fork changes
 
+## 2026-07-30 — Publish gate honors consumer-resolved platform optionals (#446)
+
+- Changed: `assertSenpiPackedWorkspaceFiles()` now validates the staged `bundleDependencies` contract when it is available, while retaining the legacy all-runtime fallback for callers without a staged manifest.
+- Why: issue #446 intentionally promotes complete native optional-dependency families into the published root manifest so npm can select the consumer platform. The publish-only workflow still treated those non-bundled optionals as missing vendored files and stopped before npm publication.
+- What changed: `publish.mjs` passes the staged bundle list into the pack assertion, and focused RED→GREEN coverage proves a bundled portable Claude SDK may omit the consumer-resolved `darwin-arm64` package from the universal tarball.
+- Why the extension system could not handle this: the failure occurs in npm tarball validation before package publication or runtime extension loading.
+- Merge-conflict risk: low. Expected conflict zones are the publish pack assertion, `publish.mjs`, and the focused packaging test.
+
 ## 2026-07-29 — Consumer-resolved Claude Agent SDK sidecars (#446)
 
 - Changed: publish-manifest staging now promotes a bundled package's complete platform-specific optional dependency family into the root `@code-yeongyu/senpi` manifest while continuing to exclude the publish runner's materialized native package from `bundleDependencies`.

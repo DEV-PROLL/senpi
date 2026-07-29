@@ -105,6 +105,7 @@ function validatePack(directory) {
 				...Object.keys(packageJson.dependencies ?? {}),
 				...Object.keys(packageJson.optionalDependencies ?? {}),
 			],
+			bundledDependencies: packageJson.bundleDependencies ?? packageJson.bundledDependencies,
 		});
 	}
 	if (sourceOnlyPackages.has(packageJson.name)) {

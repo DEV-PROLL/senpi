@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Allow consumer-resolved native optional dependencies to remain outside the universal tarball's vendored bundle, enabling the cross-platform Claude Agent SDK sidecar fix to publish successfully ([#446](https://github.com/code-yeongyu/senpi/issues/446)).
+
 ### Removed
 
 ## [2026.7.29-2] - 2026-07-29
