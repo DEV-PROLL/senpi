@@ -5,6 +5,7 @@ import { Chalk } from "chalk";
 import { Markdown } from "../src/components/markdown.ts";
 import { resetCapabilitiesCache, setCapabilities } from "../src/terminal-image.ts";
 import { type Component, TUI } from "../src/tui.ts";
+import { visibleWidth } from "../src/utils.ts";
 import { defaultMarkdownTheme } from "./test-themes.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
 
@@ -1451,6 +1452,41 @@ bar`,
 
 			assert.ok(rendered.includes("Fallback: \\foo{bar} + α."), rendered);
 			assert.ok(!rendered.includes("$"), rendered);
+		});
+
+		it("LaTeX renders Korean Japanese and Chinese formulas", () => {
+			const markdown = new Markdown(
+				[
+					"한국어: $\\text{속도} = \\frac{\\text{거리}}{\\text{시간}}$",
+					"日本語: $\\text{面積} = \\pi \\times \\text{半径}^2$",
+					"中文: $\\text{能量} = \\text{质量} \\times \\text{光速}^2$",
+					"",
+					"Inline code: `$\\text{속도}$`.",
+					"",
+					"```tex",
+					"$\\text{面積}$",
+					"```",
+					"",
+					"Unmatched: \\[未完",
+				].join("\n"),
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+
+			const lines = markdown.render(40).map((line) => stripAnsi(line).trimEnd());
+			const rendered = lines.join("\n");
+
+			assert.ok(rendered.includes("한국어: 속도 = (거리)⁄(시간)"), rendered);
+			assert.ok(rendered.includes("日本語: 面積 = π × 半径²"), rendered);
+			assert.ok(rendered.includes("中文: 能量 = 质量 × 光速²"), rendered);
+			assert.ok(rendered.includes("$\\text{속도}$"), rendered);
+			assert.ok(rendered.includes("$\\text{面積}$"), rendered);
+			assert.ok(rendered.includes("Unmatched: \\[未完"), rendered);
+			assert.ok(
+				lines.every((line) => visibleWidth(line) <= 40),
+				rendered,
+			);
 		});
 	});
 

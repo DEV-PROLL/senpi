@@ -159,11 +159,11 @@ const replaceScripts = (input: string, marker: "^" | "_", alphabet: Readonly<Rec
 
 export const latexToUnicode = (formula: string): string => {
 	let output = formula.trim().replace(/\s+/g, " ");
-	output = replaceBraced(output, "\\sqrt", (body) => `√(${body})`);
-	output = output.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, "($1)⁄($2)");
 	for (const command of ["\\mathrm", "\\mathbf", "\\mathit", "\\text", "\\operatorname"]) {
 		output = replaceBraced(output, command, (body) => body);
 	}
+	output = replaceBraced(output, "\\sqrt", (body) => `√(${body})`);
+	output = output.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, "($1)⁄($2)");
 	output = output.replace(/\\(?:left|right)(?=[()[\]{}|])/g, "");
 	for (const [command, symbol] of Object.entries(SYMBOLS).sort(([a], [b]) => b.length - a.length)) {
 		output = output.replace(new RegExp(`${escapeRegex(command)}(?![A-Za-z])`, "g"), symbol);
