@@ -32,6 +32,14 @@ interface LatexToken extends Tokens.Generic {
 const MAX_LATEX_FORMULA_LENGTH = 4096;
 const WORD_CHARACTER_REGEX = /[\p{L}\p{M}\p{N}_]/u;
 
+interface InlineCodePrefixState {
+	hasUnclosedCodeSpan: boolean;
+	lastProcessedRaw?: string;
+	processedTokenCount: number;
+}
+
+const inlineCodePrefixStates = new WeakMap<Token[], InlineCodePrefixState>();
+
 function createLatexToken(type: LatexToken["type"], raw: string, text: string): LatexToken {
 	return { raw, text, type };
 }
@@ -52,6 +60,25 @@ function previousRawCharacter(tokens: Token[]): string | undefined {
 function firstCharacter(value: string): string | undefined {
 	const codePoint = value.codePointAt(0);
 	return codePoint === undefined ? undefined : String.fromCodePoint(codePoint);
+}
+
+function followsUnclosedCodeSpan(tokens: Token[]): boolean {
+	let state = inlineCodePrefixStates.get(tokens);
+	const previousProcessedToken = state ? tokens[state.processedTokenCount - 1] : undefined;
+	if (!state || previousProcessedToken?.raw !== state.lastProcessedRaw) {
+		state = { hasUnclosedCodeSpan: false, processedTokenCount: 0 };
+		inlineCodePrefixStates.set(tokens, state);
+	}
+
+	for (let index = state.processedTokenCount; index < tokens.length; index += 1) {
+		const token = tokens[index];
+		if (token?.type === "text" && token.raw.includes("`")) {
+			state.hasUnclosedCodeSpan = true;
+		}
+	}
+	state.processedTokenCount = tokens.length;
+	state.lastProcessedRaw = tokens.at(-1)?.raw;
+	return state.hasUnclosedCodeSpan;
 }
 
 function findInlineMath(
@@ -89,11 +116,7 @@ function findMalformedInlineSpan(src: string, open: "\\(" | "\\[", close: "\\)" 
 		if (src[index] === "\n" || src[index] === "`") {
 			return competingOpener ? src.slice(0, index) : undefined;
 		}
-		const nestedOpen = src.startsWith("\\(", index)
-			? "\\("
-			: src.startsWith("\\[", index)
-				? "\\["
-				: undefined;
+		const nestedOpen = src.startsWith("\\(", index) ? "\\(" : src.startsWith("\\[", index) ? "\\[" : undefined;
 		if (nestedOpen !== undefined) {
 			competingOpener = true;
 			closers.push(nestedOpen === "\\(" ? "\\)" : "\\]");
@@ -119,11 +142,13 @@ function findMalformedInlineSpan(src: string, open: "\\(" | "\\[", close: "\\)" 
 	return competingOpener ? src.slice(0, scanEnd) : undefined;
 }
 
-function isLikelyShellDollarBody(text: string): boolean {
+function isLikelyLiteralDollarBody(text: string): boolean {
 	return (
 		text.startsWith("{") ||
 		/^\([^)\r\n]*\)[/\\]$/.test(text) ||
-		/^[!#$?@*-][/\\]$/.test(text)
+		/^[!#$?@*-][/\\]$/.test(text) ||
+		/^[A-Za-z_][A-Za-z0-9_]*[./\\:-]$/.test(text) ||
+		/^\d[\d,.]*(?:[-–—]|[/\\])$/.test(text)
 	);
 }
 
@@ -182,10 +207,16 @@ const inlineMathTokenizer: TokenizerExtension = {
 		return index >= 0 ? index : undefined;
 	},
 	tokenizer(src, tokens) {
+		const codeSpanLiteral = /^(?:\${1,2}|\\\(|\\\)|\\\[|\\\])/.exec(src)?.[0];
+		if (codeSpanLiteral && followsUnclosedCodeSpan(tokens)) {
+			return createLatexToken("latex_literal", codeSpanLiteral, codeSpanLiteral);
+		}
 		if (src.startsWith("$")) {
 			if (src.startsWith("$$")) return createLatexToken("latex_literal", "$$", "$$");
 			const match = findInlineMath(src, "$", "$");
-			if (match && isLikelyShellDollarBody(match.text)) return createLatexToken("latex_literal", "$", "$");
+			if (match && isLikelyLiteralDollarBody(match.text)) {
+				return createLatexToken("latex_literal", match.raw, match.raw);
+			}
 			const previous = previousRawCharacter(tokens);
 			const next = match ? firstCharacter(src.slice(match.raw.length)) : undefined;
 			if (

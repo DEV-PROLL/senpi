@@ -1536,6 +1536,27 @@ bar`,
 			assert.ok(rendered.includes("Valid math: x²."), rendered);
 		});
 
+		it("LaTeX preserves partial streamed currency and shell pairs", () => {
+			const markdown = new Markdown("", 0, 0, defaultMarkdownTheme);
+			const bracedShellPair = "use $HOME/$" + "{USER}";
+			const frames = [
+				["Budget: $5-$", "Budget: $5-$"],
+				["Budget: $5-$10", "Budget: $5-$10"],
+				["use $HOME/$", "use $HOME/$"],
+				["use $HOME/$USER", "use $HOME/$USER"],
+				[bracedShellPair, bracedShellPair],
+			] as const;
+
+			for (const [frame, expected] of frames) {
+				markdown.setText(frame);
+				const rendered = markdown
+					.render(80)
+					.map((line) => stripAnsi(line).trimEnd())
+					.join("\n");
+				assert.strictEqual(rendered, expected, frame);
+			}
+		});
+
 		it("LaTeX preserves malformed nested and over-budget blocks", () => {
 			const nested = "\\[\nouter\n\\[\nx\n\\]\n";
 			const falseCloser = `$$x$$not-close${"y".repeat(5000)}\n\nValid: $z^2$.`;
@@ -1590,6 +1611,26 @@ bar`,
 			assert.ok(rendered.includes("$a"), rendered);
 			assert.ok(rendered.includes("b$"), rendered);
 			assert.ok(rendered.includes("Padded explicit: x²."), rendered);
+		});
+
+		it("LaTeX preserves partial streamed inline code spans", () => {
+			const markdown = new Markdown("", 0, 0, defaultMarkdownTheme);
+			const frames = [
+				["Inline: `$x^2$", "Inline: `$x^2$"],
+				["Explicit: `\\(x^2\\)", "Explicit: `\\(x^2\\)"],
+				["Nested formatting: `code **bold** $x^2$", "Nested formatting: `code bold $x^2$"],
+				["Escaped backtick: \\` then $x^2$.", "Escaped backtick: ` then x²."],
+				["Inline: `$x^2$`", "Inline: $x^2$"],
+			] as const;
+
+			for (const [frame, expected] of frames) {
+				markdown.setText(frame);
+				const rendered = markdown
+					.render(80)
+					.map((line) => stripAnsi(line).trimEnd())
+					.join("\n");
+				assert.strictEqual(rendered, expected, frame);
+			}
 		});
 
 		it("LaTeX preserves separated malformed openers", () => {
@@ -1655,6 +1696,22 @@ bar`,
 
 			assert.ok(stripAnsi(rendered).includes("│ x²"), rendered);
 			assert.ok(!rendered.includes("\x1b[90m"), rendered);
+		});
+
+		it("LaTeX anchors leading combining marks to terminal width", async () => {
+			const formula = latexToUnicode("\\text{\u0301}");
+			assert.strictEqual(formula, "◌\u0301");
+
+			const markdown = new Markdown("$\\text{\u0301}$", 0, 0, defaultMarkdownTheme);
+			const rendered = stripAnsi(markdown.render(10)[0] ?? "").trimEnd();
+			assert.strictEqual(rendered, formula);
+
+			const terminal = new VirtualTerminal(10, 2);
+			terminal.write(formula);
+			await terminal.flush();
+			assert.strictEqual(terminal.getCursorPosition().x, visibleWidth(formula));
+			assert.strictEqual(getCellWidth(terminal, 0, 0), 1);
+			terminal.stop();
 		});
 
 		it("LaTeX renders CJK math through headless terminal cells", async () => {

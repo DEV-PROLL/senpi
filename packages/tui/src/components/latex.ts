@@ -128,6 +128,7 @@ const SUBSCRIPTS: Readonly<Record<string, string>> = {
 
 const MAX_FORMULA_LENGTH = 4096;
 const MAX_NESTING_DEPTH = 64;
+const LEADING_COMBINING_MARK_REGEX = /^\p{Mark}/u;
 const STYLE_COMMANDS = new Set(["\\mathrm", "\\mathbf", "\\mathit", "\\text", "\\operatorname"]);
 
 const scriptText = (text: string, alphabet: Readonly<Record<string, string>>): string | undefined => {
@@ -282,7 +283,10 @@ class LatexParser {
 
 export const latexToUnicode = (formula: string): string => {
 	const trimmed = formula.trim();
-	if (trimmed.length > MAX_FORMULA_LENGTH) return trimmed;
-	const normalized = trimmed.replace(/\s+/g, " ");
-	return new LatexParser(normalized).parse() ?? trimmed;
+	let rendered = trimmed;
+	if (trimmed.length <= MAX_FORMULA_LENGTH) {
+		const normalized = trimmed.replace(/\s+/g, " ");
+		rendered = new LatexParser(normalized).parse() ?? trimmed;
+	}
+	return LEADING_COMBINING_MARK_REGEX.test(rendered) ? `◌${rendered}` : rendered;
 };
