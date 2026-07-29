@@ -366,12 +366,12 @@ export class FileSettingsStorage implements SettingsStorage {
 		let release: (() => void) | undefined;
 		try {
 			// Only create directory and lock if file exists or we need to write
-			const fileExists = existsSync(path);
-			if (fileExists) {
+			let current: string | undefined;
+			if (existsSync(path)) {
 				release = this.acquireLockSyncWithRetry(path);
+				current = existsSync(path) ? readFileSync(path, "utf-8") : undefined;
 			}
-			const current = fileExists ? readFileSync(path, "utf-8") : undefined;
-			const next = fn(current);
+			let next = fn(current);
 			if (next !== undefined) {
 				// Only create directory when we actually need to write
 				if (!existsSync(dir)) {
@@ -379,9 +379,15 @@ export class FileSettingsStorage implements SettingsStorage {
 				}
 				if (!release) {
 					release = this.acquireLockSyncWithRetry(path);
+					if (existsSync(path)) {
+						// Lost the first-write race: re-merge against the winner's content under the lock.
+						next = fn(readFileSync(path, "utf-8"));
+					}
 				}
-				writeFileSync(path, next, "utf-8");
-				recordSelfWrite(path, next);
+				if (next !== undefined) {
+					writeFileSync(path, next, "utf-8");
+					recordSelfWrite(path, next);
+				}
 			}
 		} finally {
 			if (release) {

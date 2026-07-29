@@ -1,5 +1,16 @@
 # changes
 
+## Settings withLock first-write TOCTOU fix (2026-07-29)
+
+### What changed
+
+- `settings-manager.ts` `FileSettingsStorage.withLock`: when the settings file does not exist yet, the merge callback used to run with no lock held and the write-time lock then overwrote whatever a concurrent process had created. The write path now re-checks existence after acquiring the lock and re-runs the merge callback against the winner's content before writing. The existing-file path additionally re-verifies existence after the lock before reading.
+- Pure read paths are unchanged: a read on a missing file still creates no directory and no lock artifacts, so loading settings in an arbitrary cwd still cannot spray `.senpi/` directories.
+
+### Why
+
+- Two processes racing the first write of a fresh `settings.json` silently lost one side's fields (`existsSync` gated the lock, so the merge ran unlocked). Deterministic regression: `test/settings-storage-lock.test.ts` injects a concurrent first-write at lock acquisition and asserts the merge preserves it.
+
 ## Nearest-parent project settings discovery (2026-07-28)
 
 ### What changed
