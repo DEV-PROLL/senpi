@@ -10,8 +10,6 @@
 
 ### Changed
 
-- Modernized the provider and parsing dependency stack, including Google GenAI 2.x, Mistral 2.x, current AWS Bedrock/Smithy clients, TypeBox 1.3, Diff 9, Chalk 6, Highlight.js 11, Babel parser 8, Undici 8, and related validated transitive tooling; retained older TypeScript, Anthropic SDK, and OpenAI SDK lines where newer releases break required compiler, browser-bundle, or provider contracts ([#486](https://github.com/code-yeongyu/senpi/pull/486)).
-
 ### Fixed
 
 - Treat Anthropic `credits_required` and “credits are required” responses as non-retryable billing failures, avoiding repeated requests against an exhausted account and allowing the coding agent to pin a configured fallback immediately ([#484](https://github.com/code-yeongyu/senpi/pull/484)).

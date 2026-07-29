@@ -36,7 +36,6 @@
 - Remove cumulative input/output token totals from the footer while retaining context-window usage, cache hit rate, cost, session, path, branch, model, and extension statuses ([#461](https://github.com/code-yeongyu/senpi/pull/461)).
 - Highlight active monitor and detached-eval footer statuses with the current theme’s selected background in interactive mode while preserving plain status strings for RPC, print, JSON, and app-server consumers ([#457](https://github.com/code-yeongyu/senpi/pull/457), [#483](https://github.com/code-yeongyu/senpi/pull/483)).
 - Make `senpi update` compare an OMO plugin build-input fingerprint instead of rebuilding for unrelated monorepo changes, and dispatch required rebuilds to a detached worker so normal updates return after the fast fetch/compare path ([#452](https://github.com/code-yeongyu/senpi/pull/452)).
-- Modernize direct dependencies across the CLI and bundled workspaces, regenerate publish/install locks, and retain exact older versions where TypeScript 7, newer Anthropic SDK browser imports, or newer OpenAI client behavior would violate current build/runtime contracts ([#486](https://github.com/code-yeongyu/senpi/pull/486)).
 
 ### Fixed
 

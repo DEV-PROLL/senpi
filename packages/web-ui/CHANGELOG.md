@@ -8,8 +8,6 @@
 
 ### Changed
 
-- Modernized validated browser UI, Markdown, syntax-highlighting, PDF, icon, DOM-test, and styling dependencies while preserving Lit rendering and browser-bundle compatibility ([#486](https://github.com/code-yeongyu/senpi/pull/486)).
-
 ### Fixed
 
 ### Removed

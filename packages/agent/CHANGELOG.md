@@ -10,8 +10,6 @@
 
 ### Changed
 
-- Updated validated runtime and test dependencies while preserving the agent package’s browser-safe and strip-only TypeScript contracts ([#486](https://github.com/code-yeongyu/senpi/pull/486)).
-
 ### Fixed
 
 - Preserve queued steering and follow-up messages across provider idle-timeout retries, apply a 30-second idle cap only to the retry continuation, restore the configured timeout afterward, and retain queued input when the retry terminates with an error or abort ([#458](https://github.com/code-yeongyu/senpi/pull/458) by [@realsigridjin](https://github.com/realsigridjin)).

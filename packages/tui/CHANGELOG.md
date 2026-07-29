@@ -10,8 +10,6 @@
 
 ### Changed
 
-- Modernized validated Markdown, highlighting, icon, test, and build dependencies while preserving the differential renderer’s terminal-width and browser compatibility contracts ([#486](https://github.com/code-yeongyu/senpi/pull/486)).
-
 ### Fixed
 
 ### Removed

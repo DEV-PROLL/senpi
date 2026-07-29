@@ -10,8 +10,6 @@
 
 ### Changed
 
-- Modernized the validated eval runtime, schema, and test dependencies while retaining persistent-kernel and source-only compatibility ([#486](https://github.com/code-yeongyu/senpi/pull/486)).
-
 ### Fixed
 
 - Route reserved `agent()`, `output()`, and `tool_schema()` bridge calls from Python and other subprocess kernels through the reserved HTTP handler instead of attempting to execute nonexistent `__agent__`, `__output__`, and `__schema__` tools; ordinary bridge tool calls remain unchanged ([#462](https://github.com/code-yeongyu/senpi/pull/462)).
