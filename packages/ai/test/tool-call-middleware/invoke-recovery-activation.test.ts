@@ -13,6 +13,7 @@ const supportedTextFormats = [
 	"gemma4-delimiter",
 	"anthropic-xml",
 	"antml",
+	"kimi-xtml",
 ] as const;
 
 function createModel(id: string, overrides: Partial<Model<"openai-completions">> = {}): Model<"openai-completions"> {

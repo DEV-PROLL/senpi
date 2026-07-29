@@ -1,5 +1,20 @@
 # changes
 
+## Ethos tips: tool-call repair now names Kimi K3 (2026-07-29)
+
+### What changed
+
+- `tips/catalog/ethos-tips.ts`: the `ethos.tool-call-repair` copy now covers Kimi K3 alongside Claude - "claude's sloppy invokes, kimi k3's leaked XTML channels, all of it" - matching the new normal-mode XTML recovery in `packages/ai` (Kimi models get the same leaked tool-call auto-correction Claude has).
+- Coverage: `test/suite/ethos-tips.test.ts` pin updated verbatim.
+
+### Why
+
+- The repair tip only described the Claude/antml case. With XTML recovery shipped for Kimi models, the brag undersells the feature.
+
+### Expected merge conflict zones
+
+- LOW: single render string in `ethos-tips.ts` and its verbatim pin.
+
 ## Footer omits cumulative input and output counters (2026-07-29)
 
 ### What changed
@@ -15,6 +30,26 @@
 ### Expected merge conflict zones
 
 - LOW: `components/footer.ts` around the optional middle-stat segment construction.
+
+## Tip lines point at the give-me-tips skill (2026-07-29)
+
+### What changed
+
+- `tips/startup-tip.ts` and `tips/working-tip.ts`: the resolved `line` now carries a second pointer
+  line - `↳ Want the full story on any tip? Ask about it — the give-me-tips skill has the tour.` -
+  appended under the byte-identical `Tip: ${body}` first line. Both render sites draw the tip as a
+  single `Text` component, so the pointer lands directly below the tip row.
+- Coverage: `test/suite/startup-tip.test.ts` and `test/suite/working-tip.test.ts` pin the two-line
+  shape and the `give-me-tips` literal.
+
+### Why
+
+- A one-line tip cannot tell the whole story; the pointer teaches users that the give-me-tips skill
+  can expand any tip on ask.
+
+### Expected merge conflict zones
+
+- LOW: the `line` template in both resolvers.
 
 ## Ethos tips: the fork's voice in the tip rotation (2026-07-29)
 

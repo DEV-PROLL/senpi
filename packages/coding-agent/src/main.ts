@@ -14,6 +14,7 @@ import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
 import { listModels } from "./cli/list-models.ts";
+import { listTips } from "./cli/list-tips.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
@@ -139,7 +140,11 @@ function toProjectTrustMode(appMode: AppMode): AppMode {
 }
 
 function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
-	return !parsed.print && parsed.mode === undefined && (parsed.help === true || parsed.listModels !== undefined);
+	return (
+		!parsed.print &&
+		parsed.mode === undefined &&
+		(parsed.help === true || parsed.listModels !== undefined || parsed.listTips === true)
+	);
 }
 
 async function prepareInitialMessage(
@@ -292,7 +297,7 @@ async function createSessionManager(
 	sessionDir: string | undefined,
 	settingsManager: SettingsManager,
 ): Promise<SessionManager> {
-	if (parsed.noSession || parsed.help || parsed.listModels !== undefined) {
+	if (parsed.noSession || parsed.help || parsed.listModels !== undefined || parsed.listTips) {
 		return SessionManager.inMemory(cwd, parsed.sessionId !== undefined ? { id: parsed.sessionId } : undefined);
 	}
 
@@ -612,6 +617,11 @@ export async function main(args: string[], options?: MainOptions) {
 	const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
 
+	if (parsed.listTips) {
+		listTips();
+		process.exit(0);
+	}
+
 	if (parsed.listModels !== undefined) {
 		const services = await createAgentSessionServices({
 			cwd,
@@ -642,7 +652,13 @@ export async function main(args: string[], options?: MainOptions) {
 
 	// Experimental first-time setup: theme choice and analytics opt-in.
 	// Runs before any runtime services are created so the chosen settings apply everywhere.
-	if (appMode === "interactive" && !parsed.help && parsed.listModels === undefined && shouldRunFirstTimeSetup()) {
+	if (
+		appMode === "interactive" &&
+		!parsed.help &&
+		parsed.listModels === undefined &&
+		!parsed.listTips &&
+		shouldRunFirstTimeSetup()
+	) {
 		await showFirstTimeSetup(startupSettingsManager);
 		time("firstTimeSetup");
 	}
@@ -688,7 +704,7 @@ export async function main(args: string[], options?: MainOptions) {
 			? sessionCwd
 			: undefined;
 	const trustPromptMode: AppMode =
-		parsed.help || parsed.listModels !== undefined ? "print" : toProjectTrustMode(appMode);
+		parsed.help || parsed.listModels !== undefined || parsed.listTips ? "print" : toProjectTrustMode(appMode);
 	const projectTrustByCwd = new Map<string, boolean>();
 
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
