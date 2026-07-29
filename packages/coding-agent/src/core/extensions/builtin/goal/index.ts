@@ -1,5 +1,8 @@
+import { GOAL_CONTINUATION_MESSAGE_TYPE } from "../../../messages.ts";
+import type { SessionEntry } from "../../../session-manager.ts";
 import type { AgentEndEvent, ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { registerGoalCommand } from "./command-registration.ts";
+import { GOAL_CONTINUATION_CAP } from "./continuation.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
 import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
@@ -80,7 +83,20 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 		// A config reload must not auto-start an agent that was stopped. Only a fresh
 		// startup or explicit resume may re-engage an active goal via a continuation.
-		if (goal && event.reason !== "reload") await queueGoalContinuationForCurrentSession(pi, ctx, goal);
+		if (goal && event.reason !== "reload") {
+			// Migration-lite admission: a resumed session carrying a trailing flood of
+			// historical continuations must not reignite on load. Skip the auto-queue,
+			// leave the goal active (no status rewrite), and tell the user how to resume.
+			const trailingContinuations = countTrailingGoalContinuationEntries(ctx.sessionManager.getBranch());
+			if (trailingContinuations >= GOAL_CONTINUATION_CAP) {
+				ctx.ui.notify(
+					`Goal auto-continuation suppressed for this resumed session (${trailingContinuations} historical continuations). Send a message to resume.`,
+					"info",
+				);
+			} else {
+				await queueGoalContinuationForCurrentSession(pi, ctx, goal);
+			}
+		}
 	});
 
 	pi.on("before_agent_start", async (_event, ctx) => {
@@ -304,6 +320,22 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 		return goal;
 	}
+}
+
+/**
+ * Counts goal-continuation entries queued since the most recent real user message
+ * in the current branch (mirrors the todo-gate / todo-bridge backward branch read).
+ * A real user message is the only reset: the assistant turns in between are exactly
+ * the unattended loop this admission guard exists to stop.
+ */
+function countTrailingGoalContinuationEntries(entries: readonly SessionEntry[]): number {
+	let count = 0;
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry?.type === "message" && entry.message.role === "user") break;
+		if (entry?.type === "custom_message" && entry.customType === GOAL_CONTINUATION_MESSAGE_TYPE) count += 1;
+	}
+	return count;
 }
 
 function didTerminalProviderErrorEndTurn(event: AgentEndEvent): boolean {

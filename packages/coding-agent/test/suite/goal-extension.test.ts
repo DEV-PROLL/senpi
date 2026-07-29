@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
 import { goalFilePath, readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "../../src/core/extensions/types.ts";
@@ -81,8 +81,12 @@ async function makeUiCtx(
 	} as unknown as ExtensionContext;
 }
 
-async function makeNotifyingCtx(notices: string[], threadId: string): Promise<ExtensionContext> {
-	const base = await makeCtx(threadId);
+async function makeNotifyingCtx(
+	notices: string[],
+	threadId: string,
+	branchEntries: SessionEntry[] = [],
+): Promise<ExtensionContext> {
+	const base = await makeCtx(threadId, branchEntries);
 	return {
 		...base,
 		hasUI: true,
@@ -549,6 +553,124 @@ describe("goal extension reload does not auto-start a stopped agent", () => {
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
 	});
 });
+
+describe("goal extension session_start migration-lite admission", () => {
+	it("suppresses auto-continuation and notifies when a resumed session ends in a continuation flood", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const notices: string[] = [];
+		const ctx = await makeNotifyingCtx(notices, "thread-flooded-resume", [
+			userMessageEntry(),
+			...goalContinuationEntries(300),
+		]);
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
+
+		expect(sent).toHaveLength(0);
+		expect(notices).toContainEqual(
+			"Goal auto-continuation suppressed for this resumed session (300 historical continuations). Send a message to resume.",
+		);
+		// Migration-lite is load-time admission only: the stored goal keeps its status untouched.
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+	});
+
+	it("queues a continuation normally when only a few trailing continuations exist", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const notices: string[] = [];
+		const ctx = await makeNotifyingCtx(notices, "thread-healthy-resume", [
+			userMessageEntry(),
+			...goalContinuationEntries(3),
+		]);
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
+
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+		expect(notices).toEqual([]);
+	});
+
+	it("queues a continuation normally when historical continuations are followed by a real user message", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const notices: string[] = [];
+		const ctx = await makeNotifyingCtx(notices, "thread-flood-then-user", [
+			...goalContinuationEntries(300),
+			userMessageEntry(),
+		]);
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "resume" }, ctx);
+
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+		expect(notices).toEqual([]);
+	});
+
+	it("resumes normally on the next clean turn after a real user prompt follows a suppressed load", async () => {
+		vi.useFakeTimers();
+		const { tools, handlers, sent } = createGoalHarness();
+		const notices: string[] = [];
+		const ctx = await makeNotifyingCtx(notices, "thread-suppressed-then-prompt", [
+			userMessageEntry(),
+			...goalContinuationEntries(300),
+		]);
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
+		expect(sent).toHaveLength(0);
+
+		await runHandlers(handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantMessageWithStopReason("stop")] },
+			ctx,
+		);
+		// A user-initiated turn end triggers the 60s grace delay (todo 6), so nothing
+		// is queued immediately. The continuation fires after the grace window.
+		expect(sent).toHaveLength(0);
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+		vi.useRealTimers();
+	});
+
+	it("keeps reload sessions inert even with a flooded branch (no queue, no suppression notice)", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const notices: string[] = [];
+		const ctx = await makeNotifyingCtx(notices, "thread-flooded-reload", [
+			userMessageEntry(),
+			...goalContinuationEntries(300),
+		]);
+		await tools.get("create_goal")?.execute("c1", { objective: "Keep going" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+
+		expect(sent).toHaveLength(0);
+		expect(notices).toEqual([]);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+	});
+});
+
+function userMessageEntry(): SessionEntry {
+	return {
+		type: "message",
+		message: {
+			role: "user",
+			content: [{ type: "text", text: "a real user message" }],
+			timestamp: Date.now(),
+		},
+	} as unknown as SessionEntry;
+}
+
+function goalContinuationEntries(count: number): SessionEntry[] {
+	return Array.from({ length: count }, () => ({
+		type: "custom_message",
+		customType: "goal-continuation",
+		content: "continue the goal",
+		display: false,
+	})) as unknown as SessionEntry[];
+}
 
 describe("goal extension session_abort blocks an active goal outside an agent run", () => {
 	it("blocks an active goal when session_abort fires (abort during retry backoff or queued continuation)", async () => {
