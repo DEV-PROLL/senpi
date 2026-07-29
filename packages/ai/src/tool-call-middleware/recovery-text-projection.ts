@@ -1,5 +1,6 @@
 import type { AssistantMessage, Tool } from "../types.ts";
 import { createAntmlInvokeRecoveryStreamParser } from "./protocols/antml/recovery-stream.ts";
+import type { RecoveryStreamParser } from "./protocols/anthropic-xml/recovery-stream.ts";
 import { createRecoveryCodeMask, type RecoveryCodeMaskSegment } from "./recovery-code-mask.ts";
 import { appendRecoveryDiagnostic } from "./recovery-diagnostics.ts";
 import type { RecoveryNativeProjection } from "./recovery-native-projection.ts";
@@ -11,7 +12,7 @@ export class RecoveryTextProjection {
 	private readonly projection: StreamMessageProjection;
 	private readonly nativeProjection: RecoveryNativeProjection;
 	private readonly innerIndex: number;
-	private readonly parser: ReturnType<typeof createAntmlInvokeRecoveryStreamParser>;
+	private readonly parser: RecoveryStreamParser;
 	private readonly mask = createRecoveryCodeMask();
 	private activeInvoke = false;
 	private textBuffer = "";
@@ -23,11 +24,12 @@ export class RecoveryTextProjection {
 		projection: StreamMessageProjection,
 		nativeProjection: RecoveryNativeProjection,
 		innerIndex: number,
+		createParser: (tools: readonly Tool[]) => RecoveryStreamParser = createAntmlInvokeRecoveryStreamParser,
 	) {
 		this.projection = projection;
 		this.nativeProjection = nativeProjection;
 		this.innerIndex = innerIndex;
-		this.parser = createAntmlInvokeRecoveryStreamParser(tools);
+		this.parser = createParser(tools);
 	}
 
 	start(source: AssistantMessage): boolean {

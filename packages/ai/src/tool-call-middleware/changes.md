@@ -1,5 +1,18 @@
 # Tool Call Middleware Changes
 
+# Tool Call Middleware Changes
+
+## 2026-07-29 - Kimi XTML leaked tool-call recovery in normal mode
+
+### What changed and why
+
+- `shouldRecoverTextToolCalls()` now defaults on for Kimi-family model ids (boundary regex, mirroring the Claude default), so Kimi models get the same normal-mode auto-correction Claude has when native tool calling misfires into plain text.
+- New `createXtmlRecoveryStreamParser()` (`protocols/kimi-xtml/recovery-stream.ts`): recovers leaked `<|open|>tools<|sep|>` blocks into canonical tool calls and strips stray XTML channel-transition markers (think/response/message) from visible text; code-masked spans stay untouched; `interrupt()` restores retained marker fragments as plain text like the invoke parser.
+- `wrapStreamWithInvokeRecovery()` and `RecoveryTextProjection` accept an optional recovery-parser factory (default unchanged: ANTML invoke). `ModelRuntime` selects the XTML factory for Kimi models via `hasKimiTextToolCallRecovery()`; Claude and non-Kimi behavior is byte-identical.
+
+### Why the extension system could not handle this
+
+- Recovery must observe raw provider-neutral assistant text before the coding-agent loop executes tools, and the parser selection must happen inside the stream wrapper, ahead of extension-observable events.
 ## 2026-07-29 - Kimi XTML protocol (Kimi K3 native channel syntax)
 
 ### What changed and why

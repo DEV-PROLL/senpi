@@ -47,5 +47,16 @@ export function shouldRecoverTextToolCalls<TApi extends Api>(model: Model<TApi>)
 	if (model.recoverTextToolCalls !== undefined) {
 		return typeof model.recoverTextToolCalls === "boolean" ? model.recoverTextToolCalls : false;
 	}
-	return /(^|[^a-z0-9])claude([^a-z0-9]|$)/i.test(model.id);
+	return CLAUDE_MODEL_ID_PATTERN.test(model.id) || KIMI_MODEL_ID_PATTERN.test(model.id);
+}
+
+const CLAUDE_MODEL_ID_PATTERN = /(^|[^a-z0-9])claude([^a-z0-9]|$)/i;
+const KIMI_MODEL_ID_PATTERN = /(^|[^a-z0-9])kimi([^a-z0-9]|$)/i;
+
+/**
+ * Whether the model leaks Kimi XTML channel markers when tool calling fails,
+ * selecting the XTML recovery parser over the default invoke recovery parser.
+ */
+export function hasKimiTextToolCallRecovery<TApi extends Api>(model: Model<TApi>): boolean {
+	return KIMI_MODEL_ID_PATTERN.test(model.id);
 }
