@@ -30,6 +30,7 @@ function createSession(options: {
 	branchUsage?: AssistantUsage;
 	compactionUsage?: AssistantUsage;
 	toolUsage?: AssistantUsage;
+	cwd?: string;
 }): AgentSession {
 	const usage = options.usage;
 	const entries: FooterUsageEntry[] = [];
@@ -106,7 +107,7 @@ function createSession(options: {
 				return totals;
 			},
 			getSessionName: () => options.sessionName,
-			getCwd: () => "/tmp/project",
+			getCwd: () => options.cwd ?? "/tmp/project",
 		},
 		getContextUsage: () => ({ contextWindow: 200_000, percent: 12.3 }),
 		modelRuntime: {
@@ -117,12 +118,12 @@ function createSession(options: {
 	return session as unknown as AgentSession;
 }
 
-function createFooterData(providerCount: number): ReadonlyFooterDataProvider {
+function createFooterData(providerCount: number, omoNative = false): ReadonlyFooterDataProvider {
 	const provider = {
 		getGitBranch: () => "main",
 		getExtensionStatuses: () => new Map<string, string>(),
 		getAvailableProviderCount: () => providerCount,
-		isOmoNative: () => false,
+		isOmoNative: () => omoNative,
 		onBranchChange: (callback: () => void) => {
 			void callback;
 			return () => {};
@@ -298,6 +299,69 @@ describe("FooterComponent width handling", () => {
 		expect(plain).toContain("…");
 	});
 
+	it("elides the path before hiding cache and cost stats", () => {
+		const width = 110;
+		const session = createSession({
+			sessionName: "",
+			modelId: "test-model",
+			provider: "test",
+			reasoning: true,
+			thinkingLevel: "high",
+			cwd: "/workspace/client/platform/services/senpi/packages/coding-agent",
+			usage: {
+				input: 100,
+				output: 10,
+				cacheRead: 50,
+				cacheWrite: 50,
+				cost: { total: 1.234 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(2));
+
+		const lines = footer.render(width);
+		const plain = lines.map((line) => stripAnsi(line)).join("\n");
+		for (const line of lines) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
+		expect(plain).toContain("CH25.0%");
+		expect(plain).toContain("$1.234");
+		expect(plain).toContain("test-model:high");
+		expect(plain).toMatch(/^…/);
+		expect(plain).toContain("coding-agent");
+		expect(plain).not.toContain("/workspace/client");
+	});
+
+	it("elides the path instead of the OmO Native badge", () => {
+		const width = 130;
+		const session = createSession({
+			sessionName: "",
+			modelId: "test-model",
+			provider: "test",
+			reasoning: true,
+			thinkingLevel: "high",
+			cwd: "/workspace/client/platform/services/senpi/packages/coding-agent",
+			usage: {
+				input: 100,
+				output: 10,
+				cacheRead: 50,
+				cacheWrite: 50,
+				cost: { total: 1.234 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(2, true));
+
+		const lines = footer.render(width);
+		const plain = lines.map((line) => stripAnsi(line)).join("\n");
+		for (const line of lines) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
+		expect(plain).toContain("(🏴‍☠️ OmO Native)");
+		expect(plain).toContain("coding-agent");
+		expect(plain).not.toContain("/workspace/client");
+		expect(plain).toContain("CH25.0%");
+		expect(plain).toContain("$1.234");
+	});
+
 	it("still renders the model label at very narrow widths", () => {
 		const width = 30;
 		const session = createSession({
@@ -366,6 +430,7 @@ describe("planFooterLayout provider priority", () => {
 	const ellipsisMarker = seg("…");
 	const baseInput = {
 		anchor,
+		pwdIndex: 0,
 		middle,
 		tail,
 		right,

@@ -149,6 +149,7 @@ export class FooterComponent implements Component {
 		const anchor: [FooterSegment, ...FooterSegment[]] = [{ plain: pwdRaw, colored: theme.fg("accent", pwdRaw) }];
 		if (omoNativeBadge) anchor.unshift(omoNativeBadge);
 		if (branch) anchor.push({ plain: branch, colored: theme.fg("warning", branch) });
+		const pwdIndex = omoNativeBadge ? 1 : 0;
 
 		const dim = (plain: string): FooterSegment => ({ plain, colored: theme.fg("dim", plain) });
 		const middle: FooterSegment[] = [];
@@ -200,6 +201,7 @@ export class FooterComponent implements Component {
 		const plan = planFooterLayout({
 			width,
 			anchor,
+			pwdIndex,
 			middle,
 			tail,
 			right: { minimal, full },
@@ -225,12 +227,16 @@ export class FooterComponent implements Component {
 			segments.push(tail);
 			left = joinSegments(segments);
 		} else if (plan.kind === "pwd-elided") {
-			right = minimal;
-			left = joinSegments([
-				{ plain: plan.pwdPlain, colored: theme.fg("accent", plan.pwdPlain) },
-				...anchor.slice(1),
-				tail,
-			]);
+			right = plan.useFullRight && full ? full : minimal;
+			const segments: FooterSegment[] = [
+				...anchor.map((segment, index) =>
+					index === pwdIndex ? { plain: plan.pwdPlain, colored: theme.fg("accent", plan.pwdPlain) } : segment,
+				),
+				...middle.slice(0, plan.keptMiddleCount),
+			];
+			if (plan.showMarker) segments.push(marker);
+			segments.push(tail);
+			left = joinSegments(segments);
 		} else if (plan.kind === "left-elided") {
 			right = minimal;
 			left = { colored: theme.fg("muted", plan.leftPlain), width: visibleWidth(plan.leftPlain) };
