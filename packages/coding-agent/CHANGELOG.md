@@ -39,6 +39,7 @@
 
 ### Fixed
 
+- Report unregistered provider API failures with the selected provider/model and concrete configuration guidance instead of the unactionable generic `No API provider registered for api: ...` stream error.
 - Treat Anthropic `credits_required` responses as permanent billing failures: skip futile same-model retries, select the billing fallback immediately, place the failed provider in the billing cooldown bucket, and pin the replacement instead of reverting into an exhausted account ([#484](https://github.com/code-yeongyu/senpi/pull/484)).
 - Escalate repeated zero-event provider stalls through progressively bounded same-model probes and the configured fallback chain instead of replaying the identical large request for the full idle timeout on every attempt ([#453](https://github.com/code-yeongyu/senpi/pull/453)).
 - Preserve steering and follow-up input across provider idle retries, cap only retry continuations at 30 seconds, restore ordinary timeout settings afterward, and retain queued input when a stalled retry terminates ([#458](https://github.com/code-yeongyu/senpi/pull/458) by [@realsigridjin](https://github.com/realsigridjin)).
