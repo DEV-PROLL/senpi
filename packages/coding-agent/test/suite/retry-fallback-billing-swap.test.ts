@@ -10,9 +10,16 @@ const fallback = "faux/faux-2";
 // claude-fable-5): the billing class this behavior targets.
 const creditBalanceError =
 	'400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."},"request_id":"req_011CdUDPLwbT8EDXCxMJBvQy"}';
+// Verbatim provider error captured from a real session (2026-07-29, anthropic
+// claude-fable-5): Anthropic Console credit exhaustion arrives as a 429
+// rate_limit_error carrying error_code credits_required.
+const creditsRequiredError =
+	'429 event: error\ndata: {"type":"error","error":{"type":"rate_limit_error","message":"Usage credits are required for this model.","details":{"error_code":"credits_required","model":"claude-fable-5"}},"request_id":"req_011CdW2nFxprAx6KQ9JhnAvq"}';
 const terminalNonBillingError = "Error: provider rejected the request permanently";
 
 const billingError = () => fauxAssistantMessage("", { stopReason: "error", errorMessage: creditBalanceError });
+const creditsRequiredBillingError = () =>
+	fauxAssistantMessage("", { stopReason: "error", errorMessage: creditsRequiredError });
 const hardError = () => fauxAssistantMessage("", { stopReason: "error", errorMessage: terminalNonBillingError });
 
 function createChainHarness(now: () => number): Promise<Harness> {
@@ -56,6 +63,32 @@ describe("retry fallback billing swap", () => {
 		expect(harness.faux.getCallLog().map((call) => call.modelId)).toEqual(["faux-1", "faux-2", "faux-2"]);
 	});
 
+	it("pins an anthropic credits_required fallback instead of reverting into the dead model", async () => {
+		let now = 0;
+		const harness = await createChainHarness(() => now);
+		harnesses.push(harness);
+		harness.setResponses([
+			creditsRequiredBillingError(),
+			fauxAssistantMessage("fallback answer"),
+			fauxAssistantMessage("still fallback"),
+		]);
+
+		await harness.session.prompt("first");
+
+		expect(harness.session.model?.id).toBe("faux-2");
+		expect(harness.eventsOfType("retry_fallback_applied").map((event) => event.reason)).toEqual(["billing"]);
+
+		// Past every transient bucket: the credits-dead primary must stay parked
+		// and the pinned fallback must hold, or cooldown-expiry reverts into a
+		// model that answers the same 429 forever (2026-07-29 incident session
+		// 019fac55: fable-5 -> kimi-k3 fallback reverted after 30s, thrash).
+		now += 31 * 60_000;
+		await harness.session.prompt("second");
+
+		expect(harness.eventsOfType("retry_fallback_reverted")).toEqual([]);
+		expect(harness.session.model?.id).toBe("faux-2");
+	});
+
 	it("keeps a non-billing hard error temporary and revertable", async () => {
 		let now = 0;
 		const harness = await createChainHarness(() => now);
@@ -90,6 +123,9 @@ describe("isBillingErrorMessage", () => {
 		],
 		["bare insufficient_quota", "billing error: insufficient_quota", true],
 		["purchase credits", "Please purchase credits to continue using this API", true],
+		["anthropic credits_required 429", creditsRequiredError, true],
+		["credits_required error code only", '429 {"error_code":"credits_required"}', true],
+		["generic credits wording stays non-billing", "earn bonus credits with referrals", false],
 		["overloaded", "overloaded_error", false],
 		["rate limit", "429 rate_limit_exceeded - retry after 30 seconds", false],
 		["server error", "Error 500: internal server error", false],

@@ -39,7 +39,8 @@ export class SelectorCooldowns {
 		}
 
 		const message = errorMessage?.toLowerCase() ?? "";
-		if (/usage[- ]limit|quota|insufficient_quota|billing/.test(message)) return 30 * 60_000;
+		if (/usage[- ]limit|quota|insufficient_quota|billing|credits[-_ ]required|credits are required/.test(message))
+			return 30 * 60_000;
 		if (/rate[ -]?limit|429|too many requests/.test(message)) return 30_000;
 		if (/overloaded|capacity/.test(message)) return 45_000 + this.capacityJitterMs();
 		if (/5xx|\b5\d\d\b|server|internal error/.test(message)) return 20_000;
