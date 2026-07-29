@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type {
 	Agent,
+	AgentContinuationOptions,
 	AgentEvent,
 	AgentMessage,
 	AgentState,
@@ -46,6 +47,7 @@ import {
 	cleanupSessionResources,
 	isClassifierRefusal,
 	isContextOverflow,
+	isProviderTimeoutError,
 	isRetryableAssistantError,
 	modelsAreEqual,
 	type RetryCallbacks,
@@ -148,8 +150,6 @@ import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapp
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
-const PROVIDER_TIMEOUT_PATTERN = /(?:timed? out|timeout)/i;
-const PROVIDER_STREAM_IDLE_RETRY_TIMEOUT_CAP_MS = 30_000;
 
 // ============================================================================
 // Skill Block Parsing
@@ -4365,9 +4365,7 @@ export class AgentSession {
 		this._scheduledContinuationRecompacted = true;
 	}
 
-	private async _continueAgentAfterCurrentRun(
-		options: { deferQueuedMessages?: boolean; timeoutMs?: number } = {},
-	): Promise<void> {
+	private async _continueAgentAfterCurrentRun(options: AgentContinuationOptions = {}): Promise<void> {
 		await this.agent.waitForIdle();
 		await this._revalidateScheduledContinuationAdmission();
 		const useQueuedContinuation = this._scheduledContinuationRecompacted;
@@ -5158,7 +5156,7 @@ export class AgentSession {
 		if (!message.errorMessage) return false;
 
 		if (message.stopReason === "aborted") {
-			return /timed? out|timeout/i.test(message.errorMessage);
+			return isProviderTimeoutError(message);
 		}
 
 		return isRetryableAssistantError(message);
@@ -5208,6 +5206,23 @@ export class AgentSession {
 			return Math.ceil(value * 1000);
 		}
 		return Math.ceil(value);
+	}
+
+	private _getProviderTimeoutRetryOptions(message: AssistantMessage): AgentContinuationOptions {
+		if (!isProviderTimeoutError(message)) return {};
+
+		const capMs = this.settingsManager.getProviderStreamRetryTimeoutMs();
+		const capEnabledBound = (configuredMs: number | undefined): number | undefined => {
+			if (capMs === undefined || configuredMs === undefined) return undefined;
+			return Math.min(configuredMs, capMs);
+		};
+		const timeoutMs = capEnabledBound(this.agent.timeoutMs);
+		const streamStartTimeoutMs = capEnabledBound(this.agent.streamStartTimeoutMs);
+		return {
+			deferQueuedMessages: true,
+			...(timeoutMs === undefined ? {} : { timeoutMs }),
+			...(streamStartTimeoutMs === undefined ? {} : { streamStartTimeoutMs }),
+		};
 	}
 
 	/**
@@ -5434,19 +5449,13 @@ export class AgentSession {
 		}
 
 		// Retry via the shared continuation path after the event handler chain settles.
-		// Agent core would otherwise drain these queues before the continuation
-		// revalidates its provider admission. The scheduled continuation owns them
-		// until it either starts or reports a terminal admission failure.
-		const deferQueuedMessages = PROVIDER_TIMEOUT_PATTERN.test(errorMessage);
-		const timeoutMs = deferQueuedMessages
-			? Math.min(
-					this.agent.timeoutMs ?? PROVIDER_STREAM_IDLE_RETRY_TIMEOUT_CAP_MS,
-					PROVIDER_STREAM_IDLE_RETRY_TIMEOUT_CAP_MS,
-				)
-			: undefined;
+		// Lifecycle suppression protects queued work while retry admission settles;
+		// known provider-timeout retries additionally skip the first queue poll so
+		// user input stays deferred until that retry request proves responsive.
+		const continuationOptions = this._getProviderTimeoutRetryOptions(message);
 		this.agent.suppressQueuedMessageDrain();
 		setTimeout(() => {
-			void this._continueAgentAfterCurrentRun({ deferQueuedMessages, timeoutMs }).catch(async (error) => {
+			void this._continueAgentAfterCurrentRun(continuationOptions).catch(async (error) => {
 				const message = error instanceof Error ? error.message : String(error);
 				this._emit({
 					type: "continuation_error",

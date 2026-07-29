@@ -30,13 +30,17 @@
 
 ### What changed
 
-- `core/agent-session.ts`: retries triggered by provider timeout errors defer queued steering and follow-up input
-  until the retry produces a response. This covers both the stream reader's idle-timeout message and transport-level
-  `Request timed out` variants. Failed retries retain the queue; a successful retry lets the existing post-run queue
-  drain answer it immediately.
-- Those retries cap only their continuation-scoped stream idle timeout at 30 seconds. The initial request and later
-  ordinary turns retain the configured provider idle timeout.
-- Coverage: `test/suite/regressions/provider-idle-recovery.test.ts` pins request ordering and timeout restoration.
+- `core/agent-session.ts`: retries triggered by the shared anchored provider-timeout classifier defer queued steering
+  and follow-up input from the retry's first provider request. This covers the two agent-loop stream watchdog messages
+  and exact transport-level `Request timed out` variants without matching incidental command, MCP, or extension text.
+- `core/settings-manager.ts`: `retry.provider.streamRetryTimeoutMs` configures the first-request retry liveness cap
+  (default 30 seconds; `0` disables). The retry clamps only enabled idle/start guards, so it never re-enables an
+  explicitly disabled guard. Both timeout bounds return to their configured values for later provider requests.
+- The retry start bound is capped as well as the provider request option, while the configured idle timeout resumes
+  after the first event so healthy reasoning gaps are not limited to 30 seconds.
+- Coverage: `test/suite/regressions/provider-idle-recovery.test.ts` pins exact request text/order, configurable timeout
+  sequences, disabled guards, negative classifier shapes, and a real no-first-event stream expiry at the cap;
+  `test/settings-manager.test.ts` pins setting defaults and `0` semantics.
 
 ### Why
 
@@ -46,7 +50,8 @@
 
 ### Expected merge conflict zones on next upstream sync
 
-- LOW: one retry-continuation option branch in `core/agent-session.ts`.
+- MEDIUM: `core/agent-session.ts` retry-controller continuation options and scheduled-continuation admission.
+- LOW: `core/settings-manager.ts` provider retry settings and timeout getters.
 
 ## Absent fallback chains no longer produce a startup warning (2026-07-28)
 

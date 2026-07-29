@@ -11,6 +11,7 @@ import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
 export const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
+export const DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS = 30_000;
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -34,6 +35,7 @@ export interface BranchSummarySettings {
 export interface ProviderRetrySettings {
 	timeoutMs?: number; // SDK request timeout + agent stream idle timeout; defaults to httpIdleTimeoutMs
 	streamStartTimeoutMs?: number; // max wait for the FIRST provider stream event; default: 90000, 0 disables
+	streamRetryTimeoutMs?: number; // first-request liveness cap after a provider timeout; default: 30000, 0 disables
 	maxRetries?: number; // SDK/provider retry attempts
 	maxRetryDelayMs?: number; // default: 60000 (max server-requested delay honoured on the same model; beyond it the fallback chain engages)
 }
@@ -1106,6 +1108,20 @@ export class SettingsManager {
 			maxRetries: this.settings.retry?.provider?.maxRetries,
 			maxRetryDelayMs: this.settings.retry?.provider?.maxRetryDelayMs ?? 60000,
 		};
+	}
+
+	/**
+	 * First-request liveness cap for retries of known provider stream/transport
+	 * timeouts. `retry.provider.streamRetryTimeoutMs` overrides the 30s default;
+	 * 0 disables the cap without disabling queue deferral. The retry path clamps
+	 * only already-enabled stream guards, so this setting never re-enables one.
+	 */
+	getProviderStreamRetryTimeoutMs(): number | undefined {
+		const explicit = this.settings.retry?.provider?.streamRetryTimeoutMs;
+		if (explicit !== undefined) {
+			return explicit > 0 ? explicit : undefined;
+		}
+		return DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS;
 	}
 
 	/**
