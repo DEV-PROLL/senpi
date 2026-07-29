@@ -9,7 +9,12 @@ import {
 	GOAL_MONITOR_CONTINUATION_DELAY_MS,
 	MonitorAwareGoalContinuation,
 } from "../../src/core/extensions/builtin/goal/monitor-continuation.ts";
-import { readGoal, recordContinuationDelivered, updateGoal, writeGoal } from "../../src/core/extensions/builtin/goal/store.ts";
+import {
+	readGoal,
+	recordContinuationDelivered,
+	updateGoal,
+	writeGoal,
+} from "../../src/core/extensions/builtin/goal/store.ts";
 import type { Goal } from "../../src/core/extensions/builtin/goal/types.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
@@ -17,9 +22,9 @@ import {
 	cleanupGoalMonitorTempDirs,
 	createGoalHarness,
 	type GoalHandler,
-	TestEventBus,
 	makeGoalContext,
 	runGoalHandlers,
+	TestEventBus,
 } from "./goal-monitor-test-harness.ts";
 
 function goalStoreRef(ctx: ExtensionContext) {

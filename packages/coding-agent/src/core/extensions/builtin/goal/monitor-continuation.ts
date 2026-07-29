@@ -171,7 +171,12 @@ export class MonitorAwareGoalContinuation {
 		const goal = this.#goal;
 		if (ctx === undefined || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
 		if (kind === "monitor" && this.#activeMonitorCount === 0) return;
-		await this.#admitAndQueue(ctx, goal, kind === "monitor" ? "monitorDelayed" : "userGrace", this.#lastAgentEndMessages);
+		await this.#admitAndQueue(
+			ctx,
+			goal,
+			kind === "monitor" ? "monitorDelayed" : "userGrace",
+			this.#lastAgentEndMessages,
+		);
 	}
 
 	async #admitAndQueue(
