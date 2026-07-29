@@ -69,6 +69,7 @@ export interface SpeculativeCompactionSnapshot {
 	contextWindow: number;
 	preparation: CompactionPreparation;
 	promptVariant: MergedCompactionPromptVariant;
+	origin?: "speculative" | "blocking" | "core-route";
 	customInstructions?: string;
 	/** Agent system prompt; used to make the summarization request look like normal agent traffic. */
 	systemPrompt?: string;
@@ -421,7 +422,12 @@ export function getPromptVariant(options: {
 
 export function createSpeculativeCompactionSnapshot(
 	context: SpeculativeCompactionContext,
-	options: { customInstructions?: string; generation: number; tools?: Tool[] },
+	options: {
+		customInstructions?: string;
+		generation: number;
+		origin: "speculative" | "blocking" | "core-route";
+		tools?: Tool[];
+	},
 ): SpeculativeCompactionSnapshot | undefined {
 	const model = context.model;
 	if (!model) return undefined;
@@ -444,6 +450,7 @@ export function createSpeculativeCompactionSnapshot(
 		contextWindow,
 		preparation,
 		promptVariant: getPromptVariant({ reason: "extension", preparation }),
+		origin: options.origin,
 		customInstructions: options.customInstructions,
 		systemPrompt: context.getSystemPrompt?.(),
 		tools: options.tools,
@@ -540,7 +547,12 @@ export async function runExtensionCompaction(
 			summary,
 			firstKeptEntryId: snapshot.preparation.firstKeptEntryId,
 			tokensBefore: snapshot.preparation.tokensBefore,
-			details: { schema: SUMMARY_SCHEMA, promptVariant: snapshot.promptVariant, tokenEstimate },
+			details: {
+				schema: SUMMARY_SCHEMA,
+				promptVariant: snapshot.promptVariant,
+				tokenEstimate,
+				...(snapshot.origin ? { origin: snapshot.origin } : {}),
+			},
 		};
 	}
 
