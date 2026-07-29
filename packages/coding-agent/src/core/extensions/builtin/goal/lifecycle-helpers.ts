@@ -10,7 +10,7 @@ import {
 	type GoalContinuationVerdict,
 	hashAssistantText,
 } from "./continuation.ts";
-import { buildContinuationPrompt, buildTruncationRecoveryPrompt } from "./prompt.ts";
+import { buildContinuationPrompt } from "./prompt.ts";
 import { recordContinuationDelivered, updateGoal } from "./store.ts";
 import { goalStoreRef } from "./store-ref.ts";
 import { openTodoTaskContents } from "./todo-gate.ts";
