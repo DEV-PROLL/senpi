@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerTerminalExtension } from "../../src/core/extensions/builtin/terminal/extension.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
+import { initTheme, theme } from "../../src/modes/interactive/theme/theme.ts";
 
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
@@ -92,7 +93,7 @@ function makeCtx(runner: FakeRunner, cwd: string, sessionId: string): ExtensionC
 		cwd,
 		mode: "tui",
 		model: { id: "test-model", api: "openai-completions" },
-		ui: { setStatus: runner.setStatus, notify: () => {} },
+		ui: { setStatus: runner.setStatus, notify: () => {}, theme },
 		sessionManager: { getSessionId: () => sessionId, getSessionFile: () => undefined },
 	} as unknown as ExtensionContext;
 }
@@ -118,6 +119,7 @@ describe("terminal extension — background state survives reload", () => {
 	let liveGenerations: Array<{ runner: FakeRunner; ctx: ExtensionContext }> = [];
 
 	beforeEach(() => {
+		initTheme("dark");
 		process.env.SENPI_PTY_FORCE_PIPE = "1";
 		tmp = mkdtempSync(join(tmpdir(), "senpi-reload-survival-"));
 		process.env.SENPI_CODING_AGENT_DIR = join(tmp, "agent-home");

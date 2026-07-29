@@ -53,7 +53,14 @@ function bundleSinks(pi: ExtensionAPI, state: TerminalExtensionState): TerminalE
 	return {
 		onMonitorEvent: (event) => state.monitorNotifier?.notifyEvent(event),
 		onMonitorState: (snapshot) => {
-			state.ctx?.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot));
+			const ctx = state.ctx;
+			const status = formatMonitorStatus(snapshot);
+			ctx?.ui.setStatus(
+				MONITOR_STATUS_KEY,
+				status === undefined || ctx.mode !== "tui"
+					? status
+					: ctx.ui.theme.bg("selectedBg", ctx.ui.theme.fg("text", status)),
+			);
 			pi.events?.emit(TERMINAL_MONITOR_STATE_EVENT, { activeCount: snapshot.length });
 		},
 		onBackgroundExit: (id, runtime) => state.notifier?.notifyCompletion(id, runtime),
