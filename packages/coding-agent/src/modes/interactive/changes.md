@@ -1,5 +1,22 @@
 # changes
 
+## Long footer paths yield before cache and cost stats (2026-07-29)
+
+### What changed
+
+- `components/footer-layout.ts`: when the pwd consumes more than one third of the available footer width, the responsive ladder shortens the indexed pwd anchor from the head at each right-label/middle-stat richness rung before dropping another middle segment. Ordinary shorter paths retain the existing provider-prefix and middle-elision order. The explicit pwd index keeps leading badges intact; the `pwd-elided` plan carries the retained middle count, ellipsis-marker state, and full/minimal model-label choice.
+- `components/footer.ts`: pwd-elided rendering keeps the middle segments selected by the layout plan, so cache hit rate and total cost remain visible when shortening the leading path is enough to fit them.
+- Coverage: `test/footer-width.test.ts` pins a width-110 long-cwd case that retains the `coding-agent` tail, `CH25.0%`, `$1.234`, and the model label without overflowing, plus an OmO Native case proving the badge stays intact while the actual path elides.
+
+### Why
+
+- Long workspace paths consumed footer width before the layout considered shortening them, so the right-most telemetry fields (cost first, then cache hit rate) disappeared even when eliding the non-identifying path head could preserve both.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer-layout.ts` around the width-priority ladder and `pwd-elided` plan shape.
+- LOW: `components/footer.ts` around `pwd-elided` materialization.
+
 ## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
 
 ### What changed
