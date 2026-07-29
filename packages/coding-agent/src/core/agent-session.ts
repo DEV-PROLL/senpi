@@ -548,6 +548,7 @@ export class AgentSession {
 	 */
 	private readonly _messageEndsAwaitingPersistence = new Set<AgentMessage>();
 	private _isAgentRunActive = false;
+	private _toolExecutionDepth = 0;
 	private _promptStartPending = false;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
@@ -829,16 +830,36 @@ export class AgentSession {
 
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
-			return this._emitBeforeToolCallHooks(toolCall, args);
+			this._toolExecutionDepth++;
+			try {
+				const result = await this._emitBeforeToolCallHooks(toolCall, args);
+				if (result?.block) {
+					this._toolExecutionDepth--;
+				}
+				return result;
+			} catch (err) {
+				this._toolExecutionDepth--;
+				throw err;
+			}
 		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
-			return this._emitAfterToolCallHooks(toolCall, args, result, isError);
+			try {
+				return await this._emitAfterToolCallHooks(toolCall, args, result, isError);
+			} finally {
+				this._toolExecutionDepth--;
+			}
 		};
 	}
 
-	private async _emitBeforeToolCallHooks(toolCall: AgentToolCall, args: unknown) {
-		await this._agentEventQueue;
+	private async _emitBeforeToolCallHooks(
+		toolCall: AgentToolCall,
+		args: unknown,
+		options: { waitForEventQueue?: boolean } = {},
+	) {
+		if (options.waitForEventQueue !== false) {
+			await this._agentEventQueue;
+		}
 
 		const runner = this._extensionRunner;
 		if (!runner.hasHandlers("tool_call")) {
@@ -1934,7 +1955,9 @@ export class AgentSession {
 			);
 		}
 
-		const beforeResult = await this._emitBeforeToolCallHooks(prepared.toolCall, prepared.args);
+		const beforeResult = await this._emitBeforeToolCallHooks(prepared.toolCall, prepared.args, {
+			waitForEventQueue: this._toolExecutionDepth === 0,
+		});
 		if (beforeResult?.block) {
 			throw new ExecuteToolError(
 				"blocked",
