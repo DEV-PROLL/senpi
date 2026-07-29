@@ -1,0 +1,99 @@
+import { beforeAll, describe, expect, it } from "vitest";
+import { renderGoalCacheWarmupEntry } from "../../src/core/extensions/builtin/goal/cache-warm-renderer.ts";
+import type { GoalCacheWarmupEntryData } from "../../src/core/extensions/builtin/goal/cache-warm.ts";
+import type { CustomEntry } from "../../src/core/session-manager.ts";
+import { initTheme, theme } from "../../src/modes/interactive/theme/theme.ts";
+
+const ANSI_PATTERN = new RegExp(String.raw`\u001b\[[0-9;]*m`, "g");
+
+function warmupEntry(data: GoalCacheWarmupEntryData): CustomEntry<GoalCacheWarmupEntryData> {
+	return {
+		type: "custom",
+		id: "entry-cache-warm",
+		parentId: null,
+		timestamp: "2026-07-29T00:00:00.000Z",
+		customType: "goal-cache-warmup",
+		data,
+	};
+}
+
+function renderToText(data: GoalCacheWarmupEntryData, expanded = false): string {
+	const component = renderGoalCacheWarmupEntry(warmupEntry(data), { expanded }, theme);
+	const lines = component?.render(100) ?? [];
+	return lines.join("\n").replace(ANSI_PATTERN, "");
+}
+
+describe("goal cache-warm entry renderer", () => {
+	beforeAll(() => {
+		initTheme("dark");
+	});
+
+	it("renders the scheduled wait with the cache story", () => {
+		const text = renderToText({
+			phase: "scheduled",
+			goalId: "goal-1",
+			delayMs: 240_000,
+			activeMonitorCount: 1,
+			cache: { ttlSeconds: 300, cachedTokens: 120_000, estimatedSavedUsd: 0.324 },
+		});
+		expect(text).toContain("Cache-warm wait");
+		expect(text).toContain("1 monitor on duty");
+		expect(text).toContain("5m prompt-cache TTL");
+		expect(text).toContain("~120K tokens kept warm");
+		expect(text).toContain("$0.324 saved");
+	});
+
+	it("renders the resumed wake with savings", () => {
+		const text = renderToText({
+			phase: "resumed",
+			goalId: "goal-1",
+			delayMs: 240_000,
+			waitedMs: 240_000,
+			activeMonitorCount: 2,
+			cache: { ttlSeconds: 300, cachedTokens: 120_000, estimatedSavedUsd: 0.324 },
+		});
+		expect(text).toContain("Cache-warm wake");
+		expect(text).toContain("waited 4m");
+		expect(text).toContain("2 monitors on duty");
+		expect(text).toContain("~120K tokens stayed warm");
+		expect(text).toContain("$0.324 saved");
+	});
+
+	it("stays readable without cache metrics", () => {
+		const text = renderToText({
+			phase: "scheduled",
+			goalId: "goal-1",
+			delayMs: 240_000,
+			activeMonitorCount: 1,
+		});
+		expect(text).toContain("Cache-warm wait");
+		expect(text).toContain("1 monitor on duty");
+		expect(text).not.toContain("tokens");
+	});
+
+	it("reveals goal details when expanded", () => {
+		const collapsed = renderToText({
+			phase: "resumed",
+			goalId: "goal-42",
+			delayMs: 240_000,
+			waitedMs: 200_000,
+			activeMonitorCount: 1,
+			cache: { cachedTokens: 500 },
+		});
+		expect(collapsed).not.toContain("goal-42");
+
+		const expanded = renderToText(
+			{
+				phase: "resumed",
+				goalId: "goal-42",
+				delayMs: 240_000,
+				waitedMs: 200_000,
+				activeMonitorCount: 1,
+				cache: { cachedTokens: 500 },
+			},
+			true,
+		);
+		expect(expanded).toContain("goal-42");
+		expect(expanded).toContain("waited 3m 20s");
+	});
+});
