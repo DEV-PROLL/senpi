@@ -1,5 +1,17 @@
 # Builtin extensions changes
 
+## service-tier: add `/fast` for OpenAI Codex (2026-07-29)
+
+- `service-tier.ts` registers `/fast` for OpenAI Codex sessions. Each invocation
+  toggles the current session between priority processing and the default tier.
+- The implementation stays entirely inside the existing builtin extension:
+  command state is closure-local and resets on `session_start`. No session-core
+  or persistent settings surface changed; existing ChatGPT/OpenAI API
+  service-tier configuration remains unchanged.
+- `test/suite/service-tier-extension.test.ts` covers both toggle states.
+- Expected merge conflict zones: LOW in `service-tier.ts` around the existing
+  `before_provider_request` handler.
+
 ## terminal + goal: monitor liveness event contract (2026-07-28)
 
 - New `monitor-state-event.ts` defines the internal `terminal_monitor_state` pi-event
