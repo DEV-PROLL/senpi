@@ -1,5 +1,29 @@
 # goal Extension Changes
 
+## Stale-goal system reminder on todo add operations (2026-07-29)
+
+### What changed
+
+- `todo-gate.ts` gained the reverse-direction bridge: `todoResultAddsOpenTasks(details)`
+  (structural guard: a todo result whose op is `init`/`append` and whose resulting phases
+  still hold at least one open task) and `staleGoalTodoReminder(goal)` (a
+  `<system-reminder>` block naming `create_goal` when the thread has no goal or only a
+  stale, already-`complete` one; silent for active/paused/blocked goals).
+- `index.ts` registers a `tool_result` handler on the builtin `todo` tool that appends the
+  reminder to the tool-result content, plus a `turn_start` reset so at most one reminder
+  is injected per assistant turn (init + append in the same turn nudges once). Mirrors the
+  nested-agents-md `tool_result` injection pattern.
+- Coverage: `test/suite/goal-todo-stale-reminder.test.ts` - unit pins for both helpers and
+  four real-AgentSession e2e scenarios (no goal, stale complete goal, active goal +
+  non-add ops stay silent, per-turn dedupe).
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `index.ts` around the event-handler block and in `todo-gate.ts`; both are
+  fork-owned surfaces.
+- NONE in todotools: the feature reads `TodoToolDetails` structurally without touching the
+  todo tool itself.
+
 ## Cache-warm continuation story: enriched events + durable entry + TUI renderer (2026-07-29)
 
 ### What changed
