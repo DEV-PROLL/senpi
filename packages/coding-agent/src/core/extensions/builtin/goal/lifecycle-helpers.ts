@@ -1,14 +1,14 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { GOAL_CONTINUATION_MESSAGE_TYPE } from "../../../messages.ts";
-import { getLatestPhasesFromBranchEntries } from "../todotools/state.ts";
 import type { SessionEntry } from "../../../session-manager.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
+import { getLatestPhasesFromBranchEntries } from "../todotools/state.ts";
 import {
 	buildGoalContinuationSignature,
 	evaluateGoalContinuation,
-	hashAssistantText,
 	type GoalContinuationInput,
 	type GoalContinuationVerdict,
+	hashAssistantText,
 } from "./continuation.ts";
 import { buildContinuationPrompt, buildTruncationRecoveryPrompt } from "./prompt.ts";
 import { recordContinuationDelivered, updateGoal } from "./store.ts";
@@ -70,7 +70,11 @@ export async function queueGoalContinuation(
 	goal: Goal,
 	options: SessionStartContinuationOptions,
 ): Promise<Goal> {
-	const signature = buildCurrentGoalContinuationSignature(ctx, goal, lastAssistantTextFromEntries(ctx.sessionManager.getBranch()));
+	const signature = buildCurrentGoalContinuationSignature(
+		ctx,
+		goal,
+		lastAssistantTextFromEntries(ctx.sessionManager.getBranch()),
+	);
 	return admitAndQueueGoalContinuation(pi, ctx, goal, {
 		input: {
 			isIdle: ctx.isIdle(),
@@ -119,7 +123,10 @@ function lastAssistantTextFromEntries(entries: readonly SessionEntry[]): string 
 }
 
 function textContent(message: Extract<AgentMessage, { role: "assistant" }>): string {
-	return message.content.filter((content) => content.type === "text").map((content) => content.text).join("\n");
+	return message.content
+		.filter((content) => content.type === "text")
+		.map((content) => content.text)
+		.join("\n");
 }
 
 async function handleDeniedContinuation(
@@ -132,7 +139,11 @@ async function handleDeniedContinuation(
 	const blockedReason = blockedReasonForContinuationGuard(reason);
 	if (blockedReason === undefined) return goal;
 
-	const blocked = await updateGoal(goalStoreRef(ctx.sessionManager, ctx.cwd), { status: "blocked", reason: blockedReason }, "model");
+	const blocked = await updateGoal(
+		goalStoreRef(ctx.sessionManager, ctx.cwd),
+		{ status: "blocked", reason: blockedReason },
+		"model",
+	);
 	if (ctx.hasUI) ctx.ui.notify(`Goal continuation blocked: ${blockedReason}`, "warning");
 	pi.events?.emit("goal_continuation_guard_tripped", {
 		goalId: goal.id,

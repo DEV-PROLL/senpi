@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { parseGoalCommand } from "../../src/core/extensions/builtin/goal/command.ts";
 import {
 	evaluateGoalContinuation,
+	type GoalContinuationInput,
 	shouldQueueGoalContinuationAfterAgentEnd,
 	shouldQueueGoalContinuationWhenIdle,
-	type GoalContinuationInput,
 } from "../../src/core/extensions/builtin/goal/continuation.ts";
 import {
 	formatGoalElapsedSeconds,

@@ -54,10 +54,7 @@ function createDirectMonitorHarness(): { monitor: MonitorAwareGoalContinuation; 
 	return { monitor: new MonitorAwareGoalContinuation(pi), sent };
 }
 
-async function runUserInitiatedTurn(
-	handlers: Map<string, GoalHandler[]>,
-	ctx: ExtensionContext,
-): Promise<void> {
+async function runUserInitiatedTurn(handlers: Map<string, GoalHandler[]>, ctx: ExtensionContext): Promise<void> {
 	await runGoalHandlers(handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
 	await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
 	await runGoalHandlers(handlers, "agent_end", { type: "agent_end", messages: [cleanAssistantStop()] }, ctx);
@@ -165,9 +162,10 @@ describe("goal continuation while a monitor is active", () => {
 		expect(sent).toHaveLength(0);
 	});
 
-	it.each(["paused", "complete"] as const)(
-	"cancels a pending user grace continuation when the goal becomes %s",
-	async (status) => {
+	it.each([
+		"paused",
+		"complete",
+	] as const)("cancels a pending user grace continuation when the goal becomes %s", async (status) => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
 		const ctx = await makeGoalContext(notices, `thread-user-grace-${status}-cancel`);
@@ -182,8 +180,7 @@ describe("goal continuation while a monitor is active", () => {
 		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
 
 		expect(sent).toHaveLength(0);
-	},
-);
+	});
 
 	it("does not continue a pending user grace turn after pending messages arrive", async () => {
 		vi.useFakeTimers();

@@ -402,7 +402,9 @@ describe("goal extension contract (budget-free)", () => {
 	it("blocks a non-user aborted turn after retries are exhausted", async () => {
 		const { tools, handlers } = createGoalHarness();
 		const ctx = await makeCtx("thread-system-abort-provider-guard");
-		await tools.get("create_goal")?.execute("c1", { objective: "Recover from provider aborts" }, undefined, undefined, ctx);
+		await tools
+			.get("create_goal")
+			?.execute("c1", { objective: "Recover from provider aborts" }, undefined, undefined, ctx);
 
 		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runHandlers(

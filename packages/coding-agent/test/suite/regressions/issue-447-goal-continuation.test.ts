@@ -219,7 +219,7 @@ describe("issue #447: goal continuation guardrails", () => {
 		expect(harness.sent).toHaveLength(0);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active" });
 		expect(notices).toContainEqual(
-		"Goal auto-continuation suppressed for this resumed session (300 historical continuations). Send a message to resume.",
-	);
+			"Goal auto-continuation suppressed for this resumed session (300 historical continuations). Send a message to resume.",
+		);
 	});
 });
