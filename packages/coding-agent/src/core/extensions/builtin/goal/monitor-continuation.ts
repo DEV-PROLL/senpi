@@ -111,11 +111,11 @@ export class MonitorAwareGoalContinuation {
 	}
 
 	syncGoal(goal: Goal | null): void {
-		if (goal?.id !== this.#goal?.id) this.#resetToollessContinuationStreak();
+		if (goal?.id !== this.#goal?.id) this.#resetContinuationState();
 		this.#goal = goal;
 		if (goal?.status !== "active") {
 			this.#cancelTimer();
-			this.#resetToollessContinuationStreak();
+			this.#resetContinuationState();
 		}
 	}
 
@@ -154,7 +154,14 @@ export class MonitorAwareGoalContinuation {
 			});
 		}
 		this.#scheduledContinuationKind = kind;
-		this.#timer = setTimeout(() => void this.#continueIfEligible(kind), delayMs);
+		this.#timer = setTimeout(() => {
+			void this.#continueIfEligible(kind).catch((error: unknown) => {
+				if (this.#ctx?.hasUI) {
+					const message = error instanceof Error ? error.message : String(error);
+					this.#ctx.ui.notify(`Goal continuation delivery failed: ${message}`, "error");
+				}
+			});
+		}, delayMs);
 	}
 
 	async #continueIfEligible(kind: DelayedContinuationKind): Promise<void> {
@@ -164,7 +171,7 @@ export class MonitorAwareGoalContinuation {
 		const goal = this.#goal;
 		if (ctx === undefined || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
 		if (kind === "monitor" && this.#activeMonitorCount === 0) return;
-		await this.#admitAndQueue(ctx, goal, "monitorDelayed", this.#lastAgentEndMessages);
+		await this.#admitAndQueue(ctx, goal, kind === "monitor" ? "monitorDelayed" : "userGrace", this.#lastAgentEndMessages);
 	}
 
 	async #admitAndQueue(

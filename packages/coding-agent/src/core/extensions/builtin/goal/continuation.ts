@@ -10,7 +10,7 @@ export const GOAL_REPETITION_HASH_STREAK = 3;
 export const GOAL_LENGTH_RECOVERY_LIMIT = 1;
 export const GOAL_USER_GRACE_DELAY_MS = 60_000;
 
-export type GoalContinuationPath = "immediate" | "monitorDelayed" | "sessionStart";
+export type GoalContinuationPath = "immediate" | "monitorDelayed" | "userGrace" | "sessionStart";
 
 export type GoalContinuationInput = {
 	readonly goal: Goal | null;
@@ -93,7 +93,7 @@ export function evaluateGoalContinuation(input: GoalContinuationInput): GoalCont
 		return { kind: "deny", reason: "cap" };
 	}
 	if (
-		input.path === "immediate" &&
+		(input.path === "immediate" || input.path === "userGrace") &&
 		input.lastContinuationSignature !== undefined &&
 		input.lastContinuationSignature === input.currentSignature
 	) {
@@ -147,7 +147,7 @@ function isEligibleForGoalContinuation(input: GoalContinuationInput): boolean {
 }
 
 function isContinuationCapPath(path: GoalContinuationPath): boolean {
-	return path === "immediate" || path === "sessionStart";
+	return path === "immediate" || path === "userGrace" || path === "sessionStart";
 }
 
 function hasRepeatedNormalizedOutputHash(hashes: readonly string[]): boolean {

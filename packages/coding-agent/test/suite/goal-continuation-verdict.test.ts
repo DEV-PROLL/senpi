@@ -56,6 +56,7 @@ describe("goal continuation verdict", () => {
 		["rejects an immediate path with pending messages", makeInput({ hasPendingMessages: true })],
 		["rejects an immediate path after an unclean end", makeInput({ lastStopReason: "error" })],
 		["requires idle state for monitor-delayed continuation", makeInput({ path: "monitorDelayed", isIdle: false })],
+		["requires idle state for user-grace continuation", makeInput({ path: "userGrace", isIdle: false })],
 		["requires idle state for session-start continuation", makeInput({ path: "sessionStart", isIdle: false })],
 	] as const)("denies as not eligible when %s", (_label, input) => {
 		expect(evaluateGoalContinuation(input)).toEqual({ kind: "deny", reason: "not-eligible" });
@@ -119,7 +120,7 @@ describe("goal continuation verdict", () => {
 		});
 	});
 
-	it("exempts monitor-delayed continuations from cap and stale guards while session start remains capped", () => {
+	it("exempts only monitor-delayed continuations from cap and stale guards", () => {
 		const capped = makeInput({
 			consecutiveContinuations: GOAL_CONTINUATION_CAP,
 			lastContinuationSignature: "goal-1:1/2:abc123",
@@ -127,6 +128,14 @@ describe("goal continuation verdict", () => {
 
 		expect(evaluateGoalContinuation({ ...capped, path: "monitorDelayed" })).toMatchObject({ kind: "continue" });
 		expect(evaluateGoalContinuation({ ...capped, path: "sessionStart" })).toEqual({ kind: "deny", reason: "cap" });
+		expect(evaluateGoalContinuation({ ...capped, path: "userGrace" })).toEqual({ kind: "deny", reason: "cap" });
+		expect(
+			evaluateGoalContinuation({
+				...capped,
+				path: "userGrace",
+				consecutiveContinuations: GOAL_CONTINUATION_CAP - 1,
+			}),
+		).toEqual({ kind: "deny", reason: "stale" });
 		expect(
 			evaluateGoalContinuation({
 				...capped,

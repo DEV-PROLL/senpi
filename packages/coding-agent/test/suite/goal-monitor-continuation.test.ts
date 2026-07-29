@@ -1,10 +1,15 @@
+import { watch } from "node:fs";
 import { join } from "node:path";
+import { clearTimeout as clearRealTimeout, setTimeout as setRealTimeout } from "node:timers";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOAL_USER_GRACE_DELAY_MS } from "../../src/core/extensions/builtin/goal/continuation.ts";
 import { admitAndQueueGoalContinuation } from "../../src/core/extensions/builtin/goal/lifecycle-helpers.ts";
-import { MonitorAwareGoalContinuation } from "../../src/core/extensions/builtin/goal/monitor-continuation.ts";
-import { readGoal, recordContinuationDelivered } from "../../src/core/extensions/builtin/goal/store.ts";
+import {
+	GOAL_MONITOR_CONTINUATION_DELAY_MS,
+	MonitorAwareGoalContinuation,
+} from "../../src/core/extensions/builtin/goal/monitor-continuation.ts";
+import { readGoal, recordContinuationDelivered, updateGoal, writeGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { Goal } from "../../src/core/extensions/builtin/goal/types.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
@@ -12,6 +17,7 @@ import {
 	cleanupGoalMonitorTempDirs,
 	createGoalHarness,
 	type GoalHandler,
+	TestEventBus,
 	makeGoalContext,
 	runGoalHandlers,
 } from "./goal-monitor-test-harness.ts";
@@ -21,6 +27,35 @@ function goalStoreRef(ctx: ExtensionContext) {
 		baseDir: join(ctx.sessionManager.getSessionDir(), "extensions", "goal"),
 		threadId: ctx.sessionManager.getSessionId(),
 	};
+}
+
+function waitForGoalContinuationCount(ctx: ExtensionContext, expectedCount: number): Promise<void> {
+	const ref = goalStoreRef(ctx);
+	const goalFileName = `${encodeURIComponent(ref.threadId)}.json`;
+	return new Promise((resolve, reject) => {
+		let completed = false;
+		let timeout: ReturnType<typeof setRealTimeout> | undefined;
+		const watcher = watch(ref.baseDir, { encoding: "utf8" }, (_eventType, changedFileName) => {
+			if (changedFileName !== goalFileName) return;
+			void readGoal(ref).then((goal) => {
+				if (goal?.consecutiveContinuations === expectedCount) complete();
+			}, complete);
+		});
+		timeout = setRealTimeout(
+			() => complete(new Error(`Timed out waiting for continuation count ${expectedCount}`)),
+			5_000,
+		);
+		watcher.once("error", complete);
+
+		function complete(error: Error | undefined = undefined): void {
+			if (completed) return;
+			completed = true;
+			if (timeout !== undefined) clearRealTimeout(timeout);
+			watcher.close();
+			if (error === undefined) resolve();
+			else reject(error);
+		}
+	});
 }
 
 function cleanAssistantStopWithText(text: string): AgentMessage {
@@ -46,12 +81,14 @@ function activeGoal(id: string): Goal {
 	};
 }
 
-function createDirectMonitorHarness(): { monitor: MonitorAwareGoalContinuation; sent: string[] } {
+function createDirectMonitorHarness(): { monitor: MonitorAwareGoalContinuation; sent: string[]; events: TestEventBus } {
 	const sent: string[] = [];
+	const events = new TestEventBus();
 	const pi = {
 		sendMessage: (message: { readonly content: string }) => sent.push(message.content),
+		events,
 	} as unknown as ExtensionAPI;
-	return { monitor: new MonitorAwareGoalContinuation(pi), sent };
+	return { monitor: new MonitorAwareGoalContinuation(pi), sent, events };
 }
 
 async function runUserInitiatedTurn(handlers: Map<string, GoalHandler[]>, ctx: ExtensionContext): Promise<void> {
@@ -109,22 +146,55 @@ describe("goal continuation while a monitor is active", () => {
 		expect(notices).toHaveLength(0);
 	});
 
-	it("waits sixty seconds before continuing a clean user-initiated turn", async () => {
+	it("counts user grace delivery toward the continuation cap", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
-		const { tools, handlers, sent } = createGoalHarness();
-		const ctx = await makeGoalContext(notices, "thread-user-grace-delay");
+		const { tools, handlers, sent, events } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-user-grace-counted");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
 		await runUserInitiatedTurn(handlers, ctx);
 		expect(sent).toHaveLength(0);
-
 		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS - 1);
 		expect(sent).toHaveLength(0);
+		const graceDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
 		await vi.advanceTimersByTimeAsync(1);
+		await graceDeliveryRecorded;
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ consecutiveContinuations: 1 });
+
+		for (let turn = 2; turn <= 8; turn++) {
+			await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+			await runGoalHandlers(
+				handlers,
+				"agent_end",
+				{ type: "agent_end", messages: [cleanAssistantStopWithText(`progress ${turn}`)] },
+				ctx,
+			);
+		}
+
+		expect(sent).toHaveLength(8);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 8 });
+
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runGoalHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [cleanAssistantStopWithText("progress 9")] },
+			ctx,
+		);
+
+		expect(sent).toHaveLength(8);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "continuation cap reached",
+		});
+		expect(events.emitted).toContainEqual({
+			channel: "goal_continuation_guard_tripped",
+			data: expect.objectContaining({ reason: "cap", count: 8 }),
+		});
 	});
 
 	it("continues after user grace even when an active monitor settles", async () => {
@@ -140,7 +210,9 @@ describe("goal continuation while a monitor is active", () => {
 		await runUserInitiatedTurn(handlers, ctx);
 		events.emit("terminal_monitor_state", { activeCount: 0 });
 		await events.flush();
+		const graceDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
 		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
+		await graceDeliveryRecorded;
 
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
@@ -198,6 +270,70 @@ describe("goal continuation while a monitor is active", () => {
 		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS - 45_000);
 
 		expect(sent).toHaveLength(0);
+	});
+
+	it("resets monitor-delayed repetition state when a goal pauses and resumes", async () => {
+		vi.useFakeTimers();
+		const notices: string[] = [];
+		const ctx = await makeGoalContext(notices, "thread-monitor-repetition-resume");
+		const { monitor, sent, events } = createDirectMonitorHarness();
+		const goal = activeGoal("goal-monitor-repetition-resume");
+		await writeGoal(goalStoreRef(ctx), goal);
+		monitor.start(ctx);
+		events.emit("terminal_monitor_state", { activeCount: 1 });
+		await events.flush();
+
+		for (let turn = 1; turn <= 2; turn++) {
+			await monitor.afterAgentEnd({
+				ctx,
+				goal,
+				messages: [cleanAssistantStopWithText("unchanged monitor output")],
+			});
+			await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
+		}
+
+		const paused = await updateGoal(goalStoreRef(ctx), { status: "paused" }, "user");
+		monitor.syncGoal(paused);
+		const resumed = await updateGoal(goalStoreRef(ctx), { status: "active" }, "user");
+		monitor.syncGoal(resumed);
+		await monitor.afterAgentEnd({
+			ctx,
+			goal: resumed,
+			messages: [cleanAssistantStopWithText("unchanged monitor output")],
+		});
+		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
+
+		expect(sent).toHaveLength(3);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active" });
+	});
+
+	it("resets truncation recovery state when a goal pauses and resumes", async () => {
+		const notices: string[] = [];
+		const ctx = await makeGoalContext(notices, "thread-length-resume");
+		const { monitor, sent } = createDirectMonitorHarness();
+		const goal = activeGoal("goal-length-resume");
+		await writeGoal(goalStoreRef(ctx), goal);
+		monitor.start(ctx);
+
+		await monitor.afterAgentEnd({
+			ctx,
+			goal,
+			messages: [assistantStopWithReason("length", "first unfinished implementation")],
+		});
+		expect(sent).toHaveLength(1);
+
+		const paused = await updateGoal(goalStoreRef(ctx), { status: "paused" }, "user");
+		monitor.syncGoal(paused);
+		const resumed = await updateGoal(goalStoreRef(ctx), { status: "active" }, "user");
+		monitor.syncGoal(resumed);
+		await monitor.afterAgentEnd({
+			ctx,
+			goal: resumed,
+			messages: [assistantStopWithReason("length", "second unfinished implementation")],
+		});
+
+		expect(sent).toHaveLength(2);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active" });
 	});
 
 	it("queues one minimal recovery prompt after an output truncation", async () => {
