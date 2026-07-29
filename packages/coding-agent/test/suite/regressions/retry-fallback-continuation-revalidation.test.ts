@@ -16,6 +16,10 @@ type ContinuationInternals = {
 	_revalidateScheduledContinuationAdmission(): Promise<void>;
 };
 
+type SessionWorkBarrier = {
+	readonly hasActiveWork: boolean;
+};
+
 function createDeferred(): Deferred {
 	let resolve: (() => void) | undefined;
 	const promise = new Promise<void>((next) => {
@@ -43,6 +47,52 @@ describe("retry fallback continuation revalidation", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
+	});
+
+	it("treats a concurrent low-level prompt as a benign retry-continuation takeover", async () => {
+		const revalidationStarted = createDeferred();
+		const releaseRevalidation = createDeferred();
+		const harness = await createHarness({
+			settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 0 } },
+		});
+		harnesses.push(harness);
+		const internals = harness.session as unknown as ContinuationInternals;
+		vi.spyOn(internals, "_revalidateScheduledContinuationAdmission").mockImplementation(async () => {
+			revalidationStarted.resolve();
+			await releaseRevalidation.promise;
+		});
+		const sessionWorkBarrier = Reflect.get(harness.session, "_sessionWorkBarrier") as SessionWorkBarrier;
+		const continuationErrors: string[] = [];
+		const settledStreamingStates: boolean[] = [];
+		harness.session.subscribe((event) => {
+			if (event.type === "continuation_error") continuationErrors.push(event.errorMessage);
+			if (event.type === "agent_settled") settledStreamingStates.push(harness.agent.state.isStreaming);
+		});
+		harness.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "Request timed out." }),
+			fauxAssistantMessage("low-level prompt won admission"),
+			fauxAssistantMessage("retry continuation must not run"),
+		]);
+
+		const sessionPrompt = harness.session.prompt("original request");
+		await revalidationStarted.promise;
+		const barrierWasClaimed = sessionWorkBarrier.hasActiveWork;
+		const lowLevelPrompt = harness.agent.prompt("concurrent low-level prompt");
+		expect(harness.agent.state.isStreaming).toBe(true);
+		releaseRevalidation.resolve();
+
+		await Promise.all([sessionPrompt, lowLevelPrompt]);
+		await harness.session.waitForSettledSessionWork();
+
+		expect(barrierWasClaimed).toBe(true);
+		expect(continuationErrors).toEqual([]);
+		expect(settledStreamingStates).toEqual([false]);
+		expect(harness.faux.state.callCount).toBe(2);
+		expect(harness.eventsOfType("auto_retry_end").map((event) => event.success)).toEqual([true]);
+		expect(internals._isAgentRunActive).toBe(false);
+		expect(internals._retryPromise).toBeUndefined();
+		expect(harness.session.isStreaming).toBe(false);
+		expect(harness.agent.state.isStreaming).toBe(false);
 	});
 
 	it("settles a fallback retry when continuation admission rejects before agent.continue", async () => {

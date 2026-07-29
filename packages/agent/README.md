@@ -152,9 +152,22 @@ When you use the `Agent` class, assistant `message_end` processing is treated as
 ```typescript
 // After an error, retry from current state
 await agent.continue();
+
+// Keep queued user input out of the retry request and use shorter liveness
+// bounds without mutating the Agent's configured defaults.
+await agent.continue({
+  deferQueuedMessages: true,
+  timeoutMs: 30_000,
+  streamStartTimeoutMs: 30_000,
+});
 ```
 
-The last message in context must be `user` or `toolResult` (not `assistant`).
+The last message in context must be `user` or `toolResult` (not `assistant`). Continuation options are
+one-shot: queue deferral and both timeout overrides apply only to the first provider request. If that
+request succeeds and the same run continues through tools or queued input, later provider requests use
+the Agent's configured `timeoutMs` and `streamStartTimeoutMs`. `continueWithQueuedMessages(options)`
+keeps compaction recovery queue-first; the selected queued message becomes the continuation input, so
+`deferQueuedMessages` cannot defer that message, while the first-request timeout overrides still apply.
 
 ### Event Types
 

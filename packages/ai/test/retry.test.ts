@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "../src/providers/faux.ts";
 import {
 	isProviderStreamStallError,
+	isProviderTimeoutError,
 	isRetryableAssistantError,
 	type RetryPolicy,
 	retryAssistantCall,
@@ -68,6 +69,41 @@ describe("provider retry classification", () => {
 		expect(
 			isRetryableAssistantError(
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Provider stream never started" }),
+			),
+		).toBe(false);
+	});
+
+	it.each([
+		["Idle timeout waiting for provider stream after 300000ms", true, true],
+		["Provider stream start timed out after 90000ms", true, true],
+		["Request timed out.", false, true],
+		["Request timed out", false, true],
+		["Command timed out after 30000ms", false, false],
+		["MCP server example timed out", false, false],
+		["extension timed out", false, false],
+	] as const)("classifies provider timeout provenance without matching incidental text: %s", (errorMessage, expectedStall, expectedTimeout) => {
+		const message = fauxAssistantMessage("", { stopReason: "error", errorMessage });
+		expect(isProviderStreamStallError(message)).toBe(expectedStall);
+		expect(isProviderTimeoutError(message)).toBe(expectedTimeout);
+	});
+
+	it("recognizes aborted transport timeouts but not unrelated aborted work", () => {
+		expect(
+			isProviderTimeoutError(
+				fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "Request timed out." }),
+			),
+		).toBe(true);
+		expect(
+			isProviderTimeoutError(
+				fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "Command timed out after 30000ms" }),
+			),
+		).toBe(false);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "aborted",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
 			),
 		).toBe(false);
 	});

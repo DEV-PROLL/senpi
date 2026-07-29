@@ -248,17 +248,26 @@ export function isRetryableAssistantError(message: AssistantMessage): boolean {
 /**
  * Matches the agent-loop stream watchdog failures ("Idle timeout waiting for
  * provider stream after <n>ms" and "Provider stream start timed out after
- * <n>ms"): the provider connection was accepted but delivered no events for
- * the entire watchdog budget. Retrying such a stall replays an identical
- * payload and, against a hung provider, silently burns that budget again, so
- * callers may escalate to a fallback instead of spending the whole same-model
- * retry budget.
+ * <n>ms"). These anchored shapes distinguish provider-stream stalls from
+ * unrelated extension, command, or MCP timeout diagnostics.
  */
 const PROVIDER_STREAM_STALL_ERROR_PATTERN =
-	/\bIdle timeout waiting for provider stream after \d+ms\b|\bProvider stream start timed out after \d+ms\b/;
+	/^(?:Idle timeout waiting for provider stream after \d+ms|Provider stream start timed out after \d+ms)$/i;
+const PROVIDER_TRANSPORT_TIMEOUT_ERROR_PATTERN = /^Request timed out\.?$/i;
 
 export function isProviderStreamStallError(message: AssistantMessage): boolean {
 	return message.stopReason === "error" && PROVIDER_STREAM_STALL_ERROR_PATTERN.test(message.errorMessage ?? "");
+}
+
+/**
+ * Classifies timeout failures that originate from the provider stream or its
+ * transport. Transport timeouts may arrive as `aborted`; stream watchdog
+ * failures are ordinary error responses.
+ */
+export function isProviderTimeoutError(message: AssistantMessage): boolean {
+	if (isProviderStreamStallError(message)) return true;
+	if (message.stopReason !== "error" && message.stopReason !== "aborted") return false;
+	return PROVIDER_TRANSPORT_TIMEOUT_ERROR_PATTERN.test(message.errorMessage ?? "");
 }
 
 /**

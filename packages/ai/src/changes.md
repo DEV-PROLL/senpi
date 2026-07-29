@@ -15,6 +15,21 @@
 - Coverage: `test/retry.test.ts` pins the stall class against the idle-timeout message, `Request timed out.`,
   and aborted stop reasons.
 
+## 2026-07-29 - Classify provider stream and transport timeouts precisely
+
+### What changed and why
+
+- `utils/retry.ts` exports `isProviderStreamStallError()` for the two anchored agent-loop watchdog
+  messages and `isProviderTimeoutError()` for those stalls plus the exact `Request timed out` transport
+  shape. The shared classifier accepts transport timeouts reported as `aborted` while rejecting incidental
+  timeout text from commands, MCP servers, and extensions.
+- `../test/retry.test.ts` pins the observed positive shapes, negative lookalikes, and stop-reason policy.
+
+### Expected merge conflict zones
+
+- LOW: additive classifiers beside `isRetryableAssistantError()` in `utils/retry.ts`; keep
+  `isProviderStreamStallError()` aligned with PR #453 when the branches meet.
+
 ## 2026-07-29 - kimi-xtml text tool-call protocol + ToolCallFormat union
 
 ### What changed and why

@@ -156,6 +156,12 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 */
 	streamStartTimeoutMs?: number;
 
+	/** Provider/SDK timeout override for only the first request in this loop invocation. */
+	initialRequestTimeoutMs?: number;
+
+	/** Stream-start timeout override for only the first request in this loop invocation. */
+	initialRequestStreamStartTimeoutMs?: number;
+
 	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
 	 *

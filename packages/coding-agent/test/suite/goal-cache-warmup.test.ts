@@ -141,7 +141,12 @@ describe("goal cache-warm continuation story", () => {
 		harness.events.emit("terminal_monitor_state", { activeCount: 1 });
 		await harness.events.flush();
 		await runGoalHandlers(harness.handlers, "agent_start", { type: "agent_start" }, ctx);
-		await runGoalHandlers(harness.handlers, "agent_end", { type: "agent_end", messages: [cleanAssistantStop()] }, ctx);
+		await runGoalHandlers(
+			harness.handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [cleanAssistantStop()] },
+			ctx,
+		);
 
 		expect(notices[0]).toMatch(/4 minutes/i);
 		expect(notices[0]).not.toContain("tokens");
