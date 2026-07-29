@@ -62,11 +62,17 @@ function genericTimeoutError() {
 }
 
 function getRequestUserTexts(harness: Harness): string[][] {
-	return harness.faux.getCallLog().map((call) =>
-		call.context.messages
-			.filter((message) => message.role === "user")
-			.map((message) => getMessageText(message)),
-	);
+	return harness.faux
+		.getCallLog()
+		.map((call) =>
+			call.context.messages.filter((message) => message.role === "user").map((message) => getMessageText(message)),
+		);
+}
+
+function getStreamStartTimeoutMs(options: unknown): number | undefined {
+	if (!options || typeof options !== "object" || !("streamStartTimeoutMs" in options)) return undefined;
+	const value = (options as { streamStartTimeoutMs?: unknown }).streamStartTimeoutMs;
+	return typeof value === "number" ? value : undefined;
 }
 
 describe("provider idle recovery", () => {
@@ -136,7 +142,7 @@ describe("provider idle recovery", () => {
 			RETRY_PROVIDER_TIMEOUT_MS,
 			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
 		]);
-		expect(harness.faux.getCallLog().map((call) => call.options?.streamStartTimeoutMs)).toEqual([
+		expect(harness.faux.getCallLog().map((call) => getStreamStartTimeoutMs(call.options))).toEqual([
 			DEFAULT_STREAM_START_TIMEOUT_MS,
 			RETRY_PROVIDER_TIMEOUT_MS,
 			RETRY_PROVIDER_TIMEOUT_MS,
@@ -173,7 +179,7 @@ describe("provider idle recovery", () => {
 			45_000,
 			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
 		]);
-		expect(harness.faux.getCallLog().map((call) => call.options?.streamStartTimeoutMs)).toEqual([
+		expect(harness.faux.getCallLog().map((call) => getStreamStartTimeoutMs(call.options))).toEqual([
 			DEFAULT_STREAM_START_TIMEOUT_MS,
 			45_000,
 			DEFAULT_STREAM_START_TIMEOUT_MS,
@@ -192,7 +198,7 @@ describe("provider idle recovery", () => {
 		await harness.session.prompt("first request");
 
 		expect(harness.faux.getCallLog().map((call) => call.options?.timeoutMs)).toEqual([undefined, undefined]);
-		expect(harness.faux.getCallLog().map((call) => call.options?.streamStartTimeoutMs)).toEqual([
+		expect(harness.faux.getCallLog().map((call) => getStreamStartTimeoutMs(call.options))).toEqual([
 			undefined,
 			undefined,
 		]);
@@ -216,7 +222,7 @@ describe("provider idle recovery", () => {
 			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
 			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
 		]);
-		expect(harness.faux.getCallLog().map((call) => call.options?.streamStartTimeoutMs)).toEqual([
+		expect(harness.faux.getCallLog().map((call) => getStreamStartTimeoutMs(call.options))).toEqual([
 			DEFAULT_STREAM_START_TIMEOUT_MS,
 			DEFAULT_STREAM_START_TIMEOUT_MS,
 		]);
@@ -243,70 +249,67 @@ describe("provider idle recovery", () => {
 		["assistant", "empty"],
 		["non-assistant", "queued"],
 		["non-assistant", "empty"],
-	] as const)(
-		"keeps timeout retries queue-first after recompaction with a %s tail and %s queue",
-		async (tail, queueState) => {
-			const harness = await createHarness({
-				settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 0 } },
-			});
-			harnesses.push(harness);
-			harness.agent.timeoutMs = DEFAULT_PROVIDER_IDLE_TIMEOUT_MS;
-			harness.agent.streamStartTimeoutMs = DEFAULT_STREAM_START_TIMEOUT_MS;
-			const internals = harness.session as unknown as ContinuationInternals;
-			vi.spyOn(internals, "_revalidateScheduledContinuationAdmission").mockImplementation(async () => {
-				internals._scheduledContinuationRecompacted = true;
-				if (tail === "assistant") {
-					harness.agent.state.messages = [
-						...harness.agent.state.messages,
-						fauxAssistantMessage("", { stopReason: "error", errorMessage: "Request timed out." }),
-					];
-					return;
-				}
+	] as const)("keeps timeout retries queue-first after recompaction with a %s tail and %s queue", async (tail, queueState) => {
+		const harness = await createHarness({
+			settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 0 } },
+		});
+		harnesses.push(harness);
+		harness.agent.timeoutMs = DEFAULT_PROVIDER_IDLE_TIMEOUT_MS;
+		harness.agent.streamStartTimeoutMs = DEFAULT_STREAM_START_TIMEOUT_MS;
+		const internals = harness.session as unknown as ContinuationInternals;
+		vi.spyOn(internals, "_revalidateScheduledContinuationAdmission").mockImplementation(async () => {
+			internals._scheduledContinuationRecompacted = true;
+			if (tail === "assistant") {
 				harness.agent.state.messages = [
 					...harness.agent.state.messages,
-					{
-						role: "custom",
-						customType: "compactionSummary",
-						content: "accepted retry compaction summary",
-						display: false,
-						timestamp: Date.now(),
-					},
+					fauxAssistantMessage("", { stopReason: "error", errorMessage: "Request timed out." }),
 				];
-			});
-			const queueAwareContinue = vi.spyOn(harness.agent, "continueWithQueuedMessages");
-			let queuedInput: Promise<void> | undefined;
-			harness.session.subscribe((event) => {
-				if (queueState === "queued" && event.type === "auto_retry_start" && queuedInput === undefined) {
-					queuedInput = harness.session.steer("queued after timeout");
-				}
-			});
-			harness.setResponses([
-				genericTimeoutError(),
-				fauxAssistantMessage("recovered after recompaction"),
-				fauxAssistantMessage("must not run"),
-			]);
-
-			await harness.session.prompt("original request");
-			await queuedInput;
-
-			expect(queueAwareContinue).toHaveBeenCalledTimes(1);
-			expect(harness.eventsOfType("continuation_error")).toEqual([]);
-			const retryUserTexts = [
-				"original request",
-				...(tail === "non-assistant" ? ["accepted retry compaction summary"] : []),
-				...(queueState === "queued" ? ["queued after timeout"] : []),
+				return;
+			}
+			harness.agent.state.messages = [
+				...harness.agent.state.messages,
+				{
+					role: "custom",
+					customType: "compactionSummary",
+					content: "accepted retry compaction summary",
+					display: false,
+					timestamp: Date.now(),
+				},
 			];
-			expect(getRequestUserTexts(harness)).toEqual([["original request"], retryUserTexts]);
-			expect(harness.faux.getCallLog().map((call) => call.options?.timeoutMs)).toEqual([
-				DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
-				RETRY_PROVIDER_TIMEOUT_MS,
-			]);
-			expect(harness.faux.getCallLog().map((call) => call.options?.streamStartTimeoutMs)).toEqual([
-				DEFAULT_STREAM_START_TIMEOUT_MS,
-				RETRY_PROVIDER_TIMEOUT_MS,
-			]);
-		},
-	);
+		});
+		const queueAwareContinue = vi.spyOn(harness.agent, "continueWithQueuedMessages");
+		let queuedInput: Promise<void> | undefined;
+		harness.session.subscribe((event) => {
+			if (queueState === "queued" && event.type === "auto_retry_start" && queuedInput === undefined) {
+				queuedInput = harness.session.steer("queued after timeout");
+			}
+		});
+		harness.setResponses([
+			genericTimeoutError(),
+			fauxAssistantMessage("recovered after recompaction"),
+			fauxAssistantMessage("must not run"),
+		]);
+
+		await harness.session.prompt("original request");
+		await queuedInput;
+
+		expect(queueAwareContinue).toHaveBeenCalledTimes(1);
+		expect(harness.eventsOfType("continuation_error")).toEqual([]);
+		const retryUserTexts = [
+			"original request",
+			...(tail === "non-assistant" ? ["accepted retry compaction summary"] : []),
+			...(queueState === "queued" ? ["queued after timeout"] : []),
+		];
+		expect(getRequestUserTexts(harness)).toEqual([["original request"], retryUserTexts]);
+		expect(harness.faux.getCallLog().map((call) => call.options?.timeoutMs)).toEqual([
+			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
+			RETRY_PROVIDER_TIMEOUT_MS,
+		]);
+		expect(harness.faux.getCallLog().map((call) => getStreamStartTimeoutMs(call.options))).toEqual([
+			DEFAULT_STREAM_START_TIMEOUT_MS,
+			RETRY_PROVIDER_TIMEOUT_MS,
+		]);
+	});
 
 	it("retains queued input when a capped retry is aborted in flight", async () => {
 		const harness = await createHarness({
@@ -371,7 +374,7 @@ describe("provider idle recovery", () => {
 			providerCalls++;
 			providerOptions.push({
 				timeoutMs: options?.timeoutMs,
-				streamStartTimeoutMs: options?.streamStartTimeoutMs,
+				streamStartTimeoutMs: getStreamStartTimeoutMs(options),
 			});
 			const stream = createAssistantStream();
 			if (providerCalls === 1) {

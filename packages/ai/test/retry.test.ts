@@ -81,14 +81,11 @@ describe("provider retry classification", () => {
 		["Command timed out after 30000ms", false, false],
 		["MCP server example timed out", false, false],
 		["extension timed out", false, false],
-	] as const)(
-		"classifies provider timeout provenance without matching incidental text: %s",
-		(errorMessage, expectedStall, expectedTimeout) => {
-			const message = fauxAssistantMessage("", { stopReason: "error", errorMessage });
-			expect(isProviderStreamStallError(message)).toBe(expectedStall);
-			expect(isProviderTimeoutError(message)).toBe(expectedTimeout);
-		},
-	);
+	] as const)("classifies provider timeout provenance without matching incidental text: %s", (errorMessage, expectedStall, expectedTimeout) => {
+		const message = fauxAssistantMessage("", { stopReason: "error", errorMessage });
+		expect(isProviderStreamStallError(message)).toBe(expectedStall);
+		expect(isProviderTimeoutError(message)).toBe(expectedTimeout);
+	});
 
 	it("recognizes aborted transport timeouts but not unrelated aborted work", () => {
 		expect(

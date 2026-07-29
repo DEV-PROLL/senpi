@@ -243,8 +243,7 @@ async function runLoop(
 				? {
 						...config,
 						timeoutMs: config.initialRequestTimeoutMs ?? config.timeoutMs,
-						streamStartTimeoutMs:
-							config.initialRequestStreamStartTimeoutMs ?? config.streamStartTimeoutMs,
+						streamStartTimeoutMs: config.initialRequestStreamStartTimeoutMs ?? config.streamStartTimeoutMs,
 					}
 				: config;
 			const streamIdleTimeoutMs = isInitialProviderRequest ? config.timeoutMs : requestConfig.timeoutMs;

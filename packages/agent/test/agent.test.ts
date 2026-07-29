@@ -91,6 +91,12 @@ function getUserMessageText(message: AgentMessage): string {
 		.join("");
 }
 
+function getStreamStartTimeoutMs(options: unknown): number | undefined {
+	if (!options || typeof options !== "object" || !("streamStartTimeoutMs" in options)) return undefined;
+	const value = (options as { streamStartTimeoutMs?: unknown }).streamStartTimeoutMs;
+	return typeof value === "number" ? value : undefined;
+}
+
 describe("Agent", () => {
 	it("uses the configured default when a legacy caller omits streamFn", async () => {
 		let calls = 0;
@@ -628,7 +634,7 @@ describe("Agent", () => {
 				);
 				providerTimeouts.push({
 					timeoutMs: options?.timeoutMs,
-					streamStartTimeoutMs: options?.streamStartTimeoutMs,
+					streamStartTimeoutMs: getStreamStartTimeoutMs(options),
 				});
 				const stream = new MockAssistantStream();
 				queueMicrotask(() => {
@@ -645,10 +651,7 @@ describe("Agent", () => {
 			streamStartTimeoutMs: 30_000,
 		});
 
-		expect(providerUserTexts).toEqual([
-			["original request"],
-			["original request", "queued steering"],
-		]);
+		expect(providerUserTexts).toEqual([["original request"], ["original request", "queued steering"]]);
 		expect(providerTimeouts).toEqual([
 			{ timeoutMs: 30_000, streamStartTimeoutMs: 30_000 },
 			{ timeoutMs: 300_000, streamStartTimeoutMs: 90_000 },
@@ -667,7 +670,7 @@ describe("Agent", () => {
 			streamFn: (_model, _context, options) => {
 				providerTimeouts.push({
 					timeoutMs: options?.timeoutMs,
-					streamStartTimeoutMs: options?.streamStartTimeoutMs,
+					streamStartTimeoutMs: getStreamStartTimeoutMs(options),
 				});
 				const stream = new MockAssistantStream();
 				queueMicrotask(() => {
@@ -699,7 +702,7 @@ describe("Agent", () => {
 				streamFn: (_model, _context, options) => {
 					providerOptions = {
 						timeoutMs: options?.timeoutMs,
-						streamStartTimeoutMs: options?.streamStartTimeoutMs,
+						streamStartTimeoutMs: getStreamStartTimeoutMs(options),
 					};
 					const stream = new MockAssistantStream();
 					queueMicrotask(() => {
@@ -721,9 +724,9 @@ describe("Agent", () => {
 			await continuation;
 
 			expect(providerOptions).toEqual({ timeoutMs: 30_000, streamStartTimeoutMs: 30_000 });
-			expect(agent.state.messages.at(-1)?.content).toEqual([
-				{ type: "text", text: "healthy delayed response" },
-			]);
+			const lastMessage = agent.state.messages.at(-1);
+			if (lastMessage?.role !== "assistant") throw new Error("Expected final assistant response");
+			expect(lastMessage.content).toEqual([{ type: "text", text: "healthy delayed response" }]);
 		} finally {
 			vi.useRealTimers();
 		}
@@ -785,10 +788,7 @@ describe("Agent", () => {
 
 		expect(providerUserTexts).toEqual(
 			queue === "steering"
-				? [
-						["initial request"],
-						["initial request", "later admitted prompt", "retained queued input"],
-					]
+				? [["initial request"], ["initial request", "later admitted prompt", "retained queued input"]]
 				: [
 						["initial request"],
 						["initial request", "later admitted prompt"],
