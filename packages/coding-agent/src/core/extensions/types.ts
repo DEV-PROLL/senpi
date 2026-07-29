@@ -56,6 +56,7 @@ import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
 import type { KeybindingsManager } from "../keybindings.ts";
 import type { CustomMessage } from "../messages.ts";
 import type { ModelRegistry } from "../model-registry.ts";
+import type { InitialModelProvenance } from "../model-resolver.ts";
 import type {
 	BranchSummaryEntry,
 	CompactionEntry,
@@ -690,6 +691,8 @@ export interface SessionStartEvent {
 	type: "session_start";
 	/** Why this session start happened. */
 	reason: "startup" | "reload" | "new" | "resume" | "fork";
+	/** Initial model resolver branch, when the session was resolved during this startup. */
+	initialModelProvenance?: InitialModelProvenance;
 	/** Previously active session file. Present for "new", "resume", and "fork". */
 	previousSessionFile?: string;
 }

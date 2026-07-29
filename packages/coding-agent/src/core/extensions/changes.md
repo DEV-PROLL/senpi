@@ -1,5 +1,30 @@
 # Core Extensions Changes
 
+## 2026-07-29 - Initial model provenance on session_start
+
+### What changed and why
+
+- `SessionStartEvent` now carries optional `initialModelProvenance`, identifying the branch that selected a freshly resolved startup model: `cli`, `scoped`, `settings`, `provider-default`, or `first-available`.
+- `findInitialModel()` produces this provenance and the SDK forwards it when it resolves the startup model. CLI and scoped selections supplied by `main.ts` carry their explicit provenance too.
+- The new `recommended-models` builtin uses this field to limit automatic default-model selection to settings/provider-default/first-available startup paths, preserving explicit CLI and scoped selections.
+
+### Why the extension system couldn't handle this alone
+
+The extension runs after the core resolver has selected the startup model. Without the resolver branch crossing the existing `session_start` boundary, it cannot distinguish a saved default from an explicit CLI or scoped selection.
+
+### Files modified
+
+- `types.ts` (`SessionStartEvent`)
+- `../model-resolver.ts`, `../sdk.ts`, `../../main.ts` (provenance production and forwarding)
+- `builtin/recommended-models/index.ts` (consumer)
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `types.ts` around `SessionStartEvent`; retain the optional `initialModelProvenance` field.
+- MEDIUM: `../sdk.ts` startup-model resolution and session-start event assembly; preserve provenance when the SDK resolves the initial model.
+
+
+
 ## 2026-07-28 - Prompt-cache safe-wait budget on ExtensionContext
 
 ### What changed and why
