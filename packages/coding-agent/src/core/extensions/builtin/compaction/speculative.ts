@@ -553,7 +553,7 @@ export async function runExtensionCompaction(
 				promptVariant: snapshot.promptVariant,
 				tokenEstimate,
 				structuralYield: computeStructuralYield({
-					previousSummary: snapshot.preparation.previousSummary,
+					previousSummary: snapshot.preparation.previousSummary ?? "",
 					messagesToSummarize: snapshot.preparation.messagesToSummarize,
 					turnPrefixMessages: snapshot.preparation.turnPrefixMessages,
 					summary,

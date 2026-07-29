@@ -2,24 +2,11 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { estimateTokens } from "../../../compaction/index.ts";
 
 function estimateMessageTokens(message: AgentMessage): number {
-	const content = (message as { content?: unknown }).content;
-	if (typeof content === "string") {
-		return estimateTokens({
-			role: "assistant",
-			content: content,
-			api: "openai",
-			provider: "openai",
-			model: "",
-			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 },
-			stopReason: "end_turn",
-			timestamp: 0,
-		} as unknown as AgentMessage);
-	}
-	return 0;
+	return estimateTokens(message);
 }
 
 export interface ComputeStructuralYieldOptions {
-	previousSummary?: string;
+	previousSummary: string;
 	messagesToSummarize: AgentMessage[];
 	turnPrefixMessages: AgentMessage[];
 	summary: string;
@@ -33,15 +20,20 @@ export interface StructuralYield {
 }
 
 function approxTokens(text: string): number {
-	return Math.max(0, estimateMessageTokens({ role: "assistant", content: text } as unknown as AgentMessage));
+	return Math.max(0, estimateMessageTokens({
+		role: "assistant",
+		content: [{ type: "text", text }],
+		api: "openai",
+		provider: "openai",
+		model: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+		stopReason: "stop",
+		timestamp: 0,
+	}));
 }
 
 function sumEstimateTokens(messages: AgentMessage[]): number {
-	return messages.reduce((total, message) => {
-		const content = (message as { content?: unknown }).content;
-		if (typeof content !== "string") return total;
-		return total + estimateMessageTokens(message);
-	}, 0);
+	return messages.reduce((total, message) => total + estimateMessageTokens(message), 0);
 }
 
 export function computeStructuralYield({

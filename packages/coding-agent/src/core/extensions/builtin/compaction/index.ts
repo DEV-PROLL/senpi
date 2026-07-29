@@ -3,7 +3,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
-import type { ContextUsage, ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "../../types.ts";
+import type { ContextUsage, ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent, SessionCompactEvent } from "../../types.ts";
 import * as checkpointState from "./checkpoint-state.ts";
 import * as breaker from "./circuit-breaker.ts";
 import {
@@ -170,8 +170,11 @@ export default function compactionExtension(
 		| undefined;
 	const pendingMetadata = new Map<string, PendingCompactionMetadata>();
 	let logger: CompactionLogger | undefined;
-	const getLogger = (ctx: ExtensionContext): CompactionLogger =>
-		(logger ??= createCompactionLogger((ctx as { agentDir?: string }).agentDir));
+	interface CompactionContext extends ExtensionContext {
+		agentDir?: string;
+	}
+	const getLogger = (ctx: CompactionContext): CompactionLogger =>
+		(logger ??= createCompactionLogger(ctx.agentDir));
 
 	function getSummarizationTools(): Tool[] {
 		if (typeof pi.getAllTools !== "function" || typeof pi.getActiveTools !== "function") return [];
@@ -348,8 +351,8 @@ export default function compactionExtension(
 			try {
 				compaction = await runExtensionCompaction(ctx, snapshot, feedbackSignal, (delta) =>
 					ctx.updateCompaction?.({
-						reason: (event as unknown as SessionBeforeCompactEvent).reason as never,
-						signal: (event as unknown as SessionBeforeCompactEvent).signal,
+						reason: "extension",
+						signal: feedbackSignal,
 						delta,
 					}),
 				);
@@ -383,8 +386,7 @@ export default function compactionExtension(
 		}
 	}
 
-	pi.on("session_before_compact", async (event, ctx) => {
-		if (!event) return;
+	pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx) => {
 		invalidateSpeculativeCompaction(ctx);
 		if (cap.shouldRejectByCap(state, { reason: event.reason }).cancel) {
 			getLogger(ctx).debug("skip_cap", { reason: event.reason, count: state.acceptedThisTurn });
@@ -484,33 +486,34 @@ export default function compactionExtension(
 		}
 	});
 
-	pi.on("session_compact", async (event, ctx) => {
+	pi.on("session_compact", async (event: SessionCompactEvent, ctx) => {
+		const compactEvent = event;
 		invalidateSpeculativeCompaction(ctx);
-		if (event.accepted) {
-			persistAcceptedMetadata(event.requestId);
+		if (compactEvent.accepted) {
+			persistAcceptedMetadata(compactEvent.requestId);
 			const branchEntries = ctx.sessionManager.getBranch();
-			const firstKeptIndex = branchEntries.findIndex((entry) => entry.id === event.compactionEntry.firstKeptEntryId);
+			const firstKeptIndex = branchEntries.findIndex((entry) => entry.id === compactEvent.compactionEntry.firstKeptEntryId);
 			const keptEntries = firstKeptIndex === -1 ? [] : branchEntries.slice(firstKeptIndex);
 			state = cap.incrementAccepted(state);
 			state = breaker.recordSuccess(state);
-			const details = event.compactionEntry.details as
+			const details = compactEvent.compactionEntry.details as
 				| { structuralYield?: { savedTokens: number; savingsRatio: number } }
 				| undefined;
 			const sy = details?.structuralYield;
 			if (sy && typeof sy.savedTokens === "number" && typeof sy.savingsRatio === "number") {
 				state = {
 					...state,
-					lastYield: { savedTokens: sy.savedTokens, tokensBefore: event.compactionEntry.tokensBefore },
+					lastYield: { savedTokens: sy.savedTokens, tokensBefore: compactEvent.compactionEntry.tokensBefore },
 				};
 				if (
 					isIneffectiveCompaction({
-						tokensBefore: event.compactionEntry.tokensBefore,
+						tokensBefore: compactEvent.compactionEntry.tokensBefore,
 						savedTokens: sy.savedTokens,
 						savingsRatio: sy.savingsRatio,
 					})
 				) {
 					getLogger(ctx).debug("ineffective_counted", {
-						tokensBefore: event.compactionEntry.tokensBefore,
+						tokensBefore: compactEvent.compactionEntry.tokensBefore,
 						savedTokens: sy.savedTokens,
 						savingsRatio: sy.savingsRatio,
 					});
@@ -523,8 +526,8 @@ export default function compactionExtension(
 			if (settings.restorationEnabled ?? true) {
 				restoration.preparePendingPayload(restorationState, {
 					accepted: true,
-					reason: event.reason,
-					compactionEntryId: event.compactionEntry.id,
+					reason: compactEvent.reason,
+					compactionEntryId: compactEvent.compactionEntry.id,
 					contextWindow: usage?.contextWindow ?? ctx.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
 					usageTokens: usage?.tokens ?? null,
 					reserveTokens: settings.reserveTokens,
@@ -537,7 +540,7 @@ export default function compactionExtension(
 			}
 			return;
 		}
-		state = breaker.recordFailure(state, Date.now(), { route: event.reason });
+		state = breaker.recordFailure(state, Date.now(), { route: compactEvent.reason });
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
