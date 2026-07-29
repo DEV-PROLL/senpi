@@ -1,5 +1,21 @@
 # AI Source Changes
 
+## 2026-07-29 - Classify Anthropic credits_required as non-retryable billing exhaustion
+
+### What changed and why
+
+- `utils/retry.ts`: `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` gains `credits_required` and
+  `credits are required`, the Anthropic Console credit-exhaustion wording (a 429 `rate_limit_error` whose
+  details carry `error_code: credits_required`). The account stays dead until the user buys credits or raises
+  the spend limit, so same-model retries can never recover it. Callers now route the shape through the
+  hard-error fallback branch, where coding-agent pins the billing fallback, instead of burning the same-model
+  retry budget (1 + maxRetries dead requests) on every turn.
+- Coverage: `test/retry.test.ts` pins the verbatim incident message as non-retryable.
+
+### Expected merge conflict zones
+
+- LOW: two strings appended to the non-retryable pattern list in `utils/retry.ts`.
+
 ## 2026-07-29 - Classify zero-event provider stream stalls
 
 ### What changed and why

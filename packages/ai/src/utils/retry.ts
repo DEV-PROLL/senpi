@@ -21,6 +21,13 @@ const NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN = buildProviderErrorPattern([
 	"out of budget",
 	"quota exceeded",
 	"billing",
+
+	// Anthropic Console credit exhaustion: a 429 rate_limit_error whose details
+	// carry error_code credits_required ("Usage credits are required for this
+	// model."). The account is dead until the user buys credits or raises the
+	// spend limit, so same-model retries can never recover it.
+	"credits_required",
+	"credits are required",
 ]);
 
 const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
