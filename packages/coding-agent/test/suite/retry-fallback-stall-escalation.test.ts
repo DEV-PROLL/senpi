@@ -15,6 +15,7 @@ const fallback = "faux/faux-2";
  * 1906/1919): the user experienced this as a permanently wedged session.
  */
 const STALL_ERROR = "Idle timeout waiting for provider stream after 300000ms";
+const STREAM_START_STALL_ERROR = "Provider stream start timed out after 90000ms";
 
 describe("retry fallback stall escalation", () => {
 	const harnesses: Harness[] = [];
@@ -22,7 +23,10 @@ describe("retry fallback stall escalation", () => {
 		while (harnesses.length) harnesses.pop()?.cleanup();
 	});
 
-	it("escalates to the fallback chain on the second consecutive provider-stream stall", async () => {
+	it.each([
+		["idle-timeout", STALL_ERROR],
+		["stream-start-timeout", STREAM_START_STALL_ERROR],
+	])("escalates to the fallback chain on the second consecutive %s stall", async (_wording, stallError) => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1" }, { id: "faux-2" }],
 			settings: {
@@ -36,8 +40,8 @@ describe("retry fallback stall escalation", () => {
 		});
 		harnesses.push(harness);
 		harness.setResponses([
-			fauxAssistantMessage("", { stopReason: "error", errorMessage: STALL_ERROR }),
-			fauxAssistantMessage("", { stopReason: "error", errorMessage: STALL_ERROR }),
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: stallError }),
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: stallError }),
 			fauxAssistantMessage("fallback answer"),
 		]);
 

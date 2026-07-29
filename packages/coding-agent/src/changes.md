@@ -3,7 +3,7 @@
 ### What changed
 
 - `core/agent-session.ts`: the transient retry branch tracks consecutive provider-stream stalls
-  (`isProviderStreamStallError` from pi-ai). The second consecutive stall escalates to the fallback chain
+  (`isProviderStreamStallError` from pi-ai, covering both the idle-timeout and stream-start-timeout wordings). The second consecutive stall escalates to the fallback chain
   immediately (same `tryFallback("transient")` path as budget exhaustion); without a chain the retry loop ends
   instead of replaying the identical payload for the remaining same-model budget. Non-stall failures reset the
   streak, fallback switches and fresh retry loops start at zero.

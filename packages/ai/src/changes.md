@@ -4,8 +4,9 @@
 
 ### What changed and why
 
-- `utils/retry.ts` exports `isProviderStreamStallError()`: matches the agent-loop idle-watchdog failure
-  ("Idle timeout waiting for provider stream after <n>ms") on `stopReason: "error"` messages. The class stays
+- `utils/retry.ts` exports `isProviderStreamStallError()`: matches the agent-loop stream-watchdog failures
+  ("Idle timeout waiting for provider stream after <n>ms" and "Provider stream start timed out after <n>ms")
+  on `stopReason: "error"` messages. The class stays
   retryable (unchanged), but callers can now distinguish "the provider accepted the request and sent zero events
   for the whole idle budget" from fast transient failures. agent-session uses it to escalate a second consecutive
   stall to the fallback chain instead of replaying the identical payload for the rest of the same-model budget

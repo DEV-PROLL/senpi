@@ -126,6 +126,14 @@ describe("provider retry classification", () => {
 		).toBe(true);
 		expect(
 			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Provider stream start timed out after 90000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isProviderStreamStallError(
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Request timed out." }),
 			),
 		).toBe(false);
