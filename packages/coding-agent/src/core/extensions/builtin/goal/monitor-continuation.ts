@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isTerminalMonitorStateEvent, TERMINAL_MONITOR_STATE_EVENT } from "../monitor-state-event.ts";
 import {
 	evaluateGoalContinuation,
+	GOAL_USER_GRACE_DELAY_MS,
 	type GoalContinuationInput,
 	type GoalContinuationPath,
 	type GoalContinuationVerdict,
@@ -29,6 +30,7 @@ interface AgentEndOptions {
 }
 
 type ContinuingGoalContinuationVerdict = Extract<GoalContinuationVerdict, { kind: "continue" }>;
+type DelayedContinuationKind = "monitor" | "userGrace";
 
 export class MonitorAwareGoalContinuation {
 	readonly #pi: ExtensionAPI;
@@ -38,6 +40,7 @@ export class MonitorAwareGoalContinuation {
 	#ctx: ExtensionContext | undefined;
 	#goal: Goal | null = null;
 	#timer: ReturnType<typeof setTimeout> | undefined;
+	#scheduledContinuationKind: DelayedContinuationKind | undefined;
 	#unsubscribeMonitorState: (() => void) | undefined;
 	#lastAgentEndMessages: readonly AgentMessage[] = [];
 	#consecutiveLengthRecoveries = 0;
@@ -70,7 +73,7 @@ export class MonitorAwareGoalContinuation {
 			if (!isTerminalMonitorStateEvent(data)) return;
 			this.#activeMonitorCount = data.activeCount;
 			if (data.activeCount === 0) {
-				this.#cancelTimer();
+				if (this.#scheduledContinuationKind === "monitor") this.#cancelTimer();
 				this.#resetToollessContinuationStreak();
 			}
 		});
@@ -82,18 +85,27 @@ export class MonitorAwareGoalContinuation {
 		this.#goal = options.goal;
 		this.#lastAgentEndMessages = options.messages;
 		this.#recordAssistantOutput(options.messages);
-		if (options.goal === null) return options.goal;
+		if (options.goal?.status !== "active") {
+			this.#cancelTimer();
+			return options.goal;
+		}
 		this.#recordToollessContinuationTurn(options.goal, options.messages);
 
 		const immediateInput = this.#buildVerdictInput(options.ctx, options.goal, "immediate", options.messages);
 		const immediateVerdict = evaluateGoalContinuation({ goal: options.goal, ...immediateInput });
-		if (immediateVerdict.kind === "deny" && immediateVerdict.reason === "not-eligible") return options.goal;
+		if (immediateVerdict.kind === "deny") {
+			if (immediateVerdict.reason === "not-eligible") return options.goal;
+			if (immediateVerdict.reason === "grace") {
+				this.#schedule(options.goal, "userGrace");
+				return options.goal;
+			}
+		}
 
 		if (this.#activeMonitorCount === 0) {
 			this.#cancelTimer();
 			return this.#admitAndQueue(options.ctx, options.goal, "immediate", options.messages);
 		}
-		this.#schedule(options.goal);
+		this.#schedule(options.goal, "monitor");
 		return options.goal;
 	}
 
@@ -108,6 +120,7 @@ export class MonitorAwareGoalContinuation {
 
 	/** A real user prompt breaks unattended continuation state before its agent turn begins. */
 	noteUserPrompt(): void {
+		this.#cancelTimer();
 		this.#endedTurnWasUserInitiated = true;
 		this.#resetContinuationState();
 	}
@@ -128,22 +141,28 @@ export class MonitorAwareGoalContinuation {
 		this.#resetContinuationState();
 	}
 
-	#schedule(goal: Goal): void {
+	#schedule(goal: Goal, kind: DelayedContinuationKind): void {
 		if (this.#timer !== undefined) return;
-		if (this.#ctx?.hasUI) this.#ctx.ui.notify(GOAL_MONITOR_CONTINUATION_NOTICE, "info");
-		this.#pi.events?.emit(GOAL_CONTINUATION_SCHEDULED_EVENT, {
-			goalId: goal.id,
-			delayMs: GOAL_MONITOR_CONTINUATION_DELAY_MS,
-			activeMonitorCount: this.#activeMonitorCount,
-		});
-		this.#timer = setTimeout(() => void this.#continueIfEligible(), GOAL_MONITOR_CONTINUATION_DELAY_MS);
+		const delayMs = kind === "monitor" ? GOAL_MONITOR_CONTINUATION_DELAY_MS : GOAL_USER_GRACE_DELAY_MS;
+		if (kind === "monitor") {
+			if (this.#ctx?.hasUI) this.#ctx.ui.notify(GOAL_MONITOR_CONTINUATION_NOTICE, "info");
+			this.#pi.events?.emit(GOAL_CONTINUATION_SCHEDULED_EVENT, {
+				goalId: goal.id,
+				delayMs,
+				activeMonitorCount: this.#activeMonitorCount,
+			});
+		}
+		this.#scheduledContinuationKind = kind;
+		this.#timer = setTimeout(() => void this.#continueIfEligible(kind), delayMs);
 	}
 
-	async #continueIfEligible(): Promise<void> {
+	async #continueIfEligible(kind: DelayedContinuationKind): Promise<void> {
 		this.#timer = undefined;
+		this.#scheduledContinuationKind = undefined;
 		const ctx = this.#ctx;
 		const goal = this.#goal;
-		if (ctx === undefined || goal === null || this.#activeMonitorCount === 0) return;
+		if (ctx === undefined || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
+		if (kind === "monitor" && this.#activeMonitorCount === 0) return;
 		await this.#admitAndQueue(ctx, goal, "monitorDelayed", this.#lastAgentEndMessages);
 	}
 
@@ -241,9 +260,9 @@ export class MonitorAwareGoalContinuation {
 	}
 
 	#cancelTimer(): void {
-		if (this.#timer === undefined) return;
-		clearTimeout(this.#timer);
+		if (this.#timer !== undefined) clearTimeout(this.#timer);
 		this.#timer = undefined;
+		this.#scheduledContinuationKind = undefined;
 	}
 }
 
