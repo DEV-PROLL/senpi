@@ -4,7 +4,7 @@ import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
 import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
 import { MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
-import { accountGoalUsage, readGoal, updateGoal } from "./store.ts";
+import { accountGoalUsage, readGoal, resetContinuationStreak, updateGoal } from "./store.ts";
 import { goalStoreRef as buildGoalStoreRef } from "./store-ref.ts";
 import { registerGoalTools } from "./tool-registration.ts";
 import { TurnUsageTracker } from "./turn-usage.ts";
@@ -25,8 +25,15 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	let agentGoalAccounting: AgentGoalAccounting | null = null;
 	let blockedThisTurnGoalId: string | null = null;
 	let completedThisTurnGoalId: string | null = null;
+	let continuationPending = false;
 	const turnUsage = new TurnUsageTracker();
-	const monitorContinuation = new MonitorAwareGoalContinuation(pi);
+	const monitorContinuation = new MonitorAwareGoalContinuation(
+		pi,
+		() => continuationPending,
+		() => {
+			continuationPending = true;
+		},
+	);
 
 	const goalTicker = new GoalElapsedTicker({
 		render: (renderCtx, renderGoal, live) => {
@@ -53,7 +60,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		beginAgentGoalAccounting,
 		stopAgentGoalAccounting,
 		clearAgentGoalAccounting,
-		queueGoalContinuation,
+		queueGoalContinuation: (extensionApi, commandCtx, goal) => {
+			void queueGoalContinuationForCurrentSession(extensionApi, commandCtx, goal);
+		},
 		refreshGoalUi,
 	});
 
@@ -71,7 +80,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 		// A config reload must not auto-start an agent that was stopped. Only a fresh
 		// startup or explicit resume may re-engage an active goal via a continuation.
-		if (goal && event.reason !== "reload") queueGoalContinuation(pi, ctx, goal);
+		if (goal && event.reason !== "reload") await queueGoalContinuationForCurrentSession(pi, ctx, goal);
 	});
 
 	pi.on("before_agent_start", async (_event, ctx) => {
@@ -81,14 +90,18 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		// flag, means a rejected run cannot leak a stale resume signal to a later
 		// continuation-style turn that starts the agent without a preceding user prompt.
 		monitorContinuation.noteUserPrompt();
-		const goal = await readGoal(goalStoreRef(ctx));
+		const ref = goalStoreRef(ctx);
+		let goal = await resetContinuationStreak(ref);
 		if (goal?.status === "blocked") {
-			const resumed = await updateGoal(goalStoreRef(ctx), { status: "active" }, "user");
-			refreshGoalUi(ctx, resumed);
+			goal = await updateGoal(ref, { status: "active" }, "user");
 		}
+		if (goal !== null) refreshGoalUi(ctx, goal);
 	});
 
 	pi.on("agent_start", async (_event, ctx) => {
+		const continuationStarted = continuationPending;
+		continuationPending = false;
+		if (continuationStarted) monitorContinuation.noteContinuationStarted();
 		agentTurnInProgress = true;
 		blockedThisTurnGoalId = null;
 		completedThisTurnGoalId = null;
@@ -129,12 +142,16 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			clearAgentGoalAccounting();
 		}
 		refreshGoalUiBestEffort(ctx, goal);
-		monitorContinuation.afterAgentEnd({
-			ctx,
-			goal,
-			messages: event.messages,
-			aborted: event.aborted === true,
-		});
+		const continuationGoal = await monitorContinuation.afterAgentEnd({ ctx, goal, messages: event.messages });
+		if (continuationGoal !== goal) {
+			goal = continuationGoal;
+			if (goal?.status === "active") {
+				beginAgentGoalAccounting(goal);
+			} else {
+				clearAgentGoalAccounting();
+			}
+			refreshGoalUiBestEffort(ctx, goal);
+		}
 	});
 
 	pi.on("session_abort", async (_event, ctx) => {
@@ -181,8 +198,25 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		beginAgentGoalAccounting(resumed);
 		refreshGoalUi(ctx, resumed);
 		ctx.ui.notify(`Goal ${goalStatusLabel(resumed.status)}\n${formatGoalForTool(resumed)}`, "info");
-		queueGoalContinuation(pi, ctx, resumed);
+		await queueGoalContinuationForCurrentSession(pi, ctx, resumed);
 		return true;
+	}
+
+	async function queueGoalContinuationForCurrentSession(
+		extensionApi: ExtensionAPI,
+		ctx: ExtensionContext,
+		goal: Goal,
+	): Promise<void> {
+		const continuedGoal = await queueGoalContinuation(extensionApi, ctx, goal, {
+			continuationPending,
+			markContinuationPending: () => {
+				continuationPending = true;
+			},
+		});
+		if (continuedGoal.status === goal.status) return;
+		if (continuedGoal.status === "active") beginAgentGoalAccounting(continuedGoal);
+		else clearAgentGoalAccounting();
+		refreshGoalUiBestEffort(ctx, continuedGoal);
 	}
 
 	function beginAgentGoalAccounting(goal: Goal): void {

@@ -2,8 +2,10 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import { parseGoalCommand } from "../../src/core/extensions/builtin/goal/command.ts";
 import {
+	evaluateGoalContinuation,
 	shouldQueueGoalContinuationAfterAgentEnd,
 	shouldQueueGoalContinuationWhenIdle,
+	type GoalContinuationInput,
 } from "../../src/core/extensions/builtin/goal/continuation.ts";
 import {
 	formatGoalElapsedSeconds,
@@ -130,6 +132,31 @@ describe("goal continuation gating", () => {
 				abortedToolResultMessage(),
 			]),
 		).toBe(false);
+	});
+
+	it("applies the persisted cap on immediate and session-start paths but not monitor-delayed paths", () => {
+		const input = {
+			goal: makeGoal({ consecutiveContinuations: 8 }),
+			isIdle: true,
+			hasPendingMessages: false,
+			lastStopReason: "stop",
+			consecutiveContinuations: 8,
+			lastContinuationSignature: undefined,
+			currentSignature: undefined,
+			consecutiveLengthRecoveries: 0,
+			recentNormalizedOutputHashes: [],
+			toollessContinuationStreak: 0,
+			endedTurnWasUserInitiated: false,
+			continuationPending: false,
+		} satisfies Omit<GoalContinuationInput, "path">;
+
+		expect(evaluateGoalContinuation({ ...input, path: "immediate" })).toEqual({ kind: "deny", reason: "cap" });
+		expect(evaluateGoalContinuation({ ...input, path: "sessionStart" })).toEqual({ kind: "deny", reason: "cap" });
+		expect(evaluateGoalContinuation({ ...input, path: "monitorDelayed" })).toEqual({
+			kind: "continue",
+			prompt: "full",
+			stallNotice: false,
+		});
 	});
 });
 
