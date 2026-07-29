@@ -64,24 +64,20 @@ describe("Kimi K3 prompt preset", () => {
 		expect(preset?.prompt.length).toBeGreaterThan(2_000);
 	});
 
-	it.each([
-		"kimi-k2.6-0528",
-		"kimi-k2.7-code",
-		"kimi-for-coding",
-		"kimi-latest",
-		"grok-3",
-		"deepseek-r1-k3b",
-	])("does not route %s to the kimi-k3 preset", (modelId) => {
-		// given
-		const settings: PromptPresetSettings = { promptPreset: "auto" };
-		const model = createModel(modelId, "moonshot");
+	it.each(["kimi-k2.6-0528", "kimi-k2.7-code", "kimi-for-coding", "kimi-latest", "grok-3", "deepseek-r1-k3b"])(
+		"does not route %s to the kimi-k3 preset",
+		(modelId) => {
+			// given
+			const settings: PromptPresetSettings = { promptPreset: "auto" };
+			const model = createModel(modelId, "moonshot");
 
-		// when
-		const presetName = resolvePresetName(model, settings);
+			// when
+			const presetName = resolvePresetName(model, settings);
 
-		// then
-		expect(presetName).not.toBe("kimi-k3");
-	});
+			// then
+			expect(presetName).not.toBe("kimi-k3");
+		},
+	);
 
 	it("keeps Kimi K3 distinct from the K2.6 and K2.7 presets", () => {
 		// given

@@ -36,26 +36,29 @@ return { written, content: await read("local://notes/merge-map.md") };`,
 	it.each([
 		["traversal", 'await write("local://../escape.md", "x")', /traversal|escapes/iu],
 		["unsupported scheme", 'await read("memory://x.md")', /not supported/iu],
-	] as const)("Given %s when a helper resolves a protocol URL then the cell rejects it", async (_name, code, error) => {
-		const root = await mkdtemp(join(tmpdir(), "senpi-js-local-guard-"));
-		try {
-			await withJavaScriptKernel(
-				async (kernel) => {
-					// Given: a confined local root.
-					// When
-					const run = await runJavaScriptCell(kernel, code);
+	] as const)(
+		"Given %s when a helper resolves a protocol URL then the cell rejects it",
+		async (_name, code, error) => {
+			const root = await mkdtemp(join(tmpdir(), "senpi-js-local-guard-"));
+			try {
+				await withJavaScriptKernel(
+					async (kernel) => {
+						// Given: a confined local root.
+						// When
+						const run = await runJavaScriptCell(kernel, code);
 
-					// Then
-					expect(run.result.ok).toBe(false);
-					if (run.result.ok) throw new Error("protocol guard unexpectedly succeeded");
-					expect(run.result.error.message).toMatch(error);
-				},
-				{ cwd: root, localRoots: { local: join(root, "local") } },
-			);
-		} finally {
-			await rm(root, { recursive: true, force: true });
-		}
-	});
+						// Then
+						expect(run.result.ok).toBe(false);
+						if (run.result.ok) throw new Error("protocol guard unexpectedly succeeded");
+						expect(run.result.error.message).toMatch(error);
+					},
+					{ cwd: root, localRoots: { local: join(root, "local") } },
+				);
+			} finally {
+				await rm(root, { recursive: true, force: true });
+			}
+		},
+	);
 
 	it("Given plain relative and absolute paths when helpers run then both resolve against their documented bases", async () => {
 		const root = await mkdtemp(join(tmpdir(), "senpi-js-plain-path-"));

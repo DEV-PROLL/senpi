@@ -33,7 +33,7 @@ export function makeRoot(slug: string, cleanupTasks: Array<() => Promise<void>>)
 	const testRoot = { agentDir: join(root, "agent"), cwd: join(root, "project") };
 	mkdirSync(testRoot.agentDir, { recursive: true });
 	mkdirSync(join(testRoot.cwd, ".senpi"), { recursive: true });
-	cleanupTasks.push(() => rm(root, { recursive: true, force: true }));
+	cleanupTasks.push(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 	return testRoot;
 }
 

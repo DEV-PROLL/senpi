@@ -169,7 +169,7 @@ export class PdfArtifact extends ArtifactElement {
 			this.error = error?.message || i18n("Failed to load PDF");
 		} finally {
 			if (pdf) {
-				pdf.destroy();
+				await pdf.cleanup();
 			}
 		}
 	}

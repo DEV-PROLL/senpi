@@ -288,56 +288,59 @@ describe("post-compaction queued input recovery", () => {
 		["rejected overflow", "overflow" as const, true, "reject" as const],
 		["rejected threshold", "threshold" as const, false, "reject" as const],
 		["feedback-only abort", undefined, false, "abort" as const],
-	])("keeps queued TUI input owned by the editor after a %s compaction_end", async (_label, reason, willRetry, outcome) => {
-		const marker = `[TUI queue remains ${outcome}]`;
-		const harness = await createHarness({
-			models: [{ id: "faux-1", contextWindow: 128_000, maxTokens: 64 }],
-			settings: { compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1 } },
-			extensionFactories:
-				outcome === "reject"
-					? [
-							(pi: ExtensionAPI) => {
-								pi.on("session_before_compact", () => ({
-									cancel: true,
-									rejectionCause: "cancelled-by-extension",
-									reason: "test rejection",
-								}));
-							},
-						]
-					: [],
-		});
-		harnesses.push(harness);
-		harness.setResponses([fauxAssistantMessage("seed handled"), fauxAssistantMessage("must not execute")]);
-		await harness.session.prompt("seed context ".repeat(40));
-		const providerCallsBeforeCompaction = harness.faux.state.callCount;
-		const context = createTuiCompactionEventContext(harness);
-		context.compactionQueuedMessages.push({ text: marker, mode: "steer" });
-		harness.session.subscribe((event) => {
-			if (event.type === "compaction_end") {
-				void getHandleEvent()(context, event);
-			}
-		});
+	])(
+		"keeps queued TUI input owned by the editor after a %s compaction_end",
+		async (_label, reason, willRetry, outcome) => {
+			const marker = `[TUI queue remains ${outcome}]`;
+			const harness = await createHarness({
+				models: [{ id: "faux-1", contextWindow: 128_000, maxTokens: 64 }],
+				settings: { compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1 } },
+				extensionFactories:
+					outcome === "reject"
+						? [
+								(pi: ExtensionAPI) => {
+									pi.on("session_before_compact", () => ({
+										cancel: true,
+										rejectionCause: "cancelled-by-extension",
+										reason: "test rejection",
+									}));
+								},
+							]
+						: [],
+			});
+			harnesses.push(harness);
+			harness.setResponses([fauxAssistantMessage("seed handled"), fauxAssistantMessage("must not execute")]);
+			await harness.session.prompt("seed context ".repeat(40));
+			const providerCallsBeforeCompaction = harness.faux.state.callCount;
+			const context = createTuiCompactionEventContext(harness);
+			context.compactionQueuedMessages.push({ text: marker, mode: "steer" });
+			harness.session.subscribe((event) => {
+				if (event.type === "compaction_end") {
+					void getHandleEvent()(context, event);
+				}
+			});
 
-		if (outcome === "abort") {
-			const beginFeedback = Reflect.get(harness.session, "_beginExtensionCompactionFeedback");
-			const endFeedback = Reflect.get(harness.session, "_endExtensionCompactionFeedback");
-			if (typeof beginFeedback !== "function" || typeof endFeedback !== "function") {
-				throw new Error("Expected extension compaction feedback lifecycle methods");
+			if (outcome === "abort") {
+				const beginFeedback = Reflect.get(harness.session, "_beginExtensionCompactionFeedback");
+				const endFeedback = Reflect.get(harness.session, "_endExtensionCompactionFeedback");
+				if (typeof beginFeedback !== "function" || typeof endFeedback !== "function") {
+					throw new Error("Expected extension compaction feedback lifecycle methods");
+				}
+				const signal = beginFeedback.call(harness.session, "extension") as AbortSignal;
+				endFeedback.call(harness.session, { reason: "extension", signal, aborted: true });
+			} else {
+				await getRunAutoCompaction(harness)(reason!, willRetry);
 			}
-			const signal = beginFeedback.call(harness.session, "extension") as AbortSignal;
-			endFeedback.call(harness.session, { reason: "extension", signal, aborted: true });
-		} else {
-			await getRunAutoCompaction(harness)(reason!, willRetry);
-		}
-		await Promise.all(context.flushes);
-		await harness.session.waitForSettledSessionWork();
+			await Promise.all(context.flushes);
+			await harness.session.waitForSettledSessionWork();
 
-		expect(context.compactionQueuedMessages).toEqual([{ text: marker, mode: "steer" }]);
-		expect(context.compactionInFlightMessages).toEqual([]);
-		expect(getUserTexts(harness)).not.toContain(marker);
-		expect(harness.faux.state.callCount).toBe(providerCallsBeforeCompaction);
-		expect(harness.eventsOfType("compaction_start")).toHaveLength(1);
-	});
+			expect(context.compactionQueuedMessages).toEqual([{ text: marker, mode: "steer" }]);
+			expect(context.compactionInFlightMessages).toEqual([]);
+			expect(getUserTexts(harness)).not.toContain(marker);
+			expect(harness.faux.state.callCount).toBe(providerCallsBeforeCompaction);
+			expect(harness.eventsOfType("compaction_start")).toHaveLength(1);
+		},
+	);
 
 	it("flushes accepted compaction input once through the real compaction_end handler", async () => {
 		const marker = "[TUI queue flushes once]";

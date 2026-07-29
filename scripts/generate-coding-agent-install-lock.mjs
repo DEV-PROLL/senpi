@@ -25,7 +25,7 @@ const outputLockfilePath = join(outputDir, "package-lock.json");
 const internalPackagePrefixes = ["@earendil-works/pi-", "@code-yeongyu/senpi"];
 const installPackageName = "@code-yeongyu/senpi-install";
 const allowedInstallScriptPackages = new Map([
-	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
+	["@google/genai@2.13.0", "preinstall is a no-op in the published package"],
 	["protobufjs@7.6.5", "postinstall only warns about protobufjs version scheme mismatches"],
 ]);
 

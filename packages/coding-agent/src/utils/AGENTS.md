@@ -26,7 +26,6 @@ utils/
 ├── html.ts                      # HTML entity decoding
 ├── json.ts                      # stripJsonComments — strip // comments + trailing commas
 ├── syntax-highlight.ts          # highlight.js wrapper → themed terminal formatting
-├── highlight-js-lib-index.d.ts  # Type declarations for highlight.js/lib/index.js
 ├── frontmatter.ts               # YAML frontmatter parser (skills, prompt templates)
 ├── sleep.ts                     # Promise-returning timer with abort
 ├── deprecation.ts               # One-shot deprecation warnings (deduped by message)

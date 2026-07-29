@@ -58,9 +58,7 @@ type WebSocketConstructor = new (
 ) => WebSocketLike;
 
 type MutableResponsesPayload = ResponseCreateParamsStreaming & {
-	include?: unknown[];
-	tool_choice?: unknown;
-	tools?: unknown[];
+	prompt_cache_options?: { mode?: "explicit" | "implicit" };
 };
 
 const websocketSessionCache = new Map<string, CachedWebSocketConnection>();
@@ -124,9 +122,9 @@ function isOpenAiWebSearchPreviewTool(value: unknown): boolean {
 }
 
 function sanitizeUnsupportedNativeTools(
-	params: ResponseCreateParamsStreaming,
+	params: MutableResponsesPayload,
 	compat: Required<OpenAIResponsesCompat>,
-): ResponseCreateParamsStreaming {
+): MutableResponsesPayload {
 	if (compat.supportsWebSearchPreview) {
 		return params;
 	}
@@ -231,7 +229,7 @@ export const stream: StreamFunction<"openai-responses", OpenAIResponsesOptions> 
 			let params = buildParams(model, context, options, compat, grammarToolInputProperties);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
-				params = nextParams as ResponseCreateParamsStreaming;
+				params = nextParams as MutableResponsesPayload;
 			}
 
 			params = sanitizeUnsupportedNativeTools(params, compat);
@@ -418,7 +416,7 @@ function buildParams(
 
 	const cacheRetention = resolveCacheRetention(options?.cacheRetention ?? model.cacheRetention, options?.env);
 	const disableImplicitPromptCache = cacheRetention === "none" && compat.supportsExplicitPromptCacheMode;
-	const params: ResponseCreateParamsStreaming & { prompt_cache_options?: { mode: "explicit" } } = {
+	const params: MutableResponsesPayload = {
 		model: model.id,
 		input: messages,
 		stream: true,

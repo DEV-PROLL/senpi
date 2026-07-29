@@ -60,16 +60,19 @@ describe("JavaScript runtime output parity", () => {
 		["stdout string writes", "process.stdout.write('a'); process.stdout.write('b');", "stdout", "ab"],
 		["stderr string writes", "process.stderr.write('oops');", "stderr", "oops"],
 		["stdout Buffer writes", "process.stdout.write(Buffer.from('héllo', 'utf8'));", "stdout", "héllo"],
-	] as const)("Given %s when the cell runs then exact bytes reach the text stream", async (_name, code, stream, text) => {
-		await withJavaScriptKernel(async (kernel) => {
-			// Given: a live worker kernel.
-			// When
-			const run = await runJavaScriptCell(kernel, code);
+	] as const)(
+		"Given %s when the cell runs then exact bytes reach the text stream",
+		async (_name, code, stream, text) => {
+			await withJavaScriptKernel(async (kernel) => {
+				// Given: a live worker kernel.
+				// When
+				const run = await runJavaScriptCell(kernel, code);
 
-			// Then
-			expect(textOutput(run.messages, stream)).toBe(text);
-		});
-	});
+				// Then
+				expect(textOutput(run.messages, stream)).toBe(text);
+			});
+		},
+	);
 
 	it.each([
 		["strict base64", JSON.stringify(pngBase64)],
@@ -96,17 +99,20 @@ describe("JavaScript runtime output parity", () => {
 	it.each([
 		["unrecognized object", "{ not: 'a buffer' }"],
 		["invalid base64", JSON.stringify("abcd=efg")],
-	] as const)("Given %s image data when display runs then the image is dropped with a diagnostic", async (_name, expression) => {
-		await withJavaScriptKernel(async (kernel) => {
-			// Given
-			const code = `display({ type: "image", data: ${expression}, mimeType: "image/png" });`;
+	] as const)(
+		"Given %s image data when display runs then the image is dropped with a diagnostic",
+		async (_name, expression) => {
+			await withJavaScriptKernel(async (kernel) => {
+				// Given
+				const code = `display({ type: "image", data: ${expression}, mimeType: "image/png" });`;
 
-			// When
-			const run = await runJavaScriptCell(kernel, code);
+				// When
+				const run = await runJavaScriptCell(kernel, code);
 
-			// Then
-			expect(displayOutput(run.messages)).toEqual([]);
-			expect(textOutput(run.messages, "stdout")).toMatch(/image dropped/u);
-		});
-	});
+				// Then
+				expect(displayOutput(run.messages)).toEqual([]);
+				expect(textOutput(run.messages, "stdout")).toMatch(/image dropped/u);
+			});
+		},
+	);
 });
