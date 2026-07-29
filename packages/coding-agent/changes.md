@@ -1,5 +1,13 @@
 # Local fork changes
 
+## 2026-07-30 — Root-owned consumer sidecar installation (#446)
+
+- Changed: publish staging now removes promoted platform optional-dependency edges from the bundled portable package manifest after copying the complete family to Senpi's root optional dependencies.
+- Why: npm 11 placed `claude-agent-sdk-darwin-arm64` for the root and bundled SDK edges but never fetched its tarball, leaving an invalid empty directory. A fresh `2026.7.29-5` install therefore still failed native resolution even though the universal tarball contained zero platform sidecar files.
+- What changed: the literal issue-446 test proves the root retains all eight Claude platform optionals while the staged bundled SDK owns none, so npm has one consumer-resolved edge and downloads the real Darwin executable.
+- Why the extension system could not handle this: npm synthesizes the invalid empty dependency directory before Senpi or its provider runtime starts.
+- Merge-conflict risk: low. Expected conflict zones are publish-manifest staging and the focused issue-446 packaging test.
+
 ## 2026-07-30 — Strip publisher-native packages before npm pack (#446)
 
 - Changed: after promoting complete platform optional-dependency families into the root manifest, publish staging now removes every platform-constrained package directory before npm traverses bundled dependency graphs.
