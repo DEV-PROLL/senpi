@@ -7,6 +7,7 @@ export interface NativeModelInfo {
 	provider: string;
 	id: string;
 	baseUrl: string;
+	api?: string;
 }
 
 export type NativeAuthResult =
@@ -21,6 +22,7 @@ export interface NativeModelRegistry {
 interface NativeProviderMapping {
 	provider: SearchProvider;
 	resource: string;
+	routeLabel?: string;
 }
 
 interface NativeEntryOptions {
@@ -29,12 +31,23 @@ interface NativeEntryOptions {
 }
 
 function nativeMapping(model: NativeModelInfo): NativeProviderMapping | null {
-	if (model.provider === "openai" && /^gpt-(4o|4\.1|5)/.test(model.id) && !model.id.includes("codex")) {
+	const isOpenAiModel = /^gpt-(4o|4\.1|5)/.test(model.id) && !model.id.includes("codex");
+	if (model.provider === "openai" && isOpenAiModel) {
 		return { provider: "openai", resource: "responses" };
+	}
+	if (
+		model.provider !== "openai" &&
+		(model.api === "openai-responses" || model.api === "azure-openai-responses") &&
+		isOpenAiModel
+	) {
+		return { provider: "openai", resource: "responses", routeLabel: model.provider };
 	}
 
 	if (model.provider === "anthropic" && /^claude-/.test(model.id)) {
 		return { provider: "anthropic", resource: "messages" };
+	}
+	if (model.provider !== "anthropic" && model.api === "anthropic-messages" && /^claude-/.test(model.id)) {
+		return { provider: "anthropic", resource: "messages", routeLabel: model.provider };
 	}
 
 	if (model.provider === "xai" && /^grok-/.test(model.id)) {
@@ -63,6 +76,14 @@ function nativeMapping(model: NativeModelInfo): NativeProviderMapping | null {
 	}
 
 	return null;
+}
+
+function shouldDiscoverNativeRoute(activeModel: NativeModelInfo | undefined, availableModel: NativeModelInfo): boolean {
+	const mapping = nativeMapping(availableModel);
+	if (!mapping) return false;
+	if (!activeModel) return true;
+	if (mapping.provider !== "openai" && mapping.provider !== "anthropic") return true;
+	return activeModel.provider === availableModel.provider;
 }
 
 function buildEndpointUrl(baseUrl: string, resource: string): string {
@@ -106,10 +127,11 @@ async function buildNativeEntryForModel(
 	options: NativeEntryOptions = {},
 ): Promise<SearchProviderEntry | null> {
 	if (!model || !modelRegistry) return null;
-	const { id = "native", signal } = options;
+	const { id, signal } = options;
 
 	const mapping = nativeMapping(model);
 	if (!mapping) return null;
+	const entryId = id ?? (mapping.routeLabel ? `${mapping.routeLabel}/native` : "native");
 	const baseUrl = buildEndpointUrl(model.baseUrl, mapping.resource);
 	if (!isAllowedProviderBaseUrl(baseUrl)) return null;
 
@@ -135,7 +157,7 @@ async function buildNativeEntryForModel(
 	if (!auth.ok || !auth.apiKey) return null;
 
 	return {
-		id,
+		id: entryId,
 		provider: mapping.provider,
 		apiKey: auth.apiKey,
 		baseUrl,
@@ -164,6 +186,7 @@ export async function buildNativeEntries(
 	if (!modelRegistry.getAvailable) return entries;
 
 	for (const availableModel of modelRegistry.getAvailable()) {
+		if (!shouldDiscoverNativeRoute(model, availableModel)) continue;
 		const routeKey = nativeRouteKey(availableModel);
 		if (!routeKey || seenRoutes.has(routeKey)) continue;
 		seenRoutes.add(routeKey);

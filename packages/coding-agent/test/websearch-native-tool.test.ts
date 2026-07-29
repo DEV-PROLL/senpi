@@ -80,7 +80,43 @@ afterEach(() => {
 });
 
 describe("vendored websearch native tool", () => {
-	it("#given an active native model and same-route aliases #when the real tool is executed #then orders native routes before configured providers without duplication", async () => {
+	it("#given an active custom OpenAI-compatible model #when the real tool is executed #then tries that custom native route first", async () => {
+		// given
+		const activeModel = nativeModel(
+			"quotio-openai",
+			"gpt-5.6-sol-fast",
+			"openai-responses",
+			"https://quotio.example.com/v1",
+		);
+		const modelRegistry = ModelRegistry.inMemory(AuthStorage.inMemory());
+		vi.spyOn(modelRegistry, "getApiKeyAndHeaders").mockResolvedValue({ ok: true, apiKey: "quotio-native-key" });
+		vi.spyOn(modelRegistry, "getAvailable").mockReturnValue([]);
+		const progress: SearchProgressDetails[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn<typeof fetch>(async () => successfulSearchResponse()),
+		);
+		const tool = createWebSearchTool(() => ({ ok: true, config: autoConfig(), source: "test" }));
+
+		// when
+		await tool.execute(
+			"custom-native-route",
+			{ query: "custom native route" },
+			undefined,
+			(update) => {
+				if (update.details && "phase" in update.details && update.details.phase === "searching") {
+					progress.push(update.details);
+				}
+			},
+			toolContext(activeModel, modelRegistry),
+		);
+
+		// then
+		expect(progress[0]?.providerLabels[0]).toBe("quotio-openai/native");
+		expect(progress[1]?.currentProvider).toBe("quotio-openai/native");
+	});
+
+	it("#given an active native model and same-provider route aliases #when the real tool is executed #then orders one matching native route before configured providers", async () => {
 		// given
 		const activeModel = nativeModel("openai", "gpt-5.5", "openai-responses", "https://gateway.example.com/v1");
 		const authModels: string[] = [];
@@ -118,14 +154,12 @@ describe("vendored websearch native tool", () => {
 		expect(progress[1]?.currentProvider).toBe("openai/native");
 		expect(progress[1]?.attempts).toEqual([]);
 		const providerLabels = progress[0]?.providerLabels ?? [];
-		expect(providerLabels).toHaveLength(4);
+		expect(providerLabels).toHaveLength(3);
 		expect(providerLabels[0]).toBe("openai/native");
-		expect(providerLabels[1]?.startsWith("anthropic/")).toBe(true);
-		expect(providerLabels[1]).not.toContain("claude");
-		expect(providerLabels[2]).toBe("duckduckgo-html/configured-first");
-		expect(providerLabels[3]).toBe("z-ai/configured-second");
+		expect(providerLabels[1]).toBe("duckduckgo-html/configured-first");
+		expect(providerLabels[2]).toBe("z-ai/configured-second");
 		expect(providerLabels.filter((label) => label.startsWith("openai/"))).toEqual(["openai/native"]);
-		expect(authModels).toEqual(["gpt-5.5", "claude-sonnet-4-20250514"]);
+		expect(authModels).toEqual(["gpt-5.5"]);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
