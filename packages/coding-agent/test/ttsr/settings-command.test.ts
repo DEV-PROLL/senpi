@@ -33,43 +33,11 @@ function uiUnavailable(): never {
 
 function createCapturingUi(notifications: Notification[]): ExtensionUIContext {
 	return {
-		select: uiUnavailable,
-		confirm: uiUnavailable,
-		input: uiUnavailable,
-		notify: (message, type) => {
+		notify: (message: string, type?: "info" | "warning" | "error") => {
 			notifications.push({ message, type });
 		},
-		onTerminalInput: () => () => {},
-		setStatus: () => {},
-		setWorkingMessage: () => {},
-		setWorkingVisible: () => {},
-		setWorkingIndicator: () => {},
-		setHiddenThinkingLabel: () => {},
-		setWidget: () => {},
-		setFooter: () => {},
-		setHeader: () => {},
-		setTitle: () => {},
-		custom: uiUnavailable,
-		pasteToEditor: uiUnavailable,
-		setEditorText: uiUnavailable,
-		getEditorText: () => "",
-		editor: uiUnavailable,
-		addAutocompleteProvider: uiUnavailable,
-		setEditorComponent: uiUnavailable,
-		getEditorComponent: () => undefined,
-		getAllThemes: () => [],
-		getTheme: () => undefined,
-		setTheme: () => ({ success: false, error: "unavailable" }),
-		getToolsExpanded: () => false,
-		setToolsExpanded: uiUnavailable,
-		getRetryFallbackSettings: uiUnavailable,
-		setFallbackChain: uiUnavailable,
-		removeFallbackChain: uiUnavailable,
-		setModelFallbackEnabled: uiUnavailable,
-		setFallbackRevertPolicy: uiUnavailable,
-	};
+	} as unknown as ExtensionUIContext;
 }
-
 function readSessionEntries(harness: Harness): PersistedEntry[] {
 	const file = harness.sessionManager.getSessionFile();
 	if (typeof file !== "string") throw new Error("expected a persisted session file");

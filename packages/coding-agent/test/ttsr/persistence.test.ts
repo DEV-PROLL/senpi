@@ -81,7 +81,8 @@ function injectedNamesFrom(entries: readonly SessionEntry[]): string[] {
 
 function nudgeTexts(harness: Harness): string[] {
 	return harness.session.messages
-		.filter((message) => message.role === "custom" && message.customType === TTSR_INJECTION_CUSTOM_TYPE)
+		.filter((message) => message.role === "custom")
+		.filter((message) => message.customType === TTSR_INJECTION_CUSTOM_TYPE)
 		.map((message) => (typeof message.content === "string" ? message.content : ""));
 }
 
