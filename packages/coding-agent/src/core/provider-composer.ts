@@ -609,7 +609,11 @@ export function configuredRequestAuthStatus(
 	extension: ProviderConfigInput | undefined,
 ): AuthStatus | undefined {
 	const value = configuredApiKey(config, extension);
-	if (value === undefined) return undefined;
+	if (value === undefined) {
+		const headers = configuredHeaders(config, extension);
+		if (!headers || Object.keys(headers).length === 0) return undefined;
+		return { configured: true, source: extension?.headers !== undefined ? "fallback" : "models_json_key" };
+	}
 	if (isCommandConfigValue(value)) return { configured: true, source: "models_json_command" };
 	const names = getConfigValueEnvVarNames(value);
 	if (names.length > 0) {
