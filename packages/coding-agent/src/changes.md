@@ -26,6 +26,28 @@
 - LOW: one settings getter + one field in `ProviderRetrySettings`; one error message in
   `composeModelProvider`; one option in the `Agent` construction in `core/sdk.ts`.
 
+## Provider idle retries preserve user input and use a bounded retry budget (2026-07-29)
+
+### What changed
+
+- `core/agent-session.ts`: retries triggered by provider timeout errors defer queued steering and follow-up input
+  until the retry produces a response. This covers both the stream reader's idle-timeout message and transport-level
+  `Request timed out` variants. Failed retries retain the queue; a successful retry lets the existing post-run queue
+  drain answer it immediately.
+- Those retries cap only their continuation-scoped stream idle timeout at 30 seconds. The initial request and later
+  ordinary turns retain the configured provider idle timeout.
+- Coverage: `test/suite/regressions/provider-idle-recovery.test.ts` pins request ordering and timeout restoration.
+
+### Why
+
+- A silent provider stream previously consumed user steering into another full-length retry. Repeated 300-second
+  retries made the session look stuck and could leave the user's `continue` adjacent to an error instead of a real
+  answer.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one retry-continuation option branch in `core/agent-session.ts`.
+
 ## Absent fallback chains no longer produce a startup warning (2026-07-28)
 
 ### What changed

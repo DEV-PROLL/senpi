@@ -148,6 +148,8 @@ import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapp
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
+const PROVIDER_TIMEOUT_PATTERN = /(?:timed? out|timeout)/i;
+const PROVIDER_STREAM_IDLE_RETRY_TIMEOUT_CAP_MS = 30_000;
 
 // ============================================================================
 // Skill Block Parsing
@@ -4363,12 +4365,16 @@ export class AgentSession {
 		this._scheduledContinuationRecompacted = true;
 	}
 
-	private async _continueAgentAfterCurrentRun(): Promise<void> {
+	private async _continueAgentAfterCurrentRun(
+		options: { deferQueuedMessages?: boolean; timeoutMs?: number } = {},
+	): Promise<void> {
 		await this.agent.waitForIdle();
 		await this._revalidateScheduledContinuationAdmission();
 		const useQueuedContinuation = this._scheduledContinuationRecompacted;
 		try {
-			if (useQueuedContinuation) {
+			if (options.deferQueuedMessages || options.timeoutMs !== undefined) {
+				await this.agent.continue(options);
+			} else if (useQueuedContinuation) {
 				await this.agent.continueWithQueuedMessages();
 			} else {
 				await this.agent.continue();
@@ -5431,9 +5437,16 @@ export class AgentSession {
 		// Agent core would otherwise drain these queues before the continuation
 		// revalidates its provider admission. The scheduled continuation owns them
 		// until it either starts or reports a terminal admission failure.
+		const deferQueuedMessages = PROVIDER_TIMEOUT_PATTERN.test(errorMessage);
+		const timeoutMs = deferQueuedMessages
+			? Math.min(
+					this.agent.timeoutMs ?? PROVIDER_STREAM_IDLE_RETRY_TIMEOUT_CAP_MS,
+					PROVIDER_STREAM_IDLE_RETRY_TIMEOUT_CAP_MS,
+				)
+			: undefined;
 		this.agent.suppressQueuedMessageDrain();
 		setTimeout(() => {
-			void this._continueAgentAfterCurrentRun().catch(async (error) => {
+			void this._continueAgentAfterCurrentRun({ deferQueuedMessages, timeoutMs }).catch(async (error) => {
 				const message = error instanceof Error ? error.message : String(error);
 				this._emit({
 					type: "continuation_error",

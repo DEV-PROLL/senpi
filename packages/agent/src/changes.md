@@ -24,6 +24,17 @@
 - `types.ts`
 - `../test/agent-loop-stream-start-timeout.test.ts`
 
+## 2026-07-29 - Continuation-scoped queue and timeout controls
+
+### What changed and why
+
+- `Agent.continue()` accepts continuation-only options that defer queued input until the first provider response and
+  override the stream idle timeout without mutating the agent's configured default.
+- The core run lifecycle retains queued steering and follow-up input after terminal error or abort responses instead
+  of racing an asynchronous session-level retry controller and starting an unintended provider request.
+- Coding-agent retries use these controls after a silent provider stream so a doomed retry cannot consume newly
+  queued user input and a later ordinary turn automatically returns to the configured timeout.
+
 ## 2026-07-27 - End classifier-refused turns before tool execution
 
 ### What changed and why

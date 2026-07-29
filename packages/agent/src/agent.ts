@@ -124,6 +124,13 @@ export interface AgentOptions {
 	abortServerSideFallback?: boolean;
 }
 
+export interface AgentContinuationOptions {
+	/** Keep queued steering and follow-up input out of the continuation's first provider request. */
+	deferQueuedMessages?: boolean;
+	/** Override the provider stream idle timeout for this continuation only. */
+	timeoutMs?: number;
+}
+
 class PendingMessageQueue {
 	private messages: AgentMessage[] = [];
 	private clearGeneration = 0;
@@ -408,8 +415,11 @@ export class Agent {
 		await this.continue();
 	}
 
-	/** Continue from the current transcript. The last message must be a user or tool-result message. */
-	async continue(): Promise<void> {
+	/**
+	 * Continue from the current transcript. The last message must be a user or tool-result message.
+	 * Queued input can be deferred until the continuation produces its first response.
+	 */
+	async continue(options: AgentContinuationOptions = {}): Promise<void> {
 		if (this.activeRun) {
 			throw new Error("Agent is already processing. Wait for completion before continuing.");
 		}
@@ -435,7 +445,7 @@ export class Agent {
 			throw new Error("Cannot continue from message role: assistant");
 		}
 
-		await this.runContinuation();
+		await this.runContinuation(options);
 	}
 
 	private normalizePromptInput(
@@ -473,11 +483,14 @@ export class Agent {
 		});
 	}
 
-	private async runContinuation(): Promise<void> {
+	private async runContinuation(options: AgentContinuationOptions = {}): Promise<void> {
 		await this.runWithLifecycle(async (signal) => {
 			await runAgentLoopContinue(
 				this.createContextSnapshot(),
-				this.createLoopConfig(),
+				this.createLoopConfig({
+					skipInitialSteeringPoll: options.deferQueuedMessages,
+					timeoutMs: options.timeoutMs,
+				}),
 				(event) => this.processEvents(event),
 				signal,
 				this.streamFunction,
@@ -493,7 +506,7 @@ export class Agent {
 		};
 	}
 
-	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
+	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean; timeoutMs?: number } = {}): AgentLoopConfig {
 		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
 		let steeringQueueGeneration = this.steeringQueue.getClearGeneration();
 		let followUpQueueGeneration = this.followUpQueue.getClearGeneration();
@@ -505,7 +518,7 @@ export class Agent {
 			onResponse: this.onResponse,
 			transport: this.transport,
 			thinkingBudgets: this.thinkingBudgets,
-			timeoutMs: this.timeoutMs,
+			timeoutMs: options.timeoutMs ?? this.timeoutMs,
 			streamStartTimeoutMs: this.streamStartTimeoutMs,
 			maxRetryDelayMs: this.maxRetryDelayMs,
 			abortServerSideFallback: this.abortServerSideFallback,
@@ -570,6 +583,7 @@ export class Agent {
 			while (
 				!abortController.signal.aborted &&
 				!this.activeRun?.suppressQueuedMessageDrain &&
+				this.canDrainQueuedMessagesAfterRun() &&
 				this.hasQueuedMessages()
 			) {
 				await this.runQueuedMessagesAfterAgentEnd(abortController.signal);
@@ -579,6 +593,14 @@ export class Agent {
 		} finally {
 			this.finishRun();
 		}
+	}
+
+	private canDrainQueuedMessagesAfterRun(): boolean {
+		const lastMessage = this._state.messages[this._state.messages.length - 1];
+		return (
+			lastMessage?.role !== "assistant" ||
+			(lastMessage.stopReason !== "error" && lastMessage.stopReason !== "aborted")
+		);
 	}
 
 	private async runQueuedMessagesAfterAgentEnd(signal: AbortSignal): Promise<void> {
