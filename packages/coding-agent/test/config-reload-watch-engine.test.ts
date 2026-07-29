@@ -353,8 +353,19 @@ describe("config reload watch engine", () => {
 		};
 
 		// Subscribe to the production FSWatcher event before arming the assertion write.
-		renameSync(watchReadyPath, `${watchReadyPath}.armed`);
-		await awaitChange(watcherReady, "readiness event");
+		// macOS FSEvents establishes asynchronously with no ready callback and silently
+		// drops operations performed before the stream is live, so a one-shot probe can
+		// starve forever. Re-arm the probe until the watcher proves it is delivering.
+		const armReadiness = setInterval(() => {
+			writeFileSync(watchReadyPath, String(Date.now()));
+		}, 250);
+		try {
+			renameSync(watchReadyPath, `${watchReadyPath}.armed`);
+			writeFileSync(watchReadyPath, "armed");
+			await awaitChange(watcherReady, "readiness event");
+		} finally {
+			clearInterval(armReadiness);
+		}
 		writeFileSync(settingsPath, "after");
 		const result = await awaitChange(settingsChanged, "settings.json change");
 
