@@ -1,8 +1,9 @@
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { admitAndQueueGoalContinuation } from "../../src/core/extensions/builtin/goal/lifecycle-helpers.ts";
 import { readGoal, recordContinuationDelivered } from "../../src/core/extensions/builtin/goal/store.ts";
-import type { ExtensionContext } from "../../src/core/extensions/types.ts";
+import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
 	cleanAssistantStop,
 	cleanupGoalMonitorTempDirs,
@@ -181,5 +182,48 @@ describe("goal continuation while a monitor is active", () => {
 
 		expect(sent).toHaveLength(1);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 1 });
+	});
+
+	it("delivers an unsigned immediate continuation without recording its streak", async () => {
+		const notices: string[] = [];
+		const { tools } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-unsigned-continuation");
+		await tools
+			.get("create_goal")
+			?.execute("create", { objective: "Continue without a signature" }, undefined, undefined, ctx);
+		const goal = await readGoal(goalStoreRef(ctx));
+		if (goal === null) throw new Error("Expected persisted goal");
+
+		let continuationMarked = false;
+		const result = await admitAndQueueGoalContinuation(
+			{ sendMessage: () => {} } as unknown as ExtensionAPI,
+			ctx,
+			goal,
+			{
+				input: {
+					isIdle: true,
+					hasPendingMessages: false,
+					path: "immediate",
+					lastStopReason: "stop",
+					consecutiveContinuations: goal.consecutiveContinuations ?? 0,
+					lastContinuationSignature: goal.lastContinuationSignature,
+					currentSignature: undefined,
+					consecutiveLengthRecoveries: 0,
+					recentNormalizedOutputHashes: [],
+					toollessContinuationStreak: 0,
+					endedTurnWasUserInitiated: false,
+					continuationPending: false,
+				},
+				content: () => "Continue",
+				markContinuationPending: () => {
+					continuationMarked = true;
+				},
+			},
+		);
+
+		expect(continuationMarked).toBe(true);
+		expect(result.consecutiveContinuations ?? 0).toBe(0);
+		expect(result.lastContinuationSignature).toBeUndefined();
+		expect((await readGoal(goalStoreRef(ctx)))?.consecutiveContinuations ?? 0).toBe(0);
 	});
 });

@@ -3,24 +3,23 @@ import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isTerminalMonitorStateEvent, TERMINAL_MONITOR_STATE_EVENT } from "../monitor-state-event.ts";
 import {
 	evaluateGoalContinuation,
-	hashAssistantText,
-	normalizeAssistantText,
 	type GoalContinuationInput,
 	type GoalContinuationPath,
 	type GoalContinuationVerdict,
+	hashAssistantText,
+	normalizeAssistantText,
 } from "./continuation.ts";
 import {
 	admitAndQueueGoalContinuation,
 	buildCurrentGoalContinuationSignature,
 	lastAssistantText,
 } from "./lifecycle-helpers.ts";
-import { buildContinuationPrompt, buildGoalStallNotice, buildMonitorStallNotice, buildTruncationRecoveryPrompt } from "./prompt.ts";
+import { buildContinuationPrompt, buildGoalStallNotice, buildTruncationRecoveryPrompt } from "./prompt.ts";
 import type { Goal } from "./types.ts";
 
 export const GOAL_MONITOR_CONTINUATION_DELAY_MS = 240_000;
 export const GOAL_CONTINUATION_SCHEDULED_EVENT = "goal_continuation_scheduled";
 export const GOAL_MONITOR_CONTINUATION_NOTICE = "Goal continuation scheduled in 4 minutes while a monitor is active.";
-export const GOAL_MONITOR_STALL_THRESHOLD = 3;
 export const GOAL_MONITOR_STALL_EVENT = "goal_monitor_continuation_stall";
 
 interface AgentEndOptions {
@@ -41,11 +40,10 @@ export class MonitorAwareGoalContinuation {
 	#timer: ReturnType<typeof setTimeout> | undefined;
 	#unsubscribeMonitorState: (() => void) | undefined;
 	#lastAgentEndMessages: readonly AgentMessage[] = [];
-	#consecutiveMonitorContinuations = 0;
-	#stallGoalId: string | null = null;
 	#consecutiveLengthRecoveries = 0;
 	#recentNormalizedOutputHashes: string[] = [];
 	#toollessContinuationStreak = 0;
+	#toollessStreakGoalId: string | null = null;
 	#endedTurnWasUserInitiated = false;
 
 	constructor(
@@ -63,9 +61,9 @@ export class MonitorAwareGoalContinuation {
 		this.#unsubscribeMonitorState?.();
 		this.#ctx = ctx;
 		this.#activeMonitorCount = 0;
+		this.#goal = null;
 		this.#lastAgentEndMessages = [];
 		this.#resetContinuationState();
-		this.#resetStallStreak();
 		const events = this.#pi.events;
 		if (events === undefined) return;
 		this.#unsubscribeMonitorState = events.on(TERMINAL_MONITOR_STATE_EVENT, (data) => {
@@ -73,17 +71,19 @@ export class MonitorAwareGoalContinuation {
 			this.#activeMonitorCount = data.activeCount;
 			if (data.activeCount === 0) {
 				this.#cancelTimer();
-				this.#resetStallStreak();
+				this.#resetToollessContinuationStreak();
 			}
 		});
 	}
 
 	async afterAgentEnd(options: AgentEndOptions): Promise<Goal | null> {
+		if (options.goal?.id !== this.#goal?.id) this.#resetToollessContinuationStreak();
 		this.#ctx = options.ctx;
 		this.#goal = options.goal;
 		this.#lastAgentEndMessages = options.messages;
 		this.#recordAssistantOutput(options.messages);
 		if (options.goal === null) return options.goal;
+		this.#recordToollessContinuationTurn(options.goal, options.messages);
 
 		const immediateInput = this.#buildVerdictInput(options.ctx, options.goal, "immediate", options.messages);
 		const immediateVerdict = evaluateGoalContinuation({ goal: options.goal, ...immediateInput });
@@ -91,7 +91,6 @@ export class MonitorAwareGoalContinuation {
 
 		if (this.#activeMonitorCount === 0) {
 			this.#cancelTimer();
-			this.#resetStallStreak();
 			return this.#admitAndQueue(options.ctx, options.goal, "immediate", options.messages);
 		}
 		this.#schedule(options.goal);
@@ -99,10 +98,11 @@ export class MonitorAwareGoalContinuation {
 	}
 
 	syncGoal(goal: Goal | null): void {
+		if (goal?.id !== this.#goal?.id) this.#resetToollessContinuationStreak();
 		this.#goal = goal;
 		if (goal?.status !== "active") {
 			this.#cancelTimer();
-			this.#resetStallStreak();
+			this.#resetToollessContinuationStreak();
 		}
 	}
 
@@ -110,7 +110,6 @@ export class MonitorAwareGoalContinuation {
 	noteUserPrompt(): void {
 		this.#endedTurnWasUserInitiated = true;
 		this.#resetContinuationState();
-		this.#resetStallStreak();
 	}
 
 	/** A queued hidden continuation has started, so the next end is not user-initiated. */
@@ -127,7 +126,6 @@ export class MonitorAwareGoalContinuation {
 		this.#activeMonitorCount = 0;
 		this.#lastAgentEndMessages = [];
 		this.#resetContinuationState();
-		this.#resetStallStreak();
 	}
 
 	#schedule(goal: Goal): void {
@@ -157,13 +155,13 @@ export class MonitorAwareGoalContinuation {
 	): Promise<Goal> {
 		const admittedGoal = await admitAndQueueGoalContinuation(this.#pi, ctx, goal, {
 			input: this.#buildVerdictInput(ctx, goal, path, messages),
-			content: (verdict) => this.#buildContinuationContent(ctx, goal, path, verdict),
+			content: (verdict) => this.#buildContinuationContent(ctx, goal, verdict),
 			markContinuationPending: this.#markContinuationPending,
 		});
 		this.#goal = admittedGoal;
 		if (admittedGoal.status !== "active") {
 			this.#cancelTimer();
-			this.#resetStallStreak();
+			this.#resetToollessContinuationStreak();
 		}
 		return admittedGoal;
 	}
@@ -191,40 +189,25 @@ export class MonitorAwareGoalContinuation {
 		};
 	}
 
-	#buildContinuationContent(
-		ctx: ExtensionContext,
-		goal: Goal,
-		path: GoalContinuationPath,
-		verdict: ContinuingGoalContinuationVerdict,
-	): string {
+	#buildContinuationContent(ctx: ExtensionContext, goal: Goal, verdict: ContinuingGoalContinuationVerdict): string {
 		let content = verdict.prompt === "minimal" ? buildTruncationRecoveryPrompt() : buildContinuationPrompt(goal);
-		if (verdict.stallNotice) {
-			content = `${buildGoalStallNotice(this.#toollessContinuationStreak, {
-				monitorsActive: this.#activeMonitorCount > 0,
-			})}\n\n${content}`;
-		}
-		return path === "monitorDelayed" ? this.#buildMonitorContinuationContent(ctx, goal, content) : content;
-	}
+		if (!verdict.stallNotice) return content;
 
-	/** Counts consecutive monitor-wait continuations; from the third one on, prepends an active stall check. */
-	#buildMonitorContinuationContent(ctx: ExtensionContext, goal: Goal, content: string): string {
-		if (goal.id !== this.#stallGoalId) {
-			this.#stallGoalId = goal.id;
-			this.#consecutiveMonitorContinuations = 0;
-		}
-		this.#consecutiveMonitorContinuations += 1;
-		if (this.#consecutiveMonitorContinuations < GOAL_MONITOR_STALL_THRESHOLD) return content;
+		const monitorsActive = this.#activeMonitorCount > 0;
 		this.#pi.events?.emit(GOAL_MONITOR_STALL_EVENT, {
 			goalId: goal.id,
-			consecutiveContinuations: this.#consecutiveMonitorContinuations,
+			consecutiveContinuations: this.#toollessContinuationStreak,
+			toolless: true,
 		});
 		if (ctx.hasUI) {
+			const context = monitorsActive ? "while monitors stayed active" : "without tool use";
 			ctx.ui.notify(
-				`Goal continuation repeated ${this.#consecutiveMonitorContinuations} times while monitors stayed active - injected a stall check.`,
+				`Goal continuation repeated ${this.#toollessContinuationStreak} toolless turns ${context} - injected a stall check.`,
 				"info",
 			);
 		}
-		return `${buildMonitorStallNotice(this.#consecutiveMonitorContinuations)}\n\n${content}`;
+		content = `${buildGoalStallNotice(this.#toollessContinuationStreak, { monitorsActive })}\n\n${content}`;
+		return content;
 	}
 
 	#recordAssistantOutput(messages: readonly AgentMessage[]): void {
@@ -233,15 +216,28 @@ export class MonitorAwareGoalContinuation {
 		this.#recentNormalizedOutputHashes = [...this.#recentNormalizedOutputHashes, hashAssistantText(text)].slice(-3);
 	}
 
+	#recordToollessContinuationTurn(goal: Goal, messages: readonly AgentMessage[]): void {
+		if (goal.id !== this.#toollessStreakGoalId) {
+			this.#toollessStreakGoalId = goal.id;
+			this.#toollessContinuationStreak = 0;
+		}
+		if (this.#endedTurnWasUserInitiated) return;
+		if (continuationTurnUsedTools(messages)) {
+			this.#toollessContinuationStreak = 0;
+			return;
+		}
+		this.#toollessContinuationStreak += 1;
+	}
+
 	#resetContinuationState(): void {
 		this.#consecutiveLengthRecoveries = 0;
 		this.#recentNormalizedOutputHashes = [];
-		this.#toollessContinuationStreak = 0;
+		this.#resetToollessContinuationStreak();
 	}
 
-	#resetStallStreak(): void {
-		this.#consecutiveMonitorContinuations = 0;
-		this.#stallGoalId = null;
+	#resetToollessContinuationStreak(): void {
+		this.#toollessContinuationStreak = 0;
+		this.#toollessStreakGoalId = null;
 	}
 
 	#cancelTimer(): void {
@@ -249,6 +245,13 @@ export class MonitorAwareGoalContinuation {
 		clearTimeout(this.#timer);
 		this.#timer = undefined;
 	}
+}
+
+function continuationTurnUsedTools(messages: readonly AgentMessage[]): boolean {
+	return messages.some((message) => {
+		if (message?.role === "toolResult") return true;
+		return message?.role === "assistant" && message.content.some((content) => content.type === "toolCall");
+	});
 }
 
 function findLastAssistantMessage(

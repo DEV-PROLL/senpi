@@ -55,9 +55,12 @@ export async function admitAndQueueGoalContinuation(
 
 	options.markContinuationPending();
 	queueHiddenGoalPrompt(pi, options.content(verdict));
-	if (options.input.path === "monitorDelayed") return goal;
+	if (options.input.path === "monitorDelayed" || options.input.currentSignature === undefined) return goal;
 
-	return (await recordContinuationDelivered(goalStoreRef(ctx.sessionManager, ctx.cwd), options.input.currentSignature)) ?? goal;
+	return (
+		(await recordContinuationDelivered(goalStoreRef(ctx.sessionManager, ctx.cwd), options.input.currentSignature)) ??
+		goal
+	);
 }
 
 /** Routes startup and resume continuations through the same verdict and delivery accounting as agent-end paths. */

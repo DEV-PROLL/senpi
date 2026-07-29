@@ -252,8 +252,8 @@ describe("goal truncation recovery prompt", () => {
 describe("goal stall notice", () => {
 	it("emits generic toolless-stall bullets when no monitors are active", () => {
 		const notice = buildGoalStallNotice(3, { monitorsActive: false });
-		expect(notice).toContain("<goal_monitor_stall_check>");
-		expect(notice).toContain("</goal_monitor_stall_check>");
+		expect(notice).toContain("<goal_stall_check>");
+		expect(notice).toContain("</goal_stall_check>");
 		expect(notice).toContain("3");
 		expect(notice).not.toContain("bash_output");
 		expect(notice).not.toContain("kill_bash");
@@ -265,7 +265,7 @@ describe("goal stall notice", () => {
 
 	it("keeps the monitor-investigation bullets while monitors are active", () => {
 		const notice = buildGoalStallNotice(4, { monitorsActive: true });
-		expect(notice).toContain("<goal_monitor_stall_check>");
+		expect(notice).toContain("<goal_stall_check>");
 		expect(notice).toContain("bash_output");
 		expect(notice).toContain("kill_bash");
 		expect(notice).toContain("4");
@@ -273,7 +273,7 @@ describe("goal stall notice", () => {
 
 	it("keeps buildMonitorStallNotice as a legacy wrapper over the generalized notice", () => {
 		const legacy = buildMonitorStallNotice(5);
-		expect(legacy).toContain("<goal_monitor_stall_check>");
+		expect(legacy).toContain("<goal_stall_check>");
 		expect(legacy).toBe(buildGoalStallNotice(5, { monitorsActive: true }));
 	});
 });

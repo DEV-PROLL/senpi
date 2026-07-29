@@ -52,7 +52,7 @@ export function buildTruncationRecoveryPrompt(): string {
 export function buildGoalStallNotice(consecutiveToollessTurns: number, options: { monitorsActive: boolean }): string {
 	if (options.monitorsActive) {
 		return [
-			"<goal_monitor_stall_check>",
+			"<goal_stall_check>",
 			`System check: this is monitor-wait goal continuation #${consecutiveToollessTurns} in a row. The same monitor(s) stayed active across ${consecutiveToollessTurns} consecutive continuation turns with no new user input and no monitor completion. The current situation is likely abnormal - a stalled or dead wait.`,
 			"Before waiting on the monitors again, actively investigate:",
 			"- Inspect the monitored sessions' output now (bash_output) and verify the watched condition can still occur.",
@@ -60,18 +60,18 @@ export function buildGoalStallNotice(consecutiveToollessTurns: number, options: 
 			"- If the wait target is wrong or no longer needed, kill the monitor (kill_bash) and pursue the goal another way.",
 			"- If the goal truly cannot progress, run the blocked audit instead of waiting again.",
 			"Do not end this turn with only another passive wait.",
-			"</goal_monitor_stall_check>",
+			"</goal_stall_check>",
 		].join("\n");
 	}
 	return [
-		"<goal_monitor_stall_check>",
+		"<goal_stall_check>",
 		`System check: this is goal continuation #${consecutiveToollessTurns} in a row with no tool use and no new user input. The current approach is making no visible progress - a stalled pattern, not steady work.`,
 		"Before continuing in the same way, change what you are doing:",
 		"- Re-read the todo list and inspect the actual worktree state; treat it as authoritative over memory of earlier turns.",
 		"- Take one concrete action that moves the goal forward: edit a file, run a command, or verify a real result.",
 		"- If the goal truly cannot progress, run the blocked audit instead of repeating the same turn.",
 		"Do not end this turn with only narration about what you intend to do.",
-		"</goal_monitor_stall_check>",
+		"</goal_stall_check>",
 	].join("\n");
 }
 
