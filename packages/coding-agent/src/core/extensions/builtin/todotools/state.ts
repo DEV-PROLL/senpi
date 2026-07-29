@@ -552,13 +552,41 @@ function getActivePhase(phases: readonly TodoPhase[]): TodoPhase | undefined {
 	return phases.find((phase) => phase.tasks.includes(activeTask));
 }
 
+const TODO_WIDGET_MAX_LINES = 10;
+const TODO_WIDGET_HEADER_LINES = 2;
+const TODO_WIDGET_RECENT_TASKS = 2;
+
+function formatOmittedTasks(count: number, direction: "earlier" | "later"): string {
+	return `... (${count} ${direction} task${count === 1 ? "" : "s"})`;
+}
+
 export function getTodoWidgetLines(phases: readonly TodoPhase[]): string[] | undefined {
 	const activePhase = getActivePhase(phases);
 	if (!activePhase) return undefined;
+	const header = ["Todo", sanitizeTodoText(activePhase.name)];
+	const taskLines = activePhase.tasks.map((todo) => `${getTodoMarker(todo.status)} ${sanitizeTodoText(todo.content)}`);
+	if (header.length + taskLines.length <= TODO_WIDGET_MAX_LINES) return [...header, ...taskLines];
+
+	const activeTask = nextActionableTask([activePhase]);
+	if (!activeTask) return undefined;
+	const activeIndex = activePhase.tasks.indexOf(activeTask);
+	const firstVisibleTask = Math.max(0, activeIndex - TODO_WIDGET_RECENT_TASKS);
+	const earlierOmitted = firstVisibleTask;
+	const bodyBudget = TODO_WIDGET_MAX_LINES - TODO_WIDGET_HEADER_LINES;
+	const recentAndActive = taskLines.slice(firstVisibleTask, activeIndex + 1);
+	const earlierMarkerRows = earlierOmitted > 0 ? 1 : 0;
+	const upcomingCount = taskLines.length - activeIndex - 1;
+	const upcomingBudget = bodyBudget - recentAndActive.length - earlierMarkerRows;
+	const visibleUpcomingCount = upcomingCount > upcomingBudget ? Math.max(0, upcomingBudget - 1) : upcomingCount;
+	const laterOmitted = upcomingCount - visibleUpcomingCount;
+
 	return [
 		"Todo",
 		sanitizeTodoText(activePhase.name),
-		...activePhase.tasks.map((todo) => `${getTodoMarker(todo.status)} ${sanitizeTodoText(todo.content)}`),
+		...(earlierOmitted > 0 ? [formatOmittedTasks(earlierOmitted, "earlier")] : []),
+		...recentAndActive,
+		...taskLines.slice(activeIndex + 1, activeIndex + 1 + visibleUpcomingCount),
+		...(laterOmitted > 0 ? [formatOmittedTasks(laterOmitted, "later")] : []),
 	];
 }
 

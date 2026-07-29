@@ -1,5 +1,21 @@
 # todotools Fork Tracker
 
+## 2026-07-29 - Keep active work visible in long todo widgets
+
+### What changed
+
+- Bounded the phase-aware `todo-sidebar` output to the interactive widget's
+  10-line budget before the generic widget renderer truncates it.
+- Long active phases now keep the two tasks immediately before the active
+  item, the active item itself, and as much upcoming work as fits.
+- Explicit earlier/later omission rows report how many tasks are outside the
+  window. Short phases preserve their existing complete output.
+
+### Expected merge conflict zones
+
+- MEDIUM: `state.ts` around `getTodoWidgetLines` if upstream changes todo
+  sidebar layout or the interactive widget line budget.
+
 ## 2026-07-28 - Preserve open todo work across new instructions
 
 ### What changed
