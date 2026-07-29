@@ -23,6 +23,34 @@
 
 - MEDIUM: `_handleRetryableError` transient branch and the `switchedFallback` reset in `core/agent-session.ts`.
 
+## Stream-start timeout wiring and unregistered-api error context (2026-07-29)
+
+### What changed
+
+- `core/settings-manager.ts`: new `retry.provider.streamStartTimeoutMs` setting and
+  `getAgentStreamStartTimeoutMs()` (default 90000ms; 0 disables; the default is clamped to a
+  shorter idle timeout and disabled together with a disabled idle guard). `core/sdk.ts` and the
+  interactive settings handler wire it into `Agent.streamStartTimeoutMs`.
+- `core/provider-composer.ts`: the stream-time `No API provider registered for api: <api>` error
+  now names the model (`provider/id`) and points at the models.json provider entry or the missing
+  provider extension.
+- Coverage: `test/settings-manager.test.ts` (retry describe), `test/provider-composer-unknown-api.test.ts`,
+  `packages/ai/test/retry.test.ts` (stream timeout wordings stay retryable).
+
+### Why
+
+- Incident (donated session log): a dead upstream accepted requests but never sent a first byte.
+  With only the 300s idle bound, each turn attempt froze the session for 5 minutes with `usage: 0`
+  and nothing persisted; retries repeated the same 300s wait, making the session practically
+  unrecoverable while new sessions worked. A 90s first-event bound with the retryable wording lets
+  the retry/fallback ladder engage quickly. Related incident error `No API provider registered for
+  api: kiro-api` carried no context about which model or config produced it.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one settings getter + one field in `ProviderRetrySettings`; one error message in
+  `composeModelProvider`; one option in the `Agent` construction in `core/sdk.ts`.
+
 ## Absent fallback chains no longer produce a startup warning (2026-07-28)
 
 ### What changed
@@ -233,7 +261,8 @@
 - A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
 - The user's checkout receives ZERO git mutations: the hook performs one read-only `git fetch origin dev`, builds in a feature-owned persistent worktree under the agent directory, and atomically swaps the installed plugin directory by rename. No checkout/branch/commit/merge/reset/clean/stash/push ever touches the user's tree.
 - `SENPI_OMO_LOCAL_UPDATE=0` is a kill-switch that disables the hook entirely. All failures are non-fatal: the hook never throws and never sets `process.exitCode`; any error downgrades to a warning plus a manual-update hint so the `senpi` self-update proceeds untouched.
-- Removal is exactly three steps: delete `src/beta/omo-local-update.ts`; delete all `test/omo-local-update*` files; delete the two BETA-marked touch points (the import and the hook call) in `package-manager-cli.ts`.
+- Fast path (2026-07-29): the skip decision now compares a build-input fingerprint of `origin/dev` (`src/beta/omo-local-update-fingerprint.ts`: sha256 over root tree entries minus documentation/agent-config paths) instead of the bare commit sha, so docs/CI-only churn in the omo monorepo no longer triggers the ~30s rebuild. When a rebuild IS needed, the bare-update foreground now only fetches and compares (~1s) and hands the build to a detached worker (`src/beta/omo-local-update-worker.ts`, hidden `senpi update --omo-local-update-worker` flag, output to `<agentDir>/omo-local-update/worker.log`); the worker serializes through the existing pid lock and swaps/stamps exactly like the former inline path. `SENPI_OMO_LOCAL_UPDATE_SYNC=1` restores the old blocking foreground behavior.
+- Removal is exactly three steps: delete all `src/beta/omo-local-update*.ts` files; delete all `test/omo-local-update*` files; delete the BETA-marked touch points (the import, the hook calls, and the `--omo-local-update-worker` flag) in `package-manager-cli.ts`.
 
 ## App-server daemon launch diagnostics and hermetic lifecycle coverage (2026-07-24)
 

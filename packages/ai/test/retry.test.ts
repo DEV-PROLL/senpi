@@ -45,6 +45,33 @@ describe("provider retry classification", () => {
 		).toBe(true);
 	});
 
+	it("classifies agent-loop stream timeout errors as retryable", () => {
+		// Wordings produced by packages/agent/src/agent-loop.ts; the "timed out"
+		// coupling is what lets a dead stream start retry instead of dead-ending
+		// the session.
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Provider stream start timed out after 90000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Provider stream never started" }),
+			),
+		).toBe(false);
+	});
+
 	it("classifies the observed OpenAI server_error as retryable", () => {
 		expect(
 			isRetryableAssistantError(

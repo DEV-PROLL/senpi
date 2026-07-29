@@ -10,6 +10,8 @@ import { findNearestParentConfigDir } from "../nearest-parent-config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
+export const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
+
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
@@ -31,6 +33,7 @@ export interface BranchSummarySettings {
 
 export interface ProviderRetrySettings {
 	timeoutMs?: number; // SDK request timeout + agent stream idle timeout; defaults to httpIdleTimeoutMs
+	streamStartTimeoutMs?: number; // max wait for the FIRST provider stream event; default: 90000, 0 disables
 	maxRetries?: number; // SDK/provider retry attempts
 	maxRetryDelayMs?: number; // default: 60000 (max server-requested delay honoured on the same model; beyond it the fallback chain engages)
 }
@@ -1120,6 +1123,27 @@ export class SettingsManager {
 		}
 		const httpIdleTimeoutMs = this.getHttpIdleTimeoutMs();
 		return httpIdleTimeoutMs === 0 ? undefined : httpIdleTimeoutMs;
+	}
+
+	/**
+	 * Bound on the time to the FIRST provider stream event. Providers only emit
+	 * their first event once the HTTP response begins, so a dead upstream that
+	 * accepts the request but never answers is otherwise bounded only by the
+	 * idle timeout (default 5 minutes) — long enough to make a session feel
+	 * permanently stuck. `retry.provider.streamStartTimeoutMs` overrides the
+	 * 90s default (0 disables). The default never exceeds the idle timeout and
+	 * is disabled together with a disabled idle guard.
+	 */
+	getAgentStreamStartTimeoutMs(): number | undefined {
+		const explicit = this.settings.retry?.provider?.streamStartTimeoutMs;
+		if (explicit !== undefined) {
+			return explicit > 0 ? explicit : undefined;
+		}
+		const idleTimeoutMs = this.getAgentStreamIdleTimeoutMs();
+		if (idleTimeoutMs === undefined) {
+			return undefined;
+		}
+		return Math.min(DEFAULT_STREAM_START_TIMEOUT_MS, idleTimeoutMs);
 	}
 
 	getWebSocketConnectTimeoutMs(): number | undefined {
