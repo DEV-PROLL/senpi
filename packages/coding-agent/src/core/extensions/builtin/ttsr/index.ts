@@ -16,9 +16,9 @@ import {
 import { compileRuleCondition } from "./rule-condition.ts";
 import {
 	DEFAULT_TTSR_SETTINGS,
-	TTSR_INJECTION_CUSTOM_TYPE,
 	type DetectionResolution,
 	type GenerationDetectionState,
+	TTSR_INJECTION_CUSTOM_TYPE,
 	type TtsrRule,
 } from "./types.ts";
 import { StreamWatcher } from "./watch.ts";
@@ -44,7 +44,10 @@ function isInterruptKey(data: string): boolean {
 
 function parseDisabledRules(raw: boolean | string | undefined): string[] {
 	return typeof raw === "string" && raw.length > 0
-		? raw.split(",").map((name) => name.trim()).filter((name) => name.length > 0)
+		? raw
+				.split(",")
+				.map((name) => name.trim())
+				.filter((name) => name.length > 0)
 		: [];
 }
 

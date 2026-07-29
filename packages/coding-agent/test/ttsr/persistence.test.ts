@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
-
-import { afterEach, describe, expect, it } from "vitest";
-
 import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it } from "vitest";
 
 import ttsrExtension from "../../src/core/extensions/builtin/ttsr/index.ts";
 import { TtsrManager, type TtsrMatchContext } from "../../src/core/extensions/builtin/ttsr/manager.ts";
@@ -13,7 +11,7 @@ import {
 	type TtsrRule,
 	type TtsrScope,
 } from "../../src/core/extensions/builtin/ttsr/types.ts";
-import { SessionManager, type SessionEntry } from "../../src/core/session-manager.ts";
+import { type SessionEntry, SessionManager } from "../../src/core/session-manager.ts";
 import { createHarness, getMessageText, type Harness } from "../suite/harness.ts";
 
 const ALL_SCOPE: TtsrScope = { allowText: true, allowThinking: true, toolScopes: [] };
@@ -171,9 +169,8 @@ describe("ttsr persistence", () => {
 			persisted.filter((entry) => entry.type === "custom" && entry.customType === TTSR_INJECTION_CUSTOM_TYPE).length,
 		).toBeGreaterThan(0);
 		expect(
-			persisted.filter(
-				(entry) => entry.type === "custom_message" && entry.customType === TTSR_INJECTION_CUSTOM_TYPE,
-			).length,
+			persisted.filter((entry) => entry.type === "custom_message" && entry.customType === TTSR_INJECTION_CUSTOM_TYPE)
+				.length,
 		).toBeGreaterThan(0);
 		expect(persisted.filter((entry) => entry.type === "compaction")).toHaveLength(1);
 

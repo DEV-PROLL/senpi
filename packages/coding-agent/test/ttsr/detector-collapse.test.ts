@@ -4,11 +4,11 @@ import { collapseDetector, createCollapseState } from "../../src/core/extensions
 import type { DetectorContext, DetectorMatch } from "../../src/core/extensions/builtin/ttsr/types.ts";
 import {
 	AN11_LINE,
+	AP1_PREFIX,
+	AP9_LINE,
 	AP10_LINE_A,
 	AP10_LINE_B,
 	AP12_PREFIX,
-	AP1_PREFIX,
-	AP9_LINE,
 	buildAsciiArt,
 	buildBase64,
 	buildBoxTable,
@@ -84,18 +84,100 @@ const AP10_CYCLE_WIDTH = AP10_LINE_A.length + AP10_LINE_B.length + 2;
 const AP9_LINE_WIDTH = AP9_LINE.length + 1;
 
 const COLLAPSE_ROWS: readonly CollapseRow[] = [
-	{ id: "A-P1", seed: 11, input: AP1_PREFIX + "!".repeat(2207), expected: { mechanism: "dominant-scalar-run", anomalyStart: AP1_PREFIX.length, garbageStart: AP1_PREFIX.length + 1, fireOffset: AP1_PREFIX.length + 255 } },
-	{ id: "A-P2", seed: 12, input: "永".repeat(250), expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 1, fireOffset: 223 } },
-	{ id: "A-P3", seed: 13, input: "\u{1F600}".repeat(250), expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 2, fireOffset: 447 } },
-	{ id: "A-P4", seed: 14, input: "foo ".repeat(100), expected: { mechanism: "short-period", period: 4, anomalyStart: 0, garbageStart: 4, fireOffset: 259 } },
-	{ id: "A-P5", seed: 15, input: "yes no ".repeat(80), expected: { mechanism: "short-period", period: 7, anomalyStart: 0, garbageStart: 7, fireOffset: 262 } },
-	{ id: "A-P6", seed: 16, input: "!?".repeat(200), expected: { mechanism: "short-period", period: 2, anomalyStart: 0, garbageStart: 2, fireOffset: 257 } },
-	{ id: "A-P7", seed: 17, input: " ".repeat(600), expected: { mechanism: "whitespace-flood", anomalyStart: 0, garbageStart: 1, fireOffset: 479 } },
-	{ id: "A-P8", seed: 18, input: "\n".repeat(400), expected: { mechanism: "whitespace-flood", anomalyStart: 0, garbageStart: 1, fireOffset: 319 } },
-	{ id: "A-P9", seed: 19, input: (AP9_LINE + "\n").repeat(6), expected: { mechanism: "line-cycle", period: 1, anomalyStart: 0, garbageStart: AP9_LINE_WIDTH, fireOffset: 6 * AP9_LINE_WIDTH - 1 } },
-	{ id: "A-P10", seed: 20, input: (AP10_LINE_A + "\n" + AP10_LINE_B + "\n").repeat(6), expected: { mechanism: "line-cycle", period: 2, anomalyStart: 0, garbageStart: AP10_CYCLE_WIDTH, fireOffset: 6 * AP10_CYCLE_WIDTH - 1 } },
-	{ id: "A-P11", seed: 21, input: "ok\n".repeat(120), expected: { mechanism: "short-period", period: 3, anomalyStart: 0, garbageStart: 3, fireOffset: 258 } },
-	{ id: "A-P12", seed: 22, input: AP12_PREFIX + "!".repeat(500), expected: { mechanism: "dominant-scalar-run", anomalyStart: AP12_PREFIX.length, garbageStart: AP12_PREFIX.length + 1, fireOffset: AP12_PREFIX.length + 255 } },
+	{
+		id: "A-P1",
+		seed: 11,
+		input: AP1_PREFIX + "!".repeat(2207),
+		expected: {
+			mechanism: "dominant-scalar-run",
+			anomalyStart: AP1_PREFIX.length,
+			garbageStart: AP1_PREFIX.length + 1,
+			fireOffset: AP1_PREFIX.length + 255,
+		},
+	},
+	{
+		id: "A-P2",
+		seed: 12,
+		input: "永".repeat(250),
+		expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 1, fireOffset: 223 },
+	},
+	{
+		id: "A-P3",
+		seed: 13,
+		input: "\u{1F600}".repeat(250),
+		expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 2, fireOffset: 447 },
+	},
+	{
+		id: "A-P4",
+		seed: 14,
+		input: "foo ".repeat(100),
+		expected: { mechanism: "short-period", period: 4, anomalyStart: 0, garbageStart: 4, fireOffset: 259 },
+	},
+	{
+		id: "A-P5",
+		seed: 15,
+		input: "yes no ".repeat(80),
+		expected: { mechanism: "short-period", period: 7, anomalyStart: 0, garbageStart: 7, fireOffset: 262 },
+	},
+	{
+		id: "A-P6",
+		seed: 16,
+		input: "!?".repeat(200),
+		expected: { mechanism: "short-period", period: 2, anomalyStart: 0, garbageStart: 2, fireOffset: 257 },
+	},
+	{
+		id: "A-P7",
+		seed: 17,
+		input: " ".repeat(600),
+		expected: { mechanism: "whitespace-flood", anomalyStart: 0, garbageStart: 1, fireOffset: 479 },
+	},
+	{
+		id: "A-P8",
+		seed: 18,
+		input: "\n".repeat(400),
+		expected: { mechanism: "whitespace-flood", anomalyStart: 0, garbageStart: 1, fireOffset: 319 },
+	},
+	{
+		id: "A-P9",
+		seed: 19,
+		input: (AP9_LINE + "\n").repeat(6),
+		expected: {
+			mechanism: "line-cycle",
+			period: 1,
+			anomalyStart: 0,
+			garbageStart: AP9_LINE_WIDTH,
+			fireOffset: 6 * AP9_LINE_WIDTH - 1,
+		},
+	},
+	{
+		id: "A-P10",
+		seed: 20,
+		input: (AP10_LINE_A + "\n" + AP10_LINE_B + "\n").repeat(6),
+		expected: {
+			mechanism: "line-cycle",
+			period: 2,
+			anomalyStart: 0,
+			garbageStart: AP10_CYCLE_WIDTH,
+			fireOffset: 6 * AP10_CYCLE_WIDTH - 1,
+		},
+	},
+	{
+		id: "A-P11",
+		seed: 21,
+		input: "ok\n".repeat(120),
+		expected: { mechanism: "short-period", period: 3, anomalyStart: 0, garbageStart: 3, fireOffset: 258 },
+	},
+	{
+		id: "A-P12",
+		seed: 22,
+		input: AP12_PREFIX + "!".repeat(500),
+		expected: {
+			mechanism: "dominant-scalar-run",
+			anomalyStart: AP12_PREFIX.length,
+			garbageStart: AP12_PREFIX.length + 1,
+			fireOffset: AP12_PREFIX.length + 255,
+		},
+	},
 	{ id: "A-N1", seed: 23, input: buildMarkdownRules(), expected: null },
 	{ id: "A-N2", seed: 24, input: "// " + "=".repeat(2000) + "\n// section end\n", expected: null },
 	{ id: "A-N3", seed: 25, input: buildAsciiArt(), expected: null },
@@ -109,16 +191,46 @@ const COLLAPSE_ROWS: readonly CollapseRow[] = [
 	{ id: "A-N11", seed: 33, input: (AN11_LINE + "\n").repeat(5), expected: null },
 	{ id: "A-N12", seed: 34, input: " ".repeat(400), expected: null },
 	{ id: "B-1", seed: 35, input: "!".repeat(255), expected: null },
-	{ id: "B-2", seed: 36, input: "!".repeat(256), expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 1, fireOffset: 255 } },
+	{
+		id: "B-2",
+		seed: 36,
+		input: "!".repeat(256),
+		expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 1, fireOffset: 255 },
+	},
 	{ id: "B-3", seed: 37, input: "永".repeat(223), expected: null },
-	{ id: "B-4", seed: 38, input: "永".repeat(224), expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 1, fireOffset: 223 } },
+	{
+		id: "B-4",
+		seed: 38,
+		input: "永".repeat(224),
+		expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 1, fireOffset: 223 },
+	},
 	{ id: "B-5", seed: 39, input: " ".repeat(479), expected: null },
-	{ id: "B-6", seed: 40, input: " ".repeat(480), expected: { mechanism: "whitespace-flood", anomalyStart: 0, garbageStart: 1, fireOffset: 479 } },
+	{
+		id: "B-6",
+		seed: 40,
+		input: " ".repeat(480),
+		expected: { mechanism: "whitespace-flood", anomalyStart: 0, garbageStart: 1, fireOffset: 479 },
+	},
 	{ id: "B-7", seed: 41, input: "\n".repeat(319), expected: null },
-	{ id: "B-8", seed: 42, input: "\n".repeat(320), expected: { mechanism: "whitespace-flood", anomalyStart: 0, garbageStart: 1, fireOffset: 319 } },
+	{
+		id: "B-8",
+		seed: 42,
+		input: "\n".repeat(320),
+		expected: { mechanism: "whitespace-flood", anomalyStart: 0, garbageStart: 1, fireOffset: 319 },
+	},
 	{ id: "B-9", seed: 43, input: "foo ".repeat(64), expected: null },
-	{ id: "B-10", seed: 44, input: "foo ".repeat(65), expected: { mechanism: "short-period", period: 4, anomalyStart: 0, garbageStart: 4, fireOffset: 259 } },
-	{ id: "B-11", seed: 45, input: ("!".repeat(80) + "\n").repeat(8), expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 1, fireOffset: 258 } },
+	{
+		id: "B-10",
+		seed: 44,
+		input: "foo ".repeat(65),
+		expected: { mechanism: "short-period", period: 4, anomalyStart: 0, garbageStart: 4, fireOffset: 259 },
+	},
+	{
+		id: "B-11",
+		seed: 45,
+		input: ("!".repeat(80) + "\n").repeat(8),
+		expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 1, fireOffset: 258 },
+	},
 	{ id: "H-1", seed: 46, input: buildHealthyPrefix(3072), expected: null },
 ];
 
@@ -151,7 +263,10 @@ function assertRow(row: CollapseRow, outcome: FeedOutcome, mode: string): void {
 const MODES = [
 	{ name: "single delta", feed: (row: CollapseRow): FeedOutcome => feedChunks([row.input]) },
 	{ name: "one-char deltas", feed: (row: CollapseRow): FeedOutcome => feedPerChar(row.input) },
-	{ name: "random deterministic chunks", feed: (row: CollapseRow): FeedOutcome => feedRandomChunks(row.input, row.seed) },
+	{
+		name: "random deterministic chunks",
+		feed: (row: CollapseRow): FeedOutcome => feedRandomChunks(row.input, row.seed),
+	},
 ] as const;
 
 describe("Detector A collapse/repetition spec rows", () => {

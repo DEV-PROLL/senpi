@@ -62,5 +62,3 @@ export class StreamWatcher {
 		return track;
 	}
 }
-
-

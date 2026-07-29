@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
-
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-
 import { fauxAssistantMessage, fauxThinking, isRetryableAssistantError } from "@earendil-works/pi-ai";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import ttsrExtension from "../../src/core/extensions/builtin/ttsr/index.ts";
 import { LEAK_ERROR_MESSAGE } from "../../src/core/extensions/builtin/ttsr/prompts.ts";

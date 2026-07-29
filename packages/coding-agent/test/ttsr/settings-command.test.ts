@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
-
-import { afterEach, describe, expect, it } from "vitest";
-
 import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { registerTtsrCommands, type TtsrPublicState } from "../../src/core/extensions/builtin/ttsr/commands.ts";
 import ttsrExtension from "../../src/core/extensions/builtin/ttsr/index.ts";
@@ -172,7 +170,9 @@ describe("ttsr settings and flag gating", () => {
 		expect(finished?.stopReason).toBe("stop");
 		expect(thinkingTextOf(finished)).toContain(garbage);
 		expect(entries.filter((e) => e.type === "custom" && e.customType === TTSR_INJECTION_CUSTOM_TYPE)).toHaveLength(0);
-		expect(entries.filter((e) => e.type === "custom_message" && e.customType === TTSR_INJECTION_CUSTOM_TYPE)).toHaveLength(0);
+		expect(
+			entries.filter((e) => e.type === "custom_message" && e.customType === TTSR_INJECTION_CUSTOM_TYPE),
+		).toHaveLength(0);
 		expect(harness.faux.getCallLog()).toHaveLength(1);
 	});
 
@@ -182,9 +182,7 @@ describe("ttsr settings and flag gating", () => {
 			extensionFlagValues: new Map([["ttsr-rules-disabled", "collapse-repetition"]]),
 			persistSession: true,
 		});
-		harness.setResponses([
-			fauxAssistantMessage([fauxThinking(`analyzing the problem ${"!".repeat(600)}`)]),
-		]);
+		harness.setResponses([fauxAssistantMessage([fauxThinking(`analyzing the problem ${"!".repeat(600)}`)])]);
 
 		await harness.session.prompt("do work");
 

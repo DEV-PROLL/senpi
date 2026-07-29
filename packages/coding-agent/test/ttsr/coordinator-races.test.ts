@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
-
-import { afterEach, describe, expect, it } from "vitest";
-
 import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	claimAbort,
@@ -13,9 +11,9 @@ import {
 import ttsrExtension from "../../src/core/extensions/builtin/ttsr/index.ts";
 import { LEAK_ERROR_MESSAGE } from "../../src/core/extensions/builtin/ttsr/prompts.ts";
 import {
-	TTSR_INJECTION_CUSTOM_TYPE,
 	type DetectionResolution,
 	type DetectorMatch,
+	TTSR_INJECTION_CUSTOM_TYPE,
 } from "../../src/core/extensions/builtin/ttsr/types.ts";
 import { createHarness, getMessageText, getUserTexts, type Harness } from "../suite/harness.ts";
 
@@ -100,10 +98,42 @@ describe("coordinator mixed-ownership matrix", () => {
 		observed: readonly string[];
 		retryMode: string;
 	}> = [
-		{ name: "M-1/M-2/M-3/M-8 leak dominates with collapse observed", direct: makeMatch("control-token-leak"), collapse: makeMatch("collapse-repetition"), corroborated: null, owner: "control-token-leak", observed: ["control-token-leak", "collapse-repetition"], retryMode: "provider-error" },
-		{ name: "M-4/M-5 collapse owns when corroboration does not apply", direct: null, collapse: makeMatch("collapse-repetition"), corroborated: null, owner: "collapse-repetition", observed: ["collapse-repetition"], retryMode: "nudge" },
-		{ name: "M-6 corroboration reclassifies collapse to the leak owner", direct: null, collapse: makeMatch("collapse-repetition"), corroborated: makeMatch("control-token-leak"), owner: "control-token-leak", observed: ["control-token-leak", "collapse-repetition"], retryMode: "provider-error" },
-		{ name: "direct leak alone observes only the leak", direct: makeMatch("control-token-leak"), collapse: null, corroborated: null, owner: "control-token-leak", observed: ["control-token-leak"], retryMode: "provider-error" },
+		{
+			name: "M-1/M-2/M-3/M-8 leak dominates with collapse observed",
+			direct: makeMatch("control-token-leak"),
+			collapse: makeMatch("collapse-repetition"),
+			corroborated: null,
+			owner: "control-token-leak",
+			observed: ["control-token-leak", "collapse-repetition"],
+			retryMode: "provider-error",
+		},
+		{
+			name: "M-4/M-5 collapse owns when corroboration does not apply",
+			direct: null,
+			collapse: makeMatch("collapse-repetition"),
+			corroborated: null,
+			owner: "collapse-repetition",
+			observed: ["collapse-repetition"],
+			retryMode: "nudge",
+		},
+		{
+			name: "M-6 corroboration reclassifies collapse to the leak owner",
+			direct: null,
+			collapse: makeMatch("collapse-repetition"),
+			corroborated: makeMatch("control-token-leak"),
+			owner: "control-token-leak",
+			observed: ["control-token-leak", "collapse-repetition"],
+			retryMode: "provider-error",
+		},
+		{
+			name: "direct leak alone observes only the leak",
+			direct: makeMatch("control-token-leak"),
+			collapse: null,
+			corroborated: null,
+			owner: "control-token-leak",
+			observed: ["control-token-leak"],
+			retryMode: "provider-error",
+		},
 	];
 	for (const row of matrix) {
 		it(row.name, () => {
@@ -126,7 +156,9 @@ describe("coordinator mixed-ownership matrix", () => {
 	it("user cancellation before any claim stands the generation down", () => {
 		const state = createGenerationState();
 		markUserCancelled(state);
-		expect(claimAbort(state, mustResolve(makeMatch("control-token-leak"), makeMatch("collapse-repetition"), null))).toBe(false);
+		expect(
+			claimAbort(state, mustResolve(makeMatch("control-token-leak"), makeMatch("collapse-repetition"), null)),
+		).toBe(false);
 		expect(state.abortClaimed).toBe(false);
 		expect(state.abortOwner).toBeUndefined();
 	});
@@ -180,7 +212,11 @@ describe("coordinator races through the session wiring", () => {
 		]);
 		const controller = new AbortController();
 		harness.session.subscribe((event) => {
-			if (event.type === "message_end" && event.message.role === "assistant" && event.message.stopReason === "aborted") {
+			if (
+				event.type === "message_end" &&
+				event.message.role === "assistant" &&
+				event.message.stopReason === "aborted"
+			) {
 				harness.session.prompt("user interrupt", { signal: controller.signal }).catch(() => undefined);
 			}
 		});
@@ -193,9 +229,11 @@ describe("coordinator races through the session wiring", () => {
 		expect(records[0]?.data?.owner).toBe("collapse-repetition");
 		expect(harness.faux.getCallLog().length).toBe(2);
 		expect(getUserTexts(harness)).not.toContain("user interrupt");
-		expect(assistantMessages(entries).map((message) => getMessageText(message)).join("\n")).toContain(
-			"after nudge",
-		);
+		expect(
+			assistantMessages(entries)
+				.map((message) => getMessageText(message))
+				.join("\n"),
+		).toContain("after nudge");
 		controller.abort();
 	});
 
@@ -252,7 +290,9 @@ describe("coordinator races through the session wiring", () => {
 		expect(harness.eventsOfType("auto_retry_start").length).toBe(2);
 		const entries = readSessionEntries(harness);
 		const assistants = assistantMessages(entries);
-		expect(assistants.filter((m) => m.stopReason === "error" && m.errorMessage === LEAK_ERROR_MESSAGE).length).toBe(2);
+		expect(assistants.filter((m) => m.stopReason === "error" && m.errorMessage === LEAK_ERROR_MESSAGE).length).toBe(
+			2,
+		);
 		expect(injectionRecords(entries).length).toBe(2);
 		expect(nudgeMessages(entries).length).toBe(0);
 		expect(assistants.map((message) => getMessageText(message)).join("\n")).toContain("clean answer");

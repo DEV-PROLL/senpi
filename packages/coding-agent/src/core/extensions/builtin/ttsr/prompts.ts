@@ -17,8 +17,7 @@ export const COLLAPSE_RULE_CONTENT = [
 	"Do NOT apologize at length, do NOT repeat the garbled pattern, and do NOT restart work that was already completed.",
 ].join("\n");
 
-export const LEAK_ERROR_MESSAGE =
-	"Degeneration guard: control-token leakage; treating as internal error, resampling";
+export const LEAK_ERROR_MESSAGE = "Degeneration guard: control-token leakage; treating as internal error, resampling";
 
 export const COLLAPSE_RULE_NAME = "collapse-repetition";
 export const CONTROL_LEAK_RULE_NAME = "control-token-leak";

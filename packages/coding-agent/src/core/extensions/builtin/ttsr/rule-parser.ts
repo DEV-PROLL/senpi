@@ -1,7 +1,7 @@
 import { compileRuleCondition } from "./rule-condition.ts";
 
-export { compileRuleCondition } from "./rule-condition.ts";
 export type { CompiledCondition } from "./rule-condition.ts";
+export { compileRuleCondition } from "./rule-condition.ts";
 
 import { parse as parseYaml } from "yaml";
 

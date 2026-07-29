@@ -160,8 +160,7 @@ export function discoverTtsrRulesSync(cwd: string, homeDir?: string): TtsrDiscov
 	const projectRoot = findProjectRootSync(cwd, resolvedHome);
 	const projectDir = join(projectRoot, SENPI_DIR_NAME, TTSR_DIR_NAME);
 	const globalResult = loadRulesSync(globalDir, "global");
-	const projectResult =
-		projectDir === globalDir ? { rules: [], warnings: [] } : loadRulesSync(projectDir, "project");
+	const projectResult = projectDir === globalDir ? { rules: [], warnings: [] } : loadRulesSync(projectDir, "project");
 	const projectNames = new Set(projectResult.rules.map((rule) => rule.name));
 	const rules = [...globalResult.rules.filter((rule) => !projectNames.has(rule.name)), ...projectResult.rules];
 	return { rules, warnings: [...globalResult.warnings, ...projectResult.warnings] };
