@@ -187,6 +187,7 @@ async function runLoop(
 	let currentContext = initialContext;
 	let config = initialConfig;
 	let firstTurn = true;
+	let firstProviderRequest = true;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 	let drainedTerminatingQueue: "steering" | "followUp" | undefined;
@@ -232,8 +233,29 @@ async function runLoop(
 				pendingMessages = [];
 			}
 
-			// Stream assistant response
-			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFunction);
+			// Stream assistant response. Continuation-scoped overrides apply to one
+			// provider request only. Once that request emits its first event, the
+			// configured idle timeout resumes so healthy reasoning gaps are not bound
+			// by the short liveness probe.
+			const isInitialProviderRequest = firstProviderRequest;
+			firstProviderRequest = false;
+			const requestConfig = isInitialProviderRequest
+				? {
+						...config,
+						timeoutMs: config.initialRequestTimeoutMs ?? config.timeoutMs,
+						streamStartTimeoutMs:
+							config.initialRequestStreamStartTimeoutMs ?? config.streamStartTimeoutMs,
+					}
+				: config;
+			const streamIdleTimeoutMs = isInitialProviderRequest ? config.timeoutMs : requestConfig.timeoutMs;
+			const message = await streamAssistantResponse(
+				currentContext,
+				requestConfig,
+				signal,
+				emit,
+				streamFunction,
+				streamIdleTimeoutMs,
+			);
 			newMessages.push(message);
 
 			if (shouldTerminateAssistantTurn(message)) {
@@ -380,6 +402,7 @@ async function streamAssistantResponse(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 	streamFunction: StreamFn,
+	streamIdleTimeoutMs: number | undefined,
 ): Promise<AssistantMessage> {
 	let partialMessage: AssistantMessage | null = null;
 	let addedPartial = false;
@@ -441,7 +464,7 @@ async function streamAssistantResponse(
 		const iterator = response[Symbol.asyncIterator]();
 		const eventReader = createAssistantEventReader(
 			iterator,
-			config.timeoutMs,
+			streamIdleTimeoutMs,
 			requestAbortController.signal,
 			(error) => requestAbortController.abort(error),
 			config.streamStartTimeoutMs,

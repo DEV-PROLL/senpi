@@ -1,6 +1,6 @@
 import { type AssistantMessage, type AssistantMessageEvent, EventStream, getModel } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	Agent,
 	type AgentEvent,
@@ -609,6 +609,193 @@ describe("Agent", () => {
 
 		expect(agent.hasQueuedMessages()).toBe(false);
 		expect(providerCalls).toBe(2);
+	});
+
+	it("defers queued input only from a continuation's first provider request", async () => {
+		const providerUserTexts: string[][] = [];
+		const providerTimeouts: Array<{ timeoutMs?: number; streamStartTimeoutMs?: number }> = [];
+		const agent = new Agent({
+			initialState: {
+				messages: [{ role: "user", content: "original request", timestamp: Date.now() }],
+			},
+			timeoutMs: 300_000,
+			streamStartTimeoutMs: 90_000,
+			streamFn: (_model, context, options) => {
+				providerUserTexts.push(
+					context.messages
+						.filter((message) => message.role === "user")
+						.map((message) => getUserMessageText(message)),
+				);
+				providerTimeouts.push({
+					timeoutMs: options?.timeoutMs,
+					streamStartTimeoutMs: options?.streamStartTimeoutMs,
+				});
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("recovered") });
+				});
+				return stream;
+			},
+		});
+		agent.steer({ role: "user", content: "queued steering", timestamp: Date.now() });
+
+		await agent.continue({
+			deferQueuedMessages: true,
+			timeoutMs: 30_000,
+			streamStartTimeoutMs: 30_000,
+		});
+
+		expect(providerUserTexts).toEqual([
+			["original request"],
+			["original request", "queued steering"],
+		]);
+		expect(providerTimeouts).toEqual([
+			{ timeoutMs: 30_000, streamStartTimeoutMs: 30_000 },
+			{ timeoutMs: 300_000, streamStartTimeoutMs: 90_000 },
+		]);
+		expect(agent.hasQueuedMessages()).toBe(false);
+	});
+
+	it("restores configured timeouts after a call-scoped continuation override", async () => {
+		const providerTimeouts: Array<{ timeoutMs?: number; streamStartTimeoutMs?: number }> = [];
+		const agent = new Agent({
+			initialState: {
+				messages: [{ role: "user", content: "retry me", timestamp: Date.now() }],
+			},
+			timeoutMs: 300_000,
+			streamStartTimeoutMs: 90_000,
+			streamFn: (_model, _context, options) => {
+				providerTimeouts.push({
+					timeoutMs: options?.timeoutMs,
+					streamStartTimeoutMs: options?.streamStartTimeoutMs,
+				});
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("done") });
+				});
+				return stream;
+			},
+		});
+
+		await agent.continue({ timeoutMs: 30_000, streamStartTimeoutMs: 30_000 });
+		await agent.prompt("ordinary request");
+
+		expect(providerTimeouts).toEqual([
+			{ timeoutMs: 30_000, streamStartTimeoutMs: 30_000 },
+			{ timeoutMs: 300_000, streamStartTimeoutMs: 90_000 },
+		]);
+	});
+
+	it("restores the configured idle timeout after a capped retry stream shows life", async () => {
+		vi.useFakeTimers();
+		try {
+			let providerOptions: { timeoutMs?: number; streamStartTimeoutMs?: number } | undefined;
+			const agent = new Agent({
+				initialState: {
+					messages: [{ role: "user", content: "retry me", timestamp: Date.now() }],
+				},
+				timeoutMs: 300_000,
+				streamStartTimeoutMs: 90_000,
+				streamFn: (_model, _context, options) => {
+					providerOptions = {
+						timeoutMs: options?.timeoutMs,
+						streamStartTimeoutMs: options?.streamStartTimeoutMs,
+					};
+					const stream = new MockAssistantStream();
+					queueMicrotask(() => {
+						stream.push({ type: "start", partial: createAssistantMessage("") });
+						setTimeout(() => {
+							stream.push({
+								type: "done",
+								reason: "stop",
+								message: createAssistantMessage("healthy delayed response"),
+							});
+						}, 40_000);
+					});
+					return stream;
+				},
+			});
+
+			const continuation = agent.continue({ timeoutMs: 30_000, streamStartTimeoutMs: 30_000 });
+			await vi.advanceTimersByTimeAsync(40_000);
+			await continuation;
+
+			expect(providerOptions).toEqual({ timeoutMs: 30_000, streamStartTimeoutMs: 30_000 });
+			expect(agent.state.messages.at(-1)?.content).toEqual([
+				{ type: "text", text: "healthy delayed response" },
+			]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it.each([
+		["error", "steering"],
+		["error", "followUp"],
+		["aborted", "steering"],
+		["aborted", "followUp"],
+	] as const)("parks queued %s-run %s input until a later admitted prompt", async (stopReason, queue) => {
+		let providerCalls = 0;
+		const providerUserTexts: string[][] = [];
+		const queuedMessage: AgentMessage = {
+			role: "user",
+			content: "retained queued input",
+			timestamp: Date.now(),
+		};
+		const agent = new Agent({
+			streamFn: (_model, context) => {
+				providerCalls++;
+				providerUserTexts.push(
+					context.messages
+						.filter((message) => message.role === "user")
+						.map((message) => getUserMessageText(message)),
+				);
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					if (providerCalls === 1) {
+						stream.push({
+							type: "error",
+							reason: stopReason,
+							error: {
+								...createAssistantMessage(""),
+								stopReason,
+								errorMessage: `${stopReason} provider response`,
+							},
+						});
+						return;
+					}
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("recovered") });
+				});
+				return stream;
+			},
+		});
+		agent.subscribe((event) => {
+			if (event.type !== "agent_end" || providerCalls !== 1) return;
+			if (queue === "steering") agent.steer(queuedMessage);
+			else agent.followUp(queuedMessage);
+		});
+
+		await agent.prompt("initial request");
+
+		expect(agent.hasQueuedMessages()).toBe(true);
+		expect(providerCalls).toBe(1);
+		expect(agent.state.messages).not.toContain(queuedMessage);
+
+		await agent.prompt("later admitted prompt");
+
+		expect(providerUserTexts).toEqual(
+			queue === "steering"
+				? [
+						["initial request"],
+						["initial request", "later admitted prompt", "retained queued input"],
+					]
+				: [
+						["initial request"],
+						["initial request", "later admitted prompt"],
+						["initial request", "later admitted prompt", "retained queued input"],
+					],
+		);
+		expect(agent.hasQueuedMessages()).toBe(false);
 	});
 
 	it("should throw when prompt() called while streaming", async () => {

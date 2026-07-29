@@ -28,12 +28,35 @@
 
 ### What changed and why
 
-- `Agent.continue()` accepts continuation-only options that defer queued input until the first provider response and
-  override the stream idle timeout without mutating the agent's configured default.
-- The core run lifecycle retains queued steering and follow-up input after terminal error or abort responses instead
-  of racing an asynchronous session-level retry controller and starting an unintended provider request.
+- `Agent.continue()` and `continueWithQueuedMessages()` accept continuation-only options that defer queued input from
+  the first provider request and override both stream idle and stream-start bounds for that request without mutating
+  the agent's configured defaults. Later requests in the same run restore the configured bounds; after the first
+  retry event, the configured idle timeout also governs inter-event gaps so healthy silent reasoning is not capped.
+- Queue-first recompaction recovery takes precedence over deferral: the selected queued message is the continuation
+  input, while first-request timeout overrides still apply.
+- The core run lifecycle intentionally parks queued steering and follow-up input after terminal error or abort
+  responses until an external retry/compaction owner or a later admitted prompt consumes it. This stop-reason policy
+  is distinct from `suppressQueuedMessageDrain()`, which transfers one active run's post-`agent_end` ownership.
 - Coding-agent retries use these controls after a silent provider stream so a doomed retry cannot consume newly
-  queued user input and a later ordinary turn automatically returns to the configured timeout.
+  queued user input and a later ordinary provider request automatically returns to the configured timeout.
+
+### Files modified
+
+- `agent.ts`
+- `types.ts`
+- `agent-loop.ts`
+- `../test/agent.test.ts`
+- `../README.md`
+
+### Why the extension system could not handle this
+
+- Provider-request queue polling, event-reader timeout selection, and post-run native queue draining happen inside
+  agent core before coding-agent extensions can safely claim or restore that work.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `agent.ts` continuation APIs/config creation and active-run lifecycle queue draining.
+- MEDIUM: `agent-loop.ts` provider-request timeout selection inside `runLoop()`.
 
 ## 2026-07-27 - End classifier-refused turns before tool execution
 
