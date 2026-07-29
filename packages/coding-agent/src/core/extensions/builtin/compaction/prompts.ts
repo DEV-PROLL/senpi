@@ -9,22 +9,12 @@ export type BuildMergedCompactionPromptOptions = {
 };
 
 const TASK_INTENT_ACQUISITION_CLAUDE = `PASS 1 — Internal task-intent extraction
-Emit <task-intent>
-ORIGINAL_REQUEST: ...
-TASK_TYPE: investigation|refactoring|debugging|implementation|explanation|other
-MUST_PRESERVE: ...
-MUST_NOT_LOSE: ...
-</task-intent> BEFORE <summary>.`;
+Write one <task-intent> block with ORIGINAL_REQUEST, TASK_TYPE, MUST_PRESERVE, and MUST_NOT_LOSE before <summary>.`;
 
 const TASK_INTENT_ACQUISITION_GPT = `Write one <task-intent> block with ORIGINAL_REQUEST, TASK_TYPE, MUST_PRESERVE, and MUST_NOT_LOSE before <summary>.`;
 
 const TASK_INTENT_UPDATE_ACQUIRE_CLAUDE = `PASS 1 — Internal task-intent extraction
-Emit <task-intent>
-ORIGINAL_REQUEST: ...
-TASK_TYPE: investigation|refactoring|debugging|implementation|explanation|other
-MUST_PRESERVE: ...
-MUST_NOT_LOSE: ...
-</task-intent> BEFORE <summary>.`;
+Write one <task-intent> block with ORIGINAL_REQUEST, TASK_TYPE, MUST_PRESERVE, and MUST_NOT_LOSE before <summary>.`;
 
 const TASK_INTENT_UPDATE_ACQUIRE_GPT = `Write one <task-intent> block with ORIGINAL_REQUEST, TASK_TYPE, MUST_PRESERVE, and MUST_NOT_LOSE before <summary>.`;
 
@@ -237,12 +227,19 @@ export function buildPrompt(options: BuildMergedCompactionPromptOptions): { syst
 function buildUserPrompt(options: BuildMergedCompactionPromptOptions): string {
 	switch (options.variant) {
 		case "default":
-			return mergeTaskIntent(MERGED_COMPACTION_PROMPT_USER, promptFamilyText(options.promptFamily, TASK_INTENT_ACQUISITION_CLAUDE, TASK_INTENT_ACQUISITION_GPT));
+			return mergeTaskIntent(
+				MERGED_COMPACTION_PROMPT_USER,
+				promptFamilyText(options.promptFamily, TASK_INTENT_ACQUISITION_CLAUDE, TASK_INTENT_ACQUISITION_GPT),
+			);
 		case "update":
 			if (options.taskIntent) {
 				return MERGED_COMPACTION_PROMPT_UPDATE.replace(
 					"{{taskIntentInstruction}}",
-					promptFamilyText(options.promptFamily, TASK_INTENT_UPDATE_ANCHOR_CLAUDE, TASK_INTENT_UPDATE_ANCHOR_GPT).replace("{{taskIntent}}", sanitizeTaskIntent(options.taskIntent)),
+					promptFamilyText(
+						options.promptFamily,
+						TASK_INTENT_UPDATE_ANCHOR_CLAUDE,
+						TASK_INTENT_UPDATE_ANCHOR_GPT,
+					).replace("{{taskIntent}}", sanitizeTaskIntent(options.taskIntent)),
 				).replace("{{previousSummary}}", sanitizePreviousSummary(options.previousSummary));
 			}
 			return MERGED_COMPACTION_PROMPT_UPDATE.replace(
@@ -254,7 +251,10 @@ function buildUserPrompt(options: BuildMergedCompactionPromptOptions): string {
 		case "turn_prefix":
 			return options.taskIntent
 				? MERGED_COMPACTION_PROMPT_TURN_PREFIX
-				: mergeTaskIntent(MERGED_COMPACTION_PROMPT_TURN_PREFIX, promptFamilyText(options.promptFamily, TASK_INTENT_ACQUISITION_CLAUDE, TASK_INTENT_ACQUISITION_GPT));
+				: mergeTaskIntent(
+						MERGED_COMPACTION_PROMPT_TURN_PREFIX,
+						promptFamilyText(options.promptFamily, TASK_INTENT_ACQUISITION_CLAUDE, TASK_INTENT_ACQUISITION_GPT),
+					);
 	}
 	const exhaustiveCheck: never = options.variant;
 	return exhaustiveCheck;
@@ -289,7 +289,9 @@ function sanitizeCustomInstructions(customInstructions: string): string {
 }
 
 export function resolvePromptFamily(model: { id?: string; provider?: string }): "claude" | "gpt" {
-	return /^gpt-|^o\d|codex/.test(model.id ?? "") || model.provider === "openai" || model.provider === "azure-openai" ? "gpt" : "claude";
+	return /^gpt-|^o\d|codex/.test(model.id ?? "") || model.provider === "openai" || model.provider === "azure-openai"
+		? "gpt"
+		: "claude";
 }
 
 function sanitizeTaskIntent(text: string): string {

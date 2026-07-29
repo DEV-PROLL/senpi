@@ -3,7 +3,6 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
-import type { CompactionEntry } from "../../../session-manager.ts";
 import type { ContextUsage, ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "../../types.ts";
 import * as checkpointState from "./checkpoint-state.ts";
 import * as breaker from "./circuit-breaker.ts";
@@ -19,6 +18,7 @@ import {
 	RECOVERY_INSTRUCTIONS,
 	resetOnSessionCompact,
 } from "./degradation-monitor.ts";
+import { type CompactionLogger, createCompactionLogger } from "./log.ts";
 import {
 	markOpenAiRemoteReplayBoundary,
 	type OpenAiRemoteCompactionDependencies,
@@ -33,7 +33,6 @@ import {
 } from "./openai-remote-model.ts";
 import * as cap from "./per-turn-cap.ts";
 import * as policy from "./policy.ts";
-import { createCompactionLogger, type CompactionLogger } from "./log.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
 import * as restoration from "./restoration-tracker.ts";
 import {
@@ -50,6 +49,7 @@ import {
 import { type CompactionExtensionState, createInitialState, resetTurnCounter } from "./state.ts";
 import * as todoBridge from "./todo-bridge.ts";
 import { isTransientSummarizationFailure } from "./transient-failure.ts";
+import { isIneffectiveCompaction } from "./yield.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const EMERGENCY_COMPACTION_INSTRUCTIONS =
@@ -170,7 +170,8 @@ export default function compactionExtension(
 		| undefined;
 	const pendingMetadata = new Map<string, PendingCompactionMetadata>();
 	let logger: CompactionLogger | undefined;
-	const getLogger = (ctx: ExtensionContext): CompactionLogger => (logger ??= createCompactionLogger(ctx.agentDir));
+	const getLogger = (ctx: ExtensionContext): CompactionLogger =>
+		(logger ??= createCompactionLogger((ctx as { agentDir?: string }).agentDir));
 
 	function getSummarizationTools(): Tool[] {
 		if (typeof pi.getAllTools !== "function" || typeof pi.getActiveTools !== "function") return [];
@@ -288,7 +289,8 @@ export default function compactionExtension(
 				try {
 					compaction = await pendingJob.promise;
 					inheritedFailure = await pendingJob.failure;
-					if (compaction) getLogger(ctx).debug("warm_consumed", { generation: pendingJob.generation, route: "speculative" });
+					if (compaction)
+						getLogger(ctx).debug("warm_consumed", { generation: pendingJob.generation, route: "speculative" });
 				} finally {
 					unlinkAbort();
 				}
@@ -314,7 +316,11 @@ export default function compactionExtension(
 				);
 				if (result.applied || result.reason === "stale") {
 					speculativeJob = undefined;
-					if (result.applied) getLogger(ctx).debug("speculative_applied", { generation: pendingJob.generation, origin: "speculative" });
+					if (result.applied)
+						getLogger(ctx).debug("speculative_applied", {
+							generation: pendingJob.generation,
+							origin: "speculative",
+						});
 					else getLogger(ctx).debug("speculative_stale", { generation: pendingJob.generation });
 					endCompactionFeedback(ctx, feedbackSignal, result);
 					return result;
@@ -341,7 +347,11 @@ export default function compactionExtension(
 			let compaction: CompactionResult | undefined;
 			try {
 				compaction = await runExtensionCompaction(ctx, snapshot, feedbackSignal, (delta) =>
-					ctx.updateCompaction?.({ reason: event.reason, signal: event.signal, delta }),
+					ctx.updateCompaction?.({
+						reason: (event as unknown as SessionBeforeCompactEvent).reason as never,
+						signal: (event as unknown as SessionBeforeCompactEvent).signal,
+						delta,
+					}),
 				);
 			} catch (error) {
 				if (!(error instanceof SummaryGenerationError)) throw error;
@@ -374,6 +384,7 @@ export default function compactionExtension(
 	}
 
 	pi.on("session_before_compact", async (event, ctx) => {
+		if (!event) return;
 		invalidateSpeculativeCompaction(ctx);
 		if (cap.shouldRejectByCap(state, { reason: event.reason }).cancel) {
 			getLogger(ctx).debug("skip_cap", { reason: event.reason, count: state.acceptedThisTurn });
@@ -482,7 +493,29 @@ export default function compactionExtension(
 			const keptEntries = firstKeptIndex === -1 ? [] : branchEntries.slice(firstKeptIndex);
 			state = cap.incrementAccepted(state);
 			state = breaker.recordSuccess(state);
-			state = updateLastYield(state, event.compactionEntry);
+			const details = event.compactionEntry.details as
+				| { structuralYield?: { savedTokens: number; savingsRatio: number } }
+				| undefined;
+			const sy = details?.structuralYield;
+			if (sy && typeof sy.savedTokens === "number" && typeof sy.savingsRatio === "number") {
+				state = {
+					...state,
+					lastYield: { savedTokens: sy.savedTokens, tokensBefore: event.compactionEntry.tokensBefore },
+				};
+				if (
+					isIneffectiveCompaction({
+						tokensBefore: event.compactionEntry.tokensBefore,
+						savedTokens: sy.savedTokens,
+						savingsRatio: sy.savingsRatio,
+					})
+				) {
+					getLogger(ctx).debug("ineffective_counted", {
+						tokensBefore: event.compactionEntry.tokensBefore,
+						savedTokens: sy.savedTokens,
+						savingsRatio: sy.savingsRatio,
+					});
+				}
+			}
 			resetOnSessionCompact(degradationState);
 			todoBridge.restoreTodosIfMissing(pi, ctx);
 			const usage = ctx.getContextUsage();
@@ -520,14 +553,22 @@ export default function compactionExtension(
 		const usageWithPendingPrompt = usage ? withAdditionalTokens(usage, pendingPromptTokens) : undefined;
 		const breakerCoolingDown = breaker.isTripped(state, Date.now());
 		if (usage && policy.isAtHardLimit(usage, contextWindow, settings.reserveTokens, pendingPromptTokens)) {
-			getLogger(ctx).debug("hard_limit_trigger", { contextWindow, tokens: usage.tokens ?? 0, threshold: settings.reserveTokens });
+			getLogger(ctx).debug("hard_limit_trigger", {
+				contextWindow,
+				tokens: usage.tokens ?? 0,
+				threshold: settings.reserveTokens,
+			});
 			await applyBlockingCompaction(ctx, EMERGENCY_COMPACTION_INSTRUCTIONS);
 		} else if (
 			!breakerCoolingDown &&
 			usageWithPendingPrompt &&
 			policy.shouldTriggerCompaction(usageWithPendingPrompt, contextWindow, settings, state.lastYield ?? undefined)
 		) {
-			getLogger(ctx).debug("threshold_trigger", { contextWindow, tokens: usageWithPendingPrompt.tokens ?? 0, threshold: settings.reserveTokens });
+			getLogger(ctx).debug("threshold_trigger", {
+				contextWindow,
+				tokens: usageWithPendingPrompt.tokens ?? 0,
+				threshold: settings.reserveTokens,
+			});
 			await applyBlockingCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
 		} else if (
 			!breakerCoolingDown &&
@@ -539,7 +580,10 @@ export default function compactionExtension(
 				state.lastYield ?? undefined,
 			)
 		) {
-			getLogger(ctx).debug("emergency_prune", { route: "context-event", tokens: usageWithPendingPrompt.tokens ?? 0 });
+			getLogger(ctx).debug("emergency_prune", {
+				route: "context-event",
+				tokens: usageWithPendingPrompt.tokens ?? 0,
+			});
 			startSpeculativeCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
 		}
 

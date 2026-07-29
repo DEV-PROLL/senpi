@@ -82,7 +82,13 @@ export interface CompactionLoggerOptions {
 	maxBytes?: number;
 }
 
-export function createCompactionLogger(agentDir: string, options: CompactionLoggerOptions = {}): CompactionLogger {
+export function createCompactionLogger(
+	agentDir: string | undefined,
+	options: CompactionLoggerOptions = {},
+): CompactionLogger {
+	if (typeof agentDir !== "string" || agentDir.length === 0) {
+		return { debug: () => {}, info: () => {} };
+	}
 	const filePath = join(agentDir, "logs", "compaction.log");
 	const maxBytes = validMaxBytes(options.maxBytes);
 	let reportedFailure = false;

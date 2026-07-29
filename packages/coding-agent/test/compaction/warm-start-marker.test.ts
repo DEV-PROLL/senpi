@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { DEFAULT_COMPACTION_SETTINGS } from "../../src/core/compaction/index.ts";
 import {
-	createSpeculativeCompactionSnapshot,
 	runExtensionCompaction,
 	type SpeculativeCompactionContext,
 } from "../../src/core/extensions/builtin/compaction/speculative.ts";
@@ -28,7 +27,7 @@ function createContext(): SpeculativeCompactionContext & {
 } {
 	const registration = registerFauxProvider();
 	registrations.push(registration);
-	const model = registration.getModel();
+	const model = registration.getModel()!;
 	const authStorage = AuthStorage.inMemory();
 	authStorage.setRuntimeApiKey(model.provider, "faux-key");
 	const modelRegistry = ModelRegistry.inMemory(authStorage);
@@ -75,15 +74,15 @@ describe("warm-start marker", () => {
 		const snapshot = {
 			generation: 1,
 			expectedRevision: 1,
-			model: context.model,
-			contextWindow: context.model.contextWindow,
+			model: context.model!,
+			contextWindow: context.model!.contextWindow,
 			preparation: {
 				firstKeptEntryId: "x",
 				messagesToSummarize: [],
 				turnPrefixMessages: [],
 				isSplitTurn: false,
 				tokensBefore: 1,
-				fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+				fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
 				settings: DEFAULT_COMPACTION_SETTINGS,
 			},
 			promptVariant: "default" as const,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createCompactionLogger } from "../../src/core/extensions/builtin/compaction/log.ts";
+import { type CompactionLoggerData, createCompactionLogger } from "../../src/core/extensions/builtin/compaction/log.ts";
 
 describe("compaction logger", () => {
 	afterEach(() => {
@@ -51,7 +51,7 @@ describe("compaction logger", () => {
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		const logger = createCompactionLogger(dir);
 
-		logger.debug("warm_consumed", { route: "speculative", count: 1 });
+		logger.debug("warm_consumed", { message: "nope" } as unknown as CompactionLoggerData);
 
 		expect(error).toHaveBeenCalledWith("[senpi-compaction]", expect.stringContaining('"event":"warm_consumed"'));
 	});
@@ -76,7 +76,7 @@ describe("compaction logger", () => {
 			message: "do not include",
 			summary: "nope",
 			tokens: 42,
-		});
+		} as unknown as CompactionLoggerData);
 
 		const entry = JSON.parse(sink[0] as string) as Record<string, unknown>;
 		expect(entry).toMatchObject({

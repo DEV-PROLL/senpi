@@ -28,10 +28,10 @@ import type { ReadonlySessionManager } from "../../../session-manager.ts";
 import type { ApplyCompactionResult, ContextUsage, ProviderRequestPreparation } from "../../types.ts";
 import { sanitizeAnthropicPayload } from "../tool-pair-guard/sanitize-anthropic-payload.ts";
 import { computeEffectiveKeepRecentTokens, computeEffectiveThreshold } from "./policy.ts";
-import { computeStructuralYield } from "./yield.ts";
 import { buildPrompt, type MergedCompactionPromptVariant } from "./prompts.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
 import * as truncation from "./tool-truncation.ts";
+import { computeStructuralYield } from "./yield.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const COMPACTION_BUDGET_RATIO = 0.6;
@@ -426,7 +426,7 @@ export function createSpeculativeCompactionSnapshot(
 	options: {
 		customInstructions?: string;
 		generation: number;
-		origin: "speculative" | "blocking" | "core-route";
+		origin?: "speculative" | "blocking" | "core-route";
 		tools?: Tool[];
 	},
 ): SpeculativeCompactionSnapshot | undefined {
@@ -451,7 +451,7 @@ export function createSpeculativeCompactionSnapshot(
 		contextWindow,
 		preparation,
 		promptVariant: getPromptVariant({ reason: "extension", preparation }),
-		origin: options.origin,
+		...(options.origin ? { origin: options.origin } : {}),
 		customInstructions: options.customInstructions,
 		systemPrompt: context.getSystemPrompt?.(),
 		tools: options.tools,

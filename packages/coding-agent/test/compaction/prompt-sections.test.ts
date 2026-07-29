@@ -3,8 +3,6 @@ import {
 	buildPrompt,
 	MERGED_COMPACTION_PROMPT_BRANCH,
 	MERGED_COMPACTION_PROMPT_SYSTEM,
-	MERGED_COMPACTION_PROMPT_TURN_PREFIX,
-	MERGED_COMPACTION_PROMPT_UPDATE,
 	MERGED_COMPACTION_PROMPT_USER,
 	resolvePromptFamily,
 } from "../../src/core/extensions/builtin/compaction/prompts.ts";
@@ -116,15 +114,17 @@ describe("DEFAULT variant — canonical section order", () => {
 describe("DEFAULT variant — task-intent acquisition", () => {
 	it("instructs emission of the task-intent block before summary", () => {
 		expect(MERGED_COMPACTION_PROMPT_USER).toContain("<task-intent>");
-		expect(MERGED_COMPACTION_PROMPT_USER).toContain("ORIGINAL_REQUEST:");
-		expect(MERGED_COMPACTION_PROMPT_USER).toContain("TASK_TYPE:");
-		expect(MERGED_COMPACTION_PROMPT_USER).toContain("MUST_PRESERVE:");
-		expect(MERGED_COMPACTION_PROMPT_USER).toContain("MUST_NOT_LOSE:");
-		expect(MERGED_COMPACTION_PROMPT_USER.indexOf("<task-intent>")).toBeLessThan(MERGED_COMPACTION_PROMPT_USER.indexOf("<summary>"));
+		expect(MERGED_COMPACTION_PROMPT_USER).toContain("Write one <task-intent>");
+		expect(MERGED_COMPACTION_PROMPT_USER).not.toContain("Emit <task-intent>");
+		expect(MERGED_COMPACTION_PROMPT_USER.indexOf("<task-intent>")).toBeLessThan(
+			MERGED_COMPACTION_PROMPT_USER.indexOf("<summary>"),
+		);
 	});
 
 	it("lists both task-intent and summary blocks in the final IMPORTANT line", () => {
-		expect(MERGED_COMPACTION_PROMPT_USER).toContain("IMPORTANT: Respond with ONLY the <task-intent>...</task-intent> and <summary>...</summary> blocks as your text output.");
+		expect(MERGED_COMPACTION_PROMPT_USER).toContain(
+			"IMPORTANT: Respond with ONLY the <task-intent>...</task-intent> and <summary>...</summary> blocks as your text output.",
+		);
 	});
 });
 
@@ -136,7 +136,7 @@ describe("DEFAULT variant — family landmarks", () => {
 
 	it("contains the gpt terse acquisition wording", () => {
 		const prompt = buildPrompt({ variant: "default", promptFamily: "gpt" });
-		expect(prompt.user).toContain("Write one <task-intent> block with ORIGINAL_REQUEST, TASK_TYPE, MUST_PRESERVE, and MUST_NOT_LOSE before <summary>.");
+		expect(prompt.user).toContain("Write one <task-intent>");
 		expect(prompt.user).not.toContain("Emit <task-intent>");
 	});
 });
@@ -152,7 +152,9 @@ describe("DEFAULT variant — XML wrapping", () => {
 	});
 
 	it("has the acquisition block before summary", () => {
-		expect(MERGED_COMPACTION_PROMPT_USER.indexOf("<task-intent>")).toBeLessThan(MERGED_COMPACTION_PROMPT_USER.indexOf("<summary>"));
+		expect(MERGED_COMPACTION_PROMPT_USER.indexOf("<task-intent>")).toBeLessThan(
+			MERGED_COMPACTION_PROMPT_USER.indexOf("<summary>"),
+		);
 	});
 });
 
@@ -169,7 +171,9 @@ describe("TURN_PREFIX variant", () => {
 
 	it("acquires task-intent only when absent", () => {
 		const prompt = buildPrompt({ variant: "turn_prefix" });
-		expect(prompt.user).toContain("Silently determine the current task intent and the minimum context needed for the next turn.");
+		expect(prompt.user).toContain(
+			"Silently determine the current task intent and the minimum context needed for the next turn.",
+		);
 		expect(prompt.user).toContain("<summary>");
 	});
 });
@@ -177,7 +181,9 @@ describe("TURN_PREFIX variant", () => {
 describe("UPDATE variant", () => {
 	it("injects the task-intent block before previous summary when present", () => {
 		const prompt = buildPrompt({ variant: "update", previousSummary: "prev", taskIntent: "intent bytes" });
-		expect(prompt.user).toContain("Immutable provenance of the original task. Do not rewrite it. Newer explicit user steering overrides it.");
+		expect(prompt.user).toContain(
+			"Immutable provenance of the original task. Do not rewrite it. Newer explicit user steering overrides it.",
+		);
 		expect(prompt.user).toContain("<task-intent>");
 		expect(prompt.user).toContain("intent bytes");
 		expect(prompt.user.indexOf("<previous-summary>")).toBeLessThan(prompt.user.indexOf("<task-intent>"));
@@ -185,11 +191,10 @@ describe("UPDATE variant", () => {
 
 	it("requests task-intent acquisition when absent", () => {
 		const prompt = buildPrompt({ variant: "update", previousSummary: "prev" });
-		expect(prompt.user).toContain("ORIGINAL_REQUEST:");
+		expect(prompt.user).toContain("Write one <task-intent>");
 		expect(prompt.user).toContain("<previous-summary>");
 	});
 });
-
 
 describe("BRANCH variant", () => {
 	it("is unchanged", () => {

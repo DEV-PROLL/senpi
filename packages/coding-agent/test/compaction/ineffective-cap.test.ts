@@ -28,12 +28,12 @@ describe("compaction ineffective cap", () => {
 			registerFauxProvider();
 			const local = computeStructuralYield({
 				previousSummary: "prev",
-				messagesToSummarize: [{ content: "alpha" }],
-				turnPrefixMessages: [{ content: "beta" }],
+				messagesToSummarize: [{ role: "user", content: "alpha", timestamp: 0 }],
+				turnPrefixMessages: [{ role: "user", content: "beta", timestamp: 0 }],
 				summary: "gamma",
 				tokensBefore: 100,
 			});
-			expect(local).toEqual(structuralYield(local.savedTokens, 100));
+			expect(local).toMatchObject(structuralYield(local.savedTokens, 100));
 			expect(isIneffectiveCompaction(local)).toBe(local.savedTokens < 1024 || local.savingsRatio < 0.1);
 		});
 	});
