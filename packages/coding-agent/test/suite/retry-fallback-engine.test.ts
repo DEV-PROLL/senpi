@@ -311,117 +311,120 @@ describe("retry fallback engine", () => {
 	it.each([
 		["rejects", true],
 		["accepts", false],
-	])("revalidates the smaller fallback context window immediately before a retry (%s second compaction)", async (_label, rejectSecondCompaction) => {
-		let compactionCount = 0;
-		let releasePrimaryError: (() => void) | undefined;
-		const primaryErrorReady = new Promise<void>((resolve) => {
-			releasePrimaryError = resolve;
-		});
-		let primaryProviderStarted: (() => void) | undefined;
-		const primaryStarted = new Promise<void>((resolve) => {
-			primaryProviderStarted = resolve;
-		});
-		const fallbackCompactionEndsAtCall: number[] = [];
-		const harness = await createHarness({
-			models: [
-				{ id: "faux-1", contextWindow: 1_000, maxTokens: 64 },
-				{ id: "faux-2", contextWindow: 100, maxTokens: 64 },
-			],
-			settings: {
-				compaction: { enabled: true, reserveTokens: 0, keepRecentTokens: 0 },
-				retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } },
-			},
-			extensionFactories: [
-				(pi) => {
-					pi.on("session_before_compact", (event) => {
-						compactionCount++;
-						if (compactionCount === 2 && rejectSecondCompaction) {
-							return {
-								cancel: true,
-								rejectionCause: "cancelled-by-extension" as const,
-								reason: "fallback window requires a rejected second compaction",
-							};
-						}
-						return {
-							compaction: {
-								summary: compactionCount === 1 ? "p".repeat(480) : "fallback summary",
-								firstKeptEntryId: event.preparation.firstKeptEntryId,
-								tokensBefore: event.preparation.tokensBefore,
-							},
-						};
-					});
+	])(
+		"revalidates the smaller fallback context window immediately before a retry (%s second compaction)",
+		async (_label, rejectSecondCompaction) => {
+			let compactionCount = 0;
+			let releasePrimaryError: (() => void) | undefined;
+			const primaryErrorReady = new Promise<void>((resolve) => {
+				releasePrimaryError = resolve;
+			});
+			let primaryProviderStarted: (() => void) | undefined;
+			const primaryStarted = new Promise<void>((resolve) => {
+				primaryProviderStarted = resolve;
+			});
+			const fallbackCompactionEndsAtCall: number[] = [];
+			const harness = await createHarness({
+				models: [
+					{ id: "faux-1", contextWindow: 1_000, maxTokens: 64 },
+					{ id: "faux-2", contextWindow: 100, maxTokens: 64 },
+				],
+				settings: {
+					compaction: { enabled: true, reserveTokens: 0, keepRecentTokens: 0 },
+					retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } },
 				},
-			],
-		});
-		harnesses.push(harness);
-		const primaryModel = harness.getModel("faux-1");
-		if (!primaryModel) throw new Error("Expected primary fallback model");
-		const historyTimestamp = Date.now() - 1_000;
-		harness.sessionManager.appendMessage({
-			role: "user",
-			content: [{ type: "text", text: "history before retry fallback" }],
-			timestamp: historyTimestamp,
-		});
-		harness.sessionManager.appendMessage({
-			...fauxAssistantMessage("history response", { timestamp: historyTimestamp + 1 }),
-			api: primaryModel.api,
-			provider: primaryModel.provider,
-			model: primaryModel.id,
-			usage: {
-				input: 900,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 900,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-		});
-		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
-		harness.setResponses([
-			async (_context, _options, _state, model) => {
-				if (model.id === "faux-1") {
-					primaryProviderStarted?.();
-					await primaryErrorReady;
-					return fauxAssistantMessage("context ".repeat(900), {
-						stopReason: "error",
-						errorMessage: "overloaded_error",
-					});
-				}
-				fallbackCompactionEndsAtCall.push(
-					harness.eventsOfType("compaction_end").filter((event) => event.accepted === true).length,
-				);
-				return fauxAssistantMessage("fallback answer");
-			},
-			(_context, _options, _state, model) => {
-				fallbackCompactionEndsAtCall.push(
-					harness.eventsOfType("compaction_end").filter((event) => event.accepted === true).length,
-				);
-				expect(model.id).toBe("faux-2");
-				return fauxAssistantMessage("fallback answer");
-			},
-			fauxAssistantMessage("queued continuation answer"),
-		]);
+				extensionFactories: [
+					(pi) => {
+						pi.on("session_before_compact", (event) => {
+							compactionCount++;
+							if (compactionCount === 2 && rejectSecondCompaction) {
+								return {
+									cancel: true,
+									rejectionCause: "cancelled-by-extension" as const,
+									reason: "fallback window requires a rejected second compaction",
+								};
+							}
+							return {
+								compaction: {
+									summary: compactionCount === 1 ? "p".repeat(480) : "fallback summary",
+									firstKeptEntryId: event.preparation.firstKeptEntryId,
+									tokensBefore: event.preparation.tokensBefore,
+								},
+							};
+						});
+					},
+				],
+			});
+			harnesses.push(harness);
+			const primaryModel = harness.getModel("faux-1");
+			if (!primaryModel) throw new Error("Expected primary fallback model");
+			const historyTimestamp = Date.now() - 1_000;
+			harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "history before retry fallback" }],
+				timestamp: historyTimestamp,
+			});
+			harness.sessionManager.appendMessage({
+				...fauxAssistantMessage("history response", { timestamp: historyTimestamp + 1 }),
+				api: primaryModel.api,
+				provider: primaryModel.provider,
+				model: primaryModel.id,
+				usage: {
+					input: 900,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 900,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			});
+			harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+			harness.setResponses([
+				async (_context, _options, _state, model) => {
+					if (model.id === "faux-1") {
+						primaryProviderStarted?.();
+						await primaryErrorReady;
+						return fauxAssistantMessage("context ".repeat(900), {
+							stopReason: "error",
+							errorMessage: "overloaded_error",
+						});
+					}
+					fallbackCompactionEndsAtCall.push(
+						harness.eventsOfType("compaction_end").filter((event) => event.accepted === true).length,
+					);
+					return fauxAssistantMessage("fallback answer");
+				},
+				(_context, _options, _state, model) => {
+					fallbackCompactionEndsAtCall.push(
+						harness.eventsOfType("compaction_end").filter((event) => event.accepted === true).length,
+					);
+					expect(model.id).toBe("faux-2");
+					return fauxAssistantMessage("fallback answer");
+				},
+				fauxAssistantMessage("queued continuation answer"),
+			]);
 
-		const prompt = harness.session.prompt("trigger fallback window revalidation");
-		await primaryStarted;
-		if (rejectSecondCompaction) {
-			await harness.session.followUp("queued until fallback context is safe");
-		}
-		releasePrimaryError?.();
-		await prompt;
+			const prompt = harness.session.prompt("trigger fallback window revalidation");
+			await primaryStarted;
+			if (rejectSecondCompaction) {
+				await harness.session.followUp("queued until fallback context is safe");
+			}
+			releasePrimaryError?.();
+			await prompt;
 
-		expect(harness.eventsOfType("retry_fallback_applied")).toMatchObject([{ from: primary, to: fallback }]);
-		if (rejectSecondCompaction) {
-			expect(fallbackCompactionEndsAtCall).toEqual([]);
-			expect(harness.session.agent.hasQueuedMessages()).toBe(true);
-			expect(harness.eventsOfType("compaction_start")).toHaveLength(2);
-			expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({ accepted: false });
-		} else {
-			expect(fallbackCompactionEndsAtCall).toEqual([2]);
-			expect(harness.eventsOfType("compaction_start")).toHaveLength(2);
-			expect(harness.eventsOfType("compaction_end").filter((event) => event.accepted === true)).toHaveLength(2);
-		}
-	});
+			expect(harness.eventsOfType("retry_fallback_applied")).toMatchObject([{ from: primary, to: fallback }]);
+			if (rejectSecondCompaction) {
+				expect(fallbackCompactionEndsAtCall).toEqual([]);
+				expect(harness.session.agent.hasQueuedMessages()).toBe(true);
+				expect(harness.eventsOfType("compaction_start")).toHaveLength(2);
+				expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({ accepted: false });
+			} else {
+				expect(fallbackCompactionEndsAtCall).toEqual([2]);
+				expect(harness.eventsOfType("compaction_start")).toHaveLength(2);
+				expect(harness.eventsOfType("compaction_end").filter((event) => event.accepted === true)).toHaveLength(2);
+			}
+		},
+	);
 
 	it("owns a provider-confirmed fallback retry overflow despite the post-retry compaction skip", async () => {
 		// Composition: a retryable primary error selects the smaller fallback window,

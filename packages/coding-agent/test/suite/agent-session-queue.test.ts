@@ -196,156 +196,155 @@ describe("AgentSession queue characterization", () => {
 		expect(harness.faux.state.callCount).toBe(2);
 	});
 
-	it.each([
-		"rejected",
-		"aborted",
-	] as const)("keeps a background extension follow-up fail-closed after a %s manual compaction", async (outcome) => {
-		const marker = `retain extension follow-up after ${outcome} compaction`;
-		let compactionAttempt = 0;
-		let resolveFirstCompactionStart: (() => void) | undefined;
-		const firstCompactionStarted = new Promise<void>((resolve) => {
-			resolveFirstCompactionStart = resolve;
-		});
-		const harness = await createHarness({
-			models: [{ id: `extension-${outcome}-compaction`, contextWindow: 5_000, maxTokens: 1_000 }],
-			settings: { compaction: { enabled: false, keepRecentTokens: 1, reserveTokens: 1_000 } },
-			extensionFactories: [
-				(pi) => {
-					pi.on("session_before_compact", async (event) => {
-						compactionAttempt += 1;
-						if (compactionAttempt === 1) {
-							queueMicrotask(() => {
-								pi.sendUserMessage(marker, { deliverAs: "followUp" });
+	it.each(["rejected", "aborted"] as const)(
+		"keeps a background extension follow-up fail-closed after a %s manual compaction",
+		async (outcome) => {
+			const marker = `retain extension follow-up after ${outcome} compaction`;
+			let compactionAttempt = 0;
+			let resolveFirstCompactionStart: (() => void) | undefined;
+			const firstCompactionStarted = new Promise<void>((resolve) => {
+				resolveFirstCompactionStart = resolve;
+			});
+			const harness = await createHarness({
+				models: [{ id: `extension-${outcome}-compaction`, contextWindow: 5_000, maxTokens: 1_000 }],
+				settings: { compaction: { enabled: false, keepRecentTokens: 1, reserveTokens: 1_000 } },
+				extensionFactories: [
+					(pi) => {
+						pi.on("session_before_compact", async (event) => {
+							compactionAttempt += 1;
+							if (compactionAttempt === 1) {
+								queueMicrotask(() => {
+									pi.sendUserMessage(marker, { deliverAs: "followUp" });
+								});
+								resolveFirstCompactionStart?.();
+							}
+							if (outcome === "rejected" || compactionAttempt > 1) {
+								return { cancel: true, rejectionCause: "cancelled-by-extension" };
+							}
+							return await new Promise<{ cancel: true }>((resolve) => {
+								event.signal.addEventListener("abort", () => resolve({ cancel: true }), { once: true });
 							});
-							resolveFirstCompactionStart?.();
-						}
-						if (outcome === "rejected" || compactionAttempt > 1) {
-							return { cancel: true, rejectionCause: "cancelled-by-extension" };
-						}
-						return await new Promise<{ cancel: true }>((resolve) => {
-							event.signal.addEventListener("abort", () => resolve({ cancel: true }), { once: true });
 						});
-					});
-				},
-			],
-		});
-		harnesses.push(harness);
-		harness.setResponses([fauxAssistantMessage("seed response")]);
-		await harness.session.prompt("pre-compaction context ".repeat(1_600));
-		harness.settingsManager.applyOverrides({
-			compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 1_000 },
-		});
+					},
+				],
+			});
+			harnesses.push(harness);
+			harness.setResponses([fauxAssistantMessage("seed response")]);
+			await harness.session.prompt("pre-compaction context ".repeat(1_600));
+			harness.settingsManager.applyOverrides({
+				compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 1_000 },
+			});
 
-		const waitForSettledSessionWork = getWaitForSettledSessionWork(harness);
-		const barrier = getSessionWorkBarrier(harness);
-		const barrierStatesAtExtensionAdmission: boolean[] = [];
-		Reflect.set(harness.session, "_waitForSettledSessionWork", async () => {
-			barrierStatesAtExtensionAdmission.push(barrier.hasActiveWork);
-			await waitForSettledSessionWork();
-		});
-		const compact = harness.session.compact();
-		await firstCompactionStarted;
-		if (outcome === "aborted") harness.session.abortCompaction();
-		await compact.catch(() => undefined);
-		await harness.session.waitForSettledSessionWork();
-
-		expect(barrierStatesAtExtensionAdmission[0]).toBe(true);
-		expect(harness.faux.state.callCount).toBe(1);
-		expect(harness.session.getFollowUpMessages()).toEqual([marker]);
-	});
-
-	it.each([
-		"accepted",
-		"rejected",
-		"aborted",
-	] as const)("keeps pi.sendMessage({ triggerTurn: true }) behind the %s manual compaction boundary", async (outcome) => {
-		const marker = `custom trigger-turn during ${outcome} manual compaction`;
-		let beforeCompactCalls = 0;
-		let resolveBeforeCompact: (() => void) | undefined;
-		const beforeCompact = new Promise<void>((resolve) => {
-			resolveBeforeCompact = resolve;
-		});
-		const providerContexts: AgentMessage[][] = [];
-		const harness = await createHarness({
-			settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
-			extensionFactories: [
-				(pi) => {
-					pi.on("session_before_compact", async (event) => {
-						beforeCompactCalls++;
-						pi.sendMessage(
-							{
-								customType: "compaction-trigger-turn",
-								content: marker,
-								display: false,
-							},
-							{ triggerTurn: true },
-						);
-						resolveBeforeCompact?.();
-
-						if (outcome === "accepted") {
-							return {
-								compaction: {
-									summary: `accepted summary before ${marker}`,
-									firstKeptEntryId: event.preparation.firstKeptEntryId,
-									tokensBefore: event.preparation.tokensBefore,
-								},
-							};
-						}
-						if (outcome === "rejected") {
-							return { cancel: true, rejectionCause: "cancelled-by-extension" as const };
-						}
-						return await new Promise<{ cancel: true }>((resolve) => {
-							event.signal.addEventListener("abort", () => resolve({ cancel: true }), { once: true });
-						});
-					});
-				},
-			],
-		});
-		harnesses.push(harness);
-		harness.setResponses([fauxAssistantMessage("seed response")]);
-		await harness.session.prompt("seed manual compaction context");
-		harness.setResponses([
-			(context) => {
-				providerContexts.push(context.messages);
-				return fauxAssistantMessage("custom trigger-turn handled");
-			},
-		]);
-
-		const compact = harness.session.compact();
-		await beforeCompact;
-		if (outcome === "aborted") harness.session.abortCompaction();
-		if (outcome === "accepted") {
-			await compact;
-		} else {
+			const waitForSettledSessionWork = getWaitForSettledSessionWork(harness);
+			const barrier = getSessionWorkBarrier(harness);
+			const barrierStatesAtExtensionAdmission: boolean[] = [];
+			Reflect.set(harness.session, "_waitForSettledSessionWork", async () => {
+				barrierStatesAtExtensionAdmission.push(barrier.hasActiveWork);
+				await waitForSettledSessionWork();
+			});
+			const compact = harness.session.compact();
+			await firstCompactionStarted;
+			if (outcome === "aborted") harness.session.abortCompaction();
 			await compact.catch(() => undefined);
-		}
-		await harness.session.waitForSettledSessionWork();
-		await harness.session.agent.waitForIdle();
+			await harness.session.waitForSettledSessionWork();
 
-		expect(beforeCompactCalls).toBe(1);
-		if (outcome === "accepted") {
-			expect(harness.faux.state.callCount).toBe(2);
-			expect(providerContexts).toHaveLength(1);
-			const providerContext = providerContexts[0] ?? [];
-			const summaryIndex = providerContext.findIndex(
-				(message) => message.role === "user" && getMessageText(message).includes("accepted summary"),
-			);
-			const customIndex = providerContext.findIndex(
-				(message) => message.role === "user" && getMessageText(message) === marker,
-			);
-			expect(summaryIndex).toBeGreaterThanOrEqual(0);
-			expect(customIndex).toBeGreaterThan(summaryIndex);
-			expect(
-				harness.sessionManager
-					.getEntries()
-					.filter((entry) => entry.type === "custom_message" && entry.content === marker),
-			).toHaveLength(1);
-		} else {
+			expect(barrierStatesAtExtensionAdmission[0]).toBe(true);
 			expect(harness.faux.state.callCount).toBe(1);
-			expect(providerContexts).toEqual([]);
-			expect(harness.session.agent.hasQueuedMessages()).toBe(true);
-		}
-	});
+			expect(harness.session.getFollowUpMessages()).toEqual([marker]);
+		},
+	);
+
+	it.each(["accepted", "rejected", "aborted"] as const)(
+		"keeps pi.sendMessage({ triggerTurn: true }) behind the %s manual compaction boundary",
+		async (outcome) => {
+			const marker = `custom trigger-turn during ${outcome} manual compaction`;
+			let beforeCompactCalls = 0;
+			let resolveBeforeCompact: (() => void) | undefined;
+			const beforeCompact = new Promise<void>((resolve) => {
+				resolveBeforeCompact = resolve;
+			});
+			const providerContexts: AgentMessage[][] = [];
+			const harness = await createHarness({
+				settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
+				extensionFactories: [
+					(pi) => {
+						pi.on("session_before_compact", async (event) => {
+							beforeCompactCalls++;
+							pi.sendMessage(
+								{
+									customType: "compaction-trigger-turn",
+									content: marker,
+									display: false,
+								},
+								{ triggerTurn: true },
+							);
+							resolveBeforeCompact?.();
+
+							if (outcome === "accepted") {
+								return {
+									compaction: {
+										summary: `accepted summary before ${marker}`,
+										firstKeptEntryId: event.preparation.firstKeptEntryId,
+										tokensBefore: event.preparation.tokensBefore,
+									},
+								};
+							}
+							if (outcome === "rejected") {
+								return { cancel: true, rejectionCause: "cancelled-by-extension" as const };
+							}
+							return await new Promise<{ cancel: true }>((resolve) => {
+								event.signal.addEventListener("abort", () => resolve({ cancel: true }), { once: true });
+							});
+						});
+					},
+				],
+			});
+			harnesses.push(harness);
+			harness.setResponses([fauxAssistantMessage("seed response")]);
+			await harness.session.prompt("seed manual compaction context");
+			harness.setResponses([
+				(context) => {
+					providerContexts.push(context.messages);
+					return fauxAssistantMessage("custom trigger-turn handled");
+				},
+			]);
+
+			const compact = harness.session.compact();
+			await beforeCompact;
+			if (outcome === "aborted") harness.session.abortCompaction();
+			if (outcome === "accepted") {
+				await compact;
+			} else {
+				await compact.catch(() => undefined);
+			}
+			await harness.session.waitForSettledSessionWork();
+			await harness.session.agent.waitForIdle();
+
+			expect(beforeCompactCalls).toBe(1);
+			if (outcome === "accepted") {
+				expect(harness.faux.state.callCount).toBe(2);
+				expect(providerContexts).toHaveLength(1);
+				const providerContext = providerContexts[0] ?? [];
+				const summaryIndex = providerContext.findIndex(
+					(message) => message.role === "user" && getMessageText(message).includes("accepted summary"),
+				);
+				const customIndex = providerContext.findIndex(
+					(message) => message.role === "user" && getMessageText(message) === marker,
+				);
+				expect(summaryIndex).toBeGreaterThanOrEqual(0);
+				expect(customIndex).toBeGreaterThan(summaryIndex);
+				expect(
+					harness.sessionManager
+						.getEntries()
+						.filter((entry) => entry.type === "custom_message" && entry.content === marker),
+				).toHaveLength(1);
+			} else {
+				expect(harness.faux.state.callCount).toBe(1);
+				expect(providerContexts).toEqual([]);
+				expect(harness.session.agent.hasQueuedMessages()).toBe(true);
+			}
+		},
+	);
 
 	it("delivers follow-up messages only after the current run finishes", async () => {
 		const waiting = await createWaitingHarness();

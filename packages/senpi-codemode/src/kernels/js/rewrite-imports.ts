@@ -49,7 +49,7 @@ function parseProgram(code: string): ReturnType<typeof parse> | undefined {
 			allowSuperOutsideMethod: true,
 			allowUndeclaredExports: true,
 			errorRecovery: true,
-			plugins: ["typescript", "importAttributes"],
+			plugins: ["typescript"],
 		});
 	} catch (error) {
 		if (error instanceof SyntaxError) return undefined;
@@ -130,6 +130,11 @@ function rewriteImportDeclaration(node: ImportDeclaration): string {
 }
 
 function dynamicImportEdit(node: AstNode): TextEdit | undefined {
+	// Babel 8 parses dynamic import() as an ImportExpression node; Babel 7 used
+	// a CallExpression with an Import callee. Handle both shapes.
+	if (node.type === "ImportExpression") {
+		return { start: node.start, end: node.start + "import".length, text: DYNAMIC_IMPORT_CALLEE };
+	}
 	if (node.type !== "CallExpression") return undefined;
 	const callee = nodeFrom(node.value.callee);
 	if (callee?.type !== "Import") return undefined;

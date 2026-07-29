@@ -80,59 +80,62 @@ describe("terminating-tool queue ownership", () => {
 		}
 	});
 
-	it.each([
-		"steering",
-		"followUp",
-	] as const)("retains %s input without restarting provider work when public abort interrupts preparation", async (queue) => {
-		// given
-		const run = await createBlockedTerminatingRun();
-		harnesses.push(run.harness);
-		await queueMessage(run.harness, queue, "retain after abort");
-		run.releaseTool();
-		await run.preparationStarted;
+	it.each(["steering", "followUp"] as const)(
+		"retains %s input without restarting provider work when public abort interrupts preparation",
+		async (queue) => {
+			// given
+			const run = await createBlockedTerminatingRun();
+			harnesses.push(run.harness);
+			await queueMessage(run.harness, queue, "retain after abort");
+			run.releaseTool();
+			await run.preparationStarted;
 
-		// when
-		const abortPromise = run.harness.session.abort();
-		run.releasePreparation();
-		await Promise.all([run.promptPromise, abortPromise]);
+			// when
+			const abortPromise = run.harness.session.abort();
+			run.releasePreparation();
+			await Promise.all([run.promptPromise, abortPromise]);
 
-		// then
-		expect(run.harness.faux.state.callCount).toBe(1);
-		expect(getUserTexts(run.harness)).toEqual(["start"]);
-		expect(run.harness.session.pendingMessageCount).toBe(1);
-		expect(run.harness.session.agent.hasQueuedMessages()).toBe(true);
-	});
+			// then
+			expect(run.harness.faux.state.callCount).toBe(1);
+			expect(getUserTexts(run.harness)).toEqual(["start"]);
+			expect(run.harness.session.pendingMessageCount).toBe(1);
+			expect(run.harness.session.agent.hasQueuedMessages()).toBe(true);
+		},
+	);
 
 	it.each([
 		["steering", false],
 		["steering", true],
 		["followUp", false],
 		["followUp", true],
-	] as const)("does not deliver cleared %s input after successful preparation (replacement: %s)", async (queue, replace) => {
-		// given
-		const run = await createBlockedTerminatingRun();
-		harnesses.push(run.harness);
-		await queueMessage(run.harness, queue, "withdrawn safety instruction");
-		run.releaseTool();
-		await run.preparationStarted;
+	] as const)(
+		"does not deliver cleared %s input after successful preparation (replacement: %s)",
+		async (queue, replace) => {
+			// given
+			const run = await createBlockedTerminatingRun();
+			harnesses.push(run.harness);
+			await queueMessage(run.harness, queue, "withdrawn safety instruction");
+			run.releaseTool();
+			await run.preparationStarted;
 
-		// when
-		const cleared = run.harness.session.clearQueue();
-		if (replace) {
-			await queueMessage(run.harness, queue, "replacement instruction");
-		}
-		run.releasePreparation();
-		await run.promptPromise;
+			// when
+			const cleared = run.harness.session.clearQueue();
+			if (replace) {
+				await queueMessage(run.harness, queue, "replacement instruction");
+			}
+			run.releasePreparation();
+			await run.promptPromise;
 
-		// then
-		expect(cleared).toEqual(
-			queue === "steering"
-				? { steering: ["withdrawn safety instruction"], followUp: [] }
-				: { steering: [], followUp: ["withdrawn safety instruction"] },
-		);
-		expect(run.harness.faux.state.callCount).toBe(replace ? 2 : 1);
-		expect(getUserTexts(run.harness)).toEqual(replace ? ["start", "replacement instruction"] : ["start"]);
-		expect(run.harness.session.pendingMessageCount).toBe(0);
-		expect(run.harness.session.agent.hasQueuedMessages()).toBe(false);
-	});
+			// then
+			expect(cleared).toEqual(
+				queue === "steering"
+					? { steering: ["withdrawn safety instruction"], followUp: [] }
+					: { steering: [], followUp: ["withdrawn safety instruction"] },
+			);
+			expect(run.harness.faux.state.callCount).toBe(replace ? 2 : 1);
+			expect(getUserTexts(run.harness)).toEqual(replace ? ["start", "replacement instruction"] : ["start"]);
+			expect(run.harness.session.pendingMessageCount).toBe(0);
+			expect(run.harness.session.agent.hasQueuedMessages()).toBe(false);
+		},
+	);
 });

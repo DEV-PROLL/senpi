@@ -117,78 +117,74 @@ function createFaux() {
 }
 
 describe("cross-format truncation e2e matrix", () => {
-	it.each(fixtureRows("recovered"))("recovers $label EOF fixture: $fixture.title", async ({
-		format,
-		fixtureFormat,
-		fixture,
-	}) => {
-		if (fixture.expected.kind !== "recovered") throw new Error("Expected recovered fixture");
+	it.each(fixtureRows("recovered"))(
+		"recovers $label EOF fixture: $fixture.title",
+		async ({ format, fixtureFormat, fixture }) => {
+			if (fixture.expected.kind !== "recovered") throw new Error("Expected recovered fixture");
 
-		const result = await streamFixture(createFaux(), format, fixture.input);
+			const result = await streamFixture(createFaux(), format, fixture.input);
 
-		expect(result.stopReason).toBe("toolUse");
-		expect(toolCalls(result)).toEqual([
-			expect.objectContaining({
-				name: fixture.tool,
-				arguments: fixture.expected.arguments,
-			}),
-		]);
-		expect(toolCalls(result)[0]?.incomplete).toBeUndefined();
-		expect(textBlocks(result).every((text) => !text.includes(openingMarker(fixtureFormat)))).toBe(true);
-	});
+			expect(result.stopReason).toBe("toolUse");
+			expect(toolCalls(result)).toEqual([
+				expect.objectContaining({
+					name: fixture.tool,
+					arguments: fixture.expected.arguments,
+				}),
+			]);
+			expect(toolCalls(result)[0]?.incomplete).toBeUndefined();
+			expect(textBlocks(result).every((text) => !text.includes(openingMarker(fixtureFormat)))).toBe(true);
+		},
+	);
 
-	it.each(fixtureRows("recovered"))("converts length to toolUse for recovered $label fixture: $fixture.title", async ({
-		format,
-		fixtureFormat,
-		fixture,
-	}) => {
-		if (fixture.expected.kind !== "recovered") throw new Error("Expected recovered fixture");
+	it.each(fixtureRows("recovered"))(
+		"converts length to toolUse for recovered $label fixture: $fixture.title",
+		async ({ format, fixtureFormat, fixture }) => {
+			if (fixture.expected.kind !== "recovered") throw new Error("Expected recovered fixture");
 
-		const result = await streamFixture(createFaux(), format, fixture.input, "length");
+			const result = await streamFixture(createFaux(), format, fixture.input, "length");
 
-		expect(result.stopReason).toBe("toolUse");
-		expect(toolCalls(result)).toEqual([
-			expect.objectContaining({
-				name: fixture.tool,
-				arguments: fixture.expected.arguments,
-			}),
-		]);
-		expect(toolCalls(result)[0]?.incomplete).toBeUndefined();
-		expect(textBlocks(result).every((text) => !text.includes(openingMarker(fixtureFormat)))).toBe(true);
-	});
+			expect(result.stopReason).toBe("toolUse");
+			expect(toolCalls(result)).toEqual([
+				expect.objectContaining({
+					name: fixture.tool,
+					arguments: fixture.expected.arguments,
+				}),
+			]);
+			expect(toolCalls(result)[0]?.incomplete).toBeUndefined();
+			expect(textBlocks(result).every((text) => !text.includes(openingMarker(fixtureFormat)))).toBe(true);
+		},
+	);
 
-	it.each(fixtureRows("incomplete"))("flags unrecoverable $label EOF fixture: $fixture.title", async ({
-		format,
-		fixtureFormat,
-		fixture,
-	}) => {
-		const result = await streamFixture(createFaux(), format, fixture.input);
+	it.each(fixtureRows("incomplete"))(
+		"flags unrecoverable $label EOF fixture: $fixture.title",
+		async ({ format, fixtureFormat, fixture }) => {
+			const result = await streamFixture(createFaux(), format, fixture.input);
 
-		expect(toolCalls(result)).toEqual([expect.objectContaining({ name: fixture.tool, incomplete: true })]);
-		expect(textBlocks(result).every((text) => !text.includes(openingMarker(fixtureFormat)))).toBe(true);
-	});
+			expect(toolCalls(result)).toEqual([expect.objectContaining({ name: fixture.tool, incomplete: true })]);
+			expect(textBlocks(result).every((text) => !text.includes(openingMarker(fixtureFormat)))).toBe(true);
+		},
+	);
 
-	it.each(fixtureRows("dropped"))("drops nameless or unknown $label EOF fixture: $fixture.title", async ({
-		format,
-		fixtureFormat,
-		fixture,
-	}) => {
-		const result = await streamFixture(createFaux(), format, fixture.input);
+	it.each(fixtureRows("dropped"))(
+		"drops nameless or unknown $label EOF fixture: $fixture.title",
+		async ({ format, fixtureFormat, fixture }) => {
+			const result = await streamFixture(createFaux(), format, fixture.input);
 
-		expect(toolCalls(result)).toHaveLength(0);
-		expect(textBlocks(result).every((text) => !text.includes(fixture.input))).toBe(true);
-		expect(textBlocks(result).every((text) => !text.includes(openingMarker(fixtureFormat)))).toBe(true);
-	});
+			expect(toolCalls(result)).toHaveLength(0);
+			expect(textBlocks(result).every((text) => !text.includes(fixture.input))).toBe(true);
+			expect(textBlocks(result).every((text) => !text.includes(openingMarker(fixtureFormat)))).toBe(true);
+		},
+	);
 
-	it.each(fixtureRows("text"))("preserves unknown-name $label fixture verbatim as text: $fixture.title", async ({
-		format,
-		fixture,
-	}) => {
-		const result = await streamFixture(createFaux(), format, fixture.input);
+	it.each(fixtureRows("text"))(
+		"preserves unknown-name $label fixture verbatim as text: $fixture.title",
+		async ({ format, fixture }) => {
+			const result = await streamFixture(createFaux(), format, fixture.input);
 
-		expect(toolCalls(result)).toHaveLength(0);
-		expect(textBlocks(result)).toContain(fixture.input);
-	});
+			expect(toolCalls(result)).toHaveLength(0);
+			expect(textBlocks(result)).toContain(fixture.input);
+		},
+	);
 
 	it.each(formatRows)("mixed recovered calls preserve $label content order", async ({ format, fixtureFormat }) => {
 		const fixture = TRUNCATION_FIXTURES[fixtureFormat].find((entry) => entry.expected.kind === "recovered");
