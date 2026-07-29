@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
-import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxThinking } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { registerTtsrCommands, type TtsrPublicState } from "../../src/core/extensions/builtin/ttsr/commands.ts";
 import ttsrExtension from "../../src/core/extensions/builtin/ttsr/index.ts";
 import { TTSR_INJECTION_CUSTOM_TYPE, type TtsrRule } from "../../src/core/extensions/builtin/ttsr/types.ts";
 import type { ExtensionAPI, ExtensionUIContext } from "../../src/core/extensions/types.ts";
-import { createHarness, getMessageText, type Harness } from "../suite/harness.ts";
+import { createHarness, type Harness } from "../suite/harness.ts";
 
 interface PersistedMessage {
 	role?: string;
@@ -25,7 +25,7 @@ interface Notification {
 	type: string | undefined;
 }
 
-function uiUnavailable(): never {
+function _uiUnavailable(): never {
 	throw new Error("ui surface not available in this test");
 }
 

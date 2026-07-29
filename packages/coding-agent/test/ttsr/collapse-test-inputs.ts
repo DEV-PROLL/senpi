@@ -32,20 +32,20 @@ export function buildMarkdownRules(): string {
 		parts.push(`Rule ${index} above separates section ${index} of the document body text.`);
 		index += 1;
 	}
-	return parts.join("\n") + "\n";
+	return `${parts.join("\n")}\n`;
 }
 
 export function buildAsciiArt(): string {
 	const rows: string[] = [];
-	rows.push("+" + "-".repeat(38) + "+");
+	rows.push(`+${"-".repeat(38)}+`);
 	for (let i = 0; i < 20; i++) {
 		const fill = i % 2 === 0 ? "/" : "\\";
 		const fillCount = i % 7;
-		rows.push("|" + fill.repeat(fillCount) + " ".repeat(38 - fillCount) + "|");
+		rows.push(`|${fill.repeat(fillCount)}${" ".repeat(38 - fillCount)}|`);
 	}
-	for (let i = 0; i < 4; i++) rows.push("|" + " ".repeat(38) + "|");
-	rows.push("+" + "-".repeat(38) + "+");
-	return rows.join("\n") + "\n";
+	for (let i = 0; i < 4; i++) rows.push(`|${" ".repeat(38)}|`);
+	rows.push(`+${"-".repeat(38)}+`);
+	return `${rows.join("\n")}\n`;
 }
 
 export function buildBoxTable(): string {
@@ -59,7 +59,7 @@ export function buildBoxTable(): string {
 		if (i % 3 === 2) rows.push(`├${horizontal}┼${horizontal}┤`);
 	}
 	rows.push(`└${horizontal}┴${horizontal}┘`);
-	return rows.join("\n") + "\n";
+	return `${rows.join("\n")}\n`;
 }
 
 export function buildBase64(targetLength: number, seed: number): string {
@@ -84,9 +84,9 @@ export function buildSeparatorComments(): string {
 	const chars = ["-", "=", "*", "/", "#", "~", "_", "+"];
 	const rows: string[] = [];
 	for (let i = 0; i < 20; i++) {
-		rows.push("// " + (chars[i % chars.length] ?? "-").repeat(30 + i * 11));
+		rows.push(`// ${(chars[i % chars.length] ?? "-").repeat(30 + i * 11)}`);
 	}
-	return rows.join("\n") + "\n";
+	return `${rows.join("\n")}\n`;
 }
 
 export function buildCjkArticle(targetLength: number, seed: number): string {

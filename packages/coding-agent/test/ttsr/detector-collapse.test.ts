@@ -140,7 +140,7 @@ const COLLAPSE_ROWS: readonly CollapseRow[] = [
 	{
 		id: "A-P9",
 		seed: 19,
-		input: (AP9_LINE + "\n").repeat(6),
+		input: `${AP9_LINE}\n`.repeat(6),
 		expected: {
 			mechanism: "line-cycle",
 			period: 1,
@@ -152,7 +152,7 @@ const COLLAPSE_ROWS: readonly CollapseRow[] = [
 	{
 		id: "A-P10",
 		seed: 20,
-		input: (AP10_LINE_A + "\n" + AP10_LINE_B + "\n").repeat(6),
+		input: `${AP10_LINE_A}\n${AP10_LINE_B}\n`.repeat(6),
 		expected: {
 			mechanism: "line-cycle",
 			period: 2,
@@ -179,7 +179,7 @@ const COLLAPSE_ROWS: readonly CollapseRow[] = [
 		},
 	},
 	{ id: "A-N1", seed: 23, input: buildMarkdownRules(), expected: null },
-	{ id: "A-N2", seed: 24, input: "// " + "=".repeat(2000) + "\n// section end\n", expected: null },
+	{ id: "A-N2", seed: 24, input: `// ${"=".repeat(2000)}\n// section end\n`, expected: null },
 	{ id: "A-N3", seed: 25, input: buildAsciiArt(), expected: null },
 	{ id: "A-N4", seed: 26, input: buildBoxTable(), expected: null },
 	{ id: "A-N5", seed: 27, input: buildBase64(20480, 5), expected: null },
@@ -188,7 +188,7 @@ const COLLAPSE_ROWS: readonly CollapseRow[] = [
 	{ id: "A-N8", seed: 30, input: buildSeparatorComments(), expected: null },
 	{ id: "A-N9", seed: 31, input: buildCjkArticle(20480, 9), expected: null },
 	{ id: "A-N10", seed: 32, input: "00 ".repeat(500), expected: null },
-	{ id: "A-N11", seed: 33, input: (AN11_LINE + "\n").repeat(5), expected: null },
+	{ id: "A-N11", seed: 33, input: `${AN11_LINE}\n`.repeat(5), expected: null },
 	{ id: "A-N12", seed: 34, input: " ".repeat(400), expected: null },
 	{ id: "B-1", seed: 35, input: "!".repeat(255), expected: null },
 	{
@@ -228,7 +228,7 @@ const COLLAPSE_ROWS: readonly CollapseRow[] = [
 	{
 		id: "B-11",
 		seed: 45,
-		input: ("!".repeat(80) + "\n").repeat(8),
+		input: `${"!".repeat(80)}\n`.repeat(8),
 		expected: { mechanism: "dominant-scalar-run", anomalyStart: 0, garbageStart: 1, fireOffset: 258 },
 	},
 	{ id: "H-1", seed: 46, input: buildHealthyPrefix(3072), expected: null },
