@@ -20,6 +20,17 @@ export interface SkippedRule {
 	readonly warning: string;
 }
 
+interface ParsedFrontmatter {
+	readonly fields: Record<string, unknown>;
+	readonly body: string;
+}
+
+const FRONTMATTER_FENCE = "---";
+const CLOSING_FENCE_PATTERN = "\n---";
+const FALLBACK_KEY_VALUE = /^([\w-]+):\s*(.*)$/;
+const CONDITION_GLOB_SCOPE_TOOLS = ["edit", "write"] as const;
+const CATCH_ALL_CONDITION = ".*";
+
 const REGEX_META_CHARS = /[\\^$+|()]/;
 const GLOB_META_CHARS = /[?*[\]{}]/;
 const EXTENSION_GLOB = /^\*\.[^\s/]+$/;
