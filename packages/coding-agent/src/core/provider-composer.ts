@@ -512,7 +512,12 @@ export function composeModelProvider(
 					: base.stream(model, context, options);
 			}
 			const api = getApiProvider(model.api);
-			if (!api) throw new Error(`No API provider registered for api: ${model.api}`);
+			if (!api) {
+				throw new Error(
+					`No API provider registered for api: ${model.api} (model "${model.provider}/${model.id}"). ` +
+						`Load the extension that implements this api, or fix the "api" value for provider "${providerId}" in models.json.`,
+				);
+			}
 			return simple
 				? api.streamSimple(model, context, options as SimpleStreamOptions)
 				: api.stream(model, context, options);

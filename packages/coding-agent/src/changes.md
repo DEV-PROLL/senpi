@@ -1,3 +1,31 @@
+## Stream-start timeout wiring and unregistered-api error context (2026-07-29)
+
+### What changed
+
+- `core/settings-manager.ts`: new `retry.provider.streamStartTimeoutMs` setting and
+  `getAgentStreamStartTimeoutMs()` (default 90000ms; 0 disables; the default is clamped to a
+  shorter idle timeout and disabled together with a disabled idle guard). `core/sdk.ts` and the
+  interactive settings handler wire it into `Agent.streamStartTimeoutMs`.
+- `core/provider-composer.ts`: the stream-time `No API provider registered for api: <api>` error
+  now names the model (`provider/id`) and points at the models.json provider entry or the missing
+  provider extension.
+- Coverage: `test/settings-manager.test.ts` (retry describe), `test/provider-composer-unknown-api.test.ts`,
+  `packages/ai/test/retry.test.ts` (stream timeout wordings stay retryable).
+
+### Why
+
+- Incident (donated session log): a dead upstream accepted requests but never sent a first byte.
+  With only the 300s idle bound, each turn attempt froze the session for 5 minutes with `usage: 0`
+  and nothing persisted; retries repeated the same 300s wait, making the session practically
+  unrecoverable while new sessions worked. A 90s first-event bound with the retryable wording lets
+  the retry/fallback ladder engage quickly. Related incident error `No API provider registered for
+  api: kiro-api` carried no context about which model or config produced it.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one settings getter + one field in `ProviderRetrySettings`; one error message in
+  `composeModelProvider`; one option in the `Agent` construction in `core/sdk.ts`.
+
 ## Absent fallback chains no longer produce a startup warning (2026-07-28)
 
 ### What changed
