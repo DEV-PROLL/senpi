@@ -40,6 +40,10 @@
   after the first event so healthy reasoning gaps are not limited to 30 seconds.
 - Consecutive transport timeouts reported with `stopReason: "aborted"` keep consuming the same retry counter. Only a
   genuinely successful assistant response resets the budget or emits `auto_retry_end { success: true }`.
+- Retry continuations use the session-work barrier and revalidate atomically with the scheduled-continuation path.
+  Accepted recompaction stays queue-first while retaining timeout options; reconstructed failed assistant tails are
+  retired before continuation. A concurrent low-level `Agent.prompt()` is treated as a benign takeover, and session
+  settlement is never emitted while Agent core is still streaming.
 - Coverage: `test/suite/regressions/provider-idle-recovery.test.ts` pins exact request text/order, configurable timeout
   sequences, disabled guards, negative classifier shapes, and a real no-first-event stream expiry at the cap;
   `test/settings-manager.test.ts` pins setting defaults and `0` semantics.

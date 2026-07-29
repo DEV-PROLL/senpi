@@ -1048,6 +1048,9 @@ export class AgentSession {
 	}
 
 	private async _emitAgentSettled(): Promise<void> {
+		if (this.agent.state.isStreaming) {
+			await this.agent.waitForIdle();
+		}
 		if (!this._isAgentRunActive) {
 			this._resolveIdleWaitIfIdle();
 			return;
@@ -4370,37 +4373,64 @@ export class AgentSession {
 		this._scheduledContinuationRecompacted = true;
 	}
 
-	private async _continueAgentAfterCurrentRun(options: AgentContinuationOptions = {}): Promise<void> {
+	private async _continueAgentAfterCurrentRun(
+		options: AgentContinuationOptions = {},
+	): Promise<"continued" | "taken-over"> {
 		await this.agent.waitForIdle();
-		await this._revalidateScheduledContinuationAdmission();
-		const useQueuedContinuation = this._scheduledContinuationRecompacted;
 		try {
-			if (options.deferQueuedMessages || options.timeoutMs !== undefined) {
-				await this.agent.continue(options);
-			} else if (useQueuedContinuation) {
-				await this.agent.continueWithQueuedMessages();
+			if (this.agent.state.isStreaming) return "taken-over";
+
+			await this._revalidateScheduledContinuationAdmission();
+			if (this.agent.state.isStreaming) return "taken-over";
+
+			if (this._scheduledContinuationRecompacted) {
+				const tail = this.agent.state.messages.at(-1);
+				if (tail?.role === "assistant" && (tail.stopReason === "error" || tail.stopReason === "aborted")) {
+					this._retireFailedRetryAssistant(tail);
+					if (this.agent.state.messages.at(-1) === tail) {
+						this.agent.state.messages = this.agent.state.messages.slice(0, -1);
+						this._incrementMessageRevision();
+					}
+				}
+				await this.agent.continueWithQueuedMessages(options);
 			} else {
-				await this.agent.continue();
+				await this.agent.continue(options);
 			}
+			return "continued";
+		} catch (error) {
+			if (
+				this.agent.state.isStreaming &&
+				error instanceof Error &&
+				error.message.startsWith("Agent is already processing")
+			) {
+				return "taken-over";
+			}
+			throw error;
 		} finally {
 			this._scheduledContinuationRecompacted = false;
 		}
 	}
 
-	private _scheduleContinuationAfterCurrentEvent(): void {
+	private _scheduleContinuationAfterCurrentEvent(
+		options: AgentContinuationOptions = {},
+		retryContinuation = false,
+	): void {
 		// Tool hooks wait for queued message persistence, so continue() cannot run inside this event promise.
 		const currentEventQueue = this._agentEventQueue;
 		const finishContinuationWork = this._sessionWorkBarrier.begin();
 		const continueAfterEvent = async (): Promise<void> => {
 			try {
-				await this._continueAgentAfterCurrentRun();
+				await this._continueAgentAfterCurrentRun(options);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				this._emit({
 					type: "continuation_error",
 					errorMessage: `Failed to continue queued messages: ${message}`,
 				});
-				await this._emitAgentSettled();
+				if (!this.agent.state.isStreaming) {
+					await this._emitAgentSettled();
+				}
+				if (retryContinuation) this._resolveRetry();
 			}
 		};
 
@@ -5453,23 +5483,15 @@ export class AgentSession {
 			this._skipNextPostRetryCompactionCheck = true;
 		}
 
-		// Retry via the shared continuation path after the event handler chain settles.
-		// Lifecycle suppression protects queued work while retry admission settles;
-		// known provider-timeout retries additionally skip the first queue poll so
-		// user input stays deferred until that retry request proves responsive.
+		// Retry through the barrier-owned scheduled-continuation path after the
+		// event handler chain settles. Lifecycle suppression protects queued work
+		// while admission settles; known provider-timeout retries additionally skip
+		// the first queue poll so user input stays deferred until that request proves
+		// responsive. A concurrent low-level Agent prompt is a benign takeover, not
+		// a terminal continuation failure.
 		const continuationOptions = this._getProviderTimeoutRetryOptions(message);
 		this.agent.suppressQueuedMessageDrain();
-		setTimeout(() => {
-			void this._continueAgentAfterCurrentRun(continuationOptions).catch(async (error) => {
-				const message = error instanceof Error ? error.message : String(error);
-				this._emit({
-					type: "continuation_error",
-					errorMessage: `Failed to continue queued messages: ${message}`,
-				});
-				await this._emitAgentSettled();
-				this._resolveRetry();
-			});
-		}, 0);
+		this._scheduleContinuationAfterCurrentEvent(continuationOptions, true);
 
 		return "continued";
 	}
