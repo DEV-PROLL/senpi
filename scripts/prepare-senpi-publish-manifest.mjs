@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const ownedRegistryAliases = new Map([
@@ -143,6 +143,12 @@ export function stagePublishManifest(repoRoot) {
 		...platformOptionalDependencyFamilies(codingAgentNodeModules, stagedPackageNames),
 		...(manifest.optionalDependencies ?? {}),
 	};
+	const bundlableSet = new Set(bundlablePackageNames);
+	for (const packageName of stagedPackageNames) {
+		if (!bundlableSet.has(packageName)) {
+			rmSync(join(codingAgentNodeModules, packageName), { recursive: true, force: true });
+		}
+	}
 	// Keep the original dependency keys so npm packs the modules at the import paths
 	// the compiled source uses. Resolve those keys through fork-owned aliases instead
 	// of attempting to fetch lockstep versions from the upstream-owned namespace.
