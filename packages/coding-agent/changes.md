@@ -1,5 +1,13 @@
 # Local fork changes
 
+## 2026-07-30 — Strip publisher-native packages before npm pack (#446)
+
+- Changed: after promoting complete platform optional-dependency families into the root manifest, publish staging now removes every platform-constrained package directory before npm traverses bundled dependency graphs.
+- Why: excluding the Linux sidecar from `bundleDependencies` was not sufficient. npm still followed the bundled portable Claude SDK's installed optional dependency and physically embedded the publisher's `claude-agent-sdk-linux-x64` files in the universal tarball.
+- What changed: the literal issue-446 test now runs real `npm pack --dry-run` and asserts the Linux sidecar path is absent, while the consumer optional contract remains intact for darwin-arm64 installation.
+- Why the extension system could not handle this: the publisher-native files were already baked into the npm artifact before install or runtime extension loading.
+- Merge-conflict risk: low. Expected conflict zones are publish-manifest staging and the focused issue-446 packaging test.
+
 ## 2026-07-30 — Publish gate honors consumer-resolved platform optionals (#446)
 
 - Changed: `assertSenpiPackedWorkspaceFiles()` now validates the staged `bundleDependencies` contract when it is available, while retaining the legacy all-runtime fallback for callers without a staged manifest.

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -259,6 +260,13 @@ describe("stagePublishManifest", () => {
 		assert.deepEqual(manifest.optionalDependencies, platformPackages);
 		assert.ok(manifest.bundleDependencies.includes("@anthropic-ai/claude-agent-sdk"));
 		assert.ok(!manifest.bundleDependencies.includes("@anthropic-ai/claude-agent-sdk-linux-x64"));
+		const packed = JSON.parse(
+			execFileSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
+				cwd: join(tempDir, "packages", "coding-agent"),
+				encoding: "utf8",
+			}),
+		)[0];
+		assert.ok(!(packed.files ?? []).some(({ path }) => path.includes("claude-agent-sdk-linux-x64")));
 	});
 
 	it("keeps an unreadable staged package for the later pack validation gate", () => {
