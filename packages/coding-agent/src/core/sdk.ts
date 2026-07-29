@@ -11,7 +11,12 @@ import type { ServiceTier } from "./extensions/builtin/service-tier.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { convertToLlmForTransport, TRANSPORT_IMAGE_BUDGET_BYTES } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
-import { findInitialModel, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
+import {
+	findInitialModel,
+	getModelNarrowingPatterns,
+	type InitialModelProvenance,
+	resolveModelScope,
+} from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
@@ -54,6 +59,8 @@ export interface CreateAgentSessionOptions {
 
 	/** Model to use. Default: from settings, else first available */
 	model?: Model<any>;
+	/** Provenance for an explicitly supplied initial model. Omit to leave external SDK model selection untouched. */
+	initialModelProvenance?: InitialModelProvenance;
 	/** Thinking level. Default: from settings, else 'medium' (clamped to model capabilities) */
 	thinkingLevel?: ThinkingLevel;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
@@ -236,6 +243,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const hasThinkingEntry = sessionManager.getBranch().some((entry) => entry.type === "thinking_level_change");
 
 	let model = options.model;
+	let initialModelProvenance = options.initialModelProvenance;
 	let modelFallbackMessage: string | undefined;
 
 	// If session has data, try to restore model from it
@@ -260,6 +268,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			modelRuntime,
 		});
 		model = result.model;
+		initialModelProvenance = result.provenance;
 		if (!model) {
 			modelFallbackMessage = formatNoModelsAvailableMessage();
 		} else if (modelFallbackMessage) {
@@ -374,6 +383,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		transport: settingsManager.getTransport(),
 		thinkingBudgets: settingsManager.getThinkingBudgets(),
 		timeoutMs: settingsManager.getAgentStreamIdleTimeoutMs(),
+		streamStartTimeoutMs: settingsManager.getAgentStreamStartTimeoutMs(),
 		maxRetryDelayMs: settingsManager.getProviderRetrySettings().maxRetryDelayMs,
 	});
 
@@ -391,6 +401,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionManager.appendThinkingLevelChange(thinkingLevel);
 	}
 
+	const sessionStartEvent = initialModelProvenance
+		? {
+				...(options.sessionStartEvent ?? { type: "session_start" as const, reason: "startup" as const }),
+				initialModelProvenance,
+			}
+		: options.sessionStartEvent;
+
 	const session = new AgentSession({
 		agent,
 		sessionManager,
@@ -407,7 +424,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		allowedToolNames,
 		excludedToolNames,
 		extensionRunnerRef,
-		sessionStartEvent: options.sessionStartEvent,
+		sessionStartEvent,
 		autoTitleSessions: options.autoTitleSessions,
 	});
 	const extensionsResult = resourceLoader.getExtensions();

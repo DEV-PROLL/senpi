@@ -22,6 +22,7 @@ import openaiWebSearchExtension from "./openai-web-search/index.ts";
 import permissionSystemExtension from "./permission-system/index.ts";
 import promptPresetExtension from "./prompt-preset/index.ts";
 import promptUrlWidgetExtension from "./prompt-url-widget.ts";
+import recommendedModelsExtension from "./recommended-models/index.ts";
 import redrawsExtension from "./redraws.ts";
 import piRulesExtension from "./rules/index.ts";
 import serviceTierExtension from "./service-tier.ts";
@@ -59,6 +60,7 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "openai-web-search", factory: openaiWebSearchExtension },
 	{ id: "service-tier", factory: serviceTierExtension },
 	{ id: "model-fallback", factory: modelFallbackExtension },
+	{ id: "recommended-models", factory: recommendedModelsExtension },
 	{ id: "bash-timeout", factory: bashTimeoutExtension },
 	// Terminal follows bash-timeout so its injected default reaches the PTY bash, and follows
 	// anthropic-bash so mutual-exclusion (companion step-aside) is evaluated after it registers.

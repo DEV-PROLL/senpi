@@ -5099,6 +5099,7 @@ export class InteractiveMode {
 						this.settingsManager.setHttpIdleTimeoutMs(timeoutMs);
 						configureHttpDispatcher(timeoutMs);
 						this.session.agent.timeoutMs = this.settingsManager.getAgentStreamIdleTimeoutMs();
+						this.session.agent.streamStartTimeoutMs = this.settingsManager.getAgentStreamStartTimeoutMs();
 						this.showStatus(`HTTP idle timeout: ${formatHttpIdleTimeoutMs(timeoutMs)}`);
 					},
 					onThinkingLevelChange: (level) => {

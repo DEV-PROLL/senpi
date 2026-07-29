@@ -1,4 +1,5 @@
 import { CLI_TIPS } from "./catalog/cli-tips.ts";
+import { ETHOS_TIPS } from "./catalog/ethos-tips.ts";
 import { INPUT_TIPS } from "./catalog/input-tips.ts";
 import { MODEL_TIPS } from "./catalog/model-tips.ts";
 import { SESSION_TIPS } from "./catalog/session-tips.ts";
@@ -17,4 +18,5 @@ export const TIP_DEFINITIONS: readonly TipDefinition[] = [
 	...SETTINGS_TIPS,
 	...CLI_TIPS,
 	...SUBAGENT_TIPS,
+	...ETHOS_TIPS,
 ];

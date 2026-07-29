@@ -58,6 +58,8 @@ interface PackageCommandOptions {
 	source?: string;
 	updateTarget?: UpdateTarget;
 	showExtensionsSkippedNote: boolean;
+	// BETA(omo-local-update): hidden internal flag; remove with src/beta/omo-local-update*.ts.
+	omoLocalUpdateWorker: boolean;
 	local: boolean;
 	force: boolean;
 	projectTrustOverride?: boolean;
@@ -202,6 +204,7 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 
 	let local = false;
 	let force = false;
+	let omoLocalUpdateWorker = false;
 	let projectTrustOverride: boolean | undefined;
 	let help = false;
 	let invalidOption: string | undefined;
@@ -280,6 +283,15 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 		if (arg === "--force") {
 			if (command === "update") {
 				force = true;
+			} else {
+				invalidOption = invalidOption ?? arg;
+			}
+			continue;
+		}
+
+		if (arg === "--omo-local-update-worker") {
+			if (command === "update") {
+				omoLocalUpdateWorker = true;
 			} else {
 				invalidOption = invalidOption ?? arg;
 			}
@@ -377,6 +389,7 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 		source,
 		updateTarget,
 		showExtensionsSkippedNote,
+		omoLocalUpdateWorker,
 		local,
 		force,
 		projectTrustOverride,
@@ -819,13 +832,24 @@ export async function handlePackageCommand(
 
 			case "update": {
 				const target = options.updateTarget ?? { type: "self" };
-				// BETA(omo-local-update): remove this block, src/beta/omo-local-update.ts and all test/omo-local-update* files to drop the feature.
+				// BETA(omo-local-update): remove this block, src/beta/omo-local-update*.ts and all test/omo-local-update* files to drop the feature.
+				if (options.omoLocalUpdateWorker) {
+					await runOmoLocalUpdateBeta({
+						env: process.env,
+						agentDir,
+						settings: settingsManager.getGlobalSettings(),
+						force: options.force,
+						mode: "build",
+					});
+					return true;
+				}
 				if (options.showExtensionsSkippedNote) {
 					await runOmoLocalUpdateBeta({
 						env: process.env,
 						agentDir,
 						settings: settingsManager.getGlobalSettings(),
 						force: options.force,
+						mode: "dispatch",
 					});
 				}
 				if (options.showExtensionsSkippedNote) {

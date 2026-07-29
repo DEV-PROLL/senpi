@@ -23,12 +23,40 @@ export const BRANCH_SUMMARY_PREFIX = `The following is a summary of a branch tha
 
 export const BRANCH_SUMMARY_SUFFIX = `</summary>`;
 
+export const GOAL_CONTINUATION_MESSAGE_TYPE = "goal-continuation";
+
+/**
+ * Per-type exclusion must remain false: compaction and branch summarization
+ * inspect entries independently, where excluding this type would hide the live
+ * goal-continuation message. Whole-context filtering below removes only stale
+ * goal-continuation entries while retaining the last triggering message.
+ */
 export function isContextExcludedCustomMessage(_customType: string): boolean {
 	return false;
 }
 
+function keepLatestGoalContinuationMessage(messages: AgentMessage[]): AgentMessage[] {
+	let lastGoalContinuationIndex = -1;
+
+	for (let index = 0; index < messages.length; index++) {
+		const message = messages[index];
+		if (message.role === "custom" && message.customType === GOAL_CONTINUATION_MESSAGE_TYPE) {
+			lastGoalContinuationIndex = index;
+		}
+	}
+
+	if (lastGoalContinuationIndex === -1) return messages;
+
+	return messages.filter(
+		(message, index) =>
+			index === lastGoalContinuationIndex ||
+			message.role !== "custom" ||
+			message.customType !== GOAL_CONTINUATION_MESSAGE_TYPE,
+	);
+}
+
 export function filterContextExcludedMessages(messages: AgentMessage[]): AgentMessage[] {
-	return messages;
+	return keepLatestGoalContinuationMessage(messages);
 }
 
 /**
@@ -158,7 +186,7 @@ export function createCustomMessage(
 export function convertToLlm(messages: AgentMessage[]): Message[] {
 	const withContextProvenance = <T extends Message>(source: AgentMessage, target: T): T =>
 		copyContextProvenance(source, target);
-	return messages
+	return keepLatestGoalContinuationMessage(messages)
 		.map((m): Message | undefined => {
 			switch (m.role) {
 				case "bashExecution":

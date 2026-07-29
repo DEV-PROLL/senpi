@@ -139,7 +139,7 @@ describe("resolveWorkingTipLine", () => {
 		expect(resolveWorkingTipLine(args)?.tipId).toBe(resolveWorkingTipLine(args)?.tipId);
 	});
 
-	it("emits exactly one line so the status area never grows by more than one row", () => {
+	it("emits exactly two lines: the tip and the give-me-tips pointer below it", () => {
 		const resolved = resolveWorkingTipLine({
 			tipsEnabled: true,
 			history: {},
@@ -149,6 +149,22 @@ describe("resolveWorkingTipLine", () => {
 			keys: fakeKeys,
 		});
 
-		expect(resolved?.line.split("\n")).toHaveLength(1);
+		expect(resolved?.line.split("\n")).toHaveLength(2);
+	});
+
+	it("points at the give-me-tips skill on a second line under the tip", () => {
+		const resolved = resolveWorkingTipLine({
+			tipsEnabled: true,
+			history: {},
+			sessionShownTipIds: new Set<string>(),
+			now: 1_000,
+			definitions,
+			keys: fakeKeys,
+		});
+
+		const lines = resolved?.line.split("\n");
+		expect(lines).toHaveLength(2);
+		expect(lines?.[0]).toContain("Tip:");
+		expect(lines?.[1]).toContain("give-me-tips");
 	});
 });

@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
@@ -9,7 +10,7 @@ import {
 	runGoalHandlers,
 } from "./goal-monitor-test-harness.ts";
 
-const STALL_MARKER = "<goal_monitor_stall_check>";
+const STALL_MARKER = "<goal_stall_check>";
 const STALL_EVENT = "goal_monitor_continuation_stall";
 
 interface StallHarness {
@@ -18,7 +19,7 @@ interface StallHarness {
 	readonly notices: string[];
 }
 
-async function createStallHarness(threadId: string): Promise<StallHarness> {
+async function createStallHarness(threadId: string, monitorsActive = true): Promise<StallHarness> {
 	const notices: string[] = [];
 	const harness = createGoalHarness();
 	const ctx = await makeGoalContext(notices, threadId);
@@ -26,14 +27,51 @@ async function createStallHarness(threadId: string): Promise<StallHarness> {
 		.get("create_goal")
 		?.execute("create", { objective: "Keep monitoring" }, undefined, undefined, ctx);
 	await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
-	harness.events.emit("terminal_monitor_state", { activeCount: 1 });
-	await harness.events.flush();
+	if (monitorsActive) {
+		harness.events.emit("terminal_monitor_state", { activeCount: 1 });
+		await harness.events.flush();
+	}
 	return { harness, ctx, notices };
 }
 
-async function runMonitorContinuationCycle(harness: GoalHarness, ctx: ExtensionContext): Promise<void> {
+function cleanAssistantStopWithText(text: string): AgentMessage {
+	const message = cleanAssistantStop();
+	if (message.role !== "assistant") throw new Error("Expected an assistant message");
+	return { ...message, content: [{ type: "text", text }] };
+}
+
+function toolUsingContinuationMessages(text: string): AgentMessage[] {
+	const finalAssistant = cleanAssistantStopWithText(text);
+	if (finalAssistant.role !== "assistant") throw new Error("Expected an assistant message");
+	return [
+		{
+			...finalAssistant,
+			content: [{ type: "toolCall", id: "stall-reset-tool", name: "bash", arguments: { command: "true" } }],
+			stopReason: "toolUse",
+		},
+		{
+			role: "toolResult",
+			toolCallId: "stall-reset-tool",
+			toolName: "bash",
+			content: [{ type: "text", text: "ok" }],
+			isError: false,
+			timestamp: finalAssistant.timestamp,
+		},
+		finalAssistant,
+	];
+}
+
+async function runContinuationCycle(
+	harness: GoalHarness,
+	ctx: ExtensionContext,
+	messages: readonly AgentMessage[] = [cleanAssistantStop()],
+): Promise<void> {
 	await runGoalHandlers(harness.handlers, "agent_start", { type: "agent_start" }, ctx);
-	await runGoalHandlers(harness.handlers, "agent_end", { type: "agent_end", messages: [cleanAssistantStop()] }, ctx);
+	await runGoalHandlers(harness.handlers, "agent_end", { type: "agent_end", messages: [...messages] }, ctx);
+}
+
+async function runMonitorContinuationCycle(harness: GoalHarness, ctx: ExtensionContext): Promise<void> {
+	await runContinuationCycle(harness, ctx);
 	await vi.advanceTimersByTimeAsync(240_000);
 }
 
@@ -61,12 +99,48 @@ describe("goal monitor continuation stall check", () => {
 		await runMonitorContinuationCycle(harness, ctx);
 		expect(harness.sent).toHaveLength(3);
 		expect(harness.sent[2]?.message.content).toContain(STALL_MARKER);
-		expect(stallEvents(harness)).toEqual([expect.objectContaining({ consecutiveContinuations: 3 })]);
+		expect(harness.sent[2]?.message.content).toContain("bash_output");
+		expect(harness.sent[2]?.message.content).toContain("kill_bash");
+		expect(stallEvents(harness)).toEqual([expect.objectContaining({ consecutiveContinuations: 3, toolless: true })]);
 		expect(notices.some((notice) => /stall/i.test(notice))).toBe(true);
 
 		await runMonitorContinuationCycle(harness, ctx);
 		expect(harness.sent[3]?.message.content).toContain(STALL_MARKER);
 		expect(stallEvents(harness)).toHaveLength(2);
+	});
+
+	it("injects the stall check from the third toolless immediate continuation", async () => {
+		const { harness, ctx } = await createStallHarness("thread-stall-no-monitor", false);
+
+		for (let turn = 1; turn <= 3; turn++) {
+			await runContinuationCycle(harness, ctx, [cleanAssistantStopWithText(`toolless turn ${turn}`)]);
+		}
+
+		expect(harness.sent).toHaveLength(3);
+		expect(harness.sent[0]?.message.content).not.toContain(STALL_MARKER);
+		expect(harness.sent[1]?.message.content).not.toContain(STALL_MARKER);
+		expect(harness.sent[2]?.message.content).toContain(STALL_MARKER);
+		expect(harness.sent[2]?.message.content).not.toContain("bash_output");
+		expect(stallEvents(harness)).toEqual([expect.objectContaining({ consecutiveContinuations: 3, toolless: true })]);
+	});
+
+	it("resets the toolless streak after a continuation turn uses tools", async () => {
+		const { harness, ctx } = await createStallHarness("thread-stall-tool-reset", false);
+
+		await runContinuationCycle(harness, ctx, [cleanAssistantStopWithText("toolless turn 1")]);
+		await runContinuationCycle(harness, ctx, [cleanAssistantStopWithText("toolless turn 2")]);
+		await runContinuationCycle(harness, ctx, toolUsingContinuationMessages("tool-ful turn"));
+		await runContinuationCycle(harness, ctx, [cleanAssistantStopWithText("toolless turn 3")]);
+		await runContinuationCycle(harness, ctx, [cleanAssistantStopWithText("toolless turn 4")]);
+
+		expect(harness.sent).toHaveLength(5);
+		for (const sent of harness.sent) {
+			expect(sent.message.content).not.toContain(STALL_MARKER);
+		}
+		expect(stallEvents(harness)).toHaveLength(0);
+
+		await runContinuationCycle(harness, ctx, [cleanAssistantStopWithText("toolless turn 5")]);
+		expect(harness.sent[5]?.message.content).toContain(STALL_MARKER);
 	});
 
 	it("resets the streak when the monitors settle and a new monitor starts", async () => {
