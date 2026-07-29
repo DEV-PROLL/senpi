@@ -1,3 +1,32 @@
+## Availability-aware default Fable fallback chain (2026-07-29)
+
+### What changed
+
+- `core/retry-fallback/settings.ts` now owns retry setting types and normalization, including the shipped default
+  `anthropic/claude-fable-5` chain:
+  `apitopia/kimi-k3-unlocked:max` -> `anthropic/claude-opus-5:xhigh` ->
+  `anthropic/claude-opus-4-8:xhigh`.
+- The default applies only when `retry.fallbackChains` is absent or malformed. Explicit chain maps, including
+  an explicitly empty map, remain authoritative.
+- `core/retry-fallback/chains.ts` and the model-fallback builtin omit unavailable models and remove chains with
+  no usable candidates, so runtime selection and `/fallback` display agree.
+- Existing defaults remain enabled: model fallback on, server-side fallback abort on, and cooldown-expiry revert.
+- Coverage: `test/settings-manager-retry-fallback.test.ts`,
+  `test/suite/model-fallback-command.test.ts`, and `test/suite/model-fallback-host-wiring.test.ts`.
+
+### Why
+
+- A fresh Senpi install previously aborted provider-side fallback by default but had no client chain, producing a
+  dead-end warning. Shipping the preferred chain makes that default policy actionable while keeping optional model
+  providers safe: missing models are skipped rather than warned about or selected.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: retry settings imports and delegation in `core/settings-manager.ts`; the new retry settings module has no
+  upstream counterpart.
+- LOW: canonical chain construction in `core/retry-fallback/chains.ts`.
+- LOW: registry-aware loading in `core/extensions/builtin/model-fallback/`.
+
 ## Stream-start timeout wiring and unregistered-api error context (2026-07-29)
 
 ### What changed

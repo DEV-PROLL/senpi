@@ -1,4 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
+import { GOAL_CACHE_WARMUP_ENTRY_TYPE } from "./cache-warm.ts";
+import { renderGoalCacheWarmupEntry } from "./cache-warm-renderer.ts";
 import { registerGoalCommand } from "./command-registration.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
@@ -39,6 +41,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerEntryRenderer(GOAL_CACHE_WARMUP_ENTRY_TYPE, renderGoalCacheWarmupEntry);
 	registerGoalTools(pi, {
 		goalStoreRef: (ctx) => buildGoalStoreRef(ctx.sessionManager, ctx.cwd),
 		accountCurrentAgentTurn,
