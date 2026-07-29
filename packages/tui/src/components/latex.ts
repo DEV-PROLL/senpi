@@ -174,7 +174,7 @@ class LatexParser {
 			if (character === "{") {
 				const group = this.parseGroup(depth);
 				if (group === undefined) return undefined;
-				output.push(`{${group}}`);
+				output.push(group);
 				continue;
 			}
 			output.push(character ?? "");
@@ -209,26 +209,42 @@ class LatexParser {
 		const symbol = SYMBOLS[command];
 		if (symbol !== undefined) return symbol;
 		if (STYLE_COMMANDS.has(command)) {
+			this.skipSpaces();
 			return this.input[this.index] === "{" ? this.parseGroup(depth) : command;
 		}
 		if (command === "\\sqrt") {
+			this.skipSpaces();
 			const body = this.parseGroup(depth);
 			return body === undefined ? undefined : `√(${body})`;
 		}
 		if (command === "\\frac") {
+			this.skipSpaces();
 			const numerator = this.parseGroup(depth);
+			this.skipSpaces();
 			const denominator = numerator === undefined ? undefined : this.parseGroup(depth);
 			return numerator === undefined || denominator === undefined ? undefined : `(${numerator})⁄(${denominator})`;
 		}
 		if (command === "\\left" || command === "\\right") {
+			this.skipSpaces();
 			const delimiter = this.input[this.index];
+			const escapedDelimiter = delimiter === "\\" ? this.input[this.index + 1] : undefined;
+			if (escapedDelimiter !== undefined && "{}".includes(escapedDelimiter)) {
+				this.index += 2;
+				return escapedDelimiter;
+			}
 			if (delimiter !== undefined && "()[]{}|".includes(delimiter)) {
 				this.index += 1;
 				return delimiter;
 			}
 		}
 		if (command === "\\quad") return "  ";
-		return command;
+		let fallback = command;
+		while (this.input[this.index] === "{") {
+			const group = this.parseGroup(depth);
+			if (group === undefined) return undefined;
+			fallback += `{${group}}`;
+		}
+		return fallback;
 	}
 
 	private parseScript(marker: "^" | "_", depth: number): string | undefined {
@@ -244,6 +260,10 @@ class LatexParser {
 		const body = String.fromCodePoint(codePoint);
 		this.index += body.length;
 		return alphabet[body] ?? `${marker}${body}`;
+	}
+
+	private skipSpaces(): void {
+		while (this.input[this.index] === " ") this.index += 1;
 	}
 }
 

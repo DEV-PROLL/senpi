@@ -76,6 +76,25 @@ function findInlineMath(
 	return undefined;
 }
 
+function findMalformedInlineSpan(src: string, open: "\\(" | "\\[", close: "\\)" | "\\]"): string | undefined {
+	if (!src.startsWith(open)) return undefined;
+	const scanEnd = Math.min(src.length, open.length + MAX_LATEX_FORMULA_LENGTH + 1);
+	let competingOpener = false;
+	for (let index = open.length; index < scanEnd; index += 1) {
+		if (src[index] === "\n" || src[index] === "`") return undefined;
+		if (src.startsWith(open, index)) {
+			competingOpener = true;
+			index += open.length - 1;
+			continue;
+		}
+		if (src.startsWith(close, index)) {
+			return competingOpener ? src.slice(0, index + close.length) : undefined;
+		}
+		if (src[index] === "\\") index += 1;
+	}
+	return undefined;
+}
+
 function findBlockMath(
 	src: string,
 	open: "$$" | "\\[",
@@ -151,6 +170,10 @@ const inlineMathTokenizer: TokenizerExtension = {
 			}
 			return createLatexToken("latex_literal", "$", "$");
 		}
+		const malformedParens = findMalformedInlineSpan(src, "\\(", "\\)");
+		if (malformedParens) return createLatexToken("latex_literal", malformedParens, malformedParens);
+		const malformedBrackets = findMalformedInlineSpan(src, "\\[", "\\]");
+		if (malformedBrackets) return createLatexToken("latex_literal", malformedBrackets, malformedBrackets);
 		const repeatedParens = repeatedMalformedOpeners(src, "\\(");
 		if (repeatedParens) return createLatexToken("latex_literal", repeatedParens, repeatedParens);
 		const repeatedBrackets = repeatedMalformedOpeners(src, "\\[");

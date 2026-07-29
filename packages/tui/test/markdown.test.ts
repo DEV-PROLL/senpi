@@ -1547,7 +1547,11 @@ bar`,
 
 		it("LaTeX delimiters do not cross inline code spans", () => {
 			const markdown = new Markdown(
-				["Before \\[unfinished before `\\]` after", "Before \\(unfinished before `\\)` after"].join("\n"),
+				[
+					"Before \\[unfinished before `\\]` after",
+					"Before \\(unfinished before `\\)` after",
+					"Nested \\(outer \\(inner\\) remains literal",
+				].join("\n"),
 				0,
 				0,
 				defaultMarkdownTheme,
@@ -1559,6 +1563,7 @@ bar`,
 
 			assert.ok(rendered.includes("Before \\[unfinished before \\] after"), rendered);
 			assert.ok(rendered.includes("Before \\(unfinished before \\) after"), rendered);
+			assert.ok(rendered.includes("Nested \\(outer \\(inner\\) remains literal"), rendered);
 		});
 
 		it("LaTeX converts nested structures and preserves command distinctions", () => {
@@ -1567,6 +1572,15 @@ bar`,
 			assert.strictEqual(latexToUnicode("\\epsilon \\varepsilon \\phi \\varphi"), "ϵ ε ϕ φ");
 			assert.strictEqual(latexToUnicode("\\text{file\\_1 and x\\^2}"), "file_1 and x^2");
 			assert.strictEqual(latexToUnicode("\\quadruple"), "\\quadruple");
+		});
+
+		it("LaTeX handles TeX delimiter whitespace and grouping", () => {
+			assert.strictEqual(latexToUnicode("\\left\\{x\\right\\}"), "{x}");
+			assert.strictEqual(latexToUnicode("\\frac {a}{b}"), "(a)⁄(b)");
+			assert.strictEqual(latexToUnicode("\\sqrt {x}"), "√(x)");
+			assert.strictEqual(latexToUnicode("\\text {한}"), "한");
+			assert.strictEqual(latexToUnicode("a+{b}"), "a+b");
+			assert.strictEqual(latexToUnicode("\\foo{bar}"), "\\foo{bar}");
 		});
 
 		it("LaTeX falls back literally beyond conversion budgets", () => {
