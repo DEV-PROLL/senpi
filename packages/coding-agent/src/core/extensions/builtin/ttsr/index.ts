@@ -1,9 +1,9 @@
 import { getKeybindings } from "@earendil-works/pi-tui";
 
 import type { ExtensionAPI, ExtensionContext, MessageUpdateEvent } from "../../types.ts";
-import { claimAbort, createGenerationState, markUserCancelled, resolveDetection } from "./coordinator.ts";
-import { collapseDetector, createCollapseState } from "./detectors/collapse.ts";
-import { corroboratesControlLeak, createControlLeakDetector } from "./detectors/control-leak.ts";
+import { registerTtsrCommands, type TtsrPublicState } from "./commands.ts";
+import { claimAbort, createGenerationState, markUserCancelled } from "./coordinator.ts";
+import { discoverTtsrRulesSync } from "./discovery.ts";
 import { TtsrManager } from "./manager.ts";
 import { COLLAPSE_RULE_CONTENT } from "./prompts.ts";
 import {
@@ -18,18 +18,18 @@ import {
 	DEFAULT_TTSR_SETTINGS,
 	TTSR_INJECTION_CUSTOM_TYPE,
 	type DetectionResolution,
-	type DetectorContext,
 	type GenerationDetectionState,
+	type TtsrRule,
 } from "./types.ts";
-
-interface StreamTrack {
-	readonly collapse: ReturnType<typeof createCollapseState>;
-	readonly leak: ReturnType<ReturnType<typeof createControlLeakDetector>["createState"]>;
-}
+import { StreamWatcher } from "./watch.ts";
 
 interface PendingRemediation {
 	readonly resolution: DetectionResolution;
 	readonly streamKind: "text" | "thinking";
+}
+
+interface PendingRuleNudge {
+	readonly rule: TtsrRule;
 }
 
 const INTERRUPT_KEYBINDING = "app.interrupt";
@@ -40,6 +40,12 @@ function isInterruptKey(data: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+function parseDisabledRules(raw: boolean | string | undefined): string[] {
+	return typeof raw === "string" && raw.length > 0
+		? raw.split(",").map((name) => name.trim()).filter((name) => name.length > 0)
+		: [];
 }
 
 export default function ttsrExtension(pi: ExtensionAPI): void {
@@ -54,79 +60,48 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		description: "Comma-separated TTSR rule names to disable.",
 	});
 
-	const leakDetector = createControlLeakDetector();
 	let manager: TtsrManager | null = null;
-	let initialized = false;
+	let watcher: StreamWatcher | null = null;
 	let genState: GenerationDetectionState = createGenerationState();
 	let generation = 0;
 	let pendingRemediation: PendingRemediation | null = null;
+	let pendingRuleNudge: PendingRuleNudge | null = null;
 	let pendingNudge: TtsrNudgeMessage | null = null;
 	let disabled = false;
 
-	const tracks = new Map<string, StreamTrack>();
-
-	function trackFor(source: "text" | "thinking", streamKey: string): StreamTrack {
-		const key = `${source}:${streamKey}`;
-		let track = tracks.get(key);
-		if (track === undefined) {
-			track = { collapse: createCollapseState(), leak: leakDetector.createState() };
-			tracks.set(key, track);
-		}
-		return track;
-	}
-
 	function cancelRemediation(): void {
-		if (pendingRemediation !== null || pendingNudge !== null) {
+		if (pendingRemediation !== null || pendingNudge !== null || pendingRuleNudge !== null) {
 			markUserCancelled(genState);
 			pendingRemediation = null;
+			pendingRuleNudge = null;
 			pendingNudge = null;
 		}
 	}
 
-	function recordInjection(resolution: DetectionResolution): void {
+	function recordInjection(owner: string, observed: readonly string[], retryMode: string): void {
 		pi.appendEntry(TTSR_INJECTION_CUSTOM_TYPE, {
-			rules: resolution.observedRules,
-			owner: resolution.owner,
-			remediation: resolution.remediation.retryMode,
+			rules: observed,
+			owner,
+			remediation: retryMode,
 			at: Date.now(),
 		});
 	}
 
-	function notify(ctx: ExtensionContext, resolution: DetectionResolution): void {
+	function notify(ctx: ExtensionContext, owner: string): void {
 		if (ctx.mode !== "tui") return;
 		try {
-			ctx.ui.notify(`Stream rule triggered: ${resolution.owner}`, "warning");
+			ctx.ui.notify(`Stream rule triggered: ${owner}`, "warning");
 		} catch {
 			return;
 		}
 	}
 
-	function resolveForDelta(
-		track: StreamTrack,
-		delta: string,
-		detectorCtx: DetectorContext,
-	): DetectionResolution | null {
-		const leakMatch = leakDetector.checkDelta(track.leak, delta, detectorCtx);
-		const collapseMatch = collapseDetector.checkDelta(track.collapse, delta, detectorCtx);
-		const evidence = track.leak.pendingEvidence;
-		const corroborated =
-			collapseMatch !== null &&
-			evidence !== undefined &&
-			corroboratesControlLeak(evidence, collapseMatch.anomalyStartOffset, track.leak.currentOffset)
-				? collapseMatch
-				: null;
-		return resolveDetection(leakMatch, collapseMatch, corroborated);
-	}
-
 	function ensureInitialized(ctx: ExtensionContext): void {
-		if (initialized) return;
-		initialized = true;
+		if (manager !== null) return;
 		disabled = pi.getFlag("ttsr-disabled") === true;
-		const disabledRulesRaw = pi.getFlag("ttsr-rules-disabled");
-		const disabledRules = typeof disabledRulesRaw === "string" && disabledRulesRaw.length > 0
-			? disabledRulesRaw.split(",").map((name) => name.trim()).filter((name) => name.length > 0)
-			: [];
-		manager = new TtsrManager({ ...DEFAULT_TTSR_SETTINGS, enabled: !disabled, disabledRules }, (pattern) => compileRuleCondition(pattern).regex);
+		const disabledRules = parseDisabledRules(pi.getFlag("ttsr-rules-disabled"));
+		const settings = { ...DEFAULT_TTSR_SETTINGS, enabled: !disabled, disabledRules };
+		manager = new TtsrManager(settings, (pattern) => compileRuleCondition(pattern).regex);
 		const injectedNames = ctx.sessionManager
 			.getEntries()
 			.filter((entry) => entry.type === "custom" && entry.customType === TTSR_INJECTION_CUSTOM_TYPE)
@@ -137,6 +112,11 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 				return Array.isArray(rules) ? rules.filter((rule): rule is string => typeof rule === "string") : [];
 			});
 		manager.restoreInjected(injectedNames);
+		const discovered = discoverTtsrRulesSync(ctx.cwd);
+		for (const rule of discovered.rules) {
+			manager.addRule(rule);
+		}
+		watcher = new StreamWatcher(manager, disabledRules);
 		if (ctx.mode === "tui") {
 			try {
 				ctx.ui.onTerminalInput((data) => {
@@ -148,7 +128,17 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		}
 	}
 
-	pi.on("session_start", async (_event, ctx) => {
+	function publicState(): TtsrPublicState {
+		return {
+			rules: manager?.getRules() ?? [],
+			injectedRuleNames: manager?.getInjectedRuleNames() ?? [],
+			disabled,
+		};
+	}
+
+	registerTtsrCommands(pi, publicState);
+
+	pi.on("session_start", (_event, ctx) => {
 		ensureInitialized(ctx);
 	});
 
@@ -164,9 +154,9 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		ensureInitialized(ctx);
 		generation += 1;
 		genState = createGenerationState();
-		tracks.clear();
 		pendingRemediation = null;
-		manager?.resetBuffers();
+		pendingRuleNudge = null;
+		watcher?.reset();
 	});
 
 	pi.on("turn_end", () => {
@@ -175,29 +165,49 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 
 	pi.on("message_update", (event: MessageUpdateEvent, ctx) => {
 		ensureInitialized(ctx);
-		if (disabled || manager === null) return;
+		if (disabled || manager === null || watcher === null) return;
 		const deltaEvent = event.assistantMessageEvent;
 		if (deltaEvent.type !== "text_delta" && deltaEvent.type !== "thinking_delta") return;
 		const source = deltaEvent.type === "text_delta" ? "text" : "thinking";
 		const streamKey = `${source}:${String(deltaEvent.contentIndex)}`;
-		const detectorCtx: DetectorContext = { source, streamKey, generation };
-		const track = trackFor(source, streamKey);
-		const resolution = resolveForDelta(track, deltaEvent.delta, detectorCtx);
-		if (resolution !== null && claimAbort(genState, resolution)) {
-			pendingRemediation = { resolution, streamKind: source };
-			notify(ctx, resolution);
+		const outcome = watcher.handleDelta(source, streamKey, deltaEvent.delta, generation);
+		if (outcome.resolution !== null) console.log("TTSRDBG claim pre:", genState.abortClaimed, genState.userCancelled);
+		if (outcome.resolution !== null && claimAbort(genState, outcome.resolution)) {
+			pendingRemediation = { resolution: outcome.resolution, streamKind: source };
+			notify(ctx, outcome.resolution.owner);
+			console.log("TTSRDBG abort call");
+			ctx.abort();
+			return;
+		}
+		const interrupting = outcome.ruleMatches.filter((rule) => rule.interruptMode === "always");
+		const rule = interrupting[0];
+		if (rule !== undefined && pendingRuleNudge === null && !genState.abortClaimed) {
+			genState.abortClaimed = true;
+			genState.abortOwner = "collapse-repetition";
+			genState.selfAbortAt = Date.now();
+			pendingRuleNudge = { rule };
+			notify(ctx, rule.name);
 			ctx.abort();
 		}
 	});
 
 	pi.on("message_end", (event) => {
-		if (pendingRemediation === null || genState.userCancelled) return undefined;
+		if (genState.userCancelled) return undefined;
 		if (event.message.role !== "assistant") return undefined;
+		if (pendingRuleNudge !== null) {
+			const pending = pendingRuleNudge;
+			pendingRuleNudge = null;
+			manager?.markInjectedByNames([pending.rule.name]);
+			recordInjection(pending.rule.name, [pending.rule.name], "nudge");
+			pendingNudge = buildNudgeMessage(pending.rule.name, pending.rule.content);
+			return undefined;
+		}
+		if (pendingRemediation === null) return undefined;
 		const pending = pendingRemediation;
 		pendingRemediation = null;
 		try {
 			if (pending.resolution.remediation.corruptionScope === "generation") {
-				recordInjection(pending.resolution);
+				recordInjection(pending.resolution.owner, pending.resolution.observedRules, "provider-error");
 				return { message: { ...event.message, ...buildErrorShellReplacement() } };
 			}
 			const replaced = buildTruncateReplacement(
@@ -205,7 +215,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 				pending.resolution.match.garbageStartOffset,
 				pending.streamKind,
 			);
-			recordInjection(pending.resolution);
+			recordInjection(pending.resolution.owner, pending.resolution.observedRules, "nudge");
 			pendingNudge = buildNudgeMessage(pending.resolution.owner, COLLAPSE_RULE_CONTENT);
 			return { message: replaced as unknown as typeof event.message };
 		} catch (error) {
@@ -226,5 +236,4 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		pendingNudge = null;
 		pi.sendMessage(nudge, { triggerTurn: true });
 	});
-
 }

@@ -208,7 +208,7 @@ describe("ttsr settings and flag gating", () => {
 		expect(harness.faux.getCallLog()).toHaveLength(1);
 	});
 
-	it("ttsr-rules-disabled=collapse-repetition does not gate the builtin collapse detector (known bypass)", async () => {
+	it("ttsr-rules-disabled=collapse-repetition gates the builtin collapse detector off", async () => {
 		harness = await createHarness({
 			extensionFactories: [ttsrExtension],
 			extensionFlagValues: new Map([["ttsr-rules-disabled", "collapse-repetition"]]),
@@ -216,19 +216,16 @@ describe("ttsr settings and flag gating", () => {
 		});
 		harness.setResponses([
 			fauxAssistantMessage([fauxThinking(`analyzing the problem ${"!".repeat(600)}`)]),
-			fauxAssistantMessage([fauxText("recovered answer")]),
 		]);
 
 		await harness.session.prompt("do work");
 
 		const entries = readSessionEntries(harness);
 		const messages = assistantMessages(entries);
-		const aborted = messages[0];
-		expect(aborted?.stopReason).toBe("aborted");
-		const thinking = thinkingTextOf(aborted);
-		expect(thinking.startsWith("analyzing the problem")).toBe(true);
-		expect(thinking.length).toBeLessThan(40);
-		expect(harness.faux.getCallLog()).toHaveLength(2);
-		expect(messages.map((m) => getMessageText(m)).join("\n")).toContain("recovered answer");
+		const completed = messages[0];
+		expect(completed?.stopReason).toBe("stop");
+		const thinking = thinkingTextOf(completed);
+		expect(thinking).toContain("!".repeat(200));
+		expect(harness.faux.getCallLog()).toHaveLength(1);
 	});
 });
