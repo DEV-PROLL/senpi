@@ -1508,7 +1508,7 @@ bar`,
 					"The US$5$ bill remains payable.",
 					"Astral suffix: $x$𐐀",
 					"Astral prefix: 𐐀$x$",
-					"Braced shell: ${HOME}/${USER}",
+					"Braced shell: $" + "{HOME}/$" + "{USER}",
 					"Combining suffix: Cafe\u0301$x$",
 					"Valid math: $x^2$.",
 				].join("\n"),
@@ -1527,7 +1527,7 @@ bar`,
 			assert.ok(rendered.includes("The US$5$ bill remains payable."), rendered);
 			assert.ok(rendered.includes("Astral suffix: $x$𐐀"), rendered);
 			assert.ok(rendered.includes("Astral prefix: 𐐀$x$"), rendered);
-			assert.ok(rendered.includes("Braced shell: ${HOME}/${USER}"), rendered);
+			assert.ok(rendered.includes("Braced shell: $" + "{HOME}/$" + "{USER}"), rendered);
 			assert.ok(rendered.includes("Combining suffix: Cafe\u0301$x$"), rendered);
 			assert.ok(rendered.includes("Valid math: x²."), rendered);
 		});

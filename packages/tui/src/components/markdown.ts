@@ -89,7 +89,11 @@ function findMalformedInlineSpan(src: string, open: "\\(" | "\\[", close: "\\)" 
 		if (src[index] === "\n" || src[index] === "`") {
 			return competingOpener ? src.slice(0, index) : undefined;
 		}
-		const nestedOpen = src.startsWith("\\(", index) ? "\\(" : src.startsWith("\\[", index) ? "\\[" : undefined;
+		const nestedOpen = src.startsWith("\\(", index)
+			? "\\("
+			: src.startsWith("\\[", index)
+				? "\\["
+				: undefined;
 		if (nestedOpen !== undefined) {
 			competingOpener = true;
 			closers.push(nestedOpen === "\\(" ? "\\)" : "\\]");
