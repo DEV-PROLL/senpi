@@ -23,6 +23,8 @@ Per-feature fixtures establish a **behavioral contract** between each subsystem 
 | 9 | `todo-preservation/` | `todos-then-compact.jsonl` | Todo entries preserved across compaction | 12 |
 | 10 | `degradation-monitor/` | `post-compact-three-no-text.jsonl` | Assistant messages with only tool calls after compaction | 13 |
 | 11 | `extension-hooks/` | `manual-with-custom-instructions.jsonl` | Extension-driven compaction with custom instructions | 12 |
+| 12 | `warm-start/` | `speculative-then-blocking.jsonl` | Speculative compaction followed by a blocking compaction | 6 |
+| 13 | `ineffective-cap/` | `low-yield-run.jsonl` | Three accepted low-yield compactions in one turn | 5 |
 
 ## Validation
 

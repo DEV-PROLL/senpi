@@ -17,8 +17,15 @@ export function incrementAccepted(state: CompactionExtensionState): CompactionEx
 	};
 }
 
+export function incrementIneffective(state: CompactionExtensionState): CompactionExtensionState {
+	return {
+		...state,
+		ineffectiveAttemptsThisTurn: state.ineffectiveAttemptsThisTurn + 1,
+	};
+}
+
 export function isOverSoftCap(state: CompactionExtensionState): boolean {
-	return state.acceptedThisTurn >= softCap;
+	return state.acceptedThisTurn + (state.ineffectiveAttemptsThisTurn ?? 0) >= softCap;
 }
 
 export function isOverHardCap(state: CompactionExtensionState): boolean {
