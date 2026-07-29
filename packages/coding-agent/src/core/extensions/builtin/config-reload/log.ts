@@ -16,6 +16,7 @@ export type ConfigReloadLogEvent =
 	| "routine_settings_change_suppressed"
 	| "generated_shim_change_suppressed"
 	| "reload_requested"
+	| "reload_deferred"
 	| "reload_completed"
 	| "validation_rejected"
 	| "registration_rejected"
@@ -31,6 +32,7 @@ export interface ConfigReloadLogDetails {
 	routine_settings_change_suppressed: { path: string };
 	generated_shim_change_suppressed: { path: string };
 	reload_requested: { reason: string; paths: readonly string[] };
+	reload_deferred: { reason: string };
 	reload_completed: { durationMs: number };
 	validation_rejected: { registrationId: string; errorCount: number };
 	registration_rejected: { registrationId: string; errorCount: number };
@@ -142,6 +144,9 @@ function formatEntry<Event extends ConfigReloadLogEvent>(
 			entry.paths = safePaths(eventDetails.paths);
 			break;
 		}
+		case "reload_deferred":
+			entry.reason = safeText((details as ConfigReloadLogDetails["reload_deferred"]).reason);
+			break;
 		case "reload_completed":
 			entry.durationMs = finiteNumber((details as ConfigReloadLogDetails["reload_completed"]).durationMs);
 			break;
