@@ -30,7 +30,7 @@ interface LatexToken extends Tokens.Generic {
 }
 
 const MAX_LATEX_FORMULA_LENGTH = 4096;
-const WORD_CHARACTER_REGEX = /[\p{L}\p{N}_]/u;
+const WORD_CHARACTER_REGEX = /[\p{L}\p{M}\p{N}_]/u;
 
 function createLatexToken(type: LatexToken["type"], raw: string, text: string): LatexToken {
 	return { raw, text, type };
@@ -67,8 +67,9 @@ function findInlineMath(
 		if (src[index] === "\n" || src[index] === "`") return undefined;
 		if (src.startsWith(close, index)) {
 			const text = src.slice(bodyStart, index);
-			if (!text || /^\s|\s$/.test(text)) return undefined;
-			return { raw: src.slice(0, index + close.length), text };
+			const normalizedText = open === close ? text : text.trim();
+			if (!normalizedText || (open === close && /^\s|\s$/.test(text))) return undefined;
+			return { raw: src.slice(0, index + close.length), text: normalizedText };
 		}
 		if (open !== close && src.startsWith(open, index)) return undefined;
 		if (src[index] === "\\") {
@@ -172,6 +173,7 @@ const inlineMathTokenizer: TokenizerExtension = {
 		if (src.startsWith("$")) {
 			if (src.startsWith("$$")) return createLatexToken("latex_literal", "$$", "$$");
 			const match = findInlineMath(src, "$", "$");
+			if (match?.text.startsWith("{")) return createLatexToken("latex_literal", "$", "$");
 			const previous = previousRawCharacter(tokens);
 			const next = match ? firstCharacter(src.slice(match.raw.length)) : undefined;
 			if (

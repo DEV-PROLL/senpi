@@ -1508,6 +1508,8 @@ bar`,
 					"The US$5$ bill remains payable.",
 					"Astral suffix: $x$𐐀",
 					"Astral prefix: 𐐀$x$",
+					"Braced shell: ${HOME}/${USER}",
+					"Combining suffix: Cafe\u0301$x$",
 					"Valid math: $x^2$.",
 				].join("\n"),
 				0,
@@ -1525,6 +1527,8 @@ bar`,
 			assert.ok(rendered.includes("The US$5$ bill remains payable."), rendered);
 			assert.ok(rendered.includes("Astral suffix: $x$𐐀"), rendered);
 			assert.ok(rendered.includes("Astral prefix: 𐐀$x$"), rendered);
+			assert.ok(rendered.includes("Braced shell: ${HOME}/${USER}"), rendered);
+			assert.ok(rendered.includes("Combining suffix: Cafe\u0301$x$"), rendered);
 			assert.ok(rendered.includes("Valid math: x²."), rendered);
 		});
 
@@ -1555,6 +1559,7 @@ bar`,
 					"Mixed nested \\(outer \\[inner\\] remains literal",
 					"Escaped identifier punctuation: array\\[0\\] and call\\(arg\\)",
 					"Escaped newline: $a\\\nb$",
+					"Padded explicit: \\( x^2 \\).",
 				].join("\n"),
 				0,
 				0,
@@ -1573,6 +1578,7 @@ bar`,
 			assert.ok(rendered.includes("Escaped identifier punctuation: array[0] and call(arg)"), rendered);
 			assert.ok(rendered.includes("$a"), rendered);
 			assert.ok(rendered.includes("b$"), rendered);
+			assert.ok(rendered.includes("Padded explicit: x²."), rendered);
 		});
 
 		it("LaTeX preserves separated malformed openers", () => {
@@ -1612,6 +1618,8 @@ bar`,
 			assert.strictEqual(latexToUnicode("A^\\mathrm{T}"), "A^T");
 			assert.strictEqual(latexToUnicode("a+{b}"), "a+b");
 			assert.strictEqual(latexToUnicode("\\foo{bar}"), "\\foo{bar}");
+			assert.strictEqual(latexToUnicode("\\foo {bar}"), "\\foo{bar}");
+			assert.strictEqual(latexToUnicode("\\left. f(x) \\right|_0^1"), " f(x) |₀¹");
 		});
 
 		it("LaTeX falls back literally beyond conversion budgets", () => {

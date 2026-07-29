@@ -228,6 +228,10 @@ class LatexParser {
 		if (command === "\\left" || command === "\\right") {
 			this.skipSpaces();
 			const delimiter = this.input[this.index];
+			if (delimiter === ".") {
+				this.index += 1;
+				return "";
+			}
 			const escapedDelimiter = delimiter === "\\" ? this.input[this.index + 1] : undefined;
 			if (escapedDelimiter !== undefined && "{}".includes(escapedDelimiter)) {
 				this.index += 2;
@@ -240,6 +244,9 @@ class LatexParser {
 		}
 		if (command === "\\quad") return "  ";
 		let fallback = command;
+		const argumentStart = this.index;
+		this.skipSpaces();
+		if (this.input[this.index] !== "{") this.index = argumentStart;
 		while (this.input[this.index] === "{") {
 			const group = this.parseGroup(depth);
 			if (group === undefined) return undefined;
