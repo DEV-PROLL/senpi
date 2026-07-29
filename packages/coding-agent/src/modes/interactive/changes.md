@@ -1,5 +1,25 @@
 # changes
 
+## Tip lines point at the give-me-tips skill (2026-07-29)
+
+### What changed
+
+- `tips/startup-tip.ts` and `tips/working-tip.ts`: the resolved `line` now carries a second pointer
+  line - `↳ Want the full story on any tip? Ask about it — the give-me-tips skill has the tour.` -
+  appended under the byte-identical `Tip: ${body}` first line. Both render sites draw the tip as a
+  single `Text` component, so the pointer lands directly below the tip row.
+- Coverage: `test/suite/startup-tip.test.ts` and `test/suite/working-tip.test.ts` pin the two-line
+  shape and the `give-me-tips` literal.
+
+### Why
+
+- A one-line tip cannot tell the whole story; the pointer teaches users that the give-me-tips skill
+  can expand any tip on ask.
+
+### Expected merge conflict zones
+
+- LOW: the `line` template in both resolvers.
+
 ## Ethos tips: the fork's voice in the tip rotation (2026-07-29)
 
 ### What changed
