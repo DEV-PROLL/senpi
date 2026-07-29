@@ -134,12 +134,11 @@ export function assertSenpiPackedWorkspaceFiles(packed, options = {}) {
 	const prebuildFiles = new Set(nativeTargets.map(nativePrebuildFile));
 	const filePaths = new Set((packed.files ?? []).map((file) => file.path));
 
-	// Every runtime dependency of the publish manifest must be vendored in the tarball.
-	// npm only packs node_modules entries reachable from bundleDependencies, so a dep
-	// missing here means it would be fetched from the registry at install time — the
-	// exact failure mode (nondeterministic ERR_MODULE_NOT_FOUND) the full bundle removes.
+	// Every dependency selected by the staged bundle manifest must be vendored in the
+	// tarball. Platform-specific optional dependencies intentionally stay outside this
+	// list so npm can resolve the matching native package on the consumer machine.
 	const missingRuntimeDependencies = [];
-	for (const dependencyName of options.runtimeDependencies ?? []) {
+	for (const dependencyName of options.bundledDependencies ?? options.runtimeDependencies ?? []) {
 		const packageJsonPath = `node_modules/${dependencyName}/package.json`;
 		if (!filePaths.has(`package/${packageJsonPath}`) && !filePaths.has(packageJsonPath)) {
 			missingRuntimeDependencies.push(dependencyName);
