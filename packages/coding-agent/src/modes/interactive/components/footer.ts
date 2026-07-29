@@ -110,8 +110,6 @@ export class FooterComponent implements Component {
 		// O(1) running totals maintained by SessionManager (identical to summing
 		// usage over all entries; totals are not branch-scoped).
 		const usageTotals = this.session.sessionManager.getUsageTotals();
-		const totalInput = usageTotals.input;
-		const totalOutput = usageTotals.output;
 		const totalCacheRead = usageTotals.cacheRead;
 		const totalCacheWrite = usageTotals.cacheWrite;
 		const totalCost = usageTotals.cost;
@@ -153,8 +151,6 @@ export class FooterComponent implements Component {
 		const dim = (plain: string): FooterSegment => ({ plain, colored: theme.fg("dim", plain) });
 		const middle: FooterSegment[] = [];
 		if (sessionName) middle.push({ plain: sessionName, colored: theme.fg("muted", sessionName) });
-		if (totalInput) middle.push(dim(`↑${formatTokens(totalInput)}`));
-		if (totalOutput) middle.push(dim(`↓${formatTokens(totalOutput)}`));
 		if ((totalCacheRead > 0 || totalCacheWrite > 0) && latestCacheHitRate !== undefined) {
 			middle.push(dim(`CH${latestCacheHitRate.toFixed(1)}%`));
 		}

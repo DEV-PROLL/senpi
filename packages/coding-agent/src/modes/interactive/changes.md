@@ -1,7 +1,5 @@
 # changes
 
-# changes
-
 ## Ethos tips: tool-call repair now names Kimi K3 (2026-07-29)
 
 ### What changed
@@ -16,6 +14,23 @@
 ### Expected merge conflict zones
 
 - LOW: single render string in `ethos-tips.ts` and its verbatim pin.
+
+## Footer omits cumulative input and output counters (2026-07-29)
+
+### What changed
+
+- `components/footer.ts` no longer adds the cumulative `↑<input>` and `↓<output>` token segments to the interactive footer.
+- Context-window usage, cache-hit rate, session name, cost, model, working directory, branch, and extension statuses remain unchanged.
+- Coverage: `test/footer-token-format.test.ts` asserts that the usage arrows are absent while the neighboring cache-hit and context details still render.
+
+### Why
+
+- The cumulative input/output counters add visual noise to the always-visible footer without helping the active context decision; the context-window segment remains the relevant token signal.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer.ts` around the optional middle-stat segment construction.
+
 ## Ethos tips: the fork's voice in the tip rotation (2026-07-29)
 
 ### What changed
