@@ -1,8 +1,9 @@
 // allow: SIZE_OK - existing markdown renderer is oversized; this merge only preserves behavior and cache-key correctness.
-import { Marked, type Token, Tokenizer, type Tokens } from "marked";
+import { Marked, type Token, Tokenizer, type TokenizerExtension, type Tokens } from "marked";
 import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.ts";
 import type { Component } from "../tui.ts";
 import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
+import { latexToUnicode } from "./latex.ts";
 
 const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
 
@@ -22,6 +23,70 @@ class StrictStrikethroughTokenizer extends Tokenizer {
 		};
 	}
 }
+
+interface LatexToken extends Tokens.Generic {
+	text: string;
+	type: "latex_block" | "latex_inline" | "latex_literal";
+}
+
+function createLatexToken(type: LatexToken["type"], raw: string, text: string): LatexToken {
+	return { raw, text, type };
+}
+
+function isLatexToken(token: Token): token is LatexToken {
+	return (
+		(token.type === "latex_block" || token.type === "latex_inline" || token.type === "latex_literal") &&
+		"text" in token &&
+		typeof token.text === "string"
+	);
+}
+
+const blockMathTokenizer: TokenizerExtension = {
+	name: "latex_block",
+	level: "block",
+	tokenizer(src) {
+		const dollars = /^ {0,3}\$\$[ \t]*\n?([\s\S]*?)\n?[ \t]*\$\$[ \t]*(?:\n+|$)/.exec(src);
+		if (dollars?.[1]?.trim()) {
+			return createLatexToken("latex_block", dollars[0], dollars[1]);
+		}
+		const brackets = /^ {0,3}\\\[[ \t]*\n?([\s\S]*?)\n?[ \t]*\\\][ \t]*(?:\n+|$)/.exec(src);
+		if (brackets?.[1]?.trim()) {
+			return createLatexToken("latex_block", brackets[0], brackets[1]);
+		}
+		return undefined;
+	},
+};
+
+const inlineMathTokenizer: TokenizerExtension = {
+	name: "latex_inline",
+	level: "inline",
+	start(src) {
+		const starts = [
+			src.indexOf("$"),
+			src.indexOf("\\("),
+			src.indexOf("\\["),
+			src.indexOf("\\)"),
+			src.indexOf("\\]"),
+		].filter((index) => index >= 0);
+		return starts.length > 0 ? Math.min(...starts) : undefined;
+	},
+	tokenizer(src) {
+		const parens = /^\\\((.*?)\\\)/.exec(src);
+		if (parens?.[1] && !parens[1].includes("\n")) {
+			return createLatexToken("latex_inline", parens[0], parens[1]);
+		}
+		const brackets = /^\\\[([\s\S]+?)\\\]/.exec(src);
+		if (brackets?.[1]) {
+			return createLatexToken("latex_inline", brackets[0], brackets[1]);
+		}
+		const dollars = /^\$([^$\n]+?)\$/.exec(src);
+		if (dollars?.[1] && !/^\s|\s$/.test(dollars[1])) {
+			return createLatexToken("latex_inline", dollars[0], dollars[1]);
+		}
+		const literal = /^(?:\\\(|\\\)|\\\[|\\\])/.exec(src);
+		return literal ? createLatexToken("latex_literal", literal[0], literal[0]) : undefined;
+	},
+};
 
 function trimPartialClosingFences(tokens: readonly Token[]): void {
 	const token = tokens[tokens.length - 1];
@@ -49,6 +114,7 @@ function trimPartialClosingFences(tokens: readonly Token[]): void {
 }
 
 const markdownParser = new Marked();
+markdownParser.use({ extensions: [blockMathTokenizer, inlineMathTokenizer] });
 markdownParser.setOptions({
 	tokenizer: new StrictStrikethroughTokenizer(),
 });
@@ -507,6 +573,15 @@ export class Markdown implements Component {
 				break;
 			}
 
+			case "latex_block":
+				if (isLatexToken(token)) {
+					lines.push(this.applyDefaultStyle(latexToUnicode(token.text)));
+					if (nextTokenType && nextTokenType !== "space") {
+						lines.push("");
+					}
+				}
+				break;
+
 			case "text":
 				lines.push(this.renderInlineTokens([token], styleContext));
 				break;
@@ -655,6 +730,18 @@ export class Markdown implements Component {
 
 				case "codespan":
 					result += this.theme.code(token.text) + stylePrefix;
+					break;
+
+				case "latex_inline":
+					if (isLatexToken(token)) {
+						result += applyTextWithNewlines(latexToUnicode(token.text));
+					}
+					break;
+
+				case "latex_literal":
+					if (isLatexToken(token)) {
+						result += applyTextWithNewlines(token.text);
+					}
 					break;
 
 				case "link": {

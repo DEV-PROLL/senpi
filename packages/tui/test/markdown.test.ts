@@ -1397,6 +1397,63 @@ bar`,
 		});
 	});
 
+	describe("LaTeX math", () => {
+		it("LaTeX renders inline and display math", () => {
+			const markdown = new Markdown("Energy is $E=mc^2$.\n\n$$\\int_0^1 x^2 dx$$", 0, 0, defaultMarkdownTheme);
+
+			const plain = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
+			const rendered = plain.join("\n");
+
+			assert.ok(rendered.includes("Energy is E=mc²."), rendered);
+			assert.ok(rendered.includes("∫₀¹ x² dx"), rendered);
+			assert.ok(!rendered.includes("$"), rendered);
+			assert.ok(!rendered.includes("\\int"), rendered);
+		});
+
+		it("LaTeX preserves malformed and code literals", () => {
+			const markdown = new Markdown(
+				[
+					"Outside \\(x^2\\).",
+					"",
+					"Unmatched $x and \\[y",
+					"",
+					"Inline code: `$x^2$` and `\\(y^2\\)`.",
+					"",
+					"```tex",
+					"$$x^2$$",
+					"\\[y^2\\]",
+					"```",
+				].join("\n"),
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+
+			const rendered = markdown
+				.render(80)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+
+			assert.ok(rendered.includes("Outside x²."), rendered);
+			assert.ok(rendered.includes("Unmatched $x and \\[y"), rendered);
+			assert.ok(rendered.includes("`$x^2$`") || rendered.includes("$x^2$"), rendered);
+			assert.ok(rendered.includes("\\(y^2\\)"), rendered);
+			assert.ok(rendered.includes("$$x^2$$"), rendered);
+			assert.ok(rendered.includes("\\[y^2\\]"), rendered);
+		});
+
+		it("LaTeX preserves unknown command grouping", () => {
+			const markdown = new Markdown("Fallback: $\\foo{bar} + \\alpha$.", 0, 0, defaultMarkdownTheme);
+			const rendered = markdown
+				.render(80)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+
+			assert.ok(rendered.includes("Fallback: \\foo{bar} + α."), rendered);
+			assert.ok(!rendered.includes("$"), rendered);
+		});
+	});
+
 	describe("Streaming code fences", () => {
 		it("stabilizes partial closing fence rendering", () => {
 			const cases = [

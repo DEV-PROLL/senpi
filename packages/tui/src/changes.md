@@ -1,5 +1,28 @@
 # TUI delta rendering fork changes
 
+## 2026-07-29: Native Unicode LaTeX in Markdown conversations
+
+### What changed
+
+- `components/markdown.ts` registers conservative Marked block and inline tokenizers for `$...$`, `$$...$$`,
+  `\(...\)`, and `\[...\]` math. Recognized formulas render as width-stable Unicode text through the new
+  dependency-free `components/latex.ts` converter.
+- The converter handles common operators, relations, arrows, Greek letters, grouped fractions and roots, and
+  Unicode sub/superscripts. Unknown commands remain readable instead of invoking external processes or hiding input.
+- Marked still owns fenced and inline code tokenization, so math-looking code stays literal. Unmatched bracket or
+  parenthesis delimiters are emitted literally rather than losing their backslashes to Markdown escape normalization.
+- Coverage: `test/markdown.test.ts` proves inline/display rendering and code/malformed delimiter preservation.
+
+### Why this cannot be expressed externally
+
+The `Markdown` component owns tokenization before extension-facing coding-agent UI hooks run. Rendering formulas
+consistently in assistant messages, nested Markdown structures, and every direct TUI consumer requires the parser seam.
+
+### Expected merge conflict zones
+
+- MEDIUM: `components/markdown.ts` parser construction and custom token branches.
+- LOW: `components/latex.ts` symbol/script conversion tables and `test/markdown.test.ts` LaTeX cases.
+
 ## 2026-07-28: over-wide diagnostics stop rescanning settled large histories
 
 ### What changed
