@@ -1,5 +1,29 @@
 # Changes
 
+## 2026-07-29 - Bounded provider stream start (streamStartTimeoutMs)
+
+### What changed and why
+
+- `agent-loop.ts` bounds the wait for the FIRST provider stream event with a new optional
+  `AgentLoopConfig.streamStartTimeoutMs`. Providers emit their first event only once the HTTP
+  response begins, so a dead upstream that accepts a request and never answers was previously
+  bounded only by `timeoutMs` (the idle timeout, default 5 minutes): every attempt froze the
+  session for 300s with zero events, zero usage, and nothing persisted. Observed in a donated
+  5h session log where the same session hung deterministically on reopen while new sessions
+  worked. After the first event arrives the idle bound governs as before.
+- The failure message `Provider stream start timed out after <ms>ms` deliberately contains
+  "timed out" so the existing retryable-error classifier (`isRetryableErrorMessage`) retries
+  it instead of dead-ending the session; the request-local abort controller tears the dead
+  request down exactly like an idle timeout.
+- `agent.ts` plumbs `streamStartTimeoutMs` through `AgentOptions`/`Agent` into the loop config.
+
+### Files modified
+
+- `agent-loop.ts`
+- `agent.ts`
+- `types.ts`
+- `../test/agent-loop-stream-start-timeout.test.ts`
+
 ## 2026-07-27 - End classifier-refused turns before tool execution
 
 ### What changed and why

@@ -163,6 +163,16 @@ class StreamIdleTimeoutError extends Error {
 	}
 }
 
+// The wording must keep matching the retryable-error classifier
+// ("timed out" in packages/ai/src/utils/retry.ts) so a dead stream start is
+// retried instead of dead-ending the session.
+class StreamStartTimeoutError extends Error {
+	constructor(timeoutMs: number) {
+		super(`Provider stream start timed out after ${timeoutMs}ms`);
+		this.name = "StreamStartTimeoutError";
+	}
+}
+
 /**
  * Main loop logic shared by agentLoop and agentLoopContinue.
  */
@@ -434,6 +444,7 @@ async function streamAssistantResponse(
 			config.timeoutMs,
 			requestAbortController.signal,
 			(error) => requestAbortController.abort(error),
+			config.streamStartTimeoutMs,
 		);
 		try {
 			while (true) {
@@ -544,14 +555,20 @@ type AssistantEventReader = {
 	dispose(): void;
 };
 
+function normalizeTimeoutMs(timeoutMs: number | undefined): number | undefined {
+	return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined;
+}
+
 function createAssistantEventReader(
 	iterator: AsyncIterator<AssistantMessageEvent>,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
-	onIdleTimeout?: (error: StreamIdleTimeoutError) => void,
+	onIdleTimeout?: (error: Error) => void,
+	streamStartTimeoutMs?: number,
 ): AssistantEventReader {
-	const idleTimeoutMs =
-		typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined;
+	const idleTimeoutMs = normalizeTimeoutMs(timeoutMs);
+	const startTimeoutMs = normalizeTimeoutMs(streamStartTimeoutMs);
+	let sawFirstEvent = false;
 	let removeAbortListener: (() => void) | undefined;
 	let abortPromise: Promise<typeof ABORTED> | undefined;
 
@@ -568,12 +585,27 @@ function createAssistantEventReader(
 	}
 
 	return {
-		next: () => {
+		next: async () => {
 			if (signal?.aborted) {
 				void iterator.return?.();
 				return Promise.reject(new Error("Request was aborted"));
 			}
-			return readNextAssistantEvent(iterator, idleTimeoutMs, abortPromise, onIdleTimeout);
+			// The start bound applies only until the provider proves the request is
+			// alive with its first event; afterwards the idle bound governs as before.
+			const useStartBound = !sawFirstEvent && startTimeoutMs !== undefined;
+			const readTimeoutMs = useStartBound ? startTimeoutMs : idleTimeoutMs;
+			const makeTimeoutError = useStartBound
+				? (ms: number) => new StreamStartTimeoutError(ms)
+				: (ms: number) => new StreamIdleTimeoutError(ms);
+			const result = await readNextAssistantEvent(
+				iterator,
+				readTimeoutMs,
+				makeTimeoutError,
+				abortPromise,
+				onIdleTimeout,
+			);
+			if (!result.done) sawFirstEvent = true;
+			return result;
 		},
 		dispose: () => removeAbortListener?.(),
 	};
@@ -582,8 +614,9 @@ function createAssistantEventReader(
 async function readNextAssistantEvent(
 	iterator: AsyncIterator<AssistantMessageEvent>,
 	idleTimeoutMs: number | undefined,
+	makeTimeoutError: (timeoutMs: number) => Error,
 	abortPromise: Promise<typeof ABORTED> | undefined,
-	onIdleTimeout?: (error: StreamIdleTimeoutError) => void,
+	onIdleTimeout?: (error: Error) => void,
 ): Promise<IteratorResult<AssistantMessageEvent>> {
 	if (idleTimeoutMs === undefined && abortPromise === undefined) {
 		return iterator.next();
@@ -604,7 +637,7 @@ async function readNextAssistantEvent(
 
 		if (idleTimeoutMs !== undefined) {
 			timeout = setTimeout(() => {
-				const error = new StreamIdleTimeoutError(idleTimeoutMs);
+				const error = makeTimeoutError(idleTimeoutMs);
 				void iterator.return?.();
 				settle(() => reject(error));
 				// Abort after settling so the failure surfaces as an idle timeout,
