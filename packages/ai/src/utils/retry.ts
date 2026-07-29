@@ -246,6 +246,31 @@ export function isRetryableAssistantError(message: AssistantMessage): boolean {
 }
 
 /**
+ * Matches the agent-loop stream watchdog failures ("Idle timeout waiting for
+ * provider stream after <n>ms" and "Provider stream start timed out after
+ * <n>ms"). These anchored shapes distinguish provider-stream stalls from
+ * unrelated extension, command, or MCP timeout diagnostics.
+ */
+const PROVIDER_STREAM_STALL_ERROR_PATTERN =
+	/^(?:Idle timeout waiting for provider stream after \d+ms|Provider stream start timed out after \d+ms)$/i;
+const PROVIDER_TRANSPORT_TIMEOUT_ERROR_PATTERN = /^Request timed out\.?$/i;
+
+export function isProviderStreamStallError(message: AssistantMessage): boolean {
+	return message.stopReason === "error" && PROVIDER_STREAM_STALL_ERROR_PATTERN.test(message.errorMessage ?? "");
+}
+
+/**
+ * Classifies timeout failures that originate from the provider stream or its
+ * transport. Transport timeouts may arrive as `aborted`; stream watchdog
+ * failures are ordinary error responses.
+ */
+export function isProviderTimeoutError(message: AssistantMessage): boolean {
+	if (isProviderStreamStallError(message)) return true;
+	if (message.stopReason !== "error" && message.stopReason !== "aborted") return false;
+	return PROVIDER_TRANSPORT_TIMEOUT_ERROR_PATTERN.test(message.errorMessage ?? "");
+}
+
+/**
  * Classifies a raw error-message string with the same transient-vs-terminal
  * rules as {@link isRetryableAssistantError}, for callers that hold a thrown
  * `Error` instead of an `AssistantMessage` (e.g. compaction summarization

@@ -19,6 +19,7 @@ import {
 export type { ProviderRetrySettings, RetrySettings } from "./retry-fallback/settings.ts";
 
 export const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
+export const DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS = 30_000;
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -1072,6 +1073,20 @@ export class SettingsManager {
 			maxRetries: this.settings.retry?.provider?.maxRetries,
 			maxRetryDelayMs: this.settings.retry?.provider?.maxRetryDelayMs ?? 60000,
 		};
+	}
+
+	/**
+	 * First-request liveness cap for retries of known provider stream/transport
+	 * timeouts. `retry.provider.streamRetryTimeoutMs` overrides the 30s default;
+	 * 0 disables the cap without disabling queue deferral. The retry path clamps
+	 * only already-enabled stream guards, so this setting never re-enables one.
+	 */
+	getProviderStreamRetryTimeoutMs(): number | undefined {
+		const explicit = this.settings.retry?.provider?.streamRetryTimeoutMs;
+		if (explicit !== undefined) {
+			return explicit > 0 ? explicit : undefined;
+		}
+		return DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS;
 	}
 
 	/**

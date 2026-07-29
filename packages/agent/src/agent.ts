@@ -124,6 +124,15 @@ export interface AgentOptions {
 	abortServerSideFallback?: boolean;
 }
 
+export interface AgentContinuationOptions {
+	/** Keep queued steering and follow-up input out of the continuation's first provider request only. */
+	deferQueuedMessages?: boolean;
+	/** Override the provider stream idle timeout for the continuation's first provider request only. */
+	timeoutMs?: number;
+	/** Override the provider stream-start timeout for the continuation's first provider request only. */
+	streamStartTimeoutMs?: number;
+}
+
 class PendingMessageQueue {
 	private messages: AgentMessage[] = [];
 	private clearGeneration = 0;
@@ -342,6 +351,8 @@ export class Agent {
 	/**
 	 * Keep queued steering and follow-up messages for an external owner after
 	 * this run reaches agent_end, without changing the active abort signal.
+	 * This is ownership suppression for one active run; terminal error/abort
+	 * parking is a separate stop-reason policy enforced by the run lifecycle.
 	 */
 	suppressQueuedMessageDrain(): void {
 		if (this.activeRun) {
@@ -382,34 +393,49 @@ export class Agent {
 		await this.runPromptMessages(messages);
 	}
 
-	/** Continue by delivering queued input first when a compaction leaves custom context at the tail. */
-	async continueWithQueuedMessages(): Promise<void> {
+	/**
+	 * Continue by delivering queued input first when a compaction leaves custom context at the tail.
+	 * Queue-first recovery takes precedence over `deferQueuedMessages`: the selected queued message is
+	 * the continuation input, while timeout overrides still apply to its first provider request.
+	 */
+	async continueWithQueuedMessages(options: AgentContinuationOptions = {}): Promise<void> {
 		if (this.activeRun) {
 			throw new Error("Agent is already processing. Wait for completion before continuing.");
 		}
 
 		if (this._state.messages[this._state.messages.length - 1]?.role === "assistant") {
-			await this.continue();
+			await this.continue(options);
 			return;
 		}
 
 		const queuedSteering = this.steeringQueue.drain();
 		if (queuedSteering.length > 0) {
-			await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true });
+			await this.runPromptMessages(queuedSteering, {
+				skipInitialSteeringPoll: true,
+				initialRequestTimeoutMs: options.timeoutMs,
+				initialRequestStreamStartTimeoutMs: options.streamStartTimeoutMs,
+			});
 			return;
 		}
 
 		const queuedFollowUps = this.followUpQueue.drain();
 		if (queuedFollowUps.length > 0) {
-			await this.runPromptMessages(queuedFollowUps);
+			await this.runPromptMessages(queuedFollowUps, {
+				initialRequestTimeoutMs: options.timeoutMs,
+				initialRequestStreamStartTimeoutMs: options.streamStartTimeoutMs,
+			});
 			return;
 		}
 
-		await this.continue();
+		await this.continue(options);
 	}
 
-	/** Continue from the current transcript. The last message must be a user or tool-result message. */
-	async continue(): Promise<void> {
+	/**
+	 * Continue from the current transcript. The last message must be a user or tool-result message.
+	 * Queue deferral and timeout overrides apply only to the first provider request; later requests in
+	 * the same run and later runs use the configured Agent defaults.
+	 */
+	async continue(options: AgentContinuationOptions = {}): Promise<void> {
 		if (this.activeRun) {
 			throw new Error("Agent is already processing. Wait for completion before continuing.");
 		}
@@ -422,20 +448,27 @@ export class Agent {
 		if (lastMessage.role === "assistant") {
 			const queuedSteering = this.steeringQueue.drain();
 			if (queuedSteering.length > 0) {
-				await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true });
+				await this.runPromptMessages(queuedSteering, {
+					skipInitialSteeringPoll: true,
+					initialRequestTimeoutMs: options.timeoutMs,
+					initialRequestStreamStartTimeoutMs: options.streamStartTimeoutMs,
+				});
 				return;
 			}
 
 			const queuedFollowUps = this.followUpQueue.drain();
 			if (queuedFollowUps.length > 0) {
-				await this.runPromptMessages(queuedFollowUps);
+				await this.runPromptMessages(queuedFollowUps, {
+					initialRequestTimeoutMs: options.timeoutMs,
+					initialRequestStreamStartTimeoutMs: options.streamStartTimeoutMs,
+				});
 				return;
 			}
 
 			throw new Error("Cannot continue from message role: assistant");
 		}
 
-		await this.runContinuation();
+		await this.runContinuation(options);
 	}
 
 	private normalizePromptInput(
@@ -459,7 +492,11 @@ export class Agent {
 
 	private async runPromptMessages(
 		messages: AgentMessage[],
-		options: { skipInitialSteeringPoll?: boolean } = {},
+		options: {
+			skipInitialSteeringPoll?: boolean;
+			initialRequestTimeoutMs?: number;
+			initialRequestStreamStartTimeoutMs?: number;
+		} = {},
 	): Promise<void> {
 		await this.runWithLifecycle(async (signal) => {
 			await runAgentLoop(
@@ -473,11 +510,15 @@ export class Agent {
 		});
 	}
 
-	private async runContinuation(): Promise<void> {
+	private async runContinuation(options: AgentContinuationOptions = {}): Promise<void> {
 		await this.runWithLifecycle(async (signal) => {
 			await runAgentLoopContinue(
 				this.createContextSnapshot(),
-				this.createLoopConfig(),
+				this.createLoopConfig({
+					skipInitialSteeringPoll: options.deferQueuedMessages,
+					initialRequestTimeoutMs: options.timeoutMs,
+					initialRequestStreamStartTimeoutMs: options.streamStartTimeoutMs,
+				}),
 				(event) => this.processEvents(event),
 				signal,
 				this.streamFunction,
@@ -493,7 +534,13 @@ export class Agent {
 		};
 	}
 
-	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
+	private createLoopConfig(
+		options: {
+			skipInitialSteeringPoll?: boolean;
+			initialRequestTimeoutMs?: number;
+			initialRequestStreamStartTimeoutMs?: number;
+		} = {},
+	): AgentLoopConfig {
 		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
 		let steeringQueueGeneration = this.steeringQueue.getClearGeneration();
 		let followUpQueueGeneration = this.followUpQueue.getClearGeneration();
@@ -507,6 +554,8 @@ export class Agent {
 			thinkingBudgets: this.thinkingBudgets,
 			timeoutMs: this.timeoutMs,
 			streamStartTimeoutMs: this.streamStartTimeoutMs,
+			initialRequestTimeoutMs: options.initialRequestTimeoutMs,
+			initialRequestStreamStartTimeoutMs: options.initialRequestStreamStartTimeoutMs,
 			maxRetryDelayMs: this.maxRetryDelayMs,
 			abortServerSideFallback: this.abortServerSideFallback,
 			toolExecution: this.toolExecution,
@@ -567,9 +616,13 @@ export class Agent {
 
 		try {
 			await executor(abortController.signal);
+			// A provider-returned terminal error/abort has no safe implicit owner for
+			// queued work. Park it until an external retry/compaction owner continues,
+			// or until a later admitted prompt drains it through the normal queue poll.
 			while (
 				!abortController.signal.aborted &&
 				!this.activeRun?.suppressQueuedMessageDrain &&
+				this.canDrainQueuedMessagesAfterRun() &&
 				this.hasQueuedMessages()
 			) {
 				await this.runQueuedMessagesAfterAgentEnd(abortController.signal);
@@ -579,6 +632,14 @@ export class Agent {
 		} finally {
 			this.finishRun();
 		}
+	}
+
+	private canDrainQueuedMessagesAfterRun(): boolean {
+		const lastMessage = this._state.messages[this._state.messages.length - 1];
+		return (
+			lastMessage?.role !== "assistant" ||
+			(lastMessage.stopReason !== "error" && lastMessage.stopReason !== "aborted")
+		);
 	}
 
 	private async runQueuedMessagesAfterAgentEnd(signal: AbortSignal): Promise<void> {

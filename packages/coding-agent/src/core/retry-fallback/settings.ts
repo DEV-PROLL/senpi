@@ -3,6 +3,7 @@ import type { FallbackChains } from "./chains.ts";
 export interface ProviderRetrySettings {
 	timeoutMs?: number;
 	streamStartTimeoutMs?: number;
+	streamRetryTimeoutMs?: number; // first-request liveness cap after a provider timeout; default: 30000, 0 disables
 	maxRetries?: number;
 	maxRetryDelayMs?: number;
 }
