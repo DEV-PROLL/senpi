@@ -24,9 +24,13 @@ function goalStoreRef(ctx: ExtensionContext) {
 }
 
 function cleanAssistantStopWithText(text: string): AgentMessage {
+	return assistantStopWithReason("stop", text);
+}
+
+function assistantStopWithReason(stopReason: "stop" | "length", text: string): AgentMessage {
 	const message = cleanAssistantStop();
 	if (message.role !== "assistant") throw new Error("Expected assistant stop message");
-	return { ...message, content: [{ type: "text", text }] };
+	return { ...message, content: [{ type: "text", text }], stopReason };
 }
 
 function activeGoal(id: string): Goal {
@@ -197,6 +201,110 @@ describe("goal continuation while a monitor is active", () => {
 		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS - 45_000);
 
 		expect(sent).toHaveLength(0);
+	});
+
+	it("queues one minimal recovery prompt after an output truncation", async () => {
+		const notices: string[] = [];
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-length-minimal");
+		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
+		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runGoalHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantStopWithReason("length", "unfinished implementation")] },
+			ctx,
+		);
+
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+		expect(sent[0]?.message.content).toContain("cut off");
+		expect(sent[0]?.message.content).not.toContain("<untrusted_objective>");
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 1 });
+	});
+
+	it("blocks a second consecutive output truncation without queuing another prompt", async () => {
+		const notices: string[] = [];
+		const { tools, handlers, sent, events } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-length-exhausted");
+		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
+		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runGoalHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantStopWithReason("length", "first unfinished implementation")] },
+			ctx,
+		);
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runGoalHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantStopWithReason("length", "second unfinished implementation")] },
+			ctx,
+		);
+
+		expect(sent).toHaveLength(1);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "output truncation repeated",
+		});
+		expect(events.emitted).toContainEqual({
+			channel: "goal_continuation_guard_tripped",
+			data: expect.objectContaining({ reason: "length-exhausted" }),
+		});
+	});
+
+	it("resets truncation recovery after a clean stop", async () => {
+		const notices: string[] = [];
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-length-reset");
+		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
+		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runGoalHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantStopWithReason("length", "first unfinished implementation")] },
+			ctx,
+		);
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runGoalHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [cleanAssistantStopWithText("completed a clean step")] },
+			ctx,
+		);
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runGoalHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantStopWithReason("length", "second unfinished implementation")] },
+			ctx,
+		);
+
+		expect(sent).toHaveLength(3);
+		expect(sent[2]?.message.content).toContain("cut off");
+		expect(sent[2]?.message.content).not.toContain("<untrusted_objective>");
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active" });
+
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runGoalHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantStopWithReason("length", "third unfinished implementation")] },
+			ctx,
+		);
+
+		expect(sent).toHaveLength(3);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "output truncation repeated",
+		});
 	});
 
 	it("blocks the ninth clean immediate continuation without queuing a ninth hidden prompt", async () => {

@@ -43,7 +43,7 @@ export class MonitorAwareGoalContinuation {
 	#scheduledContinuationKind: DelayedContinuationKind | undefined;
 	#unsubscribeMonitorState: (() => void) | undefined;
 	#lastAgentEndMessages: readonly AgentMessage[] = [];
-	#consecutiveLengthRecoveries = 0;
+	#consecutiveLengthRecoveries = new Map<string, number>();
 	#recentNormalizedOutputHashes: string[] = [];
 	#toollessContinuationStreak = 0;
 	#toollessStreakGoalId: string | null = null;
@@ -84,6 +84,7 @@ export class MonitorAwareGoalContinuation {
 		this.#ctx = options.ctx;
 		this.#goal = options.goal;
 		this.#lastAgentEndMessages = options.messages;
+		this.#resetLengthRecoveryAfterCleanStop(options.goal, options.messages);
 		this.#recordAssistantOutput(options.messages);
 		if (options.goal?.status !== "active") {
 			this.#cancelTimer();
@@ -172,11 +173,16 @@ export class MonitorAwareGoalContinuation {
 		path: GoalContinuationPath,
 		messages: readonly AgentMessage[],
 	): Promise<Goal> {
+		const input = this.#buildVerdictInput(ctx, goal, path, messages);
+		const verdict = evaluateGoalContinuation({ goal, ...input });
 		const admittedGoal = await admitAndQueueGoalContinuation(this.#pi, ctx, goal, {
-			input: this.#buildVerdictInput(ctx, goal, path, messages),
-			content: (verdict) => this.#buildContinuationContent(ctx, goal, verdict),
+			input,
+			content: (continuationVerdict) => this.#buildContinuationContent(ctx, goal, continuationVerdict),
 			markContinuationPending: this.#markContinuationPending,
 		});
+		if (verdict.kind === "continue" && input.lastStopReason === "length") {
+			this.#consecutiveLengthRecoveries.set(goal.id, input.consecutiveLengthRecoveries + 1);
+		}
 		this.#goal = admittedGoal;
 		if (admittedGoal.status !== "active") {
 			this.#cancelTimer();
@@ -200,7 +206,7 @@ export class MonitorAwareGoalContinuation {
 			consecutiveContinuations: goal.consecutiveContinuations ?? 0,
 			lastContinuationSignature: goal.lastContinuationSignature,
 			currentSignature: buildCurrentGoalContinuationSignature(ctx, goal, lastAssistantText(messages)),
-			consecutiveLengthRecoveries: this.#consecutiveLengthRecoveries,
+			consecutiveLengthRecoveries: this.#consecutiveLengthRecoveries.get(goal.id) ?? 0,
 			recentNormalizedOutputHashes: this.#recentNormalizedOutputHashes,
 			toollessContinuationStreak: this.#toollessContinuationStreak,
 			endedTurnWasUserInitiated: this.#endedTurnWasUserInitiated,
@@ -248,8 +254,13 @@ export class MonitorAwareGoalContinuation {
 		this.#toollessContinuationStreak += 1;
 	}
 
+	#resetLengthRecoveryAfterCleanStop(goal: Goal | null, messages: readonly AgentMessage[]): void {
+		if (goal === null || findLastAssistantMessage(messages)?.stopReason !== "stop") return;
+		this.#consecutiveLengthRecoveries.delete(goal.id);
+	}
+
 	#resetContinuationState(): void {
-		this.#consecutiveLengthRecoveries = 0;
+		this.#consecutiveLengthRecoveries.clear();
 		this.#recentNormalizedOutputHashes = [];
 		this.#resetToollessContinuationStreak();
 	}
