@@ -1,4 +1,5 @@
-import type { Api } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "../../model-registry.ts";
 import { SettingsManager } from "../../settings-manager.ts";
 import type { ExtensionAPI, ServiceTier } from "../types.ts";
 
@@ -6,7 +7,10 @@ export type { ServiceTier };
 
 type ProviderPayload = Record<string, unknown>;
 
-const SERVICE_TIER_APIS: ReadonlySet<Api> = new Set(["openai-responses"]);
+const OPENAI_CODEX_PROVIDER = "openai-codex";
+const OPENAI_CODEX_RESPONSES_API = "openai-codex-responses";
+const FAST_MODEL_SUFFIX = "-fast";
+const SERVICE_TIER_APIS: ReadonlySet<Api> = new Set(["openai-responses", OPENAI_CODEX_RESPONSES_API]);
 
 function isRecord(value: unknown): value is ProviderPayload {
 	return typeof value === "object" && value !== null;
@@ -27,45 +31,85 @@ export function addServiceTierToPayload(api: Api | undefined, payload: unknown, 
 	};
 }
 
+function getRequestModelId(modelRegistry: ModelRegistry, model: Model<Api>): string {
+	return modelRegistry.getUpstreamModelId(model) ?? model.id;
+}
+
+function isCompatibleFastVariant(modelRegistry: ModelRegistry, baseModel: Model<Api>, fastModel: Model<Api>): boolean {
+	return (
+		fastModel.provider === baseModel.provider &&
+		fastModel.api === baseModel.api &&
+		modelRegistry.getServiceTier(fastModel) === "priority" &&
+		getRequestModelId(modelRegistry, fastModel) === getRequestModelId(modelRegistry, baseModel)
+	);
+}
+
+function findBaseModel(modelRegistry: ModelRegistry, fastModel: Model<Api>): Model<Api> | undefined {
+	if (!fastModel.id.endsWith(FAST_MODEL_SUFFIX)) {
+		return undefined;
+	}
+
+	const baseModelId = fastModel.id.slice(0, -FAST_MODEL_SUFFIX.length);
+	const baseModel = modelRegistry.find(fastModel.provider, baseModelId);
+	return baseModel && isCompatibleFastVariant(modelRegistry, baseModel, fastModel) ? baseModel : undefined;
+}
+
+function findFastModel(modelRegistry: ModelRegistry, baseModel: Model<Api>): Model<Api> | undefined {
+	if (baseModel.id.endsWith(FAST_MODEL_SUFFIX)) {
+		return undefined;
+	}
+
+	const fastModel = modelRegistry.find(baseModel.provider, `${baseModel.id}${FAST_MODEL_SUFFIX}`);
+	return fastModel && isCompatibleFastVariant(modelRegistry, baseModel, fastModel) ? fastModel : undefined;
+}
+
 export default function serviceTierExtension(pi: ExtensionAPI): void {
 	let settingsServiceTier: ServiceTier | undefined;
-	let codexFastMode = false;
 
 	pi.on("session_start", async (_event, ctx) => {
 		const settingsManager = SettingsManager.create(ctx.cwd);
 		settingsServiceTier = settingsManager.getOpenAIServiceTier();
-		codexFastMode = false;
+
+		const model = ctx.model;
+		if (model?.provider !== OPENAI_CODEX_PROVIDER) {
+			return;
+		}
+
+		const baseModel = findBaseModel(ctx.modelRegistry, model);
+		if (baseModel) {
+			await pi.setSessionModel(baseModel);
+		}
 	});
 
 	pi.registerCommand("fast", {
 		description: "Toggle OpenAI Codex fast mode for this session",
 		handler: async (_args, ctx) => {
-			if (ctx.model?.provider !== "openai-codex" || ctx.model.api !== "openai-codex-responses") {
-				ctx.ui.notify("Fast mode is only available for OpenAI Codex models.", "error");
+			const model = ctx.model;
+			if (model?.provider !== OPENAI_CODEX_PROVIDER) {
+				ctx.ui.notify("Fast mode is only available for OpenAI Codex models.", "warning");
 				return;
 			}
 
-			codexFastMode = !codexFastMode;
-			ctx.ui.notify(`Fast mode: ${codexFastMode ? "priority" : "default"}`, "info");
+			const baseModel = findBaseModel(ctx.modelRegistry, model);
+			const targetModel = baseModel ?? findFastModel(ctx.modelRegistry, model);
+			if (!targetModel) {
+				ctx.ui.notify(`Fast mode is not supported for ${model.provider}/${model.id}.`, "warning");
+				return;
+			}
+
+			if (!(await pi.setSessionModel(targetModel))) {
+				ctx.ui.notify(`Could not switch to ${targetModel.provider}/${targetModel.id}.`, "error");
+				return;
+			}
+
+			const enabled = baseModel === undefined;
+			ctx.ui.notify(`Fast mode ${enabled ? "enabled" : "disabled"}: ${targetModel.id}`, "info");
 		},
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {
-		if (
-			ctx.model?.provider === "openai-codex" &&
-			ctx.model.api === "openai-codex-responses" &&
-			isRecord(event.payload)
-		) {
-			const payload = { ...event.payload };
-			if (codexFastMode) {
-				payload.service_tier = "priority";
-			} else {
-				delete payload.service_tier;
-			}
-			return payload;
-		}
-
-		const effectiveServiceTier = ctx.serviceTier ?? settingsServiceTier;
+		const effectiveServiceTier =
+			ctx.model?.api === OPENAI_CODEX_RESPONSES_API ? ctx.serviceTier : (ctx.serviceTier ?? settingsServiceTier);
 		return addServiceTierToPayload(ctx.model?.api, event.payload, effectiveServiceTier);
 	});
 }

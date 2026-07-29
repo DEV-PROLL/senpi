@@ -1614,6 +1614,15 @@ export interface ExtensionAPI {
 	/** Set thinking level (clamped to model capabilities). */
 	setThinkingLevel(level: ThinkingLevel): void;
 
+	/**
+	 * Set the model for this session only, leaving the user's persisted default
+	 * model untouched. Returns false if no API key is available.
+	 */
+	setSessionModel(model: Model<any>): Promise<boolean>;
+
+	/** Set thinking level for this session only (clamped), leaving the persisted default untouched. */
+	setSessionThinkingLevel(level: ThinkingLevel): void;
+
 	// =========================================================================
 	// Provider Registration
 	// =========================================================================
@@ -1969,6 +1978,8 @@ export interface ExtensionActions {
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
 	setThinkingLevel: SetThinkingLevelHandler;
+	setSessionModel: SetModelHandler;
+	setSessionThinkingLevel: SetThinkingLevelHandler;
 }
 
 /**
