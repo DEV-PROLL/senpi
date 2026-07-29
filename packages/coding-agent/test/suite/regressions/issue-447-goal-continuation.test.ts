@@ -2,7 +2,6 @@ import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import goalExtension from "../../../src/core/extensions/builtin/goal/index.ts";
 import { readGoal } from "../../../src/core/extensions/builtin/goal/store.ts";
 import type { ExtensionContext } from "../../../src/core/extensions/types.ts";
 import type { SessionEntry } from "../../../src/core/session-manager.ts";
