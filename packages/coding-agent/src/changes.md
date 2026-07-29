@@ -1,3 +1,18 @@
+## Kimi XTML recovery preserves protocol identity (2026-07-29)
+
+### What changed
+
+- `core/model-runtime.ts` passes both `createXtmlRecoveryStreamParser` and `protocol: "kimi-xtml"` to the shared
+  invoke-recovery wrapper for Kimi models.
+- Successful recovered tool calls and terminal recovery failures now expose Kimi-specific diagnostics and
+  `recovered-kimi-xtml-*` IDs instead of misleading ANTML metadata.
+- `test/kimi-xtml-recovery-runtime-boundary.test.ts` pins the user-visible runtime result while the default ANTML
+  path remains covered in the AI package.
+
+### Expected merge conflict zones
+
+- LOW: the two invoke-recovery call sites in `core/model-runtime.ts`.
+
 ## Static credential headers participate in real provider auth resolution (2026-07-29)
 
 ### What changed

@@ -111,7 +111,24 @@ describe("kimi model runtime XTML recovery", () => {
 
 		// Then
 		const toolCall = result.content.find((item) => item.type === "toolCall");
-		expect(toolCall).toMatchObject({ type: "toolCall", name: "Echo", arguments: { value: "hello" } });
+		expect(toolCall).toMatchObject({
+			type: "toolCall",
+			id: "recovered-kimi-xtml-0",
+			name: "Echo",
+			arguments: { value: "hello" },
+		});
+		expect(result.diagnostics).toEqual([
+			{
+				type: "text_tool_call_recovery",
+				timestamp: expect.any(Number),
+				details: {
+					protocol: "kimi-xtml",
+					toolName: "Echo",
+					id: "recovered-kimi-xtml-0",
+					status: "complete",
+				},
+			},
+		]);
 		const visibleText = result.content
 			.filter((item) => item.type === "text")
 			.map((item) => (item.type === "text" ? item.text : ""))
