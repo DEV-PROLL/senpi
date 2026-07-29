@@ -97,7 +97,7 @@ export function providerEntryLabel(entry: {
 	const id = entry.entryId ?? entry.id;
 	if (!id || id === entry.provider) return entry.provider;
 	const nativePrefix = `native-${entry.provider}-`;
-	return `${entry.provider}/${id.startsWith(nativePrefix) ? "native" : id}`;
+	return id.endsWith("/native") ? id : `${entry.provider}/${id.startsWith(nativePrefix) ? "native" : id}`;
 }
 
 function sortedPriorityIndices(providers: SearchProviderEntry[]): number[] {
