@@ -4,12 +4,13 @@ const USAGE_ENDPOINT = "https://chatgpt.com/backend-api/wham/usage";
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export interface CodexUsage {
-	readonly fiveHourRemainingPercent: number;
-	readonly weeklyRemainingPercent: number;
+	readonly fiveHourRemainingPercent: number | undefined;
+	readonly weeklyRemainingPercent: number | undefined;
 }
 
 interface UsageResponse {
 	readonly ok: boolean;
+	readonly status: number;
 	json(): Promise<unknown>;
 }
 
@@ -69,18 +70,22 @@ export function parseCodexUsage(value: unknown): CodexUsage | null {
 		}
 	}
 
-	if (fiveHourRemainingPercent === undefined && weeklyRemainingPercent === undefined) {
+	if (typeof rateLimit !== "object" || rateLimit === null) {
 		return null;
 	}
 
 	return {
-		fiveHourRemainingPercent: fiveHourRemainingPercent ?? 100,
-		weeklyRemainingPercent: weeklyRemainingPercent ?? 100,
+		fiveHourRemainingPercent,
+		weeklyRemainingPercent,
 	};
 }
 
+function formatRemainingPercent(value: number | undefined): string {
+	return value === undefined ? "unavailable" : `${value}%`;
+}
+
 export function formatCodexUsage(usage: CodexUsage): string {
-	return `5h ${usage.fiveHourRemainingPercent}% | W ${usage.weeklyRemainingPercent}%`;
+	return `5h ${formatRemainingPercent(usage.fiveHourRemainingPercent)} | W ${formatRemainingPercent(usage.weeklyRemainingPercent)}`;
 }
 
 export function codexUsageStatusText(
@@ -103,7 +108,10 @@ export async function fetchCodexUsage(options: CodexUsageRequestOptions): Promis
 		redirect: "error",
 		signal,
 	});
-	return response.ok ? parseCodexUsage(await response.json()) : null;
+	if (!response.ok) {
+		throw new Error(`Codex usage endpoint returned HTTP ${response.status}`);
+	}
+	return parseCodexUsage(await response.json());
 }
 
 export function startCodexUsagePolling(options: CodexUsagePollingOptions): CodexUsagePollingController {

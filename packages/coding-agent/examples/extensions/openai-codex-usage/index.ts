@@ -9,6 +9,7 @@ import {
 } from "./codex-usage.ts";
 
 const STATUS_KEY = "provider-usage";
+const UNAVAILABLE_STATUS = "Codex usage unavailable";
 
 export function shouldLoadCodexUsage(provider: string | undefined, usingOAuth: boolean, hasUi: boolean): boolean {
 	return hasUi && provider === "openai-codex" && usingOAuth;
@@ -81,7 +82,10 @@ export default function (pi: ExtensionAPI) {
 				const status = codexUsageStatusText(ctx.model?.provider, usage, enabled);
 				ctx.ui.setStatus(STATUS_KEY, status ? ctx.ui.theme.fg("dim", status) : undefined);
 			},
-			onError: () => console.error("[openai-codex-usage] Refresh failed"),
+			onError: () => {
+				ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("dim", UNAVAILABLE_STATUS));
+				console.error("[openai-codex-usage] Refresh failed");
+			},
 		});
 	};
 
