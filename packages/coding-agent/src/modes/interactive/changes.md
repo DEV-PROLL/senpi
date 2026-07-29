@@ -1,5 +1,22 @@
 # changes
 
+## Long footer paths yield before cache and cost stats (2026-07-29)
+
+### What changed
+
+- `components/footer-layout.ts`: when the pwd consumes more than one third of the available footer width, the responsive ladder shortens the indexed pwd anchor from the head at each right-label/middle-stat richness rung before dropping another middle segment. Ordinary shorter paths retain the existing provider-prefix and middle-elision order. The explicit pwd index keeps leading badges intact; the `pwd-elided` plan carries the retained middle count, ellipsis-marker state, and full/minimal model-label choice.
+- `components/footer.ts`: pwd-elided rendering keeps the middle segments selected by the layout plan, so cache hit rate and total cost remain visible when shortening the leading path is enough to fit them.
+- Coverage: `test/footer-width.test.ts` pins a width-110 long-cwd case that retains the `coding-agent` tail, `CH25.0%`, `$1.234`, and the model label without overflowing, plus an OmO Native case proving the badge stays intact while the actual path elides.
+
+### Why
+
+- Long workspace paths consumed footer width before the layout considered shortening them, so the right-most telemetry fields (cost first, then cache hit rate) disappeared even when eliding the non-identifying path head could preserve both.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer-layout.ts` around the width-priority ladder and `pwd-elided` plan shape.
+- LOW: `components/footer.ts` around `pwd-elided` materialization.
+
 ## Ethos tips: tool-call repair now names Kimi K3 (2026-07-29)
 
 ### What changed
@@ -71,6 +88,402 @@
 ### Expected merge conflict zones
 
 - LOW: `tips/registry.ts` import block and the `TIP_DEFINITIONS` concatenation tail.
+
+## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
+
+### What changed
+
+- `components/footer.ts`: `render()` prepends an `(OmO Native)` anchor segment (colored `success`) as the leftmost footer element when `footerData.isOmoNative()` returns true, before pwd and branch. The badge participates in the existing width-elision ladder as an anchor (never dropped, only elided with pwd when space is exhausted).
+- The badge is fed by `FooterDataProvider.isOmoNative()`, set once at startup by `interactive-mode.ts` from `detectOmoNativeInstall()` (see root `src/changes.md`).
+- Coverage: `test/omo-native-footer.test.ts` asserts the segment is the leftmost rendered text when active and absent when inactive.
+
+### Why
+
+- Makes the OMO native install state visible in the bottom-left footer without a separate status line.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer.ts` around the anchor segment construction.
+
+## Large resumed sessions use event-driven Working updates (2026-07-28)
+
+### What changed
+
+- `working-status.ts` adds `largeSessionWorkingStatusInterval()`: sessions below 1,000 persisted entries retain the
+  existing 32 ms message shimmer and 600 ms indicator cadence. Larger histories refresh informational Working text
+  and hook rows every second while limiting the decorative indicator fallback to once per 60 seconds.
+- `interactive-mode.ts` applies the policy to the default Working indicator, message, and tool-hook timers. Tool,
+  stream, status, and message events still request immediate renders, so large sessions remain live without
+  continuously repainting an unchanged transcript.
+- The persisted-entry threshold is sampled when a default indicator is created (and when a hook ticker starts);
+  custom `setWorkingIndicator()` options bypass this policy by design.
+- `test/interactive-mode-working-status.test.ts` locks both sides of the threshold and both large-session cadences;
+  `test/hook-status-ticker.test.ts` locks the one-second large-session hook timer.
+
+### Why
+
+Each animation tick asks the TUI to render the complete component tree. That is cheap for ordinary sessions but can
+become continuous CPU work after resuming a multi-thousand-entry transcript. One-second informational updates keep
+elapsed labels honest, while event-driven renders and the 60-second decorative fallback avoid continuous repainting
+of settled history.
+
+### Expected merge conflict zones
+
+- LOW: `working-status.ts` around animation timing helpers.
+- LOW/MED: `interactive-mode.ts` around `getWorkingIndicatorOptions()` and `startToolHookStatusTimer()`.
+
+## Paste markers survive editor hand-off; unset is a same-instance no-op (2026-07-28)
+
+### What changed
+
+- `interactive-mode.ts` `setCustomEditorComponent()`: switching between the default and a custom editor now transfers raw text plus the paste registry snapshot when the source exposes a snapshot AND the target implements the paired paste-state API (`setPasteState` with `getPasteState` — a target that could not re-export collapsed markers on the next hand-off receives expanded text instead), so `[paste #N ...]` markers stay collapsed across the swap. Otherwise it falls back to the expanded text via `getExpandedEditorText()`.
+- New `getExpandedEditorText()` helper used by every full-editor-text consumer (`ctx.ui.getEditorText()`, Alt+Enter follow-up, external-editor open, and the hand-off fallback): prefers the editor's `getExpandedText()`, then expansion from `getPasteState()` via pi-tui's exported `expandPasteMarkers()`, then raw text (an editor with neither capability never had expandable markers).
+- `setCustomEditorComponent(undefined)` is a draft no-op when the default editor is already active (`resetExtensionUI()` calls it unconditionally during extension resets and session invalidation): no hand-off happens, so no setText round-trip touches the user's draft.
+- Previously the raw text alone was copied into the destination editor, whose empty registry turned live markers into dead literals — submit then sent the `[paste #N ...]` placeholder to the model instead of the pasted body.
+
+### Why
+
+- Companion to the pi-tui paste-registry fix (`packages/tui/src/changes.md`, same date). The hand-off is interactive-mode logic: only this layer knows both editor instances and their optional capabilities.
+
+### Expected merge conflict zones
+
+- LOW: `setCustomEditorComponent()` around the transfer helper and the factory/unset branches.
+- LOW: `packages/coding-agent/test/suite/regressions/0000-editor-paste-marker-transfer.test.ts` (drives the real method with real tui editors).
+
+## /reload honors the session_before_reload extension veto (2026-07-28)
+
+### What changed
+
+- `interactive-mode.ts` `handleReloadCommand()`: before building the reload box, the handler calls
+  `session.checkReloadVeto()`; when an extension cancels (`session_before_reload` returning
+  `cancel: true`), the command shows the extension's `reason` as a warning and returns — no reload box,
+  no focus steal, no teardown. A cancelled result from `session.reload()` itself (late veto) dismisses
+  the box back to the previous editor and shows the same warning.
+
+### Why
+
+- Reload destroys the extension runtime; extensions owning live background work (running subagents in
+  omo-senpi) need a way to block it. The streaming/compaction guards already set the warning precedent.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` around `handleReloadCommand()`.
+
+## Fix: the startup tip is destroyed by extension headers (2026-07-27)
+
+### What changed
+
+- `tips/startup-header.ts` (new): `appendStartupHeader()` attaches the built-in header and the startup tip to the header container as **separate children**.
+- `interactive-mode.ts`: the tip is no longer interpolated into the `ExpandableText` header closures.
+
+### Why
+
+`ui.setHeader()` replaces the built-in header component in place, and the builtin `prompt-preset` extension calls it on every `session_start`. Because the tip was part of the header's own text, that replacement silently discarded it: the tip resolved and was recorded into `tipsHistory`, but never reached the terminal. Keeping the tip as a sibling of the header makes it survive any extension header override.
+
+## Tips cover the whole feature surface, and command tips are gated (2026-07-28)
+
+### What changed
+
+- `tips/catalog/` (new): the tip catalog is split by domain into `model-tips.ts`, `input-tips.ts`, `session-tips.ts`, `workspace-tips.ts`, `settings-tips.ts`, `cli-tips.ts`, and `subagent-tips.ts`, with the shared `TipDefinition` in `catalog/types.ts`. `tips/registry.ts` is now a barrel that concatenates them, so `TIP_DEFINITIONS` and `TipDefinition` keep their import paths.
+- The catalog grew from 25 to 70 tips: model fallback chains and `/fallback`, `/login`, `--models` scoping, `thinkingBudgets`, `promptPreset`, `@` file references, Tab path completion, the `?` overlay, steering vs follow-up delivery, `escape` restoring the queue, `/clone`, `-c`/`-r`, `/name`, `/session`, `/export`, `/share`, `/compact`, auto-compaction, AGENTS.md context loading, `/skill:name` and prompt templates, `/files`, `/diff`, `/todo`, `/goal`, `/btw`, `/lookat`, `/mcp`, `/rules`, `/hooks`, `/websearch`, settings locations, `permissionPreset`, `packages`, custom themes, `/reload`, `/trust`, the `tips` toggle, print mode, tool/allow deny flags, subagent categories, `/tasks`, `~/.omo/omo.jsonc`, and teams.
+- `TipDefinition.requiresCommand` (new): a tip that teaches an extension-provided command names it, and `selectTip()` skips that tip when the injected `hasCommand` resolver reports the command is not registered. `interactive-mode.ts` injects `hasRegisteredCommand()` (backed by `extensionRunner.getCommand()`) into both the startup and working tip resolvers.
+
+### Why
+
+The tip line was teaching a small slice of the product while most of the surface - retry fallback chains, session branching, permissions, subagent categories, the omo config file - stayed invisible. Gating by registered command keeps that breadth honest: builtin extensions can be disabled and the omo workflow tips only apply when the omo plugin is loaded, so those tips no longer advertise commands the session cannot run.
+
+## Feature discoverability: tips, `?` overlay, live favorite hints, `/keybindings` (2026-07-27)
+
+### What changed
+
+- `tips/registry.ts` (new): a `TIP_DEFINITIONS` catalog teaching existing senpi features and workflow skills (`ulw plan`, `$start-work`, `ulw`/`ulw loop`, `ulw-research`, `hyperplan`, `review work`). Each tip declares its `bindings` and renders through an injected key resolver, so displayed keys always reflect the user's live configuration.
+- `tips/scheduler.ts` (new): `selectTip()` picks the least-recently-shown eligible tip, honoring an injected key-availability resolver and a caller-owned exclusion set. `tips/history-writer.ts` (new): pure `recordTipShown()` merge with no module state; persistence is explicit via `settings-manager`.
+- `tips/startup-tip.ts` (new): `resolveStartupTipLine()` resolves one banner tip line, gated by the `tips` setting and `quietStartup`. `interactive-mode.ts` renders it in both compact and expanded startup variants and records it once through the shared writer with a per-session shown-set.
+- `tips/working-tip.ts` (new): `resolveWorkingTipLine()` resolves the tip under the working status. `interactive-mode.ts` wraps the indicator and tip in one Container so the single-child `statusContainer` contract holds, caches the pick per turn, excludes the banner tip, and resets on turn end.
+- `tips/favorite-messages.ts` (new): `buildFavoriteCycleStatusMessage()` renders the favorite-model empty/single states with live `app.model.select` / `app.models.toggleFavorite` keys instead of the previous hardcoded copy.
+- `components/shortcut-overlay.ts` (new): `ShortcutOverlay` plus the pure `shouldShowShortcutOverlay()` predicate. `interactive-mode.ts` mounts it only on a typed `?` in an empty editor (paste and non-empty text never trigger) and dismisses it on any further input or submit.
+- `keybindings-command.ts` (new): `seedKeybindingsFile()` writes the effective bindings when the config is missing, and `applyKeybindingsFileEdit()` reloads only valid JSON. `interactive-mode.ts` adds a `/keybindings` dispatch that opens the real config via the new `editFileInExternalEditor()` seam in `external-editor.ts` and reloads the live manager without restart.
+
+### Why
+
+- The product already cycles favorites, toggles thinking, and exposes dozens of shortcuts, but none of that was discoverable in-product; users (including the owner) did not know `Ctrl+F` toggles favorites or that a favorite cycle existed.
+
+### Merge-conflict zones
+
+- `interactive-mode.ts` imports block, the startup banner assembly, the `defaultEditor.onChange` / `onSubmit` handlers, `showStatusIndicator`/`clearStatusIndicator`, and the slash-command text dispatch beside `/hotkeys` (five serialized edits).
+
+## Footer cache segment removal and anchor-pinned layout (2026-07-27)
+
+### What changed
+
+- `components/footer-layout.ts` (new): pure width planning for the classic footer. `planFooterLayout()` picks the
+  richest layout that fits the terminal: full line, then middle segments elided right-most-first behind a single
+  dim "…" marker, then the pwd head-elided ("…/senpi"), then the whole left block head-elided, with the model
+  label truncated only as the last resort. `elideHead()` keeps the tail of a path, which carries the most
+  identifying information.
+- `components/footer.ts`: the `cache <read>/<write>` totals segment was removed (the `CH<x>%` cache-hit-rate
+  segment stays); rendering now builds plain/colored `FooterSegment` pairs and delegates fitting to
+  `planFooterLayout()`, so the model label and the pwd • branch • context-usage block stay visible at any width
+  instead of the right side being truncated away first.
+
+### Why
+
+- The cache read/write totals cost footer space out of proportion to their value, and the old truncation logic
+  sacrificed the right-side model label whenever the left overflowed — the two anchors users watch (context
+  usage, current model) were the first things to disappear on narrow terminals.
+
+### Expected merge conflict zones
+
+- MEDIUM: `components/footer.ts` `render()` was rewritten around `FooterSegment` pairs; upstream footer layout
+  changes will conflict textually. `components/footer-layout.ts` is additive.
+
+## Adaptive smooth-streaming buffer (2026-07-27)
+
+### What changed
+
+- `streaming-reveal.ts`, `streaming-reveal-pacing.ts`, and `streaming-reveal-content.ts`: smooth assistant output
+  waits for an 80ms startup buffer, estimates the provider's grapheme arrival rate with an EWMA, and follows that
+  learned base rate without a hard ceiling. Individual outlier samples are limited to four times the prior
+  estimate, extra catch-up is bounded independently, and signed backlog correction converges toward roughly
+  140ms of queued text across provider chunk cadences.
+- Fully drained bursts reset fractional progress so a later chunk cannot inherit reveal budget from an earlier
+  burst. Streaming tool arguments retain one-code-unit progress and parse in bounded 64-unit batches, preserving
+  surrogate pairs while sharing the assistant pacing helper.
+- `../../../test/streaming-reveal-{content,pacing}.test.ts`, `../../../test/streaming-reveal.test.ts`, and
+  `../../../test/helpers/streaming-reveal.ts`: split grapheme, pacing, and controller coverage into focused modules
+  and exercise timed 45/90/180/240/500-unit-per-second arrivals, multiple cadences, sustained fast streams,
+  convergence and final-tail bounds, lifecycle flushes, and drained-burst carry reset.
+
+### Why
+
+- The previous fixed 267ms catch-up policy drained each provider burst completely, while the first adaptive
+  implementation capped the total reveal rate at 240 graphemes per second. Providers above that rate accumulated
+## Footer omits cumulative input and output counters (2026-07-29)
+
+### What changed
+
+- `components/footer.ts` no longer adds the cumulative `↑<input>` and `↓<output>` token segments to the interactive footer.
+- Context-window usage, cache-hit rate, session name, cost, model, working directory, branch, and extension statuses remain unchanged.
+- Coverage: `test/footer-token-format.test.ts` asserts that the usage arrows are absent while the neighboring cache-hit and context details still render.
+
+### Why
+
+- The cumulative input/output counters add visual noise to the always-visible footer without helping the active context decision; the context-window segment remains the relevant token signal.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer.ts` around the optional middle-stat segment construction.
+
+## Tip lines point at the give-me-tips skill (2026-07-29)
+
+### What changed
+
+- `tips/startup-tip.ts` and `tips/working-tip.ts`: the resolved `line` now carries a second pointer
+  line - `↳ Want the full story on any tip? Ask about it — the give-me-tips skill has the tour.` -
+  appended under the byte-identical `Tip: ${body}` first line. Both render sites draw the tip as a
+  single `Text` component, so the pointer lands directly below the tip row.
+- Coverage: `test/suite/startup-tip.test.ts` and `test/suite/working-tip.test.ts` pin the two-line
+  shape and the `give-me-tips` literal.
+
+### Why
+
+- A one-line tip cannot tell the whole story; the pointer teaches users that the give-me-tips skill
+  can expand any tip on ask.
+
+### Expected merge conflict zones
+
+- LOW: the `line` template in both resolvers.
+
+## Ethos tips: the fork's voice in the tip rotation (2026-07-29)
+
+### What changed
+
+- `tips/catalog/ethos-tips.ts` (new): a `ETHOS_TIPS` catalog of seven manifesto tips framing how `@code-yeongyu/senpi` is tuned - system-prompt discipline for `gpt-5.6-sol`, tools that stay out of the way, spending tokens to buy time, and pointers to `ulw-plan` on `fable-5 xhigh` and the `ulw loop`.
+- `tips/registry.ts`: `TIP_DEFINITIONS` now concatenates `...ETHOS_TIPS` after `SUBAGENT_TIPS`.
+- The two command-referencing tips (`ethos.ulw-plan-sage`, `ethos.ulw-loop-shallow`) declare `requiresCommand: "tasks"`, so they only surface when the omo plugin's `tasks` command is registered - matching the `workflow-skills.*` tips in `subagent-tips.ts`. The eight pure manifesto tips (including the monitor/cache bragging tips) are keyless and ungated.
+- Three additional tips brag about the harness's monitor tool (subscribe to stdout, never sleep), the prompt-cache budget (never block past cache TTL), and the live cache-hit rate in the footer. All three are keyless and ungated.
+- Three more tips brag about multimodal vision (the agent sees screenshots, PDFs, diagrams), Claude Code OAuth multi-account (switch logins, not env vars), and the agent-SDK foundation (no ToS gray zone, no ban anxiety). All three are keyless and ungated.
+- One tip brags about the tool-call repair middleware (malformed antml:invoke calls are intercepted, corrected, and salvaged instead of failing the turn). Keyless and ungated.
+- Coverage: `test/suite/ethos-tips.test.ts` pins the fourteen ids, the verbatim approved English copy, the `tasks` gating, and the unbound/ungated manifesto set.
+
+### Why
+
+- The tip line taught mechanics and commands but had no voice for the fork's tuning philosophy. These tips surface the system-prompt-tuning claim (a 5-minute job takes 5 minutes, a 12-hour job takes 12), the anti-tool-study stance, and the spend-tokens-for-time trade, which are the fork's reason for existing.
+- Gating the ulw command tips on `tasks` preserves the existing honesty invariant: never advertise commands the session cannot run.
+
+### Expected merge conflict zones
+
+- LOW: `tips/registry.ts` import block and the `TIP_DEFINITIONS` concatenation tail.
+
+## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
+
+### What changed
+
+- `components/footer.ts`: `render()` prepends an `(OmO Native)` anchor segment (colored `success`) as the leftmost footer element when `footerData.isOmoNative()` returns true, before pwd and branch. The badge participates in the existing width-elision ladder as an anchor (never dropped, only elided with pwd when space is exhausted).
+- The badge is fed by `FooterDataProvider.isOmoNative()`, set once at startup by `interactive-mode.ts` from `detectOmoNativeInstall()` (see root `src/changes.md`).
+- Coverage: `test/omo-native-footer.test.ts` asserts the segment is the leftmost rendered text when active and absent when inactive.
+
+### Why
+
+- Makes the OMO native install state visible in the bottom-left footer without a separate status line.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer.ts` around the anchor segment construction.
+
+## Large resumed sessions use event-driven Working updates (2026-07-28)
+
+### What changed
+
+- `working-status.ts` adds `largeSessionWorkingStatusInterval()`: sessions below 1,000 persisted entries retain the
+  existing 32 ms message shimmer and 600 ms indicator cadence. Larger histories refresh informational Working text
+  and hook rows every second while limiting the decorative indicator fallback to once per 60 seconds.
+- `interactive-mode.ts` applies the policy to the default Working indicator, message, and tool-hook timers. Tool,
+  stream, status, and message events still request immediate renders, so large sessions remain live without
+  continuously repainting an unchanged transcript.
+- The persisted-entry threshold is sampled when a default indicator is created (and when a hook ticker starts);
+  custom `setWorkingIndicator()` options bypass this policy by design.
+- `test/interactive-mode-working-status.test.ts` locks both sides of the threshold and both large-session cadences;
+  `test/hook-status-ticker.test.ts` locks the one-second large-session hook timer.
+
+### Why
+
+Each animation tick asks the TUI to render the complete component tree. That is cheap for ordinary sessions but can
+become continuous CPU work after resuming a multi-thousand-entry transcript. One-second informational updates keep
+elapsed labels honest, while event-driven renders and the 60-second decorative fallback avoid continuous repainting
+of settled history.
+
+### Expected merge conflict zones
+
+- LOW: `working-status.ts` around animation timing helpers.
+- LOW/MED: `interactive-mode.ts` around `getWorkingIndicatorOptions()` and `startToolHookStatusTimer()`.
+
+## Paste markers survive editor hand-off; unset is a same-instance no-op (2026-07-28)
+
+### What changed
+
+- `interactive-mode.ts` `setCustomEditorComponent()`: switching between the default and a custom editor now transfers raw text plus the paste registry snapshot when the source exposes a snapshot AND the target implements the paired paste-state API (`setPasteState` with `getPasteState` — a target that could not re-export collapsed markers on the next hand-off receives expanded text instead), so `[paste #N ...]` markers stay collapsed across the swap. Otherwise it falls back to the expanded text via `getExpandedEditorText()`.
+- New `getExpandedEditorText()` helper used by every full-editor-text consumer (`ctx.ui.getEditorText()`, Alt+Enter follow-up, external-editor open, and the hand-off fallback): prefers the editor's `getExpandedText()`, then expansion from `getPasteState()` via pi-tui's exported `expandPasteMarkers()`, then raw text (an editor with neither capability never had expandable markers).
+- `setCustomEditorComponent(undefined)` is a draft no-op when the default editor is already active (`resetExtensionUI()` calls it unconditionally during extension resets and session invalidation): no hand-off happens, so no setText round-trip touches the user's draft.
+- Previously the raw text alone was copied into the destination editor, whose empty registry turned live markers into dead literals — submit then sent the `[paste #N ...]` placeholder to the model instead of the pasted body.
+
+### Why
+
+- Companion to the pi-tui paste-registry fix (`packages/tui/src/changes.md`, same date). The hand-off is interactive-mode logic: only this layer knows both editor instances and their optional capabilities.
+
+### Expected merge conflict zones
+
+- LOW: `setCustomEditorComponent()` around the transfer helper and the factory/unset branches.
+- LOW: `packages/coding-agent/test/suite/regressions/0000-editor-paste-marker-transfer.test.ts` (drives the real method with real tui editors).
+
+## /reload honors the session_before_reload extension veto (2026-07-28)
+
+### What changed
+
+- `interactive-mode.ts` `handleReloadCommand()`: before building the reload box, the handler calls
+  `session.checkReloadVeto()`; when an extension cancels (`session_before_reload` returning
+  `cancel: true`), the command shows the extension's `reason` as a warning and returns — no reload box,
+  no focus steal, no teardown. A cancelled result from `session.reload()` itself (late veto) dismisses
+  the box back to the previous editor and shows the same warning.
+
+### Why
+
+- Reload destroys the extension runtime; extensions owning live background work (running subagents in
+  omo-senpi) need a way to block it. The streaming/compaction guards already set the warning precedent.
+
+## Fix: the startup tip is destroyed by extension headers (2026-07-27)
+
+### What changed
+
+- `tips/startup-header.ts` (new): `appendStartupHeader()` attaches the built-in header and the startup tip to the header container as **separate children**.
+- `interactive-mode.ts`: the tip is no longer interpolated into the `ExpandableText` header closures.
+
+### Why
+
+`ui.setHeader()` replaces the built-in header component in place, and the builtin `prompt-preset` extension calls it on every `session_start`. Because the tip was part of the header's own text, that replacement silently discarded it: the tip resolved and was recorded into `tipsHistory`, but never reached the terminal. Keeping the tip as a sibling of the header makes it survive any extension header override.
+
+## Tips cover the whole feature surface, and command tips are gated (2026-07-28)
+
+### What changed
+
+- `tips/catalog/` (new): the tip catalog is split by domain into `model-tips.ts`, `input-tips.ts`, `session-tips.ts`, `workspace-tips.ts`, `settings-tips.ts`, `cli-tips.ts`, and `subagent-tips.ts`, with the shared `TipDefinition` in `catalog/types.ts`. `tips/registry.ts` is now a barrel that concatenates them, so `TIP_DEFINITIONS` and `TipDefinition` keep their import paths.
+- The catalog grew from 25 to 70 tips: model fallback chains and `/fallback`, `/login`, `--models` scoping, `thinkingBudgets`, `promptPreset`, `@` file references, Tab path completion, the `?` overlay, steering vs follow-up delivery, `escape` restoring the queue, `/clone`, `-c`/`-r`, `/name`, `/session`, `/export`, `/share`, `/compact`, auto-compaction, AGENTS.md context loading, `/skill:name` and prompt templates, `/files`, `/diff`, `/todo`, `/goal`, `/btw`, `/lookat`, `/mcp`, `/rules`, `/hooks`, `/websearch`, settings locations, `permissionPreset`, `packages`, custom themes, `/reload`, `/trust`, the `tips` toggle, print mode, tool allow/deny flags, subagent categories, `/tasks`, `~/.omo/omo.jsonc`, and teams.
+- `TipDefinition.requiresCommand` (new): a tip that teaches an extension-provided command names it, and `selectTip()` skips that tip when the injected `hasCommand` resolver reports the command is not registered. `interactive-mode.ts` injects `hasRegisteredCommand()` (backed by `extensionRunner.getCommand()`) into both the startup and working tip resolvers.
+
+### Why
+
+The tip line was teaching a small slice of the product while most of the surface - retry fallback chains, session branching, permissions, subagent categories, the omo config file - stayed invisible. Gating by registered command keeps that breadth honest: builtin extensions can be disabled and the omo workflow tips only apply when the omo plugin is loaded, so those tips no longer advertise commands the session cannot run.
+
+## Feature discoverability: tips, `?` overlay, live favorite hints, `/keybindings` (2026-07-27)
+
+### What changed
+
+- `tips/registry.ts` (new): a `TIP_DEFINITIONS` catalog teaching existing senpi features and workflow skills (`ulw plan`, `$start-work`, `ulw`/`ulw loop`, `ulw-research`, `hyperplan`, `review work`). Each tip declares its `bindings` and renders through an injected key resolver, so displayed keys always reflect the user's live configuration.
+- `tips/scheduler.ts` (new): `selectTip()` picks the least-recently-shown eligible tip, honoring an injected key-availability resolver and a caller-owned exclusion set. `tips/history-writer.ts` (new): pure `recordTipShown()` merge with no module state; persistence is explicit via `settings-manager`.
+- `tips/startup-tip.ts` (new): `resolveStartupTipLine()` resolves one banner tip line, gated by the `tips` setting and `quietStartup`. `interactive-mode.ts` renders it in both compact and expanded startup variants and records it once through the shared writer with a per-session shown-set.
+- `tips/working-tip.ts` (new): `resolveWorkingTipLine()` resolves the tip under the working status. `interactive-mode.ts` wraps the indicator and tip in one Container so the single-child `statusContainer` contract holds, caches the pick per turn, excludes the banner tip, and resets on turn end.
+- `tips/favorite-messages.ts` (new): `buildFavoriteCycleStatusMessage()` renders the favorite-model empty/single states with live `app.model.select` / `app.models.toggleFavorite` keys instead of the previous hardcoded copy.
+- `components/shortcut-overlay.ts` (new): `ShortcutOverlay` plus the pure `shouldShowShortcutOverlay()` predicate. `interactive-mode.ts` mounts it only on a typed `?` in an empty editor (paste and non-empty text never trigger) and dismisses it on any further input or submit.
+- `keybindings-command.ts` (new): `seedKeybindingsFile()` writes the effective bindings when the config is missing, and `applyKeybindingsFileEdit()` reloads only valid JSON. `interactive-mode.ts` adds a `/keybindings` dispatch that opens the real config via the new `editFileInExternalEditor()` seam in `external-editor.ts` and reloads the live manager without restart.
+
+### Why
+
+- The product already cycles favorites, toggles thinking, and exposes dozens of shortcuts, but none of that was discoverable in-product; users (including the owner) did not know `Ctrl+F` toggles favorites or that a favorite cycle existed.
+
+### Merge-conflict zones
+
+- `interactive-mode.ts` imports block, the startup banner assembly, the `defaultEditor.onChange` / `onSubmit` handlers, `showStatusIndicator`/`clearStatusIndicator`, and the slash-command text dispatch beside `/hotkeys` (five serialized edits).
+
+## Footer cache segment removal and anchor-pinned layout (2026-07-27)
+
+### What changed
+
+- `components/footer-layout.ts` (new): pure width planning for the classic footer. `planFooterLayout()` picks the
+  richest layout that fits the terminal: full line, then middle segments elided right-most-first behind a single
+  dim "…" marker, then the pwd head-elided ("…/senpi"), then the whole left block head-elided, with the model
+  label truncated only as the last resort. `elideHead()` keeps the tail of a path, which carries the most
+  identifying information.
+- `components/footer.ts`: the `cache <read>/<write>` totals segment was removed (the `CH<x>%` cache-hit-rate
+  segment stays); rendering now builds plain/colored `FooterSegment` pairs and delegates fitting to
+  `planFooterLayout()`, so the model label and the pwd • branch • context-usage block stay visible at any width
+  instead of the right side being truncated away first.
+
+### Why
+
+- The cache read/write totals cost footer space out of proportion to their value, and the old truncation logic
+  sacrificed the right-side model label whenever the left overflowed — the two anchors users watch (context
+  usage, current model) were the first things to disappear on narrow terminals.
+
+### Expected merge conflict zones
+
+- MEDIUM: `components/footer.ts` `render()` was rewritten around `FooterSegment` pairs; upstream footer layout
+  changes will conflict textually. `components/footer-layout.ts` is additive.
+
+## Adaptive smooth-streaming buffer (2026-07-27)
+
+### What changed
+
+- `streaming-reveal.ts`, `streaming-reveal-pacing.ts`, and `streaming-reveal-content.ts`: smooth assistant output
+  waits for an 80ms startup buffer, estimates the provider's grapheme arrival rate with an EWMA, and follows that
+  learned base rate without a hard ceiling. Individual outlier samples are limited to four times the prior
+  estimate, extra catch-up is bounded independently, and signed backlog correction converges toward roughly
+  140ms of queued text across provider chunk cadences.
+- Fully drained bursts reset fractional progress so a later chunk cannot inherit reveal budget from an earlier
+  burst. Streaming tool arguments retain one-code-unit progress and parse in bounded 64-unit batches, preserving
+  surrogate pairs while sharing the assistant pacing helper.
+- `../../../test/streaming-reveal-{content,pacing}.test.ts`, `../../../test/streaming-reveal.test.ts`, and
+  `../../../test/helpers/streaming-reveal.ts`: split grapheme, pacing, and controller coverage into focused modules
+  and exercise timed 45/90/180/240/500-unit-per-second arrivals, multiple cadences, sustained fast streams,
+  convergence and final-tail bounds, lifecycle flushes, and drained-burst carry reset.
+
+### Why
+
+- The previous fixed 267ms catch-up policy drained each provider burst completely, while the first adaptive
+  implementation capped the total reveal rate at 240 graphemes per second. Providers above that rate accumulated
+  an unbounded tail that snapped onscreen at `message_end`; separating the learned base rate from bounded
+  correction keeps immediate completion flushes small without delaying lifecycle events.
+
+### Expected merge conflict zones
 
 ## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
 
