@@ -1003,6 +1003,8 @@ describe("openai-completions tool_choice", () => {
 		expect(eventTypes.filter((type) => type === "toolcall_start")).toHaveLength(4);
 		expect(eventTypes.filter((type) => type === "toolcall_delta")).toHaveLength(9);
 		expect(eventTypes.filter((type) => type === "toolcall_end")).toHaveLength(4);
+		expect(eventTypes.indexOf("text_end")).toBeLessThan(eventTypes.indexOf("thinking_start"));
+		expect(eventTypes.indexOf("thinking_end")).toBeLessThan(eventTypes.indexOf("toolcall_start"));
 		expect(toolEventsByContentIndex.get(2)).toEqual([
 			"toolcall_start",
 			"toolcall_delta",

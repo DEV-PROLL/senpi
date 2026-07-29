@@ -13,6 +13,10 @@
 ### Fixed
 
 - Strip publish-runner-native optional packages before packing the universal Senpi tarball while preserving npm's consumer-platform sidecar selection contract ([#446](https://github.com/code-yeongyu/senpi/issues/446)).
+- Repair incomplete OMO local runtime installations even when a legacy update stamp matches, restoring deleted
+  packaged artifacts such as the LSP daemon CLI ([#500](https://github.com/code-yeongyu/senpi/pull/500)).
+- Preserve Kimi XTML recovery diagnostics and tool-call IDs while preventing valid reasoning-to-text native-tool
+  streams from failing with `Invalid assistant content event order` ([#498](https://github.com/code-yeongyu/senpi/pull/498)).
 
 ### Removed
 

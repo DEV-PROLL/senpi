@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- Preserve Kimi XTML protocol identity in recovered tool-call diagnostics and IDs, and serialize OpenAI-compatible
+  reasoning, text, and native tool-call lifecycles without breaking providers that stream mixed content and
+  parallel tool deltas ([#498](https://github.com/code-yeongyu/senpi/pull/498)).
+
 ### Removed
 
 ## [2026.7.29-3] - 2026-07-29
