@@ -1,5 +1,33 @@
 # TUI delta rendering fork changes
 
+## 2026-07-29: Native Unicode LaTeX in Markdown conversations
+
+### What changed
+
+- `components/markdown.ts` registers bounded Marked block and inline tokenizers for `$...$`, `$$...$$`, `\(...\)`,
+  and `\[...\]` math. Dollar delimiters require non-word outer boundaries, and bracket/parenthesis candidates stop at
+  inline-code or competing opener boundaries. Currency, shell variables, code spans, and malformed delimiters remain
+  literal, including partial streamed currency/shell pairs and math-like text after an unclosed inline-code opener.
+- The dependency-free `components/latex.ts` converter uses a balanced parser for nested fractions, roots, text
+  wrappers, symbols, and Unicode sub/superscripts. Formula length and nesting budgets fall back to the original text
+  instead of partially converting or repeatedly rescanning untrusted input. A leading combining mark receives a
+  dotted-circle anchor so terminal cell width agrees with the differential renderer.
+- TeX epsilon/phi variants and escaped script markers stay distinct, complete command names prevent prefix
+  corruption, and unknown commands remain readable. Display formulas inherit their surrounding style context.
+- Coverage: `test/markdown.test.ts` proves ordinary-text boundaries, nested/budgeted conversion, streamed partial
+  currency/shell and inline-code frames, CJK wide cells, inherited styles, malformed preservation, and focused
+  `VirtualTerminal` cell widths including a column-zero combining mark.
+
+### Why this cannot be expressed externally
+
+The `Markdown` component owns tokenization before extension-facing coding-agent UI hooks run. Rendering formulas
+consistently in assistant messages, nested Markdown structures, and every direct TUI consumer requires the parser seam.
+
+### Expected merge conflict zones
+
+- MEDIUM: `components/markdown.ts` parser construction and custom token branches.
+- LOW: `components/latex.ts` symbol/script conversion tables and `test/markdown.test.ts` LaTeX cases.
+
 ## 2026-07-28: over-wide diagnostics stop rescanning settled large histories
 
 ### What changed

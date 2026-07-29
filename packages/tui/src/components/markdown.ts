@@ -1,8 +1,9 @@
 // allow: SIZE_OK - existing markdown renderer is oversized; this merge only preserves behavior and cache-key correctness.
-import { Marked, type Token, Tokenizer, type Tokens } from "marked";
+import { Marked, type Token, Tokenizer, type TokenizerExtension, type Tokens } from "marked";
 import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.ts";
 import type { Component } from "../tui.ts";
 import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
+import { latexToUnicode } from "./latex.ts";
 
 const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
 
@@ -22,6 +23,251 @@ class StrictStrikethroughTokenizer extends Tokenizer {
 		};
 	}
 }
+
+interface LatexToken extends Tokens.Generic {
+	text: string;
+	type: "latex_block" | "latex_inline" | "latex_literal";
+}
+
+const MAX_LATEX_FORMULA_LENGTH = 4096;
+const WORD_CHARACTER_REGEX = /[\p{L}\p{M}\p{N}_]/u;
+
+interface InlineCodePrefixState {
+	hasUnclosedCodeSpan: boolean;
+	lastProcessedRaw?: string;
+	processedTokenCount: number;
+}
+
+const inlineCodePrefixStates = new WeakMap<Token[], InlineCodePrefixState>();
+
+function createLatexToken(type: LatexToken["type"], raw: string, text: string): LatexToken {
+	return { raw, text, type };
+}
+
+function isLatexToken(token: Token): token is LatexToken {
+	return (
+		(token.type === "latex_block" || token.type === "latex_inline" || token.type === "latex_literal") &&
+		"text" in token &&
+		typeof token.text === "string"
+	);
+}
+
+function previousRawCharacter(tokens: Token[]): string | undefined {
+	const raw = tokens[tokens.length - 1]?.raw;
+	return raw ? Array.from(raw).at(-1) : undefined;
+}
+
+function firstCharacter(value: string): string | undefined {
+	const codePoint = value.codePointAt(0);
+	return codePoint === undefined ? undefined : String.fromCodePoint(codePoint);
+}
+
+function followsUnclosedCodeSpan(tokens: Token[]): boolean {
+	let state = inlineCodePrefixStates.get(tokens);
+	const previousProcessedToken = state ? tokens[state.processedTokenCount - 1] : undefined;
+	if (!state || previousProcessedToken?.raw !== state.lastProcessedRaw) {
+		state = { hasUnclosedCodeSpan: false, processedTokenCount: 0 };
+		inlineCodePrefixStates.set(tokens, state);
+	}
+
+	for (let index = state.processedTokenCount; index < tokens.length; index += 1) {
+		const token = tokens[index];
+		if (token?.type === "text" && token.raw.includes("`")) {
+			state.hasUnclosedCodeSpan = true;
+		}
+	}
+	state.processedTokenCount = tokens.length;
+	state.lastProcessedRaw = tokens.at(-1)?.raw;
+	return state.hasUnclosedCodeSpan;
+}
+
+function findInlineMath(
+	src: string,
+	open: "$" | "\\(" | "\\[",
+	close: "$" | "\\)" | "\\]",
+): { raw: string; text: string } | undefined {
+	if (!src.startsWith(open)) return undefined;
+	const bodyStart = open.length;
+	const scanEnd = Math.min(src.length, bodyStart + MAX_LATEX_FORMULA_LENGTH + 1);
+
+	for (let index = bodyStart; index < scanEnd; index += 1) {
+		if (src[index] === "\n" || src[index] === "`") return undefined;
+		if (src.startsWith(close, index)) {
+			const text = src.slice(bodyStart, index);
+			const normalizedText = open === close ? text : text.trim();
+			if (!normalizedText || (open === close && /^\s|\s$/.test(text))) return undefined;
+			return { raw: src.slice(0, index + close.length), text: normalizedText };
+		}
+		if (open !== close && src.startsWith(open, index)) return undefined;
+		if (src[index] === "\\") {
+			if (src[index + 1] === "\n" || src[index + 1] === "\r") return undefined;
+			index += 1;
+		}
+	}
+	return undefined;
+}
+
+function findMalformedInlineSpan(src: string, open: "\\(" | "\\[", close: "\\)" | "\\]"): string | undefined {
+	if (!src.startsWith(open)) return undefined;
+	const scanEnd = Math.min(src.length, open.length + MAX_LATEX_FORMULA_LENGTH + 1);
+	let competingOpener = false;
+	const closers = [close];
+	for (let index = open.length; index < scanEnd; index += 1) {
+		if (src[index] === "\n" || src[index] === "`") {
+			return competingOpener ? src.slice(0, index) : undefined;
+		}
+		const nestedOpen = src.startsWith("\\(", index) ? "\\(" : src.startsWith("\\[", index) ? "\\[" : undefined;
+		if (nestedOpen !== undefined) {
+			competingOpener = true;
+			closers.push(nestedOpen === "\\(" ? "\\)" : "\\]");
+			index += nestedOpen.length - 1;
+			continue;
+		}
+		const expectedClose = closers.at(-1);
+		if (expectedClose !== undefined && src.startsWith(expectedClose, index)) {
+			closers.pop();
+			if (closers.length === 0) {
+				return competingOpener ? src.slice(0, index + expectedClose.length) : undefined;
+			}
+			index += expectedClose.length - 1;
+			continue;
+		}
+		if (src[index] === "\\") {
+			if (src[index + 1] === "\n" || src[index + 1] === "\r") {
+				return competingOpener ? src.slice(0, index) : undefined;
+			}
+			index += 1;
+		}
+	}
+	return competingOpener ? src.slice(0, scanEnd) : undefined;
+}
+
+function isLikelyLiteralDollarBody(text: string): boolean {
+	return (
+		text.startsWith("{") ||
+		/^\([^)\r\n]*\)[/\\]$/.test(text) ||
+		/^[!#$?@*-][/\\]$/.test(text) ||
+		/^[A-Za-z_][A-Za-z0-9_]*[./\\:-]$/.test(text) ||
+		/^\d[\d,.]*(?:[-–—]|[/\\])$/.test(text)
+	);
+}
+
+function findBlockMath(
+	src: string,
+	open: "$$" | "\\[",
+	close: "$$" | "\\]",
+): { raw: string; text: string } | undefined {
+	if (!src.startsWith(open)) return undefined;
+	const bodyStart = open.length;
+	const scanEnd = Math.min(src.length, bodyStart + MAX_LATEX_FORMULA_LENGTH + 1);
+	const lineValidationEnd = Math.min(src.length, scanEnd + close.length + 256);
+
+	for (let index = bodyStart; index < scanEnd; index += 1) {
+		if (src[index] === "`") return undefined;
+		if (open !== close && src.startsWith(open, index)) return undefined;
+		if (!src.startsWith(close, index)) continue;
+		const closeEnd = index + close.length;
+		let rawLineEnd = closeEnd;
+		while (rawLineEnd < lineValidationEnd && src[rawLineEnd] !== "\n" && /[ \t]/.test(src[rawLineEnd] ?? "")) {
+			rawLineEnd += 1;
+		}
+		if (rawLineEnd < src.length && src[rawLineEnd] !== "\n") return undefined;
+		const text = src.slice(bodyStart, index).trim();
+		if (!text) return undefined;
+		let rawEnd = rawLineEnd;
+		while (rawEnd < lineValidationEnd && src[rawEnd] === "\n") rawEnd += 1;
+		return { raw: src.slice(0, rawEnd), text };
+	}
+	return undefined;
+}
+
+function repeatedMalformedOpeners(src: string, opener: "\\(" | "\\["): string | undefined {
+	let end = opener.length;
+	while (src.startsWith(opener, end)) end += opener.length;
+	return end > opener.length ? src.slice(0, end) : undefined;
+}
+
+const blockMathTokenizer: TokenizerExtension = {
+	name: "latex_block",
+	level: "block",
+	tokenizer(src) {
+		const leadingSpaces = /^ {0,3}/.exec(src)?.[0] ?? "";
+		const candidate = src.slice(leadingSpaces.length);
+		const match = findBlockMath(candidate, "$$", "$$") ?? findBlockMath(candidate, "\\[", "\\]");
+		if (match) return createLatexToken("latex_block", `${leadingSpaces}${match.raw}`, match.text);
+		return undefined;
+	},
+};
+
+const inlineMathTokenizer: TokenizerExtension = {
+	name: "latex_inline",
+	level: "inline",
+	start(src) {
+		const index = src.search(/\$|\\[()[\]]/);
+		return index >= 0 ? index : undefined;
+	},
+	tokenizer(src, tokens) {
+		const codeSpanLiteral = /^(?:\${1,2}|\\\(|\\\)|\\\[|\\\])/.exec(src)?.[0];
+		if (codeSpanLiteral && followsUnclosedCodeSpan(tokens)) {
+			return createLatexToken("latex_literal", codeSpanLiteral, codeSpanLiteral);
+		}
+		if (src.startsWith("$")) {
+			if (src.startsWith("$$")) return createLatexToken("latex_literal", "$$", "$$");
+			const match = findInlineMath(src, "$", "$");
+			if (match && isLikelyLiteralDollarBody(match.text)) {
+				return createLatexToken("latex_literal", match.raw, match.raw);
+			}
+			const previous = previousRawCharacter(tokens);
+			const next = match ? firstCharacter(src.slice(match.raw.length)) : undefined;
+			if (
+				match &&
+				(previous === undefined || !WORD_CHARACTER_REGEX.test(previous)) &&
+				(next === undefined || !WORD_CHARACTER_REGEX.test(next))
+			) {
+				return createLatexToken("latex_inline", match.raw, match.text);
+			}
+			return createLatexToken("latex_literal", "$", "$");
+		}
+		const malformedParens = findMalformedInlineSpan(src, "\\(", "\\)");
+		if (malformedParens) return createLatexToken("latex_literal", malformedParens, malformedParens);
+		const malformedBrackets = findMalformedInlineSpan(src, "\\[", "\\]");
+		if (malformedBrackets) return createLatexToken("latex_literal", malformedBrackets, malformedBrackets);
+		const repeatedParens = repeatedMalformedOpeners(src, "\\(");
+		if (repeatedParens) return createLatexToken("latex_literal", repeatedParens, repeatedParens);
+		const repeatedBrackets = repeatedMalformedOpeners(src, "\\[");
+		if (repeatedBrackets) return createLatexToken("latex_literal", repeatedBrackets, repeatedBrackets);
+		const parens = findInlineMath(src, "\\(", "\\)");
+		if (parens) {
+			const previous = previousRawCharacter(tokens);
+			const next = firstCharacter(src.slice(parens.raw.length));
+			if (
+				(previous === undefined || !WORD_CHARACTER_REGEX.test(previous)) &&
+				(next === undefined || !WORD_CHARACTER_REGEX.test(next))
+			) {
+				return createLatexToken("latex_inline", parens.raw, parens.text);
+			}
+			return undefined;
+		}
+		const brackets = findInlineMath(src, "\\[", "\\]");
+		if (brackets) {
+			const previous = previousRawCharacter(tokens);
+			const next = firstCharacter(src.slice(brackets.raw.length));
+			if (
+				(previous === undefined || !WORD_CHARACTER_REGEX.test(previous)) &&
+				(next === undefined || !WORD_CHARACTER_REGEX.test(next))
+			) {
+				return createLatexToken("latex_inline", brackets.raw, brackets.text);
+			}
+			return undefined;
+		}
+		const literal = /^(?:\\\(|\\\)|\\\[|\\\])/.exec(src);
+		if (!literal) return undefined;
+		const previous = previousRawCharacter(tokens);
+		return previous !== undefined && WORD_CHARACTER_REGEX.test(previous)
+			? undefined
+			: createLatexToken("latex_literal", literal[0], literal[0]);
+	},
+};
 
 function trimPartialClosingFences(tokens: readonly Token[]): void {
 	const token = tokens[tokens.length - 1];
@@ -49,6 +295,7 @@ function trimPartialClosingFences(tokens: readonly Token[]): void {
 }
 
 const markdownParser = new Marked();
+markdownParser.use({ extensions: [blockMathTokenizer, inlineMathTokenizer] });
 markdownParser.setOptions({
 	tokenizer: new StrictStrikethroughTokenizer(),
 });
@@ -507,6 +754,16 @@ export class Markdown implements Component {
 				break;
 			}
 
+			case "latex_block":
+				if (isLatexToken(token)) {
+					const formula = latexToUnicode(token.text);
+					lines.push(styleContext ? styleContext.applyText(formula) : this.applyDefaultStyle(formula));
+					if (nextTokenType && nextTokenType !== "space") {
+						lines.push("");
+					}
+				}
+				break;
+
 			case "text":
 				lines.push(this.renderInlineTokens([token], styleContext));
 				break;
@@ -655,6 +912,18 @@ export class Markdown implements Component {
 
 				case "codespan":
 					result += this.theme.code(token.text) + stylePrefix;
+					break;
+
+				case "latex_inline":
+					if (isLatexToken(token)) {
+						result += applyTextWithNewlines(latexToUnicode(token.text));
+					}
+					break;
+
+				case "latex_literal":
+					if (isLatexToken(token)) {
+						result += applyTextWithNewlines(token.text);
+					}
 					break;
 
 				case "link": {
