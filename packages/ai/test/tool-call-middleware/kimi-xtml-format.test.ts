@@ -54,7 +54,9 @@ describe("kimiXtmlFormatToolCall", () => {
 describe("kimiXtmlFormatToolResponse", () => {
 	it("renders results with the Kimi-family return convention", () => {
 		// when
-		const rendered = kimiXtmlFormatToolResponse("get_weather", "kimi-xtml-tool-0", [{ type: "text", text: "sunny, 31C" }]);
+		const rendered = kimiXtmlFormatToolResponse("get_weather", "kimi-xtml-tool-0", [
+			{ type: "text", text: "sunny, 31C" },
+		]);
 
 		// then
 		expect(rendered).toBe("## Return of get_weather\nsunny, 31C");

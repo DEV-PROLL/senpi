@@ -38,11 +38,7 @@ export function coerceXtmlArgumentValue(raw: string, type: string | undefined): 
 	}
 }
 
-function parseCallBody(
-	body: string,
-	tool: Tool,
-	options?: ParserOptions,
-): Record<string, unknown> | null {
+function parseCallBody(body: string, tool: Tool, options?: ParserOptions): Record<string, unknown> | null {
 	const args: Record<string, unknown> = {};
 	let rest = body;
 	for (;;) {
@@ -87,7 +83,10 @@ export function parseKimiXtmlGeneratedText(text: string, tools: Tool[], options?
 			if (headerEnd === -1) break;
 			const attributes = parseXtmlAttributes(block.slice(callStart + XTML_CALL_OPEN.length, headerEnd));
 			const bodyEnd = block.indexOf(XTML_CALL_CLOSE, headerEnd + XTML_SEP.length);
-			const callBody = bodyEnd === -1 ? block.slice(headerEnd + XTML_SEP.length) : block.slice(headerEnd + XTML_SEP.length, bodyEnd);
+			const callBody =
+				bodyEnd === -1
+					? block.slice(headerEnd + XTML_SEP.length)
+					: block.slice(headerEnd + XTML_SEP.length, bodyEnd);
 			callCursor = bodyEnd === -1 ? block.length : bodyEnd + XTML_CALL_CLOSE.length;
 
 			const name = attributes.tool;

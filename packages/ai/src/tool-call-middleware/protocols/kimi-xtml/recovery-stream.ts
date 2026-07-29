@@ -14,7 +14,14 @@ import {
 } from "./markers.ts";
 import { coerceXtmlArgumentValue } from "./parse.ts";
 
-type ParserMode = "text" | "tools" | "call-header" | "call-body" | "argument-header" | "argument-value" | "discard-call";
+type ParserMode =
+	| "text"
+	| "tools"
+	| "call-header"
+	| "call-body"
+	| "argument-header"
+	| "argument-value"
+	| "discard-call";
 
 const CHANNEL_MARKER_PATTERN = /^<\|(?:open|close)\|>[a-zA-Z_][a-zA-Z0-9_]*<\|sep\|>/;
 const OPEN_PREFIX = "<|open|>";

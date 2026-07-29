@@ -13,7 +13,14 @@ import {
 } from "./markers.ts";
 import { coerceXtmlArgumentValue } from "./parse.ts";
 
-type ParserMode = "text" | "tools" | "call-header" | "call-body" | "argument-header" | "argument-value" | "discard-call";
+type ParserMode =
+	| "text"
+	| "tools"
+	| "call-header"
+	| "call-body"
+	| "argument-header"
+	| "argument-value"
+	| "discard-call";
 
 const TEXT_BOUNDARY_TOKENS = [XTML_TOOLS_OPEN] as const;
 const TOOLS_BOUNDARY_TOKENS = [XTML_CALL_OPEN, XTML_TOOLS_CLOSE] as const;

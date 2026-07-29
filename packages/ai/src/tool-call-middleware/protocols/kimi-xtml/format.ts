@@ -46,7 +46,10 @@ export function kimiXtmlFormatToolResponse(
 export function kimiXtmlFormatToolsSystemPrompt(tools: Tool[]): string {
 	if (tools.length === 0) return "";
 	const toolDescriptions = tools
-		.map((tool) => `Name: ${tool.name}\nDescription: ${tool.description}\nParameters Schema:\n${JSON.stringify(tool.parameters, null, 3)}`)
+		.map(
+			(tool) =>
+				`Name: ${tool.name}\nDescription: ${tool.description}\nParameters Schema:\n${JSON.stringify(tool.parameters, null, 3)}`,
+		)
 		.join("\n\n");
 	return `You have access to the following tools. Use them when appropriate.
 

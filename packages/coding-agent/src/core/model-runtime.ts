@@ -13,6 +13,8 @@ import {
 	type CredentialInfo,
 	type CredentialStore,
 	createModels,
+	createXtmlRecoveryStreamParser,
+	hasKimiTextToolCallRecovery,
 	lazyStream,
 	type Model,
 	type Models,
@@ -28,8 +30,6 @@ import {
 	type ProviderHeaders,
 	type SimpleStreamOptions,
 	type StreamOptions,
-	createXtmlRecoveryStreamParser,
-	hasKimiTextToolCallRecovery,
 	shouldRecoverTextToolCalls,
 	wrapStreamWithInvokeRecovery,
 } from "@earendil-works/pi-ai";

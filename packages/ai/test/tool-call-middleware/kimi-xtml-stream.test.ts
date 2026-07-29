@@ -111,7 +111,15 @@ describe("createKimiXtmlStreamParser", () => {
 
 	it("handles a marker split exactly mid-token", () => {
 		// when
-		const events = feedAll(["<|op", "en|>tools<|se", "p|>", '<|open|>call tool="get_weather" index="1"<|sep|>', '<|open|>argument key="city" type="string"<|sep|>Seoul<|close|>argument<|sep|>', "<|close|>call<|sep|>", "<|close|>tools<|sep|>"]);
+		const events = feedAll([
+			"<|op",
+			"en|>tools<|se",
+			"p|>",
+			'<|open|>call tool="get_weather" index="1"<|sep|>',
+			'<|open|>argument key="city" type="string"<|sep|>Seoul<|close|>argument<|sep|>',
+			"<|close|>call<|sep|>",
+			"<|close|>tools<|sep|>",
+		]);
 		const end = events.find((event) => event.type === "toolcall_end");
 
 		// then
