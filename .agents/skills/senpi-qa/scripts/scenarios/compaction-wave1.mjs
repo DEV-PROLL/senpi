@@ -63,6 +63,17 @@ function assertArtifacts(checks, { sessionJsonlPath, compactionLogPath, stderr, 
 	checks.ok("stderr contains a [senpi-compaction] mirror line", expectMirror ? stderr.includes(MIRROR_NEEDLE) : !stderr.includes(MIRROR_NEEDLE), `mirror=${stderr.includes(MIRROR_NEEDLE)}`);
 }
 
+function writePreBakedArtifacts(box) {
+	const sessionDir = join(box.agentDir, "sessions", "prebaked");
+	mkdirSync(sessionDir, { recursive: true });
+	const sessionJsonlPath = join(sessionDir, "session.jsonl");
+	writeFileSync(sessionJsonlPath, `${JSON.stringify({ event: "compaction", details: { origin: "speculative", taskIntent: "ORIGINAL_REQUEST: TASK_TYPE: implementation MUST_PRESERVE: files MUST_NOT_LOSE: nothing" } })}\n`);
+	const compactionLogPath = join(box.agentDir, "logs", "compaction.log");
+	mkdirSync(join(box.agentDir, "logs"), { recursive: true });
+	writeFileSync(compactionLogPath, `${JSON.stringify({ decision: "compact", details: { origin: "speculative", taskIntent: "ORIGINAL_REQUEST: TASK_TYPE: implementation MUST_PRESERVE: files MUST_NOT_LOSE: nothing" } })}\n`);
+	return { sessionJsonlPath, compactionLogPath };
+}
+
 async function runScenario({ debug = true, fixtureOnly = false } = {}) {
 	installCleanupHooks();
 	const checks = createChecks(fixtureOnly ? "compaction-wave1.mjs --self-test" : "compaction-wave1.mjs");
@@ -71,6 +82,12 @@ async function runScenario({ debug = true, fixtureOnly = false } = {}) {
 	let server = null;
 	let result = { code: 0, stdout: "", stderr: "", timedOut: false };
 	try {
+		if (fixtureOnly) {
+			// self-test: validates assertion logic against pre-baked artifacts; the real-CLI path is deferred (harness multi-turn limitation).
+			const { sessionJsonlPath, compactionLogPath } = writePreBakedArtifacts(box);
+			assertArtifacts(checks, { sessionJsonlPath, compactionLogPath, stderr: "", expectMirror: false });
+			process.exit(checks.finish() ? 0 : 1);
+		}
 		server = await startFakeModelServer({ turns: [{ text: COMPACTION_REQUEST }, { text: FINAL_TURN_TEXT }] });
 		const preset = API_PRESETS["openai-completions"];
 		writeMockModelsJson(box.agentDir, server, "openai-completions", { contextWindow: 4096 });
@@ -96,7 +113,7 @@ async function runScenario({ debug = true, fixtureOnly = false } = {}) {
 
 const argv = process.argv.slice(2);
 if (argv.includes("--self-test")) {
-	runScenario({ preBaked: true }).catch((error) => {
+	runScenario({ fixtureOnly: true }).catch((error) => {
 		process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
 		process.exit(1);
 	});
