@@ -128,13 +128,19 @@ export default function recommendedModelsExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
+		const persistAsDefault = ctx.mode === "tui";
 		automaticSelection = true;
 		try {
-			if (!(await pi.setModel(target.model))) {
+			const switched = persistAsDefault ? await pi.setModel(target.model) : await pi.setSessionModel(target.model);
+			if (!switched) {
 				warnWhenNoRecommendationIsAvailable(ctx);
 				return;
 			}
-			pi.setThinkingLevel(target.recommendation.thinkingLevel);
+			if (persistAsDefault) {
+				pi.setThinkingLevel(target.recommendation.thinkingLevel);
+			} else {
+				pi.setSessionThinkingLevel(target.recommendation.thinkingLevel);
+			}
 			ctx.ui.notify(`Switched to recommended model '${target.model.id}'.`, "info");
 		} finally {
 			automaticSelection = false;

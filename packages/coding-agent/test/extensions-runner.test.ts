@@ -135,6 +135,8 @@ describe("ExtensionRunner", () => {
 		setModel: async () => false,
 		getThinkingLevel: () => "off",
 		setThinkingLevel: () => {},
+		setSessionModel: async () => false,
+		setSessionThinkingLevel: () => {},
 	};
 
 	const extensionContextActions: ExtensionContextActions = {

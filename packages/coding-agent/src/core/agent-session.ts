@@ -4774,6 +4774,12 @@ export class AgentSession {
 				},
 				getThinkingLevel: () => this.thinkingLevel,
 				setThinkingLevel: (level) => this.setThinkingLevel(level),
+				setSessionModel: async (model) => {
+					if (!this._modelRuntime.hasConfiguredAuth(model.provider)) return false;
+					await this.setSessionModel(model);
+					return true;
+				},
+				setSessionThinkingLevel: (level) => this.setSessionThinkingLevel(level),
 			},
 			{
 				getModel: () => this.model,

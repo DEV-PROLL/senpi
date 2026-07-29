@@ -26,6 +26,31 @@ Only the session core can consult `session_before_reload` without side effects; 
 
 
 
+## 2026-07-29 - Session-scoped model APIs; headless recommended-model switch no longer persists
+
+### What changed and why
+
+- `ExtensionAPI` gains `setSessionModel(model)` and `setSessionThinkingLevel(level)`: session-scoped counterparts of `setModel`/`setThinkingLevel`. They change the active session model/thinking level (still recorded in session history) without rewriting the user's persisted `defaultProvider`/`defaultModel`/`defaultThinkingLevel`.
+- The `recommended-models` builtin persists its automatic startup switch only in interactive (`tui`) mode. Headless modes (`print`, `rpc`, `json`) switch session-scoped, so background/child sessions no longer rewrite the user's real `~/.senpi/agent/settings.json` defaults on every start. Observed in the field: concurrent headless sessions with differing provider auth repeatedly overwrote the user's saved defaults minutes after the user restored them.
+
+### Why the extension system couldn't handle this alone
+
+`AgentSession.setSessionModel`/`setSessionThinkingLevel` already existed but were not exposed through the extension runtime, so extensions could only make persisting switches.
+
+### Files modified
+
+- `types.ts` (`ExtensionAPI`, `ExtensionActions`)
+- `loader.ts`, `runner.ts` (runtime stubs, facade, action binding)
+- `../agent-session.ts` (action wiring to the existing session-scoped setters)
+- `builtin/recommended-models/index.ts` (mode-scoped persistence)
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `types.ts` around the Model/Thinking Level API block; retain both session-scoped methods.
+- LOW: `runner.ts` action copy block and `loader.ts` runtime stub/facade lists; keep the session-scoped entries.
+
+
+
 ## 2026-07-29 - Initial model provenance on session_start
 
 ### What changed and why
