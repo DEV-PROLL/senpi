@@ -3,6 +3,28 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## Theme-aware active-monitor footer (2026-07-29)
+
+### What changed
+
+- Active monitor footer text is wrapped with the current TUI theme's `text` foreground and
+  `selectedBg` background before publication through `ctx.ui.setStatus`.
+- Styling is restricted to `ctx.mode === "tui"`; RPC, app-server, JSON, and print contexts keep
+  the original plain status string, and an empty monitor snapshot still clears with `undefined`.
+- The formatter remains unchanged, so the 48-column cap, whole-description packing, watch glyph,
+  monitor count, and paused suffix stay independent of ANSI byte length.
+
+### Why
+
+The live `◉ watching …` row could blend into adjacent footer content. Reusing the active theme's
+selection background creates a visible but restrained chip in both dark and light themes without
+introducing a monitor-specific color token.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: the fork-owned monitor registry `onChange` callback in `extension.ts` and its focused footer
+  wiring test.
+
 ## bash_output ghost wait_for params removed (2026-07-28)
 
 ### What changed
