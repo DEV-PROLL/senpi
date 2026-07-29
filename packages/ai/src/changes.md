@@ -1,5 +1,11 @@
 # AI Source Changes
 
+## 2026-07-29 - kimi-xtml text tool-call protocol + ToolCallFormat union
+
+### What changed and why
+
+- `ToolCallFormat` gains `"kimi-xtml"` (Kimi K3 native XTML channel syntax); `getToolCallFormat()` whitelist, protocol registry, compat docs, and middleware TESTING.md updated accordingly. Protocol implementation lives in `tool-call-middleware/protocols/kimi-xtml/` (markers, parse, format, stream); details in `tool-call-middleware/changes.md`.
+
 ## 2026-07-28 - Demote unavailable Anthropic tool references instead of failing the request
 
 ### What changed and why

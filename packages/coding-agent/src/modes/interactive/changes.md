@@ -1,5 +1,20 @@
 # changes
 
+## Ethos tips: tool-call repair now names Kimi K3 (2026-07-29)
+
+### What changed
+
+- `tips/catalog/ethos-tips.ts`: the `ethos.tool-call-repair` copy now covers Kimi K3 alongside Claude - "claude's sloppy invokes, kimi k3's leaked XTML channels, all of it" - matching the new normal-mode XTML recovery in `packages/ai` (Kimi models get the same leaked tool-call auto-correction Claude has).
+- Coverage: `test/suite/ethos-tips.test.ts` pin updated verbatim.
+
+### Why
+
+- The repair tip only described the Claude/antml case. With XTML recovery shipped for Kimi models, the brag undersells the feature.
+
+### Expected merge conflict zones
+
+- LOW: single render string in `ethos-tips.ts` and its verbatim pin.
+
 ## Footer omits cumulative input and output counters (2026-07-29)
 
 ### What changed

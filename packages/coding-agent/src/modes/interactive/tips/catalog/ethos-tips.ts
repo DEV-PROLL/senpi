@@ -84,6 +84,6 @@ export const ETHOS_TIPS = [
 		id: "ethos.tool-call-repair",
 		bindings: [],
 		render: () =>
-			"senpi catches malformed tool calls on the wire, fixes them, and salvages the turn. Other harnesses retry the whole thing and bill you for the privilege. *table stakes, honestly*",
+			"senpi catches malformed tool calls on the wire, fixes them, and salvages the turn - claude's sloppy invokes, kimi k3's leaked XTML channels, all of it. Other harnesses retry the whole thing and bill you for the privilege. *table stakes, honestly*",
 	},
 ] satisfies readonly TipDefinition[];
