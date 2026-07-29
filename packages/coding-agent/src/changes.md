@@ -38,6 +38,8 @@
   explicitly disabled guard. Both timeout bounds return to their configured values for later provider requests.
 - The retry start bound is capped as well as the provider request option, while the configured idle timeout resumes
   after the first event so healthy reasoning gaps are not limited to 30 seconds.
+- Consecutive transport timeouts reported with `stopReason: "aborted"` keep consuming the same retry counter. Only a
+  genuinely successful assistant response resets the budget or emits `auto_retry_end { success: true }`.
 - Coverage: `test/suite/regressions/provider-idle-recovery.test.ts` pins exact request text/order, configurable timeout
   sequences, disabled guards, negative classifier shapes, and a real no-first-event stream expiry at the cap;
   `test/settings-manager.test.ts` pins setting defaults and `0` semantics.

@@ -1443,13 +1443,18 @@ export class AgentSession {
 				this._lastAssistantMessage = event.message;
 
 				const assistantMsg = event.message as AssistantMessage;
-				if (assistantMsg.stopReason !== "error") {
+				const succeeded =
+					assistantMsg.stopReason !== "error" &&
+					assistantMsg.stopReason !== "aborted" &&
+					!isClassifierRefusal(assistantMsg);
+				if (succeeded) {
 					this._overflowRecoveryAttempted = false;
 				}
 
-				// Reset retry counter immediately on successful assistant response
-				// This prevents accumulation across multiple LLM calls within a turn
-				if (assistantMsg.stopReason !== "error" && this._retryAttempt > 0) {
+				// Reset retry state only after a genuinely successful response. Provider
+				// transport timeouts can arrive as `aborted` and must keep consuming the
+				// same bounded retry budget instead of reporting a false success.
+				if (succeeded && this._retryAttempt > 0) {
 					const fallback = this._retryFallback.activeState;
 					if (fallback) {
 						this._emit({
