@@ -8,6 +8,8 @@ import {
 	createGoal,
 	goalFilePath,
 	readGoal,
+	recordContinuationDelivered,
+	resetContinuationStreak,
 	updateGoal,
 	writeGoal,
 } from "../../src/core/extensions/builtin/goal/store.ts";
@@ -316,5 +318,135 @@ describe("goal store (budget-free)", () => {
 		expect(await clearGoal(ref)).toBe(true);
 		expect(await readGoal(ref)).toBeNull();
 		expect(await readFile(goalFilePath(ref), "utf8")).toContain('"version": 1');
+	});
+});
+
+describe("goal continuation streak persistence", () => {
+	it("starts new goals at zero continuations with no signature", async () => {
+		const ref = await tempStore("thread-streak-new");
+		const goal = await createGoal(ref, "Start clean");
+
+		expect(goal.consecutiveContinuations).toBe(0);
+		expect(goal.lastContinuationSignature).toBeUndefined();
+		expect(await readGoal(ref)).toMatchObject({ consecutiveContinuations: 0 });
+	});
+
+	it("round-trips delivered continuations and their signature", async () => {
+		const ref = await tempStore("thread-streak-roundtrip");
+		const goal = await createGoal(ref, "Count continuations");
+
+		const first = await recordContinuationDelivered(ref, `${goal.id}:0/3:hash-a`);
+		expect(first).toMatchObject({
+			consecutiveContinuations: 1,
+			lastContinuationSignature: `${goal.id}:0/3:hash-a`,
+		});
+
+		const second = await recordContinuationDelivered(ref, `${goal.id}:0/3:hash-b`);
+		expect(second?.consecutiveContinuations).toBe(2);
+
+		const persisted = await readGoal(ref);
+		expect(persisted).toMatchObject({
+			consecutiveContinuations: 2,
+			lastContinuationSignature: `${goal.id}:0/3:hash-b`,
+		});
+
+		const fileContents = await readFile(goalFilePath(ref), "utf8");
+		expect(fileContents).toContain('"consecutiveContinuations": 2');
+		expect(fileContents).toContain("hash-b");
+	});
+
+	it("leaves updatedAt unchanged when a continuation is delivered", async () => {
+		const ref = await tempStore("thread-streak-updated-at");
+		const goal = await createGoal(ref, "Steady clock");
+
+		const delivered = await recordContinuationDelivered(ref, `${goal.id}:1/2:hash-c`);
+
+		expect(delivered?.updatedAt).toBe(goal.updatedAt);
+		expect((await readGoal(ref))?.updatedAt).toBe(goal.updatedAt);
+	});
+
+	it("parses goals written before continuation tracking with default streak semantics", async () => {
+		const ref = await tempStore("thread-streak-legacy");
+		await createGoal(ref, "Legacy goal");
+		const raw = JSON.parse(await readFile(goalFilePath(ref), "utf8")) as { goal: Record<string, unknown> };
+		delete raw.goal.consecutiveContinuations;
+		delete raw.goal.lastContinuationSignature;
+		await writeRawGoalFile(ref, `${JSON.stringify(raw, null, 2)}\n`);
+
+		const persisted = await readGoal(ref);
+
+		expect(persisted?.consecutiveContinuations ?? 0).toBe(0);
+		expect(persisted?.lastContinuationSignature).toBeUndefined();
+		expect(persisted).not.toHaveProperty("consecutiveContinuations");
+
+		const delivered = await recordContinuationDelivered(ref, `${persisted?.id ?? ""}:0/1:hash-legacy`);
+		expect(delivered?.consecutiveContinuations).toBe(1);
+	});
+
+	it("drops corrupt continuation fields without throwing", async () => {
+		const ref = await tempStore("thread-streak-corrupt");
+		await createGoal(ref, "Corrupt streak");
+		const raw = JSON.parse(await readFile(goalFilePath(ref), "utf8")) as { goal: Record<string, unknown> };
+		raw.goal.consecutiveContinuations = "eight";
+		raw.goal.lastContinuationSignature = 42;
+		await writeRawGoalFile(ref, `${JSON.stringify(raw, null, 2)}\n`);
+
+		const persisted = await readGoal(ref);
+		expect(persisted?.consecutiveContinuations).toBeUndefined();
+		expect(persisted?.lastContinuationSignature).toBeUndefined();
+
+		raw.goal.consecutiveContinuations = -3;
+		await writeRawGoalFile(ref, `${JSON.stringify(raw, null, 2)}\n`);
+		const reread = await readGoal(ref);
+		expect(reread?.consecutiveContinuations).toBeUndefined();
+		expect((await recordContinuationDelivered(ref, "sig-corrupt"))?.consecutiveContinuations).toBe(1);
+	});
+
+	it("resets the streak when the goal status changes", async () => {
+		const ref = await tempStore("thread-streak-status-reset");
+		const goal = await createGoal(ref, "Reset on status");
+		await recordContinuationDelivered(ref, `${goal.id}:0/1:hash-d`);
+		await recordContinuationDelivered(ref, `${goal.id}:0/1:hash-d`);
+
+		const paused = await updateGoal(ref, { status: "paused" }, "user");
+
+		expect(paused.consecutiveContinuations).toBe(0);
+		expect(paused.lastContinuationSignature).toBeUndefined();
+		expect(await readGoal(ref)).toMatchObject({ consecutiveContinuations: 0 });
+	});
+
+	it("resets the streak when the objective is replaced", async () => {
+		const ref = await tempStore("thread-streak-objective-reset");
+		const goal = await createGoal(ref, "Original objective");
+		await recordContinuationDelivered(ref, `${goal.id}:0/1:hash-e`);
+
+		const replaced = await updateGoal(ref, { objective: "Replacement objective" }, "user");
+
+		expect(replaced.id).not.toBe(goal.id);
+		expect(replaced.consecutiveContinuations).toBe(0);
+		expect(replaced.lastContinuationSignature).toBeUndefined();
+	});
+
+	it("resetContinuationStreak clears count and signature without bumping updatedAt", async () => {
+		const ref = await tempStore("thread-streak-reset");
+		const goal = await createGoal(ref, "Reset helper");
+		const delivered = await recordContinuationDelivered(ref, `${goal.id}:2/5:hash-f`);
+		expect(delivered?.consecutiveContinuations).toBe(1);
+
+		const reset = await resetContinuationStreak(ref);
+
+		expect(reset?.consecutiveContinuations).toBe(0);
+		expect(reset?.lastContinuationSignature).toBeUndefined();
+		expect(reset?.updatedAt).toBe(goal.updatedAt);
+		const persisted = await readGoal(ref);
+		expect(persisted?.consecutiveContinuations).toBe(0);
+		expect(persisted?.lastContinuationSignature).toBeUndefined();
+	});
+
+	it("returns null from streak helpers when no goal exists", async () => {
+		const ref = await tempStore("thread-streak-no-goal");
+
+		expect(await recordContinuationDelivered(ref, "sig")).toBeNull();
+		expect(await resetContinuationStreak(ref)).toBeNull();
 	});
 });

@@ -67,7 +67,7 @@ function parseGoalFile(raw: string): GoalFile {
 	if (parsed.version !== STORE_VERSION) throw new UnsupportedGoalStoreVersionError("unsupported goal store version");
 	if (parsed.goal !== null && !isGoal(parsed.goal))
 		throw new InvalidGoalStoreError("goal store contains an invalid goal");
-	return { version: STORE_VERSION, goal: parsed.goal };
+	return { version: STORE_VERSION, goal: parsed.goal === null ? null : sanitizeContinuationState(parsed.goal) };
 }
 
 function recoverGoalFileWithStaleClosingBraces(raw: string): string | undefined {
@@ -132,6 +132,13 @@ function hasValidBlockedFields(value: Record<string, unknown>, status: GoalStatu
 		);
 	}
 	return value.blockedReason === undefined && value.blockedAt === undefined;
+}
+
+function sanitizeContinuationState(goal: Goal): Goal {
+	const next: Goal = { ...goal };
+	if (!isNonNegativeSafeInteger(next.consecutiveContinuations)) delete next.consecutiveContinuations;
+	if (typeof next.lastContinuationSignature !== "string") delete next.lastContinuationSignature;
+	return next;
 }
 
 function isMissingFile(error: unknown): boolean {

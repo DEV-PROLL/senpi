@@ -15,6 +15,44 @@
 
 - LOW: `getSettingsPath()` in `settings-manager.ts`.
 
+## messages.ts keep-latest exclusion for goal-continuation (2026-07-29)
+
+### What changed
+
+- `messages.ts` now excludes consumed `goal-continuation` custom messages by position instead of by type: every
+  `role === "custom" && customType === GOAL_CONTINUATION_MESSAGE_TYPE` entry is dropped except the last one.
+  The same keep-latest rule is applied in both `filterContextExcludedMessages` and `convertToLlm`, so token estimation
+  and provider payload assembly stay in sync.
+- `isContextExcludedCustomMessage` remains `false` for this custom type; the live triggering message still needs to be
+  visible to per-entry consumers such as compaction and branch summarization.
+
+### Why
+
+- Goal continuation messages accumulate across long sessions, and stale consumed entries must stay out of the next
+  provider request without hiding the active trigger or letting the estimator disagree with the payload.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW in `messages.ts` around the shared keep-latest helper, `filterContextExcludedMessages`, and `convertToLlm`.
+- NONE in the per-entry custom-message predicate semantics.
+
+## AgentEndEvent.willRetry extension event field (2026-07-29)
+
+### What changed
+
+- `extensions/types.ts` now exposes an optional `willRetry?: boolean` on `AgentEndEvent`, mirroring the agent-session
+  end event so builtin extensions can tell a terminal provider error from a retryable one.
+- The field is additive only; existing extension consumers that ignore it continue to behave the same.
+
+### Why
+
+- The goal builtin needs to block on terminal provider errors only after retries are exhausted. Without the retry
+  signal, a terminal error could be misclassified while a fallback retry was still in flight.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW in `extensions/types.ts` and the runner plumbing that forwards agent-session end events to builtin extensions.
+
 ## claude-agent-sdk provider with native multi-account OAuth (2026-07-27)
 
 ### What changed

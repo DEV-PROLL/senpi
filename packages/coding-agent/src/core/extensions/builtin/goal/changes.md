@@ -72,7 +72,7 @@
   `<goal_monitor_stall_check>` block (`buildMonitorStallNotice` in `prompt.ts`) telling
   the agent the repeated wait looks abnormal and to actively inspect the monitored state
   (bash_output, process health, kill_bash + alternate approach, or the blocked audit)
-  before waiting again. A `goal_monitor_continuation_stall` event is emitted and a UI
+  before waiting again. A `goal_continuation_scheduled`/stall notice is emitted and a UI
   notice shown when the check is injected.
 - The streak resets on every signal that breaks the unattended wait loop: monitor
   completion (`terminal_monitor_state` activeCount 0), a real user prompt
@@ -86,6 +86,42 @@
 - LOW in `monitor-continuation.ts` around `#continueIfEligible` and the monitor-state
   subscription.
 - LOW in `prompt.ts` (appended exported builder) and `index.ts` `before_agent_start`.
+
+## Goal continuation guardrails (2026-07-29)
+
+### What changed
+
+- `continuation.ts` now persists the continuation cap as stateful goal metadata and treats
+  continued stale signatures and repeated normalized assistant outputs as stop conditions.
+  The cap remains 8, stale-signature comparison stays immediate-path only, and a single-flight
+  latch prevents duplicate queued continuations.
+- `prompt.ts` generalizes the stall notice from monitor-only to goal-wide: the same
+  continuation block now covers toolless continuation streaks from the 3rd consecutive turn,
+  uses `<goal_stall_check>` for the renamed block, keeps the monitor-flavored bullets when
+  monitors are active, and emits generic recovery bullets otherwise. The user-prompt grace
+  delay remains 60s, truncation recovery remains one minimal prompt, and terminal provider
+  errors now block the goal when `AgentEndEvent.willRetry` is false.
+- `monitor-continuation.ts`, `lifecycle-helpers.ts`, and `index.ts` route immediate,
+  monitor-delayed, and session-start continuation entry points through the verdict engine;
+  user prompts reset the streak state, and the session-start admission path suppresses
+  resumed flooded sessions with 8+ historical trailing continuation entries.
+- `types.ts` and persistence/store code now carry the continuation streak and signature
+  fields so a restart cannot bypass the cap, while the existing `tokenBudget` field stays
+  inert compatibility metadata only.
+
+### Why
+
+- The built-in goal feature had multiple independent loop sources: repeated clean agent turns,
+  stale hidden control prompts after state changes, immediate re-entry after a real user turn,
+  truncation loops, silent provider terminal failures, and resumed sessions that replayed long
+  continuation histories. These guards close those paths without introducing budget-based policy.
+
+### Expected merge conflict zones on the next sync
+
+- HIGH in `continuation.ts`, `monitor-continuation.ts`, `lifecycle-helpers.ts`, and `index.ts`
+  where continuation admission and reset state are wired.
+- MEDIUM in `prompt.ts` and the goal store/persistence files for the new guard state.
+- LOW in `extensions/types.ts` and related core event plumbing for `AgentEndEvent.willRetry`.
 
 ## Blank reasons treated as omitted for update_goal complete (2026-07-28)
 
