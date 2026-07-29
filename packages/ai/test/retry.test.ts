@@ -148,6 +148,41 @@ describe("provider retry classification", () => {
 		).toBe(true);
 	});
 
+	it("classifies zero-event stream idle timeouts as provider stream stalls", () => {
+		// Stall retries replay the identical payload against a provider that
+		// already sat silent for the whole idle budget, so agent-session uses
+		// this class to escalate repeated stalls to the fallback chain.
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Provider stream start timed out after 90000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Request timed out." }),
+			),
+		).toBe(false);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "aborted",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(false);
+	});
+
 	it("classifies agent-loop stream idle timeouts as retryable", () => {
 		// Emitted by @earendil-works/pi-agent-core when a provider stream stops
 		// delivering events (e.g. a connection that died after a network change).

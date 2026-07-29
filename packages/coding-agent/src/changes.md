@@ -27,6 +27,32 @@
   has no upstream counterpart.
 - LOW: the `projectTrustContext` fallback wrap inside `createRuntime`.
 
+||||||| 2a853f363
+## Repeated provider-stream stalls escalate to the fallback chain (2026-07-29)
+
+### What changed
+
+- `core/agent-session.ts`: the transient retry branch tracks consecutive provider-stream stalls
+  (`isProviderStreamStallError` from pi-ai, covering both the idle-timeout and stream-start-timeout wordings). The second consecutive stall escalates to the fallback chain
+  immediately (same `tryFallback("transient")` path as budget exhaustion); without a chain the retry loop ends
+  instead of replaying the identical payload for the remaining same-model budget. Non-stall failures reset the
+  streak, fallback switches and fresh retry loops start at zero.
+- Coverage: `test/suite/retry-fallback-stall-escalation.test.ts` (escalation with chain, surrender without chain,
+  streak reset for non-consecutive stalls).
+
+### Why
+
+- A stall means the provider accepted the request and delivered zero events for the entire idle budget
+  (`httpIdleTimeoutMs`, default 300s). Each retry replays an identical payload, so a hung provider/gateway
+  previously cost (1 + maxRetries) * 300s (~20 minutes) of opaque dead air per turn before the chain was
+  consulted - experienced as a permanently wedged session (Discord report 2026-07-29, donated session
+  019fa8da-43ad-70b7-b01b-8f34f4d907f2 records 1906/1919: reopening a 5h session hit the 300s idle timeout on
+  every goal-continuation while new sessions worked).
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `_handleRetryableError` transient branch and the `switchedFallback` reset in `core/agent-session.ts`.
+
 ## Availability-aware default Fable fallback chain (2026-07-29)
 
 ### What changed

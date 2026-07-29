@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { renderGoalCacheWarmupEntry } from "../../src/core/extensions/builtin/goal/cache-warm-renderer.ts";
 import type { GoalCacheWarmupEntryData } from "../../src/core/extensions/builtin/goal/cache-warm.ts";
+import { renderGoalCacheWarmupEntry } from "../../src/core/extensions/builtin/goal/cache-warm-renderer.ts";
 import type { CustomEntry } from "../../src/core/session-manager.ts";
 import { initTheme, theme } from "../../src/modes/interactive/theme/theme.ts";
 
-const ANSI_PATTERN = new RegExp(String.raw`\u001b\[[0-9;]*m`, "g");
+const ANSI_PATTERN = /\u001b\[[0-9;]*m/g;
 
 function warmupEntry(data: GoalCacheWarmupEntryData): CustomEntry<GoalCacheWarmupEntryData> {
 	return {

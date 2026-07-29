@@ -30,8 +30,7 @@ export const renderGoalCacheWarmupEntry: EntryRenderer<GoalCacheWarmupEntryData>
 };
 
 function titleLine(data: GoalCacheWarmupEntryData): string {
-	const monitors =
-		data.activeMonitorCount === 1 ? "1 monitor on duty" : `${data.activeMonitorCount} monitors on duty`;
+	const monitors = data.activeMonitorCount === 1 ? "1 monitor on duty" : `${data.activeMonitorCount} monitors on duty`;
 	switch (data.phase) {
 		case "scheduled":
 			return `⚡ Cache-warm wait · ${monitors}`;
