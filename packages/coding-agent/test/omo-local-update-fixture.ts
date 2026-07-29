@@ -209,7 +209,7 @@ export function dirtyUntracked(repoRoot: string): string {
 	return relativePath;
 }
 
-export type OmoAdvanceTouch = "omo-senpi" | "senpi-task" | "other";
+export type OmoAdvanceTouch = "omo-senpi" | "senpi-task" | "other" | "docs";
 
 /**
  * Advance origin/dev by committing in a second temporary clone of the bare
@@ -233,6 +233,8 @@ export function advanceOriginDev(options: { originDir: string; touch: OmoAdvance
 			writeSeedFile(workDir, BUILD_MARKER, `marker-${n}\n`);
 		} else if (touch === "senpi-task") {
 			appendFileSync(join(workDir, SENPI_TASK_INDEX_TS), `// senpi-task change ${n}\n`);
+		} else if (touch === "docs") {
+			writeSeedFile(workDir, join("docs", `notes-${n}.md`), `docs note ${n}\n`);
 		} else {
 			writeSeedFile(workDir, `origin-dev-${n}.txt`, `origin dev commit ${n}\n`);
 		}

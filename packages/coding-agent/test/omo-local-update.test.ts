@@ -358,6 +358,7 @@ describe("readStamp/writeStamp", () => {
 		sha: "0123456789abcdef",
 		omoSenpiTree: "tree-omo",
 		senpiTaskTree: "tree-task",
+		buildInputsHash: "inputs-hash",
 		installedAt: "2026-07-25T00:00:00.000Z",
 		artifacts: ["extensions/omo.js", "scripts/install.mjs"],
 	};
@@ -395,6 +396,9 @@ describe("readStamp/writeStamp", () => {
 			JSON.stringify({ repoRoot: "/some/repo", builtSha: "abc", builtAt: "now", artifacts: [] }),
 		);
 		expect(readStamp(agentDir)).toBeUndefined();
+		// A pre-fingerprint v2 stamp (no buildInputsHash) is also invalid -> one rebuild on upgrade.
+		writeFileSync(omoLocalUpdateStampPath(agentDir), JSON.stringify({ ...stamp, buildInputsHash: undefined }));
+		expect(readStamp(agentDir)).toBeUndefined();
 	});
 });
 
@@ -404,6 +408,7 @@ describe("shouldSkipUpdate", () => {
 		sha: "abc123",
 		omoSenpiTree: "tree-omo",
 		senpiTaskTree: "tree-task",
+		buildInputsHash: "inputs-a",
 		installedAt: "2026-07-25T00:00:00.000Z",
 		artifacts: ["extensions/omo.js"],
 	};
@@ -411,6 +416,7 @@ describe("shouldSkipUpdate", () => {
 		stamp,
 		repoRoot: "/repo",
 		remoteSha: "abc123",
+		remoteBuildInputsHash: "inputs-a",
 		stampArtifactsExist: true,
 		force: false,
 	};
@@ -423,8 +429,16 @@ describe("shouldSkipUpdate", () => {
 		expect(shouldSkipUpdate({ ...base, force: true })).toBe(false);
 	});
 
-	it("updates when the remote sha moved", () => {
-		expect(shouldSkipUpdate({ ...base, remoteSha: "def456" })).toBe(false);
+	it("updates when the remote sha and the build inputs both moved", () => {
+		expect(shouldSkipUpdate({ ...base, remoteSha: "def456", remoteBuildInputsHash: "inputs-b" })).toBe(false);
+	});
+
+	it("skips when the remote sha moved but the build inputs match", () => {
+		expect(shouldSkipUpdate({ ...base, remoteSha: "def456" })).toBe(true);
+	});
+
+	it("skips at an unchanged sha even when the stored fingerprint differs", () => {
+		expect(shouldSkipUpdate({ ...base, remoteBuildInputsHash: "inputs-b" })).toBe(true);
 	});
 
 	it("updates when any inventoried artifact is missing", () => {
