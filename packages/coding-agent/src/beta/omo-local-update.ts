@@ -17,24 +17,19 @@
 // CLI-side helper imports, no logic duplication.
 
 import { randomUUID } from "node:crypto";
-import {
-	cpSync,
-	type Dirent,
-	existsSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	renameSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import chalk from "chalk";
 import type { PackageSource } from "../core/settings-manager.ts";
 import { spawnProcess, waitForChildProcess } from "../utils/child-process.ts";
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { killProcessTree } from "../utils/shell.ts";
+import {
+	collectArtifactInventory,
+	currentRequiredBuildArtifactsExist,
+	findMissingBuildArtifacts,
+} from "./omo-local-update-artifacts.ts";
 import { computeBuildInputsHashFromLsTree } from "./omo-local-update-fingerprint.ts";
 import { defaultSpawnWorker, type OmoLocalSpawnWorker } from "./omo-local-update-worker.ts";
 
@@ -494,90 +489,6 @@ function releaseOmoLocalLock(lock: OmoLocalLock): void {
 	}
 }
 
-/** Post-build completeness set: five files plus a non-empty skills glob. */
-const REQUIRED_BUILD_ARTIFACTS = [
-	"extensions/omo.js",
-	"runtime/lsp-daemon/dist/cli.js",
-	"runtime/lsp-daemon/dist/index.js",
-	"runtime/lsp-daemon/dist/.omo-runtime-manifest.json",
-	"scripts/install.mjs",
-] as const;
-
-function walkFiles(rootDir: string): string[] {
-	const files: string[] = [];
-	const pending = [rootDir];
-	while (pending.length > 0) {
-		const dir = pending.pop();
-		if (dir === undefined) {
-			continue;
-		}
-		let entries: Dirent[];
-		try {
-			entries = readdirSync(dir, { withFileTypes: true });
-		} catch {
-			continue;
-		}
-		for (const entry of entries) {
-			const full = join(dir, entry.name);
-			if (entry.isDirectory()) {
-				pending.push(full);
-			} else if (entry.isFile()) {
-				files.push(full);
-			}
-		}
-	}
-	return files;
-}
-
-/**
- * Post-install inventory for the stamp: every file under plugin/extensions/ and
- * plugin/runtime/lsp-daemon/dist/, every SKILL.md under plugin/skills/, plus
- * plugin/scripts/install.mjs - paths relative to the plugin dir, posix-separated, sorted.
- */
-function collectArtifactInventory(pluginPath: string): string[] {
-	const inventory: string[] = [];
-	const collectUnder = (relativeDir: string, filter?: (posixPath: string) => boolean): void => {
-		for (const filePath of walkFiles(join(pluginPath, relativeDir))) {
-			const posixPath = relative(pluginPath, filePath).split(sep).join("/");
-			if (filter === undefined || filter(posixPath)) {
-				inventory.push(posixPath);
-			}
-		}
-	};
-	collectUnder("extensions");
-	collectUnder(join("runtime", "lsp-daemon", "dist"));
-	collectUnder("skills", (posixPath) => posixPath.endsWith("/SKILL.md"));
-	if (existsSync(join(pluginPath, "scripts", "install.mjs"))) {
-		inventory.push("scripts/install.mjs");
-	}
-	inventory.sort();
-	return inventory;
-}
-
-/** Post-build completeness check: the five required files + >=1 skills/<name>/SKILL.md. */
-function findMissingBuildArtifacts(pluginPath: string): string[] {
-	const missing: string[] = [];
-	for (const required of REQUIRED_BUILD_ARTIFACTS) {
-		if (!existsSync(join(pluginPath, required))) {
-			missing.push(required);
-		}
-	}
-	let skillCount = 0;
-	try {
-		for (const entry of readdirSync(join(pluginPath, "skills"), { withFileTypes: true })) {
-			if (entry.isDirectory() && existsSync(join(pluginPath, "skills", entry.name, "SKILL.md"))) {
-				skillCount++;
-			}
-		}
-	} catch {
-		// A missing skills dir counts as zero skills.
-	}
-	if (skillCount === 0) {
-		missing.push("skills/*/SKILL.md");
-	}
-	return missing;
-}
-
 /** Marker error: the bun binary is missing from PATH (spawn ENOENT). */
 class OmoLocalBunMissingError extends Error {
 	constructor() {
@@ -840,7 +751,8 @@ export async function runOmoLocalUpdateBeta(options: RunOmoLocalUpdateBetaOption
 			// Skip decision FIRST: a skip touches NOTHING (no worktree ops, no install, no writes).
 			const stamp = readStamp(options.agentDir);
 			const stampArtifactsExist =
-				stamp?.artifacts.every((artifact) => existsSync(join(pluginPath, artifact))) ?? false;
+				(stamp?.artifacts.every((artifact) => existsSync(join(pluginPath, artifact))) ?? false) &&
+				currentRequiredBuildArtifactsExist(pluginPath);
 			if (
 				shouldSkipUpdate({
 					stamp,
