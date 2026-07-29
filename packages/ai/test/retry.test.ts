@@ -241,6 +241,17 @@ describe("provider retry classification", () => {
 		).toBe(false);
 	});
 
+	it("keeps anthropic credits_required errors non-retryable", () => {
+		// Verbatim 429 from a real session (2026-07-29, anthropic claude-fable-5):
+		// a billing-dead account must not burn same-model retries before the
+		// fallback chain takes over.
+		const creditsRequired =
+			'429 event: error\ndata: {"type":"error","error":{"type":"rate_limit_error","message":"Usage credits are required for this model.","details":{"error_code":"credits_required","model":"claude-fable-5"}},"request_id":"req_011CdW2nFxprAx6KQ9JhnAvq"}';
+		expect(
+			isRetryableAssistantError(fauxAssistantMessage("", { stopReason: "error", errorMessage: creditsRequired })),
+		).toBe(false);
+	});
+
 	it("classifies assistant error messages", () => {
 		expect(
 			isRetryableAssistantError(fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" })),
