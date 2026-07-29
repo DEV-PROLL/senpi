@@ -55,6 +55,39 @@
 - LOW: one settings getter + one field in `ProviderRetrySettings`; one error message in
   `composeModelProvider`; one option in the `Agent` construction in `core/sdk.ts`.
 
+## Provider idle retries preserve user input and use a bounded retry budget (2026-07-29)
+
+### What changed
+
+- `core/agent-session.ts`: retries triggered by the shared anchored provider-timeout classifier defer queued steering
+  and follow-up input from the retry's first provider request. This covers the two agent-loop stream watchdog messages
+  and exact transport-level `Request timed out` variants without matching incidental command, MCP, or extension text.
+- `core/settings-manager.ts`: `retry.provider.streamRetryTimeoutMs` configures the first-request retry liveness cap
+  (default 30 seconds; `0` disables). The retry clamps only enabled idle/start guards, so it never re-enables an
+  explicitly disabled guard. Both timeout bounds return to their configured values for later provider requests.
+- The retry start bound is capped as well as the provider request option, while the configured idle timeout resumes
+  after the first event so healthy reasoning gaps are not limited to 30 seconds.
+- Consecutive transport timeouts reported with `stopReason: "aborted"` keep consuming the same retry counter. Only a
+  genuinely successful assistant response resets the budget or emits `auto_retry_end { success: true }`.
+- Retry continuations use the session-work barrier and revalidate atomically with the scheduled-continuation path.
+  Accepted recompaction stays queue-first while retaining timeout options; reconstructed failed assistant tails are
+  retired before continuation. A concurrent low-level `Agent.prompt()` is treated as a benign takeover, and session
+  settlement is never emitted while Agent core is still streaming.
+- Coverage: `test/suite/regressions/provider-idle-recovery.test.ts` pins exact request text/order, configurable timeout
+  sequences, disabled guards, negative classifier shapes, and a real no-first-event stream expiry at the cap;
+  `test/settings-manager.test.ts` pins setting defaults and `0` semantics.
+
+### Why
+
+- A silent provider stream previously consumed user steering into another full-length retry. Repeated 300-second
+  retries made the session look stuck and could leave the user's `continue` adjacent to an error instead of a real
+  answer.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `core/agent-session.ts` retry-controller continuation options and scheduled-continuation admission.
+- LOW: `core/settings-manager.ts` provider retry settings and timeout getters.
+
 ## Absent fallback chains no longer produce a startup warning (2026-07-28)
 
 ### What changed
