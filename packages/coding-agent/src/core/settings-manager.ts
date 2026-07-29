@@ -90,6 +90,7 @@ export interface OpenAISettings {
 
 export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
+	offRecommendedModel?: boolean; // default: false
 }
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
@@ -155,6 +156,7 @@ export interface Settings {
 	promptCache?: PromptCacheSettings;
 	images?: ImageSettings;
 	lookAt?: LookAtSettings;
+	recommendedModels?: string[]; // Preferred default model ids, in priority order
 	favoriteModels?: string[]; // Model patterns for Ctrl+P cycling (same format as --models CLI flag)
 	enabledModels?: string[]; // Legacy global model narrowing patterns (same format as --models CLI flag)
 	doubleEscapeAction?: "fork" | "tree" | "none"; // Action for double-escape with empty editor (default: "tree")
@@ -1477,6 +1479,10 @@ export class SettingsManager {
 
 	getEnabledModels(): string[] | undefined {
 		return this.settings.enabledModels;
+	}
+
+	getRecommendedModels(): string[] | undefined {
+		return this.settings.recommendedModels ? [...this.settings.recommendedModels] : undefined;
 	}
 
 	getFavoriteModels(): string[] | undefined {
