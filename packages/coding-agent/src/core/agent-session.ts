@@ -4790,6 +4790,7 @@ export class AgentSession {
 				},
 				hasPendingMessages: () => this.pendingMessageCount > 0,
 				isCompacting: () => this.isCompacting,
+				checkReloadVeto: () => this.checkReloadVeto(),
 				shutdown: () => {
 					this._extensionShutdownHandler?.();
 				},

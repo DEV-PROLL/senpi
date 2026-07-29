@@ -206,6 +206,14 @@ function silentLogger(): ConfigReloadLogger {
 	} as unknown as ConfigReloadLogger;
 }
 
+type VetoState = { active: boolean; readonly reason: string };
+
+function vetoExtensionFactory(state: VetoState): (pi: ExtensionAPI) => void {
+	return (pi) => {
+		pi.on("session_before_reload", () => (state.active ? { cancel: true, reason: state.reason } : undefined));
+	};
+}
+
 const harnesses: Harness[] = [];
 const agentDirs: string[] = [];
 
@@ -969,6 +977,73 @@ describe("config reload builtin extension", () => {
 
 		await fixture.harness.getExtensionRunner().emit({ type: "agent_settled" });
 		expect(fixture.reload).toHaveBeenCalledTimes(2);
+	});
+
+	it("defers a vetoed hot-reload silently instead of renotifying every idle edge", async () => {
+		vi.useFakeTimers();
+		const veto: VetoState = { active: true, reason: "5 subagent(s) still running: pr449, pr450" };
+		const fixture = await createFixture({ extraFactories: [vetoExtensionFactory(veto)] });
+
+		writeJson(fixture.settingsPath, { theme: "light" });
+		await settleChange(fixture, fixture.agentDir, "settings.json");
+		await fixture.harness.getExtensionRunner().emit({ type: "agent_settled" });
+		await fixture.harness.getExtensionRunner().emit({ type: "agent_settled" });
+
+		expect(fixture.reload).not.toHaveBeenCalled();
+		expect(fixture.notifications.filter((message) => message.startsWith("Hot-reloading:"))).toEqual([]);
+		const deferred = fixture.notifications.filter((message) => message.startsWith("Hot-reload deferred:"));
+		expect(deferred).toHaveLength(1);
+		expect(deferred[0]).toContain(veto.reason);
+	});
+
+	it("applies a deferred reload on the next idle edge once the veto clears", async () => {
+		vi.useFakeTimers();
+		const veto: VetoState = { active: true, reason: "1 subagent(s) still running: worker" };
+		const fixture = await createFixture({ extraFactories: [vetoExtensionFactory(veto)] });
+
+		writeJson(fixture.settingsPath, { theme: "light" });
+		await settleChange(fixture, fixture.agentDir, "settings.json");
+		expect(fixture.reload).not.toHaveBeenCalled();
+
+		veto.active = false;
+		await fixture.harness.getExtensionRunner().emit({ type: "agent_settled" });
+
+		expect(fixture.reload).toHaveBeenCalledTimes(1);
+		expect(fixture.notifications.filter((message) => message.startsWith("Hot-reloading:"))).toHaveLength(1);
+	});
+
+	it("retries a vetoed reload on the recheck clock without further agent activity", async () => {
+		vi.useFakeTimers();
+		const veto: VetoState = { active: true, reason: "2 subagent(s) still running: a, b" };
+		const fixture = await createFixture({ extraFactories: [vetoExtensionFactory(veto)] });
+
+		writeJson(fixture.settingsPath, { theme: "light" });
+		await settleChange(fixture, fixture.agentDir, "settings.json");
+		expect(fixture.reload).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(fixture.reload).not.toHaveBeenCalled();
+
+		veto.active = false;
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(fixture.reload).toHaveBeenCalledTimes(1);
+		expect(fixture.notifications.filter((message) => message.startsWith("Hot-reload deferred:"))).toHaveLength(1);
+		expect(fixture.notifications.filter((message) => message.startsWith("Hot-reloading:"))).toHaveLength(1);
+	});
+
+	it("drops the veto recheck when the session shuts down", async () => {
+		vi.useFakeTimers();
+		const veto: VetoState = { active: true, reason: "1 subagent(s) still running: worker" };
+		const fixture = await createFixture({ extraFactories: [vetoExtensionFactory(veto)] });
+
+		writeJson(fixture.settingsPath, { theme: "light" });
+		await settleChange(fixture, fixture.agentDir, "settings.json");
+		expect(fixture.reload).not.toHaveBeenCalled();
+
+		await fixture.harness.getExtensionRunner().emit({ type: "session_shutdown", reason: "quit" });
+		veto.active = false;
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(fixture.reload).not.toHaveBeenCalled();
 	});
 
 	it("starts late registrations immediately and replaces duplicate ids", async () => {
