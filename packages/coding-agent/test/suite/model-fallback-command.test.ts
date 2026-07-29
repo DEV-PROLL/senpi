@@ -20,6 +20,9 @@ const dirs: string[] = [];
 let previousAgentDir: string | undefined;
 const primary = model("anthropic", "claude-fable-5", true);
 const fallback = model("ccapi", "kimi-k3", true);
+const kimiK3 = model("apitopia", "kimi-k3-unlocked", true);
+const opus5 = model("anthropic", "claude-opus-5", true);
+const opus48 = model("anthropic", "claude-opus-4-8", true);
 
 type Command = {
 	description?: string;
@@ -35,7 +38,7 @@ function model(provider: string, id: string, reasoning: boolean): Model<Api> {
 		api: "faux",
 		baseUrl: "https://models.example.test/v1",
 		reasoning,
-		thinkingLevelMap: { max: "max" },
+		thinkingLevelMap: { xhigh: "xhigh", max: "max" },
 		input: ["text"],
 		contextWindow: 1,
 		maxTokens: 1,
@@ -88,18 +91,23 @@ function createUi(notices: string[], choices: string[]): ExtensionUIContext {
 	};
 }
 
-function createModelRegistry(): ModelRegistry {
+function createModelRegistry(registeredModels: Model<Api>[] = [primary, fallback]): ModelRegistry {
 	const modelRegistry = ModelRegistry.inMemory(AuthStorage.inMemory());
-	modelRegistry.getAll = () => [primary, fallback];
-	modelRegistry.getAvailable = () => [primary, fallback];
+	modelRegistry.getAll = () => registeredModels;
+	modelRegistry.getAvailable = () => registeredModels;
 	modelRegistry.find = (provider: string, id: string) =>
-		[primary, fallback].find((registeredModel) => registeredModel.provider === provider && registeredModel.id === id);
+		registeredModels.find((registeredModel) => registeredModel.provider === provider && registeredModel.id === id);
 	return modelRegistry;
 }
 
-async function context(dir: string, notices: string[], choices: string[] = []): Promise<ExtensionCommandContext> {
+async function context(
+	dir: string,
+	notices: string[],
+	choices: string[] = [],
+	registeredModels?: Model<Api>[],
+): Promise<ExtensionCommandContext> {
 	const settings = SettingsManager.create(dir);
-	const modelRegistry = createModelRegistry();
+	const modelRegistry = createModelRegistry(registeredModels);
 	return {
 		ui: createUi(notices, choices),
 		mode: choices.length > 0 ? "tui" : "print",
@@ -192,7 +200,7 @@ describe("model fallback builtin command", () => {
 		dirs.push(dir);
 		const notices: string[] = [];
 		await (await harness()).get("fallback")?.handler("bogus/model nope", await context(dir, notices));
-		expect(SettingsManager.create(dir).getRetryFallbackSettings().chains).toEqual({});
+		expect(SettingsManager.create(dir).getGlobalSettings().retry).toBeUndefined();
 		expect(notices.join("\n")).toContain("not a valid or known model selector");
 	});
 
@@ -200,6 +208,34 @@ describe("model fallback builtin command", () => {
 		expect(isModelFallbackDisabled(true, {})).toBe(true);
 		expect(isModelFallbackDisabled(false, { SENPI_NO_FALLBACK: "1" })).toBe(true);
 		expect(isModelFallbackDisabled(false, {})).toBe(false);
+	});
+
+	it.each([
+		{
+			name: "all default models are available",
+			models: [primary, kimiK3, opus5, opus48],
+			expected:
+				"anthropic/claude-fable-5 -> apitopia/kimi-k3-unlocked:max, anthropic/claude-opus-5:xhigh, anthropic/claude-opus-4-8:xhigh",
+		},
+		{
+			name: "Kimi K3 is unavailable",
+			models: [primary, opus5, opus48],
+			expected: "anthropic/claude-fable-5 -> anthropic/claude-opus-5:xhigh, anthropic/claude-opus-4-8:xhigh",
+		},
+		{
+			name: "Fable 5 is unavailable",
+			models: [opus5, opus48],
+			expected: "No fallback chains configured.",
+		},
+	])("shows the availability-filtered default chain when $name", async ({ models, expected }) => {
+		const dir = await mkdtemp(join(tmpdir(), "senpi-fallback-command-"));
+		dirs.push(dir);
+		const notices: string[] = [];
+		const choices = ["Show chains & live state"];
+
+		await (await harness()).get("fallback")?.handler("", await context(dir, notices, choices, models));
+
+		expect(notices.join("\n")).toContain(expected);
 	});
 
 	it("handles a headless menu invocation cleanly", async () => {
