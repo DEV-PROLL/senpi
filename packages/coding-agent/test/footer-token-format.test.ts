@@ -80,7 +80,7 @@ describe("formatTokens abbreviation", () => {
 });
 
 describe("FooterComponent token formatting", () => {
-	it("renders oh-my-pi-style abbreviated token counters and context window usage", async () => {
+	it("omits input and output token counters while retaining context details", async () => {
 		// given
 		const { FooterComponent } = await import("../src/modes/interactive/components/footer.ts");
 		const Footer = FooterComponent as new (
@@ -93,8 +93,8 @@ describe("FooterComponent token formatting", () => {
 		const rendered = stripAnsi(footer.render(160).join("\n"));
 
 		// then
-		expect(rendered).toContain("↑49");
-		expect(rendered).toContain("↓6.8K");
+		expect(rendered).not.toMatch(/↑\d/);
+		expect(rendered).not.toMatch(/↓\d/);
 		// Cache read/write totals were removed from the footer; only the hit rate stays.
 		expect(rendered).not.toContain("cache 1.5M/44K");
 		expect(rendered).not.toContain("cache ");

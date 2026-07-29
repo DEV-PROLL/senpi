@@ -1,3 +1,60 @@
+## Availability-aware default Fable fallback chain (2026-07-29)
+
+### What changed
+
+- `core/retry-fallback/settings.ts` now owns retry setting types and normalization, including the shipped default
+  `anthropic/claude-fable-5` chain:
+  `apitopia/kimi-k3-unlocked:max` -> `anthropic/claude-opus-5:xhigh` ->
+  `anthropic/claude-opus-4-8:xhigh`.
+- The default applies only when `retry.fallbackChains` is absent or malformed. Explicit chain maps, including
+  an explicitly empty map, remain authoritative.
+- `core/retry-fallback/chains.ts` and the model-fallback builtin omit unavailable models and remove chains with
+  no usable candidates, so runtime selection and `/fallback` display agree.
+- Existing defaults remain enabled: model fallback on, server-side fallback abort on, and cooldown-expiry revert.
+- Coverage: `test/settings-manager-retry-fallback.test.ts`,
+  `test/suite/model-fallback-command.test.ts`, and `test/suite/model-fallback-host-wiring.test.ts`.
+
+### Why
+
+- A fresh Senpi install previously aborted provider-side fallback by default but had no client chain, producing a
+  dead-end warning. Shipping the preferred chain makes that default policy actionable while keeping optional model
+  providers safe: missing models are skipped rather than warned about or selected.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: retry settings imports and delegation in `core/settings-manager.ts`; the new retry settings module has no
+  upstream counterpart.
+- LOW: canonical chain construction in `core/retry-fallback/chains.ts`.
+- LOW: registry-aware loading in `core/extensions/builtin/model-fallback/`.
+
+## Stream-start timeout wiring and unregistered-api error context (2026-07-29)
+
+### What changed
+
+- `core/settings-manager.ts`: new `retry.provider.streamStartTimeoutMs` setting and
+  `getAgentStreamStartTimeoutMs()` (default 90000ms; 0 disables; the default is clamped to a
+  shorter idle timeout and disabled together with a disabled idle guard). `core/sdk.ts` and the
+  interactive settings handler wire it into `Agent.streamStartTimeoutMs`.
+- `core/provider-composer.ts`: the stream-time `No API provider registered for api: <api>` error
+  now names the model (`provider/id`) and points at the models.json provider entry or the missing
+  provider extension.
+- Coverage: `test/settings-manager.test.ts` (retry describe), `test/provider-composer-unknown-api.test.ts`,
+  `packages/ai/test/retry.test.ts` (stream timeout wordings stay retryable).
+
+### Why
+
+- Incident (donated session log): a dead upstream accepted requests but never sent a first byte.
+  With only the 300s idle bound, each turn attempt froze the session for 5 minutes with `usage: 0`
+  and nothing persisted; retries repeated the same 300s wait, making the session practically
+  unrecoverable while new sessions worked. A 90s first-event bound with the retryable wording lets
+  the retry/fallback ladder engage quickly. Related incident error `No API provider registered for
+  api: kiro-api` carried no context about which model or config produced it.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one settings getter + one field in `ProviderRetrySettings`; one error message in
+  `composeModelProvider`; one option in the `Agent` construction in `core/sdk.ts`.
+
 ## Absent fallback chains no longer produce a startup warning (2026-07-28)
 
 ### What changed
@@ -208,7 +265,8 @@
 - A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
 - The user's checkout receives ZERO git mutations: the hook performs one read-only `git fetch origin dev`, builds in a feature-owned persistent worktree under the agent directory, and atomically swaps the installed plugin directory by rename. No checkout/branch/commit/merge/reset/clean/stash/push ever touches the user's tree.
 - `SENPI_OMO_LOCAL_UPDATE=0` is a kill-switch that disables the hook entirely. All failures are non-fatal: the hook never throws and never sets `process.exitCode`; any error downgrades to a warning plus a manual-update hint so the `senpi` self-update proceeds untouched.
-- Removal is exactly three steps: delete `src/beta/omo-local-update.ts`; delete all `test/omo-local-update*` files; delete the two BETA-marked touch points (the import and the hook call) in `package-manager-cli.ts`.
+- Fast path (2026-07-29): the skip decision now compares a build-input fingerprint of `origin/dev` (`src/beta/omo-local-update-fingerprint.ts`: sha256 over root tree entries minus documentation/agent-config paths) instead of the bare commit sha, so docs/CI-only churn in the omo monorepo no longer triggers the ~30s rebuild. When a rebuild IS needed, the bare-update foreground now only fetches and compares (~1s) and hands the build to a detached worker (`src/beta/omo-local-update-worker.ts`, hidden `senpi update --omo-local-update-worker` flag, output to `<agentDir>/omo-local-update/worker.log`); the worker serializes through the existing pid lock and swaps/stamps exactly like the former inline path. `SENPI_OMO_LOCAL_UPDATE_SYNC=1` restores the old blocking foreground behavior.
+- Removal is exactly three steps: delete all `src/beta/omo-local-update*.ts` files; delete all `test/omo-local-update*` files; delete the BETA-marked touch points (the import, the hook calls, and the `--omo-local-update-worker` flag) in `package-manager-cli.ts`.
 
 ## App-server daemon launch diagnostics and hermetic lifecycle coverage (2026-07-24)
 

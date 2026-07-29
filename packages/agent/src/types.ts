@@ -147,6 +147,16 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
 
 	/**
+	 * Maximum time in milliseconds to wait for the FIRST provider stream event.
+	 * Providers emit their first event only once the HTTP response begins, so a
+	 * dead upstream that accepts the request but never answers is otherwise only
+	 * bounded by `timeoutMs` (the idle timeout, default 5 minutes). After the
+	 * first event arrives, `timeoutMs` governs inter-event idleness as before.
+	 * Unset or non-positive values disable the start bound.
+	 */
+	streamStartTimeoutMs?: number;
+
+	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
 	 *
 	 * Each AgentMessage must be converted to a UserMessage, AssistantMessage, or ToolResultMessage

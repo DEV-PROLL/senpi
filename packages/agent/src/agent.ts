@@ -117,6 +117,7 @@ export interface AgentOptions {
 	thinkingBudgets?: ThinkingBudgets;
 	transport?: Transport;
 	timeoutMs?: number;
+	streamStartTimeoutMs?: number;
 	maxRetryDelayMs?: number;
 	toolExecution?: ToolExecutionMode;
 	removedToolHints?: Record<string, string>;
@@ -217,6 +218,8 @@ export class Agent {
 	/** Preferred transport forwarded to the stream function. */
 	public transport: Transport;
 	public timeoutMs?: number;
+	/** Optional bound on the wait for the first provider stream event. */
+	public streamStartTimeoutMs?: number;
 	/** Optional cap for provider-requested retry delays. */
 	public maxRetryDelayMs?: number;
 	/** Tool execution strategy for assistant messages that contain multiple tool calls. */
@@ -246,6 +249,7 @@ export class Agent {
 		this.thinkingBudgets = runtimeOptions.thinkingBudgets;
 		this.transport = runtimeOptions.transport ?? "auto";
 		this.timeoutMs = runtimeOptions.timeoutMs;
+		this.streamStartTimeoutMs = runtimeOptions.streamStartTimeoutMs;
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
 		this.removedToolHints = runtimeOptions.removedToolHints ?? {};
@@ -502,6 +506,7 @@ export class Agent {
 			transport: this.transport,
 			thinkingBudgets: this.thinkingBudgets,
 			timeoutMs: this.timeoutMs,
+			streamStartTimeoutMs: this.streamStartTimeoutMs,
 			maxRetryDelayMs: this.maxRetryDelayMs,
 			abortServerSideFallback: this.abortServerSideFallback,
 			toolExecution: this.toolExecution,

@@ -93,7 +93,9 @@ export function canonicalizeFallbackChains(chains: FallbackChains, lookup: Fallb
 			const parsedEntry = parseFallbackSelector(entry, lookup);
 			return parsedEntry ? [formatParsedSelector(parsedEntry)] : [];
 		});
-		canonical[formatParsedSelector(parsedKey)] = canonicalEntries;
+		if (canonicalEntries.length > 0) {
+			canonical[formatParsedSelector(parsedKey)] = canonicalEntries;
+		}
 	}
 
 	return canonical;
