@@ -20,6 +20,8 @@ export type Goal = {
 	tokenBudget?: number;
 	tokensUsed: number;
 	timeUsedSeconds: number;
+	consecutiveContinuations?: number;
+	lastContinuationSignature?: string;
 	createdAt: number;
 	updatedAt: number;
 	lastStartedAt?: number;
