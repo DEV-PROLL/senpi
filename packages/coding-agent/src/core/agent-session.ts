@@ -1654,7 +1654,8 @@ export class AgentSession {
 			const aborted =
 				abortSource !== undefined || this._findLastAssistantInMessages(event.messages)?.stopReason === "aborted";
 			try {
-				await this._extensionRunner.emitAgentEnd({
+				await this._extensionRunner.emit({
+					type: "agent_end",
 					messages: event.messages,
 					willRetry: agentEndWillRetry,
 					...(aborted ? { aborted: true } : {}),

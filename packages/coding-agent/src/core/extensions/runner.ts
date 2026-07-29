@@ -16,7 +16,6 @@ import { SettingsManager } from "../settings-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import { drainPendingProviderRegistrations } from "./loader.ts";
 import type {
-	AgentEndEvent,
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
 	BeforeProviderHeadersEvent,
@@ -1126,10 +1125,6 @@ export class ExtensionRunner {
 			event.type === "session_before_compact" ||
 			event.type === "session_before_tree"
 		);
-	}
-
-	async emitAgentEnd(event: Omit<AgentEndEvent, "type">): Promise<void> {
-		await this.emit({ type: "agent_end", ...event });
 	}
 
 	async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>> {
