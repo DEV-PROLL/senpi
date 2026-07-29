@@ -12,6 +12,22 @@ Copyright (c) 2025 Mario Zechner
 Copyright (c) 2025-2026 Can Bölük
 ```
 
+## TTSR stream-rule extension
+
+The TTSR (time-traveling stream rules) extension in
+`packages/coding-agent/src/core/extensions/builtin/ttsr/` is ported and
+adapted from oh-my-pi's `packages/coding-agent/src/export/ttsr.ts`,
+`src/session/ttsr-coordinator.ts`, `src/capability/rule.ts`, and
+`src/prompts/system/ttsr-interrupt.md`, which are MIT-licensed:
+
+[`oh-my-pi`](https://github.com/can1357/oh-my-pi)
+
+```
+MIT License
+Copyright (c) 2025 Mario Zechner
+Copyright (c) 2025-2026 Can Bölük
+```
+
 ## Todo tool
 
 The phased `todo` tool and `/todo` command in
