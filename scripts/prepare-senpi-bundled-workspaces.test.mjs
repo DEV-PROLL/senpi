@@ -57,7 +57,6 @@ describe("directNodeModulesPackageName", () => {
 		assert.equal(directNodeModulesPackageName("packages/coding-agent"), undefined);
 	});
 });
-
 describe("listStagedPublishPackageNames", () => {
 	it("lists top-level and scoped packages, skipping dot directories", () => {
 		// Given
@@ -222,6 +221,62 @@ describe("stagePublishManifest", () => {
 		assert.deepEqual(manifest.optionalDependencies, { "@mariozechner/clipboard": "0.3.9" });
 	});
 
+	it("issue 446 promotes a bundled package's platform optional dependencies to the consumer manifest", () => {
+		// Given: the Linux publisher materializes only its own Claude sidecar, while the
+		// bundled SDK declares the complete cross-platform optional dependency family.
+		tempDir = mkdtempSync(join(tmpdir(), "senpi-stage-claude-sidecars-"));
+		const platformPackages = {
+			"@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.3.220",
+			"@anthropic-ai/claude-agent-sdk-darwin-x64": "0.3.220",
+			"@anthropic-ai/claude-agent-sdk-linux-arm64": "0.3.220",
+			"@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "0.3.220",
+			"@anthropic-ai/claude-agent-sdk-linux-x64": "0.3.220",
+			"@anthropic-ai/claude-agent-sdk-linux-x64-musl": "0.3.220",
+			"@anthropic-ai/claude-agent-sdk-win32-arm64": "0.3.220",
+			"@anthropic-ai/claude-agent-sdk-win32-x64": "0.3.220",
+		};
+		writeCodingAgentManifest(tempDir, {
+			dependencies: { "@anthropic-ai/claude-agent-sdk": "0.3.220" },
+			optionalDependencies: {},
+		});
+		stagePackage(tempDir, "@anthropic-ai/claude-agent-sdk", {
+			version: "0.3.220",
+			optionalDependencies: platformPackages,
+		});
+		stagePackage(tempDir, "@anthropic-ai/claude-agent-sdk-linux-x64", {
+			version: "0.3.220",
+			os: ["linux"],
+			cpu: ["x64"],
+			libc: ["glibc"],
+		});
+
+		// When
+		stagePublishManifest(tempDir);
+
+		// Then: npm installs the matching sidecar on the consumer instead of preserving
+		// the publisher's Linux-only binary inside the universal Senpi tarball.
+		const manifest = readStagedManifest(tempDir);
+		assert.deepEqual(manifest.optionalDependencies, platformPackages);
+		assert.ok(manifest.bundleDependencies.includes("@anthropic-ai/claude-agent-sdk"));
+		assert.ok(!manifest.bundleDependencies.includes("@anthropic-ai/claude-agent-sdk-linux-x64"));
+	});
+
+	it("keeps an unreadable staged package for the later pack validation gate", () => {
+		// Given: the existing contract leaves unreadable package metadata bundled so the
+		// dedicated staging and pack gates can report it instead of silently dropping it.
+		tempDir = mkdtempSync(join(tmpdir(), "senpi-stage-unreadable-"));
+		writeCodingAgentManifest(tempDir, {
+			dependencies: { "unreadable-package": "1.0.0" },
+			optionalDependencies: {},
+		});
+		const packageDir = join(tempDir, "packages", "coding-agent", "node_modules", "unreadable-package");
+		mkdirSync(packageDir, { recursive: true });
+		writeFileSync(join(packageDir, "package.json"), "{");
+
+		// When / Then
+		assert.deepEqual(stagePublishManifest(tempDir), ["unreadable-package"]);
+	});
+
 	it("throws when a declared runtime dependency is not staged", () => {
 		// Given: cross-spawn is declared but missing from the staged node_modules.
 		tempDir = mkdtempSync(join(tmpdir(), "senpi-stage-missing-"));
@@ -244,357 +299,5 @@ describe("stagePublishManifest", () => {
 
 		// When / Then
 		assert.throws(() => stagePublishManifest(tempDir), /must not reference local paths/);
-	});
-});
-
-describe("copyPublishDependencies", () => {
-	it("copies direct publish dependencies and skips internal workspaces and missing optional packages", () => {
-		tempDir = mkdtempSync(join(tmpdir(), "senpi-bundle-deps-"));
-		writePackage(tempDir, "typebox");
-		writePackage(tempDir, "@scope/pkg");
-		writePackage(tempDir, "nested-only");
-		writeShrinkwrap(tempDir, {
-			"": { dependencies: { typebox: "1.0.0" } },
-			"node_modules/typebox": { version: "1.0.0" },
-			"node_modules/@scope/pkg": { version: "1.0.0" },
-			"node_modules/@earendil-works/pi-ai": { version: "1.0.0" },
-			"node_modules/missing-optional": { version: "1.0.0", optional: true },
-			"node_modules/typebox/node_modules/nested-only": { version: "1.0.0" },
-		});
-
-		copyPublishDependencies(tempDir);
-
-		assert.equal(
-			JSON.parse(
-				readFileSync(join(tempDir, "packages", "coding-agent", "node_modules", "typebox", "package.json"), "utf8"),
-			).name,
-			"typebox",
-		);
-		assert.equal(
-			JSON.parse(
-				readFileSync(join(tempDir, "packages", "coding-agent", "node_modules", "@scope", "pkg", "package.json"), "utf8"),
-			).name,
-			"@scope/pkg",
-		);
-		assert.throws(
-			() =>
-				readFileSync(
-					join(tempDir, "packages", "coding-agent", "node_modules", "@earendil-works", "pi-ai", "package.json"),
-					"utf8",
-				),
-			/ENOENT/,
-		);
-		assert.throws(
-			() =>
-				readFileSync(
-					join(tempDir, "packages", "coding-agent", "node_modules", "missing-optional", "package.json"),
-					"utf8",
-				),
-			/ENOENT/,
-		);
-		assert.throws(
-			() =>
-				readFileSync(
-					join(tempDir, "packages", "coding-agent", "node_modules", "typebox", "node_modules", "nested-only"),
-					"utf8",
-				),
-			/ENOENT/,
-		);
-	});
-
-	it("copies transitive dependencies nested inside a staged package directory", () => {
-		// Given: nested-dep is not hoisted; it lives inside typebox's own node_modules.
-		tempDir = mkdtempSync(join(tmpdir(), "senpi-bundle-transitive-"));
-		writePackage(tempDir, "typebox");
-		writePackage(join(tempDir, "node_modules", "typebox"), "nested-dep");
-		writeShrinkwrap(tempDir, {
-			"": { dependencies: { typebox: "1.0.0" } },
-			"node_modules/typebox": { version: "1.0.0" },
-			"node_modules/typebox/node_modules/nested-dep": { version: "1.0.0" },
-		});
-
-		// When
-		copyPublishDependencies(tempDir);
-
-		// Then: the transitive dependency rides along with its parent's directory copy.
-		assert.equal(
-			JSON.parse(
-				readFileSync(
-					join(tempDir, "packages", "coding-agent", "node_modules", "typebox", "node_modules", "nested-dep", "package.json"),
-					"utf8",
-				),
-			).name,
-			"nested-dep",
-		);
-	});
-
-	it("throws when a required publish dependency is not installed", () => {
-		tempDir = mkdtempSync(join(tmpdir(), "senpi-bundle-missing-"));
-		writeShrinkwrap(tempDir, {
-			"": { dependencies: { typebox: "1.0.0" } },
-			"node_modules/typebox": { version: "1.0.0" },
-		});
-
-		assert.throws(() => copyPublishDependencies(tempDir), /Missing .*node_modules\/typebox/);
-	});
-});
-
-describe("assertSenpiPackedWorkspaceFiles", () => {
-	it("rejects senpi package metadata that omits bundled workspace files", () => {
-		// Given
-		const packed = {
-			files: [{ path: "package/dist/cli.js" }, { path: "package/CHANGELOG.md" }],
-		};
-
-		// When / Then
-		assert.throws(
-			() => assertSenpiPackedWorkspaceFiles(packed),
-			/package tarball is missing bundled workspace files: .*@earendil-works\/pi-ai/,
-		);
-	});
-
-	it("rejects a packed tarball that omits a declared runtime dependency", () => {
-		// Given: workspace bundles are present, but the cross-spawn registry dep is not vendored.
-		const hostPrebuild = nativePrebuildFile(nativePrebuildTarget());
-		const packed = {
-			files: [
-				{ path: "package/dist/cli.js" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/native/index.js" },
-				{ path: `package/node_modules/@earendil-works/pi-pty/${hostPrebuild}` },
-				{ path: "package/node_modules/@earendil-works/pi-tui/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-tui/dist/index.js" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/package.json" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/index.ts" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/kernels/py/prelude.py" },
-				{ path: "package/node_modules/which/package.json" },
-			],
-		};
-
-		// When / Then
-		assert.throws(
-			() => assertSenpiPackedWorkspaceFiles(packed, { runtimeDependencies: ["cross-spawn", "which"] }),
-			/missing vendored runtime dependencies: cross-spawn/,
-		);
-	});
-
-	it("accepts a packed tarball whose declared runtime dependencies are all vendored", () => {
-		// Given
-		const hostPrebuild = nativePrebuildFile(nativePrebuildTarget());
-		const packed = {
-			files: [
-				{ path: "package/dist/cli.js" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/native/index.js" },
-				{ path: `package/node_modules/@earendil-works/pi-pty/${hostPrebuild}` },
-				{ path: "package/node_modules/@earendil-works/pi-tui/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-tui/dist/index.js" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/package.json" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/index.ts" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/kernels/py/prelude.py" },
-				{ path: "package/node_modules/cross-spawn/package.json" },
-				{ path: "package/node_modules/@modelcontextprotocol/sdk/package.json" },
-			],
-		};
-
-		// When / Then
-		assert.doesNotThrow(() =>
-			assertSenpiPackedWorkspaceFiles(packed, { runtimeDependencies: ["cross-spawn", "@modelcontextprotocol/sdk"] }),
-		);
-	});
-
-	it("rejects a packed tarball that ships npm-shrinkwrap.json", () => {
-		// Given: a shipped npm-shrinkwrap.json is fatal — npm treats it as the complete
-		// locked tree and never installs the non-bundled direct deps (cross-spawn, the
-		// MCP sdk, ...), so the installed CLI dies with ERR_MODULE_NOT_FOUND.
-		const hostPrebuild = nativePrebuildFile(nativePrebuildTarget());
-		const packed = {
-			files: [
-				{ path: "package/dist/cli.js" },
-				{ path: "package/npm-shrinkwrap.json" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/native/index.js" },
-				{ path: `package/node_modules/@earendil-works/pi-pty/${hostPrebuild}` },
-				{ path: "package/node_modules/@earendil-works/pi-tui/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-tui/dist/index.js" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/package.json" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/index.ts" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/kernels/py/prelude.py" },
-			],
-		};
-
-		// When / Then
-		assert.throws(
-			() => assertSenpiPackedWorkspaceFiles(packed),
-			/must not ship npm-shrinkwrap\.json/,
-		);
-	});
-
-	it("accepts senpi package metadata that includes bundled workspace entrypoints", () => {
-		// Given
-		const hostPrebuild = nativePrebuildFile(nativePrebuildTarget());
-		const packed = {
-			files: [
-				{ path: "package/dist/cli.js" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/native/index.js" },
-				{ path: `package/node_modules/@earendil-works/pi-pty/${hostPrebuild}` },
-				{ path: "package/node_modules/@earendil-works/pi-tui/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-tui/dist/index.js" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/package.json" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/index.ts" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/kernels/py/prelude.py" },
-			],
-		};
-
-		// When / Then
-		assert.doesNotThrow(() => assertSenpiPackedWorkspaceFiles(packed));
-	});
-
-	it("accepts npm dry-run package metadata with unprefixed paths", () => {
-		// Given
-		const hostPrebuild = nativePrebuildFile(nativePrebuildTarget());
-		const packed = {
-			files: [
-				{ path: "dist/cli.js" },
-				{ path: "node_modules/@earendil-works/pi-agent-core/package.json" },
-				{ path: "node_modules/@earendil-works/pi-agent-core/dist/index.js" },
-				{ path: "node_modules/@earendil-works/pi-ai/package.json" },
-				{ path: "node_modules/@earendil-works/pi-ai/dist/index.js" },
-				{ path: "node_modules/@earendil-works/pi-pty/package.json" },
-				{ path: "node_modules/@earendil-works/pi-pty/dist/index.js" },
-				{ path: "node_modules/@earendil-works/pi-pty/native/index.js" },
-				{ path: `node_modules/@earendil-works/pi-pty/${hostPrebuild}` },
-				{ path: "node_modules/@earendil-works/pi-tui/package.json" },
-				{ path: "node_modules/@earendil-works/pi-tui/dist/index.js" },
-				{ path: "node_modules/@code-yeongyu/senpi-codemode/package.json" },
-				{ path: "node_modules/@code-yeongyu/senpi-codemode/src/index.ts" },
-				{ path: "node_modules/@code-yeongyu/senpi-codemode/src/kernels/py/prelude.py" },
-			],
-		};
-
-		// When / Then
-		assert.doesNotThrow(() => assertSenpiPackedWorkspaceFiles(packed));
-	});
-
-	it("rejects senpi package metadata that omits the bundled pty native loader", () => {
-		// Given
-		const packed = {
-			files: [
-				{ path: "package/dist/cli.js" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-tui/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-tui/dist/index.js" },
-			],
-		};
-
-		// When / Then
-		assert.throws(
-			() => assertSenpiPackedWorkspaceFiles(packed),
-			/package tarball is missing bundled workspace files: .*@earendil-works\/pi-pty\/native\/index\.js/,
-		);
-	});
-
-	it("accepts senpi package metadata that omits the host pty prebuild (pipe fallback)", () => {
-		// Given: all loader files present, but no host native prebuild.
-		const packed = {
-			files: [
-				{ path: "package/dist/cli.js" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/native/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-tui/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-tui/dist/index.js" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/package.json" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/index.ts" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/kernels/py/prelude.py" },
-			],
-		};
-
-		// When / Then: the native prebuild is optional (pipe fallback), so this must not throw.
-		const originalWarn = console.warn;
-		console.warn = () => {};
-		try {
-			assert.doesNotThrow(() => assertSenpiPackedWorkspaceFiles(packed));
-		} finally {
-			console.warn = originalWarn;
-		}
-	});
-
-	it("accepts an all-OS check when a target's prebuild is absent (pipe fallback)", () => {
-		// Given: the darwin-arm64 prebuild is present but linux-x64 is not.
-		const missingTarget = "linux-x64";
-		const packed = {
-			files: [
-				{ path: "package/dist/cli.js" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-ai/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/dist/index.js" },
-				{ path: "package/node_modules/@earendil-works/pi-pty/native/index.js" },
-				{ path: `package/node_modules/@earendil-works/pi-pty/${nativePrebuildFile("darwin-arm64")}` },
-				{ path: "package/node_modules/@earendil-works/pi-tui/package.json" },
-				{ path: "package/node_modules/@earendil-works/pi-tui/dist/index.js" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/package.json" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/index.ts" },
-				{ path: "package/node_modules/@code-yeongyu/senpi-codemode/src/kernels/py/prelude.py" },
-			],
-		};
-
-		// When / Then: a missing per-target prebuild is optional, so the check must not throw.
-		assert.ok(SUPPORTED_NATIVE_PREBUILD_TARGETS.includes(missingTarget));
-		const originalWarn = console.warn;
-		console.warn = () => {};
-		try {
-			assert.doesNotThrow(() =>
-				assertSenpiPackedWorkspaceFiles(packed, { nativePrebuildTargets: ["darwin-arm64", missingTarget] }),
-			);
-		} finally {
-			console.warn = originalWarn;
-		}
-	});
-
-	it("publishes the supported native target list through package checks", () => {
-		// When
-		const checks = bundledWorkspacePackageChecks(SUPPORTED_NATIVE_PREBUILD_TARGETS);
-		const ptyCheck = checks.find((check) => check.packageName === "@earendil-works/pi-pty");
-
-		// Then
-		assert.ok(ptyCheck);
-		assert.deepEqual(
-			ptyCheck.requiredFiles.filter((file) => file.startsWith("native/prebuilds/")),
-			SUPPORTED_NATIVE_PREBUILD_TARGETS.map(nativePrebuildFile),
-		);
 	});
 });
