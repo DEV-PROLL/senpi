@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "../src/providers/faux.ts";
-import { isRetryableAssistantError, type RetryPolicy, retryAssistantCall } from "../src/utils/retry.ts";
+import {
+	isProviderStreamStallError,
+	isRetryableAssistantError,
+	type RetryPolicy,
+	retryAssistantCall,
+} from "../src/utils/retry.ts";
 
 const openAIExplicitRetryMessage =
 	"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID req_******** in your message.";
@@ -78,6 +83,33 @@ describe("provider retry classification", () => {
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: codexUpstreamUnavailableMessage }),
 			),
 		).toBe(true);
+	});
+
+	it("classifies zero-event stream idle timeouts as provider stream stalls", () => {
+		// Stall retries replay the identical payload against a provider that
+		// already sat silent for the whole idle budget, so agent-session uses
+		// this class to escalate repeated stalls to the fallback chain.
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Request timed out." }),
+			),
+		).toBe(false);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "aborted",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(false);
 	});
 
 	it("classifies agent-loop stream idle timeouts as retryable", () => {

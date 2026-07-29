@@ -246,6 +246,20 @@ export function isRetryableAssistantError(message: AssistantMessage): boolean {
 }
 
 /**
+ * Matches the agent-loop stream idle watchdog failure ("Idle timeout waiting
+ * for provider stream after <n>ms"): the provider connection was accepted but
+ * delivered no events for the entire idle budget. Retrying such a stall
+ * replays an identical payload and, against a hung provider, silently burns
+ * the full idle budget again, so callers may escalate to a fallback instead
+ * of spending the whole same-model retry budget.
+ */
+const PROVIDER_STREAM_STALL_ERROR_PATTERN = /\bIdle timeout waiting for provider stream after \d+ms\b/;
+
+export function isProviderStreamStallError(message: AssistantMessage): boolean {
+	return message.stopReason === "error" && PROVIDER_STREAM_STALL_ERROR_PATTERN.test(message.errorMessage ?? "");
+}
+
+/**
  * Classifies a raw error-message string with the same transient-vs-terminal
  * rules as {@link isRetryableAssistantError}, for callers that hold a thrown
  * `Error` instead of an `AssistantMessage` (e.g. compaction summarization

@@ -1,5 +1,19 @@
 # AI Source Changes
 
+## 2026-07-29 - Classify zero-event provider stream stalls
+
+### What changed and why
+
+- `utils/retry.ts` exports `isProviderStreamStallError()`: matches the agent-loop idle-watchdog failure
+  ("Idle timeout waiting for provider stream after <n>ms") on `stopReason: "error"` messages. The class stays
+  retryable (unchanged), but callers can now distinguish "the provider accepted the request and sent zero events
+  for the whole idle budget" from fast transient failures. agent-session uses it to escalate a second consecutive
+  stall to the fallback chain instead of replaying the identical payload for the rest of the same-model budget
+  (evidence: donated session 019fa8da-43ad-70b7-b01b-8f34f4d907f2, records 1906/1919, where a hung gateway made
+  every replay burn the full 300s idle budget).
+- Coverage: `test/retry.test.ts` pins the stall class against the idle-timeout message, `Request timed out.`,
+  and aborted stop reasons.
+
 ## 2026-07-28 - Demote unavailable Anthropic tool references instead of failing the request
 
 ### What changed and why
