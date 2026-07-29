@@ -1,5 +1,26 @@
 # changes
 
+## Ethos tips: the fork's voice in the tip rotation (2026-07-29)
+
+### What changed
+
+- `tips/catalog/ethos-tips.ts` (new): a `ETHOS_TIPS` catalog of seven manifesto tips framing how `@code-yeongyu/senpi` is tuned - system-prompt discipline for `gpt-5.6-sol`, tools that stay out of the way, spending tokens to buy time, and pointers to `ulw-plan` on `fable-5 xhigh` and the `ulw loop`.
+- `tips/registry.ts`: `TIP_DEFINITIONS` now concatenates `...ETHOS_TIPS` after `SUBAGENT_TIPS`.
+- The two command-referencing tips (`ethos.ulw-plan-sage`, `ethos.ulw-loop-shallow`) declare `requiresCommand: "tasks"`, so they only surface when the omo plugin's `tasks` command is registered - matching the `workflow-skills.*` tips in `subagent-tips.ts`. The eight pure manifesto tips (including the monitor/cache bragging tips) are keyless and ungated.
+- Three additional tips brag about the harness's monitor tool (subscribe to stdout, never sleep), the prompt-cache budget (never block past cache TTL), and the live cache-hit rate in the footer. All three are keyless and ungated.
+- Three more tips brag about multimodal vision (the agent sees screenshots, PDFs, diagrams), Claude Code OAuth multi-account (switch logins, not env vars), and the agent-SDK foundation (no ToS gray zone, no ban anxiety). All three are keyless and ungated.
+- One tip brags about the tool-call repair middleware (malformed antml:invoke calls are intercepted, corrected, and salvaged instead of failing the turn). Keyless and ungated.
+- Coverage: `test/suite/ethos-tips.test.ts` pins the fourteen ids, the verbatim approved English copy, the `tasks` gating, and the unbound/ungated manifesto set.
+
+### Why
+
+- The tip line taught mechanics and commands but had no voice for the fork's tuning philosophy. These tips surface the system-prompt-tuning claim (a 5-minute job takes 5 minutes, a 12-hour job takes 12), the anti-tool-study stance, and the spend-tokens-for-time trade, which are the fork's reason for existing.
+- Gating the ulw command tips on `tasks` preserves the existing honesty invariant: never advertise commands the session cannot run.
+
+### Expected merge conflict zones
+
+- LOW: `tips/registry.ts` import block and the `TIP_DEFINITIONS` concatenation tail.
+
 ## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
 
 ### What changed
