@@ -31,7 +31,17 @@ describe("AgentSession retry and event characterization", () => {
 	});
 
 	it("retries after a transient error and succeeds", async () => {
-		const harness = await createHarness({ settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } } });
+		const extensionWillRetry: Array<boolean | undefined> = [];
+		const harness = await createHarness({
+			settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("agent_end", (event) => {
+						extensionWillRetry.push(event.willRetry);
+					});
+				},
+			],
+		});
 		harnesses.push(harness);
 		const retryEvents: string[] = [];
 		harness.session.subscribe((event) => {
@@ -47,6 +57,7 @@ describe("AgentSession retry and event characterization", () => {
 		await harness.session.prompt("test");
 
 		expect(retryEvents).toEqual(["start:1", "end:true"]);
+		expect(extensionWillRetry).toEqual([true, false]);
 		expect(harness.eventsOfType("agent_end").map((event) => event.willRetry)).toEqual([true, false]);
 		expect(harness.faux.state.callCount).toBe(2);
 		expect(harness.session.isRetrying).toBe(false);

@@ -81,6 +81,15 @@ async function makeUiCtx(
 	} as unknown as ExtensionContext;
 }
 
+async function makeNotifyingCtx(notices: string[], threadId: string): Promise<ExtensionContext> {
+	const base = await makeCtx(threadId);
+	return {
+		...base,
+		hasUI: true,
+		ui: { notify: (message: string) => notices.push(message), select: async () => undefined, setStatus: () => {} },
+	} as unknown as ExtensionContext;
+}
+
 function storeRefFor(ctx: ExtensionContext) {
 	return {
 		baseDir: join(ctx.sessionManager.getSessionDir(), "extensions", "goal"),
@@ -314,6 +323,101 @@ describe("goal extension contract (budget-free)", () => {
 		);
 
 		expect(sent).toHaveLength(0);
+	});
+
+	it("blocks a goal when a provider error ends after retries are exhausted", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const notices: string[] = [];
+		const ctx = await makeNotifyingCtx(notices, "thread-terminal-provider-error");
+		await tools
+			.get("create_goal")
+			?.execute("c1", { objective: "Recover from provider errors" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantMessageWithStopReason("error")], willRetry: false },
+			ctx,
+		);
+
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "provider error ended the turn (retries exhausted)",
+		});
+		expect(notices).toContainEqual(expect.stringContaining("provider error ended the turn (retries exhausted)"));
+		expect(sent).toHaveLength(0);
+	});
+
+	it("keeps a goal active while a provider-error retry is pending", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const notices: string[] = [];
+		const ctx = await makeNotifyingCtx(notices, "thread-provider-retry-pending");
+		await tools
+			.get("create_goal")
+			?.execute("c1", { objective: "Wait for retry recovery" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantMessageWithStopReason("error")], willRetry: true },
+			ctx,
+		);
+
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({ status: "active" });
+		expect(notices).toEqual([]);
+		expect(sent).toHaveLength(0);
+	});
+
+	it("preserves the user-abort block reason", async () => {
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeCtx("thread-user-abort-provider-guard");
+		await tools.get("create_goal")?.execute("c1", { objective: "Allow interruption" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{
+				type: "agent_end",
+				messages: [assistantMessageWithStopReason("aborted")],
+				aborted: true,
+				abortSource: "user",
+				willRetry: false,
+			},
+			ctx,
+		);
+
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "user interrupted the turn",
+		});
+	});
+
+	it("blocks a non-user aborted turn after retries are exhausted", async () => {
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeCtx("thread-system-abort-provider-guard");
+		await tools.get("create_goal")?.execute("c1", { objective: "Recover from provider aborts" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{
+				type: "agent_end",
+				messages: [assistantMessageWithStopReason("aborted")],
+				aborted: true,
+				abortSource: "system",
+				willRetry: false,
+			},
+			ctx,
+		);
+
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "provider error ended the turn (retries exhausted)",
+		});
 	});
 
 	it("rejects update_goal complete while todo tasks remain open, naming them", async () => {

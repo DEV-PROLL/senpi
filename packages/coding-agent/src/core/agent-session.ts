@@ -1399,19 +1399,19 @@ export class AgentSession {
 			}
 		}
 
+		const agentEndWillRetry = event.type === "agent_end" && this._willRetryAfterAgentEnd(event.messages);
+
 		// Emit to extensions first. Agent event persistence is intentionally
 		// asynchronous, so retain the source run signal while dispatching.
 		this._extensionEventSignal = signal;
 		try {
-			await this._emitExtensionEvent(event);
+			await this._emitExtensionEvent(event, agentEndWillRetry);
 		} finally {
 			this._extensionEventSignal = undefined;
 		}
 
 		// Notify all listeners
-		this._emit(
-			event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event.messages) } : event,
-		);
+		this._emit(event.type === "agent_end" ? { ...event, willRetry: agentEndWillRetry } : event);
 
 		// Handle session persistence
 		if (event.type === "message_end") {
@@ -1635,7 +1635,7 @@ export class AgentSession {
 	}
 
 	/** Emit extension events based on agent events */
-	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
+	private async _emitExtensionEvent(event: AgentEvent, agentEndWillRetry = false): Promise<void> {
 		if (event.type === "agent_start") {
 			this._turnIndex = 0;
 			await this._extensionRunner.emit({ type: "agent_start" });
@@ -1644,9 +1644,9 @@ export class AgentSession {
 			const aborted =
 				abortSource !== undefined || this._findLastAssistantInMessages(event.messages)?.stopReason === "aborted";
 			try {
-				await this._extensionRunner.emit({
-					type: "agent_end",
+				await this._extensionRunner.emitAgentEnd({
 					messages: event.messages,
+					willRetry: agentEndWillRetry,
 					...(aborted ? { aborted: true } : {}),
 					...(abortSource === undefined ? {} : { abortSource }),
 				});

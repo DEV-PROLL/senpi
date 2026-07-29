@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
+import type { AgentEndEvent, ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { registerGoalCommand } from "./command-registration.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
@@ -135,6 +135,13 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				{ status: "blocked", reason: "user interrupted the turn" },
 				"model",
 			);
+		} else if (didTerminalProviderErrorEndTurn(event) && goal?.status === "active") {
+			goal = await updateGoal(
+				goalStoreRef(ctx),
+				{ status: "blocked", reason: "provider error ended the turn (retries exhausted)" },
+				"model",
+			);
+			if (ctx.hasUI) ctx.ui.notify(`Goal ${goalStatusLabel(goal.status)}\n${formatGoalForTool(goal)}`, "warning");
 		}
 		if (goal?.status === "active") {
 			beginAgentGoalAccounting(goal);
@@ -297,6 +304,16 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 		return goal;
 	}
+}
+
+function didTerminalProviderErrorEndTurn(event: AgentEndEvent): boolean {
+	if (event.willRetry !== false) return false;
+	for (let index = event.messages.length - 1; index >= 0; index--) {
+		const message = event.messages[index];
+		if (message?.role !== "assistant") continue;
+		return message.stopReason === "error" || (message.stopReason === "aborted" && event.abortSource !== "user");
+	}
+	return false;
 }
 
 function goalStoreRef(ctx: ExtensionContext): GoalStoreRef {

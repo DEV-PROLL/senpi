@@ -908,6 +908,8 @@ export interface AgentEndEvent {
 	messages: AgentMessage[];
 	/** True when the agent run ended through an abort rather than normal completion. */
 	aborted?: boolean;
+	/** Whether the session will automatically retry or fall back after this end event. */
+	willRetry?: boolean;
 	/** Present when the host can attribute the abort to a user action or internal operation. */
 	abortSource?: "user" | "system";
 }
