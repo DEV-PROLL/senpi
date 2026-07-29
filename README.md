@@ -354,4 +354,4 @@ A tiny, completely unserious love letter to the [Ganbare Ganbare Senpai](https:/
 
 Yes, the entire project name is a senpai pun. Type strictly, run the tests, write a `changes.md`, keep the merge surface tiny — and *gan ganbare ganbare senpi ora!*
 
-Shoutout to [plugsuits](https://github.com/minpeter/plugsuits): senpi's compaction system takes inspiration from its design.
+Shoutout to [plugsuits](https://github.com/minpeter/pss-runtime): senpi's compaction system takes inspiration from its design.
