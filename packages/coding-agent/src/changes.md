@@ -1,3 +1,14 @@
+## From-source real-config warning (2026-07-29)
+
+### What changed
+
+- New `from-source-config-guard.ts`: pure predicates detecting a run from TypeScript sources (module URL extension, never a bun binary) whose resolved agent dir is the real `~/.senpi/agent` with no `SENPI_CODING_AGENT_DIR` override.
+- `main.ts` prints one yellow stderr warning right after agent-dir resolution when that combination holds, advising an isolated agent dir for dev/QA runs. No change to `resolveAgentDir` precedence or any default.
+
+### Why
+
+- Ad-hoc from-source runs inside the repo (which has `.senpi/` without `agent/`) silently target the real user config; that exact setup has previously leaked writes into the user's `settings.json`. Detection is separated from policy: the warning makes the footgun visible without breaking legitimate real-config runs.
+
 ## Interactive startup loading indicator (2026-07-29)
 
 ### What changed
