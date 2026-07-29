@@ -1,4 +1,4 @@
-import type { TodoOpEntry, TodoOperation, TodoPhase } from "./state.ts";
+import type { TodoOpEntry, TodoOperation, TodoPhase } from "./todo-types.ts";
 
 export type TodoNormalization = {
 	entry?: TodoOpEntry;

@@ -1,4 +1,5 @@
-import { sanitizeTodoText, type TodoItem, type TodoPhase } from "./state.ts";
+import { sanitizeTodoText } from "./todo-format.ts";
+import type { TodoItem, TodoPhase } from "./todo-types.ts";
 
 type TaskHit = {
 	task: TodoItem;

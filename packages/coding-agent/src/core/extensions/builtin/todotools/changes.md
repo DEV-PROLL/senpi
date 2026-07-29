@@ -1,5 +1,29 @@
 # todotools Fork Tracker
 
+## 2026-07-29 - Keep active work visible in long todo widgets
+
+### What changed
+
+- Bounded the phase-aware `todo-sidebar` output to the interactive widget's
+  10-line budget before the generic widget renderer truncates it.
+- Long active phases now keep the two tasks immediately before the active
+  item, the active item itself, and as much pending upcoming work as fits.
+- Completed and abandoned tasks after the active item no longer consume the
+  upcoming-work window or inflate the later omission count.
+- Explicit earlier/later omission rows report how much relevant work is
+  outside the window. Short phases preserve their existing complete output.
+- Split the former monolithic `state.ts` implementation into focused state,
+  query, resolution, operation, formatting, storage, and widget modules, each
+  below the 250-pure-line ceiling. Widget regressions now live in a dedicated
+  deterministic test file.
+
+### Expected merge conflict zones
+
+- MEDIUM: `todo-widget.ts` if upstream changes todo sidebar layout or the
+  interactive widget line budget.
+- MEDIUM: `state.ts` and the focused `todo-*.ts` modules if upstream changes
+  the todotools state API or persistence behavior.
+
 ## 2026-07-28 - Preserve open todo work across new instructions
 
 ### What changed
