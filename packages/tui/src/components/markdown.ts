@@ -71,7 +71,10 @@ function findInlineMath(
 			return { raw: src.slice(0, index + close.length), text };
 		}
 		if (open !== close && src.startsWith(open, index)) return undefined;
-		if (src[index] === "\\") index += 1;
+		if (src[index] === "\\") {
+			if (src[index + 1] === "\n" || src[index + 1] === "\r") return undefined;
+			index += 1;
+		}
 	}
 	return undefined;
 }
@@ -80,24 +83,33 @@ function findMalformedInlineSpan(src: string, open: "\\(" | "\\[", close: "\\)" 
 	if (!src.startsWith(open)) return undefined;
 	const scanEnd = Math.min(src.length, open.length + MAX_LATEX_FORMULA_LENGTH + 1);
 	let competingOpener = false;
-	let depth = 1;
+	const closers = [close];
 	for (let index = open.length; index < scanEnd; index += 1) {
 		if (src[index] === "\n" || src[index] === "`") {
 			return competingOpener ? src.slice(0, index) : undefined;
 		}
-		if (src.startsWith(open, index)) {
+		const nestedOpen = src.startsWith("\\(", index) ? "\\(" : src.startsWith("\\[", index) ? "\\[" : undefined;
+		if (nestedOpen !== undefined) {
 			competingOpener = true;
-			depth += 1;
-			index += open.length - 1;
+			closers.push(nestedOpen === "\\(" ? "\\)" : "\\]");
+			index += nestedOpen.length - 1;
 			continue;
 		}
-		if (src.startsWith(close, index)) {
-			depth -= 1;
-			if (depth === 0) return competingOpener ? src.slice(0, index + close.length) : undefined;
-			index += close.length - 1;
+		const expectedClose = closers.at(-1);
+		if (expectedClose !== undefined && src.startsWith(expectedClose, index)) {
+			closers.pop();
+			if (closers.length === 0) {
+				return competingOpener ? src.slice(0, index + expectedClose.length) : undefined;
+			}
+			index += expectedClose.length - 1;
 			continue;
 		}
-		if (src[index] === "\\") index += 1;
+		if (src[index] === "\\") {
+			if (src[index + 1] === "\n" || src[index + 1] === "\r") {
+				return competingOpener ? src.slice(0, index) : undefined;
+			}
+			index += 1;
+		}
 	}
 	return competingOpener ? src.slice(0, scanEnd) : undefined;
 }
@@ -153,14 +165,8 @@ const inlineMathTokenizer: TokenizerExtension = {
 	name: "latex_inline",
 	level: "inline",
 	start(src) {
-		const starts = [
-			src.indexOf("$"),
-			src.indexOf("\\("),
-			src.indexOf("\\["),
-			src.indexOf("\\)"),
-			src.indexOf("\\]"),
-		].filter((index) => index >= 0);
-		return starts.length > 0 ? Math.min(...starts) : undefined;
+		const index = src.search(/\$|\\[()[\]]/);
+		return index >= 0 ? index : undefined;
 	},
 	tokenizer(src, tokens) {
 		if (src.startsWith("$")) {

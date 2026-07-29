@@ -1552,7 +1552,9 @@ bar`,
 					"Before \\(unfinished before `\\)` after",
 					"Nested \\(outer \\(inner\\) remains literal",
 					"Nested siblings \\(outer \\(a\\) and \\(b\\)\\) remain literal",
+					"Mixed nested \\(outer \\[inner\\] remains literal",
 					"Escaped identifier punctuation: array\\[0\\] and call\\(arg\\)",
+					"Escaped newline: $a\\\nb$",
 				].join("\n"),
 				0,
 				0,
@@ -1567,7 +1569,10 @@ bar`,
 			assert.ok(rendered.includes("Before \\(unfinished before \\) after"), rendered);
 			assert.ok(rendered.includes("Nested \\(outer \\(inner\\) remains literal"), rendered);
 			assert.ok(rendered.includes("Nested siblings \\(outer \\(a\\) and \\(b\\)\\) remain literal"), rendered);
+			assert.ok(rendered.includes("Mixed nested \\(outer \\[inner\\] remains literal"), rendered);
 			assert.ok(rendered.includes("Escaped identifier punctuation: array[0] and call(arg)"), rendered);
+			assert.ok(rendered.includes("$a"), rendered);
+			assert.ok(rendered.includes("b$"), rendered);
 		});
 
 		it("LaTeX preserves separated malformed openers", () => {
@@ -1578,6 +1583,16 @@ bar`,
 				.map((line) => stripAnsi(line).trimEnd())
 				.join("\n");
 			assert.strictEqual(rendered, malformed);
+		});
+
+		it("LaTeX preserves repeated literal dollar markers", () => {
+			const literalDollars = "a$$".repeat(2000);
+			const markdown = new Markdown(literalDollars, 0, 0, defaultMarkdownTheme);
+			const rendered = markdown
+				.render(7000)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+			assert.strictEqual(rendered, literalDollars);
 		});
 
 		it("LaTeX converts nested structures and preserves command distinctions", () => {
@@ -1594,6 +1609,7 @@ bar`,
 			assert.strictEqual(latexToUnicode("\\sqrt {x}"), "√(x)");
 			assert.strictEqual(latexToUnicode("\\text {한}"), "한");
 			assert.strictEqual(latexToUnicode("f\\!(x)"), "f(x)");
+			assert.strictEqual(latexToUnicode("A^\\mathrm{T}"), "A^T");
 			assert.strictEqual(latexToUnicode("a+{b}"), "a+b");
 			assert.strictEqual(latexToUnicode("\\foo{bar}"), "\\foo{bar}");
 		});

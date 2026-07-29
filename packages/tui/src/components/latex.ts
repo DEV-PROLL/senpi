@@ -256,6 +256,11 @@ class LatexParser {
 			if (body === undefined) return undefined;
 			return scriptText(body, alphabet) ?? `${marker}{${body}}`;
 		}
+		if (this.input[this.index] === "\\") {
+			const body = this.parseCommand(depth);
+			if (body === undefined) return undefined;
+			return scriptText(body, alphabet) ?? `${marker}${body}`;
+		}
 		const codePoint = this.input.codePointAt(this.index);
 		if (codePoint === undefined) return marker;
 		const body = String.fromCodePoint(codePoint);
