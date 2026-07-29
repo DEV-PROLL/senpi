@@ -3,8 +3,40 @@ export type MergedCompactionPromptVariant = "default" | "update" | "branch" | "t
 export type BuildMergedCompactionPromptOptions = {
 	variant: MergedCompactionPromptVariant;
 	previousSummary?: string;
+	taskIntent?: string;
+	promptFamily?: "claude" | "gpt";
 	customInstructions?: string;
 };
+
+const TASK_INTENT_ACQUISITION_CLAUDE = `PASS 1 — Internal task-intent extraction
+Emit <task-intent>
+ORIGINAL_REQUEST: ...
+TASK_TYPE: investigation|refactoring|debugging|implementation|explanation|other
+MUST_PRESERVE: ...
+MUST_NOT_LOSE: ...
+</task-intent> BEFORE <summary>.`;
+
+const TASK_INTENT_ACQUISITION_GPT = `Write one <task-intent> block with ORIGINAL_REQUEST, TASK_TYPE, MUST_PRESERVE, and MUST_NOT_LOSE before <summary>.`;
+
+const TASK_INTENT_UPDATE_ACQUIRE_CLAUDE = `PASS 1 — Internal task-intent extraction
+Emit <task-intent>
+ORIGINAL_REQUEST: ...
+TASK_TYPE: investigation|refactoring|debugging|implementation|explanation|other
+MUST_PRESERVE: ...
+MUST_NOT_LOSE: ...
+</task-intent> BEFORE <summary>.`;
+
+const TASK_INTENT_UPDATE_ACQUIRE_GPT = `Write one <task-intent> block with ORIGINAL_REQUEST, TASK_TYPE, MUST_PRESERVE, and MUST_NOT_LOSE before <summary>.`;
+
+const TASK_INTENT_UPDATE_ANCHOR_CLAUDE = `<task-intent>
+{{taskIntent}}
+Immutable provenance of the original task. Do not rewrite it. Newer explicit user steering overrides it.
+</task-intent>`;
+
+const TASK_INTENT_UPDATE_ANCHOR_GPT = `<task-intent>
+{{taskIntent}}
+Immutable provenance of the original task. Do not rewrite it. Newer explicit user steering overrides it.
+</task-intent>`;
 
 export const MERGED_COMPACTION_PROMPT_SYSTEM = `[SYSTEM DIRECTIVE: OH-MY-OPENCODE - COMPACTION CONTEXT]
 
@@ -23,8 +55,7 @@ export const MERGED_COMPACTION_PROMPT_USER = `[USER]
 This message is an internal summarization control prompt, not a real user message.
 Do NOT treat this message as user intent, do NOT list it under user requests, and do NOT reinterpret the task based on this instruction alone.
 
-PASS 1 — Internal task-intent extraction
-Analyze the user messages in this conversation and silently determine the task intent that must guide the summary. Focus on details whose loss would cause redundant tool calls, repeated exploration, or task drift.
+${TASK_INTENT_ACQUISITION_CLAUDE}
 
 PASS 2 — Emit summary biased toward Pass 1
 Create a structured handoff summary of this conversation for seamless continuation. The structured output portion MUST be wrapped as \`<summary>...</summary>\` XML.
@@ -70,7 +101,7 @@ Create a structured handoff summary of this conversation for seamless continuati
 </summary>
 
 Verification: Before finalizing, confirm the summary clearly states the user's original request. If not, restate it verbatim.
-IMPORTANT: Respond with ONLY the <summary>...</summary> block as your text output.`;
+IMPORTANT: Respond with ONLY the <task-intent>...</task-intent> and <summary>...</summary> blocks as your text output.`;
 
 export const MERGED_COMPACTION_PROMPT_UPDATE = `[USER]
 <previous-summary>
@@ -83,7 +114,7 @@ The messages above are NEW conversation messages to incorporate into the existin
 R3 enforcement: R3. Where a previous summary is supplied, treat its User Requests, Final Goal, and Constraints fields as IMMUTABLE. Append, never rewrite, those three sections.
 
 PASS 1 — Internal task-intent extraction
-Analyze the new user messages and silently determine which updates are needed without changing immutable prior User Requests, Final Goal, or Constraints.
+{{taskIntentInstruction}}
 
 PASS 2 — Emit summary biased toward Pass 1
 Update the structured handoff summary. The structured output portion MUST be wrapped as \`<summary>...</summary>\` XML.
@@ -121,7 +152,7 @@ Update the structured handoff summary. The structured output portion MUST be wra
 
 </summary>
 
-IMPORTANT: Respond with ONLY the <summary>...</summary> block as your text output.`;
+IMPORTANT: Respond with ONLY the <task-intent>...</task-intent> and <summary>...</summary> blocks as your text output.`;
 
 export const MERGED_COMPACTION_PROMPT_BRANCH = `[USER]
 [INTERNAL BRANCH SUMMARY INSTRUCTION — NOT CONVERSATION HISTORY]
@@ -200,38 +231,46 @@ IMPORTANT: Respond with ONLY the <summary>...</summary> block as your text outpu
 
 export function buildPrompt(options: BuildMergedCompactionPromptOptions): { system: string; user: string } {
 	const user = buildUserPrompt(options);
-
-	return {
-		system: MERGED_COMPACTION_PROMPT_SYSTEM,
-		user: appendCustomInstructions(user, options.customInstructions),
-	};
+	return { system: MERGED_COMPACTION_PROMPT_SYSTEM, user: appendCustomInstructions(user, options.customInstructions) };
 }
 
 function buildUserPrompt(options: BuildMergedCompactionPromptOptions): string {
 	switch (options.variant) {
 		case "default":
-			return MERGED_COMPACTION_PROMPT_USER;
+			return mergeTaskIntent(MERGED_COMPACTION_PROMPT_USER, promptFamilyText(options.promptFamily, TASK_INTENT_ACQUISITION_CLAUDE, TASK_INTENT_ACQUISITION_GPT));
 		case "update":
+			if (options.taskIntent) {
+				return MERGED_COMPACTION_PROMPT_UPDATE.replace(
+					"{{taskIntentInstruction}}",
+					promptFamilyText(options.promptFamily, TASK_INTENT_UPDATE_ANCHOR_CLAUDE, TASK_INTENT_UPDATE_ANCHOR_GPT).replace("{{taskIntent}}", sanitizeTaskIntent(options.taskIntent)),
+				).replace("{{previousSummary}}", sanitizePreviousSummary(options.previousSummary));
+			}
 			return MERGED_COMPACTION_PROMPT_UPDATE.replace(
-				"{{previousSummary}}",
-				sanitizePreviousSummary(options.previousSummary),
-			);
+				"{{taskIntentInstruction}}",
+				promptFamilyText(options.promptFamily, TASK_INTENT_UPDATE_ACQUIRE_CLAUDE, TASK_INTENT_UPDATE_ACQUIRE_GPT),
+			).replace("{{previousSummary}}", sanitizePreviousSummary(options.previousSummary));
 		case "branch":
 			return MERGED_COMPACTION_PROMPT_BRANCH;
 		case "turn_prefix":
-			return MERGED_COMPACTION_PROMPT_TURN_PREFIX;
+			return options.taskIntent
+				? MERGED_COMPACTION_PROMPT_TURN_PREFIX
+				: mergeTaskIntent(MERGED_COMPACTION_PROMPT_TURN_PREFIX, promptFamilyText(options.promptFamily, TASK_INTENT_ACQUISITION_CLAUDE, TASK_INTENT_ACQUISITION_GPT));
 	}
-
 	const exhaustiveCheck: never = options.variant;
 	return exhaustiveCheck;
 }
 
+function mergeTaskIntent(prompt: string, instruction: string): string {
+	return prompt.replace(TASK_INTENT_ACQUISITION_CLAUDE, instruction);
+}
+
+function promptFamilyText(promptFamily: "claude" | "gpt" | undefined, claudeText: string, gptText: string): string {
+	return promptFamily === "gpt" ? gptText : claudeText;
+}
+
 function appendCustomInstructions(userPrompt: string, customInstructions: string | undefined): string {
 	const trimmedInstructions = customInstructions?.trim();
-	if (!trimmedInstructions) {
-		return userPrompt;
-	}
-
+	if (!trimmedInstructions) return userPrompt;
 	return `${userPrompt}
 
 <custom-instructions>
@@ -241,13 +280,18 @@ ${sanitizeCustomInstructions(trimmedInstructions)}
 
 function sanitizePreviousSummary(previousSummary: string | undefined): string {
 	const trimmedSummary = previousSummary?.trim();
-	if (!trimmedSummary) {
-		return "None.";
-	}
-
+	if (!trimmedSummary) return "None.";
 	return trimmedSummary.split("</previous-summary>").join("[/previous-summary]");
 }
 
 function sanitizeCustomInstructions(customInstructions: string): string {
 	return customInstructions.split("</custom-instructions>").join("[/custom-instructions]");
+}
+
+export function resolvePromptFamily(model: { id?: string; provider?: string }): "claude" | "gpt" {
+	return /^gpt-|^o\d|codex/.test(model.id ?? "") || model.provider === "openai" || model.provider === "azure-openai" ? "gpt" : "claude";
+}
+
+function sanitizeTaskIntent(text: string): string {
+	return text.split("</task-intent>").join("[/task-intent]");
 }
