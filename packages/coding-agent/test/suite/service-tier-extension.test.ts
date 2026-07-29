@@ -140,10 +140,15 @@ describe("service-tier builtin extension", () => {
 
 		// then
 		expect(harness.session.model).toBe(initialModel);
-		expect(notify).toHaveBeenCalledWith(
-			`Fast mode is not supported for ${CODEX_PROVIDER}/${BASE_MODEL_ID}.`,
-			"warning",
-		);
+		// Subscription requests are served at normal tier however the field is set
+		// (chatgpt.com echoes "auto" for service_tier=priority and rejects
+		// auto/flex/scale outright), so the notice must say fast mode is
+		// unavailable here rather than blaming the model. See issue #499.
+		const [[message, level]] = notify.mock.calls;
+		expect(level).toBe("warning");
+		expect(message).toContain("not available on a ChatGPT subscription");
+		expect(message).toContain("API-key billing");
+		expect(message).not.toContain("not supported for");
 	});
 
 	it("leaves incompatible api payloads unchanged", () => {
