@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Install the Claude Agent SDK native executable for the consumer platform instead of shipping the publish runner's Linux-only sidecar, restoring `claude-agent-sdk` models on Apple Silicon ([#446](https://github.com/code-yeongyu/senpi/issues/446)).
+
 ### Removed
 
 ## [2026.7.29] - 2026-07-29
