@@ -36,6 +36,13 @@ import {
 	hermesParseGeneratedText,
 } from "./protocols/hermes.ts";
 import {
+	createKimiXtmlStreamParser,
+	kimiXtmlFormatToolCall,
+	kimiXtmlFormatToolResponse,
+	kimiXtmlFormatToolsSystemPrompt,
+	parseKimiXtmlGeneratedText,
+} from "./protocols/kimi-xtml/index.ts";
+import {
 	createMorphXmlStreamParser,
 	morphXmlFormatToolCall,
 	morphXmlFormatToolResponse,
@@ -100,6 +107,14 @@ const antmlProtocol: ToolCallProtocol = {
 	createStreamParser: createAntmlStreamParser,
 };
 
+const kimiXtmlProtocol: ToolCallProtocol = {
+	formatToolsSystemPrompt: kimiXtmlFormatToolsSystemPrompt,
+	formatToolResponse: kimiXtmlFormatToolResponse,
+	formatToolCall: kimiXtmlFormatToolCall,
+	parseGeneratedText: parseKimiXtmlGeneratedText,
+	createStreamParser: createKimiXtmlStreamParser,
+};
+
 const anthropicXmlProtocol: ToolCallProtocol = {
 	formatToolsSystemPrompt: anthropicXmlFormatToolsSystemPrompt,
 	formatToolResponse: anthropicXmlFormatToolResponse,
@@ -119,6 +134,7 @@ const protocolRegistry: Record<ToolCallFormat, ToolCallProtocol> = {
 	"morph-xml": morphXmlProtocol,
 	"yaml-xml": yamlXmlProtocol,
 	"gemma4-delimiter": gemma4Protocol,
+	"kimi-xtml": kimiXtmlProtocol,
 };
 
 /**

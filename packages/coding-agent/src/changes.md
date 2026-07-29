@@ -1,3 +1,159 @@
+## From-source real-config warning (2026-07-29)
+
+### What changed
+
+- New `from-source-config-guard.ts`: pure predicates detecting a run from TypeScript sources (module URL extension, never a bun binary) whose resolved agent dir is the real `~/.senpi/agent` with no `SENPI_CODING_AGENT_DIR` override.
+- `main.ts` prints one yellow stderr warning right after agent-dir resolution when that combination holds, advising an isolated agent dir for dev/QA runs. No change to `resolveAgentDir` precedence or any default.
+
+### Why
+
+- Ad-hoc from-source runs inside the repo (which has `.senpi/` without `agent/`) silently target the real user config; that exact setup has previously leaked writes into the user's `settings.json`. Detection is separated from policy: the warning makes the footgun visible without breaking legitimate real-config runs.
+
+## Interactive startup loading indicator (2026-07-29)
+
+### What changed
+
+- New `cli/startup-loading-indicator.ts`: single-line dim ANSI spinner (`⠋ Loading senpi… <phase>`) with a
+  120ms grace delay (fast startups stay flash-free), phase updates, pause/resume, and an idempotent `stop()`
+  that clears the line and restores the cursor (also via a `process` exit hook). It engages only when
+  `appMode === "interactive"`, stdout is a TTY, and `--help` was not requested.
+- `main.ts` starts the indicator before `createAgentSessionRuntime` — the extensions/models/trust window that
+  previously rendered nothing — switches the phase to `opening session` before the initial session is created,
+  and stops it in a `.finally` before any other stdout writer (TUI, help, diagnostics) takes over.
+- Mid-load project-trust prompts (`createProjectTrustContext` `ui.select`/`confirm`/`input`) are wrapped by
+  `pauseIndicatorDuringPrompts`, so the trust selector TUI never fights the spinner for the terminal.
+- Coverage: `test/startup-loading-indicator.test.ts` (grace delay, frame animation, phase updates,
+  pause/resume, stop idempotency, TTY/help gating, prompt-pause wrapping).
+
+### Why
+
+- Interactive startup completed the entire heavy runtime creation before the TUI existed, leaving the terminal
+  blank and apparently stuck (QA repro: ~23s of empty screen with a slow-loading extension). Codex's TUI
+  addresses the same window by rendering a dim placeholder header until the session is configured
+  (`codex-rs/tui` chatwidget); this is the minimal-conflict equivalent for senpi's pre-TUI bootstrap window.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: the import block and indicator wiring around `createAgentSessionRuntime` in `main.ts`; the module itself
+  has no upstream counterpart.
+- LOW: the `projectTrustContext` fallback wrap inside `createRuntime`.
+
+||||||| 2a853f363
+## Repeated provider-stream stalls escalate to the fallback chain (2026-07-29)
+
+### What changed
+
+- `core/agent-session.ts`: the transient retry branch tracks consecutive provider-stream stalls
+  (`isProviderStreamStallError` from pi-ai, covering both the idle-timeout and stream-start-timeout wordings). The second consecutive stall escalates to the fallback chain
+  immediately (same `tryFallback("transient")` path as budget exhaustion); without a chain the retry loop ends
+  instead of replaying the identical payload for the remaining same-model budget. Non-stall failures reset the
+  streak, fallback switches and fresh retry loops start at zero.
+- Coverage: `test/suite/retry-fallback-stall-escalation.test.ts` (escalation with chain, surrender without chain,
+  streak reset for non-consecutive stalls).
+
+### Why
+
+- A stall means the provider accepted the request and delivered zero events for the entire idle budget
+  (`httpIdleTimeoutMs`, default 300s). Each retry replays an identical payload, so a hung provider/gateway
+  previously cost (1 + maxRetries) * 300s (~20 minutes) of opaque dead air per turn before the chain was
+  consulted - experienced as a permanently wedged session (Discord report 2026-07-29, donated session
+  019fa8da-43ad-70b7-b01b-8f34f4d907f2 records 1906/1919: reopening a 5h session hit the 300s idle timeout on
+  every goal-continuation while new sessions worked).
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `_handleRetryableError` transient branch and the `switchedFallback` reset in `core/agent-session.ts`.
+
+## Availability-aware default Fable fallback chain (2026-07-29)
+
+### What changed
+
+- `core/retry-fallback/settings.ts` now owns retry setting types and normalization, including the shipped default
+  `anthropic/claude-fable-5` chain:
+  `apitopia/kimi-k3-unlocked:max` -> `anthropic/claude-opus-5:xhigh` ->
+  `anthropic/claude-opus-4-8:xhigh`.
+- The default applies only when `retry.fallbackChains` is absent or malformed. Explicit chain maps, including
+  an explicitly empty map, remain authoritative.
+- `core/retry-fallback/chains.ts` and the model-fallback builtin omit unavailable models and remove chains with
+  no usable candidates, so runtime selection and `/fallback` display agree.
+- Existing defaults remain enabled: model fallback on, server-side fallback abort on, and cooldown-expiry revert.
+- Coverage: `test/settings-manager-retry-fallback.test.ts`,
+  `test/suite/model-fallback-command.test.ts`, and `test/suite/model-fallback-host-wiring.test.ts`.
+
+### Why
+
+- A fresh Senpi install previously aborted provider-side fallback by default but had no client chain, producing a
+  dead-end warning. Shipping the preferred chain makes that default policy actionable while keeping optional model
+  providers safe: missing models are skipped rather than warned about or selected.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: retry settings imports and delegation in `core/settings-manager.ts`; the new retry settings module has no
+  upstream counterpart.
+- LOW: canonical chain construction in `core/retry-fallback/chains.ts`.
+- LOW: registry-aware loading in `core/extensions/builtin/model-fallback/`.
+
+## Stream-start timeout wiring and unregistered-api error context (2026-07-29)
+
+### What changed
+
+- `core/settings-manager.ts`: new `retry.provider.streamStartTimeoutMs` setting and
+  `getAgentStreamStartTimeoutMs()` (default 90000ms; 0 disables; the default is clamped to a
+  shorter idle timeout and disabled together with a disabled idle guard). `core/sdk.ts` and the
+  interactive settings handler wire it into `Agent.streamStartTimeoutMs`.
+- `core/provider-composer.ts`: the stream-time `No API provider registered for api: <api>` error
+  now names the model (`provider/id`) and points at the models.json provider entry or the missing
+  provider extension.
+- Coverage: `test/settings-manager.test.ts` (retry describe), `test/provider-composer-unknown-api.test.ts`,
+  `packages/ai/test/retry.test.ts` (stream timeout wordings stay retryable).
+
+### Why
+
+- Incident (donated session log): a dead upstream accepted requests but never sent a first byte.
+  With only the 300s idle bound, each turn attempt froze the session for 5 minutes with `usage: 0`
+  and nothing persisted; retries repeated the same 300s wait, making the session practically
+  unrecoverable while new sessions worked. A 90s first-event bound with the retryable wording lets
+  the retry/fallback ladder engage quickly. Related incident error `No API provider registered for
+  api: kiro-api` carried no context about which model or config produced it.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one settings getter + one field in `ProviderRetrySettings`; one error message in
+  `composeModelProvider`; one option in the `Agent` construction in `core/sdk.ts`.
+
+## Provider idle retries preserve user input and use a bounded retry budget (2026-07-29)
+
+### What changed
+
+- `core/agent-session.ts`: retries triggered by the shared anchored provider-timeout classifier defer queued steering
+  and follow-up input from the retry's first provider request. This covers the two agent-loop stream watchdog messages
+  and exact transport-level `Request timed out` variants without matching incidental command, MCP, or extension text.
+- `core/settings-manager.ts`: `retry.provider.streamRetryTimeoutMs` configures the first-request retry liveness cap
+  (default 30 seconds; `0` disables). The retry clamps only enabled idle/start guards, so it never re-enables an
+  explicitly disabled guard. Both timeout bounds return to their configured values for later provider requests.
+- The retry start bound is capped as well as the provider request option, while the configured idle timeout resumes
+  after the first event so healthy reasoning gaps are not limited to 30 seconds.
+- Consecutive transport timeouts reported with `stopReason: "aborted"` keep consuming the same retry counter. Only a
+  genuinely successful assistant response resets the budget or emits `auto_retry_end { success: true }`.
+- Retry continuations use the session-work barrier and revalidate atomically with the scheduled-continuation path.
+  Accepted recompaction stays queue-first while retaining timeout options; reconstructed failed assistant tails are
+  retired before continuation. A concurrent low-level `Agent.prompt()` is treated as a benign takeover, and session
+  settlement is never emitted while Agent core is still streaming.
+- Coverage: `test/suite/regressions/provider-idle-recovery.test.ts` pins exact request text/order, configurable timeout
+  sequences, disabled guards, negative classifier shapes, and a real no-first-event stream expiry at the cap;
+  `test/settings-manager.test.ts` pins setting defaults and `0` semantics.
+
+### Why
+
+- A silent provider stream previously consumed user steering into another full-length retry. Repeated 300-second
+  retries made the session look stuck and could leave the user's `continue` adjacent to an error instead of a real
+  answer.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `core/agent-session.ts` retry-controller continuation options and scheduled-continuation admission.
+- LOW: `core/settings-manager.ts` provider retry settings and timeout getters.
+
 ## Absent fallback chains no longer produce a startup warning (2026-07-28)
 
 ### What changed
@@ -208,7 +364,8 @@
 - A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
 - The user's checkout receives ZERO git mutations: the hook performs one read-only `git fetch origin dev`, builds in a feature-owned persistent worktree under the agent directory, and atomically swaps the installed plugin directory by rename. No checkout/branch/commit/merge/reset/clean/stash/push ever touches the user's tree.
 - `SENPI_OMO_LOCAL_UPDATE=0` is a kill-switch that disables the hook entirely. All failures are non-fatal: the hook never throws and never sets `process.exitCode`; any error downgrades to a warning plus a manual-update hint so the `senpi` self-update proceeds untouched.
-- Removal is exactly three steps: delete `src/beta/omo-local-update.ts`; delete all `test/omo-local-update*` files; delete the two BETA-marked touch points (the import and the hook call) in `package-manager-cli.ts`.
+- Fast path (2026-07-29): the skip decision now compares a build-input fingerprint of `origin/dev` (`src/beta/omo-local-update-fingerprint.ts`: sha256 over root tree entries minus documentation/agent-config paths) instead of the bare commit sha, so docs/CI-only churn in the omo monorepo no longer triggers the ~30s rebuild. When a rebuild IS needed, the bare-update foreground now only fetches and compares (~1s) and hands the build to a detached worker (`src/beta/omo-local-update-worker.ts`, hidden `senpi update --omo-local-update-worker` flag, output to `<agentDir>/omo-local-update/worker.log`); the worker serializes through the existing pid lock and swaps/stamps exactly like the former inline path. `SENPI_OMO_LOCAL_UPDATE_SYNC=1` restores the old blocking foreground behavior.
+- Removal is exactly three steps: delete all `src/beta/omo-local-update*.ts` files; delete all `test/omo-local-update*` files; delete the BETA-marked touch points (the import, the hook calls, and the `--omo-local-update-worker` flag) in `package-manager-cli.ts`.
 
 ## App-server daemon launch diagnostics and hermetic lifecycle coverage (2026-07-24)
 

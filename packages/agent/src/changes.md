@@ -1,5 +1,63 @@
 # Changes
 
+## 2026-07-29 - Bounded provider stream start (streamStartTimeoutMs)
+
+### What changed and why
+
+- `agent-loop.ts` bounds the wait for the FIRST provider stream event with a new optional
+  `AgentLoopConfig.streamStartTimeoutMs`. Providers emit their first event only once the HTTP
+  response begins, so a dead upstream that accepts a request and never answers was previously
+  bounded only by `timeoutMs` (the idle timeout, default 5 minutes): every attempt froze the
+  session for 300s with zero events, zero usage, and nothing persisted. Observed in a donated
+  5h session log where the same session hung deterministically on reopen while new sessions
+  worked. After the first event arrives the idle bound governs as before.
+- The failure message `Provider stream start timed out after <ms>ms` deliberately contains
+  "timed out" so the existing retryable-error classifier (`isRetryableErrorMessage`) retries
+  it instead of dead-ending the session; the request-local abort controller tears the dead
+  request down exactly like an idle timeout.
+- `agent.ts` plumbs `streamStartTimeoutMs` through `AgentOptions`/`Agent` into the loop config.
+
+### Files modified
+
+- `agent-loop.ts`
+- `agent.ts`
+- `types.ts`
+- `../test/agent-loop-stream-start-timeout.test.ts`
+
+## 2026-07-29 - Continuation-scoped queue and timeout controls
+
+### What changed and why
+
+- `Agent.continue()` and `continueWithQueuedMessages()` accept continuation-only options that defer queued input from
+  the first provider request and override both stream idle and stream-start bounds for that request without mutating
+  the agent's configured defaults. Later requests in the same run restore the configured bounds; after the first
+  retry event, the configured idle timeout also governs inter-event gaps so healthy silent reasoning is not capped.
+- Queue-first recompaction recovery takes precedence over deferral: the selected queued message is the continuation
+  input, while first-request timeout overrides still apply.
+- The core run lifecycle intentionally parks queued steering and follow-up input after terminal error or abort
+  responses until an external retry/compaction owner or a later admitted prompt consumes it. This stop-reason policy
+  is distinct from `suppressQueuedMessageDrain()`, which transfers one active run's post-`agent_end` ownership.
+- Coding-agent retries use these controls after a silent provider stream so a doomed retry cannot consume newly
+  queued user input and a later ordinary provider request automatically returns to the configured timeout.
+
+### Files modified
+
+- `agent.ts`
+- `types.ts`
+- `agent-loop.ts`
+- `../test/agent.test.ts`
+- `../README.md`
+
+### Why the extension system could not handle this
+
+- Provider-request queue polling, event-reader timeout selection, and post-run native queue draining happen inside
+  agent core before coding-agent extensions can safely claim or restore that work.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `agent.ts` continuation APIs/config creation and active-run lifecycle queue draining.
+- MEDIUM: `agent-loop.ts` provider-request timeout selection inside `runLoop()`.
+
 ## 2026-07-27 - End classifier-refused turns before tool execution
 
 ### What changed and why

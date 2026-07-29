@@ -1,5 +1,30 @@
 # Tool Call Middleware Changes
 
+# Tool Call Middleware Changes
+
+## 2026-07-29 - Kimi XTML leaked tool-call recovery in normal mode
+
+### What changed and why
+
+- `shouldRecoverTextToolCalls()` now defaults on for Kimi-family model ids (boundary regex, mirroring the Claude default), so Kimi models get the same normal-mode auto-correction Claude has when native tool calling misfires into plain text.
+- New `createXtmlRecoveryStreamParser()` (`protocols/kimi-xtml/recovery-stream.ts`): recovers leaked `<|open|>tools<|sep|>` blocks into canonical tool calls and strips stray XTML channel-transition markers (think/response/message) from visible text; code-masked spans stay untouched; `interrupt()` restores retained marker fragments as plain text like the invoke parser.
+- `wrapStreamWithInvokeRecovery()` and `RecoveryTextProjection` accept an optional recovery-parser factory (default unchanged: ANTML invoke). `ModelRuntime` selects the XTML factory for Kimi models via `hasKimiTextToolCallRecovery()`; Claude and non-Kimi behavior is byte-identical.
+
+### Why the extension system could not handle this
+
+- Recovery must observe raw provider-neutral assistant text before the coding-agent loop executes tools, and the parser selection must happen inside the stream wrapper, ahead of extension-observable events.
+## 2026-07-29 - Kimi XTML protocol (Kimi K3 native channel syntax)
+
+### What changed and why
+
+- Added the `kimi-xtml` text-tool protocol: Kimi K3's native XTML channel format (`<|open|>name<|sep|>` / `<|close|>name<|sep|>` markers; tools blocks containing `call` channels with `argument` channels), so Kimi models can serve text-encoded tool calling through a syntax they are already trained on.
+- Typed argument coercion: string (default), number, boolean, object/array (strict JSON; malformed values reject the call via `onError` instead of coercing).
+- Streaming parser reassembles markers split across chunks, emits snapshot argument deltas per completed argument, and finalizes unterminated calls as `incomplete` with the arguments parsed so far. Unknown tools are skipped with diagnostics.
+- Registered in the `ToolCallFormat` union, the `getToolCallFormat()` whitelist, and the protocol registry; compat docs and TESTING.md updated.
+
+### Why the extension system could not handle this
+
+- Text tool-call protocols must intercept and re-encode the provider stream and message history inside the middleware, before coding-agent extensions observe assistant events.
 ## 2026-07-20 - Claude leaked invoke recovery
 
 ### What changed and why

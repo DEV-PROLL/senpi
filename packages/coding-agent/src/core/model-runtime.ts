@@ -13,6 +13,8 @@ import {
 	type CredentialInfo,
 	type CredentialStore,
 	createModels,
+	createXtmlRecoveryStreamParser,
+	hasKimiTextToolCallRecovery,
 	lazyStream,
 	type Model,
 	type Models,
@@ -552,7 +554,11 @@ export class ModelRuntime implements Models {
 				withPayloadRequestMetadata(prepared.options, prepared.model) as ApiStreamOptions<TApi>,
 			);
 			return shouldRecoverTextToolCalls(model) && context.tools?.length
-				? wrapStreamWithInvokeRecovery(inner, context.tools)
+				? wrapStreamWithInvokeRecovery(
+						inner,
+						context.tools,
+						hasKimiTextToolCallRecovery(model) ? createXtmlRecoveryStreamParser : undefined,
+					)
 				: inner;
 		});
 	}
@@ -573,7 +579,11 @@ export class ModelRuntime implements Models {
 				withPayloadRequestMetadata(prepared.options, prepared.model) as SimpleStreamOptions,
 			);
 			return shouldRecoverTextToolCalls(model) && context.tools?.length
-				? wrapStreamWithInvokeRecovery(inner, context.tools)
+				? wrapStreamWithInvokeRecovery(
+						inner,
+						context.tools,
+						hasKimiTextToolCallRecovery(model) ? createXtmlRecoveryStreamParser : undefined,
+					)
 				: inner;
 		});
 	}

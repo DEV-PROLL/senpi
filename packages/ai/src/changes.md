@@ -1,5 +1,41 @@
 # AI Source Changes
 
+## 2026-07-29 - Classify zero-event provider stream stalls
+
+### What changed and why
+
+- `utils/retry.ts` exports `isProviderStreamStallError()`: matches the agent-loop stream-watchdog failures
+  ("Idle timeout waiting for provider stream after <n>ms" and "Provider stream start timed out after <n>ms")
+  on `stopReason: "error"` messages. The class stays
+  retryable (unchanged), but callers can now distinguish "the provider accepted the request and sent zero events
+  for the whole idle budget" from fast transient failures. agent-session uses it to escalate a second consecutive
+  stall to the fallback chain instead of replaying the identical payload for the rest of the same-model budget
+  (evidence: donated session 019fa8da-43ad-70b7-b01b-8f34f4d907f2, records 1906/1919, where a hung gateway made
+  every replay burn the full 300s idle budget).
+- Coverage: `test/retry.test.ts` pins the stall class against the idle-timeout message, `Request timed out.`,
+  and aborted stop reasons.
+
+## 2026-07-29 - Classify provider stream and transport timeouts precisely
+
+### What changed and why
+
+- `utils/retry.ts` exports `isProviderStreamStallError()` for the two anchored agent-loop watchdog
+  messages and `isProviderTimeoutError()` for those stalls plus the exact `Request timed out` transport
+  shape. The shared classifier accepts transport timeouts reported as `aborted` while rejecting incidental
+  timeout text from commands, MCP servers, and extensions.
+- `../test/retry.test.ts` pins the observed positive shapes, negative lookalikes, and stop-reason policy.
+
+### Expected merge conflict zones
+
+- LOW: additive classifiers beside `isRetryableAssistantError()` in `utils/retry.ts`; keep
+  `isProviderStreamStallError()` aligned with PR #453 when the branches meet.
+
+## 2026-07-29 - kimi-xtml text tool-call protocol + ToolCallFormat union
+
+### What changed and why
+
+- `ToolCallFormat` gains `"kimi-xtml"` (Kimi K3 native XTML channel syntax); `getToolCallFormat()` whitelist, protocol registry, compat docs, and middleware TESTING.md updated accordingly. Protocol implementation lives in `tool-call-middleware/protocols/kimi-xtml/` (markers, parse, format, stream); details in `tool-call-middleware/changes.md`.
+
 ## 2026-07-28 - Demote unavailable Anthropic tool references instead of failing the request
 
 ### What changed and why

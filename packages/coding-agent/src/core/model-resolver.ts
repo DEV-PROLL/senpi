@@ -579,10 +579,13 @@ export function resolveCliModel(options: {
 	};
 }
 
+export type InitialModelProvenance = "cli" | "scoped" | "settings" | "provider-default" | "first-available";
+
 export interface InitialModelResult {
 	model: Model<Api> | undefined;
 	thinkingLevel: ThinkingLevel;
 	fallbackMessage: string | undefined;
+	provenance: InitialModelProvenance;
 }
 
 /**
@@ -629,7 +632,12 @@ export async function findInitialModel(options: {
 			process.exit(1);
 		}
 		if (resolved.model) {
-			return { model: resolved.model, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+			return {
+				model: resolved.model,
+				thinkingLevel: DEFAULT_THINKING_LEVEL,
+				fallbackMessage: undefined,
+				provenance: "cli",
+			};
 		}
 	}
 
@@ -639,6 +647,7 @@ export async function findInitialModel(options: {
 			model: scopedModels[0].model,
 			thinkingLevel: scopedModels[0].thinkingLevel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
 			fallbackMessage: undefined,
+			provenance: "scoped",
 		};
 	}
 
@@ -650,7 +659,7 @@ export async function findInitialModel(options: {
 			if (defaultThinkingLevel) {
 				thinkingLevel = defaultThinkingLevel;
 			}
-			return { model, thinkingLevel, fallbackMessage: undefined };
+			return { model, thinkingLevel, fallbackMessage: undefined, provenance: "settings" };
 		}
 	}
 
@@ -663,16 +672,31 @@ export async function findInitialModel(options: {
 			const defaultId = defaultModelPerProvider[provider];
 			const match = availableModels.find((m) => m.provider === provider && m.id === defaultId);
 			if (match) {
-				return { model: match, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+				return {
+					model: match,
+					thinkingLevel: DEFAULT_THINKING_LEVEL,
+					fallbackMessage: undefined,
+					provenance: "provider-default",
+				};
 			}
 		}
 
 		// If no default found, use first available
-		return { model: availableModels[0], thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+		return {
+			model: availableModels[0],
+			thinkingLevel: DEFAULT_THINKING_LEVEL,
+			fallbackMessage: undefined,
+			provenance: "first-available",
+		};
 	}
 
 	// 5. No model found
-	return { model: undefined, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+	return {
+		model: undefined,
+		thinkingLevel: DEFAULT_THINKING_LEVEL,
+		fallbackMessage: undefined,
+		provenance: "first-available",
+	};
 }
 
 /**

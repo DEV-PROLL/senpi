@@ -273,6 +273,33 @@ describe("SettingsManager", () => {
 			expect(thenRetrySettings.timeoutMs).toBe(12_345);
 		});
 
+		it("should default the provider stream retry timeout to 30s", () => {
+			const givenSettingsPath = join(agentDir, "settings.json");
+			writeFileSync(givenSettingsPath, JSON.stringify({ theme: "dark" }));
+
+			const whenManager = SettingsManager.create(projectDir, agentDir);
+
+			expect(whenManager.getProviderStreamRetryTimeoutMs()).toBe(30_000);
+		});
+
+		it("should prefer retry.provider.streamRetryTimeoutMs", () => {
+			const givenSettingsPath = join(agentDir, "settings.json");
+			writeFileSync(givenSettingsPath, JSON.stringify({ retry: { provider: { streamRetryTimeoutMs: 45_000 } } }));
+
+			const whenManager = SettingsManager.create(projectDir, agentDir);
+
+			expect(whenManager.getProviderStreamRetryTimeoutMs()).toBe(45_000);
+		});
+
+		it("should disable the provider stream retry cap when streamRetryTimeoutMs is 0", () => {
+			const givenSettingsPath = join(agentDir, "settings.json");
+			writeFileSync(givenSettingsPath, JSON.stringify({ retry: { provider: { streamRetryTimeoutMs: 0 } } }));
+
+			const whenManager = SettingsManager.create(projectDir, agentDir);
+
+			expect(whenManager.getProviderStreamRetryTimeoutMs()).toBeUndefined();
+		});
+
 		it("should default the agent stream idle timeout to httpIdleTimeoutMs", () => {
 			const givenSettingsPath = join(agentDir, "settings.json");
 			writeFileSync(givenSettingsPath, JSON.stringify({ theme: "dark" }));
@@ -310,6 +337,63 @@ describe("SettingsManager", () => {
 			const whenManager = SettingsManager.create(projectDir, agentDir);
 
 			expect(whenManager.getAgentStreamIdleTimeoutMs()).toBe(5_000);
+		});
+
+		it("should default the agent stream start timeout to 90s", () => {
+			const givenSettingsPath = join(agentDir, "settings.json");
+			writeFileSync(givenSettingsPath, JSON.stringify({ theme: "dark" }));
+
+			const whenManager = SettingsManager.create(projectDir, agentDir);
+
+			expect(whenManager.getAgentStreamStartTimeoutMs()).toBe(90_000);
+		});
+
+		it("should prefer retry.provider.streamStartTimeoutMs for the agent stream start timeout", () => {
+			const givenSettingsPath = join(agentDir, "settings.json");
+			writeFileSync(givenSettingsPath, JSON.stringify({ retry: { provider: { streamStartTimeoutMs: 30_000 } } }));
+
+			const whenManager = SettingsManager.create(projectDir, agentDir);
+
+			expect(whenManager.getAgentStreamStartTimeoutMs()).toBe(30_000);
+		});
+
+		it("should disable the agent stream start timeout when streamStartTimeoutMs is 0", () => {
+			const givenSettingsPath = join(agentDir, "settings.json");
+			writeFileSync(givenSettingsPath, JSON.stringify({ retry: { provider: { streamStartTimeoutMs: 0 } } }));
+
+			const whenManager = SettingsManager.create(projectDir, agentDir);
+
+			expect(whenManager.getAgentStreamStartTimeoutMs()).toBeUndefined();
+		});
+
+		it("should disable the default agent stream start timeout when the idle guard is disabled", () => {
+			const givenSettingsPath = join(agentDir, "settings.json");
+			writeFileSync(givenSettingsPath, JSON.stringify({ httpIdleTimeoutMs: 0 }));
+
+			const whenManager = SettingsManager.create(projectDir, agentDir);
+
+			expect(whenManager.getAgentStreamStartTimeoutMs()).toBeUndefined();
+		});
+
+		it("should clamp the default agent stream start timeout to a shorter idle timeout", () => {
+			const givenSettingsPath = join(agentDir, "settings.json");
+			writeFileSync(givenSettingsPath, JSON.stringify({ httpIdleTimeoutMs: 60_000 }));
+
+			const whenManager = SettingsManager.create(projectDir, agentDir);
+
+			expect(whenManager.getAgentStreamStartTimeoutMs()).toBe(60_000);
+		});
+
+		it("should keep an explicit agent stream start timeout even above the idle timeout", () => {
+			const givenSettingsPath = join(agentDir, "settings.json");
+			writeFileSync(
+				givenSettingsPath,
+				JSON.stringify({ httpIdleTimeoutMs: 60_000, retry: { provider: { streamStartTimeoutMs: 120_000 } } }),
+			);
+
+			const whenManager = SettingsManager.create(projectDir, agentDir);
+
+			expect(whenManager.getAgentStreamStartTimeoutMs()).toBe(120_000);
 		});
 	});
 

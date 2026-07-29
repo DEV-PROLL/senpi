@@ -22,6 +22,7 @@ import {
 	isConfigWatchValidation,
 	matchesConfigWatchFilter,
 } from "./protocol.ts";
+import { ReloadVetoDeferral } from "./reload-deferral.ts";
 import {
 	excludeRoutineOnlySettingsChanges,
 	isSettingsPath,
@@ -41,6 +42,7 @@ import {
 const BUILTIN_REGISTRATION_ID = "builtin";
 const DEFAULT_DEBOUNCE_MS = 200;
 const COMPACTION_RECHECK_MS = 250;
+const VETO_RECHECK_MS = 1000;
 const CONFIG_FILE_NAMES = ["settings.json", "models.json", "keybindings.json"] as const;
 
 /**
@@ -174,6 +176,8 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 	let deferredNoticeShown = false;
 	let unavailableReloadLogged = false;
 	let compactionRecheck: ReturnType<typeof setTimeout> | undefined;
+	let vetoRecheck: ReturnType<typeof setTimeout> | undefined;
+	const vetoDeferral = new ReloadVetoDeferral();
 	let changeChain: Promise<void> = Promise.resolve();
 
 	const closeWatchers = (): void => {
@@ -186,6 +190,12 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 		if (compactionRecheck === undefined) return;
 		(options.clock ?? defaultClock).clearTimeout(compactionRecheck);
 		compactionRecheck = undefined;
+	};
+
+	const clearVetoRecheck = (): void => {
+		if (vetoRecheck === undefined) return;
+		(options.clock ?? defaultClock).clearTimeout(vetoRecheck);
+		vetoRecheck = undefined;
 	};
 
 	const cleanupEventListeners = (): void => {
@@ -354,6 +364,24 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 			return;
 		}
 
+		// Probe the extension veto (session_before_reload) BEFORE announcing the
+		// reload: a vetoed hot-reload defers quietly (one notice per distinct
+		// reason) and retries on later idle edges or the veto recheck clock,
+		// instead of re-notifying "Hot-reloading:" plus the veto warning forever.
+		if (ctx.checkReloadVeto) {
+			const veto = await ctx.checkReloadVeto();
+			if (currentContext !== ctx || reloadInFlight || pending.size === 0) return;
+			if (veto.cancelled) {
+				const notice = vetoDeferral.defer(veto.reason);
+				if (notice) ctx.ui.notify(notice, "info");
+				logger.info("reload_deferred", { reason: veto.reason ?? "extension veto" });
+				armVetoRecheck();
+				return;
+			}
+		}
+		clearVetoRecheck();
+		vetoDeferral.reset();
+
 		const changes = pendingChanges(pending);
 		const paths = uniquePaths(changes.flatMap((change) => change.paths));
 		reloadInFlight = true;
@@ -386,6 +414,15 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 			compactionRecheck = undefined;
 			void flushPending();
 		}, COMPACTION_RECHECK_MS);
+	};
+
+	const armVetoRecheck = (): void => {
+		if (vetoRecheck !== undefined) return;
+		const clock = options.clock ?? defaultClock;
+		vetoRecheck = clock.setTimeout(() => {
+			vetoRecheck = undefined;
+			void flushPending();
+		}, VETO_RECHECK_MS);
 	};
 
 	const processReloadHandoff = async (event: SessionStartEvent, ctx: ExtensionContext): Promise<void> => {
@@ -439,6 +476,8 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 		currentContext = undefined;
 		closeWatchers();
 		clearCompactionRecheck();
+		clearVetoRecheck();
+		vetoDeferral.reset();
 		cleanupEventListeners();
 		pending.clear();
 		if (event.reason !== "reload" && closingContext) reloadHandoffs.delete(handoffKey(closingContext));

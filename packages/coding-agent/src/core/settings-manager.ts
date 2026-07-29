@@ -9,6 +9,17 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { findNearestParentConfigDir } from "../nearest-parent-config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import {
+	type ResolvedRetryFallbackSettings,
+	type RetrySettings as RetrySettingsConfig,
+	resolveAbortServerSideFallback,
+	resolveRetryFallbackSettings,
+} from "./retry-fallback/settings.ts";
+
+export type { ProviderRetrySettings, RetrySettings } from "./retry-fallback/settings.ts";
+
+export const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
+export const DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS = 30_000;
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -27,23 +38,6 @@ export interface CompactionSettings {
 export interface BranchSummarySettings {
 	reserveTokens?: number; // default: 16384 (tokens reserved for prompt + LLM response)
 	skipPrompt?: boolean; // default: false - when true, skips "Summarize branch?" prompt and defaults to no summary
-}
-
-export interface ProviderRetrySettings {
-	timeoutMs?: number; // SDK request timeout + agent stream idle timeout; defaults to httpIdleTimeoutMs
-	maxRetries?: number; // SDK/provider retry attempts
-	maxRetryDelayMs?: number; // default: 60000 (max server-requested delay honoured on the same model; beyond it the fallback chain engages)
-}
-
-export interface RetrySettings {
-	enabled?: boolean; // default: true
-	maxRetries?: number; // default: 3
-	baseDelayMs?: number; // default: 2000 (exponential backoff: 2s, 4s, 8s)
-	provider?: ProviderRetrySettings;
-	modelFallback?: boolean; // default: true
-	fallbackChains?: Record<string, string[]>;
-	fallbackRevertPolicy?: "cooldown-expiry" | "never"; // default: "cooldown-expiry"
-	abortServerSideFallback?: boolean; // default: true
 }
 
 export interface TerminalSettings {
@@ -97,6 +91,7 @@ export interface OpenAISettings {
 
 export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
+	offRecommendedModel?: boolean; // default: false
 }
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
@@ -132,7 +127,7 @@ export interface Settings {
 	theme?: string;
 	compaction?: CompactionSettings;
 	branchSummary?: BranchSummarySettings;
-	retry?: RetrySettings;
+	retry?: RetrySettingsConfig;
 	hideThinkingBlock?: boolean;
 	smoothStreaming?: boolean; // default: true
 	smoothStreamingFps?: number; // default: 60, clamped to 30-120 when read
@@ -162,6 +157,7 @@ export interface Settings {
 	promptCache?: PromptCacheSettings;
 	images?: ImageSettings;
 	lookAt?: LookAtSettings;
+	recommendedModels?: string[]; // Preferred default model ids, in priority order
 	favoriteModels?: string[]; // Model patterns for Ctrl+P cycling (same format as --models CLI flag)
 	enabledModels?: string[]; // Legacy global model narrowing patterns (same format as --models CLI flag)
 	doubleEscapeAction?: "fork" | "tree" | "none"; // Action for double-escape with empty editor (default: "tree")
@@ -370,12 +366,12 @@ export class FileSettingsStorage implements SettingsStorage {
 		let release: (() => void) | undefined;
 		try {
 			// Only create directory and lock if file exists or we need to write
-			const fileExists = existsSync(path);
-			if (fileExists) {
+			let current: string | undefined;
+			if (existsSync(path)) {
 				release = this.acquireLockSyncWithRetry(path);
+				current = existsSync(path) ? readFileSync(path, "utf-8") : undefined;
 			}
-			const current = fileExists ? readFileSync(path, "utf-8") : undefined;
-			const next = fn(current);
+			let next = fn(current);
 			if (next !== undefined) {
 				// Only create directory when we actually need to write
 				if (!existsSync(dir)) {
@@ -383,9 +379,15 @@ export class FileSettingsStorage implements SettingsStorage {
 				}
 				if (!release) {
 					release = this.acquireLockSyncWithRetry(path);
+					if (existsSync(path)) {
+						// Lost the first-write race: re-merge against the winner's content under the lock.
+						next = fn(readFileSync(path, "utf-8"));
+					}
 				}
-				writeFileSync(path, next, "utf-8");
-				recordSelfWrite(path, next);
+				if (next !== undefined) {
+					writeFileSync(path, next, "utf-8");
+					recordSelfWrite(path, next);
+				}
 			}
 		} finally {
 			if (release) {
@@ -990,9 +992,7 @@ export class SettingsManager {
 	 * fallback chain instead of the provider. Defaults to enabled.
 	 */
 	getAbortServerSideFallback(): boolean {
-		return typeof this.settings.retry?.abortServerSideFallback === "boolean"
-			? this.settings.retry.abortServerSideFallback
-			: true;
+		return resolveAbortServerSideFallback(this.settings.retry);
 	}
 
 	/** Raw retry.fallbackChains value before sanitization, for startup validation warnings. */
@@ -1000,32 +1000,8 @@ export class SettingsManager {
 		return this.settings.retry?.fallbackChains;
 	}
 
-	getRetryFallbackSettings(): {
-		modelFallback: boolean;
-		chains: Readonly<Record<string, readonly string[]>>;
-		revertPolicy: "cooldown-expiry" | "never";
-	} {
-		const fallbackChains = this.settings.retry?.fallbackChains;
-		const chains: Record<string, readonly string[]> = {};
-		if (typeof fallbackChains === "object" && fallbackChains !== null && !Array.isArray(fallbackChains)) {
-			for (const [key, entries] of Object.entries(fallbackChains)) {
-				if (!Array.isArray(entries) || !entries.every((entry) => typeof entry === "string")) {
-					return {
-						modelFallback:
-							typeof this.settings.retry?.modelFallback === "boolean" ? this.settings.retry.modelFallback : true,
-						chains: {},
-						revertPolicy: this.settings.retry?.fallbackRevertPolicy === "never" ? "never" : "cooldown-expiry",
-					};
-				}
-				chains[key] = [...entries];
-			}
-		}
-		return {
-			modelFallback:
-				typeof this.settings.retry?.modelFallback === "boolean" ? this.settings.retry.modelFallback : true,
-			chains,
-			revertPolicy: this.settings.retry?.fallbackRevertPolicy === "never" ? "never" : "cooldown-expiry",
-		};
+	getRetryFallbackSettings(): ResolvedRetryFallbackSettings {
+		return resolveRetryFallbackSettings(this.settings.retry);
 	}
 
 	setFallbackChain(key: string, entries: string[]): void {
@@ -1106,6 +1082,20 @@ export class SettingsManager {
 	}
 
 	/**
+	 * First-request liveness cap for retries of known provider stream/transport
+	 * timeouts. `retry.provider.streamRetryTimeoutMs` overrides the 30s default;
+	 * 0 disables the cap without disabling queue deferral. The retry path clamps
+	 * only already-enabled stream guards, so this setting never re-enables one.
+	 */
+	getProviderStreamRetryTimeoutMs(): number | undefined {
+		const explicit = this.settings.retry?.provider?.streamRetryTimeoutMs;
+		if (explicit !== undefined) {
+			return explicit > 0 ? explicit : undefined;
+		}
+		return DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS;
+	}
+
+	/**
 	 * Idle timeout for the agent loop's provider event reader. Defaults to
 	 * httpIdleTimeoutMs so streams that stop delivering events (e.g. a
 	 * connection that silently died after a network change) fail with a
@@ -1120,6 +1110,27 @@ export class SettingsManager {
 		}
 		const httpIdleTimeoutMs = this.getHttpIdleTimeoutMs();
 		return httpIdleTimeoutMs === 0 ? undefined : httpIdleTimeoutMs;
+	}
+
+	/**
+	 * Bound on the time to the FIRST provider stream event. Providers only emit
+	 * their first event once the HTTP response begins, so a dead upstream that
+	 * accepts the request but never answers is otherwise bounded only by the
+	 * idle timeout (default 5 minutes) — long enough to make a session feel
+	 * permanently stuck. `retry.provider.streamStartTimeoutMs` overrides the
+	 * 90s default (0 disables). The default never exceeds the idle timeout and
+	 * is disabled together with a disabled idle guard.
+	 */
+	getAgentStreamStartTimeoutMs(): number | undefined {
+		const explicit = this.settings.retry?.provider?.streamStartTimeoutMs;
+		if (explicit !== undefined) {
+			return explicit > 0 ? explicit : undefined;
+		}
+		const idleTimeoutMs = this.getAgentStreamIdleTimeoutMs();
+		if (idleTimeoutMs === undefined) {
+			return undefined;
+		}
+		return Math.min(DEFAULT_STREAM_START_TIMEOUT_MS, idleTimeoutMs);
 	}
 
 	getWebSocketConnectTimeoutMs(): number | undefined {
@@ -1489,6 +1500,10 @@ export class SettingsManager {
 
 	getEnabledModels(): string[] | undefined {
 		return this.settings.enabledModels;
+	}
+
+	getRecommendedModels(): string[] | undefined {
+		return this.settings.recommendedModels ? [...this.settings.recommendedModels] : undefined;
 	}
 
 	getFavoriteModels(): string[] | undefined {

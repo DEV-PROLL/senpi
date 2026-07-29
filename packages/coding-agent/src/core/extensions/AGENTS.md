@@ -30,7 +30,7 @@ extensions/
 | Flags | `registerFlag`, `getFlag` | New CLI flag |
 | Providers | `registerProvider`, `unregisterProvider` | New LLM provider (extension-local) |
 | Messages | `sendMessage`, `sendUserMessage`, `appendEntry`, `registerMessageRenderer` | Inject messages/entries into the session |
-| Model | `setModel`, `getThinkingLevel`, `setThinkingLevel` | Model + thinking-level control |
+| Model | `setModel`, `setSessionModel`, `getThinkingLevel`, `setThinkingLevel`, `setSessionThinkingLevel` | Model + thinking-level control (`setSession*` variants leave persisted defaults untouched) |
 | Session metadata | `setSessionName`, `getSessionName`, `setLabel` | Session display name + entry labels |
 | Tool execution | `executeTool` | Run a tool through the normal validation/hook/permission pipeline |
 | Events | `on(<event>, handler)` | 30+ events (session_start, tool_call, message_update, before_provider_request, before_agent_start, model_select, system_prompt_change, session_before_compact, session_compact, resources_discover, etc.) |
