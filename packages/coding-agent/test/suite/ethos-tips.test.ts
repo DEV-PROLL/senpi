@@ -9,6 +9,9 @@ const ETHOS_IDS = [
 	"ethos.deep-work",
 	"ethos.ulw-plan-sage",
 	"ethos.ulw-loop-shallow",
+	"ethos.monitor-subscribe",
+	"ethos.cache-budget",
+	"ethos.cache-hit-rate",
 ] as const;
 
 const noopKeys = (): string => "";
@@ -46,6 +49,15 @@ describe("ethos tips", () => {
 		expect(byId.get("ethos.ulw-loop-shallow")).toBe(
 			"For days when deep thought sounds awful, run the ulw loop with gpt-5.6-sol fast/medium. Fair warning: shallow thinking sends invoices.",
 		);
+		expect(byId.get("ethos.monitor-subscribe")).toBe(
+			"Subscribe to a command's stdout and forget it. CI finishes, server boots, log line lands... you're mid-edit and the news finds *you*. No sleep loops, no polling, no re-reading context like a chump.",
+		);
+		expect(byId.get("ethos.cache-budget")).toBe(
+			"My harness knows the prompt cache's expiry to the second and never blocks past it. Cold re-read tax? *Refused on your behalf.* Other agents eat that cost, mine declines it.",
+		);
+		expect(byId.get("ethos.cache-hit-rate")).toBe(
+			"Live cache-hit rate in the footer, plus a running tab of misses, idle gaps, and model swaps. I can point at the exact moment cache broke and why. Watching tokens you never re-pay stack up? Smug doesn't cover it.",
+		);
 	});
 
 	it("gates the ulw command tips on the tasks command", () => {
@@ -64,6 +76,9 @@ describe("ethos tips", () => {
 			"ethos.only-harness",
 			"ethos.spend-tokens",
 			"ethos.deep-work",
+			"ethos.monitor-subscribe",
+			"ethos.cache-budget",
+			"ethos.cache-hit-rate",
 		] as const) {
 			const tip = byId.get(id);
 			expect(tip?.bindings, id).toEqual([]);
