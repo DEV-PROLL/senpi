@@ -78,10 +78,11 @@ export function bundlablePublishPackageNames(codingAgentNodeModules, packageName
 	return packageNames.filter((name) => !isPlatformConstrainedPackage(join(codingAgentNodeModules, name)));
 }
 
-function platformOptionalDependencyFamilies(codingAgentNodeModules, packageNames) {
+function promotePlatformOptionalDependencyFamilies(codingAgentNodeModules, packageNames) {
 	const promoted = {};
 	for (const packageName of packageNames) {
-		const manifest = readPackageManifest(join(codingAgentNodeModules, packageName));
+		const packageDir = join(codingAgentNodeModules, packageName);
+		const manifest = readPackageManifest(packageDir);
 		if (!manifest) continue;
 		const optionalDependencies = manifest.optionalDependencies ?? {};
 		const materializedOptionalNames = Object.keys(optionalDependencies).filter((name) =>
@@ -95,6 +96,11 @@ function platformOptionalDependencyFamilies(codingAgentNodeModules, packageNames
 			continue;
 		}
 		Object.assign(promoted, optionalDependencies);
+		// npm treats optional edges owned by a bundled package as already satisfied by
+		// the bundle and only creates empty package directories. The promoted root edges
+		// must be the sole owners so npm fetches the consumer platform's real sidecar.
+		manifest.optionalDependencies = {};
+		writeFileSync(join(packageDir, "package.json"), `${JSON.stringify(manifest, null, "\t")}\n`);
 	}
 	return promoted;
 }
@@ -140,7 +146,7 @@ export function stagePublishManifest(repoRoot) {
 
 	const bundlablePackageNames = bundlablePublishPackageNames(codingAgentNodeModules, stagedPackageNames);
 	manifest.optionalDependencies = {
-		...platformOptionalDependencyFamilies(codingAgentNodeModules, stagedPackageNames),
+		...promotePlatformOptionalDependencyFamilies(codingAgentNodeModules, stagedPackageNames),
 		...(manifest.optionalDependencies ?? {}),
 	};
 	const bundlableSet = new Set(bundlablePackageNames);

@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Make promoted native sidecars root-owned during npm installation so bundled portable packages cannot leave invalid empty platform-package directories instead of fetching the consumer's executable ([#446](https://github.com/code-yeongyu/senpi/issues/446)).
+
 ### Removed
 
 ## [2026.7.29-5] - 2026-07-29
