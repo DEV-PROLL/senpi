@@ -1,5 +1,21 @@
 # changes
 
+## Footer omits cumulative input and output counters (2026-07-29)
+
+### What changed
+
+- `components/footer.ts` no longer adds the cumulative `↑<input>` and `↓<output>` token segments to the interactive footer.
+- Context-window usage, cache-hit rate, session name, cost, model, working directory, branch, and extension statuses remain unchanged.
+- Coverage: `test/footer-token-format.test.ts` asserts that the usage arrows are absent while the neighboring cache-hit and context details still render.
+
+### Why
+
+- The cumulative input/output counters add visual noise to the always-visible footer without helping the active context decision; the context-window segment remains the relevant token signal.
+
+### Expected merge conflict zones
+
+- LOW: `components/footer.ts` around the optional middle-stat segment construction.
+
 ## Tip lines point at the give-me-tips skill (2026-07-29)
 
 ### What changed

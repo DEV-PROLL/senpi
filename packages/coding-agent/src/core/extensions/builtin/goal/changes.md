@@ -1,5 +1,43 @@
 # goal Extension Changes
 
+## Cache-warm continuation story: enriched events + durable entry + TUI renderer (2026-07-29)
+
+### What changed
+
+- New `cache-warm.ts`: `estimateCacheWarmMetrics(model, env, lastTurnUsage)` derives
+  `GoalCacheWarmMetrics {ttlSeconds?, cachedTokens, estimatedSavedUsd?}` - prompt-cache TTL via
+  pi-ai `resolvePromptCacheTtlSeconds`, warm tokens = the last turn's cacheRead+cacheWrite, and
+  savings = cachedTokens x (input - cacheRead) $/Mtok clamped >= 0 - plus the scheduled/resumed
+  notice builders and shared token/duration/TTL/USD formatters.
+- `monitor-continuation.ts`: the monitor-wait schedule notice now explains the cache-warm
+  rationale (monitors on duty, timed wake inside the prompt-cache TTL, ~tokens kept warm) while
+  preserving the "4 minutes" wording RPC clients match. `goal_continuation_scheduled` gains a
+  `cache` payload member; a new `goal_continuation_resumed` pi-event fires when the deferred
+  continuation is queued. Both moments append a durable `goal-cache-warmup` custom entry and the
+  resumed side also notifies with waited time + estimated savings.
+- New `cache-warm-renderer.ts`, registered in `index.ts` via
+  `pi.registerEntryRenderer("goal-cache-warmup", ...)`: themed transcript block (bold accent
+  title, dim why-line, success-colored warm/savings line; expanded adds goalId + planned delay).
+- Coverage: `goal-cache-warm-metrics.test.ts`, `goal-cache-warmup.test.ts`,
+  `goal-cache-warm-renderer.test.ts`; the goal monitor harness gained
+  `appendEntry`/`registerEntryRenderer` fakes, an optional ctx `model`, and usage-bearing
+  assistant stops.
+
+### Event/entry contract (consumed by omo-desktop-app later)
+
+- pi-event `goal_continuation_scheduled`: `{goalId, delayMs, activeMonitorCount, cache?}`.
+- pi-event `goal_continuation_resumed`: `{goalId, delayMs, waitedMs, activeMonitorCount, cache?}`.
+- Custom session entry `goal-cache-warmup` (`CustomEntry.data = GoalCacheWarmupEntryData`):
+  `{phase: "scheduled"|"resumed", goalId, delayMs, waitedMs?, activeMonitorCount, cache?}`,
+  `cache = {ttlSeconds?, cachedTokens, estimatedSavedUsd?}`.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `monitor-continuation.ts` around `#schedule`/`#continueIfEligible` and `index.ts`
+  renderer registration.
+- NONE in persistence, tool schemas, or status transitions; standalone `pi-goal` has no terminal
+  monitor integration.
+
 ## Monitor-wait continuation stall check (2026-07-28)
 
 ### What changed

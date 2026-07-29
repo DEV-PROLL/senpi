@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "../../src/core/extensions/types.ts";
 
@@ -42,15 +43,19 @@ export class TestEventBus {
 	}
 }
 
+export type AppendedGoalEntry = { readonly customType: string; readonly data: unknown };
+
 export interface GoalHarness {
 	readonly tools: Map<string, AnyTool>;
 	readonly handlers: Map<string, GoalHandler[]>;
 	readonly sent: SentGoalMessage[];
 	readonly events: TestEventBus;
+	readonly entries: AppendedGoalEntry[];
 }
 
 export interface GoalContextState {
 	pendingMessages: boolean;
+	model?: Model<Api>;
 }
 
 export function createGoalHarness(): GoalHarness {
@@ -58,9 +63,12 @@ export function createGoalHarness(): GoalHarness {
 	const handlers = new Map<string, GoalHandler[]>();
 	const sent: SentGoalMessage[] = [];
 	const events = new TestEventBus();
+	const entries: AppendedGoalEntry[] = [];
 	const pi = {
 		registerTool: (tool: AnyTool) => tools.set(tool.name, tool),
 		registerCommand: () => {},
+		registerEntryRenderer: () => {},
+		appendEntry: (customType: string, data?: unknown) => entries.push({ customType, data }),
 		on: (event: string, handler: GoalHandler) => {
 			const registered = handlers.get(event) ?? [];
 			registered.push(handler);
@@ -70,7 +78,7 @@ export function createGoalHarness(): GoalHarness {
 		events,
 	} as unknown as ExtensionAPI;
 	goalExtension(pi);
-	return { tools, handlers, sent, events };
+	return { tools, handlers, sent, events, entries };
 }
 
 const tempDirs: string[] = [];
@@ -85,6 +93,7 @@ export async function makeGoalContext(
 	return {
 		hasUI: true,
 		cwd: dir,
+		model: state.model,
 		isIdle: () => true,
 		hasPendingMessages: () => state.pendingMessages,
 		ui: {
@@ -116,7 +125,15 @@ export async function runGoalHandlers(
 	}
 }
 
-export function cleanAssistantStop(): AgentMessage {
+export type AssistantUsageOverrides = Partial<{
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	totalTokens: number;
+}>;
+
+export function cleanAssistantStop(usageOverrides: AssistantUsageOverrides = {}): AgentMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text: "" }],
@@ -130,6 +147,7 @@ export function cleanAssistantStop(): AgentMessage {
 			cacheWrite: 0,
 			totalTokens: 0,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			...usageOverrides,
 		},
 		stopReason: "stop",
 		timestamp: Date.now(),

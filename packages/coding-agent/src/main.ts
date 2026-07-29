@@ -417,6 +417,7 @@ function buildSessionOptions(
 		}
 		if (resolved.model) {
 			options.model = resolved.model;
+			options.initialModelProvenance = "cli";
 			// Allow "--model <pattern>:<thinking>" as a shorthand.
 			// Explicit --thinking still takes precedence (applied later).
 			if (!parsed.thinking && resolved.thinkingLevel) {
@@ -435,12 +436,14 @@ function buildSessionOptions(
 
 		if (savedInScope) {
 			options.model = savedInScope.model;
+			options.initialModelProvenance = "scoped";
 			// Use thinking level from scoped model config if explicitly set
 			if (!parsed.thinking && savedInScope.thinkingLevel) {
 				options.thinkingLevel = savedInScope.thinkingLevel;
 			}
 		} else {
 			options.model = scopedModels[0].model;
+			options.initialModelProvenance = "scoped";
 			// Use thinking level from first scoped model if explicitly set
 			if (!parsed.thinking && scopedModels[0].thinkingLevel) {
 				options.thinkingLevel = scopedModels[0].thinkingLevel;
