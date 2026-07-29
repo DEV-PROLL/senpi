@@ -17,15 +17,13 @@ describe("credential headers", () => {
 		expect(hasCredentialHeaders({ [name]: "credential" })).toBe(true);
 	});
 
-	it.each([
-		"User-Agent",
-		"x-request-id",
-		"x-trace-token",
-		"content-type",
-	])("does not treat %s as credential-bearing", (name) => {
-		expect(isCredentialHeaderName(name)).toBe(false);
-		expect(hasCredentialHeaders({ [name]: "metadata" })).toBe(false);
-	});
+	it.each(["User-Agent", "x-request-id", "x-trace-token", "content-type"])(
+		"does not treat %s as credential-bearing",
+		(name) => {
+			expect(isCredentialHeaderName(name)).toBe(false);
+			expect(hasCredentialHeaders({ [name]: "metadata" })).toBe(false);
+		},
+	);
 
 	it("uses the last case-insensitive value and rejects empty authorization schemes", () => {
 		expect(hasCredentialHeaders({ Authorization: "Bearer configured", authorization: "" })).toBe(false);

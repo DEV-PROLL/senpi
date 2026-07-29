@@ -212,25 +212,21 @@ describe("Bedrock Converse TTL", () => {
 });
 
 describe("automatic and unknown cache backends", () => {
-	it.each([
-		"openai-responses",
-		"openai-codex-responses",
-		"azure-openai-responses",
-	] as const)("returns five minutes for %s", (api) => {
-		expect(resolvePromptCacheTtlSeconds(createModel(api))).toBe(300);
-	});
+	it.each(["openai-responses", "openai-codex-responses", "azure-openai-responses"] as const)(
+		"returns five minutes for %s",
+		(api) => {
+			expect(resolvePromptCacheTtlSeconds(createModel(api))).toBe(300);
+		},
+	);
 
 	it("returns undefined for disabled OpenAI Responses caching", () => {
 		expect(resolvePromptCacheTtlSeconds(createModel("openai-responses", { cacheRetention: "none" }))).toBeUndefined();
 	});
 
-	it.each([
-		"google-generative-ai",
-		"google-vertex",
-		"mistral-conversations",
-		"pi-messages",
-		"unknown-api",
-	] as const)("returns undefined for %s", (api) => {
-		expect(resolvePromptCacheTtlSeconds(createModel(api))).toBeUndefined();
-	});
+	it.each(["google-generative-ai", "google-vertex", "mistral-conversations", "pi-messages", "unknown-api"] as const)(
+		"returns undefined for %s",
+		(api) => {
+			expect(resolvePromptCacheTtlSeconds(createModel(api))).toBeUndefined();
+		},
+	);
 });

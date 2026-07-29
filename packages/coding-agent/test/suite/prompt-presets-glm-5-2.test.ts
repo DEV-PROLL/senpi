@@ -32,43 +32,39 @@ function getGlm52CatalogModels(): Model<Api>[] {
 }
 
 describe("GLM 5.2 prompt preset", () => {
-	it.each([
-		"zai-org/glm-5.2",
-		"glm-5.2",
-		"GLM 5.2",
-		"zai-org/glm-5p2",
-		"zai-org/glm_5_2:thinking",
-	])("resolves %s to the glm-5.2 preset", (modelId) => {
-		// given
-		const settings: PromptPresetSettings = { promptPreset: "auto" };
-		const model = createModel(modelId, "openrouter", "openai-responses");
+	it.each(["zai-org/glm-5.2", "glm-5.2", "GLM 5.2", "zai-org/glm-5p2", "zai-org/glm_5_2:thinking"])(
+		"resolves %s to the glm-5.2 preset",
+		(modelId) => {
+			// given
+			const settings: PromptPresetSettings = { promptPreset: "auto" };
+			const model = createModel(modelId, "openrouter", "openai-responses");
 
-		// when
-		const preset = resolvePreset(model, settings);
+			// when
+			const preset = resolvePreset(model, settings);
 
-		// then
-		expect(preset?.name).toBe("glm-5.2");
-		expect(preset?.prompt).toContain("running on GLM 5.2");
-		expect(preset?.prompt).toContain("absolute certainty");
-		expect(preset?.prompt).toContain("todo");
-		expect(preset?.prompt).not.toContain("apply_patch");
-	});
+			// then
+			expect(preset?.name).toBe("glm-5.2");
+			expect(preset?.prompt).toContain("running on GLM 5.2");
+			expect(preset?.prompt).toContain("absolute certainty");
+			expect(preset?.prompt).toContain("todo");
+			expect(preset?.prompt).not.toContain("apply_patch");
+		},
+	);
 
-	it.each([
-		"glm-4.6",
-		"zai-org/glm-4.5",
-		"some-glm-compatible-router",
-	])("does not route %s to the glm-5.2 preset", (modelId) => {
-		// given
-		const settings: PromptPresetSettings = { promptPreset: "auto" };
-		const model = createModel(modelId, "openrouter", "openai-responses");
+	it.each(["glm-4.6", "zai-org/glm-4.5", "some-glm-compatible-router"])(
+		"does not route %s to the glm-5.2 preset",
+		(modelId) => {
+			// given
+			const settings: PromptPresetSettings = { promptPreset: "auto" };
+			const model = createModel(modelId, "openrouter", "openai-responses");
 
-		// when
-		const preset = resolvePreset(model, settings);
+			// when
+			const preset = resolvePreset(model, settings);
 
-		// then
-		expect(preset).toBeUndefined();
-	});
+			// then
+			expect(preset).toBeUndefined();
+		},
+	);
 
 	it("allows settings.json to force glm-5.2 regardless of model id", () => {
 		// given

@@ -239,25 +239,25 @@ describe("goal continuation while a monitor is active", () => {
 		expect(sent).toHaveLength(0);
 	});
 
-	it.each([
-		"paused",
-		"complete",
-	] as const)("cancels a pending user grace continuation when the goal becomes %s", async (status) => {
-		vi.useFakeTimers();
-		const notices: string[] = [];
-		const ctx = await makeGoalContext(notices, `thread-user-grace-${status}-cancel`);
-		const { monitor, sent } = createDirectMonitorHarness();
-		const goal = activeGoal(`goal-user-grace-${status}`);
-		monitor.start(ctx);
-		monitor.noteUserPrompt();
-		await monitor.afterAgentEnd({ ctx, goal, messages: [cleanAssistantStop()] });
+	it.each(["paused", "complete"] as const)(
+		"cancels a pending user grace continuation when the goal becomes %s",
+		async (status) => {
+			vi.useFakeTimers();
+			const notices: string[] = [];
+			const ctx = await makeGoalContext(notices, `thread-user-grace-${status}-cancel`);
+			const { monitor, sent } = createDirectMonitorHarness();
+			const goal = activeGoal(`goal-user-grace-${status}`);
+			monitor.start(ctx);
+			monitor.noteUserPrompt();
+			await monitor.afterAgentEnd({ ctx, goal, messages: [cleanAssistantStop()] });
 
-		await vi.advanceTimersByTimeAsync(45_000);
-		monitor.syncGoal({ ...goal, status });
-		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
+			await vi.advanceTimersByTimeAsync(45_000);
+			monitor.syncGoal({ ...goal, status });
+			await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
 
-		expect(sent).toHaveLength(0);
-	});
+			expect(sent).toHaveLength(0);
+		},
+	);
 
 	it("does not continue a pending user grace turn after pending messages arrive", async () => {
 		vi.useFakeTimers();

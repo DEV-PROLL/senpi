@@ -54,27 +54,31 @@ describe("getSupportedThinkingLevels", () => {
 		expect(getSupportedThinkingLevels(model!)).not.toContain("max");
 	});
 
-	it.each([
-		"gpt-5.4",
-		"gpt-5.5",
-		"gpt-5.6-sol",
-		"gpt-5.6-terra",
-		"gpt-5.6-luna",
-	] as const)("includes xhigh for openai-codex %s models", (modelId) => {
-		const model = getModel("openai-codex", modelId);
-		expect(model).toBeDefined();
-		expect(getSupportedThinkingLevels(model!)).toContain("xhigh");
-	});
+	it.each(["gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const)(
+		"includes xhigh for openai-codex %s models",
+		(modelId) => {
+			const model = getModel("openai-codex", modelId);
+			expect(model).toBeDefined();
+			expect(getSupportedThinkingLevels(model!)).toContain("xhigh");
+		},
+	);
 
-	it.each([
-		"gpt-5.6-sol",
-		"gpt-5.6-terra",
-		"gpt-5.6-luna",
-	] as const)("includes xhigh and max for OpenAI %s models", (modelId) => {
-		const model = getModel("openai", modelId);
-		expect(model).toBeDefined();
-		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-	});
+	it.each(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const)(
+		"includes xhigh and max for OpenAI %s models",
+		(modelId) => {
+			const model = getModel("openai", modelId);
+			expect(model).toBeDefined();
+			expect(getSupportedThinkingLevels(model!)).toEqual([
+				"off",
+				"minimal",
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max",
+			]);
+		},
+	);
 
 	it("includes only medium/high/xhigh for OpenAI GPT-5.5 Pro", () => {
 		const model = getModel("openai", "gpt-5.5-pro");
@@ -170,14 +174,12 @@ describe("supportsXhigh tier detection for map-less models", () => {
 		return { ...rest, id };
 	}
 
-	it.each([
-		"claude-opus-5",
-		"claude-sonnet-5",
-		"claude-fable-5",
-		"gpt-5.6-sol",
-	])("detects the xhigh tier for map-less %s", (id) => {
-		expect(supportsXhigh(maplessWithId(id))).toBe(true);
-	});
+	it.each(["claude-opus-5", "claude-sonnet-5", "claude-fable-5", "gpt-5.6-sol"])(
+		"detects the xhigh tier for map-less %s",
+		(id) => {
+			expect(supportsXhigh(maplessWithId(id))).toBe(true);
+		},
+	);
 
 	it("still reports no xhigh tier for a map-less Sonnet 4.5", () => {
 		expect(supportsXhigh(maplessWithId("claude-sonnet-4-5"))).toBe(false);
