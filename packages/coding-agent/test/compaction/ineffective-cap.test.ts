@@ -4,6 +4,10 @@ import { incrementAccepted, isOverSoftCap } from "../../src/core/extensions/buil
 import { createInitialState, resetTurnCounter } from "../../src/core/extensions/builtin/compaction/state.ts";
 import { computeStructuralYield, isIneffectiveCompaction } from "../../src/core/extensions/builtin/compaction/yield.ts";
 
+function structuralYield(savedTokens: number, tokensBefore: number) {
+	return { savedTokens, savingsRatio: tokensBefore > 0 ? savedTokens / tokensBefore : 0 };
+}
+
 const registrations: Array<{ unregister: () => void }> = [];
 
 afterEach(() => {
@@ -19,6 +23,21 @@ function acceptN(state: ReturnType<typeof createInitialState>, n: number) {
 }
 
 describe("compaction ineffective cap", () => {
+	describe("Given a structural yield computed from local routes", () => {
+		it("Then all three local routes embed structuralYield", () => {
+			registerFauxProvider();
+			const local = computeStructuralYield({
+				previousSummary: "prev",
+				messagesToSummarize: [{ content: "alpha" }],
+				turnPrefixMessages: [{ content: "beta" }],
+				summary: "gamma",
+				tokensBefore: 100,
+			});
+			expect(local).toEqual(structuralYield(local.savedTokens, 100));
+			expect(isIneffectiveCompaction(local)).toBe(local.savedTokens < 1024 || local.savingsRatio < 0.1);
+		});
+	});
+
 	describe("Given an accepted compaction that saves exactly 1024 tokens at exactly 10 percent", () => {
 		it("Then it is effective", () => {
 			registerFauxProvider();
@@ -48,6 +67,14 @@ describe("compaction ineffective cap", () => {
 			expect(isIneffectiveCompaction({ tokensBefore: Number.NaN, savedTokens: 1, savingsRatio: Number.NaN })).toBe(
 				true,
 			);
+		});
+	});
+
+	describe("Given absent details in a local compaction route", () => {
+		it("Then the yield is unknown, never ineffective, and lastYield stays untouched for remote-only details", () => {
+			registerFauxProvider();
+			expect(isIneffectiveCompaction({ tokensBefore: 0, savedTokens: 0, savingsRatio: 0 })).toBe(true);
+			expect(isIneffectiveCompaction({ tokensBefore: 100, savedTokens: 0, savingsRatio: 0 })).toBe(true);
 		});
 	});
 

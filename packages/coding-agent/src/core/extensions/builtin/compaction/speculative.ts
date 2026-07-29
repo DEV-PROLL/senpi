@@ -28,6 +28,7 @@ import type { ReadonlySessionManager } from "../../../session-manager.ts";
 import type { ApplyCompactionResult, ContextUsage, ProviderRequestPreparation } from "../../types.ts";
 import { sanitizeAnthropicPayload } from "../tool-pair-guard/sanitize-anthropic-payload.ts";
 import { computeEffectiveKeepRecentTokens, computeEffectiveThreshold } from "./policy.ts";
+import { computeStructuralYield } from "./yield.ts";
 import { buildPrompt, type MergedCompactionPromptVariant } from "./prompts.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
 import * as truncation from "./tool-truncation.ts";
@@ -551,6 +552,13 @@ export async function runExtensionCompaction(
 				schema: SUMMARY_SCHEMA,
 				promptVariant: snapshot.promptVariant,
 				tokenEstimate,
+				structuralYield: computeStructuralYield({
+					previousSummary: snapshot.preparation.previousSummary,
+					messagesToSummarize: snapshot.preparation.messagesToSummarize,
+					turnPrefixMessages: snapshot.preparation.turnPrefixMessages,
+					summary,
+					tokensBefore: snapshot.preparation.tokensBefore,
+				}),
 				...(snapshot.origin ? { origin: snapshot.origin } : {}),
 			},
 		};
