@@ -54,12 +54,13 @@ describe("resolveConfigValue", () => {
 		expect(resolveConfigValue("!echo 'hello world' | tr ' ' '-'")).toBe("hello-world");
 	});
 
-	test.each(["!exit 1", "!nonexistent-command-12345", "!printf ''"])(
-		"returns undefined when command resolution fails: %s",
-		(command) => {
-			expect(resolveConfigValue(command)).toBeUndefined();
-		},
-	);
+	test.each([
+		"!exit 1",
+		"!nonexistent-command-12345",
+		"!printf ''",
+	])("returns undefined when command resolution fails: %s", (command) => {
+		expect(resolveConfigValue(command)).toBeUndefined();
+	});
 
 	test("caches successful and failed commands until explicitly cleared", () => {
 		const counterFile = join(tempDir, "counter");

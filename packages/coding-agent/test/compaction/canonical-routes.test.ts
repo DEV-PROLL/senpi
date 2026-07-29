@@ -907,77 +907,73 @@ describe("builtin compaction canonical routes", () => {
 		}
 	});
 
-	it.each(["x-tenant-id", "x-workspace-id"] as const)(
-		"declines replay when final routing header %s changes for the same endpoint and credential",
-		(routingHeader) => {
-			const commonHeaders = {
-				authorization: "Bearer shared-account-credential",
-				"x-tenant-id": "tenant-a",
-				"x-workspace-id": "workspace-a",
-			};
-			const originA = openAiRemoteCompactionOrigin(OPENAI_MODEL, new Headers(commonHeaders));
-			const originB = openAiRemoteCompactionOrigin(
-				OPENAI_MODEL,
-				new Headers({ ...commonHeaders, [routingHeader]: `${routingHeader}-b` }),
-			);
-			if (!originA || !originB) throw new Error("Expected remote replay origins");
+	it.each([
+		"x-tenant-id",
+		"x-workspace-id",
+	] as const)("declines replay when final routing header %s changes for the same endpoint and credential", (routingHeader) => {
+		const commonHeaders = {
+			authorization: "Bearer shared-account-credential",
+			"x-tenant-id": "tenant-a",
+			"x-workspace-id": "workspace-a",
+		};
+		const originA = openAiRemoteCompactionOrigin(OPENAI_MODEL, new Headers(commonHeaders));
+		const originB = openAiRemoteCompactionOrigin(
+			OPENAI_MODEL,
+			new Headers({ ...commonHeaders, [routingHeader]: `${routingHeader}-b` }),
+		);
+		if (!originA || !originB) throw new Error("Expected remote replay origins");
 
-			const checkpoint = buildOpenAiRemoteCompactionResult({
-				model: OPENAI_MODEL,
-				firstKeptEntryId: "u2",
-				tokensBefore: 1_234,
-				requestInputItemCount: 4,
-				response: {
-					id: `resp_${routingHeader}`,
-					created_at: 1_775_000_001,
-					object: "response.compaction",
-					output: [{ type: "context_compaction", encrypted_content: "routing-bound-checkpoint" }],
-				},
-				origin: originA,
-			});
-			const branch: SessionEntry[] = [
-				...openAiBranch(),
-				{
-					type: "compaction",
-					id: "routing-checkpoint",
-					parentId: "u2",
-					timestamp: new Date(1_775_000_002_000).toISOString(),
-					summary: checkpoint.summary,
-					firstKeptEntryId: checkpoint.firstKeptEntryId,
-					tokensBefore: checkpoint.tokensBefore,
-					details: checkpoint.details,
-					fromHook: true,
-				},
-			];
-			const markedContext = markOpenAiRemoteReplayBoundary(
-				[
-					...buildSessionContext(branch).messages,
-					{ role: "user", content: [{ type: "text", text: "Continue on the new route." }], timestamp: 4 },
-				],
-				{ model: OPENAI_MODEL, branchEntries: branch },
-			);
-			const finalPayload = {
-				model: OPENAI_MODEL.id,
-				input: convertResponsesMessages(
-					OPENAI_MODEL,
-					{ messages: convertToLlm(markedContext) },
-					new Set(["openai"]),
-				),
-				stream: true,
-			};
+		const checkpoint = buildOpenAiRemoteCompactionResult({
+			model: OPENAI_MODEL,
+			firstKeptEntryId: "u2",
+			tokensBefore: 1_234,
+			requestInputItemCount: 4,
+			response: {
+				id: `resp_${routingHeader}`,
+				created_at: 1_775_000_001,
+				object: "response.compaction",
+				output: [{ type: "context_compaction", encrypted_content: "routing-bound-checkpoint" }],
+			},
+			origin: originA,
+		});
+		const branch: SessionEntry[] = [
+			...openAiBranch(),
+			{
+				type: "compaction",
+				id: "routing-checkpoint",
+				parentId: "u2",
+				timestamp: new Date(1_775_000_002_000).toISOString(),
+				summary: checkpoint.summary,
+				firstKeptEntryId: checkpoint.firstKeptEntryId,
+				tokensBefore: checkpoint.tokensBefore,
+				details: checkpoint.details,
+				fromHook: true,
+			},
+		];
+		const markedContext = markOpenAiRemoteReplayBoundary(
+			[
+				...buildSessionContext(branch).messages,
+				{ role: "user", content: [{ type: "text", text: "Continue on the new route." }], timestamp: 4 },
+			],
+			{ model: OPENAI_MODEL, branchEntries: branch },
+		);
+		const finalPayload = {
+			model: OPENAI_MODEL.id,
+			input: convertResponsesMessages(OPENAI_MODEL, { messages: convertToLlm(markedContext) }, new Set(["openai"])),
+			stream: true,
+		};
 
-			const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(finalPayload, {
-				model: OPENAI_MODEL,
-				branchEntries: branch,
-				origin: originB,
-			});
+		const rewritten = rewriteOpenAiPayloadWithRemoteCompaction(finalPayload, {
+			model: OPENAI_MODEL,
+			branchEntries: branch,
+			origin: originB,
+		});
 
-			// Every final routing decision scopes the native checkpoint, not only
-			// credentials. Neither tenant nor workspace state may cross-replay.
-			expect(rewritten).toBeUndefined();
-			expect(originB.authTenantFingerprint).not.toBe(originA.authTenantFingerprint);
-		},
-	);
+		// Every final routing decision scopes the native checkpoint, not only
+		// credentials. Neither tenant nor workspace state may cross-replay.
+		expect(rewritten).toBeUndefined();
+		expect(originB.authTenantFingerprint).not.toBe(originA.authTenantFingerprint);
+	});
 
 	it("excludes only documented volatile transport headers from non-Codex provenance", () => {
 		const stableHeaders = {

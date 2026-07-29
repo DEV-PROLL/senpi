@@ -3,7 +3,13 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
-import type { ContextUsage, ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent, SessionCompactEvent } from "../../types.ts";
+import type {
+	ContextUsage,
+	ExtensionAPI,
+	ExtensionContext,
+	SessionBeforeCompactEvent,
+	SessionCompactEvent,
+} from "../../types.ts";
 import * as checkpointState from "./checkpoint-state.ts";
 import * as breaker from "./circuit-breaker.ts";
 import {
@@ -173,8 +179,7 @@ export default function compactionExtension(
 	interface CompactionContext extends ExtensionContext {
 		agentDir?: string;
 	}
-	const getLogger = (ctx: CompactionContext): CompactionLogger =>
-		(logger ??= createCompactionLogger(ctx.agentDir));
+	const getLogger = (ctx: CompactionContext): CompactionLogger => (logger ??= createCompactionLogger(ctx.agentDir));
 
 	function getSummarizationTools(): Tool[] {
 		if (typeof pi.getAllTools !== "function" || typeof pi.getActiveTools !== "function") return [];
@@ -492,7 +497,9 @@ export default function compactionExtension(
 		if (compactEvent.accepted) {
 			persistAcceptedMetadata(compactEvent.requestId);
 			const branchEntries = ctx.sessionManager.getBranch();
-			const firstKeptIndex = branchEntries.findIndex((entry) => entry.id === compactEvent.compactionEntry.firstKeptEntryId);
+			const firstKeptIndex = branchEntries.findIndex(
+				(entry) => entry.id === compactEvent.compactionEntry.firstKeptEntryId,
+			);
 			const keptEntries = firstKeptIndex === -1 ? [] : branchEntries.slice(firstKeptIndex);
 			state = cap.incrementAccepted(state);
 			state = breaker.recordSuccess(state);

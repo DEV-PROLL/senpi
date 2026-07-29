@@ -16,19 +16,16 @@ describe("BlockUnitCounter", () => {
 		["Korean", ["한", "한글", "한글날"]],
 		["emoji ZWJ", ["👨", "👨‍👩", "👨‍👩‍👧", "👨‍👩‍👧‍👦", "👨‍👩‍👧‍👦!"]],
 		["combining marks", ["e", "e\u0301", "e\u0301x", "e\u0301x\u0323"]],
-	] as const)(
-		"#given an append-only %s stream #when counting and slicing deltas #then matches a full grapheme recount",
-		(_name, sequence) => {
-			const counter = new BlockUnitCounter();
-			for (const text of sequence) {
-				const fullCount = [...getGraphemeSegmenter().segment(text)].length;
-				expect(counter.count(0, text)).toBe(fullCount);
-				for (let units = 0; units <= fullCount + 1; units++) {
-					expect(counter.slice(0, text, units)).toBe(fullSlice(text, units));
-				}
+	] as const)("#given an append-only %s stream #when counting and slicing deltas #then matches a full grapheme recount", (_name, sequence) => {
+		const counter = new BlockUnitCounter();
+		for (const text of sequence) {
+			const fullCount = [...getGraphemeSegmenter().segment(text)].length;
+			expect(counter.count(0, text)).toBe(fullCount);
+			for (let units = 0; units <= fullCount + 1; units++) {
+				expect(counter.slice(0, text, units)).toBe(fullSlice(text, units));
 			}
-		},
-	);
+		}
+	});
 
 	test("#given a cached short suffix #when text appends #then slices the new grapheme through the fast path", () => {
 		const counter = new BlockUnitCounter();

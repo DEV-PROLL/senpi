@@ -20,16 +20,27 @@ export interface StructuralYield {
 }
 
 function approxTokens(text: string): number {
-	return Math.max(0, estimateMessageTokens({
-		role: "assistant",
-		content: [{ type: "text", text }],
-		api: "openai",
-		provider: "openai",
-		model: "",
-		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-		stopReason: "stop",
-		timestamp: 0,
-	}));
+	return Math.max(
+		0,
+		estimateMessageTokens({
+			role: "assistant",
+			content: [{ type: "text", text }],
+			api: "openai",
+			provider: "openai",
+			model: "",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoning: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: 0,
+		}),
+	);
 }
 
 function sumEstimateTokens(messages: AgentMessage[]): number {

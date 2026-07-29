@@ -105,15 +105,12 @@ describe("completion bridge parity", () => {
 	it.each([
 		["error", "provider failed", "provider failed"],
 		["aborted", undefined, "completion() request aborted"],
-	] as const)(
-		"Given a %s stop reason when completion settles then the failure is surfaced",
-		async (reason, errorMessage, expected) => {
-			const complete = vi.fn(async () => assistant(reason, "", errorMessage));
+	] as const)("Given a %s stop reason when completion settles then the failure is surfaced", async (reason, errorMessage, expected) => {
+		const complete = vi.fn(async () => assistant(reason, "", errorMessage));
 
-			// When / Then
-			await expect(createCompletionHandler(complete)(context())({ prompt: "question" })).rejects.toThrow(expected);
-		},
-	);
+		// When / Then
+		await expect(createCompletionHandler(complete)(context())({ prompt: "question" })).rejects.toThrow(expected);
+	});
 
 	it("Given a successful message without text when completion settles then the empty result is rejected", async () => {
 		const complete = vi.fn(async () => assistant("stop"));

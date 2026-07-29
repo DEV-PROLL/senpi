@@ -73,31 +73,29 @@ describe("streaming reveal pacing helpers", () => {
 		expect(updatedRate).toBe(expectedRate);
 	});
 
-	test.each([45, 90, 180, 240, 500])(
-		"#given a sustained %s unit per second stream #when timed arrivals pass through the controller #then the final tail converges near the target reserve",
-		(rate) => {
-			vi.useFakeTimers();
-			const result = runStreamScenario({ rate, cadenceMs: 20, durationMs: 5_000 });
-			const targetReserve = (rate * TARGET_BUFFER_MS) / 1000;
-			const tolerance = result.maxChunk + 2;
+	test.each([
+		45, 90, 180, 240, 500,
+	])("#given a sustained %s unit per second stream #when timed arrivals pass through the controller #then the final tail converges near the target reserve", (rate) => {
+		vi.useFakeTimers();
+		const result = runStreamScenario({ rate, cadenceMs: 20, durationMs: 5_000 });
+		const targetReserve = (rate * TARGET_BUFFER_MS) / 1000;
+		const tolerance = result.maxChunk + 2;
 
-			expect(result.finalTail).toBeGreaterThanOrEqual(Math.max(0, targetReserve - tolerance));
-			expect(result.finalTail).toBeLessThanOrEqual(targetReserve + tolerance);
-		},
-	);
+		expect(result.finalTail).toBeGreaterThanOrEqual(Math.max(0, targetReserve - tolerance));
+		expect(result.finalTail).toBeLessThanOrEqual(targetReserve + tolerance);
+	});
 
-	test.each([20, 50, 100, 200])(
-		"#given equal 90 unit per second streams at %sms cadence #when arrivals continue #then reserve convergence is cadence bounded",
-		(cadenceMs) => {
-			vi.useFakeTimers();
-			const result = runStreamScenario({ rate: 90, cadenceMs, durationMs: 5_000 });
-			const targetReserve = (90 * TARGET_BUFFER_MS) / 1000;
-			const tolerance = Math.max(2, result.maxChunk / 2 + 1);
+	test.each([
+		20, 50, 100, 200,
+	])("#given equal 90 unit per second streams at %sms cadence #when arrivals continue #then reserve convergence is cadence bounded", (cadenceMs) => {
+		vi.useFakeTimers();
+		const result = runStreamScenario({ rate: 90, cadenceMs, durationMs: 5_000 });
+		const targetReserve = (90 * TARGET_BUFFER_MS) / 1000;
+		const tolerance = Math.max(2, result.maxChunk / 2 + 1);
 
-			expect(result.finalTail).toBeGreaterThanOrEqual(Math.max(0, targetReserve - tolerance));
-			expect(result.finalTail).toBeLessThanOrEqual(targetReserve + tolerance);
-		},
-	);
+		expect(result.finalTail).toBeGreaterThanOrEqual(Math.max(0, targetReserve - tolerance));
+		expect(result.finalTail).toBeLessThanOrEqual(targetReserve + tolerance);
+	});
 
 	test("#given a sustained fast provider #when streaming for ten seconds #then the immediate final tail remains bounded", () => {
 		vi.useFakeTimers();

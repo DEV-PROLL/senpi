@@ -58,35 +58,41 @@ describe("Claude Opus 5 prompt preset", () => {
 		expect(preset?.prompt.length).toBeGreaterThan(2_000);
 	});
 
-	it.each(["claude-opus-4-5", "claude-opus-4.5", "claude-opus-4-8", "claude-fable-5", "some-opus-compatible-router"])(
-		"does not route %s to the claude-opus-5 preset",
-		(modelId) => {
-			// given
-			const settings: PromptPresetSettings = { promptPreset: "auto" };
-			const model = createModel(modelId, "anthropic");
+	it.each([
+		"claude-opus-4-5",
+		"claude-opus-4.5",
+		"claude-opus-4-8",
+		"claude-fable-5",
+		"some-opus-compatible-router",
+	])("does not route %s to the claude-opus-5 preset", (modelId) => {
+		// given
+		const settings: PromptPresetSettings = { promptPreset: "auto" };
+		const model = createModel(modelId, "anthropic");
 
-			// when
-			const presetName = resolvePresetName(model, settings);
+		// when
+		const presetName = resolvePresetName(model, settings);
 
-			// then
-			expect(presetName).not.toBe("claude-opus-5");
-		},
-	);
+		// then
+		expect(presetName).not.toBe("claude-opus-5");
+	});
 
-	it.each(["claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-fable-5"])(
-		"keeps %s on its own preset after adding claude-opus-5",
-		(modelId) => {
-			// given
-			const settings: PromptPresetSettings = { promptPreset: "auto" };
-			const model = createModel(modelId, "anthropic");
+	it.each([
+		"claude-opus-4-5",
+		"claude-opus-4-6",
+		"claude-opus-4-7",
+		"claude-opus-4-8",
+		"claude-fable-5",
+	])("keeps %s on its own preset after adding claude-opus-5", (modelId) => {
+		// given
+		const settings: PromptPresetSettings = { promptPreset: "auto" };
+		const model = createModel(modelId, "anthropic");
 
-			// when
-			const presetName = resolvePresetName(model, settings);
+		// when
+		const presetName = resolvePresetName(model, settings);
 
-			// then
-			expect(presetName).toBe(modelId);
-		},
-	);
+		// then
+		expect(presetName).toBe(modelId);
+	});
 
 	it("does not route claude-opus-5 to any 4.x preset", () => {
 		// given

@@ -461,16 +461,17 @@ describe("deferred tools", () => {
 		expect(searchOutput?.tools).toMatchObject([{ type: "function", name: "late_tool", defer_loading: true }]);
 	});
 
-	it.each(["gpt-5.2", "gpt-5.4-nano", "gpt-5.5-pro"] as const)(
-		"uses the normal tool list for unsupported OpenAI model %s",
-		async (modelId) => {
-			const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-			const payload = await capturePayload<OpenAIPayload>(getModel("openai", modelId), context);
+	it.each([
+		"gpt-5.2",
+		"gpt-5.4-nano",
+		"gpt-5.5-pro",
+	] as const)("uses the normal tool list for unsupported OpenAI model %s", async (modelId) => {
+		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
+		const payload = await capturePayload<OpenAIPayload>(getModel("openai", modelId), context);
 
-			expect(openAIToolNames(payload)).toEqual(["base_tool", "late_tool"]);
-			expect(payload.input?.some((item) => item.type === "tool_search_output")).toBe(false);
-		},
-	);
+		expect(openAIToolNames(payload)).toEqual(["base_tool", "late_tool"]);
+		expect(payload.input?.some((item) => item.type === "tool_search_output")).toBe(false);
+	});
 
 	it("uses the normal tool list when OpenAI tool search is explicitly disabled", async () => {
 		const model: Model<"openai-responses"> = {

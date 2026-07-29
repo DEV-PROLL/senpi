@@ -218,39 +218,40 @@ describe("xAI OAuth device flow", () => {
 		await expect(loginXaiForTest({ onDeviceCode: () => {} })).rejects.toThrow("Untrusted verification URI");
 	});
 
-	it.each(["http://accounts.x.ai/oauth2/device", "file:///etc/passwd", "not a url"])(
-		"rejects a non-https verification URI: %s",
-		async (verificationUri) => {
-			vi.stubGlobal(
-				"fetch",
-				vi.fn(async () => jsonResponse(deviceCodeResponse({ verification_uri: verificationUri }))),
-			);
+	it.each([
+		"http://accounts.x.ai/oauth2/device",
+		"file:///etc/passwd",
+		"not a url",
+	])("rejects a non-https verification URI: %s", async (verificationUri) => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => jsonResponse(deviceCodeResponse({ verification_uri: verificationUri }))),
+		);
 
-			await expect(loginXaiForTest({ onDeviceCode: () => {} })).rejects.toThrow("Untrusted verification URI");
-		},
-	);
+		await expect(loginXaiForTest({ onDeviceCode: () => {} })).rejects.toThrow("Untrusted verification URI");
+	});
 
-	it.each(["access_denied", "authorization_denied"])(
-		"fails when device authorization is denied: %s",
-		async (error) => {
-			vi.useFakeTimers();
-			let requestCount = 0;
-			vi.stubGlobal(
-				"fetch",
-				vi.fn(async () => {
-					requestCount += 1;
-					return requestCount === 1
-						? jsonResponse(deviceCodeResponse({ interval: 1 }))
-						: jsonResponse({ error }, 400);
-				}),
-			);
+	it.each([
+		"access_denied",
+		"authorization_denied",
+	])("fails when device authorization is denied: %s", async (error) => {
+		vi.useFakeTimers();
+		let requestCount = 0;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				requestCount += 1;
+				return requestCount === 1
+					? jsonResponse(deviceCodeResponse({ interval: 1 }))
+					: jsonResponse({ error }, 400);
+			}),
+		);
 
-			const loginPromise = loginXaiForTest({ onDeviceCode: () => {} });
-			const assertion = expect(loginPromise).rejects.toThrow("xAI device authorization was denied");
-			await vi.advanceTimersByTimeAsync(1000);
-			await assertion;
-		},
-	);
+		const loginPromise = loginXaiForTest({ onDeviceCode: () => {} });
+		const assertion = expect(loginPromise).rejects.toThrow("xAI device authorization was denied");
+		await vi.advanceTimersByTimeAsync(1000);
+		await assertion;
+	});
 
 	it("cancels while waiting for the first token poll", async () => {
 		vi.useFakeTimers();

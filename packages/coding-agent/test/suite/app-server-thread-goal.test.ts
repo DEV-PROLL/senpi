@@ -57,29 +57,30 @@ describe("app-server thread goal handlers", () => {
 		expect(objectAt(responseResult(read), "goal").tokenBudget).toBeNull();
 	});
 
-	it.each(["blocked", "usageLimited", "budgetLimited"] as const)(
-		"rejects unsupported goal status %s with its exact invalid-request message",
-		async (status) => {
-			// Given: a started persistent thread.
-			const { connection, registry, root } = await createHarness();
-			const threadId = threadIdFromResponse(
-				await registry.dispatch(connection, { id: 10, method: "thread/start", params: { cwd: root } }),
-			);
+	it.each([
+		"blocked",
+		"usageLimited",
+		"budgetLimited",
+	] as const)("rejects unsupported goal status %s with its exact invalid-request message", async (status) => {
+		// Given: a started persistent thread.
+		const { connection, registry, root } = await createHarness();
+		const threadId = threadIdFromResponse(
+			await registry.dispatch(connection, { id: 10, method: "thread/start", params: { cwd: root } }),
+		);
 
-			// When: the Codex-only status is supplied to thread/goal/set.
-			const response = await registry.dispatch(connection, {
-				id: 11,
-				method: "thread/goal/set",
-				params: { threadId, objective: "Reject this", status },
-			});
+		// When: the Codex-only status is supplied to thread/goal/set.
+		const response = await registry.dispatch(connection, {
+			id: 11,
+			method: "thread/goal/set",
+			params: { threadId, objective: "Reject this", status },
+		});
 
-			// Then: the server returns the pinned invalid-request category and message.
-			expect(response).toEqual({
-				id: 11,
-				error: { code: -32600, message: `unsupported goal status: ${status}` },
-			});
-		},
-	);
+		// Then: the server returns the pinned invalid-request category and message.
+		expect(response).toEqual({
+			id: 11,
+			error: { code: -32600, message: `unsupported goal status: ${status}` },
+		});
+	});
 
 	it("reads a persisted blocked goal while thread/goal/set continues to reject blocked", async () => {
 		// Given: a started persistent thread with an agent-created blocked goal.

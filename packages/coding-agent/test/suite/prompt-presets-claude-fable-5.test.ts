@@ -58,20 +58,21 @@ describe("Claude Fable 5 prompt preset", () => {
 		expect(preset?.prompt.length).toBeGreaterThan(2_000);
 	});
 
-	it.each(["claude-opus-4-8", "~anthropic/claude-fable-latest", "some-fable-compatible-router"])(
-		"does not route %s to the claude-fable-5 preset",
-		(modelId) => {
-			// given
-			const settings: PromptPresetSettings = { promptPreset: "auto" };
-			const model = createModel(modelId, "anthropic");
+	it.each([
+		"claude-opus-4-8",
+		"~anthropic/claude-fable-latest",
+		"some-fable-compatible-router",
+	])("does not route %s to the claude-fable-5 preset", (modelId) => {
+		// given
+		const settings: PromptPresetSettings = { promptPreset: "auto" };
+		const model = createModel(modelId, "anthropic");
 
-			// when
-			const presetName = resolvePresetName(model, settings);
+		// when
+		const presetName = resolvePresetName(model, settings);
 
-			// then
-			expect(presetName).not.toBe("claude-fable-5");
-		},
-	);
+		// then
+		expect(presetName).not.toBe("claude-fable-5");
+	});
 
 	it("allows settings.json to force claude-fable-5 regardless of model id", () => {
 		// given

@@ -136,19 +136,22 @@ describe("getSafeInvokeTextLength", () => {
 		expect(safeLength).toBe(text.indexOf("<inv"));
 	});
 
-	it.each(["<parameter", "<function_calls", "< invoke name=", '<invoke name="Bash', "<invoke name='Bash'"])(
-		"withholds partial %s starts",
-		(partialStart) => {
-			// given
-			const text = `prefix ${partialStart}`;
+	it.each([
+		"<parameter",
+		"<function_calls",
+		"< invoke name=",
+		'<invoke name="Bash',
+		"<invoke name='Bash'",
+	])("withholds partial %s starts", (partialStart) => {
+		// given
+		const text = `prefix ${partialStart}`;
 
-			// when
-			const safeLength = getSafeInvokeTextLength(text);
+		// when
+		const safeLength = getSafeInvokeTextLength(text);
 
-			// then
-			expect(safeLength).toBe(text.indexOf("<"));
-		},
-	);
+		// then
+		expect(safeLength).toBe(text.indexOf("<"));
+	});
 
 	it("emits an already-invalid closed invoke attribute with trailing content", () => {
 		// given
