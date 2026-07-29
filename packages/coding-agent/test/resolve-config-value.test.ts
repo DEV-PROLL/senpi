@@ -76,10 +76,12 @@ describe("resolveConfigValue", () => {
 		expect(resolveConfigValue(success)).toBe("value");
 		expect(readFileSync(counterFile, "utf-8").trim()).toBe("2");
 
+		// A failed resolution retries the command (3 attempts) before caching the
+		// failure; the second resolve hits the cache without executing again.
 		const failure = `!sh -c 'count=$(cat "${escapedPath}"); echo $((count + 1)) > "${escapedPath}"; exit 1'`;
 		expect(resolveConfigValue(failure)).toBeUndefined();
 		expect(resolveConfigValue(failure)).toBeUndefined();
-		expect(readFileSync(counterFile, "utf-8").trim()).toBe("3");
+		expect(readFileSync(counterFile, "utf-8").trim()).toBe("5");
 	});
 
 	test("does not cache environment values", () => {
@@ -101,6 +103,25 @@ describe("resolveConfigValue", () => {
 		expect(resolveConfigValueUncached(command)).toBe("value");
 		expect(resolveConfigValueUncached(command)).toBe("value");
 		expect(readFileSync(counterFile, "utf-8").trim()).toBe("2");
+	});
+
+	test("retries a transiently failing command until it succeeds", () => {
+		const counterFile = join(tempDir, "retry-counter");
+		writeFileSync(counterFile, "0");
+		const escapedPath = counterFile.replace(/\\/g, "/").replace(/"/g, '\\"');
+		// Fails while the counter is below 3: attempts 1-2 fail, attempt 3 succeeds.
+		const command = `!sh -c 'count=$(cat "${escapedPath}"); count=$((count + 1)); echo $count > "${escapedPath}"; [ $count -lt 3 ] && exit 1; echo value'`;
+		expect(resolveConfigValueUncached(command)).toBe("value");
+		expect(readFileSync(counterFile, "utf-8").trim()).toBe("3");
+	});
+
+	test("gives up retrying after a bounded number of attempts", () => {
+		const counterFile = join(tempDir, "giveup-counter");
+		writeFileSync(counterFile, "0");
+		const escapedPath = counterFile.replace(/\\/g, "/").replace(/"/g, '\\"');
+		const command = `!sh -c 'count=$(cat "${escapedPath}"); echo $((count + 1)) > "${escapedPath}"; exit 1'`;
+		expect(resolveConfigValueUncached(command)).toBeUndefined();
+		expect(readFileSync(counterFile, "utf-8").trim()).toBe("3");
 	});
 
 	test("uses stdin when the configured Windows shell requires it", () => {
