@@ -34,7 +34,8 @@ export function getToolCallFormat<TApi extends Api>(model: Model<TApi>): ToolCal
 		format === "yaml-xml" ||
 		format === "gemma4-delimiter" ||
 		format === "anthropic-xml" ||
-		format === "antml"
+		format === "antml" ||
+		format === "kimi-xtml"
 	) {
 		return format;
 	}
