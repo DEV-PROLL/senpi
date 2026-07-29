@@ -1509,6 +1509,8 @@ bar`,
 					"Astral suffix: $x$𐐀",
 					"Astral prefix: 𐐀$x$",
 					"Braced shell: $" + "{HOME}/$" + "{USER}",
+					"Subshells: $(pwd)/$(whoami)",
+					"Special parameters: $?/$!",
 					"Combining suffix: Cafe\u0301$x$",
 					"Valid math: $x^2$.",
 				].join("\n"),
@@ -1528,6 +1530,8 @@ bar`,
 			assert.ok(rendered.includes("Astral suffix: $x$𐐀"), rendered);
 			assert.ok(rendered.includes("Astral prefix: 𐐀$x$"), rendered);
 			assert.ok(rendered.includes("Braced shell: $" + "{HOME}/$" + "{USER}"), rendered);
+			assert.ok(rendered.includes("Subshells: $(pwd)/$(whoami)"), rendered);
+			assert.ok(rendered.includes("Special parameters: $?/$!"), rendered);
 			assert.ok(rendered.includes("Combining suffix: Cafe\u0301$x$"), rendered);
 			assert.ok(rendered.includes("Valid math: x²."), rendered);
 		});
@@ -1535,8 +1539,14 @@ bar`,
 		it("LaTeX preserves malformed nested and over-budget blocks", () => {
 			const nested = "\\[\nouter\n\\[\nx\n\\]\n";
 			const falseCloser = `$$x$$not-close${"y".repeat(5000)}\n\nValid: $z^2$.`;
+			const prematureCloser = "$$x$$ trailing\nparagraph\n$$";
 			const overBudget = `$$${"x".repeat(4097)}$$`;
-			const markdown = new Markdown(`${nested}\n${falseCloser}\n\n${overBudget}`, 0, 0, defaultMarkdownTheme);
+			const markdown = new Markdown(
+				`${nested}\n${falseCloser}\n\n${prematureCloser}\n\n${overBudget}`,
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
 			const rendered = markdown
 				.render(6000)
 				.map((line) => stripAnsi(line).trimEnd())
@@ -1546,6 +1556,7 @@ bar`,
 			assert.strictEqual(rendered.match(/\\\]/g)?.length, 1, rendered.slice(0, 200));
 			assert.ok(rendered.includes("$$x$$not-close"), rendered.slice(0, 200));
 			assert.ok(rendered.includes("Valid: z²."), rendered.slice(-100));
+			assert.ok(rendered.includes(prematureCloser), rendered);
 			assert.ok(rendered.includes(overBudget), rendered.slice(-4200));
 		});
 

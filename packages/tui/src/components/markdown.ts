@@ -119,6 +119,14 @@ function findMalformedInlineSpan(src: string, open: "\\(" | "\\[", close: "\\)" 
 	return competingOpener ? src.slice(0, scanEnd) : undefined;
 }
 
+function isLikelyShellDollarBody(text: string): boolean {
+	return (
+		text.startsWith("{") ||
+		/^\([^)\r\n]*\)[/\\]$/.test(text) ||
+		/^[!#$?@*-][/\\]$/.test(text)
+	);
+}
+
 function findBlockMath(
 	src: string,
 	open: "$$" | "\\[",
@@ -138,7 +146,7 @@ function findBlockMath(
 		while (rawLineEnd < lineValidationEnd && src[rawLineEnd] !== "\n" && /[ \t]/.test(src[rawLineEnd] ?? "")) {
 			rawLineEnd += 1;
 		}
-		if (rawLineEnd < src.length && src[rawLineEnd] !== "\n") continue;
+		if (rawLineEnd < src.length && src[rawLineEnd] !== "\n") return undefined;
 		const text = src.slice(bodyStart, index).trim();
 		if (!text) return undefined;
 		let rawEnd = rawLineEnd;
@@ -177,7 +185,7 @@ const inlineMathTokenizer: TokenizerExtension = {
 		if (src.startsWith("$")) {
 			if (src.startsWith("$$")) return createLatexToken("latex_literal", "$$", "$$");
 			const match = findInlineMath(src, "$", "$");
-			if (match?.text.startsWith("{")) return createLatexToken("latex_literal", "$", "$");
+			if (match && isLikelyShellDollarBody(match.text)) return createLatexToken("latex_literal", "$", "$");
 			const previous = previousRawCharacter(tokens);
 			const next = match ? firstCharacter(src.slice(match.raw.length)) : undefined;
 			if (
