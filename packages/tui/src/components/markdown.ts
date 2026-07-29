@@ -29,6 +29,9 @@ interface LatexToken extends Tokens.Generic {
 	type: "latex_block" | "latex_inline" | "latex_literal";
 }
 
+const MAX_LATEX_FORMULA_LENGTH = 4096;
+const WORD_CHARACTER_REGEX = /[\p{L}\p{N}_]/u;
+
 function createLatexToken(type: LatexToken["type"], raw: string, text: string): LatexToken {
 	return { raw, text, type };
 }
@@ -41,18 +44,81 @@ function isLatexToken(token: Token): token is LatexToken {
 	);
 }
 
+function previousRawCharacter(tokens: Token[]): string | undefined {
+	const raw = tokens[tokens.length - 1]?.raw;
+	return raw ? Array.from(raw).at(-1) : undefined;
+}
+
+function firstCharacter(value: string): string | undefined {
+	const codePoint = value.codePointAt(0);
+	return codePoint === undefined ? undefined : String.fromCodePoint(codePoint);
+}
+
+function findInlineMath(
+	src: string,
+	open: "$" | "\\(" | "\\[",
+	close: "$" | "\\)" | "\\]",
+): { raw: string; text: string } | undefined {
+	if (!src.startsWith(open)) return undefined;
+	const bodyStart = open.length;
+	const scanEnd = Math.min(src.length, bodyStart + MAX_LATEX_FORMULA_LENGTH + 1);
+
+	for (let index = bodyStart; index < scanEnd; index += 1) {
+		if (src[index] === "\n" || src[index] === "`") return undefined;
+		if (src.startsWith(close, index)) {
+			const text = src.slice(bodyStart, index);
+			if (!text || /^\s|\s$/.test(text)) return undefined;
+			return { raw: src.slice(0, index + close.length), text };
+		}
+		if (open !== close && src.startsWith(open, index)) return undefined;
+		if (src[index] === "\\") index += 1;
+	}
+	return undefined;
+}
+
+function findBlockMath(
+	src: string,
+	open: "$$" | "\\[",
+	close: "$$" | "\\]",
+): { raw: string; text: string } | undefined {
+	if (!src.startsWith(open)) return undefined;
+	const bodyStart = open.length;
+	const scanEnd = Math.min(src.length, bodyStart + MAX_LATEX_FORMULA_LENGTH + 1);
+	const lineValidationEnd = Math.min(src.length, scanEnd + close.length + 256);
+
+	for (let index = bodyStart; index < scanEnd; index += 1) {
+		if (src[index] === "`") return undefined;
+		if (open !== close && src.startsWith(open, index)) return undefined;
+		if (!src.startsWith(close, index)) continue;
+		const closeEnd = index + close.length;
+		let rawLineEnd = closeEnd;
+		while (rawLineEnd < lineValidationEnd && src[rawLineEnd] !== "\n" && /[ \t]/.test(src[rawLineEnd] ?? "")) {
+			rawLineEnd += 1;
+		}
+		if (rawLineEnd < src.length && src[rawLineEnd] !== "\n") continue;
+		const text = src.slice(bodyStart, index).trim();
+		if (!text) return undefined;
+		let rawEnd = rawLineEnd;
+		while (rawEnd < lineValidationEnd && src[rawEnd] === "\n") rawEnd += 1;
+		return { raw: src.slice(0, rawEnd), text };
+	}
+	return undefined;
+}
+
+function repeatedMalformedOpeners(src: string, opener: "\\(" | "\\["): string | undefined {
+	let end = opener.length;
+	while (src.startsWith(opener, end)) end += opener.length;
+	return end > opener.length ? src.slice(0, end) : undefined;
+}
+
 const blockMathTokenizer: TokenizerExtension = {
 	name: "latex_block",
 	level: "block",
 	tokenizer(src) {
-		const dollars = /^ {0,3}\$\$[ \t]*\n?([\s\S]*?)\n?[ \t]*\$\$[ \t]*(?:\n+|$)/.exec(src);
-		if (dollars?.[1]?.trim()) {
-			return createLatexToken("latex_block", dollars[0], dollars[1]);
-		}
-		const brackets = /^ {0,3}\\\[[ \t]*\n?([\s\S]*?)\n?[ \t]*\\\][ \t]*(?:\n+|$)/.exec(src);
-		if (brackets?.[1]?.trim()) {
-			return createLatexToken("latex_block", brackets[0], brackets[1]);
-		}
+		const leadingSpaces = /^ {0,3}/.exec(src)?.[0] ?? "";
+		const candidate = src.slice(leadingSpaces.length);
+		const match = findBlockMath(candidate, "$$", "$$") ?? findBlockMath(candidate, "\\[", "\\]");
+		if (match) return createLatexToken("latex_block", `${leadingSpaces}${match.raw}`, match.text);
 		return undefined;
 	},
 };
@@ -70,19 +136,29 @@ const inlineMathTokenizer: TokenizerExtension = {
 		].filter((index) => index >= 0);
 		return starts.length > 0 ? Math.min(...starts) : undefined;
 	},
-	tokenizer(src) {
-		const parens = /^\\\((.*?)\\\)/.exec(src);
-		if (parens?.[1] && !parens[1].includes("\n")) {
-			return createLatexToken("latex_inline", parens[0], parens[1]);
+	tokenizer(src, tokens) {
+		if (src.startsWith("$")) {
+			if (src.startsWith("$$")) return createLatexToken("latex_literal", "$$", "$$");
+			const match = findInlineMath(src, "$", "$");
+			const previous = previousRawCharacter(tokens);
+			const next = match ? firstCharacter(src.slice(match.raw.length)) : undefined;
+			if (
+				match &&
+				(previous === undefined || !WORD_CHARACTER_REGEX.test(previous)) &&
+				(next === undefined || !WORD_CHARACTER_REGEX.test(next))
+			) {
+				return createLatexToken("latex_inline", match.raw, match.text);
+			}
+			return createLatexToken("latex_literal", "$", "$");
 		}
-		const brackets = /^\\\[([\s\S]+?)\\\]/.exec(src);
-		if (brackets?.[1]) {
-			return createLatexToken("latex_inline", brackets[0], brackets[1]);
-		}
-		const dollars = /^\$([^$\n]+?)\$/.exec(src);
-		if (dollars?.[1] && !/^\s|\s$/.test(dollars[1])) {
-			return createLatexToken("latex_inline", dollars[0], dollars[1]);
-		}
+		const repeatedParens = repeatedMalformedOpeners(src, "\\(");
+		if (repeatedParens) return createLatexToken("latex_literal", repeatedParens, repeatedParens);
+		const repeatedBrackets = repeatedMalformedOpeners(src, "\\[");
+		if (repeatedBrackets) return createLatexToken("latex_literal", repeatedBrackets, repeatedBrackets);
+		const parens = findInlineMath(src, "\\(", "\\)");
+		if (parens) return createLatexToken("latex_inline", parens.raw, parens.text);
+		const brackets = findInlineMath(src, "\\[", "\\]");
+		if (brackets) return createLatexToken("latex_inline", brackets.raw, brackets.text);
 		const literal = /^(?:\\\(|\\\)|\\\[|\\\])/.exec(src);
 		return literal ? createLatexToken("latex_literal", literal[0], literal[0]) : undefined;
 	},
@@ -575,7 +651,8 @@ export class Markdown implements Component {
 
 			case "latex_block":
 				if (isLatexToken(token)) {
-					lines.push(this.applyDefaultStyle(latexToUnicode(token.text)));
+					const formula = latexToUnicode(token.text);
+					lines.push(styleContext ? styleContext.applyText(formula) : this.applyDefaultStyle(formula));
 					if (nextTokenType && nextTokenType !== "space") {
 						lines.push("");
 					}

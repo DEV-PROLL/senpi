@@ -4,14 +4,17 @@
 
 ### What changed
 
-- `components/markdown.ts` registers conservative Marked block and inline tokenizers for `$...$`, `$$...$$`,
-  `\(...\)`, and `\[...\]` math. Recognized formulas render as width-stable Unicode text through the new
-  dependency-free `components/latex.ts` converter.
-- The converter handles common operators, relations, arrows, Greek letters, grouped fractions and roots, and
-  Unicode sub/superscripts. Unknown commands remain readable instead of invoking external processes or hiding input.
-- Marked still owns fenced and inline code tokenization, so math-looking code stays literal. Unmatched bracket or
-  parenthesis delimiters are emitted literally rather than losing their backslashes to Markdown escape normalization.
-- Coverage: `test/markdown.test.ts` proves inline/display rendering and code/malformed delimiter preservation.
+- `components/markdown.ts` registers bounded Marked block and inline tokenizers for `$...$`, `$$...$$`, `\(...\)`,
+  and `\[...\]` math. Dollar delimiters require non-word outer boundaries, and bracket/parenthesis candidates stop at
+  inline-code or competing opener boundaries. Currency, shell variables, code spans, and malformed delimiters remain
+  literal.
+- The dependency-free `components/latex.ts` converter uses a balanced parser for nested fractions, roots, text
+  wrappers, symbols, and Unicode sub/superscripts. Formula length and nesting budgets fall back to the original text
+  instead of partially converting or repeatedly rescanning untrusted input.
+- TeX epsilon/phi variants and escaped script markers stay distinct, complete command names prevent prefix
+  corruption, and unknown commands remain readable. Display formulas inherit their surrounding style context.
+- Coverage: `test/markdown.test.ts` proves ordinary-text boundaries, nested/budgeted conversion, CJK wide cells,
+  inherited styles, code/malformed preservation, and focused `VirtualTerminal` cell widths.
 
 ### Why this cannot be expressed externally
 

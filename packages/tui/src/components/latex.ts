@@ -8,7 +8,7 @@ const SYMBOLS: Readonly<Record<string, string>> = {
 	"\\Delta": "Δ",
 	"\\delta": "δ",
 	"\\div": "÷",
-	"\\epsilon": "ε",
+	"\\epsilon": "ϵ",
 	"\\equiv": "≡",
 	"\\eta": "η",
 	"\\exists": "∃",
@@ -40,7 +40,7 @@ const SYMBOLS: Readonly<Record<string, string>> = {
 	"\\otimes": "⊗",
 	"\\partial": "∂",
 	"\\Phi": "Φ",
-	"\\phi": "φ",
+	"\\phi": "ϕ",
 	"\\Pi": "Π",
 	"\\pi": "π",
 	"\\pm": "±",
@@ -64,7 +64,7 @@ const SYMBOLS: Readonly<Record<string, string>> = {
 	"\\to": "→",
 	"\\Upsilon": "Υ",
 	"\\upsilon": "υ",
-	"\\varepsilon": "ϵ",
+	"\\varepsilon": "ε",
 	"\\varphi": "φ",
 	"\\vartheta": "ϑ",
 	"\\xi": "ξ",
@@ -126,18 +126,9 @@ const SUBSCRIPTS: Readonly<Record<string, string>> = {
 	x: "ₓ",
 };
 
-const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const replaceBraced = (input: string, command: string, render: (body: string) => string): string => {
-	const pattern = new RegExp(`${escapeRegex(command)}\\{([^{}]*)\\}`, "g");
-	let output = input;
-	let previous: string;
-	do {
-		previous = output;
-		output = output.replace(pattern, (_match, body: string) => render(body));
-	} while (output !== previous);
-	return output;
-};
+const MAX_FORMULA_LENGTH = 4096;
+const MAX_NESTING_DEPTH = 64;
+const STYLE_COMMANDS = new Set(["\\mathrm", "\\mathbf", "\\mathit", "\\text", "\\operatorname"]);
 
 const scriptText = (text: string, alphabet: Readonly<Record<string, string>>): string | undefined => {
 	let output = "";
@@ -149,27 +140,116 @@ const scriptText = (text: string, alphabet: Readonly<Record<string, string>>): s
 	return output;
 };
 
-const replaceScripts = (input: string, marker: "^" | "_", alphabet: Readonly<Record<string, string>>): string => {
-	const grouped = new RegExp(`${escapeRegex(marker)}\\{([^{}\\n]+)\\}`, "g");
-	const single = new RegExp(`${escapeRegex(marker)}([A-Za-z0-9+\\-=()])`, "g");
-	return input
-		.replace(grouped, (raw, body: string) => scriptText(body, alphabet) ?? raw)
-		.replace(single, (raw, body: string) => scriptText(body, alphabet) ?? raw);
-};
+class LatexParser {
+	private index = 0;
+	private readonly input: string;
+
+	constructor(input: string) {
+		this.input = input;
+	}
+
+	parse(): string | undefined {
+		const output = this.parseSequence(0, false);
+		return output !== undefined && this.index === this.input.length ? output : undefined;
+	}
+
+	private parseSequence(depth: number, stopAtBrace: boolean): string | undefined {
+		if (depth > MAX_NESTING_DEPTH) return undefined;
+		const output: string[] = [];
+		while (this.index < this.input.length) {
+			const character = this.input[this.index];
+			if (character === "}" && stopAtBrace) return output.join("");
+			if (character === "\\") {
+				const command = this.parseCommand(depth);
+				if (command === undefined) return undefined;
+				output.push(command);
+				continue;
+			}
+			if (character === "^" || character === "_") {
+				const script = this.parseScript(character, depth);
+				if (script === undefined) return undefined;
+				output.push(script);
+				continue;
+			}
+			if (character === "{") {
+				const group = this.parseGroup(depth);
+				if (group === undefined) return undefined;
+				output.push(`{${group}}`);
+				continue;
+			}
+			output.push(character ?? "");
+			this.index += 1;
+		}
+		return stopAtBrace ? undefined : output.join("");
+	}
+
+	private parseGroup(depth: number): string | undefined {
+		if (this.input[this.index] !== "{") return undefined;
+		this.index += 1;
+		const body = this.parseSequence(depth + 1, true);
+		if (body === undefined || this.input[this.index] !== "}") return undefined;
+		this.index += 1;
+		return body;
+	}
+
+	private parseCommand(depth: number): string | undefined {
+		this.index += 1;
+		const first = this.input[this.index];
+		if (first === undefined) return "\\";
+		if (!/[A-Za-z]/.test(first)) {
+			this.index += 1;
+			if ("_^{}[]()$%&#".includes(first)) return first;
+			if (",;:!".includes(first)) return " ";
+			return `\\${first}`;
+		}
+
+		const start = this.index;
+		while (/[A-Za-z]/.test(this.input[this.index] ?? "")) this.index += 1;
+		const command = `\\${this.input.slice(start, this.index)}`;
+		const symbol = SYMBOLS[command];
+		if (symbol !== undefined) return symbol;
+		if (STYLE_COMMANDS.has(command)) {
+			return this.input[this.index] === "{" ? this.parseGroup(depth) : command;
+		}
+		if (command === "\\sqrt") {
+			const body = this.parseGroup(depth);
+			return body === undefined ? undefined : `√(${body})`;
+		}
+		if (command === "\\frac") {
+			const numerator = this.parseGroup(depth);
+			const denominator = numerator === undefined ? undefined : this.parseGroup(depth);
+			return numerator === undefined || denominator === undefined ? undefined : `(${numerator})⁄(${denominator})`;
+		}
+		if (command === "\\left" || command === "\\right") {
+			const delimiter = this.input[this.index];
+			if (delimiter !== undefined && "()[]{}|".includes(delimiter)) {
+				this.index += 1;
+				return delimiter;
+			}
+		}
+		if (command === "\\quad") return "  ";
+		return command;
+	}
+
+	private parseScript(marker: "^" | "_", depth: number): string | undefined {
+		this.index += 1;
+		const alphabet = marker === "^" ? SUPERSCRIPTS : SUBSCRIPTS;
+		if (this.input[this.index] === "{") {
+			const body = this.parseGroup(depth);
+			if (body === undefined) return undefined;
+			return scriptText(body, alphabet) ?? `${marker}{${body}}`;
+		}
+		const codePoint = this.input.codePointAt(this.index);
+		if (codePoint === undefined) return marker;
+		const body = String.fromCodePoint(codePoint);
+		this.index += body.length;
+		return alphabet[body] ?? `${marker}${body}`;
+	}
+}
 
 export const latexToUnicode = (formula: string): string => {
-	let output = formula.trim().replace(/\s+/g, " ");
-	for (const command of ["\\mathrm", "\\mathbf", "\\mathit", "\\text", "\\operatorname"]) {
-		output = replaceBraced(output, command, (body) => body);
-	}
-	output = replaceBraced(output, "\\sqrt", (body) => `√(${body})`);
-	output = output.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, "($1)⁄($2)");
-	output = output.replace(/\\(?:left|right)(?=[()[\]{}|])/g, "");
-	for (const [command, symbol] of Object.entries(SYMBOLS).sort(([a], [b]) => b.length - a.length)) {
-		output = output.replace(new RegExp(`${escapeRegex(command)}(?![A-Za-z])`, "g"), symbol);
-	}
-	output = replaceScripts(output, "^", SUPERSCRIPTS);
-	output = replaceScripts(output, "_", SUBSCRIPTS);
-	output = output.replace(/\\(?:,|;|:|!)/g, " ").replace(/\\quad/g, "  ");
-	return output.trim();
+	const trimmed = formula.trim();
+	if (trimmed.length > MAX_FORMULA_LENGTH) return trimmed;
+	const normalized = trimmed.replace(/\s+/g, " ");
+	return new LatexParser(normalized).parse() ?? trimmed;
 };
