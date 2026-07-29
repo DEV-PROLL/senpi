@@ -1,3 +1,34 @@
+## Static credential headers participate in real provider auth resolution (2026-07-29)
+
+### What changed
+
+- `core/provider-header-auth.ts` classifies only credential-like provider headers, preserves case-insensitive
+  override semantics, and derives distinct models.json versus extension status sources.
+- `core/provider-api-key-auth.ts` resolves credential-bearing provider headers into a genuine header-only
+  `AuthResult`, exposes the same result through `checkAuth()`, and leaves metadata-only or empty header maps
+  unconfigured. Header-only auth does not fabricate an API-key login method, and OAuth providers remain logged out
+  when their only configured headers are request metadata.
+- `configuredRequestAuthStatus()` uses the same credential-header contract, keeping synchronous registry reads,
+  asynchronous availability snapshots, TUI/RPC status, and request execution aligned.
+
+### Why this belongs in core
+
+- Auth resolution, registry availability, and status projection are package-owned provider-composition seams. An
+  extension can supply headers but cannot make the shared model runtime interpret them consistently.
+
+### Coverage
+
+- `test/provider-composer-headers-auth.test.ts` exercises models.json and extension header auth through registry
+  availability, `checkAuth()`, `getAuth()`, and runtime streaming, while locking metadata, empty-header, OAuth, API
+  key, and `authHeader` behavior.
+- `packages/ai/test/auth-headers.test.ts` and `packages/ai/test/openai-header-auth.test.ts` cover the shared
+  classification and OpenAI-compatible request path.
+
+### Expected merge conflict zones
+
+- LOW: additive `core/provider-header-auth.ts`, `core/provider-api-key-auth.ts`, and focused regression coverage.
+- MEDIUM: `core/provider-composer.ts` auth composition and status projection.
+
 ## Anthropic credits_required 429 pins the billing fallback (2026-07-29)
 
 ### What changed
@@ -65,7 +96,6 @@
   has no upstream counterpart.
 - LOW: the `projectTrustContext` fallback wrap inside `createRuntime`.
 
-||||||| 2a853f363
 ## Repeated provider-stream stalls escalate to the fallback chain (2026-07-29)
 
 ### What changed

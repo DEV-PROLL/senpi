@@ -149,7 +149,15 @@ export interface RpcAuthProvider {
 /** Auth status mirror (no credential values), from getProviderAuthStatus. */
 export interface RpcAuthStatus {
 	configured: boolean;
-	source?: "stored" | "runtime" | "environment" | "fallback" | "models_json_key" | "models_json_command";
+	source?:
+		| "stored"
+		| "runtime"
+		| "environment"
+		| "fallback"
+		| "models_json_key"
+		| "models_json_command"
+		| "models_json_headers"
+		| "extension_headers";
 	label?: string;
 }
 
