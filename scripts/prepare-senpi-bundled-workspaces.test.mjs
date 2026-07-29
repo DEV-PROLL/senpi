@@ -257,7 +257,11 @@ describe("stagePublishManifest", () => {
 		// Then: npm installs the matching sidecar on the consumer instead of preserving
 		// the publisher's Linux-only binary inside the universal Senpi tarball.
 		const manifest = readStagedManifest(tempDir);
+		const stagedSdkManifest = JSON.parse(
+			readFileSync(join(tempDir, "packages", "coding-agent", "node_modules", "@anthropic-ai", "claude-agent-sdk", "package.json"), "utf8"),
+		);
 		assert.deepEqual(manifest.optionalDependencies, platformPackages);
+		assert.deepEqual(stagedSdkManifest.optionalDependencies, {});
 		assert.ok(manifest.bundleDependencies.includes("@anthropic-ai/claude-agent-sdk"));
 		assert.ok(!manifest.bundleDependencies.includes("@anthropic-ai/claude-agent-sdk-linux-x64"));
 		const packed = JSON.parse(
