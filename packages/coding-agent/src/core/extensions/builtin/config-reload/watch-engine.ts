@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, type Stats } from "node:fs";
 import { basename, isAbsolute, join, normalize, resolve, sep } from "node:path";
-import { watchWithErrorHandler } from "../../../../utils/fs-watch.ts";
+
+export { createFsWatchEventSource } from "./watch-event-source.ts";
 
 export type WatchTarget = {
 	readonly id: string;
@@ -363,19 +364,6 @@ export class ConfigReloadWatchEngine {
 			// Error reporting must not take down the watcher.
 		}
 	}
-}
-
-/** Production event source. Tests inject a deterministic source instead. */
-export function createFsWatchEventSource(onError: (error: unknown, path: string) => void = () => {}): WatchEventSource {
-	return (path, listener, options) => {
-		const watcher = watchWithErrorHandler(
-			path,
-			listener,
-			() => onError(new Error(`fs.watch failed for ${path}`), path),
-			{ recursive: options?.recursive ?? false },
-		);
-		return () => watcher?.close();
-	};
 }
 
 function hashFile(path: string): string {
