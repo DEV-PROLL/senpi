@@ -6,9 +6,21 @@
 
 ### Added
 
+- Added per-request `fetch` injection across provider adapters and image generation paths.
+- Added manual redirect URL fallback for OpenRouter OAuth login.
+- Added GitHub Copilot Claude Opus 5 model support.
+
 ### Changed
 
+- Streaming adapters now preserve pending and raw provider stop/status metadata for downstream diagnostics.
+
 ### Fixed
+
+- Preserved raw stop reasons/statuses for Anthropic, Bedrock, Google, Mistral, OpenAI Completions, and OpenAI Responses streams.
+- Fixed Qwen token-plan reasoning controls and Z.AI `max_tokens` routing for OpenAI-compatible providers.
+- Fixed OpenAI-compatible function arguments when custom tool payloads are empty.
+- Fixed Bedrock credential resolution to prefer the configured profile over ambient AWS credentials.
+- Fixed TypeBox nullable array validation and the OpenCode Go provider display name.
 
 ### Removed
 

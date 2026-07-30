@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Shortened and hyperlinked terminal image fallback paths, and clamped fallback width for terminals without inline image support.
+
 ### Removed
 
 ## [2026.7.30] - 2026-07-30

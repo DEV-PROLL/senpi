@@ -4,13 +4,27 @@
 
 ### New Features
 
+- Added `senpi auth` credential-print commands for external clients.
+- Added `ctx.scopedModels` to the extension context and surfaced scoped models in the TUI extension context.
+- Added upstream extension eval scenarios and typed eval output support.
+
 ### Breaking Changes
 
 ### Added
 
 ### Changed
 
+- Coding-agent tests now run offline by default unless a test opts into network access.
+
 ### Fixed
+
+- Fixed startup context so system prompt files are shown and nested linked worktrees do not load the same AGENTS/CLAUDE context file twice.
+- Fixed tool expansion status rendering, response-time tree navigation, failed git-install cleanup, model selector filtering, and extension resource metadata after reload.
+- Fixed RPC bash handling so it no longer bypasses `user_bash`, and fixed concurrent user bash cancellation.
+- Fixed duplicate messages on startup session switch and preserved eval run diagnostics.
+- Enabled streaming usage for the llama.cpp provider.
+- Incorporated upstream provider fixes for fetch injection, raw stop metadata, Qwen/Z.AI controls, Bedrock profile selection, and OpenCode Go naming.
+- Incorporated upstream TUI image fallback fixes for shortened paths, hyperlinks, and width clamping.
 
 ### Removed
 
