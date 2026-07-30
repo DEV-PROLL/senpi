@@ -233,6 +233,7 @@ export class AssistantMessageComponent extends Container {
 			case "error":
 				if (!this.hasToolCalls) addError(`Error: ${message.errorMessage || "Unknown error"}`);
 				break;
+			case "pending":
 			case "stop":
 			case "toolUse":
 				break;

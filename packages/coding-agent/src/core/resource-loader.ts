@@ -721,20 +721,16 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		// SYSTEM.md / APPEND_SYSTEM.md file discovery was intentionally removed; the explicit
 		// options are the only static prompt source (see packages/coding-agent/changes.md).
-		const baseSystemPrompt = resolvePromptInput(this.systemPromptSource, "system prompt");
-		this.systemPrompt = this.systemPromptOverride ? this.systemPromptOverride(baseSystemPrompt) : baseSystemPrompt;
+		this.systemPrompt = resolvePromptInput(this.systemPromptSource, "system prompt");
 		this.systemPromptSourcePath =
 			this.systemPromptSource && existsSync(this.systemPromptSource)
 				? resolvePath(this.systemPromptSource)
 				: undefined;
 
 		const appendSources = this.appendSystemPromptSource ?? [];
-		const baseAppend = appendSources
+		this.appendSystemPrompt = appendSources
 			.map((source) => resolvePromptInput(source, "append system prompt"))
 			.filter((source): source is string => source !== undefined);
-		this.appendSystemPrompt = this.appendSystemPromptOverride
-			? this.appendSystemPromptOverride(baseAppend)
-			: baseAppend;
 		this.appendSystemPromptSourcePaths = appendSources
 			.filter((source) => existsSync(source))
 			.map((source) => resolvePath(source));
