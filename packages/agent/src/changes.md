@@ -13,7 +13,7 @@
   Kimi responses before their first visible text/tool signal, avoiding reasoning-stream regressions for other
   model families.
 - Coverage: agent-loop tests pin one-shot recovery, bounded failure, terminal-state preservation, and tool
-  execution.
+  execution. The real CLI mock-loop scenario proves the user-visible recovery path.
 
 ## 2026-07-29 - Bounded provider stream start (streamStartTimeoutMs)
 

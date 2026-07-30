@@ -4,6 +4,9 @@
   `wrapStreamWithModelRecovery()` boundary.
 - Kimi structural response-channel recovery therefore runs on final-answer requests with an empty tool list, while
   Claude/Kimi leaked tool-call recovery still activates only when tools are available.
+- Real CLI QA adds `--scenario kimi-xtml-thinking-recover`, proving a malformed thinking-only first response is
+  discarded, the second response is visible exactly once, XTML markers never leak, real auth is unchanged, and
+  the sandbox is cleaned.
 
 ## Bun self-updates preserve the Bun launcher (2026-07-30)
 
