@@ -46,6 +46,7 @@ type RunContext = {
 	getUserInput: () => Promise<string>;
 	showNewVersionNotification: (version: string) => void;
 	showPackageUpdateNotification: (packages: string[]) => void;
+	showRiskyMainModelWarning: () => void;
 	showWarning: (message: string) => void;
 	showError: (message: string) => void;
 };
@@ -124,6 +125,7 @@ describe("InteractiveMode startup input", () => {
 			getUserInput,
 			showNewVersionNotification: vi.fn(),
 			showPackageUpdateNotification: vi.fn(),
+			showRiskyMainModelWarning: vi.fn(),
 			showWarning: vi.fn(),
 			showError: vi.fn(),
 		};
