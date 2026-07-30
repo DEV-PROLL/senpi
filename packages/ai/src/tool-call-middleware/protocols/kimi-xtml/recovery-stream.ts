@@ -23,7 +23,7 @@ type ParserMode =
 	| "argument-value"
 	| "discard-call";
 
-const CHANNEL_MARKER_PATTERN = /^<\|(?:open|close)\|>[a-zA-Z_][a-zA-Z0-9_]*<\|sep\|>/;
+const CHANNEL_MARKER_PATTERN = /^<\|(?:open|close)\|>(?:[a-zA-Z_][a-zA-Z0-9_]*)?<\|sep\|>/;
 const OPEN_PREFIX = "<|open|>";
 const CLOSE_PREFIX = "<|close|>";
 
@@ -34,7 +34,7 @@ function couldBeMarkerPrefix(tail: string): boolean {
 		const rest = tail.slice(prefix.length);
 		const angleIndex = rest.indexOf("<");
 		if (angleIndex === -1) return /^[a-zA-Z0-9_]*$/.test(rest);
-		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(rest.slice(0, angleIndex))) return false;
+		if (!/^(?:[a-zA-Z_][a-zA-Z0-9_]*)?$/.test(rest.slice(0, angleIndex))) return false;
 		return XTML_SEP.startsWith(rest.slice(angleIndex));
 	}
 	return false;

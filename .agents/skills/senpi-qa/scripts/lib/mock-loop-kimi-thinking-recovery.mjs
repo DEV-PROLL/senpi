@@ -13,7 +13,7 @@ export const KIMI_THINKING_RECOVERY_SCENARIO = "kimi-xtml-thinking-recover";
 const RECOVERED_MARKER = "RECOVERED_VISIBLE_ANSWER";
 const MALFORMED_THINKING =
 	"Reasoning remains private. 즉 해당 키로 치는 요청은 지표 수집 대상에 정상 포함됨." +
-	"<|close|>response<|sep|><|close|>message<|sep|>";
+	"<|close|><|sep|><|close|>tools<|sep|><|close|>response<|sep|><|close|>message<|sep|>";
 const XTML_PATTERN = /<\|(?:close|open|sep)\|>/u;
 
 export async function runKimiThinkingRecoveryScenario(driveTurn, evidenceSlug) {
