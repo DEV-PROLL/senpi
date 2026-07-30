@@ -59,6 +59,7 @@ describe("InteractiveMode scoped-setting caller compatibility", () => {
 			updateEditorBorderColor: vi.fn(),
 			showStatus: vi.fn(),
 			showError: vi.fn(),
+			showRiskyMainModelWarning: vi.fn(),
 			maybeWarnAboutAnthropicSubscriptionAuth: vi.fn(),
 			checkDaxnutsEasterEgg: vi.fn(),
 		};
@@ -129,6 +130,7 @@ describe("InteractiveMode scoped-setting caller compatibility", () => {
 			updateEditorBorderColor: vi.fn(),
 			showStatus: vi.fn(),
 			showError: vi.fn(),
+			showRiskyMainModelWarning: vi.fn(),
 			maybeWarnAboutAnthropicSubscriptionAuth: vi.fn(),
 			checkDaxnutsEasterEgg: vi.fn(),
 		};
