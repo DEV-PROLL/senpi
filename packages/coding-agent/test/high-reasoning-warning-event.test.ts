@@ -25,7 +25,7 @@ class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMe
 	}
 }
 
-function sensitiveModel(id = "claude-fable-5", provider = "anthropic"): Model<Api> {
+function sensitiveModel(id = "gpt-5.6-sol", provider = "anthropic"): Model<Api> {
 	return {
 		id,
 		provider,
@@ -120,7 +120,7 @@ describe("AgentSession high_reasoning_warning event", () => {
 		expect(warningEvents(events).length).toBe(1);
 		const e = warningEvents(events)[0] as { type: string; modelId: string; provider: string; thinkingLevel: string };
 		expect(e.type).toBe("high_reasoning_warning");
-		expect(e.modelId).toBe("claude-fable-5");
+		expect(e.modelId).toBe("gpt-5.6-sol");
 		expect(e.provider).toBe("anthropic");
 		expect(e.thinkingLevel).toBe("xhigh");
 	});
@@ -146,12 +146,26 @@ describe("AgentSession high_reasoning_warning event", () => {
 		expect(warningEvents(events).length).toBe(1);
 	});
 
-	it("emits when switching to a different sensitive model while already at xhigh", async () => {
+	it("emits when switching to a different sol variant while already at xhigh", async () => {
+		const { session, events } = await createSession();
+		session.agent.state.model = sensitiveModel("gpt-5.6-sol");
+		session.setThinkingLevel("xhigh");
+		expect(warningEvents(events).length).toBe(1);
+		await session.setModel(sensitiveModel("openai/gpt-5.6-sol-pro"));
+		expect(warningEvents(events).length).toBe(2);
+	});
+
+	it("does NOT emit for claude-fable-5 at xhigh (reported bug)", async () => {
 		const { session, events } = await createSession();
 		session.agent.state.model = sensitiveModel("claude-fable-5");
 		session.setThinkingLevel("xhigh");
-		expect(warningEvents(events).length).toBe(1);
-		await session.setModel(sensitiveModel("claude-opus-4-8"));
-		expect(warningEvents(events).length).toBe(2);
+		expect(warningEvents(events).length).toBe(0);
+	});
+
+	it("does NOT emit for claude-fable-5 at max (reported bug)", async () => {
+		const { session, events } = await createSession();
+		session.agent.state.model = sensitiveModel("claude-fable-5");
+		session.setThinkingLevel("max");
+		expect(warningEvents(events).length).toBe(0);
 	});
 });

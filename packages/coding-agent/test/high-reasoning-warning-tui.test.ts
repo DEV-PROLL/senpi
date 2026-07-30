@@ -41,15 +41,15 @@ describe("InteractiveMode.showHighReasoningWarning", () => {
 		expect(rendered).toMatch(/stop|loop/i);
 	});
 
-	test("reflects the max level when max is selected", () => {
+	test("reflects the max level for a sol variant when max is selected", () => {
 		const fakeThis: { chatContainer: Container; ui: { requestRender: () => void } } = {
 			chatContainer: new Container(),
 			ui: { requestRender: vi.fn() },
 		};
 		const event = {
 			type: "high_reasoning_warning",
-			modelId: "claude-opus-4-8",
-			provider: "anthropic",
+			modelId: "openai/gpt-5.6-sol-pro",
+			provider: "openai",
 			thinkingLevel: "max",
 		} as Extract<AgentSessionEvent, { type: "high_reasoning_warning" }>;
 
@@ -58,6 +58,6 @@ describe("InteractiveMode.showHighReasoningWarning", () => {
 		).prototype.showHighReasoningWarning.call(fakeThis, event);
 
 		expect(stripAnsi(renderAll(fakeThis.chatContainer))).toContain("max");
-		expect(stripAnsi(renderAll(fakeThis.chatContainer))).toContain("claude-opus-4-8");
+		expect(stripAnsi(renderAll(fakeThis.chatContainer))).toContain("openai/gpt-5.6-sol-pro");
 	});
 });

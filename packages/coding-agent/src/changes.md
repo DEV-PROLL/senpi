@@ -1,3 +1,21 @@
+## high_reasoning_warning narrowed to gpt-5.6-sol only (2026-07-30)
+
+### What changed
+
+- `high-reasoning-warning.ts`: `isSensitiveHighReasoningModel` now matches ONLY gpt-5.x "sol" variants via a dedicated regex (`/gpt-5(?:\.\d+)?-sol(?![a-z])/i`), fully decoupled from `supportsXhigh`/`supportsMax`. The prior implementation reused those capability gates, so the scary warning wrongly fired for every frontier model that merely supports xhigh/max (claude-fable-5, opus, sonnet-5, deepseek-v4).
+
+### Why
+
+- The warning is about a specific risky model family (gpt-5.6-sol-like), not about xhigh/max capability. Conflating the two surfaced the warning on anthropic/claude-fable-5 @ xhigh, which was not intended. The negative lookahead keeps unrelated ids such as `upstage/solar-pro-3` from matching.
+
+### Why extension system couldn't handle this alone
+
+- The detection is consumed by the in-session emit path (`agent-session.ts`); it is core risk logic, not an extension concern.
+
+### Expected merge conflict zones
+
+- LOW: `high-reasoning-warning.ts` `isSensitiveHighReasoningModel`. `thinking-levels.ts` is deliberately unchanged so capability gating (fable-5 still supports xhigh/max) is preserved.
+
 ## Runtime API keys propagate to session titles (2026-07-30)
 
 - Background session-title generation now reuses the active agent request API key before resolving provider
