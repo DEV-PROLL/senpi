@@ -25,6 +25,7 @@ Per-feature fixtures establish a **behavioral contract** between each subsystem 
 | 11 | `extension-hooks/` | `manual-with-custom-instructions.jsonl` | Extension-driven compaction with custom instructions | 12 |
 | 12 | `warm-start/` | `speculative-then-blocking.jsonl` | Speculative compaction followed by a blocking compaction | 6 |
 | 13 | `ineffective-cap/` | `low-yield-run.jsonl` | Three accepted low-yield compactions in one turn | 5 |
+| 14 | `idle-trigger/` | `over-threshold-at-idle.jsonl` | Turn end with context over the threshold, exercises the proactive idle compaction trigger | 3 |
 
 ## Validation
 

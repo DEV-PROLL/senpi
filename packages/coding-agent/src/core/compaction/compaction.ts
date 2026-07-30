@@ -160,6 +160,7 @@ export interface CompactionSettings {
 	restorationMaxTokensPerItem?: number;
 	restorationMaxTotalTokens?: number;
 	restorationContextRatio?: number;
+	idleCompactionEnabled?: boolean;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
@@ -174,6 +175,7 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	restorationMaxTokensPerItem: 5000,
 	restorationMaxTotalTokens: 50_000,
 	restorationContextRatio: 0.15,
+	idleCompactionEnabled: true,
 };
 
 // ============================================================================

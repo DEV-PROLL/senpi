@@ -33,6 +33,7 @@ export interface CompactionSettings {
 	restorationMaxTokensPerItem?: number; // default: 5000
 	restorationMaxTotalTokens?: number; // default: 50000
 	restorationContextRatio?: number; // default: 0.15
+	idleCompactionEnabled?: boolean; // default: true
 }
 
 export interface BranchSummarySettings {
@@ -938,6 +939,7 @@ export class SettingsManager {
 		restorationMaxTokensPerItem: number;
 		restorationMaxTotalTokens: number;
 		restorationContextRatio: number;
+		idleCompactionEnabled: boolean;
 	} {
 		return {
 			enabled: this.getCompactionEnabled(),
@@ -951,6 +953,7 @@ export class SettingsManager {
 			restorationMaxTokensPerItem: this.settings.compaction?.restorationMaxTokensPerItem ?? 5000,
 			restorationMaxTotalTokens: this.settings.compaction?.restorationMaxTotalTokens ?? 50_000,
 			restorationContextRatio: this.settings.compaction?.restorationContextRatio ?? 0.15,
+			idleCompactionEnabled: this.settings.compaction?.idleCompactionEnabled ?? true,
 		};
 	}
 

@@ -1,5 +1,14 @@
 # Builtin compaction extension changes
 
+## Proactive idle compaction (2026-07-30)
+
+### What changed
+
+- Added a proactive idle-time compaction trigger. When the agent finishes a turn (`agent_end`) and the context is over the soft threshold (`policy.shouldTriggerCompaction`), the extension runs the full compaction now via `applyBlockingCompaction` so the next user message starts without compaction latency. The handler awaits the compaction — unlike `turn_end`'s fire-and-forget ineffective-recovery — so the context is fully compacted before the next `before_agent_start`.
+- Guards: skipped when the run will auto-continue (`willRetry`), was aborted, when the circuit breaker is tripped, in one-shot modes (`print`/`json`), or when `idleCompactionEnabled` is false.
+- New pure module `idle.ts` (`shouldRunIdleCompaction` predicate + `IDLE_COMPACTION_INSTRUCTIONS`); `index.ts` only wires it. New setting `compaction.idleCompactionEnabled` (default `true`) on both `CompactionSettings` interfaces. New logger event `idle_trigger`. New fixture #14 `idle-trigger/over-threshold-at-idle.jsonl`.
+- Expected merge-conflict zones: `compaction/index.ts` `agent_end` handler; `core/compaction/compaction.ts` `CompactionSettings` + `DEFAULT_COMPACTION_SETTINGS`; `settings-manager.ts` local `CompactionSettings` + `getCompactionSettings()` return.
+
 ## Plugsuits wave1: observability, ineffective-cap, task-intent anchor (2026-07-29)
 
 ### What changed
