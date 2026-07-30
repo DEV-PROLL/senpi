@@ -99,6 +99,16 @@ describe("goal continuation verdict", () => {
 		expect(evaluateGoalContinuation(input)).toEqual({ kind: "deny", reason });
 	});
 
+	it("admits below the continuation cap and denies at the boundary", () => {
+		expect(
+			evaluateGoalContinuation(makeInput({ consecutiveContinuations: GOAL_CONTINUATION_CAP - 1 })),
+		).toMatchObject({ kind: "continue" });
+		expect(evaluateGoalContinuation(makeInput({ consecutiveContinuations: GOAL_CONTINUATION_CAP }))).toEqual({
+			kind: "deny",
+			reason: "cap",
+		});
+	});
+
 	it.each([
 		["a clean ordinary end", makeInput(), { kind: "continue", prompt: "full", stallNotice: false }],
 		[
