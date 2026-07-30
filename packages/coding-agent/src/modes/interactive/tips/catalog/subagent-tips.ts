@@ -39,6 +39,38 @@ export const SUBAGENT_TIPS = [
 		render: () => 'Trigger "review work" to run parallel goal, quality, security, and hands-on QA reviews.',
 	},
 	{
+		id: "workflow-skills.init-deep",
+		bindings: [],
+		requiresCommand: "tasks",
+		render: () => 'Trigger "/init-deep" to map a project and generate a hierarchical AGENTS.md knowledge base.',
+	},
+	{
+		id: "workflow-skills.debugging",
+		bindings: [],
+		requiresCommand: "tasks",
+		render: () =>
+			'Trigger "debug this" for parallel hypotheses, a failing regression test, a minimal fix, and real-surface QA.',
+	},
+	{
+		id: "workflow-skills.refactor",
+		bindings: [],
+		requiresCommand: "tasks",
+		render: () => 'Trigger "refactor" for codebase-aware cleanup that pins behavior before changing structure.',
+	},
+	{
+		id: "workflow-skills.remove-ai-slops",
+		bindings: [],
+		requiresCommand: "tasks",
+		render: () =>
+			'Trigger "remove AI slop" to lock behavior first, then strip generated-code smells without drive-by rewrites.',
+	},
+	{
+		id: "workflow-skills.visual-qa",
+		bindings: [],
+		requiresCommand: "tasks",
+		render: () => 'Trigger "visual QA" to capture browser or xterm evidence and review web or terminal interfaces.',
+	},
+	{
 		id: "subagent-categories",
 		bindings: [],
 		requiresCommand: "tasks",

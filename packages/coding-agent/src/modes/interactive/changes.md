@@ -1,5 +1,24 @@
 # changes
 
+## Omo-senpi coding workflow tips (2026-07-30)
+
+### What changed
+
+- `tips/catalog/subagent-tips.ts` now advertises the shipped `init-deep`, debugging, refactor,
+  remove-ai-slops, and visual-qa skills alongside the existing plan, ultrawork, research, and review tips.
+- Every new entry uses the existing `tasks` command gate so users only see omo-senpi workflow tips when
+  the task extension surface is available.
+- Coverage: `test/suite/list-tips.test.ts` pins each ID, rendered line, and command gate.
+
+### Why
+
+- The tip rotation covered the headline orchestration workflows but skipped the everyday project
+  initialization, diagnosis, cleanup, and visual-verification skills that omo-senpi also installs.
+
+### Expected merge conflict zones
+
+- LOW: additive entries in `tips/catalog/subagent-tips.ts` and one focused catalog assertion.
+
 ## Footer hides low cache hit rates (2026-07-29)
 
 ### What changed
