@@ -23,7 +23,9 @@
   `service_tier: "priority"`. The tier is session-only (never persisted) and
   resets on `session_start`; an explicit model/scoped tier still wins.
 - `test/suite/service-tier-extension.test.ts` replaces the "clear no-op" case with
-  the toggle assertion on the payload.
+  the toggle assertion on the payload, and covers a mid-session switch to another
+  Codex model keeping the tier, a hop to a non-OpenAI model dropping it,
+  explicit-tier precedence, and the `session_start` reset.
 - Expected merge conflict zones: LOW in `service-tier.ts` around the
   `sessionFastMode` flag, the no-variant branch, and the
   `before_provider_request` tier resolution.
