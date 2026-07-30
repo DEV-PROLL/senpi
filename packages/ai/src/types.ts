@@ -117,7 +117,6 @@ export type ProviderRequestMetadata = {
 	headers: ProviderHeaders;
 };
 export type FetchFunction = typeof globalThis.fetch;
-export type SessionAffinityFormat = "openai" | "openai-nosession" | "openrouter";
 
 export interface ProviderResponse {
 	status: number;

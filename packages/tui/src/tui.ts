@@ -97,8 +97,10 @@ export interface Component {
 	dispose?(): void;
 }
 
-type InputListenerResult = { consume?: boolean; data?: string } | undefined;
-type InputListener = (data: string) => InputListenerResult;
+export type TuiInputListenerResult = { consume?: boolean; data?: string } | undefined;
+export type TuiInputListener = (data: string) => TuiInputListenerResult;
+type InputListenerResult = TuiInputListenerResult;
+type InputListener = TuiInputListener;
 type PendingOsc11BackgroundQuery = {
 	settled: boolean;
 	resolve: ((rgb: RgbColor | undefined) => void) | undefined;
@@ -488,6 +490,48 @@ export class Container implements Component {
 	}
 }
 
+/** Splice overlay content into a base line at a specific column. */
+export function compositeTuiLine(
+	baseLine: string,
+	overlayLine: string,
+	startCol: number,
+	overlayWidth: number,
+	totalWidth: number,
+): string {
+	if (isImageLine(baseLine) && visibleWidth(baseLine) === 0) return baseLine;
+	const placeholderIndex = baseLine.indexOf("\u{10eeee}");
+	const protocolEnd = placeholderIndex === -1 ? -1 : baseLine.lastIndexOf("\x1b\\", placeholderIndex);
+	const protocolPrefix = protocolEnd === -1 ? "" : baseLine.slice(0, protocolEnd + 2);
+
+	const afterStart = startCol + overlayWidth;
+	const base = extractSegments(baseLine, startCol, afterStart, totalWidth - afterStart, true);
+	const overlay = sliceWithWidth(overlayLine, 0, overlayWidth, true);
+
+	const beforePad = Math.max(0, startCol - base.beforeWidth);
+	const overlayPad = Math.max(0, overlayWidth - overlay.width);
+	const actualBeforeWidth = Math.max(startCol, base.beforeWidth);
+	const actualOverlayWidth = Math.max(overlayWidth, overlay.width);
+	const afterTarget = Math.max(0, totalWidth - actualBeforeWidth - actualOverlayWidth);
+	const afterPad = Math.max(0, afterTarget - base.afterWidth);
+
+	const r = TuiBase.SEGMENT_RESET;
+	const result =
+		base.before +
+		" ".repeat(beforePad) +
+		r +
+		overlay.text +
+		" ".repeat(overlayPad) +
+		r +
+		base.after +
+		" ".repeat(afterPad);
+
+	const resultWidth = visibleWidth(result);
+	if (resultWidth <= totalWidth) {
+		return protocolPrefix + result;
+	}
+	return protocolPrefix + sliceByColumn(result, 0, totalWidth, true);
+}
+
 /**
  * TUI - Main class for managing terminal UI with differential rendering
  */
@@ -567,6 +611,20 @@ export class TuiBase extends Container {
 
 	getClearOnShrink(): boolean {
 		return this.clearOnShrink;
+	}
+
+	protected beforeTerminalStart(): void {}
+
+	protected beforeTerminalStop(): void {}
+
+	protected afterTerminalStop(): void {}
+
+	protected resetRenderState(): void {
+		this.previousLines = [];
+		this.previousRawLines = [];
+		this.previousKittyImageIds.clear();
+		this.previousWidth = 0;
+		this.previousHeight = 0;
 	}
 
 	/**
@@ -856,6 +914,7 @@ export class TuiBase extends Container {
 			(data) => this.handleInput(data),
 			() => this.requestRender(),
 		);
+		this.beforeTerminalStart();
 		if (process.env.TMUX) this.terminal.write(ENABLE_FOCUS_REPORTING);
 		this.#setCursorVisibility(false);
 		if (this.terminalColorSchemeNotificationsEnabled) {
@@ -907,6 +966,7 @@ export class TuiBase extends Container {
 		this.stopped = true;
 		this.renderRequested = false;
 		this.inputRenderPending = false;
+		this.beforeTerminalStop();
 		if (this.renderTimer) {
 			clearTimeout(this.renderTimer);
 			this.renderTimer = undefined;
@@ -931,13 +991,10 @@ export class TuiBase extends Container {
 		this.#lastCursorVisibility = undefined;
 		this.#setCursorVisibility(true);
 		if (process.env.TMUX) this.terminal.write(DISABLE_FOCUS_REPORTING);
+		this.afterTerminalStop();
 		this.terminal.stop();
 		this.#lastCursorVisibility = undefined;
-		this.previousLines = [];
-		this.previousRawLines = [];
-		this.previousKittyImageIds.clear();
-		this.previousWidth = 0;
-		this.previousHeight = 0;
+		this.resetRenderState();
 		this.cursorRow = 0;
 		this.hardwareCursorRow = 0;
 		this.maxLinesRendered = 0;
@@ -1378,7 +1435,7 @@ export class TuiBase extends Container {
 		return result;
 	}
 
-	private static readonly SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
+	static readonly SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
 
 	/**
 	 * Every frame write is bracketed by synchronized output (DECSET 2026) and
@@ -1771,50 +1828,7 @@ export class TuiBase extends Container {
 		overlayWidth: number,
 		totalWidth: number,
 	): string {
-		if (isImageLine(baseLine) && visibleWidth(baseLine) === 0) return baseLine;
-		const placeholderIndex = baseLine.indexOf("\u{10eeee}");
-		const protocolEnd = placeholderIndex === -1 ? -1 : baseLine.lastIndexOf("\x1b\\", placeholderIndex);
-		const protocolPrefix = protocolEnd === -1 ? "" : baseLine.slice(0, protocolEnd + 2);
-
-		// Single pass through baseLine extracts both before and after segments
-		const afterStart = startCol + overlayWidth;
-		const base = extractSegments(baseLine, startCol, afterStart, totalWidth - afterStart, true);
-
-		// Extract overlay with width tracking (strict=true to exclude wide chars at boundary)
-		const overlay = sliceWithWidth(overlayLine, 0, overlayWidth, true);
-
-		// Pad segments to target widths
-		const beforePad = Math.max(0, startCol - base.beforeWidth);
-		const overlayPad = Math.max(0, overlayWidth - overlay.width);
-		const actualBeforeWidth = Math.max(startCol, base.beforeWidth);
-		const actualOverlayWidth = Math.max(overlayWidth, overlay.width);
-		const afterTarget = Math.max(0, totalWidth - actualBeforeWidth - actualOverlayWidth);
-		const afterPad = Math.max(0, afterTarget - base.afterWidth);
-
-		// Compose result
-		const r = TuiBase.SEGMENT_RESET;
-		const result =
-			base.before +
-			" ".repeat(beforePad) +
-			r +
-			overlay.text +
-			" ".repeat(overlayPad) +
-			r +
-			base.after +
-			" ".repeat(afterPad);
-
-		// CRITICAL: Always verify and truncate to terminal width.
-		// This is the final safeguard against width overflow which would crash the TUI.
-		// Width tracking can drift from actual visible width due to:
-		// - Complex ANSI/OSC sequences (hyperlinks, colors)
-		// - Wide characters at segment boundaries
-		// - Edge cases in segment extraction
-		const resultWidth = visibleWidth(result);
-		if (resultWidth <= totalWidth) {
-			return protocolPrefix + result;
-		}
-		// Truncate with strict=true to ensure we don't exceed totalWidth
-		return protocolPrefix + sliceByColumn(result, 0, totalWidth, true);
+		return compositeTuiLine(baseLine, overlayLine, startCol, overlayWidth, totalWidth);
 	}
 
 	/**

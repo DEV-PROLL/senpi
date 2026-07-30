@@ -10,7 +10,7 @@ import {
 	setCapabilities,
 	type TerminalCapabilities,
 } from "./terminal-image.ts";
-import { CURSOR_MARKER, type TUI, TuiBase } from "./tui.ts";
+import { CURSOR_MARKER, TuiBase } from "./tui.ts";
 import {
 	getGraphemeCellRange,
 	getOsc8LinkAtColumn,
@@ -51,7 +51,7 @@ export interface TuiAltScreenOptions {
 }
 
 /** Alternate-screen TUI with a scrollable, application-owned viewport. */
-export class TuiAltScreen extends TuiBase implements TUI {
+export class TuiAltScreen extends TuiBase {
 	private previousScreen: string[] = [];
 	private lastDocument: string[] = [];
 	private previousScreenWidth = 0;
@@ -114,7 +114,7 @@ export class TuiAltScreen extends TuiBase implements TUI {
 	protected override beforeTerminalStop(): void {
 		if (!this.altScreenActive) return;
 		this.terminal.write(
-			`${BEGIN_SYNCHRONIZED_OUTPUT}${this.deleteKittyImages()}${this.mouseEnabled ? DISABLE_MOUSE : ""}${ENABLE_AUTOWRAP}${END_SYNCHRONIZED_OUTPUT}`,
+			`${BEGIN_SYNCHRONIZED_OUTPUT}${this.deleteAltKittyImages()}${this.mouseEnabled ? DISABLE_MOUSE : ""}${ENABLE_AUTOWRAP}${END_SYNCHRONIZED_OUTPUT}`,
 		);
 	}
 
@@ -134,7 +134,7 @@ export class TuiAltScreen extends TuiBase implements TUI {
 		}
 	}
 
-	private deleteKittyImages(): string {
+	private deleteAltKittyImages(): string {
 		return this.imageProtocol === "kitty" ? deleteAllKittyImages() : "";
 	}
 
@@ -405,9 +405,9 @@ export class TuiAltScreen extends TuiBase implements TUI {
 		let buffer = BEGIN_SYNCHRONIZED_OUTPUT;
 		if (fullRedraw) {
 			this.fullRedrawCount += 1;
-			buffer += `${this.deleteKittyImages()}\x1b[2J`;
+			buffer += `${this.deleteAltKittyImages()}\x1b[2J`;
 		} else if (imagesNeedRedraw) {
-			buffer += this.imageProtocol === "iterm2" ? "\x1b[2J" : this.deleteKittyImages();
+			buffer += this.imageProtocol === "iterm2" ? "\x1b[2J" : this.deleteAltKittyImages();
 		}
 
 		for (let row = 0; row < height; row++) {

@@ -719,25 +719,21 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
 		time("contextFiles", "extensions");
 
-			// SYSTEM.md / APPEND_SYSTEM.md file discovery was intentionally removed; the explicit
-			// options are the only static prompt source (see packages/coding-agent/changes.md).
-			const systemPromptSource = this.systemPromptSource;
-			const baseSystemPrompt = resolvePromptInput(systemPromptSource, "system prompt");
-			this.systemPrompt = this.systemPromptOverride ? this.systemPromptOverride(baseSystemPrompt) : baseSystemPrompt;
-			this.systemPromptSourcePath =
-				systemPromptSource && existsSync(systemPromptSource) ? resolvePath(systemPromptSource) : undefined;
+		// SYSTEM.md / APPEND_SYSTEM.md file discovery was intentionally removed; the explicit
+		// options are the only static prompt source (see packages/coding-agent/changes.md).
+		const systemPromptSource = this.systemPromptSource;
+		this.systemPrompt = resolvePromptInput(systemPromptSource, "system prompt");
+		this.systemPromptSourcePath =
+			systemPromptSource && existsSync(systemPromptSource) ? resolvePath(systemPromptSource) : undefined;
 
-			const appendSources = this.appendSystemPromptSource ?? [];
-			const baseAppend = appendSources
-				.map((s) => resolvePromptInput(s, "append system prompt"))
-				.filter((s): s is string => s !== undefined);
-		this.appendSystemPrompt = this.appendSystemPromptOverride
-			? this.appendSystemPromptOverride(baseAppend)
-			: baseAppend;
-			this.appendSystemPromptSourcePaths = appendSources
-				.filter((source) => existsSync(source))
-				.map((source) => resolvePath(source));
-			this.loaded = true;
+		const appendSources = this.appendSystemPromptSource ?? [];
+		this.appendSystemPrompt = appendSources
+			.map((s) => resolvePromptInput(s, "append system prompt"))
+			.filter((s): s is string => s !== undefined);
+		this.appendSystemPromptSourcePaths = appendSources
+			.filter((source) => existsSync(source))
+			.map((source) => resolvePath(source));
+		this.loaded = true;
 	}
 
 	private ensureGlobalDefaultExtensions(): void {

@@ -530,7 +530,7 @@ export function renderImage(
 			const placeholderRow = buildKittyPlaceholderRow(imageId, row, columns);
 			lines.push(row === 0 ? sequence + placeholderRow : placeholderRow);
 		}
-		return { sequence, rows, imageId, lines };
+		return { sequence, columns, rows, imageId, lines };
 	}
 
 	if (caps.images === "kitty") {

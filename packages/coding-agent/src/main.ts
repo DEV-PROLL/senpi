@@ -1042,10 +1042,9 @@ export async function main(args: string[], options?: MainOptions) {
 			initialTitlePrompt,
 			initialMessages: parsed.messages,
 			verbose: parsed.verbose,
-				chrome: parsed.grokNeo ? "grok" : undefined,
-				alt: parsed.alt,
-				chrome: parsed.grokNeo ? "grok" : undefined,
-			});
+			chrome: parsed.grokNeo ? "grok" : undefined,
+			alt: parsed.alt,
+		});
 		if (startupBenchmark) {
 			await interactiveMode.init();
 			time("interactiveMode.init");
