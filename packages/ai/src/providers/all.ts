@@ -63,8 +63,80 @@ const XIAOMI_MIMO_PROVIDERS = new Set([
 	"xiaomi-token-plan-sgp",
 ]);
 
+const QWEN_TOKEN_PLAN_PROVIDERS = new Set(["qwen-token-plan", "qwen-token-plan-cn"]);
+
+const QWEN_TOKEN_PLAN_HIGH_MAX_THINKING_LEVEL_MAP = {
+	minimal: null,
+	low: null,
+	medium: null,
+	high: "high",
+	xhigh: null,
+	max: "max",
+} as const;
+
+const QWEN_TOKEN_PLAN_QWEN38_THINKING_LEVEL_MAP = {
+	minimal: null,
+	low: "low",
+	medium: "medium",
+	high: null,
+	xhigh: "xhigh",
+	max: null,
+} as const;
+
 function normalizeBuiltinModel<TApi extends Api>(model: Model<TApi> | undefined): Model<TApi> | undefined {
 	if (!model) return undefined;
+
+	if (model.provider === "github-copilot" && model.id === "claude-opus-5") {
+		return {
+			...model,
+			thinkingLevelMap: {
+				...model.thinkingLevelMap,
+				minimal: "low",
+			},
+		};
+	}
+
+	if (QWEN_TOKEN_PLAN_PROVIDERS.has(model.provider)) {
+		const supportsReasoningEffort = ![
+			"MiniMax-M2.5",
+			"deepseek-v3.2",
+			"kimi-k2.5",
+			"kimi-k2.6",
+			"kimi-k2.7-code",
+			"qwen3.6-flash",
+			"qwen3.6-plus",
+			"qwen3.7-max",
+			"qwen3.7-plus",
+		].includes(model.id);
+		return {
+			...model,
+			compat: {
+				...model.compat,
+				thinkingFormat: "qwen",
+				supportsReasoningEffort,
+				supportsDeveloperRole: false,
+				supportsStore: false,
+			},
+			...(supportsReasoningEffort
+				? {
+						thinkingLevelMap:
+							model.id === "qwen3.8-max-preview"
+								? QWEN_TOKEN_PLAN_QWEN38_THINKING_LEVEL_MAP
+								: QWEN_TOKEN_PLAN_HIGH_MAX_THINKING_LEVEL_MAP,
+					}
+				: {}),
+		} as Model<TApi>;
+	}
+
+	if (model.provider === "zai" && (model.id === "glm-5.1" || model.id === "glm-5.2")) {
+		return {
+			...model,
+			compat: {
+				...model.compat,
+				maxTokensField: "max_tokens",
+			},
+		} as Model<TApi>;
+	}
 
 	if (XIAOMI_MIMO_PROVIDERS.has(model.provider) && model.id === "mimo-v2.5-pro") {
 		return {

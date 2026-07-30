@@ -170,7 +170,7 @@ export class ModelRuntime implements Models {
 			modelsPath,
 			modelsStore,
 			providers,
-			process.env.PI_OFFLINE === undefined && options.allowModelNetwork === true,
+			options.allowModelNetwork === true,
 			options.modelRefreshTimeoutMs ?? 15_000,
 		);
 		runtime.configureRadiusProviders();

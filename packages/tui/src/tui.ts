@@ -909,11 +909,11 @@ export class TuiBase extends Container {
 		this.renderRequested = false;
 		this.inputRenderPending = false;
 		this.#lastCursorVisibility = undefined;
+		this.beforeTerminalStart();
 		this.terminal.start(
 			(data) => this.handleInput(data),
 			() => this.requestRender(),
 		);
-		this.beforeTerminalStart();
 		if (process.env.TMUX) this.terminal.write(ENABLE_FOCUS_REPORTING);
 		this.#setCursorVisibility(false);
 		if (this.terminalColorSchemeNotificationsEnabled) {
@@ -990,8 +990,8 @@ export class TuiBase extends Container {
 		this.#lastCursorVisibility = undefined;
 		this.#setCursorVisibility(true);
 		if (process.env.TMUX) this.terminal.write(DISABLE_FOCUS_REPORTING);
-		this.afterTerminalStop();
 		this.terminal.stop();
+		this.afterTerminalStop();
 		this.#lastCursorVisibility = undefined;
 		this.resetRenderState();
 		this.cursorRow = 0;

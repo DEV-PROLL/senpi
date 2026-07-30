@@ -6,6 +6,10 @@ import { loadGitHubCopilotOAuth } from "../auth/oauth/load.ts";
 import { createProvider, type Provider } from "../models.ts";
 import { GITHUB_COPILOT_MODELS } from "./github-copilot.models.ts";
 
+const githubCopilotModels = Object.values(GITHUB_COPILOT_MODELS).map((model) =>
+	model.id === "claude-opus-5" ? { ...model, thinkingLevelMap: { ...model.thinkingLevelMap, minimal: "low" } } : model,
+);
+
 export function githubCopilotProvider(): Provider<"anthropic-messages" | "openai-completions" | "openai-responses"> {
 	return createProvider({
 		id: "github-copilot",
@@ -15,7 +19,7 @@ export function githubCopilotProvider(): Provider<"anthropic-messages" | "openai
 			apiKey: envApiKeyAuth("GitHub Copilot token", ["COPILOT_GITHUB_TOKEN"]),
 			oauth: lazyOAuth({ name: "GitHub Copilot", load: loadGitHubCopilotOAuth }),
 		},
-		models: Object.values(GITHUB_COPILOT_MODELS),
+		models: githubCopilotModels,
 		filterModels: (models, credential) => {
 			if (credential?.type !== "oauth") return models;
 			const availableModelIds = credential.availableModelIds;
