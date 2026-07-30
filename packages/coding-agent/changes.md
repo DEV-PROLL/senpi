@@ -1,5 +1,12 @@
 # Local fork changes
 
+## 2026-07-30 — CalVer-aware update ordering
+
+- Changed: package update checks now compare Senpi's `YYYY.M.D-N` same-day revisions using the release contract, where the bare date is revision 1 and `-2`, `-3`, and later suffixes are newer releases.
+- Why: npm semver treats `2026.7.30-2` as a prerelease older than `2026.7.30`, so a client on the second same-day release could incorrectly "update" back to the first release.
+- Coverage: `test/version-check.test.ts` proves same-day revision ordering, cross-day ordering, and both update-detection directions while preserving normal semver comparisons.
+- Merge-conflict risk: low. The change is isolated to the shared package-version comparator and its focused tests.
+
 ## 2026-07-30 — Root-owned consumer sidecar installation (#446)
 
 - Changed: publish staging now removes promoted platform optional-dependency edges from the bundled portable package manifest after copying the complete family to Senpi's root optional dependencies.
