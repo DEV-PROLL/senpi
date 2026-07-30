@@ -89,7 +89,7 @@ function hasCmd(cmd) {
 
 function npm(cwd, npmArgs) {
 	const bin = isWindows ? "npm.cmd" : "npm";
-	execFileSync(bin, npmArgs, { cwd, stdio: "inherit" });
+	execFileSync(bin, npmArgs, { cwd, stdio: "inherit", shell: isWindows });
 }
 
 function run(cmd, cmdArgs, options = {}) {
@@ -135,8 +135,10 @@ function installDeps() {
 		log("Installing senpi-qa skill deps (node-pty for cross-platform TUI QA)...");
 		try {
 			npm(skillDir, ["install", "--no-audit", "--no-fund"]);
-		} catch {
-			warn("senpi-qa skill deps failed to install (node-pty native build). TUI QA falls back to tmux on POSIX.");
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			const fallback = isWindows ? "" : " TUI QA can fall back to tmux on POSIX.";
+			warn(`senpi-qa skill deps failed to install: ${detail}.${fallback}`);
 		}
 	}
 }

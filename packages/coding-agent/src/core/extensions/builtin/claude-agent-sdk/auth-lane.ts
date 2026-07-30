@@ -189,9 +189,8 @@ function sdkFailure(message: SDKMessage): unknown | undefined {
 		// append it — otherwise classifySdkError() scores every result error as
 		// non-retryable "other", the exhausted account is never blocked, and a
 		// multi-account pool never rotates past it.
-		const reason = "terminal_reason" in message && typeof message.terminal_reason === "string"
-			? message.terminal_reason
-			: "";
+		const reason =
+			"terminal_reason" in message && typeof message.terminal_reason === "string" ? message.terminal_reason : "";
 		return new Error(reason ? `Claude Code ${message.subtype}: ${reason}` : `Claude Code ${message.subtype}`);
 	}
 	return undefined;

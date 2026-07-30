@@ -1,5 +1,25 @@
 # changes — btw
 
+## Runtime provider dispatch for side queries (2026-07-30)
+
+### What changed
+
+- `/btw` now passes a stream function backed by `ctx.modelRegistry.modelRuntime`
+  into the side-query runner instead of allowing it to fall back to the compat
+  API registry.
+- Added issue #488 regression coverage with a provider whose API id exists only
+  in Senpi's runtime registry.
+
+### Why
+
+- Providers registered through `pi.registerProvider()` work in the main loop but
+  may not exist in compat's built-in API registry. `/btw` therefore failed before
+  invoking their registered stream implementation.
+
+### Merge-conflict zones
+
+- `index.ts` side-query dependency construction only.
+
 ## Parallel side questions via `/btw` (2026-07-21)
 
 ### What changed

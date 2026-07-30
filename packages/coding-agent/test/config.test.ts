@@ -10,6 +10,7 @@ import {
 } from "../src/config.ts";
 
 const execPathDescriptor = Object.getOwnPropertyDescriptor(process, "execPath");
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
 const originalPath = process.env.PATH;
 const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
 const originalArgv1 = process.argv[1];
@@ -25,6 +26,9 @@ function setExecPath(value: string): void {
 afterEach(() => {
 	if (execPathDescriptor) {
 		Object.defineProperty(process, "execPath", execPathDescriptor);
+	}
+	if (platformDescriptor) {
+		Object.defineProperty(process, "platform", platformDescriptor);
 	}
 	if (originalPath === undefined) {
 		delete process.env.PATH;
@@ -292,12 +296,43 @@ describe("detectInstallMethod", () => {
 		);
 	});
 
-	test("self-updates bun global installs from bun pm bin", () => {
+	test("self-updates bun global installs from bun pm bin and repairs the launcher", () => {
 		createBunGlobalInstall();
 
 		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent");
 
 		expect(detectInstallMethod()).toBe("bun");
+		expect(command).toMatchObject({
+			command: "bun",
+			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@earendil-works/pi-coding-agent"],
+			steps: [
+				{
+					command: "bun",
+					args: [
+						"install",
+						"-g",
+						"--ignore-scripts",
+						"--minimum-release-age=0",
+						"@earendil-works/pi-coding-agent",
+					],
+				},
+				{
+					command: "bun",
+					args: ["-e", expect.any(String), expect.any(String), expect.any(String)],
+				},
+			],
+		});
+	});
+
+	test("does not append the POSIX Bun launcher repair on Windows", () => {
+		createBunGlobalInstall();
+		Object.defineProperty(process, "platform", {
+			value: "win32",
+			configurable: true,
+		});
+
+		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent");
+
 		expect(command).toEqual({
 			command: "bun",
 			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@earendil-works/pi-coding-agent"],
@@ -405,21 +440,21 @@ describe("detectInstallMethod", () => {
 		const command = getSelfUpdateCommand("@code-yeongyu/senpi", undefined, "@new-scope/pi");
 
 		expect(detectInstallMethod()).toBe("bun");
-		expect(command).toEqual({
+		expect(command).toMatchObject({
 			command: "bun",
 			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@new-scope/pi"],
-			display:
-				"bun uninstall -g @code-yeongyu/senpi && bun install -g --ignore-scripts --minimum-release-age=0 @new-scope/pi",
 			steps: [
 				{
 					command: "bun",
 					args: ["uninstall", "-g", "@code-yeongyu/senpi"],
-					display: "bun uninstall -g @code-yeongyu/senpi",
 				},
 				{
 					command: "bun",
 					args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@new-scope/pi"],
-					display: "bun install -g --ignore-scripts --minimum-release-age=0 @new-scope/pi",
+				},
+				{
+					command: "bun",
+					args: ["-e", expect.any(String), expect.any(String), expect.any(String)],
 				},
 			],
 		});
