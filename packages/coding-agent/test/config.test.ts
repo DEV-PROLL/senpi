@@ -292,16 +292,31 @@ describe("detectInstallMethod", () => {
 		);
 	});
 
-	test("self-updates bun global installs from bun pm bin", () => {
+	test("self-updates bun global installs from bun pm bin and repairs the launcher", () => {
 		createBunGlobalInstall();
 
 		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent");
 
 		expect(detectInstallMethod()).toBe("bun");
-		expect(command).toEqual({
+		expect(command).toMatchObject({
 			command: "bun",
 			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@earendil-works/pi-coding-agent"],
-			display: "bun install -g --ignore-scripts --minimum-release-age=0 @earendil-works/pi-coding-agent",
+			steps: [
+				{
+					command: "bun",
+					args: [
+						"install",
+						"-g",
+						"--ignore-scripts",
+						"--minimum-release-age=0",
+						"@earendil-works/pi-coding-agent",
+					],
+				},
+				{
+					command: "bun",
+					args: ["-e", expect.any(String), expect.any(String), expect.any(String), expect.any(String)],
+				},
+			],
 		});
 	});
 
@@ -405,21 +420,21 @@ describe("detectInstallMethod", () => {
 		const command = getSelfUpdateCommand("@code-yeongyu/senpi", undefined, "@new-scope/pi");
 
 		expect(detectInstallMethod()).toBe("bun");
-		expect(command).toEqual({
+		expect(command).toMatchObject({
 			command: "bun",
 			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@new-scope/pi"],
-			display:
-				"bun uninstall -g @code-yeongyu/senpi && bun install -g --ignore-scripts --minimum-release-age=0 @new-scope/pi",
 			steps: [
 				{
 					command: "bun",
 					args: ["uninstall", "-g", "@code-yeongyu/senpi"],
-					display: "bun uninstall -g @code-yeongyu/senpi",
 				},
 				{
 					command: "bun",
 					args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@new-scope/pi"],
-					display: "bun install -g --ignore-scripts --minimum-release-age=0 @new-scope/pi",
+				},
+				{
+					command: "bun",
+					args: ["-e", expect.any(String), expect.any(String), expect.any(String), expect.any(String)],
 				},
 			],
 		});

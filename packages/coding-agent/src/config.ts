@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readFileSync, realpathSync } from "f
 import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
 import { fileURLToPath } from "url";
+import { createBunLauncherRepairCommand } from "./bun-global-launcher.ts";
 import { findNearestParentConfigDir } from "./nearest-parent-config.ts";
 import { spawnProcessSync } from "./utils/child-process.ts";
 import { normalizePath } from "./utils/paths.ts";
@@ -54,12 +55,18 @@ function normalizeSelfUpdatePackageTarget(target: SelfUpdatePackageTarget): {
 function makeSelfUpdateCommand(
 	installStep: SelfUpdateCommandStep,
 	uninstallStep?: SelfUpdateCommandStep,
+	postInstallStep?: SelfUpdateCommandStep,
 ): SelfUpdateCommand {
-	if (!uninstallStep) return installStep;
+	const steps = [
+		...(uninstallStep ? [uninstallStep] : []),
+		installStep,
+		...(postInstallStep ? [postInstallStep] : []),
+	];
+	if (steps.length === 1) return installStep;
 	return {
 		...installStep,
-		display: `${uninstallStep.display} && ${installStep.display}`,
-		steps: [uninstallStep, installStep],
+		display: steps.map((step) => step.display).join(" && "),
+		steps,
 	};
 }
 
@@ -151,7 +158,9 @@ function getSelfUpdateCommandForMethod(
 					? undefined
 					: makeSelfUpdateCommandStep("yarn", ["global", "remove", installedPackageName]),
 			);
-		case "bun":
+		case "bun": {
+			const binDir = readCommandOutput("bun", ["pm", "bin", "-g"]);
+			if (!binDir) return undefined;
 			return makeSelfUpdateCommand(
 				makeSelfUpdateCommandStep("bun", [
 					"install",
@@ -163,7 +172,9 @@ function getSelfUpdateCommandForMethod(
 				target.packageName === installedPackageName
 					? undefined
 					: makeSelfUpdateCommandStep("bun", ["uninstall", "-g", installedPackageName]),
+				createBunLauncherRepairCommand(binDir, target.packageName, APP_NAME),
 			);
+		}
 		case "npm": {
 			const [command = "npm", ...npmArgs] = npmCommand ?? [];
 			const inferred = npmCommand?.length ? undefined : getInferredNpmInstall();
