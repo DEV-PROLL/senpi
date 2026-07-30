@@ -18,7 +18,7 @@ const MODEL: Model<Api> = {
 const CONTEXT: Context = { messages: [] };
 
 describe("issue #494: Claude Agent SDK denied tool replay", () => {
-	it("terminally denies native and custom MCP tools before Claude Code can execute or retry them", async () => {
+	it("terminally stops the SDK turn with continue:false for native and custom MCP host-captured tools", async () => {
 		// Given: the inference-only SDK adapter options.
 		const options = buildClaudeAgentSdkQueryOptions({
 			model: MODEL,
@@ -57,6 +57,7 @@ describe("issue #494: Claude Agent SDK denied tool replay", () => {
 		).toBe(true);
 		expect(matches.test("WebSearch")).toBe(false);
 		expect(output).toEqual({
+			continue: false,
 			hookSpecificOutput: {
 				hookEventName: "PreToolUse",
 				permissionDecision: "deny",

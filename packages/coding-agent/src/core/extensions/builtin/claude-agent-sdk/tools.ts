@@ -33,6 +33,7 @@ export const HOST_TOOL_DENIAL_HOOKS: NonNullable<Options["hooks"]> = {
 			matcher: HOST_CAPTURED_SDK_TOOL_MATCHER,
 			hooks: [
 				async () => ({
+					continue: false,
 					hookSpecificOutput: {
 						hookEventName: "PreToolUse",
 						permissionDecision: "deny",

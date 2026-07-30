@@ -3,7 +3,7 @@
 ## 2026-07-30 - Terminal pre-execution denial for host-captured tools (#494)
 
 - Added an SDK `PreToolUse` hook for the six native Claude Code tools and `mcp__custom-tools__*`.
-- The hook denies before Claude Code permission handling or safe-command execution with a terminal instruction not to retry.
+- The hook denies before Claude Code permission handling or safe-command execution and terminates SDK processing via top-level `continue: false` alongside its terminal do-not-retry instruction.
 - Senpi still captures the streamed tool call and executes it through its own validation, hook, and permission pipeline.
 - Merge-conflict risk: low. Expected conflict zones are the query options and tool denial constants.
 
