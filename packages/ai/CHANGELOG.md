@@ -12,6 +12,27 @@
 
 ### Removed
 
+## [2026.7.30-2] - 2026-07-30
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Recover Kimi-family visible response channels that arrive inside structural XTML thinking streams. Text is
+  promoted only after an explicit response-open boundary, while structural markers are sanitized without exposing
+  closing-marker-only chain-of-thought. Harden recovery to strip malformed unnamed channels, `tools` and other valid
+  named channels, and bare XTML open / close / separator tokens, including markers split across stream chunks.
+  Recovery preserves XTML-looking inline and fenced code, runs even when no tools are registered, and remains
+  isolated to Kimi-family models
+  ([#523](https://github.com/code-yeongyu/senpi/pull/523),
+  [#537](https://github.com/code-yeongyu/senpi/pull/537)).
+
+### Removed
+
 ## [2026.7.30] - 2026-07-30
 
 ### Breaking Changes

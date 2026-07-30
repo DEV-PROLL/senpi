@@ -9,6 +9,9 @@
 </p>
 
 > New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
+>
+> Release, upgrade, dual-machine installation, verification, rollback, and maintenance:
+> [Senpi Release and Installation Guide](docs/release-guide.md).
 
 ---
 

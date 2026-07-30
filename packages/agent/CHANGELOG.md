@@ -12,6 +12,24 @@
 
 ### Removed
 
+## [2026.7.30-2] - 2026-07-30
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Retry one Kimi-family provider turn when it ends with `stop` but contains neither non-empty visible text nor a tool
+  call. A successful retry is committed once with an `empty_assistant_response_recovery` diagnostic; a second empty
+  result becomes a visible bounded error instead of silently ending the session or looping. Error, abort, refusal,
+  length, and tool-call terminal states retain their prior behavior
+  ([#523](https://github.com/code-yeongyu/senpi/pull/523)).
+
+### Removed
+
 ## [2026.7.30] - 2026-07-30
 
 ### Breaking Changes
