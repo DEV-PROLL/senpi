@@ -170,6 +170,7 @@ import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./gr
 import { restoreInteractiveStderr, takeOverInteractiveStderr } from "./interactive-stderr-guard.ts";
 import { applyKeybindingsFileEdit, seedKeybindingsFile } from "./keybindings-command.ts";
 import { getModelSearchText } from "./model-search.ts";
+import { isRiskyMainModel, RISKY_MAIN_MODEL_WARNING } from "./risky-main-model-warning.ts";
 import { resolveStartupToolPaths } from "./startup-tools.ts";
 import { DEFAULT_SMOOTH_FPS, StreamingRevealController } from "./streaming-reveal.ts";
 import {
@@ -1153,6 +1154,7 @@ export class InteractiveMode {
 			this.showWarning(warning);
 		}
 
+		this.showRiskyMainModelWarning(this.session.model);
 		void this.maybeWarnAboutAnthropicSubscriptionAuth();
 
 		// Process initial messages
@@ -4681,6 +4683,7 @@ export class InteractiveMode {
 					? `, system prompt: ${result.systemPromptChange.systemPromptName}`
 					: "";
 				this.showStatus(`Switched to ${result.model.name || result.model.id}${thinkingStr}${systemPromptStr}`);
+				this.showRiskyMainModelWarning(result.model);
 				void this.maybeWarnAboutAnthropicSubscriptionAuth(result.model);
 			}
 		} catch (error) {
@@ -4786,6 +4789,22 @@ export class InteractiveMode {
 			),
 		);
 		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
+		this.ui.requestRender();
+	}
+
+	showRiskyMainModelWarning(model: Model<any> | undefined): void {
+		if (!model || !isRiskyMainModel(model)) return;
+
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
+		this.chatContainer.addChild(
+			new Text(
+				`${theme.bold(theme.fg("error", "위험한 모델 경고"))}\n${theme.fg("error", RISKY_MAIN_MODEL_WARNING)}`,
+				1,
+				0,
+			),
+		);
+		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
 		this.ui.requestRender();
 	}
 
@@ -5325,6 +5344,7 @@ export class InteractiveMode {
 				? ` (system prompt: ${systemPromptChange.systemPromptName})`
 				: "";
 			this.showStatus(`Model: ${model.id}${systemPromptStr}`);
+			this.showRiskyMainModelWarning(model);
 			void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
 			this.checkDaxnutsEasterEgg(model);
 		} catch (error) {
@@ -6096,6 +6116,7 @@ export class InteractiveMode {
 			this.showStatus(
 				`${actionLabel}. Selected ${selectedModel.id}.${systemPromptStr} Credentials saved to ${getAuthPath()}`,
 			);
+			this.showRiskyMainModelWarning(selectedModel);
 			void this.maybeWarnAboutAnthropicSubscriptionAuth(selectedModel);
 			this.checkDaxnutsEasterEgg(selectedModel);
 		} else {
