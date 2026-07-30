@@ -52,6 +52,23 @@ describe("OpenAI Responses thinking matrix", () => {
 		expect(payload).toMatchObject({ reasoning: { effort: "max", summary: "auto" } });
 	});
 
+	it("preserves max effort for a map-less gpt-5.6-sol model", async () => {
+		const model = {
+			...getModel("openai", "gpt-5.6-sol"),
+			provider: "codex-lb",
+			thinkingLevelMap: undefined,
+		};
+		const payload = await capturePayload((onPayload) =>
+			streamSimpleOpenAIResponses(model, context, {
+				apiKey: "test-key",
+				reasoning: "max",
+				onPayload,
+			}),
+		);
+
+		expect(payload).toMatchObject({ reasoning: { effort: "max", summary: "auto" } });
+	});
+
 	it("preserves Azure's explicit gpt-5.6 max effort mapping", async () => {
 		const model = {
 			...getModel("azure-openai-responses", "gpt-5.6-sol"),
