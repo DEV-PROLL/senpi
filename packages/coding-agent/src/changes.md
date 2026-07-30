@@ -8,6 +8,25 @@
   discarded, the second response is visible exactly once, XTML markers never leak, real auth is unchanged, and
   the sandbox is cleaned.
 
+## high_reasoning_warning for sensitive frontier models at xhigh/max (2026-07-30)
+
+### What changed
+
+- New `core/high-reasoning-warning.ts`: provider-agnostic, model-name-based detection (`isSensitiveHighReasoningModel`, reusing `supportsXhigh`/`supportsMax`) plus `shouldWarnHighReasoning` and `buildHighReasoningWarning`.
+- `agent-session.ts`: emits a new `high_reasoning_warning` `AgentSessionEvent` when a sensitive model is driven at xhigh/max, deduped by provider/model/level, wired into `_switchActiveModel` and `_setThinkingLevel`.
+
+### Why
+
+- Frontier reasoning models (gpt-5.x, deepseek-v4-pro/flash, opus-4-6..5, sonnet-5, fable-5) at xhigh/max are acutely prompt-sensitive: human-prompted runs risk non-stopping, unrequested actions, or risky behavior. The warning urges use via the ultrabrain subagent and states direct-use responsibility.
+
+### Why extension system couldn't handle this alone
+
+- The event must fire from session model/thinking-level transitions inside `AgentSession`, which extensions can only observe after the fact; the dedupe + emit belongs in the session lifecycle.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` `_switchActiveModel`/`_setThinkingLevel` and the `AgentSessionEvent` union.
+
 ## Bun self-updates preserve the Bun launcher (2026-07-30)
 
 - Bun-managed global self-updates now replace Bun's generated Node-shebang symlink with a small launcher that

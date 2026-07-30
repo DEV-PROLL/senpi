@@ -119,6 +119,7 @@ import type {
 	ModelSelectSource,
 } from "./extensions/types.ts";
 import { RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
+import { shouldWarnHighReasoning } from "./high-reasoning-warning.ts";
 import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
@@ -201,6 +202,7 @@ export type AgentSessionEvent =
 	| ExtensionToolHookLifecycleEvent
 	| SystemPromptChangeEvent
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
+	| { type: "high_reasoning_warning"; modelId: string; provider: string; thinkingLevel: ThinkingLevel }
 	| {
 			type: "compaction_end";
 			reason: CompactionReason;
@@ -647,6 +649,7 @@ export class AgentSession {
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
 	private _currentServiceTier: ServiceTier | undefined = undefined;
+	private _lastHighReasoningWarningKey: string | undefined = undefined;
 	private _baseSystemPromptOptions!: BuildDynamicSystemPromptOptions;
 	private _systemPromptOverride?: string;
 
@@ -3213,6 +3216,8 @@ export class AgentSession {
 			this.setSessionThinkingLevel(thinkingLevel);
 		}
 
+		this._emitHighReasoningWarningIfNeeded();
+
 		if (!opts.emitModelSelect) return undefined;
 		return await this._emitModelSelect(model, previousModel, opts.modelSelectSource);
 	}
@@ -3328,7 +3333,28 @@ export class AgentSession {
 				level: effectiveLevel,
 				previousLevel,
 			});
+			this._emitHighReasoningWarningIfNeeded();
 		}
+	}
+
+	private _emitHighReasoningWarningIfNeeded(): void {
+		const model = this.model;
+		const level = this.thinkingLevel;
+		if (!model || !shouldWarnHighReasoning(model, level)) {
+			this._lastHighReasoningWarningKey = undefined;
+			return;
+		}
+		const key = `${model.provider}/${model.id}:${level}`;
+		if (this._lastHighReasoningWarningKey === key) {
+			return;
+		}
+		this._lastHighReasoningWarningKey = key;
+		this._emit({
+			type: "high_reasoning_warning",
+			modelId: model.id,
+			provider: model.provider,
+			thinkingLevel: level,
+		});
 	}
 
 	/**

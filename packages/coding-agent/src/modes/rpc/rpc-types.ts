@@ -445,6 +445,13 @@ export interface RpcThinkingLevelChangedEvent {
 	level: ThinkingLevel;
 }
 
+export interface RpcHighReasoningWarningEvent {
+	type: "high_reasoning_warning";
+	modelId: string;
+	provider: string;
+	thinkingLevel: ThinkingLevel;
+}
+
 /** Emitted after an account is added, removed, pinned, or blocked by refresh failure. */
 export interface RpcAuthAccountsChangedEvent {
 	type: "auth_accounts_changed";
