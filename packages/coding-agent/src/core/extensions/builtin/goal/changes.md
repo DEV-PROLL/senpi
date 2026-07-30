@@ -1,5 +1,32 @@
 # goal Extension Changes
 
+## A newly created goal starts immediately instead of waiting for user grace (2026-07-30)
+
+### What changed
+
+- The `create_goal` tool registration now marks the current turn goal-driven before opening
+  the new goal accounting window. The clean `agent_end` therefore queues the first hidden
+  continuation immediately instead of treating the explicit goal-creation request like a
+  side question on an already-active goal and waiting for the 60-second grace timer.
+- The existing grace policy is unchanged for real user turns that begin with a pre-existing
+  active goal. Monitor delays, continuation caps, repetition/stale guards, and single-flight
+  delivery are also unchanged.
+- Coverage: `test/suite/regressions/goal-created-turn-continuation.test.ts` reproduces the
+  exact lifecycle (`before_agent_start` -> `agent_start` -> `create_goal` -> clean
+  `agent_end`) and asserts one immediate `goal-continuation` message.
+
+### Why
+
+- The observed release-goal session created the goal, stopped normally, and then remained
+  idle for the full user-grace window. The user sent the next instruction at 59 seconds,
+  just before the scheduled continuation, so the goal appeared abandoned even though the
+  footer still showed it as active.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `index.ts` at the dependency passed to `registerGoalTools`.
+- NONE in the continuation verdict, persistence, prompt, or public extension API.
+
 ## Waiting on a live resumption channel is never a blocked goal (2026-07-30)
 
 ### What changed

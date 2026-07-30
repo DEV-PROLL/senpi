@@ -57,7 +57,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	registerGoalTools(pi, {
 		goalStoreRef: (ctx) => buildGoalStoreRef(ctx.sessionManager, ctx.cwd),
 		accountCurrentAgentTurn,
-		beginAgentGoalAccounting,
+		beginAgentGoalAccounting: (goal) => {
+			monitorContinuation.noteContinuationStarted();
+			beginAgentGoalAccounting(goal);
+		},
 		markGoalBlockedThisTurn,
 		markGoalCompletedThisTurn,
 		refreshGoalUi,
