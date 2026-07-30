@@ -67,6 +67,28 @@ function cleanAssistantStopWithText(text: string): AgentMessage {
 	return assistantStopWithReason("stop", text);
 }
 
+function toolUsingContinuationMessages(turn: number): AgentMessage[] {
+	const finalAssistant = cleanAssistantStopWithText(`progress ${turn}`);
+	if (finalAssistant.role !== "assistant") throw new Error("Expected an assistant stop message");
+	const toolCallId = `continuation-tool-${turn}`;
+	return [
+		{
+			...finalAssistant,
+			content: [{ type: "toolCall", id: toolCallId, name: "bash", arguments: { command: "true" } }],
+			stopReason: "toolUse",
+		},
+		{
+			role: "toolResult",
+			toolCallId,
+			toolName: "bash",
+			content: [{ type: "text", text: "ok" }],
+			isError: false,
+			timestamp: finalAssistant.timestamp,
+		},
+		finalAssistant,
+	];
+}
+
 function assistantStopWithReason(stopReason: "stop" | "length", text: string): AgentMessage {
 	const message = cleanAssistantStop();
 	if (message.role !== "assistant") throw new Error("Expected assistant stop message");
@@ -443,6 +465,36 @@ describe("goal continuation while a monitor is active", () => {
 			status: "blocked",
 			blockedReason: "output truncation repeated",
 		});
+	});
+
+	it("keeps admitting immediate continuations when every turn uses tools", async () => {
+		const notices: string[] = [];
+		const { tools, handlers, sent, events } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-immediate-tool-progress");
+		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
+		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+
+		for (let turn = 1; turn <= 9; turn++) {
+			await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+			await runGoalHandlers(
+				handlers,
+				"agent_end",
+				{ type: "agent_end", messages: toolUsingContinuationMessages(turn) },
+				ctx,
+			);
+		}
+
+		expect(sent).toHaveLength(9);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
+			status: "active",
+			consecutiveContinuations: 1,
+		});
+		expect(events.emitted).not.toContainEqual(
+			expect.objectContaining({
+				channel: "goal_continuation_guard_tripped",
+				data: expect.objectContaining({ reason: "cap" }),
+			}),
+		);
 	});
 
 	it("blocks the ninth clean immediate continuation without queuing a ninth hidden prompt", async () => {

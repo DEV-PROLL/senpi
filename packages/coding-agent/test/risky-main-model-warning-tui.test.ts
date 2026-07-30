@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, test, vi } from "vitest";
 import { Container } from "../../tui/src/tui.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { isRiskyMainModel, RISKY_MAIN_MODEL_WARNING } from "../src/modes/interactive/risky-main-model-warning.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
 function model(overrides: Partial<Model<"openai-completions">>): Model<"openai-completions"> {
@@ -63,7 +63,7 @@ describe("risky main-model warning", () => {
 			const plain = stripAnsi(rendered).replace(/\s+/g, " ");
 			expect(plain).toContain(RISKY_MAIN_MODEL_WARNING);
 			expect(plain).toContain("위험한 모델 경고");
-			expect(rendered).toContain("\u001b[38;2;204;102;102m");
+			expect(rendered).toContain(theme.getFgAnsi("error"));
 			expect(fakeThis.chatContainer.children).toHaveLength(4);
 			expect(fakeThis.ui.requestRender).toHaveBeenCalledExactlyOnceWith();
 		},

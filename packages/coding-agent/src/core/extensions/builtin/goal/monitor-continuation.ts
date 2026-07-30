@@ -25,6 +25,8 @@ import {
 	lastAssistantText,
 } from "./lifecycle-helpers.ts";
 import { buildContinuationPrompt, buildGoalStallNotice, buildTruncationRecoveryPrompt } from "./prompt.ts";
+import { resetContinuationStreak } from "./store.ts";
+import { goalStoreRef } from "./store-ref.ts";
 import { collectAssistantUsage } from "./turn-usage.ts";
 import type { Goal, TokenUsageSnapshot } from "./types.ts";
 
@@ -111,25 +113,32 @@ export class MonitorAwareGoalContinuation {
 			this.#cancelTimer();
 			return options.goal;
 		}
-		this.#recordToollessContinuationTurn(options.goal, options.messages);
+		const turnUsedTools = continuationTurnUsedTools(options.messages);
+		this.#recordToollessContinuationTurn(options.goal, turnUsedTools);
+		const goal =
+			!this.#endedTurnWasUserInitiated && turnUsedTools
+				? ((await resetContinuationStreak(goalStoreRef(options.ctx.sessionManager, options.ctx.cwd))) ??
+					options.goal)
+				: options.goal;
+		this.#goal = goal;
 
-		const immediateInput = this.#buildVerdictInput(options.ctx, options.goal, "immediate", options.messages);
-		const immediateVerdict = evaluateGoalContinuation({ goal: options.goal, ...immediateInput });
+		const immediateInput = this.#buildVerdictInput(options.ctx, goal, "immediate", options.messages);
+		const immediateVerdict = evaluateGoalContinuation({ goal, ...immediateInput });
 		if (immediateVerdict.kind === "deny") {
-			if (immediateVerdict.reason === "not-eligible") return options.goal;
+			if (immediateVerdict.reason === "not-eligible") return goal;
 			if (immediateVerdict.reason === "grace") {
-				this.#schedule(options.goal, "userGrace");
-				return options.goal;
+				this.#schedule(goal, "userGrace");
+				return goal;
 			}
 		}
 
 		if (this.#activeMonitorCount === 0) {
 			this.#cancelTimer();
-			const admission = await this.#admitAndQueue(options.ctx, options.goal, "immediate", options.messages);
+			const admission = await this.#admitAndQueue(options.ctx, goal, "immediate", options.messages);
 			return admission.goal;
 		}
-		this.#schedule(options.goal, "monitor");
-		return options.goal;
+		this.#schedule(goal, "monitor");
+		return goal;
 	}
 
 	syncGoal(goal: Goal | null): void {
@@ -319,13 +328,13 @@ export class MonitorAwareGoalContinuation {
 		this.#recentNormalizedOutputHashes = [...this.#recentNormalizedOutputHashes, hashAssistantText(text)].slice(-3);
 	}
 
-	#recordToollessContinuationTurn(goal: Goal, messages: readonly AgentMessage[]): void {
+	#recordToollessContinuationTurn(goal: Goal, turnUsedTools: boolean): void {
 		if (goal.id !== this.#toollessStreakGoalId) {
 			this.#toollessStreakGoalId = goal.id;
 			this.#toollessContinuationStreak = 0;
 		}
 		if (this.#endedTurnWasUserInitiated) return;
-		if (continuationTurnUsedTools(messages)) {
+		if (turnUsedTools) {
 			this.#toollessContinuationStreak = 0;
 			return;
 		}

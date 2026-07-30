@@ -10,7 +10,7 @@ type RecoveredThinking = {
 	readonly recoveredResponse: boolean;
 };
 
-const CHANNEL_MARKER_PATTERN = /<\|(open|close)\|>(think|response|message)<\|sep\|>/g;
+const CHANNEL_MARKER_PATTERN = /<\|(open|close)\|>([a-zA-Z_][a-zA-Z0-9_]*)?<\|sep\|>|<\|(?:open|close|sep)\|>/g;
 
 function recoverThinkingContent(input: string): RecoveredThinking {
 	const mask = createRecoveryCodeMask();
