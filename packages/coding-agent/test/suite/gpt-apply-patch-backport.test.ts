@@ -45,9 +45,11 @@ describe("gpt-apply-patch backported behavior", () => {
 
 		expect(result.summaries).toEqual(["update: ok.txt"]);
 		expect(result.failures).toHaveLength(1);
-		expect(result.recoveryInstructions.mustReadFiles).toEqual(["missing.txt"]);
+		expect(result.recoveryInstructions.mustReadFiles).toEqual([]);
+		expect(result.recoveryInstructions.failedFiles).toEqual(["missing.txt"]);
 		expect(result.recoveryInstructions.mustNotReadFiles).toEqual(["ok.txt"]);
-		expect(buildPartialFailureText(result)).toContain("MUST read missing.txt");
+		expect(buildPartialFailureText(result)).not.toContain("MUST read");
+		expect(buildPartialFailureText(result)).toContain("ENOENT");
 	});
 
 	it("keeps applyPatch fail-fast with ApplyPatchError", async () => {

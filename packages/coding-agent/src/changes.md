@@ -8,6 +8,14 @@
   discarded, the second response is visible exactly once, XTML markers never leak, real auth is unchanged, and
   the sandbox is cleaned.
 
+## Runtime API keys propagate to session titles (2026-07-30)
+
+- Background session-title generation now reuses the active agent request API key before resolving provider
+  headers and compatibility options.
+- This prevents a turn launched with `--api-key` from succeeding under one credential and then sending its
+  `x-apitopia-session` title request with a different configured credential, which Apitopia rejects with 401.
+- Coverage: `test/agent-session-auto-title-routing.test.ts`.
+
 ## high_reasoning_warning for sensitive frontier models at xhigh/max (2026-07-30)
 
 ### What changed

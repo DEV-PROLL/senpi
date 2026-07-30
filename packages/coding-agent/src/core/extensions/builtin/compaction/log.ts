@@ -51,6 +51,7 @@ export type CompactionLoggerEvent =
 	| "hard_limit_trigger"
 	| "emergency_prune"
 	| "ineffective_counted"
+	| "idle_trigger"
 	| "summary_failed";
 
 export interface CompactionLoggerData {
