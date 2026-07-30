@@ -8,6 +8,15 @@ import { getShellConfig } from "../utils/shell.ts";
 
 // Cache for shell command results (persists for process lifetime)
 const commandResultCache = new Map<string, string | undefined>();
+
+// Credential helper commands (auth brokers like `omp token …`) are cold-started on
+// every invocation and can fail transiently — broker lock contention, a slow spawn
+// under load, an OAuth refresh racing another process. A single failed attempt must
+// not read as "credential gone": callers escalate an unresolved API key to a
+// hard-error provider ejection, so one blip would kick the session off its model
+// without any retry. Retry with a short backoff before giving up.
+const COMMAND_EXECUTION_MAX_ATTEMPTS = 3;
+const COMMAND_EXECUTION_BACKOFF_MS = [250, 1000] as const;
 const ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
 
@@ -202,7 +211,11 @@ function executeWithDefaultShell(command: string, env?: Record<string, string>):
 	}
 }
 
-function executeCommandUncached(commandConfig: string, env?: Record<string, string>): string | undefined {
+function sleepBlocking(milliseconds: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function executeCommandOnce(commandConfig: string, env?: Record<string, string>): string | undefined {
 	const command = commandConfig.slice(1);
 	return process.platform === "win32"
 		? (() => {
@@ -210,6 +223,16 @@ function executeCommandUncached(commandConfig: string, env?: Record<string, stri
 				return configuredResult.executed ? configuredResult.value : executeWithDefaultShell(command, env);
 			})()
 		: executeWithDefaultShell(command, env);
+}
+
+function executeCommandUncached(commandConfig: string, env?: Record<string, string>): string | undefined {
+	for (let attempt = 0; attempt < COMMAND_EXECUTION_MAX_ATTEMPTS; attempt++) {
+		const value = executeCommandOnce(commandConfig, env);
+		if (value !== undefined) return value;
+		const backoffMs = COMMAND_EXECUTION_BACKOFF_MS[attempt];
+		if (backoffMs !== undefined) sleepBlocking(backoffMs);
+	}
+	return undefined;
 }
 
 function executeCommand(commandConfig: string): string | undefined {

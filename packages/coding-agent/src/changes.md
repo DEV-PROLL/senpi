@@ -8,6 +8,36 @@
   without a launcher repair.
 - Coverage: `test/suite/regressions/496-bun-launcher-self-update.test.ts`.
 
+## Shell-command credential resolution retries before giving up (2026-07-29)
+
+### What changed
+
+- `core/resolve-config-value.ts`: `executeCommandUncached` now runs up to 3 attempts (250ms then 1000ms backoff
+  via a blocking `Atomics.wait` sleep — the call sites are synchronous `execSync`/`spawnSync` already) before
+  returning `undefined`. Previously a single failed spawn, non-zero exit, or timeout of a credential helper
+  propagated through `resolveConfigValueOrThrow` as `Failed to resolve API key … from shell command`, which
+  `agent-session` classifies as hard-error eligible and ejects the active model without a single retry.
+- Coverage: `test/resolve-config-value.test.ts` — new: transient-fail-then-success resolves on attempt 3;
+  persistent failure bounded at exactly 3 attempts. Updated: cache-failure arithmetic (one failing resolve now
+  costs 3 executions before the `undefined` is cached).
+
+### Why
+
+- Incident session `019faccb-3e7c-7307-8b19-2c7fb9e77b5c` (2026-07-29), five fallback cascades in one day:
+  every cascade opened with `API key auth failed for provider kimi-code: Failed to resolve API key … from shell
+  command: omp token kimi-code`, hard-error ejecting `kimi-code/k3`; the same flake hit `omp token anthropic`
+  mid-chain. Measured `omp token` cold-start latency is 1.5–4.0s per invocation (bun startup + SQLite auth
+  store); under load the subprocess intermittently fails while the credential itself is healthy — re-running it
+  seconds later succeeds. A hard-error ejection on a transient resolver blip converts a one-second hiccup into
+  a full provider-switch cascade (primary → exhausted fallbacks → last-resort model).
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `core/resolve-config-value.ts` also exists upstream in badlogic/pi-mono (same
+  `executeCommandUncached`), so the retry wrapper (`executeCommandOnce` keeps the original body) can collide
+  with upstream edits to that function; constants and `sleepBlocking` are additive. The same fix belongs
+  upstream as well.
+
 ## Kimi XTML recovery preserves protocol identity (2026-07-29)
 
 ### What changed

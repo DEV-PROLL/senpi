@@ -1636,7 +1636,9 @@ describe("ModelRegistry", () => {
 				expect(key2).toBeUndefined();
 
 				const count = parseInt(readFileSync(counterFile, "utf-8").trim(), 10);
-				expect(count).toBe(2);
+				// Two independent request-time resolutions, each running the bounded
+				// 3-attempt command retry from #489 before giving up: 2 x 3 = 6.
+				expect(count).toBe(6);
 			});
 
 			test("provider auth status reports apiKey environment variables from models.json", async () => {
