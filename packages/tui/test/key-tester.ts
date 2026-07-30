@@ -2,7 +2,7 @@
 import { matchesKey } from "../src/keys.ts";
 import { TuiMainScreen } from "../src/TuiMainScreen.ts";
 import { ProcessTerminal } from "../src/terminal.ts";
-import { type Component, TUI } from "../src/tui.ts";
+import type { Component, TUI } from "../src/tui.ts";
 import { truncateToWidth, visibleWidth } from "../src/utils.ts";
 
 /**

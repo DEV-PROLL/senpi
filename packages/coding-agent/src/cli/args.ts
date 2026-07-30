@@ -184,12 +184,12 @@ export function parseArgs(args: string[], options: { grokNeoEnabled?: boolean } 
 			} else {
 				result.listModels = true;
 			}
-			} else if (arg === "--list-tips") {
-				result.listTips = true;
-			} else if (arg === "--alt") {
-				result.alt = true;
-			} else if (arg === "--verbose") {
-				result.verbose = true;
+		} else if (arg === "--list-tips") {
+			result.listTips = true;
+		} else if (arg === "--alt") {
+			result.alt = true;
+		} else if (arg === "--verbose") {
+			result.verbose = true;
 		} else if (arg === "--approve" || arg === "-a") {
 			result.projectTrustOverride = true;
 		} else if (arg === "--no-approve" || arg === "-na") {

@@ -130,7 +130,7 @@ export {
 	type OverlayOptions,
 	type OverlayUnfocusOptions,
 	type SizeValue,
-	type TUI,
+	TUI,
 	type TuiInputListener,
 	type TuiInputListenerResult,
 } from "./tui.ts";

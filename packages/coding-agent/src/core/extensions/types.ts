@@ -389,7 +389,7 @@ export interface ExtensionContext {
 	 *  `enabledModels` settings against the available catalogue). Same set
 	 *  the `/scoped-models` command shows. Empty when no scoping is
 	 *  configured (all available models are usable). Read-only snapshot. */
-	scopedModels: readonly ScopedModel[];
+	scopedModels?: readonly ScopedModel[];
 	/** Current thinking level, when provided by the session runtime. */
 	thinkingLevel?: ThinkingLevel;
 	/** Whether the agent is idle (not streaming) */

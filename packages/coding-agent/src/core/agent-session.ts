@@ -4868,11 +4868,11 @@ export class AgentSession {
 				},
 				setSessionThinkingLevel: (level) => this.setSessionThinkingLevel(level),
 			},
-				{
-					getModel: () => this.model,
-					getServiceTier: () => this.serviceTier,
-					getScopedModels: () => this._scopedModels,
-					isIdle: () => this.isIdle,
+			{
+				getModel: () => this.model,
+				getServiceTier: () => this.serviceTier,
+				getScopedModels: () => this._scopedModels,
+				isIdle: () => this.isIdle,
 				isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
 				getSignal: () => this._extensionEventSignal ?? this.agent.signal,
 				abort: () => {

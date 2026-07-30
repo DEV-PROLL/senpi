@@ -99,7 +99,6 @@ export interface Component {
 
 export type TuiInputListenerResult = { consume?: boolean; data?: string } | undefined;
 export type TuiInputListener = (data: string) => TuiInputListenerResult;
-type InputListenerResult = TuiInputListenerResult;
 type InputListener = TuiInputListener;
 type PendingOsc11BackgroundQuery = {
 	settled: boolean;

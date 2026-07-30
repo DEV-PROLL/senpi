@@ -1776,7 +1776,7 @@ function createClient(
 					model.headers,
 					dynamicHeaders,
 					optionsHeaders,
-					),
+				),
 			),
 		});
 
@@ -1803,7 +1803,7 @@ function createClient(
 					},
 					model.headers,
 					optionsHeaders,
-					),
+				),
 			),
 		});
 

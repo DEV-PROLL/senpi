@@ -13,7 +13,8 @@ import {
 	setCapabilities,
 	setCellDimensions,
 } from "../src/terminal-image.ts";
-import type { Component, TUI } from "../src/tui.ts";
+import type { Component } from "../src/tui.ts";
+import { TUI } from "../src/tui.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
 
 class TestComponent implements Component {

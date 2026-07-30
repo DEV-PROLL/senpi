@@ -156,21 +156,21 @@ describe("ExtensionRunner", () => {
 		applyCompaction: async () => ({ applied: false, reason: "rejected" }),
 		getCompactionSettings: () => DEFAULT_COMPACTION_SETTINGS,
 		getLookAtSettings: () => ({ enabled: true, models: undefined }),
-			getImageSettings: () => ({ autoResize: true, blockImages: false }),
-			sessionSettings: createInMemoryExtensionSessionSettings(),
-			getSystemPrompt: () => "",
-			getLoadedHookSources: () => ({
-				agentDir: tempDir,
-				cwd: tempDir,
+		getImageSettings: () => ({ autoResize: true, blockImages: false }),
+		sessionSettings: createInMemoryExtensionSessionSettings(),
+		getSystemPrompt: () => "",
+		getLoadedHookSources: () => ({
+			agentDir: tempDir,
+			cwd: tempDir,
 			globalHookSourcePaths: [],
 			globalHooksPath: path.join(tempDir, "hooks.json"),
 			preSessionHookSourcePaths: [],
 			projectHookSourcePaths: [],
-				projectHooksPath: path.join(tempDir, ".senpi", "hooks.json"),
-				runtimeHookSourcePaths: [],
-			}),
-			getScopedModels: () => [],
-		};
+			projectHooksPath: path.join(tempDir, ".senpi", "hooks.json"),
+			runtimeHookSourcePaths: [],
+		}),
+		getScopedModels: () => [],
+	};
 
 	type JsonContextFixture = {
 		readonly messages: AgentMessage[];
@@ -273,13 +273,13 @@ describe("ExtensionRunner", () => {
 		return providerNative.raw;
 	};
 
-		const requireToolDetails = (messages: AgentMessage[]): Record<string, unknown> => {
-			const toolResult = messages.find((message) => message.role === "toolResult");
-			if (toolResult?.role !== "toolResult") {
-				throw new Error("Expected tool result message");
-			}
-			return requireRecord(toolResult.details, "tool result details");
-		};
+	const requireToolDetails = (messages: AgentMessage[]): Record<string, unknown> => {
+		const toolResult = messages.find((message) => message.role === "toolResult");
+		if (toolResult?.role !== "toolResult") {
+			throw new Error("Expected tool result message");
+		}
+		return requireRecord(toolResult.details, "tool result details");
+	};
 
 	describe("scopedModels", () => {
 		it("reflects the getScopedModels context action on ctx.scopedModels", async () => {

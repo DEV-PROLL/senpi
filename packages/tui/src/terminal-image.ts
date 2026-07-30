@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";

@@ -477,11 +477,11 @@ export class ExtensionRunner {
 		this.runtime.setSessionModel = actions.setSessionModel;
 		this.runtime.setSessionThinkingLevel = actions.setSessionThinkingLevel;
 
-			// Context actions (required)
-			this.getModel = contextActions.getModel;
-			this.getServiceTier = contextActions.getServiceTier;
-			this.getScopedModels = contextActions.getScopedModels;
-			this.isIdleFn = contextActions.isIdle;
+		// Context actions (required)
+		this.getModel = contextActions.getModel;
+		this.getServiceTier = contextActions.getServiceTier;
+		this.getScopedModels = contextActions.getScopedModels;
+		this.isIdleFn = contextActions.isIdle;
 		this.isProjectTrustedFn = contextActions.isProjectTrusted;
 		this.getSignalFn = contextActions.getSignal;
 		this.abortFn = contextActions.abort;
@@ -943,13 +943,13 @@ export class ExtensionRunner {
 	 * Create an ExtensionContext for use in event handlers and tool execution.
 	 * Context values are resolved at call time, so changes via bindCore/bindUI are reflected.
 	 */
-		createContext(excludeBeforeProviderRequestExtensionPath?: string): ExtensionContext {
-			const runner = this;
-			const getModel = this.getModel;
-			const getServiceTier = this.getServiceTier;
-			let compactionSignal: AbortSignal | undefined;
-			const getScopedModels = this.getScopedModels;
-			return {
+	createContext(excludeBeforeProviderRequestExtensionPath?: string): ExtensionContext {
+		const runner = this;
+		const getModel = this.getModel;
+		const getServiceTier = this.getServiceTier;
+		let compactionSignal: AbortSignal | undefined;
+		const getScopedModels = this.getScopedModels;
+		return {
 			get ui() {
 				runner.assertActive();
 				return runner.uiContext;
@@ -978,14 +978,14 @@ export class ExtensionRunner {
 				runner.assertActive();
 				return getModel();
 			},
-				get serviceTier() {
-					runner.assertActive();
-					return getServiceTier();
-				},
-				get scopedModels() {
-					runner.assertActive();
-					return getScopedModels();
-				},
+			get serviceTier() {
+				runner.assertActive();
+				return getServiceTier();
+			},
+			get scopedModels() {
+				runner.assertActive();
+				return getScopedModels();
+			},
 			get thinkingLevel() {
 				runner.assertActive();
 				return runner.runtime.getThinkingLevel();

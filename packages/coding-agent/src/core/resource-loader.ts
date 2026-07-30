@@ -321,6 +321,8 @@ export interface DefaultResourceLoaderOptions {
 	noContextFiles?: boolean;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
+	systemPromptOverride?: (base: string | undefined) => string | undefined;
+	appendSystemPromptOverride?: (base: string[]) => string[];
 	extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
 	skillsOverride?: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
 		skills: Skill[];
@@ -359,6 +361,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private noContextFiles: boolean;
 	private systemPromptSource?: string;
 	private appendSystemPromptSource?: string[];
+	private systemPromptOverride?: (base: string | undefined) => string | undefined;
+	private appendSystemPromptOverride?: (base: string[]) => string[];
 	private extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
 	private skillsOverride?: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
 		skills: Skill[];
@@ -425,6 +429,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.noContextFiles = options.noContextFiles ?? false;
 		this.systemPromptSource = options.systemPrompt;
 		this.appendSystemPromptSource = options.appendSystemPrompt;
+		this.systemPromptOverride = options.systemPromptOverride;
+		this.appendSystemPromptOverride = options.appendSystemPromptOverride;
 		this.extensionsOverride = options.extensionsOverride;
 		this.skillsOverride = options.skillsOverride;
 		this.promptsOverride = options.promptsOverride;
@@ -576,12 +582,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
 			temporary: true,
 		});
-			time("packageResolve", "extensions");
-			// Kept on the instance so post-reload passes (extendResources) can still resolve package metadata.
-			this.resourceMetadataByPath = new Map();
-			const metadataByPath = this.resourceMetadataByPath;
+		time("packageResolve", "extensions");
+		// Kept on the instance so post-reload passes (extendResources) can still resolve package metadata.
+		this.resourceMetadataByPath = new Map();
+		const metadataByPath = this.resourceMetadataByPath;
 
-			this.extensionSkillSourceInfos = new Map();
+		this.extensionSkillSourceInfos = new Map();
 		this.extensionPromptSourceInfos = new Map();
 		this.extensionThemeSourceInfos = new Map();
 
@@ -722,14 +728,18 @@ export class DefaultResourceLoader implements ResourceLoader {
 		// SYSTEM.md / APPEND_SYSTEM.md file discovery was intentionally removed; the explicit
 		// options are the only static prompt source (see packages/coding-agent/changes.md).
 		const systemPromptSource = this.systemPromptSource;
-		this.systemPrompt = resolvePromptInput(systemPromptSource, "system prompt");
+		const baseSystemPrompt = resolvePromptInput(systemPromptSource, "system prompt");
+		this.systemPrompt = this.systemPromptOverride ? this.systemPromptOverride(baseSystemPrompt) : baseSystemPrompt;
 		this.systemPromptSourcePath =
 			systemPromptSource && existsSync(systemPromptSource) ? resolvePath(systemPromptSource) : undefined;
 
 		const appendSources = this.appendSystemPromptSource ?? [];
-		this.appendSystemPrompt = appendSources
+		const baseAppend = appendSources
 			.map((s) => resolvePromptInput(s, "append system prompt"))
 			.filter((s): s is string => s !== undefined);
+		this.appendSystemPrompt = this.appendSystemPromptOverride
+			? this.appendSystemPromptOverride(baseAppend)
+			: baseAppend;
 		this.appendSystemPromptSourcePaths = appendSources
 			.filter((source) => existsSync(source))
 			.map((source) => resolvePath(source));
