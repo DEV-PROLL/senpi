@@ -21,23 +21,23 @@ export default function modelFallbackExtension(pi: ExtensionAPI): void {
 async function handleFallbackCommand(rawArgs: string, ctx: ExtensionCommandContext): Promise<void> {
 	const args = rawArgs.trim().split(/\s+/).filter(Boolean);
 	if (args.length === 0) {
-		const settings = loadFallbackSettings(ctx.sessionSettings);
+		const settings = loadFallbackSettings(ctx.sessionSettings, ctx.modelRegistry);
 		await runFallbackMenu(ctx, settings, {
 			setChain: (target, entries) => saveChain(ctx, target, entries),
 			removeChain: async (target) => {
-				await updateFallbackSettings(ctx.sessionSettings, (sessionSettings) =>
+				await updateFallbackSettings(ctx.sessionSettings, ctx.modelRegistry, (sessionSettings) =>
 					sessionSettings.removeFallbackChain(target),
 				);
 				ctx.ui.notify(`Removed fallback chain for ${target}.`);
 			},
 			toggle: async () => {
-				await updateFallbackSettings(ctx.sessionSettings, (sessionSettings) =>
+				await updateFallbackSettings(ctx.sessionSettings, ctx.modelRegistry, (sessionSettings) =>
 					sessionSettings.setModelFallbackEnabled(!settings.modelFallback),
 				);
 				ctx.ui.notify(`Model fallback ${settings.modelFallback ? "disabled" : "enabled"}.`);
 			},
 			setRevertPolicy: async (policy) => {
-				await updateFallbackSettings(ctx.sessionSettings, (sessionSettings) =>
+				await updateFallbackSettings(ctx.sessionSettings, ctx.modelRegistry, (sessionSettings) =>
 					sessionSettings.setFallbackRevertPolicy(policy),
 				);
 				ctx.ui.notify(`Fallback revert policy set to ${policy}.`);
@@ -58,7 +58,7 @@ async function saveChain(ctx: ExtensionCommandContext, target: string, entries: 
 		ctx.ui.notify(warnings.join("\n"), "warning");
 		return false;
 	}
-	await updateFallbackSettings(ctx.sessionSettings, (sessionSettings) =>
+	await updateFallbackSettings(ctx.sessionSettings, ctx.modelRegistry, (sessionSettings) =>
 		sessionSettings.setFallbackChain(target, entries),
 	);
 	ctx.ui.notify(`Fallback chain saved for ${target}.`);

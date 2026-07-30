@@ -2,9 +2,11 @@ import assert from "node:assert";
 import { afterEach, describe, it } from "node:test";
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import { Chalk } from "chalk";
+import { latexToUnicode } from "../src/components/latex.ts";
 import { Markdown } from "../src/components/markdown.ts";
 import { resetCapabilitiesCache, setCapabilities } from "../src/terminal-image.ts";
 import { type Component, TUI } from "../src/tui.ts";
+import { visibleWidth } from "../src/utils.ts";
 import { defaultMarkdownTheme } from "./test-themes.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
 
@@ -29,6 +31,15 @@ function getCellUnderline(terminal: VirtualTerminal, row: number, col: number): 
 	const cell = line.getCell(col);
 	assert.ok(cell, `Missing cell at row ${row} col ${col}`);
 	return cell.isUnderline();
+}
+
+function getCellWidth(terminal: VirtualTerminal, row: number, col: number): number {
+	const xterm: XtermTerminalType = Reflect.get(terminal, "xterm");
+	const line = xterm.buffer.active.getLine(xterm.buffer.active.viewportY + row);
+	assert.ok(line, `Missing buffer line at row ${row}`);
+	const cell = line.getCell(col);
+	assert.ok(cell, `Missing cell at row ${row} col ${col}`);
+	return cell.getWidth();
 }
 
 function stripAnsi(line: string): string {
@@ -1394,6 +1405,328 @@ bar`,
 				joinedPlain.includes("<div>") && joinedPlain.includes("</div>"),
 				"Should render HTML in code blocks",
 			);
+		});
+	});
+
+	describe("LaTeX math", () => {
+		it("LaTeX renders inline and display math", () => {
+			const markdown = new Markdown("Energy is $E=mc^2$.\n\n$$\\int_0^1 x^2 dx$$", 0, 0, defaultMarkdownTheme);
+
+			const plain = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
+			const rendered = plain.join("\n");
+
+			assert.ok(rendered.includes("Energy is E=mc²."), rendered);
+			assert.ok(rendered.includes("∫₀¹ x² dx"), rendered);
+			assert.ok(!rendered.includes("$"), rendered);
+			assert.ok(!rendered.includes("\\int"), rendered);
+		});
+
+		it("LaTeX preserves malformed and code literals", () => {
+			const markdown = new Markdown(
+				[
+					"Outside \\(x^2\\).",
+					"",
+					"Unmatched $x and \\[y",
+					"",
+					"Inline code: `$x^2$` and `\\(y^2\\)`.",
+					"",
+					"```tex",
+					"$$x^2$$",
+					"\\[y^2\\]",
+					"```",
+				].join("\n"),
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+
+			const rendered = markdown
+				.render(80)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+
+			assert.ok(rendered.includes("Outside x²."), rendered);
+			assert.ok(rendered.includes("Unmatched $x and \\[y"), rendered);
+			assert.ok(rendered.includes("`$x^2$`") || rendered.includes("$x^2$"), rendered);
+			assert.ok(rendered.includes("\\(y^2\\)"), rendered);
+			assert.ok(rendered.includes("$$x^2$$"), rendered);
+			assert.ok(rendered.includes("\\[y^2\\]"), rendered);
+		});
+
+		it("LaTeX preserves unknown command grouping", () => {
+			const markdown = new Markdown("Fallback: $\\foo{bar} + \\alpha$.", 0, 0, defaultMarkdownTheme);
+			const rendered = markdown
+				.render(80)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+
+			assert.ok(rendered.includes("Fallback: \\foo{bar} + α."), rendered);
+			assert.ok(!rendered.includes("$"), rendered);
+		});
+
+		it("LaTeX renders Korean Japanese and Chinese formulas", () => {
+			const markdown = new Markdown(
+				[
+					"한국어: $\\text{속도} = \\frac{\\text{거리}}{\\text{시간}}$",
+					"日本語: $\\text{面積} = \\pi \\times \\text{半径}^2$",
+					"中文: $\\text{能量} = \\text{质量} \\times \\text{光速}^2$",
+					"",
+					"Inline code: `$\\text{속도}$`.",
+					"",
+					"```tex",
+					"$\\text{面積}$",
+					"```",
+					"",
+					"Unmatched: \\[未完",
+				].join("\n"),
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+
+			const lines = markdown.render(40).map((line) => stripAnsi(line).trimEnd());
+			const rendered = lines.join("\n");
+
+			assert.ok(rendered.includes("한국어: 속도 = (거리)⁄(시간)"), rendered);
+			assert.ok(rendered.includes("日本語: 面積 = π × 半径²"), rendered);
+			assert.ok(rendered.includes("中文: 能量 = 质量 × 光速²"), rendered);
+			assert.ok(rendered.includes("$\\text{속도}$"), rendered);
+			assert.ok(rendered.includes("$\\text{面積}$"), rendered);
+			assert.ok(rendered.includes("Unmatched: \\[未完"), rendered);
+			assert.ok(
+				lines.every((line) => visibleWidth(line) <= 40),
+				rendered,
+			);
+		});
+
+		it("LaTeX preserves ordinary dollar-delimited text", () => {
+			const markdown = new Markdown(
+				[
+					"Budget: $5-$10",
+					"use $HOME/$USER",
+					"identifier$token$tail",
+					"The US$5$ bill remains payable.",
+					"Astral suffix: $x$𐐀",
+					"Astral prefix: 𐐀$x$",
+					"Braced shell: $" + "{HOME}/$" + "{USER}",
+					"Subshells: $(pwd)/$(whoami)",
+					"Special parameters: $?/$!",
+					"Combining suffix: Cafe\u0301$x$",
+					"Valid math: $x^2$.",
+				].join("\n"),
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+			const rendered = markdown
+				.render(80)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+
+			assert.ok(rendered.includes("Budget: $5-$10"), rendered);
+			assert.ok(rendered.includes("use $HOME/$USER"), rendered);
+			assert.ok(rendered.includes("identifier$token$tail"), rendered);
+			assert.ok(rendered.includes("The US$5$ bill remains payable."), rendered);
+			assert.ok(rendered.includes("Astral suffix: $x$𐐀"), rendered);
+			assert.ok(rendered.includes("Astral prefix: 𐐀$x$"), rendered);
+			assert.ok(rendered.includes("Braced shell: $" + "{HOME}/$" + "{USER}"), rendered);
+			assert.ok(rendered.includes("Subshells: $(pwd)/$(whoami)"), rendered);
+			assert.ok(rendered.includes("Special parameters: $?/$!"), rendered);
+			assert.ok(rendered.includes("Combining suffix: Cafe\u0301$x$"), rendered);
+			assert.ok(rendered.includes("Valid math: x²."), rendered);
+		});
+
+		it("LaTeX preserves partial streamed currency and shell pairs", () => {
+			const markdown = new Markdown("", 0, 0, defaultMarkdownTheme);
+			const bracedShellPair = "use $HOME/$" + "{USER}";
+			const frames = [
+				["Budget: $5-$", "Budget: $5-$"],
+				["Budget: $5-$10", "Budget: $5-$10"],
+				["use $HOME/$", "use $HOME/$"],
+				["use $HOME/$USER", "use $HOME/$USER"],
+				[bracedShellPair, bracedShellPair],
+			] as const;
+
+			for (const [frame, expected] of frames) {
+				markdown.setText(frame);
+				const rendered = markdown
+					.render(80)
+					.map((line) => stripAnsi(line).trimEnd())
+					.join("\n");
+				assert.strictEqual(rendered, expected, frame);
+			}
+		});
+
+		it("LaTeX preserves malformed nested and over-budget blocks", () => {
+			const nested = "\\[\nouter\n\\[\nx\n\\]\n";
+			const falseCloser = `$$x$$not-close${"y".repeat(5000)}\n\nValid: $z^2$.`;
+			const prematureCloser = "$$x$$ trailing\nparagraph\n$$";
+			const overBudget = `$$${"x".repeat(4097)}$$`;
+			const markdown = new Markdown(
+				`${nested}\n${falseCloser}\n\n${prematureCloser}\n\n${overBudget}`,
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+			const rendered = markdown
+				.render(6000)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+
+			assert.strictEqual(rendered.match(/\\\[/g)?.length, 2, rendered.slice(0, 200));
+			assert.strictEqual(rendered.match(/\\\]/g)?.length, 1, rendered.slice(0, 200));
+			assert.ok(rendered.includes("$$x$$not-close"), rendered.slice(0, 200));
+			assert.ok(rendered.includes("Valid: z²."), rendered.slice(-100));
+			assert.ok(rendered.includes(prematureCloser), rendered);
+			assert.ok(rendered.includes(overBudget), rendered.slice(-4200));
+		});
+
+		it("LaTeX delimiters do not cross inline code spans", () => {
+			const markdown = new Markdown(
+				[
+					"Before \\[unfinished before `\\]` after",
+					"Before \\(unfinished before `\\)` after",
+					"Nested \\(outer \\(inner\\) remains literal",
+					"Nested siblings \\(outer \\(a\\) and \\(b\\)\\) remain literal",
+					"Mixed nested \\(outer \\[inner\\] remains literal",
+					"Escaped identifier punctuation: array\\[0\\] and call\\(arg\\)",
+					"Escaped newline: $a\\\nb$",
+					"Padded explicit: \\( x^2 \\).",
+				].join("\n"),
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+			const rendered = markdown
+				.render(80)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+
+			assert.ok(rendered.includes("Before \\[unfinished before \\] after"), rendered);
+			assert.ok(rendered.includes("Before \\(unfinished before \\) after"), rendered);
+			assert.ok(rendered.includes("Nested \\(outer \\(inner\\) remains literal"), rendered);
+			assert.ok(rendered.includes("Nested siblings \\(outer \\(a\\) and \\(b\\)\\) remain literal"), rendered);
+			assert.ok(rendered.includes("Mixed nested \\(outer \\[inner\\] remains literal"), rendered);
+			assert.ok(rendered.includes("Escaped identifier punctuation: array[0] and call(arg)"), rendered);
+			assert.ok(rendered.includes("$a"), rendered);
+			assert.ok(rendered.includes("b$"), rendered);
+			assert.ok(rendered.includes("Padded explicit: x²."), rendered);
+		});
+
+		it("LaTeX preserves partial streamed inline code spans", () => {
+			const markdown = new Markdown("", 0, 0, defaultMarkdownTheme);
+			const frames = [
+				["Inline: `$x^2$", "Inline: `$x^2$"],
+				["Explicit: `\\(x^2\\)", "Explicit: `\\(x^2\\)"],
+				["Nested formatting: `code **bold** $x^2$", "Nested formatting: `code bold $x^2$"],
+				["Escaped backtick: \\` then $x^2$.", "Escaped backtick: ` then x²."],
+				["Inline: `$x^2$`", "Inline: $x^2$"],
+			] as const;
+
+			for (const [frame, expected] of frames) {
+				markdown.setText(frame);
+				const rendered = markdown
+					.render(80)
+					.map((line) => stripAnsi(line).trimEnd())
+					.join("\n");
+				assert.strictEqual(rendered, expected, frame);
+			}
+		});
+
+		it("LaTeX preserves separated malformed openers", () => {
+			const malformed = "\\(a".repeat(2000);
+			const markdown = new Markdown(malformed, 0, 0, defaultMarkdownTheme);
+			const rendered = markdown
+				.render(7000)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+			assert.strictEqual(rendered, malformed);
+		});
+
+		it("LaTeX preserves repeated literal dollar markers", () => {
+			const literalDollars = "a$$".repeat(2000);
+			const markdown = new Markdown(literalDollars, 0, 0, defaultMarkdownTheme);
+			const rendered = markdown
+				.render(7000)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+			assert.strictEqual(rendered, literalDollars);
+		});
+
+		it("LaTeX converts nested structures and preserves command distinctions", () => {
+			assert.strictEqual(latexToUnicode("\\sqrt{\\frac{거리}{시간}}"), "√((거리)⁄(시간))");
+			assert.strictEqual(latexToUnicode("\\frac{1}{\\frac{2}{3}}"), "(1)⁄((2)⁄(3))");
+			assert.strictEqual(latexToUnicode("\\epsilon \\varepsilon \\phi \\varphi"), "ϵ ε ϕ φ");
+			assert.strictEqual(latexToUnicode("\\text{file\\_1 and x\\^2}"), "file_1 and x^2");
+			assert.strictEqual(latexToUnicode("\\quadruple"), "\\quadruple");
+		});
+
+		it("LaTeX handles TeX delimiter whitespace and grouping", () => {
+			assert.strictEqual(latexToUnicode("\\left\\{x\\right\\}"), "{x}");
+			assert.strictEqual(latexToUnicode("\\frac {a}{b}"), "(a)⁄(b)");
+			assert.strictEqual(latexToUnicode("\\sqrt {x}"), "√(x)");
+			assert.strictEqual(latexToUnicode("\\text {한}"), "한");
+			assert.strictEqual(latexToUnicode("f\\!(x)"), "f(x)");
+			assert.strictEqual(latexToUnicode("A^\\mathrm{T}"), "A^T");
+			assert.strictEqual(latexToUnicode("a+{b}"), "a+b");
+			assert.strictEqual(latexToUnicode("\\foo{bar}"), "\\foo{bar}");
+			assert.strictEqual(latexToUnicode("\\foo {bar}"), "\\foo{bar}");
+			assert.strictEqual(latexToUnicode("\\left. f(x) \\right|_0^1"), " f(x) |₀¹");
+		});
+
+		it("LaTeX falls back literally beyond conversion budgets", () => {
+			const tooDeep = `${"\\sqrt{".repeat(65)}x${"}".repeat(65)}`;
+			const tooLong = `\\alpha${"x".repeat(4096)}`;
+			assert.strictEqual(latexToUnicode(tooDeep), tooDeep);
+			assert.strictEqual(latexToUnicode(tooLong), tooLong);
+
+			const markdown = new Markdown(`$${tooLong}$`, 0, 0, defaultMarkdownTheme);
+			const rendered = markdown
+				.render(5000)
+				.map((line) => stripAnsi(line).trimEnd())
+				.join("\n");
+			assert.ok(rendered.includes(`$${tooLong}$`), rendered.slice(0, 100));
+		});
+
+		it("LaTeX display math inherits blockquote style context", () => {
+			const markdown = new Markdown("> $$x^2$$", 0, 0, defaultMarkdownTheme, {
+				color: (text) => chalk.gray(text),
+			});
+			const rendered = markdown.render(80).join("\n");
+
+			assert.ok(stripAnsi(rendered).includes("│ x²"), rendered);
+			assert.ok(!rendered.includes("\x1b[90m"), rendered);
+		});
+
+		it("LaTeX anchors leading combining marks to terminal width", async () => {
+			const formula = latexToUnicode("\\text{\u0301}");
+			assert.strictEqual(formula, "◌\u0301");
+
+			const markdown = new Markdown("$\\text{\u0301}$", 0, 0, defaultMarkdownTheme);
+			const rendered = stripAnsi(markdown.render(10)[0] ?? "").trimEnd();
+			assert.strictEqual(rendered, formula);
+
+			const terminal = new VirtualTerminal(10, 2);
+			terminal.write(formula);
+			await terminal.flush();
+			assert.strictEqual(terminal.getCursorPosition().x, visibleWidth(formula));
+			assert.strictEqual(getCellWidth(terminal, 0, 0), 1);
+			terminal.stop();
+		});
+
+		it("LaTeX renders CJK math through headless terminal cells", async () => {
+			const markdown = new Markdown("한 $x^2$ 中", 0, 0, defaultMarkdownTheme);
+			const terminal = new VirtualTerminal(40, 4);
+			const tui = new TUI(terminal);
+			tui.addChild(markdown);
+			tui.start();
+			await terminal.waitForRender();
+
+			assert.ok(terminal.getViewport()[0]?.includes("한 x² 中"));
+			assert.strictEqual(getCellWidth(terminal, 0, 0), 2);
+			assert.strictEqual(getCellWidth(terminal, 0, 1), 0);
+			assert.strictEqual(getCellWidth(terminal, 0, 6), 2);
+			tui.stop();
 		});
 	});
 

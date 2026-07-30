@@ -1,5 +1,51 @@
 # Local fork changes
 
+## 2026-07-30 — Root-owned consumer sidecar installation (#446)
+
+- Changed: publish staging now removes promoted platform optional-dependency edges from the bundled portable package manifest after copying the complete family to Senpi's root optional dependencies.
+- Why: npm 11 placed `claude-agent-sdk-darwin-arm64` for the root and bundled SDK edges but never fetched its tarball, leaving an invalid empty directory. A fresh `2026.7.29-5` install therefore still failed native resolution even though the universal tarball contained zero platform sidecar files.
+- What changed: the literal issue-446 test proves the root retains all eight Claude platform optionals while the staged bundled SDK owns none, so npm has one consumer-resolved edge and downloads the real Darwin executable.
+- Why the extension system could not handle this: npm synthesizes the invalid empty dependency directory before Senpi or its provider runtime starts.
+- Merge-conflict risk: low. Expected conflict zones are publish-manifest staging and the focused issue-446 packaging test.
+
+## 2026-07-30 — Strip publisher-native packages before npm pack (#446)
+
+- Changed: after promoting complete platform optional-dependency families into the root manifest, publish staging now removes every platform-constrained package directory before npm traverses bundled dependency graphs.
+- Why: excluding the Linux sidecar from `bundleDependencies` was not sufficient. npm still followed the bundled portable Claude SDK's installed optional dependency and physically embedded the publisher's `claude-agent-sdk-linux-x64` files in the universal tarball.
+- What changed: the literal issue-446 test now runs real `npm pack --dry-run` and asserts the Linux sidecar path is absent, while the consumer optional contract remains intact for darwin-arm64 installation.
+- Why the extension system could not handle this: the publisher-native files were already baked into the npm artifact before install or runtime extension loading.
+- Merge-conflict risk: low. Expected conflict zones are publish-manifest staging and the focused issue-446 packaging test.
+
+## 2026-07-30 — Publish gate honors consumer-resolved platform optionals (#446)
+
+- Changed: `assertSenpiPackedWorkspaceFiles()` now validates the staged `bundleDependencies` contract when it is available, while retaining the legacy all-runtime fallback for callers without a staged manifest.
+- Why: issue #446 intentionally promotes complete native optional-dependency families into the published root manifest so npm can select the consumer platform. The publish-only workflow still treated those non-bundled optionals as missing vendored files and stopped before npm publication.
+- What changed: `publish.mjs` passes the staged bundle list into the pack assertion, and focused RED→GREEN coverage proves a bundled portable Claude SDK may omit the consumer-resolved `darwin-arm64` package from the universal tarball.
+- Why the extension system could not handle this: the failure occurs in npm tarball validation before package publication or runtime extension loading.
+- Merge-conflict risk: low. Expected conflict zones are the publish pack assertion, `publish.mjs`, and the focused packaging test.
+
+## 2026-07-29 — Consumer-resolved Claude Agent SDK sidecars (#446)
+
+- Changed: publish-manifest staging now promotes a bundled package's complete platform-specific optional dependency family into the root `@code-yeongyu/senpi` manifest while continuing to exclude the publish runner's materialized native package from `bundleDependencies`.
+- Why: the universal npm tarball bundled `@anthropic-ai/claude-agent-sdk-linux-x64` from the Linux publish runner. npm did not re-resolve the bundled SDK's nested optional dependencies on install, so Apple Silicon consumers received no `darwin-arm64` Claude executable and the provider failed before authentication.
+- What changed: extracted publish-manifest construction into `scripts/prepare-senpi-publish-manifest.mjs`, kept workspace staging and pack checks in `prepare-senpi-bundled-workspaces.mjs`, split the oversized packaging test suite by responsibility, and added issue #446 plus unreadable-manifest RED→GREEN coverage. A real local release installed only `claude-agent-sdk-darwin-arm64` on this Mac and resolved its `claude` binary with `CLAUDE_CODE_EXECUTABLE` unset.
+- Why the extension system could not handle this: npm dependency bundling and consumer-side optional dependency resolution happen before the Senpi runtime and extension loader start.
+- Merge-conflict risk: low. Expected conflict zones are publish-manifest staging and the colocated packaging tests; runtime provider code is unchanged.
+
+## 2026-07-29 — OpenAI Codex usage extension example
+
+- Changed: added a standalone `examples/extensions/openai-codex-usage/` example that resolves Senpi-managed Codex OAuth, fetches the remaining five-hour and weekly limits, and publishes them through `ctx.ui.setStatus()`. Missing windows render as unavailable; sanitized HTTP/network/parse failures replace stale values with an unavailable status. The poller is single-flight, abortable, and cleared on model changes, shutdown, or `/usage`.
+- Why: users can see provider limits with the built-in footer or any custom footer that consumes extension statuses, without coupling usage retrieval to one footer implementation or presenting unknown/stale percentages as current.
+- Extension boundary: the example uses public model-registry, lifecycle, command, and status APIs; no core footer or authentication source changes are required. Deterministic fake-API and fake-timer tests cover toggle, model-change, abort, scheduled polling, and shutdown cleanup.
+- Merge-conflict risk: low. The change adds an isolated example directory, one test, one catalog row, documentation, and this record.
+
+## 2026-07-28 — Billing-class provider errors always pin the session model swap
+
+- Changed: billing-class failures (credit balance, insufficient quota) engage the fallback chain with the pinned `"billing"` reason unconditionally — the candidate becomes the session model for the rest of the session and never auto-reverts. Files: `src/core/retry-fallback/billing.ts` (classifier), `src/core/retry-fallback/controller.ts` (billing reason pins and notes the cooldown), `src/core/agent-session.ts` (classifies hard-error-eligible failures). Non-billing hard errors keep the temporary, revertable switch. Supersedes the opt-in `retry.billingErrorPolicy` variant of the same change; the setting no longer exists.
+- Why: a credit-exhausted account never recovers within a session, but the ordinary hard-error fallback reverted to the dead model after the 30-minute billing cooldown, killing later turns. Observed in a real session (anthropic-api claude-fable-5, 2026-07-28): the turn died with a 400 "credit balance is too low".
+- Coverage: `test/suite/retry-fallback-billing-swap.test.ts` (billing errors pin and hold past the cooldown with default settings, non-billing hard errors stay temporary, classifier table) and `test/suite/retry-fallback-hard-error.test.ts` (insufficient-quota fixture now reports the billing reason).
+- Merge-conflict risk: low. Additive union members and one engagement branch; the controller's reason handling is the expected conflict zone.
+
 ## 2026-07-26 — Resolve Bun dependencies through fork-owned aliases (#230)
 
 - Changed: `scripts/publish.mjs` stages the four upstream-named private source

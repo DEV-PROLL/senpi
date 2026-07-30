@@ -21,6 +21,13 @@ const NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN = buildProviderErrorPattern([
 	"out of budget",
 	"quota exceeded",
 	"billing",
+
+	// Anthropic Console credit exhaustion: a 429 rate_limit_error whose details
+	// carry error_code credits_required ("Usage credits are required for this
+	// model."). The account is dead until the user buys credits or raises the
+	// spend limit, so same-model retries can never recover it.
+	"credits_required",
+	"credits are required",
 ]);
 
 const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
@@ -243,6 +250,31 @@ export function isRetryableAssistantError(message: AssistantMessage): boolean {
 		return false;
 	}
 	return isRetryableErrorMessage(message.errorMessage);
+}
+
+/**
+ * Matches the agent-loop stream watchdog failures ("Idle timeout waiting for
+ * provider stream after <n>ms" and "Provider stream start timed out after
+ * <n>ms"). These anchored shapes distinguish provider-stream stalls from
+ * unrelated extension, command, or MCP timeout diagnostics.
+ */
+const PROVIDER_STREAM_STALL_ERROR_PATTERN =
+	/^(?:Idle timeout waiting for provider stream after \d+ms|Provider stream start timed out after \d+ms)$/i;
+const PROVIDER_TRANSPORT_TIMEOUT_ERROR_PATTERN = /^Request timed out\.?$/i;
+
+export function isProviderStreamStallError(message: AssistantMessage): boolean {
+	return message.stopReason === "error" && PROVIDER_STREAM_STALL_ERROR_PATTERN.test(message.errorMessage ?? "");
+}
+
+/**
+ * Classifies timeout failures that originate from the provider stream or its
+ * transport. Transport timeouts may arrive as `aborted`; stream watchdog
+ * failures are ordinary error responses.
+ */
+export function isProviderTimeoutError(message: AssistantMessage): boolean {
+	if (isProviderStreamStallError(message)) return true;
+	if (message.stopReason !== "error" && message.stopReason !== "aborted") return false;
+	return PROVIDER_TRANSPORT_TIMEOUT_ERROR_PATTERN.test(message.errorMessage ?? "");
 }
 
 /**

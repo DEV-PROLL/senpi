@@ -12,6 +12,119 @@
 
 ### Removed
 
+## [2026.7.29-6] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-5] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-4] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-3] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-2] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+- Added a separate `streamStartTimeoutMs` agent-loop guard for bounding time to the first provider event independently from the normal between-event idle timeout ([#451](https://github.com/code-yeongyu/senpi/pull/451)).
+
+### Changed
+
+### Fixed
+
+- Preserve queued steering and follow-up messages across provider idle-timeout retries, apply a 30-second idle cap only to the retry continuation, restore the configured timeout afterward, and retain queued input when the retry terminates with an error or abort ([#458](https://github.com/code-yeongyu/senpi/pull/458) by [@realsigridjin](https://github.com/realsigridjin)).
+- Abort and classify provider requests that never emit a first event through the new stream-start timeout so dead upstreams fail into retry/fallback policy instead of freezing an agent run for the full idle budget ([#451](https://github.com/code-yeongyu/senpi/pull/451)).
+
+### Removed
+
+## [2026.7.28-3] - 2026-07-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.28-2] - 2026-07-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.28] - 2026-07-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [2026.7.26] - 2026-07-26
 
 ### Breaking Changes

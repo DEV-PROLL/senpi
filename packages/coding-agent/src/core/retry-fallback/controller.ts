@@ -21,7 +21,7 @@ export interface ActiveFallbackState {
 	pinned: boolean;
 }
 
-type FallbackReason = "transient" | "refusal" | "hard-error";
+type FallbackReason = "transient" | "refusal" | "hard-error" | "billing";
 
 interface FallbackSettings {
 	modelFallback: boolean;
@@ -149,7 +149,7 @@ export class RetryFallbackController {
 		const candidate = this.nextCandidate();
 		if (!current || !candidate) return false;
 		const currentBase = formatSelector(current.model);
-		if (reason === "transient" || reason === "hard-error") {
+		if (reason === "transient" || reason === "hard-error" || reason === "billing") {
 			this.deps.cooldowns.note(currentBase, failure);
 			this.deps.logger.info("cooldown_noted", { selector: currentBase, errorMessage: failure.errorMessage });
 		}
@@ -163,7 +163,7 @@ export class RetryFallbackController {
 			originalSelector: this.state?.originalSelector ?? from,
 			originalThinkingLevel: this.state?.originalThinkingLevel ?? current.thinkingLevel,
 			lastAppliedThinkingLevel: thinking,
-			pinned: this.state?.pinned === true || reason === "refusal",
+			pinned: this.state?.pinned === true || reason === "refusal" || reason === "billing",
 		};
 		this.deps.logger.info("fallback_applied", { from, to, chainKey: candidate.chainKey, reason });
 		this.deps.emit({ type: "retry_fallback_applied", from, to, chainKey: candidate.chainKey, reason });

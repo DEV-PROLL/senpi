@@ -9,6 +9,7 @@ export interface WorkingTipOptions {
 	now: number;
 	definitions: readonly TipDefinition[];
 	keys: (binding: Keybinding) => string;
+	hasCommand?: (command: string) => boolean;
 }
 
 export interface WorkingTipLine {
@@ -47,6 +48,7 @@ export function resolveWorkingTipLine(options: WorkingTipOptions): WorkingTipLin
 
 	const tip = selectTip(options.definitions, options.history, options.now, {
 		keys: options.keys,
+		...(options.hasCommand ? { hasCommand: options.hasCommand } : {}),
 		exclude: options.sessionShownTipIds,
 	});
 	if (!tip) return undefined;
@@ -55,5 +57,6 @@ export function resolveWorkingTipLine(options: WorkingTipOptions): WorkingTipLin
 		.render(options.keys)
 		.replace(/\s*\n\s*/g, " ")
 		.trim();
-	return { line: `Tip: ${body}`, tipId: tip.id };
+	const pointer = "↳ Want the full story on any tip? Ask about it — the give-me-tips skill has the tour.";
+	return { line: `Tip: ${body}\n${pointer}`, tipId: tip.id };
 }

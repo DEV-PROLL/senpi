@@ -1,5 +1,152 @@
 # AI Source Changes
 
+## 2026-07-29 - Preserve invoke-recovery protocol provenance
+
+### What changed and why
+
+- `wrapStreamWithInvokeRecovery()` accepts typed recovery options carrying both the parser factory and the protocol
+  identity. The previous parser-only argument selected Kimi XTML correctly but lost that provenance in shared
+  diagnostics and recovered tool-call IDs.
+- Successful Kimi recovery now reports `protocol: "kimi-xtml"` and allocates `recovered-kimi-xtml-*` IDs. Invalid
+  content/native event order and collision failures use the same protocol identity instead of always claiming
+  `antml`.
+- The default and legacy parser-function call forms remain ANTML-compatible, preserving existing Claude/default
+  recovery diagnostics and IDs.
+- Coverage: the shared wrapper pins Kimi failure diagnostics, and the coding-agent runtime boundary pins successful
+  Kimi diagnostics plus recovered IDs.
+
+### Expected merge conflict zones
+
+- MEDIUM: invoke-recovery wrapper, diagnostic, failure, and native projection constructor signatures.
+
+## 2026-07-29 - Serialize OpenAI completion content block events
+
+### What changed and why
+
+- `api/openai-completions.ts` now closes the active thinking, text, or native tool-call block before starting the
+  next block. The adapter previously accumulated every block and emitted all `*_end` events only after the wire
+  stream finished, producing overlapping canonical lifecycles such as `thinking_start -> text_start` and
+  `text_start -> toolcall_start`.
+- Providers that put text, reasoning, and parallel tool-call deltas in the same chunk keep their established
+  single-block aggregation. The adapter defers that mixed chunk's content events and replays text, thinking, and
+  each tool call as complete sequential lifecycles, avoiding duplicate text/thinking starts without restoring
+  overlapping events.
+- The invoke-recovery wrapper correctly rejects overlapping canonical content lifecycles. Kimi K3 exposed the
+  adapter bug when a normal response streamed reasoning, visible text, and native tool calls in sequence, causing
+  the user-facing terminal error `Invalid assistant content event order`.
+- Coverage: `test/openai-completions-stream-lifecycle.test.ts` drives a real local SSE endpoint through reasoning,
+  text, and a native tool call and pins the sequential start/delta/end event order.
+  `test/openai-completions-tool-choice.test.ts` pins mixed text/reasoning/parallel-tool aggregation and sequential
+  event replay.
+
+### Expected merge conflict zones
+
+- LOW: the block lifecycle helpers inside `api/openai-completions.ts`.
+
+## 2026-07-29 - Support static credential headers without a synthetic API key
+
+### What changed and why
+
+- `auth/headers.ts` defines the narrow, case-insensitive credential-header contract shared by auth discovery and
+  request adapters. Standard authorization, API-key, API-token, auth-token, access-token, and client-secret header
+  names count only when their effective value contains credential material; metadata such as `User-Agent`,
+  request ids, and trace tokens does not.
+- `api/openai-client-auth.ts` lets OpenAI-compatible adapters initialize from credential-bearing headers when
+  `ModelAuth.apiKey` is absent. Header-only clients suppress the SDK's default `Authorization: Bearer ...` header
+  unless an explicit Authorization or the existing Cloudflare AI Gateway authorization path owns that behavior.
+- `api/openai-completions.ts` and `api/openai-responses.ts` use the shared client-auth resolver for HTTP and
+  Responses WebSocket requests, so `x-api-key` and equivalent static credentials work without an invented bearer
+  token.
+
+### Coverage
+
+- `test/auth-headers.test.ts` covers recognized names, metadata rejection, case-insensitive overrides, and empty
+  authorization schemes.
+- `test/openai-header-auth.test.ts` exercises real OpenAI-compatible request construction for Completions and
+  Responses and proves metadata-only headers fail before any request is issued.
+
+### Expected merge conflict zones
+
+- LOW: additive auth/header helpers and root export.
+- MEDIUM: the duplicated OpenAI client-auth setup removed from `api/openai-completions.ts` and
+  `api/openai-responses.ts`.
+
+## 2026-07-29 - Classify Anthropic credits_required as non-retryable billing exhaustion
+
+### What changed and why
+
+- `utils/retry.ts`: `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` gains `credits_required` and
+  `credits are required`, the Anthropic Console credit-exhaustion wording (a 429 `rate_limit_error` whose
+  details carry `error_code: credits_required`). The account stays dead until the user buys credits or raises
+  the spend limit, so same-model retries can never recover it. Callers now route the shape through the
+  hard-error fallback branch, where coding-agent pins the billing fallback, instead of burning the same-model
+  retry budget (1 + maxRetries dead requests) on every turn.
+- Coverage: `test/retry.test.ts` pins the verbatim incident message as non-retryable.
+
+### Expected merge conflict zones
+
+- LOW: two strings appended to the non-retryable pattern list in `utils/retry.ts`.
+
+## 2026-07-29 - Classify zero-event provider stream stalls
+
+### What changed and why
+
+- `utils/retry.ts` exports `isProviderStreamStallError()`: matches the agent-loop stream-watchdog failures
+  ("Idle timeout waiting for provider stream after <n>ms" and "Provider stream start timed out after <n>ms")
+  on `stopReason: "error"` messages. The class stays
+  retryable (unchanged), but callers can now distinguish "the provider accepted the request and sent zero events
+  for the whole idle budget" from fast transient failures. agent-session uses it to escalate a second consecutive
+  stall to the fallback chain instead of replaying the identical payload for the rest of the same-model budget
+  (evidence: donated session 019fa8da-43ad-70b7-b01b-8f34f4d907f2, records 1906/1919, where a hung gateway made
+  every replay burn the full 300s idle budget).
+- Coverage: `test/retry.test.ts` pins the stall class against the idle-timeout message, `Request timed out.`,
+  and aborted stop reasons.
+
+## 2026-07-29 - Classify provider stream and transport timeouts precisely
+
+### What changed and why
+
+- `utils/retry.ts` exports `isProviderStreamStallError()` for the two anchored agent-loop watchdog
+  messages and `isProviderTimeoutError()` for those stalls plus the exact `Request timed out` transport
+  shape. The shared classifier accepts transport timeouts reported as `aborted` while rejecting incidental
+  timeout text from commands, MCP servers, and extensions.
+- `../test/retry.test.ts` pins the observed positive shapes, negative lookalikes, and stop-reason policy.
+
+### Expected merge conflict zones
+
+- LOW: additive classifiers beside `isRetryableAssistantError()` in `utils/retry.ts`; keep
+  `isProviderStreamStallError()` aligned with PR #453 when the branches meet.
+
+## 2026-07-29 - kimi-xtml text tool-call protocol + ToolCallFormat union
+
+### What changed and why
+
+- `ToolCallFormat` gains `"kimi-xtml"` (Kimi K3 native XTML channel syntax); `getToolCallFormat()` whitelist, protocol registry, compat docs, and middleware TESTING.md updated accordingly. Protocol implementation lives in `tool-call-middleware/protocols/kimi-xtml/` (markers, parse, format, stream); details in `tool-call-middleware/changes.md`.
+
+## 2026-07-28 - Demote unavailable Anthropic tool references instead of failing the request
+
+### What changed and why
+
+- `api/anthropic-messages.ts` gains a final payload pass, `demoteUnavailableToolReferences()`, applied after
+  `sanitizeUnsupportedNativeTools()` on every request. Anthropic rejects a request whose message history references
+  a tool that is neither defined in `tools` nor discovered through a `tool_reference` block in the same request
+  (`400 invalid_request_error: Tool reference '<name>' not found in available tools`). Sessions outlive their
+  tools: an MCP server can be absent after a `senpi --session` resume, an extension can stop registering a tool,
+  or an `onPayload` hook can strip a definition while the history still carries the call.
+- The pass collects defined tool names and names discovered via `tool_reference` blocks (including replayed
+  server-side tool-search results), then demotes offending `tool_use` blocks to plain text, demotes their
+  `tool_result` blocks in lockstep (preserving the original result text), and strips `tool_reference` entries
+  whose definition vanished — so neither the original 400 nor an orphan-pairing 400 can occur.
+- `../test/anthropic-tool-reference-integrity.test.ts` drives the full request path offline through a fake
+  Anthropic client: single and mixed-turn demotion, still-available tools kept intact, deferred
+  `tool_reference` discovery kept intact, and dangling-reference stripping after a payload hook removes a
+  definition.
+
+### Expected merge conflict zones
+
+- LOW: the request-finalization chain inside `createRequest()` in `api/anthropic-messages.ts`.
+- LOW: new unexported helpers near the other payload sanitizers in `api/anthropic-messages.ts`.
+
 ## 2026-07-28 - Retry OpenAI-compatible stream failures before the first chunk
 
 ### What changed and why

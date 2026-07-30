@@ -7,6 +7,7 @@ type HookStatusTickerPrototype = {
 
 type HookStatusTickerThis = {
 	hookStatusIntervalId: ReturnType<typeof setInterval> | undefined;
+	sessionManager: { getEntries(): readonly unknown[] };
 	refreshToolHookStatuses(): void;
 };
 
@@ -19,6 +20,7 @@ describe("InteractiveMode hook status ticker", () => {
 		const unrefSpy = vi.spyOn(intervalHandle, "unref");
 		const fakeThis: HookStatusTickerThis = {
 			hookStatusIntervalId: undefined,
+			sessionManager: { getEntries: () => [] },
 			refreshToolHookStatuses: vi.fn(),
 		};
 
@@ -28,7 +30,29 @@ describe("InteractiveMode hook status ticker", () => {
 
 			// Then
 			expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+			expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 32);
 			expect(unrefSpy).toHaveBeenCalledTimes(1);
+		} finally {
+			clearInterval(intervalHandle);
+			vi.restoreAllMocks();
+		}
+	});
+
+	test("uses a one-second hook status cadence for large sessions", () => {
+		const prototype = InteractiveMode.prototype as unknown as HookStatusTickerPrototype;
+		const intervalHandle = setInterval(() => {}, 60_000);
+		const setIntervalSpy = vi.spyOn(globalThis, "setInterval").mockReturnValue(intervalHandle);
+		const fakeThis: HookStatusTickerThis = {
+			hookStatusIntervalId: undefined,
+			sessionManager: { getEntries: () => Array.from({ length: 1000 }) },
+			refreshToolHookStatuses: vi.fn(),
+		};
+
+		try {
+			prototype.startToolHookStatusTimer.call(fakeThis);
+
+			expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+			expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 1_000);
 		} finally {
 			clearInterval(intervalHandle);
 			vi.restoreAllMocks();

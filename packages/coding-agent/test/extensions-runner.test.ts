@@ -135,6 +135,8 @@ describe("ExtensionRunner", () => {
 		setModel: async () => false,
 		getThinkingLevel: () => "off",
 		setThinkingLevel: () => {},
+		setSessionModel: async () => false,
+		setSessionThinkingLevel: () => {},
 	};
 
 	const extensionContextActions: ExtensionContextActions = {
@@ -1610,6 +1612,28 @@ describe("ExtensionRunner", () => {
 			expect(context.isCompacting?.()).toBe(true);
 			compacting = false;
 			expect(context.isCompacting?.()).toBe(false);
+		});
+
+		it("reflects the bound reload veto probe", async () => {
+			const runtime = createExtensionRuntime();
+			const runner = new ExtensionRunner([], runtime, tempDir, sessionManager, modelRegistry);
+			let vetoed = true;
+
+			runner.bindCore(extensionActions, {
+				...extensionContextActions,
+				checkReloadVeto: async () => (vetoed ? { cancelled: true, reason: "busy" } : { cancelled: false }),
+			});
+			const context = runner.createContext();
+			await expect(context.checkReloadVeto?.()).resolves.toEqual({ cancelled: true, reason: "busy" });
+			vetoed = false;
+			await expect(context.checkReloadVeto?.()).resolves.toEqual({ cancelled: false });
+		});
+
+		it("leaves checkReloadVeto undefined without a host probe", () => {
+			const runtime = createExtensionRuntime();
+			const runner = new ExtensionRunner([], runtime, tempDir, sessionManager, modelRegistry);
+
+			expect(runner.createContext().checkReloadVeto).toBeUndefined();
 		});
 	});
 

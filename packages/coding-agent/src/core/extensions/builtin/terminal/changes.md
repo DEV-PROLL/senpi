@@ -3,6 +3,96 @@
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
 
+## Background sessions and monitors survive session reload (2026-07-29)
+
+### What changed
+
+- `session-bundle.ts` (new): `TerminalSessionBundle` owns the long-lived per-session runtime
+  (the `TerminalManager` plus the `MonitorRegistry`) and routes monitor events, monitor-state
+  snapshots, and background-exit notifications through mutable sinks the current extension
+  instance binds. A module-level parked map (`parkBundle`/`claimParkedBundle`/
+  `teardownParkedBundle`, keyed by `ctx.sessionManager.getSessionId()`, at most one parked
+  bundle per session) hands the bundle across the extension-runner replacement a reload performs.
+- `extension.ts`: `session_shutdown` with `reason:"reload"` parks the bundle instead of tearing
+  it down; every other reason (`quit`/`new`/`resume`/`fork`) keeps the full teardown AND sweeps
+  any stale parked bundle. `session_start` with `reason:"reload"` claims the parked bundle,
+  re-binds sinks to the new instance's notifiers, re-publishes the `monitors` footer status, and
+  flushes events buffered during the reload window (bounded: 100 monitor events, 32 exits);
+  other reasons keep today's fresh-bundle behavior. `onBackgroundExit` now dispatches through
+  the bundle so exit listeners registered before a reload reach the post-reload notifier.
+- Result: after `/reload`, existing `bash_N` ids remain addressable (`bash_output`,
+  `bash_input`, `kill_bash`), monitors keep injecting events, and background completion
+  notifications reach the new runner instead of dying with the old one. Previously reload
+  tree-killed every background session and orphaned every watcher the model knew about.
+- Known bounds: terminal `maxSessions`/`scrollback` setting changes apply to bundles created
+  after a non-reload session start (a preserved bundle keeps its construction-time caps); a
+  headless host that skips `session_start` after reload leaves the bundle parked until the next
+  real shutdown sweep.
+- Tests: `test/suite/terminal-reload-survival.test.ts` (monitor survival + footer re-publish,
+  background-session id survival via screen peek, post-reload completion-notification routing,
+  quit-teardown characterization pin).
+
+### Why
+
+Observed live: a reload during an active `gh pr checks --watch` monitor orphaned the watcher
+(process kept running, session lost the subscription, footer went blank, all bash ids dangled).
+Waiting state parked behind a reload must keep waiting, cleanly.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: fork-owned `extension.ts` session lifecycle handlers and the new `session-bundle.ts`.
+
+## Theme-aware active-monitor footer (2026-07-29)
+
+### What changed
+
+- Active monitor footer text is wrapped with the current TUI theme's `text` foreground and
+  `selectedBg` background before publication through `ctx.ui.setStatus`.
+- Styling is restricted to `ctx.mode === "tui"`; RPC, app-server, JSON, and print contexts keep
+  the original plain status string, and an empty monitor snapshot still clears with `undefined`.
+- The formatter remains unchanged, so the 48-column cap, whole-description packing, watch glyph,
+  monitor count, and paused suffix stay independent of ANSI byte length.
+
+### Why
+
+The live `◉ watching …` row could blend into adjacent footer content. Reusing the active theme's
+selection background creates a visible but restrained chip in both dark and light themes without
+introducing a monitor-specific color token.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: the fork-owned monitor registry `onChange` callback in `extension.ts` and its focused footer
+  wiring test.
+
+## bash_output ghost wait_for params removed (2026-07-28)
+
+### What changed
+
+- `bash_output` no longer exposes the `wait_for`, `block`, and `timeout` params,
+  and the `BASH_OUTPUT_WAIT_REMOVED_GUIDANCE` migration string and
+  `GHOST_PARAM_DESCRIPTION` were removed from `tools/bash-output.ts`.
+- `BashOutputInput` is now exactly `{ bash_id, filter?, view? }`; any caller still
+  sending the removed params gets a generic schema-validation error instead of
+  the migration text.
+- Tests that pinned the ghost guidance were removed:
+  - `test/bash-output-peek.test.ts` `describe("bash_output removed blocking params")` block.
+  - `test/suite/terminal-extension.test.ts` `it("wait_for ghost param returns migration guidance …")`.
+  - `test/prompt-surface-stale-wait-idioms.test.ts` `it("the ghost guidance exists …")`.
+- The negative guards in `prompt-surface-stale-wait-idioms.test.ts` (no surface
+  teaches `wait_for` / `block until` / tmux backgrounding) stay in place.
+
+### Why
+
+The ghost params kept the removed `wait_for` idiom visible to the model in the
+schema, so it kept being called and returning the guidance text — the migration
+message never stopped appearing. Dropping the params from the schema removes the
+mention entirely; the monitor/notification model in `terminal/prompt.ts` and
+`docs/terminal-tools.md` is already the single taught path.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: fork-owned `bash_output` schema and the removed ghost-param tests.
+
 ## Hidden agent wake notifications (2026-07-28)
 
 ### What changed
@@ -52,6 +142,15 @@ or below the budget retain their existing foreground behavior.
 - `monitor-status.ts` (new): `formatMonitorStatus(snapshot)` — undefined when nothing is watched
   (clears the footer status), `watching <desc>` for one, `watching N: <d1>, <d2>` elided to a
   48-char cap for many, `(paused)` / `(k paused)` markers. `MONITOR_STATUS_KEY = "monitors"`.
+
+### Count-forward visibility rework (2026-07-28)
+
+- `formatMonitorStatus` now leads with the `◉` watch glyph (session-selector glyph family) so the
+  status is visually distinct from other extension statuses, and packs whole descriptions instead
+  of mid-word elision: `◉ watching <desc>` for one, `◉ watching N: <d1>, <d2> +k more` for many.
+  The monitor count and the `(paused)` / `(k paused)` suffix always survive truncation; only the
+  description list shrinks (whole-name packing first, single-name `…` truncation as last resort).
+  48-char cap unchanged. Tests updated in `test/suite/terminal-monitor-footer.test.ts`.
 - `extension.ts`: the session monitor registry is created with an onChange that publishes
   `ctx.ui.setStatus(MONITOR_STATUS_KEY, formatMonitorStatus(snapshot))` — the goal-builtin
   footer-status pattern. Non-interactive modes no-op via the optional ctx; settle/shutdown

@@ -15,7 +15,19 @@ import { runAnthropicPolicyRefusalScenario } from "./mock-loop-policy-refusal.mj
 const OPENAI_SERVER_ERROR_MESSAGE =
 	"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID e4026cfc-c6b6-414a-8a21-c03a6adf0336 in your message.";
 
+// Verbatim provider error captured from a real senpi session (2026-07-28,
+// anthropic-api claude-fable-5): the billing class pinned-swap behavior targets.
+const CREDIT_BALANCE_ERROR_MESSAGE =
+	'400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."},"request_id":"req_011CdUDPLwbT8EDXCxMJBvQy"}';
+
 const STANDARD_RETRY_SCENARIOS = {
+	"billing-swap": {
+		error: { status: 400, message: CREDIT_BALANCE_ERROR_MESSAGE },
+		errorCount: 1,
+		marker: "SENPI-QA-RETRY-BILLING-SWAP-3f0a",
+		primaryAttempts: 1,
+		fallbackAttempts: 1,
+	},
 	"transient-recover": {
 		error: { status: 500, message: "overloaded_error" },
 		errorCount: 2,

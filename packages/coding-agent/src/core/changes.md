@@ -1,5 +1,41 @@
 # changes
 
+## Codex fast-variant service-tier metadata lookup (2026-07-29)
+
+### What changed
+
+- `model-registry.ts` now exposes a selected model's configured `serviceTier`
+  synchronously, alongside the existing `getUpstreamModelId()` lookup.
+- The builtin `/fast` command uses both values to accept only catalog siblings
+  that send the same upstream model with `service_tier: "priority"`.
+
+### Why
+
+- A `-fast` suffix alone is not proof that a model supports priority
+  processing. The command must validate the request metadata already resolved
+  by the model registry before switching the session.
+
+### Why extension system couldn't handle this alone
+
+- Compatibility request metadata is composed inside `ModelRuntime`; extensions
+  can inspect the registry but could not synchronously read its resolved
+  per-model service tier.
+
+### Expected merge conflict zones
+
+- LOW: the request-metadata accessors in `model-registry.ts`.
+
+## Settings withLock first-write TOCTOU fix (2026-07-29)
+
+### What changed
+
+- `settings-manager.ts` `FileSettingsStorage.withLock`: when the settings file does not exist yet, the merge callback used to run with no lock held and the write-time lock then overwrote whatever a concurrent process had created. The write path now re-checks existence after acquiring the lock and re-runs the merge callback against the winner's content before writing. The existing-file path additionally re-verifies existence after the lock before reading.
+- Pure read paths are unchanged: a read on a missing file still creates no directory and no lock artifacts, so loading settings in an arbitrary cwd still cannot spray `.senpi/` directories.
+
+### Why
+
+- Two processes racing the first write of a fresh `settings.json` silently lost one side's fields (`existsSync` gated the lock, so the merge ran unlocked). Deterministic regression: `test/settings-storage-lock.test.ts` injects a concurrent first-write at lock acquisition and asserts the merge preserves it.
+
 ## Nearest-parent project settings discovery (2026-07-28)
 
 ### What changed
@@ -14,6 +50,44 @@
 ### Expected merge conflict zones on next upstream sync
 
 - LOW: `getSettingsPath()` in `settings-manager.ts`.
+
+## messages.ts keep-latest exclusion for goal-continuation (2026-07-29)
+
+### What changed
+
+- `messages.ts` now excludes consumed `goal-continuation` custom messages by position instead of by type: every
+  `role === "custom" && customType === GOAL_CONTINUATION_MESSAGE_TYPE` entry is dropped except the last one.
+  The same keep-latest rule is applied in both `filterContextExcludedMessages` and `convertToLlm`, so token estimation
+  and provider payload assembly stay in sync.
+- `isContextExcludedCustomMessage` remains `false` for this custom type; the live triggering message still needs to be
+  visible to per-entry consumers such as compaction and branch summarization.
+
+### Why
+
+- Goal continuation messages accumulate across long sessions, and stale consumed entries must stay out of the next
+  provider request without hiding the active trigger or letting the estimator disagree with the payload.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW in `messages.ts` around the shared keep-latest helper, `filterContextExcludedMessages`, and `convertToLlm`.
+- NONE in the per-entry custom-message predicate semantics.
+
+## AgentEndEvent.willRetry extension event field (2026-07-29)
+
+### What changed
+
+- `extensions/types.ts` now exposes an optional `willRetry?: boolean` on `AgentEndEvent`, mirroring the agent-session
+  end event so builtin extensions can tell a terminal provider error from a retryable one.
+- The field is additive only; existing extension consumers that ignore it continue to behave the same.
+
+### Why
+
+- The goal builtin needs to block on terminal provider errors only after retries are exhausted. Without the retry
+  signal, a terminal error could be misclassified while a fallback retry was still in flight.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW in `extensions/types.ts` and the runner plumbing that forwards agent-session end events to builtin extensions.
 
 ## claude-agent-sdk provider with native multi-account OAuth (2026-07-27)
 

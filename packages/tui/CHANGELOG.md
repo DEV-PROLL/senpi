@@ -12,6 +12,123 @@
 
 ### Removed
 
+## [2026.7.29-6] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-5] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-4] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-3] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-2] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+- Render inline and display LaTeX delimiters as width-stable terminal Unicode, covering common operators, Greek letters, relations, roots, fractions, and sub/superscripts while preserving unmatched delimiters, code spans/fences, and unknown command groups without new runtime dependencies ([#449](https://github.com/code-yeongyu/senpi/pull/449) by [@minpeter](https://github.com/minpeter)).
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.28-3] - 2026-07-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.28-2] - 2026-07-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.28] - 2026-07-28
+
+### Breaking Changes
+
+### Added
+
+- Render Kitty graphics through tmux passthrough with split-safe Unicode placeholders and tmux-reported cell sizing ([#389](https://github.com/code-yeongyu/senpi/pull/389) by [@minpeter](https://github.com/minpeter)).
+
+### Changed
+
+- Pace high-frequency large-session rendering with separate immediate and deferred synchronization paths.
+
+### Fixed
+
+- Preserve paste-marker provenance and expansion across editor transfers, `setText()` round-trips, deletion, undo, and full-text consumers ([#411](https://github.com/code-yeongyu/senpi/pull/411) by [@minpeter](https://github.com/minpeter)).
+- Prevent large sessions from entering repeated synchronous render loops while still honoring immediate render requests ([#424](https://github.com/code-yeongyu/senpi/pull/424) by [@sigridjineth](https://github.com/sigridjineth)).
+
+### Removed
+
 ## [2026.7.26] - 2026-07-26
 
 ### Breaking Changes

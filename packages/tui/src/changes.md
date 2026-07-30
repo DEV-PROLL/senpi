@@ -1,5 +1,56 @@
 # TUI delta rendering fork changes
 
+## 2026-07-29: Native Unicode LaTeX in Markdown conversations
+
+### What changed
+
+- `components/markdown.ts` registers bounded Marked block and inline tokenizers for `$...$`, `$$...$$`, `\(...\)`,
+  and `\[...\]` math. Dollar delimiters require non-word outer boundaries, and bracket/parenthesis candidates stop at
+  inline-code or competing opener boundaries. Currency, shell variables, code spans, and malformed delimiters remain
+  literal, including partial streamed currency/shell pairs and math-like text after an unclosed inline-code opener.
+- The dependency-free `components/latex.ts` converter uses a balanced parser for nested fractions, roots, text
+  wrappers, symbols, and Unicode sub/superscripts. Formula length and nesting budgets fall back to the original text
+  instead of partially converting or repeatedly rescanning untrusted input. A leading combining mark receives a
+  dotted-circle anchor so terminal cell width agrees with the differential renderer.
+- TeX epsilon/phi variants and escaped script markers stay distinct, complete command names prevent prefix
+  corruption, and unknown commands remain readable. Display formulas inherit their surrounding style context.
+- Coverage: `test/markdown.test.ts` proves ordinary-text boundaries, nested/budgeted conversion, streamed partial
+  currency/shell and inline-code frames, CJK wide cells, inherited styles, malformed preservation, and focused
+  `VirtualTerminal` cell widths including a column-zero combining mark.
+
+### Why this cannot be expressed externally
+
+The `Markdown` component owns tokenization before extension-facing coding-agent UI hooks run. Rendering formulas
+consistently in assistant messages, nested Markdown structures, and every direct TUI consumer requires the parser seam.
+
+### Expected merge conflict zones
+
+- MEDIUM: `components/markdown.ts` parser construction and custom token branches.
+- LOW: `components/latex.ts` symbol/script conversion tables and `test/markdown.test.ts` LaTeX cases.
+
+## 2026-07-28: over-wide diagnostics stop rescanning settled large histories
+
+### What changed
+
+- `tui.ts` now formats the full over-wide render diagnostic only when strict mode needs it or before the first
+  release-mode crash dump. Later over-wide release frames still truncate safely, but no longer map every rendered
+  line through `visibleWidth()` after the one-shot dump has already been written.
+- `__renderDiagnosticStats()` exposes diagnostic line-scan counts only under `PI_TUI_TEST_SEAMS=1`.
+- `test/render-contract.test.ts` proves the first over-wide release frame scans diagnostic input and a second frame
+  neither writes nor rescans the transcript.
+
+### Why
+
+The existing `overWideCrashDumpWritten` guard covered only the filesystem write. Building `crashData` happened before
+that guard, so an animated row could rescan a large resumed transcript on every frame even though no second dump was
+possible. Before the companion coding-agent throttle, a 34 MB session's 32 ms Working shimmer turned that
+diagnostic work into a continuous CPU loop.
+
+### Expected merge conflict zones
+
+- LOW: `tui.ts` around release-mode over-wide truncation and crash diagnostics.
+- LOW: `test/render-contract.test.ts` over-wide release behavior.
+
 ## 2026-07-28: setText prunes instead of clearing the paste registry; paste-state transfer API
 
 ### What changed

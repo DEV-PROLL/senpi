@@ -12,6 +12,127 @@
 
 ### Removed
 
+## [2026.7.29-6] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-5] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-4] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-3] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-2] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+- Show every live detached eval cell in the interactive footer, using a highlighted `↗ <language> · <title>` status for one cell and a bounded packed summary for multiple cells; clear the status immediately when the final detached cell settles ([#483](https://github.com/code-yeongyu/senpi/pull/483)).
+
+### Changed
+
+### Fixed
+
+- Route reserved `agent()`, `output()`, and `tool_schema()` bridge calls from Python and other subprocess kernels through the reserved HTTP handler instead of attempting to execute nonexistent `__agent__`, `__output__`, and `__schema__` tools; ordinary bridge tool calls remain unchanged ([#462](https://github.com/code-yeongyu/senpi/pull/462)).
+
+### Removed
+
+## [2026.7.28-3] - 2026-07-28
+
+### Breaking Changes
+
+### Added
+
+- Add nested tool-call widgets that render the real call shape of tools invoked from eval cells, with truthful status, duration, and sanitized previews ([#444](https://github.com/code-yeongyu/senpi/pull/444)).
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.28-2] - 2026-07-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Start a fresh eval cell when a caller reuses the ID of a terminal cell, preventing completed or failed results from being replayed as though new code had executed ([#439](https://github.com/code-yeongyu/senpi/pull/439)).
+- Omit the eval `took` duration when timing metadata is unavailable, avoiding misleading zero-duration status output for detached or restored cell results ([#439](https://github.com/code-yeongyu/senpi/pull/439)).
+
+### Removed
+
+## [2026.7.28] - 2026-07-28
+
+### Breaking Changes
+
+### Added
+
+- Add `tool_schema()` and return parameter schemas from failed eval tool calls so cells can inspect and self-correct tool invocations ([#407](https://github.com/code-yeongyu/senpi/pull/407)).
+
+### Changed
+
+- Allow eval cells and extensions to activate named searchable tools lazily on the calling surface without globally widening the active tool set ([#408](https://github.com/code-yeongyu/senpi/pull/408)).
+
+### Fixed
+
+### Removed
+
 ## [2026.7.26] - 2026-07-26
 
 ### Breaking Changes

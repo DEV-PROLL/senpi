@@ -790,6 +790,165 @@ function sanitizeUnsupportedNativeTools(
 	return changed ? (sanitized as MessageCreateParamsStreaming) : params;
 }
 
+/**
+ * Anthropic validates that every tool referenced by the message history is
+ * available in the same request — defined in `tools` or discovered through a
+ * `tool_reference` block — and rejects the whole request otherwise
+ * ("Tool reference '<name>' not found in available tools"). Sessions outlive
+ * their tools: an MCP server can be absent after a resume, an extension can
+ * stop registering a tool, or a payload hook can strip a definition while the
+ * history still carries the call. Demote those references to plain text so
+ * the turn can proceed; the matching tool_result is demoted in lockstep so no
+ * orphan pairing error replaces the original one.
+ */
+function demoteUnavailableToolReferences(params: MessageCreateParamsStreaming): MessageCreateParamsStreaming {
+	const messages = params.messages;
+	if (!Array.isArray(messages) || messages.length === 0) return params;
+
+	const definedNames = new Set<string>();
+	if (Array.isArray(params.tools)) {
+		for (const tool of params.tools) {
+			if (isRecord(tool) && typeof tool.name === "string") definedNames.add(tool.name);
+		}
+	}
+
+	// `tool_reference` blocks — emitted for deferred tools or replayed from a
+	// server-side tool search — make their targets available without a
+	// non-deferred definition.
+	const discoveredNames = new Set<string>();
+	collectToolReferenceNames(messages, discoveredNames);
+
+	const demotedCallNames = new Map<string, string>();
+	for (const message of messages) {
+		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+		for (const block of message.content) {
+			if (
+				isRecord(block) &&
+				block.type === "tool_use" &&
+				typeof block.name === "string" &&
+				!definedNames.has(block.name) &&
+				!discoveredNames.has(block.name)
+			) {
+				demotedCallNames.set(block.id, block.name);
+			}
+		}
+	}
+
+	// A `tool_reference` without its definition 400s the same way.
+	const danglingReferenceNames = new Set<string>();
+	for (const name of discoveredNames) {
+		if (!definedNames.has(name)) danglingReferenceNames.add(name);
+	}
+
+	if (demotedCallNames.size === 0 && danglingReferenceNames.size === 0) return params;
+
+	let changed = false;
+	const rewrittenMessages: MessageParam[] = [];
+	for (const message of messages) {
+		if (!Array.isArray(message.content)) {
+			rewrittenMessages.push(message);
+			continue;
+		}
+		let messageChanged = false;
+		const content: ContentBlockParam[] = [];
+		for (const block of message.content) {
+			if (message.role === "assistant" && isRecord(block) && block.type === "tool_use") {
+				const demotedName = demotedCallNames.get(block.id);
+				if (demotedName !== undefined) {
+					messageChanged = true;
+					content.push({ type: "text", text: demotedToolCallText(demotedName, block.input) });
+					continue;
+				}
+			}
+			if (isRecord(block) && block.type === "tool_result") {
+				const demotedName = demotedCallNames.get(block.tool_use_id);
+				if (demotedName !== undefined) {
+					messageChanged = true;
+					content.push({ type: "text", text: demotedToolResultText(demotedName, block.content) });
+					continue;
+				}
+				if (danglingReferenceNames.size > 0 && Array.isArray(block.content)) {
+					const kept: unknown[] = [];
+					const omitted: string[] = [];
+					for (const item of block.content) {
+						if (
+							isRecord(item) &&
+							item.type === "tool_reference" &&
+							typeof item.tool_name === "string" &&
+							danglingReferenceNames.has(item.tool_name)
+						) {
+							omitted.push(item.tool_name);
+							continue;
+						}
+						kept.push(item);
+					}
+					if (omitted.length > 0) {
+						messageChanged = true;
+						const nextContent =
+							kept.length > 0
+								? kept
+								: [{ type: "text", text: `Tool reference unavailable: ${[...new Set(omitted)].join(", ")}` }];
+						content.push({ ...block, content: nextContent } as ContentBlockParam);
+						continue;
+					}
+				}
+			}
+			content.push(block);
+		}
+		if (content.length === 0) {
+			changed = true;
+			continue;
+		}
+		if (messageChanged) {
+			changed = true;
+			rewrittenMessages.push({ ...message, content });
+			continue;
+		}
+		rewrittenMessages.push(message);
+	}
+
+	if (!changed) return params;
+	return { ...params, messages: rewrittenMessages };
+}
+
+function collectToolReferenceNames(value: unknown, names: Set<string>): void {
+	if (Array.isArray(value)) {
+		for (const item of value) collectToolReferenceNames(item, names);
+		return;
+	}
+	if (!isRecord(value)) return;
+	if (value.type === "tool_reference" && typeof value.tool_name === "string") names.add(value.tool_name);
+	for (const nested of Object.values(value)) collectToolReferenceNames(nested, names);
+}
+
+function demotedToolCallText(name: string, input: unknown): string {
+	let serializedInput: string;
+	try {
+		serializedInput = JSON.stringify(input ?? {});
+	} catch {
+		serializedInput = "{}";
+	}
+	return `[Called tool "${name}" (no longer available in this session) with input: ${serializedInput}]`;
+}
+
+function demotedToolResultText(name: string, content: unknown): string {
+	return `[Result of unavailable tool "${name}": ${toolResultText(content)}]`;
+}
+
+function toolResultText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		const parts: string[] = [];
+		for (const item of content) {
+			if (!isRecord(item)) continue;
+			if (item.type === "text" && typeof item.text === "string") parts.push(item.text);
+			else if (typeof item.type === "string") parts.push(`[${item.type}]`);
+		}
+		if (parts.length > 0) return parts.join("\n");
+	}
+	return "Tool output unavailable.";
+}
+
 function sanitizeAdaptiveThinkingPayload(
 	model: Model<"anthropic-messages">,
 	params: MessageCreateParamsStreaming,
@@ -1104,6 +1263,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				}
 				params = sanitizeAdaptiveThinkingPayload(model, params, options);
 				params = sanitizeUnsupportedNativeTools(model, params);
+				params = demoteUnavailableToolReferences(params);
 				const payloadRequestMetadata = extractPayloadRequestMetadata(params);
 				params = payloadRequestMetadata.params;
 				const requestOptions = {

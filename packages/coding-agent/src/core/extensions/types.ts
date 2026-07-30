@@ -56,6 +56,7 @@ import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
 import type { KeybindingsManager } from "../keybindings.ts";
 import type { CustomMessage } from "../messages.ts";
 import type { ModelRegistry } from "../model-registry.ts";
+import type { InitialModelProvenance } from "../model-resolver.ts";
 import type {
 	BranchSummaryEntry,
 	CompactionEntry,
@@ -404,6 +405,13 @@ export interface ExtensionContext {
 	requestReload?(): Promise<void>;
 	/** Whether session compaction or branch summarization is currently running. */
 	isCompacting?(): boolean;
+	/**
+	 * Ask extensions whether a full session reload may proceed (the cancellable
+	 * `session_before_reload` gate) WITHOUT starting a reload. Hosts with a
+	 * reload veto gate expose this so watchers can defer quietly instead of
+	 * triggering a reload that would be blocked and re-warned on every retry.
+	 */
+	checkReloadVeto?(): Promise<ReloadVetoDecision>;
 	/** Gracefully shutdown pi and exit. Available in all contexts. */
 	shutdown(): void;
 	/** Get current context usage for the active model. */
@@ -690,6 +698,8 @@ export interface SessionStartEvent {
 	type: "session_start";
 	/** Why this session start happened. */
 	reason: "startup" | "reload" | "new" | "resume" | "fork";
+	/** Initial model resolver branch, when the session was resolved during this startup. */
+	initialModelProvenance?: InitialModelProvenance;
 	/** Previously active session file. Present for "new", "resume", and "fork". */
 	previousSessionFile?: string;
 }
@@ -908,6 +918,8 @@ export interface AgentEndEvent {
 	messages: AgentMessage[];
 	/** True when the agent run ended through an abort rather than normal completion. */
 	aborted?: boolean;
+	/** Whether the session will automatically retry or fall back after this end event. */
+	willRetry?: boolean;
 	/** Present when the host can attribute the abort to a user action or internal operation. */
 	abortSource?: "user" | "system";
 }
@@ -1335,6 +1347,13 @@ export interface SessionBeforeReloadResult {
 	reason?: string;
 }
 
+/** Outcome of probing the `session_before_reload` gate without reloading. */
+export interface ReloadVetoDecision {
+	cancelled: boolean;
+	/** Human-readable veto reason forwarded from the cancelling extension. */
+	reason?: string;
+}
+
 export interface SessionBeforeCompactResult {
 	cancel?: boolean;
 	compaction?: CompactionResult;
@@ -1613,6 +1632,15 @@ export interface ExtensionAPI {
 
 	/** Set thinking level (clamped to model capabilities). */
 	setThinkingLevel(level: ThinkingLevel): void;
+
+	/**
+	 * Set the model for this session only, leaving the user's persisted default
+	 * model untouched. Returns false if no API key is available.
+	 */
+	setSessionModel(model: Model<any>): Promise<boolean>;
+
+	/** Set thinking level for this session only (clamped), leaving the persisted default untouched. */
+	setSessionThinkingLevel(level: ThinkingLevel): void;
 
 	// =========================================================================
 	// Provider Registration
@@ -1969,6 +1997,8 @@ export interface ExtensionActions {
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
 	setThinkingLevel: SetThinkingLevelHandler;
+	setSessionModel: SetModelHandler;
+	setSessionThinkingLevel: SetThinkingLevelHandler;
 }
 
 /**
@@ -1984,6 +2014,7 @@ export interface ExtensionContextActions {
 	abort: () => void;
 	hasPendingMessages: () => boolean;
 	isCompacting: () => boolean;
+	checkReloadVeto?: () => Promise<ReloadVetoDecision>;
 	shutdown: () => void;
 	getContextUsage: () => ContextUsage | undefined;
 	getCompactionSettings: () => CompactionPreparation["settings"];

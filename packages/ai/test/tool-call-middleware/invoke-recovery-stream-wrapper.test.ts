@@ -2,7 +2,9 @@ import { spawnSync } from "node:child_process";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { wrapStreamWithInvokeRecovery } from "../../src/index.ts";
+import { createXtmlRecoveryStreamParser } from "../../src/tool-call-middleware/protocols/kimi-xtml/recovery-stream.ts";
 import type { AssistantMessageEvent, Tool } from "../../src/types.ts";
+import { AssistantMessageEventStream } from "../../src/utils/event-stream.ts";
 import { registerInvokeRecoveryContentExclusionCases } from "./invoke-recovery-content-exclusion-cases.ts";
 import { registerInvokeRecoveryContentOrderCases } from "./invoke-recovery-content-order-cases.ts";
 import { registerInvokeRecoveryNativeCases } from "./invoke-recovery-native-cases.ts";
@@ -50,6 +52,35 @@ describe("wrapStreamWithInvokeRecovery", () => {
 	registerInvokeRecoveryTerminationCases(bashTool);
 	registerInvokeRecoveryTerminalEdgeCases(bashTool);
 	registerInvokeRecoverySnapshotCancelCases(bashTool);
+
+	it("labels invalid Kimi content order with the XTML protocol", async () => {
+		// Given
+		const inner = new AssistantMessageEventStream();
+		const partial = createAssistantMessage([]);
+		const wrapped = wrapStreamWithInvokeRecovery(inner, [bashTool], {
+			createParser: createXtmlRecoveryStreamParser,
+			protocol: "kimi-xtml",
+		});
+		inner.push({ type: "start", partial: structuredClone(partial) });
+		partial.content.push({ type: "thinking", thinking: "" });
+		inner.push({ type: "thinking_start", contentIndex: 0, partial: structuredClone(partial) });
+		partial.content.push({ type: "text", text: "" });
+
+		// When
+		inner.push({ type: "text_start", contentIndex: 1, partial: structuredClone(partial) });
+		const events = await collectEvents(wrapped);
+		const result = await wrapped.result();
+
+		// Then
+		expect(events.map((event) => event.type)).toEqual(["start", "thinking_start", "error"]);
+		expect(result.diagnostics).toEqual([
+			{
+				type: "text_tool_call_recovery_invalid_content_event",
+				timestamp: expect.any(Number),
+				details: { protocol: "kimi-xtml", status: "invalid_content_event_order" },
+			},
+		]);
+	});
 
 	it("reconstructs text toolCall text and starts before the closing invoke", { timeout: 1000 }, async () => {
 		// Given

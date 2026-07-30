@@ -88,6 +88,7 @@ import {
 	resolveModelScope,
 	type ScopedModel,
 } from "../../core/model-resolver.ts";
+import { detectOmoNativeInstall } from "../../core/omo-native-detect.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
@@ -198,6 +199,7 @@ import {
 	formatActiveToolWorkingLabel,
 	formatToolHookStatusMessageFrame,
 	formatWorkingStatusMessageFrame,
+	largeSessionWorkingStatusInterval,
 	sanitizeWorkingStatusPlainText,
 	type WorkingStatusRgbColor,
 } from "./working-status.ts";
@@ -265,6 +267,8 @@ function isCustomSessionEntry(item: RenderSessionItem): item is Extract<SessionE
 const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
 const DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS = 600;
 const DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS = 32;
+const LARGE_SESSION_WORKING_STATUS_REFRESH_INTERVAL_MS = 60_000;
+const LARGE_SESSION_WORKING_STATUS_MESSAGE_INTERVAL_MS = 1_000;
 const FALLBACK_STATUS_KEY = "fallback";
 const RGB_FOREGROUND_PATTERN = /\x1b\[38;2;(\d+);(\d+);(\d+)m/;
 
@@ -668,6 +672,7 @@ export class InteractiveMode {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
+		this.footerDataProvider.setOmoNative(detectOmoNativeInstall(this.settingsManager.getPackages(), getAgentDir()));
 		this.footer = this.chrome
 			? this.chrome.createFooter(this.session, this.footerDataProvider)
 			: new FooterComponent(this.session, this.footerDataProvider);
@@ -999,6 +1004,7 @@ export class InteractiveMode {
 				now: Date.now(),
 				definitions: TIP_DEFINITIONS,
 				keys: keyText,
+				hasCommand: (command) => this.hasRegisteredCommand(command),
 			});
 			if (startupTip) {
 				this.recordShownTip(startupTip.tipId);
@@ -1043,7 +1049,7 @@ export class InteractiveMode {
 		});
 
 		// Initialize available provider count for footer display
-		await this.updateAvailableProviderCount();
+		this.updateAvailableProviderCount();
 	}
 
 	/**
@@ -1081,7 +1087,10 @@ export class InteractiveMode {
 		if (!process.env.PI_OFFLINE) {
 			void this.session.modelRuntime
 				.refresh()
-				.then(() => this.updateAvailableProviderCount())
+				.then(() => {
+					this.updateAvailableProviderCount();
+					this.ui.requestRender();
+				})
 				.catch(() => {});
 		}
 
@@ -2073,7 +2082,7 @@ export class InteractiveMode {
 			await this.bindCurrentSessionExtensions();
 			this.subscribeToAgent();
 		}
-		await this.updateAvailableProviderCount();
+		this.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
 	}
@@ -2200,9 +2209,14 @@ export class InteractiveMode {
 		if (this.hookStatusIntervalId) {
 			return;
 		}
+		const intervalMs = largeSessionWorkingStatusInterval(
+			this.sessionManager.getEntries().length,
+			DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS,
+			LARGE_SESSION_WORKING_STATUS_MESSAGE_INTERVAL_MS,
+		);
 		this.hookStatusIntervalId = setInterval(() => {
 			this.refreshToolHookStatuses();
-		}, DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS);
+		}, intervalMs);
 		this.hookStatusIntervalId.unref();
 	}
 
@@ -2367,31 +2381,41 @@ export class InteractiveMode {
 	}
 
 	private getWorkingIndicatorOptions(): LoaderIndicatorOptions {
-		return (
-			this.workingIndicatorOptions ?? {
-				frames: theme.getColorMode() === "truecolor" ? ["•"] : [theme.fg("accent", "•"), theme.fg("muted", "◦")],
-				intervalMs: DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS,
-				indicatorFormatter:
-					theme.getColorMode() === "truecolor"
-						? (frame, elapsedMs) => formatWorkingStatusShimmerText(frame, elapsedMs)
-						: undefined,
-				messageFormatter: (message, animationElapsedMs) =>
-					formatWorkingStatusMessageFrame(
-						message,
-						this.getWorkingElapsedSeconds(),
-						keyText("app.interrupt"),
-						animationElapsedMs,
-						{
-							base: (text) => theme.fg("dim", text),
-							glow: (text) => theme.fg("text", text),
-							highlight: (text) => theme.bold(theme.fg("text", text)),
-							shimmer: formatWorkingStatusShimmerText,
-							suffix: (text) => theme.fg("dim", text),
-						},
-					),
-				messageIntervalMs: DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS,
-			}
-		);
+		if (this.workingIndicatorOptions !== undefined) {
+			return this.workingIndicatorOptions;
+		}
+		const sessionEntryCount = this.sessionManager.getEntries().length;
+		return {
+			frames: theme.getColorMode() === "truecolor" ? ["•"] : [theme.fg("accent", "•"), theme.fg("muted", "◦")],
+			intervalMs: largeSessionWorkingStatusInterval(
+				sessionEntryCount,
+				DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS,
+				LARGE_SESSION_WORKING_STATUS_REFRESH_INTERVAL_MS,
+			),
+			indicatorFormatter:
+				theme.getColorMode() === "truecolor"
+					? (frame, elapsedMs) => formatWorkingStatusShimmerText(frame, elapsedMs)
+					: undefined,
+			messageFormatter: (message, animationElapsedMs) =>
+				formatWorkingStatusMessageFrame(
+					message,
+					this.getWorkingElapsedSeconds(),
+					keyText("app.interrupt"),
+					animationElapsedMs,
+					{
+						base: (text) => theme.fg("dim", text),
+						glow: (text) => theme.fg("text", text),
+						highlight: (text) => theme.bold(theme.fg("text", text)),
+						shimmer: formatWorkingStatusShimmerText,
+						suffix: (text) => theme.fg("dim", text),
+					},
+				),
+			messageIntervalMs: largeSessionWorkingStatusInterval(
+				sessionEntryCount,
+				DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS,
+				LARGE_SESSION_WORKING_STATUS_MESSAGE_INTERVAL_MS,
+			),
+		};
 	}
 
 	private showStatusIndicator(indicator: StatusIndicator): void {
@@ -2424,6 +2448,7 @@ export class InteractiveMode {
 					now: Date.now(),
 					definitions: TIP_DEFINITIONS,
 					keys: keyText,
+					hasCommand: (command) => this.hasRegisteredCommand(command),
 				}),
 			(tip) => this.recordShownTip(tip.tipId),
 		);
@@ -4869,6 +4894,10 @@ export class InteractiveMode {
 		this.showStatus("Queued message for after compaction");
 	}
 
+	private hasRegisteredCommand(command: string): boolean {
+		return !!this.session.extensionRunner.getCommand(command);
+	}
+
 	private isExtensionCommand(text: string): boolean {
 		if (!text.startsWith("/")) return false;
 
@@ -5070,6 +5099,7 @@ export class InteractiveMode {
 						this.settingsManager.setHttpIdleTimeoutMs(timeoutMs);
 						configureHttpDispatcher(timeoutMs);
 						this.session.agent.timeoutMs = this.settingsManager.getAgentStreamIdleTimeoutMs();
+						this.session.agent.streamStartTimeoutMs = this.settingsManager.getAgentStreamStartTimeoutMs();
 						this.showStatus(`HTTP idle timeout: ${formatHttpIdleTimeoutMs(timeoutMs)}`);
 					},
 					onThinkingLevelChange: (level) => {
@@ -5310,10 +5340,13 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	/** Update the footer's available provider count from current model candidates */
-	private async updateAvailableProviderCount(): Promise<void> {
-		const models = await this.getModelCandidates();
-		const uniqueProviders = new Set(models.map((m) => m.provider));
+	/** Update the footer's available provider count from the current snapshot without refreshing catalogs. */
+	private updateAvailableProviderCount(): void {
+		const models =
+			this.session.scopedModels.length > 0
+				? this.session.scopedModels.map((scoped) => scoped.model)
+				: this.session.modelRuntime.getAvailableSnapshot();
+		const uniqueProviders = new Set(models.map((model) => model.provider));
 		this.footerDataProvider.setAvailableProviderCount(uniqueProviders.size);
 	}
 
@@ -5955,7 +5988,7 @@ export class InteractiveMode {
 
 					try {
 						await this.session.modelRuntime.logout(providerOption.id);
-						await this.updateAvailableProviderCount();
+						this.updateAvailableProviderCount();
 						const message =
 							providerOption.authType === "oauth"
 								? `Logged out of ${providerOption.name}`
@@ -6011,7 +6044,7 @@ export class InteractiveMode {
 			}
 		}
 
-		await this.updateAvailableProviderCount();
+		this.updateAvailableProviderCount();
 		this.footer.invalidate();
 		this.updateEditorBorderColor();
 		if (selectedModel) {

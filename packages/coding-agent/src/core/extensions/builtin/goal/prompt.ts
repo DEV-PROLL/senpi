@@ -38,6 +38,47 @@ export function buildContinuationPrompt(goal: Goal): string {
 	].join("\n");
 }
 
+export function buildTruncationRecoveryPrompt(): string {
+	return [
+		"Your previous response was cut off by the output-token limit before it finished.",
+		"",
+		"Continue exactly where it stopped: resume the interrupted sentence, tool call, or code block at the cut point.",
+		"- Do not restart, restate, or re-plan the work; the earlier content is already in the conversation.",
+		"- Do not repeat completed sections; produce only the missing remainder.",
+		"- Keep the continuation focused so this response fits within the limit.",
+	].join("\n");
+}
+
+export function buildGoalStallNotice(consecutiveToollessTurns: number, options: { monitorsActive: boolean }): string {
+	if (options.monitorsActive) {
+		return [
+			"<goal_stall_check>",
+			`System check: this is monitor-wait goal continuation #${consecutiveToollessTurns} in a row. The same monitor(s) stayed active across ${consecutiveToollessTurns} consecutive continuation turns with no new user input and no monitor completion. The current situation is likely abnormal - a stalled or dead wait.`,
+			"Before waiting on the monitors again, actively investigate:",
+			"- Inspect the monitored sessions' output now (bash_output) and verify the watched condition can still occur.",
+			"- Check whether the underlying process is hung, exited silently, or waiting on input; restart or replace it if so.",
+			"- If the wait target is wrong or no longer needed, kill the monitor (kill_bash) and pursue the goal another way.",
+			"- If the goal truly cannot progress, run the blocked audit instead of waiting again.",
+			"Do not end this turn with only another passive wait.",
+			"</goal_stall_check>",
+		].join("\n");
+	}
+	return [
+		"<goal_stall_check>",
+		`System check: this is goal continuation #${consecutiveToollessTurns} in a row with no tool use and no new user input. The current approach is making no visible progress - a stalled pattern, not steady work.`,
+		"Before continuing in the same way, change what you are doing:",
+		"- Re-read the todo list and inspect the actual worktree state; treat it as authoritative over memory of earlier turns.",
+		"- Take one concrete action that moves the goal forward: edit a file, run a command, or verify a real result.",
+		"- If the goal truly cannot progress, run the blocked audit instead of repeating the same turn.",
+		"Do not end this turn with only narration about what you intend to do.",
+		"</goal_stall_check>",
+	].join("\n");
+}
+
+export function buildMonitorStallNotice(consecutiveContinuations: number): string {
+	return buildGoalStallNotice(consecutiveContinuations, { monitorsActive: true });
+}
+
 function escapeXmlText(value: string): string {
 	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }

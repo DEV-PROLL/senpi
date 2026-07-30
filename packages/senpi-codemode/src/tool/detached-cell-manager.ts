@@ -41,9 +41,18 @@ export interface EvalDetachedCellNotifier {
 	notify(cells: readonly EvalDetachedCellNotification[]): void;
 }
 
+/** One live detached cell, as shown in the footer status line. */
+export interface EvalDetachedCellStatusEntry {
+	readonly cellId: string;
+	readonly language: EvalLanguage;
+	readonly title?: string;
+}
+
 export interface EvalDetachedCellManagerOptions {
 	readonly artifactsDir?: string;
 	readonly notifier?: EvalDetachedCellNotifier;
+	/** Called with every detached cell whenever that set changes; empty clears the status. */
+	readonly onStatusChange?: (entries: readonly EvalDetachedCellStatusEntry[]) => void;
 }
 
 /**
@@ -56,6 +65,7 @@ export interface EvalDetachedCellManagerOptions {
 export class EvalDetachedCellManager {
 	readonly #artifactsDir: string | undefined;
 	readonly #notifier: EvalDetachedCellNotifier | undefined;
+	readonly #onStatusChange: ((entries: readonly EvalDetachedCellStatusEntry[]) => void) | undefined;
 	readonly #cells = new Map<string, ManagedCell>();
 	readonly #detachedByLanguage = new Map<EvalLanguage, ManagedCell>();
 	#notificationQueue: ManagedCell[] = [];
@@ -64,11 +74,15 @@ export class EvalDetachedCellManager {
 	constructor(options: EvalDetachedCellManagerOptions = {}) {
 		this.#artifactsDir = options.artifactsDir;
 		this.#notifier = options.notifier;
+		this.#onStatusChange = options.onStatusChange;
 	}
 
 	create(cellId: string, input: EvalToolInput): ManagedCell {
 		const existing = this.#cells.get(cellId);
-		if (existing !== undefined) throw new Error(`Eval cell ${cellId} is already managed`);
+		if (existing !== undefined) {
+			if (existing.state === "running" || existing.state === "detached") throw activeCellReuseError(existing);
+			this.#cells.delete(cellId);
+		}
 		const spillPath =
 			this.#artifactsDir === undefined
 				? undefined
@@ -102,6 +116,7 @@ export class EvalDetachedCellManager {
 		if (!cell.canDetach || !this.#transition(cell, "detached")) return false;
 		cell.wasDetached = true;
 		this.#detachedByLanguage.set(cell.input.language, cell);
+		this.#emitStatus();
 		return true;
 	}
 
@@ -161,9 +176,22 @@ export class EvalDetachedCellManager {
 		if (cell.wasDetached && next !== "detached") {
 			if (this.#detachedByLanguage.get(cell.input.language) === cell)
 				this.#detachedByLanguage.delete(cell.input.language);
+			this.#emitStatus();
 			this.#queueNotification(cell);
 		}
 		return true;
+	}
+
+	#emitStatus(): void {
+		const emit = this.#onStatusChange;
+		if (emit === undefined) return;
+		emit(
+			[...this.#detachedByLanguage.values()].map((cell) => ({
+				cellId: cell.cellId,
+				language: cell.input.language,
+				...(cell.input.title === undefined ? {} : { title: cell.input.title }),
+			})),
+		);
 	}
 
 	#queueNotification(cell: ManagedCell): void {
@@ -230,6 +258,12 @@ export class EvalDetachedCellManager {
 			stateRetained: cell.stateRetained,
 		};
 	}
+}
+
+function activeCellReuseError(cell: ManagedCell): Error {
+	return new Error(
+		`Eval cell ${cell.cellId} from a previous call is still ${cell.state} in the ${cell.input.language} kernel. Use eval({ action: "peek", cell_id: "${cell.cellId}" }) to read it or eval({ action: "stop", cell_id: "${cell.cellId}" }) to end it before its id can be reused.`,
+	);
 }
 
 function allowsTransition(from: EvalDetachedCellState, to: EvalDetachedCellState): boolean {

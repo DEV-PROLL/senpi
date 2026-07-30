@@ -9,6 +9,7 @@ import { formatMonitorStatus } from "../../src/core/extensions/builtin/terminal/
 import type { TerminalToolContext } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createMonitorTool, type MonitorInput } from "../../src/core/extensions/builtin/terminal/tools/monitor.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
+import { initTheme, theme } from "../../src/modes/interactive/theme/theme.ts";
 
 /** Resolves when the wrapped spy is called with a matching argument set. */
 function deferredCall<TArgs extends unknown[]>(predicate: (...args: TArgs) => boolean) {
@@ -34,29 +35,48 @@ describe("formatMonitorStatus", () => {
 		expect(formatMonitorStatus([])).toBeUndefined();
 	});
 
-	it("names the single watched thing", () => {
-		const text = formatMonitorStatus([entry("bash_1", "errors in deploy.log")]);
-		expect(text).toContain("errors in deploy.log");
-		expect(text).toContain("watching");
+	it("marks the single watched thing with the watch glyph and its full description", () => {
+		expect(formatMonitorStatus([entry("bash_1", "errors in deploy.log")])).toBe("◉ watching errors in deploy.log");
 	});
 
-	it("shows the count and elides long lists to a hard cap", () => {
+	it("lists every description when they all fit", () => {
+		const text = formatMonitorStatus([entry("bash_1", "deploy errors"), entry("bash_2", "webpack rebuild")]);
+		expect(text).toBe("◉ watching 2: deploy errors, webpack rebuild");
+	});
+
+	it("keeps whole names and folds the overflow into a +N more counter", () => {
 		const text = formatMonitorStatus([
 			entry("bash_1", "errors in deploy.log"),
 			entry("bash_2", "integration test output on ci runner four"),
 			entry("bash_3", "webpack rebuild"),
 		]);
-		expect(text).toBeDefined();
-		expect(text).toContain("3");
+		expect(text).toBe("◉ watching 3: errors in deploy.log +2 more");
 		expect((text ?? "").length).toBeLessThanOrEqual(48);
-		expect(text).toContain("…");
 	});
 
-	it("marks paused watches", () => {
+	it("never truncates away the count when the first name alone overflows", () => {
+		const text = formatMonitorStatus([
+			entry("bash_1", "a".repeat(60)),
+			entry("bash_2", "b"),
+			entry("bash_3", "c"),
+			entry("bash_4", "d"),
+		]);
+		expect(text).toContain("watching 4:");
+		expect(text).toContain("+3 more");
+		expect(text).toContain("…");
+		expect((text ?? "").length).toBeLessThanOrEqual(48);
+	});
+
+	it("marks paused watches and keeps the marker through truncation", () => {
 		const all = formatMonitorStatus([entry("bash_1", "a", true), entry("bash_2", "b", true)]);
-		expect(all).toContain("paused");
-		const some = formatMonitorStatus([entry("bash_1", "a", true), entry("bash_2", "b")]);
-		expect(some).toContain("1 paused");
+		expect(all).toBe("◉ watching 2: a, b (paused)");
+		const some = formatMonitorStatus([
+			entry("bash_1", "errors in deploy.log", true),
+			entry("bash_2", "integration test output on ci runner four"),
+			entry("bash_3", "webpack rebuild"),
+		]);
+		expect(some).toContain("(1 paused)");
+		expect((some ?? "").length).toBeLessThanOrEqual(48);
 	});
 });
 
@@ -146,6 +166,7 @@ describe("terminal extension footer status wiring", () => {
 	});
 
 	it("publishes the monitors footer status while a watch is live and clears it on settle", async () => {
+		initTheme("dark");
 		type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 		const handlers = new Map<string, Handler[]>();
 		const tools = new Map<string, { execute: (id: string, input: MonitorInput) => Promise<unknown> }>();
@@ -175,15 +196,19 @@ describe("terminal extension footer status wiring", () => {
 		setStatus.mockImplementation((key: string, text: string | undefined) => cleared.handler(key, text));
 		const ctx = {
 			cwd: process.cwd(),
-			ui: { setStatus, notify: () => {} },
+			hasUI: true,
+			mode: "tui",
+			ui: { setStatus, notify: () => {}, theme },
 		} as unknown as ExtensionContext;
 		for (const handler of handlers.get("session_start") ?? []) await handler({}, ctx);
 
 		const monitorTool = tools.get("monitor");
 		expect(monitorTool).toBeDefined();
-		await monitorTool?.execute("call_1", { description: "footer smoke watch", command: "printf 'line\\n'" });
+		const description = "PR 453 checks on new head f40d4d15c";
+		await monitorTool?.execute("call_1", { description, command: "printf 'line\\n'" });
 
-		expect(setStatus).toHaveBeenCalledWith("monitors", expect.stringContaining("footer smoke watch"));
+		const plainStatus = `◉ watching ${description}`;
+		expect(setStatus).toHaveBeenCalledWith("monitors", theme.bg("selectedBg", theme.fg("text", plainStatus)));
 		await cleared.promise;
 		expect(setStatus).toHaveBeenCalledWith("monitors", undefined);
 

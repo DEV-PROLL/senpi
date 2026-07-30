@@ -18,6 +18,10 @@ const registry = {
 };
 
 describe("validateFallbackChains", () => {
+	it("does not warn when fallback chains are absent", () => {
+		expect(validateFallbackChains(undefined, registry)).toEqual([]);
+	});
+
 	it("exposes the warnings calculated when the session starts", async () => {
 		const harness = await createHarness({
 			settings: { retry: { fallbackChains: { smol: ["faux/faux-1"] } } },

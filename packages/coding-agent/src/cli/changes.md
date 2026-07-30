@@ -1,5 +1,34 @@
 # changes
 
+## `senpi --list-tips` prints the tip catalog as JSON (2026-07-29)
+
+### What changed
+
+- `args.ts`: added the `--list-tips` boolean flag next to `--list-models`, with a help row.
+- `list-tips.ts` (new): `collectTips()` renders every `TIP_DEFINITIONS` entry through the default
+  `KeybindingsManager` (the same construction the tips tests use for live keys) into
+  `{id, text, requiresCommand?}` records; `listTips()` prints the array as 2-space-indented JSON.
+- `main.ts`: mirrors every `--list-models` dispatch branch for the new flag - plain runtime metadata
+  command, in-memory session manager, early exit before first-time setup, and print-mode project
+  trust - except the flag needs no model runtime, so it prints and exits without creating
+  agent-session services.
+- Coverage: `test/suite/list-tips.test.ts` pins the full catalog id order (including
+  `fallback-chains-setting`), non-empty rendered text, and `requiresCommand` gating.
+
+### Why
+
+- The tip catalog teaches most of the fork's surface but was only visible one line at a time; a
+  JSON dump gives scripts and the give-me-tips skill the whole catalog in one pass.
+
+### Why extension system couldn't handle this
+
+- Flag parsing and pre-runtime dispatch run before extensions load.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `args.ts` flag table and parse branches.
+- LOW: `main.ts` dispatch branches; `list-tips.ts` is additive.
+
 ## Removed legacy `--neo` CLI flags and launcher plumbing (2026-07-26)
 
 ### What changed

@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@code-yeongyu/senpi";
 import type { AgentExecuteTool } from "../bridges/agent-bridge.ts";
+import type { EvalSchemaToolInfo } from "../bridges/schema-bridge.ts";
 import type { CompletionRequest, CompletionResult } from "../completion/handler.ts";
 import {
 	type CodemodeSettings,
@@ -23,6 +24,7 @@ import {
 export interface CodemodeRuntimeAPI {
 	readonly executeTool: AgentExecuteTool;
 	getActiveTools(): string[];
+	getAllTools(): readonly EvalSchemaToolInfo[];
 }
 
 export interface RuntimeFactoryOptions {
@@ -71,6 +73,7 @@ export async function createRuntime(
 		availability,
 		artifactsDir: artifacts.dir,
 		executeTool,
+		listTools: () => pi.getAllTools(),
 		complete,
 	});
 	return {

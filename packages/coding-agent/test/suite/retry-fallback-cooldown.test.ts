@@ -18,6 +18,8 @@ describe("SelectorCooldowns", () => {
 		["usage limits", "usage limit reached", 30 * 60_000],
 		["quota", "insufficient_quota", 30 * 60_000],
 		["billing", "Billing limit reached", 30 * 60_000],
+		["credits required", "429 Usage credits are required for this model.", 30 * 60_000],
+		["credits_required code", '429 {"error_code":"credits_required"}', 30 * 60_000],
 		["rate limit", "rate limit exceeded", 30_000],
 		["HTTP 429", "HTTP 429", 30_000],
 		["too many requests", "Too Many Requests", 30_000],

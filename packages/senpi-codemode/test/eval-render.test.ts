@@ -351,3 +351,200 @@ describe("eval renderer", () => {
 		}
 	});
 });
+
+type NestedToolCall = {
+	readonly name: string;
+	readonly ok: boolean;
+	readonly args?: unknown;
+	readonly durationMs?: number;
+	readonly resultPreview?: string;
+	readonly error?: string;
+};
+
+const FG_COLORS = {
+	accent: "#010101",
+	border: "#020202",
+	borderAccent: "#030303",
+	borderMuted: "#040404",
+	success: "#050505",
+	error: "#060606",
+	warning: "#070707",
+	muted: "#080808",
+	dim: "#090909",
+	text: "#0a0a0a",
+	thinkingText: "#0b0b0b",
+	userMessageText: "#0c0c0c",
+	customMessageText: "#0d0d0d",
+	customMessageLabel: "#0e0e0e",
+	toolTitle: "#0f0f0f",
+	toolOutput: "#101010",
+	mdHeading: "#111111",
+	mdLink: "#121212",
+	mdLinkUrl: "#131313",
+	mdCode: "#141414",
+	mdCodeBlock: "#151515",
+	mdCodeBlockBorder: "#161616",
+	mdQuote: "#171717",
+	mdQuoteBorder: "#181818",
+	mdHr: "#191919",
+	mdListBullet: "#1a1a1a",
+	toolDiffAdded: "#1b1b1b",
+	toolDiffRemoved: "#1c1c1c",
+	toolDiffContext: "#1d1d1d",
+	syntaxComment: "#1e1e1e",
+	syntaxKeyword: "#1f1f1f",
+	syntaxFunction: "#202020",
+	syntaxVariable: "#202020",
+	syntaxString: "#222222",
+	syntaxNumber: "#232323",
+	syntaxType: "#242424",
+	syntaxOperator: "#252525",
+	syntaxPunctuation: "#262626",
+	thinkingOff: "#272727",
+	thinkingMinimal: "#282828",
+	thinkingLow: "#292929",
+	thinkingMedium: "#2a2a2a",
+	thinkingHigh: "#292929",
+	thinkingXhigh: "#2a2a2a",
+	thinkingMax: "#2b2b2b",
+	bashMode: "#2c2c2c",
+};
+
+const BG_COLORS = {
+	selectedBg: "#303030",
+	userMessageBg: "#313131",
+	customMessageBg: "#323232",
+	toolPendingBg: "#333333",
+	toolSuccessBg: "#343434",
+	toolErrorBg: "#353535",
+};
+
+function stripNestedAnsi(text: string): string {
+	return text.replace(/\u001b\[[0-9;]*m/gu, "");
+}
+
+async function nestedToolResult(toolCalls: readonly NestedToolCall[]) {
+	const { evalResultWithNestedToolCalls } = await import("./eval-render-fixtures.ts");
+	return evalResultWithNestedToolCalls(toolCalls);
+}
+
+async function nestedWidgetTheme() {
+	const { Theme, initTheme } = await import("@code-yeongyu/senpi");
+	initTheme();
+	return new Theme(FG_COLORS, BG_COLORS, "truecolor", { name: "eval-render-nested-widgets-test" });
+}
+
+describe("nested tool-call widgets", () => {
+	it("nested widgets: legacy row string pinned", async () => {
+		const lines = renderLines(
+			renderEvalResult(
+				await nestedToolResult([{ name: "read", ok: true }]),
+				{ expanded: false, isPartial: false },
+				undefined,
+				resultContext(),
+			),
+		);
+
+		expect(lines).toContain("- tool.read: ok");
+	});
+
+	it("nested widgets: enriched renders shapes", async () => {
+		const theme = await nestedWidgetTheme();
+		const lines = renderLines(
+			renderEvalResult(
+				await nestedToolResult([
+					{
+						name: "read",
+						ok: true,
+						args: { path: "/tmp/config.json" },
+						durationMs: 1_200,
+						resultPreview: "loaded configuration",
+					},
+					{ name: "bash", ok: false, args: { command: "echo nested" }, error: "exit 1" },
+				]),
+				{ expanded: false, isPartial: false },
+				theme,
+				resultContext(),
+			),
+		);
+		const output = stripNestedAnsi(lines.join("\n"));
+
+		expect(output).toContain("config.json");
+		expect(output).toContain("$ echo nested");
+		expect(output).toContain("✓");
+		expect(output).toContain("✗");
+	});
+
+	it("nested widgets: mixed list", async () => {
+		const theme = await nestedWidgetTheme();
+		const output = stripNestedAnsi(
+			renderLines(
+				renderEvalResult(
+					await nestedToolResult([
+						{ name: "read", ok: true, args: { path: "/tmp/config.json" } },
+						{ name: "completion", ok: true },
+					]),
+					{ expanded: false, isPartial: false },
+					theme,
+					resultContext(),
+				),
+			).join("\n"),
+		);
+
+		expect(output).toContain("config.json");
+		expect(output).toContain("- tool.completion: ok");
+	});
+
+	it("nested widgets: theme undefined", async () => {
+		const lines = renderLines(
+			renderEvalResult(
+				await nestedToolResult([{ name: "read", ok: true, args: { path: "/tmp/config.json" } }]),
+				{ expanded: false, isPartial: false },
+				undefined,
+				resultContext(),
+			),
+		);
+
+		expect(lines).toContain("- tool.read: ok");
+		expect(lines.join("\n")).not.toContain("\u001b");
+	});
+
+	it("nested widgets: collapse budget", async () => {
+		const theme = await nestedWidgetTheme();
+		const calls = Array.from({ length: 8 }, (_, index) => ({
+			name: "bash",
+			ok: true,
+			args: { command: `echo nested-${index + 1}` },
+		}));
+		const output = stripNestedAnsi(
+			renderLines(
+				renderEvalResult(
+					await nestedToolResult(calls),
+					{ expanded: false, isPartial: false },
+					theme,
+					resultContext(),
+				),
+			).join("\n"),
+		);
+
+		expect(output).toContain("3 earlier tool calls");
+		for (const index of [4, 5, 6, 7, 8]) expect(output).toContain(`$ echo nested-${index}`);
+		for (const index of [1, 2, 3]) expect(output).not.toContain(`$ echo nested-${index}`);
+	});
+
+	it("nested widgets: streaming partial", async () => {
+		const theme = await nestedWidgetTheme();
+		const output = stripNestedAnsi(
+			renderLines(
+				renderEvalResult(
+					await nestedToolResult([{ name: "read", ok: true, args: { path: "/tmp/partial.json" } }]),
+					{ expanded: false, isPartial: true },
+					theme,
+					resultContext(),
+				),
+			).join("\n"),
+		);
+
+		expect(output).toContain("partial.json");
+	});
+});

@@ -1,17 +1,19 @@
 import type { AssistantMessage, Tool } from "../types.ts";
+import type { RecoveryStreamParser } from "./protocols/anthropic-xml/recovery-stream.ts";
 import { createAntmlInvokeRecoveryStreamParser } from "./protocols/antml/recovery-stream.ts";
 import { createRecoveryCodeMask, type RecoveryCodeMaskSegment } from "./recovery-code-mask.ts";
 import { appendRecoveryDiagnostic } from "./recovery-diagnostics.ts";
 import type { RecoveryNativeProjection } from "./recovery-native-projection.ts";
 import type { StreamMessageProjection } from "./stream-wrapper-shared.ts";
-import type { StreamParserEvent } from "./types.ts";
+import type { StreamParserEvent, ToolCallFormat } from "./types.ts";
 
 /** Owns one ordinary assistant text block's mask/parser/projection lifecycle. */
 export class RecoveryTextProjection {
 	private readonly projection: StreamMessageProjection;
 	private readonly nativeProjection: RecoveryNativeProjection;
 	private readonly innerIndex: number;
-	private readonly parser: ReturnType<typeof createAntmlInvokeRecoveryStreamParser>;
+	private readonly parser: RecoveryStreamParser;
+	private readonly protocol: ToolCallFormat;
 	private readonly mask = createRecoveryCodeMask();
 	private activeInvoke = false;
 	private textBuffer = "";
@@ -23,11 +25,16 @@ export class RecoveryTextProjection {
 		projection: StreamMessageProjection,
 		nativeProjection: RecoveryNativeProjection,
 		innerIndex: number,
+		options: {
+			createParser?: (tools: readonly Tool[]) => RecoveryStreamParser;
+			protocol?: ToolCallFormat;
+		} = {},
 	) {
 		this.projection = projection;
 		this.nativeProjection = nativeProjection;
 		this.innerIndex = innerIndex;
-		this.parser = createAntmlInvokeRecoveryStreamParser(tools);
+		this.parser = (options.createParser ?? createAntmlInvokeRecoveryStreamParser)(tools);
+		this.protocol = options.protocol ?? "antml";
 	}
 
 	start(source: AssistantMessage): boolean {
@@ -74,7 +81,9 @@ export class RecoveryTextProjection {
 			if (event.type === "toolcall_start") this.activeInvoke = true;
 			if (event.type === "toolcall_end") {
 				this.activeInvoke = false;
-				for (const toolCall of result.completedToolCalls) appendRecoveryDiagnostic(this.projection, toolCall);
+				for (const toolCall of result.completedToolCalls) {
+					appendRecoveryDiagnostic(this.projection, toolCall, this.protocol);
+				}
 			}
 		}
 		this.nativeProjection.extendText(this.innerIndex);

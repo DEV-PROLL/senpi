@@ -60,6 +60,7 @@ import {
 	resolveJsonSchemaStrictSampling,
 } from "./constrained-sampling.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
+import { resolveOpenAIClientAuth } from "./openai-client-auth.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import {
 	applyExtraBody,
@@ -196,21 +197,6 @@ function resolveReasoningEffort(
  * This is needed because Anthropic (via proxy) requires the tools param
  * to be present when messages include tool_calls or tool role messages.
  */
-function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
-	if (!headers) return false;
-	const expected = name.toLowerCase();
-	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === expected && value !== null && value.trim().length > 0) return true;
-	}
-	return false;
-}
-
-function getClientApiKey(provider: string, apiKey: string | undefined, headers: ProviderHeaders | undefined): string {
-	if (apiKey) return apiKey;
-	if (hasHeader(headers, "authorization") || hasHeader(headers, "cf-aig-authorization")) return "unused";
-	throw new Error(`No API key for provider: ${provider}`);
-}
-
 function hasToolHistory(messages: Message[]): boolean {
 	for (const msg of messages) {
 		if (msg.role === "toolResult") {
@@ -366,7 +352,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 		};
 
 		try {
-			const apiKey = getClientApiKey(model.provider, options?.apiKey, options?.headers);
+			const clientAuth = resolveOpenAIClientAuth(model.provider, options?.apiKey, options?.headers);
 			const compat = getCompat(model);
 			const grammarToolInputProperties = createGrammarToolInputProperties(
 				context.tools,
@@ -374,7 +360,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			);
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention ?? model.cacheRetention, options?.env);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
-			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId, compat);
+			const client = createClient(model, context, clientAuth.apiKey, clientAuth.headers, cacheSessionId, compat);
 			let params = buildParams(model, context, options, compat, cacheRetention, grammarToolInputProperties);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
@@ -435,7 +421,12 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 
 			let textBlock: TextContent | null = null;
 			let thinkingBlock: ThinkingContent | null = null;
+			let activeBlock: StreamingBlock | null = null;
+			let deferMixedEvents = false;
 			let hasFinishReason = false;
+			const deferredTextDeltas: string[] = [];
+			const deferredThinkingDeltas: string[] = [];
+			const deferredToolCallDeltas = new Map<StreamingToolCallBlock, string[]>();
 			const toolCallBlocksByIndex = new Map<number, StreamingToolCallBlock>();
 			const toolCallBlocksById = new Map<string, StreamingToolCallBlock>();
 			const pendingReasoningDetailsByToolCallId = new Map<string, string>();
@@ -509,23 +500,46 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 					});
 				}
 			};
+			const finishActiveBlock = () => {
+				if (!activeBlock) return;
+				finishBlock(activeBlock);
+				activeBlock = null;
+			};
 			const ensureTextBlock = () => {
 				if (!textBlock) {
+					if (!deferMixedEvents) {
+						finishActiveBlock();
+						thinkingBlock = null;
+					}
 					textBlock = { type: "text", text: "" };
 					blocks.push(textBlock);
-					stream.push({ type: "text_start", contentIndex: getContentIndex(textBlock), partial: output });
+					if (!deferMixedEvents) {
+						activeBlock = textBlock;
+						stream.push({ type: "text_start", contentIndex: getContentIndex(textBlock), partial: output });
+					}
 				}
 				return textBlock;
 			};
 			const ensureThinkingBlock = (thinkingSignature: string) => {
 				if (!thinkingBlock) {
+					if (!deferMixedEvents) {
+						finishActiveBlock();
+						textBlock = null;
+					}
 					thinkingBlock = {
 						type: "thinking",
 						thinking: "",
 						thinkingSignature,
 					};
 					blocks.push(thinkingBlock);
-					stream.push({ type: "thinking_start", contentIndex: getContentIndex(thinkingBlock), partial: output });
+					if (!deferMixedEvents) {
+						activeBlock = thinkingBlock;
+						stream.push({
+							type: "thinking_start",
+							contentIndex: getContentIndex(thinkingBlock),
+							partial: output,
+						});
+					}
 				}
 				return thinkingBlock;
 			};
@@ -547,6 +561,11 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 					block = toolCallBlocksById.get(toolCall.id);
 				}
 				if (!block) {
+					if (!deferMixedEvents) {
+						finishActiveBlock();
+						textBlock = null;
+						thinkingBlock = null;
+					}
 					// Note: the "input" fallback here should/must not be taken.  in case the LLM makes up
 					// a tool we don't knwo about, we at least have a place to stash our stuff.
 					const customInputProperty = toolCall.custom
@@ -571,11 +590,14 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 						toolCallBlocksById.set(toolCall.id, block);
 					}
 					blocks.push(block);
-					stream.push({
-						type: "toolcall_start",
-						contentIndex: getContentIndex(block),
-						partial: output,
-					});
+					if (!deferMixedEvents) {
+						activeBlock = block;
+						stream.push({
+							type: "toolcall_start",
+							contentIndex: getContentIndex(block),
+							partial: output,
+						});
+					}
 				}
 				if (streamIndex !== undefined && block.streamIndex === undefined) {
 					block.streamIndex = streamIndex;
@@ -598,6 +620,28 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				}
 				applyPendingReasoningDetail(block);
 				return block;
+			};
+			const flushDeferredBlocks = () => {
+				for (const block of blocks) {
+					const contentIndex = getContentIndex(block);
+					if (block.type === "text") {
+						stream.push({ type: "text_start", contentIndex, partial: output });
+						for (const delta of deferredTextDeltas) {
+							stream.push({ type: "text_delta", contentIndex, delta, partial: output });
+						}
+					} else if (block.type === "thinking") {
+						stream.push({ type: "thinking_start", contentIndex, partial: output });
+						for (const delta of deferredThinkingDeltas) {
+							stream.push({ type: "thinking_delta", contentIndex, delta, partial: output });
+						}
+					} else {
+						stream.push({ type: "toolcall_start", contentIndex, partial: output });
+						for (const delta of deferredToolCallDeltas.get(block) ?? []) {
+							stream.push({ type: "toolcall_delta", contentIndex, delta, partial: output });
+						}
+					}
+					finishBlock(block);
+				}
 			};
 
 			for await (const chunk of openaiStream) {
@@ -633,25 +677,10 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				}
 
 				if (choice.delta) {
-					if (
-						choice.delta.content !== null &&
-						choice.delta.content !== undefined &&
-						choice.delta.content.length > 0
-					) {
-						const block = ensureTextBlock();
-						block.text += choice.delta.content;
-						stream.push({
-							type: "text_delta",
-							contentIndex: getContentIndex(block),
-							delta: choice.delta.content,
-							partial: output,
-						});
-					}
-
-					// Some endpoints return reasoning in reasoning_content (llama.cpp),
-					// or reasoning (other openai compatible endpoints)
-					// Use the first non-empty reasoning field to avoid duplication
-					// (e.g., chutes.ai returns both reasoning_content and reasoning with same content)
+					const contentDelta =
+						typeof choice.delta.content === "string" && choice.delta.content.length > 0
+							? choice.delta.content
+							: null;
 					const reasoningFields = ["reasoning_content", "reasoning", "reasoning_text"];
 					const deltaFields = choice.delta as Record<string, unknown>;
 					let foundReasoningField: string | null = null;
@@ -662,7 +691,29 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 							break;
 						}
 					}
+					if (blocks.length === 0 && contentDelta && foundReasoningField) {
+						deferMixedEvents = true;
+					}
 
+					if (contentDelta) {
+						const block = ensureTextBlock();
+						block.text += contentDelta;
+						if (deferMixedEvents) {
+							deferredTextDeltas.push(contentDelta);
+						} else {
+							stream.push({
+								type: "text_delta",
+								contentIndex: getContentIndex(block),
+								delta: contentDelta,
+								partial: output,
+							});
+						}
+					}
+
+					// Some endpoints return reasoning in reasoning_content (llama.cpp),
+					// or reasoning (other openai compatible endpoints)
+					// Use the first non-empty reasoning field to avoid duplication
+					// (e.g., chutes.ai returns both reasoning_content and reasoning with same content)
 					if (foundReasoningField) {
 						const delta = deltaFields[foundReasoningField];
 						if (typeof delta === "string" && delta.length > 0) {
@@ -672,12 +723,16 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 									: foundReasoningField;
 							const block = ensureThinkingBlock(thinkingSignature);
 							block.thinking += delta;
-							stream.push({
-								type: "thinking_delta",
-								contentIndex: getContentIndex(block),
-								delta,
-								partial: output,
-							});
+							if (deferMixedEvents) {
+								deferredThinkingDeltas.push(delta);
+							} else {
+								stream.push({
+									type: "thinking_delta",
+									contentIndex: getContentIndex(block),
+									delta,
+									partial: output,
+								});
+							}
 						}
 					}
 
@@ -702,12 +757,18 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 								const nextInput = getCustomToolCallInput(block) + toolCall.custom.input;
 								delta = appendCustomToolCallInput(block, nextInput, false) ?? "";
 							}
-							stream.push({
-								type: "toolcall_delta",
-								contentIndex: getContentIndex(block),
-								delta,
-								partial: output,
-							});
+							if (deferMixedEvents) {
+								const deltas = deferredToolCallDeltas.get(block) ?? [];
+								deltas.push(delta);
+								deferredToolCallDeltas.set(block, deltas);
+							} else {
+								stream.push({
+									type: "toolcall_delta",
+									contentIndex: getContentIndex(block),
+									delta,
+									partial: output,
+								});
+							}
 						}
 					}
 
@@ -728,9 +789,8 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				}
 			}
 
-			for (const block of blocks) {
-				finishBlock(block);
-			}
+			if (deferMixedEvents) flushDeferredBlocks();
+			else finishActiveBlock();
 			if (options?.signal?.aborted) {
 				throw new Error("Request was aborted");
 			}
@@ -778,7 +838,7 @@ export const streamSimple: StreamFunction<"openai-completions", SimpleStreamOpti
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	getClientApiKey(model.provider, options?.apiKey, options?.headers);
+	resolveOpenAIClientAuth(model.provider, options?.apiKey, options?.headers);
 
 	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const compat = getCompat(model);

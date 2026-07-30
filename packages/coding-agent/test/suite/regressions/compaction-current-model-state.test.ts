@@ -114,124 +114,124 @@ describe("Regression: compaction state during model fallback", () => {
 		expect(harness.session.model?.id).toBe("faux-2");
 	});
 
-	it.each([
-		"rejected",
-		"accepted",
-	] as const)("revalidates the model selected by a delayed session_compact handler before queued continuation when re-compaction is %s", async (secondCompaction) => {
-		const continuationMarker = `queued continuation after ${secondCompaction} smaller-model revalidation`;
-		const firstSummary = "large-window summary ".repeat(80);
-		let compactionRequests = 0;
-		let smallerModel: Harness["models"][number] | undefined;
-		let resolveFirstCompactionEnd: (() => void) | undefined;
-		const firstCompactionEnd = new Promise<void>((resolve) => {
-			resolveFirstCompactionEnd = resolve;
-		});
-		const compactionEndModels: string[] = [];
-		const providerCompactionCounts: number[] = [];
-		let switchedToSmallerModel = false;
-		const harness = await createHarness({
-			models: [
-				{ id: "large", contextWindow: 1_000, maxTokens: 64 },
-				{ id: "small", contextWindow: 100, maxTokens: 64 },
-			],
-			settings: { compaction: { enabled: true, reserveTokens: 0, keepRecentTokens: 0 } },
-			extensionFactories: [
-				(pi) => {
-					pi.on("session_before_compact", (event) => {
-						compactionRequests++;
-						if (compactionRequests === 2 && secondCompaction === "rejected") {
+	it.each(["rejected", "accepted"] as const)(
+		"revalidates the model selected by a delayed session_compact handler before queued continuation when re-compaction is %s",
+		async (secondCompaction) => {
+			const continuationMarker = `queued continuation after ${secondCompaction} smaller-model revalidation`;
+			const firstSummary = "large-window summary ".repeat(80);
+			let compactionRequests = 0;
+			let smallerModel: Harness["models"][number] | undefined;
+			let resolveFirstCompactionEnd: (() => void) | undefined;
+			const firstCompactionEnd = new Promise<void>((resolve) => {
+				resolveFirstCompactionEnd = resolve;
+			});
+			const compactionEndModels: string[] = [];
+			const providerCompactionCounts: number[] = [];
+			let switchedToSmallerModel = false;
+			const harness = await createHarness({
+				models: [
+					{ id: "large", contextWindow: 1_000, maxTokens: 64 },
+					{ id: "small", contextWindow: 100, maxTokens: 64 },
+				],
+				settings: { compaction: { enabled: true, reserveTokens: 0, keepRecentTokens: 0 } },
+				extensionFactories: [
+					(pi) => {
+						pi.on("session_before_compact", (event) => {
+							compactionRequests++;
+							if (compactionRequests === 2 && secondCompaction === "rejected") {
+								return {
+									cancel: true,
+									rejectionCause: "cancelled-by-extension" as const,
+									reason: "smaller model requires a rejected second compaction",
+								};
+							}
 							return {
-								cancel: true,
-								rejectionCause: "cancelled-by-extension" as const,
-								reason: "smaller model requires a rejected second compaction",
+								compaction: {
+									summary: compactionRequests === 1 ? firstSummary : "small-window replacement summary",
+									firstKeptEntryId: event.preparation.firstKeptEntryId,
+									tokensBefore: event.preparation.tokensBefore,
+								},
 							};
-						}
-						return {
-							compaction: {
-								summary: compactionRequests === 1 ? firstSummary : "small-window replacement summary",
-								firstKeptEntryId: event.preparation.firstKeptEntryId,
-								tokensBefore: event.preparation.tokensBefore,
-							},
-						};
-					});
-					pi.on("session_compact", async (event) => {
-						if (!event.accepted || switchedToSmallerModel) return;
-						await firstCompactionEnd;
-						pi.sendMessage({
-							customType: "post-compaction-state",
-							content: "first post-compaction state",
-							display: false,
 						});
-						pi.sendMessage({
-							customType: "post-compaction-state",
-							content: "second post-compaction state",
-							display: false,
+						pi.on("session_compact", async (event) => {
+							if (!event.accepted || switchedToSmallerModel) return;
+							await firstCompactionEnd;
+							pi.sendMessage({
+								customType: "post-compaction-state",
+								content: "first post-compaction state",
+								display: false,
+							});
+							pi.sendMessage({
+								customType: "post-compaction-state",
+								content: "second post-compaction state",
+								display: false,
+							});
+							if (!smallerModel) throw new Error("Expected smaller model");
+							switchedToSmallerModel = await pi.setModel(smallerModel);
 						});
-						if (!smallerModel) throw new Error("Expected smaller model");
-						switchedToSmallerModel = await pi.setModel(smallerModel);
-					});
+					},
+				],
+			});
+			harnesses.push(harness);
+			smallerModel = harness.getModel("small");
+			if (!smallerModel) throw new Error("Expected smaller model");
+			const largeModel = harness.getModel("large");
+			if (!largeModel) throw new Error("Expected large model");
+			const timestamp = Date.now();
+			harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "large context before compaction ".repeat(120) }],
+				timestamp: timestamp - 1,
+			});
+			harness.sessionManager.appendMessage({
+				...fauxAssistantMessage("large context response"),
+				api: largeModel.api,
+				provider: largeModel.provider,
+				model: largeModel.id,
+				usage: {
+					input: 900,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 900,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 				},
-			],
-		});
-		harnesses.push(harness);
-		smallerModel = harness.getModel("small");
-		if (!smallerModel) throw new Error("Expected smaller model");
-		const largeModel = harness.getModel("large");
-		if (!largeModel) throw new Error("Expected large model");
-		const timestamp = Date.now();
-		harness.sessionManager.appendMessage({
-			role: "user",
-			content: [{ type: "text", text: "large context before compaction ".repeat(120) }],
-			timestamp: timestamp - 1,
-		});
-		harness.sessionManager.appendMessage({
-			...fauxAssistantMessage("large context response"),
-			api: largeModel.api,
-			provider: largeModel.provider,
-			model: largeModel.id,
-			usage: {
-				input: 900,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 900,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			timestamp,
-		});
-		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
-		harness.setResponses([
-			() => {
-				providerCompactionCounts.push(
-					harness.eventsOfType("compaction_end").filter((event) => event.accepted === true).length,
-				);
-				return fauxAssistantMessage("queued continuation handled");
-			},
-		]);
-		harness.session.subscribe((event) => {
-			if (event.type === "compaction_end" && event.accepted && event.reason === "threshold") {
-				compactionEndModels.push(harness.session.model?.id ?? "none");
-				resolveFirstCompactionEnd?.();
+				timestamp,
+			});
+			harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+			harness.setResponses([
+				() => {
+					providerCompactionCounts.push(
+						harness.eventsOfType("compaction_end").filter((event) => event.accepted === true).length,
+					);
+					return fauxAssistantMessage("queued continuation handled");
+				},
+			]);
+			harness.session.subscribe((event) => {
+				if (event.type === "compaction_end" && event.accepted && event.reason === "threshold") {
+					compactionEndModels.push(harness.session.model?.id ?? "none");
+					resolveFirstCompactionEnd?.();
+				}
+			});
+			await harness.session.followUp(continuationMarker);
+
+			await runAutoCompaction(harness, "threshold", false);
+			await harness.session.waitForSettledSessionWork();
+
+			expect(compactionEndModels[0]).toBe("large");
+			expect(switchedToSmallerModel).toBe(true);
+			expect(harness.session.model?.id).toBe("small");
+			if (secondCompaction === "rejected") {
+				expect(harness.faux.state.callCount).toBe(0);
+				expect(providerCompactionCounts).toEqual([]);
+				expect(compactionRequests).toBe(2);
+				expect(harness.session.getFollowUpMessages()).toEqual([continuationMarker]);
+				expect(harness.session.agent.hasQueuedMessages()).toBe(true);
+			} else {
+				expect(compactionRequests).toBe(2);
+				expect(providerCompactionCounts).toEqual([2]);
+				expect(harness.faux.state.callCount).toBe(1);
 			}
-		});
-		await harness.session.followUp(continuationMarker);
-
-		await runAutoCompaction(harness, "threshold", false);
-		await harness.session.waitForSettledSessionWork();
-
-		expect(compactionEndModels[0]).toBe("large");
-		expect(switchedToSmallerModel).toBe(true);
-		expect(harness.session.model?.id).toBe("small");
-		if (secondCompaction === "rejected") {
-			expect(harness.faux.state.callCount).toBe(0);
-			expect(providerCompactionCounts).toEqual([]);
-			expect(compactionRequests).toBe(2);
-			expect(harness.session.getFollowUpMessages()).toEqual([continuationMarker]);
-			expect(harness.session.agent.hasQueuedMessages()).toBe(true);
-		} else {
-			expect(compactionRequests).toBe(2);
-			expect(providerCompactionCounts).toEqual([2]);
-			expect(harness.faux.state.callCount).toBe(1);
-		}
-	});
+		},
+	);
 });

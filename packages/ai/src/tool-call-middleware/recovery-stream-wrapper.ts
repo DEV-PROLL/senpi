@@ -1,4 +1,6 @@
 import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Tool } from "../types.ts";
+import type { RecoveryStreamParser } from "./protocols/anthropic-xml/recovery-stream.ts";
+import { createAntmlInvokeRecoveryStreamParser } from "./protocols/antml/recovery-stream.ts";
 import { type RecoveryContentKind, RecoveryContentLifecycle } from "./recovery-content-lifecycle.ts";
 import { RecoveryAssistantMessageEventStream } from "./recovery-event-stream.ts";
 import { RecoveryNativeProjection } from "./recovery-native-projection.ts";
@@ -6,12 +8,22 @@ import { type RecoveryStreamFailure, terminateRecoveryStreamForFailure } from ".
 import { RecoveryStreamTerminal } from "./recovery-stream-terminal.ts";
 import { RecoveryTextProjection } from "./recovery-text-projection.ts";
 import { StreamMessageProjection } from "./stream-wrapper-shared.ts";
+import type { ToolCallFormat } from "./types.ts";
+
+export interface InvokeRecoveryOptions {
+	createParser?: (tools: readonly Tool[]) => RecoveryStreamParser;
+	protocol?: ToolCallFormat;
+}
 
 export function wrapStreamWithInvokeRecovery(
 	innerStream: AssistantMessageEventStream,
 	tools: readonly Tool[],
+	options: InvokeRecoveryOptions | ((tools: readonly Tool[]) => RecoveryStreamParser) = {},
 ): AssistantMessageEventStream {
 	const outerStream = new RecoveryAssistantMessageEventStream();
+	const resolvedOptions = typeof options === "function" ? { createParser: options } : options;
+	const createParser = resolvedOptions.createParser ?? createAntmlInvokeRecoveryStreamParser;
+	const protocol = resolvedOptions.protocol ?? "antml";
 
 	void (async (): Promise<void> => {
 		const innerIterator = innerStream[Symbol.asyncIterator]();
@@ -46,7 +58,7 @@ export function wrapStreamWithInvokeRecovery(
 		const terminateForFailure = (source: AssistantMessage, failure: RecoveryStreamFailure): void => {
 			if (!projection || !outerStream.markSourceClosed()) return;
 			finishText();
-			terminateRecoveryStreamForFailure(outerStream, projection, source, failure);
+			terminateRecoveryStreamForFailure(outerStream, projection, { source, failure, protocol });
 		};
 
 		const prepareContentEvent = (source: AssistantMessage, contentIndex: number): boolean => {
@@ -95,7 +107,7 @@ export function wrapStreamWithInvokeRecovery(
 
 		const synchronizeTerminal = (source: AssistantMessage): boolean => {
 			projection ??= new StreamMessageProjection(outerStream, source, { preserveSourceMetadata: true });
-			nativeProjection ??= new RecoveryNativeProjection(outerStream, projection.message);
+			nativeProjection ??= new RecoveryNativeProjection(outerStream, projection.message, protocol);
 			projection.sync(source);
 			nativeProjection.reserveVisibleIds(source);
 			finishText();
@@ -112,7 +124,7 @@ export function wrapStreamWithInvokeRecovery(
 						projection = new StreamMessageProjection(outerStream, event.partial, {
 							preserveSourceMetadata: true,
 						});
-						nativeProjection = new RecoveryNativeProjection(outerStream, projection.message);
+						nativeProjection = new RecoveryNativeProjection(outerStream, projection.message, protocol);
 						nativeProjection.reserveVisibleIds(event.partial);
 						outerStream.push({ type: "start", partial: projection.message });
 						break;
@@ -120,7 +132,10 @@ export function wrapStreamWithInvokeRecovery(
 						if (!canStart(event.partial, event.contentIndex, "text")) return;
 						if (!prepareContentEvent(event.partial, event.contentIndex) || !projection || !nativeProjection)
 							return;
-						const nextText = new RecoveryTextProjection(tools, projection, nativeProjection, event.contentIndex);
+						const nextText = new RecoveryTextProjection(tools, projection, nativeProjection, event.contentIndex, {
+							createParser,
+							protocol,
+						});
 						if (!nextText.start(event.partial)) {
 							terminateForFailure(event.partial, "invalid_native_event_order");
 							return;

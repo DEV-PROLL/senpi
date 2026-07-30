@@ -91,6 +91,10 @@ export class ModelRegistry {
 		return this.runtime.getCompatibilityRequestConfig(model).upstreamModelId;
 	}
 
+	getServiceTier(model: Model<Api>): "auto" | "flex" | "priority" | undefined {
+		return this.runtime.getCompatibilityRequestConfig(model).serviceTier;
+	}
+
 	async getApiKeyAndHeaders(model: Model<Api>): Promise<ResolvedRequestAuth> {
 		try {
 			const resolution = await this.runtime.getAuth(model);

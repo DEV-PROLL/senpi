@@ -379,6 +379,7 @@ export class ExtensionRunner {
 	private abortFn: () => void = () => {};
 	private hasPendingMessagesFn: () => boolean = () => false;
 	private isCompactingFn: () => boolean = () => false;
+	private checkReloadVetoFn: ExtensionContextActions["checkReloadVeto"];
 	private getContextUsageFn: () => ContextUsage | undefined = () => undefined;
 	private getCompactionSettingsFn: ExtensionContextActions["getCompactionSettings"] = () => ({
 		enabled: true,
@@ -471,6 +472,8 @@ export class ExtensionRunner {
 		this.runtime.setModel = actions.setModel;
 		this.runtime.getThinkingLevel = actions.getThinkingLevel;
 		this.runtime.setThinkingLevel = actions.setThinkingLevel;
+		this.runtime.setSessionModel = actions.setSessionModel;
+		this.runtime.setSessionThinkingLevel = actions.setSessionThinkingLevel;
 
 		// Context actions (required)
 		this.getModel = contextActions.getModel;
@@ -481,6 +484,7 @@ export class ExtensionRunner {
 		this.abortFn = contextActions.abort;
 		this.hasPendingMessagesFn = contextActions.hasPendingMessages;
 		this.isCompactingFn = contextActions.isCompacting;
+		this.checkReloadVetoFn = contextActions.checkReloadVeto;
 		this.shutdownHandler = contextActions.shutdown;
 		this.getContextUsageFn = contextActions.getContextUsage;
 		this.getCompactionSettingsFn = contextActions.getCompactionSettings;
@@ -1001,6 +1005,11 @@ export class ExtensionRunner {
 			get requestReload() {
 				runner.assertActive();
 				return runner.reloadHandler ? () => runner.requestReload() : undefined;
+			},
+			get checkReloadVeto() {
+				runner.assertActive();
+				const probe = runner.checkReloadVetoFn;
+				return probe ? () => probe() : undefined;
 			},
 			isCompacting: () => {
 				runner.assertActive();

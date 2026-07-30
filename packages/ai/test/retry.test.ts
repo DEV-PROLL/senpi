@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "../src/providers/faux.ts";
-import { isRetryableAssistantError, type RetryPolicy, retryAssistantCall } from "../src/utils/retry.ts";
+import {
+	isProviderStreamStallError,
+	isProviderTimeoutError,
+	isRetryableAssistantError,
+	type RetryPolicy,
+	retryAssistantCall,
+} from "../src/utils/retry.ts";
 
 const openAIExplicitRetryMessage =
 	"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID req_******** in your message.";
@@ -38,6 +44,71 @@ describe("provider retry classification", () => {
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: nvidiaNIMResourceExhaustedMessage }),
 			),
 		).toBe(true);
+	});
+
+	it("classifies agent-loop stream timeout errors as retryable", () => {
+		// Wordings produced by packages/agent/src/agent-loop.ts; the "timed out"
+		// coupling is what lets a dead stream start retry instead of dead-ending
+		// the session.
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Provider stream start timed out after 90000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Provider stream never started" }),
+			),
+		).toBe(false);
+	});
+
+	it.each([
+		["Idle timeout waiting for provider stream after 300000ms", true, true],
+		["Provider stream start timed out after 90000ms", true, true],
+		["Request timed out.", false, true],
+		["Request timed out", false, true],
+		["Command timed out after 30000ms", false, false],
+		["MCP server example timed out", false, false],
+		["extension timed out", false, false],
+	] as const)(
+		"classifies provider timeout provenance without matching incidental text: %s",
+		(errorMessage, expectedStall, expectedTimeout) => {
+			const message = fauxAssistantMessage("", { stopReason: "error", errorMessage });
+			expect(isProviderStreamStallError(message)).toBe(expectedStall);
+			expect(isProviderTimeoutError(message)).toBe(expectedTimeout);
+		},
+	);
+
+	it("recognizes aborted transport timeouts but not unrelated aborted work", () => {
+		expect(
+			isProviderTimeoutError(
+				fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "Request timed out." }),
+			),
+		).toBe(true);
+		expect(
+			isProviderTimeoutError(
+				fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "Command timed out after 30000ms" }),
+			),
+		).toBe(false);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "aborted",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(false);
 	});
 
 	it("classifies the observed OpenAI server_error as retryable", () => {
@@ -78,6 +149,41 @@ describe("provider retry classification", () => {
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: codexUpstreamUnavailableMessage }),
 			),
 		).toBe(true);
+	});
+
+	it("classifies zero-event stream idle timeouts as provider stream stalls", () => {
+		// Stall retries replay the identical payload against a provider that
+		// already sat silent for the whole idle budget, so agent-session uses
+		// this class to escalate repeated stalls to the fallback chain.
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "Provider stream start timed out after 90000ms",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Request timed out." }),
+			),
+		).toBe(false);
+		expect(
+			isProviderStreamStallError(
+				fauxAssistantMessage("", {
+					stopReason: "aborted",
+					errorMessage: "Idle timeout waiting for provider stream after 300000ms",
+				}),
+			),
+		).toBe(false);
 	});
 
 	it("classifies agent-loop stream idle timeouts as retryable", () => {
@@ -135,6 +241,17 @@ describe("provider retry classification", () => {
 			isRetryableAssistantError(
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 quota exceeded" }),
 			),
+		).toBe(false);
+	});
+
+	it("keeps anthropic credits_required errors non-retryable", () => {
+		// Verbatim 429 from a real session (2026-07-29, anthropic claude-fable-5):
+		// a billing-dead account must not burn same-model retries before the
+		// fallback chain takes over.
+		const creditsRequired =
+			'429 event: error\ndata: {"type":"error","error":{"type":"rate_limit_error","message":"Usage credits are required for this model.","details":{"error_code":"credits_required","model":"claude-fable-5"}},"request_id":"req_011CdW2nFxprAx6KQ9JhnAvq"}';
+		expect(
+			isRetryableAssistantError(fauxAssistantMessage("", { stopReason: "error", errorMessage: creditsRequired })),
 		).toBe(false);
 	});
 

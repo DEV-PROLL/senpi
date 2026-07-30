@@ -1,3 +1,281 @@
+## Kimi XTML recovery preserves protocol identity (2026-07-29)
+
+### What changed
+
+- `core/model-runtime.ts` passes both `createXtmlRecoveryStreamParser` and `protocol: "kimi-xtml"` to the shared
+  invoke-recovery wrapper for Kimi models.
+- Successful recovered tool calls and terminal recovery failures now expose Kimi-specific diagnostics and
+  `recovered-kimi-xtml-*` IDs instead of misleading ANTML metadata.
+- `test/kimi-xtml-recovery-runtime-boundary.test.ts` pins the user-visible runtime result while the default ANTML
+  path remains covered in the AI package.
+
+### Expected merge conflict zones
+
+- LOW: the two invoke-recovery call sites in `core/model-runtime.ts`.
+
+## Static credential headers participate in real provider auth resolution (2026-07-29)
+
+### What changed
+
+- `core/provider-header-auth.ts` classifies only credential-like provider headers, preserves case-insensitive
+  override semantics, and derives distinct models.json versus extension status sources.
+- `core/provider-api-key-auth.ts` resolves credential-bearing provider headers into a genuine header-only
+  `AuthResult`, exposes the same result through `checkAuth()`, and leaves metadata-only or empty header maps
+  unconfigured. Header-only auth does not fabricate an API-key login method, and OAuth providers remain logged out
+  when their only configured headers are request metadata.
+- `configuredRequestAuthStatus()` uses the same credential-header contract, keeping synchronous registry reads,
+  asynchronous availability snapshots, TUI/RPC status, and request execution aligned.
+
+### Why this belongs in core
+
+- Auth resolution, registry availability, and status projection are package-owned provider-composition seams. An
+  extension can supply headers but cannot make the shared model runtime interpret them consistently.
+
+### Coverage
+
+- `test/provider-composer-headers-auth.test.ts` exercises models.json and extension header auth through registry
+  availability, `checkAuth()`, `getAuth()`, and runtime streaming, while locking metadata, empty-header, OAuth, API
+  key, and `authHeader` behavior.
+- `packages/ai/test/auth-headers.test.ts` and `packages/ai/test/openai-header-auth.test.ts` cover the shared
+  classification and OpenAI-compatible request path.
+
+### Expected merge conflict zones
+
+- LOW: additive `core/provider-header-auth.ts`, `core/provider-api-key-auth.ts`, and focused regression coverage.
+- MEDIUM: `core/provider-composer.ts` auth composition and status projection.
+
+## Anthropic credits_required 429 pins the billing fallback (2026-07-29)
+
+### What changed
+
+- `core/retry-fallback/billing.ts`: `BILLING_ERROR_PATTERN` now matches Anthropic Console credit exhaustion —
+  the 429 `rate_limit_error` whose details carry `error_code: credits_required` ("Usage credits are required
+  for this model."). The hard-error fallback branch classifies the shape as `billing` instead of `hard-error`.
+- `core/retry-fallback/cooldown.ts`: the 30-minute billing suppression bucket covers the same wording instead
+  of the 30-second rate-limit bucket that let cooldown-expiry resurrect the dead model.
+- Coverage: `test/suite/retry-fallback-billing-swap.test.ts` (pinned swap + classifier rows),
+  `test/suite/retry-fallback-cooldown.test.ts` (duration rows); channel-3 real-CLI proof
+  `.agents/skills/senpi-qa/scripts/mock-loop-credits-fallback.mjs` (one primary request, `reason: "billing"`
+  in fallback.log, final marker streamed by the fallback model).
+
+### Why
+
+- Incident session `019fac55-3531-7d35-92f1-2d740b659c3c` (2026-07-29): `anthropic/claude-fable-5` answered
+  429 credits_required. The switch to `apitopia/kimi-k3-unlocked` fired as `transient`, the 30-second cooldown
+  expired, and cooldown-expiry reverted the session into the billing-dead fable-5; the chain then thrashed
+  fable-5 → kimi-k3 → opus-5 → opus-4-8 → fable-5 until the session was abandoned. Billing-class failures
+  never recover on the same account, so the fallback for one must pin from the first failure.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one regex each in `core/retry-fallback/billing.ts` and `core/retry-fallback/cooldown.ts`; both modules
+  are fork-local.
+
+## From-source real-config warning (2026-07-29)
+
+### What changed
+
+- New `from-source-config-guard.ts`: pure predicates detecting a run from TypeScript sources (module URL extension, never a bun binary) whose resolved agent dir is the real `~/.senpi/agent` with no `SENPI_CODING_AGENT_DIR` override.
+- `main.ts` prints one yellow stderr warning right after agent-dir resolution when that combination holds, advising an isolated agent dir for dev/QA runs. No change to `resolveAgentDir` precedence or any default.
+
+### Why
+
+- Ad-hoc from-source runs inside the repo (which has `.senpi/` without `agent/`) silently target the real user config; that exact setup has previously leaked writes into the user's `settings.json`. Detection is separated from policy: the warning makes the footgun visible without breaking legitimate real-config runs.
+
+## Interactive startup loading indicator (2026-07-29)
+
+### What changed
+
+- New `cli/startup-loading-indicator.ts`: single-line dim ANSI spinner (`⠋ Loading senpi… <phase>`) with a
+  120ms grace delay (fast startups stay flash-free), phase updates, pause/resume, and an idempotent `stop()`
+  that clears the line and restores the cursor (also via a `process` exit hook). It engages only when
+  `appMode === "interactive"`, stdout is a TTY, and `--help` was not requested.
+- `main.ts` starts the indicator before `createAgentSessionRuntime` — the extensions/models/trust window that
+  previously rendered nothing — switches the phase to `opening session` before the initial session is created,
+  and stops it in a `.finally` before any other stdout writer (TUI, help, diagnostics) takes over.
+- Mid-load project-trust prompts (`createProjectTrustContext` `ui.select`/`confirm`/`input`) are wrapped by
+  `pauseIndicatorDuringPrompts`, so the trust selector TUI never fights the spinner for the terminal.
+- Coverage: `test/startup-loading-indicator.test.ts` (grace delay, frame animation, phase updates,
+  pause/resume, stop idempotency, TTY/help gating, prompt-pause wrapping).
+
+### Why
+
+- Interactive startup completed the entire heavy runtime creation before the TUI existed, leaving the terminal
+  blank and apparently stuck (QA repro: ~23s of empty screen with a slow-loading extension). Codex's TUI
+  addresses the same window by rendering a dim placeholder header until the session is configured
+  (`codex-rs/tui` chatwidget); this is the minimal-conflict equivalent for senpi's pre-TUI bootstrap window.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: the import block and indicator wiring around `createAgentSessionRuntime` in `main.ts`; the module itself
+  has no upstream counterpart.
+- LOW: the `projectTrustContext` fallback wrap inside `createRuntime`.
+
+## Repeated provider-stream stalls escalate to the fallback chain (2026-07-29)
+
+### What changed
+
+- `core/agent-session.ts`: the transient retry branch tracks consecutive provider-stream stalls
+  (`isProviderStreamStallError` from pi-ai, covering both the idle-timeout and stream-start-timeout wordings). The second consecutive stall escalates to the fallback chain
+  immediately (same `tryFallback("transient")` path as budget exhaustion); without a chain the retry loop ends
+  instead of replaying the identical payload for the remaining same-model budget. Non-stall failures reset the
+  streak, fallback switches and fresh retry loops start at zero.
+- Coverage: `test/suite/retry-fallback-stall-escalation.test.ts` (escalation with chain, surrender without chain,
+  streak reset for non-consecutive stalls).
+
+### Why
+
+- A stall means the provider accepted the request and delivered zero events for the entire idle budget
+  (`httpIdleTimeoutMs`, default 300s). Each retry replays an identical payload, so a hung provider/gateway
+  previously cost (1 + maxRetries) * 300s (~20 minutes) of opaque dead air per turn before the chain was
+  consulted - experienced as a permanently wedged session (Discord report 2026-07-29, donated session
+  019fa8da-43ad-70b7-b01b-8f34f4d907f2 records 1906/1919: reopening a 5h session hit the 300s idle timeout on
+  every goal-continuation while new sessions worked).
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `_handleRetryableError` transient branch and the `switchedFallback` reset in `core/agent-session.ts`.
+
+## Availability-aware default Fable fallback chain (2026-07-29)
+
+### What changed
+
+- `core/retry-fallback/settings.ts` now owns retry setting types and normalization, including the shipped default
+  `anthropic/claude-fable-5` chain:
+  `apitopia/kimi-k3-unlocked:max` -> `anthropic/claude-opus-5:xhigh` ->
+  `anthropic/claude-opus-4-8:xhigh`.
+- The default applies only when `retry.fallbackChains` is absent or malformed. Explicit chain maps, including
+  an explicitly empty map, remain authoritative.
+- `core/retry-fallback/chains.ts` and the model-fallback builtin omit unavailable models and remove chains with
+  no usable candidates, so runtime selection and `/fallback` display agree.
+- Existing defaults remain enabled: model fallback on, server-side fallback abort on, and cooldown-expiry revert.
+- Coverage: `test/settings-manager-retry-fallback.test.ts`,
+  `test/suite/model-fallback-command.test.ts`, and `test/suite/model-fallback-host-wiring.test.ts`.
+
+### Why
+
+- A fresh Senpi install previously aborted provider-side fallback by default but had no client chain, producing a
+  dead-end warning. Shipping the preferred chain makes that default policy actionable while keeping optional model
+  providers safe: missing models are skipped rather than warned about or selected.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: retry settings imports and delegation in `core/settings-manager.ts`; the new retry settings module has no
+  upstream counterpart.
+- LOW: canonical chain construction in `core/retry-fallback/chains.ts`.
+- LOW: registry-aware loading in `core/extensions/builtin/model-fallback/`.
+
+## Stream-start timeout wiring and unregistered-api error context (2026-07-29)
+
+### What changed
+
+- `core/settings-manager.ts`: new `retry.provider.streamStartTimeoutMs` setting and
+  `getAgentStreamStartTimeoutMs()` (default 90000ms; 0 disables; the default is clamped to a
+  shorter idle timeout and disabled together with a disabled idle guard). `core/sdk.ts` and the
+  interactive settings handler wire it into `Agent.streamStartTimeoutMs`.
+- `core/provider-composer.ts`: the stream-time `No API provider registered for api: <api>` error
+  now names the model (`provider/id`) and points at the models.json provider entry or the missing
+  provider extension.
+- Coverage: `test/settings-manager.test.ts` (retry describe), `test/provider-composer-unknown-api.test.ts`,
+  `packages/ai/test/retry.test.ts` (stream timeout wordings stay retryable).
+
+### Why
+
+- Incident (donated session log): a dead upstream accepted requests but never sent a first byte.
+  With only the 300s idle bound, each turn attempt froze the session for 5 minutes with `usage: 0`
+  and nothing persisted; retries repeated the same 300s wait, making the session practically
+  unrecoverable while new sessions worked. A 90s first-event bound with the retryable wording lets
+  the retry/fallback ladder engage quickly. Related incident error `No API provider registered for
+  api: kiro-api` carried no context about which model or config produced it.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one settings getter + one field in `ProviderRetrySettings`; one error message in
+  `composeModelProvider`; one option in the `Agent` construction in `core/sdk.ts`.
+
+## Provider idle retries preserve user input and use a bounded retry budget (2026-07-29)
+
+### What changed
+
+- `core/agent-session.ts`: retries triggered by the shared anchored provider-timeout classifier defer queued steering
+  and follow-up input from the retry's first provider request. This covers the two agent-loop stream watchdog messages
+  and exact transport-level `Request timed out` variants without matching incidental command, MCP, or extension text.
+- `core/settings-manager.ts`: `retry.provider.streamRetryTimeoutMs` configures the first-request retry liveness cap
+  (default 30 seconds; `0` disables). The retry clamps only enabled idle/start guards, so it never re-enables an
+  explicitly disabled guard. Both timeout bounds return to their configured values for later provider requests.
+- The retry start bound is capped as well as the provider request option, while the configured idle timeout resumes
+  after the first event so healthy reasoning gaps are not limited to 30 seconds.
+- Consecutive transport timeouts reported with `stopReason: "aborted"` keep consuming the same retry counter. Only a
+  genuinely successful assistant response resets the budget or emits `auto_retry_end { success: true }`.
+- Retry continuations use the session-work barrier and revalidate atomically with the scheduled-continuation path.
+  Accepted recompaction stays queue-first while retaining timeout options; reconstructed failed assistant tails are
+  retired before continuation. A concurrent low-level `Agent.prompt()` is treated as a benign takeover, and session
+  settlement is never emitted while Agent core is still streaming.
+- Coverage: `test/suite/regressions/provider-idle-recovery.test.ts` pins exact request text/order, configurable timeout
+  sequences, disabled guards, negative classifier shapes, and a real no-first-event stream expiry at the cap;
+  `test/settings-manager.test.ts` pins setting defaults and `0` semantics.
+
+### Why
+
+- A silent provider stream previously consumed user steering into another full-length retry. Repeated 300-second
+  retries made the session look stuck and could leave the user's `continue` adjacent to an error instead of a real
+  answer.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `core/agent-session.ts` retry-controller continuation options and scheduled-continuation admission.
+- LOW: `core/settings-manager.ts` provider retry settings and timeout getters.
+
+## Absent fallback chains no longer produce a startup warning (2026-07-28)
+
+### What changed
+
+- `core/retry-fallback/validate.ts`: `validateFallbackChains(undefined, registry)` now returns no warnings. Explicit malformed values such as `null` and arrays still produce `Fallback chains must be a plain object.`
+- Coverage: `test/suite/retry-fallback-validate.test.ts` pins the absent-setting case.
+
+### Why
+
+- `retry.fallbackChains` is optional. A fresh configuration without the setting previously emitted a misleading startup warning even though the user had not configured a malformed chain.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one early return in `validateFallbackChains`.
+
+## Footer shows (OmO Native) when the local omo-senpi + senpi-task stack is installed (2026-07-28)
+
+### What changed
+
+- `core/omo-native-detect.ts` (new): `detectOmoNativeInstall(packages, agentDir)` — sync, dependency-free detection of the "OMO Native" local install. A settings `packages` entry that is a local path resolving to a dir whose package.json name is `@code-yeongyu/omo-senpi`, whose derived repo root (`pluginPath/../../..`) contains both workspace packages `@oh-my-opencode/omo-senpi` and `@oh-my-opencode/senpi-task`. Mirrors gates 1 and 2 of the beta `detectOmoLocalInstall` (beta/omo-local-update.ts), dropping gate 3 (the `git rev-parse --show-toplevel` integrity check) so it stays sync and cheap for footer rendering; the beta module's export policy forbids importing its helpers into production core.
+- `core/footer-data-provider.ts`: `FooterDataProvider` gains `setOmoNative(boolean)` / `isOmoNative()` (field-backed, matching the existing `availableProviderCount` injection pattern) and `isOmoNative` is exposed on `ReadonlyFooterDataProvider`.
+- `modes/interactive/interactive-mode.ts`: after constructing the provider, calls `setOmoNative(detectOmoNativeInstall(this.settingsManager.getPackages(), getAgentDir()))`.
+- Coverage: `test/omo-native-detect.test.ts` pins happy + edge cases; `test/omo-native-footer.test.ts` pins the rendered segment; `test/footer-width.test.ts`, `test/grok/footer.test.ts`, `test/grok/classic-chrome-characterization.test.ts` updated for the new `isOmoNative` Pick member.
+
+### Why
+
+- A senpi session backed by the local OMO source checkout (omo-senpi + senpi-task workspace packages installed as a local-path package) is the "OMO Native" configuration; surfacing it in the footer makes the active stack visible at a glance, mirroring the detection already used by the beta `senpi update` local-update flow.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `core/footer-data-provider.ts` around the `availableProviderCount` field and the `ReadonlyFooterDataProvider` Pick (additive).
+- LOW: `modes/interactive/interactive-mode.ts` around the `FooterDataProvider` construction site.
+- NEW file `core/omo-native-detect.ts` — no upstream counterpart, no conflict.
+
+## Provider-qualified fallback selectors resolve inside their own provider (2026-07-28)
+
+### What changed
+
+- `core/retry-fallback/chains.ts`: `parseFallbackSelector` now filters the lookup list to the explicitly requested provider before calling `parseModelPattern`. Previously the id pattern was resolved globally, so a foreign id containing the pattern won over the requested provider's exact id: `anthropic/claude-opus-5:xhigh` fuzzy-matched Bedrock's `us.anthropic.claude-opus-5`, failed the provider check, and produced the spurious startup warning `Fallback chain entry ... is not a valid or known model selector.` (The ambiguity arises whenever two configured providers carry the same bare id, e.g. `anthropic` + `anthropic-api`, which makes the bare-id exact match ambiguous and drops resolution into partial matching.)
+- Coverage: `test/suite/retry-fallback-chains.test.ts` pins in-provider resolution when `anthropic`, `anthropic-api`, and `amazon-bedrock` all carry colliding `claude-opus-5` ids, with and without a thinking-level suffix.
+
+### Why
+
+- A selector with an explicit provider can only ever resolve inside that provider (the post-check rejected cross-provider results), so global resolution could only turn valid selectors into spurious warnings; scoping converts those failures into the correct in-provider match.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: one scoped-lookup block inside `parseFallbackSelector` in `chains.ts`; upstream edits to selector parsing will conflict trivially.
+
+
 ## Paste markers survive editor hand-off and setText round-trips (2026-07-28)
 
 - `modes/interactive/interactive-mode.ts` `setCustomEditorComponent()` now transfers editor content safely when switching between the default and a custom editor: if both editors support the paste-state API (`getPasteState`/`setPasteState` from pi-tui), the raw text plus the registry snapshot are transferred so `[paste #N ...]` markers stay collapsed; otherwise it falls back to the expanded text — `getExpandedText?.()`, or expansion from the paste snapshot via the exported `expandPasteMarkers()` when the source implements `getPasteState` without `getExpandedText`, or the raw text when neither capability exists. Previously the raw text alone was copied into a fresh editor with no registry, turning live markers into dead literals and silently dropping the pasted body from the submitted prompt.
@@ -158,7 +436,9 @@
 - A bare `senpi update` now triggers the beta OMO local-update hook (`src/beta/omo-local-update.ts`, reachable only through the two BETA-marked touch points in `package-manager-cli.ts`) before any self-update work. The hook compares the state of the two packages (`omo-senpi` + `senpi-task`) on `origin/dev` of the OMO source checkout against the locally installed modules, and updates the local install ONLY when they differ.
 - The user's checkout receives ZERO git mutations: the hook performs one read-only `git fetch origin dev`, builds in a feature-owned persistent worktree under the agent directory, and atomically swaps the installed plugin directory by rename. No checkout/branch/commit/merge/reset/clean/stash/push ever touches the user's tree.
 - `SENPI_OMO_LOCAL_UPDATE=0` is a kill-switch that disables the hook entirely. All failures are non-fatal: the hook never throws and never sets `process.exitCode`; any error downgrades to a warning plus a manual-update hint so the `senpi` self-update proceeds untouched.
-- Removal is exactly three steps: delete `src/beta/omo-local-update.ts`; delete all `test/omo-local-update*` files; delete the two BETA-marked touch points (the import and the hook call) in `package-manager-cli.ts`.
+- Fast path (2026-07-29): the skip decision now compares a build-input fingerprint of `origin/dev` (`src/beta/omo-local-update-fingerprint.ts`: sha256 over root tree entries minus documentation/agent-config paths) instead of the bare commit sha, so docs/CI-only churn in the omo monorepo no longer triggers the ~30s rebuild. When a rebuild IS needed, the bare-update foreground now only fetches and compares (~1s) and hands the build to a detached worker (`src/beta/omo-local-update-worker.ts`, hidden `senpi update --omo-local-update-worker` flag, output to `<agentDir>/omo-local-update/worker.log`); the worker serializes through the existing pid lock and swaps/stamps exactly like the former inline path. `SENPI_OMO_LOCAL_UPDATE_SYNC=1` restores the old blocking foreground behavior.
+- The fast skip also checks the updater's current required-artifact contract independently of the historical stamp inventory. A legacy, stale, or externally damaged stamp can no longer hide a missing packaged LSP daemon CLI; the next update rebuilds and atomically repairs the plugin.
+- Removal is exactly three steps: delete all `src/beta/omo-local-update*.ts` files; delete all `test/omo-local-update*` files; delete the BETA-marked touch points (the import, the hook calls, and the `--omo-local-update-worker` flag) in `package-manager-cli.ts`.
 
 ## App-server daemon launch diagnostics and hermetic lifecycle coverage (2026-07-24)
 

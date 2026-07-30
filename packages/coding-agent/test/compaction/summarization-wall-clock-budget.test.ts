@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { completeSummarization } from "../../src/core/compaction/compaction.ts";
 import {
 	consumeStreamWithIdleTimeout,
 	DEFAULT_SUMMARIZATION_MAX_DURATION_MS,
 	StreamDurationBudgetError,
 } from "../../src/core/compaction/stream-watchdog.ts";
+import { OPENAI_NATIVE_LEGACY_MODEL } from "./openai-remote-test-models.ts";
 
 /**
  * The idle watchdog only catches a *silent* provider connection. A summarization
@@ -100,6 +102,26 @@ describe("consumeStreamWithIdleTimeout wall-clock budget", () => {
 		});
 		controller.abort();
 		await outcome;
+	});
+
+	it("starts the duration budget before the provider returns a stream", async () => {
+		let requestSignal: AbortSignal | undefined;
+		const outcome = completeSummarization(
+			OPENAI_NATIVE_LEGACY_MODEL,
+			{ systemPrompt: "", messages: [] },
+			{ maxTokens: 32 },
+			async (_model, _context, options) => {
+				requestSignal = options?.signal;
+				return await new Promise<never>(() => undefined);
+			},
+		).catch((caught: unknown) => caught);
+
+		await vi.advanceTimersByTimeAsync(DEFAULT_SUMMARIZATION_MAX_DURATION_MS + 1);
+
+		const pending = Symbol("pending");
+		const observed = await Promise.race([outcome, Promise.resolve(pending)]);
+		expect(observed).toBeInstanceOf(StreamDurationBudgetError);
+		expect(requestSignal?.aborted).toBe(true);
 	});
 
 	it("exposes a default wall-clock budget below the idle timeout", () => {

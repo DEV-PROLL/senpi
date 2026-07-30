@@ -1,5 +1,49 @@
 # Builtin extensions changes
 
+## service-tier: explain why `/fast` is unavailable on a subscription (2026-07-30)
+
+- Fixes the misleading notice reported in issue #499. `/fast` is registered only
+  for `openai-codex`, but `generate-models.ts` emits `-fast` priority variants
+  only for the direct `openai` provider, so no Codex model ever has a target and
+  the command could only ever answer "Fast mode is not supported for
+  openai-codex/<model>" — which reads as a per-model gap rather than a
+  plan-level limitation.
+- Generating the missing Codex variants would be wrong. Measured against
+  `chatgpt.com/backend-api/codex/responses` with a live ChatGPT Pro
+  subscription: `service_tier: "priority"` and `"default"` both return HTTP 200
+  and the response echoes `"auto"`, while `"auto"`, `"flex"` and `"scale"` are
+  rejected with HTTP 400 `Unsupported service_tier`. The backend allowlists
+  `priority` but serves it at normal tier, and
+  `getServiceTierCostMultiplier()` would still bill it at 2.5x for gpt-5.5
+  (2x elsewhere) — so synthesising variants would inflate reported cost for
+  unchanged service.
+- The no-variant branch now states that priority tier is unavailable on a
+  ChatGPT subscription and that it requires API-key billing on the `openai`
+  provider, where `-fast` variants already exist and `/fast` works.
+- `test/suite/service-tier-extension.test.ts` asserts the notice explains the
+  subscription limitation and no longer blames the model.
+- Expected merge conflict zones: LOW in `service-tier.ts` around the
+  `FAST_UNAVAILABLE_ON_SUBSCRIPTION` constant and the no-variant branch.
+
+## service-tier: add `/fast` for OpenAI Codex (2026-07-29)
+
+- `service-tier.ts` registers `/fast` only for the `openai-codex` provider.
+  Enabling resolves the active model's compatible `-fast` catalog sibling,
+  switches the current session to it, and derives priority mode from that
+  selected model's `upstreamModelId` plus `serviceTier` metadata.
+- Disabling restores the compatible base catalog model. `session_start` also
+  restores the base model when a session opens on a fast variant, so the command
+  remains session-scoped and never rewrites persisted model defaults.
+- Models without a compatible priority variant and non-Codex providers receive
+  clear no-op notifications.
+- The shared service-tier payload injector now covers
+  `openai-codex-responses`; explicit payload tiers remain authoritative.
+- `test/suite/service-tier-extension.test.ts` covers session reset, both model
+  switches, upstream request model plus priority tier, provider/model gating,
+  non-Codex payloads, and explicit-tier preservation.
+- Expected merge conflict zones: MEDIUM in `service-tier.ts` around the command
+  and `before_provider_request` handler.
+
 ## terminal + goal: monitor liveness event contract (2026-07-28)
 
 - New `monitor-state-event.ts` defines the internal `terminal_monitor_state` pi-event

@@ -1,7 +1,7 @@
 {
 	"name": "@earendil-works/pi-pty",
 	"private": true,
-	"version": "2026.7.26",
+	"version": "2026.7.29-6",
 	"description": "Typed PTY session loader for Senpi persistent terminals",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -54,9 +54,9 @@
 		"node": ">=24.0.0"
 	},
 	"dependencies": {
-		"@xterm/headless": "5.5.0"
+		"@xterm/headless": "6.0.0"
 	},
 	"devDependencies": {
-		"@types/node": "25.9.1"
+		"@types/node": "26.1.1"
 	}
 }

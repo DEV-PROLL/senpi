@@ -699,6 +699,7 @@ describe("InteractiveMode.getWorkingIndicatorOptions", () => {
 		// Given
 		const fakeThis: any = {
 			workingIndicatorOptions: undefined,
+			sessionManager: { getEntries: () => [] },
 			getWorkingElapsedSeconds: () => 7,
 		};
 
@@ -733,6 +734,7 @@ describe("InteractiveMode.getWorkingIndicatorOptions", () => {
 		initTheme("dark");
 		const fakeThis: any = {
 			workingIndicatorOptions: undefined,
+			sessionManager: { getEntries: () => [] },
 			getWorkingElapsedSeconds: () => 7,
 		};
 

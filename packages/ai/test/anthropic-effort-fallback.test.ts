@@ -80,13 +80,11 @@ describe("Anthropic adaptive effort fallback for map-less models", () => {
 });
 
 describe("Anthropic adaptive detection without the compat pin", () => {
-	it.each<FixtureId>([
-		"claude-opus-4-8",
-		"claude-opus-5",
-		"claude-sonnet-5",
-		"claude-fable-5",
-	])("treats %s as adaptive from the model marker alone", async (id) => {
-		const payload = await capturePayload(maplessUnflagged(id), { reasoning: "high" });
-		expect(payload.thinking?.type).toBe("adaptive");
-	});
+	it.each<FixtureId>(["claude-opus-4-8", "claude-opus-5", "claude-sonnet-5", "claude-fable-5"])(
+		"treats %s as adaptive from the model marker alone",
+		async (id) => {
+			const payload = await capturePayload(maplessUnflagged(id), { reasoning: "high" });
+			expect(payload.thinking?.type).toBe("adaptive");
+		},
+	);
 });

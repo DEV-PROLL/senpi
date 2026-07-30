@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type {
 	Agent,
+	AgentContinuationOptions,
 	AgentEvent,
 	AgentMessage,
 	AgentState,
@@ -46,6 +47,8 @@ import {
 	cleanupSessionResources,
 	isClassifierRefusal,
 	isContextOverflow,
+	isProviderStreamStallError,
+	isProviderTimeoutError,
 	isRetryableAssistantError,
 	modelsAreEqual,
 	type RetryCallbacks,
@@ -123,6 +126,7 @@ import type { ModelRuntime } from "./model-runtime.ts";
 import { PROMPT_CACHE_SAFE_WAIT_ENV, resolvePromptCacheSafeWaitSeconds } from "./prompt-cache-budget.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import { isBillingErrorMessage } from "./retry-fallback/billing.ts";
 import { RetryFallbackController } from "./retry-fallback/controller.ts";
 import { SelectorCooldowns } from "./retry-fallback/cooldown.ts";
 import { createFallbackLogger } from "./retry-fallback/log.ts";
@@ -214,7 +218,7 @@ export type AgentSessionEvent =
 			from: string;
 			to: string;
 			chainKey: string;
-			reason: "transient" | "refusal" | "hard-error";
+			reason: "transient" | "refusal" | "hard-error" | "billing";
 	  }
 	| { type: "retry_fallback_succeeded"; model: string; chainKey: string }
 	| { type: "retry_fallback_reverted"; from: string; to: string }
@@ -544,6 +548,7 @@ export class AgentSession {
 	 */
 	private readonly _messageEndsAwaitingPersistence = new Set<AgentMessage>();
 	private _isAgentRunActive = false;
+	private _toolExecutionDepth = 0;
 	private _promptStartPending = false;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
@@ -588,6 +593,7 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
+	private _consecutiveProviderStreamStalls = 0;
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _userAbortPromise: Promise<void> | undefined = undefined;
@@ -824,16 +830,36 @@ export class AgentSession {
 
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
-			return this._emitBeforeToolCallHooks(toolCall, args);
+			this._toolExecutionDepth++;
+			try {
+				const result = await this._emitBeforeToolCallHooks(toolCall, args);
+				if (result?.block) {
+					this._toolExecutionDepth--;
+				}
+				return result;
+			} catch (err) {
+				this._toolExecutionDepth--;
+				throw err;
+			}
 		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
-			return this._emitAfterToolCallHooks(toolCall, args, result, isError);
+			try {
+				return await this._emitAfterToolCallHooks(toolCall, args, result, isError);
+			} finally {
+				this._toolExecutionDepth--;
+			}
 		};
 	}
 
-	private async _emitBeforeToolCallHooks(toolCall: AgentToolCall, args: unknown) {
-		await this._agentEventQueue;
+	private async _emitBeforeToolCallHooks(
+		toolCall: AgentToolCall,
+		args: unknown,
+		options: { waitForEventQueue?: boolean } = {},
+	) {
+		if (options.waitForEventQueue !== false) {
+			await this._agentEventQueue;
+		}
 
 		const runner = this._extensionRunner;
 		if (!runner.hasHandlers("tool_call")) {
@@ -1045,6 +1071,9 @@ export class AgentSession {
 	}
 
 	private async _emitAgentSettled(): Promise<void> {
+		if (this.agent.state.isStreaming) {
+			await this.agent.waitForIdle();
+		}
 		if (!this._isAgentRunActive) {
 			this._resolveIdleWaitIfIdle();
 			return;
@@ -1398,19 +1427,19 @@ export class AgentSession {
 			}
 		}
 
+		const agentEndWillRetry = event.type === "agent_end" && this._willRetryAfterAgentEnd(event.messages);
+
 		// Emit to extensions first. Agent event persistence is intentionally
 		// asynchronous, so retain the source run signal while dispatching.
 		this._extensionEventSignal = signal;
 		try {
-			await this._emitExtensionEvent(event);
+			await this._emitExtensionEvent(event, agentEndWillRetry);
 		} finally {
 			this._extensionEventSignal = undefined;
 		}
 
 		// Notify all listeners
-		this._emit(
-			event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event.messages) } : event,
-		);
+		this._emit(event.type === "agent_end" ? { ...event, willRetry: agentEndWillRetry } : event);
 
 		// Handle session persistence
 		if (event.type === "message_end") {
@@ -1440,13 +1469,18 @@ export class AgentSession {
 				this._lastAssistantMessage = event.message;
 
 				const assistantMsg = event.message as AssistantMessage;
-				if (assistantMsg.stopReason !== "error") {
+				const succeeded =
+					assistantMsg.stopReason !== "error" &&
+					assistantMsg.stopReason !== "aborted" &&
+					!isClassifierRefusal(assistantMsg);
+				if (succeeded) {
 					this._overflowRecoveryAttempted = false;
 				}
 
-				// Reset retry counter immediately on successful assistant response
-				// This prevents accumulation across multiple LLM calls within a turn
-				if (assistantMsg.stopReason !== "error" && this._retryAttempt > 0) {
+				// Reset retry state only after a genuinely successful response. Provider
+				// transport timeouts can arrive as `aborted` and must keep consuming the
+				// same bounded retry budget instead of reporting a false success.
+				if (succeeded && this._retryAttempt > 0) {
 					const fallback = this._retryFallback.activeState;
 					if (fallback) {
 						this._emit({
@@ -1634,7 +1668,7 @@ export class AgentSession {
 	}
 
 	/** Emit extension events based on agent events */
-	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
+	private async _emitExtensionEvent(event: AgentEvent, agentEndWillRetry = false): Promise<void> {
 		if (event.type === "agent_start") {
 			this._turnIndex = 0;
 			await this._extensionRunner.emit({ type: "agent_start" });
@@ -1646,6 +1680,7 @@ export class AgentSession {
 				await this._extensionRunner.emit({
 					type: "agent_end",
 					messages: event.messages,
+					willRetry: agentEndWillRetry,
 					...(aborted ? { aborted: true } : {}),
 					...(abortSource === undefined ? {} : { abortSource }),
 				});
@@ -1921,7 +1956,9 @@ export class AgentSession {
 			);
 		}
 
-		const beforeResult = await this._emitBeforeToolCallHooks(prepared.toolCall, prepared.args);
+		const beforeResult = await this._emitBeforeToolCallHooks(prepared.toolCall, prepared.args, {
+			waitForEventQueue: this._toolExecutionDepth === 0,
+		});
 		if (beforeResult?.block) {
 			throw new ExecuteToolError(
 				"blocked",
@@ -1943,7 +1980,7 @@ export class AgentSession {
 		} catch (err) {
 			result = {
 				content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-				details: {},
+				details: { isError: true },
 			};
 			isError = true;
 		}
@@ -4362,35 +4399,64 @@ export class AgentSession {
 		this._scheduledContinuationRecompacted = true;
 	}
 
-	private async _continueAgentAfterCurrentRun(): Promise<void> {
+	private async _continueAgentAfterCurrentRun(
+		options: AgentContinuationOptions = {},
+	): Promise<"continued" | "taken-over"> {
 		await this.agent.waitForIdle();
-		await this._revalidateScheduledContinuationAdmission();
-		const useQueuedContinuation = this._scheduledContinuationRecompacted;
 		try {
-			if (useQueuedContinuation) {
-				await this.agent.continueWithQueuedMessages();
+			if (this.agent.state.isStreaming) return "taken-over";
+
+			await this._revalidateScheduledContinuationAdmission();
+			if (this.agent.state.isStreaming) return "taken-over";
+
+			if (this._scheduledContinuationRecompacted) {
+				const tail = this.agent.state.messages.at(-1);
+				if (tail?.role === "assistant" && (tail.stopReason === "error" || tail.stopReason === "aborted")) {
+					this._retireFailedRetryAssistant(tail);
+					if (this.agent.state.messages.at(-1) === tail) {
+						this.agent.state.messages = this.agent.state.messages.slice(0, -1);
+						this._incrementMessageRevision();
+					}
+				}
+				await this.agent.continueWithQueuedMessages(options);
 			} else {
-				await this.agent.continue();
+				await this.agent.continue(options);
 			}
+			return "continued";
+		} catch (error) {
+			if (
+				this.agent.state.isStreaming &&
+				error instanceof Error &&
+				error.message.startsWith("Agent is already processing")
+			) {
+				return "taken-over";
+			}
+			throw error;
 		} finally {
 			this._scheduledContinuationRecompacted = false;
 		}
 	}
 
-	private _scheduleContinuationAfterCurrentEvent(): void {
+	private _scheduleContinuationAfterCurrentEvent(
+		options: AgentContinuationOptions = {},
+		retryContinuation = false,
+	): void {
 		// Tool hooks wait for queued message persistence, so continue() cannot run inside this event promise.
 		const currentEventQueue = this._agentEventQueue;
 		const finishContinuationWork = this._sessionWorkBarrier.begin();
 		const continueAfterEvent = async (): Promise<void> => {
 			try {
-				await this._continueAgentAfterCurrentRun();
+				await this._continueAgentAfterCurrentRun(options);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				this._emit({
 					type: "continuation_error",
 					errorMessage: `Failed to continue queued messages: ${message}`,
 				});
-				await this._emitAgentSettled();
+				if (!this.agent.state.isStreaming) {
+					await this._emitAgentSettled();
+				}
+				if (retryContinuation) this._resolveRetry();
 			}
 		};
 
@@ -4732,6 +4798,12 @@ export class AgentSession {
 				},
 				getThinkingLevel: () => this.thinkingLevel,
 				setThinkingLevel: (level) => this.setThinkingLevel(level),
+				setSessionModel: async (model) => {
+					if (!this._modelRuntime.hasConfiguredAuth(model.provider)) return false;
+					await this.setSessionModel(model);
+					return true;
+				},
+				setSessionThinkingLevel: (level) => this.setSessionThinkingLevel(level),
 			},
 			{
 				getModel: () => this.model,
@@ -4748,6 +4820,7 @@ export class AgentSession {
 				},
 				hasPendingMessages: () => this.pendingMessageCount > 0,
 				isCompacting: () => this.isCompacting,
+				checkReloadVeto: () => this.checkReloadVeto(),
 				shutdown: () => {
 					this._extensionShutdownHandler?.();
 				},
@@ -5151,7 +5224,7 @@ export class AgentSession {
 		if (!message.errorMessage) return false;
 
 		if (message.stopReason === "aborted") {
-			return /timed? out|timeout/i.test(message.errorMessage);
+			return isProviderTimeoutError(message);
 		}
 
 		return isRetryableAssistantError(message);
@@ -5201,6 +5274,23 @@ export class AgentSession {
 			return Math.ceil(value * 1000);
 		}
 		return Math.ceil(value);
+	}
+
+	private _getProviderTimeoutRetryOptions(message: AssistantMessage): AgentContinuationOptions {
+		if (!isProviderTimeoutError(message)) return {};
+
+		const capMs = this.settingsManager.getProviderStreamRetryTimeoutMs();
+		const capEnabledBound = (configuredMs: number | undefined): number | undefined => {
+			if (capMs === undefined || configuredMs === undefined) return undefined;
+			return Math.min(configuredMs, capMs);
+		};
+		const timeoutMs = capEnabledBound(this.agent.timeoutMs);
+		const streamStartTimeoutMs = capEnabledBound(this.agent.streamStartTimeoutMs);
+		return {
+			deferQueuedMessages: true,
+			...(timeoutMs === undefined ? {} : { timeoutMs }),
+			...(streamStartTimeoutMs === undefined ? {} : { streamStartTimeoutMs }),
+		};
 	}
 
 	/**
@@ -5262,7 +5352,10 @@ export class AgentSession {
 		let switchedFallback = false;
 		if (hardErrorFallback) {
 			// A non-retryable provider failure must never replay on the same model.
-			switchedFallback = await this._retryFallback.tryFallback("hard-error", { errorMessage });
+			// Billing-class failures never recover on this account, so the fallback
+			// switch pins as the session model instead of reverting after the cooldown.
+			const reason = isBillingErrorMessage(errorMessage) ? "billing" : "hard-error";
+			switchedFallback = await this._retryFallback.tryFallback(reason, { errorMessage });
 			if (!switchedFallback) {
 				this._resolveRetry();
 				return "not-handled";
@@ -5287,8 +5380,21 @@ export class AgentSession {
 			}
 			this._retryAttempt++;
 		} else {
+			if (this._retryAttempt === 0) {
+				this._consecutiveProviderStreamStalls = 0;
+			}
+			// A provider-stream stall means the request was accepted but delivered
+			// zero events for the whole idle budget. Replaying the identical payload
+			// against a hung provider burns that full budget again per attempt
+			// ((1 + maxRetries) * httpIdleTimeoutMs of opaque dead air), so a second
+			// consecutive stall escalates to the fallback chain immediately. Fast
+			// non-stall failures in between reset the streak and keep the normal
+			// same-model recovery semantics.
+			const stallError = isProviderStreamStallError(message);
+			const escalateAfterRepeatedStall = stallError && this._consecutiveProviderStreamStalls > 0;
+			this._consecutiveProviderStreamStalls = stallError ? this._consecutiveProviderStreamStalls + 1 : 0;
 			this._retryAttempt++;
-			if (this._retryAttempt > settings.maxRetries) {
+			if (this._retryAttempt > settings.maxRetries || escalateAfterRepeatedStall) {
 				switchedFallback = await this._retryFallback.tryFallback("transient", {
 					errorMessage,
 					retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
@@ -5316,6 +5422,10 @@ export class AgentSession {
 					return "not-handled";
 				}
 			}
+		}
+
+		if (switchedFallback) {
+			this._consecutiveProviderStreamStalls = 0;
 		}
 
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
@@ -5423,22 +5533,15 @@ export class AgentSession {
 			this._skipNextPostRetryCompactionCheck = true;
 		}
 
-		// Retry via the shared continuation path after the event handler chain settles.
-		// Agent core would otherwise drain these queues before the continuation
-		// revalidates its provider admission. The scheduled continuation owns them
-		// until it either starts or reports a terminal admission failure.
+		// Retry through the barrier-owned scheduled-continuation path after the
+		// event handler chain settles. Lifecycle suppression protects queued work
+		// while admission settles; known provider-timeout retries additionally skip
+		// the first queue poll so user input stays deferred until that request proves
+		// responsive. A concurrent low-level Agent prompt is a benign takeover, not
+		// a terminal continuation failure.
+		const continuationOptions = this._getProviderTimeoutRetryOptions(message);
 		this.agent.suppressQueuedMessageDrain();
-		setTimeout(() => {
-			void this._continueAgentAfterCurrentRun().catch(async (error) => {
-				const message = error instanceof Error ? error.message : String(error);
-				this._emit({
-					type: "continuation_error",
-					errorMessage: `Failed to continue queued messages: ${message}`,
-				});
-				await this._emitAgentSettled();
-				this._resolveRetry();
-			});
-		}, 0);
+		this._scheduleContinuationAfterCurrentEvent(continuationOptions, true);
 
 		return "continued";
 	}

@@ -231,7 +231,7 @@ async function processPdf(
 	} finally {
 		// Clean up PDF resources
 		if (pdf) {
-			pdf.destroy();
+			await pdf.cleanup();
 		}
 	}
 }

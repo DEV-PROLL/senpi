@@ -52,13 +52,16 @@ export function parseFallbackSelector(raw: string, lookup: FallbackModelLookup):
 	const modelPattern = parsedReference.reference.slice(slashIndex + 1).trim();
 	if (!provider || !modelPattern) return undefined;
 
+	// The provider is explicit, so resolve the id pattern inside that provider only.
+	// A global lookup lets foreign ids containing the pattern (e.g. Bedrock's
+	// "us.anthropic.claude-opus-5") win over the requested provider's exact id.
+	const providerModels = models.filter((model) => model.provider.toLowerCase() === provider.toLowerCase());
 	const parsed = parseModelPattern(
 		parsedReference.thinkingLevel ? `${modelPattern}:${parsedReference.thinkingLevel}` : modelPattern,
-		models,
+		providerModels,
 		{ allowInvalidThinkingLevelFallback: false },
 	);
-	if (!parsed.model || parsed.warning || parsed.model.provider.toLowerCase() !== provider.toLowerCase())
-		return undefined;
+	if (!parsed.model || parsed.warning) return undefined;
 	if (parsedReference.thinkingLevel && !parsed.thinkingLevel) return undefined;
 
 	return {
@@ -90,7 +93,9 @@ export function canonicalizeFallbackChains(chains: FallbackChains, lookup: Fallb
 			const parsedEntry = parseFallbackSelector(entry, lookup);
 			return parsedEntry ? [formatParsedSelector(parsedEntry)] : [];
 		});
-		canonical[formatParsedSelector(parsedKey)] = canonicalEntries;
+		if (canonicalEntries.length > 0) {
+			canonical[formatParsedSelector(parsedKey)] = canonicalEntries;
+		}
 	}
 
 	return canonical;

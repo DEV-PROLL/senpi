@@ -14,10 +14,16 @@ import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
 import { listModels } from "./cli/list-models.ts";
+import { listTips } from "./cli/list-tips.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
+import {
+	createStartupLoadingIndicator,
+	pauseIndicatorDuringPrompts,
+	shouldShowStartupLoadingIndicator,
+} from "./cli/startup-loading-indicator.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
+import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -49,6 +55,7 @@ import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { builtInExtensions } from "./extensions/index.ts";
+import { getFromSourceRealConfigWarning } from "./from-source-config-guard.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
@@ -139,7 +146,11 @@ function toProjectTrustMode(appMode: AppMode): AppMode {
 }
 
 function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
-	return !parsed.print && parsed.mode === undefined && (parsed.help === true || parsed.listModels !== undefined);
+	return (
+		!parsed.print &&
+		parsed.mode === undefined &&
+		(parsed.help === true || parsed.listModels !== undefined || parsed.listTips === true)
+	);
 }
 
 async function prepareInitialMessage(
@@ -292,7 +303,7 @@ async function createSessionManager(
 	sessionDir: string | undefined,
 	settingsManager: SettingsManager,
 ): Promise<SessionManager> {
-	if (parsed.noSession || parsed.help || parsed.listModels !== undefined) {
+	if (parsed.noSession || parsed.help || parsed.listModels !== undefined || parsed.listTips) {
 		return SessionManager.inMemory(cwd, parsed.sessionId !== undefined ? { id: parsed.sessionId } : undefined);
 	}
 
@@ -412,6 +423,7 @@ function buildSessionOptions(
 		}
 		if (resolved.model) {
 			options.model = resolved.model;
+			options.initialModelProvenance = "cli";
 			// Allow "--model <pattern>:<thinking>" as a shorthand.
 			// Explicit --thinking still takes precedence (applied later).
 			if (!parsed.thinking && resolved.thinkingLevel) {
@@ -430,12 +442,14 @@ function buildSessionOptions(
 
 		if (savedInScope) {
 			options.model = savedInScope.model;
+			options.initialModelProvenance = "scoped";
 			// Use thinking level from scoped model config if explicitly set
 			if (!parsed.thinking && savedInScope.thinkingLevel) {
 				options.thinkingLevel = savedInScope.thinkingLevel;
 			}
 		} else {
 			options.model = scopedModels[0].model;
+			options.initialModelProvenance = "scoped";
 			// Use thinking level from first scoped model if explicitly set
 			if (!parsed.thinking && scopedModels[0].thinkingLevel) {
 				options.thinkingLevel = scopedModels[0].thinkingLevel;
@@ -528,6 +542,10 @@ export async function main(args: string[], options?: MainOptions) {
 
 	const cwd = process.cwd();
 	const agentDir = getAgentDir();
+	const fromSourceWarning = getFromSourceRealConfigWarning(agentDir);
+	if (fromSourceWarning) {
+		console.error(chalk.yellow(fromSourceWarning));
+	}
 	const bootstrapSettingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
 	applyHttpProxySettings(bootstrapSettingsManager.getGlobalSettings().httpProxy);
 	configureHttpDispatcher();
@@ -609,6 +627,11 @@ export async function main(args: string[], options?: MainOptions) {
 	const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
 
+	if (parsed.listTips) {
+		listTips();
+		process.exit(0);
+	}
+
 	if (parsed.listModels !== undefined) {
 		const services = await createAgentSessionServices({
 			cwd,
@@ -639,7 +662,13 @@ export async function main(args: string[], options?: MainOptions) {
 
 	// Experimental first-time setup: theme choice and analytics opt-in.
 	// Runs before any runtime services are created so the chosen settings apply everywhere.
-	if (appMode === "interactive" && !parsed.help && parsed.listModels === undefined && shouldRunFirstTimeSetup()) {
+	if (
+		appMode === "interactive" &&
+		!parsed.help &&
+		parsed.listModels === undefined &&
+		!parsed.listTips &&
+		shouldRunFirstTimeSetup()
+	) {
 		await showFirstTimeSetup(startupSettingsManager);
 		time("firstTimeSetup");
 	}
@@ -685,8 +714,27 @@ export async function main(args: string[], options?: MainOptions) {
 			? sessionCwd
 			: undefined;
 	const trustPromptMode: AppMode =
-		parsed.help || parsed.listModels !== undefined ? "print" : toProjectTrustMode(appMode);
+		parsed.help || parsed.listModels !== undefined || parsed.listTips ? "print" : toProjectTrustMode(appMode);
 	const projectTrustByCwd = new Map<string, boolean>();
+
+	// Immediate feedback while the heavy runtime (extensions, models, trust) is
+	// created; without it the terminal stays blank and looks stuck (codex-style
+	// UI-first startup). Stopped before any other surface writes to stdout.
+	const startupLoadingIndicator = createStartupLoadingIndicator({
+		writer: (chunk) => process.stdout.write(chunk),
+		isTTY: process.stdout.isTTY === true,
+		label: `Loading ${APP_NAME}`,
+	});
+	if (
+		shouldShowStartupLoadingIndicator({
+			appMode,
+			stdoutIsTTY: process.stdout.isTTY === true,
+			helpRequested: parsed.help === true,
+		})
+	) {
+		startupLoadingIndicator.start();
+		startupLoadingIndicator.setPhase("extensions & models");
+	}
 
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 		cwd,
@@ -724,12 +772,15 @@ export async function main(args: string[], options?: MainOptions) {
 								extensionsResult,
 								projectTrustContext:
 									projectTrustContext ??
-									createProjectTrustContext({
-										cwd,
-										mode: isInitialRuntime ? trustPromptMode : toProjectTrustMode(appMode),
-										settingsManager: startupSettingsManager,
-										hasUI: isInitialRuntime && trustPromptMode === "interactive",
-									}),
+									pauseIndicatorDuringPrompts(
+										createProjectTrustContext({
+											cwd,
+											mode: isInitialRuntime ? trustPromptMode : toProjectTrustMode(appMode),
+											settingsManager: startupSettingsManager,
+											hasUI: isInitialRuntime && trustPromptMode === "interactive",
+										}),
+										startupLoadingIndicator,
+									),
 								onExtensionError: (message) => projectTrustDiagnostics.push({ type: "warning", message }),
 							});
 							projectTrustByCwd.set(cwd, trusted);
@@ -807,6 +858,9 @@ export async function main(args: string[], options?: MainOptions) {
 			}
 		}
 
+		if (isInitialRuntime) {
+			startupLoadingIndicator.setPhase("opening session");
+		}
 		const created = await createAgentSessionFromServices({
 			services,
 			sessionManager,
@@ -853,6 +907,8 @@ export async function main(args: string[], options?: MainOptions) {
 		cwd: sessionManager.getCwd(),
 		agentDir,
 		sessionManager,
+	}).finally(() => {
+		startupLoadingIndicator.stop();
 	});
 	time("createAgentSessionRuntime");
 	const { services, session, modelFallbackMessage } = runtime;

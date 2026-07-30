@@ -326,7 +326,8 @@ describe("app-server turn engine", () => {
 
 		// And: turn/completed serves the same agent message item from the turn log.
 		const turnCompleted = notifications.find((notification) => notification.method === "turn/completed");
-		const turn = (turnCompleted?.params as { turn: { items: Array<{ type: string; text?: string }> } }).turn;
+		if (!turnCompleted) throw new Error("expected turn/completed notification");
+		const turn = (turnCompleted.params as { turn: { items: Array<{ type: string; text?: string }> } }).turn;
 		expect(turn.items.map((item) => item.type)).toEqual(["userMessage", "agentMessage"]);
 		expect(turn.items[1]?.text).toBe("mock answer");
 	});
@@ -359,7 +360,7 @@ describe("app-server turn engine", () => {
 		expect(started?.params).toMatchObject({ threadId: "thread-a", turn: { status: "inProgress" } });
 		expect(completed?.params).toMatchObject({
 			threadId: "thread-a",
-			turn: { id: (started?.params as { turn: { id: string } }).turn.id, status: "completed" },
+			turn: { id: (started?.params as { turn: { id: string } } | undefined)?.turn.id ?? "", status: "completed" },
 		});
 		expect(turnLog.readTurns("thread-a")[0]?.items).toMatchObject([
 			{ type: "userMessage", clientId: null, content: [{ type: "text", text: "extension wakeup" }] },
@@ -395,7 +396,7 @@ describe("app-server turn engine", () => {
 		expect(started?.params).toMatchObject({ threadId: "thread-a", turn: { status: "inProgress" } });
 		expect(completed?.params).toMatchObject({
 			threadId: "thread-a",
-			turn: { id: (started?.params as { turn: { id: string } }).turn.id, status: "completed" },
+			turn: { id: (started?.params as { turn: { id: string } } | undefined)?.turn.id ?? "", status: "completed" },
 		});
 		expect(turnLog.readTurns("thread-a")[0]?.items).toEqual([]);
 	});
@@ -452,7 +453,8 @@ describe("app-server turn engine", () => {
 		expect(toolCompletedIndex).toBeGreaterThan(-1);
 		expect(toolCompletedIndex).toBeLessThan(turnCompletedIndex);
 		const turnCompleted = notifications.find((notification) => notification.method === "turn/completed");
-		const turn = (turnCompleted?.params as { turn: { items: Array<{ type: string }> } }).turn;
+		if (!turnCompleted) throw new Error("expected turn/completed notification");
+		const turn = (turnCompleted.params as { turn: { items: Array<{ type: string }> } }).turn;
 		expect(turn.items.map((item) => item.type)).toEqual(["userMessage", "commandExecution"]);
 	});
 });

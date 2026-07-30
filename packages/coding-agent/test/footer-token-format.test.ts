@@ -8,7 +8,7 @@ vi.mock("../src/modes/interactive/theme/theme.js", () => ({
 	},
 }));
 
-function createSession(): unknown {
+function createSession(latestCacheHitRate = (1_500_000 / (49 + 1_500_000 + 44_000)) * 100): unknown {
 	const session = {
 		state: {
 			model: {
@@ -41,7 +41,7 @@ function createSession(): unknown {
 				cacheRead: 1_500_000,
 				cacheWrite: 44_000,
 				cost: 0,
-				latestCacheHitRate: (1_500_000 / (49 + 1_500_000 + 44_000)) * 100,
+				latestCacheHitRate,
 			}),
 			getSessionName: () => "",
 			getCwd: () => "/tmp/project",
@@ -61,6 +61,7 @@ function createFooterData(): unknown {
 		getExtensionStatuses: () => new Map<string, string>(),
 		getAvailableProviderCount: () => 1,
 		onBranchChange: () => () => {},
+		isOmoNative: () => false,
 	};
 }
 
@@ -79,7 +80,24 @@ describe("formatTokens abbreviation", () => {
 });
 
 describe("FooterComponent token formatting", () => {
-	it("renders oh-my-pi-style abbreviated token counters and context window usage", async () => {
+	it("hides cache hit rates below 10% while retaining the threshold", async () => {
+		// given
+		const { FooterComponent } = await import("../src/modes/interactive/components/footer.ts");
+		const Footer = FooterComponent as new (
+			session: unknown,
+			footerData: unknown,
+		) => { render(width: number): string[] };
+
+		// when
+		const belowThreshold = stripAnsi(new Footer(createSession(9.9), createFooterData()).render(160).join("\n"));
+		const atThreshold = stripAnsi(new Footer(createSession(10), createFooterData()).render(160).join("\n"));
+
+		// then
+		expect(belowThreshold).not.toContain("CH9.9%");
+		expect(atThreshold).toContain("CH10.0%");
+	});
+
+	it("omits input and output token counters while retaining context details", async () => {
 		// given
 		const { FooterComponent } = await import("../src/modes/interactive/components/footer.ts");
 		const Footer = FooterComponent as new (
@@ -92,8 +110,8 @@ describe("FooterComponent token formatting", () => {
 		const rendered = stripAnsi(footer.render(160).join("\n"));
 
 		// then
-		expect(rendered).toContain("↑49");
-		expect(rendered).toContain("↓6.8K");
+		expect(rendered).not.toMatch(/↑\d/);
+		expect(rendered).not.toMatch(/↓\d/);
 		// Cache read/write totals were removed from the footer; only the hit rate stays.
 		expect(rendered).not.toContain("cache 1.5M/44K");
 		expect(rendered).not.toContain("cache ");

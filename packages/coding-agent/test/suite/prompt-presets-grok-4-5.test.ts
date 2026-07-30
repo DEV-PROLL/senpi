@@ -83,23 +83,20 @@ describe("Grok 4.5 prompt preset", () => {
 		expect(preset?.prompt).not.toMatch(/`task` child|category: "deep"|category: "ultrabrain"|run_in_background/i);
 	});
 
-	it.each([
-		"grok-4.3",
-		"grok-4.20-0309-reasoning",
-		"grok-3",
-		"grok-code-fast-1",
-		"some-grok-compatible-router",
-	])("does not route %s to the grok-4.5 preset", (modelId) => {
-		// given
-		const settings: PromptPresetSettings = { promptPreset: "auto" };
-		const model = createModel(modelId, "xai", "openai-responses");
+	it.each(["grok-4.3", "grok-4.20-0309-reasoning", "grok-3", "grok-code-fast-1", "some-grok-compatible-router"])(
+		"does not route %s to the grok-4.5 preset",
+		(modelId) => {
+			// given
+			const settings: PromptPresetSettings = { promptPreset: "auto" };
+			const model = createModel(modelId, "xai", "openai-responses");
 
-		// when
-		const preset = resolvePreset(model, settings);
+			// when
+			const preset = resolvePreset(model, settings);
 
-		// then
-		expect(preset).toBeUndefined();
-	});
+			// then
+			expect(preset).toBeUndefined();
+		},
+	);
 
 	it("allows settings.json to force grok-4.5 regardless of model id", () => {
 		// given

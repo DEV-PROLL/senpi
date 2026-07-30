@@ -19,8 +19,10 @@ export interface FooterRightLabel {
 
 export interface FooterLayoutInput {
 	readonly width: number;
-	/** Always-kept leading segments (pwd first, then branch). */
+	/** Always-kept leading segments in display order. */
 	readonly anchor: readonly [FooterSegment, ...FooterSegment[]];
+	/** Index of the pwd segment inside anchor. */
+	readonly pwdIndex: number;
 	/** Droppable middle segments in display order; dropped from the right end first. */
 	readonly middle: readonly FooterSegment[];
 	/** Always-kept trailing segment (context usage). */
@@ -40,8 +42,19 @@ export interface FooterLayoutInput {
  */
 export type FooterLayout =
 	| { readonly kind: "full"; readonly useFullRight: boolean }
-	| { readonly kind: "middle-elided"; readonly keptMiddleCount: number; readonly showMarker: boolean }
-	| { readonly kind: "pwd-elided"; readonly pwdPlain: string }
+	| {
+			readonly kind: "middle-elided";
+			readonly keptMiddleCount: number;
+			readonly showMarker: boolean;
+			readonly useFullRight: boolean;
+	  }
+	| {
+			readonly kind: "pwd-elided";
+			readonly pwdPlain: string;
+			readonly keptMiddleCount: number;
+			readonly showMarker: boolean;
+			readonly useFullRight: boolean;
+	  }
 	| { readonly kind: "left-elided"; readonly leftPlain: string }
 	| { readonly kind: "right-truncated"; readonly rightPlain: string };
 
@@ -54,6 +67,16 @@ function segmentsWidth(segments: readonly FooterSegment[], separator: string): n
 
 function fits(left: readonly FooterSegment[], right: FooterSegment, input: FooterLayoutInput): boolean {
 	return segmentsWidth(left, input.separator) + input.minPadding + visibleWidth(right.plain) <= input.width;
+}
+
+function pwdBudget(rest: readonly FooterSegment[], right: FooterSegment, input: FooterLayoutInput): number {
+	return (
+		input.width -
+		input.minPadding -
+		visibleWidth(right.plain) -
+		visibleWidth(input.separator) -
+		segmentsWidth(rest, input.separator)
+	);
 }
 
 /**
@@ -81,33 +104,62 @@ export function elideHead(text: string, maxWidth: number): string {
 
 /**
  * Pick the richest layout that fits the width. The model label is pinned to
- * the right edge and the anchor/tail segments stay visible; the middle stats
- * yield first (right-most first), then the pwd shrinks from its head.
+ * the right edge and the anchor/tail segments stay visible. The pwd shrinks
+ * from its head before middle stats yield from the right.
  */
 export function planFooterLayout(input: FooterLayoutInput): FooterLayout {
 	const { anchor, middle, tail, right } = input;
-	const fullLeft = [...anchor, ...middle, tail];
-	if (right.full !== undefined && fits(fullLeft, right.full, input)) {
-		return { kind: "full", useFullRight: true };
-	}
-	if (fits(fullLeft, right.minimal, input)) {
-		return { kind: "full", useFullRight: false };
-	}
-	for (let kept = middle.length - 1; kept >= 0; kept--) {
-		const candidate = [...anchor, ...middle.slice(0, kept), input.ellipsisMarker, tail];
-		if (fits(candidate, right.minimal, input)) {
-			return { kind: "middle-elided", keptMiddleCount: kept, showMarker: true };
+	const pwd = anchor[input.pwdIndex];
+	if (pwd === undefined) throw new RangeError(`pwdIndex ${input.pwdIndex} is outside the footer anchor`);
+	const anchorRest = anchor.filter((_, index) => index !== input.pwdIndex);
+	const preferPwdElision = visibleWidth(pwd.plain) > Math.floor(input.width / 3);
+
+	const planForRight = (rightSegment: FooterSegment, useFullRight: boolean): FooterLayout | undefined => {
+		const candidates = [
+			{ keptMiddleCount: middle.length, showMarker: false },
+			...Array.from({ length: middle.length }, (_, index) => ({
+				keptMiddleCount: middle.length - index - 1,
+				showMarker: true,
+			})),
+			{ keptMiddleCount: 0, showMarker: false },
+		];
+
+		for (const candidate of candidates) {
+			const retainedMiddle = middle.slice(0, candidate.keptMiddleCount);
+			const marker = candidate.showMarker ? [input.ellipsisMarker] : [];
+			const left = [...anchor, ...retainedMiddle, ...marker, tail];
+			if (fits(left, rightSegment, input)) {
+				if (candidate.keptMiddleCount === middle.length) {
+					return { kind: "full", useFullRight };
+				}
+				return { kind: "middle-elided", ...candidate, useFullRight };
+			}
+
+			const isMinimalFallback = !useFullRight && candidate.keptMiddleCount === 0 && !candidate.showMarker;
+			if (preferPwdElision || isMinimalFallback) {
+				const budget = pwdBudget([...anchorRest, ...retainedMiddle, ...marker, tail], rightSegment, input);
+				if (budget >= 2) {
+					return {
+						kind: "pwd-elided",
+						pwdPlain: elideHead(pwd.plain, budget),
+						...candidate,
+						useFullRight,
+					};
+				}
+			}
 		}
+
+		return undefined;
+	};
+
+	if (right.full !== undefined) {
+		const fullRightPlan = planForRight(right.full, true);
+		if (fullRightPlan !== undefined) return fullRightPlan;
 	}
-	if (fits([...anchor, tail], right.minimal, input)) {
-		return { kind: "middle-elided", keptMiddleCount: 0, showMarker: false };
-	}
-	const [, ...anchorRest] = anchor;
-	const restWidth = segmentsWidth([...anchorRest, tail], input.separator) + visibleWidth(input.separator);
-	const pwdBudget = input.width - input.minPadding - visibleWidth(right.minimal.plain) - restWidth;
-	if (pwdBudget >= 2) {
-		return { kind: "pwd-elided", pwdPlain: elideHead(anchor[0].plain, pwdBudget) };
-	}
+
+	const minimalRightPlan = planForRight(right.minimal, false);
+	if (minimalRightPlan !== undefined) return minimalRightPlan;
+
 	const leftBudget = input.width - input.minPadding - visibleWidth(right.minimal.plain);
 	if (leftBudget >= 1) {
 		const allLeftPlain = [...anchor, tail].map((segment) => segment.plain).join(input.separator);

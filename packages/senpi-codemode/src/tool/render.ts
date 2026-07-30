@@ -19,6 +19,7 @@ import {
 	JSON_TREE_SCALAR_LEN_EXPANDED,
 	renderJsonTreeLines,
 } from "./json-tree.ts";
+import { codePointPrefix, formatDuration, renderToolCallWidget } from "./tool-widgets.ts";
 import type {
 	EvalCellResult,
 	EvalInputSchema,
@@ -114,18 +115,6 @@ function style(theme: Theme | undefined, color: ThemeColor, text: string): strin
 
 function appendLines(target: string[], source: readonly string[]): void {
 	for (const line of source) target.push(line);
-}
-
-function codePointPrefix(text: string, maxCodePoints: number): string {
-	let end = 0;
-	for (let count = 0; count < maxCodePoints && end < text.length; count += 1) {
-		const firstCodeUnit = text.charCodeAt(end);
-		const secondCodeUnit = text.charCodeAt(end + 1);
-		const isSurrogatePair =
-			firstCodeUnit >= 0xd800 && firstCodeUnit <= 0xdbff && secondCodeUnit >= 0xdc00 && secondCodeUnit <= 0xdfff;
-		end += isSurrogatePair ? 2 : 1;
-	}
-	return text.slice(0, end);
 }
 
 function renderAllVisualLines(text: string, width: number): string[] {
@@ -230,18 +219,6 @@ function highlightedCode(code: string, language: EvalLanguage, theme: Theme | un
 	const normalizedCode = code.trim().length > 0 ? code : "...";
 	const lines = highlightCode(normalizedCode, languageForHighlighter(language));
 	return (theme === undefined ? lines.map((line) => line.replace(/\u001b\[[0-9;]*m/gu, "")) : lines).join("\n");
-}
-
-function formatDuration(milliseconds: number): string {
-	const totalSeconds = Math.floor(Math.max(0, milliseconds) / 1_000);
-	if (totalSeconds < 1) return "<1s";
-	const seconds = totalSeconds % 60;
-	const totalMinutes = Math.floor(totalSeconds / 60);
-	if (totalMinutes < 1) return `${seconds}s`;
-	const minutes = totalMinutes % 60;
-	const hours = Math.floor(totalMinutes / 60);
-	if (hours < 1) return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
-	return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 }
 
 function spinner(frame: number | undefined): string {
@@ -695,6 +672,46 @@ function toolCallRows(details: EvalToolDetails | undefined): ToolCallRow[] {
 	});
 }
 
+function nestedToolCallBlock(
+	details: EvalToolDetails | undefined,
+	theme: Theme | undefined,
+	cwd: string,
+	expanded: boolean,
+): RenderBlock | undefined {
+	const toolCalls = details?.toolCalls;
+	if (theme === undefined || toolCalls === undefined || !toolCalls.some((call) => call.args !== undefined)) {
+		return undefined;
+	}
+	const legacyRows = toolCallRows(details);
+	return {
+		kind: "dynamic",
+		render: (width) => {
+			const retainedCalls = expanded ? toolCalls : toolCalls.slice(-TOOL_CALL_PREVIEW_COUNT);
+			const retainedRows = expanded ? legacyRows : legacyRows.slice(-TOOL_CALL_PREVIEW_COUNT);
+			const skippedCount = toolCalls.length - retainedCalls.length;
+			const toolCallNoun = skippedCount === 1 ? "call" : "calls";
+			const lines =
+				expanded || skippedCount === 0
+					? []
+					: renderAllVisualLines(style(theme, "muted", `${skippedCount} earlier tool ${toolCallNoun}`), width);
+			const legacyBlock: Extract<RenderBlock, { kind: "toolCalls" }> = {
+				kind: "toolCalls",
+				calls: retainedRows,
+				expanded,
+				theme,
+			};
+			for (const [index, call] of retainedCalls.entries()) {
+				if (call.args !== undefined) {
+					appendLines(lines, renderToolCallWidget(call, { cwd, theme, expanded, width }));
+				} else {
+					appendLines(lines, renderToolCall(retainedRows[index], legacyBlock, width));
+				}
+			}
+			return lines;
+		},
+	};
+}
+
 function resultStatus(
 	details: EvalToolDetails | undefined,
 	options: ToolRenderResultOptions,
@@ -732,7 +749,7 @@ function resultMetadata(
 ): RenderBlock[] {
 	const metadata: string[] = [];
 	if (details?.phase) metadata.push(`phase ${details.phase}`);
-	if (!options.isPartial && details) metadata.push(`took ${details.durationMs}ms`);
+	if (!options.isPartial && typeof details?.durationMs === "number") metadata.push(`took ${details.durationMs}ms`);
 	if (metadata.length === 0) return [];
 	return [{ kind: "text", text: style(theme, "muted", metadata.join(" | ")) }];
 }
@@ -824,7 +841,9 @@ export function renderEvalResult(
 			},
 		];
 		const calls = toolCallRows(details);
-		if (calls.length > 0) blocks.push({ kind: "blank" }, { kind: "toolCalls", calls, expanded, theme });
+		const nestedCalls = nestedToolCallBlock(details, theme, context.cwd, expanded);
+		if (calls.length > 0)
+			blocks.push({ kind: "blank" }, nestedCalls ?? { kind: "toolCalls", calls, expanded, theme });
 		component.setBlocks(blocks);
 		return component;
 	}
@@ -888,7 +907,8 @@ export function renderEvalResult(
 		);
 	}
 	const calls = toolCallRows(details);
-	if (calls.length > 0) blocks.push({ kind: "blank" }, { kind: "toolCalls", calls, expanded, theme });
+	const nestedCalls = nestedToolCallBlock(details, theme, context.cwd, expanded);
+	if (calls.length > 0) blocks.push({ kind: "blank" }, nestedCalls ?? { kind: "toolCalls", calls, expanded, theme });
 	if (details?.notice !== undefined)
 		blocks.push({ kind: "blank" }, { kind: "text", text: style(theme, "dim", details.notice) });
 	const warning = formatTruncationWarning(details?.meta) ?? (details?.truncated ? "[eval output truncated]" : null);

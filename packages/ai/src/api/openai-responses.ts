@@ -24,6 +24,7 @@ import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { isCloudflareProvider, resolveCloudflareBaseUrl } from "./cloudflare.ts";
 import { createGrammarToolInputProperties } from "./constrained-sampling.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
+import { resolveOpenAIClientAuth } from "./openai-client-auth.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
 import { buildBaseOptions, clampMaxForOpenAI, OPENAI_RESPONSES_RESERVED_BODY_KEYS } from "./simple-options.ts";
@@ -57,27 +58,10 @@ type WebSocketConstructor = new (
 ) => WebSocketLike;
 
 type MutableResponsesPayload = ResponseCreateParamsStreaming & {
-	include?: unknown[];
-	tool_choice?: unknown;
-	tools?: unknown[];
+	prompt_cache_options?: { mode?: "explicit" | "implicit" };
 };
 
 const websocketSessionCache = new Map<string, CachedWebSocketConnection>();
-
-function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
-	if (!headers) return false;
-	const expected = name.toLowerCase();
-	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === expected && value !== null && value.trim().length > 0) return true;
-	}
-	return false;
-}
-
-function getClientApiKey(provider: string, apiKey: string | undefined, headers: ProviderHeaders | undefined): string {
-	if (apiKey) return apiKey;
-	if (hasHeader(headers, "authorization") || hasHeader(headers, "cf-aig-authorization")) return "unused";
-	throw new Error(`No API key for provider: ${provider}`);
-}
 
 function detectSessionAffinityFormat(model: Pick<Model<"openai-responses">, "provider" | "baseUrl">) {
 	return model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai") ? "openrouter" : "openai";
@@ -138,9 +122,9 @@ function isOpenAiWebSearchPreviewTool(value: unknown): boolean {
 }
 
 function sanitizeUnsupportedNativeTools(
-	params: ResponseCreateParamsStreaming,
+	params: MutableResponsesPayload,
 	compat: Required<OpenAIResponsesCompat>,
-): ResponseCreateParamsStreaming {
+): MutableResponsesPayload {
 	if (compat.supportsWebSearchPreview) {
 		return params;
 	}
@@ -226,7 +210,7 @@ export const stream: StreamFunction<"openai-responses", OpenAIResponsesOptions> 
 		};
 
 		try {
-			const apiKey = getClientApiKey(model.provider, options?.apiKey, options?.headers);
+			const clientAuth = resolveOpenAIClientAuth(model.provider, options?.apiKey, options?.headers);
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
 			const compat = getCompat(model, options?.env);
@@ -234,11 +218,18 @@ export const stream: StreamFunction<"openai-responses", OpenAIResponsesOptions> 
 				context.tools,
 				compat.supportsOpenAIGrammarTools,
 			);
-			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId, options?.env);
+			const client = createClient(
+				model,
+				context,
+				clientAuth.apiKey,
+				clientAuth.headers,
+				cacheSessionId,
+				options?.env,
+			);
 			let params = buildParams(model, context, options, compat, grammarToolInputProperties);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
-				params = nextParams as ResponseCreateParamsStreaming;
+				params = nextParams as MutableResponsesPayload;
 			}
 
 			params = sanitizeUnsupportedNativeTools(params, compat);
@@ -249,7 +240,14 @@ export const stream: StreamFunction<"openai-responses", OpenAIResponsesOptions> 
 					await processWebSocketStream(
 						resolveOpenAIResponsesWebSocketUrl(model, options?.env),
 						params,
-						buildWebSocketHeaders(model, context, apiKey, options?.headers, cacheSessionId, options?.env),
+						buildWebSocketHeaders(
+							model,
+							context,
+							clientAuth.apiKey,
+							clientAuth.headers,
+							cacheSessionId,
+							options?.env,
+						),
 						output,
 						stream,
 						model,
@@ -329,7 +327,7 @@ export const streamSimple: StreamFunction<"openai-responses", SimpleStreamOption
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	getClientApiKey(model.provider, options?.apiKey, options?.headers);
+	resolveOpenAIClientAuth(model.provider, options?.apiKey, options?.headers);
 
 	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
@@ -418,7 +416,7 @@ function buildParams(
 
 	const cacheRetention = resolveCacheRetention(options?.cacheRetention ?? model.cacheRetention, options?.env);
 	const disableImplicitPromptCache = cacheRetention === "none" && compat.supportsExplicitPromptCacheMode;
-	const params: ResponseCreateParamsStreaming & { prompt_cache_options?: { mode: "explicit" } } = {
+	const params: MutableResponsesPayload = {
 		model: model.id,
 		input: messages,
 		stream: true,
@@ -797,6 +795,7 @@ function buildWebSocketHeaders(
 	env?: ProviderEnv,
 ): Headers {
 	const headers = new Headers(model.headers);
+	let suppressDefaultAuthorization = false;
 	if (model.provider === "github-copilot") {
 		const hasImages = hasCopilotVisionInput(context.messages);
 		const copilotHeaders = buildCopilotDynamicHeaders({ messages: context.messages, hasImages });
@@ -806,12 +805,13 @@ function buildWebSocketHeaders(
 	}
 	for (const [key, value] of Object.entries(optionsHeaders || {})) {
 		if (value === null) {
+			if (key.toLowerCase() === "authorization") suppressDefaultAuthorization = true;
 			headers.delete(key);
 		} else {
 			headers.set(key, value);
 		}
 	}
-	if (!headers.has("Authorization")) {
+	if (!suppressDefaultAuthorization && !headers.has("Authorization")) {
 		headers.set("Authorization", `Bearer ${apiKey}`);
 	}
 	if (sessionId) {

@@ -22,6 +22,7 @@ import openaiWebSearchExtension from "./openai-web-search/index.ts";
 import permissionSystemExtension from "./permission-system/index.ts";
 import promptPresetExtension from "./prompt-preset/index.ts";
 import promptUrlWidgetExtension from "./prompt-url-widget.ts";
+import recommendedModelsExtension from "./recommended-models/index.ts";
 import redrawsExtension from "./redraws.ts";
 import piRulesExtension from "./rules/index.ts";
 import serviceTierExtension from "./service-tier.ts";
@@ -29,6 +30,7 @@ import terminalExtension from "./terminal/index.ts";
 import todowriteExtension from "./todotools/index.ts";
 import toolPairGuardExtension from "./tool-pair-guard/index.ts";
 import tpsExtension from "./tps.ts";
+import ttsrExtension from "./ttsr/index.ts";
 import videoInExtension from "./video-in/index.ts";
 import webfetchExtension from "./webfetch/index.ts";
 import websearchExtension from "./websearch/index.ts";
@@ -59,6 +61,7 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "openai-web-search", factory: openaiWebSearchExtension },
 	{ id: "service-tier", factory: serviceTierExtension },
 	{ id: "model-fallback", factory: modelFallbackExtension },
+	{ id: "recommended-models", factory: recommendedModelsExtension },
 	{ id: "bash-timeout", factory: bashTimeoutExtension },
 	// Terminal follows bash-timeout so its injected default reaches the PTY bash, and follows
 	// anthropic-bash so mutual-exclusion (companion step-aside) is evaluated after it registers.
@@ -75,6 +78,7 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "nested-agents-md", factory: nestedAgentsMdExtension },
 	{ id: "rules", factory: piRulesExtension },
 	{ id: "goal", factory: goalExtension },
+	{ id: "ttsr", factory: ttsrExtension },
 	{ id: "btw", factory: btwExtension },
 	{ id: "claude-agent-sdk", factory: claudeAgentSdkExtension },
 	// Config reload follows settings-dependent builtins so reloads rebuild their resolved settings before MCP observes them.

@@ -1,5 +1,5 @@
 import type { AssistantMessage, AssistantMessageEventStream, ToolCall } from "../types.ts";
-import type { StreamParserEvent } from "./types.ts";
+import type { StreamParserEvent, ToolCallFormat } from "./types.ts";
 
 type ContentBlock = AssistantMessage["content"][number];
 type ContentRange = { start: number; end: number };
@@ -23,12 +23,14 @@ export class RecoveryNativeProjection {
 	private readonly reservedIds = new Set<string>();
 	private readonly recoveredIds = new Set<string>();
 	private readonly recoveredIdByParserIndex = new Map<number, string>();
+	private readonly recoveredIdPrefix: string;
 	private highestProjectedInnerIndex = -1;
 	private nextRecoveredId = 0;
 
-	constructor(stream: AssistantMessageEventStream, message: AssistantMessage) {
+	constructor(stream: AssistantMessageEventStream, message: AssistantMessage, protocol: ToolCallFormat = "antml") {
 		this.stream = stream;
 		this.message = message;
+		this.recoveredIdPrefix = `recovered-${protocol}-`;
 	}
 
 	reserveVisibleIds(source: AssistantMessage): void {
@@ -141,7 +143,7 @@ export class RecoveryNativeProjection {
 
 	private allocateRecoveredId(): string {
 		for (;;) {
-			const id = `recovered-antml-${this.nextRecoveredId}`;
+			const id = `${this.recoveredIdPrefix}${this.nextRecoveredId}`;
 			this.nextRecoveredId += 1;
 			if (this.reservedIds.has(id)) continue;
 			this.reservedIds.add(id);
