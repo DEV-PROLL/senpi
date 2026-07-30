@@ -5075,10 +5075,14 @@ export class InteractiveMode {
 								);
 							},
 						),
-					deliverQueued: (message) =>
-						message.mode === "followUp"
+					deliverQueued: (message) => {
+						if (message.enqueueOrder === undefined) {
+							return message.mode === "followUp" ? session.followUp(message.text) : session.steer(message.text);
+						}
+						return message.mode === "followUp"
 							? session.followUp(message.text, undefined, { enqueueOrder: message.enqueueOrder })
-							: session.steer(message.text, undefined, { enqueueOrder: message.enqueueOrder }),
+							: session.steer(message.text, undefined, { enqueueOrder: message.enqueueOrder });
+					},
 					reportFailure: (error, undeliveredCount) => {
 						this.showError(
 							`Failed to send queued message${undeliveredCount === 1 ? "" : "s"}: ${
