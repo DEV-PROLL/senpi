@@ -10,7 +10,7 @@
 - Merge commit: 6af97e50b57bad5c55c515de2ceaa60387dd775a
 - Post-merge fix commit: 335b2d075800b1437910e12f65f59921abad5816
 - Upstream ancestry: confirmed upstream/main is an ancestor of HEAD.
-- HEAD...upstream/main count: 2928 ahead, 0 behind.
+- Upstream range: `HEAD..upstream/main` is empty.
 
 ## Pin
 
