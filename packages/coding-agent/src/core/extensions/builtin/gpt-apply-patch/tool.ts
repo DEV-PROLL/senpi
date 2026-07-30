@@ -107,10 +107,6 @@ export function createApplyPatchTool(variant: "freeform" | "json" = "freeform"):
 			});
 			const resultPreview = appliedPreview(result);
 			if (result.failures.length > 0) {
-				if (result.appliedFiles.length === 0) {
-					const firstFailure = result.failures[0];
-					if (firstFailure) throw new Error(firstFailure.message);
-				}
 				return {
 					content: [{ type: "text", text: buildPartialFailureText(result) }],
 					details: resultPreview ? { preview: resultPreview, result } : { result },
