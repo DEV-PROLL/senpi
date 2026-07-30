@@ -276,3 +276,49 @@ describe("normalizeTodoParams", () => {
 		});
 	});
 });
+
+describe("normalizeTodoParams rm both-blank padding", () => {
+	// Verbatim GPT-5.x all-fields padding observed in senpi session
+	// 019fabf3 (2026-07-29, apitopia): the serializer emits every schema
+	// property and pads omitted strings with "".
+	const PADDED = { op: "rm", list: [], task: "", phase: "", items: [] };
+
+	it("treats rm with both targets blank as a bulk clear with one correction", () => {
+		const result = normalizeTodoParams(PADDED, populatedPhases);
+		expect(result.error).toBeUndefined();
+		expect(result.entry).toEqual({ op: "rm" });
+		expect(result.corrections).toHaveLength(1);
+		expect(result.corrections[0]).toContain("[auto-corrected]");
+		expect(result.corrections[0]).toContain("bulk clear");
+	});
+
+	it("does not mutate the padded raw payload", () => {
+		const raw = { op: "rm", list: [], task: "", phase: "", items: [] };
+		normalizeTodoParams(raw, populatedPhases);
+		expect(raw).toEqual(PADDED);
+	});
+
+	it("treats whitespace-only rm targets the same as empty strings", () => {
+		const result = normalizeTodoParams({ op: "rm", task: " \t", phase: " \n " }, populatedPhases);
+		expect(result.error).toBeUndefined();
+		expect(result.entry).toEqual({ op: "rm" });
+	});
+
+	it.each(["start", "done", "drop"] as const)("still rejects %s with both targets blank", (op) => {
+		expect(expectError({ op, task: "", phase: "" })).toBe(
+			'Blank "task" — pass the exact task text, or omit the field entirely for a bulk operation.',
+		);
+	});
+
+	it("still rejects rm with only the task blank", () => {
+		expect(expectError({ op: "rm", task: "" })).toBe(
+			'Blank "task" — pass the exact task text, or omit the field entirely for a bulk operation.',
+		);
+	});
+
+	it("still rejects rm with only the phase blank", () => {
+		expect(expectError({ op: "rm", phase: " " })).toBe(
+			'Blank "phase" — pass the exact phase text, or omit the field entirely for a bulk operation.',
+		);
+	});
+});
