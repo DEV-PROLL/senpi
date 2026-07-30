@@ -1,5 +1,25 @@
 # Core Extensions Changes
 
+## 2026-07-30 - Linux recursive config watches leave the interactive main thread
+
+### What changed and why
+
+- `builtin/config-reload/watch-event-source.ts` now routes Linux recursive `fs.watch` subscriptions through one
+  session-local worker thread, while non-recursive config file/directory subscriptions keep the existing direct
+  watcher path. The worker owns setup, reconciliation, and event delivery for every recursive target registered by
+  that config-reload instance.
+- This preserves recursive config/resource reload behavior and avoids one worker per target, but keeps Node's
+  expensive recursive directory enumeration off the TUI event loop. Issue #477 captured 350,387 inotify watches and
+  a V8 profile dominated by `node:internal/fs/recursive_watch`, `readdir`, and path normalization while terminal input
+  was frozen.
+- `test/suite/regressions/477-recursive-watch-main-thread-stall.test.ts` asserts the backend choice directly: Linux
+  recursive targets share the worker, and non-recursive targets still call `fs.watch` with `recursive: false`.
+
+### Expected merge conflict zones
+
+- LOW: `builtin/config-reload/watch-engine.ts` now re-exports the production event source from its dedicated module.
+- NONE: the new worker-backed event source is fork-owned and does not change the public `config-watch:*` protocol.
+
 ## 2026-07-29 - Reload veto probe on ExtensionContext + quiet config-reload deferral
 
 ### What changed and why
