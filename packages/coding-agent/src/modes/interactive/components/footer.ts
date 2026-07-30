@@ -152,7 +152,7 @@ export class FooterComponent implements Component {
 		const dim = (plain: string): FooterSegment => ({ plain, colored: theme.fg("dim", plain) });
 		const middle: FooterSegment[] = [];
 		if (sessionName) middle.push({ plain: sessionName, colored: theme.fg("muted", sessionName) });
-		if ((totalCacheRead > 0 || totalCacheWrite > 0) && latestCacheHitRate !== undefined) {
+		if ((totalCacheRead > 0 || totalCacheWrite > 0) && latestCacheHitRate !== undefined && latestCacheHitRate >= 10) {
 			middle.push(dim(`CH${latestCacheHitRate.toFixed(1)}%`));
 		}
 

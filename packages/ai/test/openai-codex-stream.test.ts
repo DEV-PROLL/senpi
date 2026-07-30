@@ -1086,96 +1086,99 @@ describe("openai-codex streaming", () => {
 		["gpt-5.1-codex", "priority", 2],
 		["gpt-5.5", "flex", 0.5],
 		["gpt-5.5", "priority", 2.5],
-	] as const)("uses the client-sent %s service tier for %s when Codex echoes default", async (modelId, serviceTier, multiplier) => {
-		const tempDir = mkdtempSync(join(tmpdir(), "pi-codex-stream-"));
-		process.env.PI_CODING_AGENT_DIR = tempDir;
-		const token = mockToken();
-		const sse = `${[
-			`data: ${JSON.stringify({
-				type: "response.output_item.added",
-				item: { type: "message", id: "msg_1", role: "assistant", status: "in_progress", content: [] },
-			})}`,
-			`data: ${JSON.stringify({ type: "response.content_part.added", part: { type: "output_text", text: "" } })}`,
-			`data: ${JSON.stringify({ type: "response.output_text.delta", delta: "Hello" })}`,
-			`data: ${JSON.stringify({
-				type: "response.output_item.done",
-				item: {
-					type: "message",
-					id: "msg_1",
-					role: "assistant",
-					status: "completed",
-					content: [{ type: "output_text", text: "Hello" }],
-				},
-			})}`,
-			`data: ${JSON.stringify({
-				type: "response.completed",
-				response: {
-					status: "completed",
-					service_tier: "default",
-					usage: {
-						input_tokens: 1000000,
-						output_tokens: 1000000,
-						total_tokens: 2000000,
-						input_tokens_details: { cached_tokens: 0 },
+	] as const)(
+		"uses the client-sent %s service tier for %s when Codex echoes default",
+		async (modelId, serviceTier, multiplier) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "pi-codex-stream-"));
+			process.env.PI_CODING_AGENT_DIR = tempDir;
+			const token = mockToken();
+			const sse = `${[
+				`data: ${JSON.stringify({
+					type: "response.output_item.added",
+					item: { type: "message", id: "msg_1", role: "assistant", status: "in_progress", content: [] },
+				})}`,
+				`data: ${JSON.stringify({ type: "response.content_part.added", part: { type: "output_text", text: "" } })}`,
+				`data: ${JSON.stringify({ type: "response.output_text.delta", delta: "Hello" })}`,
+				`data: ${JSON.stringify({
+					type: "response.output_item.done",
+					item: {
+						type: "message",
+						id: "msg_1",
+						role: "assistant",
+						status: "completed",
+						content: [{ type: "output_text", text: "Hello" }],
 					},
+				})}`,
+				`data: ${JSON.stringify({
+					type: "response.completed",
+					response: {
+						status: "completed",
+						service_tier: "default",
+						usage: {
+							input_tokens: 1000000,
+							output_tokens: 1000000,
+							total_tokens: 2000000,
+							input_tokens_details: { cached_tokens: 0 },
+						},
+					},
+				})}`,
+			].join("\n\n")}\n\n`;
+
+			const encoder = new TextEncoder();
+			const stream = new ReadableStream<Uint8Array>({
+				start(controller) {
+					controller.enqueue(encoder.encode(sse));
+					controller.close();
 				},
-			})}`,
-		].join("\n\n")}\n\n`;
+			});
 
-		const encoder = new TextEncoder();
-		const stream = new ReadableStream<Uint8Array>({
-			start(controller) {
-				controller.enqueue(encoder.encode(sse));
-				controller.close();
-			},
-		});
+			const fetchMock = vi.fn(async (input: string | URL) => {
+				const url = typeof input === "string" ? input : input.toString();
+				if (url === "https://api.github.com/repos/openai/codex/releases/latest") {
+					return new Response(JSON.stringify({ tag_name: "rust-v0.0.0" }), { status: 200 });
+				}
+				if (url.startsWith("https://raw.githubusercontent.com/openai/codex/")) {
+					return new Response("PROMPT", { status: 200, headers: { etag: '"etag"' } });
+				}
+				if (url === "https://chatgpt.com/backend-api/codex/responses") {
+					return new Response(stream, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					});
+				}
+				return new Response("not found", { status: 404 });
+			});
+			vi.stubGlobal("fetch", fetchMock);
 
-		const fetchMock = vi.fn(async (input: string | URL) => {
-			const url = typeof input === "string" ? input : input.toString();
-			if (url === "https://api.github.com/repos/openai/codex/releases/latest") {
-				return new Response(JSON.stringify({ tag_name: "rust-v0.0.0" }), { status: 200 });
-			}
-			if (url.startsWith("https://raw.githubusercontent.com/openai/codex/")) {
-				return new Response("PROMPT", { status: 200, headers: { etag: '"etag"' } });
-			}
-			if (url === "https://chatgpt.com/backend-api/codex/responses") {
-				return new Response(stream, {
-					status: 200,
-					headers: { "content-type": "text/event-stream" },
-				});
-			}
-			return new Response("not found", { status: 404 });
-		});
-		vi.stubGlobal("fetch", fetchMock);
+			const model: Model<"openai-codex-responses"> = {
+				id: modelId,
+				name: modelId === "gpt-5.5" ? "GPT-5.5" : "GPT-5.1 Codex",
+				api: "openai-codex-responses",
+				provider: "openai-codex",
+				baseUrl: "https://chatgpt.com/backend-api",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 400000,
+				maxTokens: 128000,
+			};
 
-		const model: Model<"openai-codex-responses"> = {
-			id: modelId,
-			name: modelId === "gpt-5.5" ? "GPT-5.5" : "GPT-5.1 Codex",
-			api: "openai-codex-responses",
-			provider: "openai-codex",
-			baseUrl: "https://chatgpt.com/backend-api",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 400000,
-			maxTokens: 128000,
-		};
+			const context: Context = {
+				systemPrompt: "You are a helpful assistant.",
+				messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
+			};
 
-		const context: Context = {
-			systemPrompt: "You are a helpful assistant.",
-			messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
-		};
+			const result = await streamOpenAICodexResponses(model, context, {
+				apiKey: token,
+				serviceTier,
+				transport: "sse",
+			}).result();
 
-		const result = await streamOpenAICodexResponses(model, context, {
-			apiKey: token,
-			serviceTier,
-			transport: "sse",
-		}).result();
-
-		expect(result.usage.cost.input).toBe(1 * multiplier);
-		expect(result.usage.cost.output).toBe(2 * multiplier);
-		expect(result.usage.cost.total).toBe(3 * multiplier);
-	});
+			expect(result.usage.cost.input).toBe(1 * multiplier);
+			expect(result.usage.cost.output).toBe(2 * multiplier);
+			expect(result.usage.cost.total).toBe(3 * multiplier);
+		},
+	);
 
 	it("does not set session-id/x-client-request-id headers when sessionId is not provided", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "pi-codex-stream-"));
@@ -2263,223 +2266,223 @@ describe("openai-codex streaming", () => {
 		expect(global.fetch).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		"websocket",
-		"sse",
-	] as const)("recovers a missing cached websocket continuation via %s", async (recoveryTransport) => {
-		const token = mockToken();
-		const sessionId = `missing-continuation-${recoveryTransport}`;
-		const encoder = new TextEncoder();
-		const fetchMock = vi.fn(
-			async () =>
-				new Response(
-					new ReadableStream<Uint8Array>({
-						start(controller) {
-							controller.enqueue(encoder.encode(buildSSEPayload({ status: "completed" })));
-							controller.close();
-						},
-					}),
-					{ status: 200, headers: { "content-type": "text/event-stream" } },
-				),
-		);
-		vi.stubGlobal("fetch", fetchMock);
-		const sentBodies: Array<{
-			connectionId: number;
-			input: unknown[];
-			previous_response_id?: string;
-		}> = [];
-		let connections = 0;
-
-		class MockWebSocket {
-			static OPEN = 1;
-			static CLOSED = 3;
-			readyState = MockWebSocket.OPEN;
-			private readonly connectionId = ++connections;
-			private listeners = new Map<string, Set<(event: unknown) => void>>();
-
-			constructor(_url: string, _protocols?: string | string[] | { headers?: Record<string, string> }) {
-				queueMicrotask(() => this.dispatch("open", {}));
-			}
-
-			addEventListener(type: string, listener: (event: unknown) => void): void {
-				let listeners = this.listeners.get(type);
-				if (!listeners) {
-					listeners = new Set();
-					this.listeners.set(type, listeners);
-				}
-				listeners.add(listener);
-			}
-
-			removeEventListener(type: string, listener: (event: unknown) => void): void {
-				this.listeners.get(type)?.delete(listener);
-			}
-
-			send(data: string): void {
-				const body = JSON.parse(data) as { input: unknown[]; previous_response_id?: string };
-				sentBodies.push({ ...body, connectionId: this.connectionId });
-				if (sentBodies.length === 2) {
-					this.dispatchEvents([
-						{
-							type: "codex.rate_limits",
-							plan_type: "plus",
-							rate_limits: {
-								allowed: true,
-								limit_reached: false,
-								primary: {
-									used_percent: 7,
-									window_minutes: 10080,
-									reset_after_seconds: 556112,
-									reset_at: 1785269351,
-								},
-								secondary: null,
+	it.each(["websocket", "sse"] as const)(
+		"recovers a missing cached websocket continuation via %s",
+		async (recoveryTransport) => {
+			const token = mockToken();
+			const sessionId = `missing-continuation-${recoveryTransport}`;
+			const encoder = new TextEncoder();
+			const fetchMock = vi.fn(
+				async () =>
+					new Response(
+						new ReadableStream<Uint8Array>({
+							start(controller) {
+								controller.enqueue(encoder.encode(buildSSEPayload({ status: "completed" })));
+								controller.close();
 							},
-							code_review_rate_limits: null,
-							additional_rate_limits: null,
-							credits: { has_credits: false, unlimited: false, balance: "0" },
-							promo: null,
+						}),
+						{ status: 200, headers: { "content-type": "text/event-stream" } },
+					),
+			);
+			vi.stubGlobal("fetch", fetchMock);
+			const sentBodies: Array<{
+				connectionId: number;
+				input: unknown[];
+				previous_response_id?: string;
+			}> = [];
+			let connections = 0;
+
+			class MockWebSocket {
+				static OPEN = 1;
+				static CLOSED = 3;
+				readyState = MockWebSocket.OPEN;
+				private readonly connectionId = ++connections;
+				private listeners = new Map<string, Set<(event: unknown) => void>>();
+
+				constructor(_url: string, _protocols?: string | string[] | { headers?: Record<string, string> }) {
+					queueMicrotask(() => this.dispatch("open", {}));
+				}
+
+				addEventListener(type: string, listener: (event: unknown) => void): void {
+					let listeners = this.listeners.get(type);
+					if (!listeners) {
+						listeners = new Set();
+						this.listeners.set(type, listeners);
+					}
+					listeners.add(listener);
+				}
+
+				removeEventListener(type: string, listener: (event: unknown) => void): void {
+					this.listeners.get(type)?.delete(listener);
+				}
+
+				send(data: string): void {
+					const body = JSON.parse(data) as { input: unknown[]; previous_response_id?: string };
+					sentBodies.push({ ...body, connectionId: this.connectionId });
+					if (sentBodies.length === 2) {
+						this.dispatchEvents([
+							{
+								type: "codex.rate_limits",
+								plan_type: "plus",
+								rate_limits: {
+									allowed: true,
+									limit_reached: false,
+									primary: {
+										used_percent: 7,
+										window_minutes: 10080,
+										reset_after_seconds: 556112,
+										reset_at: 1785269351,
+									},
+									secondary: null,
+								},
+								code_review_rate_limits: null,
+								additional_rate_limits: null,
+								credits: { has_credits: false, unlimited: false, balance: "0" },
+								promo: null,
+							},
+							{
+								type: "error",
+								status: 400,
+								error: {
+									code: "previous_response_not_found",
+									message: "Previous response with id 'resp_1' not found.",
+									param: "previous_response_id",
+								},
+							},
+						]);
+						return;
+					}
+					if (sentBodies.length === 3 && recoveryTransport === "sse") {
+						queueMicrotask(() => this.dispatch("error", { message: "retry websocket failed" }));
+						return;
+					}
+
+					const response =
+						sentBodies.length === 1
+							? { responseId: "resp_1", messageId: "msg_1", text: "Hello" }
+							: { responseId: "resp_2", messageId: "msg_2", text: "Recovered" };
+					this.dispatchEvents([
+						{ type: "response.created", response: { id: response.responseId } },
+						{
+							type: "response.output_item.added",
+							output_index: 0,
+							item: {
+								type: "message",
+								id: response.messageId,
+								role: "assistant",
+								status: "in_progress",
+								content: [],
+							},
 						},
 						{
-							type: "error",
-							status: 400,
-							error: {
-								code: "previous_response_not_found",
-								message: "Previous response with id 'resp_1' not found.",
-								param: "previous_response_id",
+							type: "response.output_item.done",
+							output_index: 0,
+							item: {
+								type: "message",
+								id: response.messageId,
+								role: "assistant",
+								status: "completed",
+								content: [{ type: "output_text", text: response.text }],
+							},
+						},
+						{
+							type: "response.completed",
+							response: {
+								id: response.responseId,
+								status: "completed",
+								usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 },
 							},
 						},
 					]);
-					return;
-				}
-				if (sentBodies.length === 3 && recoveryTransport === "sse") {
-					queueMicrotask(() => this.dispatch("error", { message: "retry websocket failed" }));
-					return;
 				}
 
-				const response =
-					sentBodies.length === 1
-						? { responseId: "resp_1", messageId: "msg_1", text: "Hello" }
-						: { responseId: "resp_2", messageId: "msg_2", text: "Recovered" };
-				this.dispatchEvents([
-					{ type: "response.created", response: { id: response.responseId } },
-					{
-						type: "response.output_item.added",
-						output_index: 0,
-						item: {
-							type: "message",
-							id: response.messageId,
-							role: "assistant",
-							status: "in_progress",
-							content: [],
-						},
-					},
-					{
-						type: "response.output_item.done",
-						output_index: 0,
-						item: {
-							type: "message",
-							id: response.messageId,
-							role: "assistant",
-							status: "completed",
-							content: [{ type: "output_text", text: response.text }],
-						},
-					},
-					{
-						type: "response.completed",
-						response: {
-							id: response.responseId,
-							status: "completed",
-							usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 },
-						},
-					},
-				]);
-			}
+				close(): void {
+					this.readyState = MockWebSocket.CLOSED;
+				}
 
-			close(): void {
-				this.readyState = MockWebSocket.CLOSED;
-			}
+				private dispatchEvents(events: unknown[]): void {
+					queueMicrotask(() => {
+						for (const event of events) {
+							this.dispatch("message", { data: JSON.stringify(event) });
+						}
+					});
+				}
 
-			private dispatchEvents(events: unknown[]): void {
-				queueMicrotask(() => {
-					for (const event of events) {
-						this.dispatch("message", { data: JSON.stringify(event) });
+				private dispatch(type: string, event: unknown): void {
+					for (const listener of this.listeners.get(type) ?? []) {
+						listener(event);
 					}
-				});
-			}
-
-			private dispatch(type: string, event: unknown): void {
-				for (const listener of this.listeners.get(type) ?? []) {
-					listener(event);
 				}
 			}
-		}
 
-		vi.stubGlobal("WebSocket", MockWebSocket);
+			vi.stubGlobal("WebSocket", MockWebSocket);
 
-		const model: Model<"openai-codex-responses"> = {
-			id: "gpt-5.1-codex",
-			name: "GPT-5.1 Codex",
-			api: "openai-codex-responses",
-			provider: "openai-codex",
-			baseUrl: "https://chatgpt.com/backend-api",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 400000,
-			maxTokens: 128000,
-		};
-		const firstContext: Context = {
-			systemPrompt: "You are a helpful assistant.",
-			messages: [{ role: "user", content: "Say hello", timestamp: 1 }],
-		};
+			const model: Model<"openai-codex-responses"> = {
+				id: "gpt-5.1-codex",
+				name: "GPT-5.1 Codex",
+				api: "openai-codex-responses",
+				provider: "openai-codex",
+				baseUrl: "https://chatgpt.com/backend-api",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 400000,
+				maxTokens: 128000,
+			};
+			const firstContext: Context = {
+				systemPrompt: "You are a helpful assistant.",
+				messages: [{ role: "user", content: "Say hello", timestamp: 1 }],
+			};
 
-		const first = await streamOpenAICodexResponses(model, firstContext, {
-			apiKey: token,
-			sessionId,
-			transport: "websocket-cached",
-		}).result();
-		const secondContext: Context = {
-			systemPrompt: "You are a helpful assistant.",
-			messages: [...firstContext.messages, first, { role: "user", content: "Now finish", timestamp: 2 }],
-		};
-		const eventTypes: string[] = [];
-		const secondStream = streamOpenAICodexResponses(model, secondContext, {
-			apiKey: token,
-			sessionId,
-			transport: "websocket-cached",
-		});
-		for await (const event of secondStream) {
-			eventTypes.push(event.type);
-		}
-		const second = await secondStream.result();
+			const first = await streamOpenAICodexResponses(model, firstContext, {
+				apiKey: token,
+				sessionId,
+				transport: "websocket-cached",
+			}).result();
+			const secondContext: Context = {
+				systemPrompt: "You are a helpful assistant.",
+				messages: [...firstContext.messages, first, { role: "user", content: "Now finish", timestamp: 2 }],
+			};
+			const eventTypes: string[] = [];
+			const secondStream = streamOpenAICodexResponses(model, secondContext, {
+				apiKey: token,
+				sessionId,
+				transport: "websocket-cached",
+			});
+			for await (const event of secondStream) {
+				eventTypes.push(event.type);
+			}
+			const second = await secondStream.result();
 
-		expect(second.stopReason).toBe("stop");
-		expect(second.content.find((content) => content.type === "text")?.text).toBe(
-			recoveryTransport === "sse" ? "Hello" : "Recovered",
-		);
-		expect(eventTypes.filter((type) => type === "start")).toHaveLength(1);
-		expect(eventTypes).not.toContain("error");
-		expect(connections).toBe(2);
-		expect(sentBodies).toHaveLength(3);
-		expect(sentBodies.map((body) => body.connectionId)).toEqual([1, 1, 2]);
-		expect(sentBodies[1].previous_response_id).toBe("resp_1");
-		expect(sentBodies[1].input).toEqual([{ role: "user", content: [{ type: "input_text", text: "Now finish" }] }]);
-		expect(sentBodies[2].previous_response_id).toBeUndefined();
-		expect(sentBodies[2].input).toHaveLength(3);
-		expect(sentBodies[2].input.at(-1)).toEqual({
-			role: "user",
-			content: [{ type: "input_text", text: "Now finish" }],
-		});
-		expect(fetchMock).toHaveBeenCalledTimes(recoveryTransport === "sse" ? 1 : 0);
-		expect(getOpenAICodexWebSocketDebugStats(sessionId)).toMatchObject({
-			requests: 3,
-			connectionsCreated: 2,
-			connectionsReused: 1,
-			fullContextRequests: 2,
-			deltaRequests: 1,
-			websocketFailures: recoveryTransport === "sse" ? 1 : 0,
-			sseFallbacks: recoveryTransport === "sse" ? 1 : 0,
-		});
-	});
+			expect(second.stopReason).toBe("stop");
+			expect(second.content.find((content) => content.type === "text")?.text).toBe(
+				recoveryTransport === "sse" ? "Hello" : "Recovered",
+			);
+			expect(eventTypes.filter((type) => type === "start")).toHaveLength(1);
+			expect(eventTypes).not.toContain("error");
+			expect(connections).toBe(2);
+			expect(sentBodies).toHaveLength(3);
+			expect(sentBodies.map((body) => body.connectionId)).toEqual([1, 1, 2]);
+			expect(sentBodies[1].previous_response_id).toBe("resp_1");
+			expect(sentBodies[1].input).toEqual([{ role: "user", content: [{ type: "input_text", text: "Now finish" }] }]);
+			expect(sentBodies[2].previous_response_id).toBeUndefined();
+			expect(sentBodies[2].input).toHaveLength(3);
+			expect(sentBodies[2].input.at(-1)).toEqual({
+				role: "user",
+				content: [{ type: "input_text", text: "Now finish" }],
+			});
+			expect(fetchMock).toHaveBeenCalledTimes(recoveryTransport === "sse" ? 1 : 0);
+			expect(getOpenAICodexWebSocketDebugStats(sessionId)).toMatchObject({
+				requests: 3,
+				connectionsCreated: 2,
+				connectionsReused: 1,
+				fullContextRequests: 2,
+				deltaRequests: 1,
+				websocketFailures: recoveryTransport === "sse" ? 1 : 0,
+				sseFallbacks: recoveryTransport === "sse" ? 1 : 0,
+			});
+		},
+	);
 
 	it.each([
 		["retry-after-ms", () => ({ "content-type": "application/json", "retry-after-ms": "1500" }), 1500],

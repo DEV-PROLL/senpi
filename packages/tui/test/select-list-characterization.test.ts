@@ -60,7 +60,7 @@ describe("SelectList byte-identical characterization (pre-seam capture)", () => 
 			5,
 			markerTheme,
 		);
-		assert.deepStrictEqual(list.render(80), EXPECTED["wideDescriptions"]);
+		assert.deepStrictEqual(list.render(80), EXPECTED.wideDescriptions);
 	});
 
 	it("suppresses the description column at narrow width", () => {
@@ -72,7 +72,7 @@ describe("SelectList byte-identical characterization (pre-seam capture)", () => 
 			5,
 			markerTheme,
 		);
-		assert.deepStrictEqual(list.render(30), EXPECTED["narrowWidth"]);
+		assert.deepStrictEqual(list.render(30), EXPECTED.narrowWidth);
 	});
 
 	it("renders rows without descriptions", () => {
@@ -84,7 +84,7 @@ describe("SelectList byte-identical characterization (pre-seam capture)", () => 
 			5,
 			markerTheme,
 		);
-		assert.deepStrictEqual(list.render(80), EXPECTED["noDescriptions"]);
+		assert.deepStrictEqual(list.render(80), EXPECTED.noDescriptions);
 	});
 
 	it("truncates a long primary against the default column cap", () => {
@@ -100,7 +100,7 @@ describe("SelectList byte-identical characterization (pre-seam capture)", () => 
 			5,
 			markerTheme,
 		);
-		assert.deepStrictEqual(list.render(80), EXPECTED["truncatedLongPrimary"]);
+		assert.deepStrictEqual(list.render(80), EXPECTED.truncatedLongPrimary);
 	});
 
 	it("renders CJK wide-glyph primaries and descriptions", () => {
@@ -114,7 +114,7 @@ describe("SelectList byte-identical characterization (pre-seam capture)", () => 
 			markerTheme,
 		);
 		list.setSelectedIndex(1);
-		assert.deepStrictEqual(list.render(80), EXPECTED["cjkItems"]);
+		assert.deepStrictEqual(list.render(80), EXPECTED.cjkItems);
 	});
 
 	it("renders the scroll info line when items overflow maxVisible", () => {
@@ -131,13 +131,13 @@ describe("SelectList byte-identical characterization (pre-seam capture)", () => 
 			markerTheme,
 		);
 		list.setSelectedIndex(4);
-		assert.deepStrictEqual(list.render(80), EXPECTED["scrollInfo"]);
+		assert.deepStrictEqual(list.render(80), EXPECTED.scrollInfo);
 	});
 
 	it("renders the no-match message when the filter removes every item", () => {
 		const list = new SelectList([{ value: "help", label: "help" }], 5, markerTheme);
 		list.setFilter("zzz");
-		assert.deepStrictEqual(list.render(80), EXPECTED["noMatch"]);
+		assert.deepStrictEqual(list.render(80), EXPECTED.noMatch);
 	});
 
 	it("truncates descriptions at mid width", () => {
@@ -149,6 +149,6 @@ describe("SelectList byte-identical characterization (pre-seam capture)", () => 
 			5,
 			markerTheme,
 		);
-		assert.deepStrictEqual(list.render(50), EXPECTED["truncatedDescription"]);
+		assert.deepStrictEqual(list.render(50), EXPECTED.truncatedDescription);
 	});
 });

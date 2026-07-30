@@ -12,6 +12,90 @@
 
 ### Removed
 
+## [2026.7.29-6] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-5] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-4] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Preserve Kimi XTML protocol identity in recovered tool-call diagnostics and IDs, and serialize OpenAI-compatible
+  reasoning, text, and native tool-call lifecycles without breaking providers that stream mixed content and
+  parallel tool deltas ([#498](https://github.com/code-yeongyu/senpi/pull/498)).
+
+### Removed
+
+## [2026.7.29-3] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-2] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+- Added the native `kimi-xtml` text tool-call protocol for Kimi K3, including typed argument coercion, chunk-safe streaming, incomplete-call finalization, and normal-mode recovery that turns leaked XTML channel blocks into executable tool calls while removing protocol markers from visible assistant text ([#465](https://github.com/code-yeongyu/senpi/pull/465)).
+
+### Changed
+
+### Fixed
+
+- Treat Anthropic `credits_required` and “credits are required” responses as non-retryable billing failures, avoiding repeated requests against an exhausted account and allowing the coding agent to pin a configured fallback immediately ([#484](https://github.com/code-yeongyu/senpi/pull/484)).
+- Classify zero-event provider-stream stalls separately from ordinary transient failures so the coding agent can apply bounded stall escalation instead of replaying a dead upstream with the full idle timeout on every retry ([#453](https://github.com/code-yeongyu/senpi/pull/453)).
+- Preserve steering and follow-up input across provider idle-timeout retries, cap only the retry continuation’s idle wait at 30 seconds, and restore the configured timeout for later ordinary turns ([#458](https://github.com/code-yeongyu/senpi/pull/458) by [@realsigridjin](https://github.com/realsigridjin)).
+- Treat provider configurations whose authentication is fully supplied through custom headers as configured, while leaving `authHeader` and genuinely unauthenticated configurations unchanged ([#472](https://github.com/code-yeongyu/senpi/pull/472) by [@eddieparc](https://github.com/eddieparc)).
+- Abort provider requests that emit no first stream event within the new stream-start timeout, producing a retryable diagnostic and tearing down the dead request without waiting for the longer in-stream idle timeout ([#451](https://github.com/code-yeongyu/senpi/pull/451)).
+
+### Removed
+
 ## [2026.7.28-3] - 2026-07-28
 
 ### Breaking Changes

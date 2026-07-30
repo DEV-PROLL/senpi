@@ -1,5 +1,23 @@
 # Builtin compaction extension changes
 
+## Plugsuits wave1: observability, ineffective-cap, task-intent anchor (2026-07-29)
+
+### What changed
+
+- `summary.v1` now carries an origin marker in `details.origin`, and compaction logging is always on via `compaction.log`; when `SENPI_COMPACTION_DEBUG` is enabled, the same log stream is mirrored to stderr for local debugging.
+- Structural yield is now embedded at generation time in `details.structuralYield`, so the accept/reject path no longer has to reconstruct it later. The ineffective predicate is `savedTokens < 1024 || ratio < 0.10`; would-overflow attempts count toward the per-turn cap, while breaker and accepted-result semantics stay unchanged.
+- Task intent is now anchored across compaction by extracting it, persisting it, and reinjecting it into the post-compaction prompt. The baseline is Claude, with a terse GPT preset for the compact form.
+
+### Why
+
+- These changes make compaction behavior observable and debuggable without changing the underlying acceptance semantics, and they preserve intent through compaction so follow-up turns stay grounded.
+
+### Expected merge conflict zones
+
+- `index.ts` around logger/origin/cap wiring.
+- `speculative.ts` around `structuralYield`/taskIntent extraction.
+- `prompts.ts` around PASS-1/family selection.
+
 ## Degrade wall-clock budget trips like stalled streams (2026-07-28)
 
 ### What changed

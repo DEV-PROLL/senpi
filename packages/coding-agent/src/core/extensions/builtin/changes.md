@@ -1,5 +1,30 @@
 # Builtin extensions changes
 
+## service-tier: explain why `/fast` is unavailable on a subscription (2026-07-30)
+
+- Fixes the misleading notice reported in issue #499. `/fast` is registered only
+  for `openai-codex`, but `generate-models.ts` emits `-fast` priority variants
+  only for the direct `openai` provider, so no Codex model ever has a target and
+  the command could only ever answer "Fast mode is not supported for
+  openai-codex/<model>" — which reads as a per-model gap rather than a
+  plan-level limitation.
+- Generating the missing Codex variants would be wrong. Measured against
+  `chatgpt.com/backend-api/codex/responses` with a live ChatGPT Pro
+  subscription: `service_tier: "priority"` and `"default"` both return HTTP 200
+  and the response echoes `"auto"`, while `"auto"`, `"flex"` and `"scale"` are
+  rejected with HTTP 400 `Unsupported service_tier`. The backend allowlists
+  `priority` but serves it at normal tier, and
+  `getServiceTierCostMultiplier()` would still bill it at 2.5x for gpt-5.5
+  (2x elsewhere) — so synthesising variants would inflate reported cost for
+  unchanged service.
+- The no-variant branch now states that priority tier is unavailable on a
+  ChatGPT subscription and that it requires API-key billing on the `openai`
+  provider, where `-fast` variants already exist and `/fast` works.
+- `test/suite/service-tier-extension.test.ts` asserts the notice explains the
+  subscription limitation and no longer blames the model.
+- Expected merge conflict zones: LOW in `service-tier.ts` around the
+  `FAST_UNAVAILABLE_ON_SUBSCRIPTION` constant and the no-variant branch.
+
 ## service-tier: add `/fast` for OpenAI Codex (2026-07-29)
 
 - `service-tier.ts` registers `/fast` only for the `openai-codex` provider.

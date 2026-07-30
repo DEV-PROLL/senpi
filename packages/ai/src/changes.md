@@ -1,5 +1,76 @@
 # AI Source Changes
 
+## 2026-07-29 - Preserve invoke-recovery protocol provenance
+
+### What changed and why
+
+- `wrapStreamWithInvokeRecovery()` accepts typed recovery options carrying both the parser factory and the protocol
+  identity. The previous parser-only argument selected Kimi XTML correctly but lost that provenance in shared
+  diagnostics and recovered tool-call IDs.
+- Successful Kimi recovery now reports `protocol: "kimi-xtml"` and allocates `recovered-kimi-xtml-*` IDs. Invalid
+  content/native event order and collision failures use the same protocol identity instead of always claiming
+  `antml`.
+- The default and legacy parser-function call forms remain ANTML-compatible, preserving existing Claude/default
+  recovery diagnostics and IDs.
+- Coverage: the shared wrapper pins Kimi failure diagnostics, and the coding-agent runtime boundary pins successful
+  Kimi diagnostics plus recovered IDs.
+
+### Expected merge conflict zones
+
+- MEDIUM: invoke-recovery wrapper, diagnostic, failure, and native projection constructor signatures.
+
+## 2026-07-29 - Serialize OpenAI completion content block events
+
+### What changed and why
+
+- `api/openai-completions.ts` now closes the active thinking, text, or native tool-call block before starting the
+  next block. The adapter previously accumulated every block and emitted all `*_end` events only after the wire
+  stream finished, producing overlapping canonical lifecycles such as `thinking_start -> text_start` and
+  `text_start -> toolcall_start`.
+- Providers that put text, reasoning, and parallel tool-call deltas in the same chunk keep their established
+  single-block aggregation. The adapter defers that mixed chunk's content events and replays text, thinking, and
+  each tool call as complete sequential lifecycles, avoiding duplicate text/thinking starts without restoring
+  overlapping events.
+- The invoke-recovery wrapper correctly rejects overlapping canonical content lifecycles. Kimi K3 exposed the
+  adapter bug when a normal response streamed reasoning, visible text, and native tool calls in sequence, causing
+  the user-facing terminal error `Invalid assistant content event order`.
+- Coverage: `test/openai-completions-stream-lifecycle.test.ts` drives a real local SSE endpoint through reasoning,
+  text, and a native tool call and pins the sequential start/delta/end event order.
+  `test/openai-completions-tool-choice.test.ts` pins mixed text/reasoning/parallel-tool aggregation and sequential
+  event replay.
+
+### Expected merge conflict zones
+
+- LOW: the block lifecycle helpers inside `api/openai-completions.ts`.
+
+## 2026-07-29 - Support static credential headers without a synthetic API key
+
+### What changed and why
+
+- `auth/headers.ts` defines the narrow, case-insensitive credential-header contract shared by auth discovery and
+  request adapters. Standard authorization, API-key, API-token, auth-token, access-token, and client-secret header
+  names count only when their effective value contains credential material; metadata such as `User-Agent`,
+  request ids, and trace tokens does not.
+- `api/openai-client-auth.ts` lets OpenAI-compatible adapters initialize from credential-bearing headers when
+  `ModelAuth.apiKey` is absent. Header-only clients suppress the SDK's default `Authorization: Bearer ...` header
+  unless an explicit Authorization or the existing Cloudflare AI Gateway authorization path owns that behavior.
+- `api/openai-completions.ts` and `api/openai-responses.ts` use the shared client-auth resolver for HTTP and
+  Responses WebSocket requests, so `x-api-key` and equivalent static credentials work without an invented bearer
+  token.
+
+### Coverage
+
+- `test/auth-headers.test.ts` covers recognized names, metadata rejection, case-insensitive overrides, and empty
+  authorization schemes.
+- `test/openai-header-auth.test.ts` exercises real OpenAI-compatible request construction for Completions and
+  Responses and proves metadata-only headers fail before any request is issued.
+
+### Expected merge conflict zones
+
+- LOW: additive auth/header helpers and root export.
+- MEDIUM: the duplicated OpenAI client-auth setup removed from `api/openai-completions.ts` and
+  `api/openai-responses.ts`.
+
 ## 2026-07-29 - Classify Anthropic credits_required as non-retryable billing exhaustion
 
 ### What changed and why

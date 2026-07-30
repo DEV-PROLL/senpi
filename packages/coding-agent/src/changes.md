@@ -28,6 +28,52 @@
   with upstream edits to that function; constants and `sleepBlocking` are additive. The same fix belongs
   upstream as well.
 
+## Kimi XTML recovery preserves protocol identity (2026-07-29)
+
+### What changed
+
+- `core/model-runtime.ts` passes both `createXtmlRecoveryStreamParser` and `protocol: "kimi-xtml"` to the shared
+  invoke-recovery wrapper for Kimi models.
+- Successful recovered tool calls and terminal recovery failures now expose Kimi-specific diagnostics and
+  `recovered-kimi-xtml-*` IDs instead of misleading ANTML metadata.
+- `test/kimi-xtml-recovery-runtime-boundary.test.ts` pins the user-visible runtime result while the default ANTML
+  path remains covered in the AI package.
+
+### Expected merge conflict zones
+
+- LOW: the two invoke-recovery call sites in `core/model-runtime.ts`.
+
+## Static credential headers participate in real provider auth resolution (2026-07-29)
+
+### What changed
+
+- `core/provider-header-auth.ts` classifies only credential-like provider headers, preserves case-insensitive
+  override semantics, and derives distinct models.json versus extension status sources.
+- `core/provider-api-key-auth.ts` resolves credential-bearing provider headers into a genuine header-only
+  `AuthResult`, exposes the same result through `checkAuth()`, and leaves metadata-only or empty header maps
+  unconfigured. Header-only auth does not fabricate an API-key login method, and OAuth providers remain logged out
+  when their only configured headers are request metadata.
+- `configuredRequestAuthStatus()` uses the same credential-header contract, keeping synchronous registry reads,
+  asynchronous availability snapshots, TUI/RPC status, and request execution aligned.
+
+### Why this belongs in core
+
+- Auth resolution, registry availability, and status projection are package-owned provider-composition seams. An
+  extension can supply headers but cannot make the shared model runtime interpret them consistently.
+
+### Coverage
+
+- `test/provider-composer-headers-auth.test.ts` exercises models.json and extension header auth through registry
+  availability, `checkAuth()`, `getAuth()`, and runtime streaming, while locking metadata, empty-header, OAuth, API
+  key, and `authHeader` behavior.
+- `packages/ai/test/auth-headers.test.ts` and `packages/ai/test/openai-header-auth.test.ts` cover the shared
+  classification and OpenAI-compatible request path.
+
+### Expected merge conflict zones
+
+- LOW: additive `core/provider-header-auth.ts`, `core/provider-api-key-auth.ts`, and focused regression coverage.
+- MEDIUM: `core/provider-composer.ts` auth composition and status projection.
+
 ## Anthropic credits_required 429 pins the billing fallback (2026-07-29)
 
 ### What changed
@@ -95,7 +141,6 @@
   has no upstream counterpart.
 - LOW: the `projectTrustContext` fallback wrap inside `createRuntime`.
 
-||||||| 2a853f363
 ## Repeated provider-stream stalls escalate to the fallback chain (2026-07-29)
 
 ### What changed
@@ -422,6 +467,7 @@
 - The user's checkout receives ZERO git mutations: the hook performs one read-only `git fetch origin dev`, builds in a feature-owned persistent worktree under the agent directory, and atomically swaps the installed plugin directory by rename. No checkout/branch/commit/merge/reset/clean/stash/push ever touches the user's tree.
 - `SENPI_OMO_LOCAL_UPDATE=0` is a kill-switch that disables the hook entirely. All failures are non-fatal: the hook never throws and never sets `process.exitCode`; any error downgrades to a warning plus a manual-update hint so the `senpi` self-update proceeds untouched.
 - Fast path (2026-07-29): the skip decision now compares a build-input fingerprint of `origin/dev` (`src/beta/omo-local-update-fingerprint.ts`: sha256 over root tree entries minus documentation/agent-config paths) instead of the bare commit sha, so docs/CI-only churn in the omo monorepo no longer triggers the ~30s rebuild. When a rebuild IS needed, the bare-update foreground now only fetches and compares (~1s) and hands the build to a detached worker (`src/beta/omo-local-update-worker.ts`, hidden `senpi update --omo-local-update-worker` flag, output to `<agentDir>/omo-local-update/worker.log`); the worker serializes through the existing pid lock and swaps/stamps exactly like the former inline path. `SENPI_OMO_LOCAL_UPDATE_SYNC=1` restores the old blocking foreground behavior.
+- The fast skip also checks the updater's current required-artifact contract independently of the historical stamp inventory. A legacy, stale, or externally damaged stamp can no longer hide a missing packaged LSP daemon CLI; the next update rebuilds and atomically repairs the plugin.
 - Removal is exactly three steps: delete all `src/beta/omo-local-update*.ts` files; delete all `test/omo-local-update*` files; delete the BETA-marked touch points (the import, the hook calls, and the `--omo-local-update-worker` flag) in `package-manager-cli.ts`.
 
 ## App-server daemon launch diagnostics and hermetic lifecycle coverage (2026-07-24)

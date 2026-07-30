@@ -12,6 +12,82 @@
 
 ### Removed
 
+## [2026.7.29-6] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-5] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-4] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-3] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-2] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+- Show every live detached eval cell in the interactive footer, using a highlighted `↗ <language> · <title>` status for one cell and a bounded packed summary for multiple cells; clear the status immediately when the final detached cell settles ([#483](https://github.com/code-yeongyu/senpi/pull/483)).
+
+### Changed
+
+### Fixed
+
+- Route reserved `agent()`, `output()`, and `tool_schema()` bridge calls from Python and other subprocess kernels through the reserved HTTP handler instead of attempting to execute nonexistent `__agent__`, `__output__`, and `__schema__` tools; ordinary bridge tool calls remain unchanged ([#462](https://github.com/code-yeongyu/senpi/pull/462)).
+
+### Removed
+
 ## [2026.7.28-3] - 2026-07-28
 
 ### Breaking Changes

@@ -14,9 +14,12 @@ compaction/
 ├── openai-remote.ts          # OpenAI Responses remote-compaction route (`senpi.compaction.openai-remote.v1` schema)
 ├── repair-tool-pairs.ts      # Replaces orphaned tool-call/result pairs left by pruning with placeholders
 ├── circuit-breaker.ts        # N consecutive failures → halt automatic compaction
-├── per-turn-cap.ts           # Max compactions per turn rate-limiter
 ├── degradation-monitor.ts    # Detects post-compact assistant degradation (all-tool, no-text turns)
+├── log.ts                    # Always-on compaction logging + debug stderr mirror
+├── per-turn-cap.ts           # Max compactions per turn rate-limiter
+├── task-intent.ts            # Extracts/persists/reinjects task-intent anchors across compaction
 ├── tool-truncation.ts        # Emergency/compaction-budget truncation for oversized bash/read results
+├── yield.ts                  # Structural yield capture and ineffective-compaction accounting
 ├── checkpoint-state.ts       # Snapshots agent state (model, thinking, todos) at compact boundaries
 ├── todo-bridge.ts            # Carries todos through compaction so the summary preserves them
 ├── restoration-tracker.ts    # Post-compact: re-injects skill + file context (fork-introduced)
@@ -48,7 +51,7 @@ compaction/
 ## CONVENTIONS
 
 - **Each sub-policy is a pure module** with explicit state passed through. Don't add singletons.
-- **The 12 per-feature compaction fixtures** under `packages/coding-agent/test/fixtures/compaction/` map 1:1 onto these sub-policies — when you change a policy, update its fixture (and add a new one if you split a behavior).
+- **The 13 per-feature compaction fixtures** under `packages/coding-agent/test/fixtures/compaction/` map 1:1 onto these sub-policies — when you change a policy, update its fixture (and add a new one if you split a behavior).
 - **Restoration tracker is opt-in via `CompactionSettings`** — don't make it unconditional; tests rely on the on/off path.
 - **`session_compact` is the canonical event**; everything else (degradation, restoration) hangs off it.
 
@@ -62,5 +65,5 @@ compaction/
 ## NOTES
 
 - The fork's compaction differs significantly from upstream pi (speculative + restoration + degradation are all senpi additions). Upstream has a much simpler `core/compaction/` policy.
-- The 12 per-feature fixtures (under `test/fixtures/compaction/`) are documented in their own `README.md` — each isolates one subsystem to avoid spooky-action regressions.
+- The 13 per-feature fixtures (under `packages/coding-agent/test/fixtures/compaction/`) are documented in their own `README.md` — each isolates one subsystem to avoid spooky-action regressions.
 - `restoration-tracker.ts` is the marquee feature: post-compact, the agent re-reads its prior file/skill context so summarization doesn't lose tool grounding.

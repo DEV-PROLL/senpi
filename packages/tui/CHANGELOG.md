@@ -12,6 +12,80 @@
 
 ### Removed
 
+## [2026.7.29-6] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-5] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-4] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-3] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29-2] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.29] - 2026-07-29
+
+### Breaking Changes
+
+### Added
+
+- Render inline and display LaTeX delimiters as width-stable terminal Unicode, covering common operators, Greek letters, relations, roots, fractions, and sub/superscripts while preserving unmatched delimiters, code spans/fences, and unknown command groups without new runtime dependencies ([#449](https://github.com/code-yeongyu/senpi/pull/449) by [@minpeter](https://github.com/minpeter)).
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [2026.7.28-3] - 2026-07-28
 
 ### Breaking Changes

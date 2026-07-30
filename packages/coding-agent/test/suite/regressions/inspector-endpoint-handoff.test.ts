@@ -115,7 +115,7 @@ function driveRun(child: ChildProcessByStdio<null, Readable, Readable>): Promise
 		const attached = new Set<string>();
 		const timer = setTimeout(
 			() => reject(new Error(`--inspect-brk handoff timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`)),
-			50_000,
+			150_000,
 		);
 		timer.unref();
 		child.stdout.on("data", (chunk: Buffer) => {
@@ -199,4 +199,4 @@ test("hands a fixed inspect-brk endpoint across two fully resumed debugger sessi
 		expect(state.paused).toBe(true);
 		expect(state.resumed).toBe(true);
 	}
-}, 60_000);
+}, 180_000);

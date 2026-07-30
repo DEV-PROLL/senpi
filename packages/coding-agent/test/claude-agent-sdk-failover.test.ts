@@ -52,6 +52,48 @@ describe("Claude Agent SDK failover", () => {
 		expect(classifySdkError("HTTP 529 overloaded")).toEqual({ kind: "overloaded", retryable: true });
 	});
 
+	it("treats Claude Code's prose subscription limits as rate limits", () => {
+		// Real message from the CLI on an exhausted Pro/Max plan: no SDK error code
+		// and no HTTP status, so without prose matching it classified as
+		// non-retryable "other" and the exhausted account was never blocked — a
+		// multi-account pool then never rotated past it.
+		expect(classifySdkError("You've hit your weekly limit \u00b7 resets 5am (Asia/Seoul)")).toEqual({
+			kind: "rate_limit",
+			retryable: true,
+		});
+		expect(classifySdkError("You've reached your 5-hour limit")).toEqual({
+			kind: "rate_limit",
+			retryable: true,
+		});
+		expect(classifySdkError("Daily limit exceeded")).toEqual({ kind: "rate_limit", retryable: true });
+	});
+
+	it("treats SDK terminal_reason limit signals as rate limits", () => {
+		// auth-lane appends `terminal_reason` to result errors because `subtype`
+		// alone reports plain "error_during_execution" for a blocked subscription.
+		expect(classifySdkError("Claude Code error_during_execution: blocking_limit")).toEqual({
+			kind: "rate_limit",
+			retryable: true,
+		});
+		expect(classifySdkError("Claude Code error_during_execution: rapid_refill_breaker")).toEqual({
+			kind: "rate_limit",
+			retryable: true,
+		});
+		expect(classifySdkError("Claude Code error_during_execution: model_error")).toEqual({
+			kind: "other",
+			retryable: false,
+		});
+	});
+
+	it("still treats unrelated errors as non-retryable", () => {
+		// The prose matcher must not swallow ordinary failures into the retry path.
+		expect(classifySdkError("context window exceeded for this request")).toEqual({
+			kind: "other",
+			retryable: false,
+		});
+		expect(classifySdkError("connection reset by peer")).toEqual({ kind: "other", retryable: false });
+	});
+
 	it("walks HRW order after a rate limit, persists the cooldown, and emits failover", async () => {
 		const store = await storeWithAccounts();
 		const sessionId = "failover-session";

@@ -1,7 +1,7 @@
 {
 	"name": "@earendil-works/pi-tui",
 	"private": true,
-	"version": "2026.7.28-3",
+	"version": "2026.7.29-6",
 	"description": "Terminal User Interface library with differential rendering for efficient text-based applications",
 	"type": "module",
 	"main": "dist/index.js",
@@ -40,10 +40,10 @@
 	"types": "./dist/index.d.ts",
 	"dependencies": {
 		"get-east-asian-width": "1.6.0",
-		"marked": "18.0.5"
+		"marked": "18.0.7"
 	},
 	"devDependencies": {
-		"@xterm/headless": "5.5.0",
-		"chalk": "5.6.2"
+		"@xterm/headless": "6.0.0",
+		"chalk": "6.0.0"
 	}
 }

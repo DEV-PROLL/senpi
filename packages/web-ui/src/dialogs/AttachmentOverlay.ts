@@ -375,7 +375,7 @@ export class AttachmentOverlay extends LitElement {
 			this.error = error?.message || i18n("Failed to load PDF");
 		} finally {
 			if (pdf) {
-				pdf.destroy();
+				await pdf.cleanup();
 			}
 		}
 	}

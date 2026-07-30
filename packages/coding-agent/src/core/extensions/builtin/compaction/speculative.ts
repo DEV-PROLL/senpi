@@ -31,6 +31,7 @@ import { computeEffectiveKeepRecentTokens, computeEffectiveThreshold } from "./p
 import { buildPrompt, type MergedCompactionPromptVariant } from "./prompts.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
 import * as truncation from "./tool-truncation.ts";
+import { computeStructuralYield } from "./yield.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const COMPACTION_BUDGET_RATIO = 0.6;
@@ -69,6 +70,7 @@ export interface SpeculativeCompactionSnapshot {
 	contextWindow: number;
 	preparation: CompactionPreparation;
 	promptVariant: MergedCompactionPromptVariant;
+	origin?: "speculative" | "blocking" | "core-route";
 	customInstructions?: string;
 	/** Agent system prompt; used to make the summarization request look like normal agent traffic. */
 	systemPrompt?: string;
@@ -421,7 +423,12 @@ export function getPromptVariant(options: {
 
 export function createSpeculativeCompactionSnapshot(
 	context: SpeculativeCompactionContext,
-	options: { customInstructions?: string; generation: number; tools?: Tool[] },
+	options: {
+		customInstructions?: string;
+		generation: number;
+		origin?: "speculative" | "blocking" | "core-route";
+		tools?: Tool[];
+	},
 ): SpeculativeCompactionSnapshot | undefined {
 	const model = context.model;
 	if (!model) return undefined;
@@ -444,6 +451,7 @@ export function createSpeculativeCompactionSnapshot(
 		contextWindow,
 		preparation,
 		promptVariant: getPromptVariant({ reason: "extension", preparation }),
+		...(options.origin ? { origin: options.origin } : {}),
 		customInstructions: options.customInstructions,
 		systemPrompt: context.getSystemPrompt?.(),
 		tools: options.tools,
@@ -540,7 +548,19 @@ export async function runExtensionCompaction(
 			summary,
 			firstKeptEntryId: snapshot.preparation.firstKeptEntryId,
 			tokensBefore: snapshot.preparation.tokensBefore,
-			details: { schema: SUMMARY_SCHEMA, promptVariant: snapshot.promptVariant, tokenEstimate },
+			details: {
+				schema: SUMMARY_SCHEMA,
+				promptVariant: snapshot.promptVariant,
+				tokenEstimate,
+				structuralYield: computeStructuralYield({
+					previousSummary: snapshot.preparation.previousSummary ?? "",
+					messagesToSummarize: snapshot.preparation.messagesToSummarize,
+					turnPrefixMessages: snapshot.preparation.turnPrefixMessages,
+					summary,
+					tokensBefore: snapshot.preparation.tokensBefore,
+				}),
+				...(snapshot.origin ? { origin: snapshot.origin } : {}),
+			},
 		};
 	}
 
