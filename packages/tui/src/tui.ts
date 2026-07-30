@@ -1396,6 +1396,16 @@ export class TuiBase extends Container {
 		return result;
 	}
 
+	compositeLineAt(
+		baseLine: string,
+		overlayLine: string,
+		startCol: number,
+		overlayWidth: number,
+		totalWidth: number,
+	): string {
+		return compositeTuiLine(baseLine, overlayLine, startCol, overlayWidth, totalWidth);
+	}
+
 	public static readonly SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
 
 	/**

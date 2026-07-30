@@ -1528,6 +1528,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 						},
 						compat: {
 							supportsDeveloperRole: false,
+							maxTokensField: "max_tokens",
 							thinkingFormat: "zai",
 							...(isGlm52 ? { supportsReasoningEffort: true } : {}),
 							...(!ZAI_TOOL_STREAM_UNSUPPORTED_MODELS.has(modelId) ? { zaiToolStream: true } : {}),
@@ -2076,6 +2077,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			thinkingFormat: "qwen",
 			supportsDeveloperRole: false,
 			supportsStore: false,
+			maxTokensField: "max_tokens",
 			supportsReasoningEffort: true,
 		};
 		const qwenTokenPlanVariants = [
