@@ -16,7 +16,7 @@ import {
 	normalizeTerminalAssistantMessage,
 	shouldTerminateAssistantTurn,
 } from "./assistant-terminal-state.ts";
-import { getDefaultStreamFn } from "./stream-fn.ts";
+import { getDefaultStreamFn, withEmptyAssistantRecovery } from "./stream-fn.ts";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -252,7 +252,7 @@ async function runLoop(
 				requestConfig,
 				signal,
 				emit,
-				streamFunction,
+				withEmptyAssistantRecovery(requestConfig.model, streamFunction),
 				streamIdleTimeoutMs,
 			);
 			newMessages.push(message);
