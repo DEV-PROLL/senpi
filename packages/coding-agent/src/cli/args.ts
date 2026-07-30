@@ -48,6 +48,7 @@ export interface Args {
 	listModels?: string | true;
 	listTips?: boolean;
 	offline?: boolean;
+	alt?: boolean;
 	verbose?: boolean;
 	projectTrustOverride?: boolean;
 	/** Launch the experimental grok interactive chrome. */
@@ -185,6 +186,8 @@ export function parseArgs(args: string[], options: { grokNeoEnabled?: boolean } 
 			}
 		} else if (arg === "--list-tips") {
 			result.listTips = true;
+		} else if (arg === "--alt") {
+			result.alt = true;
 		} else if (arg === "--verbose") {
 			result.verbose = true;
 		} else if (arg === "--approve" || arg === "-a") {
@@ -255,7 +258,8 @@ ${chalk.bold("Commands:")}
                                  Serve agent sessions over the Codex app-server protocol
   ${APP_NAME} app-server daemon <start|stop|status|restart> [--listen <url>]
                                  Manage the app-server daemon
-  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list/config
+  ${APP_NAME} auth <command>            Print credentials for external clients
+  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list/config/auth
 
 ${chalk.bold("Options:")}
   --provider <name>              Provider name (default: google)
@@ -295,6 +299,7 @@ ${chalk.bold("Options:")}
   --list-models [search]         List available models (with optional fuzzy search)
   --list-tips                    List all tips as JSON
   --verbose                      Force verbose startup (overrides quietStartup setting)
+  --alt                          Use the alternate-screen TUI in interactive mode
   --approve, -a                  Trust project-local files for this run
   --no-approve, -na              Ignore project-local files for this run
   --offline                      Disable startup network operations (same as PI_OFFLINE=1)
@@ -304,6 +309,12 @@ ${grokNeoOptionsText}  --help, -h                     Show this help
 Extensions can register additional flags (e.g., --plan from plan-mode extension).${extensionFlagsText}
 
 ${chalk.bold("Examples:")}
+  # Print a provider API key for an external client
+  ${APP_NAME} auth print-api-key --provider openai --model gpt-5.5
+
+  # Print an OAuth bearer token for an external client (refreshes if expired)
+  ${APP_NAME} auth print-bearer-token --provider openai-codex --model gpt-5.5
+
   # Interactive mode
   ${APP_NAME}
 

@@ -196,6 +196,9 @@ export class AgentSessionRuntime {
 				reason,
 			};
 		}
+		// Settle any active response first so the aborted turn (including tool
+		// results) is persisted to the outgoing session before it is replaced.
+		await this.session.abort();
 		await emitSessionShutdownEvent(oldRunner, {
 			type: "session_shutdown",
 			reason,

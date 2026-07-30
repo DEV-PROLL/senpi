@@ -21,6 +21,8 @@ vi.mock("@earendil-works/pi-ai/compat", async (importOriginal) => {
 				const message = (await completeMock(model, context, options)) as AssistantMessage;
 				if (message.stopReason === "error" || message.stopReason === "aborted") {
 					output.push({ type: "error", reason: message.stopReason, error: message });
+				} else if (message.stopReason === "pending") {
+					throw new Error("Test assistant message must have a terminal stop reason.");
 				} else {
 					output.push({ type: "done", reason: message.stopReason, message });
 				}

@@ -16,7 +16,7 @@ Pi is a minimal terminal coding harness. Adapt pi to your workflows, not the oth
 
 Pi ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask pi to build what you want or install a third party pi package that matches your workflow.
 
-Pi runs in five modes: interactive, print or JSON, RPC for process integration, app-server for Codex-compatible app integrations, and an SDK for embedding in your own apps. See [openclaw/openclaw](https://github.com/openclaw/openclaw) for a real-world SDK integration.
+Pi runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps.
 
 ## Share your OSS coding agent sessions
 
@@ -134,7 +134,6 @@ For each built-in provider, pi maintains a list of tool-capable models. Configur
 - Xiaomi MiMo Token Plan (China)
 - Xiaomi MiMo Token Plan (Amsterdam)
 - Xiaomi MiMo Token Plan (Singapore)
-- Alibaba Token Plan
 
 Pi also supports the llama.cpp router server. Configure it with `/login llama.cpp`, manage downloads and loaded models with `/llama`, then select a loaded model with `/model`. See [docs/llama-cpp.md](docs/llama-cpp.md) for setup and usage.
 
@@ -197,7 +196,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/reload` | Reload keybindings, extensions, skills, prompts, themes, and context files |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
-| `/quit`, `/exit` | Quit pi |
+| `/quit` | Quit pi |
 
 ### Keyboard Shortcuts
 
@@ -292,37 +291,6 @@ Use `/settings` to modify common options, or edit JSON files directly:
 
 See [docs/settings.md](docs/settings.md) for all options.
 
-### Permissions
-
-Pi includes a built-in permission system for tool calls. The default preset is `full-access`, which allows tool calls without prompting. Use `permissionPreset` in settings or `--permission-preset` for stricter behavior:
-
-| Preset | Behavior |
-|--------|----------|
-| `full-access` | Allow all permission checks |
-| `workspace` | Allow read, list, grep, edit, and bash; ask for external-directory access |
-| `read-only` | Allow read, list, and grep; ask before edit, bash, and external-directory access |
-| `ask` | Prompt whenever no explicit rule matches |
-
-```json
-{
-  "permissionPreset": "workspace",
-  "permission": {
-    "bash": {
-      "rm *": "deny"
-    }
-  }
-}
-```
-
-Explicit `permission` rules override the selected preset. CLI overrides have the highest precedence:
-
-```bash
-pi --permission-preset read-only
-pi --permission-preset workspace --permission "bash:rm *=deny"
-```
-
-Permissions are confirmation policy, not a sandbox. Pi and its extensions still run with the permissions of the host process. Use containers, VMs, or a policy sandbox for isolation.
-
 ### Project Trust
 
 On interactive startup, pi asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.pi/agent/trust.json`. Trusting a project allows pi to load `.pi/settings.json` and `.pi` resources, install missing project packages, and execute project extensions.
@@ -415,7 +383,6 @@ The default export can also be `async`. pi waits for async extension factories b
 - Custom tools (or replace built-in tools entirely)
 - Sub-agents and plan mode
 - Custom compaction and summarization
-- Builtin command hooks for local guardrails
 - Permission gates and path protection
 - Custom editors and UI components
 - Status lines, headers, footers
@@ -426,7 +393,7 @@ The default export can also be `async`. pi waits for async extension factories b
 - Games while waiting (yes, Doom runs)
 - ...anything you can dream up
 
-Place in `~/.pi/agent/extensions/`, `.pi/extensions/`, or a [pi package](#pi-packages) to share with others. See [docs/extensions.md](docs/extensions.md), [Builtin Hooks](docs/extensions.md#builtin-hooks), and [examples/extensions/](examples/extensions/).
+Place in `~/.pi/agent/extensions/`, `.pi/extensions/`, or a [pi package](#pi-packages) to share with others. See [docs/extensions.md](docs/extensions.md) and [examples/extensions/](examples/extensions/).
 
 ### Themes
 
@@ -519,27 +486,17 @@ RPC mode uses strict LF-delimited JSONL framing. Clients must split records on `
 
 See [docs/rpc.md](docs/rpc.md) for the protocol.
 
-### App Server Mode
-
-For Codex-compatible app or editor integrations, use app-server mode over authenticated loopback websocket or stdio:
-
-```bash
-senpi app-server --listen ws://127.0.0.1:18990
-```
-
-See [docs/app-server.md](docs/app-server.md) for activation, framing, and method coverage.
-
 ---
 
 ## Philosophy
 
 Pi is aggressively extensible so it doesn't have to dictate your workflow. Features that other tools bake in can be built with [extensions](#extensions), [skills](#skills), or installed from third-party [pi packages](#pi-packages). This keeps the core minimal while letting you shape pi to fit how you work.
 
-**MCP as a builtin extension, not core.** Upstream pi ships no MCP ([why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)); this fork adds MCP support as a builtin extension — configure servers under `mcpServers` and manage them with `/mcp`. Prefer CLI tools with READMEs (see [Skills](#skills)) when they fit; MCP is there when a server is the right integration.
+**No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
 
 **No sub-agents.** There's many ways to do this. Spawn pi instances via tmux, or build your own with [extensions](#extensions), or install a package that does it your way.
 
-**Permission presets, not a sandbox.** Use the built-in permission presets for tool-call confirmation policy. Run in a container or VM when you need an actual isolation boundary.
+**No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
 **No plan mode.** Write plans to files, or build it with [extensions](#extensions), or install a package.
 
@@ -584,7 +541,6 @@ pi config                    # Enable/disable package resources
 | `-p`, `--print` | Print response and exit |
 | `--mode json` | Output all events as JSON lines (see [docs/json.md](docs/json.md)) |
 | `--mode rpc` | RPC mode for process integration (see [docs/rpc.md](docs/rpc.md)) |
-| `app-server` | Codex-compatible app-server integration (see [docs/app-server.md](docs/app-server.md)) |
 | `--export <in> [out]` | Export session to HTML |
 
 In print mode, pi also reads piped stdin and merges it into the initial prompt:
@@ -622,8 +578,6 @@ cat README.md | pi -p "Summarize this text"
 |--------|-------------|
 | `--tools <list>`, `-t <list>` | Allowlist specific tool names across built-in, extension, and custom tools |
 | `--exclude-tools <list>`, `-xt <list>` | Disable specific tool names across built-in, extension, and custom tools |
-| `--permission-preset <preset>` | Set permission preset: `full-access`, `workspace`, `read-only`, or `ask` |
-| `--permission <rules>` | Add permission rules, e.g. `bash:rm *=deny` or `edit=ask` |
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools by default but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools by default |
 
@@ -651,6 +605,7 @@ Combine `--no-*` with explicit flags to load exactly what you need, ignoring set
 |--------|-------------|
 | `--system-prompt <text>` | Replace default prompt (context files and skills still appended) |
 | `--append-system-prompt <text>` | Append to system prompt |
+| `--alt` | Use the alternate-screen TUI with application-owned scrolling in interactive mode |
 | `--verbose` | Force verbose startup |
 | `-a`, `--approve` | Trust project-local files for this run |
 | `-na`, `--no-approve` | Ignore project-local files for this run |
