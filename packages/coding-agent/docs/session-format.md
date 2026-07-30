@@ -123,6 +123,8 @@ interface Usage {
 
 ### Extended Message Types (from @code-yeongyu/senpi)
 
+The exported pi-ai `StopReason` type also includes `"pending"`, but that value is reserved for partial messages in streaming events. Terminal `done`/`error` messages replace it with a completion reason before Senpi persists the assistant message, so `"pending"` should never appear in session JSONL.
+
 ```typescript
 interface BashExecutionMessage {
   role: "bashExecution";
