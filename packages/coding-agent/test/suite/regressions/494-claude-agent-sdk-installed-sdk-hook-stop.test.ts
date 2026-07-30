@@ -12,13 +12,16 @@ describe("issue #494: installed Claude Agent SDK terminal hook stop", () => {
 
 			// Then: the streamed tool call reached the SDK as a raw stream event and as a
 			// finalized assistant block, but the hook stopped the turn first - no permission
-			// callback, no Bash command side effect, no custom MCP handler invocation, no
-			// tool_result in the SDK stream or on the wire, and no second provider request.
+			// callback, no Bash command side effect, and no custom MCP handler invocation.
+			// The SDK stream carries exactly one tool_result: the non-executed denial
+			// (is_error, permission-rule); nothing was executed, and no tool_result ever
+			// went out on the wire because there is no second provider request.
 			expect(observation.partialToolUseName).toBe(toolName);
 			expect(observation.finalizedToolUseName).toBe(toolName);
 			expect(observation.permissionPrompts).toBe(0);
 			expect(observation.markerExists).toBe(false);
 			expect(observation.customHandlerRuns).toBe(0);
+			expect(observation.toolResults).toBe(1);
 			expect(observation.executedToolResults).toBe(0);
 			expect(observation.providerSawToolResult).toBe(false);
 			expect(observation.providerRequests).toBe(1);
