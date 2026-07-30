@@ -12,6 +12,33 @@ function stripAnsi(value: string): string {
 	return value.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
+function makeCompactionFakeThis<T extends object>(overrides: T) {
+	return {
+		isInitialized: true,
+		footer: { invalidate: vi.fn() },
+		autoCompactionEscapeHandler: undefined as (() => void) | undefined,
+		autoCompactionLoader: undefined as { stop(): void } | undefined,
+		autoCompactionProgressText: "",
+		defaultEditor: {} as { onEscape?: () => void },
+		session: { abortCompaction: vi.fn() },
+		statusContainer: { clear: vi.fn() },
+		chatContainer: { clear: vi.fn(), addChild: vi.fn() },
+		rebuildChatFromMessages: vi.fn(),
+		addMessageToChat: vi.fn(),
+		showError: vi.fn(),
+		showWarning: vi.fn(),
+		showStatus: vi.fn(),
+		clearStatusIndicator: vi.fn(),
+		compactionQueuedMessages: [] as Array<{ text: string; mode: "steer" | "followUp" }>,
+		getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
+		flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
+		restoreQueuedMessagesToEditor: vi.fn(),
+		settingsManager: { getShowTerminalProgress: () => false },
+		ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
+		...overrides,
+	};
+}
+
 type PrivateMethod = (this: object, ...args: unknown[]) => void;
 
 function renderExpandedPersistedCompactionSummary(sessionManager: SessionManager): string {
@@ -65,17 +92,7 @@ describe("InteractiveMode compaction events", () => {
 
 	test("shows a context compaction loader for extension compaction starts", async () => {
 		const statusContainer = new Container();
-		const fakeThis = {
-			isInitialized: true,
-			footer: { invalidate: vi.fn() },
-			autoCompactionEscapeHandler: undefined as (() => void) | undefined,
-			autoCompactionLoader: undefined as { stop(): void } | undefined,
-			defaultEditor: {} as { onEscape?: () => void },
-			session: { abortCompaction: vi.fn() },
-			statusContainer,
-			settingsManager: { getShowTerminalProgress: () => false },
-			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
-		};
+		const fakeThis = makeCompactionFakeThis({ statusContainer });
 
 		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 			this: typeof fakeThis,
@@ -99,18 +116,7 @@ describe("InteractiveMode compaction events", () => {
 
 	test("bounds streamed compaction progress to the active status row", async () => {
 		const statusContainer = new Container();
-		const fakeThis = {
-			isInitialized: true,
-			footer: { invalidate: vi.fn() },
-			autoCompactionEscapeHandler: undefined as (() => void) | undefined,
-			autoCompactionLoader: undefined as { stop(): void } | undefined,
-			autoCompactionProgressText: "",
-			defaultEditor: {} as { onEscape?: () => void },
-			session: { abortCompaction: vi.fn() },
-			statusContainer,
-			settingsManager: { getShowTerminalProgress: () => false },
-			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
-		};
+		const fakeThis = makeCompactionFakeThis({ statusContainer });
 
 		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 			this: typeof fakeThis,
@@ -157,26 +163,7 @@ describe("InteractiveMode compaction events", () => {
 	});
 
 	test("rebuilds chat and appends a synthetic compaction summary at the bottom", async () => {
-		const fakeThis = {
-			isInitialized: true,
-			footer: { invalidate: vi.fn() },
-			autoCompactionEscapeHandler: undefined as (() => void) | undefined,
-			autoCompactionLoader: undefined,
-			defaultEditor: {},
-			statusContainer: { clear: vi.fn() },
-			chatContainer: { clear: vi.fn() },
-			rebuildChatFromMessages: vi.fn(),
-			addMessageToChat: vi.fn(),
-			showError: vi.fn(),
-			showStatus: vi.fn(),
-			clearStatusIndicator: vi.fn(),
-			compactionQueuedMessages: [] as Array<{ text: string; mode: "steer" | "followUp" }>,
-			getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
-			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
-			restoreQueuedMessagesToEditor: vi.fn(),
-			settingsManager: { getShowTerminalProgress: () => false },
-			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
-		};
+		const fakeThis = makeCompactionFakeThis({ chatContainer: { clear: vi.fn() } });
 
 		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 			this: typeof fakeThis,
@@ -221,26 +208,10 @@ describe("InteractiveMode compaction events", () => {
 	])(
 		"compaction queue recovery restores queued messages after terminal compaction failure: %s",
 		async (_name, errorMessage) => {
-			const fakeThis = {
-				isInitialized: true,
-				footer: { invalidate: vi.fn() },
-				autoCompactionEscapeHandler: undefined as (() => void) | undefined,
-				autoCompactionLoader: undefined,
-				defaultEditor: {},
-				statusContainer: { clear: vi.fn() },
-				chatContainer: { clear: vi.fn(), addChild: vi.fn() },
-				rebuildChatFromMessages: vi.fn(),
-				addMessageToChat: vi.fn(),
-				showError: vi.fn(),
-				showStatus: vi.fn(),
-				clearStatusIndicator: vi.fn(),
+			const fakeThis = makeCompactionFakeThis({
 				compactionQueuedMessages: [{ text: "queued during compaction", mode: "steer" as const }],
-				getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
-				flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
 				restoreQueuedMessagesToEditor: vi.fn().mockReturnValue(1),
-				settingsManager: { getShowTerminalProgress: () => false },
-				ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
-			};
+			});
 
 			const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 				this: typeof fakeThis,
@@ -273,26 +244,10 @@ describe("InteractiveMode compaction events", () => {
 	);
 
 	test("compaction queue recovery defers retryable failures to the native queues", async () => {
-		const fakeThis = {
-			isInitialized: true,
-			footer: { invalidate: vi.fn() },
-			autoCompactionEscapeHandler: undefined as (() => void) | undefined,
-			autoCompactionLoader: undefined,
-			defaultEditor: {},
-			statusContainer: { clear: vi.fn() },
-			chatContainer: { clear: vi.fn(), addChild: vi.fn() },
-			rebuildChatFromMessages: vi.fn(),
-			addMessageToChat: vi.fn(),
-			showError: vi.fn(),
-			showStatus: vi.fn(),
-			clearStatusIndicator: vi.fn(),
+		const fakeThis = makeCompactionFakeThis({
 			compactionQueuedMessages: [{ text: "queued during compaction", mode: "steer" as const }],
-			getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
-			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
 			restoreQueuedMessagesToEditor: vi.fn().mockReturnValue(0),
-			settingsManager: { getShowTerminalProgress: () => false },
-			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
-		};
+		});
 
 		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 			this: typeof fakeThis,
@@ -323,27 +278,7 @@ describe("InteractiveMode compaction events", () => {
 	});
 
 	test("compaction queue recovery restores a manual would-overflow rejection instead of silently swallowing it", async () => {
-		const fakeThis = {
-			isInitialized: true,
-			footer: { invalidate: vi.fn() },
-			autoCompactionEscapeHandler: undefined as (() => void) | undefined,
-			autoCompactionLoader: undefined,
-			defaultEditor: {},
-			statusContainer: { clear: vi.fn() },
-			chatContainer: { clear: vi.fn(), addChild: vi.fn() },
-			rebuildChatFromMessages: vi.fn(),
-			addMessageToChat: vi.fn(),
-			showError: vi.fn(),
-			showWarning: vi.fn(),
-			showStatus: vi.fn(),
-			clearStatusIndicator: vi.fn(),
-			compactionQueuedMessages: [] as Array<{ text: string; mode: "steer" | "followUp" }>,
-			getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
-			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
-			restoreQueuedMessagesToEditor: vi.fn(),
-			settingsManager: { getShowTerminalProgress: () => false },
-			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
-		};
+		const fakeThis = makeCompactionFakeThis({});
 
 		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 			this: typeof fakeThis,
@@ -418,28 +353,7 @@ describe("InteractiveMode compaction events", () => {
 		const sanitizedText = sanitizeTerminalLabel(hostileText);
 		const statusContainer = new Container();
 		const chatContainer = new Container();
-		const fakeThis = {
-			isInitialized: true,
-			footer: { invalidate: vi.fn() },
-			autoCompactionEscapeHandler: undefined as (() => void) | undefined,
-			autoCompactionLoader: undefined as { stop(): void } | undefined,
-			autoCompactionProgressText: "",
-			defaultEditor: {} as { onEscape?: () => void },
-			session: { abortCompaction: vi.fn() },
-			statusContainer,
-			chatContainer,
-			clearStatusIndicator: vi.fn(),
-			rebuildChatFromMessages: vi.fn(),
-			addMessageToChat: vi.fn(),
-			showError: vi.fn(),
-			showStatus: vi.fn(),
-			compactionQueuedMessages: [] as Array<{ text: string; mode: "steer" | "followUp" }>,
-			getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
-			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
-			restoreQueuedMessagesToEditor: vi.fn(),
-			settingsManager: { getShowTerminalProgress: () => false },
-			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
-		};
+		const fakeThis = makeCompactionFakeThis({ statusContainer, chatContainer });
 		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 			this: typeof fakeThis,
 			event: object,
