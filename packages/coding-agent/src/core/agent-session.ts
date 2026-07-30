@@ -4432,7 +4432,7 @@ export class AgentSession {
 				reason,
 				result: undefined,
 				aborted,
-				willRetry,
+				willRetry: false,
 				errorMessage: aborted ? undefined : `Pre-prompt compaction failed: ${errorMessage}`,
 			});
 			return false;

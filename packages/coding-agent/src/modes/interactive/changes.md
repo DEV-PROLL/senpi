@@ -1,5 +1,22 @@
 # changes
 
+## Failed compaction restores queued input (2026-07-30)
+
+### What changed
+
+- Terminal compaction failures, rejections, and aborts restore messages queued during compaction to the editable composer instead of leaving them pending indefinitely. Native session steer and follow-up queues are drained into the composer too.
+- Failed pre-prompt overflow compaction now emits `willRetry: false`, so queued input follows the terminal restoration path instead of waiting for a retry that cannot run.
+- The defensive retryable-failure branch keeps the native-queue handoff (`flushCompactionQueue({ willRetry: true, deferAdmission: true })`) for any producer that can truthfully promise a retry.
+- Coverage: `test/interactive-mode-compaction.test.ts` pins truncated, timed-out, rejected, retryable, and successful compaction outcomes; `test/suite/regressions/post-compaction-queued-input-resume.test.ts` drives the real failed pre-prompt overflow path and real editor-restoration helper.
+
+### Why
+
+- Retrying queued delivery against the unchanged over-threshold context repeats the same required-compaction failure; restoring the draft lets the user edit or retry explicitly.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` in the `compaction_end` queue handoff branch.
+
 ## Risky main-model selection warning (2026-07-30)
 
 - Interactive startup, `/model` (including exact references), the full and favorite-model selectors, post-auth default selection, and favorite rotation now pass the selected main model through one shared warning predicate.

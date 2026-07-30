@@ -1,3 +1,22 @@
+## Failed pre-prompt compaction reports terminal recovery (2026-07-30)
+
+### What changed
+
+- `core/agent-session.ts`: `_runPrePromptCompaction()` now emits failed `compaction_end` events with `willRetry: false`. Its caller throws `RequiredCompactionError` when compaction fails, so no retry can follow that terminal event.
+- Coverage drives a real pre-prompt overflow compaction through a failing faux provider and pins both the truthful event and restoration of queued TUI input through the real interactive helper.
+
+### Why
+
+- Emitting `willRetry: true` deferred queued input to native session queues even though failed compaction blocks provider admission, leaving that input parked indefinitely.
+
+### Why extension system couldn't handle this alone
+
+- `willRetry` is authored inside the core pre-prompt compaction lifecycle before extensions consume the event; only the session can truthfully report whether its caller will retry.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` in `_runPrePromptCompaction()`'s terminal catch emission.
+
 ## high_reasoning_warning narrowed to gpt-5.6-sol only (2026-07-30)
 
 ### What changed

@@ -46,8 +46,20 @@ function createAcceptedCompactionExtension() {
 function getFlushCompactionQueue() {
 	const flush = Reflect.get(InteractiveMode.prototype, "flushCompactionQueue");
 	if (typeof flush !== "function") throw new Error("Expected InteractiveMode.flushCompactionQueue");
-	return (context: object, options: { willRetry: boolean }): Promise<void> =>
+	return (context: object, options: { willRetry: boolean; deferAdmission?: boolean }): Promise<void> =>
 		Promise.resolve(flush.call(context, options));
+}
+
+function getClearAllQueues() {
+	const clear = Reflect.get(InteractiveMode.prototype, "clearAllQueues");
+	if (typeof clear !== "function") throw new Error("Expected InteractiveMode.clearAllQueues");
+	return (context: object): { steering: string[]; followUp: string[] } => clear.call(context);
+}
+
+function getRestoreQueuedMessagesToEditor() {
+	const restore = Reflect.get(InteractiveMode.prototype, "restoreQueuedMessagesToEditor");
+	if (typeof restore !== "function") throw new Error("Expected InteractiveMode.restoreQueuedMessagesToEditor");
+	return (context: object): number => restore.call(context);
 }
 
 function getHandleEvent() {
@@ -61,6 +73,12 @@ function getRunAutoCompaction(harness: Harness) {
 	if (typeof runAutoCompaction !== "function") throw new Error("Expected AgentSession._runAutoCompaction");
 	return (reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> =>
 		Promise.resolve(runAutoCompaction.call(harness.session, reason, willRetry));
+}
+
+function getQueueNativeMessage(harness: Harness, mode: "Steer" | "FollowUp") {
+	const queue = Reflect.get(harness.session, `_queue${mode}`);
+	if (typeof queue !== "function") throw new Error(`Expected AgentSession._queue${mode}`);
+	return (text: string): Promise<void> => Promise.resolve(queue.call(harness.session, text));
 }
 
 function createTuiQueueContext(harness: Harness) {
@@ -93,11 +111,17 @@ function createTuiCompactionEventContext(harness: Harness) {
 		showStatus: (message: string) => void;
 		ui: { requestRender: () => void; terminal: { setProgress: () => void } };
 		settingsManager: { getShowTerminalProgress: () => boolean };
-		flushCompactionQueue: (options: { willRetry: boolean }) => Promise<void>;
+		flushCompactionQueue: (options: { willRetry: boolean; deferAdmission?: boolean }) => Promise<void>;
 		flushes: Promise<void>[];
+		restoredMessages: string[][];
+		clearAllQueues: () => { steering: string[]; followUp: string[] };
+		editor: { getText: () => string; setText: (text: string) => void };
+		restoreQueuedMessagesToEditor: () => number;
 	};
 	const flushes: Promise<void>[] = [];
 	const statusMessages: string[] = [];
+	const restoredMessages: string[][] = [];
+	let editorText = "";
 	Object.assign(context, {
 		isInitialized: true,
 		footer: { invalidate: () => {} },
@@ -117,10 +141,24 @@ function createTuiCompactionEventContext(harness: Harness) {
 		settingsManager: { getShowTerminalProgress: () => false },
 		getSessionLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {} }),
 		flushes,
-		flushCompactionQueue(options: { willRetry: boolean }) {
+		restoredMessages,
+		flushCompactionQueue(options: { willRetry: boolean; deferAdmission?: boolean }) {
 			const flush = getFlushCompactionQueue()(context, options);
 			flushes.push(flush);
 			return flush;
+		},
+		clearAllQueues() {
+			return getClearAllQueues()(context);
+		},
+		editor: {
+			getText: () => editorText,
+			setText: (text: string) => {
+				editorText = text;
+				restoredMessages.push(text.split("\n\n"));
+			},
+		},
+		restoreQueuedMessagesToEditor() {
+			return getRestoreQueuedMessagesToEditor()(context);
 		},
 	});
 	return context;
@@ -295,7 +333,7 @@ describe("post-compaction queued input recovery", () => {
 		["rejected threshold", "threshold" as const, false, "reject" as const],
 		["feedback-only abort", undefined, false, "abort" as const],
 	])(
-		"routes queued TUI input to the native session queue after a %s compaction_end",
+		"restores queued TUI input to the editor after a terminal %s compaction_end",
 		async (_label, reason, willRetry, outcome) => {
 			const marker = `[TUI queue remains ${outcome}]`;
 			const harness = await createHarness({
@@ -318,6 +356,10 @@ describe("post-compaction queued input recovery", () => {
 			harness.setResponses([fauxAssistantMessage("seed handled"), fauxAssistantMessage("must not execute")]);
 			await harness.session.prompt("seed context ".repeat(40));
 			const providerCallsBeforeCompaction = harness.faux.state.callCount;
+			const nativeSteer = `[native steer ${outcome}]`;
+			const nativeFollowUp = `[native follow-up ${outcome}]`;
+			await getQueueNativeMessage(harness, "Steer")(nativeSteer);
+			await getQueueNativeMessage(harness, "FollowUp")(nativeFollowUp);
 			const context = createTuiCompactionEventContext(harness);
 			context.compactionQueuedMessages.push({ text: marker, mode: "steer" });
 			harness.session.subscribe((event) => {
@@ -340,15 +382,109 @@ describe("post-compaction queued input recovery", () => {
 			await Promise.all(context.flushes);
 			await harness.session.waitForSettledSessionWork();
 
+			// Extension rejections and feedback-only aborts always emit willRetry: false,
+			// so every case here is terminal: the marker goes back to the composer and
+			// never reaches a native queue or the provider.
 			expect(context.compactionQueuedMessages).toEqual([]);
+			expect(context.restoredMessages).toEqual([[nativeSteer, marker, nativeFollowUp]]);
 			expect(context.compactionInFlightMessages).toEqual([]);
-			expect(harness.session.getSteeringMessages()).toContain(marker);
+			expect(harness.session.getSteeringMessages()).toEqual([]);
+			expect(harness.session.getFollowUpMessages()).toEqual([]);
 			expect(getUserTexts(harness)).not.toContain(marker);
 			expect(harness.faux.state.callCount).toBe(providerCallsBeforeCompaction);
 			expect(harness.eventsOfType("compaction_start")).toHaveLength(1);
-			expect(context.statusMessages.some((message) => message.includes("queued message"))).toBe(true);
+			expect(context.statusMessages.some((message) => message.includes("restored to the editor"))).toBe(true);
+			expect(context.statusMessages.some((message) => message.includes("will send with the next turn"))).toBe(false);
 		},
 	);
+
+	it("restores queued TUI input after real pre-prompt overflow compaction failure", async () => {
+		const marker = "[TUI queue restores after failed overflow compaction]";
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 10_000, maxTokens: 1_000 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
+		});
+		harnesses.push(harness);
+
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "overflowing prior context ".repeat(2_000) }],
+			timestamp: Date.now() - 1_000,
+		});
+		const overflowAssistant = createOverflowResponse(harness);
+		harness.sessionManager.appendMessage(overflowAssistant);
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+		const failCompactionProvider: FauxResponseFactory = () => {
+			throw new Error("forced compaction provider failure");
+		};
+		harness.setResponses([failCompactionProvider]);
+
+		const context = createTuiCompactionEventContext(harness);
+		const compactionEnds: Array<Extract<(typeof harness.events)[number], { type: "compaction_end" }>> = [];
+		harness.session.subscribe((event) => {
+			if (event.type === "compaction_start" && event.reason === "overflow") {
+				context.compactionQueuedMessages.push({ text: marker, mode: "steer" });
+			}
+			if (event.type === "compaction_end" && event.reason === "overflow") {
+				compactionEnds.push(event);
+				void getHandleEvent()(context, event);
+			}
+		});
+
+		await expect(harness.session.prompt("retry after overflow")).rejects.toThrow(
+			"Context remains above the compaction threshold because compaction did not complete",
+		);
+		await Promise.all(context.flushes);
+		await harness.session.waitForSettledSessionWork();
+
+		expect(compactionEnds).toHaveLength(1);
+		expect(compactionEnds[0]).toMatchObject({
+			reason: "overflow",
+			result: undefined,
+			aborted: false,
+			willRetry: false,
+		});
+		expect(compactionEnds[0]?.errorMessage).toMatch(/Pre-prompt compaction failed/);
+		expect(context.restoredMessages).toEqual([[marker]]);
+		expect(context.compactionQueuedMessages).toEqual([]);
+		expect(harness.session.getSteeringMessages()).toEqual([]);
+		expect(harness.faux.state.callCount).toBe(1);
+	});
+
+	it("routes queued TUI input to the native session queue after a retryable compaction_end", async () => {
+		const marker = "[TUI queue defers to retry]";
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 128_000, maxTokens: 64 }],
+			settings: { compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1 } },
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("seed handled"), fauxAssistantMessage("must not execute")]);
+		await harness.session.prompt("seed context ".repeat(40));
+		const providerCallsBeforeCompaction = harness.faux.state.callCount;
+		const context = createTuiCompactionEventContext(harness);
+		context.compactionQueuedMessages.push({ text: marker, mode: "steer" });
+
+		await getHandleEvent()(context, {
+			type: "compaction_end",
+			reason: "overflow",
+			result: undefined,
+			aborted: false,
+			willRetry: true,
+			errorMessage: "Context overflow recovery failed: transient provider error",
+		});
+		await Promise.all(context.flushes);
+		await harness.session.waitForSettledSessionWork();
+
+		// A retry is still coming, so the queued input is handed to the native steering
+		// queue instead of the editor and must not start its own provider turn.
+		expect(context.restoredMessages).toEqual([]);
+		expect(context.compactionQueuedMessages).toEqual([]);
+		expect(context.compactionInFlightMessages).toEqual([]);
+		expect(harness.session.getSteeringMessages()).toContain(marker);
+		expect(getUserTexts(harness)).not.toContain(marker);
+		expect(harness.faux.state.callCount).toBe(providerCallsBeforeCompaction);
+		expect(context.statusMessages.some((message) => message.includes("queued message"))).toBe(true);
+	});
 
 	it("flushes accepted compaction input once through the real compaction_end handler", async () => {
 		const marker = "[TUI queue flushes once]";
@@ -374,6 +510,7 @@ describe("post-compaction queued input recovery", () => {
 
 		expect(context.compactionQueuedMessages).toEqual([]);
 		expect(context.compactionInFlightMessages).toEqual([]);
+		expect(context.restoredMessages).toEqual([]);
 		expect(getUserTexts(harness).filter((text) => text === marker)).toHaveLength(1);
 		expect(harness.faux.state.callCount).toBe(2);
 	});
