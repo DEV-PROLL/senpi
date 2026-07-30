@@ -92,11 +92,23 @@ export function normalizeTodoParams(
 	const op = isOperation(rawOp) ? rawOp : undefined;
 	const task = nonBlank(raw.task);
 	const phase = nonBlank(raw.phase);
+	const corrections: string[] = [];
 	if (op === "start" || op === "done" || op === "drop" || op === "rm") {
-		if (isBlank(raw.task) && !phase) {
+		// GPT-5.x-style function calling serializes every schema property and pads
+		// omitted strings with "". When BOTH targets arrive blank on rm, the only
+		// documented no-target rm form is a bulk clear, so the padding is
+		// unambiguous — drop it instead of demanding a field omission the
+		// serializer cannot express. Single-blank targets and the destructive-bulk
+		// ops (start/done/drop) still error, so a truncated single target never
+		// widens into a bulk action.
+		if (op === "rm" && isBlank(raw.task) && isBlank(raw.phase)) {
+			corrections.push(
+				'[auto-corrected] "task" and "phase" were both blank; treated as a bulk clear. ' +
+					'For a single target pass the exact text: {"op":"rm","task":"<exact task content>"}.',
+			);
+		} else if (isBlank(raw.task) && !phase) {
 			return error('Blank "task" — pass the exact task text, or omit the field entirely for a bulk operation.');
-		}
-		if (isBlank(raw.phase) && !task) {
+		} else if (isBlank(raw.phase) && !task) {
 			return error('Blank "phase" — pass the exact phase text, or omit the field entirely for a bulk operation.');
 		}
 	}
@@ -113,7 +125,6 @@ export function normalizeTodoParams(
 	const alias = aliases[0];
 	let effectiveItems = rawItems && rawItems.length > 0 ? rawItems : undefined;
 	let candidate: Alias | undefined;
-	const corrections: string[] = [];
 	if (alias) {
 		if (op && op !== alias.name) return error(CONFLICTING_SHAPES);
 		effectiveItems = alias.items;

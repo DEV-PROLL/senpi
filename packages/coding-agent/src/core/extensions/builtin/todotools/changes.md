@@ -1,5 +1,38 @@
 # todotools Fork Tracker
 
+## 2026-07-30 - Bulk-clear rm when both targets arrive blank
+
+### What changed
+
+- `{"op":"rm","task":"","phase":""}` now normalizes to a bulk clear with one
+  `[auto-corrected]` correction instead of the `Blank "task"` dead-end
+  error. GPT-5.x-style function calling serializes every schema property
+  and pads omitted strings with `""`, so telling the model to "omit the
+  field entirely" pointed at an option its serializer cannot express;
+  session 019fabf3 (2026-07-29, apitopia) showed the same failing call
+  retried verbatim. Both targets blank together is unambiguous — the only
+  documented no-target rm form is a bulk clear (the prompt table already
+  documents "rm: omit both to clear").
+- Guard scope is unchanged for everything else: rm with exactly one target
+  blank, and `start`/`done`/`drop` with blank targets, still return the
+  `Blank "target"` error. Widening the single-blank or bulk form of those
+  ops from padding could silently complete or abandon every task, so the
+  defensive error is kept there.
+- Regression coverage pins the two layers: unit normalization cases in
+  `test/suite/todo-normalize.test.ts` (`rm both-blank padding`, including
+  the verbatim padded payload and non-mutation), plus registered-execute
+  assertions in `test/suite/todo-rm-blank-bulk-clear.test.ts` that the
+  padded payload bulk-clears through the real tool (correction surfaced,
+  state emptied, one state entry appended) and that `done` with both
+  targets blank still throws.
+
+### Expected merge conflict zones
+
+- HIGH: `normalize.ts` — the blank-target guard block and the hoisted
+  `corrections` declaration if upstream ships similar correction logic.
+- LOW: `test/suite/todo-normalize.test.ts` and the new
+  `test/suite/todo-rm-blank-bulk-clear.test.ts` (fork-only).
+
 ## 2026-07-29 - Keep active work visible in long todo widgets
 
 ### What changed
