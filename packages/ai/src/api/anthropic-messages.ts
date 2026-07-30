@@ -18,6 +18,7 @@ import type {
 	Message,
 	Model,
 	ProviderEnv,
+	ProviderHeaders,
 	ProviderNativeContent,
 	SimpleStreamOptions,
 	StopReason,
