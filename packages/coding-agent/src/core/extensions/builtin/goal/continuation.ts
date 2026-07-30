@@ -138,6 +138,23 @@ export function buildGoalContinuationSignature(
 	return `${goal.id}:${openTodos}/${totalTodos}:${lastAssistantTextHash}`;
 }
 
+export function hasGoalContinuationProgress(
+	input: Pick<GoalContinuationInput, "lastContinuationSignature" | "currentSignature">,
+): boolean {
+	return (
+		input.lastContinuationSignature !== undefined &&
+		input.currentSignature !== undefined &&
+		input.lastContinuationSignature !== input.currentSignature
+	);
+}
+
+export function continuationTurnUsedTools(messages: readonly AgentMessage[]): boolean {
+	return messages.some((message) => {
+		if (message?.role === "toolResult") return true;
+		return message?.role === "assistant" && message.content.some((content) => content.type === "toolCall");
+	});
+}
+
 function isEligibleForGoalContinuation(input: GoalContinuationInput): boolean {
 	if (input.goal?.status !== "active" || input.hasPendingMessages) return false;
 	if (input.path === "immediate") {
