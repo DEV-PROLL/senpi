@@ -97,6 +97,8 @@ export default function btwExtension(pi: ExtensionAPI) {
 						auth: { apiKey: auth.apiKey, headers: auth.headers, extraBody: auth.extraBody },
 						sessionId,
 						thinkingLevel: thinkingLevel === "off" ? undefined : thinkingLevel,
+						streamFn: (streamModel, streamContext, options) =>
+							ctx.modelRegistry.modelRuntime.streamSimple(streamModel, streamContext, options),
 					},
 					context,
 					{
