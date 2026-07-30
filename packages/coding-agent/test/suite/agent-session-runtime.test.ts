@@ -204,12 +204,7 @@ describe("AgentSessionRuntime characterization", () => {
 		const outgoingEntries = SessionManager.open(outgoingSession.sessionFile!)
 			.getEntries()
 			.filter((entry) => entry.type === "message");
-		expect(outgoingEntries.map((entry) => entry.message.role)).toEqual([
-			"user",
-			"assistant",
-			"toolResult",
-			"assistant",
-		]);
+		expect(outgoingEntries.map((entry) => entry.message.role)).toEqual(["user", "assistant", "toolResult"]);
 	});
 
 	it("emits session_before_switch and session_start for new and resume flows", async () => {

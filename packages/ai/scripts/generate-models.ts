@@ -631,6 +631,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Open
 		provider === "zai-coding-cn" ||
 		baseUrl.includes("api.z.ai") ||
 		baseUrl.includes("open.bigmodel.cn");
+	const isQwenTokenPlan = provider === "qwen-token-plan" || provider === "qwen-token-plan-cn";
 	const isTogether =
 		provider === "together" || baseUrl.includes("api.together.ai") || baseUrl.includes("api.together.xyz");
 	const isMoonshot = provider === "moonshotai" || provider === "moonshotai-cn" || baseUrl.includes("api.moonshot.");
@@ -651,6 +652,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Open
 		baseUrl.includes("chutes.ai") ||
 		baseUrl.includes("deepseek.com") ||
 		isZai ||
+		isQwenTokenPlan ||
 		isMoonshot ||
 		provider === "opencode" ||
 		baseUrl.includes("opencode.ai") ||
@@ -659,7 +661,14 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Open
 		isAntLing;
 
 	const useMaxTokens =
-		baseUrl.includes("chutes.ai") || isMoonshot || isCloudflareAiGateway || isTogether || isNvidia || isAntLing || isZai;
+		baseUrl.includes("chutes.ai") ||
+		isMoonshot ||
+		isCloudflareAiGateway ||
+		isTogether ||
+		isNvidia ||
+		isAntLing ||
+		isZai ||
+		isQwenTokenPlan;
 
 	const isGrok = provider === "xai" || baseUrl.includes("api.x.ai");
 	const isDeepSeek = provider === "deepseek" || baseUrl.includes("deepseek.com");
@@ -681,7 +690,9 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Open
 		requiresReasoningContentOnAssistantMessages: isDeepSeek,
 		thinkingFormat: isDeepSeek
 			? "deepseek"
-			: isZai
+			: isQwenTokenPlan
+				? "qwen"
+				: isZai
 				? "zai"
 				: isTogether && !isTogetherReasoningOnly
 					? "together"
@@ -906,6 +917,14 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	}
 	if (model.provider === "openai-codex" && supportsOpenAiXhigh(model.id)) {
 		mergeThinkingLevelMap(model, { minimal: "low" });
+	}
+	if (model.provider === "github-copilot") {
+		const override = (
+			GITHUB_COPILOT_THINKING_LEVEL_OVERRIDES as Partial<
+				Record<string, NonNullable<Model<Api>["thinkingLevelMap"]>>
+			>
+		)[model.id];
+		if (override) mergeThinkingLevelMap(model, override);
 	}
 	if (
 		(model.provider === "moonshotai" || model.provider === "moonshotai-cn") &&
