@@ -3891,23 +3891,43 @@ export class InteractiveMode {
 						this.chatContainer.addChild(new Text(theme.fg("error", message), 1, 0));
 					}
 				}
-				// Every terminal compaction_end flushes the TUI compaction queue.
-				// Accepted compactions deliver through prompt admission; unsuccessful
-				// ones route through the native steer/followUp queues so submitted
-				// input is never silently parked (field bug: messages typed during a
-				// failing compaction were held forever and lost on session switch).
+				// Every terminal compaction_end resolves the TUI compaction queue.
+				// Accepted compactions deliver through prompt admission. Retryable
+				// failures route through the native steer/followUp queues so submitted
+				// input rides along with the retry instead of being silently parked
+				// (field bug: messages typed during a failing compaction were held
+				// forever and lost on session switch). Terminal failures hand the input
+				// back to the editable composer: retrying delivery against the same
+				// over-threshold context would just repeat the failure.
 				const compactionSucceeded = event.accepted === true || event.result !== undefined;
 				const heldCount = this.compactionQueuedMessages.length;
-				if (!compactionSucceeded && heldCount > 0) {
-					this.getSessionLogger().warn("compaction_queue_deferred", {
-						count: heldCount,
-						cause: event.errorMessage ?? event.rejectionCause ?? (event.aborted ? "aborted" : "no-result"),
-					});
-					this.showStatus(
-						`${heldCount} queued message${heldCount === 1 ? "" : "s"} will send with the next turn (compaction did not complete)`,
-					);
+				const failureCause =
+					event.errorMessage ?? event.rejectionCause ?? (event.aborted ? "aborted" : "no-result");
+				if (compactionSucceeded) {
+					void this.flushCompactionQueue({ willRetry: event.willRetry, deferAdmission: false });
+				} else if (event.willRetry === true) {
+					if (heldCount > 0) {
+						this.getSessionLogger().warn("compaction_queue_deferred", {
+							count: heldCount,
+							cause: failureCause,
+						});
+						this.showStatus(
+							`${heldCount} queued message${heldCount === 1 ? "" : "s"} will send with the next turn (compaction will retry)`,
+						);
+					}
+					void this.flushCompactionQueue({ willRetry: true, deferAdmission: true });
+				} else {
+					const restoredCount = this.restoreQueuedMessagesToEditor();
+					if (restoredCount > 0) {
+						this.getSessionLogger().warn("compaction_queue_restored", {
+							restored: restoredCount,
+							cause: failureCause,
+						});
+						this.showStatus(
+							`${restoredCount} queued message${restoredCount === 1 ? "" : "s"} restored to the editor (compaction did not complete)`,
+						);
+					}
 				}
-				void this.flushCompactionQueue({ willRetry: event.willRetry, deferAdmission: !compactionSucceeded });
 				this.ui.requestRender();
 				break;
 			}
