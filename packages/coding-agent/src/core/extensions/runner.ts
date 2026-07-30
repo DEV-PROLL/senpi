@@ -11,6 +11,7 @@ import { stripAnsi } from "../../utils/ansi.ts";
 import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";
+import type { ScopedModel } from "../model-resolver.ts";
 import { getSessionContextEntryId, SESSION_CONTEXT_ENTRY_ID, type SessionManager } from "../session-manager.ts";
 import { SettingsManager } from "../settings-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
@@ -372,6 +373,7 @@ export class ExtensionRunner {
 	private errorListeners: Set<ExtensionErrorListener> = new Set();
 	private getModel: () => Model<any> | undefined = () => undefined;
 	private getServiceTier: () => ServiceTier | undefined = () => undefined;
+	private getScopedModels: () => readonly ScopedModel[] = () => [];
 	private isIdleFn: () => boolean = () => true;
 	private isProjectTrustedFn: () => boolean = () => true;
 	private getSignalFn: () => AbortSignal | undefined = () => undefined;
@@ -475,10 +477,11 @@ export class ExtensionRunner {
 		this.runtime.setSessionModel = actions.setSessionModel;
 		this.runtime.setSessionThinkingLevel = actions.setSessionThinkingLevel;
 
-		// Context actions (required)
-		this.getModel = contextActions.getModel;
-		this.getServiceTier = contextActions.getServiceTier;
-		this.isIdleFn = contextActions.isIdle;
+			// Context actions (required)
+			this.getModel = contextActions.getModel;
+			this.getServiceTier = contextActions.getServiceTier;
+			this.getScopedModels = contextActions.getScopedModels;
+			this.isIdleFn = contextActions.isIdle;
 		this.isProjectTrustedFn = contextActions.isProjectTrusted;
 		this.getSignalFn = contextActions.getSignal;
 		this.abortFn = contextActions.abort;
@@ -940,12 +943,13 @@ export class ExtensionRunner {
 	 * Create an ExtensionContext for use in event handlers and tool execution.
 	 * Context values are resolved at call time, so changes via bindCore/bindUI are reflected.
 	 */
-	createContext(excludeBeforeProviderRequestExtensionPath?: string): ExtensionContext {
-		const runner = this;
-		const getModel = this.getModel;
-		const getServiceTier = this.getServiceTier;
-		let compactionSignal: AbortSignal | undefined;
-		return {
+		createContext(excludeBeforeProviderRequestExtensionPath?: string): ExtensionContext {
+			const runner = this;
+			const getModel = this.getModel;
+			const getServiceTier = this.getServiceTier;
+			let compactionSignal: AbortSignal | undefined;
+			const getScopedModels = this.getScopedModels;
+			return {
 			get ui() {
 				runner.assertActive();
 				return runner.uiContext;
@@ -974,10 +978,14 @@ export class ExtensionRunner {
 				runner.assertActive();
 				return getModel();
 			},
-			get serviceTier() {
-				runner.assertActive();
-				return getServiceTier();
-			},
+				get serviceTier() {
+					runner.assertActive();
+					return getServiceTier();
+				},
+				get scopedModels() {
+					runner.assertActive();
+					return getScopedModels();
+				},
 			get thinkingLevel() {
 				runner.assertActive();
 				return runner.runtime.getThinkingLevel();

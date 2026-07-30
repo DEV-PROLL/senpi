@@ -20,6 +20,7 @@ import type {
 	OverlayHandle,
 	OverlayOptions,
 	SlashCommand,
+	Terminal,
 } from "@earendil-works/pi-tui";
 import {
 	CombinedAutocompleteProvider,
@@ -38,7 +39,9 @@ import {
 	setKeybindings,
 	Text,
 	TruncatedText,
-	TUI,
+	type TUI,
+	TuiAltScreen,
+	TuiMainScreen,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -110,6 +113,7 @@ import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelo
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
+import { openBrowser } from "../../utils/open-browser.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
@@ -446,6 +450,24 @@ export interface InteractiveModeOptions {
 	verbose?: boolean;
 	/** Select an experimental interactive chrome. */
 	chrome?: InteractiveChrome | "grok";
+	/** Use the alternate-screen TUI renderer. */
+	alt?: boolean;
+}
+
+interface InteractiveTuiOptions {
+	alt: boolean;
+	showHardwareCursor: boolean;
+	logDirectory: string;
+	terminal?: Terminal;
+}
+
+/** Composition root for selecting the interactive terminal renderer. */
+export function createInteractiveTui(options: InteractiveTuiOptions): TUI {
+	const terminal = options.terminal ?? new ProcessTerminal({ onExternalStdoutWrite: appendHiddenTuiStdout });
+	if (options.alt) {
+		return new TuiAltScreen(terminal, options.showHardwareCursor, options.logDirectory, { openUrl: openBrowser });
+	}
+	return new TuiMainScreen(terminal, options.showHardwareCursor, options.logDirectory);
 }
 
 export class InteractiveMode {
@@ -626,10 +648,11 @@ export class InteractiveMode {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
 		this.version = VERSION;
-		this.ui = new TUI(
-			new ProcessTerminal({ onExternalStdoutWrite: appendHiddenTuiStdout }),
-			this.settingsManager.getShowHardwareCursor(),
-		);
+		this.ui = createInteractiveTui({
+			alt: options.alt ?? false,
+			showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
+			logDirectory: getAgentDir(),
+		});
 		this.streamingReveal = new StreamingRevealController({
 			getSmoothStreaming: () => this.settingsManager.getSmoothStreaming(),
 			getSmoothStreamingFps: () => this.settingsManager.getSmoothStreamingFps(),
@@ -1836,7 +1859,12 @@ export class InteractiveMode {
 		}
 
 		if (showListing) {
-			const contextFiles = this.session.resourceLoader.getAgentsFiles().agentsFiles;
+			const systemPromptSource = this.session.resourceLoader.getSystemPromptSource();
+			const contextFiles = [
+				...(systemPromptSource ? [systemPromptSource] : []),
+				...this.session.resourceLoader.getAppendSystemPromptSources(),
+				...this.session.resourceLoader.getAgentsFiles().agentsFiles,
+			];
 			if (contextFiles.length > 0) {
 				this.loadedResourcesContainer.addChild(new Spacer(1));
 				const contextList = contextFiles
@@ -2076,18 +2104,27 @@ export class InteractiveMode {
 
 	private async rebindCurrentSession(options: { renderBeforeBind?: boolean } = {}): Promise<void> {
 		InteractiveMode.restoreCompactionEscapeOverride(this);
+		const session = this.session;
+
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
 		this.applyRuntimeSettings();
+
 		if (options.renderBeforeBind) {
 			this.renderCurrentSessionState();
 			this.subscribeToAgent();
-			await this.bindCurrentSessionExtensions();
-		} else {
-			await this.bindCurrentSessionExtensions();
+		}
+
+		await this.bindCurrentSessionExtensions();
+
+		if (this.session !== session) {
+			return;
+		}
+
+		if (!options.renderBeforeBind) {
 			this.subscribeToAgent();
 		}
-		this.updateAvailableProviderCount();
+		await this.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
 	}
@@ -2139,11 +2176,12 @@ export class InteractiveMode {
 			mode: "tui",
 			hasUI: true,
 			cwd: this.sessionManager.getCwd(),
-			sessionManager: this.sessionManager,
-			modelRegistry: extensionRunner.getModelRegistry(),
-			model: this.session.model,
-			serviceTier: this.session.serviceTier,
-			thinkingLevel: this.session.thinkingLevel,
+				sessionManager: this.sessionManager,
+				modelRegistry: extensionRunner.getModelRegistry(),
+				model: this.session.model,
+				serviceTier: this.session.serviceTier,
+				scopedModels: this.session.scopedModels,
+				thinkingLevel: this.session.thinkingLevel,
 			isIdle: () => this.session.isIdle,
 			isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
 			signal: this.session.agent.signal,
@@ -2477,7 +2515,7 @@ export class InteractiveMode {
 			this.workingStartedAt = undefined;
 		}
 		this.statusContainer.clear();
-		if (hadActiveStatusIndicator && this.ui.getClearOnShrink()) {
+		if (hadActiveStatusIndicator && !this.options.alt && this.ui.getClearOnShrink()) {
 			this.statusContainer.addChild(this.idleStatus);
 		}
 	}
@@ -4718,6 +4756,8 @@ export class InteractiveMode {
 	}
 
 	private setToolsExpanded(expanded: boolean): void {
+		if (expanded === this.toolOutputExpanded) return;
+
 		this.toolOutputExpanded = expanded;
 		const activeHeader = this.customHeader ?? this.builtInHeader;
 		if (isExpandable(activeHeader)) {
@@ -4730,7 +4770,7 @@ export class InteractiveMode {
 				}
 			}
 		}
-		this.ui.requestRender();
+		this.showStatus(`Tool output: ${expanded ? "expanded" : "collapsed"}`);
 	}
 
 	private toggleThinkingBlockVisibility(): void {
@@ -5662,7 +5702,7 @@ export class InteractiveMode {
 				this.ui.terminal.rows,
 				async (entryId) => {
 					// Selecting the current leaf is a no-op (already there)
-					if (entryId === realLeafId) {
+					if (entryId === this.sessionManager.getLeafId()) {
 						done();
 						this.showStatus("Already at this point");
 						return;
@@ -5703,6 +5743,12 @@ export class InteractiveMode {
 							// User made a complete choice
 							break;
 						}
+					}
+
+					// The user committed to navigating: stop the active response first.
+					if (this.session.isStreaming) {
+						this.restoreQueuedMessagesToEditor();
+						await this.session.abort();
 					}
 
 					// Set up escape handler and status indicator if summarizing

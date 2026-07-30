@@ -74,6 +74,8 @@ export {
 export { type EditorPasteState, expandPasteMarkers } from "./paste-markers.ts";
 // Input buffering for batch splitting
 export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.ts";
+export { TuiAltScreen, type TuiAltScreenOptions } from "./TuiAltScreen.ts";
+export { TuiMainScreen } from "./TuiMainScreen.ts";
 // Terminal interface and implementations
 export { ProcessTerminal, type ProcessTerminalOptions, type Terminal } from "./terminal.ts";
 // Terminal colors
@@ -119,6 +121,7 @@ export {
 	type Component,
 	Container,
 	CURSOR_MARKER,
+	compositeTuiLine,
 	type Focusable,
 	isFocusable,
 	type OverlayAnchor,
@@ -127,13 +130,17 @@ export {
 	type OverlayOptions,
 	type OverlayUnfocusOptions,
 	type SizeValue,
-	TUI,
+	type TUI,
+	type TuiInputListener,
+	type TuiInputListenerResult,
 } from "./tui.ts";
 // Utilities
 export {
 	getGraphemeSegmenter,
+	getOsc8LinkAtColumn,
 	getWordSegmenter,
 	sliceByColumn,
+	stripTerminalSequences,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
