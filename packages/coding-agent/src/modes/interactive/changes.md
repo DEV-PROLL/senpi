@@ -1,5 +1,12 @@
 # changes
 
+## Risky main-model selection warning (2026-07-30)
+
+- Interactive startup, `/model` (including exact references), the full and favorite-model selectors, post-auth default selection, and favorite rotation now pass the selected main model through one shared warning predicate.
+- Provider/model identifiers and displayed model names containing `minimax` or `qwen`, case-insensitively, render a prominent `error`-red Korean warning box. Safe model families render no warning.
+- The warning is confined to the interactive main-session model surface; task/subagent routing is unchanged.
+- Coverage: `test/risky-main-model-warning-tui.test.ts` pins matching fields, case-insensitivity, Korean/CJK output, red styling, selector/rotation paths, and a safe-model negative case.
+
 ## high_reasoning_warning TUI box (2026-07-30)
 
 - `interactive-mode.ts` consumes `high_reasoning_warning` and renders a scary red (`error`-themed) warning box via `showHighReasoningWarning`, urging use via the ultrabrain subagent. Mirrors `showNewVersionNotification` styling.
