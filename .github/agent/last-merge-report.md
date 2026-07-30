@@ -6,7 +6,8 @@
 - Upstream tag commit: 845d6ff1f6643aba440341cce877ce1c43ebbc39
 - Merged upstream/main: 71efc6f0c1909874ec8c944637a9ae7fc0e2d508
 - Merge commit: 405f08f6654fd8f2d961631db18ccd4fc7c86710
-- Final branch HEAD: 1b755b856a03fdc0f0ae4b1768d3d3fbde71d478
+- Verified branch HEAD before report commit: 1b755b856a03fdc0f0ae4b1768d3d3fbde71d478
+- Report commit: 053d956e6
 
 ## Preserved Fork Behavior
 
@@ -49,6 +50,7 @@ The coding-agent changelog also records fork-side post-release fixes for `/fast`
 - `9e20a5fba fix: satisfy upstream merge check`
 - `4e9e56144 fix: align upstream merge tests`
 - `1b755b856 fix: apply merge check formatting`
+- `053d956e docs: record upstream merge report`
 
 ## QA Results
 
