@@ -4,13 +4,48 @@
 
 ### New Features
 
+- **Credential export for external clients** — `senpi auth print-api-key` and `senpi auth print-bearer-token` export configured credentials with automatic OAuth refresh and minimum-validity enforcement.
+- **Headless OpenRouter sign-in** — Complete `/login` over SSH by pasting the redirect URL or authorization code when the loopback callback is unavailable.
+- **Claude Opus 5 on GitHub Copilot** — Use Claude Opus 5 through GitHub Copilot with adaptive thinking and a 1M context window.
+
 ### Breaking Changes
 
 ### Added
 
+- Added `senpi auth print-api-key` and `senpi auth print-bearer-token` commands for exporting configured credentials to external clients, including automatic OAuth refresh and configurable minimum token validity ([#7168](https://github.com/earendil-works/pi/pull/7168)).
+- Exposed the session's resolved model scope as `ctx.scopedModels` to extensions ([#7191](https://github.com/earendil-works/pi/pull/7191) by [@pungggi](https://github.com/pungggi), [#7215](https://github.com/earendil-works/pi/pull/7215)).
+- Added inherited per-request `fetch` injection for supported text and image provider transports.
+- Added the inherited `"pending"` stop reason for partial streaming messages ([#7151](https://github.com/earendil-works/pi/pull/7151) by [@lucasmeijer](https://github.com/lucasmeijer)).
+- Added inherited raw provider stop reasons across Google, Anthropic, Amazon Bedrock, Mistral, and OpenAI streams; unmapped terminal reasons now surface as provider errors instead of successful stops ([#7272](https://github.com/earendil-works/pi/pull/7272)).
+- Added manual redirect URL and authorization-code entry to OpenRouter login for remote and headless environments ([#7114](https://github.com/earendil-works/pi/pull/7114) by [@rgarcia](https://github.com/rgarcia)).
+- Added inherited Claude Opus 5 support for GitHub Copilot with adaptive thinking and a 1M context window ([#7158](https://github.com/earendil-works/pi/pull/7158) by [@jay-aye-see-kay](https://github.com/jay-aye-see-kay)).
+
 ### Changed
 
+- Changed inherited OAuth credential resolution to refresh tokens with less than five minutes of validity remaining instead of waiting until expiration ([#7168](https://github.com/earendil-works/pi/pull/7168)).
+
 ### Fixed
+
+- Explain why `/fast` is unavailable on a ChatGPT subscription instead of presenting the generic priority-tier failure ([#499](https://github.com/code-yeongyu/senpi/issues/499)).
+- Classify Claude Agent SDK subscription-limit errors so multi-account failover can continue to the next account.
+- Route `/btw` side queries through the model runtime so extension-provided provider behavior and auth overrides are honored ([#488](https://github.com/code-yeongyu/senpi/issues/488)).
+- Preserve and repair the Bun global launcher during self-update, including cross-drive launcher path coverage on Windows ([#496](https://github.com/code-yeongyu/senpi/issues/496)).
+- Fixed inherited TypeBox nullable array tool-argument validation ([#7243](https://github.com/earendil-works/pi/pull/7243) by [@petrroll](https://github.com/petrroll)).
+- Added a status line when the tool output expansion is toggled ([#7180](https://github.com/earendil-works/pi/issues/7180)).
+- Fixed context files loading twice when a linked Git worktree is nested under its main repository ([#7221](https://github.com/earendil-works/pi/pull/7221) by [@arajkumar](https://github.com/arajkumar)).
+- Fixed llama.cpp streamed responses reporting zero token usage and leaving session context accounting empty ([#7258](https://github.com/earendil-works/pi/pull/7258) by [@SteveImmanuel](https://github.com/SteveImmanuel)).
+- Fixed session replacement and committed tree navigation during an active response to abort and persist the outgoing turn instead of leaving dangling tool calls ([#7022](https://github.com/earendil-works/pi/pull/7022) by [@tmustier](https://github.com/tmustier)).
+- Fixed failed Git package installs leaving partial directories that blocked clean retries ([#7210](https://github.com/earendil-works/pi/pull/7210) by [@haoqixu](https://github.com/haoqixu)).
+- Fixed the `/model` selector retaining a stale selection while filtering instead of highlighting the top match ([#7211](https://github.com/earendil-works/pi/pull/7211) by [@christianbasch](https://github.com/christianbasch)).
+- Fixed direct RPC bash commands bypassing extension `user_bash` handlers ([#7214](https://github.com/earendil-works/pi/pull/7214)).
+- Fixed skills, prompts, and themes losing package source metadata after extensions reload resources ([#6968](https://github.com/earendil-works/pi/issues/6968)).
+- Fixed cancellation of concurrently running user bash commands so every active command is aborted ([#7103](https://github.com/earendil-works/pi/pull/7103) by [@yzhg1983](https://github.com/yzhg1983)).
+- Fixed duplicate messages appearing when extensions switch sessions during interactive startup ([#7110](https://github.com/earendil-works/pi/pull/7110) by [@yzhg1983](https://github.com/yzhg1983)).
+- Fixed inherited Qwen Token Plan reasoning models to send their service-specific thinking controls and supported reasoning-effort levels ([#6951](https://github.com/earendil-works/pi/issues/6951), [#6998](https://github.com/earendil-works/pi/issues/6998)).
+- Fixed inherited Z.AI output limits being sent through an unsupported parameter ([#7174](https://github.com/earendil-works/pi/pull/7174) by [@HyeokjaeLee](https://github.com/HyeokjaeLee)).
+- Fixed explicitly configured Amazon Bedrock profiles being overridden by ambient AWS access keys ([#7176](https://github.com/earendil-works/pi/pull/7176) by [@christianbasch](https://github.com/christianbasch)).
+- Fixed inherited image fallback paths overflowing narrow terminals, shortened home-directory paths, and made absolute paths clickable when terminal hyperlinks are available ([#7262](https://github.com/earendil-works/pi/pull/7262)).
+- Fixed inherited OpenAI-compatible tool calls losing their function arguments when malformed deltas also contain an empty `custom` object ([#7288](https://github.com/earendil-works/pi/pull/7288) by [@sunnyyoung](https://github.com/sunnyyoung)).
 
 ### Removed
 
