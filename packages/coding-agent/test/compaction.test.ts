@@ -22,7 +22,8 @@ vi.mock("@earendil-works/pi-ai/compat", async (importOriginal) => {
 				if (message.stopReason === "error" || message.stopReason === "aborted") {
 					output.push({ type: "error", reason: message.stopReason, error: message });
 				} else {
-					output.push({ type: "done", reason: message.stopReason, message });
+					const reason = message.stopReason === "pending" ? "stop" : message.stopReason;
+					output.push({ type: "done", reason, message });
 				}
 				output.end(message);
 			});
