@@ -279,6 +279,8 @@ describe("ExtensionRunner", () => {
 			throw new Error("Expected tool result message");
 		}
 		return requireRecord(toolResult.details, "tool result details");
+	};
+
 	describe("scopedModels", () => {
 		it("reflects the getScopedModels context action on ctx.scopedModels", async () => {
 			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
