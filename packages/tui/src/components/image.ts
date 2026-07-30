@@ -3,8 +3,8 @@ import {
 	getCapabilities,
 	getCellDimensions,
 	getImageDimensions,
-	imageFallback,
 	type ImageDimensions,
+	imageFallback,
 	renderImage,
 } from "../terminal-image.ts";
 import type { Component } from "../tui.ts";

@@ -723,7 +723,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 		// options are the only static prompt source (see packages/coding-agent/changes.md).
 		this.systemPrompt = resolvePromptInput(this.systemPromptSource, "system prompt");
 		this.systemPromptSourcePath =
-			this.systemPromptSource && existsSync(this.systemPromptSource) ? resolvePath(this.systemPromptSource) : undefined;
+			this.systemPromptSource && existsSync(this.systemPromptSource)
+				? resolvePath(this.systemPromptSource)
+				: undefined;
 		this.appendSystemPrompt = (this.appendSystemPromptSource ?? [])
 			.map((source) => resolvePromptInput(source, "append system prompt"))
 			.filter((source): source is string => source !== undefined);
