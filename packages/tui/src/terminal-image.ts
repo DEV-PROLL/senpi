@@ -6,6 +6,7 @@ import {
 	detectTerminalCapabilities,
 	type TerminalCapabilities,
 } from "./terminal-capabilities.ts";
+import { sanitizeTerminalLabel } from "./terminal-text.ts";
 
 export type { ImageProtocol, TerminalCapabilities } from "./terminal-capabilities.ts";
 export { outerKittyGraphicsMode } from "./terminal-capabilities.ts";
@@ -549,14 +550,14 @@ function shortenImagePath(filename: string): string {
 export function imageFallback(mimeType: string, dimensions?: ImageDimensions, filename?: string): string {
 	const parts: string[] = [];
 	if (filename) {
-		const display = shortenImagePath(filename);
+		const display = sanitizeTerminalLabel(shortenImagePath(filename));
 		if (getCapabilities().hyperlinks && isAbsolute(filename)) {
 			parts.push(hyperlink(display, pathToFileURL(filename).href));
 		} else {
 			parts.push(display);
 		}
 	}
-	parts.push(`[${mimeType}]`);
+	parts.push(`[${sanitizeTerminalLabel(mimeType)}]`);
 	if (dimensions) parts.push(`${dimensions.widthPx}x${dimensions.heightPx}`);
 	return `[Image: ${parts.join(" ")}]`;
 }

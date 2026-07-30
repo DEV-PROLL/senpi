@@ -48,21 +48,28 @@ function createDynamicProvider(id: string) {
 
 describe("ModelRuntime post-startup provider registration", () => {
 	it("loads a registered native provider's catalog under the runtime network policy without a manual refresh", async () => {
-		const runtime = await ModelRuntime.create({
-			credentials: new InMemoryCredentialStore(),
-			modelsPath: null,
-			allowModelNetwork: true,
-			catalogBaseUrl: UNREACHABLE_CATALOG_BASE_URL,
-			modelRefreshTimeoutMs: 5_000,
-		});
-		const { provider, refreshPolicies } = createDynamicProvider("test-dynamic");
+		const previousOffline = process.env.PI_OFFLINE;
+		delete process.env.PI_OFFLINE;
+		try {
+			const runtime = await ModelRuntime.create({
+				credentials: new InMemoryCredentialStore(),
+				modelsPath: null,
+				allowModelNetwork: true,
+				catalogBaseUrl: UNREACHABLE_CATALOG_BASE_URL,
+				modelRefreshTimeoutMs: 5_000,
+			});
+			const { provider, refreshPolicies } = createDynamicProvider("test-dynamic");
 
-		// Registration resolves once the provider's bounded policy refresh has landed.
-		await runtime.registerNativeProvider(provider);
+			// Registration resolves once the provider's bounded policy refresh has landed.
+			await runtime.registerNativeProvider(provider);
 
-		expect(refreshPolicies).toContain(true);
-		expect(runtime.getModel("test-dynamic", "test-dynamic-model")).toBeDefined();
-		expect(runtime.getAvailableSnapshot().some((model) => model.provider === "test-dynamic")).toBe(true);
+			expect(refreshPolicies).toContain(true);
+			expect(runtime.getModel("test-dynamic", "test-dynamic-model")).toBeDefined();
+			expect(runtime.getAvailableSnapshot().some((model) => model.provider === "test-dynamic")).toBe(true);
+		} finally {
+			if (previousOffline === undefined) delete process.env.PI_OFFLINE;
+			else process.env.PI_OFFLINE = previousOffline;
+		}
 	});
 
 	it("keeps the registration refresh offline when the runtime disallows model network", async () => {
