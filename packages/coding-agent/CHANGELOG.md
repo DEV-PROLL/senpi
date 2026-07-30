@@ -8,9 +8,24 @@
 
 ### Added
 
+- Add a rotating, content-free `logs/session.log` timeline for compaction decisions, provider failures, queued input, prompt admission failures, and clipboard errors, with secret redaction and opt-in stderr mirroring for diagnosing stuck sessions ([#512](https://github.com/code-yeongyu/senpi/pull/512)).
+
 ### Changed
 
 ### Fixed
+
+- Keep active goals running while a live monitor, scheduled continuation, or background child can still resume them, rather than incorrectly marking monitored waits as blocked ([#515](https://github.com/code-yeongyu/senpi/pull/515)).
+- Stop Claude Agent SDK turns immediately after host-captured native or custom tools are denied, preventing duplicate provider requests and repeated denied tool calls while preserving Senpi's own permission and execution pipeline ([#511](https://github.com/code-yeongyu/senpi/pull/511)).
+- Retry shell-command credential helpers up to three times with bounded backoff before treating an API key as unavailable, avoiding provider fallback cascades from transient subprocess failures ([#490](https://github.com/code-yeongyu/senpi/pull/490) by [@unclejobs-ai](https://github.com/unclejobs-ai)).
+- Deliver input queued during failed, rejected, or aborted compaction through the native steer/follow-up queues instead of parking it indefinitely, while keeping successful compaction on the normal admission path ([#512](https://github.com/code-yeongyu/senpi/pull/512)).
+- Surface clipboard paste failures as a sanitized interactive status instead of silently swallowing permission and clipboard errors ([#512](https://github.com/code-yeongyu/senpi/pull/512)).
+- Treat `todo` remove calls with both `task` and `phase` padded as blank strings as the documented bulk-clear form, while retaining strict errors for ambiguous single-target and destructive bulk operations ([#514](https://github.com/code-yeongyu/senpi/pull/514)).
+- Move recursive Linux config watches to a shared worker thread so large directory trees no longer stall terminal input while preserving direct watchers for non-recursive targets ([#510](https://github.com/code-yeongyu/senpi/pull/510)).
+- Preserve a working Bun launcher after global self-updates by repairing the generated Node-shebang symlink with the Bun runtime that performed the update, including nonstandard Bun installation paths ([#509](https://github.com/code-yeongyu/senpi/pull/509)).
+- Route `/btw` side queries through Senpi's model runtime so providers registered dynamically with `pi.registerProvider()` work outside the built-in compatibility API registry ([#507](https://github.com/code-yeongyu/senpi/pull/507)).
+- Terminate vendored rules project-root discovery when a filesystem walk stops progressing, preventing synchronous infinite loops for Windows cross-drive and UNC paths ([#432](https://github.com/code-yeongyu/senpi/pull/432) by [@lavi-kj](https://github.com/lavi-kj)).
+- Classify Claude Code subscription-limit prose and terminal reasons as retryable rate limits so exhausted accounts enter cooldown and multi-account Claude Agent SDK sessions fail over correctly ([#505](https://github.com/code-yeongyu/senpi/pull/505) by [@eddieparc](https://github.com/eddieparc)).
+- Explain that `/fast` priority processing is unavailable on ChatGPT subscriptions and requires API-key billing, instead of misleadingly reporting the selected Codex model as unsupported ([#503](https://github.com/code-yeongyu/senpi/pull/503) by [@eddieparc](https://github.com/eddieparc)).
 
 ### Removed
 
