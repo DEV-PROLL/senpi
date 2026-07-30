@@ -1036,3 +1036,15 @@
 The retry budget, abortable retry sleep, provider continuation, and active model state all belong to `AgentSession`; an extension cannot safely replace a model inside that lifecycle without persisting it or rebuilding context.
 - Retry fallback revert-to-primary at turn boundaries: unpinned fallback state under the `cooldown-expiry` policy restores the original model once its selector cooldown lapses (checked at prompt entry and between the retry sleep and continuation), emits `retry_fallback_reverted`, preserves user thinking-level overrides, and is abandoned on manual `setModel`/`cycleModel` (which also abort a pending fallback retry sleep).
 - Server-side fallback aborts (2026-07-25): `retry.abortServerSideFallback` (default true) forwards `abortServerSideFallback` into provider stream options via a new `Agent` field and `createLoopConfig`. `AgentSession` translates the provider's `server_fallback_aborted` diagnostic into a session event of the same name carrying `from`/`to`/`chainConfigured`, emitted synchronously from `message_end` so it precedes refusal retry handling, and the existing refusal path then routes the turn onto the configured chain. `RetryFallbackController.hasConfiguredChain()` distinguishes "no chain configured" from "chain spent", because the no-chain refusal path emits no `retry_fallback_exhausted`. Interactive mode renders the abort and names `/fallback` when no chain exists.
+
+## Session lifecycle stuck-route logging (2026-07-30)
+
+### What changed
+
+- `core/session-log.ts`: new rotating content-free JSONL logger writing `<agentDir>/logs/session.log` (5MB rotate, allow-listed scalar fields, secret redaction, `SENPI_SESSION_DEBUG=1` stderr mirror), following the existing `retry-fallback/log.ts` pattern.
+- `core/agent-session.ts`: mirrors stuck-prone lifecycle transitions into `session.log`: `compaction_decision` on every terminal `compaction_end` (reason/accepted/aborted/willRetry/rejectionCause/error), `provider_error` on assistant `message_end` errors classified as stall/timeout/error, `queue_enqueue` on native steer/followUp queueing, and `prompt_rejected` when a `RequiredCompactionError` rejects prompt admission.
+- `modes/interactive/interactive-mode.ts`: logs `compaction_queue_enqueue` when input is parked during compaction, `compaction_queue_deferred` when a failed compaction defers queued input to the native queues, and `clipboard_error` on clipboard paste failures.
+
+### Why extension system couldn't handle this
+
+The instrumented transitions (`_emit`, queue internals, `RequiredCompactionError` admission, the TUI compaction queue, clipboard catch) are private `AgentSession`/`InteractiveMode` state with no extension-visible hook carrying the needed fields; field debugging of "stuck forever" sessions (Discord report 2026-07-30) requires a single post-hoc timeline in the logs directory.

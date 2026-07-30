@@ -39,10 +39,13 @@ function getHandleClipboardPaste(): HandleClipboardPaste {
 }
 
 function makeContext() {
+	const sessionLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
 	return {
 		editor: { insertTextAtCursor: vi.fn() },
 		ui: { requestRender: vi.fn() },
 		showStatus: vi.fn(),
+		sessionLogger,
+		getSessionLogger: () => sessionLogger,
 	};
 }
 
@@ -59,6 +62,10 @@ describe("InteractiveMode clipboard paste error surfacing", () => {
 		const status = context.showStatus.mock.calls[0]?.[0];
 		expect(String(status)).toContain("Clipboard paste failed");
 		expect(String(status)).toContain("pasteboard permission denied");
+		expect(context.sessionLogger.warn).toHaveBeenCalledWith(
+			"clipboard_error",
+			expect.objectContaining({ op: "paste", error: expect.stringContaining("pasteboard permission denied") }),
+		);
 	});
 
 	it("surfaces a status message when clipboard text read fails after empty image", async () => {
@@ -81,5 +88,6 @@ describe("InteractiveMode clipboard paste error surfacing", () => {
 
 		expect(context.showStatus).not.toHaveBeenCalled();
 		expect(context.editor.insertTextAtCursor).not.toHaveBeenCalled();
+		expect(context.sessionLogger.warn).not.toHaveBeenCalled();
 	});
 });
