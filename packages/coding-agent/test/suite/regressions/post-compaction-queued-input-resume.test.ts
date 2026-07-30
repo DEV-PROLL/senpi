@@ -50,6 +50,18 @@ function getFlushCompactionQueue() {
 		Promise.resolve(flush.call(context, options));
 }
 
+function getClearAllQueues() {
+	const clear = Reflect.get(InteractiveMode.prototype, "clearAllQueues");
+	if (typeof clear !== "function") throw new Error("Expected InteractiveMode.clearAllQueues");
+	return (context: object): { steering: string[]; followUp: string[] } => clear.call(context);
+}
+
+function getRestoreQueuedMessagesToEditor() {
+	const restore = Reflect.get(InteractiveMode.prototype, "restoreQueuedMessagesToEditor");
+	if (typeof restore !== "function") throw new Error("Expected InteractiveMode.restoreQueuedMessagesToEditor");
+	return (context: object): number => restore.call(context);
+}
+
 function getHandleEvent() {
 	const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent");
 	if (typeof handleEvent !== "function") throw new Error("Expected InteractiveMode.handleEvent");
@@ -61,6 +73,12 @@ function getRunAutoCompaction(harness: Harness) {
 	if (typeof runAutoCompaction !== "function") throw new Error("Expected AgentSession._runAutoCompaction");
 	return (reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> =>
 		Promise.resolve(runAutoCompaction.call(harness.session, reason, willRetry));
+}
+
+function getQueueNativeMessage(harness: Harness, mode: "Steer" | "FollowUp") {
+	const queue = Reflect.get(harness.session, `_queue${mode}`);
+	if (typeof queue !== "function") throw new Error(`Expected AgentSession._queue${mode}`);
+	return (text: string): Promise<void> => Promise.resolve(queue.call(harness.session, text));
 }
 
 function createTuiQueueContext(harness: Harness) {
@@ -96,11 +114,14 @@ function createTuiCompactionEventContext(harness: Harness) {
 		flushCompactionQueue: (options: { willRetry: boolean; deferAdmission?: boolean }) => Promise<void>;
 		flushes: Promise<void>[];
 		restoredMessages: string[][];
+		clearAllQueues: () => { steering: string[]; followUp: string[] };
+		editor: { getText: () => string; setText: (text: string) => void };
 		restoreQueuedMessagesToEditor: () => number;
 	};
 	const flushes: Promise<void>[] = [];
 	const statusMessages: string[] = [];
 	const restoredMessages: string[][] = [];
+	let editorText = "";
 	Object.assign(context, {
 		isInitialized: true,
 		footer: { invalidate: () => {} },
@@ -126,20 +147,18 @@ function createTuiCompactionEventContext(harness: Harness) {
 			flushes.push(flush);
 			return flush;
 		},
+		clearAllQueues() {
+			return getClearAllQueues()(context);
+		},
+		editor: {
+			getText: () => editorText,
+			setText: (text: string) => {
+				editorText = text;
+				restoredMessages.push(text.split("\n\n"));
+			},
+		},
 		restoreQueuedMessagesToEditor() {
-			// Mirrors the real helper: the native session queues are drained into the
-			// editor draft alongside the TUI compaction queue.
-			const { steering, followUp } = harness.session.clearQueue();
-			const restored = [
-				...context.compactionInFlightMessages,
-				...context.compactionQueuedMessages,
-				...steering.map((text) => ({ text, mode: "steer" as const })),
-				...followUp.map((text) => ({ text, mode: "followUp" as const })),
-			].map((message) => message.text);
-			context.compactionInFlightMessages = [];
-			context.compactionQueuedMessages = [];
-			restoredMessages.push(restored);
-			return restored.length;
+			return getRestoreQueuedMessagesToEditor()(context);
 		},
 	});
 	return context;
@@ -337,6 +356,10 @@ describe("post-compaction queued input recovery", () => {
 			harness.setResponses([fauxAssistantMessage("seed handled"), fauxAssistantMessage("must not execute")]);
 			await harness.session.prompt("seed context ".repeat(40));
 			const providerCallsBeforeCompaction = harness.faux.state.callCount;
+			const nativeSteer = `[native steer ${outcome}]`;
+			const nativeFollowUp = `[native follow-up ${outcome}]`;
+			await getQueueNativeMessage(harness, "Steer")(nativeSteer);
+			await getQueueNativeMessage(harness, "FollowUp")(nativeFollowUp);
 			const context = createTuiCompactionEventContext(harness);
 			context.compactionQueuedMessages.push({ text: marker, mode: "steer" });
 			harness.session.subscribe((event) => {
@@ -363,10 +386,10 @@ describe("post-compaction queued input recovery", () => {
 			// so every case here is terminal: the marker goes back to the composer and
 			// never reaches a native queue or the provider.
 			expect(context.compactionQueuedMessages).toEqual([]);
-			expect(context.restoredMessages).toEqual([[marker]]);
+			expect(context.restoredMessages).toEqual([[nativeSteer, marker, nativeFollowUp]]);
 			expect(context.compactionInFlightMessages).toEqual([]);
-			expect(harness.session.getSteeringMessages()).not.toContain(marker);
-			expect(harness.session.getFollowUpMessages()).not.toContain(marker);
+			expect(harness.session.getSteeringMessages()).toEqual([]);
+			expect(harness.session.getFollowUpMessages()).toEqual([]);
 			expect(getUserTexts(harness)).not.toContain(marker);
 			expect(harness.faux.state.callCount).toBe(providerCallsBeforeCompaction);
 			expect(harness.eventsOfType("compaction_start")).toHaveLength(1);
