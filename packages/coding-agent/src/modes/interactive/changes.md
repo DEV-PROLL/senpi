@@ -1,5 +1,10 @@
 # changes
 
+## high_reasoning_warning TUI box (2026-07-30)
+
+- `interactive-mode.ts` consumes `high_reasoning_warning` and renders a scary red (`error`-themed) warning box via `showHighReasoningWarning`, urging use via the ultrabrain subagent. Mirrors `showNewVersionNotification` styling.
+- QA: `local-ignore/qa-evidence/20260730-high-reasoning-warning/` (ans/html/grid triplet; 916 red cells; WARNING+ultrabrain+responsibility confirmed).
+
 ## Omo-senpi coding workflow tips (2026-07-30)
 
 ### What changed
