@@ -1443,3 +1443,9 @@ The tip line was teaching a small slice of the product while most of the surface
 - Changed `src/modes/interactive/interactive-mode.ts` so startup no longer checks upstream npm registry version/package updates before entering the interactive loop.
 - This was changed in core UI because those startup checks are internal `InteractiveMode` methods and there is no extension hook that can reliably suppress them before they run.
 - Expected merge-conflict zone on upstream sync: startup helpers around `checkForNewVersion()` and `checkForPackageUpdates()` in `src/modes/interactive/interactive-mode.ts`.
+
+## clipboard paste error surfacing
+
+- Changed `src/modes/interactive/interactive-mode.ts` so `handleClipboardPaste()` failures show a `Clipboard paste failed: <reason>` status instead of being silently swallowed; an empty clipboard still stays quiet.
+- This was changed in core UI because clipboard paste is internal `InteractiveMode` editor wiring (`onPasteImage`); extensions cannot observe that catch path.
+- Expected merge-conflict zone on upstream sync: `handleClipboardPaste()` in `src/modes/interactive/interactive-mode.ts`.

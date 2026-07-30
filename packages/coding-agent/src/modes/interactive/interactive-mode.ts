@@ -3323,8 +3323,10 @@ export class InteractiveMode {
 				this.editor.insertTextAtCursor?.(text);
 				this.ui.requestRender();
 			}
-		} catch {
-			// Silently ignore clipboard errors (may not have permission, etc.)
+		} catch (error) {
+			this.showStatus(
+				`Clipboard paste failed: ${sanitizeTuiErrorMessage(error instanceof Error ? error.message : String(error))}`,
+			);
 		}
 	}
 
