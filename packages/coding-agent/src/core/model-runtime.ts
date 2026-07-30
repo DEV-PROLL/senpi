@@ -161,7 +161,7 @@ export class ModelRuntime implements Models {
 		const providers = builtinProviderCatalog
 			.builtinProviders()
 			.map((provider) =>
-				provider.id === "radius"
+				provider.refreshModels
 					? provider
 					: withRemoteCatalog(provider, options.catalogBaseUrl, builtinModelDataGeneratedAt),
 			);
@@ -202,9 +202,7 @@ export class ModelRuntime implements Models {
 				: new InMemoryCodingAgentModelsStore());
 		const providers = builtinProviderCatalog
 			.builtinProviders()
-			.map((provider) =>
-				provider.id === "radius" ? provider : withRemoteCatalog(provider, options.catalogBaseUrl),
-			);
+			.map((provider) => (provider.refreshModels ? provider : withRemoteCatalog(provider, options.catalogBaseUrl)));
 		const runtime = new ModelRuntime(
 			credentials,
 			config,

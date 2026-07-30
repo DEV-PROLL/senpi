@@ -46,6 +46,16 @@ describe("parseArgs", () => {
 			const result = parseArgs(["-h"]);
 			expect(result.help).toBe(true);
 		});
+
+		test("documents Ollama Cloud authentication", () => {
+			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+			try {
+				printHelp();
+				expect(logSpy.mock.calls.map(([message]) => String(message)).join("\n")).toContain("OLLAMA_API_KEY");
+			} finally {
+				logSpy.mockRestore();
+			}
+		});
 	});
 
 	describe("--print flag", () => {

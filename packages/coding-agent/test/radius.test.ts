@@ -126,7 +126,15 @@ describe("Radius provider", () => {
 		writeFileSync(
 			modelsPath,
 			JSON.stringify({
-				providers: { "radius-dev": { name: "Radius (dev)", baseUrl: "http://localhost:8788", oauth: "radius" } },
+				providers: {
+					"radius-dev": {
+						name: "Radius (dev)",
+						baseUrl: "http://localhost:8788",
+						oauth: "radius",
+						api: "pi-messages",
+						models: [{ id: "configured-model" }],
+					},
+				},
 			}),
 		);
 		const runtime = await ModelRuntime.create({
@@ -147,7 +155,9 @@ describe("Radius provider", () => {
 			api: "pi-messages",
 			baseUrl: "http://localhost:8788/v1",
 		});
+		expect(runtime.getModel("radius-dev", "configured-model")).toBeDefined();
 		expect(runtime.getProvider("radius-dev")?.name).toBe("Radius (dev)");
+		expect(fetch).toHaveBeenCalledTimes(1);
 	});
 
 	it("requires baseUrl for custom Radius gateways", async () => {

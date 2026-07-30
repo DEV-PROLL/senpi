@@ -381,6 +381,9 @@ export function composeModelProvider(
 	const apiKey = composeApiKeyAuth(providerId, base, config, extension);
 	const oauth = composeOAuthAuth(providerId, base, config, extension);
 	if (!apiKey && !oauth) throw new Error(`Provider ${providerId}: no authentication method configured.`);
+	// The documented local `ollama` models.json catalog must not invoke the Cloud builtin's refresh with its
+	// placeholder key. Other dynamic providers (notably custom Radius gateways) keep their provider-owned refresh.
+	const refreshBase = providerId === "ollama" && config?.models?.length ? undefined : base?.refreshModels?.bind(base);
 
 	const supportsBaseApi = (model: Model<Api>) => base?.getModels().some((entry) => entry.api === model.api) ?? false;
 	const streamWith = (
@@ -425,9 +428,9 @@ export function composeModelProvider(
 		auth: { ...(apiKey ? { apiKey } : {}), ...(oauth ? { oauth } : {}) },
 		getModels,
 		refreshModels:
-			base?.refreshModels || extension?.refreshModels || extension?.oauth?.modifyModels
+			refreshBase || extension?.refreshModels || extension?.oauth?.modifyModels
 				? async (context) => {
-						await base?.refreshModels?.(context);
+						await refreshBase?.(context);
 						if (extension?.refreshModels) {
 							const refreshed = await extension.refreshModels(context);
 							if (!context.signal?.aborted) {

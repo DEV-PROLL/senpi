@@ -139,7 +139,7 @@ const OLLAMA_THINKING_LEVEL_MAP = {
 	medium: "medium",
 	high: "high",
 	xhigh: null,
-	max: "max",
+	max: "high",
 } satisfies ThinkingLevelMap;
 
 function getThinkingLevelMap(

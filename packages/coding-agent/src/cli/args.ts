@@ -366,6 +366,7 @@ ${chalk.bold("Environment Variables:")}
   ANTHROPIC_OAUTH_TOKEN            - Anthropic OAuth token (alternative to API key)
   ANT_LING_API_KEY                 - Ant Ling API key
   OPENAI_API_KEY                   - OpenAI GPT API key
+  OLLAMA_API_KEY                   - Ollama Cloud API key
   AZURE_OPENAI_API_KEY             - Azure OpenAI API key
   AZURE_OPENAI_BASE_URL            - Azure OpenAI/Cognitive Services base URL (e.g. https://{resource}.openai.azure.com)
   AZURE_OPENAI_RESOURCE_NAME       - Azure OpenAI resource name (alternative to base URL)

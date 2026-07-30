@@ -1,5 +1,29 @@
 # AI Source Changes
 
+## 2026-07-30 - Add the official Ollama Cloud dynamic provider
+
+### What changed and why
+
+- New `providers/ollama.ts` registers `ollama` as an OpenAI-compatible builtin using `OLLAMA_API_KEY` and
+  `https://ollama.com/v1`.
+- The provider discovers the current Cloud catalog from `/api/tags`, enriches each entry through `/api/show`,
+  exposes only tool-capable models, and derives thinking, vision, and architecture-specific context metadata.
+- Per-model inspection uses bounded concurrency and retains a last-known tool model when that tag's inspection
+  fails beside usable results; complete inspection failure, an empty usable result, and aborts fail the refresh
+  without replacing the cache.
+- Catalog reads use the shared auth-aware `ModelsStore` refresh lifecycle, so successful data is persisted and a
+  failed refresh cannot replace the last-known list. Subscription usage has no stable per-token dollar rate, so
+  discovered models report zero cost instead of fabricating prices.
+- Ollama's OpenAI-compatible endpoint does not accept OpenAI-only storage/developer/strict-tool fields; the model
+  compatibility projection uses `max_tokens`, and Senpi's `max` reasoning level clamps to Ollama's supported
+  `high` wire value.
+
+### Expected merge conflict zones
+
+- LOW: additive provider factory, provider registration, `KnownProvider`, environment-key map entries, and the
+  existing Ollama reasoning-level map in `api/openai-completions.ts`.
+- LOW: additive provider documentation and deterministic catalog fixtures.
+
 ## 2026-07-29 - Preserve invoke-recovery protocol provenance
 
 ### What changed and why
