@@ -7,7 +7,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
 import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@earendil-works/pi-ai/compat";
 import type {
@@ -56,6 +56,7 @@ import {
 	VERSION,
 } from "../../config.ts";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
+import { buildHighReasoningWarning } from "../../core/high-reasoning-warning.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import { isApiKeyLoginProvider } from "../../core/auth-providers.ts";
 import {
@@ -3617,6 +3618,10 @@ export class InteractiveMode {
 				this.updateEditorBorderColor();
 				break;
 
+			case "high_reasoning_warning":
+				this.showHighReasoningWarning(event);
+				break;
+
 			case "message_start":
 				if (event.message.role === "custom") {
 					this.addMessageToChat(event.message);
@@ -4781,6 +4786,24 @@ export class InteractiveMode {
 			),
 		);
 		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
+		this.ui.requestRender();
+	}
+
+	showHighReasoningWarning(event: { modelId: string; provider: string; thinkingLevel: ThinkingLevel }): void {
+		const { title, body } = buildHighReasoningWarning(
+			{ id: event.modelId, provider: event.provider },
+			event.thinkingLevel,
+		);
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
+		this.chatContainer.addChild(
+			new Text(
+				`${theme.bold(theme.fg("error", title))}\n${body.map((line) => theme.fg("error", line)).join("\n")}`,
+				1,
+				0,
+			),
+		);
+		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
 		this.ui.requestRender();
 	}
 

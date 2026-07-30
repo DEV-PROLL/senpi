@@ -16,7 +16,7 @@ export interface HighReasoningWarningContent {
 }
 
 export function buildHighReasoningWarning(
-	model: Model<Api>,
+	model: Pick<Model<Api>, "id" | "provider">,
 	thinkingLevel: ThinkingLevel,
 ): HighReasoningWarningContent {
 	const modelId = model.id;
