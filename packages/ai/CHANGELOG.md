@@ -11,6 +11,9 @@
 ### Fixed
 
 - Updated GPT-5.6 Terra and Luna pricing across OpenAI and passthrough model catalogs.
+- Recovered Kimi XTML response channels from thinking output and hardened recovery marker parsing.
+- Corrected the OpenCode Go provider display name.
+
 ### Removed
 
 ## [2026.7.30] - 2026-07-30

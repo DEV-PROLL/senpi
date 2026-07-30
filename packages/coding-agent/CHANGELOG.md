@@ -8,12 +8,25 @@
 
 ### Added
 
+- Added warnings for risky main-model selections and high-reasoning GPT-5.6 Sol usage, including interactive TUI rendering.
+- Added OMO Senpi workflow tips and the `/list-tips` command.
+- Added proactive idle compaction after agent turns.
 - Added `--alt` to run interactive mode with the alternate-screen TUI ([#7304](https://github.com/earendil-works/pi/issues/7304)).
+
 ### Changed
+
+- Streamlined comparative eval artifact recording, normalization, and report output.
 
 ### Fixed
 
+- Reset the goal continuation cap after tool use or measurable progress, and continue newly created goals immediately.
+- Restored queued user input after failed compaction and marked failed pre-prompt recovery as terminal.
+- Reused runtime API keys for session title generation.
+- Recovered Kimi XTML thinking channels and hardened recovery marker parsing.
+- Reported apply-patch failure reasons and serialized file mutations to avoid overlapping edits.
+- Limited the high-reasoning warning to GPT-5.6 Sol instead of every frontier model.
 - Fixed `setToolsExpanded(false)` to be a no-op when tool output is already collapsed, avoiding redundant `Tool output: collapsed` startup notices from extensions ([#7292](https://github.com/earendil-works/pi/issues/7292)).
+
 ### Removed
 
 ## [2026.7.30] - 2026-07-30
