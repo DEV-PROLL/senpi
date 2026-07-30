@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { registerFauxProvider } from "@earendil-works/pi-ai";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import compactionExtension from "../../src/core/extensions/builtin/compaction/index.ts";
 import {
 	hardCap,
 	incrementAccepted,
@@ -9,7 +10,17 @@ import {
 	softCap,
 } from "../../src/core/extensions/builtin/compaction/per-turn-cap.ts";
 import { resetTurnCounter } from "../../src/core/extensions/builtin/compaction/state.ts";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+	ExtensionHandler,
+	SessionBeforeCompactEvent,
+	SessionBeforeCompactResult,
+	SessionCompactEvent,
+} from "../../src/core/extensions/index.ts";
+import type { CompactionReason } from "../../src/core/extensions/types.ts";
 import { migrateSessionEntries, parseSessionEntries, type SessionEntry } from "../../src/core/session-manager.ts";
+import { type BlockingHarness, createBlockingContext } from "../helpers/blocking-compaction-harness.ts";
 
 interface FutureCapState {
 	acceptedThisTurn: number;
@@ -38,6 +49,82 @@ function acceptN(state: FutureCapState, n: number): FutureCapState {
 	}
 	return next;
 }
+
+interface CapHandlers {
+	beforeCompact: ExtensionHandler<SessionBeforeCompactEvent, SessionBeforeCompactResult>;
+	sessionCompact: ExtensionHandler<SessionCompactEvent, void>;
+}
+
+function createCapHandlers(): CapHandlers {
+	let beforeCompact: CapHandlers["beforeCompact"] | undefined;
+	let sessionCompact: CapHandlers["sessionCompact"] | undefined;
+	compactionExtension({
+		events: { emit: () => undefined },
+		on: (event: string, handler: unknown) => {
+			if (event === "session_before_compact") {
+				beforeCompact = handler as CapHandlers["beforeCompact"];
+			}
+			if (event === "session_compact") {
+				sessionCompact = handler as CapHandlers["sessionCompact"];
+			}
+		},
+	} as unknown as ExtensionAPI);
+	if (!beforeCompact || !sessionCompact) {
+		throw new Error("Compaction extension did not register cap handlers");
+	}
+	return { beforeCompact, sessionCompact };
+}
+
+async function reachAbsoluteHardCap(handlers: CapHandlers, harness: BlockingHarness): Promise<void> {
+	for (let accepted = 1; accepted <= EXPECTED_HARD_CAP; accepted++) {
+		await handlers.sessionCompact(
+			{
+				type: "session_compact",
+				reason: "threshold",
+				requestId: `accepted-${accepted}`,
+				accepted: true,
+				compactionEntry: {
+					type: "compaction",
+					id: `compaction-${accepted}`,
+					parentId: harness.ctx.sessionManager.getLeafId(),
+					timestamp: new Date(accepted).toISOString(),
+					summary: `accepted summary ${accepted}`,
+					firstKeptEntryId: "kept",
+					tokensBefore: 10_000,
+				},
+				fromExtension: true,
+				willRetry: false,
+			},
+			harness.ctx as ExtensionContext,
+		);
+	}
+}
+
+function capBoundaryEvent(reason: CompactionReason): SessionBeforeCompactEvent {
+	return {
+		type: "session_before_compact",
+		reason,
+		willRetry: false,
+		requestId: `${reason}-at-hard-cap`,
+		preparation: {
+			firstKeptEntryId: "kept",
+			messagesToSummarize: [],
+			turnPrefixMessages: [],
+			isSplitTurn: false,
+			tokensBefore: 10_000,
+			fileOps: { read: new Set(), edited: new Set(), written: new Set() },
+			settings: harnessSettings,
+		},
+		branchEntries: [],
+		signal: new AbortController().signal,
+	};
+}
+
+const harnessSettings = {
+	enabled: true,
+	reserveTokens: 100,
+	keepRecentTokens: 2_000,
+};
 
 const registrations: Array<{ unregister: () => void }> = [];
 
@@ -121,6 +208,29 @@ describe("compaction per-turn cap", () => {
 				expect(stateAtSoftCap.acceptedAbsolute).toBeLessThan(EXPECTED_HARD_CAP);
 			});
 		});
+	});
+
+	describe("Given acceptedAbsolute is exactly the absolute hard cap", () => {
+		it.each(["manual", "extension"] as const)(
+			"rejects a %s-triggered attempt before the compaction generator runs",
+			async (reason) => {
+				const handlers = createCapHandlers();
+				const harness = createBlockingContext({ usageTokens: 9_950 });
+				registrations.push(harness.registration);
+				harness.registration.setResponses([]);
+				expect(hardCap).toBe(EXPECTED_HARD_CAP);
+				await reachAbsoluteHardCap(handlers, harness);
+
+				const result = await handlers.beforeCompact(capBoundaryEvent(reason), harness.ctx as ExtensionContext);
+
+				expect(result).toEqual({
+					cancel: true,
+					rejectionCause: "per-turn-cap",
+					reason: "per-turn compaction cap reached for this turn",
+				});
+				expect(harness.registration.getCallLog()).toHaveLength(0);
+			},
+		);
 	});
 
 	describe("Given the soft cap was reached and the session is reloaded with fresh in-memory state", () => {

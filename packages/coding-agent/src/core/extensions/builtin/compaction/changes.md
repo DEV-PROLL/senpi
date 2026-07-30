@@ -1,5 +1,33 @@
 # Builtin compaction extension changes
 
+## Deterministic recovery after terminal required-compaction failure (2026-07-30)
+
+### What changed
+
+- Required threshold compaction now converts a summarization wall-clock/idle watchdog trip or exact
+  `upstream_stream_truncated` failure into one deterministic `CompactionResult` instead of cancelling and leaving
+  the durable branch oversized.
+- The fallback reuses the canonical prepared cut point, preserves the bounded previous checkpoint and structured
+  task intent, embeds todo/checkpoint metadata in the same compaction entry, and performs no additional provider
+  request. Core still owns stale-revision checks, exact overflow simulation, append, and context reconstruction.
+- Manual compaction and non-target failures keep their existing fail-closed behavior.
+- Task-intent inheritance now reads the persisted schema from `entry.details`, and generated task-intent blocks are
+  extracted into compaction details instead of leaking into the visible summary.
+
+### Why
+
+- A terminal summarizer timeout previously returned `{ cancel: true }`. Required provider admission then saw the
+  unchanged oversized branch on every turn, producing a permanent compaction-stuck loop. Request-local emergency
+  pruning could not repair the persisted branch.
+
+### Verification
+
+- `required-compaction-deterministic-fallback.test.ts` covers exact truncated-stream routing, typed watchdog
+  classification without sleeps, bounded UTF-8 checkpoint retention, metadata durability, and manual-failure
+  exclusion.
+- `agent-session-compaction.test.ts` proves the fallback is appended, reconstructed below the provider admission
+  limit, and permits the next provider request.
+
 ## Proactive idle compaction (2026-07-30)
 
 ### What changed

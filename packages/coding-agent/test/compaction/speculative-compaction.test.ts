@@ -478,6 +478,23 @@ describe("speculative compaction", () => {
 		expect(deltas.join("")).toBe("live summary");
 	});
 
+	it("extracts task intent into compaction details", async () => {
+		const context = createContext();
+		const snapshot = createSpeculativeCompactionSnapshot(context, { generation: 1 });
+		context.registration.setResponses([
+			fauxAssistantMessage(
+				"<task-intent>Fix queue recovery without changing Ctrl+Tab.</task-intent>\n<summary>Verified state.</summary>",
+			),
+		]);
+
+		const result = snapshot ? await runExtensionCompaction(context, snapshot) : undefined;
+
+		expect(result?.summary).toBe("Verified state.");
+		expect(result?.details as Record<string, unknown>).toMatchObject({
+			taskIntent: "Fix queue recovery without changing Ctrl+Tab.",
+		});
+	});
+
 	it("retries a compaction summary request with a smaller input after a context-window failure", async () => {
 		// Given
 		const context = createContext();

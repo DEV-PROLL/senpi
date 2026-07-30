@@ -27,6 +27,14 @@ describe("isTransientSummarizationFailure", () => {
 		expect(isTransientSummarizationFailure(transient, transient.message)).toBe(true);
 	});
 
+	it("recognizes the exact upstream truncated-stream code", () => {
+		const error = new SummaryRequestError(
+			"upstream_stream_truncated: Responses stream ended before a terminal event",
+			false,
+		);
+		expect(isTransientSummarizationFailure(error, error.message)).toBe(true);
+	});
+
 	it("falls back to the message classifier for bare transport throws", () => {
 		const network = new Error("fetch failed");
 		expect(isTransientSummarizationFailure(network, network.message)).toBe(true);

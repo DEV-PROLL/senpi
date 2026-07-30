@@ -442,6 +442,19 @@ export interface ExtensionBindings {
 /** Options for AgentSession.prompt() */
 export type PromptDisposition = "handled" | "queued" | "started";
 
+export type QueuedInput = {
+	readonly text: string;
+	readonly mode: "steer" | "followUp";
+	readonly enqueueOrder: number;
+};
+
+export type ClearedQueue = {
+	steering: string[];
+	followUp: string[];
+	/** Global enqueue order, independent of native delivery priority. */
+	readonly ordered: readonly QueuedInput[];
+};
+
 export interface PromptOptions {
 	/** Whether to expand file-based prompt templates (default: true) */
 	expandPromptTemplates?: boolean;
@@ -560,6 +573,9 @@ export class AgentSession {
 	private _steeringMessages: string[] = [];
 	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
 	private _followUpMessages: string[] = [];
+	/** Recovery-only order across both native queue modes and TUI compaction ownership. */
+	private _queuedInputOrder: QueuedInput[] = [];
+	private _nextQueuedInputOrder = 0;
 	private _sessionLogger: SessionLogger;
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
@@ -1149,7 +1165,9 @@ export class AgentSession {
 				for (const message of queuedMessages) this.agent.steer(message);
 				const userMessage = queuedMessages.find((message) => message.role === "user");
 				if (userMessage?.role === "user") {
-					this._steeringMessages.push(this._extractUserMessageText(userMessage.content));
+					const text = this._extractUserMessageText(userMessage.content);
+					this._steeringMessages.push(text);
+					this._recordQueuedInput(text, "steer");
 					this._emitQueueUpdate();
 				}
 				return;
@@ -1453,12 +1471,14 @@ export class AgentSession {
 				const steeringIndex = this._steeringMessages.indexOf(messageText);
 				if (steeringIndex !== -1) {
 					this._steeringMessages.splice(steeringIndex, 1);
+					this._removeQueuedInput(messageText, "steer");
 					this._emitQueueUpdate();
 				} else {
 					// Check follow-up queue
 					const followUpIndex = this._followUpMessages.indexOf(messageText);
 					if (followUpIndex !== -1) {
 						this._followUpMessages.splice(followUpIndex, 1);
+						this._removeQueuedInput(messageText, "followUp");
 						this._emitQueueUpdate();
 					}
 				}
@@ -2666,7 +2686,7 @@ export class AgentSession {
 	 * @param images Optional image attachments to include with the message
 	 * @throws Error if text is an extension command
 	 */
-	async steer(text: string, images?: ImageContent[]): Promise<void> {
+	async steer(text: string, images?: ImageContent[], recovery?: { enqueueOrder?: number }): Promise<void> {
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -2676,7 +2696,7 @@ export class AgentSession {
 		let expandedText = this._expandSkillCommand(text);
 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 
-		await this._queueSteer(expandedText, images);
+		await this._queueSteer(expandedText, images, recovery?.enqueueOrder);
 	}
 
 	/**
@@ -2686,7 +2706,7 @@ export class AgentSession {
 	 * @param images Optional image attachments to include with the message
 	 * @throws Error if text is an extension command
 	 */
-	async followUp(text: string, images?: ImageContent[]): Promise<void> {
+	async followUp(text: string, images?: ImageContent[], recovery?: { enqueueOrder?: number }): Promise<void> {
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -2696,7 +2716,7 @@ export class AgentSession {
 		let expandedText = this._expandSkillCommand(text);
 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 
-		await this._queueFollowUp(expandedText, images);
+		await this._queueFollowUp(expandedText, images, recovery?.enqueueOrder);
 	}
 
 	private _startSessionTitleGeneration(firstPrompt: string): void {
@@ -2777,8 +2797,9 @@ export class AgentSession {
 	/**
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
-	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
+	private async _queueSteer(text: string, images?: ImageContent[], enqueueOrder?: number): Promise<void> {
 		this._steeringMessages.push(text);
+		this._recordQueuedInput(text, "steer", enqueueOrder);
 		this._sessionLogger.debug("queue_enqueue", { mode: "steer", count: this._steeringMessages.length });
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -2796,8 +2817,9 @@ export class AgentSession {
 	/**
 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
 	 */
-	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
+	private async _queueFollowUp(text: string, images?: ImageContent[], enqueueOrder?: number): Promise<void> {
 		this._followUpMessages.push(text);
+		this._recordQueuedInput(text, "followUp", enqueueOrder);
 		this._sessionLogger.debug("queue_enqueue", { mode: "followUp", count: this._followUpMessages.length });
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -3002,25 +3024,46 @@ export class AgentSession {
 		}
 	}
 
+	/** Reserve a global order for input temporarily owned outside the native queues. */
+	reserveQueuedInputOrder(): number {
+		this._nextQueuedInputOrder += 1;
+		return this._nextQueuedInputOrder;
+	}
+
+	private _recordQueuedInput(text: string, mode: QueuedInput["mode"], enqueueOrder?: number): void {
+		const order = enqueueOrder ?? this.reserveQueuedInputOrder();
+		this._nextQueuedInputOrder = Math.max(this._nextQueuedInputOrder, order);
+		this._queuedInputOrder.push({ text, mode, enqueueOrder: order });
+	}
+
+	private _removeQueuedInput(text: string, mode: QueuedInput["mode"]): void {
+		const index = this._queuedInputOrder.findIndex((message) => message.mode === mode && message.text === text);
+		if (index !== -1) this._queuedInputOrder.splice(index, 1);
+	}
+
 	/**
 	 * Clear all queued messages and return them.
-	 * Useful for restoring to editor when user aborts.
-	 * @returns Object with steering and followUp arrays
+	 * Useful for restoring to editor when user aborts. The non-enumerable
+	 * `ordered` view preserves legacy object equality and native queue semantics.
 	 */
-	clearQueue(): { steering: string[]; followUp: string[] } {
+	clearQueue(): ClearedQueue {
 		const steering = [...this._steeringMessages];
 		const followUp = [...this._followUpMessages];
+		const ordered = [...this._queuedInputOrder].sort((a, b) => a.enqueueOrder - b.enqueueOrder);
 		if (steering.length > 0 || followUp.length > 0) this._hadClearedQueuedMessages = true;
 		// Clear every queue synchronously. Deferred post-compaction messages are
 		// already represented in visible bookkeeping, so they must not be returned
 		// a second time or later resurrected into Agent's native queues.
 		this._steeringMessages = [];
 		this._followUpMessages = [];
+		this._queuedInputOrder = [];
 		this._postCompactionDeferredSteeringMessages = [];
 		this._postCompactionDeferredFollowUpMessages = [];
 		this.agent.clearAllQueues();
 		this._emitQueueUpdate();
-		return { steering, followUp };
+		const cleared = { steering, followUp } as ClearedQueue;
+		Object.defineProperty(cleared, "ordered", { value: ordered, enumerable: false });
+		return cleared;
 	}
 
 	/** Number of pending messages (includes both steering and follow-up) */
@@ -4173,6 +4216,7 @@ export class AgentSession {
 			const compacted = await this._runPrePromptCompaction(assistantMessage, skipAbortedCheck, inlineReason);
 			if (compacted) return true;
 		}
+		if (this._isCompactionOnCooldown()) return false;
 		throw new RequiredCompactionError();
 	}
 
@@ -4214,6 +4258,7 @@ export class AgentSession {
 		}
 
 		const compacted = await this._runPrePromptCompaction(lastAssistantMessage, false, "pre_prompt");
+		if (!compacted && !isOversized() && this._isCompactionOnCooldown()) return;
 		if (!compacted || isOversized()) {
 			throw new RequiredCompactionError();
 		}
@@ -4389,6 +4434,11 @@ export class AgentSession {
 		return false;
 	}
 
+	private _isCompactionOnCooldown(): boolean {
+		const state = this._compactionLifecycle.state;
+		return state.status === "failed" && state.rejectionCause === "circuit-breaker";
+	}
+
 	private async _runPrePromptCompaction(
 		lastAssistantMessage: AssistantMessage | undefined,
 		skipAbortedCheck: boolean,
@@ -4458,7 +4508,10 @@ export class AgentSession {
 		if (!shouldCompact(contextTokens, model.contextWindow, settings)) return;
 
 		const compacted = await this._runPrePromptCompaction(this._findLastAssistantMessage(), true, "pre_prompt");
-		if (!compacted) throw new RequiredCompactionError();
+		if (!compacted) {
+			if (this._isCompactionOnCooldown()) return;
+			throw new RequiredCompactionError();
+		}
 		this._scheduledContinuationRecompacted = true;
 	}
 
@@ -5581,7 +5634,8 @@ export class AgentSession {
 			model &&
 			shouldCompact(contextTokens, model.contextWindow, compactionSettings)
 		) {
-			if (!(await this._runPrePromptCompaction(message, true, "threshold", true, true))) {
+			const preRetryCompaction = await this._runPrePromptCompaction(message, true, "threshold", true, true);
+			if (!preRetryCompaction && !this._isCompactionOnCooldown()) {
 				const attempt = this._retryAttempt;
 				this._retryAttempt = 0;
 				this._emit({

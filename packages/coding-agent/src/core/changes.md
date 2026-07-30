@@ -1,5 +1,18 @@
 # changes
 
+## Failed pre-prompt compaction is terminal for queue recovery (2026-07-30)
+
+### What changed
+
+- `_runPrePromptCompaction` now emits `willRetry: false` when compaction throws, regardless of the caller's
+  original retry intent.
+- Successful compactions still preserve their retry intent.
+
+### Why
+
+- A failed required compaction blocks the pending retry. Advertising `willRetry: true` handed queued input back
+  to native queues against the unchanged over-threshold context instead of restoring it to the editor.
+
 ## Codex fast-variant service-tier metadata lookup (2026-07-29)
 
 ### What changed

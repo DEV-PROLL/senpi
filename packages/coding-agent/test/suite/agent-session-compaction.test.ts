@@ -8,6 +8,7 @@ import {
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { estimateContextTokens, estimateTokens, generateSummary } from "../../src/core/compaction/index.ts";
+import compactionExtension from "../../src/core/extensions/builtin/compaction/index.ts";
 import type { ExtensionAPI } from "../../src/core/extensions/index.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
@@ -17,6 +18,13 @@ type CheckCompaction = (
 	requestReason?: "pre_prompt",
 ) => Promise<void>;
 type RunAutoCompaction = (reason: "overflow" | "threshold", willRetry: boolean) => Promise<void>;
+type RunPrePromptCompaction = (
+	lastAssistantMessage: AssistantMessage | undefined,
+	skipAbortedCheck: boolean,
+	reason: "overflow" | "threshold",
+	willRetry: boolean,
+	emitLifecycle?: boolean,
+) => Promise<boolean>;
 interface BlockingBeforeCompactExtension {
 	extension: (pi: ExtensionAPI) => void;
 	releaseCancel(): void;
@@ -39,6 +47,14 @@ function getRunAutoCompaction(session: Harness["session"]): RunAutoCompaction {
 	return value;
 }
 
+function getRunPrePromptCompaction(session: Harness["session"]): RunPrePromptCompaction {
+	const value = Reflect.get(session, "_runPrePromptCompaction");
+	if (typeof value !== "function") {
+		throw new Error("AgentSession._runPrePromptCompaction is not available for characterization tests");
+	}
+	return value;
+}
+
 async function checkCompaction(
 	session: Harness["session"],
 	assistantMessage: AssistantMessage,
@@ -54,6 +70,24 @@ async function runAutoCompaction(
 	willRetry: boolean,
 ): Promise<void> {
 	await getRunAutoCompaction(session).call(session, reason, willRetry);
+}
+
+async function runPrePromptCompaction(
+	session: Harness["session"],
+	lastAssistantMessage: AssistantMessage | undefined,
+	skipAbortedCheck: boolean,
+	reason: "overflow" | "threshold",
+	willRetry: boolean,
+	emitLifecycle = true,
+): Promise<boolean> {
+	return await getRunPrePromptCompaction(session).call(
+		session,
+		lastAssistantMessage,
+		skipAbortedCheck,
+		reason,
+		willRetry,
+		emitLifecycle,
+	);
 }
 
 function stubRunAutoCompaction(session: Harness["session"]) {
@@ -460,6 +494,117 @@ describe("AgentSession compaction characterization", () => {
 		expect(getStreamCallCount()).toBe(1);
 	});
 
+	it("durably recovers below the admission limit after a truncated summary stream", async () => {
+		const reserveTokens = 1_000;
+		const harness = await createHarness({
+			settings: { compaction: { keepRecentTokens: 1, reserveTokens } },
+			extensionFactories: [compactionExtension],
+		});
+		harnesses.push(harness);
+		const model = harness.getModel();
+		const contextWindow = model.contextWindow ?? 10_000;
+		const now = Date.now();
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "old oversized context ".repeat(contextWindow) }],
+			timestamp: now - 2_000,
+		});
+		harness.sessionManager.appendMessage(
+			createAssistant(harness, {
+				text: "old assistant response",
+				stopReason: "stop",
+				totalTokens: contextWindow - 100,
+				timestamp: now - 1_000,
+			}),
+		);
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "continue the retained turn" }],
+			timestamp: now,
+		});
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+		harness.setResponses([
+			createAssistant(harness, {
+				stopReason: "error",
+				errorMessage: "upstream_stream_truncated: Responses stream ended before a terminal event",
+			}),
+		]);
+
+		await runAutoCompaction(harness.session, "threshold", false);
+
+		const compactionEntries = harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction");
+		expect(compactionEntries).toHaveLength(1);
+		expect(compactionEntries[0]).toMatchObject({
+			details: {
+				schema: "senpi.compaction.deterministic-fallback.v1",
+				failureKind: "upstream-stream-truncated",
+			},
+		});
+		expect(estimateContextTokens(harness.sessionManager.buildSessionContext().messages).tokens).toBeLessThan(
+			contextWindow - reserveTokens,
+		);
+
+		harness.appendResponses([fauxAssistantMessage("continued after fallback")]);
+		await harness.session.prompt("next admission");
+
+		expect(harness.faux.getCallLog()).toHaveLength(2);
+		expect(harness.session.messages.at(-1)).toMatchObject({
+			role: "assistant",
+			content: [{ type: "text", text: "continued after fallback" }],
+		});
+	});
+
+	it("drops an unfit retained suffix instead of repeating required compaction", async () => {
+		const reserveTokens = 1_000;
+		const harness = await createHarness({
+			settings: { compaction: { keepRecentTokens: 1, reserveTokens } },
+			extensionFactories: [compactionExtension],
+		});
+		harnesses.push(harness);
+		const model = harness.getModel();
+		const contextWindow = model.contextWindow ?? 10_000;
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "older request" }],
+			timestamp: Date.now() - 2_000,
+		});
+		harness.sessionManager.appendMessage(
+			createAssistant(harness, {
+				text: "older response",
+				stopReason: "stop",
+				totalTokens: 100,
+				timestamp: Date.now() - 1_000,
+			}),
+		);
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "mandatory latest payload ".repeat(contextWindow) }],
+			timestamp: Date.now(),
+		});
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+		harness.setResponses([
+			createAssistant(harness, {
+				stopReason: "error",
+				errorMessage: "upstream_stream_truncated: Responses stream ended before a terminal event",
+			}),
+		]);
+
+		await runAutoCompaction(harness.session, "threshold", false);
+
+		const compactionEntries = harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction");
+		expect(compactionEntries).toHaveLength(1);
+		expect(compactionEntries[0]).toMatchObject({
+			firstKeptEntryId: "",
+			details: {
+				schema: "senpi.compaction.deterministic-fallback.v1",
+				retainedSuffix: "none",
+			},
+		});
+		expect(estimateContextTokens(harness.sessionManager.buildSessionContext().messages).tokens).toBeLessThan(
+			contextWindow - reserveTokens,
+		);
+	});
+
 	it("balances auto-compaction events when there is nothing to prepare", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
@@ -479,6 +624,32 @@ describe("AgentSession compaction characterization", () => {
 				willRetry: false,
 			}),
 		]);
+	});
+
+	it("terminalizes a failed pre-prompt compaction instead of advertising another retry", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		Reflect.set(
+			harness.session,
+			"_executeCompaction",
+			vi.fn(async () => {
+				throw new Error(
+					"Summarization stream exceeded its 120000ms wall-clock budget; treating the request as too slow to keep the session waiting",
+				);
+			}),
+		);
+
+		const succeeded = await runPrePromptCompaction(harness.session, undefined, true, "threshold", true);
+
+		expect(succeeded).toBe(false);
+		expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({
+			type: "compaction_end",
+			reason: "threshold",
+			result: undefined,
+			aborted: false,
+			willRetry: false,
+			errorMessage: expect.stringContaining("120000ms wall-clock budget"),
+		});
 	});
 
 	it("publishes an aborted preflight end after a start listener aborts auto-compaction", async () => {

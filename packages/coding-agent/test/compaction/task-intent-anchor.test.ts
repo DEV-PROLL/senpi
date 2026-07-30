@@ -35,24 +35,33 @@ describe("task-intent parser anchor", () => {
 	});
 
 	it("ignores legacy details without taskIntent when resolving inheritance", () => {
-		expect(resolveInheritedTaskIntent([{ schema: "senpi.compaction.summary.v1", details: {} }])).toBeUndefined();
+		expect(resolveInheritedTaskIntent([{ details: { schema: "senpi.compaction.summary.v1" } }])).toBeUndefined();
 	});
 
 	it("resolves the newest local taskIntent across remote interleaves", () => {
 		expect(
 			resolveInheritedTaskIntent([
-				{ schema: "senpi.compaction.summary.v1", details: { taskIntent: "local-old" } },
-				{ schema: "senpi.compaction.summary.v1", details: { taskIntent: "local-new" } },
-				{ schema: "senpi.compaction.openai-remote.v1", details: { taskIntent: "remote" } },
+				{ details: { schema: "senpi.compaction.summary.v1", taskIntent: "local-old" } },
+				{ details: { schema: "senpi.compaction.summary.v1", taskIntent: "local-new" } },
+				{ details: { schema: "senpi.compaction.openai-remote.v1", taskIntent: "remote" } },
 			]),
 		).toBe("local-new");
+	});
+
+	it("bounds inherited task intent by UTF-8 bytes", () => {
+		const inherited = resolveInheritedTaskIntent([
+			{ details: { schema: "senpi.compaction.summary.v1", taskIntent: "계속 ".repeat(5_000) } },
+		]);
+
+		expect(Buffer.byteLength(inherited ?? "")).toBeLessThanOrEqual(4_096);
+		expect(inherited).not.toContain("\uFFFD");
 	});
 
 	it("skips remote-schema entries while walking the branch backwards", () => {
 		expect(
 			resolveInheritedTaskIntent([
-				{ schema: "senpi.compaction.openai-remote.v1", details: { taskIntent: "remote" } },
-				{ schema: "senpi.compaction.summary.v1", details: { taskIntent: "branch-intent" } },
+				{ details: { schema: "senpi.compaction.openai-remote.v1", taskIntent: "remote" } },
+				{ details: { schema: "senpi.compaction.summary.v1", taskIntent: "branch-intent" } },
 			]),
 		).toBe("branch-intent");
 	});
@@ -60,7 +69,7 @@ describe("task-intent parser anchor", () => {
 	it("supports branch exclusion input by ignoring remote-only branches", () => {
 		expect(
 			resolveInheritedTaskIntent([
-				{ schema: "senpi.compaction.openai-remote.v1", details: { taskIntent: "remote" } },
+				{ details: { schema: "senpi.compaction.openai-remote.v1", taskIntent: "remote" } },
 			]),
 		).toBeUndefined();
 	});

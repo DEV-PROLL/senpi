@@ -4,7 +4,28 @@ import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 type QueuedMessages = {
 	steering: string[];
 	followUp: string[];
+	ordered?: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
 };
+
+type ClearAllQueuesThis = {
+	session: {
+		clearQueue: () => { steering: string[]; followUp: string[] };
+	};
+	compactionInFlightMessages: Array<{ text: string; mode: "steer" | "followUp" }>;
+	compactionQueuedMessages: Array<{ text: string; mode: "steer" | "followUp" }>;
+	compactionTransferAbortControllers: Map<string, AbortController>;
+};
+
+type ClearAllQueues = (this: ClearAllQueuesThis) => QueuedMessages;
+
+function clearAllQueues(fakeThis: ClearAllQueuesThis): QueuedMessages {
+	const descriptor = Object.getOwnPropertyDescriptor(InteractiveMode.prototype, "clearAllQueues");
+	const clear = descriptor?.value as ClearAllQueues | undefined;
+	if (!clear) {
+		throw new Error("clearAllQueues is missing");
+	}
+	return clear.call(fakeThis);
+}
 
 type RestoreQueuedMessagesToEditorThis = {
 	clearAllQueues: () => QueuedMessages;
@@ -36,6 +57,28 @@ function restoreQueuedMessagesToEditor(
 }
 
 describe("InteractiveMode.restoreQueuedMessagesToEditor", () => {
+	test("preserves mixed-mode compaction submission order", () => {
+		const fakeThis = {
+			session: {
+				clearQueue: () => ({ steering: [], followUp: [] }),
+			},
+			compactionInFlightMessages: [
+				{ text: "first follow-up", mode: "followUp" },
+				{ text: "second steering", mode: "steer" },
+			],
+			compactionQueuedMessages: [{ text: "third follow-up", mode: "followUp" }],
+			compactionTransferAbortControllers: new Map<string, AbortController>(),
+		} satisfies ClearAllQueuesThis;
+
+		const cleared = clearAllQueues(fakeThis);
+
+		expect(cleared.ordered?.map(({ text, mode }) => ({ text, mode }))).toEqual([
+			{ text: "first follow-up", mode: "followUp" },
+			{ text: "second steering", mode: "steer" },
+			{ text: "third follow-up", mode: "followUp" },
+		]);
+	});
+
 	test("aborts through the session after restoring queued messages", () => {
 		// given
 		const abort = vi.fn<() => void>();

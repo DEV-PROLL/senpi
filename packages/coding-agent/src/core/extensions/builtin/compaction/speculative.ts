@@ -30,6 +30,7 @@ import { sanitizeAnthropicPayload } from "../tool-pair-guard/sanitize-anthropic-
 import { computeEffectiveKeepRecentTokens, computeEffectiveThreshold } from "./policy.ts";
 import { buildPrompt, type MergedCompactionPromptVariant } from "./prompts.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
+import { extractTaskIntent, resolveInheritedTaskIntent } from "./task-intent.ts";
 import * as truncation from "./tool-truncation.ts";
 import { computeStructuralYield } from "./yield.ts";
 
@@ -69,6 +70,7 @@ export interface SpeculativeCompactionSnapshot {
 	model: Model<any>;
 	contextWindow: number;
 	preparation: CompactionPreparation;
+	branchEntries?: ReturnType<ReadonlySessionManager["getBranch"]>;
 	promptVariant: MergedCompactionPromptVariant;
 	origin?: "speculative" | "blocking" | "core-route";
 	customInstructions?: string;
@@ -450,6 +452,7 @@ export function createSpeculativeCompactionSnapshot(
 		model,
 		contextWindow,
 		preparation,
+		branchEntries,
 		promptVariant: getPromptVariant({ reason: "extension", preparation }),
 		...(options.origin ? { origin: options.origin } : {}),
 		customInstructions: options.customInstructions,
@@ -487,6 +490,7 @@ export async function runExtensionCompaction(
 	const prompt = buildPrompt({
 		variant: snapshot.promptVariant,
 		previousSummary: snapshot.preparation.previousSummary,
+		taskIntent: resolveInheritedTaskIntent(snapshot.branchEntries ?? []),
 		customInstructions: snapshot.customInstructions,
 	});
 
@@ -544,8 +548,10 @@ export async function runExtensionCompaction(
 		// size of the *discarded* input made large sessions uncompactable.
 		const tokenEstimate = estimateContextTokens(convertToLlm(messages)).tokens + approxTokens(summary);
 
+		const parsedSummary = extractTaskIntent(summary);
+		const taskIntent = parsedSummary.taskIntent ?? resolveInheritedTaskIntent(snapshot.branchEntries ?? []);
 		return {
-			summary,
+			summary: parsedSummary.summaryText,
 			firstKeptEntryId: snapshot.preparation.firstKeptEntryId,
 			tokensBefore: snapshot.preparation.tokensBefore,
 			details: {
@@ -556,10 +562,11 @@ export async function runExtensionCompaction(
 					previousSummary: snapshot.preparation.previousSummary ?? "",
 					messagesToSummarize: snapshot.preparation.messagesToSummarize,
 					turnPrefixMessages: snapshot.preparation.turnPrefixMessages,
-					summary,
+					summary: parsedSummary.summaryText,
 					tokensBefore: snapshot.preparation.tokensBefore,
 				}),
 				...(snapshot.origin ? { origin: snapshot.origin } : {}),
+				...(taskIntent ? { taskIntent } : {}),
 			},
 		};
 	}

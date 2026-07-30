@@ -4889,8 +4889,21 @@ export class InteractiveMode {
 	 * Clear all queued messages and return their contents.
 	 * Clears both session queue and compaction queue.
 	 */
-	private clearAllQueues(): { steering: string[]; followUp: string[] } {
-		const { steering, followUp } = this.session.clearQueue();
+	private clearAllQueues(): {
+		steering: string[];
+		followUp: string[];
+		ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
+	} {
+		const clearedNative = this.session.clearQueue();
+		const { steering, followUp } = clearedNative;
+		const nativeMessages = clearedNative.ordered ?? [
+			...steering.map((text, enqueueOrder) => ({ text, mode: "steer" as const, enqueueOrder })),
+			...followUp.map((text, index) => ({
+				text,
+				mode: "followUp" as const,
+				enqueueOrder: steering.length + index,
+			})),
+		];
 		const compactionMessages = [...this.compactionInFlightMessages, ...this.compactionQueuedMessages];
 		const compactionSteering = compactionMessages.filter((msg) => msg.mode === "steer").map((msg) => msg.text);
 		const compactionFollowUp = compactionMessages.filter((msg) => msg.mode === "followUp").map((msg) => msg.text);
@@ -4898,10 +4911,24 @@ export class InteractiveMode {
 		this.compactionInFlightMessages = [];
 		this.compactionTransferAbortControllers.clear();
 		this.compactionQueuedMessages = [];
-		return {
+		const fallbackOrder = nativeMessages.reduce((maximum, message) => Math.max(maximum, message.enqueueOrder), 0);
+		const ordered = [
+			...nativeMessages,
+			...compactionMessages.map((message, index) => ({
+				...message,
+				enqueueOrder: message.enqueueOrder ?? fallbackOrder + index + 1,
+			})),
+		].sort((a, b) => a.enqueueOrder - b.enqueueOrder);
+		const cleared = {
 			steering: [...steering, ...compactionSteering],
 			followUp: [...followUp, ...compactionFollowUp],
+		} as {
+			steering: string[];
+			followUp: string[];
+			ordered: typeof ordered;
 		};
+		Object.defineProperty(cleared, "ordered", { value: ordered, enumerable: false });
+		return cleared;
 	}
 
 	private updatePendingMessagesDisplay(): void {
@@ -4924,8 +4951,8 @@ export class InteractiveMode {
 	}
 
 	private restoreQueuedMessagesToEditor(options?: { abort?: boolean; currentText?: string }): number {
-		const { steering, followUp } = this.clearAllQueues();
-		const allQueued = [...steering, ...followUp];
+		const { steering, followUp, ordered } = this.clearAllQueues();
+		const allQueued = ordered?.map((message) => message.text) ?? [...steering, ...followUp];
 		if (allQueued.length === 0) {
 			this.updatePendingMessagesDisplay();
 			if (options?.abort) {
@@ -4954,8 +4981,8 @@ export class InteractiveMode {
 	 * - The helper never auto-prompts restored queue text; the user decides whether to send it.
 	 */
 	private async abortAndFireQueuedMessages(): Promise<number> {
-		const { steering, followUp } = this.clearAllQueues();
-		const allQueued = [...steering, ...followUp];
+		const { steering, followUp, ordered } = this.clearAllQueues();
+		const allQueued = ordered?.map((message) => message.text) ?? [...steering, ...followUp];
 		this.updatePendingMessagesDisplay();
 		await this.session.abort();
 
@@ -4971,7 +4998,7 @@ export class InteractiveMode {
 	}
 
 	private queueCompactionMessage(text: string, mode: "steer" | "followUp"): void {
-		this.compactionQueuedMessages.push({ text, mode });
+		this.compactionQueuedMessages.push({ text, mode, enqueueOrder: this.session.reserveQueuedInputOrder() });
 		this.getSessionLogger().debug("compaction_queue_enqueue", { mode, count: this.compactionQueuedMessages.length });
 		this.editor.addToHistory?.(text);
 		this.editor.setText("");
@@ -5049,7 +5076,9 @@ export class InteractiveMode {
 							},
 						),
 					deliverQueued: (message) =>
-						message.mode === "followUp" ? session.followUp(message.text) : session.steer(message.text),
+						message.mode === "followUp"
+							? session.followUp(message.text, undefined, { enqueueOrder: message.enqueueOrder })
+							: session.steer(message.text, undefined, { enqueueOrder: message.enqueueOrder }),
 					reportFailure: (error, undeliveredCount) => {
 						this.showError(
 							`Failed to send queued message${undeliveredCount === 1 ? "" : "s"}: ${

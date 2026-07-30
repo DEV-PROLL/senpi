@@ -17,6 +17,26 @@
 
 - LOW: `agent-session.ts` in `_runPrePromptCompaction()`'s terminal catch emission.
 
+## Required compaction failures recover with a deterministic durable checkpoint (2026-07-30)
+
+- Terminal summarization watchdog and exact `upstream_stream_truncated` failures during required threshold
+  compaction now append a bounded deterministic checkpoint through the normal compaction lifecycle.
+- The active context is reconstructed below provider admission limits before the next request; manual and unrelated
+  failures remain fail-closed, and queued input stays under the existing success/failure ownership rules.
+
+## Map-less GPT-5.6 Sol cycles from xhigh to max (2026-07-30)
+
+### What changed
+
+- Thinking-level capability detection now exposes `max` for map-less OpenAI-compatible `gpt-5.6-sol` models.
+- The existing Shift+Tab thinking cycle therefore advances `xhigh` to `max`; no shortcut was added or changed.
+- Session persistence, footer/status rendering, and provider payload tests cover the same effective level.
+
+### Why
+
+- Generated catalog models already carried a max mapping, but custom-provider Sol models did not. The mismatch
+  made Shift+Tab wrap from `xhigh` to `off` and could silently downgrade a forced max request on the wire.
+
 ## high_reasoning_warning narrowed to gpt-5.6-sol only (2026-07-30)
 
 ### What changed
