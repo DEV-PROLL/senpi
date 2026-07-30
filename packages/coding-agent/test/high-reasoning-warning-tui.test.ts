@@ -27,8 +27,9 @@ describe("InteractiveMode.showHighReasoningWarning", () => {
 			thinkingLevel: "xhigh",
 		} as Extract<AgentSessionEvent, { type: "high_reasoning_warning" }>;
 
-		(InteractiveMode as unknown as { prototype: { showHighReasoningWarning(this: unknown, event: unknown): void } })
-			.prototype.showHighReasoningWarning.call(fakeThis, event);
+		(
+			InteractiveMode as unknown as { prototype: { showHighReasoningWarning(this: unknown, event: unknown): void } }
+		).prototype.showHighReasoningWarning.call(fakeThis, event);
 
 		expect(fakeThis.chatContainer.children).toHaveLength(4);
 		const rendered = stripAnsi(renderAll(fakeThis.chatContainer));
@@ -52,8 +53,9 @@ describe("InteractiveMode.showHighReasoningWarning", () => {
 			thinkingLevel: "max",
 		} as Extract<AgentSessionEvent, { type: "high_reasoning_warning" }>;
 
-		(InteractiveMode as unknown as { prototype: { showHighReasoningWarning(this: unknown, event: unknown): void } })
-			.prototype.showHighReasoningWarning.call(fakeThis, event);
+		(
+			InteractiveMode as unknown as { prototype: { showHighReasoningWarning(this: unknown, event: unknown): void } }
+		).prototype.showHighReasoningWarning.call(fakeThis, event);
 
 		expect(stripAnsi(renderAll(fakeThis.chatContainer))).toContain("max");
 		expect(stripAnsi(renderAll(fakeThis.chatContainer))).toContain("claude-opus-4-8");

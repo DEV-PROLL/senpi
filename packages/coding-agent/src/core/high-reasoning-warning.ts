@@ -25,7 +25,7 @@ export function buildHighReasoningWarning(
 		`${modelId} is a frontier reasoning model. Running it at "${thinkingLevel}" effort makes it acutely sensitive to prompt quality.`,
 		"Driving this model directly from a human prompt is NOT recommended. Risks include:",
 		"  • The model may refuse to stop, looping or working far past the stated goal.",
-		"  • It may perform unrequested actions in order to \"complete\" the task.",
+		'  • It may perform unrequested actions in order to "complete" the task.',
 		"  • It may take risky, irreversible, or dangerous actions to force completion.",
 		"Strongly recommended: use this model ONLY through the ultrabrain subagent.",
 		"Human prompts leave gaps; an agent-authored prompt is denser and stricter than a human's — exactly what these high-effort models need to stay bounded.",

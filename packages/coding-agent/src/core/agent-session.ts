@@ -119,6 +119,7 @@ import type {
 	ModelSelectSource,
 } from "./extensions/types.ts";
 import { RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
+import { shouldWarnHighReasoning } from "./high-reasoning-warning.ts";
 import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
@@ -145,7 +146,6 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinking-levels.ts";
-import { shouldWarnHighReasoning } from "./high-reasoning-warning.ts";
 import { resetTimings, time } from "./timings.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";

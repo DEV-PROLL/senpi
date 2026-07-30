@@ -56,7 +56,6 @@ import {
 	VERSION,
 } from "../../config.ts";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
-import { buildHighReasoningWarning } from "../../core/high-reasoning-warning.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import { isApiKeyLoginProvider } from "../../core/auth-providers.ts";
 import {
@@ -80,6 +79,7 @@ import type {
 } from "../../core/extensions/index.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 import { appendHiddenTuiStdout } from "../../core/hidden-stdout-log.ts";
+import { buildHighReasoningWarning } from "../../core/high-reasoning-warning.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
