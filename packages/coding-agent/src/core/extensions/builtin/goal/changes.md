@@ -1,5 +1,40 @@
 # goal Extension Changes
 
+## Observable progress resets the persisted continuation cap streak (2026-07-30)
+
+### What changed
+
+- `continuation.ts` now exposes `hasGoalContinuationProgress`, which treats a
+  changed persisted continuation signature as observable goal progress.
+- `monitor-continuation.ts` resets `consecutiveContinuations` before the next
+  admission when a non-user continuation turn either used tools or changed that
+  signature. The verdict is rebuilt from the reset goal so the cap remains a
+  backstop for uninterrupted non-progress rather than a raw turn counter.
+- The cap stays at 8, remains inclusive at the boundary, and still applies to
+  immediate, user-grace, and session-start paths. User-prompt resets,
+  single-flight delivery, stale/repetition/length guards, monitor scheduling,
+  and blocked-state deduplication are unchanged.
+- Coverage rewrites the former distinct-text cap pins in
+  `goal-monitor-continuation.test.ts` and
+  `regressions/issue-447-goal-continuation.test.ts`, and adds an explicit
+  below-cap/at-cap verdict boundary assertion.
+
+### Why
+
+- Codex has no deterministic continuation counter; its blocked audit restarts
+  whenever the goal makes meaningful progress. Senpi intentionally retains an
+  eight-turn safety cap, but previously reset it only for tool use. A goal that
+  made distinct toolless progress therefore blocked on the ninth continuation,
+  resumed on user input, then repeated the same false block cycle.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `continuation.ts` around signature helpers and in
+  `monitor-continuation.ts` around `afterAgentEnd`.
+- LOW in the two cap regression tests whose old expectations encoded raw turn
+  counting rather than progress-aware streak accounting.
+- NONE in persistence schema, public extension API, or goal status transitions.
+
 ## Tool-using continuations reset the persisted cap streak (2026-07-30)
 
 ### What changed

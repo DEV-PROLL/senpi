@@ -10,12 +10,14 @@ import {
 	type GoalCacheWarmupEntryData,
 } from "./cache-warm.ts";
 import {
+	continuationTurnUsedTools,
 	evaluateGoalContinuation,
 	GOAL_STALL_TOOLLESS_THRESHOLD,
 	GOAL_USER_GRACE_DELAY_MS,
 	type GoalContinuationInput,
 	type GoalContinuationPath,
 	type GoalContinuationVerdict,
+	hasGoalContinuationProgress,
 	hashAssistantText,
 	normalizeAssistantText,
 } from "./continuation.ts";
@@ -115,15 +117,18 @@ export class MonitorAwareGoalContinuation {
 		}
 		const turnUsedTools = continuationTurnUsedTools(options.messages);
 		this.#recordToollessContinuationTurn(options.goal, turnUsedTools);
+		const immediateInput = this.#buildVerdictInput(options.ctx, options.goal, "immediate", options.messages);
 		const goal =
-			!this.#endedTurnWasUserInitiated && turnUsedTools
+			!this.#endedTurnWasUserInitiated && (turnUsedTools || hasGoalContinuationProgress(immediateInput))
 				? ((await resetContinuationStreak(goalStoreRef(options.ctx.sessionManager, options.ctx.cwd))) ??
 					options.goal)
 				: options.goal;
 		this.#goal = goal;
 
-		const immediateInput = this.#buildVerdictInput(options.ctx, goal, "immediate", options.messages);
-		const immediateVerdict = evaluateGoalContinuation({ goal, ...immediateInput });
+		const immediateVerdict = evaluateGoalContinuation({
+			goal,
+			...this.#buildVerdictInput(options.ctx, goal, "immediate", options.messages),
+		});
 		if (immediateVerdict.kind === "deny") {
 			if (immediateVerdict.reason === "not-eligible") return goal;
 			if (immediateVerdict.reason === "grace") {
@@ -364,13 +369,6 @@ export class MonitorAwareGoalContinuation {
 		this.#timer = undefined;
 		this.#scheduledContinuationKind = undefined;
 	}
-}
-
-function continuationTurnUsedTools(messages: readonly AgentMessage[]): boolean {
-	return messages.some((message) => {
-		if (message?.role === "toolResult") return true;
-		return message?.role === "assistant" && message.content.some((content) => content.type === "toolCall");
-	});
 }
 
 function findLastAssistantMessage(
