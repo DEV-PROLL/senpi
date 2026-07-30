@@ -3900,13 +3900,13 @@ export class InteractiveMode {
 				// back to the editable composer: retrying delivery against the same
 				// over-threshold context would just repeat the failure.
 				const compactionSucceeded = event.accepted === true || event.result !== undefined;
-				const heldCount = this.compactionQueuedMessages.length;
-				const failureCause =
-					event.errorMessage ?? event.rejectionCause ?? (event.aborted ? "aborted" : "no-result");
 				if (compactionSucceeded) {
 					void this.flushCompactionQueue({ willRetry: event.willRetry, deferAdmission: false });
 				} else if (event.willRetry === true) {
+					const heldCount = this.compactionQueuedMessages.length;
 					if (heldCount > 0) {
+						const failureCause =
+							event.errorMessage ?? event.rejectionCause ?? (event.aborted ? "aborted" : "no-result");
 						this.getSessionLogger().warn("compaction_queue_deferred", {
 							count: heldCount,
 							cause: failureCause,
@@ -3919,6 +3919,8 @@ export class InteractiveMode {
 				} else {
 					const restoredCount = this.restoreQueuedMessagesToEditor();
 					if (restoredCount > 0) {
+						const failureCause =
+							event.errorMessage ?? event.rejectionCause ?? (event.aborted ? "aborted" : "no-result");
 						this.getSessionLogger().warn("compaction_queue_restored", {
 							restored: restoredCount,
 							cause: failureCause,
