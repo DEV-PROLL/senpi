@@ -1,5 +1,20 @@
 # Builtin compaction extension changes
 
+## Runtime provider dispatch for summarization (2026-07-31)
+
+### What changed
+
+- `speculative.ts` dispatches the summarization request through `context.modelRegistry.modelRuntime.stream()` when a registry is present, and only falls back to the compat `stream()` when a `SpeculativeCompactionContext` is built without one.
+- Added issue #543 regression coverage in `test/suite/regressions/543-compaction-runtime-provider.test.ts` with a provider whose api id exists only in Senpi's `ModelRuntime`.
+
+### Why
+
+- Providers registered through `pi.registerProvider()` (builtin `claude-agent-sdk`, extension providers such as `senpi-accounts`' Kiro) never land in compat's builtin api-registry, so every compaction attempt failed with `compaction generator failed: No API provider registered for api: <api>` while normal agent turns on the same model worked. Same bug class as #488 for `/btw`.
+
+### Merge-conflict zones
+
+- `speculative.ts` import block plus the single `stream(...)` call site in `generateSummaryMessage`.
+
 ## Proactive idle compaction (2026-07-30)
 
 ### What changed
