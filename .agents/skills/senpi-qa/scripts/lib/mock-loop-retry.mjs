@@ -10,6 +10,10 @@ import {
 	API_PRESETS,
 	checkRealAuthUnchanged,
 } from "./mock-loop-support.mjs";
+import {
+	KIMI_THINKING_RECOVERY_SCENARIO,
+	runKimiThinkingRecoveryScenario,
+} from "./mock-loop-kimi-thinking-recovery.mjs";
 import { runAnthropicPolicyRefusalScenario } from "./mock-loop-policy-refusal.mjs";
 
 const OPENAI_SERVER_ERROR_MESSAGE =
@@ -62,7 +66,7 @@ const STANDARD_RETRY_SCENARIOS = {
 const POLICY_REFUSAL_SCENARIO = "anthropic-policy-refusal-fallback";
 
 export function retryScenarioNames() {
-	return [...Object.keys(STANDARD_RETRY_SCENARIOS), POLICY_REFUSAL_SCENARIO];
+	return [...Object.keys(STANDARD_RETRY_SCENARIOS), POLICY_REFUSAL_SCENARIO, KIMI_THINKING_RECOVERY_SCENARIO];
 }
 
 export function isRetryScenario(name) {
@@ -77,6 +81,13 @@ export async function checkStandardRetryScenarios(checks, driveTurn) {
 }
 
 export async function runRetryScenario(scenarioName, apiName, driveTurn, evidenceSlug) {
+	if (scenarioName === KIMI_THINKING_RECOVERY_SCENARIO) {
+		if (apiName !== "openai-completions") {
+			throw new Error(`${KIMI_THINKING_RECOVERY_SCENARIO} requires --api openai-completions`);
+		}
+		await runKimiThinkingRecoveryScenario(driveTurn, evidenceSlug);
+		return;
+	}
 	if (scenarioName === POLICY_REFUSAL_SCENARIO) {
 		if (apiName !== "anthropic-messages") {
 			throw new Error(`${POLICY_REFUSAL_SCENARIO} requires --api anthropic-messages`);

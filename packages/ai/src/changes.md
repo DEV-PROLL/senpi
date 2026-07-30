@@ -1,5 +1,18 @@
 # AI Source Changes
 
+## 2026-07-30 - Recover Kimi XTML response channels from thinking
+
+### What changed and why
+
+- Kimi-family streams now sanitize structural `think` / `response` / `message` XTML markers from final thinking
+  content and promote text only when an explicit response-open boundary makes the split unambiguous.
+- Recovery uses the existing code mask, so XTML-looking examples inside inline or fenced code remain literal.
+  Closing-marker-only payloads are sanitized but never exposed as visible chain-of-thought.
+- Model recovery composition now applies Kimi response-channel recovery even when no tools are registered, while
+  leaked text-tool-call reconstruction remains conditional on available tools.
+- Coverage: coding-agent runtime-boundary tests pin no-tools recovery, split markers, conservative malformed
+  handling, code literals, ordinary Kimi thinking, non-Kimi isolation, and existing tool-call recovery.
+
 ## 2026-07-29 - Preserve invoke-recovery protocol provenance
 
 ### What changed and why
