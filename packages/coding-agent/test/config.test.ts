@@ -10,6 +10,7 @@ import {
 } from "../src/config.ts";
 
 const execPathDescriptor = Object.getOwnPropertyDescriptor(process, "execPath");
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
 const originalPath = process.env.PATH;
 const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
 const originalArgv1 = process.argv[1];
@@ -25,6 +26,9 @@ function setExecPath(value: string): void {
 afterEach(() => {
 	if (execPathDescriptor) {
 		Object.defineProperty(process, "execPath", execPathDescriptor);
+	}
+	if (platformDescriptor) {
+		Object.defineProperty(process, "platform", platformDescriptor);
 	}
 	if (originalPath === undefined) {
 		delete process.env.PATH;
@@ -314,9 +318,25 @@ describe("detectInstallMethod", () => {
 				},
 				{
 					command: "bun",
-					args: ["-e", expect.any(String), expect.any(String), expect.any(String), expect.any(String)],
+					args: ["-e", expect.any(String), expect.any(String), expect.any(String)],
 				},
 			],
+		});
+	});
+
+	test("does not append the POSIX Bun launcher repair on Windows", () => {
+		createBunGlobalInstall();
+		Object.defineProperty(process, "platform", {
+			value: "win32",
+			configurable: true,
+		});
+
+		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent");
+
+		expect(command).toEqual({
+			command: "bun",
+			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@earendil-works/pi-coding-agent"],
+			display: "bun install -g --ignore-scripts --minimum-release-age=0 @earendil-works/pi-coding-agent",
 		});
 	});
 
@@ -434,7 +454,7 @@ describe("detectInstallMethod", () => {
 				},
 				{
 					command: "bun",
-					args: ["-e", expect.any(String), expect.any(String), expect.any(String), expect.any(String)],
+					args: ["-e", expect.any(String), expect.any(String), expect.any(String)],
 				},
 			],
 		});

@@ -172,7 +172,9 @@ function getSelfUpdateCommandForMethod(
 				target.packageName === installedPackageName
 					? undefined
 					: makeSelfUpdateCommandStep("bun", ["uninstall", "-g", installedPackageName]),
-				createBunLauncherRepairCommand(binDir, target.packageName, APP_NAME),
+				process.platform === "win32"
+					? undefined
+					: createBunLauncherRepairCommand(binDir, target.packageName, APP_NAME),
 			);
 		}
 		case "npm": {

@@ -75,5 +75,5 @@ test("preserves Bun execution when a Bun global self-update replaces the launche
 	// Then: the launcher is a Bun wrapper rather than the Node entrypoint symlink.
 	expect(result.status, result.stderr).toBe(0);
 	expect(lstatSync(launcher).isSymbolicLink()).toBe(false);
-	expect(readFileSync(launcher, "utf8")).toContain(`exec '${fakeBun}' '${entrypoint}' "$@"`);
+	expect(readFileSync(launcher, "utf8")).toContain(`exec '${originalExecPath}' '${entrypoint}' "$@"`);
 });
