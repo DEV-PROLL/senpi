@@ -69,6 +69,7 @@ export type ApplyPatchFailure = {
 	filePath: string;
 	operation: ApplyPatchOperation;
 	message: string;
+	code?: string | undefined;
 };
 
 export type AppliedPatchOperation = {
@@ -79,6 +80,7 @@ export type AppliedPatchOperation = {
 export type ApplyPatchRecoveryInstructions = {
 	mustReadFiles: string[];
 	mustNotReadFiles: string[];
+	failedFiles: string[];
 };
 
 export type ApplyPatchResult = {

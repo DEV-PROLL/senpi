@@ -1,15 +1,19 @@
 import { mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { withFileMutationQueue } from "../../../tools/file-mutation-queue.ts";
 import { ApplyPatchError } from "./errors.ts";
 import { parsePatch } from "./parser.ts";
 import { replaceChunks } from "./patch-replace.ts";
 import { buildPatchPreviewFile, readPatchFileSnapshot } from "./preview.ts";
+import { createRecoveryInstructions } from "./recovery.ts";
+
+export { buildPartialFailureText } from "./recovery.ts";
+
 import { normalizePatchText } from "./text.ts";
 import type {
 	AppliedPatchOperation,
 	ApplyPatchFailure,
 	ApplyPatchProgressCallback,
-	ApplyPatchRecoveryInstructions,
 	ApplyPatchResult,
 	AtomicWriteOperations,
 	ParsedPatch,
@@ -31,6 +35,13 @@ async function notifyApplyPatchProgress(
 
 function hasErrorCode(error: unknown, code: string): boolean {
 	return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
+}
+
+function extractErrorCode(error: unknown): string | undefined {
+	if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
+		return error.code;
+	}
+	return undefined;
 }
 
 async function writeFileAtomic(
@@ -67,85 +78,73 @@ async function applySingleHunk(
 	readonly preview: ReturnType<typeof buildPatchPreviewFile>;
 }> {
 	const absolutePath = resolvePatchPath(cwd, hunk.filePath);
-	if (hunk.type === "add") {
-		const source = await readPatchFileSnapshot(absolutePath);
-		const preview = buildPatchPreviewFile({ hunk, source, newContent: hunk.content });
-		await mkdir(path.dirname(absolutePath), { recursive: true });
-		await writeFileAtomic(absolutePath, hunk.content);
-		return { summary: `add: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0, preview };
-	}
+	const mutationPaths =
+		hunk.type === "update" && hunk.movePath ? [absolutePath, resolvePatchPath(cwd, hunk.movePath)] : [absolutePath];
+	return withPatchMutationQueues(mutationPaths, async () => {
+		if (hunk.type === "add") {
+			const source = await readPatchFileSnapshot(absolutePath);
+			const preview = buildPatchPreviewFile({ hunk, source, newContent: hunk.content });
+			await mkdir(path.dirname(absolutePath), { recursive: true });
+			await writeFileAtomic(absolutePath, hunk.content);
+			return { summary: `add: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0, preview };
+		}
 
-	if (hunk.type === "delete") {
-		const oldContent = await readFile(absolutePath, "utf-8");
-		const preview = buildPatchPreviewFile({
-			hunk,
-			source: { exists: true, content: oldContent },
-			newContent: "",
-		});
-		await rm(absolutePath);
-		return { summary: `delete: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0, preview };
-	}
+		if (hunk.type === "delete") {
+			const oldContent = await readFile(absolutePath, "utf-8");
+			const preview = buildPatchPreviewFile({
+				hunk,
+				source: { exists: true, content: oldContent },
+				newContent: "",
+			});
+			await rm(absolutePath);
+			return { summary: `delete: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: 0, preview };
+		}
 
-	const currentContent = await readFile(absolutePath, "utf-8");
-	const chunkResult =
-		hunk.chunks.length === 0
-			? { content: currentContent, fuzz: 0 }
-			: replaceChunks(currentContent, hunk.filePath, hunk.chunks);
+		const currentContent = await readFile(absolutePath, "utf-8");
+		const chunkResult =
+			hunk.chunks.length === 0
+				? { content: currentContent, fuzz: 0 }
+				: replaceChunks(currentContent, hunk.filePath, hunk.chunks);
 
-	if (hunk.movePath) {
-		const absoluteMovePath = resolvePatchPath(cwd, hunk.movePath);
-		const moveDestination =
-			absoluteMovePath === absolutePath ? undefined : await readPatchFileSnapshot(absoluteMovePath);
+		if (hunk.movePath) {
+			const absoluteMovePath = resolvePatchPath(cwd, hunk.movePath);
+			const moveDestination =
+				absoluteMovePath === absolutePath ? undefined : await readPatchFileSnapshot(absoluteMovePath);
+			const preview = buildPatchPreviewFile({
+				hunk,
+				source: { exists: true, content: currentContent },
+				newContent: chunkResult.content,
+				...(moveDestination ? { moveDestination } : {}),
+			});
+			await mkdir(path.dirname(absoluteMovePath), { recursive: true });
+			await writeFileAtomic(absoluteMovePath, chunkResult.content);
+			if (absoluteMovePath !== absolutePath) await rm(absolutePath);
+			return {
+				summary: `move: ${hunk.filePath} -> ${hunk.movePath}`,
+				appliedFile: hunk.movePath,
+				fuzz: chunkResult.fuzz,
+				preview,
+			};
+		}
+
 		const preview = buildPatchPreviewFile({
 			hunk,
 			source: { exists: true, content: currentContent },
 			newContent: chunkResult.content,
-			...(moveDestination ? { moveDestination } : {}),
 		});
-		await mkdir(path.dirname(absoluteMovePath), { recursive: true });
-		await writeFileAtomic(absoluteMovePath, chunkResult.content);
-		if (absoluteMovePath !== absolutePath) await rm(absolutePath);
-		return {
-			summary: `move: ${hunk.filePath} -> ${hunk.movePath}`,
-			appliedFile: hunk.movePath,
-			fuzz: chunkResult.fuzz,
-			preview,
-		};
-	}
-
-	const preview = buildPatchPreviewFile({
-		hunk,
-		source: { exists: true, content: currentContent },
-		newContent: chunkResult.content,
+		await writeFileAtomic(absolutePath, chunkResult.content);
+		return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: chunkResult.fuzz, preview };
 	});
-	await writeFileAtomic(absolutePath, chunkResult.content);
-	return { summary: `update: ${hunk.filePath}`, appliedFile: hunk.filePath, fuzz: chunkResult.fuzz, preview };
 }
 
-function createRecoveryInstructions(
-	result: Pick<ApplyPatchResult, "appliedFiles" | "failures">,
-): ApplyPatchRecoveryInstructions {
-	const mustReadFiles = [...new Set(result.failures.map((failure) => failure.filePath))];
-	const mustNotReadFiles = [...new Set(result.appliedFiles.filter((filePath) => !mustReadFiles.includes(filePath)))];
-	return { mustReadFiles, mustNotReadFiles };
-}
-
-export function buildPartialFailureText(result: ApplyPatchResult): string {
-	const failed = result.recoveryInstructions.mustReadFiles.join(", ");
-	const mustReadText = failed.includes(",") ? failed.split(", ").join(" and ") : failed;
-	return [
-		"apply_patch partially failed.",
-		`Failed: ${failed}`,
-		`Recovery: MUST read ${mustReadText} before retrying.`,
-		result.appliedFiles.length > 0
-			? "Earlier file actions in this patch were already applied."
-			: "No file actions were applied.",
-		result.recoveryInstructions.mustNotReadFiles.length > 0
-			? "Recovery: MUST NOT reread other files from this patch unless a specific dependency requires it."
-			: "",
-	]
-		.filter((line) => line.length > 0)
-		.join("\n");
+async function withPatchMutationQueues<T>(filePaths: readonly string[], operation: () => Promise<T>): Promise<T> {
+	const sortedPaths = [...new Set(filePaths)].sort((left, right) => left.localeCompare(right));
+	const runQueued = (index: number): Promise<T> => {
+		const filePath = sortedPaths[index];
+		if (filePath === undefined) return operation();
+		return withFileMutationQueue(filePath, () => runQueued(index + 1));
+	};
+	return runQueued(0);
 }
 
 function parseNonEmptyPatch(patchText: string): ParsedPatch[] {
@@ -179,7 +178,8 @@ export async function applyPatchDetailed(
 			fuzz += applied.fuzz;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			failures.push({ operationIndex, filePath: hunk.filePath, operation: hunk.type, message });
+			const code = extractErrorCode(error);
+			failures.push({ operationIndex, filePath: hunk.filePath, operation: hunk.type, message, code });
 		}
 		await notifyApplyPatchProgress(onProgress, {
 			applied: appliedFiles.length,
@@ -193,7 +193,7 @@ export async function applyPatchDetailed(
 		appliedFiles,
 		failures,
 		hasPartialSuccess: appliedFiles.length > 0 && failures.length > 0,
-		recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [] },
+		recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [], failedFiles: [] },
 		details: { fuzz, appliedOperations },
 	};
 	result.recoveryInstructions = createRecoveryInstructions(result);
@@ -214,7 +214,7 @@ export async function applyPatch(cwd: string, patchText: string): Promise<string
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			const failures: ApplyPatchFailure[] = [
-				{ operationIndex, filePath: hunk.filePath, operation: hunk.type, message },
+				{ operationIndex, filePath: hunk.filePath, operation: hunk.type, message, code: extractErrorCode(error) },
 			];
 			const result: ApplyPatchResult = {
 				summaries,
