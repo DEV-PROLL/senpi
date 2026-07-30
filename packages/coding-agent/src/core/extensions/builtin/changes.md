@@ -1,5 +1,33 @@
 # Builtin extensions changes
 
+## service-tier: `/fast` toggles a session priority tier on subscription Codex models (2026-07-31)
+
+- Fixes issue #545 and reverses the conclusion of the 2026-07-30 entry below. `/fast`
+  on an `openai-codex` model has no `-fast` catalog sibling to switch to, and the
+  previous change turned that into a "priority tier is not available on a ChatGPT
+  subscription" notice. That premise was wrong.
+- Measured with a live ChatGPT Pro token:
+  `chatgpt.com/backend-api/codex/models?client_version=0.145.0` (originator
+  `codex_cli_rs`) advertises
+  `service_tiers: [{ id: "priority", name: "Fast", description: "1.5x speed, increased usage" }]`
+  and `additional_speed_tiers: ["fast"]` for gpt-5.6-sol/terra/luna, gpt-5.5 and
+  gpt-5.4 (empty for gpt-5.4-mini and gpt-5.3-codex-spark). The first-party Codex
+  CLI 0.145.0, routed through a logging proxy on subscription OAuth, sends
+  `service_tier: "priority"` in the `POST /backend-api/codex/responses` body.
+- The earlier "served at normal tier" reading came from the SSE echo, which is not
+  a confirmation channel: `response.created` reports `auto` and
+  `response.completed` reports `default` whether `priority` was sent or nothing was.
+- The no-variant branch now toggles a session-scoped priority tier that the
+  existing `before_provider_request` handler injects, so `/fast` reports
+  `Fast mode enabled: <model>` and the next Codex request carries
+  `service_tier: "priority"`. The tier is session-only (never persisted) and
+  resets on `session_start`; an explicit model/scoped tier still wins.
+- `test/suite/service-tier-extension.test.ts` replaces the "clear no-op" case with
+  the toggle assertion on the payload.
+- Expected merge conflict zones: LOW in `service-tier.ts` around the
+  `sessionFastMode` flag, the no-variant branch, and the
+  `before_provider_request` tier resolution.
+
 ## service-tier: explain why `/fast` is unavailable on a subscription (2026-07-30)
 
 - Fixes the misleading notice reported in issue #499. `/fast` is registered only

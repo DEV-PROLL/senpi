@@ -122,8 +122,13 @@ describe("service-tier builtin extension", () => {
 		expect(notify).toHaveBeenCalledWith("Fast mode is only available for OpenAI Codex models.", "warning");
 	});
 
-	it("is a clear no-op when the Codex model has no compatible fast variant", async () => {
+	it("toggles a session-level priority tier when the Codex model has no compatible fast variant", async () => {
 		// given
+		// chatgpt.com/backend-api/codex/models advertises
+		// service_tiers [{ id: "priority", name: "Fast" }] to subscription accounts, and the
+		// first-party Codex CLI sends service_tier=priority over that same OAuth, so a missing
+		// `-fast` catalog sibling must fall back to a session tier toggle rather than declaring
+		// fast mode unavailable. See issue #545.
 		const harness = await createHarness({
 			api: CODEX_API,
 			provider: CODEX_PROVIDER,
@@ -140,15 +145,19 @@ describe("service-tier builtin extension", () => {
 
 		// then
 		expect(harness.session.model).toBe(initialModel);
-		// Subscription requests are served at normal tier however the field is set
-		// (chatgpt.com echoes "auto" for service_tier=priority and rejects
-		// auto/flex/scale outright), so the notice must say fast mode is
-		// unavailable here rather than blaming the model. See issue #499.
-		const [[message, level]] = notify.mock.calls;
-		expect(level).toBe("warning");
-		expect(message).toContain("not available on a ChatGPT subscription");
-		expect(message).toContain("API-key billing");
-		expect(message).not.toContain("not supported for");
+		expect(notify).toHaveBeenCalledWith(`Fast mode enabled: ${BASE_MODEL_ID}`, "info");
+		expect(await runner.emitBeforeProviderRequest({ model: BASE_MODEL_ID })).toEqual({
+			model: BASE_MODEL_ID,
+			service_tier: "priority",
+		});
+
+		// when
+		await harness.session.prompt("/fast");
+
+		// then
+		expect(notify).toHaveBeenCalledWith(`Fast mode disabled: ${BASE_MODEL_ID}`, "info");
+		const defaultPayload = { model: BASE_MODEL_ID };
+		expect(await runner.emitBeforeProviderRequest(defaultPayload)).toBe(defaultPayload);
 	});
 
 	it("leaves incompatible api payloads unchanged", () => {
