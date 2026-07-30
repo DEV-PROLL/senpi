@@ -8,7 +8,7 @@ import {
 	type ClaudeAgentSdkTokenInjection,
 	loadClaudeAgentSdkProviderSettingsFromDisk,
 } from "./settings.ts";
-import { BUILTIN_SDK_TOOLS, canUseTool } from "./tools.ts";
+import { BUILTIN_SDK_TOOLS, canUseTool, HOST_TOOL_DENIAL_HOOKS } from "./tools.ts";
 
 export type ClaudeAgentSdkAuthLane = ClaudeAgentSdkTokenInjection;
 
@@ -185,6 +185,7 @@ export function buildClaudeAgentSdkQueryOptions(input: ClaudeAgentSdkQueryOption
 		permissionMode: "dontAsk",
 		includePartialMessages: true,
 		canUseTool,
+		hooks: HOST_TOOL_DENIAL_HOOKS,
 		systemPrompt: { type: "preset", preset: "claude_code", append: append.join("\n\n") || undefined },
 		settingSources: resolveSettingSources(providerSettings, appendSystemPrompt, authLane),
 	};

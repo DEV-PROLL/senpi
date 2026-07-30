@@ -22,8 +22,28 @@ export const PI_TO_SDK_TOOL_NAME: Readonly<Record<string, string>> = {
 
 export const BUILTIN_SDK_TOOLS = ["Read", "Write", "Edit", "Bash", "Grep", "Glob"] as const;
 export const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution is unavailable in this environment.";
+export const HOST_TOOL_EXECUTION_DENIED_MESSAGE =
+	"This tool call is captured and executed by the host. Do not retry with other tools; end the turn.";
 export const CUSTOM_TOOLS_MCP_SERVER_NAME = "custom-tools";
 export const CUSTOM_TOOLS_MCP_PREFIX = `mcp__${CUSTOM_TOOLS_MCP_SERVER_NAME}__`;
+export const HOST_CAPTURED_SDK_TOOL_MATCHER = "Bash|Write|Edit|Read|Grep|Glob|mcp__custom-tools__.*";
+export const HOST_TOOL_DENIAL_HOOKS: NonNullable<Options["hooks"]> = {
+	PreToolUse: [
+		{
+			matcher: HOST_CAPTURED_SDK_TOOL_MATCHER,
+			hooks: [
+				async () => ({
+					continue: false,
+					hookSpecificOutput: {
+						hookEventName: "PreToolUse",
+						permissionDecision: "deny",
+						permissionDecisionReason: HOST_TOOL_EXECUTION_DENIED_MESSAGE,
+					},
+				}),
+			],
+		},
+	],
+};
 
 export type ResolvedSdkTools = {
 	sdkTools: string[];
