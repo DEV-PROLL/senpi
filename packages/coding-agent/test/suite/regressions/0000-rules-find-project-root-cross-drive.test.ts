@@ -1,32 +1,36 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, parse } from "node:path";
-import { describe, expect, it } from "vitest";
+import { win32 } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { findProjectRoot } from "../../../src/core/extensions/builtin/rules/rules/project-root.ts";
+
+const { cwdRoot, startPath } = vi.hoisted(() => ({
+	cwdRoot: "E:\\",
+	startPath: "C:\\workspace\\plain\\nested",
+}));
+
+vi.mock("node:fs", () => ({
+	existsSync: (path: string) => path === startPath,
+	statSync: () => ({ isDirectory: () => true }),
+}));
+
+vi.mock("node:path", async (importOriginal) => {
+	const path = await importOriginal<typeof import("node:path")>();
+	return {
+		...path,
+		dirname: path.win32.dirname,
+		join: path.win32.join,
+		resolve: (input: string) => (input === "/" ? cwdRoot : path.win32.resolve(input)),
+	};
+});
 
 describe("rules findProjectRoot cross-drive termination", () => {
 	it("#given startPath on a different drive than cwd (Windows cross-drive) #when finding root #then terminates with null instead of looping forever", () => {
-		// Cross-drive paths only exist on Windows; this scenario cannot occur elsewhere.
-		if (process.platform !== "win32") {
-			return;
-		}
-		// The bug needs the temp dir and cwd on different drive roots; skip the body on single-drive machines.
-		if (parse(tmpdir()).root.toLowerCase() === parse(process.cwd()).root.toLowerCase()) {
-			return;
-		}
 		// given
-		const root = mkdtempSync(join(tmpdir(), "senpi-rules-project-root-"));
-		const startPath = join(root, "plain", "nested");
-		mkdirSync(startPath, { recursive: true });
+		expect(win32.dirname("C:\\")).toBe("C:\\");
 
-		try {
-			// when
-			const result = findProjectRoot(startPath, [".nonexistent-marker-senpi"]);
+		// when
+		const result = findProjectRoot(startPath, [".nonexistent-marker-senpi"]);
 
-			// then
-			expect(result).toBeNull();
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
+		// then
+		expect(result).toBeNull();
 	});
 });
