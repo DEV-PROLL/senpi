@@ -7,7 +7,7 @@
 - Upstream main SHA: `05558a79280a2f1356bd390a573aeb28726d26b5`
 - Upstream tag SHA: `845d6ff1f6643aba440341cce877ce1c43ebbc39`
 - Merge commit: `bcc501925`
-- Final branch HEAD: `937ff3e57`
+- QA-fix commit before this report: `937ff3e57`
 - Confirmed ancestry: `upstream/main` is an ancestor of branch `HEAD`.
 - Upstream pin: `.github/upstream.json` records `v0.83.0` at `05558a79280a2f1356bd390a573aeb28726d26b5`.
 
