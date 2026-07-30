@@ -112,7 +112,6 @@ export type Transport = "sse" | "websocket" | "websocket-cached" | "auto";
 export type ProviderEnv = Record<string, string>;
 export type ProviderHeaders = Record<string, string | null>;
 export type FetchFunction = typeof globalThis.fetch;
-export type SessionAffinityFormat = "openai" | "openai-nosession" | "openrouter";
 /** Effective model and fully transformed headers for a request payload hook. */
 export type ProviderRequestMetadata = {
 	model: Model<Api>;
