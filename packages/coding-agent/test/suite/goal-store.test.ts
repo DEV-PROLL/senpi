@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "n
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { migrateLegacyGoalFile } from "../../src/core/extensions/builtin/goal/persistence.ts";
 import {
 	accountGoalUsage,
 	clearGoal,
@@ -37,6 +38,22 @@ describe("goal store JSON recovery", () => {
 		// Given
 		const ref = await tempStore("thread-valid-json");
 		const goal = await createGoal(ref, "Keep reading valid goals");
+
+		// When
+		const persisted = await readGoal(ref);
+
+		// Then
+		expect(persisted).toEqual(goal);
+	});
+
+	it("preserves token budgets in the current goal store", async () => {
+		// Given
+		const ref = await tempStore("thread-current-token-budget");
+		const goal = {
+			...(await createGoal(ref, "Keep the current token budget")),
+			tokenBudget: 8_192,
+		};
+		await writeGoal(ref, goal);
 
 		// When
 		const persisted = await readGoal(ref);
@@ -129,6 +146,54 @@ describe("goal store JSON recovery", () => {
 
 		// When / Then
 		await expect(readGoal(ref)).rejects.toThrow("goal store contains an invalid goal");
+	});
+});
+
+describe("legacy goal store migration", () => {
+	it("migrates a budget-limited pi-goal file into the current budget-free store", async () => {
+		const ref = await tempStore("thread-legacy-migration");
+		const legacyRef = { ...ref, baseDir: join(ref.baseDir, "..", "pi-goal") };
+		await mkdir(legacyRef.baseDir, { recursive: true });
+		await writeFile(
+			goalFilePath(legacyRef),
+			`${JSON.stringify({
+				version: 1,
+				goal: {
+					id: "legacy-goal-id",
+					threadId: ref.threadId,
+					objective: "Resume the legacy goal",
+					status: "budgetLimited",
+					tokenBudget: 100,
+					tokensUsed: 40,
+					timeUsedSeconds: 8,
+					createdAt: 1,
+					updatedAt: 2,
+				},
+			})}\n`,
+			"utf8",
+		);
+
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		expect(migrated).toMatchObject({
+			id: "legacy-goal-id",
+			status: "active",
+			tokensUsed: 40,
+			timeUsedSeconds: 8,
+		});
+		expect(migrated).not.toHaveProperty("tokenBudget");
+		expect(await readGoal(ref)).toEqual(migrated);
+	});
+
+	it("does not overwrite an existing current goal with a legacy file", async () => {
+		const ref = await tempStore("thread-current-wins");
+		const current = await createGoal(ref, "Keep the current goal");
+		const legacyRef = { ...ref, baseDir: join(ref.baseDir, "..", "pi-goal") };
+		await mkdir(legacyRef.baseDir, { recursive: true });
+		await writeFile(goalFilePath(legacyRef), '{"version":1,"goal":null}\n', "utf8");
+
+		expect(await migrateLegacyGoalFile(ref)).toBeNull();
+		expect(await readGoal(ref)).toEqual(current);
 	});
 });
 
