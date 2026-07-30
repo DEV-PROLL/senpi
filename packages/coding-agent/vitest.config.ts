@@ -8,12 +8,15 @@ const ptySrcIndex = fileURLToPath(new URL("../pty/src/index.ts", import.meta.url
 export default mergeConfig(
 	baseConfig,
 	defineConfig({
-		test: {
-			globals: true,
-			environment: "node",
-			testTimeout: 30000,
-			setupFiles: ["./test/setup.ts"],
-			reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
+			test: {
+				globals: true,
+				environment: "node",
+				testTimeout: 30000,
+				setupFiles: ["./test/setup.ts"],
+				// Tests run offline by default; opt in with allowNetwork() from test/test-network-env.ts.
+				env: { PI_OFFLINE: "1" },
+				unstubEnvs: true,
+				reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 			silent: "passed-only",
 			// Cap fork concurrency when CI is set. This suite's subprocess-lifecycle tests
 			// (MCP keep-alive/ping-on-call fixtures, the default-on terminal PTY builtin,

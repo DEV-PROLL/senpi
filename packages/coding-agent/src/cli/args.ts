@@ -251,11 +251,12 @@ ${chalk.bold("Commands:")}
                                  List installed extensions from settings
   ${APP_NAME} config [--no-approve]
                                  Open TUI to enable/disable package resources (Tab switches scope)
+  ${APP_NAME} auth <command>            Print credentials for external clients
   ${APP_NAME} app-server [--listen <url>]
                                  Serve agent sessions over the Codex app-server protocol
   ${APP_NAME} app-server daemon <start|stop|status|restart> [--listen <url>]
                                  Manage the app-server daemon
-  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list/config
+  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list/config/auth
 
 ${chalk.bold("Options:")}
   --provider <name>              Provider name (default: google)
@@ -304,6 +305,12 @@ ${grokNeoOptionsText}  --help, -h                     Show this help
 Extensions can register additional flags (e.g., --plan from plan-mode extension).${extensionFlagsText}
 
 ${chalk.bold("Examples:")}
+  # Print a provider API key for an external client
+  ${APP_NAME} auth print-api-key --provider openai --model gpt-5.5
+
+  # Print an OAuth bearer token for an external client (refreshes if expired)
+  ${APP_NAME} auth print-bearer-token --provider openai-codex --model gpt-5.5
+
   # Interactive mode
   ${APP_NAME}
 
