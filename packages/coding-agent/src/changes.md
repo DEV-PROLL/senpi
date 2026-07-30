@@ -1,3 +1,10 @@
+## Kimi XTML thinking recovery runs without tools (2026-07-30)
+
+- `ModelRuntime.stream()` and `streamSimple()` now compose model recovery through the AI package's shared
+  `wrapStreamWithModelRecovery()` boundary.
+- Kimi structural response-channel recovery therefore runs on final-answer requests with an empty tool list, while
+  Claude/Kimi leaked tool-call recovery still activates only when tools are available.
+
 ## Bun self-updates preserve the Bun launcher (2026-07-30)
 
 - Bun-managed global self-updates now replace Bun's generated Node-shebang symlink with a small launcher that

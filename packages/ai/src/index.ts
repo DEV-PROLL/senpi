@@ -52,6 +52,7 @@ export {
 	hasKimiTextToolCallRecovery,
 	shouldRecoverTextToolCalls,
 	transformContext,
+	wrapStreamWithModelRecovery,
 	wrapStreamWithToolCallMiddleware,
 } from "./tool-call-middleware/index.ts";
 export { createXtmlRecoveryStreamParser } from "./tool-call-middleware/protocols/kimi-xtml/recovery-stream.ts";

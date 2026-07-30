@@ -1,4 +1,7 @@
-import type { Api, Model, OpenAICompletionsCompat } from "../types.ts";
+import type { Api, AssistantMessageEventStream, Model, OpenAICompletionsCompat, Tool } from "../types.ts";
+import { createXtmlRecoveryStreamParser } from "./protocols/kimi-xtml/recovery-stream.ts";
+import { wrapStreamWithKimiThinkingRecovery } from "./protocols/kimi-xtml/thinking-recovery-stream.ts";
+import { wrapStreamWithInvokeRecovery } from "./recovery-stream-wrapper.ts";
 import type { ToolCallFormat } from "./types.ts";
 
 export { getProtocol, transformContext } from "./context-transformer.ts";
@@ -59,4 +62,22 @@ const KIMI_MODEL_ID_PATTERN = /(^|[^a-z0-9])kimi([^a-z0-9]|$)/i;
  */
 export function hasKimiTextToolCallRecovery<TApi extends Api>(model: Model<TApi>): boolean {
 	return KIMI_MODEL_ID_PATTERN.test(model.id);
+}
+
+export function wrapStreamWithModelRecovery<TApi extends Api>(
+	innerStream: AssistantMessageEventStream,
+	model: Model<TApi>,
+	tools: readonly Tool[],
+): AssistantMessageEventStream {
+	const recoveredStream = hasKimiTextToolCallRecovery(model)
+		? wrapStreamWithKimiThinkingRecovery(innerStream)
+		: innerStream;
+	if (!shouldRecoverTextToolCalls(model) || tools.length === 0) return recoveredStream;
+	return wrapStreamWithInvokeRecovery(
+		recoveredStream,
+		tools,
+		hasKimiTextToolCallRecovery(model)
+			? { createParser: createXtmlRecoveryStreamParser, protocol: "kimi-xtml" }
+			: undefined,
+	);
 }

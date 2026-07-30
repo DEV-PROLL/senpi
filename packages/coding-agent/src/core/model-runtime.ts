@@ -13,8 +13,6 @@ import {
 	type CredentialInfo,
 	type CredentialStore,
 	createModels,
-	createXtmlRecoveryStreamParser,
-	hasKimiTextToolCallRecovery,
 	lazyStream,
 	type Model,
 	type Models,
@@ -30,8 +28,7 @@ import {
 	type ProviderHeaders,
 	type SimpleStreamOptions,
 	type StreamOptions,
-	shouldRecoverTextToolCalls,
-	wrapStreamWithInvokeRecovery,
+	wrapStreamWithModelRecovery,
 } from "@earendil-works/pi-ai";
 import * as builtinProviderCatalog from "@earendil-works/pi-ai/providers/all";
 import { getAgentDir } from "../config.ts";
@@ -553,15 +550,7 @@ export class ModelRuntime implements Models {
 				context,
 				withPayloadRequestMetadata(prepared.options, prepared.model) as ApiStreamOptions<TApi>,
 			);
-			return shouldRecoverTextToolCalls(model) && context.tools?.length
-				? wrapStreamWithInvokeRecovery(
-						inner,
-						context.tools,
-						hasKimiTextToolCallRecovery(model)
-							? { createParser: createXtmlRecoveryStreamParser, protocol: "kimi-xtml" }
-							: undefined,
-					)
-				: inner;
+			return wrapStreamWithModelRecovery(inner, model, context.tools ?? []);
 		});
 	}
 
@@ -580,15 +569,7 @@ export class ModelRuntime implements Models {
 				context,
 				withPayloadRequestMetadata(prepared.options, prepared.model) as SimpleStreamOptions,
 			);
-			return shouldRecoverTextToolCalls(model) && context.tools?.length
-				? wrapStreamWithInvokeRecovery(
-						inner,
-						context.tools,
-						hasKimiTextToolCallRecovery(model)
-							? { createParser: createXtmlRecoveryStreamParser, protocol: "kimi-xtml" }
-							: undefined,
-					)
-				: inner;
+			return wrapStreamWithModelRecovery(inner, model, context.tools ?? []);
 		});
 	}
 	completeSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): Promise<AssistantMessage> {
