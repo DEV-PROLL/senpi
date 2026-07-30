@@ -6,7 +6,6 @@ import {
 	GOAL_LENGTH_RECOVERY_LIMIT,
 	GOAL_REPETITION_HASH_STREAK,
 	GOAL_STALL_TOOLLESS_THRESHOLD,
-	GOAL_USER_GRACE_DELAY_MS,
 	hashAssistantText,
 	normalizeAssistantText,
 } from "../../src/core/extensions/builtin/goal/continuation.ts";
@@ -56,7 +55,6 @@ describe("goal continuation verdict", () => {
 		["rejects an immediate path with pending messages", makeInput({ hasPendingMessages: true })],
 		["rejects an immediate path after an unclean end", makeInput({ lastStopReason: "error" })],
 		["requires idle state for monitor-delayed continuation", makeInput({ path: "monitorDelayed", isIdle: false })],
-		["requires idle state for user-grace continuation", makeInput({ path: "userGrace", isIdle: false })],
 		["requires idle state for session-start continuation", makeInput({ path: "sessionStart", isIdle: false })],
 	] as const)("denies as not eligible when %s", (_label, input) => {
 		expect(evaluateGoalContinuation(input)).toEqual({ kind: "deny", reason: "not-eligible" });
@@ -74,12 +72,6 @@ describe("goal continuation verdict", () => {
 			"stale",
 			makeInput({
 				lastContinuationSignature: "goal-1:1/2:abc123",
-			}),
-		],
-		[
-			"grace",
-			makeInput({
-				endedTurnWasUserInitiated: true,
 			}),
 		],
 		[
@@ -130,6 +122,13 @@ describe("goal continuation verdict", () => {
 		});
 	});
 
+	it("never denies with a removed user-grace reason", () => {
+		// The userGrace path and its grace deny reason were removed with the pause contract:
+		// a would-be user turn now pauses the goal instead of scheduling a graced continuation.
+		const input = makeInput({ endedTurnWasUserInitiated: true });
+		expect(evaluateGoalContinuation(input)).toMatchObject({ kind: "continue" });
+	});
+
 	it("exempts only monitor-delayed continuations from cap and stale guards", () => {
 		const capped = makeInput({
 			consecutiveContinuations: GOAL_CONTINUATION_CAP,
@@ -138,14 +137,6 @@ describe("goal continuation verdict", () => {
 
 		expect(evaluateGoalContinuation({ ...capped, path: "monitorDelayed" })).toMatchObject({ kind: "continue" });
 		expect(evaluateGoalContinuation({ ...capped, path: "sessionStart" })).toEqual({ kind: "deny", reason: "cap" });
-		expect(evaluateGoalContinuation({ ...capped, path: "userGrace" })).toEqual({ kind: "deny", reason: "cap" });
-		expect(
-			evaluateGoalContinuation({
-				...capped,
-				path: "userGrace",
-				consecutiveContinuations: GOAL_CONTINUATION_CAP - 1,
-			}),
-		).toEqual({ kind: "deny", reason: "stale" });
 		expect(
 			evaluateGoalContinuation({
 				...capped,
@@ -186,6 +177,5 @@ describe("goal continuation verdict", () => {
 		expect(GOAL_STALL_TOOLLESS_THRESHOLD).toBe(3);
 		expect(GOAL_REPETITION_HASH_STREAK).toBe(3);
 		expect(GOAL_LENGTH_RECOVERY_LIMIT).toBe(1);
-		expect(GOAL_USER_GRACE_DELAY_MS).toBe(60_000);
 	});
 });

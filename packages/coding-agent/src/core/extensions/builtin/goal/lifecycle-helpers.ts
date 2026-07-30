@@ -166,7 +166,6 @@ function blockedReasonForContinuationGuard(
 		case "not-eligible":
 		case "single-flight":
 		case "stale":
-		case "grace":
 			return undefined;
 	}
 }

@@ -34,6 +34,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	let blockedThisTurnGoalId: string | null = null;
 	let completedThisTurnGoalId: string | null = null;
 	let continuationPending = false;
+	// A non-extension user input received during an in-flight turn pauses the active goal
+	// after that turn is fully accounted at agent_end. Keyed on goal id so a goal that is
+	// replaced or cleared mid-turn is never paused by a stale signal.
+	let pausePendingForGoalId: string | null = null;
 	const turnUsage = new TurnUsageTracker();
 	const monitorContinuation = new MonitorAwareGoalContinuation(
 		pi,
@@ -110,18 +114,43 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("before_agent_start", async (_event, ctx) => {
-		// before_agent_start fires only for real user prompts and BEFORE the host's final
-		// provider admission check (which can reject the run so no agent_start follows).
-		// Resuming a blocked goal here, instead of deferring to agent_start via a sticky
-		// flag, means a rejected run cannot leak a stale resume signal to a later
-		// continuation-style turn that starts the agent without a preceding user prompt.
-		monitorContinuation.noteUserPrompt();
-		const ref = goalStoreRef(ctx);
-		let goal = await resetContinuationStreak(ref);
-		if (goal?.status === "blocked") {
-			goal = await updateGoal(ref, { status: "active" }, "user");
+	// Direct user input (interactive or rpc) pauses an active goal persistently. Idle input
+	// pauses at this seam before the new turn starts, so the unrelated new turn is never
+	// charged to the stale goal; input received while an agent run is already active defers
+	// the pause to that run's agent_end so the in-flight turn's usage is accounted first.
+	// A blocked/paused/complete goal is left untouched, and extension-originated input (hidden
+	// goal continuations and other automation) never pauses.
+	pi.on("input", async (event, ctx) => {
+		if (event.source === "extension") return;
+		// Break unattended continuation state synchronously, before any await can interleave
+		// with a scheduled continuation timer. Closure state is the authority for the
+		// idle-vs-in-flight split.
+		monitorContinuation.noteUserInput();
+		if (agentTurnInProgress) {
+			// A run is in flight: defer the pause to that run's agent_end so the in-flight turn's
+			// usage is accounted first. Key on the goal currently being accounted, read from
+			// closure state with no fs await so a scheduled continuation cannot race in; goal-id
+			// matching at agent_end prevents pausing a goal replaced or cleared mid-turn.
+			if (agentGoalAccounting !== null) pausePendingForGoalId = agentGoalAccounting.goalId;
+			return;
 		}
+		// Idle direct input: account the existing idle accounting window, then pause
+		// active -> paused now so the new turn this input triggers runs with no active goal and
+		// is not charged to the stale goal. Mirrors the /goal pause path.
+		const goal = await readGoal(goalStoreRef(ctx));
+		if (goal?.status !== "active") return;
+		await accountCurrentAgentTurn(ctx, "active");
+		const paused = await updateGoal(goalStoreRef(ctx), { status: "paused" }, "user");
+		clearAgentGoalAccounting();
+		refreshGoalUiBestEffort(ctx, paused);
+	});
+
+	pi.on("before_agent_start", async (_event, ctx) => {
+		// before_agent_start fires only for real user prompts. Reset only the persisted
+		// continuation streak here; the `input` seam owns the user-input signal (pause of an
+		// active goal) and a blocked goal stays blocked until an explicit /goal resume.
+		const ref = goalStoreRef(ctx);
+		const goal = await resetContinuationStreak(ref);
 		if (goal !== null) refreshGoalUi(ctx, goal);
 	});
 
@@ -186,6 +215,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			);
 			if (ctx.hasUI) ctx.ui.notify(`Goal ${goalStatusLabel(goal.status)}\n${formatGoalForTool(goal)}`, "warning");
 		}
+		if (pausePendingForGoalId !== null && goal?.status === "active" && goal.id === pausePendingForGoalId) {
+			// The turn the user interrupted is now fully accounted; pause the goal before any
+			// continuation can be evaluated so no stale work resumes.
+			goal = await updateGoal(goalStoreRef(ctx), { status: "paused" }, "user");
+		}
+		pausePendingForGoalId = null;
 		if (goal?.status === "active") {
 			beginAgentGoalAccounting(goal);
 		} else {

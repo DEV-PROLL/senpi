@@ -43,8 +43,29 @@ a stale-signature check on immediate re-entry, and a single-flight latch so only
 hidden continuation can be queued at a time. The stall notice is goal-wide: from the
 3rd consecutive toolless continuation turn it prefixes the prompt with `<goal_stall_check>`
 and switches between monitor-flavored bullets while monitors are active and generic
-recovery bullets otherwise. A real user prompt imposes a 60s grace window before
-resuming, a `length` stop gets exactly one minimal truncation recovery before the goal
+recovery bullets otherwise.
+
+**Source-aware pause (stale-goal contract).** Any `input` event whose `source` is not
+`extension` (interactive or `rpc` direct input) **pauses** an `active` goal persistently.
+The idle-vs-in-flight split is driven by the closure `agentTurnInProgress` flag, not a
+post-await sample: when **no** run is in flight, the goal is paused **at the input seam**
+(account the idle accounting window, then `active -> paused`) so the unrelated new turn the
+input triggers is **not** charged to the stale goal; when a run **is** in flight, a
+`pausePendingForGoalId` marker is set synchronously from the currently-accounted goal id
+(no fs read/race) and the pause is applied at that run's `agent_end` after its usage is
+accounted. Either way `active -> paused` lands before any continuation is evaluated, so no
+hidden continuation resumes stale work, and goal-id matching means a goal replaced or
+cleared mid-turn is never paused by a stale signal. Extension-sourced input (hidden goal
+continuations and other automation) never pauses. There is **no** 60-second `userGrace` re-arm — the fallback
+timer that could resurrect a stale goal was removed. A `blocked` goal **stays blocked** on
+user input (the old `before_agent_start` auto-unblock is gone) and only an explicit resume
+action (`/goal resume`, or the existing paused-session resume confirmation) reactivates a
+paused or blocked goal. The continuation prompt gives the newest direct user instruction in
+the conversation immediate precedence over the objective parts it conflicts with. New-goal
+immediate continuation, unattended monitor-delayed continuation, session-start guards, and
+explicit `/goal pause`/`resume`/`clear` are unchanged.
+
+A `length` stop gets exactly one minimal truncation recovery before the goal
 blocks on repetition, terminal provider errors block the goal only when `AgentEndEvent.willRetry`
 is false, and resumed sessions with 8+ trailing historical continuation entries suppress
 session-start auto-resume. `tokenBudget` remains inert compatibility metadata only; this
@@ -55,7 +76,11 @@ policy is budget-free by design.
 `store.ts` writes `GoalFile{version:1, goal}` to
 `<sessionDir>/extensions/goal/<threadId>.json`, falling back to
 `getAgentDir()/extensions/goal/no-session/<sha256(cwd)[:24]>/` when the session
-has no file (in-memory / print mode). One goal per thread.
+has no file (in-memory / print mode). On session start, an absent current file is
+migrated from `<sessionDir>/extensions/pi-goal/<threadId>.json`; legacy budget
+metadata is discarded and a budget-limited status becomes `active`. An existing
+current file always wins, and its inert `tokenBudget` metadata is preserved on
+ordinary reads. One goal per thread.
 
 ## ERRORS
 

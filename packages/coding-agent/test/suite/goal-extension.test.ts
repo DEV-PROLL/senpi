@@ -612,7 +612,7 @@ describe("goal extension session_start migration-lite admission", () => {
 		expect(notices).toEqual([]);
 	});
 
-	it("resumes normally on the next clean turn after a real user prompt follows a suppressed load", async () => {
+	it("pauses the goal when a real user prompt follows a suppressed load", async () => {
 		vi.useFakeTimers();
 		const { tools, handlers, sent } = createGoalHarness();
 		const notices: string[] = [];
@@ -624,6 +624,9 @@ describe("goal extension session_start migration-lite admission", () => {
 		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
 		expect(sent).toHaveLength(0);
 
+		// A real user prompt now pauses the active goal before its unrelated turn starts;
+		// no fallback timer resurrects it.
+		await runHandlers(handlers, "input", { type: "input", source: "interactive", text: "new direction" }, ctx);
 		await runHandlers(handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
 		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runHandlers(
@@ -632,12 +635,11 @@ describe("goal extension session_start migration-lite admission", () => {
 			{ type: "agent_end", messages: [assistantMessageWithStopReason("stop")] },
 			ctx,
 		);
-		// A user-initiated turn end triggers the 60s grace delay (todo 6), so nothing
-		// is queued immediately. The continuation fires after the grace window.
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("paused");
 		expect(sent).toHaveLength(0);
-		await vi.advanceTimersByTimeAsync(60_000);
-		expect(sent).toHaveLength(1);
-		expect(sent[0]?.message.customType).toBe("goal-continuation");
+		await vi.advanceTimersByTimeAsync(10 * 60_000);
+		expect(sent).toHaveLength(0);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("paused");
 		vi.useRealTimers();
 	});
 

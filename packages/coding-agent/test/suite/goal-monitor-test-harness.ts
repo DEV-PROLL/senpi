@@ -48,9 +48,15 @@ export class TestEventBus {
 
 export type AppendedGoalEntry = { readonly customType: string; readonly data: unknown };
 
+export type GoalCommandDefinition = {
+	readonly description?: string;
+	readonly handler: (rawArgs: string, ctx: ExtensionContext) => Promise<unknown> | unknown;
+};
+
 export interface GoalHarness {
 	readonly tools: Map<string, AnyTool>;
 	readonly handlers: Map<string, GoalHandler[]>;
+	readonly commands: Map<string, GoalCommandDefinition>;
 	readonly sent: SentGoalMessage[];
 	readonly events: TestEventBus;
 	readonly entries: AppendedGoalEntry[];
@@ -64,12 +70,13 @@ export interface GoalContextState {
 export function createGoalHarness(): GoalHarness {
 	const tools = new Map<string, AnyTool>();
 	const handlers = new Map<string, GoalHandler[]>();
+	const commands = new Map<string, GoalCommandDefinition>();
 	const sent: SentGoalMessage[] = [];
 	const events = new TestEventBus();
 	const entries: AppendedGoalEntry[] = [];
 	const pi = {
 		registerTool: (tool: AnyTool) => tools.set(tool.name, tool),
-		registerCommand: () => {},
+		registerCommand: (name: string, def: GoalCommandDefinition) => commands.set(name, def),
 		registerEntryRenderer: () => {},
 		appendEntry: (customType: string, data?: unknown) => entries.push({ customType, data }),
 		on: (event: string, handler: GoalHandler) => {
@@ -81,7 +88,7 @@ export function createGoalHarness(): GoalHarness {
 		events,
 	} as unknown as ExtensionAPI;
 	goalExtension(pi);
-	return { tools, handlers, sent, events, entries };
+	return { tools, handlers, commands, sent, events, entries };
 }
 
 const tempDirs: string[] = [];

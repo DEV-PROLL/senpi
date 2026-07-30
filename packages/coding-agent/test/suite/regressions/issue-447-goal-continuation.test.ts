@@ -11,12 +11,10 @@ import {
 	createGoalHarness,
 	makeGoalContext,
 	runGoalHandlers,
-	waitForGoalContinuationCount,
 } from "../goal-monitor-test-harness.ts";
 import { createHarness, getMessageText, type Harness } from "../harness.ts";
 
 const GOAL_CONTINUATION_MESSAGE_TYPE = "goal-continuation";
-const GOAL_USER_GRACE_DELAY_MS = 60_000;
 
 const harnesses: Harness[] = [];
 
@@ -164,14 +162,21 @@ describe("issue #447: goal continuation guardrails", () => {
 		});
 	});
 
-	it("waits the full 60-second grace window after a direct user message before resuming", async () => {
+	it("pauses the goal on a direct user message instead of deferring a graced resume", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
 		const harness = createGoalHarness();
-		const ctx = await makeGoalContext(notices, "issue-447-user-grace");
+		const ctx = await makeGoalContext(notices, "issue-447-user-pause");
 		await createActiveGoal(harness, ctx, "Answer the direct user question first");
 		await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
+		// A direct user message pauses the active goal before its unrelated turn starts.
+		await runGoalHandlers(
+			harness.handlers,
+			"input",
+			{ type: "input", source: "interactive", text: "answer this instead" },
+			ctx,
+		);
 		await runGoalHandlers(harness.handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
 		await runGoalHandlers(harness.handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runGoalHandlers(
@@ -181,14 +186,12 @@ describe("issue #447: goal continuation guardrails", () => {
 			ctx,
 		);
 
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "paused" });
 		expect(harness.sent).toHaveLength(0);
-		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS - 1);
+		// No fallback timer can resurrect the stale goal at any horizon.
+		await vi.advanceTimersByTimeAsync(10 * 60_000);
 		expect(harness.sent).toHaveLength(0);
-		const resumed = waitForGoalContinuationCount(ctx, 1);
-		await vi.advanceTimersByTimeAsync(1);
-		await resumed;
-		expect(harness.sent).toHaveLength(1);
-		expect(harness.sent[0]?.message.customType).toBe(GOAL_CONTINUATION_MESSAGE_TYPE);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "paused" });
 	});
 
 	it("blocks the goal when a terminal provider error has no retry remaining", async () => {

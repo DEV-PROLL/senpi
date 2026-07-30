@@ -1,4 +1,4 @@
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
 import { createGoal, readGoal, updateGoal } from "../../src/core/extensions/builtin/goal/store.ts";
@@ -30,7 +30,7 @@ describe("goal abort lifecycle through the agent session", () => {
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
 	});
 
-	it("marks an ESC-aborted goal blocked only after usage accounting, suppresses continuation, and resumes for the next user run", async () => {
+	it("marks an ESC-aborted goal blocked only after usage accounting, suppresses continuation, and stays blocked on the next user run", async () => {
 		const streamStarted = deferred();
 		const agentEnds: AgentEndSnapshot[] = [];
 		const statusesAtAgentStart: GoalStatus[] = [];
@@ -65,7 +65,9 @@ describe("goal abort lifecycle through the agent session", () => {
 		await createGoal(ref, "Finish the interrupted task");
 		harness.setResponses([fauxAssistantMessage("streaming response ".repeat(4_000))]);
 
-		const interruptedRun = harness.session.prompt("start the active goal");
+		// Drive the goal turn as an extension-sourced continuation so the goal stays active
+		// through the run (a direct interactive prompt would pause it before the abort).
+		const interruptedRun = harness.session.prompt("start the active goal", { source: "extension" });
 		await streamStarted.promise;
 		await harness.session.abort();
 		await interruptedRun;
@@ -85,14 +87,13 @@ describe("goal abort lifecycle through the agent session", () => {
 			blockedReason: "user interrupted the turn",
 		});
 
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("update_goal", { status: "complete" })], { stopReason: "toolUse" }),
-			fauxAssistantMessage("completed after resuming"),
-		]);
+		// A direct user prompt must not auto-resume a blocked goal; it stays blocked until
+		// an explicit /goal resume, and the model's normal turn does not touch it.
+		harness.setResponses([fauxAssistantMessage("answered without touching the blocked goal")]);
 		await harness.session.prompt("continue after interruption");
 
-		expect(statusesAtAgentStart).toEqual(["active", "active"]);
-		expect((await readGoal(ref))?.status).toBe("complete");
+		expect(statusesAtAgentStart).toEqual(["active", "blocked"]);
+		expect((await readGoal(ref))?.status).toBe("blocked");
 	});
 
 	it("does not mark a normally completed agent run as aborted", async () => {
@@ -115,7 +116,7 @@ describe("goal abort lifecycle through the agent session", () => {
 		expect(observed).toEqual([{ aborted: undefined, abortSource: undefined }]);
 		expect(observed).toEqual([{ aborted: undefined, abortSource: undefined }]);
 	});
-	it("resumes a blocked goal at before_agent_start and never via a continuation-style agent_start", async () => {
+	it("keeps a blocked goal blocked at before_agent_start (no auto-unblock)", async () => {
 		const statusesAtBeforeAgentStart: GoalStatus[] = [];
 		const harness = await createHarness({
 			persistSession: true,
@@ -135,12 +136,12 @@ describe("goal abort lifecycle through the agent session", () => {
 		await createGoal(ref, "Wait for the user");
 		await updateGoal(ref, { status: "blocked", reason: "waiting on the user" });
 
-		harness.setResponses([fauxAssistantMessage("resumed and done")]);
+		harness.setResponses([fauxAssistantMessage("answered without resuming")]);
 		await harness.session.prompt("user returns");
 
-		// The observation extension's before_agent_start runs AFTER goalExtension's (registration order),
-		// so it sees the post-resume status.
-		expect(statusesAtBeforeAgentStart).toEqual(["active"]);
-		expect((await readGoal(ref))?.status).toBe("active");
+		// The auto-unblock at before_agent_start was removed: the goal stays blocked until an
+		// explicit /goal resume (re-arm-once is covered deterministically in the unit tests).
+		expect(statusesAtBeforeAgentStart).toEqual(["blocked"]);
+		expect((await readGoal(ref))?.status).toBe("blocked");
 	});
 });

@@ -1,5 +1,82 @@
 # goal Extension Changes
 
+## Preserve installed pi-goal migration while fixing stale continuation (2026-07-30)
+
+- Preserved the active runtime's session-start migration from
+  `extensions/pi-goal/<threadId>.json` into the current `extensions/goal` store
+  while merging the stale-continuation fix.
+- Existing current-store files win. Migrated legacy files drop inert
+  `tokenBudget` metadata and normalize `budgetLimited` / `budget_limited` to the
+  budget-free `active` state.
+- Added deterministic store coverage for migration, current-file precedence,
+  and preservation of a current store's inert `tokenBudget`; the app-server
+  wire round-trip remains unchanged.
+- Expected merge-conflict zones: LOW in `persistence.ts` parsing and `index.ts`
+  session-start initialization; NONE in schemas or public extension APIs.
+
+## Source-aware input pauses stale goals; remove the 60s userGrace re-arm (2026-07-30)
+
+### What changed
+
+- `index.ts` registers an `input` handler: any event whose `source` is not
+  `extension` (interactive or `rpc`) pauses an `active` goal. It cancels the
+  monitor synchronously (`noteUserInput`) before any await. The idle-vs-in-flight
+  split uses the closure `agentTurnInProgress` flag: when no run is in flight the
+  goal is paused **at the seam** (account the idle window, then `active ->
+  paused`) so the unrelated new turn is not charged to the stale goal; when a run
+  is in flight, `pausePendingForGoalId` is set synchronously from the
+  currently-accounted goal id (no fs read/race) and the pause lands at that run's
+  `agent_end` after usage accounting. Goal-id matching prevents pausing a goal
+  replaced or cleared mid-turn.
+- `before_agent_start` no longer auto-unblocks a `blocked` goal and no longer
+  calls the monitor's user-input hook; it only resets the persisted streak. A
+  `blocked` goal stays blocked and only an explicit resume action (`/goal resume`,
+  or the existing paused-session resume confirmation) reactivates a paused or
+  blocked goal.
+- Removed the automatic 60-second `userGrace` continuation entirely:
+  `GOAL_USER_GRACE_DELAY_MS`, the `userGrace` continuation path/kind, and the
+  `deny/"grace"` verdict are gone from `continuation.ts` and
+  `monitor-continuation.ts` (`noteUserPrompt` -> `noteUserInput`). No fallback
+  timer can resurrect stale work; only `monitor`-delayed continuation and
+  new-goal/session-start continuation remain.
+- `prompt.ts` continuation prompt now states that the newest direct user
+  instruction takes precedence over conflicting objective parts (a newer user
+  message pauses the goal, so continuations resume only after `/goal resume`).
+- New regression `test/suite/regressions/stale-goal-input-pause.test.ts` plus
+  deterministic no-sleep coverage in `goal-monitor-continuation.test.ts`
+  (idle-input pause, streaming/queued deferred-pause usage accounting,
+  extension-source no-op, blocked-stays-blocked, `/goal resume` re-arm exactly
+  once via the file-watch signal). `goal-continuation-verdict`,
+  `issue-447-goal-continuation`, `goal-abort-extension`, `goal-extension`, and
+  `goal-monitor-stall` tests updated to the pause contract.
+
+### Why
+
+- The always-scheduled 60s `userGrace` timer let a stale active goal retake
+  control after the user had already moved on to a newer request. A timer
+  existing at all is the root cause; pausing on direct input and
+  removing the timer is the minimal fix that preserves new-goal continuation,
+  unattended monitor continuation, and single-flight.
+
+### Compatibility risk
+
+- **Blocked "waiting on the user" goals no longer auto-resume** on the next
+  prompt; users must explicitly resume via `/goal resume` (paused sessions also
+  retain the existing resume confirmation). This is the one user-visible
+  behavior change and is documented in `AGENTS.md`.
+- RPC/app-server consumers see no `userGrace` schedule events; `monitor`-kind
+  `goal_continuation_scheduled`/`_resumed` payloads are unchanged
+  (`app-server-goal-wire` / `goal-monitor-rpc-notice` still green).
+
+### Expected merge conflict zones on the next sync
+
+- MEDIUM in `index.ts` around `before_agent_start`/`agent_end` and the new
+  `input` handler.
+- LOW in `continuation.ts`/`monitor-continuation.ts` around the removed
+  `userGrace`/`grace` branches.
+- NONE in persistence schema or goal status transitions (`active -> paused` and
+  `blocked -> active` were already legal user transitions).
+
 ## Observable progress resets the persisted continuation cap streak (2026-07-30)
 
 ### What changed
