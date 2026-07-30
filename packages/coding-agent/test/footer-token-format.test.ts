@@ -47,6 +47,7 @@ function createSession(latestCacheHitRate = (1_500_000 / (49 + 1_500_000 + 44_00
 			getCwd: () => "/tmp/project",
 		},
 		getContextUsage: () => ({ tokens: 44_000, contextWindow: 800_000, percent: 5.5 }),
+		isFastModeActive: () => false,
 		modelRuntime: {
 			isUsingOAuth: () => false,
 		},

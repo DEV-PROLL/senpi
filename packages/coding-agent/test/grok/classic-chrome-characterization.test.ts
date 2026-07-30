@@ -149,6 +149,7 @@ function createFooterSession(): AgentSession {
 			getCwd: () => "/tmp/project",
 		},
 		getContextUsage: () => ({ contextWindow: 200_000, percent: 12.3 }),
+		isFastModeActive: () => false,
 		modelRuntime: { isUsingOAuth: () => false },
 	} as unknown as AgentSession;
 }
