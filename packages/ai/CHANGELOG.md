@@ -4,11 +4,27 @@
 
 ### Breaking Changes
 
+- Upgraded the exported TypeBox dependency to 1.3.8, removing deprecated TypeBox APIs and fixing compiled validation of nullable array tool arguments inherited from upstream 0.83.0.
+
 ### Added
+
+- Added per-request `fetch` injection for supported text and image provider transports.
+- Added Claude Opus 5 support for the GitHub Copilot provider with adaptive thinking, a 1M context window, and Copilot-specific thinking-level metadata.
+- Added the `"pending"` stop reason for partial streaming assistant messages.
+- Added `AssistantMessage.rawStopReason` across Google, Anthropic, Amazon Bedrock, Mistral, and OpenAI streams so unmapped terminal reasons surface as provider errors.
+- Added manual redirect URL and authorization-code entry to OpenRouter OAuth login for remote and headless environments.
+- Added `AuthResolutionOverrides.minOAuthValidityMs` so callers can require OAuth credentials with a minimum remaining validity.
 
 ### Changed
 
+- Changed stored OAuth credentials to refresh when less than five minutes of validity remain instead of waiting until expiration.
+
 ### Fixed
+
+- Fixed Qwen Token Plan reasoning models to send their service-specific thinking controls and supported reasoning-effort levels.
+- Fixed Z.AI providers and compatible custom endpoints to send output limits through `max_tokens`.
+- Fixed explicitly configured Amazon Bedrock profiles being overridden by ambient AWS access keys.
+- Fixed malformed OpenAI-compatible tool-call deltas with both a valid `function` payload and an empty `custom` object discarding function arguments.
 
 ### Removed
 

@@ -4,13 +4,45 @@
 
 ### New Features
 
+- **Credential export for external clients** - `senpi auth print-api-key` and `senpi auth print-bearer-token` export configured credentials with automatic OAuth refresh and minimum-validity enforcement.
+- **Headless OpenRouter sign-in** - complete `/login openrouter` over SSH by pasting the redirect URL or authorization code when the loopback callback is unavailable.
+- **Claude Opus 5 on GitHub Copilot** - use Claude Opus 5 through GitHub Copilot with adaptive thinking and a 1M context window.
+
 ### Breaking Changes
+
+- Upgraded bundled TypeBox aliases to 1.3.8, removing deprecated TypeBox APIs and fixing compiled validation of nullable array tool arguments inherited from upstream 0.83.0.
 
 ### Added
 
+- Exposed the session's resolved model scope as `ctx.scopedModels` to extensions.
+- Added inherited per-request `fetch` injection for supported text and image provider transports.
+- Added inherited `"pending"` stop reasons for partial streaming assistant messages.
+- Added inherited raw provider stop reasons across Google, Anthropic, Amazon Bedrock, Mistral, and OpenAI streams.
+- Added inherited manual redirect URL and authorization-code entry to OpenRouter login for remote and headless environments.
+- Added inherited Claude Opus 5 support for GitHub Copilot with adaptive thinking and a 1M context window.
+
 ### Changed
 
+- Changed inherited OAuth credential resolution to refresh tokens with less than five minutes of validity remaining instead of waiting until expiration.
+
 ### Fixed
+
+- Added a status line when tool output expansion is toggled.
+- Show explicit file-backed `--system-prompt` and `--append-system-prompt` sources in startup context while preserving Senpi's no-implicit-prompt-discovery behavior.
+- Fixed context files loading twice when a linked Git worktree is nested under its main repository.
+- Fixed llama.cpp streamed responses reporting zero token usage and leaving session context accounting empty.
+- Fixed session replacement and committed tree navigation during an active response to abort and persist the outgoing turn instead of leaving dangling tool calls.
+- Fixed failed Git package installs leaving partial directories that blocked clean retries.
+- Fixed the `/model` selector retaining a stale selection while filtering instead of highlighting the top match.
+- Fixed direct RPC bash commands bypassing extension `user_bash` handlers.
+- Fixed skills, prompts, and themes losing package source metadata after extensions reload resources.
+- Fixed cancellation of concurrently running user bash commands so every active command is aborted.
+- Fixed duplicate messages appearing when extensions switch sessions during interactive startup.
+- Fixed inherited Qwen Token Plan reasoning models to send their service-specific thinking controls and supported reasoning-effort levels.
+- Fixed inherited Z.AI output limits being sent through an unsupported parameter.
+- Fixed explicitly configured Amazon Bedrock profiles being overridden by ambient AWS access keys.
+- Fixed inherited image fallback paths overflowing narrow terminals, shortened home-directory paths, and made absolute paths clickable when terminal hyperlinks are available.
+- Fixed inherited OpenAI-compatible tool calls losing function arguments when malformed deltas also contain an empty `custom` object.
 
 ### Removed
 

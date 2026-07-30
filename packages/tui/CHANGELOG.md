@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Fixed inherited image fallback labels to shorten home-directory paths, hyperlink absolute paths when supported, and avoid overflowing narrow terminals.
+
 ### Removed
 
 ## [2026.7.30] - 2026-07-30

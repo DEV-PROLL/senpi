@@ -6,6 +6,8 @@
 
 ### Added
 
+- Added the inherited `"pending"` stop reason for proxied partial assistant streams.
+
 ### Changed
 
 ### Fixed
