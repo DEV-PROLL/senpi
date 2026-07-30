@@ -16,7 +16,7 @@ type PromptOptions = {
 function getFlushCompactionQueue() {
 	const flush = Reflect.get(InteractiveMode.prototype, "flushCompactionQueue");
 	if (typeof flush !== "function") throw new Error("Expected InteractiveMode.flushCompactionQueue");
-	return (context: object, options?: { willRetry?: boolean }): Promise<void> =>
+	return (context: object, options?: { willRetry?: boolean; deferAdmission?: boolean }): Promise<void> =>
 		Promise.resolve(flush.call(context, options));
 }
 
@@ -60,6 +60,35 @@ describe("InteractiveMode transactional compaction queue transfer", () => {
 		expect(context.compactionQueuedMessages).not.toContain(first);
 		expect(showError).toHaveBeenCalledWith("Failed to send queued messages: synthetic transfer failure");
 		expect(clearQueue).not.toHaveBeenCalled();
+	});
+
+	it("delivers via native queues without prompt admission when deferAdmission is set", async () => {
+		const steerMessage: QueueMessage = { text: "held steer", mode: "steer" };
+		const followUpMessage: QueueMessage = { text: "held follow-up", mode: "followUp" };
+		const showError = vi.fn();
+		const context = {
+			compactionQueuedMessages: [steerMessage, followUpMessage],
+			compactionInFlightMessages: [] as QueueMessage[],
+			compactionTransferAbortControllers: new Map<QueueMessage, AbortController>(),
+			isExtensionCommand: () => false,
+			showError,
+			updatePendingMessagesDisplay: vi.fn(),
+			session: {
+				clearQueue: vi.fn(() => ({ steering: [], followUp: [] })),
+				prompt: vi.fn(async () => {}),
+				followUp: vi.fn(async () => {}),
+				steer: vi.fn(async () => {}),
+			},
+		};
+
+		await getFlushCompactionQueue()(context, { willRetry: false, deferAdmission: true });
+
+		expect(context.session.prompt).not.toHaveBeenCalled();
+		expect(context.session.steer).toHaveBeenCalledWith(steerMessage.text);
+		expect(context.session.followUp).toHaveBeenCalledWith(followUpMessage.text);
+		expect(context.compactionQueuedMessages).toEqual([]);
+		expect(context.compactionInFlightMessages).toEqual([]);
+		expect(showError).not.toHaveBeenCalled();
 	});
 
 	it("commits the first prompt at explicit preflight acceptance and never restores it after turn failure", async () => {

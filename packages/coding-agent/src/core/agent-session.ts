@@ -131,6 +131,7 @@ import { RetryFallbackController } from "./retry-fallback/controller.ts";
 import { SelectorCooldowns } from "./retry-fallback/cooldown.ts";
 import { createFallbackLogger } from "./retry-fallback/log.ts";
 import { validateFallbackChains } from "./retry-fallback/validate.ts";
+import { createSessionLogger, type SessionLogger } from "./session-log.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import {
 	buildSessionContext,
@@ -557,6 +558,7 @@ export class AgentSession {
 	private _steeringMessages: string[] = [];
 	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
 	private _followUpMessages: string[] = [];
+	private _sessionLogger: SessionLogger;
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
 	// Queues held while the first post-compaction response is classified. Agent
@@ -671,6 +673,7 @@ export class AgentSession {
 		this._modelRuntime = modelRuntime;
 		this._modelRegistry = config.modelRegistry ?? new ModelRegistry(modelRuntime);
 		const fallbackLogger = createFallbackLogger(config.agentDir ?? getAgentDir());
+		this._sessionLogger = createSessionLogger(config.agentDir ?? getAgentDir());
 		this._fallbackValidationWarnings = validateFallbackChains(
 			this.settingsManager.getRawFallbackChains(),
 			this._modelRegistry,
@@ -1004,8 +1007,34 @@ export class AgentSession {
 
 	/** Emit an event to all listeners */
 	private _emit(event: AgentSessionEvent): void {
+		this._logSessionEvent(event);
 		for (const l of this._eventListeners) {
 			l(event);
+		}
+	}
+
+	/** Mirror stuck-prone lifecycle transitions into logs/session.log (content-free). */
+	private _logSessionEvent(event: AgentSessionEvent): void {
+		if (event.type === "compaction_end") {
+			this._sessionLogger.info("compaction_decision", {
+				reason: event.reason,
+				accepted: event.accepted ?? event.result !== undefined,
+				aborted: event.aborted,
+				willRetry: event.willRetry,
+				rejectionCause: event.rejectionCause,
+				error: event.errorMessage,
+			});
+			return;
+		}
+		if (event.type === "message_end" && event.message.role === "assistant") {
+			const message = event.message as AssistantMessage;
+			if (message.stopReason !== "error") return;
+			const kind = isProviderStreamStallError(message)
+				? "stall"
+				: isProviderTimeoutError(message)
+					? "timeout"
+					: "error";
+			this._sessionLogger.warn("provider_error", { kind, error: message.errorMessage });
 		}
 	}
 
@@ -1099,6 +1128,7 @@ export class AgentSession {
 			const requiredCompactionError = this._requiredCompactionAdmissionError;
 			this._requiredCompactionAdmissionError = undefined;
 			if (requiredCompactionError) {
+				this._sessionLogger.warn("prompt_rejected", { stage: "admission", error: "RequiredCompactionError" });
 				throw requiredCompactionError;
 			}
 		} catch (error) {
@@ -2741,6 +2771,7 @@ export class AgentSession {
 	 */
 	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
 		this._steeringMessages.push(text);
+		this._sessionLogger.debug("queue_enqueue", { mode: "steer", count: this._steeringMessages.length });
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
@@ -2759,6 +2790,7 @@ export class AgentSession {
 	 */
 	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
 		this._followUpMessages.push(text);
+		this._sessionLogger.debug("queue_enqueue", { mode: "followUp", count: this._followUpMessages.length });
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
