@@ -1,3 +1,13 @@
+## Bun self-updates preserve the Bun launcher (2026-07-30)
+
+- Bun-managed global self-updates now replace Bun's generated Node-shebang symlink with a small launcher that
+  executes the updated `dist/cli.js` through the Bun runtime that performed the repair.
+- The repair uses the Bun runtime's own `process.execPath`, supports Bun binaries installed outside the global bin
+  directory, and is skipped on Windows where Bun uses platform-specific shims.
+- If `bun pm bin -g` does not return a global bin directory, self-update is now rejected instead of installing
+  without a launcher repair.
+- Coverage: `test/suite/regressions/496-bun-launcher-self-update.test.ts`.
+
 ## Kimi XTML recovery preserves protocol identity (2026-07-29)
 
 ### What changed
