@@ -5,15 +5,19 @@
 ### What changed
 
 - `speculative.ts` dispatches the summarization request through `context.modelRegistry.modelRuntime.stream()` when a registry is present, and only falls back to the compat `stream()` when a `SpeculativeCompactionContext` is built without one.
-- Added issue #543 regression coverage in `test/suite/regressions/543-compaction-runtime-provider.test.ts` with a provider whose api id exists only in Senpi's `ModelRuntime`.
+- `openai-remote.ts` resolves its stream runner the same way (`resolveRemoteStreamRunner`): an injected `dependencies.streamRunner` still wins, otherwise the model runtime serves the native remote-compaction request and compat is the last resort.
+- Summarization auth now accepts a credential request header as resolved auth instead of requiring an `apiKey`, so `headers`-authenticated providers (models.json `headers`, extension `headers`) can compact.
+- Issue #543 regression coverage: `test/suite/regressions/543-compaction-runtime-provider.test.ts` (runtime-only api id, plus a header-authenticated provider) and `test/suite/regressions/543-remote-compaction-runtime-provider.test.ts` (native remote route through the runtime).
 
 ### Why
 
 - Providers registered through `pi.registerProvider()` (builtin `claude-agent-sdk`, extension providers such as `senpi-accounts`' Kiro) never land in compat's builtin api-registry, so every compaction attempt failed with `compaction generator failed: No API provider registered for api: <api>` while normal agent turns on the same model worked. Same bug class as #488 for `/btw`.
+- The two follow-on holes had the same shape: a provider that senpi considers fully authenticated and fully routable for normal turns must be equally compactable. A header-only credential resolved `{ok: true, apiKey: undefined}` and died as "credentials unavailable"; an extension `openai-responses` proxy opting into `supportsRemoteCompactionV2` had its own transport bypassed on the remote route.
 
 ### Merge-conflict zones
 
-- `speculative.ts` import block plus the single `stream(...)` call site in `generateSummaryMessage`.
+- `speculative.ts` import block, the single `stream(...)` call site in `generateSummaryMessage`, and the auth guard at the top of `runExtensionCompaction`.
+- `openai-remote.ts` `OpenAiRemoteCompactionContext.modelRegistry` shape plus the two stream-runner defaults.
 
 ## Proactive idle compaction (2026-07-30)
 

@@ -3,6 +3,7 @@ import {
 	type AssistantMessage,
 	type AssistantMessageEventStream,
 	type Context,
+	hasCredentialHeaders,
 	isContextOverflow,
 	isRetryableAssistantError,
 	type Message,
@@ -201,7 +202,7 @@ async function generateSummaryMessage(options: {
 	signal?: AbortSignal;
 	snapshot: SpeculativeCompactionSnapshot;
 	auth: {
-		apiKey: string;
+		apiKey?: string;
 		headers?: Record<string, string>;
 		extraBody?: Record<string, unknown>;
 	};
@@ -494,8 +495,13 @@ export async function runExtensionCompaction(
 	if (signal?.aborted) return undefined;
 	const auth = await context.modelRegistry?.getApiKeyAndHeaders(snapshot.model);
 	if (signal?.aborted) return undefined;
-	if (!auth?.ok || !auth.apiKey) {
-		const detail = auth && !auth.ok ? auth.error : `no API key resolved for provider "${snapshot.model.provider}"`;
+	// A provider is authenticated for summarization by either a resolved key or a
+	// credential request header: `headers`-authenticated providers (models.json and
+	// extension providers alike) never resolve an apiKey, yet their normal agent
+	// turns are fully authenticated.
+	if (!auth?.ok || !(auth.apiKey || hasCredentialHeaders(auth.headers))) {
+		const detail =
+			auth && !auth.ok ? auth.error : `no credentials resolved for provider "${snapshot.model.provider}"`;
 		throw new SummaryGenerationError("auth", `summarization credentials unavailable: ${detail}`);
 	}
 
