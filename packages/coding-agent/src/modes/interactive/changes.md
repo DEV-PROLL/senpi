@@ -1449,3 +1449,9 @@ The tip line was teaching a small slice of the product while most of the surface
 - Changed `src/modes/interactive/interactive-mode.ts` so `handleClipboardPaste()` failures show a `Clipboard paste failed: <reason>` status instead of being silently swallowed; an empty clipboard still stays quiet.
 - This was changed in core UI because clipboard paste is internal `InteractiveMode` editor wiring (`onPasteImage`); extensions cannot observe that catch path.
 - Expected merge-conflict zone on upstream sync: `handleClipboardPaste()` in `src/modes/interactive/interactive-mode.ts`.
+
+## compaction queue delivery after unsuccessful compaction
+
+- Changed `src/modes/interactive/interactive-mode.ts` and `compaction-queue-transfer.ts` so every terminal `compaction_end` flushes the TUI compaction queue: accepted compactions keep prompt-admission delivery, while failed/rejected/aborted ones route queued input through the native steer/followUp queues (`deferAdmission`) with a visible held-count status and a `compaction_queue_deferred` session-log event. Previously the queue was flushed only on success, so messages typed during a failing compaction were silently parked forever and lost on session switch (field report 2026-07-30).
+- This was changed in core UI because the compaction queue and `compaction_end` handling are internal `InteractiveMode` state; extensions cannot observe or drain that queue.
+- Expected merge-conflict zone on upstream sync: the `compaction_end` handler and `flushCompactionQueue()` in `src/modes/interactive/interactive-mode.ts`, plus `compaction-queue-transfer.ts` transfer options.

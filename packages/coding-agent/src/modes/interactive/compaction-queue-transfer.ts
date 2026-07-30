@@ -7,6 +7,12 @@ export type PromptDisposition = "handled" | "queued" | "started";
 
 type TransferOptions = {
 	readonly willRetry?: boolean;
+	/**
+	 * Deliver prompts through the native steer/followUp queues instead of
+	 * prompt admission. Used after an unsuccessful compaction so queued input
+	 * is never dropped and never force-admitted into an over-budget context.
+	 */
+	readonly deferAdmission?: boolean;
 };
 
 type TransferDependencies = {
@@ -29,7 +35,7 @@ export async function transferCompactionQueue(
 
 	let acceptedCount = 0;
 	try {
-		if (options.willRetry) {
+		if (options.willRetry || options.deferAdmission) {
 			for (const message of batch) {
 				if (dependencies.isCommand(message)) {
 					await dependencies.deliverCommand(message);

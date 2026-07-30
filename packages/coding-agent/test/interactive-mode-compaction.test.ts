@@ -170,6 +170,8 @@ describe("InteractiveMode compaction events", () => {
 			showError: vi.fn(),
 			showStatus: vi.fn(),
 			clearStatusIndicator: vi.fn(),
+			compactionQueuedMessages: [] as Array<{ text: string; mode: "steer" | "followUp" }>,
+			getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
 			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
 			settingsManager: { getShowTerminalProgress: () => false },
 			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
@@ -208,7 +210,7 @@ describe("InteractiveMode compaction events", () => {
 				summary: "summary",
 			}),
 		);
-		expect(fakeThis.flushCompactionQueue).toHaveBeenCalledWith({ willRetry: false });
+		expect(fakeThis.flushCompactionQueue).toHaveBeenCalledWith({ willRetry: false, deferAdmission: false });
 	});
 
 	test("surfaces a manual would-overflow rejection instead of silently swallowing it", async () => {
@@ -226,6 +228,8 @@ describe("InteractiveMode compaction events", () => {
 			showWarning: vi.fn(),
 			showStatus: vi.fn(),
 			clearStatusIndicator: vi.fn(),
+			compactionQueuedMessages: [] as Array<{ text: string; mode: "steer" | "followUp" }>,
+			getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
 			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
 			settingsManager: { getShowTerminalProgress: () => false },
 			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
@@ -263,9 +267,9 @@ describe("InteractiveMode compaction events", () => {
 			...fakeThis.showStatus.mock.calls.map((call) => String(call[0])),
 		].join("\n");
 		expect(feedback).toMatch(/would.?overflow|overflow|rejected/i);
-		// Rejected compaction retains editor-owned input instead of submitting it
-		// through a recursive post-compaction prompt path.
-		expect(fakeThis.flushCompactionQueue).not.toHaveBeenCalled();
+		// Rejected compaction still flushes, but through the native queues
+		// (deferAdmission) so no recursive post-compaction prompt path runs.
+		expect(fakeThis.flushCompactionQueue).toHaveBeenCalledWith({ willRetry: false, deferAdmission: true });
 	});
 
 	test("sanitizes a detached continuation launch failure before rendering", async () => {
@@ -318,6 +322,8 @@ describe("InteractiveMode compaction events", () => {
 			addMessageToChat: vi.fn(),
 			showError: vi.fn(),
 			showStatus: vi.fn(),
+			compactionQueuedMessages: [] as Array<{ text: string; mode: "steer" | "followUp" }>,
+			getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
 			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
 			settingsManager: { getShowTerminalProgress: () => false },
 			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
@@ -537,6 +543,8 @@ describe("InteractiveMode compaction events", () => {
 			updateEditorBorderColor: vi.fn(),
 			showTreeSelector: vi.fn(),
 			showUserMessageSelector: vi.fn(),
+			compactionQueuedMessages: [] as Array<{ text: string; mode: "steer" | "followUp" }>,
+			getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
 			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
 			settingsManager: { getShowTerminalProgress: () => false, getDoubleEscapeAction: () => "none" },
 			turnWorkingTip: { resetForNewTurn: vi.fn(), resolve: vi.fn() },

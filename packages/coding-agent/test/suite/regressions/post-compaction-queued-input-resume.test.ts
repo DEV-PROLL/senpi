@@ -89,13 +89,15 @@ function createTuiCompactionEventContext(harness: Harness) {
 		clearStatusIndicator: () => void;
 		rebuildChatFromMessages: () => void;
 		addMessageToChat: () => void;
-		showStatus: () => void;
+		statusMessages: string[];
+		showStatus: (message: string) => void;
 		ui: { requestRender: () => void; terminal: { setProgress: () => void } };
 		settingsManager: { getShowTerminalProgress: () => boolean };
 		flushCompactionQueue: (options: { willRetry: boolean }) => Promise<void>;
 		flushes: Promise<void>[];
 	};
 	const flushes: Promise<void>[] = [];
+	const statusMessages: string[] = [];
 	Object.assign(context, {
 		isInitialized: true,
 		footer: { invalidate: () => {} },
@@ -107,9 +109,13 @@ function createTuiCompactionEventContext(harness: Harness) {
 		clearStatusIndicator: () => {},
 		rebuildChatFromMessages: () => {},
 		addMessageToChat: () => {},
-		showStatus: () => {},
+		statusMessages,
+		showStatus: (message: string) => {
+			statusMessages.push(message);
+		},
 		ui: { requestRender: () => {}, terminal: { setProgress: () => {} } },
 		settingsManager: { getShowTerminalProgress: () => false },
+		getSessionLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {} }),
 		flushes,
 		flushCompactionQueue(options: { willRetry: boolean }) {
 			const flush = getFlushCompactionQueue()(context, options);
@@ -289,7 +295,7 @@ describe("post-compaction queued input recovery", () => {
 		["rejected threshold", "threshold" as const, false, "reject" as const],
 		["feedback-only abort", undefined, false, "abort" as const],
 	])(
-		"keeps queued TUI input owned by the editor after a %s compaction_end",
+		"routes queued TUI input to the native session queue after a %s compaction_end",
 		async (_label, reason, willRetry, outcome) => {
 			const marker = `[TUI queue remains ${outcome}]`;
 			const harness = await createHarness({
@@ -334,11 +340,13 @@ describe("post-compaction queued input recovery", () => {
 			await Promise.all(context.flushes);
 			await harness.session.waitForSettledSessionWork();
 
-			expect(context.compactionQueuedMessages).toEqual([{ text: marker, mode: "steer" }]);
+			expect(context.compactionQueuedMessages).toEqual([]);
 			expect(context.compactionInFlightMessages).toEqual([]);
+			expect(harness.session.getSteeringMessages()).toContain(marker);
 			expect(getUserTexts(harness)).not.toContain(marker);
 			expect(harness.faux.state.callCount).toBe(providerCallsBeforeCompaction);
 			expect(harness.eventsOfType("compaction_start")).toHaveLength(1);
+			expect(context.statusMessages.some((message) => message.includes("queued message"))).toBe(true);
 		},
 	);
 

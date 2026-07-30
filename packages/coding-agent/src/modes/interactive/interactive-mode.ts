@@ -105,6 +105,7 @@ import {
 	isRecoverableInspectorVmImportError,
 } from "../../inspector-policy.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
+import { createSessionLogger, type SessionLogger } from "../../core/session-log.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
@@ -465,6 +466,7 @@ export class InteractiveMode {
 	private shortcutOverlay: ShortcutOverlay | undefined;
 	private lastEditorText = "";
 	private lastInputWasPaste = false;
+	private sessionLogger: SessionLogger | undefined;
 	private readonly turnWorkingTip = new WorkingTipCache();
 	private hookStatusContainer: Container;
 	private defaultEditor: CustomEditor;
@@ -3324,10 +3326,15 @@ export class InteractiveMode {
 				this.ui.requestRender();
 			}
 		} catch (error) {
-			this.showStatus(
-				`Clipboard paste failed: ${sanitizeTuiErrorMessage(error instanceof Error ? error.message : String(error))}`,
-			);
+			const message = error instanceof Error ? error.message : String(error);
+			this.getSessionLogger().warn("clipboard_error", { op: "paste", error: message });
+			this.showStatus(`Clipboard paste failed: ${sanitizeTuiErrorMessage(message)}`);
 		}
+	}
+
+	private getSessionLogger(): SessionLogger {
+		this.sessionLogger ??= createSessionLogger(this.runtimeHost.services.agentDir);
+		return this.sessionLogger;
 	}
 
 	private setupEditorSubmitHandler(): void {
@@ -3877,12 +3884,23 @@ export class InteractiveMode {
 						this.chatContainer.addChild(new Text(theme.fg("error", message), 1, 0));
 					}
 				}
-				// Only an accepted compaction transfers editor-owned input to the
-				// session. Rejections and aborts retain the draft for an explicit
-				// user retry while the UI cleanup above still always runs.
-				if (event.accepted === true || event.result !== undefined) {
-					void this.flushCompactionQueue({ willRetry: event.willRetry });
+				// Every terminal compaction_end flushes the TUI compaction queue.
+				// Accepted compactions deliver through prompt admission; unsuccessful
+				// ones route through the native steer/followUp queues so submitted
+				// input is never silently parked (field bug: messages typed during a
+				// failing compaction were held forever and lost on session switch).
+				const compactionSucceeded = event.accepted === true || event.result !== undefined;
+				const heldCount = this.compactionQueuedMessages.length;
+				if (!compactionSucceeded && heldCount > 0) {
+					this.getSessionLogger().warn("compaction_queue_deferred", {
+						count: heldCount,
+						cause: event.errorMessage ?? event.rejectionCause ?? (event.aborted ? "aborted" : "no-result"),
+					});
+					this.showStatus(
+						`${heldCount} queued message${heldCount === 1 ? "" : "s"} will send with the next turn (compaction did not complete)`,
+					);
 				}
+				void this.flushCompactionQueue({ willRetry: event.willRetry, deferAdmission: !compactionSucceeded });
 				this.ui.requestRender();
 				break;
 			}
@@ -4910,7 +4928,7 @@ export class InteractiveMode {
 		return !!extensionRunner.getCommand(commandName);
 	}
 
-	private async flushCompactionQueue(options?: { willRetry?: boolean }): Promise<void> {
+	private async flushCompactionQueue(options?: { willRetry?: boolean; deferAdmission?: boolean }): Promise<void> {
 		const session = this.session;
 		const generation = this.compactionQueueGeneration ?? 0;
 		const previousFlush = this.compactionQueueFlushTail;
