@@ -786,9 +786,14 @@ export class AgentSession {
 		}
 
 		try {
-			const result = await this._modelRuntime.getAuth(model);
+			const apiKey = await this.agent.getApiKey?.(model.provider);
+			const result = await this._modelRuntime.getAuth(model, { apiKey });
 			return result
-				? { apiKey: result.auth.apiKey, headers: withoutDeletedHeaders(result.auth.headers), env: result.env }
+				? {
+						apiKey: apiKey ?? result.auth.apiKey,
+						headers: withoutDeletedHeaders(result.auth.headers),
+						env: result.env,
+					}
 				: {};
 		} catch {
 			return {};

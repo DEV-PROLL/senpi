@@ -62,6 +62,25 @@ describe("agent session auto title routing", () => {
 		await expect(sessionName).resolves.toBe("Aliased Priority Task");
 	});
 
+	it("reuses the active request API key for title generation", async () => {
+		const harness = await createAutoTitleHarness();
+		harnesses.push(harness);
+		harness.agent.getApiKey = () => "runtime-key";
+		harness.agent.streamFunction = (model, context, options) => streamSimple(model, context, options);
+		harness.setResponses([
+			fauxAssistantMessage("turn complete"),
+			fauxAssistantMessage("<title>Runtime Key Task</title>"),
+		]);
+
+		const sessionName = waitForSessionName(harness);
+		await harness.session.prompt("verify runtime API key routing");
+		await waitForCallCount(harness, 2);
+
+		expect(harness.faux.getCallLog()[0]?.options?.apiKey).toBe("runtime-key");
+		expect(harness.faux.getCallLog()[1]?.options?.apiKey).toBe("runtime-key");
+		await expect(sessionName).resolves.toBe("Runtime Key Task");
+	});
+
 	it("forwards provider request hooks to title generation", async () => {
 		const onPayloadCalls: string[] = [];
 		const harness = await createAutoTitleHarness({
