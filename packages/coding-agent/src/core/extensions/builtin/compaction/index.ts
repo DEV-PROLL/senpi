@@ -24,6 +24,7 @@ import {
 	RECOVERY_INSTRUCTIONS,
 	resetOnSessionCompact,
 } from "./degradation-monitor.ts";
+import * as idle from "./idle.ts";
 import { type CompactionLogger, createCompactionLogger } from "./log.ts";
 import {
 	markOpenAiRemoteReplayBoundary,
@@ -655,8 +656,26 @@ export default function compactionExtension(
 		}
 	});
 
-	pi.on("agent_end", () => {
+	pi.on("agent_end", async (event, ctx) => {
 		state = resetTurnCounter(state, "");
+		const usage = ctx.getContextUsage();
+		const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+		const settings = ctx.getCompactionSettings();
+		if (
+			idle.shouldRunIdleCompaction({
+				willRetry: event.willRetry ?? false,
+				aborted: event.aborted === true,
+				settings,
+				usage,
+				contextWindow,
+				breakerTripped: breaker.isTripped(state, Date.now()),
+				lastYield: state.lastYield ?? undefined,
+				mode: ctx.mode,
+			})
+		) {
+			getLogger(ctx).debug("idle_trigger", { contextWindow, tokens: usage?.tokens ?? 0 });
+			await applyBlockingCompaction(ctx, idle.IDLE_COMPACTION_INSTRUCTIONS);
+		}
 	});
 
 	pi.on("message_end", async (event, ctx) => {
