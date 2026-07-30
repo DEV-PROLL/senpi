@@ -53,6 +53,8 @@ function streamMessage(message: AssistantMessage) {
 	const stream = createAssistantMessageEventStream();
 	if (message.stopReason === "error" || message.stopReason === "aborted") {
 		stream.push({ type: "error", reason: message.stopReason, error: message });
+	} else if (message.stopReason === "pending") {
+		throw new Error("Cannot emit a pending assistant message as a completed stream.");
 	} else stream.push({ type: "done", reason: message.stopReason, message });
 	return stream;
 }

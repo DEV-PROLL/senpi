@@ -480,7 +480,7 @@ export class ExtensionRunner {
 		// Context actions (required)
 		this.getModel = contextActions.getModel;
 		this.getServiceTier = contextActions.getServiceTier;
-		this.getScopedModels = contextActions.getScopedModels;
+		this.getScopedModels = contextActions.getScopedModels ?? (() => []);
 		this.isIdleFn = contextActions.isIdle;
 		this.isProjectTrustedFn = contextActions.isProjectTrusted;
 		this.getSignalFn = contextActions.getSignal;

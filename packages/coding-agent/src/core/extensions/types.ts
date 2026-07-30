@@ -389,7 +389,7 @@ export interface ExtensionContext {
 	 *  `enabledModels` settings against the available catalogue). Same set
 	 *  the `/scoped-models` command shows. Empty when no scoping is
 	 *  configured (all available models are usable). Read-only snapshot. */
-	scopedModels: readonly ScopedModel[];
+	scopedModels?: readonly ScopedModel[];
 	/** Current thinking level, when provided by the session runtime. */
 	thinkingLevel?: ThinkingLevel;
 	/** Whether the agent is idle (not streaming) */
@@ -2013,7 +2013,7 @@ export interface ExtensionActions {
 export interface ExtensionContextActions {
 	getModel: () => Model<any> | undefined;
 	getServiceTier: () => ServiceTier | undefined;
-	getScopedModels: () => readonly ScopedModel[];
+	getScopedModels?: () => readonly ScopedModel[];
 	isIdle: () => boolean;
 	isProjectTrusted: () => boolean;
 	getSignal: () => AbortSignal | undefined;
