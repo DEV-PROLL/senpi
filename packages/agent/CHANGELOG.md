@@ -6,6 +6,8 @@
 
 ### Added
 
+- Added proxy support for the inherited `"pending"` stop reason on partial streaming assistant messages ([#7151](https://github.com/earendil-works/pi/pull/7151) by [@lucasmeijer](https://github.com/lucasmeijer)).
+
 ### Changed
 
 ### Fixed
