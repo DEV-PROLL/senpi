@@ -887,7 +887,9 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	if (model.api === "openai-completions" && model.id.includes("deepseek-v4")) {
 		mergeThinkingLevelMap(
 			model,
-			model.provider === "openrouter"
+			model.provider === "qwen-token-plan" || model.provider === "qwen-token-plan-cn"
+				? {}
+				: model.provider === "openrouter"
 				? { ...DEEPSEEK_V4_THINKING_LEVEL_MAP, xhigh: "xhigh", max: null }
 				: DEEPSEEK_V4_THINKING_LEVEL_MAP,
 		);
