@@ -1,5 +1,34 @@
 # goal Extension Changes
 
+## Tool-using continuations reset the persisted cap streak (2026-07-30)
+
+### What changed
+
+- `monitor-continuation.ts` now classifies tool use once from the completed
+  continuation turn and resets the persisted `consecutiveContinuations` streak
+  before admitting the next immediate or user-grace continuation.
+- The existing cap remains 8 consecutive tool-less automatic continuations.
+  Monitor-delayed accounting, stale/repetition guards, single-flight delivery,
+  user-prompt resets, and session-start persistence are unchanged.
+- Coverage: `test/suite/goal-monitor-continuation.test.ts` runs nine consecutive
+  tool-using turns and proves they remain active while the existing tool-less
+  boundary test still blocks the ninth continuation.
+
+### Why
+
+- Tool calls are observable progress, but the persisted cap previously counted
+  every automatic continuation delivery. A long-running goal that kept using
+  tools therefore blocked itself after eight turns with `continuation cap
+  reached`, even though the separate stall detector already recognized those
+  turns as non-stalled.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `monitor-continuation.ts` around `afterAgentEnd` and the tool-less
+  streak helper.
+- NONE in the verdict engine, goal store schema, persistence, or public
+  extension API.
+
 ## A newly created goal starts immediately instead of waiting for user grace (2026-07-30)
 
 ### What changed
