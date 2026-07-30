@@ -1,5 +1,9 @@
 # changes
 
+## high_reasoning_warning RPC event (2026-07-30)
+
+- New `RpcHighReasoningWarningEvent` contract (`{ type: "high_reasoning_warning"; modelId; provider; thinkingLevel }`), auto-published to RPC stdout via the existing `session.subscribe -> outputEvent` seam. No new wiring; the event is a session event forwarded like `thinking_level_changed`.
+
 ## Credential-header auth status sources (2026-07-29)
 
 ### What changed
