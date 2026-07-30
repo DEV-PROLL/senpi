@@ -143,6 +143,8 @@ describe("goal extension contract (budget-free)", () => {
 		expect(serialized).toContain("blocked");
 		expect(serialized).toContain("reason");
 		expect(update?.description).toMatch(/3 consecutive goal turns/i);
+		expect(update?.description).toMatch(/no live resumption channel|no live monitor/i);
+		expect(update?.description).toMatch(/wait.*not an impasse/i);
 		expect(update?.description).toMatch(/fresh blocked audit after resume/i);
 		expect(update?.description).toMatch(/hard, slow, or uncertain/i);
 		expect(serialized).not.toContain("budget");

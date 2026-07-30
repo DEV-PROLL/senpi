@@ -1,5 +1,27 @@
 # goal Extension Changes
 
+## Waiting on a live resumption channel is never a blocked goal (2026-07-30)
+
+### What changed
+
+- `prompt.ts` `buildContinuationPrompt`: the turn-ending rule now names four legal endings
+  instead of three - action, `update_goal` complete, `update_goal` blocked, or ending the
+  turn while a live resumption channel (active monitor, scheduled continuation, or
+  background child whose completion wakes the session) is on duty. The blocked audit gains
+  a first gate: confirm no such channel can still deliver the awaited change, because a
+  pending delivery is a wait, not an impasse. Fixes the observed failure where a session
+  armed with a CI completion monitor called `update_goal` blocked on the same turn the
+  monitor was registered.
+- `tool-registration.ts`: the `update_goal` description now requires confirming no live
+  resumption channel exists before blocking and routes monitored waits to ending the turn.
+- Coverage: `test/suite/goal-modules.test.ts` (two new continuation-prompt pins) and
+  `test/suite/goal-extension.test.ts` (two new `update_goal` description pins).
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `prompt.ts` (fork-owned file) and `tool-registration.ts` (fork-owned); upstream
+  owns neither.
+
 ## Stale-goal system reminder on todo add operations (2026-07-29)
 
 ### What changed

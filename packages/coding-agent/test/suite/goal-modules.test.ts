@@ -222,6 +222,18 @@ describe("goal continuation prompt (budget-free)", () => {
 		expect(prompt).toMatch(/user input or an external-state change/i);
 	});
 
+	it("treats waiting on a live resumption channel as a legal turn ending, never as blocked", () => {
+		const prompt = buildContinuationPrompt(makeGoal());
+		expect(prompt).toMatch(/live resumption channel/i);
+		expect(prompt).toMatch(/wait.*not an impasse|never grounds a blocked/i);
+	});
+
+	it("gates the blocked audit on having no live resumption channel", () => {
+		const prompt = buildContinuationPrompt(makeGoal());
+		expect(prompt).toMatch(/no active monitor/i);
+		expect(prompt).toMatch(/end the turn and let it wake/i);
+	});
+
 	it("forbids ending a goal turn with narration instead of action or an update_goal call", () => {
 		const prompt = buildContinuationPrompt(makeGoal());
 		expect(prompt).toMatch(/exactly one/i);
