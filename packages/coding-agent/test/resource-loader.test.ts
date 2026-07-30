@@ -585,7 +585,7 @@ Project skill content`,
 	});
 
 	describe("system prompt sources", () => {
-		it("exposes discovered project SYSTEM.md as the system prompt source", async () => {
+		it("does not expose discovered project SYSTEM.md as the system prompt source", async () => {
 			const piDir = join(cwd, ".pi");
 			const systemPromptPath = join(piDir, "SYSTEM.md");
 			mkdirSync(piDir, { recursive: true });
@@ -594,19 +594,18 @@ Project skill content`,
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getSystemPrompt()).toBe("Project system prompt.");
-			expect(loader.getSystemPromptSource()).toEqual({ path: systemPromptPath });
+			expect(loader.getSystemPrompt()).toBeUndefined();
+			expect(loader.getSystemPromptSource()).toBeUndefined();
 		});
 
-		it("exposes discovered global SYSTEM.md as the system prompt source", async () => {
-			const systemPromptPath = join(agentDir, "SYSTEM.md");
-			writeFileSync(systemPromptPath, "Global system prompt.");
+		it("does not expose discovered global SYSTEM.md as the system prompt source", async () => {
+			writeFileSync(join(agentDir, "SYSTEM.md"), "Global system prompt.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getSystemPrompt()).toBe("Global system prompt.");
-			expect(loader.getSystemPromptSource()).toEqual({ path: systemPromptPath });
+			expect(loader.getSystemPrompt()).toBeUndefined();
+			expect(loader.getSystemPromptSource()).toBeUndefined();
 		});
 
 		it("does not expose literal system prompt text as a source", async () => {
@@ -628,17 +627,16 @@ Project skill content`,
 			expect(loader.getSystemPromptSource()).toEqual({ path: systemPromptPath });
 		});
 
-		it("exposes discovered APPEND_SYSTEM.md as an append system prompt source", async () => {
+		it("does not expose discovered APPEND_SYSTEM.md as an append system prompt source", async () => {
 			const piDir = join(cwd, ".pi");
-			const appendSystemPromptPath = join(piDir, "APPEND_SYSTEM.md");
 			mkdirSync(piDir, { recursive: true });
-			writeFileSync(appendSystemPromptPath, "Project append prompt.");
+			writeFileSync(join(piDir, "APPEND_SYSTEM.md"), "Project append prompt.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getAppendSystemPrompt()).toEqual(["Project append prompt."]);
-			expect(loader.getAppendSystemPromptSources()).toEqual([{ path: appendSystemPromptPath }]);
+			expect(loader.getAppendSystemPrompt()).toEqual([]);
+			expect(loader.getAppendSystemPromptSources()).toEqual([]);
 		});
 
 		it("does not expose literal append system prompt text as a source", async () => {

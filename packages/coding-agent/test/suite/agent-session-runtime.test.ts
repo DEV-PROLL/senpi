@@ -208,7 +208,6 @@ describe("AgentSessionRuntime characterization", () => {
 			"user",
 			"assistant",
 			"toolResult",
-			"assistant",
 		]);
 	});
 
