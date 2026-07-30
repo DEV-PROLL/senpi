@@ -1,5 +1,20 @@
 # Changes
 
+## 2026-07-30 - Bound empty Kimi assistant responses
+
+### What changed and why
+
+- Kimi-family provider streams that finish with `stop` but contain neither non-empty visible text nor a tool call
+  are discarded before turn commitment and retried once with the same request.
+- A successful second attempt is the only assistant turn committed and carries an
+  `empty_assistant_response_recovery` diagnostic. A second empty response becomes a visible error instead of
+  ending the session silently or looping indefinitely.
+- Error, aborted, refusal, length, and tool-call turns keep their existing behavior. The stream gate buffers only
+  Kimi responses before their first visible text/tool signal, avoiding reasoning-stream regressions for other
+  model families.
+- Coverage: agent-loop tests pin one-shot recovery, bounded failure, terminal-state preservation, and tool
+  execution.
+
 ## 2026-07-29 - Bounded provider stream start (streamStartTimeoutMs)
 
 ### What changed and why

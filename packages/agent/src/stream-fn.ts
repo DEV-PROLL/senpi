@@ -18,3 +18,5 @@ export function getDefaultStreamFn(): StreamFn {
 	}
 	return defaultStreamFn;
 }
+
+export { withEmptyAssistantRecovery } from "./empty-assistant-recovery.ts";
