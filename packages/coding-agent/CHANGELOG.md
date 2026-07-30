@@ -4,13 +4,74 @@
 
 ### New Features
 
+- **Credential export and headless login** — `senpi auth print-api-key` and `senpi auth print-bearer-token`
+  export configured credentials, while OpenRouter login can be completed by pasting a redirect URL or
+  authorization code in remote environments ([#7168](https://github.com/earendil-works/pi/pull/7168),
+  [#7114](https://github.com/earendil-works/pi/pull/7114) by [@rgarcia](https://github.com/rgarcia)).
+- **Alternate-screen TUI** — Add an alternate-screen renderer with owned scrolling, mouse selection, page
+  navigation, and restored main-screen transcript output.
+- **Comparative evals and model warnings** — Add the comparative Pi eval harness, extension creation evals, and
+  a high-risk main-model warning that is limited to models that actually need it.
+- **Goal and compaction continuity** — Continue newly created goals immediately, compact proactively when the
+  agent becomes idle, and reset continuation caps whenever tool progress is observed.
+
 ### Breaking Changes
+
+- Upgrade bundled TypeBox aliases to 1.3.7, removing deprecated APIs such as `Type.Base`, `Type.Promise`,
+  `Type.Iterator`, and `Value.Mutate`; extensions using removed TypeBox APIs must migrate to supported
+  replacements ([#7243](https://github.com/earendil-works/pi/pull/7243) by
+  [@petrroll](https://github.com/petrroll)).
 
 ### Added
 
+- Expose resolved model scope as `ctx.scopedModels` to extensions and include scoped models in the TUI
+  extension context ([#7191](https://github.com/earendil-works/pi/pull/7191) by
+  [@pungggi](https://github.com/pungggi), [#7215](https://github.com/earendil-works/pi/pull/7215)).
+- Add inherited per-request `fetch` injection, `"pending"` streaming stop reason support, raw provider stop
+  reasons, and Claude Opus 5 support for GitHub Copilot ([#7151](https://github.com/earendil-works/pi/pull/7151)
+  by [@lucasmeijer](https://github.com/lucasmeijer), [#7158](https://github.com/earendil-works/pi/pull/7158)
+  by [@jay-aye-see-kay](https://github.com/jay-aye-see-kay), [#7272](https://github.com/earendil-works/pi/pull/7272)).
+- Add OMO Senpi workflow tips to the interactive tip catalog.
+
 ### Changed
 
+- Refresh OAuth credentials before near-expiry and streamline comparative eval reporting, artifact naming, and
+  comparison direction output ([#7168](https://github.com/earendil-works/pi/pull/7168)).
+
 ### Fixed
+
+- Preserve explicit Amazon Bedrock profiles, Qwen Token Plan thinking controls, Z.AI output limits, OpenAI-compatible
+  function arguments, Kimi XTML thinking recovery, and the OpenCode Go provider display name
+  ([#7174](https://github.com/earendil-works/pi/pull/7174) by [@HyeokjaeLee](https://github.com/HyeokjaeLee),
+  [#7176](https://github.com/earendil-works/pi/pull/7176) by
+  [@christianbasch](https://github.com/christianbasch), [#7288](https://github.com/earendil-works/pi/pull/7288)
+  by [@sunnyyoung](https://github.com/sunnyyoung)).
+- Retry empty Kimi assistant responses once before surfacing a terminal empty-message failure.
+- Prevent duplicate messages on startup session switches and abort every active command during concurrent user-bash
+  cancellation ([#7110](https://github.com/earendil-works/pi/pull/7110) by
+  [@yzhg1983](https://github.com/yzhg1983), [#7103](https://github.com/earendil-works/pi/pull/7103) by
+  [@yzhg1983](https://github.com/yzhg1983)).
+- Stop loading context files twice in nested Git worktrees, preserve package source metadata across resource reloads,
+  and show explicit system prompt sources in startup context
+  ([#7221](https://github.com/earendil-works/pi/pull/7221) by [@arajkumar](https://github.com/arajkumar),
+  [#7218](https://github.com/earendil-works/pi/pull/7218)).
+- Route direct RPC bash commands through extension `user_bash` handlers, clean up failed Git installs, reset the
+  model selector to the top match while filtering, and show tool expansion toggle status
+  ([#7214](https://github.com/earendil-works/pi/pull/7214), [#7210](https://github.com/earendil-works/pi/pull/7210)
+  by [@haoqixu](https://github.com/haoqixu), [#7211](https://github.com/earendil-works/pi/pull/7211) by
+  [@christianbasch](https://github.com/christianbasch)).
+- Abort and persist session replacement or committed tree navigation during active responses, and report llama.cpp
+  streaming usage in session context accounting ([#7022](https://github.com/earendil-works/pi/pull/7022) by
+  [@tmustier](https://github.com/tmustier), [#7258](https://github.com/earendil-works/pi/pull/7258) by
+  [@SteveImmanuel](https://github.com/SteveImmanuel)).
+- Shorten inherited image fallback paths, clamp fallback labels to narrow terminals, and make absolute paths clickable
+  when terminal hyperlinks are available ([#7262](https://github.com/earendil-works/pi/pull/7262)).
+- Restore failed compaction input to the editor, scope failed compaction metadata correctly, and mark failed
+  pre-prompt recovery as terminal.
+- Disclose `gpt-apply-patch` failure reasons, serialize file mutations, and reuse the runtime key for automatic
+  session titles.
+- Continue newly created goals immediately, reset continuation caps after tool use or other observed progress, and
+  keep risky-model warnings scoped to `gpt-5.6-sol`.
 
 ### Removed
 

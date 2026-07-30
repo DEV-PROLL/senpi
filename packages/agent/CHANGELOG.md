@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Retry empty Kimi assistant responses once before surfacing a terminal empty-message failure.
+
 ### Removed
 
 ## [2026.7.30] - 2026-07-30

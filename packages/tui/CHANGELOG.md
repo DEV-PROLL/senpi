@@ -6,9 +6,15 @@
 
 ### Added
 
+- Add an alternate-screen renderer with application-owned scrolling, mouse selection, page navigation, and
+  renderer-compatible image handling.
+
 ### Changed
 
 ### Fixed
+
+- Shorten image fallback paths, clamp fallback labels to narrow terminals, and make absolute paths clickable
+  when terminal hyperlinks are available ([#7262](https://github.com/earendil-works/pi/pull/7262)).
 
 ### Removed
 

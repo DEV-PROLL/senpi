@@ -4,11 +4,41 @@
 
 ### Breaking Changes
 
+- Upgrade the exported TypeBox dependency to 1.3.7, removing deprecated APIs such as `Type.Base`,
+  `Type.Promise`, `Type.Iterator`, and `Value.Mutate`; consumers using removed TypeBox APIs must migrate
+  to supported replacements ([#7243](https://github.com/earendil-works/pi/pull/7243) by
+  [@petrroll](https://github.com/petrroll)).
+
 ### Added
+
+- Add per-request `fetch` injection for supported text and image provider transports.
+- Add Claude Opus 5 support for the GitHub Copilot provider, including adaptive thinking and a 1M context
+  window ([#7158](https://github.com/earendil-works/pi/pull/7158) by
+  [@jay-aye-see-kay](https://github.com/jay-aye-see-kay)).
+- Add the `"pending"` stop reason for partial streaming messages and expose raw provider stop reasons across
+  Google, Anthropic, Amazon Bedrock, Mistral, and OpenAI adapters ([#7151](https://github.com/earendil-works/pi/pull/7151)
+  by [@lucasmeijer](https://github.com/lucasmeijer), [#7272](https://github.com/earendil-works/pi/pull/7272)).
+- Add manual redirect URL and authorization-code fallback to OpenRouter OAuth login for headless
+  environments ([#7114](https://github.com/earendil-works/pi/pull/7114) by
+  [@rgarcia](https://github.com/rgarcia)).
 
 ### Changed
 
+- Refresh OAuth credentials when less than five minutes of validity remain, with caller overrides for minimum
+  remaining validity ([#7168](https://github.com/earendil-works/pi/pull/7168)).
+
 ### Fixed
+
+- Recover Kimi XTML tool-call channels leaked through thinking blocks and harden recovered marker diagnostics.
+- Preserve OpenAI-compatible function arguments when malformed deltas also include an empty `custom` payload
+  ([#7288](https://github.com/earendil-works/pi/pull/7288) by [@sunnyyoung](https://github.com/sunnyyoung)).
+- Prefer explicitly configured Amazon Bedrock profiles over ambient AWS credentials
+  ([#7176](https://github.com/earendil-works/pi/pull/7176) by
+  [@christianbasch](https://github.com/christianbasch)).
+- Send provider-specific thinking and output-limit controls for Qwen Token Plan and Z.AI-compatible providers
+  ([#7174](https://github.com/earendil-works/pi/pull/7174) by
+  [@HyeokjaeLee](https://github.com/HyeokjaeLee)).
+- Correct the OpenCode Go provider display name.
 
 ### Removed
 
