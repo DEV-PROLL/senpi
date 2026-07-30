@@ -398,6 +398,59 @@ describe("post-compaction queued input recovery", () => {
 		},
 	);
 
+	it("restores queued TUI input after real pre-prompt overflow compaction failure", async () => {
+		const marker = "[TUI queue restores after failed overflow compaction]";
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 10_000, maxTokens: 1_000 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
+		});
+		harnesses.push(harness);
+
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "overflowing prior context ".repeat(2_000) }],
+			timestamp: Date.now() - 1_000,
+		});
+		const overflowAssistant = createOverflowResponse(harness);
+		harness.sessionManager.appendMessage(overflowAssistant);
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+		const failCompactionProvider: FauxResponseFactory = () => {
+			throw new Error("forced compaction provider failure");
+		};
+		harness.setResponses([failCompactionProvider]);
+
+		const context = createTuiCompactionEventContext(harness);
+		const compactionEnds: Array<Extract<(typeof harness.events)[number], { type: "compaction_end" }>> = [];
+		harness.session.subscribe((event) => {
+			if (event.type === "compaction_start" && event.reason === "overflow") {
+				context.compactionQueuedMessages.push({ text: marker, mode: "steer" });
+			}
+			if (event.type === "compaction_end" && event.reason === "overflow") {
+				compactionEnds.push(event);
+				void getHandleEvent()(context, event);
+			}
+		});
+
+		await expect(harness.session.prompt("retry after overflow")).rejects.toThrow(
+			"Context remains above the compaction threshold because compaction did not complete",
+		);
+		await Promise.all(context.flushes);
+		await harness.session.waitForSettledSessionWork();
+
+		expect(compactionEnds).toHaveLength(1);
+		expect(compactionEnds[0]).toMatchObject({
+			reason: "overflow",
+			result: undefined,
+			aborted: false,
+			willRetry: false,
+		});
+		expect(compactionEnds[0]?.errorMessage).toMatch(/Pre-prompt compaction failed/);
+		expect(context.restoredMessages).toEqual([[marker]]);
+		expect(context.compactionQueuedMessages).toEqual([]);
+		expect(harness.session.getSteeringMessages()).toEqual([]);
+		expect(harness.faux.state.callCount).toBe(1);
+	});
+
 	it("routes queued TUI input to the native session queue after a retryable compaction_end", async () => {
 		const marker = "[TUI queue defers to retry]";
 		const harness = await createHarness({
