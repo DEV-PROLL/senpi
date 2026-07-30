@@ -127,6 +127,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 	registerSignalHandlers();
 
+
 	let detachInput = () => {};
 
 	async function shutdown(exitCode = 0, signal?: NodeJS.Signals): Promise<never> {
