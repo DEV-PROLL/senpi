@@ -2,6 +2,19 @@
 
 # Tool Call Middleware Changes
 
+## 2026-07-30 - Kimi XTML unnamed channel recovery hardening
+
+### What changed and why
+
+- `createXtmlRecoveryStreamParser()` now recognizes an empty channel name in malformed
+  `<|open|><|sep|>` / `<|close|><|sep|>` transitions, including markers split at every
+  internal stream boundary, instead of leaking them as visible text.
+- `recoverKimiXtmlThinking()` now strips `tools`, other valid named channels, and bare
+  XTML open/close/sep tokens while preserving the existing response/think state changes
+  and code-fenced protocol examples.
+- The deterministic Kimi mock-loop fixture includes the observed unnamed-close + tools
+  tail so real CLI QA fails if either client recovery layer regresses.
+
 ## 2026-07-29 - Kimi XTML leaked tool-call recovery in normal mode
 
 ### What changed and why

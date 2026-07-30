@@ -71,6 +71,26 @@ describe("createXtmlRecoveryStreamParser", () => {
 		expect(textOf(events)).toBe("final answer");
 	});
 
+	it("strips an unnamed close marker across every chunk split", () => {
+		// given
+		const marker = "<|close|><|sep|>";
+		const outputs: string[] = [];
+
+		// when
+		for (let split = 1; split < marker.length; split += 1) {
+			const parser = createXtmlRecoveryStreamParser([weatherTool]);
+			const events = [
+				...parser.feed(`before${marker.slice(0, split)}`),
+				...parser.feed(`${marker.slice(split)}after`),
+				...parser.finish(),
+			];
+			outputs.push(textOf(events));
+		}
+
+		// then
+		expect(outputs).toEqual(Array.from({ length: marker.length - 1 }, () => "beforeafter"));
+	});
+
 	it("reassembles markers split across chunks", () => {
 		// given
 		const parser = createXtmlRecoveryStreamParser([weatherTool]);
