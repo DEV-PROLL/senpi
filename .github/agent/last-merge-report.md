@@ -6,7 +6,7 @@ Generated: 2026-07-31T01:45:00Z
 
 - Merge result: clean, PR-ready after focused fixes and QA.
 - Current branch: `automation/upstream-v0.83.0-30594691517`
-- Current HEAD: `65132c9412379a20754d23cfa5c4b4cbcfe9032a`
+- Validated code HEAD before report-only commits: `65132c9412379a20754d23cfa5c4b4cbcfe9032a`
 - Upstream release tag: `v0.83.0`
 - Upstream tag commit: `845d6ff1f6643aba440341cce877ce1c43ebbc39`
 - Merged upstream main: `74caa2649f10ed71b4378ce69f5d9fbfd2466ca5`
@@ -30,6 +30,7 @@ New commits added for this integration:
 - `1c75c6bf3` - Merge OpenAI completions compatibility flags
 - `b74d7414c` - Update AI completions compatibility test fixtures
 - `65132c941` - Restore hook manifest discovery
+- Report-only commits record this file after QA.
 
 ## Conflict And Merge Decisions
 
