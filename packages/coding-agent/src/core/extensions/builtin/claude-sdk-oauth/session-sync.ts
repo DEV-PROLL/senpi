@@ -5,7 +5,7 @@ import type { Base64ImageSource, ContentBlockParam, Options } from "./sdk-bounda
 import type { ClaudeSdkOauthSessionEntry } from "./session-registry.ts";
 import { mapPiToolNameToSdk } from "./tools.ts";
 
-type SentMessage = Extract<Message, { role: "user" | "toolResult" }>;
+export type SentMessage = Extract<Message, { role: "user" | "toolResult" }>;
 
 export type SessionConfigFingerprint = {
 	systemPromptHash: string;
@@ -26,7 +26,16 @@ export type SessionSyncDecisionInput = {
 	tokenExpiring: boolean;
 };
 
+export type SessionAssistantProvenanceHooks = {
+	captureMessages(context: Context, messages: readonly SentMessage[]): void;
+	captureHashes(messages: readonly SentMessage[], hashes: readonly string[]): void;
+	matches(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[], branchPrefix: boolean): boolean;
+	record(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[]): void;
+	prime(entry: ClaudeSdkOauthSessionEntry, previous: ClaudeSdkOauthSessionEntry, from: number): void;
+};
+
 const sentHashesByEntry = new WeakMap<ClaudeSdkOauthSessionEntry, string[]>();
+let assistantProvenanceHooks: SessionAssistantProvenanceHooks | undefined;
 
 function stableValue(value: unknown, seen = new WeakSet<object>()): unknown {
 	if (typeof value === "function") return `[function:${value.name}:${value.toString()}]`;
@@ -49,14 +58,24 @@ function digest(value: unknown): string {
 		.digest("hex");
 }
 
+export function installAssistantProvenanceHooks(hooks: SessionAssistantProvenanceHooks): void {
+	assistantProvenanceHooks = hooks;
+}
+
+export function sessionSyncDigest(value: unknown): string {
+	return digest(value);
+}
+
 export function sentMessages(context: Context): SentMessage[] {
-	return context.messages.filter(
+	const messages = context.messages.filter(
 		(message): message is SentMessage => message.role === "user" || message.role === "toolResult",
 	);
+	assistantProvenanceHooks?.captureMessages(context, messages);
+	return messages;
 }
 
 export function sentMessageHashes(messages: readonly SentMessage[]): string[] {
-	return messages.map((message) =>
+	const hashes = messages.map((message) =>
 		digest(
 			message.role === "user"
 				? { role: message.role, content: message.content }
@@ -68,6 +87,8 @@ export function sentMessageHashes(messages: readonly SentMessage[]): string[] {
 					},
 		),
 	);
+	assistantProvenanceHooks?.captureHashes(messages, hashes);
+	return hashes;
 }
 
 function prefixDigest(hashes: readonly string[], count = hashes.length): string {
@@ -104,6 +125,12 @@ export function decideSessionSync(input: SessionSyncDecisionInput): SessionSyncD
 	if (entry.systemPromptHash !== input.fingerprint.systemPromptHash) {
 		return { kind: "cold-seed", reason: "system_prompt_changed" };
 	}
+	if (
+		assistantProvenanceHooks &&
+		!assistantProvenanceHooks.matches(entry, input.currentHashes, entry.branchInfo !== null)
+	) {
+		return { kind: "cold-seed", reason: "assistant_stream_diverged" };
+	}
 	const residentHashes = sentHashesByEntry.get(entry) ?? [];
 	if (entry.branchInfo) {
 		const strictPrefix =
@@ -130,6 +157,7 @@ export function decideSessionSync(input: SessionSyncDecisionInput): SessionSyncD
 
 export function recordSyncedStream(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[]): void {
 	const copy = [...hashes];
+	assistantProvenanceHooks?.record(entry, hashes);
 	sentHashesByEntry.set(entry, copy);
 	entry.sentCount = copy.length;
 	entry.syncedPrefixHash = prefixDigest(copy);
@@ -142,6 +170,7 @@ export function primeResumedEntry(
 	from: number,
 ): void {
 	const hashes = (sentHashesByEntry.get(previous) ?? []).slice(0, from);
+	assistantProvenanceHooks?.prime(entry, previous, from);
 	sentHashesByEntry.set(entry, hashes);
 	entry.sentCount = from;
 	entry.syncedPrefixHash = prefixDigest(hashes);
@@ -160,6 +189,11 @@ export function configFingerprint(
 		systemPromptHash: digest(options.systemPrompt ?? null),
 		toolsetHash: digest({
 			tools: options.tools ?? [],
+			reasoning: {
+				thinking: options.thinking,
+				effort: options.effort,
+				maxThinkingTokens: options.maxThinkingTokens,
+			},
 			contextTools: (context.tools ?? []).map((tool) => ({
 				name: tool.name,
 				description: tool.description,
