@@ -54,7 +54,7 @@ function bundleSinks(pi: ExtensionAPI, state: TerminalExtensionState): TerminalE
 		onMonitorEvent: (event) => state.monitorNotifier?.notifyEvent(event),
 		onMonitorState: (snapshot) => {
 			const ctx = state.ctx;
-			const status = formatMonitorStatus(snapshot);
+			const status = formatMonitorStatus(snapshot, Date.now());
 			ctx?.ui.setStatus(
 				MONITOR_STATUS_KEY,
 				status === undefined || ctx.mode !== "tui"
