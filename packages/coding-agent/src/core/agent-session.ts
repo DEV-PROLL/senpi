@@ -566,6 +566,7 @@ export class AgentSession {
 	private _isAgentRunActive = false;
 	private _toolExecutionDepth = 0;
 	private _promptStartPending = false;
+	private _nextInputId = 0;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
 
@@ -2349,6 +2350,13 @@ export class AgentSession {
 		let messages: AgentMessage[] | undefined;
 		let titlePrompt: string | undefined;
 		let consumedNextTurnMessages: CustomMessage[] | undefined;
+		let inputId: string | undefined;
+		const emitInputDisposition = async (
+			disposition: "handled" | "queued" | "started" | "rejected",
+		): Promise<void> => {
+			if (inputId === undefined) return;
+			await this._extensionRunner.emit({ type: "input_disposition", inputId, disposition });
+		};
 
 		try {
 			// Handle extension commands first (execute immediately, even during streaming)
@@ -2368,14 +2376,17 @@ export class AgentSession {
 			let currentText = text;
 			let currentImages = options?.images;
 			if (this._extensionRunner.hasHandlers("input")) {
+				inputId = `${this.sessionManager.getSessionId()}:${++this._nextInputId}`;
 				const inputResult = await this._extensionRunner.emitInput(
 					currentText,
 					currentImages,
 					options?.source ?? "interactive",
 					this.isStreaming ? options?.streamingBehavior : undefined,
+					inputId,
 				);
 				throwIfCancelled();
 				if (inputResult.action === "handled") {
+					await emitInputDisposition("handled");
 					promptDisposition?.("handled");
 					preflightResult?.(true);
 					return;
@@ -2409,6 +2420,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				await emitInputDisposition("queued");
 				promptDisposition?.("queued");
 				preflightResult?.(true);
 				return;
@@ -2426,6 +2438,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				await emitInputDisposition("queued");
 				promptDisposition?.("queued");
 				preflightResult?.(true);
 				return;
@@ -2453,6 +2466,7 @@ export class AgentSession {
 					} else {
 						await this._queueSteer(expandedText, currentImages);
 					}
+					await emitInputDisposition("queued");
 					promptDisposition?.("queued");
 					preflightResult?.(true);
 					return;
@@ -2475,6 +2489,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				await emitInputDisposition("queued");
 				promptDisposition?.("queued");
 				preflightResult?.(true);
 				return;
@@ -2564,7 +2579,10 @@ export class AgentSession {
 			// next-turn, and before_agent_start additions are also provider-visible,
 			// so make one final admission decision against the complete request.
 			await this._enforceFinalProviderAdmission(messages);
+			throwIfCancelled();
+			await emitInputDisposition("started");
 		} catch (error) {
+			await emitInputDisposition("rejected");
 			if (consumedNextTurnMessages && consumedNextTurnMessages.length > 0) {
 				this._pendingNextTurnMessages = [...consumedNextTurnMessages, ...this._pendingNextTurnMessages];
 			}
@@ -2578,7 +2596,6 @@ export class AgentSession {
 			return;
 		}
 
-		throwIfCancelled();
 		promptDisposition?.("started");
 		preflightResult?.(true);
 		if (options?.thinkingLevel !== undefined) {
