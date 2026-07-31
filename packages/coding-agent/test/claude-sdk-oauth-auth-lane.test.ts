@@ -97,6 +97,8 @@ function managedEnvironment(): NodeJS.ProcessEnv {
 		CLAUDE_CODE_OAUTH_TOKEN: "parent-oauth-token",
 		CLAUDE_CODE_USE_BEDROCK: "1",
 		CLAUDE_CODE_USE_VERTEX: "1",
+		SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_MODE: "untrusted",
+		SENPI_SEED: "parent-seed",
 	};
 }
 
@@ -146,7 +148,7 @@ describe("Claude SDK OAuth auth lanes", () => {
 		expect(captured[0]?.env).not.toHaveProperty("CLAUDE_CODE_USE_VERTEX");
 	});
 
-	it("leaves the subprocess environment entirely untouched in ambient mode", async () => {
+	it("preserves the parent environment minus SENPI_* variables in ambient mode", async () => {
 		const captured: Options[] = [];
 		const { CLAUDE_CODE_OAUTH_TOKEN: _oauthToken, ...ambientEnvironment } = managedEnvironment();
 		configureAuth(new InMemoryCredentialStore(), ambientEnvironment);
@@ -155,7 +157,11 @@ describe("Claude SDK OAuth auth lanes", () => {
 		await streamClaudeSdkOauth(model, context).result();
 
 		expect(captured).toHaveLength(1);
-		expect(captured[0]?.env).toBeUndefined();
+		expect(captured[0]?.env).toBeDefined();
+		expect(captured[0]?.env?.PATH).toBe("/usr/bin");
+		expect(captured[0]?.env?.ANTHROPIC_API_KEY).toBe("parent-api-key");
+		expect(captured[0]?.env).not.toHaveProperty("SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_MODE");
+		expect(captured[0]?.env).not.toHaveProperty("SENPI_SEED");
 	});
 
 	it("refreshes an expired slot before spawning the SDK query", async () => {
@@ -209,6 +215,28 @@ describe("Claude SDK OAuth auth lanes", () => {
 			},
 		});
 	});
+
+	for (const lane of ["oauth-slots", "config-dir", "ambient"] as const) {
+		it(`scrubs every SENPI_* variable on the ${lane} auth lane while preserving non-SENPI inheritance`, async () => {
+			const store =
+				lane === "ambient" ? new InMemoryCredentialStore() : await storeWith(slot("default", "slot-access"));
+			const captured: Options[] = [];
+			const { CLAUDE_CODE_OAUTH_TOKEN: _oauthToken, ...ambientEnvironment } = managedEnvironment();
+			configureAuth(store, ambientEnvironment, undefined, lane === "ambient" ? undefined : lane);
+			overrideSdkBoundary({ query: queryCapturing(captured) });
+
+			await streamClaudeSdkOauth(model, context).result();
+
+			expect(captured).toHaveLength(1);
+			const env = captured[0]?.env ?? {};
+			for (const key of Object.keys(env)) {
+				expect(key.startsWith("SENPI_")).toBe(false);
+			}
+			expect(env).not.toHaveProperty("SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_MODE");
+			expect(env).not.toHaveProperty("SENPI_SEED");
+			expect(env.PATH).toBe("/usr/bin");
+		});
+	}
 
 	it("fails over from an invalid stale slot before the first delta without surfacing an OAuth error", async () => {
 		const store = await storeWith(

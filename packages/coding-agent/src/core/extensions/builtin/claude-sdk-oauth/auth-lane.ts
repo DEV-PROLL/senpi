@@ -24,7 +24,7 @@ import type { ClaudeSdkOauthProviderSettings, ClaudeSdkOauthTokenInjection } fro
 
 export { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
 
-const EXPIRING_WITHIN_MS = 5 * 60_000;
+export const EXPIRING_WITHIN_MS = 5 * 60_000;
 const CLI_OAUTH_SCOPES = [
 	"org:create_api_key",
 	"user:profile",
@@ -98,6 +98,7 @@ function managedEnvironment(parent: NodeJS.ProcessEnv): Record<string, string | 
 	} = parent;
 	for (const name of Object.keys(environment)) {
 		if (/^CLAUDE_CODE_OAUTH_TOKEN_\d+$/.test(name)) delete environment[name];
+		if (name.startsWith("SENPI_")) delete environment[name];
 	}
 	return environment;
 }
@@ -213,7 +214,14 @@ async function* messagesFrom(query: ReturnType<SdkQuery>): AsyncGenerator<SDKMes
 export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncGenerator<SDKMessage> {
 	const pool = await managedPool(input.providerSettings);
 	if (!pool) {
-		const query = input.query({ prompt: input.prompt, options: input.buildOptions("ambient") });
+		const options = input.buildOptions("ambient");
+		const parentEnvironment = activeBoundary.env();
+		const ambientEnvironment: Record<string, string | undefined> = { ...parentEnvironment };
+		for (const name of Object.keys(ambientEnvironment)) {
+			if (name.startsWith("SENPI_")) delete ambientEnvironment[name];
+		}
+		options.env = ambientEnvironment;
+		const query = input.query({ prompt: input.prompt, options });
 		input.onQuery?.(query);
 		yield* messagesFrom(query);
 		return;
