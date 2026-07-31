@@ -110,12 +110,12 @@ export class MonitorAwareGoalContinuation {
 		this.#lastAgentEndMessages = options.messages;
 		this.#lastTurnUsage = collectAssistantUsage([...options.messages]);
 		this.#resetLengthRecoveryAfterCleanStop(options.goal, options.messages);
-		this.#recordAssistantOutput(options.messages);
+		const turnUsedTools = continuationTurnUsedTools(options.messages);
+		this.#recordAssistantOutput(options.messages, turnUsedTools);
 		if (options.goal?.status !== "active") {
 			this.#cancelTimer();
 			return options.goal;
 		}
-		const turnUsedTools = continuationTurnUsedTools(options.messages);
 		this.#recordToollessContinuationTurn(options.goal, turnUsedTools);
 		const immediateInput = this.#buildVerdictInput(options.ctx, options.goal, "immediate", options.messages);
 		const goal =
@@ -327,7 +327,12 @@ export class MonitorAwareGoalContinuation {
 		return content;
 	}
 
-	#recordAssistantOutput(messages: readonly AgentMessage[]): void {
+	/** A tool-using turn is forward progress, so it clears the repetition window instead of extending it. */
+	#recordAssistantOutput(messages: readonly AgentMessage[], turnUsedTools: boolean): void {
+		if (turnUsedTools) {
+			this.#recentNormalizedOutputHashes = [];
+			return;
+		}
 		const text = lastAssistantText(messages);
 		if (normalizeAssistantText(text).length === 0) return;
 		this.#recentNormalizedOutputHashes = [...this.#recentNormalizedOutputHashes, hashAssistantText(text)].slice(-3);
