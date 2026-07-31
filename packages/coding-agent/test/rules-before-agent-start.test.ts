@@ -56,6 +56,7 @@ describe("rules builtin - before_agent_start delivery", () => {
 		setThinkingLevel: () => {},
 		setSessionModel: async () => false,
 		setSessionThinkingLevel: () => {},
+		setSessionFastMode: () => {},
 	};
 
 	const extensionContextActions: ExtensionContextActions = {
