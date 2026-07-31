@@ -2,19 +2,34 @@ import { getAgentDir } from "../../../../config.ts";
 import { type Settings, SettingsManager } from "../../../settings-manager.ts";
 import type { SettingSource } from "./sdk-boundary.ts";
 
+export type ClaudeSdkOauthSystemPromptMode = "preset-append" | "full" | "override";
+export type ClaudeSdkOauthResumeMode = "auto" | "off";
 export type ClaudeSdkOauthTokenInjection = "oauth-slots" | "config-dir" | "ambient";
 
 export interface ClaudeSdkOauthProviderSettings {
 	readonly appendSystemPrompt?: boolean;
+	readonly systemPromptMode?: ClaudeSdkOauthSystemPromptMode;
+	readonly systemPromptFile?: string;
+	readonly resumeMode?: ClaudeSdkOauthResumeMode;
 	readonly settingSources?: SettingSource[];
 	readonly strictMcpConfig?: boolean;
 	readonly pinnedAccount?: string;
 	readonly tokenInjection?: ClaudeSdkOauthTokenInjection;
 }
 
+export type ResolvedSystemPromptMode = {
+	mode: ClaudeSdkOauthSystemPromptMode;
+	source: string;
+	conflict: boolean;
+};
+
 type SettingsWithClaudeSdkOauthProvider = Settings & {
 	claudeSdkOauthProvider?: unknown;
 };
+
+type Environment = Readonly<Record<string, string | undefined>>;
+
+const systemPromptModeSources = new WeakMap<ClaudeSdkOauthProviderSettings, "env">();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -28,30 +43,100 @@ function parseSettingSources(value: unknown): SettingSource[] | undefined {
 	return [...value];
 }
 
+function parseEnvironmentSettingSources(value: string | undefined): SettingSource[] | undefined {
+	if (value === undefined) return undefined;
+	if (value === "") return [];
+	return parseSettingSources(value.split(",").map((source) => source.trim()));
+}
+
+function parseSystemPromptMode(value: unknown): ClaudeSdkOauthSystemPromptMode | undefined {
+	return value === "preset-append" || value === "full" || value === "override" ? value : undefined;
+}
+
+function parseResumeMode(value: unknown): ClaudeSdkOauthResumeMode | undefined {
+	return value === "auto" || value === "off" ? value : undefined;
+}
+
 function parseTokenInjection(value: unknown): ClaudeSdkOauthTokenInjection | undefined {
 	return value === "oauth-slots" || value === "config-dir" || value === "ambient" ? value : undefined;
 }
 
+function parseNonEmptyString(value: unknown): string | undefined {
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function parseProviderSettings(value: unknown): ClaudeSdkOauthProviderSettings {
 	if (!isRecord(value)) return {};
+	const appendSystemPrompt = typeof value.appendSystemPrompt === "boolean" ? value.appendSystemPrompt : undefined;
+	const systemPromptMode = parseSystemPromptMode(value.systemPromptMode);
+	const systemPromptFile = parseNonEmptyString(value.systemPromptFile);
+	const resumeMode = parseResumeMode(value.resumeMode);
+	const settingSources = parseSettingSources(value.settingSources);
+	const strictMcpConfig = typeof value.strictMcpConfig === "boolean" ? value.strictMcpConfig : undefined;
+	const pinnedAccount = parseNonEmptyString(value.pinnedAccount);
+	const tokenInjection = parseTokenInjection(value.tokenInjection);
 	return {
-		appendSystemPrompt: typeof value.appendSystemPrompt === "boolean" ? value.appendSystemPrompt : undefined,
-		settingSources: parseSettingSources(value.settingSources),
-		strictMcpConfig: typeof value.strictMcpConfig === "boolean" ? value.strictMcpConfig : undefined,
-		pinnedAccount:
-			typeof value.pinnedAccount === "string" && value.pinnedAccount.length > 0 ? value.pinnedAccount : undefined,
-		tokenInjection: parseTokenInjection(value.tokenInjection),
+		...(appendSystemPrompt !== undefined ? { appendSystemPrompt } : {}),
+		...(systemPromptMode !== undefined ? { systemPromptMode } : {}),
+		...(systemPromptFile !== undefined ? { systemPromptFile } : {}),
+		...(resumeMode !== undefined ? { resumeMode } : {}),
+		...(settingSources !== undefined ? { settingSources } : {}),
+		...(strictMcpConfig !== undefined ? { strictMcpConfig } : {}),
+		...(pinnedAccount !== undefined ? { pinnedAccount } : {}),
+		...(tokenInjection !== undefined ? { tokenInjection } : {}),
 	};
 }
 
-/** Load the provider block with project values taking precedence over global values. */
-export function loadClaudeSdkOauthProviderSettings(settingsManager: SettingsManager): ClaudeSdkOauthProviderSettings {
+function parseEnvironmentSettings(environment: Environment): ClaudeSdkOauthProviderSettings {
+	const systemPromptMode = parseSystemPromptMode(environment.SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_MODE);
+	const systemPromptFile = parseNonEmptyString(environment.SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_FILE);
+	const resumeMode = parseResumeMode(environment.SENPI_CLAUDE_SDK_OAUTH_RESUME);
+	const tokenInjection = parseTokenInjection(environment.SENPI_CLAUDE_SDK_OAUTH_TOKEN_INJECTION);
+	const settingSources = parseEnvironmentSettingSources(environment.SENPI_CLAUDE_SDK_OAUTH_SETTING_SOURCES);
+	const pinnedAccount = parseNonEmptyString(environment.SENPI_CLAUDE_SDK_OAUTH_PINNED_ACCOUNT);
+	return {
+		...(systemPromptMode !== undefined ? { systemPromptMode } : {}),
+		...(systemPromptFile !== undefined ? { systemPromptFile } : {}),
+		...(resumeMode !== undefined ? { resumeMode } : {}),
+		...(tokenInjection !== undefined ? { tokenInjection } : {}),
+		...(settingSources !== undefined ? { settingSources } : {}),
+		...(pinnedAccount !== undefined ? { pinnedAccount } : {}),
+	};
+}
+
+export function resolveSystemPromptMode(settings: ClaudeSdkOauthProviderSettings): ResolvedSystemPromptMode {
+	if (settings.systemPromptMode !== undefined) {
+		return {
+			mode: settings.systemPromptMode,
+			source: systemPromptModeSources.get(settings) ?? "setting",
+			conflict: settings.appendSystemPrompt !== undefined,
+		};
+	}
+	if (settings.appendSystemPrompt !== undefined) {
+		return {
+			mode: settings.appendSystemPrompt ? "full" : "preset-append",
+			source: "legacy",
+			conflict: false,
+		};
+	}
+	return { mode: "full", source: "default", conflict: false };
+}
+
+/** Load the provider block with env values taking precedence over project and global values. */
+export function loadClaudeSdkOauthProviderSettings(
+	settingsManager: SettingsManager,
+	environment: Environment = process.env,
+): ClaudeSdkOauthProviderSettings {
 	const global = settingsManager.getGlobalSettings() as SettingsWithClaudeSdkOauthProvider;
 	const project = settingsManager.getProjectSettings() as SettingsWithClaudeSdkOauthProvider;
-	return {
+	const environmentSettings = parseEnvironmentSettings(environment);
+	const settings = {
 		...parseProviderSettings(global.claudeSdkOauthProvider),
 		...parseProviderSettings(project.claudeSdkOauthProvider),
+		...environmentSettings,
 	};
+	if (environmentSettings.systemPromptMode !== undefined) systemPromptModeSources.set(settings, "env");
+	return settings;
 }
 
 /** Load settings from Senpi's configured global and project settings.json paths. */

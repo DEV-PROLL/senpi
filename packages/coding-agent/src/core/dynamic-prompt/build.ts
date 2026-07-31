@@ -112,6 +112,7 @@ export function buildDynamicSystemPrompt(options: BuildDynamicSystemPromptOption
 		}),
 	);
 
+	// The claude-sdk-oauth lane splits the composed prompt at this exact line for its prompt-cache boundary.
 	sections.push("", `Current date: ${date}`, `Current working directory: ${promptCwd}`);
 
 	return sections.join("\n");

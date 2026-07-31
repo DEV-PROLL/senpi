@@ -12,9 +12,12 @@ import {
 import type { EffortLevel, Options, SettingSource, ThinkingConfig } from "./sdk-boundary.ts";
 import {
 	type ClaudeSdkOauthProviderSettings,
+	type ClaudeSdkOauthSystemPromptMode,
 	type ClaudeSdkOauthTokenInjection,
 	loadClaudeSdkOauthProviderSettingsFromDisk,
+	resolveSystemPromptMode,
 } from "./settings.ts";
+import { loadOverrideSystemPrompt, splitSystemPromptAtDynamicTail } from "./system-prompt.ts";
 import { BUILTIN_SDK_TOOLS, canUseTool, HOST_TOOL_DENIAL_HOOKS } from "./tools.ts";
 
 export type ClaudeSdkOauthAuthLane = ClaudeSdkOauthTokenInjection;
@@ -202,25 +205,34 @@ function isProjectRulesEnvelope(region: string): boolean {
 
 function resolveSettingSources(
 	providerSettings: ClaudeSdkOauthProviderSettings,
-	appendSystemPrompt: boolean,
+	mode: ClaudeSdkOauthSystemPromptMode,
 	authLane: ClaudeSdkOauthAuthLane,
 ): SettingSource[] {
-	if (authLane !== "ambient") return [];
-	return providerSettings.settingSources ?? (appendSystemPrompt ? [] : ["user", "project"]);
+	if (providerSettings.settingSources !== undefined) return [...providerSettings.settingSources];
+	if (mode !== "preset-append" || authLane !== "ambient") return [];
+	return ["user", "project"];
 }
 
 export function buildClaudeSdkOauthQueryOptions(input: ClaudeSdkOauthQueryOptionsInput): Options {
 	const cwd = input.cwd ?? process.cwd();
 	const providerSettings = input.providerSettings ?? loadClaudeSdkOauthProviderSettingsFromDisk(cwd);
 	const appendSystemPrompt = providerSettings.appendSystemPrompt !== false;
+	const mode = resolveSystemPromptMode(providerSettings).mode;
 	const authLane = input.authLane ?? providerSettings.tokenInjection ?? "oauth-slots";
-	const append = appendSystemPrompt
-		? [
-				extractAgentsAppend(cwd),
-				extractSkillsAppend(input.context.systemPrompt, cwd),
-				extractProjectRulesAppend(input.context.systemPrompt),
-			].filter((part): part is string => part !== undefined)
-		: [];
+	const append =
+		mode === "preset-append"
+			? [
+					extractAgentsAppend(cwd),
+					extractSkillsAppend(input.context.systemPrompt, cwd),
+					extractProjectRulesAppend(input.context.systemPrompt),
+				].filter((part): part is string => part !== undefined)
+			: [];
+	const systemPrompt =
+		mode === "preset-append"
+			? { type: "preset" as const, preset: "claude_code" as const, append: append.join("\n\n") || undefined }
+			: mode === "override"
+				? loadOverrideSystemPrompt(providerSettings.systemPromptFile)
+				: splitSystemPromptAtDynamicTail(input.context.systemPrompt, mode);
 	const strictMcpConfig = providerSettings.strictMcpConfig ?? !appendSystemPrompt;
 	const queryOptions: Options = {
 		cwd,
@@ -230,8 +242,8 @@ export function buildClaudeSdkOauthQueryOptions(input: ClaudeSdkOauthQueryOption
 		includePartialMessages: true,
 		canUseTool,
 		hooks: HOST_TOOL_DENIAL_HOOKS,
-		systemPrompt: { type: "preset", preset: "claude_code", append: append.join("\n\n") || undefined },
-		settingSources: resolveSettingSources(providerSettings, appendSystemPrompt, authLane),
+		systemPrompt,
+		settingSources: resolveSettingSources(providerSettings, mode, authLane),
 	};
 	if (input.pathToClaudeCodeExecutable) queryOptions.pathToClaudeCodeExecutable = input.pathToClaudeCodeExecutable;
 	if (strictMcpConfig) queryOptions.extraArgs = { "strict-mcp-config": null };
