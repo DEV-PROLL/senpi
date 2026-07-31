@@ -48,25 +48,24 @@ export class TestEventBus {
 
 export type AppendedGoalEntry = { readonly customType: string; readonly data: unknown };
 
-export interface GoalHarness {
-	readonly tools: Map<string, AnyTool>;
-	readonly handlers: Map<string, GoalHandler[]>;
-	readonly sent: SentGoalMessage[];
-	readonly events: TestEventBus;
-	readonly entries: AppendedGoalEntry[];
-}
+const sentCountWaiters = Symbol("sentCountWaiters");
 
 type SentCountWaiter = {
 	readonly expectedCount: number;
 	readonly complete: (error?: Error) => void;
 };
 
-const sentCountWaiters = new WeakMap<GoalHarness, Set<SentCountWaiter>>();
+export interface SentMessageHarness {
+	readonly sent: SentGoalMessage[];
+	readonly sendMessage: (message: SentGoalMessage["message"], options: unknown) => void;
+	readonly [sentCountWaiters]: Set<SentCountWaiter>;
+}
 
-function getSentCountWaiters(harness: GoalHarness): Set<SentCountWaiter> {
-	const waiters = sentCountWaiters.get(harness);
-	if (waiters === undefined) throw new Error("Cannot observe sent messages for an unknown goal harness");
-	return waiters;
+export interface GoalHarness extends SentMessageHarness {
+	readonly tools: Map<string, AnyTool>;
+	readonly handlers: Map<string, GoalHandler[]>;
+	readonly events: TestEventBus;
+	readonly entries: AppendedGoalEntry[];
 }
 
 export interface GoalContextState {
@@ -74,11 +73,22 @@ export interface GoalContextState {
 	model?: Model<Api>;
 }
 
+export function createSentMessageHarness(): SentMessageHarness {
+	const sent: SentGoalMessage[] = [];
+	const waiters = new Set<SentCountWaiter>();
+	const sendMessage = (message: SentGoalMessage["message"], options: unknown): void => {
+		sent.push({ message, options });
+		for (const waiter of waiters) {
+			if (sent.length >= waiter.expectedCount) waiter.complete();
+		}
+	};
+	return { sent, sendMessage, [sentCountWaiters]: waiters };
+}
+
 export function createGoalHarness(): GoalHarness {
 	const tools = new Map<string, AnyTool>();
 	const handlers = new Map<string, GoalHandler[]>();
-	const sent: SentGoalMessage[] = [];
-	const waiters = new Set<SentCountWaiter>();
+	const messages = createSentMessageHarness();
 	const events = new TestEventBus();
 	const entries: AppendedGoalEntry[] = [];
 	const pi = {
@@ -91,18 +101,11 @@ export function createGoalHarness(): GoalHarness {
 			registered.push(handler);
 			handlers.set(event, registered);
 		},
-		sendMessage: (message: SentGoalMessage["message"], options: unknown) => {
-			sent.push({ message, options });
-			for (const waiter of waiters) {
-				if (sent.length >= waiter.expectedCount) waiter.complete();
-			}
-		},
+		sendMessage: messages.sendMessage,
 		events,
 	} as unknown as ExtensionAPI;
 	goalExtension(pi);
-	const harness = { tools, handlers, sent, events, entries };
-	sentCountWaiters.set(harness, waiters);
-	return harness;
+	return { tools, handlers, events, entries, ...messages };
 }
 
 const tempDirs: string[] = [];
@@ -139,12 +142,12 @@ export async function cleanupGoalMonitorTempDirs(): Promise<void> {
 }
 
 export function waitForSentCount(
-	harness: GoalHarness,
+	harness: SentMessageHarness,
 	expectedCount: number,
 	options: { readonly timeoutMs?: number } = {},
 ): Promise<void> {
 	if (harness.sent.length >= expectedCount) return Promise.resolve();
-	const waiters = getSentCountWaiters(harness);
+	const waiters = harness[sentCountWaiters];
 
 	return new Promise((resolve, reject) => {
 		let completed = false;
@@ -161,6 +164,36 @@ export function waitForSentCount(
 			completed = true;
 			if (timeout !== undefined) clearRealTimeout(timeout);
 			waiters.delete(waiter);
+			if (error === undefined) resolve();
+			else reject(error);
+		}
+	});
+}
+
+export function waitForEventCount(
+	events: TestEventBus,
+	channel: string,
+	expectedCount: number,
+	options: { readonly timeoutMs?: number } = {},
+): Promise<void> {
+	const emittedCount = () => events.emitted.filter((event) => event.channel === channel).length;
+	if (emittedCount() >= expectedCount) return Promise.resolve();
+
+	return new Promise((resolve, reject) => {
+		let timeout: ReturnType<typeof setRealTimeout> | undefined;
+		const unsubscribe = events.on(channel, () => {
+			if (emittedCount() >= expectedCount) complete();
+		});
+		timeout = setRealTimeout(
+			() => complete(new Error(`Timed out waiting for ${expectedCount} ${channel} event(s)`)),
+			options.timeoutMs ?? 5_000,
+		);
+
+		function complete(error: Error | undefined = undefined): void {
+			if (timeout === undefined) return;
+			clearRealTimeout(timeout);
+			timeout = undefined;
+			unsubscribe();
 			if (error === undefined) resolve();
 			else reject(error);
 		}
