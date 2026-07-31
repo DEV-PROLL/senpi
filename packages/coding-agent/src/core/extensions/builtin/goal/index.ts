@@ -45,9 +45,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	const directInputLifecycle = new GoalDirectInputLifecycle({
 		monitor: monitorContinuation,
 		goalStoreRef,
-		isAgentTurnInProgress: () => agentTurnInProgress,
-		accountCurrentAgentTurn: (ctx) => accountCurrentAgentTurn(ctx, "active"),
-		clearAgentGoalAccounting,
 		beginAgentGoalAccounting,
 		refreshGoalUi: refreshGoalUiBestEffort,
 	});
@@ -187,7 +184,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			);
 			if (ctx.hasUI) ctx.ui.notify(`Goal ${goalStatusLabel(goal.status)}\n${formatGoalForTool(goal)}`, "warning");
 		}
-		goal = await directInputLifecycle.applyPendingPauseAfterAgentEnd(ctx, goal);
 		if (goal?.status === "active") {
 			beginAgentGoalAccounting(goal);
 		} else {

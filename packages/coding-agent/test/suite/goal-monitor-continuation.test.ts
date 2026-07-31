@@ -2,7 +2,6 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GOAL_USER_GRACE_DELAY_MS } from "../../src/core/extensions/builtin/goal/continuation.ts";
 import { admitAndQueueGoalContinuation } from "../../src/core/extensions/builtin/goal/lifecycle-helpers.ts";
 import {
 	GOAL_MONITOR_CONTINUATION_DELAY_MS,
@@ -119,7 +118,7 @@ describe("goal continuation while a monitor is active", () => {
 		await cleanupGoalMonitorTempDirs();
 	});
 
-	it("reactivates only mechanical blocks on accepted non-steer input", async () => {
+	it("reactivates only mechanical blocks on accepted direct input, including steering", async () => {
 		const notices: string[] = [];
 		const { tools, handlers } = createGoalHarness();
 		const ctx = await makeGoalContext(notices, "thread-mechanical-recovery");
@@ -136,6 +135,27 @@ describe("goal continuation while a monitor is active", () => {
 			handlers,
 			"input_disposition",
 			{ type: "input_disposition", inputId: "recover", disposition: "started" },
+			ctx,
+		);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active" });
+
+		await updateGoal(goalStoreRef(ctx), { status: "blocked", reason: "continuation cap reached" }, "model");
+		await runGoalHandlers(
+			handlers,
+			"input",
+			{
+				type: "input",
+				inputId: "steered-recover",
+				text: "continue with this",
+				source: "interactive",
+				streamingBehavior: "steer",
+			},
+			ctx,
+		);
+		await runGoalHandlers(
+			handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "steered-recover", disposition: "queued" },
 			ctx,
 		);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active" });
@@ -159,6 +179,67 @@ describe("goal continuation while a monitor is active", () => {
 		});
 	});
 
+	it.each(["handled", "rejected"] as const)("keeps a mechanical block inert when input is %s", async (disposition) => {
+		const notices: string[] = [];
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, `thread-mechanical-${disposition}`);
+		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
+		await updateGoal(goalStoreRef(ctx), { status: "blocked", reason: "continuation cap reached" }, "model");
+
+		await runGoalHandlers(
+			handlers,
+			"input",
+			{ type: "input", inputId: disposition, text: "continue", source: "interactive" },
+			ctx,
+		);
+		await runGoalHandlers(
+			handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: disposition, disposition },
+			ctx,
+		);
+
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "continuation cap reached",
+		});
+	});
+
+	it("does not migrate an accepted input candidate to a replacement Goal", async () => {
+		const notices: string[] = [];
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-input-goal-replacement");
+		await tools.get("create_goal")?.execute("create", { objective: "Original goal" }, undefined, undefined, ctx);
+		await runGoalHandlers(
+			handlers,
+			"input",
+			{ type: "input", inputId: "replacement", text: "continue", source: "interactive" },
+			ctx,
+		);
+		const replacement = {
+			...activeGoal("replacement-goal"),
+			threadId: ctx.sessionManager.getSessionId(),
+			status: "blocked" as const,
+			blockedReason: "continuation cap reached",
+			blockedAt: 1,
+			consecutiveContinuations: 5,
+		};
+		await writeGoal(goalStoreRef(ctx), replacement);
+
+		await runGoalHandlers(
+			handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "replacement", disposition: "started" },
+			ctx,
+		);
+
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
+			id: replacement.id,
+			status: "blocked",
+			consecutiveContinuations: 5,
+		});
+	});
+
 	it("leaves stale goals active when accepted input steers the current execution", async () => {
 		const notices: string[] = [];
 		const { tools, handlers } = createGoalHarness();
@@ -178,10 +259,10 @@ describe("goal continuation while a monitor is active", () => {
 			{ type: "input_disposition", inputId: "steer", disposition: "queued" },
 			ctx,
 		);
-		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 1 });
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 0 });
 	});
 
-	it("defers an accepted follow-up pause until the in-flight agent_end is accounted", async () => {
+	it("leaves an active Goal active after an accepted follow-up while accounting the in-flight turn", async () => {
 		const notices: string[] = [];
 		const { tools, handlers } = createGoalHarness();
 		const ctx = await makeGoalContext(notices, "thread-follow-up-pause");
@@ -218,7 +299,7 @@ describe("goal continuation while a monitor is active", () => {
 			ctx,
 		);
 		const after = await readGoal(goalStoreRef(ctx));
-		expect(after?.status).toBe("paused");
+		expect(after?.status).toBe("active");
 		expect((after?.tokensUsed ?? 0) - before.tokensUsed).toBe(150);
 	});
 
@@ -347,113 +428,20 @@ describe("goal continuation while a monitor is active", () => {
 		expect(notices).toHaveLength(0);
 	});
 
-	it("counts user grace delivery toward the continuation cap", async () => {
+	it("leaves an accepted user turn active but idle without arming a continuation timer", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
 		const { tools, handlers, sent } = createGoalHarness();
-		const ctx = await makeGoalContext(notices, "thread-user-grace-counted");
+		const ctx = await makeGoalContext(notices, "thread-user-turn-idle");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
 		await runUserInitiatedTurn(handlers, ctx);
-		expect(sent).toHaveLength(0);
-		const goal = await readGoal(goalStoreRef(ctx));
-		if (goal === null) throw new Error("Expected persisted goal");
-		await writeGoal(goalStoreRef(ctx), { ...goal, consecutiveContinuations: 7 });
-		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS - 1);
-		expect(sent).toHaveLength(0);
-		const graceDeliveryRecorded = waitForGoalContinuationCount(ctx, 8);
-		await vi.advanceTimersByTimeAsync(1);
-		await graceDeliveryRecorded;
-		expect(sent).toHaveLength(1);
-		expect(sent[0]?.message.customType).toBe("goal-continuation");
-		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 8 });
-	});
-
-	it("continues after user grace even when an active monitor settles", async () => {
-		vi.useFakeTimers();
-		const notices: string[] = [];
-		const { tools, handlers, sent, events } = createGoalHarness();
-		const ctx = await makeGoalContext(notices, "thread-user-grace-monitor-settles");
-		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
-		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
-		events.emit("terminal_monitor_state", { activeCount: 1 });
-		await events.flush();
-
-		await runUserInitiatedTurn(handlers, ctx);
-		events.emit("terminal_monitor_state", { activeCount: 0 });
-		await events.flush();
-		const graceDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
-		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
-		await graceDeliveryRecorded;
-
-		expect(sent).toHaveLength(1);
-		expect(sent[0]?.message.customType).toBe("goal-continuation");
-	});
-
-	it("cancels a pending user grace continuation when another user prompt arrives", async () => {
-		vi.useFakeTimers();
-		const notices: string[] = [];
-		const { tools, handlers, sent } = createGoalHarness();
-		const ctx = await makeGoalContext(notices, "thread-user-grace-prompt-cancel");
-		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
-		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
-
-		await runUserInitiatedTurn(handlers, ctx);
-		await vi.advanceTimersByTimeAsync(30_000);
-		await runGoalHandlers(
-			handlers,
-			"input",
-			{ type: "input", inputId: "second-user-turn", text: "new input", source: "interactive" },
-			ctx,
-		);
-		await runGoalHandlers(
-			handlers,
-			"input_disposition",
-			{ type: "input_disposition", inputId: "second-user-turn", disposition: "started" },
-			ctx,
-		);
-		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
 
 		expect(sent).toHaveLength(0);
-	});
-
-	it.each(["paused", "complete"] as const)(
-		"cancels a pending user grace continuation when the goal becomes %s",
-		async (status) => {
-			vi.useFakeTimers();
-			const notices: string[] = [];
-			const ctx = await makeGoalContext(notices, `thread-user-grace-${status}-cancel`);
-			const { monitor, sent } = createDirectMonitorHarness();
-			const goal = activeGoal(`goal-user-grace-${status}`);
-			monitor.start(ctx);
-			monitor.noteUserPrompt();
-			await monitor.afterAgentEnd({ ctx, goal, messages: [cleanAssistantStop()] });
-
-			await vi.advanceTimersByTimeAsync(45_000);
-			monitor.syncGoal({ ...goal, status });
-			await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
-
-			expect(sent).toHaveLength(0);
-		},
-	);
-
-	it("does not continue a pending user grace turn after pending messages arrive", async () => {
-		vi.useFakeTimers();
-		const notices: string[] = [];
-		const state = { pendingMessages: false };
-		const ctx = await makeGoalContext(notices, "thread-user-grace-pending-cancel", state);
-		const { monitor, sent } = createDirectMonitorHarness();
-		const goal = activeGoal("goal-user-grace-pending-cancel");
-		monitor.start(ctx);
-		monitor.noteUserPrompt();
-		await monitor.afterAgentEnd({ ctx, goal, messages: [cleanAssistantStop()] });
-
-		await vi.advanceTimersByTimeAsync(45_000);
-		state.pendingMessages = true;
-		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS - 45_000);
-
+		await vi.advanceTimersByTimeAsync(60_000);
 		expect(sent).toHaveLength(0);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 0 });
 	});
 
 	it("resets monitor-delayed repetition state when a goal pauses and resumes", async () => {
@@ -793,7 +781,6 @@ describe("goal continuation while a monitor is active", () => {
 						consecutiveLengthRecoveries: 0,
 						recentNormalizedOutputHashes: [],
 						toollessContinuationStreak: 0,
-						endedTurnWasUserInitiated: false,
 						continuationPending: false,
 					},
 					content: () => "Continue",

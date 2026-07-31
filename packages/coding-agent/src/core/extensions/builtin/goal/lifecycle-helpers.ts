@@ -96,20 +96,11 @@ export async function queueGoalContinuation(
 			consecutiveLengthRecoveries: 0,
 			recentNormalizedOutputHashes: [],
 			toollessContinuationStreak: 0,
-			endedTurnWasUserInitiated: false,
 			continuationPending: options.continuationPending,
 		},
 		content: () => buildContinuationPrompt(goal),
 		markContinuationPending: options.markContinuationPending,
 	});
-}
-
-export function buildCurrentGoalContinuationSignatureFromBranch(ctx: ExtensionContext, goal: Goal): string {
-	return buildCurrentGoalContinuationSignature(
-		ctx,
-		goal,
-		lastAssistantTextFromEntries(ctx.sessionManager.getBranch()),
-	);
 }
 
 export function buildCurrentGoalContinuationSignature(
@@ -183,7 +174,6 @@ function blockedReasonForContinuationGuard(
 		case "not-eligible":
 		case "single-flight":
 		case "stale":
-		case "grace":
 			return undefined;
 	}
 }

@@ -1,4 +1,4 @@
-/** Locks stale-goal admission: only accepted direct input pauses an unchanged delivered continuation. */
+/** Locks stale-goal admission: accepted direct input disarms continuation without pausing the Goal. */
 
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,16 +63,15 @@ async function createHarnessWithDeliveredContinuation(
 	return { harness, goalId: goal.id };
 }
 
-describe("stale goal input pause", () => {
-	it("persists the delivered signature and pauses on accepted direct input when observable state is unchanged", async () => {
+describe("stale goal direct input", () => {
+	it("leaves even a matching-signature Goal active after accepted direct input", async () => {
 		const { harness, goalId } = await createHarnessWithDeliveredContinuation();
 		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
-		const tokensBefore = (await readGoal(ref))?.tokensUsed;
 		harness.setResponses([fauxAssistantMessage("answered the newer request")]);
 
 		await harness.session.prompt("switch to this newer request");
 
-		expect(await readGoal(ref)).toMatchObject({ id: goalId, status: "paused", tokensUsed: tokensBefore });
+		expect(await readGoal(ref)).toMatchObject({ id: goalId, status: "active", consecutiveContinuations: 0 });
 	});
 
 	it("does not pause when observable state changed after the continuation was delivered", async () => {
@@ -103,7 +102,7 @@ describe("stale goal input pause", () => {
 		expect(await readGoal(ref)).toMatchObject({ id: goal.id, status: "active" });
 	});
 
-	it("clears the pause candidate when another input extension handles the prompt", async () => {
+	it("keeps the Goal unchanged when another input extension handles the prompt", async () => {
 		const { harness, goalId } = await createHarnessWithDeliveredContinuation({ handleRejected: true });
 		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
 
@@ -112,7 +111,7 @@ describe("stale goal input pause", () => {
 		expect(await readGoal(ref)).toMatchObject({ id: goalId, status: "active" });
 	});
 
-	it("clears the pause candidate when admission rejects the prompt", async () => {
+	it("keeps the Goal unchanged when admission rejects the prompt", async () => {
 		const controller = new AbortController();
 		const { harness, goalId } = await createHarnessWithDeliveredContinuation({ rejectSignal: controller });
 		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
