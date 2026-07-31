@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
-import { CLAUDE_AGENT_SDK_PROVIDER_ID } from "../../src/core/extensions/builtin/claude-agent-sdk/index.ts";
+import { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "../../src/core/extensions/builtin/claude-sdk-oauth/index.ts";
 import { ModelRegistry } from "../../src/core/model-registry.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
@@ -190,13 +190,13 @@ describe("RPC auth and connection handler contracts", () => {
 		const collected = makeSink();
 		const harness = makeHarness(tempDir);
 		cleanup = harness.cleanup;
-		harness.authStorage.registerOAuthProvider(CLAUDE_AGENT_SDK_PROVIDER_ID, {
+		harness.authStorage.registerOAuthProvider(CLAUDE_SDK_OAUTH_PROVIDER_ID, {
 			name: "Scripted OAuth",
 			async login() {
 				return {
 					type: "oauth",
-					access: "claude-agent-sdk-managed",
-					refresh: "claude-agent-sdk-managed",
+					access: "claude-sdk-oauth-managed",
+					refresh: "claude-sdk-oauth-managed",
 					expires: 4_102_444_800_000,
 					accounts: [
 						{
@@ -220,10 +220,10 @@ describe("RPC auth and connection handler contracts", () => {
 		const changed = collected.waitFor((message) => message.type === "auth_accounts_changed");
 
 		await handler.handleInputLine(
-			JSON.stringify({ id: "add", type: "login_start", provider: CLAUDE_AGENT_SDK_PROVIDER_ID }),
+			JSON.stringify({ id: "add", type: "login_start", provider: CLAUDE_SDK_OAUTH_PROVIDER_ID }),
 		);
 		await collected.waitFor((message) => message.type === "auth_login_end" && message.success === true);
-		expect(await changed).toEqual({ type: "auth_accounts_changed", provider: CLAUDE_AGENT_SDK_PROVIDER_ID });
+		expect(await changed).toEqual({ type: "auth_accounts_changed", provider: CLAUDE_SDK_OAUTH_PROVIDER_ID });
 
 		await handler.handleInputLine(
 			JSON.stringify({ id: "unknown-provider", type: "get_provider_accounts", provider: "unknown-provider" }),
@@ -234,7 +234,7 @@ describe("RPC auth and connection handler contracts", () => {
 		});
 
 		await handler.handleInputLine(
-			JSON.stringify({ id: "accounts", type: "get_provider_accounts", provider: CLAUDE_AGENT_SDK_PROVIDER_ID }),
+			JSON.stringify({ id: "accounts", type: "get_provider_accounts", provider: CLAUDE_SDK_OAUTH_PROVIDER_ID }),
 		);
 		expect(await collected.waitFor((message) => message.id === "accounts")).toMatchObject({
 			type: "response",

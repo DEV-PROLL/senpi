@@ -1,12 +1,12 @@
 import { join } from "node:path";
 import { getAgentDir } from "../../../config.ts";
 import { AuthStorage } from "../../../core/auth-storage.ts";
-import type { ProviderAccountEvent } from "../../../core/extensions/builtin/claude-agent-sdk/account-events.ts";
+import type { ProviderAccountEvent } from "../../../core/extensions/builtin/claude-sdk-oauth/account-events.ts";
 import {
 	getProviderAccounts,
 	pinProviderAccount,
 	removeProviderAccount,
-} from "../../../core/extensions/builtin/claude-agent-sdk/account-management.ts";
+} from "../../../core/extensions/builtin/claude-sdk-oauth/account-management.ts";
 import { resolvePath } from "../../../utils/paths.ts";
 import type {
 	AccountReadParams,
