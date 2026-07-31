@@ -136,7 +136,6 @@
 - LOW in monitor continuation tests that observe delayed persistence.
 - NONE in the goal store schema, public extension API, or status transitions.
 
-||||||| parent of a687d47c6 (fix(coding-agent): tell users how to clear a mechanical goal block)
 ## Observable progress resets the persisted continuation cap streak (2026-07-30)
 
 ### What changed
