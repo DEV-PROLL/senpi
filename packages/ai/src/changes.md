@@ -1,5 +1,36 @@
 # AI Source Changes
 
+## 2026-07-31 - Recover Codex WebSocket fallback sessions
+
+### What changed and why
+
+- A transient pre-start Codex WebSocket failure no longer pins the session to
+  SSE for the rest of the process lifetime. The fallback circuit now keeps
+  immediate requests on SSE for 60 seconds, then lets the next fresh request
+  probe WebSocket again.
+- Recovery changes only a future request. The existing guard still propagates
+  transport failures after the response stream starts, so no already-started
+  or potentially billed response is retried through SSE.
+- Production session cleanup now removes both live WebSocket resources and
+  the session's fallback/debug state. Long-lived app-server processes no
+  longer retain degraded routing after a session is closed.
+- Fallback and debug-state ownership moved into
+  `api/openai-codex-responses/fallback-state.ts`, reducing the oversized
+  adapter while keeping the public debug API stable.
+
+### Coverage
+
+- `../test/openai-codex-fallback-recovery.test.ts` proves the immediate SSE
+  cooldown boundary, post-cooldown WebSocket recovery, and immediate recovery
+  after production cleanup.
+- Existing Codex stream tests retain the post-start no-fallback guard,
+  continuation recovery, connection-limit handling, and one-shot
+  `cacheRetention: "none"` behavior.
+
+### Expected merge conflict zones
+
+- MEDIUM: Codex WebSocket debug/fallback state and session cleanup.
+
 ## 2026-07-31 - Align Codex prompt-cache affinity headers
 
 ### What changed and why
