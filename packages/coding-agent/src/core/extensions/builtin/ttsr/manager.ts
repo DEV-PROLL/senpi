@@ -129,7 +129,7 @@ export class TtsrManager {
 	}
 
 	addRule(rule: TtsrRule): boolean {
-		if (!this.#settings.enabled) {
+		if (!this.#settings.enabled || this.#settings.disabledRules.includes(rule.name)) {
 			return false;
 		}
 		if (this.#rules.has(rule.name)) {

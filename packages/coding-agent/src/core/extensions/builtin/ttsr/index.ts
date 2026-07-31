@@ -1,6 +1,7 @@
 import { getKeybindings } from "@earendil-works/pi-tui";
 
 import type { ExtensionAPI, ExtensionContext, MessageUpdateEvent } from "../../types.ts";
+import { BUILTIN_TTSR_RULES } from "./builtin-rules.ts";
 import { registerTtsrCommands, type TtsrPublicState } from "./commands.ts";
 import { claimAbort, createGenerationState, markUserCancelled } from "./coordinator.ts";
 import { discoverTtsrRulesSync } from "./discovery.ts";
@@ -115,6 +116,9 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 				return Array.isArray(rules) ? rules.filter((rule): rule is string => typeof rule === "string") : [];
 			});
 		manager.restoreInjected(injectedNames);
+		for (const rule of BUILTIN_TTSR_RULES) {
+			manager.addRule(rule);
+		}
 		const discovered = discoverTtsrRulesSync(ctx.cwd);
 		for (const rule of discovered.rules) {
 			manager.addRule(rule);
@@ -174,11 +178,9 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		const source = deltaEvent.type === "text_delta" ? "text" : "thinking";
 		const streamKey = `${source}:${String(deltaEvent.contentIndex)}`;
 		const outcome = watcher.handleDelta(source, streamKey, deltaEvent.delta, generation);
-		if (outcome.resolution !== null) console.log("TTSRDBG claim pre:", genState.abortClaimed, genState.userCancelled);
 		if (outcome.resolution !== null && claimAbort(genState, outcome.resolution)) {
 			pendingRemediation = { resolution: outcome.resolution, streamKind: source };
 			notify(ctx, outcome.resolution.owner);
-			console.log("TTSRDBG abort call");
 			ctx.abort();
 			return;
 		}

@@ -1,5 +1,19 @@
 # AI Source Changes
 
+## 2026-07-31 - Reshape unavailable Anthropic tool transcript records
+
+### What changed and why
+
+- Unavailable Anthropic `tool_use` history is still demoted to satisfy Anthropic's same-request tool-reference validation, but the assistant-role text now uses explicit `<unavailable-tool-call>` transcript records instead of an imitable `[Called tool ... with input: ...]` pseudo-action.
+- The first record for each missing tool name in a request explains that the call is historical and lists a capped, request-derived set of tools actually available now; later records for that name are terse self-closing elements. Tracking is request-local, so concurrent requests cannot interfere.
+- Historical call inputs are omitted entirely, removing large replayed patch bodies. Tool-result text remains available in `<unavailable-tool-result>` records; only literal closing-tag openers are narrowly neutralized so attacker-influenced output cannot escape the envelope.
+- XML attribute values are escaped for exotic tool names. The text builders live in the non-public `utils/` surface rather than growing the already-large Anthropic adapter.
+- Coverage drives the real fake-client request path for first/later behavior, request-derived list capping, input omission, exotic-name escaping, result preservation, and closing-tag neutralization. The existing tool-reference integrity test remains unchanged.
+
+### Expected merge conflict zones
+
+- LOW: unavailable-tool rewriting inside `api/anthropic-messages.ts` and its internal text helper import.
+
 ## 2026-07-30 - Map-less GPT-5.6 Sol preserves max reasoning
 
 ### What changed and why
