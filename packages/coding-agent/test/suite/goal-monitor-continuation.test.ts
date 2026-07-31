@@ -20,11 +20,12 @@ import {
 	cleanAssistantStop,
 	cleanupGoalMonitorTempDirs,
 	createGoalHarness,
+	createSentMessageHarness,
 	type GoalHandler,
 	makeGoalContext,
 	runGoalHandlers,
 	TestEventBus,
-	waitForGoalContinuationCount,
+	waitForSentCount,
 } from "./goal-monitor-test-harness.ts";
 
 function goalStoreRef(ctx: ExtensionContext) {
@@ -85,14 +86,14 @@ function activeGoal(id: string): Goal {
 	};
 }
 
-function createDirectMonitorHarness(): { monitor: MonitorAwareGoalContinuation; sent: string[]; events: TestEventBus } {
-	const sent: string[] = [];
+function createDirectMonitorHarness() {
+	const harness = createSentMessageHarness();
 	const events = new TestEventBus();
 	const pi = {
-		sendMessage: (message: { readonly content: string }) => sent.push(message.content),
+		sendMessage: harness.sendMessage,
 		events,
 	} as unknown as ExtensionAPI;
-	return { monitor: new MonitorAwareGoalContinuation(pi), sent, events };
+	return { monitor: new MonitorAwareGoalContinuation(pi), harness, events };
 }
 
 async function runUserInitiatedTurn(handlers: Map<string, GoalHandler[]>, ctx: ExtensionContext): Promise<void> {
@@ -306,7 +307,8 @@ describe("goal continuation while a monitor is active", () => {
 	it("keeps overlapping rejected and handled inputs keyed while restoring the armed timer", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
-		const { tools, handlers, sent, events } = createGoalHarness();
+		const harness = createGoalHarness();
+		const { tools, handlers, sent, events } = harness;
 		const ctx = await makeGoalContext(notices, "thread-overlapping-input-holds");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
@@ -331,7 +333,7 @@ describe("goal continuation while a monitor is active", () => {
 		);
 		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
 		expect(sent).toHaveLength(0);
-		const restoredDelivery = waitForGoalContinuationCount(ctx, 1);
+		const restoredDelivery = waitForSentCount(harness, 1);
 		await runGoalHandlers(
 			handlers,
 			"input_disposition",
@@ -347,7 +349,8 @@ describe("goal continuation while a monitor is active", () => {
 	it("restores the armed timer when Goal lookup fails before input disposition", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
-		const { tools, handlers, sent, events } = createGoalHarness();
+		const harness = createGoalHarness();
+		const { tools, handlers, sent, events } = harness;
 		const ctx = await makeGoalContext(notices, "thread-input-read-failure");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
@@ -371,7 +374,7 @@ describe("goal continuation while a monitor is active", () => {
 		).rejects.toBeInstanceOf(SyntaxError);
 		await writeGoal(ref, persisted);
 
-		const restoredDelivery = waitForGoalContinuationCount(ctx, 1);
+		const restoredDelivery = waitForSentCount(harness, 1);
 		await runGoalHandlers(
 			handlers,
 			"input_disposition",
@@ -386,7 +389,8 @@ describe("goal continuation while a monitor is active", () => {
 	it("waits four minutes before continuing and announces the schedule", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
-		const { tools, handlers, sent, events } = createGoalHarness();
+		const harness = createGoalHarness();
+		const { tools, handlers, sent, events } = harness;
 		const ctx = await makeGoalContext(notices, "thread-monitor-cadence");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep watching" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
@@ -405,7 +409,7 @@ describe("goal continuation while a monitor is active", () => {
 
 		await vi.advanceTimersByTimeAsync(239_999);
 		expect(sent).toHaveLength(0);
-		const delayedDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
+		const delayedDeliveryRecorded = waitForSentCount(harness, 1);
 		await vi.advanceTimersByTimeAsync(1);
 		await delayedDeliveryRecorded;
 		expect(sent).toHaveLength(1);
@@ -415,13 +419,21 @@ describe("goal continuation while a monitor is active", () => {
 	it("continues immediately after a clean continuation turn when no monitor is active", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
-		const { tools, handlers, sent } = createGoalHarness();
+		const harness = createGoalHarness();
+		const { tools, handlers, sent } = harness;
 		const ctx = await makeGoalContext(notices, "thread-no-monitor");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
 		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
-		await runGoalHandlers(handlers, "agent_end", { type: "agent_end", messages: [cleanAssistantStop()] }, ctx);
+		const deliveryRecorded = waitForSentCount(harness, 1);
+		const turnCompleted = runGoalHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [cleanAssistantStop()] },
+			ctx,
+		);
+		await Promise.all([turnCompleted, deliveryRecorded]);
 
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
@@ -448,7 +460,8 @@ describe("goal continuation while a monitor is active", () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
 		const ctx = await makeGoalContext(notices, "thread-monitor-repetition-resume");
-		const { monitor, sent, events } = createDirectMonitorHarness();
+		const { monitor, harness, events } = createDirectMonitorHarness();
+		const { sent } = harness;
 		const goal = activeGoal("goal-monitor-repetition-resume");
 		await writeGoal(goalStoreRef(ctx), goal);
 		monitor.start(ctx);
@@ -461,7 +474,7 @@ describe("goal continuation while a monitor is active", () => {
 				goal,
 				messages: [cleanAssistantStopWithText("unchanged monitor output")],
 			});
-			const delayedDeliveryRecorded = waitForGoalContinuationCount(ctx, turn);
+			const delayedDeliveryRecorded = waitForSentCount(harness, turn);
 			await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
 			await delayedDeliveryRecorded;
 		}
@@ -475,7 +488,7 @@ describe("goal continuation while a monitor is active", () => {
 			goal: resumed,
 			messages: [cleanAssistantStopWithText("unchanged monitor output")],
 		});
-		const resumedDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
+		const resumedDeliveryRecorded = waitForSentCount(harness, 3);
 		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
 		await resumedDeliveryRecorded;
 
@@ -486,7 +499,8 @@ describe("goal continuation while a monitor is active", () => {
 	it("resets truncation recovery state when a goal pauses and resumes", async () => {
 		const notices: string[] = [];
 		const ctx = await makeGoalContext(notices, "thread-length-resume");
-		const { monitor, sent } = createDirectMonitorHarness();
+		const { monitor, harness } = createDirectMonitorHarness();
+		const { sent } = harness;
 		const goal = activeGoal("goal-length-resume");
 		await writeGoal(goalStoreRef(ctx), goal);
 		monitor.start(ctx);

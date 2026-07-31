@@ -48,10 +48,22 @@ export class TestEventBus {
 
 export type AppendedGoalEntry = { readonly customType: string; readonly data: unknown };
 
-export interface GoalHarness {
+const sentCountWaiters = Symbol("sentCountWaiters");
+
+type SentCountWaiter = {
+	readonly expectedCount: number;
+	readonly complete: (error?: Error) => void;
+};
+
+export interface SentMessageHarness {
+	readonly sent: SentGoalMessage[];
+	readonly sendMessage: (message: SentGoalMessage["message"], options: unknown) => void;
+	readonly [sentCountWaiters]: Set<SentCountWaiter>;
+}
+
+export interface GoalHarness extends SentMessageHarness {
 	readonly tools: Map<string, AnyTool>;
 	readonly handlers: Map<string, GoalHandler[]>;
-	readonly sent: SentGoalMessage[];
 	readonly events: TestEventBus;
 	readonly entries: AppendedGoalEntry[];
 }
@@ -61,10 +73,22 @@ export interface GoalContextState {
 	model?: Model<Api>;
 }
 
+export function createSentMessageHarness(): SentMessageHarness {
+	const sent: SentGoalMessage[] = [];
+	const waiters = new Set<SentCountWaiter>();
+	const sendMessage = (message: SentGoalMessage["message"], options: unknown): void => {
+		sent.push({ message, options });
+		for (const waiter of waiters) {
+			if (sent.length >= waiter.expectedCount) waiter.complete();
+		}
+	};
+	return { sent, sendMessage, [sentCountWaiters]: waiters };
+}
+
 export function createGoalHarness(): GoalHarness {
 	const tools = new Map<string, AnyTool>();
 	const handlers = new Map<string, GoalHandler[]>();
-	const sent: SentGoalMessage[] = [];
+	const messages = createSentMessageHarness();
 	const events = new TestEventBus();
 	const entries: AppendedGoalEntry[] = [];
 	const pi = {
@@ -77,11 +101,11 @@ export function createGoalHarness(): GoalHarness {
 			registered.push(handler);
 			handlers.set(event, registered);
 		},
-		sendMessage: (message: SentGoalMessage["message"], options: unknown) => sent.push({ message, options }),
+		sendMessage: messages.sendMessage,
 		events,
 	} as unknown as ExtensionAPI;
 	goalExtension(pi);
-	return { tools, handlers, sent, events, entries };
+	return { tools, handlers, events, entries, ...messages };
 }
 
 const tempDirs: string[] = [];
@@ -115,6 +139,65 @@ export async function makeGoalContext(
 
 export async function cleanupGoalMonitorTempDirs(): Promise<void> {
 	await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+}
+
+export function waitForSentCount(
+	harness: SentMessageHarness,
+	expectedCount: number,
+	options: { readonly timeoutMs?: number } = {},
+): Promise<void> {
+	if (harness.sent.length >= expectedCount) return Promise.resolve();
+	const waiters = harness[sentCountWaiters];
+
+	return new Promise((resolve, reject) => {
+		let completed = false;
+		let timeout: ReturnType<typeof setRealTimeout> | undefined;
+		const waiter: SentCountWaiter = { expectedCount, complete };
+		waiters.add(waiter);
+		timeout = setRealTimeout(
+			() => complete(new Error(`Timed out waiting for ${expectedCount} sent goal message(s)`)),
+			options.timeoutMs ?? 5_000,
+		);
+
+		function complete(error: Error | undefined = undefined): void {
+			if (completed) return;
+			completed = true;
+			if (timeout !== undefined) clearRealTimeout(timeout);
+			waiters.delete(waiter);
+			if (error === undefined) resolve();
+			else reject(error);
+		}
+	});
+}
+
+export function waitForEventCount(
+	events: TestEventBus,
+	channel: string,
+	expectedCount: number,
+	options: { readonly timeoutMs?: number } = {},
+): Promise<void> {
+	const emittedCount = () => events.emitted.filter((event) => event.channel === channel).length;
+	if (emittedCount() >= expectedCount) return Promise.resolve();
+
+	return new Promise((resolve, reject) => {
+		let timeout: ReturnType<typeof setRealTimeout> | undefined;
+		const unsubscribe = events.on(channel, () => {
+			if (emittedCount() >= expectedCount) complete();
+		});
+		timeout = setRealTimeout(
+			() => complete(new Error(`Timed out waiting for ${expectedCount} ${channel} event(s)`)),
+			options.timeoutMs ?? 5_000,
+		);
+
+		function complete(error: Error | undefined = undefined): void {
+			if (timeout === undefined) return;
+			clearRealTimeout(timeout);
+			timeout = undefined;
+			unsubscribe();
+			if (error === undefined) resolve();
+			else reject(error);
+		}
+	});
 }
 
 export function waitForGoalContinuationCount(ctx: ExtensionContext, expectedCount: number): Promise<void> {
