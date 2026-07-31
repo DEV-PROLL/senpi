@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 import type { Context, ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
+import { EXPIRING_WITHIN_MS } from "./auth-lane.ts";
 import type { ClaudeSdkOauthAuthLane } from "./options.ts";
 import type { Base64ImageSource, ContentBlockParam, Options } from "./sdk-boundary.ts";
-import type { ClaudeSdkOauthSessionEntry } from "./session-registry.ts";
+import {
+	type ClaudeSdkOauthSessionEntry,
+	isBoundAccountTokenExpiring,
+	SESSION_REGISTRY_IDLE_TTL_MS,
+} from "./session-registry.ts";
 import { mapPiToolNameToSdk } from "./tools.ts";
 
 export type SentMessage = Extract<Message, { role: "user" | "toolResult" }>;
@@ -113,10 +118,22 @@ function resumeBoundary(
 		.map(([index, uuid]) => ({ index, uuid }))[0];
 }
 
+function idleTtlExpired(entry: ClaudeSdkOauthSessionEntry): boolean {
+	if (entry.activeTurn !== null || (entry.state !== "IDLE_SYNCED" && entry.state !== "TAINTED")) return false;
+	return isBoundAccountTokenExpiring(entry, [
+		{
+			name: entry.accountName,
+			expires: entry.lastUsedAt + SESSION_REGISTRY_IDLE_TTL_MS + EXPIRING_WITHIN_MS,
+			source: "login",
+		},
+	]);
+}
+
 /** Pure divergence guard: every non-proven continuation resolves to cold-seed. */
 export function decideSessionSync(input: SessionSyncDecisionInput): SessionSyncDecision {
 	const { entry } = input;
 	if (!entry) return { kind: "cold-seed", reason: "registry_miss" };
+	if (idleTtlExpired(entry)) return { kind: "cold-seed", reason: "idle_ttl" };
 	if (input.tokenExpiring) return { kind: "cold-seed", reason: "bound_account_token_expiring" };
 	if (entry.taintedReason) return { kind: "cold-seed", reason: `tainted:${entry.taintedReason}` };
 	if (entry.accountName !== input.accountName) return { kind: "cold-seed", reason: "account_changed" };

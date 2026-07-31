@@ -4,6 +4,9 @@ import type { AccountSlot } from "../src/core/extensions/builtin/claude-sdk-oaut
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import {
 	ClaudeSdkOauthSessionRegistry,
+	closeSession,
+	getOrCreateSession,
+	getSession,
 	isBoundAccountTokenExpiring,
 	overrideSessionRegistryBoundary,
 	resetSessionRegistryBoundary,
@@ -15,7 +18,7 @@ import {
 	submitSessionTurn,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-pump.ts";
 import { transitionSessionState } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-state.ts";
-import { recordSyncedStream } from "../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
+import { decideSessionSync, recordSyncedStream } from "../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
 
 class ScriptedQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
 	readonly emitted: SDKMessage[] = [];
@@ -145,7 +148,11 @@ function scheduledReaps() {
 	};
 }
 
-afterEach(() => resetSessionRegistryBoundary());
+afterEach(() => {
+	closeSession("decision-expired", "test_cleanup");
+	closeSession("decision-recent", "test_cleanup");
+	resetSessionRegistryBoundary();
+});
 
 describe("Claude SDK OAuth session registry", () => {
 	it("creates queries lazily and reuses the resident entry", () => {
@@ -216,6 +223,46 @@ describe("Claude SDK OAuth session registry", () => {
 		expect(replacement.generation).toBe(expired.generation + 1);
 		expect(registry.isCurrentGeneration("expired", expired.generation)).toBe(false);
 		expect(closed).toEqual([expired.sdkSessionId]);
+	});
+
+	it("cold-seeds a resident entry idle at the TTL on the admission decision path", () => {
+		let now = 1_000;
+		overrideSessionRegistryBoundary({ now: () => now, queryFactory: () => fakeQuery() });
+		const entry = getOrCreateSession(input("decision-expired"));
+		recordSyncedStream(entry, ["resident"]);
+		transitionSessionState(entry, "IDLE_SYNCED");
+		now += SESSION_REGISTRY_IDLE_TTL_MS;
+
+		const decision = decideSessionSync({
+			entry: getSession("decision-expired"),
+			currentHashes: ["resident", "next"],
+			accountName: "default",
+			modelId: "claude-test",
+			fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
+			tokenExpiring: false,
+		});
+
+		expect(decision).toEqual({ kind: "cold-seed", reason: "idle_ttl" });
+	});
+
+	it("keeps a recently used resident entry incremental on the admission decision path", () => {
+		let now = 1_000;
+		overrideSessionRegistryBoundary({ now: () => now, queryFactory: () => fakeQuery() });
+		const entry = getOrCreateSession(input("decision-recent"));
+		recordSyncedStream(entry, ["resident"]);
+		transitionSessionState(entry, "IDLE_SYNCED");
+		now += SESSION_REGISTRY_IDLE_TTL_MS - 1;
+
+		const decision = decideSessionSync({
+			entry: getSession("decision-recent"),
+			currentHashes: ["resident", "next"],
+			accountName: "default",
+			modelId: "claude-test",
+			fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
+			tokenExpiring: false,
+		});
+
+		expect(decision).toEqual({ kind: "incremental", from: 1 });
 	});
 
 	it("does not retire an entry with a turn in flight after the idle TTL", () => {
