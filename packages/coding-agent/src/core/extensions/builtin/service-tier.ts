@@ -10,26 +10,7 @@ type ProviderPayload = Record<string, unknown>;
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const OPENAI_CODEX_RESPONSES_API = "openai-codex-responses";
 const FAST_MODEL_SUFFIX = "-fast";
-/**
- * `/fast` is registered only for `openai-codex`, but the catalog generator emits
- * `-fast` priority variants only for the direct `openai` provider, so no Codex
- * model ever has a target and the command could only report "not supported".
- *
- * That gap is intentional rather than an oversight in the generator: measured
- * against `chatgpt.com/backend-api/codex/responses` with a live ChatGPT Pro
- * subscription, `service_tier: "priority"` returns HTTP 200 but the response
- * echoes `"auto"`, while `"auto"`/`"flex"`/`"scale"` are rejected with HTTP 400
- * `Unsupported service_tier`. Priority processing is an API-billing feature, so
- * a subscription request is served at normal tier no matter what is sent — and
- * `getServiceTierCostMultiplier()` would still bill it at up to 2.5x.
- *
- * So the honest answer is that fast mode is unavailable here, not that the
- * model does not support it.
- */
-const FAST_UNAVAILABLE_ON_SUBSCRIPTION =
-	"Fast mode (priority tier) is not available on a ChatGPT subscription: chatgpt.com accepts " +
-	"service_tier=priority but serves the request at normal tier. Priority processing requires " +
-	"API-key billing on the `openai` provider.";
+const PRIORITY_TIER: ServiceTier = "priority";
 const SERVICE_TIER_APIS: ReadonlySet<Api> = new Set(["openai-responses", OPENAI_CODEX_RESPONSES_API]);
 
 function isRecord(value: unknown): value is ProviderPayload {
@@ -85,10 +66,25 @@ function findFastModel(modelRegistry: ModelRegistry, baseModel: Model<Api>): Mod
 
 export default function serviceTierExtension(pi: ExtensionAPI): void {
 	let settingsServiceTier: ServiceTier | undefined;
+	/**
+	 * Session-level fast mode for Codex models that have no `-fast` catalog sibling.
+	 *
+	 * The catalog generator emits `-fast` priority variants only for the direct
+	 * `openai` provider, so `openai-codex` models never have a switch target. The
+	 * ChatGPT backend still offers the tier to subscriptions:
+	 * `chatgpt.com/backend-api/codex/models` advertises a `priority` service tier
+	 * labelled "Fast" ("1.5x speed, increased usage")
+	 * for gpt-5.4/5.5/5.6-*, and the first-party Codex CLI sends
+	 * `service_tier: "priority"` on subscription OAuth. The response echo is not a
+	 * confirmation channel — it reads `auto`/`default` whether or not a tier was
+	 * sent — so this toggle drives the request field directly. See issue #545.
+	 */
+	let sessionFastMode = false;
 
 	pi.on("session_start", async (_event, ctx) => {
 		const settingsManager = SettingsManager.create(ctx.cwd);
 		settingsServiceTier = settingsManager.getOpenAIServiceTier();
+		sessionFastMode = false;
 
 		const model = ctx.model;
 		if (model?.provider !== OPENAI_CODEX_PROVIDER) {
@@ -113,7 +109,8 @@ export default function serviceTierExtension(pi: ExtensionAPI): void {
 			const baseModel = findBaseModel(ctx.modelRegistry, model);
 			const targetModel = baseModel ?? findFastModel(ctx.modelRegistry, model);
 			if (!targetModel) {
-				ctx.ui.notify(FAST_UNAVAILABLE_ON_SUBSCRIPTION, "warning");
+				sessionFastMode = !sessionFastMode;
+				ctx.ui.notify(`Fast mode ${sessionFastMode ? "enabled" : "disabled"}: ${model.id}`, "info");
 				return;
 			}
 
@@ -129,7 +126,9 @@ export default function serviceTierExtension(pi: ExtensionAPI): void {
 
 	pi.on("before_provider_request", (event, ctx) => {
 		const effectiveServiceTier =
-			ctx.model?.api === OPENAI_CODEX_RESPONSES_API ? ctx.serviceTier : (ctx.serviceTier ?? settingsServiceTier);
+			ctx.model?.api === OPENAI_CODEX_RESPONSES_API
+				? (ctx.serviceTier ?? (sessionFastMode ? PRIORITY_TIER : undefined))
+				: (ctx.serviceTier ?? settingsServiceTier);
 		return addServiceTierToPayload(ctx.model?.api, event.payload, effectiveServiceTier);
 	});
 }
