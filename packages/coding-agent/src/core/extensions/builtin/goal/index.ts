@@ -5,12 +5,12 @@ import { GOAL_CACHE_WARMUP_ENTRY_TYPE } from "./cache-warm.ts";
 import { renderGoalCacheWarmupEntry } from "./cache-warm-renderer.ts";
 import { registerGoalCommand } from "./command-registration.ts";
 import { GOAL_CONTINUATION_CAP } from "./continuation.ts";
-import { isMechanicalContinuationBlock } from "./continuation-recovery.ts";
+import { GoalDirectInputLifecycle } from "./direct-input-lifecycle.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
 import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
 import { MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
-import { accountGoalUsage, readGoal, resetContinuationStreak, updateGoal } from "./store.ts";
+import { accountGoalUsage, readGoal, updateGoal } from "./store.ts";
 import { goalStoreRef as buildGoalStoreRef } from "./store-ref.ts";
 import { staleGoalTodoReminder, todoResultAddsOpenTasks } from "./todo-gate.ts";
 import { registerGoalTools } from "./tool-registration.ts";
@@ -42,6 +42,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			continuationPending = true;
 		},
 	);
+	const directInputLifecycle = new GoalDirectInputLifecycle({
+		monitor: monitorContinuation,
+		goalStoreRef,
+		beginAgentGoalAccounting,
+		refreshGoalUi: refreshGoalUiBestEffort,
+	});
 
 	const goalTicker = new GoalElapsedTicker({
 		render: (renderCtx, renderGoal, live) => {
@@ -80,6 +86,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (event, ctx) => {
 		monitorContinuation.start(ctx);
+		directInputLifecycle.reset();
 		const goal = await readGoal(goalStoreRef(ctx));
 		if (goal?.status === "active") {
 			beginAgentGoalAccounting(goal);
@@ -109,29 +116,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("input", async (event, ctx) => {
-		// The input event fires for queued steer/followUp prompts too, which return before
-		// before_agent_start ever runs. Resume a mechanically blocked goal here as well so a
-		// message sent while the agent is streaming resumes it the same as an idle one.
-		if (event.source === "extension") return;
-		const goal = await resetContinuationStreak(goalStoreRef(ctx));
-		if (goal?.status === "blocked" && isMechanicalContinuationBlock(goal.blockedReason)) {
-			await updateGoal(goalStoreRef(ctx), { status: "active" }, "user");
-		}
+		await directInputLifecycle.onInput(event, ctx);
 	});
 
-	pi.on("before_agent_start", async (_event, ctx) => {
-		// before_agent_start fires only for real user prompts and BEFORE the host's final
-		// provider admission check (which can reject the run so no agent_start follows).
-		// Resuming a blocked goal here, instead of deferring to agent_start via a sticky
-		// flag, means a rejected run cannot leak a stale resume signal to a later
-		// continuation-style turn that starts the agent without a preceding user prompt.
-		monitorContinuation.noteUserPrompt();
-		const ref = goalStoreRef(ctx);
-		let goal = await resetContinuationStreak(ref);
-		if (goal?.status === "blocked") {
-			goal = await updateGoal(ref, { status: "active" }, "user");
-		}
-		if (goal !== null) refreshGoalUi(ctx, goal);
+	pi.on("input_disposition", async (event, ctx) => {
+		await directInputLifecycle.onDisposition(event, ctx);
 	});
 
 	pi.on("turn_start", async () => {
