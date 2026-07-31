@@ -318,8 +318,16 @@ async function runSupervisor() {
 		console.error(`REJECTED signal=orphan_leaked denial=${message.denial} orphan=leaked replay=${message.replay}`);
 		process.exit(2);
 	}
-	console.log(`ACCEPTED denial=${message.denial} orphan=none replay=${message.replay}`);
-	process.exit(0);
+	if (message.denial === "ok" && message.replay === "uuid-match") {
+		console.log(`ACCEPTED denial=${message.denial} orphan=none replay=${message.replay}`);
+		process.exit(0);
+	}
+	const failing = [
+		message.denial !== "ok" ? `denial=${message.denial}` : null,
+		message.replay !== "uuid-match" ? `replay=${message.replay}` : null,
+	].filter(Boolean);
+	console.error(`REJECTED signal=${failing.join(",") || "unknown"} orphan=none`);
+	process.exit(2);
 }
 
 if (process.argv.includes(WORKER_ARGUMENT)) await runWorker();

@@ -26,7 +26,7 @@ describe("claude-sdk-oauth live persistent query spike", () => {
 				},
 				encoding: "utf8",
 			});
-			expect(output).toContain("ACCEPTED denial=");
+			expect(output).toContain("ACCEPTED denial=ok orphan=none replay=uuid-match");
 		},
 	);
 });
