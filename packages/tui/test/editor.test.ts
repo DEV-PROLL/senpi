@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { type AutocompleteProvider, CombinedAutocompleteProvider } from "../src/autocomplete.ts";
 import { Editor, wordWrapLine } from "../src/components/editor.ts";
-import { TUI } from "../src/tui.ts";
+import { CURSOR_MARKER, TUI } from "../src/tui.ts";
 import { visibleWidth } from "../src/utils.ts";
 import { defaultEditorTheme } from "./test-themes.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
@@ -39,6 +39,20 @@ async function flushAutocomplete(): Promise<void> {
 }
 
 const EXPLICIT_NEWLINE = "\x1b[13;2u";
+
+describe("Editor cursor rendering", () => {
+	it("does not draw a fake cursor when the hardware cursor is visible", () => {
+		const tui = new TUI(new VirtualTerminal(80, 24), true);
+		const editor = new Editor(tui, defaultEditorTheme);
+		editor.focused = true;
+		editor.setText("한글");
+
+		const rendered = editor.render(80).join("\n");
+
+		assert.ok(rendered.includes(CURSOR_MARKER));
+		assert.doesNotMatch(rendered, /\x1b\[7m/);
+	});
+});
 
 describe("Editor component", () => {
 	describe("Prompt history navigation", () => {

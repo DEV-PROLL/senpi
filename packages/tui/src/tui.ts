@@ -152,6 +152,8 @@ export function isFocusable(component: Component | null): component is Component
  * TUI finds and strips this marker, then positions the hardware cursor there.
  */
 export const CURSOR_MARKER = "\x1b_pi:c\x07";
+const FAKE_CURSOR_START = "\x1b[7m";
+const FAKE_CURSOR_END = "\x1b[27m";
 
 export { visibleWidth };
 
@@ -557,9 +559,6 @@ export class TUI extends Container {
 	setShowHardwareCursor(enabled: boolean): void {
 		if (this.showHardwareCursor === enabled) return;
 		this.showHardwareCursor = enabled;
-		if (!enabled) {
-			this.#setCursorVisibility(false);
-		}
 		this.requestRender();
 	}
 
@@ -914,8 +913,10 @@ export class TUI extends Container {
 		}
 		// Move cursor to the end of the content to prevent overwriting/artifacts on exit
 		if (this.previousLines.length > 0) {
-			// Overwrite the inverted cursor with a normal space to clear the artifact
-			this.terminal.write(" ");
+			// Clear only a fake cursor from the last published frame; a pending mode change must not erase content.
+			if (this.#lastCursorVisibility === false) {
+				this.terminal.write(" ");
+			}
 			const targetRow = this.previousLines.length; // Line after the last content
 			const lineDiff = targetRow - this.hardwareCursorRow;
 			if (lineDiff > 0) {
@@ -1660,14 +1661,13 @@ export class TUI extends Container {
 			finalPaintedScreenRow = row.screenRow;
 		}
 
-		buffer += TUI.FRAME_END;
+		const finalCursorRow = plan.viewportTop + finalPaintedScreenRow;
+		buffer = this.finishFrame(buffer, cursorPos, newLines.length, finalCursorRow);
 		this.terminal.write(buffer);
 
 		this.cursorRow = Math.max(0, newLines.length - 1);
-		this.hardwareCursorRow = plan.viewportTop + finalPaintedScreenRow;
 		this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
 		this.previousViewportTop = plan.viewportTop;
-		this.positionHardwareCursor(cursorPos, newLines.length);
 		this.setPreviousLines(newLines, rawLines);
 		this.previousKittyImageIds = this.collectKittyImageIds(newLines);
 		this.previousWidth = width;
@@ -1701,14 +1701,12 @@ export class TUI extends Container {
 			buffer += newLines[row] ?? "";
 		}
 
-		buffer += TUI.FRAME_END;
+		buffer = this.finishFrame(buffer, cursorPos, newLines.length, bufferLength - 1);
 		this.terminal.write(buffer);
 
 		this.cursorRow = Math.max(0, newLines.length - 1);
-		this.hardwareCursorRow = bufferLength - 1;
 		this.maxLinesRendered = newLines.length;
 		this.previousViewportTop = Math.max(0, bufferLength - height);
-		this.positionHardwareCursor(cursorPos, newLines.length);
 		this.setPreviousLines(newLines, rawLines);
 		this.previousKittyImageIds = this.collectKittyImageIds(newLines);
 		this.previousWidth = width;
@@ -1741,15 +1739,14 @@ export class TUI extends Container {
 			buffer += newLines[viewportTop + row] ?? "";
 		}
 
-		buffer += TUI.FRAME_END;
+		const finalCursorRow = viewportTop + Math.max(0, height - 1);
+		buffer = this.finishFrame(buffer, cursorPos, newLines.length, finalCursorRow);
 		this.terminal.write(buffer);
 
 		this.muxViewportRepaintCount += 1;
 		this.cursorRow = Math.max(0, newLines.length - 1);
-		this.hardwareCursorRow = viewportTop + Math.max(0, height - 1);
 		this.maxLinesRendered = newLines.length;
 		this.previousViewportTop = viewportTop;
-		this.positionHardwareCursor(cursorPos, newLines.length);
 		this.setPreviousLines(newLines, rawLines);
 		this.previousKittyImageIds = this.collectKittyImageIds(newLines);
 		this.previousWidth = width;
@@ -1830,8 +1827,18 @@ export class TUI extends Container {
 				const beforeMarker = line.slice(0, markerIndex);
 				const col = visibleWidth(beforeMarker);
 
-				// Strip marker from the line
-				lines[row] = line.slice(0, markerIndex) + line.slice(markerIndex + CURSOR_MARKER.length);
+				let afterMarker = line.slice(markerIndex + CURSOR_MARKER.length);
+				if (this.showHardwareCursor && afterMarker.startsWith(FAKE_CURSOR_START)) {
+					const fakeCursorEnd = afterMarker.indexOf(FAKE_CURSOR_END, FAKE_CURSOR_START.length);
+					if (fakeCursorEnd !== -1) {
+						afterMarker =
+							afterMarker.slice(FAKE_CURSOR_START.length, fakeCursorEnd) +
+							afterMarker.slice(fakeCursorEnd + FAKE_CURSOR_END.length);
+					}
+				}
+
+				// Strip marker and any colocated fake cursor styling when the hardware cursor owns the position.
+				lines[row] = beforeMarker + afterMarker;
 
 				return { row, col };
 			}
@@ -1906,10 +1913,10 @@ export class TUI extends Container {
 				}
 				buffer += line;
 			}
-			buffer += TUI.FRAME_END;
+			const finalCursorRow = Math.max(0, newLines.length - 1);
+			buffer = this.finishFrame(buffer, cursorPos, newLines.length, finalCursorRow);
 			this.terminal.write(buffer);
 			this.cursorRow = Math.max(0, newLines.length - 1);
-			this.hardwareCursorRow = this.cursorRow;
 			// Reset max lines when clearing, otherwise track growth
 			if (clear) {
 				this.maxLinesRendered = newLines.length;
@@ -1918,7 +1925,6 @@ export class TUI extends Container {
 			}
 			const bufferLength = Math.max(height, newLines.length);
 			this.previousViewportTop = Math.max(0, bufferLength - height);
-			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.setPreviousLines(newLines, rawLines);
 			this.previousKittyImageIds = this.collectKittyImageIds(newLines);
 			this.previousWidth = width;
@@ -2057,12 +2063,12 @@ export class TUI extends Container {
 				if (moveBack > 0) {
 					buffer += `\x1b[${moveBack}A`;
 				}
-				buffer += TUI.FRAME_END;
+				buffer = this.finishFrame(buffer, cursorPos, newLines.length, targetRow);
 				this.terminal.write(buffer);
 				this.cursorRow = targetRow;
-				this.hardwareCursorRow = targetRow;
+			} else {
+				this.positionHardwareCursor(cursorPos, newLines.length);
 			}
-			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.setPreviousLines(newLines, rawLines);
 			this.previousKittyImageIds = this.collectKittyImageIds(newLines);
 			this.previousWidth = width;
@@ -2141,14 +2147,13 @@ export class TUI extends Container {
 					buffer += newLines[viewportTop + row] ?? "";
 				}
 
-				buffer += TUI.FRAME_END;
+				const finalCursorRow = viewportTop + Math.max(0, height - 1);
+				buffer = this.finishFrame(buffer, cursorPos, newLines.length, finalCursorRow);
 				this.terminal.write(buffer);
 
 				this.cursorRow = Math.max(0, newLines.length - 1);
-				this.hardwareCursorRow = viewportTop + Math.max(0, height - 1);
 				this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
 				this.previousViewportTop = viewportTop;
-				this.positionHardwareCursor(cursorPos, newLines.length);
 				this.setPreviousLines(newLines, rawLines);
 				this.previousKittyImageIds = this.collectKittyImageIds(newLines);
 				this.previousWidth = width;
@@ -2274,7 +2279,7 @@ export class TUI extends Container {
 			buffer += `\x1b[${extraLines}A`;
 		}
 
-		buffer += TUI.FRAME_END;
+		buffer = this.finishFrame(buffer, cursorPos, newLines.length, finalCursorRow);
 
 		if (process.env.PI_TUI_DEBUG === "1") {
 			const debugDir = "/tmp/tui";
@@ -2313,13 +2318,9 @@ export class TUI extends Container {
 		// cursorRow tracks end of content (for viewport calculation)
 		// hardwareCursorRow tracks actual terminal cursor position (for movement)
 		this.cursorRow = Math.max(0, newLines.length - 1);
-		this.hardwareCursorRow = finalCursorRow;
 		// Track terminal's working area (grows but doesn't shrink unless cleared)
 		this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
 		this.previousViewportTop = Math.max(prevViewportTop, finalCursorRow - height + 1);
-
-		// Position hardware cursor for IME
-		this.positionHardwareCursor(cursorPos, newLines.length);
 
 		this.setPreviousLines(newLines, rawLines);
 		if (needsKittyImageExpansion) {
@@ -2334,7 +2335,7 @@ export class TUI extends Container {
 	 * @param cursorPos The cursor position extracted from rendered output, or null
 	 * @param totalLines Total number of rendered lines
 	 */
-	private positionHardwareCursor(cursorPos: { row: number; col: number } | null, totalLines: number): void {
+	private buildHardwareCursorSequence(cursorPos: { row: number; col: number } | null, totalLines: number): string {
 		let buffer = "";
 		if (!cursorPos || totalLines <= 0) {
 			if (this.#lastCursorVisibility !== false) {
@@ -2363,9 +2364,22 @@ export class TUI extends Container {
 			}
 		}
 
-		if (buffer) {
-			this.terminal.write(buffer);
-		}
+		return buffer;
+	}
+
+	private finishFrame(
+		buffer: string,
+		cursorPos: { row: number; col: number } | null,
+		totalLines: number,
+		hardwareCursorRow: number,
+	): string {
+		this.hardwareCursorRow = hardwareCursorRow;
+		return buffer + this.buildHardwareCursorSequence(cursorPos, totalLines) + TUI.FRAME_END;
+	}
+
+	private positionHardwareCursor(cursorPos: { row: number; col: number } | null, totalLines: number): void {
+		const buffer = this.buildHardwareCursorSequence(cursorPos, totalLines);
+		if (buffer) this.terminal.write(TUI.FRAME_BEGIN + buffer + TUI.FRAME_END);
 	}
 
 	/**
