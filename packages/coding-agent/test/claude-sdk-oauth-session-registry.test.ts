@@ -15,6 +15,7 @@ import {
 	submitSessionTurn,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-pump.ts";
 import { transitionSessionState } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-state.ts";
+import { recordSyncedStream } from "../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
 
 class ScriptedQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
 	readonly emitted: SDKMessage[] = [];
@@ -125,6 +126,25 @@ function fakeQuery(onClose?: () => void): SdkQueryHandle {
 	};
 }
 
+function scheduledReaps() {
+	const tasks: Array<{ callback: () => void; delayMs: number; canceled: boolean; unrefed: boolean }> = [];
+	return {
+		tasks,
+		scheduleReap(callback: () => void, delayMs: number) {
+			const task = { callback, delayMs, canceled: false, unrefed: false };
+			tasks.push(task);
+			return {
+				cancel: () => {
+					task.canceled = true;
+				},
+				unref: () => {
+					task.unrefed = true;
+				},
+			};
+		},
+	};
+}
+
 afterEach(() => resetSessionRegistryBoundary());
 
 describe("Claude SDK OAuth session registry", () => {
@@ -175,6 +195,146 @@ describe("Claude SDK OAuth session registry", () => {
 			registry.closeSession("session-a", "shutdown");
 		}).not.toThrow();
 		expect(closes).toBe(1);
+	});
+
+	it("retires and cold-seeds an existing entry idle past the TTL", () => {
+		let now = 1_000;
+		const closed: string[] = [];
+		overrideSessionRegistryBoundary({
+			now: () => now,
+			queryFactory: ({ options }) => fakeQuery(() => closed.push(String(options?.sessionId))),
+		});
+		const registry = new ClaudeSdkOauthSessionRegistry();
+		const expired = registry.getOrCreate(input("expired"));
+		transitionSessionState(expired, "IDLE_SYNCED");
+		now += SESSION_REGISTRY_IDLE_TTL_MS;
+
+		const replacement = registry.getOrCreate(input("expired"));
+
+		expect(replacement).not.toBe(expired);
+		expect(replacement.state).toBe("STARTING");
+		expect(replacement.generation).toBe(expired.generation + 1);
+		expect(registry.isCurrentGeneration("expired", expired.generation)).toBe(false);
+		expect(closed).toEqual([expired.sdkSessionId]);
+	});
+
+	it("does not retire an entry with a turn in flight after the idle TTL", () => {
+		let now = 1_000;
+		const query = new ScriptedQuery();
+		overrideSessionRegistryBoundary({ now: () => now, queryFactory: () => query });
+		const registry = new ClaudeSdkOauthSessionRegistry();
+		const active = registry.getOrCreate(input("active"));
+		void submitSessionTurn(registry, active, { message: userContent });
+		now += SESSION_REGISTRY_IDLE_TTL_MS;
+
+		const reused = registry.getOrCreate(input("active"));
+
+		expect(reused).toBe(active);
+		expect(reused.activeTurn).not.toBeNull();
+		expect(registry.isCurrentGeneration("active", active.generation)).toBe(true);
+		expect(query.closes).toBe(0);
+	});
+
+	it("records turn admission and completion and reaps from the completion timestamp", () => {
+		let now = 1_000;
+		let closes = 0;
+		const scheduler = scheduledReaps();
+		overrideSessionRegistryBoundary({
+			now: () => now,
+			queryFactory: () => fakeQuery(() => closes++),
+			scheduleReap: scheduler.scheduleReap,
+		});
+		const registry = new ClaudeSdkOauthSessionRegistry();
+		const entry = registry.getOrCreate(input("timed"));
+		transitionSessionState(entry, "IDLE_SYNCED");
+
+		now = 10_000;
+		entry.activeTurn = { generation: entry.generation };
+		expect(entry.lastUsedAt).toBe(now);
+		now = 20_000;
+		entry.activeTurn = null;
+
+		expect(entry.lastUsedAt).toBe(now);
+		const reap = scheduler.tasks.at(-1)!;
+		expect(reap).toMatchObject({ delayMs: SESSION_REGISTRY_IDLE_TTL_MS, unrefed: true });
+		now += SESSION_REGISTRY_IDLE_TTL_MS - 100;
+		reap.callback();
+		expect(closes).toBe(0);
+		const rescheduled = scheduler.tasks.at(-1)!;
+		expect(rescheduled).toMatchObject({ delayMs: 100, unrefed: true });
+		now += 100;
+		rescheduled.callback();
+		expect(closes).toBe(1);
+		expect(registry.get("timed")).toBeUndefined();
+	});
+
+	it("fences a canceled reap callback from an active or replacement generation", () => {
+		let now = 1_000;
+		const closed: string[] = [];
+		const scheduler = scheduledReaps();
+		overrideSessionRegistryBoundary({
+			now: () => now,
+			queryFactory: ({ options }) => fakeQuery(() => closed.push(String(options?.sessionId))),
+			scheduleReap: scheduler.scheduleReap,
+		});
+		const registry = new ClaudeSdkOauthSessionRegistry();
+		const first = registry.getOrCreate(input("fenced"));
+		transitionSessionState(first, "IDLE_SYNCED");
+		first.activeTurn = { generation: first.generation };
+		first.activeTurn = null;
+		const staleReap = scheduler.tasks.at(-1)!;
+		first.activeTurn = { generation: first.generation };
+		expect(staleReap.canceled).toBe(true);
+
+		now += SESSION_REGISTRY_IDLE_TTL_MS;
+		staleReap.callback();
+		expect(registry.get("fenced")).toBe(first);
+		expect(closed).toEqual([]);
+
+		first.activeTurn = null;
+		registry.closeSession("fenced", "replace");
+		const replacement = registry.getOrCreate(input("fenced"));
+		transitionSessionState(replacement, "IDLE_SYNCED");
+		staleReap.callback();
+		expect(registry.get("fenced")).toBe(replacement);
+		expect(closed).toEqual([first.sdkSessionId]);
+	});
+
+	it("keeps recently completed entries out of the LRU victim slot", () => {
+		let now = 0;
+		overrideSessionRegistryBoundary({ now: () => now, queryFactory: () => fakeQuery() });
+		const registry = new ClaudeSdkOauthSessionRegistry();
+		const recentlyUsed = registry.getOrCreate(input("recent"));
+		transitionSessionState(recentlyUsed, "IDLE_SYNCED");
+		for (let index = 1; index < 32; index++) {
+			now++;
+			const entry = registry.getOrCreate(input(`idle-${index}`));
+			transitionSessionState(entry, "IDLE_SYNCED");
+		}
+		now++;
+		recentlyUsed.activeTurn = { generation: recentlyUsed.generation };
+		recentlyUsed.activeTurn = null;
+		now++;
+
+		registry.getOrCreate(input("new"));
+
+		expect(registry.get("recent")).toBe(recentlyUsed);
+		expect(registry.get("idle-1")).toBeUndefined();
+	});
+
+	it("ignores late synchronized-state writes to a closed and replaced entry", () => {
+		overrideSessionRegistryBoundary({ queryFactory: () => fakeQuery() });
+		const registry = new ClaudeSdkOauthSessionRegistry();
+		const closed = registry.getOrCreate(input("late-write"));
+		registry.closeSession("late-write", "replace");
+		const replacement = registry.getOrCreate(input("late-write"));
+
+		recordSyncedStream(closed, ["late"]);
+
+		expect(closed.sentCount).toBe(0);
+		expect(closed.syncedPrefixHash).toBeNull();
+		expect(registry.get("late-write")).toBe(replacement);
+		expect(replacement.sentCount).toBe(0);
 	});
 
 	it("evicts expired idle entries using the injected clock", () => {

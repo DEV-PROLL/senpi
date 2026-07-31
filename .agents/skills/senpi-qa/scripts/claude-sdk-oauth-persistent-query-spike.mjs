@@ -14,8 +14,8 @@
  *     node .agents/skills/senpi-qa/scripts/claude-sdk-oauth-persistent-query-spike.mjs
  *
  * Outcomes (final line):
- *   exit 0 "ACCEPTED denial=<ok|degraded> orphan=<none|leaked> replay=<uuid-match|absent>"
- *   exit 2 "REJECTED signal=<result.subtype|terminal_reason|status>"
+ *   exit 0 "ACCEPTED denial=<ok|degraded> orphan=none replay=<uuid-match|absent>"
+ *   exit 2 "REJECTED signal=<result.subtype|terminal_reason|status|orphan_leaked>"
  * Never prints token material.
  */
 import { fork, spawn } from "node:child_process";
@@ -307,15 +307,18 @@ async function runSupervisor() {
 
 	const pid = Number.isInteger(message.pid) ? message.pid : null;
 	const gone = pid !== null && (await waitForProcessExit(pid, 5_000));
-	const orphan = gone ? "none" : "leaked";
-	if (!gone && pid !== null) {
-		try {
-			process.kill(pid, "SIGKILL");
-		} catch {
-			// already gone
+	if (!gone) {
+		if (pid !== null) {
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch {
+				// already gone
+			}
 		}
+		console.error(`REJECTED signal=orphan_leaked denial=${message.denial} orphan=leaked replay=${message.replay}`);
+		process.exit(2);
 	}
-	console.log(`ACCEPTED denial=${message.denial} orphan=${orphan} replay=${message.replay}`);
+	console.log(`ACCEPTED denial=${message.denial} orphan=none replay=${message.replay}`);
 	process.exit(0);
 }
 
