@@ -1,3 +1,19 @@
+## Refusal fallback exhaustion resets retry state (2026-07-31)
+
+### What changed
+
+- `core/agent-session.ts`: terminal classifier-refusal fallback exits now emit the matching failed `auto_retry_end` event and reset the retry attempt counter when a retry actually started.
+- The zero-attempt refusal path remains event-free, so `auto_retry_end` still pairs only with a prior `auto_retry_start`.
+- Regression coverage drives every configured fallback to refusal, then proves the session is idle and the interactive double-Escape history action works again.
+
+### Why
+
+- Refusal exhaustion previously resolved the retry promise without clearing `_retryAttempt`. The TUI therefore kept treating an idle session as retrying, so every Escape re-entered abort cleanup instead of arming the double-Escape session-history shortcut.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` in `_handleRetryableError()`'s classifier-refusal terminal branches.
+
 ## Claude SDK OAuth provider identity (2026-07-31)
 
 ### What changed

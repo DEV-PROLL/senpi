@@ -5464,6 +5464,15 @@ export class AgentSession {
 			// Refusals are only retried through a new chain candidate. They never use
 			// same-model retries or the transient over-budget fallback escape hatch.
 			if (this._retryAttempt + 1 > settings.maxRetries) {
+				if (this._retryAttempt > 0) {
+					this._emit({
+						type: "auto_retry_end",
+						success: false,
+						attempt: this._retryAttempt,
+						finalError: message.errorMessage,
+					});
+				}
+				this._retryAttempt = 0;
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -5473,6 +5482,15 @@ export class AgentSession {
 				if (exhaustedChainKey) {
 					this._emit({ type: "retry_fallback_exhausted", chainKey: exhaustedChainKey, lastError: errorMessage });
 				}
+				if (this._retryAttempt > 0) {
+					this._emit({
+						type: "auto_retry_end",
+						success: false,
+						attempt: this._retryAttempt,
+						finalError: message.errorMessage,
+					});
+				}
+				this._retryAttempt = 0;
 				this._resolveRetry();
 				return "not-handled";
 			}
