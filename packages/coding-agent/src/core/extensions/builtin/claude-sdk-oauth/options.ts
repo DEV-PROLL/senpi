@@ -17,7 +17,7 @@ import {
 	loadClaudeSdkOauthProviderSettingsFromDisk,
 	resolveSystemPromptMode,
 } from "./settings.ts";
-import { loadOverrideSystemPrompt, splitSystemPromptAtDynamicTail } from "./system-prompt.ts";
+import { loadOverrideSystemPrompt, resolveCustomSystemPrompt } from "./system-prompt.ts";
 import { BUILTIN_SDK_TOOLS, canUseTool, HOST_TOOL_DENIAL_HOOKS } from "./tools.ts";
 
 export type ClaudeSdkOauthAuthLane = ClaudeSdkOauthTokenInjection;
@@ -232,7 +232,7 @@ export function buildClaudeSdkOauthQueryOptions(input: ClaudeSdkOauthQueryOption
 			? { type: "preset" as const, preset: "claude_code" as const, append: append.join("\n\n") || undefined }
 			: mode === "override"
 				? loadOverrideSystemPrompt(providerSettings.systemPromptFile)
-				: splitSystemPromptAtDynamicTail(input.context.systemPrompt, mode);
+				: resolveCustomSystemPrompt(input.context.systemPrompt);
 	const strictMcpConfig = providerSettings.strictMcpConfig ?? !appendSystemPrompt;
 	const queryOptions: Options = {
 		cwd,

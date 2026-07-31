@@ -1,26 +1,13 @@
 import { readFileSync } from "node:fs";
-import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from "@anthropic-ai/claude-agent-sdk";
-import { overrideSystemPromptGuidance, systemPromptBoundaryGuidance } from "./guidance.ts";
-import type { ClaudeSdkOauthSystemPromptMode } from "./settings.ts";
+import { overrideSystemPromptGuidance } from "./guidance.ts";
 
-const DYNAMIC_TAIL_MARKER = "\nCurrent date: ";
-
-type CustomSystemPrompt = string | string[];
-
-export function splitSystemPromptAtDynamicTail(
-	prompt: string | undefined,
-	mode: ClaudeSdkOauthSystemPromptMode,
-): CustomSystemPrompt {
-	const content = prompt ?? "";
-	const markerIndex = content.lastIndexOf(DYNAMIC_TAIL_MARKER);
-	if (markerIndex === -1) {
-		console.warn(systemPromptBoundaryGuidance(mode));
-		return content;
-	}
-	return [content.slice(0, markerIndex), SYSTEM_PROMPT_DYNAMIC_BOUNDARY, content.slice(markerIndex + 1)];
+// Measured CLI behavior joins system-prompt arrays into one block and ignores the SDK sentinel,
+// so emitting a boundary only pollutes the model prompt with literal garbage.
+export function resolveCustomSystemPrompt(prompt: string | undefined): string {
+	return prompt ?? "";
 }
 
-export function loadOverrideSystemPrompt(path: string | undefined): CustomSystemPrompt {
+export function loadOverrideSystemPrompt(path: string | undefined): string {
 	if (path === undefined) {
 		throw new Error(overrideSystemPromptGuidance(undefined, "the path is not configured"));
 	}
@@ -34,5 +21,5 @@ export function loadOverrideSystemPrompt(path: string | undefined): CustomSystem
 	if (content.trim().length === 0) {
 		throw new Error(overrideSystemPromptGuidance(path, "the file is empty"));
 	}
-	return splitSystemPromptAtDynamicTail(content, "override");
+	return resolveCustomSystemPrompt(content);
 }

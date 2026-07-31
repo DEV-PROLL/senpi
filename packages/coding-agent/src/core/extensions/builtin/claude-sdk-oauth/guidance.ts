@@ -52,13 +52,6 @@ export function missingBinaryGuidance(platform: string, arch: string): string {
 
 export type SystemPromptMode = "full" | "override" | "preset-append";
 
-export function systemPromptBoundaryGuidance(mode: SystemPromptMode): string {
-	return [
-		`Claude SDK OAuth ${mode} system prompt has no "Current date:" dynamic-tail line; using one uncached prompt block.`,
-		'Keep the dynamic tail formatted as "Current date: ..." to restore the SDK prompt-cache boundary.',
-	].join(" ");
-}
-
 export function overrideSystemPromptGuidance(path: string | undefined, reason: string): string {
 	const target = path === undefined ? "systemPromptFile" : `systemPromptFile "${path}"`;
 	return [

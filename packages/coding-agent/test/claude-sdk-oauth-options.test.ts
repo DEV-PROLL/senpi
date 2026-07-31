@@ -1,9 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from "@anthropic-ai/claude-agent-sdk";
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	buildClaudeSdkOauthQueryOptions,
 	type ClaudeSdkOauthAuthLane,
@@ -15,6 +14,11 @@ import {
 import { InMemorySettingsStorage, type Settings, SettingsManager } from "../src/core/settings-manager.ts";
 
 const temporaryDirectories: string[] = [];
+const DYNAMIC_BOUNDARY_SENTINEL = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__";
+
+function expectNoDynamicBoundarySentinel(systemPrompt: unknown): void {
+	expect(JSON.stringify(systemPrompt)).not.toContain(DYNAMIC_BOUNDARY_SENTINEL);
+}
 
 function temporaryDirectory(): string {
 	const directory = mkdtempSync(join(tmpdir(), "senpi-claude-sdk-oauth-options-"));
@@ -146,9 +150,10 @@ describe("Claude SDK OAuth query options", () => {
 				rules.slice(rules.indexOf("<project_rules>"), rules.indexOf("</project_rules>") + 16),
 			].join("\n\n"),
 		});
+		expectNoDynamicBoundarySentinel(queryOptions.systemPrompt);
 	});
 
-	it("splits full prompts at the last Current date line with no preset descriptor", () => {
+	it("delivers full prompts verbatim as a string with no preset descriptor", () => {
 		const systemPrompt =
 			"stable\nCurrent date: decoy\nstill stable\nCurrent date: 2026-07-31\nCurrent working directory: /repo";
 		const queryOptions = buildClaudeSdkOauthQueryOptions({
@@ -158,17 +163,12 @@ describe("Claude SDK OAuth query options", () => {
 			providerSettings: { systemPromptMode: "full" },
 		});
 
-		expect(queryOptions.systemPrompt).toEqual([
-			"stable\nCurrent date: decoy\nstill stable",
-			SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
-			"Current date: 2026-07-31\nCurrent working directory: /repo",
-		]);
-		expect(Array.isArray(queryOptions.systemPrompt)).toBe(true);
-		expect(queryOptions.systemPrompt).not.toContainEqual(expect.objectContaining({ type: "preset" }));
+		expect(queryOptions.systemPrompt).toBe(systemPrompt);
+		expect(typeof queryOptions.systemPrompt).toBe("string");
+		expectNoDynamicBoundarySentinel(queryOptions.systemPrompt);
 	});
 
-	it("falls back to one string block and logs guidance when a full prompt has no Current date marker", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+	it("delivers a full prompt without a Current date marker verbatim", () => {
 		const queryOptions = buildClaudeSdkOauthQueryOptions({
 			model: model(),
 			context: context("custom prompt without the dynamic marker"),
@@ -177,21 +177,19 @@ describe("Claude SDK OAuth query options", () => {
 		});
 
 		expect(queryOptions.systemPrompt).toBe("custom prompt without the dynamic marker");
-		expect(warn).toHaveBeenCalledWith(expect.stringContaining("Current date:"));
-		warn.mockRestore();
+		expectNoDynamicBoundarySentinel(queryOptions.systemPrompt);
 	});
 
-	it("loads override prompt contents and applies the same cache boundary", () => {
+	it("loads override prompt contents verbatim as a string with no preset descriptor", () => {
 		const cwd = temporaryDirectory();
 		const promptFile = join(cwd, "override.md");
-		writeFileSync(promptFile, "override static\nCurrent date: per turn");
+		const overridePrompt = "override static\nCurrent date: per turn";
+		writeFileSync(promptFile, overridePrompt);
 		const queryOptions = optionsFor({ systemPromptMode: "override", systemPromptFile: promptFile }, "ambient", cwd);
 
-		expect(queryOptions.systemPrompt).toEqual([
-			"override static",
-			SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
-			"Current date: per turn",
-		]);
+		expect(queryOptions.systemPrompt).toBe(overridePrompt);
+		expect(typeof queryOptions.systemPrompt).toBe("string");
+		expectNoDynamicBoundarySentinel(queryOptions.systemPrompt);
 	});
 
 	it("throws actionable guidance when an override file is missing", () => {
