@@ -4889,8 +4889,11 @@ export class InteractiveMode {
 	 * Clear all queued messages and return their contents.
 	 * Clears both session queue and compaction queue.
 	 */
-	private clearAllQueues(): { steering: string[]; followUp: string[] } {
-		const { steering, followUp } = this.session.clearQueue();
+	private clearAllQueues(options: { abortWillFollow: boolean } = { abortWillFollow: false }): {
+		steering: string[];
+		followUp: string[];
+	} {
+		const { steering, followUp } = this.session.clearQueue(options);
 		const compactionMessages = [...this.compactionInFlightMessages, ...this.compactionQueuedMessages];
 		const compactionSteering = compactionMessages.filter((msg) => msg.mode === "steer").map((msg) => msg.text);
 		const compactionFollowUp = compactionMessages.filter((msg) => msg.mode === "followUp").map((msg) => msg.text);
@@ -4924,7 +4927,7 @@ export class InteractiveMode {
 	}
 
 	private restoreQueuedMessagesToEditor(options?: { abort?: boolean; currentText?: string }): number {
-		const { steering, followUp } = this.clearAllQueues();
+		const { steering, followUp } = this.clearAllQueues({ abortWillFollow: options?.abort === true });
 		const allQueued = [...steering, ...followUp];
 		if (allQueued.length === 0) {
 			this.updatePendingMessagesDisplay();
@@ -4954,7 +4957,7 @@ export class InteractiveMode {
 	 * - The helper never auto-prompts restored queue text; the user decides whether to send it.
 	 */
 	private async abortAndFireQueuedMessages(): Promise<number> {
-		const { steering, followUp } = this.clearAllQueues();
+		const { steering, followUp } = this.clearAllQueues({ abortWillFollow: true });
 		const allQueued = [...steering, ...followUp];
 		this.updatePendingMessagesDisplay();
 		await this.session.abort();
