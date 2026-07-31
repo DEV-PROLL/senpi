@@ -12,10 +12,9 @@
 
 ### Why
 
-- The two copies had already drifted: `packages/ai` treated an explicit `thinkingLevelMap` as authoritative
-  while the coding-agent copy inferred tiers from the id regardless, so a map-less `gpt-5.6-sol` could show
-  `max` in the UI while the provider payload clamped to `high`. Delegating keeps capability display and wire
-  payload derived from one rule set.
+- Tier rules belong to `packages/ai`; delegating removes the coding-agent's duplicate model-id lists and
+  precedence logic so future capability changes have one implementation. Generated catalog models retain
+  their explicit maps, so behavior for real catalog models is intentionally unchanged.
 
 ### Why extension system couldn't handle this alone
 

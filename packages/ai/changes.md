@@ -1,18 +1,19 @@
 # changes.md — ai
 
-## Map-less GPT-5.6 Sol max reasoning (2026-07-30)
+## Shared reasoning-tier capability detection (2026-07-30)
 
 ### What changed
 
-- Runtime capability detection now recognizes `max` for map-less OpenAI-compatible `gpt-5.6-sol` models while
-  preserving explicit map omissions and `null` vetoes.
-- OpenAI-compatible request builders serialize the selected level as `reasoning.effort: "max"`
-  (`reasoning_effort: "max"` on Completions).
+- Shared `xhigh` / `max` model-family constants are hoisted in `models.ts`, and map-less inference now uses
+  one case-normalized, boundary-aware family matcher instead of unbounded substring checks.
+- `getSupportedThinkingLevels` delegates extended-tier precedence to the exported `supportsXhigh` and
+  `supportsMax` predicates rather than duplicating their map-omission and `null`-veto rules.
 
 ### Why
 
-- Custom providers such as `codex-lb` can supply Sol without generated model metadata. The UI and provider
-  payload must agree instead of displaying `max` while silently sending `high`.
+- Capability inference for custom map-less models should reject unrelated ids and case-normalize legitimate
+  aliases while keeping one precedence implementation. Generated catalog models retain their explicit maps,
+  so behavior for real catalog models is intentionally unchanged.
 
 ## Browser-safe prompt-cache TTL resolver (2026-07-28)
 
