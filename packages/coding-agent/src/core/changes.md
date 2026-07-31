@@ -1,5 +1,28 @@
 # changes
 
+## Deduplicate high-reasoning warnings per session model (2026-07-31)
+
+### What changed
+
+- `agent-session.ts` now remembers every sensitive provider/model identity that
+  already displayed the high-reasoning warning during the current session.
+- Moving between `xhigh`, `max`, lower reasoning levels, or another model no
+  longer re-arms the warning for an identity the user already saw.
+- A different sensitive provider/model identity still receives its own first
+  warning.
+
+### Why
+
+- The previous single last-key value was cleared whenever the active state was
+  not warnable and included the reasoning level in its key. Cycling reasoning
+  levels or switching away and back therefore appended the same large warning
+  box repeatedly.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` warning-dedup state and
+  `_emitHighReasoningWarningIfNeeded()`.
+
 ## Preserve the user's reasoning preference across model switches (2026-07-31)
 
 ### What changed

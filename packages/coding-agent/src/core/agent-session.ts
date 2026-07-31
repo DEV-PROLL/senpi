@@ -667,7 +667,7 @@ export class AgentSession {
 	private _baseSystemPrompt = "";
 	private _currentServiceTier: ServiceTier | undefined = undefined;
 	private _sessionFastMode = false;
-	private _lastHighReasoningWarningKey: string | undefined = undefined;
+	private readonly _shownHighReasoningWarningKeys = new Set<string>();
 	private _baseSystemPromptOptions!: BuildDynamicSystemPromptOptions;
 	private _systemPromptOverride?: string;
 
@@ -3424,15 +3424,10 @@ export class AgentSession {
 	private _emitHighReasoningWarningIfNeeded(): void {
 		const model = this.model;
 		const level = this.thinkingLevel;
-		if (!model || !shouldWarnHighReasoning(model, level)) {
-			this._lastHighReasoningWarningKey = undefined;
-			return;
-		}
-		const key = `${model.provider}/${model.id}:${level}`;
-		if (this._lastHighReasoningWarningKey === key) {
-			return;
-		}
-		this._lastHighReasoningWarningKey = key;
+		if (!model || !shouldWarnHighReasoning(model, level)) return;
+		const key = `${model.provider}/${model.id}`;
+		if (this._shownHighReasoningWarningKeys.has(key)) return;
+		this._shownHighReasoningWarningKeys.add(key);
 		this._emit({
 			type: "high_reasoning_warning",
 			modelId: model.id,

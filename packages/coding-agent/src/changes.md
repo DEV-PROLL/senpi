@@ -1,3 +1,30 @@
+## Supersede level-scoped high-reasoning warning deduplication (2026-07-31)
+
+### What changed
+
+- High-reasoning warnings are now deduplicated once per provider/model identity
+  for the lifetime of an `AgentSession`, rather than once per
+  provider/model/reasoning-level tuple.
+- Moving between `xhigh`, `max`, lower reasoning levels, or another model and
+  back does not append the same warning again.
+- A different sensitive provider/model identity still receives its own first
+  warning.
+
+### Why
+
+- The released provider/model/level behavior caused the large warning box to
+  reappear while the user was only changing reasoning effort. This follow-up
+  intentionally supersedes that earlier contract.
+
+### Why extension system couldn't handle this
+
+- Warning deduplication is session-owned state inside `AgentSession` and must
+  apply consistently before TUI and RPC consumers receive the event.
+
+### Expected merge conflict zones
+
+- LOW: `core/agent-session.ts` high-reasoning warning state and emission.
+
 ## Required-compaction recovery and queue chronology (2026-07-31)
 
 - Targeted required-compaction summarization failures can recover from a deterministic, suffix-safe local checkpoint without a second provider request; unfit recovery remains fail-closed and preserves the latest request.
