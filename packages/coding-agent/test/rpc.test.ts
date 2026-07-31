@@ -157,7 +157,7 @@ describe("RPC mode", () => {
 	test("should get provider accounts without credential material", async () => {
 		await client.start();
 
-		const accounts = await client.getProviderAccounts("claude-agent-sdk");
+		const accounts = await client.getProviderAccounts("claude-sdk-oauth");
 		expect(accounts).toEqual([]);
 		expect(JSON.stringify(accounts)).not.toMatch(/sk-ant/);
 	}, 30000);

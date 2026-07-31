@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { emitProviderAccountFailover } from "../../src/core/extensions/builtin/claude-agent-sdk/account-events.ts";
+import { emitProviderAccountFailover } from "../../src/core/extensions/builtin/claude-sdk-oauth/account-events.ts";
 import type { RpcEnvelope } from "../../src/modes/app-server/rpc/envelope.ts";
 import { ServerCore } from "../../src/modes/app-server/server/server-core.ts";
 
@@ -32,10 +32,10 @@ describe("app-server account reads", () => {
 	it("reads, pins, and removes provider accounts without exposing credentials", async () => {
 		// Given: managed provider slots include token-shaped values that must stay in auth.json.
 		const fixture = await createFixture({
-			"claude-agent-sdk": {
+			"claude-sdk-oauth": {
 				type: "oauth",
-				access: "claude-agent-sdk-managed",
-				refresh: "claude-agent-sdk-managed",
+				access: "claude-sdk-oauth-managed",
+				refresh: "claude-sdk-oauth-managed",
 				expires: 4_102_444_800_000,
 				pinned: "work",
 				accounts: [
@@ -65,20 +65,20 @@ describe("app-server account reads", () => {
 			// When: the desktop-facing provider account methods are used.
 			await fixture.core.receive(
 				fixture.connectionId,
-				request(2, "account/providerAccounts/read", { provider: "claude-agent-sdk" }),
+				request(2, "account/providerAccounts/read", { provider: "claude-sdk-oauth" }),
 			);
 			await fixture.core.receive(
 				fixture.connectionId,
-				request(3, "account/providerAccounts/pin", { provider: "claude-agent-sdk", name: "personal" }),
+				request(3, "account/providerAccounts/pin", { provider: "claude-sdk-oauth", name: "personal" }),
 			);
 			await fixture.core.receive(
 				fixture.connectionId,
-				request(4, "account/providerAccounts/remove", { provider: "claude-agent-sdk", name: "work" }),
+				request(4, "account/providerAccounts/remove", { provider: "claude-sdk-oauth", name: "work" }),
 			);
 
 			// Then: only safe slot metadata crosses the wire and each mutation notifies clients.
 			expect(resultOf(fixture.sent[1], 2)).toEqual({
-				provider: "claude-agent-sdk",
+				provider: "claude-sdk-oauth",
 				accounts: [
 					{ name: "personal", source: "login", blocked: false, pinned: false },
 					{ name: "work", source: "import", blocked: true, pinned: true },
@@ -86,17 +86,17 @@ describe("app-server account reads", () => {
 			});
 			expect(resultOf(fixture.sent[2], 3)).toEqual({});
 			expect(resultOf(fixture.sent[4], 4)).toEqual({});
-			emitProviderAccountFailover("claude-agent-sdk", "personal", "work", "rate_limit");
+			emitProviderAccountFailover("claude-sdk-oauth", "personal", "work", "rate_limit");
 			const notifications = fixture.sent.filter(
 				(message) => "method" in message && message.method === "account/providerAccounts/updated",
 			);
 			expect(notifications).toHaveLength(2);
 			for (const notification of notifications) {
-				expect(notification).toMatchObject({ params: { provider: "claude-agent-sdk" } });
+				expect(notification).toMatchObject({ params: { provider: "claude-sdk-oauth" } });
 			}
 			expect(fixture.sent.at(-1)).toMatchObject({
 				method: "account/providerAccounts/failover",
-				params: { provider: "claude-agent-sdk", from: "personal", to: "work", reason: "rate_limit" },
+				params: { provider: "claude-sdk-oauth", from: "personal", to: "work", reason: "rate_limit" },
 			});
 			expect(JSON.stringify(fixture.sent)).not.toMatch(/sk-ant/);
 		} finally {

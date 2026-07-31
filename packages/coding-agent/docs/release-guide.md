@@ -166,7 +166,7 @@ The authoritative `builtinExtensions` registration order contains 31 extensions:
 26. `goal`
 27. `ttsr`
 28. `btw`
-29. `claude-agent-sdk`
+29. `claude-sdk-oauth`
 30. `config-reload`
 31. `mcp`
 
@@ -255,7 +255,7 @@ npm --prefix packages/coding-agent exec vitest -- \
   test/suite/vendored-builtins.test.ts \
   test/extensions/loader-concurrency.test.ts \
   test/mcp/ \
-  test/suite/claude-agent-sdk-extension.test.ts \
+  test/suite/claude-sdk-oauth-extension.test.ts \
   test/suite/terminal-extension.test.ts \
   test/compaction/ \
   test/ttsr/

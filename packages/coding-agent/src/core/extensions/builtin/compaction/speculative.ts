@@ -179,7 +179,7 @@ function isAssistantMessage(message: Message): message is AssistantMessage {
 }
 
 /**
- * Providers registered through `pi.registerProvider()` (claude-agent-sdk, Kiro, any
+ * Providers registered through `pi.registerProvider()` (claude-sdk-oauth, Kiro, any
  * extension provider) exist only in Senpi's ModelRuntime, never in compat's builtin
  * api-registry, which rejects their api id outright. Dispatch through the runtime
  * whenever it is reachable and keep compat for contexts constructed without a registry.
