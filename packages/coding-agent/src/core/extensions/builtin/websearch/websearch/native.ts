@@ -82,7 +82,6 @@ function shouldDiscoverNativeRoute(activeModel: NativeModelInfo | undefined, ava
 	const mapping = nativeMapping(availableModel);
 	if (!mapping) return false;
 	if (!activeModel) return true;
-	if (mapping.provider !== "openai" && mapping.provider !== "anthropic") return true;
 	return activeModel.provider === availableModel.provider;
 }
 

@@ -137,7 +137,8 @@ describe("websearch per-attempt progress", () => {
 			.join("\n");
 
 		// then
-		expect(collapsed).toContain('Searching "attempt progress" via exa/backup (max 10)');
+		expect(collapsed).toContain('Searching "attempt progress" via exa/backup');
+		expect(collapsed).not.toContain("(max ");
 		expect(collapsed).not.toMatch(/\[\d+\/\d+\]/);
 		expect(collapsed).not.toContain("exa/primary ->");
 		expect(expanded).toContain("route exa/primary:failed -> exa/backup:searching");
