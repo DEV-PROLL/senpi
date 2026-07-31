@@ -1,5 +1,22 @@
 # goal Extension Changes
 
+## Migrate legacy pi-goal state into the builtin goal store (2026-07-31)
+
+### What changed
+
+- Session startup now migrates a legacy sibling `pi-goal` file when the builtin `goal` store does not yet exist.
+- Legacy `budgetLimited` / `budget_limited` goals resume as active, and `tokenBudget` is stripped from runtime state while the original legacy file remains untouched.
+- Existing builtin goal files remain authoritative and are never overwritten by migration.
+
+### Why
+
+- Moving the extension store from `pi-goal` to `goal` otherwise made existing objectives appear lost, and legacy budget metadata is incompatible with the builtin goal extension's budget-free design.
+
+### Verification
+
+- Goal-store coverage pins migration, runtime budget stripping, destination persistence, source preservation, and the existing app-server wire contract.
+
+||||||| a2efa4076
 ## Accepted direct input leaves an active Goal idle (2026-07-31)
 
 ### What changed

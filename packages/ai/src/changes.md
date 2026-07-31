@@ -1,5 +1,17 @@
 # AI Source Changes
 
+## 2026-07-30 - Map-less GPT-5.6 Sol preserves max reasoning
+
+### What changed and why
+
+- OpenAI-compatible map-less `gpt-5.6-sol` models now expose `xhigh` and `max` without requiring a generated
+  `thinkingLevelMap`.
+- Explicit maps remain authoritative: a missing level on an existing map stays unavailable, and `null` still
+  vetoes the heuristic.
+- OpenAI Responses, Azure Responses, Codex Responses, and Completions send `max` on the wire instead of
+  clamping a UI-selected map-less Sol level to `high`.
+- Coverage pins capability, negative non-Sol boundaries, and captured request payloads without live tokens.
+
 ## 2026-07-30 - Recover Kimi XTML response channels from thinking
 
 ### What changed and why
