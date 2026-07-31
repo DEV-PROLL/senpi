@@ -12,6 +12,12 @@
 
 ### Fixed
 
+- Publish the CalVer-aware update comparison in a semver-forward bare-date release so clients still running
+  `2026.7.30` can bootstrap through `senpi update`. npm semver considers same-day suffixed revisions prereleases, so
+  `2026.7.30-2` contains the comparator fix but cannot be discovered by the affected old comparator; `2026.7.31`
+  restores an update path that both the old semver comparator and the corrected Senpi CalVer comparator recognize as
+  newer.
+
 ### Removed
 
 ## [2026.7.30-2] - 2026-07-30
