@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
 	cleanAssistantStop,
@@ -8,6 +10,7 @@ import {
 	type GoalHarness,
 	makeGoalContext,
 	runGoalHandlers,
+	waitForGoalContinuationCount,
 } from "./goal-monitor-test-harness.ts";
 
 const STALL_MARKER = "<goal_stall_check>";
@@ -72,7 +75,15 @@ async function runContinuationCycle(
 
 async function runMonitorContinuationCycle(harness: GoalHarness, ctx: ExtensionContext): Promise<void> {
 	await runContinuationCycle(harness, ctx);
+	const ref = {
+		baseDir: join(ctx.sessionManager.getSessionDir(), "extensions", "goal"),
+		threadId: ctx.sessionManager.getSessionId(),
+	};
+	const goal = await readGoal(ref);
+	if (goal === null) throw new Error("Expected persisted goal");
+	const delayedDeliveryRecorded = waitForGoalContinuationCount(ctx, (goal.consecutiveContinuations ?? 0) + 1);
 	await vi.advanceTimersByTimeAsync(240_000);
+	await delayedDeliveryRecorded;
 }
 
 function stallEvents(harness: GoalHarness): unknown[] {
