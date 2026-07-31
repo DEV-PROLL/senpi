@@ -2,22 +2,22 @@ import {
 	type Api,
 	type AssistantMessageEventStream,
 	type Context,
+	createAssistantMessageDiagnostic,
 	createAssistantMessageEventStream,
 	type Model,
 	parseStreamingJson,
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { getSessionClaudeAccountPin } from "./account-command.ts";
-import { AllAccountsBlockedError } from "./affinity.ts";
 import { queryWithAuthLane } from "./auth-lane.ts";
 import { buildCustomToolServers } from "./custom-tools.ts";
-import { classifySdkError } from "./errors.ts";
 import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable.ts";
-import { allAccountsBlockedGuidance, sdkErrorGuidance } from "./guidance.ts";
 import { buildClaudeSdkOauthQueryOptions } from "./options.ts";
 import { buildPromptBlocks, buildPromptStream } from "./prompt-bridge.ts";
 import { getSdkBoundary, type SdkQueryHandle } from "./sdk-boundary.ts";
+import { residentSessionMessages } from "./session-stream.ts";
 import { loadClaudeSdkOauthProviderSettingsFromDisk } from "./settings.ts";
+import { withAuthGuidance } from "./stream-guidance.ts";
 import {
 	asRecord,
 	emptyOutput,
@@ -47,8 +47,6 @@ export function streamClaudeSdkOauth(
 		let wasAborted = false;
 		let started = false;
 		let sawStreamEvent = false;
-		let sawToolCall = false;
-		let shouldStopEarly = false;
 		const closeQuery = (): void => {
 			if (closed || !sdkQuery) return;
 			closed = true;
@@ -77,30 +75,59 @@ export function streamClaudeSdkOauth(
 			const providerSettings = loadClaudeSdkOauthProviderSettingsFromDisk(process.cwd());
 			const mcpServers = buildCustomToolServers(resolvedTools.customTools);
 			const executable = resolveClaudeCodeExecutable(defaultExecutableDeps());
-			const messages = queryWithAuthLane({
-				prompt: buildPromptStream(buildPromptBlocks(context, resolvedTools.customToolNameToSdk, toolWatchNote)),
-				query: getSdkBoundary().query,
-				providerSettings,
-				sessionId: affinityKey,
-				pinnedAccount: getSessionClaudeAccountPin(options?.sessionId),
-				onQuery: (query) => {
-					sdkQuery = query;
-					if (wasAborted) requestAbort();
-				},
-				buildOptions: (authLane) => {
-					const queryOptions = buildClaudeSdkOauthQueryOptions({
+			const buildOptions = (authLane: Parameters<typeof buildClaudeSdkOauthQueryOptions>[0]["authLane"]) => {
+				const queryOptions = buildClaudeSdkOauthQueryOptions({
+					model,
+					context,
+					streamOptions: options,
+					providerSettings,
+					authLane,
+					tools: resolvedTools.sdkTools,
+					pathToClaudeCodeExecutable: executable,
+					sessionId: options?.sessionId,
+					onGuidance: (text) => {
+						output.diagnostics = [
+							...(output.diagnostics ?? []),
+							createAssistantMessageDiagnostic("claude_sdk_oauth_deprecation", text),
+						];
+					},
+				});
+				if (mcpServers) queryOptions.mcpServers = mcpServers;
+				return queryOptions;
+			};
+			const useResidentSession =
+				options?.streamKind === "main" && providerSettings.resumeMode !== "off" && options.sessionId !== undefined;
+			const messages = useResidentSession
+				? residentSessionMessages({
 						model,
 						context,
 						streamOptions: options,
 						providerSettings,
-						authLane,
-						tools: resolvedTools.sdkTools,
-						pathToClaudeCodeExecutable: executable,
+						pinnedAccount: getSessionClaudeAccountPin(options.sessionId),
+						buildOptions,
+						customToolNameToSdk: resolvedTools.customToolNameToSdk,
+						toolWatchNote,
+						onResumeFallback: (error) => {
+							output.diagnostics = [
+								...(output.diagnostics ?? []),
+								createAssistantMessageDiagnostic("claude_sdk_oauth_resume_fallback", error),
+							];
+						},
+					})
+				: queryWithAuthLane({
+						prompt: buildPromptStream(
+							buildPromptBlocks(context, resolvedTools.customToolNameToSdk, toolWatchNote),
+						),
+						query: getSdkBoundary().query,
+						providerSettings,
+						sessionId: affinityKey,
+						pinnedAccount: getSessionClaudeAccountPin(options?.sessionId),
+						onQuery: (query) => {
+							sdkQuery = query;
+							if (wasAborted) requestAbort();
+						},
+						buildOptions,
 					});
-					if (mcpServers) queryOptions.mcpServers = mcpServers;
-					return queryOptions;
-				},
-			});
 
 			for await (const message of messages) {
 				if (!started) {
@@ -129,7 +156,6 @@ export function streamClaudeSdkOauth(
 							output.content.push(block);
 							stream.push({ type: "thinking_start", contentIndex: output.content.length - 1, partial: output });
 						} else if (event.content_block.type === "tool_use") {
-							sawToolCall = true;
 							const block: ToolBlock = {
 								type: "toolCall",
 								id: event.content_block.id,
@@ -187,20 +213,24 @@ export function streamClaudeSdkOauth(
 					} else if (event.type === "message_delta") {
 						output.stopReason = mapStopReason(event.delta.stop_reason);
 						updateUsage(model, output, event.usage);
-					} else if (event.type === "message_stop" && sawToolCall) {
-						output.stopReason = "toolUse";
-						shouldStopEarly = true;
 					}
-				} else if (message.type === "result" && message.subtype === "success" && !sawStreamEvent) {
-					output.content.push({ type: "text", text: message.result });
-				} else if (message.type === "result" && message.subtype !== "success") {
+				} else if (message.type === "result" && message.subtype === "success") {
+					// Both fields are optional on the wire, so only adopt them when present.
+					// A terminal result must never downgrade a toolUse turn that the stream
+					// already established, or the agent loop would stop instead of running
+					// the tool call sitting in `output.content`.
+					if (message.usage) updateUsage(model, output, message.usage);
+					if (message.stop_reason != null && output.stopReason !== "toolUse") {
+						output.stopReason = mapStopReason(message.stop_reason);
+					}
+					if (!sawStreamEvent) output.content.push({ type: "text", text: message.result });
+				} else if (message.type === "result") {
 					const reason =
 						"errors" in message && Array.isArray(message.errors) && message.errors.length > 0
 							? String(message.errors[0])
 							: `Claude Code ${message.subtype}`;
 					throw new Error(reason);
 				}
-				if (shouldStopEarly) break;
 			}
 
 			if (wasAborted || options?.signal?.aborted) {
@@ -225,12 +255,4 @@ export function streamClaudeSdkOauth(
 		}
 	})();
 	return stream;
-}
-
-function withAuthGuidance(error: unknown, message: string): string {
-	if (error instanceof AllAccountsBlockedError) {
-		return allAccountsBlockedGuidance(error.soonestUnblockAt);
-	}
-	const guidance = sdkErrorGuidance(classifySdkError(error).kind);
-	return guidance ? `${message}\n${guidance}` : message;
 }

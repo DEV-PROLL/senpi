@@ -64,7 +64,7 @@ function context(systemPrompt?: string): Context {
 
 function optionsFor(
 	systemPrompt: string | undefined,
-	providerSettings: ClaudeSdkOauthQueryOptionsInput["providerSettings"] = {},
+	providerSettings: ClaudeSdkOauthQueryOptionsInput["providerSettings"] = { systemPromptMode: "preset-append" },
 ) {
 	return buildClaudeSdkOauthQueryOptions({
 		model: model(),
@@ -83,7 +83,7 @@ function appendOf(queryOptions: ReturnType<typeof buildClaudeSdkOauthQueryOption
 
 function appendFor(
 	systemPrompt: string | undefined,
-	providerSettings: ClaudeSdkOauthQueryOptionsInput["providerSettings"] = {},
+	providerSettings: ClaudeSdkOauthQueryOptionsInput["providerSettings"] = { systemPromptMode: "preset-append" },
 ): string {
 	return appendOf(optionsFor(systemPrompt, providerSettings));
 }
@@ -134,12 +134,22 @@ describe("Claude SDK OAuth project instructions forwarding", () => {
 		expect(append).not.toContain(RULES_HEADING);
 	});
 
-	it("#given appendSystemPrompt disabled #when building query options #then no append is produced at all", () => {
+	it("#given legacy appendSystemPrompt disabled #when building query options #then preset-append extraction is used", () => {
 		const append = appendFor(`${SENPI_BASE_PROMPT}\n\n${SKILLS_BLOCK}\n\n${RULES_REGION}`, {
 			appendSystemPrompt: false,
 		});
 
-		expect(append).toBe("");
+		expect(append).toContain(SANITIZED_AGENTS_APPEND);
+		expect(append).toContain("<skill>deploy</skill>");
+		expect(append).toContain(CANARY);
+	});
+
+	it("#given no system prompt mode #when building query options #then full mode delivers the composed prompt verbatim without an append", () => {
+		const systemPrompt = `${SENPI_BASE_PROMPT}\n\n${SKILLS_BLOCK}\n\n${RULES_REGION}`;
+		const queryOptions = optionsFor(systemPrompt, {});
+
+		expect(queryOptions.systemPrompt).toBe(systemPrompt);
+		expect(appendOf(queryOptions)).toBe("");
 	});
 
 	it("#given both the skills block and the rules region #when building query options #then skills precede the rules region in the append", () => {
