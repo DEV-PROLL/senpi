@@ -10,6 +10,11 @@
 
 ### Fixed
 
+- Preserve rich live and terminal `eval` details when peeking detached cells,
+  including code, title, output, phase, status events, tool-call summaries,
+  duration, and structured displays; cancellation now remains authoritative
+  over late completion races.
+
 ### Removed
 
 ## [2026.7.31-2] - 2026-07-31
