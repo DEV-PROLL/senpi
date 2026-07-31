@@ -1199,7 +1199,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				totalTokens: 0,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
-			stopReason: "stop",
+			stopReason: "pending",
 			timestamp: Date.now(),
 		};
 
@@ -1243,6 +1243,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					options?.interleavedThinking ?? true,
 					shouldUseFineGrainedToolStreamingBeta(model, context),
 					optionsHeaders,
+					options?.fetch,
 					copilotDynamicHeaders,
 					cacheSessionId,
 					options?.env,
@@ -1489,6 +1490,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					}
 				} else if (event.type === "message_delta") {
 					if (event.delta.stop_reason) {
+						output.rawStopReason = event.delta.stop_reason;
 						const stopReasonResult = mapStopReason(event.delta.stop_reason, event.delta.stop_details);
 						output.stopReason = stopReasonResult.stopReason;
 						if (stopReasonResult.errorMessage) {
@@ -1537,6 +1539,9 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				applyServerFallbackAbort(output, serverFallbackReceipt);
 			}
 
+			if (output.stopReason === "pending") {
+				throw new Error("Anthropic stream ended without a stop reason");
+			}
 			if (output.stopReason === "aborted" || output.stopReason === "error") {
 				throw new Error(output.errorMessage || "An unknown error occurred");
 			}
@@ -1711,6 +1716,7 @@ function createClient(
 	interleavedThinking: boolean,
 	useFineGrainedToolStreamingBeta: boolean,
 	optionsHeaders?: Record<string, string>,
+	fetch?: typeof globalThis.fetch,
 	dynamicHeaders?: Record<string, string>,
 	sessionId?: string,
 	env?: ProviderEnv,
@@ -1758,6 +1764,7 @@ function createClient(
 			authToken: apiKey,
 			baseURL: model.baseUrl,
 			dangerouslyAllowBrowser: true,
+			fetch,
 			defaultHeaders: sanitizeAdaptiveThinkingHeaders(
 				model,
 				mergeHeaders(
@@ -1783,6 +1790,7 @@ function createClient(
 			authToken: apiKey,
 			baseURL: model.baseUrl,
 			dangerouslyAllowBrowser: true,
+			fetch,
 			defaultHeaders: sanitizeAdaptiveThinkingHeaders(
 				model,
 				mergeHeaders(
@@ -1810,6 +1818,7 @@ function createClient(
 		authToken: null,
 		baseURL: model.baseUrl,
 		dangerouslyAllowBrowser: true,
+		fetch,
 		defaultHeaders: sanitizeAdaptiveThinkingHeaders(
 			model,
 			mergeHeaders(
@@ -2350,7 +2359,11 @@ function mapStopReason(
 		case "stop_sequence":
 			return { stopReason: "stop" }; // We don't supply stop sequences, so this should never happen
 		case "sensitive": // Content flagged by safety filters (not yet in SDK types)
-			return { stopReason: "error", stopDetails: { type: "sensitive" } };
+			return {
+				stopReason: "error",
+				errorMessage: "Provider stopped with: sensitive",
+				stopDetails: { type: "sensitive" },
+			};
 		default:
 			// Handle unknown stop reasons gracefully (API may add new values)
 			throw new Error(`Unhandled stop reason: ${reason}`);

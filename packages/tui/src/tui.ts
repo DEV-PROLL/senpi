@@ -97,8 +97,9 @@ export interface Component {
 	dispose?(): void;
 }
 
-type InputListenerResult = { consume?: boolean; data?: string } | undefined;
-type InputListener = (data: string) => InputListenerResult;
+export type TuiInputListenerResult = { consume?: boolean; data?: string } | undefined;
+export type TuiInputListener = (data: string) => TuiInputListenerResult;
+type InputListener = TuiInputListener;
 type PendingOsc11BackgroundQuery = {
 	settled: boolean;
 	resolve: ((rgb: RgbColor | undefined) => void) | undefined;
@@ -488,10 +489,52 @@ export class Container implements Component {
 	}
 }
 
+/** Splice overlay content into a base line at a specific column. */
+export function compositeTuiLine(
+	baseLine: string,
+	overlayLine: string,
+	startCol: number,
+	overlayWidth: number,
+	totalWidth: number,
+): string {
+	if (isImageLine(baseLine) && visibleWidth(baseLine) === 0) return baseLine;
+	const placeholderIndex = baseLine.indexOf("\u{10eeee}");
+	const protocolEnd = placeholderIndex === -1 ? -1 : baseLine.lastIndexOf("\x1b\\", placeholderIndex);
+	const protocolPrefix = protocolEnd === -1 ? "" : baseLine.slice(0, protocolEnd + 2);
+
+	const afterStart = startCol + overlayWidth;
+	const base = extractSegments(baseLine, startCol, afterStart, totalWidth - afterStart, true);
+	const overlay = sliceWithWidth(overlayLine, 0, overlayWidth, true);
+
+	const beforePad = Math.max(0, startCol - base.beforeWidth);
+	const overlayPad = Math.max(0, overlayWidth - overlay.width);
+	const actualBeforeWidth = Math.max(startCol, base.beforeWidth);
+	const actualOverlayWidth = Math.max(overlayWidth, overlay.width);
+	const afterTarget = Math.max(0, totalWidth - actualBeforeWidth - actualOverlayWidth);
+	const afterPad = Math.max(0, afterTarget - base.afterWidth);
+
+	const r = TuiBase.SEGMENT_RESET;
+	const result =
+		base.before +
+		" ".repeat(beforePad) +
+		r +
+		overlay.text +
+		" ".repeat(overlayPad) +
+		r +
+		base.after +
+		" ".repeat(afterPad);
+
+	const resultWidth = visibleWidth(result);
+	if (resultWidth <= totalWidth) {
+		return protocolPrefix + result;
+	}
+	return protocolPrefix + sliceByColumn(result, 0, totalWidth, true);
+}
+
 /**
  * TUI - Main class for managing terminal UI with differential rendering
  */
-export class TUI extends Container {
+export class TuiBase extends Container {
 	public terminal: Terminal;
 	private previousLines: string[] = [];
 	private previousRawLines: string[] = [];
@@ -515,15 +558,16 @@ export class TUI extends Container {
 	private clearOnShrink = process.env.PI_CLEAR_ON_SHRINK === "1"; // Clear empty rows when content shrinks (default: off)
 	private maxLinesRendered = 0; // Track terminal's working area (max lines ever rendered)
 	private previousViewportTop = 0; // Track previous viewport top for resize-aware cursor moves
-	private fullRedrawCount = 0;
+	protected fullRedrawCount = 0;
 	private muxViewportRepaintCount = 0;
 	private overWideCrashDumpWritten = false;
-	private stopped = false;
+	protected stopped = false;
 	private pendingOsc11BackgroundReplies = 0;
 	private pendingOsc11BackgroundQueries: PendingOsc11BackgroundQuery[] = [];
 	private terminalColorSchemeListeners = new Set<(scheme: TerminalColorScheme) => void>();
 	private terminalColorSchemeNotificationsEnabled = false;
 	#lastCursorVisibility: boolean | undefined;
+	protected readonly logDirectory: string;
 
 	// Overlay stack for modal components rendered on top of base content
 	private focusOrderCounter = 0;
@@ -531,9 +575,10 @@ export class TUI extends Container {
 	private overlayFocusRestore: OverlayFocusRestoreState = { status: "inactive" };
 	#muxDetector: () => boolean;
 
-	constructor(terminal: Terminal, options?: boolean | TuiConstructorOptions) {
+	constructor(terminal: Terminal, options?: boolean | TuiConstructorOptions, logDirectory?: string) {
 		super();
 		this.terminal = terminal;
+		this.logDirectory = logDirectory ?? path.join(os.homedir(), ".senpi", "agent");
 		// Preserve existing positional boolean callers while allowing explicit render-policy overrides.
 		const normalizedOptions = typeof options === "boolean" ? { showHardwareCursor: options } : (options ?? {});
 		this.#muxDetector = normalizedOptions.muxDetector ?? isMultiplexerSession;
@@ -565,6 +610,20 @@ export class TUI extends Container {
 
 	getClearOnShrink(): boolean {
 		return this.clearOnShrink;
+	}
+
+	protected beforeTerminalStart(): void {}
+
+	protected beforeTerminalStop(): void {}
+
+	protected afterTerminalStop(): void {}
+
+	protected resetRenderState(): void {
+		this.previousLines = [];
+		this.previousRawLines = [];
+		this.previousKittyImageIds.clear();
+		this.previousWidth = 0;
+		this.previousHeight = 0;
 	}
 
 	/**
@@ -850,6 +909,7 @@ export class TUI extends Container {
 		this.renderRequested = false;
 		this.inputRenderPending = false;
 		this.#lastCursorVisibility = undefined;
+		this.beforeTerminalStart();
 		this.terminal.start(
 			(data) => this.handleInput(data),
 			() => this.requestRender(),
@@ -905,6 +965,7 @@ export class TUI extends Container {
 		this.stopped = true;
 		this.renderRequested = false;
 		this.inputRenderPending = false;
+		this.beforeTerminalStop();
 		if (this.renderTimer) {
 			clearTimeout(this.renderTimer);
 			this.renderTimer = undefined;
@@ -930,12 +991,9 @@ export class TUI extends Container {
 		this.#setCursorVisibility(true);
 		if (process.env.TMUX) this.terminal.write(DISABLE_FOCUS_REPORTING);
 		this.terminal.stop();
+		this.afterTerminalStop();
 		this.#lastCursorVisibility = undefined;
-		this.previousLines = [];
-		this.previousRawLines = [];
-		this.previousKittyImageIds.clear();
-		this.previousWidth = 0;
-		this.previousHeight = 0;
+		this.resetRenderState();
 		this.cursorRow = 0;
 		this.hardwareCursorRow = 0;
 		this.maxLinesRendered = 0;
@@ -1315,7 +1373,7 @@ export class TUI extends Container {
 	}
 
 	/** Composite all overlays into content lines (sorted by focusOrder, higher = on top). */
-	private compositeOverlays(lines: string[], termWidth: number, termHeight: number): string[] {
+	protected compositeOverlays(lines: string[], termWidth: number, termHeight: number): string[] {
 		if (this.overlayStack.length === 0) return lines;
 		const result = [...lines];
 
@@ -1376,7 +1434,7 @@ export class TUI extends Container {
 		return result;
 	}
 
-	private static readonly SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
+	static readonly SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
 
 	/**
 	 * Every frame write is bracketed by synchronized output (DECSET 2026) and
@@ -1401,10 +1459,14 @@ export class TUI extends Container {
 		if (isImageLine(line)) {
 			return { line, normalized: false };
 		}
-		return { line: normalizeTerminalOutput(line) + TUI.SEGMENT_RESET, normalized: true };
+		return { line: normalizeTerminalOutput(line) + TuiBase.SEGMENT_RESET, normalized: true };
 	}
 
-	private applyLineResets(lines: string[], mode: "escaped" | "full" = "full"): NormalizedLinesResult {
+	protected applyLineResets(lines: string[]): string[] {
+		return this.applyLineResetResult(lines).lines;
+	}
+
+	private applyLineResetResult(lines: string[], mode: "escaped" | "full" = "full"): NormalizedLinesResult {
 		const normalizedLines: string[] = [];
 		let normalizedCount = 0;
 		for (let i = 0; i < lines.length; i++) {
@@ -1412,7 +1474,7 @@ export class TUI extends Container {
 			if (isImageLine(line)) {
 				normalizedLines.push(line);
 			} else {
-				normalizedLines.push(normalizeTerminalOutput(line) + TUI.SEGMENT_RESET);
+				normalizedLines.push(normalizeTerminalOutput(line) + TuiBase.SEGMENT_RESET);
 				normalizedCount += 1;
 			}
 		}
@@ -1438,7 +1500,7 @@ export class TUI extends Container {
 			this.previousLines.length !== rawLines.length ||
 			this.previousRawLines.length !== rawLines.length
 		) {
-			return this.applyLineResets(rawLines);
+			return this.applyLineResetResult(rawLines);
 		}
 
 		const windowStart = Math.max(0, viewportTop - VIEWPORT_RENDER_OVERSCAN);
@@ -1452,7 +1514,7 @@ export class TUI extends Container {
 				firstRawChanged = i;
 			}
 			if (i < windowStart || i >= windowEnd) {
-				return this.applyLineResets(rawLines, "escaped");
+				return this.applyLineResetResult(rawLines, "escaped");
 			}
 		}
 
@@ -1639,7 +1701,7 @@ export class TUI extends Container {
 		width: number,
 		height: number,
 	): void {
-		let buffer = TUI.FRAME_BEGIN;
+		let buffer = TuiBase.FRAME_BEGIN;
 		const regionTop = 0;
 		const regionBottom = plan.regionBottom;
 		buffer += `\x1b[${regionTop + 1};${regionBottom + 1}r`;
@@ -1651,16 +1713,16 @@ export class TUI extends Container {
 		let finalPaintedScreenRow = firstInsertedScreenRow + plan.insertedRows.length - 1;
 		for (let index = 0; index < plan.insertedRows.length; index++) {
 			const screenRow = firstInsertedScreenRow + index;
-			buffer += `\x1b[${screenRow + 1};1H\x1b[2K${TUI.SEGMENT_RESET}`;
+			buffer += `\x1b[${screenRow + 1};1H\x1b[2K${TuiBase.SEGMENT_RESET}`;
 			buffer += plan.insertedRows[index] ?? "";
 		}
 		for (const row of plan.mutatedRows) {
-			buffer += `\x1b[${row.screenRow + 1};1H\x1b[2K${TUI.SEGMENT_RESET}`;
+			buffer += `\x1b[${row.screenRow + 1};1H\x1b[2K${TuiBase.SEGMENT_RESET}`;
 			buffer += row.content;
 			finalPaintedScreenRow = row.screenRow;
 		}
 
-		buffer += TUI.FRAME_END;
+		buffer += TuiBase.FRAME_END;
 		this.terminal.write(buffer);
 
 		this.cursorRow = Math.max(0, newLines.length - 1);
@@ -1683,7 +1745,7 @@ export class TUI extends Container {
 		prevViewportTop: number,
 		hardwareCursorRow: number,
 	): void {
-		let buffer = TUI.FRAME_BEGIN;
+		let buffer = TuiBase.FRAME_BEGIN;
 		buffer += this.deleteKittyImages(this.previousKittyImageIds);
 		if (!this.shouldPreserveMuxScrollback()) {
 			buffer += "\x1b[3J";
@@ -1697,11 +1759,11 @@ export class TUI extends Container {
 		const bufferLength = Math.max(height, newLines.length);
 		for (let row = 0; row < bufferLength; row++) {
 			if (row > 0) buffer += "\r\n";
-			buffer += `\r\x1b[2K${TUI.SEGMENT_RESET}`;
+			buffer += `\r\x1b[2K${TuiBase.SEGMENT_RESET}`;
 			buffer += newLines[row] ?? "";
 		}
 
-		buffer += TUI.FRAME_END;
+		buffer += TuiBase.FRAME_END;
 		this.terminal.write(buffer);
 
 		this.cursorRow = Math.max(0, newLines.length - 1);
@@ -1729,7 +1791,7 @@ export class TUI extends Container {
 			return false;
 		}
 
-		let buffer = TUI.FRAME_BEGIN;
+		let buffer = TuiBase.FRAME_BEGIN;
 		const currentScreenRow = Math.max(0, Math.min(height - 1, this.hardwareCursorRow - this.previousViewportTop));
 		if (currentScreenRow > 0) {
 			buffer += `\x1b[${currentScreenRow}A`;
@@ -1737,11 +1799,11 @@ export class TUI extends Container {
 
 		for (let row = 0; row < height; row++) {
 			if (row > 0) buffer += "\r\n";
-			buffer += `\r\x1b[2K${TUI.SEGMENT_RESET}`;
+			buffer += `\r\x1b[2K${TuiBase.SEGMENT_RESET}`;
 			buffer += newLines[viewportTop + row] ?? "";
 		}
 
-		buffer += TUI.FRAME_END;
+		buffer += TuiBase.FRAME_END;
 		this.terminal.write(buffer);
 
 		this.muxViewportRepaintCount += 1;
@@ -1765,50 +1827,7 @@ export class TUI extends Container {
 		overlayWidth: number,
 		totalWidth: number,
 	): string {
-		if (isImageLine(baseLine) && visibleWidth(baseLine) === 0) return baseLine;
-		const placeholderIndex = baseLine.indexOf("\u{10eeee}");
-		const protocolEnd = placeholderIndex === -1 ? -1 : baseLine.lastIndexOf("\x1b\\", placeholderIndex);
-		const protocolPrefix = protocolEnd === -1 ? "" : baseLine.slice(0, protocolEnd + 2);
-
-		// Single pass through baseLine extracts both before and after segments
-		const afterStart = startCol + overlayWidth;
-		const base = extractSegments(baseLine, startCol, afterStart, totalWidth - afterStart, true);
-
-		// Extract overlay with width tracking (strict=true to exclude wide chars at boundary)
-		const overlay = sliceWithWidth(overlayLine, 0, overlayWidth, true);
-
-		// Pad segments to target widths
-		const beforePad = Math.max(0, startCol - base.beforeWidth);
-		const overlayPad = Math.max(0, overlayWidth - overlay.width);
-		const actualBeforeWidth = Math.max(startCol, base.beforeWidth);
-		const actualOverlayWidth = Math.max(overlayWidth, overlay.width);
-		const afterTarget = Math.max(0, totalWidth - actualBeforeWidth - actualOverlayWidth);
-		const afterPad = Math.max(0, afterTarget - base.afterWidth);
-
-		// Compose result
-		const r = TUI.SEGMENT_RESET;
-		const result =
-			base.before +
-			" ".repeat(beforePad) +
-			r +
-			overlay.text +
-			" ".repeat(overlayPad) +
-			r +
-			base.after +
-			" ".repeat(afterPad);
-
-		// CRITICAL: Always verify and truncate to terminal width.
-		// This is the final safeguard against width overflow which would crash the TUI.
-		// Width tracking can drift from actual visible width due to:
-		// - Complex ANSI/OSC sequences (hyperlinks, colors)
-		// - Wide characters at segment boundaries
-		// - Edge cases in segment extraction
-		const resultWidth = visibleWidth(result);
-		if (resultWidth <= totalWidth) {
-			return protocolPrefix + result;
-		}
-		// Truncate with strict=true to ensure we don't exceed totalWidth
-		return protocolPrefix + sliceByColumn(result, 0, totalWidth, true);
+		return compositeTuiLine(baseLine, overlayLine, startCol, overlayWidth, totalWidth);
 	}
 
 	/**
@@ -1819,7 +1838,7 @@ export class TUI extends Container {
 	 * @param height - Terminal height (visible viewport size)
 	 * @returns Cursor position { row, col } or null if no marker found
 	 */
-	private extractCursorPosition(lines: string[], height: number): { row: number; col: number } | null {
+	protected extractCursorPosition(lines: string[], height: number): { row: number; col: number } | null {
 		// Only scan the bottom `height` lines (visible viewport)
 		const viewportTop = Math.max(0, lines.length - height);
 		for (let row = lines.length - 1; row >= viewportTop; row--) {
@@ -1839,7 +1858,7 @@ export class TUI extends Container {
 		return null;
 	}
 
-	private doRender(): void {
+	protected doRender(): void {
 		if (this.stopped) return;
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
@@ -1879,7 +1898,7 @@ export class TUI extends Container {
 		// Helper to clear scrollback and viewport and render all new lines
 		const fullRender = (clear: boolean, clearScrollback = clear): void => {
 			this.fullRedrawCount += 1;
-			let buffer = TUI.FRAME_BEGIN;
+			let buffer = TuiBase.FRAME_BEGIN;
 			if (clear) {
 				buffer += this.deleteKittyImages(this.previousKittyImageIds);
 				buffer += "\x1b[2J\x1b[H";
@@ -1887,7 +1906,7 @@ export class TUI extends Container {
 					buffer += "\x1b[3J";
 				}
 			} else {
-				buffer += `\r\x1b[2K${TUI.SEGMENT_RESET}`;
+				buffer += `\r\x1b[2K${TuiBase.SEGMENT_RESET}`;
 			}
 			for (let i = 0; i < newLines.length; i++) {
 				if (i > 0) buffer += "\r\n";
@@ -1906,7 +1925,7 @@ export class TUI extends Container {
 				}
 				buffer += line;
 			}
-			buffer += TUI.FRAME_END;
+			buffer += TuiBase.FRAME_END;
 			this.terminal.write(buffer);
 			this.cursorRow = Math.max(0, newLines.length - 1);
 			this.hardwareCursorRow = this.cursorRow;
@@ -1928,7 +1947,7 @@ export class TUI extends Container {
 		const debugRedraw = process.env.PI_DEBUG_REDRAW === "1";
 		const logRedraw = (reason: string): void => {
 			if (!debugRedraw) return;
-			const logPath = path.join(os.homedir(), ".senpi", "agent", "senpi-debug.log");
+			const logPath = path.join(this.logDirectory, "senpi-debug.log");
 			const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})\n`;
 			fs.appendFileSync(logPath, msg, { encoding: "utf8", mode: DIAGNOSTIC_LOG_MODE });
 			chmodDiagnosticLogBestEffort(logPath);
@@ -2025,7 +2044,7 @@ export class TUI extends Container {
 		// All changes are in deleted lines (nothing to render, just clear)
 		if (firstChanged >= newLines.length) {
 			if (this.previousLines.length > newLines.length) {
-				let buffer = TUI.FRAME_BEGIN;
+				let buffer = TuiBase.FRAME_BEGIN;
 				buffer += this.deleteChangedKittyImages(firstChanged, lastChanged);
 				// Move to end of new content (clamp to 0 for empty content)
 				const targetRow = Math.max(0, newLines.length - 1);
@@ -2050,14 +2069,14 @@ export class TUI extends Container {
 					buffer += `\x1b[${clearStartOffset}B`;
 				}
 				for (let i = 0; i < extraLines; i++) {
-					buffer += `\r\x1b[2K${TUI.SEGMENT_RESET}`;
+					buffer += `\r\x1b[2K${TuiBase.SEGMENT_RESET}`;
 					if (i < extraLines - 1) buffer += "\x1b[1B";
 				}
 				const moveBack = Math.max(0, extraLines - 1 + clearStartOffset);
 				if (moveBack > 0) {
 					buffer += `\x1b[${moveBack}A`;
 				}
-				buffer += TUI.FRAME_END;
+				buffer += TuiBase.FRAME_END;
 				this.terminal.write(buffer);
 				this.cursorRow = targetRow;
 				this.hardwareCursorRow = targetRow;
@@ -2127,7 +2146,7 @@ export class TUI extends Container {
 
 			if (viewportTop !== prevViewportTop) {
 				const previousViewportBottom = Math.min(this.previousLines.length - 1, prevViewportTop + height - 1);
-				let buffer = TUI.FRAME_BEGIN;
+				let buffer = TuiBase.FRAME_BEGIN;
 				buffer += this.deleteChangedKittyImages(prevViewportTop, previousViewportBottom);
 
 				const currentScreenRow = Math.max(0, Math.min(height - 1, hardwareCursorRow - prevViewportTop));
@@ -2137,11 +2156,11 @@ export class TUI extends Container {
 
 				for (let row = 0; row < height; row++) {
 					if (row > 0) buffer += "\r\n";
-					buffer += `\r\x1b[2K${TUI.SEGMENT_RESET}`;
+					buffer += `\r\x1b[2K${TuiBase.SEGMENT_RESET}`;
 					buffer += newLines[viewportTop + row] ?? "";
 				}
 
-				buffer += TUI.FRAME_END;
+				buffer += TuiBase.FRAME_END;
 				this.terminal.write(buffer);
 
 				this.cursorRow = Math.max(0, newLines.length - 1);
@@ -2162,7 +2181,7 @@ export class TUI extends Container {
 
 		// Render from first changed line to end
 		// Build buffer with all updates wrapped in synchronized output
-		let buffer = TUI.FRAME_BEGIN;
+		let buffer = TuiBase.FRAME_BEGIN;
 		buffer += this.deleteChangedKittyImages(firstChanged, lastChanged);
 		const prevViewportBottom = prevViewportTop + height - 1;
 		const moveTargetRow = appendStart ? firstChanged - 1 : firstChanged;
@@ -2207,9 +2226,9 @@ export class TUI extends Container {
 					return;
 				}
 
-				buffer += `\x1b[2K${TUI.SEGMENT_RESET}`;
+				buffer += `\x1b[2K${TuiBase.SEGMENT_RESET}`;
 				for (let row = 1; row < imageReservedRows; row++) {
-					buffer += `\r\n\x1b[2K${TUI.SEGMENT_RESET}`;
+					buffer += `\r\n\x1b[2K${TuiBase.SEGMENT_RESET}`;
 				}
 				buffer += `\x1b[${imageReservedRows - 1}A`;
 				buffer += line;
@@ -2218,10 +2237,10 @@ export class TUI extends Container {
 				continue;
 			}
 
-			buffer += `\x1b[2K${TUI.SEGMENT_RESET}`; // Clear current line
+			buffer += `\x1b[2K${TuiBase.SEGMENT_RESET}`; // Clear current line
 			const lineWidth = visibleWidth(line);
 			if (!isImage && lineWidth > width) {
-				const crashLogPath = path.join(os.homedir(), ".senpi", "agent", "senpi-crash.log");
+				const crashLogPath = path.join(this.logDirectory, "senpi-crash.log");
 				const strictRender = process.env.PI_TUI_STRICT_RENDER === "1";
 				if (strictRender || !this.overWideCrashDumpWritten) {
 					const crashData = formatOverWideRenderDiagnostic(newLines, width, i, lineWidth);
@@ -2247,7 +2266,7 @@ export class TUI extends Container {
 						throw new Error(errorMsg);
 					}
 				}
-				const truncatedLine = sliceByColumn(line, 0, width, true) + TUI.SEGMENT_RESET;
+				const truncatedLine = sliceByColumn(line, 0, width, true) + TuiBase.SEGMENT_RESET;
 				newLines[i] = truncatedLine;
 				buffer += truncatedLine;
 				continue;
@@ -2268,13 +2287,13 @@ export class TUI extends Container {
 			}
 			const extraLines = this.previousLines.length - newLines.length;
 			for (let i = newLines.length; i < this.previousLines.length; i++) {
-				buffer += `\r\n\x1b[2K${TUI.SEGMENT_RESET}`;
+				buffer += `\r\n\x1b[2K${TuiBase.SEGMENT_RESET}`;
 			}
 			// Move cursor back to end of new content
 			buffer += `\x1b[${extraLines}A`;
 		}
 
-		buffer += TUI.FRAME_END;
+		buffer += TuiBase.FRAME_END;
 
 		if (process.env.PI_TUI_DEBUG === "1") {
 			const debugDir = "/tmp/tui";
@@ -2423,3 +2442,6 @@ export class TUI extends Container {
 		});
 	}
 }
+
+/** Legacy main-screen renderer export. */
+export class TUI extends TuiBase {}

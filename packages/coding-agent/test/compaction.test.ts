@@ -21,7 +21,7 @@ vi.mock("@earendil-works/pi-ai/compat", async (importOriginal) => {
 				const message = (await completeMock(model, context, options)) as AssistantMessage;
 				if (message.stopReason === "error" || message.stopReason === "aborted") {
 					output.push({ type: "error", reason: message.stopReason, error: message });
-				} else {
+				} else if (message.stopReason !== "pending") {
 					output.push({ type: "done", reason: message.stopReason, message });
 				}
 				output.end(message);

@@ -4,6 +4,7 @@ import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import { Chalk } from "chalk";
 import { latexToUnicode } from "../src/components/latex.ts";
 import { Markdown } from "../src/components/markdown.ts";
+import { TuiMainScreen } from "../src/TuiMainScreen.ts";
 import { resetCapabilitiesCache, setCapabilities } from "../src/terminal-image.ts";
 import { type Component, TUI } from "../src/tui.ts";
 import { visibleWidth } from "../src/utils.ts";
@@ -766,7 +767,7 @@ describe("Markdown component", () => {
 			});
 
 			const terminal = new VirtualTerminal(80, 6);
-			const tui = new TUI(terminal);
+			const tui: TUI = new TuiMainScreen(terminal);
 			const component = new MarkdownWithInput(markdown);
 			tui.addChild(component);
 			tui.start();
@@ -1207,7 +1208,7 @@ bar`,
 		it("should not leak h1 underline into padding when inline code is the last token", async () => {
 			const markdown = new Markdown("# Important distinction from `open()`", 0, 0, defaultMarkdownTheme);
 			const terminal = new VirtualTerminal(80, 4);
-			const tui = new TUI(terminal);
+			const tui: TUI = new TuiMainScreen(terminal);
 			tui.addChild(markdown);
 			tui.start();
 			await terminal.waitForRender();

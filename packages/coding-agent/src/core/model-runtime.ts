@@ -73,6 +73,8 @@ export interface CreateModelRuntimeOptions {
 export interface ModelRuntimeAuthOverrides {
 	apiKey?: string;
 	env?: Record<string, string>;
+	/** Require this much remaining OAuth-token validity; defaults to five minutes. */
+	minOAuthValidityMs?: number;
 }
 
 function mergeHeaders(
@@ -168,7 +170,7 @@ export class ModelRuntime implements Models {
 			modelsPath,
 			modelsStore,
 			providers,
-			process.env.PI_OFFLINE === undefined && options.allowModelNetwork === true,
+			options.allowModelNetwork === true,
 			options.modelRefreshTimeoutMs ?? 15_000,
 		);
 		runtime.configureRadiusProviders();

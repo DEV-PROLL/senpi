@@ -6,9 +6,13 @@
 
 ### Added
 
+- Added an AgentHarness shutdown lifecycle.
+
 ### Changed
 
 ### Fixed
+
+- Retried empty Kimi responses once before surfacing a provider failure.
 
 ### Removed
 
@@ -188,6 +192,10 @@
 ### Fixed
 
 ### Removed
+
+## [0.83.0] - 2026-07-29
+
+## [0.82.1] - 2026-07-25
 
 ## [0.82.0] - 2026-07-24
 

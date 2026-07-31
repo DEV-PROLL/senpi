@@ -235,6 +235,7 @@ export class AssistantMessageComponent extends Container {
 				break;
 			case "stop":
 			case "toolUse":
+			case "pending":
 				break;
 			default:
 				assertNever(message.stopReason);
