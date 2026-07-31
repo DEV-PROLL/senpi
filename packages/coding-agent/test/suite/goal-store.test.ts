@@ -24,9 +24,31 @@ async function tempStore(threadId = "thread-test"): Promise<GoalStoreRef> {
 	return { baseDir: join(dir, "extensions", "goal"), threadId };
 }
 
+function legacyStoreRef(ref: GoalStoreRef): GoalStoreRef {
+	return { ...ref, baseDir: join(ref.baseDir, "..", "pi-goal") };
+}
+
 async function writeRawGoalFile(ref: GoalStoreRef, contents: string): Promise<void> {
 	await mkdir(ref.baseDir, { recursive: true });
 	await writeFile(goalFilePath(ref), contents, "utf8");
+}
+
+async function writeLegacyGoalFile(ref: GoalStoreRef, goal: Record<string, unknown> | null): Promise<void> {
+	await writeRawGoalFile(legacyStoreRef(ref), `${JSON.stringify({ version: 1, goal })}\n`);
+}
+
+function legacyGoalRecord(ref: GoalStoreRef, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		id: "legacy-goal-id",
+		threadId: ref.threadId,
+		objective: "Resume the legacy goal",
+		status: "active",
+		tokensUsed: 40,
+		timeUsedSeconds: 8,
+		createdAt: 1,
+		updatedAt: 2,
+		...overrides,
+	};
 }
 
 afterEach(async () => {
@@ -44,6 +66,20 @@ describe("goal store JSON recovery", () => {
 
 		// Then
 		expect(persisted).toEqual(goal);
+	});
+
+	it("preserves an inert token budget in the current goal store", async () => {
+		// Given: current-store goals may carry tokenBudget as inert app-server wire metadata.
+		const ref = await tempStore("thread-current-token-budget");
+		const goal = { ...(await createGoal(ref, "Keep the current token budget")), tokenBudget: 8_192 };
+		await writeGoal(ref, goal);
+
+		// When
+		const persisted = await readGoal(ref);
+
+		// Then: reading the current store never strips the field.
+		expect(persisted).toEqual(goal);
+		expect(persisted?.tokenBudget).toBe(8_192);
 	});
 
 	it("recovers a complete goal file followed by stale closing braces", async () => {
@@ -127,6 +163,208 @@ describe("goal store JSON recovery", () => {
 		// Given
 		const ref = await tempStore("thread-invalid-goal");
 		await writeRawGoalFile(ref, '{"version":1,"goal":{"id":1}}\n}\n');
+
+		// When / Then
+		await expect(readGoal(ref)).rejects.toThrow("goal store contains an invalid goal");
+	});
+});
+
+describe("legacy pi-goal store migration", () => {
+	it("migrates a budgetLimited legacy goal into an active budget-free current goal", async () => {
+		// Given: only a legacy pi-goal file exists, in the removed budget-limited status.
+		const ref = await tempStore("thread-legacy-budget-limited");
+		await writeLegacyGoalFile(ref, legacyGoalRecord(ref, { status: "budgetLimited", tokenBudget: 100 }));
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then: budget enforcement is dropped, usage metrics survive.
+		expect(migrated).toMatchObject({
+			id: "legacy-goal-id",
+			objective: "Resume the legacy goal",
+			status: "active",
+			tokensUsed: 40,
+			timeUsedSeconds: 8,
+		});
+		expect(migrated).not.toHaveProperty("tokenBudget");
+		expect(await readGoal(ref)).toEqual(migrated);
+	});
+
+	it("migrates the snake_case legacy budget_limited status the same way", async () => {
+		// Given
+		const ref = await tempStore("thread-legacy-budget-limited-snake");
+		await writeLegacyGoalFile(ref, legacyGoalRecord(ref, { status: "budget_limited", tokenBudget: 7 }));
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then
+		expect(migrated?.status).toBe("active");
+		expect(migrated).not.toHaveProperty("tokenBudget");
+	});
+
+	it("drops a legacy token budget even when the legacy status is already supported", async () => {
+		// Given: legacy budgets are enforcement metadata, so migration must not carry them forward.
+		const ref = await tempStore("thread-legacy-paused-budget");
+		await writeLegacyGoalFile(ref, legacyGoalRecord(ref, { status: "paused", tokenBudget: 4_096 }));
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then
+		expect(migrated?.status).toBe("paused");
+		expect(migrated).not.toHaveProperty("tokenBudget");
+		expect(await readFile(goalFilePath(ref), "utf8")).not.toContain("tokenBudget");
+	});
+
+	it("sanitizes migrated continuation state", async () => {
+		// Given: legacy continuation bookkeeping may be malformed.
+		const ref = await tempStore("thread-legacy-continuation");
+		await writeLegacyGoalFile(
+			ref,
+			legacyGoalRecord(ref, { consecutiveContinuations: "many", lastContinuationSignature: 42 }),
+		);
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then
+		expect(migrated).not.toHaveProperty("consecutiveContinuations");
+		expect(migrated).not.toHaveProperty("lastContinuationSignature");
+		expect(await readGoal(ref)).toEqual(migrated);
+	});
+
+	it("never overwrites an existing current goal with a legacy file", async () => {
+		// Given: both stores exist.
+		const ref = await tempStore("thread-current-wins");
+		const current = await createGoal(ref, "Keep the current goal");
+		await writeLegacyGoalFile(ref, legacyGoalRecord(ref, { status: "budgetLimited", tokenBudget: 100 }));
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then: the current store always wins and is left byte-identical.
+		expect(migrated).toBeNull();
+		expect(await readGoal(ref)).toEqual(current);
+	});
+
+	it("leaves an existing current goal that carries an inert token budget untouched", async () => {
+		// Given: current-store wire metadata must survive a migration attempt.
+		const ref = await tempStore("thread-current-wins-budget");
+		const current = { ...(await createGoal(ref, "Keep the budget metadata")), tokenBudget: 2_048 };
+		await writeGoal(ref, current);
+		await writeLegacyGoalFile(ref, legacyGoalRecord(ref, { status: "budgetLimited", tokenBudget: 100 }));
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then
+		expect(migrated).toBeNull();
+		expect(await readGoal(ref)).toEqual(current);
+		expect((await readGoal(ref))?.tokenBudget).toBe(2_048);
+	});
+
+	it("is a no-op when no legacy file exists", async () => {
+		// Given: a fresh install with neither store populated.
+		const ref = await tempStore("thread-no-legacy");
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then: nothing is created.
+		expect(migrated).toBeNull();
+		expect(await readGoal(ref)).toBeNull();
+		await expect(readdir(ref.baseDir)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("treats a legacy file holding an explicit null goal as nothing to migrate", async () => {
+		// Given
+		const ref = await tempStore("thread-legacy-null");
+		await writeLegacyGoalFile(ref, null);
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then
+		expect(migrated).toBeNull();
+		expect(await readGoal(ref)).toBeNull();
+	});
+
+	it("keeps the typed unsupported-version error for a legacy file", async () => {
+		// Given
+		const ref = await tempStore("thread-legacy-version");
+		await writeRawGoalFile(legacyStoreRef(ref), '{"version":2,"goal":null}\n');
+
+		// When / Then
+		await expect(migrateLegacyGoalFile(ref)).rejects.toThrow("unsupported goal store version");
+	});
+
+	it("keeps the typed invalid-goal error for a legacy file", async () => {
+		// Given
+		const ref = await tempStore("thread-legacy-invalid");
+		await writeRawGoalFile(legacyStoreRef(ref), '{"version":1,"goal":{"id":1}}\n');
+
+		// When / Then
+		await expect(migrateLegacyGoalFile(ref)).rejects.toThrow("goal store contains an invalid goal");
+	});
+
+	it("finds the legacy store in the no-session fallback layout", async () => {
+		// Given: print/in-memory mode nests the store under no-session/<cwdKey>, so the
+		// legacy sibling is extensions/pi-goal/no-session/<cwdKey>, not a sibling of <cwdKey>.
+		const dir = await mkdtemp(join(tmpdir(), "senpi-goal-"));
+		tempDirs.push(dir);
+		const cwdKey = "a".repeat(24);
+		const ref: GoalStoreRef = {
+			baseDir: join(dir, "extensions", "goal", "no-session", cwdKey),
+			threadId: "thread-no-session-legacy",
+		};
+		const legacyRef: GoalStoreRef = {
+			...ref,
+			baseDir: join(dir, "extensions", "pi-goal", "no-session", cwdKey),
+		};
+		await writeRawGoalFile(
+			legacyRef,
+			`${JSON.stringify({ version: 1, goal: legacyGoalRecord(ref, { status: "budgetLimited", tokenBudget: 100 }) })}\n`,
+		);
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then
+		expect(migrated).toMatchObject({ id: "legacy-goal-id", status: "active" });
+		expect(migrated).not.toHaveProperty("tokenBudget");
+		expect(await readGoal(ref)).toEqual(migrated);
+	});
+
+	it("does not treat a pi-goal directory nested inside the current store as legacy state", async () => {
+		// Given: a stray pi-goal directory *inside* the current goal tree must never be
+		// mistaken for the legacy store (the naive dirname swap did exactly this).
+		const dir = await mkdtemp(join(tmpdir(), "senpi-goal-"));
+		tempDirs.push(dir);
+		const ref: GoalStoreRef = {
+			baseDir: join(dir, "extensions", "goal", "no-session", "b".repeat(24)),
+			threadId: "thread-nested-decoy",
+		};
+		await writeRawGoalFile(
+			{ ...ref, baseDir: join(dir, "extensions", "goal", "no-session", "pi-goal") },
+			`${JSON.stringify({ version: 1, goal: legacyGoalRecord(ref, { id: "decoy-goal-id" }) })}\n`,
+		);
+
+		// When
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then
+		expect(migrated).toBeNull();
+		expect(await readGoal(ref)).toBeNull();
+	});
+
+	it("does not resurrect the removed budgetLimited status through the current store reader", async () => {
+		// Given: normalization is migration-only, so a corrupt current file stays invalid.
+		const ref = await tempStore("thread-current-budget-limited");
+		await writeRawGoalFile(
+			ref,
+			`${JSON.stringify({ version: 1, goal: legacyGoalRecord(ref, { status: "budgetLimited" }) })}\n`,
+		);
 
 		// When / Then
 		await expect(readGoal(ref)).rejects.toThrow("goal store contains an invalid goal");
