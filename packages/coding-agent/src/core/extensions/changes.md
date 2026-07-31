@@ -1,5 +1,17 @@
 # Core Extensions Changes
 
+## 2026-07-31 - Correlated input dispositions
+
+### What changed and why
+
+- `InputEvent` now carries a session-local `inputId`; the new `input_disposition` event repeats that ID with `handled`, `queued`, `started`, or `rejected` after interception and final admission resolve.
+- Goal lifecycle state can therefore wait for accepted input instead of mutating persistence from raw input, while concurrent prompts retain independent ownership.
+
+### Expected merge conflict zones
+
+- MEDIUM: additive input event types/exports and `AgentSession.prompt()` admission exits.
+- LOW: `ExtensionRunner.emitInput()` event assembly.
+
 ## 2026-07-31 - `pi.setSessionFastMode()` for the fast-mode indicator
 
 ### What changed and why
