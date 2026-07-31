@@ -4,54 +4,50 @@
 
 ### What changed
 
-- `persistence.ts` exports `migrateLegacyGoalFile(ref)`, which imports a legacy
-  standalone `pi-goal` file from `<sessionDir>/extensions/pi-goal/` into the
-  current budget-free store at `<sessionDir>/extensions/goal/`.
-- `index.ts` `session_start` awaits the migration **before** `readGoal`, so an
-  imported goal participates in the session that migrated it rather than the
-  next one.
-- `parseGoalFile` gained an opt-in `{ legacy: true }` mode. Only that mode runs
-  `normalizeLegacyGoal`, which deletes `tokenBudget` and rewrites the removed
-  `budgetLimited` / `budget_limited` statuses to `active`. Migrated goals still
-  pass the normal `isGoal` validation and `sanitizeContinuationState`.
-- Precedence is absolute: an existing current file short-circuits the migration
-  and is never overwritten. Publication writes a restrictive `0600` private temp
-  sibling, then atomically hard-links it to the current path without replacement;
-  `EEXIST` means a concurrent current writer won and migration returns no import.
-  A missing legacy file is a silent no-op, and a legacy file holding an explicit
-  `null` goal migrates nothing.
-- The legacy directory is derived by replacing the `goal` path segment itself
-  (`legacyBaseDirFor`), which is correct for both store layouts:
-  `<sessionDir>/extensions/goal` and the print/in-memory fallback
-  `<agentDir>/extensions/goal/no-session/<cwdKey>`. Swapping `dirname(baseDir)`
-  handles only the first; in the fallback it resolves *inside* the current store
-  tree, so real legacy state is missed and a stray nested `pi-goal` directory
-  could be imported instead. Real-CLI RPC QA caught this; both cases are pinned
-  by regression tests.
+- `persistence.ts` exports `migrateLegacyGoalFile(ref)`, and `index.ts` awaits it
+  before the session's first `readGoal`, so imported state participates
+  immediately.
+- Legacy-only parsing deletes the old `tokenBudget` enforcement input and maps
+  `budgetLimited` / `budget_limited` to `active`. Current-store reads do not run
+  that normalization, so inert wire metadata and existing typed validation errors
+  are preserved.
+- Migration publication now uses `writeFile` with `flag: "wx"` and mode `0600`.
+  This keeps atomic exclusive-create precedence without hard-link support, temp
+  cleanup machinery, or a temp sibling that can be orphaned by `SIGKILL`.
+- Invalid, unsupported-version, and malformed legacy files are best-effort dead
+  data: they remain on disk, return no import, and do not brick the live current
+  store. Unexpected filesystem errors still propagate.
+- Successfully imported files, explicit-null files, and files that lose the
+  exclusive-create race are renamed to a sibling `.migrated` archive on a
+  best-effort basis, so completed migration is not retried on every startup.
+- Segment-aware `goal` -> `pi-goal` mapping accepts both `/` and `\\` separators
+  while retaining exact path-segment matching; names such as `my-goal` are never
+  rewritten.
+- Session-backed migration keeps its stable thread-id lookup. No-session migration
+  instead enumerates the cwd-keyed `*.json` bucket because ephemeral sessions get
+  a new id on every run. It searches both the legacy bucket beside the redirected
+  Senpi root and `PI_CODING_AGENT_DIR` (default `~/.pi/agent`), and reports an
+  explicit conflict when multiple valid live goals exist rather than guessing.
 
 ### Why
 
-- Users upgrading from standalone `pi-goal` silently lost an in-flight goal: the
-  builtin reads a different directory, so the legacy file was never seen.
-- A destination absence check followed by ordinary POSIX `rename` was racy:
-  `rename` replaces a current file created between the check and publication.
-  Same-directory hard-link publication gives macOS/Linux an atomic no-clobber
-  operation while retaining private temp cleanup and exact-file writes.
-- Normalization is deliberately confined to the legacy read path. Applying it to
-  every current-store read (the alternative considered) is destructive: it
-  strips the inert `tokenBudget` that `00571304e` added as required app-server
-  wire metadata, and it silently resurrects the removed `budgetLimited` status
-  instead of surfacing the existing `InvalidGoalStoreError`. Both regressions
-  were reproduced against `app-server-goal-wire.test.ts` before being rejected.
-- Budget-free means budgets are **not enforced**, not that budget metadata is
-  destroyed on sight. Legacy budgets are dropped because they are enforcement
-  inputs; current-store budgets are preserved because they are wire compatibility
-  metadata.
+- Standalone `pi-goal` and the builtin can use different agent roots, and
+  no-session filenames contain an old ephemeral session id. Rewriting only the
+  current Senpi path and looking up the new id silently missed the headline
+  print/in-memory upgrade path.
+- Hard links fail on common non-POSIX and network filesystems. Exclusive `wx`
+  creation provides the same no-clobber result portably and removes the crash-time
+  orphan-temp-file durability wart.
+- A stale corrupt migration source is not authoritative live state. Ignoring its
+  expected parse/schema failures keeps goal creation usable while preserving the
+  source for manual recovery.
+- Retiring a consumed source makes migration genuinely one-shot without deleting
+  the user's old data.
 
 ### Expected merge conflict zones on the next sync
 
-- LOW in `persistence.ts` around `parseGoalFile`'s new `legacy` parameter and the
-  `parseGoalFileJson` split; standalone `pi-goal` has no migration path.
+- LOW in `persistence.ts` around legacy candidate discovery and `parseGoalFile`'s
+  `legacy` option; standalone `pi-goal` has no migration path.
 - LOW in `index.ts` at the `session_start` migration call.
 - NONE in the store schema, tool schemas, status transitions, or public API.
 
