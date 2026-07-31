@@ -56,6 +56,19 @@ export interface GoalHarness {
 	readonly entries: AppendedGoalEntry[];
 }
 
+type SentCountWaiter = {
+	readonly expectedCount: number;
+	readonly complete: (error?: Error) => void;
+};
+
+const sentCountWaiters = new WeakMap<GoalHarness, Set<SentCountWaiter>>();
+
+function getSentCountWaiters(harness: GoalHarness): Set<SentCountWaiter> {
+	const waiters = sentCountWaiters.get(harness);
+	if (waiters === undefined) throw new Error("Cannot observe sent messages for an unknown goal harness");
+	return waiters;
+}
+
 export interface GoalContextState {
 	pendingMessages: boolean;
 	model?: Model<Api>;
@@ -65,6 +78,7 @@ export function createGoalHarness(): GoalHarness {
 	const tools = new Map<string, AnyTool>();
 	const handlers = new Map<string, GoalHandler[]>();
 	const sent: SentGoalMessage[] = [];
+	const waiters = new Set<SentCountWaiter>();
 	const events = new TestEventBus();
 	const entries: AppendedGoalEntry[] = [];
 	const pi = {
@@ -77,11 +91,18 @@ export function createGoalHarness(): GoalHarness {
 			registered.push(handler);
 			handlers.set(event, registered);
 		},
-		sendMessage: (message: SentGoalMessage["message"], options: unknown) => sent.push({ message, options }),
+		sendMessage: (message: SentGoalMessage["message"], options: unknown) => {
+			sent.push({ message, options });
+			for (const waiter of waiters) {
+				if (sent.length >= waiter.expectedCount) waiter.complete();
+			}
+		},
 		events,
 	} as unknown as ExtensionAPI;
 	goalExtension(pi);
-	return { tools, handlers, sent, events, entries };
+	const harness = { tools, handlers, sent, events, entries };
+	sentCountWaiters.set(harness, waiters);
+	return harness;
 }
 
 const tempDirs: string[] = [];
@@ -115,6 +136,35 @@ export async function makeGoalContext(
 
 export async function cleanupGoalMonitorTempDirs(): Promise<void> {
 	await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+}
+
+export function waitForSentCount(
+	harness: GoalHarness,
+	expectedCount: number,
+	options: { readonly timeoutMs?: number } = {},
+): Promise<void> {
+	if (harness.sent.length >= expectedCount) return Promise.resolve();
+	const waiters = getSentCountWaiters(harness);
+
+	return new Promise((resolve, reject) => {
+		let completed = false;
+		let timeout: ReturnType<typeof setRealTimeout> | undefined;
+		const waiter: SentCountWaiter = { expectedCount, complete };
+		waiters.add(waiter);
+		timeout = setRealTimeout(
+			() => complete(new Error(`Timed out waiting for ${expectedCount} sent goal message(s)`)),
+			options.timeoutMs ?? 5_000,
+		);
+
+		function complete(error: Error | undefined = undefined): void {
+			if (completed) return;
+			completed = true;
+			if (timeout !== undefined) clearRealTimeout(timeout);
+			waiters.delete(waiter);
+			if (error === undefined) resolve();
+			else reject(error);
+		}
+	});
 }
 
 export function waitForGoalContinuationCount(ctx: ExtensionContext, expectedCount: number): Promise<void> {
