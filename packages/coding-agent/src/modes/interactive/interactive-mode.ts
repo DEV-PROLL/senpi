@@ -4821,7 +4821,7 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
 		this.chatContainer.addChild(
 			new Text(
-				`${theme.bold(theme.fg("error", "위험한 모델 경고"))}\n${theme.fg("error", RISKY_MAIN_MODEL_WARNING)}`,
+				`${theme.bold(theme.fg("error", "Risky model warning"))}\n${theme.fg("error", RISKY_MAIN_MODEL_WARNING)}`,
 				1,
 				0,
 			),
