@@ -6,6 +6,7 @@ const LATEST_VERSION_URL = `https://registry.npmjs.org/${encodeURIComponent(PACK
 const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
 const RELEASE_CHANGELOG_BASE_URL = "https://github.com/code-yeongyu/senpi/blob";
 const RELEASE_CHANGELOG_PATH = "packages/coding-agent/CHANGELOG.md";
+const SENPI_CALVER_PATTERN = /^(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-([2-9]\d*))?$/;
 
 export interface LatestPiRelease {
 	version: string;
@@ -13,9 +14,30 @@ export interface LatestPiRelease {
 	note?: string;
 }
 
+function parseSenpiCalVer(version: string): readonly [number, number, number, number] | undefined {
+	const match = SENPI_CALVER_PATTERN.exec(version);
+	if (!match) {
+		return undefined;
+	}
+	return [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4] ?? 1)];
+}
+
 export function comparePackageVersions(leftVersion: string, rightVersion: string): number | undefined {
-	const left = valid(leftVersion.trim());
-	const right = valid(rightVersion.trim());
+	const leftTrimmed = leftVersion.trim();
+	const rightTrimmed = rightVersion.trim();
+	const leftCalVer = parseSenpiCalVer(leftTrimmed);
+	const rightCalVer = parseSenpiCalVer(rightTrimmed);
+	if (leftCalVer && rightCalVer) {
+		for (let index = 0; index < leftCalVer.length; index++) {
+			if (leftCalVer[index] !== rightCalVer[index]) {
+				return leftCalVer[index] < rightCalVer[index] ? -1 : 1;
+			}
+		}
+		return 0;
+	}
+
+	const left = valid(leftTrimmed);
+	const right = valid(rightTrimmed);
 	if (!left || !right) {
 		return undefined;
 	}

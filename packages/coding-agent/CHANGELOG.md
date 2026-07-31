@@ -14,6 +14,84 @@
 
 ### Removed
 
+## [2026.7.30-2] - 2026-07-30
+
+### New Features
+
+- **Safer main-model selection** — Warn interactively when a main-session provider, model id, or display name selects
+  Minimax or Qwen, including startup, `/model`, exact references, favorite rotation, and post-auth defaults. The
+  prominent Korean/CJK warning remains scoped to the main session; subagent routing and safe model families are
+  unchanged ([#530](https://github.com/code-yeongyu/senpi/pull/530)).
+- **High-reasoning risk signal** — Emit `high_reasoning_warning` through the session API, RPC JSONL, and interactive
+  red warning box when GPT-5.x `-sol` models run at `xhigh` or `max`. Detection is intentionally narrower than
+  capability support, so Claude, DeepSeek, ordinary GPT, and unrelated `solar` ids do not inherit the warning.
+  Events are deduplicated by provider, model, and level
+  ([#517](https://github.com/code-yeongyu/senpi/pull/517),
+  [#526](https://github.com/code-yeongyu/senpi/pull/526)).
+- **Broader OMO workflow tips** — Add discoverable tips for `init-deep`, debugging, refactor,
+  remove-ai-slops, and visual QA alongside the existing planning, ultrawork, research, and review guidance. The
+  additions keep the existing task-extension availability gate
+  ([#521](https://github.com/code-yeongyu/senpi/pull/521)).
+
+### Breaking Changes
+
+### Added
+
+- Add `packages/coding-agent/docs/release-guide.md`, the authoritative config-neutral build, plugin verification,
+  local installation, Jobdori installation, troubleshooting, rollback, cleanup, and maintenance guide for
+  `2026.7.30-2`.
+
+### Changed
+
+- Compact proactively at agent idle when the persisted context is over threshold, rather than waiting for the next
+  user prompt to discover the same required compaction. The idle path reuses existing admission, lifecycle,
+  cancellation, and stale-revision safeguards; below-threshold and already-running sessions remain unchanged
+  ([#522](https://github.com/code-yeongyu/senpi/pull/522)).
+- Update the bundled MCP runtime dependency from `@modelcontextprotocol/sdk` `1.29.0` to `1.30.0`. Builtin registration
+  order, the `mcp`-last invariant, user MCP configuration format, and the separate hooks plugin-manifest loader are
+  unchanged.
+- Override the bundled `brace-expansion` runtime from `5.0.7` to patched `5.0.8`, closing
+  [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg), an unbounded expansion-length
+  denial-of-service reachable transitively through `glob` and `minimatch`. This is dependency-only: glob matching,
+  extension discovery, configuration formats, and command behavior are unchanged.
+### Fixed
+
+- Compare Senpi CalVer releases by the repository's `YYYY.M.D-N` contract instead of npm prerelease ordering when
+  deciding whether an update is newer. The unsuffixed date is revision 1, so `2026.7.30-2` now correctly sorts after
+  `2026.7.30`; clients on a same-day revision no longer accept the registry's older bare-date release as an update
+  and downgrade themselves. Cross-day CalVer ordering and ordinary semver package versions retain their prior
+  behavior.
+- Continue a goal immediately when `create_goal` is the final tool action of the user’s turn. Freshly created goals
+  are now marked goal-driven before the turn ends, so the first hidden continuation starts at once instead of being
+  mistaken for a side question and waiting for the 60-second user-grace timer. User grace still applies to real
+  messages sent while a goal was already active, and monitor delays, continuation caps, stale/repetition guards,
+  single-flight delivery, and completion handling are unchanged.
+- Reset the goal continuation progress cap after an observable tool action. Long-running goals can therefore continue
+  after real progress instead of exhausting a lifetime counter and stopping despite new work, while no-progress
+  repetition detection, stale-turn fencing, monitor waits, and single-flight continuation delivery remain bounded
+  ([#534](https://github.com/code-yeongyu/senpi/pull/534)).
+- Restore user input that was queued while pre-prompt compaction failed, was rejected, or was aborted back into the
+  interactive editor instead of allowing terminal recovery to consume or strand it. Failure metadata is scoped to
+  the matching compaction attempt, terminal pre-prompt recovery is marked complete exactly once, and successful
+  compaction keeps the existing queued-input admission path
+  ([#535](https://github.com/code-yeongyu/senpi/pull/535) by
+  [@realsigridjin](https://github.com/realsigridjin)).
+- Recover Kimi XTML response channels through the shared model-runtime boundary even when no tools are registered,
+  and retry one terminal empty Kimi response once. Structural markers no longer leak into final output; successful
+  recovery appears exactly once, and repeated emptiness fails visibly and finitely
+  ([#523](https://github.com/code-yeongyu/senpi/pull/523),
+  [#537](https://github.com/code-yeongyu/senpi/pull/537)).
+- Reuse the active turn’s runtime API key for automatic session-title generation before resolving provider headers
+  and compatibility options. A CLI `--api-key` turn and its background title request therefore use the same
+  credential instead of allowing the title request to fall back to a configured key and fail with 401
+  ([#519](https://github.com/code-yeongyu/senpi/pull/519)).
+- Serialize apply-patch file mutations and disclose concrete parse, seek, file-operation, and partial-success failure
+  reasons. Multi-file patches no longer race concurrent writes, and callers receive the successful source-backed
+  patch details together with an actionable failure instead of a generic unsuccessful result
+  ([#524](https://github.com/code-yeongyu/senpi/pull/524)).
+
+### Removed
+
 ## [2026.7.30] - 2026-07-30
 
 ### New Features
