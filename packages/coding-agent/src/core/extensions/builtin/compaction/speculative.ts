@@ -1,10 +1,14 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
 	type AssistantMessage,
+	type AssistantMessageEventStream,
+	type Context,
+	hasCredentialHeaders,
 	isContextOverflow,
 	isRetryableAssistantError,
 	type Message,
 	type Model,
+	type StreamOptions,
 	type TextContent,
 	type Tool,
 } from "@earendil-works/pi-ai";
@@ -174,6 +178,22 @@ function isAssistantMessage(message: Message): message is AssistantMessage {
 	return message.role === "assistant" && "stopReason" in message;
 }
 
+/**
+ * Providers registered through `pi.registerProvider()` (claude-agent-sdk, Kiro, any
+ * extension provider) exist only in Senpi's ModelRuntime, never in compat's builtin
+ * api-registry, which rejects their api id outright. Dispatch through the runtime
+ * whenever it is reachable and keep compat for contexts constructed without a registry.
+ */
+function summarizationStream(
+	context: SpeculativeCompactionContext,
+	model: Model<any>,
+	requestContext: Context,
+	options: StreamOptions & Record<string, unknown>,
+): AssistantMessageEventStream {
+	const runtime = context.modelRegistry?.modelRuntime;
+	return runtime ? runtime.stream(model, requestContext, options) : stream(model, requestContext, options);
+}
+
 async function generateSummaryMessage(options: {
 	context: SpeculativeCompactionContext;
 	messages: AgentMessage[];
@@ -182,7 +202,7 @@ async function generateSummaryMessage(options: {
 	signal?: AbortSignal;
 	snapshot: SpeculativeCompactionSnapshot;
 	auth: {
-		apiKey: string;
+		apiKey?: string;
 		headers?: Record<string, string>;
 		extraBody?: Record<string, unknown>;
 	};
@@ -219,7 +239,7 @@ async function generateSummaryMessage(options: {
 		const headers = providerRequest
 			? await providerRequest.transformHeaders(options.auth.headers ?? {})
 			: options.auth.headers;
-		const responseStream = stream(options.snapshot.model, requestContext, {
+		const responseStream = summarizationStream(options.context, options.snapshot.model, requestContext, {
 			apiKey: options.auth.apiKey,
 			headers,
 			extraBody: options.auth.extraBody,
@@ -475,8 +495,13 @@ export async function runExtensionCompaction(
 	if (signal?.aborted) return undefined;
 	const auth = await context.modelRegistry?.getApiKeyAndHeaders(snapshot.model);
 	if (signal?.aborted) return undefined;
-	if (!auth?.ok || !auth.apiKey) {
-		const detail = auth && !auth.ok ? auth.error : `no API key resolved for provider "${snapshot.model.provider}"`;
+	// A provider is authenticated for summarization by either a resolved key or a
+	// credential request header: `headers`-authenticated providers (models.json and
+	// extension providers alike) never resolve an apiKey, yet their normal agent
+	// turns are fully authenticated.
+	if (!auth?.ok || !(auth.apiKey || hasCredentialHeaders(auth.headers))) {
+		const detail =
+			auth && !auth.ok ? auth.error : `no credentials resolved for provider "${snapshot.model.provider}"`;
 		throw new SummaryGenerationError("auth", `summarization credentials unavailable: ${detail}`);
 	}
 

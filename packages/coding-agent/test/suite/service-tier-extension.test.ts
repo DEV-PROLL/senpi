@@ -9,6 +9,8 @@ const CODEX_PROVIDER = "openai-codex";
 const CODEX_API = "openai-codex-responses";
 const BASE_MODEL_ID = "gpt-5.6-sol";
 const FAST_MODEL_ID = `${BASE_MODEL_ID}-fast`;
+const OTHER_CODEX_MODEL_ID = "gpt-5.5";
+const ANTHROPIC_MODEL_ID = "claude-sonnet-4-5";
 
 describe("service-tier builtin extension", () => {
 	const harnesses: Harness[] = [];
@@ -122,8 +124,13 @@ describe("service-tier builtin extension", () => {
 		expect(notify).toHaveBeenCalledWith("Fast mode is only available for OpenAI Codex models.", "warning");
 	});
 
-	it("is a clear no-op when the Codex model has no compatible fast variant", async () => {
+	it("toggles a session-level priority tier when the Codex model has no compatible fast variant", async () => {
 		// given
+		// chatgpt.com/backend-api/codex/models advertises
+		// service_tiers [{ id: "priority", name: "Fast" }] to subscription accounts, and the
+		// first-party Codex CLI sends service_tier=priority over that same OAuth, so a missing
+		// `-fast` catalog sibling must fall back to a session tier toggle rather than declaring
+		// fast mode unavailable. See issue #545.
 		const harness = await createHarness({
 			api: CODEX_API,
 			provider: CODEX_PROVIDER,
@@ -140,15 +147,149 @@ describe("service-tier builtin extension", () => {
 
 		// then
 		expect(harness.session.model).toBe(initialModel);
-		// Subscription requests are served at normal tier however the field is set
-		// (chatgpt.com echoes "auto" for service_tier=priority and rejects
-		// auto/flex/scale outright), so the notice must say fast mode is
-		// unavailable here rather than blaming the model. See issue #499.
-		const [[message, level]] = notify.mock.calls;
-		expect(level).toBe("warning");
-		expect(message).toContain("not available on a ChatGPT subscription");
-		expect(message).toContain("API-key billing");
-		expect(message).not.toContain("not supported for");
+		expect(notify).toHaveBeenCalledWith(`Fast mode enabled: ${BASE_MODEL_ID}`, "info");
+		expect(await runner.emitBeforeProviderRequest({ model: BASE_MODEL_ID })).toEqual({
+			model: BASE_MODEL_ID,
+			service_tier: "priority",
+		});
+
+		// when
+		await harness.session.prompt("/fast");
+
+		// then
+		expect(notify).toHaveBeenCalledWith(`Fast mode disabled: ${BASE_MODEL_ID}`, "info");
+		const defaultPayload = { model: BASE_MODEL_ID };
+		expect(await runner.emitBeforeProviderRequest(defaultPayload)).toBe(defaultPayload);
+	});
+
+	it("keeps session fast mode on across a mid-session switch to another Codex model", async () => {
+		// given
+		// Fast mode is a session intent, not a property of the selected model, so switching
+		// models mid-session (/model, Ctrl+P) must keep sending the tier. See issue #545.
+		const harness = await createHarness({
+			api: CODEX_API,
+			provider: CODEX_PROVIDER,
+			models: [{ id: BASE_MODEL_ID }, { id: OTHER_CODEX_MODEL_ID }],
+			extensionFactories: [serviceTierExtension],
+		});
+		harnesses.push(harness);
+		const runner = harness.getExtensionRunner();
+		const notify = vi.spyOn(runner.getUIContext(), "notify");
+		const otherModel = harness.getModel(OTHER_CODEX_MODEL_ID);
+		expect(otherModel).toBeDefined();
+
+		// when
+		await harness.session.prompt("/fast");
+		await harness.session.setSessionModel(otherModel!);
+
+		// then
+		expect(harness.session.model?.id).toBe(OTHER_CODEX_MODEL_ID);
+		expect(await runner.emitBeforeProviderRequest({ model: OTHER_CODEX_MODEL_ID })).toEqual({
+			model: OTHER_CODEX_MODEL_ID,
+			service_tier: "priority",
+		});
+
+		// when
+		await harness.session.prompt("/fast");
+
+		// then
+		expect(notify).toHaveBeenCalledWith(`Fast mode disabled: ${OTHER_CODEX_MODEL_ID}`, "info");
+		const defaultPayload = { model: OTHER_CODEX_MODEL_ID };
+		expect(await runner.emitBeforeProviderRequest(defaultPayload)).toBe(defaultPayload);
+	});
+
+	it("stops sending the tier when fast mode is on and the session moves to a non-Codex model", async () => {
+		// given
+		// The tier is an OpenAI-family request field; a mid-session hop to Anthropic must not
+		// carry it over, even while the Codex session intent is still enabled.
+		const harness = await createHarness({
+			api: CODEX_API,
+			provider: CODEX_PROVIDER,
+			models: [{ id: BASE_MODEL_ID }, { id: OTHER_CODEX_MODEL_ID }],
+			extensionFactories: [serviceTierExtension],
+		});
+		harnesses.push(harness);
+		const runner = harness.getExtensionRunner();
+		await harness.authStorage.modify("anthropic", async () => ({ type: "api_key", key: "faux-key" }));
+		harness.modelRegistry.registerProvider("anthropic", {
+			baseUrl: "https://api.anthropic.com",
+			apiKey: "faux-key",
+			api: "anthropic-messages",
+			models: [
+				{
+					id: ANTHROPIC_MODEL_ID,
+					name: ANTHROPIC_MODEL_ID,
+					api: "anthropic-messages",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 200000,
+					maxTokens: 8192,
+				},
+			],
+		});
+		const anthropicModel = harness.modelRegistry.find("anthropic", ANTHROPIC_MODEL_ID);
+		expect(anthropicModel).toBeDefined();
+
+		// when
+		await harness.session.prompt("/fast");
+		await harness.session.setSessionModel(anthropicModel!);
+
+		// then
+		expect(harness.session.model?.provider).toBe("anthropic");
+		const anthropicPayload = { model: ANTHROPIC_MODEL_ID };
+		expect(await runner.emitBeforeProviderRequest(anthropicPayload)).toBe(anthropicPayload);
+	});
+
+	it("lets an explicitly configured model tier win over session fast mode", async () => {
+		// given
+		// A models.json/scoped tier is a deliberate per-model choice; the session toggle is a
+		// fallback for Codex models that have none, so it must never overwrite the explicit value.
+		const harness = await createHarness({
+			api: CODEX_API,
+			provider: CODEX_PROVIDER,
+			models: [{ id: BASE_MODEL_ID }, { id: FAST_MODEL_ID }],
+			serviceTier: "flex",
+			extensionFactories: [serviceTierExtension],
+		});
+		harnesses.push(harness);
+		const runner = harness.getExtensionRunner();
+		expect(harness.session.serviceTier).toBe("flex");
+
+		// when
+		await harness.session.prompt("/fast");
+
+		// then
+		expect(await runner.emitBeforeProviderRequest({ model: BASE_MODEL_ID })).toEqual({
+			model: BASE_MODEL_ID,
+			service_tier: "flex",
+		});
+	});
+
+	it("drops session fast mode when a new session starts", async () => {
+		// given
+		// The toggle is session-scoped and never persisted, so a fresh session_start must not
+		// inherit a priority tier from the previous one.
+		const harness = await createHarness({
+			api: CODEX_API,
+			provider: CODEX_PROVIDER,
+			models: [{ id: BASE_MODEL_ID }, { id: FAST_MODEL_ID }],
+			extensionFactories: [serviceTierExtension],
+		});
+		harnesses.push(harness);
+		const runner = harness.getExtensionRunner();
+		await harness.session.prompt("/fast");
+		expect(await runner.emitBeforeProviderRequest({ model: BASE_MODEL_ID })).toEqual({
+			model: BASE_MODEL_ID,
+			service_tier: "priority",
+		});
+
+		// when
+		await harness.session.bindExtensions({});
+
+		// then
+		const defaultPayload = { model: BASE_MODEL_ID };
+		expect(await runner.emitBeforeProviderRequest(defaultPayload)).toBe(defaultPayload);
 	});
 
 	it("leaves incompatible api payloads unchanged", () => {
