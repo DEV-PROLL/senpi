@@ -6,6 +6,8 @@ import ttsrExtension from "../../src/core/extensions/builtin/ttsr/index.ts";
 import { LEAK_ERROR_MESSAGE } from "../../src/core/extensions/builtin/ttsr/prompts.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
+const FABRICATED_TOOL_CALL_RULE_NAME = "fabricated-unavailable-tool-call";
+
 interface PersistedMessage {
 	role?: string;
 	stopReason?: string;
@@ -57,6 +59,72 @@ function streamText(message: PersistedMessage | undefined, kind: "text" | "think
 	}
 	return combined;
 }
+
+function ttsrNudges(harness: Harness): string[] {
+	return harness.session.messages
+		.filter((message) => message.role === "custom")
+		.filter((message) => message.customType === "ttsr-injection")
+		.map((message) => (typeof message.content === "string" ? message.content : ""));
+}
+
+describe("fabricated unavailable-tool call remediation", () => {
+	let harness: Harness;
+
+	afterEach(() => {
+		harness.cleanup();
+	});
+
+	it.each([
+		'<unavailable-tool-call name="apply_patch">',
+		'[Called tool "apply_patch" (no longer available in this session) with input: {}]',
+	])("interrupts fabricated tool-call text and retries with an action-oriented nudge: %s", async (fabricated) => {
+		harness = await createHarness({ extensionFactories: [ttsrExtension], persistSession: true });
+		harness.setResponses([
+			fauxAssistantMessage([fauxText(`${fabricated} inert imitation`)]),
+			fauxAssistantMessage([fauxText("recovered with real tools")]),
+		]);
+
+		await harness.session.prompt("edit the file");
+
+		expect(harness.faux.getCallLog()).toHaveLength(2);
+		const nudges = ttsrNudges(harness);
+		expect(nudges).toHaveLength(1);
+		expect(nudges[0]).toContain(
+			`<system-interrupt reason="rule_violation" rule="${FABRICATED_TOOL_CALL_RULE_NAME}">`,
+		);
+		expect(nudges[0]).toMatch(/call.*real tools|real tools.*redo/i);
+		expect(getMessageText(harness.session.messages.at(-1))).toContain("recovered with real tools");
+	});
+
+	it("does not inspect thinking streams", async () => {
+		harness = await createHarness({ extensionFactories: [ttsrExtension], persistSession: true });
+		harness.setResponses([
+			fauxAssistantMessage([fauxThinking('<unavailable-tool-call name="apply_patch"> inert thinking')]),
+		]);
+
+		await harness.session.prompt("think only");
+
+		expect(harness.faux.getCallLog()).toHaveLength(1);
+		expect(ttsrNudges(harness)).toEqual([]);
+	});
+
+	it("honors ttsr-rules-disabled for the manager-held builtin rule", async () => {
+		harness = await createHarness({
+			extensionFactories: [ttsrExtension],
+			extensionFlagValues: new Map([["ttsr-rules-disabled", FABRICATED_TOOL_CALL_RULE_NAME]]),
+			persistSession: true,
+		});
+		harness.setResponses([
+			fauxAssistantMessage([fauxText('<unavailable-tool-call name="apply_patch"> inert imitation')]),
+		]);
+
+		await harness.session.prompt("edit the file");
+
+		expect(harness.faux.getCallLog()).toHaveLength(1);
+		expect(ttsrNudges(harness)).toEqual([]);
+		expect(getMessageText(harness.session.messages.at(-1))).toContain("inert imitation");
+	});
+});
 
 describe("collapse remediation persistence", () => {
 	let harness: Harness;

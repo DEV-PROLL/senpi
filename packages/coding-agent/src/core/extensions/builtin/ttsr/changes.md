@@ -1,5 +1,27 @@
 # TTSR Fork Tracker
 
+## 2026-07-31 - Interrupt fabricated unavailable-tool calls
+
+### What changed and why
+
+- TTSR now registers a manager-backed builtin stream rule before discovered global/project rules. It aborts assistant text that imitates either the new `<unavailable-tool-call ...>` transcript record or the persisted legacy `[Called tool "..." (no longer available in this session)` envelope, then injects an action-oriented nudge telling the model to call its real tools and redo the step.
+- Both conditions are deliberately case-insensitive because model-authored imitations are not trustworthy XML. The rule is explicitly text-only (`allowThinking: false`, no tool scopes), uses `interruptMode: "always"`, and does not match raw `*** Begin Patch` prose.
+- Accepted tradeoff: legitimate model prose discussing the senpi-specific `<unavailable-tool-call` envelope also triggers once per session. The default `repeatMode: "once"` caps the interruption, and remediation is a corrective nudge rather than a hard failure.
+- Builtin names are registered first and therefore reserved under the manager's existing first-registration-wins duplicate policy; project/global files cannot weaken a shipped safety rule by reusing its name.
+- `TtsrManager.addRule()` now rejects names in `settings.disabledRules`. This makes `--ttsr-rules-disabled` effective for manager-held builtin, project, and global rules instead of only the two detector-only builtins.
+- `/ttsr` partitions manager rules by source: builtin stream rules appear under a distinct `STREAM RULES` subsection beside the detector list, while `USER RULES` contains only project/global files and remains `(none)` when none are configured.
+- Removed two committed `TTSRDBG` stdout logs from the streaming path; they corrupted interactive TUI rendering.
+
+### Coverage
+
+- The faux-provider extension suite proves both envelope formats abort, inject `<system-interrupt>`, and retry; thinking streams remain untouched; and the same text is inert when the builtin name is disabled.
+- Manager and command tests pin disabled-rule registration and truthful builtin/user status partitioning. The full `test/ttsr/` directory remains a required regression gate.
+
+### Expected merge conflict zones
+
+- LOW: builtin registration order and streaming debug cleanup in `index.ts`.
+- LOW: additive builtin rule module, manager registration gate, and `/ttsr` source partition.
+
 ## 2026-07-29 - Port from oh-my-pi (commit cc00ab161, v17.1.8)
 
 ### Source

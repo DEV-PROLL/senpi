@@ -56,11 +56,11 @@ Ship and merge one PR that removes Anthropic unavailable-tool context poisoning 
 Evidence root: `local-ignore/qa-evidence/20260731-ttsr-xml-demotion/`
 
 - C1: `c1-anthropic-red.log`, `c1-anthropic-green.log`
-- C2: `c2-integrity-baseline.log`, `c2-integrity-green.log`
-- C3: `c3-ttsr-red.log`, `c3-ttsr-green.log`, `c3-ttsr-directory-green.log` (entire `packages/coding-agent/test/ttsr/` regression surface)
-- C4: `c4-regression-baseline.log`, `c4-regression-green.log` (baseline and post-change must both be 29/29; these are characterization/regression tests, so intentional RED mutation is not appropriate)
-- C5: `c5-cli-red.log`, `c5-cli-green.log`, plus the real TUI/CLI capture proving `/ttsr` lists the builtin rule from the built CLI
-- Final: `root-check.log`, `focused-tests.log`, `git-diff-check.log`, `pr-ci.txt`, `merge.txt`
+- C2: `c2-integrity-baseline.log`, `c2-integrity-green.log`, `c2-case-bypass-red.log`, `c2-case-bypass-green.log`
+- C3: `c3-ttsr-red.log`, `c3-ttsr-green.log`, `c3-mutation-scope.log`, `c3-mutation-disable.log`
+- C4: `c4-regression-baseline.log`, `c4-regression-green.log`, `c4-ttsr-directory-green.log`. Authoritative clean-base targets: `test/ttsr/` 15 files / 284 tests; `test/suite/ttsr-extension.test.ts` 3 baseline tests plus intentional new coverage; `gpt-apply-patch-extension.test.ts` 29; AI policy table 6; AI characterization 5; untouched integrity 5. Characterization/regression tests do not receive artificial RED mutations.
+- C5: `c5-cli-red.log`, `c5-cli-green.log`, `c5-cli-capture.txt` proving the built CLI's `/ttsr` status lists the builtin under `BUILTIN RULES > STREAM RULES`
+- Final: `root-check.log`, `focused-ai-tests.log`, `ttsr-extension-final.log`, `pr-ci.txt`, `merge.txt`
 
 C5 will use the senpi-qa isolation helpers and a PTY/tmux drive of the built CLI. The pre-change drive must fail to find the new builtin name; the post-change drive must find it. Real auth must remain unchanged.
 
@@ -78,17 +78,17 @@ C5 will use the senpi-qa isolation helpers and a PTY/tmux drive of the built CLI
 - [x] Commit atomic increment 1.
 - [x] Add uppercase/mixed-case result-forgery coverage; capture bypass RED.
 - [x] Fix the case-insensitive result opener neutralizer; capture GREEN.
-- [ ] Commit the case-insensitive bypass fix separately.
-- [ ] Add Part B failing tests only; capture C3 RED.
-- [ ] Capture C5 pre-change CLI RED proof.
-- [ ] Implement Part B, debug-log cleanup, and changes entry.
-- [ ] Capture C3 GREEN and focused TTSR suite GREEN.
-- [ ] Run Part B diagnostics and commit atomic increment 2 with plan footer.
-- [ ] Run C4 post-change regressions (29/29).
-- [ ] Run all affected tests directly and save combined evidence.
-- [ ] Run root `npm run check` and `git diff --check`.
-- [ ] Build and run real senpi-qa CLI proof; capture `/ttsr` builtin listing.
-- [ ] Audit diff, evidence, plan checklist, XML escaping, per-request state, and disabled-rule path.
+- [x] Commit the case-insensitive bypass fix separately.
+- [x] Add Part B failing tests only; capture C3 RED.
+- [x] Capture behavioral C5 pre-change built-CLI RED proof.
+- [x] Implement Part B, debug-log cleanup, status partition, and changes entry.
+- [x] Capture C3 GREEN plus scope/disable mutation failures.
+- [x] Run C4 post-change regressions (TTSR 285, extension 7, gpt-apply-patch 29, AI 5/6/5).
+- [x] Run all affected tests directly and save combined evidence.
+- [x] Run root `npm run check` and `git diff --check`.
+- [x] Build and run real senpi-qa CLI proof; capture `/ttsr` builtin listing.
+- [ ] Commit atomic Part B increment with plan footer.
+- [x] Audit diff, evidence, plan checklist, XML escaping, per-request state, and disabled-rule path.
 - [ ] Push branch and open reviewer-readable PR; report URL immediately.
 - [ ] Monitor CI, address review/CI findings with additional atomic green commits if needed.
 - [ ] Merge PR with a merge commit and record merge SHA.
