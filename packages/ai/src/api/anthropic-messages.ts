@@ -48,6 +48,7 @@ import {
 } from "../utils/server-fallback-receipt.ts";
 import { normalizeToolCallId } from "../utils/tool-call-id.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
+import { demotedToolCallText, demotedToolResultText } from "../utils/unavailable-tool-text.ts";
 
 import { resolveCloudflareBaseUrl } from "./cloudflare.ts";
 import { resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
@@ -843,6 +844,8 @@ function demoteUnavailableToolReferences(params: MessageCreateParamsStreaming): 
 	if (demotedCallNames.size === 0 && danglingReferenceNames.size === 0) return params;
 
 	let changed = false;
+	const availableToolNames = [...definedNames];
+	const seenDemotedCallNames = new Set<string>();
 	const rewrittenMessages: MessageParam[] = [];
 	for (const message of messages) {
 		if (!Array.isArray(message.content)) {
@@ -856,7 +859,12 @@ function demoteUnavailableToolReferences(params: MessageCreateParamsStreaming): 
 				const demotedName = demotedCallNames.get(block.id);
 				if (demotedName !== undefined) {
 					messageChanged = true;
-					content.push({ type: "text", text: demotedToolCallText(demotedName, block.input) });
+					const firstOccurrence = !seenDemotedCallNames.has(demotedName);
+					seenDemotedCallNames.add(demotedName);
+					content.push({
+						type: "text",
+						text: demotedToolCallText(demotedName, availableToolNames, firstOccurrence),
+					});
 					continue;
 				}
 			}
@@ -864,7 +872,7 @@ function demoteUnavailableToolReferences(params: MessageCreateParamsStreaming): 
 				const demotedName = demotedCallNames.get(block.tool_use_id);
 				if (demotedName !== undefined) {
 					messageChanged = true;
-					content.push({ type: "text", text: demotedToolResultText(demotedName, block.content) });
+					content.push({ type: "text", text: demotedToolResultText(demotedName, toolResultText(block.content)) });
 					continue;
 				}
 				if (danglingReferenceNames.size > 0 && Array.isArray(block.content)) {
@@ -919,20 +927,6 @@ function collectToolReferenceNames(value: unknown, names: Set<string>): void {
 	if (!isRecord(value)) return;
 	if (value.type === "tool_reference" && typeof value.tool_name === "string") names.add(value.tool_name);
 	for (const nested of Object.values(value)) collectToolReferenceNames(nested, names);
-}
-
-function demotedToolCallText(name: string, input: unknown): string {
-	let serializedInput: string;
-	try {
-		serializedInput = JSON.stringify(input ?? {});
-	} catch {
-		serializedInput = "{}";
-	}
-	return `[Called tool "${name}" (no longer available in this session) with input: ${serializedInput}]`;
-}
-
-function demotedToolResultText(name: string, content: unknown): string {
-	return `[Result of unavailable tool "${name}": ${toolResultText(content)}]`;
 }
 
 function toolResultText(content: unknown): string {
