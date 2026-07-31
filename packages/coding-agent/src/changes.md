@@ -1,3 +1,23 @@
+## Breaker-cancelled opportunistic compaction no longer blocks admission (2026-07-31)
+
+### What changed
+
+- `core/agent-session.ts`: prompt, final-payload, scheduled-continuation, and retry admission now proceed without opportunistic compaction when the latest compaction rejection is `circuit-breaker`.
+- Final-payload admission still fails closed when the provider payload is actually oversized, and overflow-triggered compaction remains fail-closed.
+- Regression and real-CLI coverage prove breaker cooldown does not permanently reject prompts while non-breaker cancellation remains blocking.
+
+### Why
+
+- The circuit breaker stops repeated summarization spend during provider outages. Converting its cooldown rejection into `RequiredCompactionError` permanently bricked sessions above the soft threshold instead of allowing the provider or existing overflow recovery to make the real admission decision.
+
+### Why extension system couldn't handle this alone
+
+- Extensions report the rejection cause, but core owns every provider-admission site and decides whether a failed opportunistic compaction blocks the turn.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` compaction admission and retry-continuation paths.
+
 ## Failed pre-prompt compaction reports terminal recovery (2026-07-30)
 
 ### What changed
