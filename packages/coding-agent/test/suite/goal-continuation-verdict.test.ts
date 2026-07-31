@@ -130,13 +130,16 @@ describe("goal continuation verdict", () => {
 		});
 	});
 
-	it("exempts only monitor-delayed continuations from cap and stale guards", () => {
+	it("applies the cap to every path while exempting only monitor-delayed continuations from stale guards", () => {
 		const capped = makeInput({
 			consecutiveContinuations: GOAL_CONTINUATION_CAP,
 			lastContinuationSignature: "goal-1:1/2:abc123",
 		});
 
-		expect(evaluateGoalContinuation({ ...capped, path: "monitorDelayed" })).toMatchObject({ kind: "continue" });
+		expect(evaluateGoalContinuation({ ...capped, path: "monitorDelayed" })).toEqual({
+			kind: "deny",
+			reason: "cap",
+		});
 		expect(evaluateGoalContinuation({ ...capped, path: "sessionStart" })).toEqual({ kind: "deny", reason: "cap" });
 		expect(evaluateGoalContinuation({ ...capped, path: "userGrace" })).toEqual({ kind: "deny", reason: "cap" });
 		expect(
@@ -146,6 +149,13 @@ describe("goal continuation verdict", () => {
 				consecutiveContinuations: GOAL_CONTINUATION_CAP - 1,
 			}),
 		).toEqual({ kind: "deny", reason: "stale" });
+		expect(
+			evaluateGoalContinuation({
+				...capped,
+				path: "monitorDelayed",
+				consecutiveContinuations: GOAL_CONTINUATION_CAP - 1,
+			}),
+		).toMatchObject({ kind: "continue" });
 		expect(
 			evaluateGoalContinuation({
 				...capped,

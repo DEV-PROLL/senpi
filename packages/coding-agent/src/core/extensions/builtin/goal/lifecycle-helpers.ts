@@ -53,14 +53,17 @@ export async function admitAndQueueGoalContinuation(
 	const verdict = evaluateGoalContinuation({ goal, ...options.input });
 	if (verdict.kind === "deny") return handleDeniedContinuation(pi, ctx, goal, options.input, verdict.reason);
 
+	if (options.input.currentSignature === undefined) {
+		throw new Error("Cannot queue a goal continuation without a progress signature");
+	}
 	options.markContinuationPending();
-	queueHiddenGoalPrompt(pi, options.content(verdict));
-	if (options.input.path === "monitorDelayed" || options.input.currentSignature === undefined) return goal;
-
-	return (
-		(await recordContinuationDelivered(goalStoreRef(ctx.sessionManager, ctx.cwd), options.input.currentSignature)) ??
-		goal
+	const recordedGoal = await recordContinuationDelivered(
+		goalStoreRef(ctx.sessionManager, ctx.cwd),
+		options.input.currentSignature,
 	);
+	if (recordedGoal === null) throw new Error("Cannot persist goal continuation delivery without an active goal");
+	queueHiddenGoalPrompt(pi, options.content(verdict));
+	return recordedGoal;
 }
 
 /** Routes startup and resume continuations through the same verdict and delivery accounting as agent-end paths. */
