@@ -1,5 +1,39 @@
 # goal Extension Changes
 
+## Mechanical continuation blocks tell the user how to resume (2026-07-31)
+
+### What changed
+
+- New `continuation-recovery.ts` owns the three mechanical continuation-guard
+  reasons (`continuation cap reached`, `repeated assistant output`,
+  `output truncation repeated`) as exported constants, classifies them with
+  `isMechanicalContinuationBlock`, and builds the user notice with
+  `continuationCapRecoveryHint`.
+- `lifecycle-helpers.ts` consumes both: `blockedReasonForContinuationGuard`
+  returns the named constants, and the blocked notify now renders
+  `Goal continuation blocked: <reason>. Send any message to resume.` for
+  mechanical guards only.
+- Intentional blocks (`user interrupted the turn`, provider-error exhaustion,
+  model-authored blocks) keep the bare notice; no resume guidance is implied
+  where a message does not clear the block.
+
+### Why
+
+- A user reported that `continuation cap reached` "stops the session so much"
+  and "is not an easy guardrail to pass". The cap is a deliberate runaway
+  backstop and already resets on tool use or observable progress, and
+  `before_agent_start` already reactivates a cap-blocked goal on any real user
+  prompt. The gap was purely informational: the warning named the guard without
+  saying that one ordinary message clears it, so the state read as terminal.
+- Behavior of the guard itself is unchanged: `GOAL_CONTINUATION_CAP` stays 8,
+  admission logic is untouched, and the existing prompt-based recovery path is
+  preserved rather than replaced.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `lifecycle-helpers.ts` around the guard-reason switch and the notify call.
+- NONE in the verdict engine, goal store schema, persistence, or public extension API.
+
 ## Monitor-delayed continuations consume the persisted cap (2026-07-31)
 
 ### What changed
@@ -26,6 +60,7 @@
 - LOW in monitor continuation tests that observe delayed persistence.
 - NONE in the goal store schema, public extension API, or status transitions.
 
+||||||| parent of a687d47c6 (fix(coding-agent): tell users how to clear a mechanical goal block)
 ## Observable progress resets the persisted continuation cap streak (2026-07-30)
 
 ### What changed

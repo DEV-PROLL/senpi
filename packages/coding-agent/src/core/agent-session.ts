@@ -603,7 +603,7 @@ export class AgentSession {
 	private _userAbortPromise: Promise<void> | undefined = undefined;
 	private _agentAbortSource: "user" | "system" | undefined = undefined;
 	private _suppressQueuedContinuationAfterUserAbort = false;
-	/** Set when clearQueue() drains non-empty queues, so abort() can detect the gap even after queues are cleared. */
+	/** Set when clearQueue({ abortWillFollow: true }) drains queues immediately before abort(). */
 	private _hadClearedQueuedMessages = false;
 	private _extensionEventSignal: AbortSignal | undefined = undefined;
 
@@ -3023,13 +3023,18 @@ export class AgentSession {
 
 	/**
 	 * Clear all queued messages and return them.
-	 * Useful for restoring to editor when user aborts.
+	 * @param options.abortWillFollow Mark a non-empty drain so an immediately following abort can emit session_abort.
 	 * @returns Object with steering and followUp arrays
 	 */
-	clearQueue(): { steering: string[]; followUp: string[] } {
+	clearQueue(options: { abortWillFollow: boolean } = { abortWillFollow: false }): {
+		steering: string[];
+		followUp: string[];
+	} {
 		const steering = [...this._steeringMessages];
 		const followUp = [...this._followUpMessages];
-		if (steering.length > 0 || followUp.length > 0) this._hadClearedQueuedMessages = true;
+		if (options.abortWillFollow && (steering.length > 0 || followUp.length > 0)) {
+			this._hadClearedQueuedMessages = true;
+		}
 		// Clear every queue synchronously. Deferred post-compaction messages are
 		// already represented in visible bookkeeping, so they must not be returned
 		// a second time or later resurrected into Agent's native queues.
@@ -5459,6 +5464,15 @@ export class AgentSession {
 			// Refusals are only retried through a new chain candidate. They never use
 			// same-model retries or the transient over-budget fallback escape hatch.
 			if (this._retryAttempt + 1 > settings.maxRetries) {
+				if (this._retryAttempt > 0) {
+					this._emit({
+						type: "auto_retry_end",
+						success: false,
+						attempt: this._retryAttempt,
+						finalError: message.errorMessage,
+					});
+				}
+				this._retryAttempt = 0;
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -5468,6 +5482,15 @@ export class AgentSession {
 				if (exhaustedChainKey) {
 					this._emit({ type: "retry_fallback_exhausted", chainKey: exhaustedChainKey, lastError: errorMessage });
 				}
+				if (this._retryAttempt > 0) {
+					this._emit({
+						type: "auto_retry_end",
+						success: false,
+						attempt: this._retryAttempt,
+						finalError: message.errorMessage,
+					});
+				}
+				this._retryAttempt = 0;
 				this._resolveRetry();
 				return "not-handled";
 			}

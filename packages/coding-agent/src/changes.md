@@ -1,3 +1,41 @@
+## Refusal fallback exhaustion resets retry state (2026-07-31)
+
+### What changed
+
+- `core/agent-session.ts`: terminal classifier-refusal fallback exits now emit the matching failed `auto_retry_end` event and reset the retry attempt counter when a retry actually started.
+- The zero-attempt refusal path remains event-free, so `auto_retry_end` still pairs only with a prior `auto_retry_start`.
+- Regression coverage drives every configured fallback to refusal, then proves the session is idle and the interactive double-Escape history action works again.
+
+### Why
+
+- Refusal exhaustion previously resolved the retry promise without clearing `_retryAttempt`. The TUI therefore kept treating an idle session as retrying, so every Escape re-entered abort cleanup instead of arming the double-Escape session-history shortcut.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` in `_handleRetryableError()`'s classifier-refusal terminal branches.
+
+## Claude SDK OAuth provider identity (2026-07-31)
+
+### What changed
+
+- Renamed the SDK-backed Claude Pro/Max builtin provider, extension directory, runtime/model ID, OAuth storage sentinels, settings key, account directory, imports, tests, QA scenarios, and public commands from `claude-agent-sdk` to `claude-sdk-oauth`.
+- Renamed the provider-local TypeScript symbols to the same identity while preserving the upstream npm dependency and executable packages under `@anthropic-ai/claude-agent-sdk`.
+- Split the oversized stream test into prompt-bridge and stream-event suites without changing its five pinned behaviors.
+
+### Why
+
+- `claude-agent-sdk` conflated Senpi's provider identity with Anthropic's upstream package name and obscured that this lane is specifically the subscription OAuth surface.
+- There was no separate `claude-oauth` implementation to retain; the renamed provider is the sole SDK-backed OAuth implementation.
+
+### Why extension system couldn't handle this alone
+
+- The extension owns the provider implementation, but host registration order, RPC/app-server account imports, persisted auth keys, settings, and QA surfaces all reference its identity outside the extension directory.
+
+### Expected merge conflict zones
+
+- HIGH: the renamed builtin extension directory and provider-focused tests.
+- MEDIUM: builtin registration, RPC/app-server account imports, provider docs, and QA scenario names.
+
 ## Breaker-cancelled opportunistic compaction no longer blocks admission (2026-07-31)
 
 ### What changed

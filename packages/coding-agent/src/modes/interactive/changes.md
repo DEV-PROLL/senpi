@@ -1,5 +1,21 @@
 # changes
 
+## Queue restoration does not leak abort state (2026-07-31)
+
+### What changed
+
+- Native queue draining now records cleared messages for `session_abort` only when the caller will immediately abort the session.
+- Terminal compaction restoration and manual dequeue-to-editor drains leave later idle aborts silent, while the deliberate clear-then-abort paths retain their existing `session_abort` behavior.
+- Coverage: `test/suite/regressions/535-terminal-compaction-abort-flag.test.ts` drives terminal `compaction_end` restoration with native steer and follow-up messages and pins both sides of the abort-event distinction.
+
+### Why
+
+- Terminal compaction failure restoration previously left `_hadClearedQueuedMessages` set indefinitely. A later unrelated idle abort emitted `session_abort`, which extensions can interpret as a control-plane instruction such as blocking an active goal.
+
+### Expected merge conflict zones
+
+- LOW: queue draining in `core/agent-session.ts` and the queue restoration helpers in `interactive-mode.ts`.
+
 ## Footer marks fast mode on the model label (2026-07-31)
 
 ### What changed
@@ -16,6 +32,22 @@
 
 - Both fast paths (an `openai` `-fast` catalog variant and the Codex session toggle) were invisible
   in the footer, which is the only always-on surface showing the active model.
+
+## Double-Escape history recovers after refusal fallback exhaustion (2026-07-31)
+
+### What changed
+
+- Terminal classifier-refusal fallback exhaustion now returns `AgentSession.retryAttempt` to zero and emits the failed `auto_retry_end` event consumed by interactive retry cleanup.
+- The existing empty-editor double-Escape handler therefore reaches the session tree again after the final `Aborted after N retry attempts` result; no keybinding or timing semantics changed.
+- Coverage: `test/suite/regressions/fallback-abort-double-escape-session-history.test.ts`.
+
+### Why
+
+- The interactive Escape handler intentionally prioritizes active retry cancellation over session history. A stale positive retry attempt made that active-retry branch permanent even after the turn had settled.
+
+### Expected merge conflict zones
+
+- NONE in interactive source; the behavioral fix is isolated to `core/agent-session.ts` retry lifecycle cleanup.
 
 ## Failed compaction restores queued input (2026-07-30)
 

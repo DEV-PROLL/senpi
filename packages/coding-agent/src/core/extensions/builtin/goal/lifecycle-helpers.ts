@@ -10,6 +10,12 @@ import {
 	type GoalContinuationVerdict,
 	hashAssistantText,
 } from "./continuation.ts";
+import {
+	CONTINUATION_CAP_BLOCKED_REASON,
+	continuationCapRecoveryHint,
+	LENGTH_EXHAUSTED_BLOCKED_REASON,
+	REPETITION_BLOCKED_REASON,
+} from "./continuation-recovery.ts";
 import { buildContinuationPrompt } from "./prompt.ts";
 import { recordContinuationDelivered, updateGoal } from "./store.ts";
 import { goalStoreRef } from "./store-ref.ts";
@@ -147,7 +153,7 @@ async function handleDeniedContinuation(
 		{ status: "blocked", reason: blockedReason },
 		"model",
 	);
-	if (ctx.hasUI) ctx.ui.notify(`Goal continuation blocked: ${blockedReason}`, "warning");
+	if (ctx.hasUI) ctx.ui.notify(continuationCapRecoveryHint(blockedReason), "warning");
 	pi.events?.emit("goal_continuation_guard_tripped", {
 		goalId: goal.id,
 		reason,
@@ -161,11 +167,11 @@ function blockedReasonForContinuationGuard(
 ): string | undefined {
 	switch (reason) {
 		case "cap":
-			return "continuation cap reached";
+			return CONTINUATION_CAP_BLOCKED_REASON;
 		case "repetition":
-			return "repeated assistant output";
+			return REPETITION_BLOCKED_REASON;
 		case "length-exhausted":
-			return "output truncation repeated";
+			return LENGTH_EXHAUSTED_BLOCKED_REASON;
 		case "not-eligible":
 		case "single-flight":
 		case "stale":

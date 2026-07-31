@@ -20,50 +20,50 @@ function fakeOAuth(name: string, credential: OAuthCredential): OAuthAuth {
 describe("AuthStorage extension OAuth providers", () => {
 	test("extension-registered oauth provider appears in getOAuthProviders", () => {
 		const storage = AuthStorage.inMemory();
-		const oauth = fakeOAuth("Claude Agent SDK (Claude Pro/Max)", {
+		const oauth = fakeOAuth("Claude SDK OAuth (Claude Pro/Max)", {
 			type: "oauth",
 			access: "a",
 			refresh: "r",
 			expires: Date.now() + 60_000,
 		});
-		storage.registerOAuthProvider("claude-agent-sdk", oauth);
+		storage.registerOAuthProvider("claude-sdk-oauth", oauth);
 		expect(storage.getOAuthProviders()).toContainEqual({
-			id: "claude-agent-sdk",
-			name: "Claude Agent SDK (Claude Pro/Max)",
+			id: "claude-sdk-oauth",
+			name: "Claude SDK OAuth (Claude Pro/Max)",
 		});
 	});
 
 	test("login() runs the extension oauth flow and stores the credential", async () => {
 		const storage = AuthStorage.inMemory();
 		const credential: OAuthCredential = { type: "oauth", access: "a", refresh: "r", expires: 123 };
-		storage.registerOAuthProvider("claude-agent-sdk", fakeOAuth("x", credential));
-		await storage.login("claude-agent-sdk", {
+		storage.registerOAuthProvider("claude-sdk-oauth", fakeOAuth("x", credential));
+		await storage.login("claude-sdk-oauth", {
 			signal: undefined,
 			onPrompt: async () => "",
 			onAuth: async () => {},
 			onManualCodeInput: async () => "",
 		} as never);
-		expect(await storage.read("claude-agent-sdk")).toEqual(credential);
+		expect(await storage.read("claude-sdk-oauth")).toEqual(credential);
 	});
 
 	test("unregisterOAuthProvider hides the provider again", () => {
 		const storage = AuthStorage.inMemory();
 		storage.registerOAuthProvider(
-			"claude-agent-sdk",
+			"claude-sdk-oauth",
 			fakeOAuth("x", { type: "oauth", access: "", refresh: "", expires: 0 }),
 		);
-		storage.unregisterOAuthProvider("claude-agent-sdk");
-		expect(storage.getOAuthProviders().map((p) => p.id)).not.toContain("claude-agent-sdk");
+		storage.unregisterOAuthProvider("claude-sdk-oauth");
+		expect(storage.getOAuthProviders().map((p) => p.id)).not.toContain("claude-sdk-oauth");
 	});
 
 	test("builtin providers still enumerate after dynamic registration", () => {
 		const storage = AuthStorage.inMemory();
 		storage.registerOAuthProvider(
-			"claude-agent-sdk",
+			"claude-sdk-oauth",
 			fakeOAuth("x", { type: "oauth", access: "", refresh: "", expires: 0 }),
 		);
 		const ids = storage.getOAuthProviders().map((p) => p.id);
 		expect(ids).toContain("anthropic");
-		expect(ids).toContain("claude-agent-sdk");
+		expect(ids).toContain("claude-sdk-oauth");
 	});
 });

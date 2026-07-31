@@ -22,13 +22,13 @@ import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
 import {
 	emitProviderAccountsChanged,
 	subscribeProviderAccountEvents,
-} from "../../core/extensions/builtin/claude-agent-sdk/account-events.ts";
+} from "../../core/extensions/builtin/claude-sdk-oauth/account-events.ts";
 import {
-	CLAUDE_AGENT_SDK_PROVIDER_ID,
+	CLAUDE_SDK_OAUTH_PROVIDER_ID,
 	getProviderAccounts,
 	pinProviderAccount,
 	removeProviderAccount,
-} from "../../core/extensions/builtin/claude-agent-sdk/account-management.ts";
+} from "../../core/extensions/builtin/claude-sdk-oauth/account-management.ts";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -486,7 +486,7 @@ export function createRpcConnectionHandler(
 				signal: controller.signal,
 			});
 			session.modelRegistry.refresh();
-			if (provider === CLAUDE_AGENT_SDK_PROVIDER_ID) emitProviderAccountsChanged(provider);
+			if (provider === CLAUDE_SDK_OAUTH_PROVIDER_ID) emitProviderAccountsChanged(provider);
 			outputEvent({ type: "auth_login_end", provider, success: true });
 		} catch (loginError: unknown) {
 			const message = loginError instanceof Error ? loginError.message : String(loginError);
