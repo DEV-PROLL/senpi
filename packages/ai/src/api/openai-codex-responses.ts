@@ -49,8 +49,17 @@ import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
 import { extractOpenAiCodexAccountId } from "../utils/openai-codex-auth.ts";
 import { uuidv7 } from "../utils/uuid.ts";
 import { createGrammarToolInputProperties } from "./constrained-sampling.ts";
+import {
+	clearWebSocketFallbackState,
+	getOrCreateWebSocketDebugStats,
+	getWebSocketDebugStats,
+	isWebSocketSseFallbackActive,
+	type OpenAICodexWebSocketDebugStats,
+	recordWebSocketFailure,
+	recordWebSocketSseFallback,
+} from "./openai-codex-responses/fallback-state.ts";
 import { buildCodexReasoning, type CodexReasoningSummaryInput } from "./openai-codex-responses/reasoning.ts";
-import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
+import { applyOpenAICodexCacheAffinityHeaders, clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
 import {
 	applyExtraBody,
@@ -887,60 +896,16 @@ interface CachedWebSocketConnection {
 	continuation?: CachedWebSocketContinuationState;
 }
 
-export interface OpenAICodexWebSocketDebugStats {
-	requests: number;
-	connectionsCreated: number;
-	connectionsReused: number;
-	cachedContextRequests: number;
-	storeTrueRequests: number;
-	fullContextRequests: number;
-	deltaRequests: number;
-	lastInputItems: number;
-	lastDeltaInputItems?: number;
-	lastPreviousResponseId?: string;
-	websocketFailures: number;
-	sseFallbacks: number;
-	websocketFallbackActive?: boolean;
-	lastWebSocketError?: string;
-}
+export type { OpenAICodexWebSocketDebugStats } from "./openai-codex-responses/fallback-state.ts";
 
 const websocketSessionCache = new Map<string, CachedWebSocketConnection>();
-const websocketDebugStats = new Map<string, OpenAICodexWebSocketDebugStats>();
-const websocketSseFallbackSessions = new Set<string>();
-
-function getOrCreateWebSocketDebugStats(sessionId: string): OpenAICodexWebSocketDebugStats {
-	let stats = websocketDebugStats.get(sessionId);
-	if (!stats) {
-		stats = {
-			requests: 0,
-			connectionsCreated: 0,
-			connectionsReused: 0,
-			cachedContextRequests: 0,
-			storeTrueRequests: 0,
-			fullContextRequests: 0,
-			deltaRequests: 0,
-			lastInputItems: 0,
-			websocketFailures: 0,
-			sseFallbacks: 0,
-		};
-		websocketDebugStats.set(sessionId, stats);
-	}
-	return stats;
-}
 
 export function getOpenAICodexWebSocketDebugStats(sessionId: string): OpenAICodexWebSocketDebugStats | undefined {
-	const stats = websocketDebugStats.get(sessionId);
-	return stats ? { ...stats } : undefined;
+	return getWebSocketDebugStats(sessionId);
 }
 
 export function resetOpenAICodexWebSocketDebugStats(sessionId?: string): void {
-	if (sessionId) {
-		websocketDebugStats.delete(sessionId);
-		websocketSseFallbackSessions.delete(sessionId);
-		return;
-	}
-	websocketDebugStats.clear();
-	websocketSseFallbackSessions.clear();
+	clearWebSocketFallbackState(sessionId);
 }
 
 export function closeOpenAICodexWebSocketSessions(sessionId?: string): void {
@@ -952,36 +917,17 @@ export function closeOpenAICodexWebSocketSessions(sessionId?: string): void {
 		const entry = websocketSessionCache.get(sessionId);
 		if (entry) closeEntry(entry);
 		websocketSessionCache.delete(sessionId);
+		clearWebSocketFallbackState(sessionId);
 		return;
 	}
 	for (const entry of websocketSessionCache.values()) {
 		closeEntry(entry);
 	}
 	websocketSessionCache.clear();
+	clearWebSocketFallbackState();
 }
 
 registerSessionResourceCleanup(closeOpenAICodexWebSocketSessions);
-
-function isWebSocketSseFallbackActive(sessionId: string | undefined): boolean {
-	return sessionId ? websocketSseFallbackSessions.has(sessionId) : false;
-}
-
-function recordWebSocketSseFallback(sessionId: string | undefined): void {
-	if (!sessionId) return;
-	const stats = getOrCreateWebSocketDebugStats(sessionId);
-	stats.sseFallbacks++;
-	stats.websocketFallbackActive = isWebSocketSseFallbackActive(sessionId);
-}
-
-function recordWebSocketFailure(sessionId: string | undefined, error: unknown): void {
-	if (!sessionId) return;
-	websocketSseFallbackSessions.add(sessionId);
-
-	const stats = getOrCreateWebSocketDebugStats(sessionId);
-	stats.websocketFailures++;
-	stats.lastWebSocketError = formatThrownValue(error);
-	stats.websocketFallbackActive = true;
-}
 
 type WebSocketConstructor = new (
 	url: string,
@@ -1692,10 +1638,7 @@ function buildSSEHeaders(
 	headers.set("accept", "text/event-stream");
 	headers.set("content-type", "application/json");
 
-	if (sessionId) {
-		headers.set("session-id", sessionId);
-		headers.set("x-client-request-id", sessionId);
-	}
+	applyOpenAICodexCacheAffinityHeaders(headers, sessionId);
 
 	return headers;
 }
@@ -1713,7 +1656,6 @@ function buildWebSocketHeaders(
 	headers.delete("OpenAI-Beta");
 	headers.delete("openai-beta");
 	headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
-	headers.set("x-client-request-id", requestId);
-	headers.set("session-id", requestId);
+	applyOpenAICodexCacheAffinityHeaders(headers, requestId);
 	return headers;
 }

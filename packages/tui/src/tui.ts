@@ -495,6 +495,7 @@ export class TUI extends Container {
 	public terminal: Terminal;
 	private previousLines: string[] = [];
 	private previousRawLines: string[] = [];
+	private normalizeMemo = new Map<string, string>();
 	private previousKittyImageIds = new Set<number>();
 	private previousWidth = 0;
 	private previousHeight = 0;
@@ -1401,21 +1402,35 @@ export class TUI extends Container {
 		if (isImageLine(line)) {
 			return { line, normalized: false };
 		}
-		return { line: normalizeTerminalOutput(line) + TUI.SEGMENT_RESET, normalized: true };
+		const cached = this.normalizeMemo.get(line);
+		if (cached !== undefined) {
+			return { line: cached, normalized: false };
+		}
+		const normalized = normalizeTerminalOutput(line) + TUI.SEGMENT_RESET;
+		this.normalizeMemo.set(line, normalized);
+		return { line: normalized, normalized: true };
 	}
 
 	private applyLineResets(lines: string[], mode: "escaped" | "full" = "full"): NormalizedLinesResult {
+		const previousMemo = this.normalizeMemo;
+		const nextMemo = new Map<string, string>();
 		const normalizedLines: string[] = [];
 		let normalizedCount = 0;
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
 			if (isImageLine(line)) {
 				normalizedLines.push(line);
-			} else {
-				normalizedLines.push(normalizeTerminalOutput(line) + TUI.SEGMENT_RESET);
+				continue;
+			}
+			let normalized = nextMemo.get(line) ?? previousMemo.get(line);
+			if (normalized === undefined) {
+				normalized = normalizeTerminalOutput(line) + TUI.SEGMENT_RESET;
 				normalizedCount += 1;
 			}
+			nextMemo.set(line, normalized);
+			normalizedLines.push(normalized);
 		}
+		this.normalizeMemo = nextMemo;
 		recordViewportRenderStats(normalizedCount, mode);
 		return {
 			lines: normalizedLines,
