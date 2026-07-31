@@ -71,7 +71,10 @@ export class MonitorAwareGoalContinuation {
 	#endedTurnWasUserInitiated = false;
 	#lastTurnUsage: TokenUsageSnapshot | undefined;
 	#scheduledAtMs: number | undefined;
+	#scheduledDueAtMs: number | undefined;
 	#scheduledCache: GoalCacheWarmMetrics | undefined;
+	#heldTimer: { kind: DelayedContinuationKind; remainingMs: number } | undefined;
+	#directInputHolds = new Set<string>();
 
 	constructor(
 		pi: ExtensionAPI,
@@ -90,6 +93,7 @@ export class MonitorAwareGoalContinuation {
 		this.#activeMonitorCount = 0;
 		this.#goal = null;
 		this.#lastAgentEndMessages = [];
+		this.#directInputHolds.clear();
 		this.#resetContinuationState();
 		const events = this.#pi.events;
 		if (events === undefined) return;
@@ -155,7 +159,41 @@ export class MonitorAwareGoalContinuation {
 		}
 	}
 
-	/** A real user prompt breaks unattended continuation state before its agent turn begins. */
+	/** Temporarily prevents a scheduled continuation from racing unresolved direct-input admission. */
+	holdDirectInput(inputId: string): void {
+		if (this.#directInputHolds.has(inputId)) return;
+		this.#directInputHolds.add(inputId);
+		if (
+			this.#directInputHolds.size !== 1 ||
+			this.#timer === undefined ||
+			this.#scheduledContinuationKind === undefined
+		) {
+			return;
+		}
+		this.#heldTimer = {
+			kind: this.#scheduledContinuationKind,
+			remainingMs: Math.max(0, (this.#scheduledDueAtMs ?? Date.now()) - Date.now()),
+		};
+		clearTimeout(this.#timer);
+		this.#timer = undefined;
+		this.#scheduledDueAtMs = undefined;
+	}
+
+	/** Resolves one admission hold without allowing overlapping inputs to consume each other. */
+	resolveDirectInput(inputId: string, accepted: boolean): void {
+		if (!this.#directInputHolds.delete(inputId)) return;
+		if (accepted) {
+			this.#heldTimer = undefined;
+			this.noteUserPrompt();
+			return;
+		}
+		if (this.#directInputHolds.size > 0 || this.#heldTimer === undefined) return;
+		const held = this.#heldTimer;
+		this.#heldTimer = undefined;
+		this.#armTimer(held.kind, held.remainingMs);
+	}
+
+	/** An accepted real user prompt starts a grace-governed user turn. */
 	noteUserPrompt(): void {
 		this.#cancelTimer();
 		this.#endedTurnWasUserInitiated = true;
@@ -175,11 +213,12 @@ export class MonitorAwareGoalContinuation {
 		this.#goal = null;
 		this.#activeMonitorCount = 0;
 		this.#lastAgentEndMessages = [];
+		this.#directInputHolds.clear();
 		this.#resetContinuationState();
 	}
 
 	#schedule(goal: Goal, kind: DelayedContinuationKind): void {
-		if (this.#timer !== undefined) return;
+		if (this.#scheduledContinuationKind !== undefined) return;
 		const delayMs = kind === "monitor" ? GOAL_MONITOR_CONTINUATION_DELAY_MS : GOAL_USER_GRACE_DELAY_MS;
 		if (kind === "monitor") {
 			const cache = estimateCacheWarmMetrics(this.#ctx?.model, process.env, this.#lastTurnUsage);
@@ -206,6 +245,15 @@ export class MonitorAwareGoalContinuation {
 			this.#scheduledCache = undefined;
 		}
 		this.#scheduledContinuationKind = kind;
+		if (this.#directInputHolds.size > 0) {
+			this.#heldTimer = { kind, remainingMs: delayMs };
+			return;
+		}
+		this.#armTimer(kind, delayMs);
+	}
+
+	#armTimer(kind: DelayedContinuationKind, delayMs: number): void {
+		this.#scheduledDueAtMs = Date.now() + delayMs;
 		this.#timer = setTimeout(() => {
 			void this.#continueIfEligible(kind).catch((error: unknown) => {
 				if (this.#ctx?.hasUI) {
@@ -218,6 +266,7 @@ export class MonitorAwareGoalContinuation {
 
 	async #continueIfEligible(kind: DelayedContinuationKind): Promise<void> {
 		this.#timer = undefined;
+		this.#scheduledDueAtMs = undefined;
 		this.#scheduledContinuationKind = undefined;
 		const delayMs = kind === "monitor" ? GOAL_MONITOR_CONTINUATION_DELAY_MS : GOAL_USER_GRACE_DELAY_MS;
 		const waitedMs = this.#scheduledAtMs === undefined ? delayMs : Math.max(0, Date.now() - this.#scheduledAtMs);
@@ -364,7 +413,9 @@ export class MonitorAwareGoalContinuation {
 
 	#cancelTimer(): void {
 		this.#scheduledAtMs = undefined;
+		this.#scheduledDueAtMs = undefined;
 		this.#scheduledCache = undefined;
+		this.#heldTimer = undefined;
 		if (this.#timer !== undefined) clearTimeout(this.#timer);
 		this.#timer = undefined;
 		this.#scheduledContinuationKind = undefined;

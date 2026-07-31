@@ -625,7 +625,18 @@ describe("goal extension session_start migration-lite admission", () => {
 		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
 		expect(sent).toHaveLength(0);
 
-		await runHandlers(handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"input",
+			{ type: "input", inputId: "suppressed-resume", text: "continue", source: "interactive" },
+			ctx,
+		);
+		await runHandlers(
+			handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "suppressed-resume", disposition: "started" },
+			ctx,
+		);
 		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runHandlers(
 			handlers,

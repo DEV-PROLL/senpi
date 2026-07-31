@@ -104,6 +104,14 @@ export async function queueGoalContinuation(
 	});
 }
 
+export function buildCurrentGoalContinuationSignatureFromBranch(ctx: ExtensionContext, goal: Goal): string {
+	return buildCurrentGoalContinuationSignature(
+		ctx,
+		goal,
+		lastAssistantTextFromEntries(ctx.sessionManager.getBranch()),
+	);
+}
+
 export function buildCurrentGoalContinuationSignature(
 	ctx: ExtensionContext,
 	goal: Goal,

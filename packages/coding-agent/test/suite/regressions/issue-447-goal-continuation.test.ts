@@ -172,7 +172,18 @@ describe("issue #447: goal continuation guardrails", () => {
 		await createActiveGoal(harness, ctx, "Answer the direct user question first");
 		await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
-		await runGoalHandlers(harness.handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+		await runGoalHandlers(
+			harness.handlers,
+			"input",
+			{ type: "input", inputId: "grace-turn", text: "continue", source: "interactive" },
+			ctx,
+		);
+		await runGoalHandlers(
+			harness.handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "grace-turn", disposition: "started" },
+			ctx,
+		);
 		await runGoalHandlers(harness.handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runGoalHandlers(
 			harness.handlers,

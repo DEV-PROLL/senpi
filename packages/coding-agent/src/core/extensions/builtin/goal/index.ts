@@ -5,11 +5,12 @@ import { GOAL_CACHE_WARMUP_ENTRY_TYPE } from "./cache-warm.ts";
 import { renderGoalCacheWarmupEntry } from "./cache-warm-renderer.ts";
 import { registerGoalCommand } from "./command-registration.ts";
 import { GOAL_CONTINUATION_CAP } from "./continuation.ts";
+import { GoalDirectInputLifecycle } from "./direct-input-lifecycle.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
 import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
 import { MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
-import { accountGoalUsage, readGoal, resetContinuationStreak, updateGoal } from "./store.ts";
+import { accountGoalUsage, readGoal, updateGoal } from "./store.ts";
 import { goalStoreRef as buildGoalStoreRef } from "./store-ref.ts";
 import { staleGoalTodoReminder, todoResultAddsOpenTasks } from "./todo-gate.ts";
 import { registerGoalTools } from "./tool-registration.ts";
@@ -41,6 +42,15 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			continuationPending = true;
 		},
 	);
+	const directInputLifecycle = new GoalDirectInputLifecycle({
+		monitor: monitorContinuation,
+		goalStoreRef,
+		isAgentTurnInProgress: () => agentTurnInProgress,
+		accountCurrentAgentTurn: (ctx) => accountCurrentAgentTurn(ctx, "active"),
+		clearAgentGoalAccounting,
+		beginAgentGoalAccounting,
+		refreshGoalUi: refreshGoalUiBestEffort,
+	});
 
 	const goalTicker = new GoalElapsedTicker({
 		render: (renderCtx, renderGoal, live) => {
@@ -79,6 +89,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (event, ctx) => {
 		monitorContinuation.start(ctx);
+		directInputLifecycle.reset();
 		const goal = await readGoal(goalStoreRef(ctx));
 		if (goal?.status === "active") {
 			beginAgentGoalAccounting(goal);
@@ -107,19 +118,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("before_agent_start", async (_event, ctx) => {
-		// before_agent_start fires only for real user prompts and BEFORE the host's final
-		// provider admission check (which can reject the run so no agent_start follows).
-		// Resuming a blocked goal here, instead of deferring to agent_start via a sticky
-		// flag, means a rejected run cannot leak a stale resume signal to a later
-		// continuation-style turn that starts the agent without a preceding user prompt.
-		monitorContinuation.noteUserPrompt();
-		const ref = goalStoreRef(ctx);
-		let goal = await resetContinuationStreak(ref);
-		if (goal?.status === "blocked") {
-			goal = await updateGoal(ref, { status: "active" }, "user");
-		}
-		if (goal !== null) refreshGoalUi(ctx, goal);
+	pi.on("input", async (event, ctx) => {
+		await directInputLifecycle.onInput(event, ctx);
+	});
+
+	pi.on("input_disposition", async (event, ctx) => {
+		await directInputLifecycle.onDisposition(event, ctx);
 	});
 
 	pi.on("turn_start", async () => {
@@ -183,6 +187,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			);
 			if (ctx.hasUI) ctx.ui.notify(`Goal ${goalStatusLabel(goal.status)}\n${formatGoalForTool(goal)}`, "warning");
 		}
+		goal = await directInputLifecycle.applyPendingPauseAfterAgentEnd(ctx, goal);
 		if (goal?.status === "active") {
 			beginAgentGoalAccounting(goal);
 		} else {

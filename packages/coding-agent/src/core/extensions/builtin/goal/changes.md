@@ -1,5 +1,18 @@
 # goal Extension Changes
 
+## Accepted direct input reconciles stale Goal state (2026-07-31)
+
+### What changed
+
+- A matching persisted `lastContinuationSignature` now identifies an unchanged stale active goal; only accepted direct non-steer input pauses it. Streaming follow-up pauses are goal-ID guarded until the in-flight `agent_end` has accounted usage.
+- Input candidates and reversible continuation holds are keyed by `inputId`, so handled/rejected and overlapping prompts neither mutate Goal persistence nor strand an armed grace/monitor continuation.
+- Accepted direct non-steer input reactivates only the mechanical block reasons already owned by `continuation-recovery.ts`; provider, interruption, and model-authored blocks stay blocked. Fresh/progressed active goals keep the existing 60-second user grace, and extension/steer input stays inert.
+
+### Expected merge conflict zones
+
+- MEDIUM in `index.ts` lifecycle wiring and `monitor-continuation.ts` timer ownership.
+- LOW in the focused direct-input lifecycle module.
+
 ## Mechanical continuation blocks tell the user how to resume (2026-07-31)
 
 ### What changed
