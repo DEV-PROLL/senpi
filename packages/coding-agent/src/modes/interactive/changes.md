@@ -45,6 +45,22 @@
 - Both fast paths (an `openai` `-fast` catalog variant and the Codex session toggle) were invisible
   in the footer, which is the only always-on surface showing the active model.
 
+## Double-Escape history recovers after refusal fallback exhaustion (2026-07-31)
+
+### What changed
+
+- Terminal classifier-refusal fallback exhaustion now returns `AgentSession.retryAttempt` to zero and emits the failed `auto_retry_end` event consumed by interactive retry cleanup.
+- The existing empty-editor double-Escape handler therefore reaches the session tree again after the final `Aborted after N retry attempts` result; no keybinding or timing semantics changed.
+- Coverage: `test/suite/regressions/fallback-abort-double-escape-session-history.test.ts`.
+
+### Why
+
+- The interactive Escape handler intentionally prioritizes active retry cancellation over session history. A stale positive retry attempt made that active-retry branch permanent even after the turn had settled.
+
+### Expected merge conflict zones
+
+- NONE in interactive source; the behavioral fix is isolated to `core/agent-session.ts` retry lifecycle cleanup.
+
 ## Failed compaction restores queued input (2026-07-30)
 
 ### What changed
