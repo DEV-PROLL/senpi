@@ -666,12 +666,8 @@ export function getSupportedThinkingLevels<TApi extends Api>(model: Model<TApi>)
 	return EXTENDED_THINKING_LEVELS.filter((level) => {
 		const mapped = model.thinkingLevelMap?.[level];
 		if (mapped === null) return false;
-		if (level === "xhigh") {
-			return mapped !== undefined || (model.thinkingLevelMap === undefined && supportsXhighModelId(model.id));
-		}
-		if (level === "max") {
-			return mapped !== undefined || (model.thinkingLevelMap === undefined && supportsMaxModel(model));
-		}
+		if (level === "xhigh") return supportsXhigh(model);
+		if (level === "max") return supportsMax(model);
 		return true;
 	});
 }
@@ -717,7 +713,9 @@ const XHIGH_MODEL_IDS = [
 	"gpt-5.3",
 	"gpt-5.4",
 	"gpt-5.5",
-	"gpt-5.6",
+	"gpt-5.6-luna",
+	"gpt-5.6-sol",
+	"gpt-5.6-terra",
 	"deepseek-v4-pro",
 	"deepseek-v4-flash",
 	"opus-4-6",
@@ -731,8 +729,21 @@ const XHIGH_MODEL_IDS = [
 	"fable-5",
 ];
 
+function escapeRegex(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Match a complete model family marker, not an alphanumeric substring of another id. */
+function matchesModelFamily(modelId: string, family: string): boolean {
+	const normalizedId = modelId.toLowerCase();
+	const escapedFamily = escapeRegex(family.toLowerCase());
+	// GPT aliases use a complete id or provider namespace; a hyphenated word prefix is not a provider namespace.
+	const leadingBoundary = family.startsWith("gpt-") ? "(?:^|[/.:_])" : "(?:^|[/.:_-])";
+	return new RegExp(`${leadingBoundary}${escapedFamily}(?=$|[^a-z0-9])`).test(normalizedId);
+}
+
 function supportsXhighModelId(modelId: string): boolean {
-	return XHIGH_MODEL_IDS.some((id) => modelId.includes(id));
+	return XHIGH_MODEL_IDS.some((id) => matchesModelFamily(modelId, id));
 }
 
 /**
@@ -757,8 +768,8 @@ const OPENAI_MAX_APIS: Api[] = [
 	"openai-completions",
 ];
 
-/** Matches `gpt-5.6-sol` and its suffixed variants, with or without a provider path prefix. */
-const GPT_56_SOL_ID = /(?:^|\/)gpt-5\.6-sol(?:$|-)/;
+/** Model family that accepts native `max` effort on OpenAI-compatible APIs. */
+const GPT_56_SOL_ID = "gpt-5.6-sol";
 
 const MAX_MODEL_IDS = [
 	"opus-4-6",
@@ -774,8 +785,8 @@ const MAX_MODEL_IDS = [
 
 function supportsMaxModel<TApi extends Api>(model: Model<TApi>): boolean {
 	if (!model.reasoning) return false;
-	if (OPENAI_MAX_APIS.includes(model.api) && GPT_56_SOL_ID.test(model.id)) return true;
-	return MAX_MODEL_IDS.some((id) => model.id.includes(id));
+	if (OPENAI_MAX_APIS.includes(model.api) && matchesModelFamily(model.id, GPT_56_SOL_ID)) return true;
+	return MAX_MODEL_IDS.some((id) => matchesModelFamily(model.id, id));
 }
 
 /**
