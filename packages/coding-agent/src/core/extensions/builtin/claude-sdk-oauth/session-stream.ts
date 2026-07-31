@@ -24,6 +24,65 @@ import {
 } from "./session-sync.ts";
 import type { ClaudeSdkOauthProviderSettings } from "./settings.ts";
 
+const SESSION_STREAM_QUEUE_CAPACITY = 256;
+
+class BoundedAsyncQueue<T> implements AsyncIterableIterator<T> {
+	private readonly capacity: number;
+	private readonly values: T[] = [];
+	private reader: { resolve: (result: IteratorResult<T>) => void; reject: (error: unknown) => void } | undefined;
+	private closed = false;
+	private failed = false;
+	private failure: unknown;
+
+	constructor(capacity: number) {
+		this.capacity = capacity;
+	}
+
+	[Symbol.asyncIterator](): AsyncIterableIterator<T> {
+		return this;
+	}
+
+	next(): Promise<IteratorResult<T>> {
+		if (this.values.length > 0) return Promise.resolve({ value: this.values.shift()!, done: false });
+		if (this.failed) return Promise.reject(this.failure);
+		if (this.closed) return Promise.resolve({ value: undefined, done: true });
+		return new Promise((resolve, reject) => {
+			this.reader = { resolve, reject };
+		});
+	}
+
+	push(value: T): void {
+		if (this.closed || this.failed) return;
+		const reader = this.reader;
+		if (reader) {
+			this.reader = undefined;
+			reader.resolve({ value, done: false });
+			return;
+		}
+		if (this.values.length >= this.capacity) {
+			throw new Error(`Claude SDK OAuth session stream queue exceeded ${this.capacity} messages`);
+		}
+		this.values.push(value);
+	}
+
+	close(): void {
+		if (this.closed || this.failed) return;
+		this.closed = true;
+		const reader = this.reader;
+		this.reader = undefined;
+		reader?.resolve({ value: undefined, done: true });
+	}
+
+	fail(error: unknown): void {
+		if (this.closed || this.failed) return;
+		this.failed = true;
+		this.failure = error;
+		const reader = this.reader;
+		this.reader = undefined;
+		reader?.reject(error);
+	}
+}
+
 export type ResidentSessionStreamInput = {
 	model: Model<Api>;
 	context: Context;
@@ -50,6 +109,41 @@ function recordAssistantUuid(entry: ClaudeSdkOauthSessionEntry, sentCount: numbe
 	}
 }
 
+async function initializeResumedEntry(
+	entry: ClaudeSdkOauthSessionEntry,
+	signal: AbortSignal | undefined,
+): Promise<void> {
+	const initialize = entry.query.initializationResult;
+	if (!initialize) throw new Error("Resumed Claude SDK query has no initialization result");
+	if (!signal) {
+		await initialize.call(entry.query);
+		return;
+	}
+	const abortError = new Error("Claude SDK OAuth resume initialization aborted");
+	if (signal.aborted) {
+		closeSession(entry.senpiSessionId, "resume_initialization_aborted");
+		throw abortError;
+	}
+	let aborted = false;
+	let rejectAbort!: (error: Error) => void;
+	const abortPromise = new Promise<never>((_resolve, reject) => {
+		rejectAbort = reject;
+	});
+	const onAbort = (): void => {
+		aborted = true;
+		closeSession(entry.senpiSessionId, "resume_initialization_aborted");
+		rejectAbort(abortError);
+	};
+	signal.addEventListener("abort", onAbort, { once: true });
+	if (signal.aborted) onAbort();
+	try {
+		await Promise.race([initialize.call(entry.query), abortPromise]);
+		if (aborted) throw abortError;
+	} finally {
+		signal.removeEventListener("abort", onAbort);
+	}
+}
+
 function turnAttempt(
 	entry: ClaudeSdkOauthSessionEntry,
 	message: SDKUserMessage["message"],
@@ -59,12 +153,21 @@ function turnAttempt(
 	const generation = entry.generation;
 	return {
 		messages: (async function* (): AsyncGenerator<SDKMessage> {
-			const turn = await submitSessionTurn(sessionRegistry, entry, {
+			const queue = new BoundedAsyncQueue<SDKMessage>(SESSION_STREAM_QUEUE_CAPACITY);
+			const completion = submitSessionTurn(sessionRegistry, entry, {
 				message,
 				signal,
-				onMessage: (sdkMessage) => recordAssistantUuid(entry, hashes.length, sdkMessage),
+				onMessage: (sdkMessage) => {
+					recordAssistantUuid(entry, hashes.length, sdkMessage);
+					queue.push(sdkMessage);
+				},
 			});
-			for (const sdkMessage of turn.messages) yield sdkMessage;
+			void completion.then(
+				() => queue.close(),
+				(error: unknown) => queue.fail(error),
+			);
+			for await (const sdkMessage of queue) yield sdkMessage;
+			const turn = await completion;
 			if (!turn.aborted && successfulTurn(turn.messages)) recordSyncedStream(entry, hashes);
 		})(),
 		discard: (): void => {
@@ -114,13 +217,12 @@ async function createResidentAttempt(
 		});
 		primeResumedEntry(entry, previous, decision.from);
 		try {
-			if (!entry.query.initializationResult)
-				throw new Error("Resumed Claude SDK query has no initialization result");
-			await entry.query.initializationResult();
+			await initializeResumedEntry(entry, input.streamOptions.signal);
 			from = decision.from;
 			coldSeed = false;
 		} catch (error) {
 			closeSession(sessionId, "resume_initialization_failed");
+			if (input.streamOptions.signal?.aborted) throw error;
 			input.onResumeFallback(error);
 			coldSeed = true;
 			entry = getOrCreateSession({

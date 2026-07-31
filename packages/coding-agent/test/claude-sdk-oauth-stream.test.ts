@@ -10,6 +10,7 @@ import {
 	type SdkQueryHandle,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import {
+	ClaudeSdkOauthSessionRegistry,
 	closeSession,
 	getSession,
 	markTainted,
@@ -17,6 +18,7 @@ import {
 	recordBranchInfo,
 	resetSessionRegistryBoundary,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
+import { submitSessionTurn } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-pump.ts";
 import { streamClaudeSdkOauth } from "../src/core/extensions/builtin/claude-sdk-oauth/stream.ts";
 
 const model: Model<Api> = {
@@ -138,6 +140,68 @@ const scriptedMessages = [
 
 const sessionIds = new Set<string>();
 
+type InterruptOutcome = "reject" | "resolve";
+
+class StalledResidentQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
+	readonly turnStarted: Promise<void>;
+	readonly interruptRequested: Promise<void>;
+	interrupts = 0;
+	closes = 0;
+	private readonly outcome: InterruptOutcome;
+	private readonly queued: SDKMessage[] = [];
+	private readonly readers: Array<(value: IteratorResult<SDKMessage>) => void> = [];
+	private done = false;
+	private markTurnStarted!: () => void;
+	private markInterruptRequested!: () => void;
+
+	constructor(prompt: AsyncIterable<SDKUserMessage>, outcome: InterruptOutcome) {
+		this.outcome = outcome;
+		this.turnStarted = new Promise((resolve) => {
+			this.markTurnStarted = resolve;
+		});
+		this.interruptRequested = new Promise((resolve) => {
+			this.markInterruptRequested = resolve;
+		});
+		void this.consume(prompt);
+	}
+
+	[Symbol.asyncIterator](): AsyncIterator<SDKMessage> {
+		return this;
+	}
+
+	next(): Promise<IteratorResult<SDKMessage>> {
+		const value = this.queued.shift();
+		if (value) return Promise.resolve({ value, done: false });
+		if (this.done) return Promise.resolve({ value: undefined, done: true });
+		return new Promise((resolve) => this.readers.push(resolve));
+	}
+
+	interrupt(): Promise<void> {
+		this.interrupts++;
+		this.markInterruptRequested();
+		return this.outcome === "reject" ? Promise.reject(new Error("interrupt rejected")) : Promise.resolve();
+	}
+
+	close(): void {
+		this.closes++;
+		this.done = true;
+		for (const reader of this.readers.splice(0)) reader({ value: undefined, done: true });
+	}
+
+	private emit(message: SDKMessage): void {
+		const reader = this.readers.shift();
+		if (reader) reader({ value: message, done: false });
+		else this.queued.push(message);
+	}
+
+	private async consume(prompt: AsyncIterable<SDKUserMessage>): Promise<void> {
+		for await (const message of prompt) {
+			this.markTurnStarted();
+			this.emit(sdkMessage({ ...message, uuid: message.uuid, isReplay: true }));
+		}
+	}
+}
+
 class ResidentQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
 	readonly submitted: SDKUserMessage[] = [];
 	readonly options: Options;
@@ -209,6 +273,71 @@ class ResidentQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
 	}
 }
 
+class StalledInitializationResidentQuery extends ResidentQuery {
+	readonly initializationStarted: Promise<void>;
+	private markInitializationStarted!: () => void;
+	private readonly initialization = new Promise<Record<string, never>>(() => {});
+
+	constructor(prompt: AsyncIterable<SDKUserMessage>, options: Options) {
+		super(prompt, options);
+		this.initializationStarted = new Promise((resolve) => {
+			this.markInitializationStarted = resolve;
+		});
+	}
+
+	override initializationResult(): Promise<Record<string, never>> {
+		this.markInitializationStarted();
+		return this.initialization;
+	}
+}
+
+function manuallyScheduledAborts() {
+	const tasks: Array<{ callback: () => void; delayMs: number; canceled: boolean }> = [];
+	return {
+		tasks,
+		scheduleAbort(callback: () => void, delayMs: number): () => void {
+			const task = { callback, delayMs, canceled: false };
+			tasks.push(task);
+			return () => {
+				task.canceled = true;
+			};
+		},
+		flush(): void {
+			for (const task of tasks) {
+				if (!task.canceled) task.callback();
+			}
+		},
+	};
+}
+
+function registryInput(senpiSessionId: string) {
+	return {
+		senpiSessionId,
+		accountName: "default",
+		modelId: model.id,
+		toolsetHash: "tools-v1",
+		systemPromptHash: "prompt-v1",
+		options: {},
+	};
+}
+
+function stalledTurnFixture(outcome: InterruptOutcome) {
+	let stalled: StalledResidentQuery | undefined;
+	overrideSessionRegistryBoundary({
+		queryFactory: ({ prompt, options = {} }) => {
+			if (typeof prompt === "string") throw new Error("Expected streaming input");
+			if (!stalled) {
+				stalled = new StalledResidentQuery(prompt, outcome);
+				return stalled;
+			}
+			return new ResidentQuery(prompt, options);
+		},
+	});
+	const registry = new ClaudeSdkOauthSessionRegistry();
+	const entry = registry.getOrCreate(registryInput(`resident-abort-${outcome}`));
+	return { registry, entry, stalled: stalled! };
+}
+
 function assistant(text: string, timestamp: number): AssistantMessage {
 	return {
 		role: "assistant",
@@ -240,7 +369,10 @@ function textFrom(message: SDKUserMessage): string {
 	return content.map((block) => (block.type === "text" ? block.text : "[image]")).join("");
 }
 
-function residentBoundary(initializationFailures = new Set<number>()) {
+function residentBoundary(
+	initializationFailures = new Set<number>(),
+	createResident?: (prompt: AsyncIterable<SDKUserMessage>, options: Options, index: number) => ResidentQuery,
+) {
 	const queries: ResidentQuery[] = [];
 	const query: SdkQuery = (input) => {
 		const { prompt, options = {} } = input;
@@ -248,11 +380,13 @@ function residentBoundary(initializationFailures = new Set<number>()) {
 			return scriptedQuery([sdkMessage({ type: "result", subtype: "success", result: "ephemeral" })])(input);
 		}
 		if (typeof prompt === "string") throw new Error("Expected streaming input");
-		const resident = new ResidentQuery(
-			prompt,
-			options,
-			initializationFailures.has(queries.length) ? new Error("resume initialization failed") : undefined,
-		);
+		const resident =
+			createResident?.(prompt, options, queries.length) ??
+			new ResidentQuery(
+				prompt,
+				options,
+				initializationFailures.has(queries.length) ? new Error("resume initialization failed") : undefined,
+			);
 		queries.push(resident);
 		return resident;
 	};
@@ -379,6 +513,218 @@ describe("Claude SDK OAuth stream events", () => {
 			reason: "error",
 			error: { stopReason: "error", errorMessage: "SDK disconnected" },
 		});
+	});
+
+	it("delivers resident turn messages before the terminal result arrives", async () => {
+		let releaseTerminal!: () => void;
+		const terminalGate = new Promise<void>((resolve) => {
+			releaseTerminal = resolve;
+		});
+		let markDeltaProduced!: () => void;
+		const deltaProduced = new Promise<void>((resolve) => {
+			markDeltaProduced = resolve;
+		});
+		let terminalProduced = false;
+		const query: SdkQuery = ({ prompt }) => {
+			if (typeof prompt === "string") throw new Error("Expected streaming input");
+			return {
+				async *[Symbol.asyncIterator]() {
+					const submitted = await prompt[Symbol.asyncIterator]().next();
+					if (submitted.done) throw new Error("Expected submitted resident turn");
+					const uuid = submitted.value.uuid!;
+					yield sdkMessage({ ...submitted.value, uuid, isReplay: true });
+					yield sdkMessage({
+						type: "stream_event",
+						event: { type: "content_block_start", index: 0, content_block: { type: "text" } },
+					});
+					yield sdkMessage({
+						type: "stream_event",
+						event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "live" } },
+					});
+					markDeltaProduced();
+					await terminalGate;
+					terminalProduced = true;
+					yield sdkMessage({
+						type: "result",
+						subtype: "success",
+						result: "live",
+						user_message_uuid: uuid,
+					});
+				},
+				async interrupt() {
+					releaseTerminal();
+				},
+				close() {
+					releaseTerminal();
+				},
+			};
+		};
+		overrideSdkBoundary({ query });
+		overrideSessionRegistryBoundary({ queryFactory: query });
+
+		const stream = streamClaudeSdkOauth(
+			model,
+			{ messages: [{ role: "user", content: "stream now", timestamp: 1 }] },
+			mainOptions("resident-live-delivery"),
+		);
+		const iterator = stream[Symbol.asyncIterator]();
+		await deltaProduced;
+		let event = await iterator.next();
+		while (!event.done && event.value.type !== "text_delta") event = await iterator.next();
+
+		expect(event).toMatchObject({ done: false, value: { type: "text_delta", delta: "live" } });
+		expect(terminalProduced).toBe(false);
+		releaseTerminal();
+		await stream.result();
+	}, 1_000);
+
+	it("terminates resident iteration when the query ends without a terminal result", async () => {
+		const query: SdkQuery = ({ prompt }) => {
+			if (typeof prompt === "string") throw new Error("Expected streaming input");
+			return {
+				async *[Symbol.asyncIterator]() {
+					const submitted = await prompt[Symbol.asyncIterator]().next();
+					if (submitted.done) throw new Error("Expected submitted resident turn");
+					yield sdkMessage({ ...submitted.value, uuid: submitted.value.uuid, isReplay: true });
+				},
+				async interrupt() {},
+				close() {},
+			};
+		};
+		overrideSdkBoundary({ query });
+		overrideSessionRegistryBoundary({ queryFactory: query });
+
+		const stream = streamClaudeSdkOauth(
+			model,
+			{ messages: [{ role: "user", content: "end early", timestamp: 1 }] },
+			mainOptions("resident-missing-result"),
+		);
+		const events = await collect(stream);
+
+		expect(events.at(-1)).toMatchObject({
+			type: "error",
+			reason: "error",
+			error: { errorMessage: "Claude SDK OAuth query ended before the active turn completed" },
+		});
+	});
+
+	it("tears down a resident turn when interrupt rejects and keeps the session usable", async () => {
+		const scheduler = manuallyScheduledAborts();
+		const abort = new AbortController();
+		const { registry, entry, stalled } = stalledTurnFixture("reject");
+		const turn = submitSessionTurn(registry, entry, {
+			message: { role: "user", content: "abort me" },
+			signal: abort.signal,
+			scheduleAbort: scheduler.scheduleAbort,
+		});
+		const turnOutcome = turn.then(
+			(value) => value,
+			(error: unknown) => error,
+		);
+
+		try {
+			await stalled.turnStarted;
+			abort.abort();
+			await stalled.interruptRequested;
+			await Promise.resolve();
+
+			expect(stalled.interrupts).toBe(1);
+			expect(stalled.closes).toBe(1);
+			expect(entry.activeTurn).toBeNull();
+			expect(registry.get(entry.senpiSessionId)).toBeUndefined();
+			expect(await turnOutcome).toMatchObject({ message: expect.stringContaining("interrupt rejected") });
+
+			const replacement = registry.getOrCreate(registryInput(entry.senpiSessionId));
+			const following = await submitSessionTurn(registry, replacement, {
+				message: { role: "user", content: "following turn" },
+			});
+			expect(following.aborted).toBe(false);
+			expect(replacement.generation).toBe(entry.generation + 1);
+		} finally {
+			registry.closeSession(entry.senpiSessionId, "test_cleanup");
+		}
+	});
+
+	it("tears down a resident turn after the abort deadline when interrupt resolves without a result", async () => {
+		const scheduler = manuallyScheduledAborts();
+		const abort = new AbortController();
+		const { registry, entry, stalled } = stalledTurnFixture("resolve");
+		const turn = submitSessionTurn(registry, entry, {
+			message: { role: "user", content: "abort me" },
+			signal: abort.signal,
+			scheduleAbort: scheduler.scheduleAbort,
+		});
+		const turnOutcome = turn.then(
+			(value) => value,
+			(error: unknown) => error,
+		);
+
+		try {
+			await stalled.turnStarted;
+			abort.abort();
+			await stalled.interruptRequested;
+			expect(scheduler.tasks).toHaveLength(1);
+			expect(scheduler.tasks[0]?.delayMs).toBeGreaterThan(0);
+			scheduler.flush();
+
+			expect(stalled.closes).toBe(1);
+			expect(entry.activeTurn).toBeNull();
+			expect(registry.get(entry.senpiSessionId)).toBeUndefined();
+			expect(await turnOutcome).toMatchObject({ message: expect.stringContaining("did not terminate") });
+
+			const replacement = registry.getOrCreate(registryInput(entry.senpiSessionId));
+			const following = await submitSessionTurn(registry, replacement, {
+				message: { role: "user", content: "following turn" },
+			});
+			expect(following.aborted).toBe(false);
+		} finally {
+			registry.closeSession(entry.senpiSessionId, "test_cleanup");
+		}
+	});
+
+	it("tears down a stalled resumed-query initialization on abort", async () => {
+		let resolveInitializing!: (query: StalledInitializationResidentQuery) => void;
+		const initializingQuery = new Promise<StalledInitializationResidentQuery>((resolve) => {
+			resolveInitializing = resolve;
+		});
+		const queries = residentBoundary(new Set(), (prompt, options, index) => {
+			if (index !== 1) return new ResidentQuery(prompt, options);
+			const query = new StalledInitializationResidentQuery(prompt, options);
+			resolveInitializing(query);
+			return query;
+		});
+		const sessionId = "resident-resume-abort";
+		const user1 = { role: "user" as const, content: "one", timestamp: 1 };
+		const user2 = { role: "user" as const, content: "two", timestamp: 3 };
+		const user3 = { role: "user" as const, content: "three", timestamp: 5 };
+		await streamClaudeSdkOauth(model, { messages: [user1] }, mainOptions(sessionId)).result();
+		await streamClaudeSdkOauth(
+			model,
+			{ messages: [user1, assistant("a1", 2), user2] },
+			mainOptions(sessionId),
+		).result();
+		await streamClaudeSdkOauth(
+			model,
+			{ messages: [user1, assistant("a1", 2), user2, assistant("a2", 4), user3] },
+			mainOptions(sessionId),
+		).result();
+		recordBranchInfo(sessionId, { oldLeafId: "old", newLeafId: "new" });
+
+		const abort = new AbortController();
+		const stream = streamClaudeSdkOauth(
+			model,
+			{ messages: [user1, assistant("a1", 2), user2] },
+			{ ...mainOptions(sessionId), signal: abort.signal },
+		);
+		const initializing = await initializingQuery;
+		await initializing.initializationStarted;
+		abort.abort();
+
+		expect(initializing.closes).toBe(1);
+		expect(getSession(sessionId)).toBeUndefined();
+		const result = await stream.result();
+		expect(result.stopReason).toBe("aborted");
+		expect(queries).toHaveLength(2);
 	});
 
 	it("reuses one resident query and sends only the new sent-stream suffix", async () => {

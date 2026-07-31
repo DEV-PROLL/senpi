@@ -16,11 +16,13 @@ import {
 
 export const DEFAULT_PRE_REPLAY_MAX_MESSAGES = 64;
 export const DEFAULT_PRE_REPLAY_MAX_BYTES = 256 * 1024;
+export const SESSION_TURN_ABORT_GRACE_MS = 1_000;
 
 export interface SessionTurnRequest {
 	message: SDKUserMessage["message"];
 	signal?: AbortSignal;
 	onMessage?: (message: SDKMessage) => void;
+	scheduleAbort?: (callback: () => void, delayMs: number) => () => void;
 }
 
 export interface SessionTurnResult {
@@ -42,11 +44,10 @@ interface ActiveTurn {
 	preReplayBytes: number;
 	claimed: boolean;
 	aborted: boolean;
-	interruptRequested: boolean;
-	resultSeen: boolean;
 	onMessage?: (message: SDKMessage) => void;
 	signal?: AbortSignal;
 	onAbort: () => void;
+	cancelAbort?: () => void;
 	resolve: (result: SessionTurnResult) => void;
 	reject: (error: Error) => void;
 	limits: PreReplayBufferLimits;
@@ -74,10 +75,6 @@ function currentTurn(entry: ClaudeSdkOauthSessionEntry): ActiveTurn | null {
 	return entry.activeTurn as ActiveTurn | null;
 }
 
-function setCurrentTurn(entry: ClaudeSdkOauthSessionEntry, turn: ActiveTurn | null): void {
-	entry.activeTurn = turn;
-}
-
 function isReplayFor(message: SDKMessage, uuid: string): boolean {
 	return message.type === "user" && "isReplay" in message && message.isReplay === true && message.uuid === uuid;
 }
@@ -96,32 +93,47 @@ function resultMatchesTurn(message: Extract<SDKMessage, { type: "result" }>, tur
 	if ("user_message_uuid" in message && message.user_message_uuid !== undefined) {
 		return message.user_message_uuid === turn.uuid;
 	}
-	return turn.claimed && !turn.resultSeen && !isAutonomousResult(message);
-}
-
-function startStreaming(entry: ClaudeSdkOauthSessionEntry): void {
-	if (entry.state === "TURN_CLAIMED") transitionToTurnStreaming(entry);
+	return turn.claimed && !isAutonomousResult(message);
 }
 
 function deliver(entry: ClaudeSdkOauthSessionEntry, turn: ActiveTurn, message: SDKMessage): void {
-	startStreaming(entry);
+	if (entry.state === "TURN_CLAIMED") transitionToTurnStreaming(entry);
 	turn.messages.push(message);
 	turn.onMessage?.(message);
 }
 
+function scheduleAbort(callback: () => void, delayMs: number): () => void {
+	const timer = setTimeout(callback, delayMs);
+	timer.unref();
+	return () => clearTimeout(timer);
+}
+
 function removeAbortListener(turn: ActiveTurn): void {
 	turn.signal?.removeEventListener("abort", turn.onAbort);
+	turn.cancelAbort?.();
+	turn.cancelAbort = undefined;
 }
 
 function failTurn(registry: ClaudeSdkOauthSessionRegistry, entry: ClaudeSdkOauthSessionEntry, error: Error): void {
 	const turn = currentTurn(entry);
 	if (turn) {
 		removeAbortListener(turn);
-		setCurrentTurn(entry, null);
+		entry.activeTurn = null;
 		turn.reject(error);
 	}
 	if (registry.isCurrentGeneration(entry.senpiSessionId, entry.generation)) {
 		registry.closeSession(entry.senpiSessionId, error.message);
+	}
+}
+
+function abortTurn(
+	registry: ClaudeSdkOauthSessionRegistry,
+	entry: ClaudeSdkOauthSessionEntry,
+	turn: ActiveTurn,
+	error: Error,
+): void {
+	if (currentTurn(entry) === turn && registry.isCurrentGeneration(entry.senpiSessionId, turn.generation)) {
+		failTurn(registry, entry, error);
 	}
 }
 
@@ -156,12 +168,11 @@ function finishTurn(
 	if (!resultMatchesTurn(message, turn)) {
 		throw new SessionTurnAttributionError("Claude SDK OAuth result user_message_uuid did not match the active turn");
 	}
-	turn.resultSeen = true;
-	startStreaming(entry);
+	if (entry.state === "TURN_CLAIMED") transitionToTurnStreaming(entry);
 	if (!turn.aborted) deliver(entry, turn, message);
 	transitionToTurnResultSeen(entry);
 	removeAbortListener(turn);
-	setCurrentTurn(entry, null);
+	entry.activeTurn = null;
 	if (turn.aborted) registry.markTainted(entry.senpiSessionId, "abort");
 	else transitionToIdleSynced(entry);
 	turn.resolve({ uuid: turn.uuid, messages: turn.messages, aborted: turn.aborted });
@@ -219,10 +230,16 @@ export function submitSessionTurn(
 	let turn!: ActiveTurn;
 	const promise = new Promise<SessionTurnResult>((resolve, reject) => {
 		const onAbort = (): void => {
-			if (turn.interruptRequested) return;
+			if (turn.aborted) return;
 			turn.aborted = true;
-			turn.interruptRequested = true;
-			void entry.query.interrupt().catch(() => {});
+			turn.cancelAbort = (request.scheduleAbort ?? scheduleAbort)(
+				() => abortTurn(registry, entry, turn, new Error("Claude SDK OAuth interrupted turn did not terminate")),
+				SESSION_TURN_ABORT_GRACE_MS,
+			);
+			void entry.query.interrupt().catch((error: unknown) => {
+				const detail = error instanceof Error ? error.message : String(error);
+				abortTurn(registry, entry, turn, new Error(`Claude SDK OAuth query interrupt failed: ${detail}`));
+			});
 		};
 		turn = {
 			uuid,
@@ -232,8 +249,6 @@ export function submitSessionTurn(
 			preReplayBytes: 0,
 			claimed: false,
 			aborted: false,
-			interruptRequested: false,
-			resultSeen: false,
 			onMessage: request.onMessage,
 			signal: request.signal,
 			onAbort,
@@ -242,7 +257,7 @@ export function submitSessionTurn(
 			limits,
 		};
 	});
-	setCurrentTurn(entry, turn);
+	entry.activeTurn = turn;
 	if (!entry.pumpTask) entry.pumpTask = runPump(registry, entry);
 	entry.inputController.push({
 		type: "user",
