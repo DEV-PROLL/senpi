@@ -1,3 +1,5 @@
+import { execSync } from "child_process";
+
 export const LIVE_API_TESTS_FLAG = "PI_ENABLE_LIVE_API_TESTS";
 export const LOCAL_LLM_LIVE_TEST_FLAG = "PI_ENABLE_LOCAL_LLM";
 export const OPENROUTER_LIVE_TEST_FLAG = "PI_ENABLE_OPENROUTER_LIVE";
@@ -12,8 +14,14 @@ export function isLiveApiTestEnabled(providerFlag: string): boolean {
 	return process.env[LIVE_API_TESTS_FLAG] === "1" || process.env[providerFlag] === "1";
 }
 
-export function isLocalLlmLiveTestAvailable(checkAvailability: () => boolean): boolean {
-	return isLiveApiTestEnabled(LOCAL_LLM_LIVE_TEST_FLAG) && checkAvailability();
+export function isOllamaLiveTestAvailable(): boolean {
+	if (!isLiveApiTestEnabled(LOCAL_LLM_LIVE_TEST_FLAG)) return false;
+	try {
+		execSync("which ollama", { stdio: "ignore" });
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 export function getLiveEnvApiKey(apiKeyEnvName: string, providerFlag: string): string | undefined {

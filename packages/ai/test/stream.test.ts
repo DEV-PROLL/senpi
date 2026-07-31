@@ -1,4 +1,4 @@
-import { type ChildProcess, execSync, spawn } from "child_process";
+import { type ChildProcess, spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { Type } from "typebox";
@@ -13,7 +13,7 @@ import { StringEnum } from "../src/utils/typebox-helpers.ts";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.ts";
 import { hasBedrockCredentials } from "./bedrock-utils.ts";
 import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.ts";
-import { getLiveEnvApiKey, isLocalLlmLiveTestAvailable, OPENROUTER_LIVE_TEST_FLAG } from "./live-api-gates.ts";
+import { getLiveEnvApiKey, isOllamaLiveTestAvailable, OPENROUTER_LIVE_TEST_FLAG } from "./live-api-gates.ts";
 import { resolveApiKey } from "./oauth.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1622,14 +1622,7 @@ describe("Generate E2E Tests", () => {
 		});
 	});
 
-	const ollamaInstalled = isLocalLlmLiveTestAvailable(() => {
-		try {
-			execSync("which ollama", { stdio: "ignore" });
-			return true;
-		} catch {
-			return false;
-		}
-	});
+	const ollamaInstalled = isOllamaLiveTestAvailable();
 
 	describe.skipIf(!ollamaInstalled)("Ollama Provider (gpt-oss-20b via OpenAI Completions)", () => {
 		let llm: Model<"openai-completions">;

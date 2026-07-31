@@ -4,11 +4,13 @@
 
 ### What changed
 
-- `test/live-api-gates.ts`: added a local-LLM availability gate that short-circuits before running its
-  availability probe unless `PI_ENABLE_LOCAL_LLM=1` or `PI_ENABLE_LIVE_API_TESTS=1`.
-- `test/live-api-gates.test.ts`: covers the default no-probe behavior and both explicit opt-in paths.
-- `test/stream.test.ts`: routes Ollama discovery through the shared gate instead of treating the absence of
+- `test/live-api-gates.ts`: owns Ollama discovery behind a gate that short-circuits before running `which ollama`
+  unless `PI_ENABLE_LOCAL_LLM=1` or `PI_ENABLE_LIVE_API_TESTS=1`.
+- `test/live-api-gates.test.ts`: mocks the command boundary and covers the default no-probe behavior plus both
+  explicit opt-in paths.
+- `test/stream.test.ts`: uses the gated Ollama discovery function instead of treating the absence of
   `PI_NO_LOCAL_LLM` as permission to probe and run the live suite.
+- `../../test.sh`: clears the two opt-in flags instead of exporting the retired `PI_NO_LOCAL_LLM` opt-out flag.
 
 ### Why
 
@@ -26,12 +28,14 @@
 - `test/live-api-gates.test.ts`
 - `test/live-api-gates.ts`
 - `test/stream.test.ts`
+- `../../test.sh`
 
 ### Expected merge conflict zones
 
 - LOW: `test/live-api-gates.ts` and its tests may conflict if upstream changes live-test activation helpers.
 - MEDIUM: the Ollama discovery and setup block in `test/stream.test.ts` may conflict if upstream changes how
   the local OpenAI-compatible test server is detected or started.
+- LOW: `../../test.sh` may conflict if upstream changes its isolated live-test environment variables.
 
 ## Browser-safe prompt-cache TTL resolver (2026-07-28)
 
