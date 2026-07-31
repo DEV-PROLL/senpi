@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	getLiveEnvApiKey,
-	isLiveApiTestEnabled,
+	isLocalLlmLiveTestEnabled,
 	LOCAL_LLM_LIVE_TEST_FLAG,
 	OPENROUTER_LIVE_TEST_FLAG,
 } from "./live-api-gates.ts";
@@ -52,13 +52,26 @@ describe("live API test gates", () => {
 
 	it("given local LLM server without opt-in when checking live tests then disables local probing", () => {
 		// given
+		vi.stubEnv("PI_NO_LOCAL_LLM", "");
 		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, "");
 		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", "");
 
 		// when
-		const enabled = isLiveApiTestEnabled(LOCAL_LLM_LIVE_TEST_FLAG);
+		const enabled = isLocalLlmLiveTestEnabled();
 
 		// then
 		expect(enabled).toBe(false);
+	});
+
+	it("given local LLM opt-in when checking live tests then enables local probing", () => {
+		// given
+		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, "1");
+		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", "");
+
+		// when
+		const enabled = isLocalLlmLiveTestEnabled();
+
+		// then
+		expect(enabled).toBe(true);
 	});
 });
