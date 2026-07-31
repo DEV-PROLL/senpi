@@ -13,6 +13,30 @@
 
 - MEDIUM in `index.ts` lifecycle wiring and `monitor-continuation.ts` timer ownership.
 - LOW in the focused direct-input lifecycle module.
+||||||| de5de53a7
+## Achieved footer shows elapsed time and truncated objective (2026-07-31)
+
+### What changed
+
+- `ui.ts` `goalStatusText` renders the `complete` status as
+  `<truncated objective> · Goal achieved (<elapsed>)`, mirroring the elapsed
+  suffix that `Pursuing goal (…)` already shows while a goal is active. The
+  elapsed suffix is omitted only when `timeUsedSeconds` is 0.
+- New exported `truncateGoalObjective` normalizes whitespace and truncates the
+  objective to 32 characters with a trailing ellipsis for the footer preview.
+- `goal-modules.test.ts` pins the new achieved-footer format, including the
+  long-objective truncation case.
+
+### Why
+
+- The achieved footer previously dropped both the objective and the total time
+  spent, so a finished goal gave no at-a-glance context about what completed or
+  how long it took.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `ui.ts` around the `goalStatusText` switch.
+
 ## Mechanically blocked goals resume on a prompt queued while streaming (2026-07-31)
 
 ### What changed
@@ -36,7 +60,6 @@
 - LOW in `index.ts` around the new `input` handler.
 - NONE in the verdict engine, goal store schema, persistence, or public extension API.
 
-||||||| 9da987f51
 ## Tool-using turns clear the output-repetition window (2026-07-31)
 
 ### What changed
@@ -127,7 +150,6 @@
 - LOW in monitor continuation tests that observe delayed persistence.
 - NONE in the goal store schema, public extension API, or status transitions.
 
-||||||| parent of a687d47c6 (fix(coding-agent): tell users how to clear a mechanical goal block)
 ## Observable progress resets the persisted continuation cap streak (2026-07-30)
 
 ### What changed
