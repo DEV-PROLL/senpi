@@ -1,5 +1,12 @@
 # Local fork changes
 
+## 2026-07-31 — Claude SDK OAuth provider identity
+
+- Changed: renamed Senpi's SDK-backed Claude subscription provider and every active internal surface from `claude-agent-sdk` to `claude-sdk-oauth`, including auth storage, settings, commands, RPC/app-server account routing, tests, docs, and QA scenarios.
+- Preserved: Anthropic's upstream package and platform sidecar names remain `@anthropic-ai/claude-agent-sdk`.
+- Coverage: three captured RED→GREEN contracts pin registry/login/path behavior; focused provider tests and real CLI/TUI QA cover the renamed surface.
+- Merge-conflict risk: high in the provider directory and its tests; medium in builtin registration and account protocol imports.
+
 ## 2026-07-30 — CalVer-aware update ordering
 
 - Changed: package update checks now compare Senpi's `YYYY.M.D-N` same-day revisions using the release contract, where the bare date is revision 1 and `-2`, `-3`, and later suffixes are newer releases.
