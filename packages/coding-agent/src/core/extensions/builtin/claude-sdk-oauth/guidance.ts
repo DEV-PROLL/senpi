@@ -49,3 +49,48 @@ export function missingBinaryGuidance(platform: string, arch: string): string {
 		"Reinstall @anthropic-ai/claude-agent-sdk without --omit=optional, or set CLAUDE_CODE_EXECUTABLE.",
 	].join("\n");
 }
+
+export type SystemPromptMode = "full" | "override" | "preset-append";
+
+export function systemPromptBoundaryGuidance(mode: SystemPromptMode): string {
+	return [
+		`Claude SDK OAuth ${mode} system prompt has no "Current date:" dynamic-tail line; using one uncached prompt block.`,
+		'Keep the dynamic tail formatted as "Current date: ..." to restore the SDK prompt-cache boundary.',
+	].join(" ");
+}
+
+export function overrideSystemPromptGuidance(path: string | undefined, reason: string): string {
+	const target = path === undefined ? "systemPromptFile" : `systemPromptFile "${path}"`;
+	return [
+		`Claude SDK OAuth override prompt could not load ${target}: ${reason}.`,
+		'Set claudeSdkOauthProvider.systemPromptFile to a readable, non-empty UTF-8 prompt file, or select systemPromptMode "full".',
+	].join(" ");
+}
+
+const DEFAULT_PRESET_APPEND_DEPRECATION_ARMED = true;
+let presetAppendDeprecationArmed = DEFAULT_PRESET_APPEND_DEPRECATION_ARMED;
+
+export function resetPresetAppendDeprecation(): void {
+	presetAppendDeprecationArmed = DEFAULT_PRESET_APPEND_DEPRECATION_ARMED;
+}
+
+export function presetAppendDeprecationGuidance(options: {
+	mode: SystemPromptMode;
+	conflict?: boolean;
+}): string | undefined {
+	if (options.mode !== "preset-append") {
+		return undefined;
+	}
+	if (!presetAppendDeprecationArmed) {
+		return undefined;
+	}
+	presetAppendDeprecationArmed = false;
+	const base =
+		"preset-append system-prompt mode is deprecated; " +
+		"`full` mode delivers the complete senpi system prompt; " +
+		"preset-append will be removed after one release.";
+	if (options.conflict) {
+		return `${base} systemPromptMode wins.`;
+	}
+	return base;
+}

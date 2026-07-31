@@ -3,6 +3,8 @@ import {
 	allAccountsBlockedGuidance,
 	missingBinaryGuidance,
 	noAccountGuidance,
+	presetAppendDeprecationGuidance,
+	resetPresetAppendDeprecation,
 	sdkErrorGuidance,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/guidance.ts";
 
@@ -41,5 +43,52 @@ describe("claude-sdk-oauth auth guidance", () => {
 		expect(text).toContain("darwin-arm64");
 		expect(text).toContain("--omit=optional");
 		expect(text).toContain("CLAUDE_CODE_EXECUTABLE");
+	});
+});
+
+describe("preset-append deprecation guidance", () => {
+	it("emits a notice for preset-append mode", () => {
+		resetPresetAppendDeprecation();
+		const text = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		expect(text).toContain("deprecated");
+		expect(text).toContain("preset-append");
+		expect(text).toContain("full");
+		expect(text).toContain("removed");
+	});
+
+	it("returns undefined for full mode", () => {
+		resetPresetAppendDeprecation();
+		expect(presetAppendDeprecationGuidance({ mode: "full" })).toBeUndefined();
+	});
+
+	it("returns undefined for override mode", () => {
+		resetPresetAppendDeprecation();
+		expect(presetAppendDeprecationGuidance({ mode: "override" })).toBeUndefined();
+	});
+
+	it("emits at most once per session", () => {
+		resetPresetAppendDeprecation();
+		const first = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		const second = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		expect(first).toContain("deprecated");
+		expect(second).toBeUndefined();
+	});
+
+	it("includes the extra sentence when conflict is true", () => {
+		resetPresetAppendDeprecation();
+		const text = presetAppendDeprecationGuidance({ mode: "preset-append", conflict: true });
+		expect(text).toContain("systemPromptMode");
+		expect(text).toContain("wins");
+	});
+
+	it("reset re-arms the once-per-session guard", () => {
+		resetPresetAppendDeprecation();
+		const first = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		const suppressed = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		expect(first).toContain("deprecated");
+		expect(suppressed).toBeUndefined();
+		resetPresetAppendDeprecation();
+		const reArmed = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		expect(reArmed).toContain("deprecated");
 	});
 });
