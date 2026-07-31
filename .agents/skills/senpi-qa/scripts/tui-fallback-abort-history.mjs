@@ -123,7 +123,7 @@ async function main() {
 
 		writeFileSync(join(evidence, "terminal.ansi"), raw);
 		writeFileSync(join(evidence, "terminal.txt"), plain);
-		renderTerminalScreenshot(root, evidence, raw);
+		await renderTerminalScreenshot(root, evidence, raw);
 		guard.assertUnchanged();
 		writeFileSync(
 			join(evidence, "summary.json"),
