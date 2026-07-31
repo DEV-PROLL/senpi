@@ -612,7 +612,7 @@ describe("goal extension session_start migration-lite admission", () => {
 		expect(notices).toEqual([]);
 	});
 
-	it("pauses the goal when a real user prompt follows a suppressed load", async () => {
+	it("reactivates the goal when a real user prompt follows a suppressed load", async () => {
 		vi.useFakeTimers();
 		const { tools, handlers, sent } = createGoalHarness();
 		const notices: string[] = [];
@@ -624,10 +624,9 @@ describe("goal extension session_start migration-lite admission", () => {
 		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
 		expect(sent).toHaveLength(0);
 
-		// A real user prompt now pauses the active goal before its unrelated turn starts;
-		// no fallback timer resurrects it.
+		// The notice promises that the next accepted direct prompt resumes the goal.
 		await runHandlers(handlers, "input", { type: "input", source: "interactive", text: "new direction" }, ctx);
-		await runHandlers(handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+		await runHandlers(handlers, "input_disposition", { type: "input_disposition", disposition: "started" }, ctx);
 		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runHandlers(
 			handlers,
@@ -635,11 +634,11 @@ describe("goal extension session_start migration-lite admission", () => {
 			{ type: "agent_end", messages: [assistantMessageWithStopReason("stop")] },
 			ctx,
 		);
-		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("paused");
-		expect(sent).toHaveLength(0);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+		expect(sent).toHaveLength(1);
 		await vi.advanceTimersByTimeAsync(10 * 60_000);
-		expect(sent).toHaveLength(0);
-		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("paused");
+		expect(sent).toHaveLength(1);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
 		vi.useRealTimers();
 	});
 

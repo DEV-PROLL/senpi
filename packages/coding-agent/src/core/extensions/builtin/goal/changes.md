@@ -1,5 +1,12 @@
 # goal Extension Changes
 
+## Pause only stale goals after prompt admission (2026-07-31)
+
+- Direct input now cancels continuation timers immediately but defers persisted goal changes until the host reports that the prompt was queued or started; handled, rejected, and failed admissions clear the candidate without pausing.
+- Active goals pause only when a delivered continuation signature still matches freshly observed goal state. Goals with progress or no delivered continuation remain active, and streaming `steer` input never abandons the current execution.
+- Accepted direct prompts reactivate continuation-cap, repeated-output, and repeated-truncation blocks while preserving intentional model/provider blocks. The next accepted prompt after load-time flood suppression also resumes as its notice promises.
+- Regression coverage drives a real hidden continuation, verifies persisted stale signatures, changed/fresh state, rejected admission, steering, mechanical-block recovery, and suppressed-load recovery.
+
 ## Preserve installed pi-goal migration while fixing stale continuation (2026-07-30)
 
 - Preserved the active runtime's session-start migration from

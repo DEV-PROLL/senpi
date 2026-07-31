@@ -4,10 +4,14 @@ import type { AgentEndEvent, ExtensionAPI, ExtensionContext } from "../../types.
 import { GOAL_CACHE_WARMUP_ENTRY_TYPE } from "./cache-warm.ts";
 import { renderGoalCacheWarmupEntry } from "./cache-warm-renderer.ts";
 import { registerGoalCommand } from "./command-registration.ts";
-import { GOAL_CONTINUATION_CAP } from "./continuation.ts";
+import { GOAL_CONTINUATION_CAP, hasGoalContinuationProgress } from "./continuation.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
-import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
+import {
+	buildCurrentGoalContinuationSignatureFromBranch,
+	isResumeOfPausedGoal,
+	queueGoalContinuation,
+} from "./lifecycle-helpers.ts";
 import { MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
 import { migrateLegacyGoalFile } from "./persistence.ts";
 import { accountGoalUsage, readGoal, resetContinuationStreak, updateGoal } from "./store.ts";
@@ -27,6 +31,17 @@ type AgentGoalAccounting = {
 	measuredFromMilliseconds: number;
 };
 
+type DirectInputGoalAction = {
+	goalId: string;
+	action: "pause" | "reactivate";
+};
+
+const MECHANICAL_BLOCK_REASONS = new Set([
+	"continuation cap reached",
+	"repeated assistant output",
+	"output truncation repeated",
+]);
+
 export default function goalExtension(pi: ExtensionAPI): void {
 	let agentTurnInProgress = false;
 	let staleGoalReminderSentThisTurn = false;
@@ -34,10 +49,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	let blockedThisTurnGoalId: string | null = null;
 	let completedThisTurnGoalId: string | null = null;
 	let continuationPending = false;
-	// A non-extension user input received during an in-flight turn pauses the active goal
-	// after that turn is fully accounted at agent_end. Keyed on goal id so a goal that is
-	// replaced or cleared mid-turn is never paused by a stale signal.
+	// Raw direct input only captures a candidate. Persistence waits for the host's
+	// input_disposition event so handled or rejected prompts cannot mutate goal state.
+	let directInputGoalAction: DirectInputGoalAction | null = null;
 	let pausePendingForGoalId: string | null = null;
+	let suppressedLoadGoalId: string | null = null;
 	const turnUsage = new TurnUsageTracker();
 	const monitorContinuation = new MonitorAwareGoalContinuation(
 		pi,
@@ -84,6 +100,8 @@ export default function goalExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (event, ctx) => {
 		monitorContinuation.start(ctx);
+		directInputGoalAction = null;
+		suppressedLoadGoalId = null;
 		const ref = goalStoreRef(ctx);
 		await migrateLegacyGoalFile(ref);
 		const goal = await readGoal(ref);
@@ -104,6 +122,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// leave the goal active (no status rewrite), and tell the user how to resume.
 			const trailingContinuations = countTrailingGoalContinuationEntries(ctx.sessionManager.getBranch());
 			if (trailingContinuations >= GOAL_CONTINUATION_CAP) {
+				suppressedLoadGoalId = goal.id;
 				ctx.ui.notify(
 					`Goal auto-continuation suppressed for this resumed session (${trailingContinuations} historical continuations). Send a message to resume.`,
 					"info",
@@ -114,44 +133,72 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	// Direct user input (interactive or rpc) pauses an active goal persistently. Idle input
-	// pauses at this seam before the new turn starts, so the unrelated new turn is never
-	// charged to the stale goal; input received while an agent run is already active defers
-	// the pause to that run's agent_end so the in-flight turn's usage is accounted first.
-	// A blocked/paused/complete goal is left untouched, and extension-originated input (hidden
-	// goal continuations and other automation) never pauses.
+	// Raw input synchronously disarms unattended continuation, then records what should
+	// happen only if the host later accepts or queues this prompt. Steering modifies the
+	// current execution and therefore never abandons or reactivates its goal.
 	pi.on("input", async (event, ctx) => {
 		if (event.source === "extension") return;
-		// Break unattended continuation state synchronously, before any await can interleave
-		// with a scheduled continuation timer. Closure state is the authority for the
-		// idle-vs-in-flight split.
 		monitorContinuation.noteUserInput();
-		if (agentTurnInProgress) {
-			// A run is in flight: defer the pause to that run's agent_end so the in-flight turn's
-			// usage is accounted first. Key on the goal currently being accounted, read from
-			// closure state with no fs await so a scheduled continuation cannot race in; goal-id
-			// matching at agent_end prevents pausing a goal replaced or cleared mid-turn.
-			if (agentGoalAccounting !== null) pausePendingForGoalId = agentGoalAccounting.goalId;
+		directInputGoalAction = null;
+		if (event.streamingBehavior === "steer") return;
+
+		const goal = await readGoal(goalStoreRef(ctx));
+		if (goal === null) return;
+		if (goal.id === suppressedLoadGoalId && goal.status === "active") {
+			directInputGoalAction = { goalId: goal.id, action: "reactivate" };
 			return;
 		}
-		// Idle direct input: account the existing idle accounting window, then pause
-		// active -> paused now so the new turn this input triggers runs with no active goal and
-		// is not charged to the stale goal. Mirrors the /goal pause path.
-		const goal = await readGoal(goalStoreRef(ctx));
-		if (goal?.status !== "active") return;
-		await accountCurrentAgentTurn(ctx, "active");
-		const paused = await updateGoal(goalStoreRef(ctx), { status: "paused" }, "user");
-		clearAgentGoalAccounting();
-		refreshGoalUiBestEffort(ctx, paused);
+		if (goal.status === "blocked" && MECHANICAL_BLOCK_REASONS.has(goal.blockedReason ?? "")) {
+			directInputGoalAction = { goalId: goal.id, action: "reactivate" };
+			return;
+		}
+		if (goal.status !== "active" || goal.lastContinuationSignature === undefined) return;
+
+		const currentSignature = buildCurrentGoalContinuationSignatureFromBranch(ctx, goal);
+		if (
+			!hasGoalContinuationProgress({
+				lastContinuationSignature: goal.lastContinuationSignature,
+				currentSignature,
+			}) &&
+			goal.lastContinuationSignature === currentSignature
+		) {
+			directInputGoalAction = { goalId: goal.id, action: "pause" };
+		}
 	});
 
-	pi.on("before_agent_start", async (_event, ctx) => {
-		// before_agent_start fires only for real user prompts. Reset only the persisted
-		// continuation streak here; the `input` seam owns the user-input signal (pause of an
-		// active goal) and a blocked goal stays blocked until an explicit /goal resume.
+	pi.on("input_disposition", async (event, ctx) => {
+		if (event.disposition === "handled" || event.disposition === "rejected") {
+			directInputGoalAction = null;
+			return;
+		}
+
+		const pendingAction = directInputGoalAction;
+		directInputGoalAction = null;
+		if (pendingAction === null) return;
 		const ref = goalStoreRef(ctx);
-		const goal = await resetContinuationStreak(ref);
-		if (goal !== null) refreshGoalUi(ctx, goal);
+		const currentGoal = await readGoal(ref);
+		if (currentGoal?.id !== pendingAction.goalId) return;
+
+		if (pendingAction.action === "reactivate") {
+			let reactivated = (await resetContinuationStreak(ref)) ?? currentGoal;
+			if (reactivated.status === "blocked") {
+				reactivated = await updateGoal(ref, { status: "active" }, "user");
+			}
+			if (suppressedLoadGoalId === reactivated.id) suppressedLoadGoalId = null;
+			beginAgentGoalAccounting(reactivated);
+			refreshGoalUiBestEffort(ctx, reactivated);
+			return;
+		}
+
+		if (currentGoal.status !== "active") return;
+		if (agentTurnInProgress) {
+			pausePendingForGoalId = currentGoal.id;
+			return;
+		}
+		await accountCurrentAgentTurn(ctx, "active");
+		const paused = await updateGoal(ref, { status: "paused" }, "user");
+		clearAgentGoalAccounting();
+		refreshGoalUiBestEffort(ctx, paused);
 	});
 
 	pi.on("turn_start", async () => {

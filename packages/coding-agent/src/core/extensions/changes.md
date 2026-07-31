@@ -1,5 +1,27 @@
 # Core Extensions Changes
 
+## `input_disposition` reports whether a prompt was accepted (2026-07-31)
+
+### What changed and why
+
+- New `InputDispositionEvent` (`type: "input_disposition"`) with
+  `disposition: "handled" | "queued" | "started" | "rejected"`, added to the
+  `ExtensionEvent` union and to the `ExtensionAPI.on` overloads.
+- `agent-session.ts` emits it after input interception and provider admission
+  decide ownership of a prompt, and only when an `input` handler ran.
+- The raw `input` event fires before model validation, pre-prompt compaction,
+  `before_agent_start`, and final provider admission, so an extension that
+  mutates persistent state from `input` mutates it for prompts that never reach
+  the model. `input_disposition` supplies the accepted/rejected outcome so raw
+  `input` can stay side-effect-light.
+
+### Expected merge conflict zones on the next sync
+
+- MEDIUM in `types.ts` around the `ExtensionEvent` union and the `on` overload
+  list, which upstream edits touch frequently.
+- MEDIUM in `agent-session.ts` around the prompt-admission returns, where each
+  queued/handled/rejected exit emits the event.
+
 ## 2026-07-30 - Linux recursive config watches leave the interactive main thread
 
 ### What changed and why

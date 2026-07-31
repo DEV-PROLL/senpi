@@ -31,6 +31,12 @@ function goalStoreRef(ctx: ExtensionContext) {
 	};
 }
 
+async function markCurrentGoalStale(ctx: ExtensionContext): Promise<void> {
+	const goal = await readGoal(goalStoreRef(ctx));
+	if (goal === null) throw new Error("Expected persisted goal");
+	await recordContinuationDelivered(goalStoreRef(ctx), `${goal.id}:0/0:811c9dc5`);
+}
+
 function cleanAssistantStopWithText(text: string): AgentMessage {
 	return assistantStopWithReason("stop", text);
 }
@@ -142,6 +148,7 @@ describe("goal continuation while a monitor is active", () => {
 		const ctx = await makeGoalContext(notices, "thread-input-idle-pause");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+		await markCurrentGoalStale(ctx);
 		events.emit("terminal_monitor_state", { activeCount: 1 });
 		await events.flush();
 
@@ -153,7 +160,9 @@ describe("goal continuation while a monitor is active", () => {
 			{ type: "input", source: "interactive", text: "unrelated question" },
 			ctx,
 		);
-		// Paused already, at the seam, before the new turn runs.
+		// Raw input only records the candidate; accepted admission persists the pause.
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", tokensUsed: 0 });
+		await runGoalHandlers(handlers, "input_disposition", { type: "input_disposition", disposition: "started" }, ctx);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "paused", tokensUsed: 0 });
 
 		// The new (unrelated) turn carries usage but must not be charged to the paused goal.
@@ -179,6 +188,7 @@ describe("goal continuation while a monitor is active", () => {
 		const ctx = await makeGoalContext(notices, "thread-input-streaming-defer");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+		await markCurrentGoalStale(ctx);
 
 		const before = await readGoal(goalStoreRef(ctx));
 		if (before === null) throw new Error("Expected persisted goal");
@@ -192,6 +202,7 @@ describe("goal continuation while a monitor is active", () => {
 			{ type: "input", source: "interactive", text: "new task", streamingBehavior: "followUp" },
 			ctx,
 		);
+		await runGoalHandlers(handlers, "input_disposition", { type: "input_disposition", disposition: "queued" }, ctx);
 		await runGoalHandlers(
 			handlers,
 			"agent_end",
@@ -211,6 +222,7 @@ describe("goal continuation while a monitor is active", () => {
 		const ctx = await makeGoalContext(notices, "thread-input-replaced-goal");
 		await tools.get("create_goal")?.execute("create", { objective: "Original goal" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+		await markCurrentGoalStale(ctx);
 
 		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runGoalHandlers(
@@ -219,6 +231,7 @@ describe("goal continuation while a monitor is active", () => {
 			{ type: "input", source: "rpc", text: "new intent", streamingBehavior: "followUp" },
 			ctx,
 		);
+		await runGoalHandlers(handlers, "input_disposition", { type: "input_disposition", disposition: "queued" }, ctx);
 
 		const original = await readGoal(goalStoreRef(ctx));
 		if (original === null) throw new Error("Expected persisted goal");
@@ -252,6 +265,7 @@ describe("goal continuation while a monitor is active", () => {
 		const ctx = await makeGoalContext(notices, "thread-input-timer-boundary");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+		await markCurrentGoalStale(ctx);
 		events.emit("terminal_monitor_state", { activeCount: 1 });
 		await events.flush();
 
@@ -278,6 +292,8 @@ describe("goal continuation while a monitor is active", () => {
 		);
 		expect(vi.getTimerCount()).toBe(timerCountBeforeInput - 1);
 		await inputHandled;
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active" });
+		await runGoalHandlers(handlers, "input_disposition", { type: "input_disposition", disposition: "started" }, ctx);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "paused" });
 
 		// Past the original deadline and well beyond: the cancelled timer never fires.
@@ -328,7 +344,7 @@ describe("goal continuation while a monitor is active", () => {
 		await updateGoal(goalStoreRef(ctx), { status: "blocked", reason: "waiting on the user" }, "model");
 
 		await runGoalHandlers(handlers, "input", { type: "input", source: "interactive", text: "back now" }, ctx);
-		await runGoalHandlers(handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+		await runGoalHandlers(handlers, "input_disposition", { type: "input_disposition", disposition: "started" }, ctx);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "blocked" });
 		expect(sent).toHaveLength(0);
 
@@ -344,14 +360,60 @@ describe("goal continuation while a monitor is active", () => {
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
 	});
 
+	it.each(["continuation cap reached", "repeated assistant output", "output truncation repeated"])(
+		"reactivates a mechanically blocked goal on accepted direct input: %s",
+		async (blockedReason) => {
+			const notices: string[] = [];
+			const { tools, handlers } = createGoalHarness();
+			const ctx = await makeGoalContext(notices, `thread-mechanical-${blockedReason}`);
+			await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
+			await updateGoal(goalStoreRef(ctx), { status: "blocked", reason: blockedReason }, "model");
+
+			await runGoalHandlers(handlers, "input", { type: "input", source: "interactive", text: "continue" }, ctx);
+			await runGoalHandlers(
+				handlers,
+				"input_disposition",
+				{ type: "input_disposition", disposition: "started" },
+				ctx,
+			);
+
+			expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
+				status: "active",
+				consecutiveContinuations: 0,
+			});
+		},
+	);
+
+	it("does not pause a stale goal when direct input steers the current execution", async () => {
+		const notices: string[] = [];
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-input-steer");
+		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
+		await markCurrentGoalStale(ctx);
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+
+		await runGoalHandlers(
+			handlers,
+			"input",
+			{ type: "input", source: "interactive", text: "adjust approach", streamingBehavior: "steer" },
+			ctx,
+		);
+		await runGoalHandlers(handlers, "input_disposition", { type: "input_disposition", disposition: "queued" }, ctx);
+		await runGoalHandlers(handlers, "agent_end", { type: "agent_end", messages: [cleanAssistantStop()] }, ctx);
+
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active" });
+	});
+
 	it("re-arms exactly one continuation on /goal resume after an input pause", async () => {
 		const notices: string[] = [];
 		const { tools, handlers, commands, sent } = createGoalHarness();
 		const ctx = await makeGoalContext(notices, "thread-input-resume-once");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+		await markCurrentGoalStale(ctx);
 
 		await runGoalHandlers(handlers, "input", { type: "input", source: "interactive", text: "switch tasks" }, ctx);
+		await runGoalHandlers(handlers, "input_disposition", { type: "input_disposition", disposition: "started" }, ctx);
 		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runGoalHandlers(handlers, "agent_end", { type: "agent_end", messages: [cleanAssistantStop()] }, ctx);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "paused" });

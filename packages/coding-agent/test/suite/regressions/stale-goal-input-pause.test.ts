@@ -1,131 +1,126 @@
-/** Locks the stale-goal failure: a newer explicit user request must pause the stale active goal. */
+/** Locks stale-goal admission: only accepted direct input pauses an unchanged delivered continuation. */
 
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import goalExtension from "../../../src/core/extensions/builtin/goal/index.ts";
 import { createGoal, readGoal } from "../../../src/core/extensions/builtin/goal/store.ts";
 import { goalStoreRef } from "../../../src/core/extensions/builtin/goal/store-ref.ts";
+import type { ExtensionAPI } from "../../../src/core/extensions/types.ts";
 import { GOAL_CONTINUATION_MESSAGE_TYPE } from "../../../src/core/messages.ts";
-import { createHarness, getMessageText, type Harness } from "../harness.ts";
+import { createHarness, type Harness } from "../harness.ts";
 
 const harnesses: Harness[] = [];
 
-afterEach(async () => {
-	vi.useRealTimers();
+const STABLE_OUTPUT = "unchanged observable goal output";
+
+afterEach(() => {
 	while (harnesses.length > 0) harnesses.pop()?.cleanup();
 });
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-	let resolve: (() => void) | undefined;
-	const promise = new Promise<void>((next) => {
-		resolve = next;
+async function createHarnessWithDeliveredContinuation(
+	options: { handleRejected?: boolean; rejectSignal?: AbortController } = {},
+): Promise<{
+	harness: Harness;
+	goalId: string;
+}> {
+	const harness = await createHarness({
+		persistSession: true,
+		extensionFactories: [
+			goalExtension,
+			...(options.handleRejected || options.rejectSignal
+				? [
+						(pi: ExtensionAPI) => {
+							pi.on("input", (event) => {
+								if (event.text !== "rejected prompt") return undefined;
+								options.rejectSignal?.abort();
+								return options.handleRejected ? { action: "handled" as const } : undefined;
+							});
+						},
+					]
+				: []),
+		],
 	});
-	if (!resolve) throw new Error("Deferred resolver was not initialized");
-	return { promise, resolve };
+	harnesses.push(harness);
+	await harness.session.bindExtensions({});
+
+	const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
+	const goal = await createGoal(ref, "Complete the active goal without drifting to unrelated work");
+	harness.setResponses([fauxAssistantMessage(STABLE_OUTPUT), fauxAssistantMessage(STABLE_OUTPUT)]);
+
+	// Drive a real extension-originated turn. Its clean agent_end queues the hidden
+	// continuation, records the signature, and the matching continuation response then
+	// stops as stale instead of recursively queueing another turn.
+	await harness.session.prompt("begin tracked work", { source: "extension" });
+
+	const persisted = await readGoal(ref);
+	expect(persisted).toMatchObject({ id: goal.id, status: "active", consecutiveContinuations: 1 });
+	expect(persisted?.lastContinuationSignature).toEqual(expect.any(String));
+	expect(
+		harness.sessionManager
+			.getEntries()
+			.filter((entry) => entry.type === "custom_message" && entry.customType === GOAL_CONTINUATION_MESSAGE_TYPE),
+	).toHaveLength(1);
+	return { harness, goalId: goal.id };
 }
 
 describe("stale goal input pause", () => {
-	it("pauses an active goal at the input seam on an idle direct prompt without charging the new turn", async () => {
-		const harness = await createHarness({ extensionFactories: [goalExtension] });
-		harnesses.push(harness);
-
+	it("persists the delivered signature and pauses on accepted direct input when observable state is unchanged", async () => {
+		const { harness, goalId } = await createHarnessWithDeliveredContinuation();
 		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
-		const goal = await createGoal(ref, "Complete the quarterly report by analyzing sales data and drafting summary");
+		const tokensBefore = (await readGoal(ref))?.tokensUsed;
+		harness.setResponses([fauxAssistantMessage("answered the newer request")]);
 
-		expect(goal.status).toBe("active");
-		const goalId = goal.id;
-		const tokensBefore = goal.tokensUsed;
+		await harness.session.prompt("switch to this newer request");
 
-		const countContinuations = () =>
-			harness.sessionManager
-				.getEntries()
-				.filter((entry) => entry.type === "custom_message" && entry.customType === GOAL_CONTINUATION_MESSAGE_TYPE)
-				.length;
+		expect(await readGoal(ref)).toMatchObject({ id: goalId, status: "paused", tokensUsed: tokensBefore });
+	});
 
-		harness.setResponses([fauxAssistantMessage("Python uses indentation and colons for block scope.")]);
-		await harness.session.prompt("how does python handle scope?");
-
-		// The newer, unrelated prompt was handled.
-		const lastMessage = harness.session.messages[harness.session.messages.length - 1];
-		expect(lastMessage?.role).toBe("assistant");
-		expect(getMessageText(lastMessage)).toContain("indentation");
-
-		// Idle input pauses at the seam before the new turn starts.
-		const goalAfterPrompt = await readGoal(ref);
-		expect(goalAfterPrompt).toMatchObject({ id: goalId, status: "paused" });
-		// The unrelated new turn is not charged to the stale goal.
-		expect(goalAfterPrompt?.tokensUsed).toBe(tokensBefore);
-		expect(countContinuations()).toBe(0);
-
-		// No later continuation resurrects the paused goal under virtual time.
-		vi.useFakeTimers();
-		await vi.advanceTimersByTimeAsync(20 * 60_000);
-		vi.useRealTimers();
-		expect((await readGoal(ref))?.status).toBe("paused");
-		expect(countContinuations()).toBe(0);
-	}, 20_000);
-
-	it("defers the pause past an in-flight hidden continuation when a newer prompt is queued, then never resumes", async () => {
-		const streamStarted = deferred();
-		const harness = await createHarness({ extensionFactories: [goalExtension] });
-		harnesses.push(harness);
-
-		// Exact stream signal: subscribe to the first assistant message_update BEFORE triggering
-		// the queued follow-up, so the injection lands mid-stream (streamingBehavior "followUp").
-		let streamed = false;
-		harness.session.subscribe((event) => {
-			if (event.type === "message_update" && event.message.role === "assistant" && !streamed) {
-				streamed = true;
-				streamStarted.resolve();
-			}
-		});
-
+	it("does not pause when observable state changed after the continuation was delivered", async () => {
+		const { harness, goalId } = await createHarnessWithDeliveredContinuation();
 		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
-		const goal = await createGoal(ref, "Refactor the billing pipeline and migrate every caller across the repo");
-		const goalId = goal.id;
-
-		const countContinuations = () =>
-			harness.sessionManager
-				.getEntries()
-				.filter((entry) => entry.type === "custom_message" && entry.customType === GOAL_CONTINUATION_MESSAGE_TYPE)
-				.length;
-
+		harness.sessionManager.appendMessage(fauxAssistantMessage("new observable progress after delivery"));
 		harness.setResponses([
-			// The in-flight hidden continuation streams a large response so a follow-up can be queued
-			// mid-stream. Extension source keeps the goal active through this turn.
-			fauxAssistantMessage("hidden goal continuation progress ".repeat(2_000)),
-			// The newer user turn that runs after the deferred pause.
-			fauxAssistantMessage("Here is the answer to your newer, unrelated question."),
+			fauxAssistantMessage("new observable progress after delivery"),
+			fauxAssistantMessage("new observable progress after delivery"),
 		]);
 
-		const continuationRun = harness.session.prompt("pursue the active goal", { source: "extension" });
-		await streamStarted.promise;
-		expect(harness.session.isStreaming).toBe(true);
-		// A newer interactive/RPC-equivalent prompt queued while the continuation streams.
-		const followUpRun = harness.session.prompt("answer my newer unrelated question instead", {
-			streamingBehavior: "followUp",
+		await harness.session.prompt("continue with the changed state");
+
+		expect(await readGoal(ref)).toMatchObject({ id: goalId, status: "active" });
+	});
+
+	it("does not pause a fresh active goal that has never received a continuation", async () => {
+		const harness = await createHarness({ persistSession: true, extensionFactories: [goalExtension] });
+		harnesses.push(harness);
+		await harness.session.bindExtensions({});
+		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
+		const goal = await createGoal(ref, "Fresh goal with no delivered continuation");
+		expect(goal.lastContinuationSignature).toBeUndefined();
+		harness.setResponses([fauxAssistantMessage(STABLE_OUTPUT), fauxAssistantMessage(STABLE_OUTPUT)]);
+
+		await harness.session.prompt("work on the fresh goal");
+
+		expect(await readGoal(ref)).toMatchObject({ id: goal.id, status: "active" });
+	});
+
+	it("clears the pause candidate when another input extension handles the prompt", async () => {
+		const { harness, goalId } = await createHarnessWithDeliveredContinuation({ handleRejected: true });
+		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
+
+		await harness.session.prompt("rejected prompt");
+
+		expect(await readGoal(ref)).toMatchObject({ id: goalId, status: "active" });
+	});
+
+	it("clears the pause candidate when admission rejects the prompt", async () => {
+		const controller = new AbortController();
+		const { harness, goalId } = await createHarnessWithDeliveredContinuation({ rejectSignal: controller });
+		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
+
+		await expect(harness.session.prompt("rejected prompt", { signal: controller.signal })).rejects.toMatchObject({
+			name: "AbortError",
 		});
-		await Promise.all([continuationRun, followUpRun]);
 
-		// Pause is deferred to agent_end: the in-flight turn's usage is accounted, then active -> paused.
-		const pausedGoal = await readGoal(ref);
-		expect(pausedGoal).toMatchObject({ id: goalId, status: "paused" });
-		expect(pausedGoal?.tokensUsed).toBeGreaterThan(0);
-
-		// The newer user prompt was handled after the pause.
-		const lastMessage = harness.session.messages[harness.session.messages.length - 1];
-		expect(lastMessage?.role).toBe("assistant");
-		expect(getMessageText(lastMessage)).toContain("newer");
-
-		// No hidden goal-continuation was delivered by the deferred pause.
-		expect(countContinuations()).toBe(0);
-
-		// Deterministic virtual-clock proof: no fallback timer resurrects the paused goal.
-		vi.useFakeTimers();
-		await vi.advanceTimersByTimeAsync(20 * 60_000);
-		vi.useRealTimers();
-
-		expect((await readGoal(ref))?.status).toBe("paused");
-		expect(countContinuations()).toBe(0);
-	}, 20_000);
+		expect(await readGoal(ref)).toMatchObject({ id: goalId, status: "active" });
+	});
 });

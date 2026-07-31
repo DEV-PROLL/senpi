@@ -1,5 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readGoal, recordContinuationDelivered } from "../../src/core/extensions/builtin/goal/store.ts";
+import { goalStoreRef } from "../../src/core/extensions/builtin/goal/store-ref.ts";
 import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
 	cleanAssistantStop,
@@ -169,9 +171,21 @@ describe("goal monitor continuation stall check", () => {
 		await runMonitorContinuationCycle(harness, ctx);
 		expect(harness.sent).toHaveLength(2);
 
-		// A real user prompt now pauses the goal (and resets the in-memory streak) before its
-		// unrelated turn; no further continuation is scheduled and no stall fires.
+		// Persist a delivered signature matching this context's unchanged observable state.
+		const ref = goalStoreRef(ctx.sessionManager, ctx.cwd);
+		const goal = await readGoal(ref);
+		if (goal === null) throw new Error("Expected persisted goal");
+		await recordContinuationDelivered(ref, `${goal.id}:0/0:811c9dc5`);
+
+		// Accepted direct input pauses the stale goal and resets the in-memory streak; no
+		// further continuation is scheduled and no stall fires.
 		await runGoalHandlers(harness.handlers, "input", { type: "input", source: "interactive", text: "stop" }, ctx);
+		await runGoalHandlers(
+			harness.handlers,
+			"input_disposition",
+			{ type: "input_disposition", disposition: "started" },
+			ctx,
+		);
 		await runContinuationCycle(harness, ctx);
 		await vi.advanceTimersByTimeAsync(240_000);
 

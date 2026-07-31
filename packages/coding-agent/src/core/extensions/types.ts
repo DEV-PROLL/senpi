@@ -1067,6 +1067,12 @@ export interface InputEvent {
 	streamingBehavior?: "steer" | "followUp";
 }
 
+/** Fired after input interception and provider admission determine ownership of a prompt. */
+export interface InputDispositionEvent {
+	type: "input_disposition";
+	disposition: "handled" | "queued" | "started" | "rejected";
+}
+
 /** Result from input event handler */
 export type InputEventResult =
 	| { action: "continue" }
@@ -1283,6 +1289,7 @@ export type ExtensionEvent =
 	| ThinkingLevelSelectEvent
 	| UserBashEvent
 	| InputEvent
+	| InputDispositionEvent
 	| ToolCallEvent
 	| ToolResultEvent;
 
@@ -1496,6 +1503,7 @@ export interface ExtensionAPI {
 	on(event: "tool_result", handler: ExtensionHandler<ToolResultEvent, ToolResultEventResult>): void;
 	on(event: "user_bash", handler: ExtensionHandler<UserBashEvent, UserBashEventResult>): void;
 	on(event: "input", handler: ExtensionHandler<InputEvent, InputEventResult>): void;
+	on(event: "input_disposition", handler: ExtensionHandler<InputDispositionEvent>): void;
 
 	// =========================================================================
 	// Tool Registration
