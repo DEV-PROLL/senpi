@@ -8,6 +8,10 @@
 
 ### Changed
 
+- Mark every primary agent-loop model request with `streamKind: "main"`, allowing providers to reserve persistent
+  session state for real conversation turns while treating unlabeled compaction, title, and helper streams as
+  auxiliary one-shot work.
+
 ### Fixed
 
 ### Removed

@@ -6,9 +6,21 @@
 
 ### Added
 
+- Expose `StreamOptions.streamKind` so provider implementations can distinguish the primary agent loop from
+  auxiliary compaction, title-generation, and helper requests. Main-loop callers opt in explicitly; an absent value
+  remains auxiliary so providers fail safe instead of accidentally retaining one-shot work in a resident session.
+
+- Support `max` reasoning for map-less GPT-5.6 Sol models across OpenAI Responses, Azure OpenAI Responses, Codex
+  Responses, and OpenAI Completions. Explicit `thinkingLevelMap` values remain authoritative: a missing level on a
+  present map stays unavailable, and `null` continues to veto model-ID capability detection.
+
 ### Changed
 
 ### Fixed
+
+- Serialize unavailable Anthropic tool history into non-imitable XML-style records that omit historical call inputs,
+  neutralize case-variant result envelopes, and retain only safe result context plus guidance derived from the tools
+  that are actually available on the current request.
 
 ### Removed
 
