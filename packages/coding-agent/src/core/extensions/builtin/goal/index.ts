@@ -10,6 +10,7 @@ import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
 import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
 import { MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
+import { migrateLegacyGoalFile } from "./persistence.ts";
 import { accountGoalUsage, readGoal, resetContinuationStreak, updateGoal } from "./store.ts";
 import { goalStoreRef as buildGoalStoreRef } from "./store-ref.ts";
 import { staleGoalTodoReminder, todoResultAddsOpenTasks } from "./todo-gate.ts";
@@ -80,7 +81,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (event, ctx) => {
 		monitorContinuation.start(ctx);
-		const goal = await readGoal(goalStoreRef(ctx));
+		const ref = goalStoreRef(ctx);
+		await migrateLegacyGoalFile(ref);
+		const goal = await readGoal(ref);
 		if (goal?.status === "active") {
 			beginAgentGoalAccounting(goal);
 		} else {
