@@ -1,3 +1,10 @@
+import {
+	PROJECT_RULES_END_MARKER,
+	PROJECT_RULES_HEADING,
+	PROJECT_RULES_REGION_END_MARKER,
+	PROJECT_RULES_REGION_START_MARKER,
+	PROJECT_RULES_START_MARKER,
+} from "./constants.ts";
 import { truncateBudget, truncateRule } from "./truncator.ts";
 import type { LoadedRule } from "./types.ts";
 
@@ -50,7 +57,23 @@ export function formatStaticBlock(rules: ReadonlyArray<LoadedRule>, options: For
 		return "";
 	}
 
-	return `\n\n## Project Instructions\n${truncateRules(rules, options).map(formatRule).join("\n\n")}`;
+	const body = neutralizeEnvelopeMarkers(
+		`${PROJECT_RULES_HEADING}\n${truncateRules(rules, options).map(formatRule).join("\n\n")}`,
+	);
+	const envelope = `${PROJECT_RULES_START_MARKER}\n${body}\n${PROJECT_RULES_END_MARKER}`;
+	return `\n\n${PROJECT_RULES_REGION_START_MARKER}\n${envelope}\n${PROJECT_RULES_REGION_END_MARKER}`;
+}
+
+/**
+ * A raw region sentinel inside a rule would terminate extraction early and drop every rule after it;
+ * a raw semantic marker would instead corrupt the envelope structure the model reads.
+ */
+function neutralizeEnvelopeMarkers(text: string): string {
+	return text
+		.replaceAll(PROJECT_RULES_REGION_START_MARKER, "&lt;!--senpi:project-rules:1:start--&gt;")
+		.replaceAll(PROJECT_RULES_REGION_END_MARKER, "&lt;!--senpi:project-rules:1:end--&gt;")
+		.replaceAll(PROJECT_RULES_START_MARKER, "&lt;project_rules&gt;")
+		.replaceAll(PROJECT_RULES_END_MARKER, "&lt;/project_rules&gt;");
 }
 
 export function formatDynamicBlock(

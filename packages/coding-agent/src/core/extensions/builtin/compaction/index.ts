@@ -248,6 +248,14 @@ export default function compactionExtension(
 		ctx: ExtensionContext,
 		customInstructions: string,
 	): Promise<SpeculativeCompactionResult> {
+		if (breaker.isTripped(state, Date.now())) {
+			getLogger(ctx).debug("skip_breaker", { route: "blocking" });
+			return { applied: false, reason: "rejected" };
+		}
+		if (cap.shouldRejectByCap(state).cancel) {
+			getLogger(ctx).debug("skip_cap", { route: "blocking" });
+			return { applied: false, reason: "rejected" };
+		}
 		let feedbackSignal = ctx.beginCompaction?.({ reason: "extension" });
 		try {
 			if (isOpenAiRemoteCompactionModel(ctx.model)) {
@@ -520,6 +528,7 @@ export default function compactionExtension(
 						savingsRatio: sy.savingsRatio,
 					})
 				) {
+					state = cap.incrementIneffective(state);
 					getLogger(ctx).debug("ineffective_counted", {
 						tokensBefore: compactEvent.compactionEntry.tokensBefore,
 						savedTokens: sy.savedTokens,
