@@ -2,6 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import type { Api, Context, Model, SimpleStreamOptions, ThinkingBudgets, ThinkingLevel } from "@earendil-works/pi-ai";
 import { CONFIG_DIR_NAME, getAgentDir } from "../../../../config.ts";
+import {
+	PROJECT_RULES_END_MARKER,
+	PROJECT_RULES_HEADING,
+	PROJECT_RULES_REGION_END_MARKER,
+	PROJECT_RULES_REGION_START_MARKER,
+	PROJECT_RULES_START_MARKER,
+} from "../rules/rules/constants.ts";
 import type { EffortLevel, Options, SettingSource, ThinkingConfig } from "./sdk-boundary.ts";
 import {
 	type ClaudeAgentSdkProviderSettings,
@@ -158,6 +165,41 @@ function extractSkillsAppend(systemPrompt: string | undefined, cwd: string): str
 	return rewriteSkillsLocations(systemPrompt.slice(start, end + "</available_skills>".length).trim(), cwd);
 }
 
+/**
+ * This lane rebuilds the prompt from the `claude_code` preset plus `append`, so any
+ * region of senpi's composed prompt without an extractor here never reaches the model.
+ *
+ * Located by the rules builtin's opaque region sentinels rather than the model-facing
+ * `<project_rules>` tags, which surrounding prompt content may legitimately contain.
+ * The sentinels are a reserved wire literal but nothing neutralizes them outside the block, so
+ * each candidate is structurally validated and rejected candidates are skipped - otherwise a
+ * context file carrying one would shadow the real block or cross-match its end sentinel.
+ * Fail-closed on a missing end sentinel: never read to end-of-string, or the sections
+ * extensions append after this one get relabelled as project rules.
+ */
+function extractProjectRulesAppend(systemPrompt: string | undefined): string | undefined {
+	if (!systemPrompt) return undefined;
+	let searchFrom = 0;
+	while (searchFrom <= systemPrompt.length) {
+		const sentinelStart = systemPrompt.indexOf(PROJECT_RULES_REGION_START_MARKER, searchFrom);
+		if (sentinelStart === -1) return undefined;
+		const regionStart = sentinelStart + PROJECT_RULES_REGION_START_MARKER.length;
+		const regionEnd = systemPrompt.indexOf(PROJECT_RULES_REGION_END_MARKER, regionStart);
+		if (regionEnd === -1) return undefined;
+		const region = systemPrompt.slice(regionStart, regionEnd).trim();
+		if (isProjectRulesEnvelope(region)) return region;
+		searchFrom = regionStart;
+	}
+	return undefined;
+}
+
+function isProjectRulesEnvelope(region: string): boolean {
+	return (
+		region.startsWith(`${PROJECT_RULES_START_MARKER}\n${PROJECT_RULES_HEADING}\n`) &&
+		region.endsWith(`\n${PROJECT_RULES_END_MARKER}`)
+	);
+}
+
 function resolveSettingSources(
 	providerSettings: ClaudeAgentSdkProviderSettings,
 	appendSystemPrompt: boolean,
@@ -173,9 +215,11 @@ export function buildClaudeAgentSdkQueryOptions(input: ClaudeAgentSdkQueryOption
 	const appendSystemPrompt = providerSettings.appendSystemPrompt !== false;
 	const authLane = input.authLane ?? providerSettings.tokenInjection ?? "oauth-slots";
 	const append = appendSystemPrompt
-		? [extractAgentsAppend(cwd), extractSkillsAppend(input.context.systemPrompt, cwd)].filter(
-				(part): part is string => part !== undefined,
-			)
+		? [
+				extractAgentsAppend(cwd),
+				extractSkillsAppend(input.context.systemPrompt, cwd),
+				extractProjectRulesAppend(input.context.systemPrompt),
+			].filter((part): part is string => part !== undefined)
 		: [];
 	const strictMcpConfig = providerSettings.strictMcpConfig ?? !appendSystemPrompt;
 	const queryOptions: Options = {

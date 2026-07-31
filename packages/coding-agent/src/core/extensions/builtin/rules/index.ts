@@ -86,11 +86,11 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 				engine.markStaticInjected(rule);
 			}
 		}
+		// Deliberately NOT gated on isStaticInjected: the host re-emits this from the BASE prompt
+		// every user prompt, so a prior turn's mark would drop the block from turn 2 onward. The
+		// marks below serve only the dynamic tool_result path.
 		const rules = loaded.rules.filter(
-			(rule) =>
-				!nativeContextPaths.has(rule.path) &&
-				!nativeContextPaths.has(rule.realPath) &&
-				!engine.isStaticInjected(rule),
+			(rule) => !nativeContextPaths.has(rule.path) && !nativeContextPaths.has(rule.realPath),
 		);
 
 		if (rules.length === 0) {
