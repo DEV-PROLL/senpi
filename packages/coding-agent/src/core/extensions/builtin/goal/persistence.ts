@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { InvalidGoalStoreError, UnsupportedGoalStoreVersionError } from "./errors.ts";
 import type { Goal, GoalFile, GoalStatus, GoalStoreRef } from "./types.ts";
@@ -29,12 +31,17 @@ export async function readGoalFile(ref: GoalStoreRef): Promise<Goal | null> {
 }
 
 /**
- * Imports a legacy standalone `pi-goal` file into the current budget-free store.
+ * Imports legacy standalone `pi-goal` state into the current budget-free store.
  *
- * The current store always wins: an existing current file (even one carrying inert
- * `tokenBudget` wire metadata) is never overwritten, and a missing legacy file is a
- * no-op. Legacy normalization is deliberately confined to this path so ordinary
- * current-store reads keep their exact bytes and their existing typed errors.
+ * The current store always wins and legacy normalization is confined to this path.
+ * Invalid, unsupported, or malformed legacy files are best-effort dead-data imports:
+ * they remain untouched and do not block the live current store. Unexpected filesystem
+ * failures still propagate.
+ *
+ * Session-backed stores use their stable thread id. No-session stores enumerate the
+ * cwd-keyed legacy bucket because each ephemeral run receives a new thread id, and they
+ * inspect both the redirected Senpi-root sibling and the standalone pi agent root.
+ * Multiple valid live candidates are reported as a conflict rather than guessed.
  *
  * Returns the imported goal, or null when nothing was migrated.
  */
@@ -46,18 +53,89 @@ export async function migrateLegacyGoalFile(ref: GoalStoreRef): Promise<Goal | n
 		if (!isMissingFile(error)) throw error;
 	}
 
+	const legacyCandidates = await readLegacyGoalCandidates(ref);
+	if (legacyCandidates.length > 1) {
+		throw new Error(
+			`multiple legacy goals found for no-session store: ${legacyCandidates.map(({ path }) => path).join(", ")}`,
+		);
+	}
+	const candidate = legacyCandidates[0];
+	if (candidate === undefined) return null;
+	const published = await publishMigratedGoalFile(ref, candidate.goal);
+	await retireLegacyGoalFile(candidate.path);
+	return published ? candidate.goal : null;
+}
+
+interface LegacyGoalCandidate {
+	path: string;
+	goal: Goal;
+}
+
+async function readLegacyGoalCandidates(ref: GoalStoreRef): Promise<LegacyGoalCandidate[]> {
 	const legacyBaseDir = legacyBaseDirFor(ref.baseDir);
-	if (legacyBaseDir === undefined) return null;
-	const legacyRef: GoalStoreRef = { ...ref, baseDir: legacyBaseDir };
-	let legacyGoal: Goal | null;
+	if (legacyBaseDir === undefined) return [];
+	const cwdKey = noSessionCwdKey(ref.baseDir);
+	if (cwdKey === undefined) {
+		const candidate = await readLegacyGoalCandidate(goalFilePath({ ...ref, baseDir: legacyBaseDir }));
+		return candidate === null ? [] : [candidate];
+	}
+
+	const standaloneAgentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+	const baseDirs = new Set([
+		legacyBaseDir,
+		join(standaloneAgentDir, "extensions", LEGACY_STORE_DIRECTORY, "no-session", cwdKey),
+	]);
+	const candidatePaths: string[] = [];
+	for (const baseDir of baseDirs) {
+		let entries: Dirent<string>[];
+		try {
+			entries = await readdir(baseDir, { withFileTypes: true });
+		} catch (error) {
+			if (isMissingFile(error)) continue;
+			throw error;
+		}
+		for (const entry of entries) {
+			if (entry.isFile() && entry.name.endsWith(".json")) candidatePaths.push(join(baseDir, entry.name));
+		}
+	}
+
+	const candidates: LegacyGoalCandidate[] = [];
+	for (const path of candidatePaths.sort()) {
+		const candidate = await readLegacyGoalCandidate(path);
+		if (candidate !== null) candidates.push(candidate);
+	}
+	return candidates;
+}
+
+async function readLegacyGoalCandidate(path: string): Promise<LegacyGoalCandidate | null> {
+	let goal: Goal | null;
 	try {
-		legacyGoal = parseGoalFile(await readFile(goalFilePath(legacyRef), "utf8"), { legacy: true }).goal;
+		goal = parseGoalFile(await readFile(path, "utf8"), { legacy: true }).goal;
 	} catch (error) {
-		if (isMissingFile(error)) return null;
+		if (isMissingFile(error) || isIgnoredLegacyStoreError(error)) return null;
 		throw error;
 	}
-	if (legacyGoal === null) return null;
-	return (await publishMigratedGoalFile(ref, legacyGoal)) ? legacyGoal : null;
+	if (goal === null) {
+		await retireLegacyGoalFile(path);
+		return null;
+	}
+	return { path, goal };
+}
+
+async function retireLegacyGoalFile(path: string): Promise<void> {
+	try {
+		await rename(path, `${path}.migrated`);
+	} catch {
+		// Retirement is best-effort: a preserved legacy file must never fail live migration.
+	}
+}
+
+function isIgnoredLegacyStoreError(error: unknown): boolean {
+	return (
+		error instanceof InvalidGoalStoreError ||
+		error instanceof UnsupportedGoalStoreVersionError ||
+		error instanceof SyntaxError
+	);
 }
 
 /**
@@ -74,11 +152,22 @@ export async function migrateLegacyGoalFile(ref: GoalStoreRef): Promise<Goal | n
  * state and can import an unrelated nested directory.
  */
 function legacyBaseDirFor(baseDir: string): string | undefined {
-	const segments = baseDir.split(sep);
+	const segments = pathSegments(baseDir);
 	const goalIndex = segments.lastIndexOf(CURRENT_STORE_DIRECTORY);
 	if (goalIndex === -1) return undefined;
 	segments[goalIndex] = LEGACY_STORE_DIRECTORY;
 	return segments.join(sep);
+}
+
+function noSessionCwdKey(baseDir: string): string | undefined {
+	const segments = pathSegments(baseDir);
+	const goalIndex = segments.lastIndexOf(CURRENT_STORE_DIRECTORY);
+	if (goalIndex === -1 || segments[goalIndex + 1] !== "no-session") return undefined;
+	return segments[goalIndex + 2];
+}
+
+function pathSegments(path: string): string[] {
+	return path.split(/[\\/]/);
 }
 
 export async function writeGoalFile(ref: GoalStoreRef, goal: Goal | null): Promise<void> {
@@ -109,34 +198,13 @@ async function publishMigratedGoalFile(ref: GoalStoreRef, goal: Goal): Promise<b
 	const filePath = goalFilePath(ref);
 	await mkdir(dirname(filePath), { recursive: true });
 	const contents = `${JSON.stringify({ version: STORE_VERSION, goal }, null, 2)}\n`;
-	const tempPath = join(dirname(filePath), `.goal-${randomUUID()}.tmp`);
-	let published = false;
-	let publicationFailed = false;
-	let publicationError: unknown;
 	try {
-		await writeFile(tempPath, contents, { encoding: "utf8", mode: 0o600 });
-		await link(tempPath, filePath);
-		published = true;
+		await writeFile(filePath, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
+		return true;
 	} catch (error) {
-		if (!isFileSystemError(error, "EEXIST")) {
-			publicationFailed = true;
-			publicationError = error;
-		}
+		if (isFileSystemError(error, "EEXIST")) return false;
+		throw error;
 	}
-
-	try {
-		await rm(tempPath, { force: true });
-	} catch (cleanupError) {
-		if (publicationFailed) {
-			throw new AggregateError(
-				[publicationError, cleanupError],
-				"goal migration publication failed and its temporary file could not be removed",
-			);
-		}
-		throw cleanupError;
-	}
-	if (publicationFailed) throw publicationError;
-	return published;
 }
 
 function parseGoalFile(raw: string, { legacy = false }: { legacy?: boolean } = {}): GoalFile {
