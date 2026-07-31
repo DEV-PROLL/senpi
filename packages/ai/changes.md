@@ -1,5 +1,38 @@
 # changes.md — ai
 
+## Require explicit opt-in before probing Ollama in stream tests (2026-07-31)
+
+### What changed
+
+- `test/live-api-gates.ts`: added a local-LLM availability gate that short-circuits before running its
+  availability probe unless `PI_ENABLE_LOCAL_LLM=1` or `PI_ENABLE_LIVE_API_TESTS=1`.
+- `test/live-api-gates.test.ts`: covers the default no-probe behavior and both explicit opt-in paths.
+- `test/stream.test.ts`: routes Ollama discovery through the shared gate instead of treating the absence of
+  `PI_NO_LOCAL_LLM` as permission to probe and run the live suite.
+
+### Why
+
+- A normal `npm test` on a machine with Ollama installed could enter the live suite, pull `gpt-oss:20b`, start
+  a local server, and load a large model without explicit consent. Default workspace tests must not probe or
+  start local model infrastructure.
+
+### Why extension system couldn't handle this
+
+- This behavior occurs during `packages/ai` Vitest discovery and setup, before the coding-agent extension
+  surface is involved.
+
+### Modified upstream files
+
+- `test/live-api-gates.test.ts`
+- `test/live-api-gates.ts`
+- `test/stream.test.ts`
+
+### Expected merge conflict zones
+
+- LOW: `test/live-api-gates.ts` and its tests may conflict if upstream changes live-test activation helpers.
+- MEDIUM: the Ollama discovery and setup block in `test/stream.test.ts` may conflict if upstream changes how
+  the local OpenAI-compatible test server is detected or started.
+
 ## Browser-safe prompt-cache TTL resolver (2026-07-28)
 
 ### What changed

@@ -12,8 +12,8 @@ export function isLiveApiTestEnabled(providerFlag: string): boolean {
 	return process.env[LIVE_API_TESTS_FLAG] === "1" || process.env[providerFlag] === "1";
 }
 
-export function isLocalLlmLiveTestEnabled(): boolean {
-	return isLiveApiTestEnabled(LOCAL_LLM_LIVE_TEST_FLAG);
+export function isLocalLlmLiveTestAvailable(checkAvailability: () => boolean): boolean {
+	return isLiveApiTestEnabled(LOCAL_LLM_LIVE_TEST_FLAG) && checkAvailability();
 }
 
 export function getLiveEnvApiKey(apiKeyEnvName: string, providerFlag: string): string | undefined {

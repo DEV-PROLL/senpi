@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	getLiveEnvApiKey,
-	isLocalLlmLiveTestEnabled,
+	isLocalLlmLiveTestAvailable,
 	LOCAL_LLM_LIVE_TEST_FLAG,
 	OPENROUTER_LIVE_TEST_FLAG,
 } from "./live-api-gates.ts";
@@ -55,23 +55,41 @@ describe("live API test gates", () => {
 		vi.stubEnv("PI_NO_LOCAL_LLM", "");
 		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, "");
 		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", "");
+		const ollamaProbe = vi.fn(() => true);
 
 		// when
-		const enabled = isLocalLlmLiveTestEnabled();
+		const available = isLocalLlmLiveTestAvailable(ollamaProbe);
 
 		// then
-		expect(enabled).toBe(false);
+		expect(available).toBe(false);
+		expect(ollamaProbe).not.toHaveBeenCalled();
 	});
 
 	it("given local LLM opt-in when checking live tests then enables local probing", () => {
 		// given
 		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, "1");
 		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", "");
+		const ollamaProbe = vi.fn(() => true);
 
 		// when
-		const enabled = isLocalLlmLiveTestEnabled();
+		const available = isLocalLlmLiveTestAvailable(ollamaProbe);
 
 		// then
-		expect(enabled).toBe(true);
+		expect(available).toBe(true);
+		expect(ollamaProbe).toHaveBeenCalledOnce();
+	});
+
+	it("given global live opt-in when checking live tests then enables local probing", () => {
+		// given
+		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, "");
+		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", "1");
+		const ollamaProbe = vi.fn(() => true);
+
+		// when
+		const available = isLocalLlmLiveTestAvailable(ollamaProbe);
+
+		// then
+		expect(available).toBe(true);
+		expect(ollamaProbe).toHaveBeenCalledOnce();
 	});
 });
