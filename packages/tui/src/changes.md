@@ -1,5 +1,21 @@
 # TUI delta rendering fork changes
 
+## 2026-07-31: Contextual skill slash-command discovery
+
+### What changed
+
+- Bare `/` and partial `/skill` input no longer list every `skill:<name>` command.
+- `/skill:` still opens the full skill namespace, while `/` followed by a skill's full name or leading letters finds
+  matching child skills directly.
+
+### Why
+
+- The shared `skill:` prefix flooded the root slash-command overview and obscured the smaller set of general commands.
+
+### Expected merge conflict zones
+
+- LOW: `slash-command-autocomplete.ts` skill filtering and its focused autocomplete regression test.
+
 ## 2026-07-29: Native Unicode LaTeX in Markdown conversations
 
 ### What changed

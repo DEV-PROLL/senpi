@@ -5,6 +5,7 @@ type CommandItem = {
 	readonly name: string;
 	readonly label: string;
 	readonly description?: string;
+	readonly searchText: string;
 };
 
 type RankedCommandItem = AutocompleteItem & {
@@ -30,19 +31,34 @@ export function getSlashCommandSuggestions(
 	commands: readonly (SlashCommand | AutocompleteItem)[],
 	prefix: string,
 ): AutocompleteItem[] {
-	const commandItems: CommandItem[] = commands.map((cmd) => {
+	const explicitSkillNamespace = prefix.startsWith("skill:");
+	const normalizedPrefix = prefix.toLowerCase();
+	const commandItems: CommandItem[] = commands.flatMap((cmd) => {
 		const name = "name" in cmd ? cmd.name : cmd.value;
+		const isSkill = name.startsWith("skill:");
+		const skillName = isSkill ? name.slice("skill:".length) : "";
+		if (
+			isSkill &&
+			!explicitSkillNamespace &&
+			(normalizedPrefix.length === 0 || !skillName.toLowerCase().startsWith(normalizedPrefix))
+		) {
+			return [];
+		}
+
 		const hint = "argumentHint" in cmd && cmd.argumentHint ? cmd.argumentHint : undefined;
 		const desc = cmd.description ?? "";
 		const fullDesc = hint ? (desc ? `${hint} — ${desc}` : hint) : desc;
-		return {
-			name,
-			label: name,
-			description: fullDesc || undefined,
-		};
+		return [
+			{
+				name,
+				label: name,
+				description: fullDesc || undefined,
+				searchText: isSkill && !explicitSkillNamespace ? skillName : name,
+			},
+		];
 	});
 
-	return fuzzyFilter(commandItems, prefix, (item) => item.name)
+	return fuzzyFilter(commandItems, prefix, (item) => item.searchText)
 		.map((item, index) => ({
 			value: item.name,
 			label: item.label,

@@ -46,6 +46,42 @@ describe("CombinedAutocompleteProvider slash command suggestions", () => {
 		);
 	});
 
+	it("keeps skills out of the root palette until their namespace or child name is typed", async () => {
+		const provider = new CombinedAutocompleteProvider(
+			[
+				{ name: "model", description: "Select a model" },
+				{ name: "skill:debugging", description: "Debug runtime failures" },
+				{ name: "skill:frontend", description: "Build web interfaces" },
+				{ name: "skill:ulw-plan", description: "Create an implementation plan" },
+			],
+			"/tmp",
+		);
+
+		const root = await getSuggestions(provider, "/");
+		const parentNamespace = await getSuggestions(provider, "/skill");
+		const namespace = await getSuggestions(provider, "/skill:");
+		const childPrefix = await getSuggestions(provider, "/ul");
+		const childName = await getSuggestions(provider, "/debugging");
+
+		assert.deepStrictEqual(
+			root?.items.map((item) => item.value),
+			["model"],
+		);
+		assert.strictEqual(parentNamespace, null);
+		assert.deepStrictEqual(
+			namespace?.items.map((item) => item.value),
+			["skill:debugging", "skill:frontend", "skill:ulw-plan"],
+		);
+		assert.deepStrictEqual(
+			childPrefix?.items.map((item) => item.value),
+			["skill:ulw-plan"],
+		);
+		assert.deepStrictEqual(
+			childName?.items.map((item) => item.value),
+			["skill:debugging"],
+		);
+	});
+
 	it("reopens only skill suggestions for an executable second leading skill command", async () => {
 		const provider = new CombinedAutocompleteProvider(
 			[
