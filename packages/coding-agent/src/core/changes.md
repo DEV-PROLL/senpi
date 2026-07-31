@@ -1,5 +1,27 @@
 # changes
 
+## Preserve the user's reasoning preference across model switches (2026-07-31)
+
+### What changed
+
+- `agent-session.ts`: manual model selection and favorite-model cycling now
+  apply model-specific overrides and capability clamps as session-effective
+  levels without replacing `defaultThinkingLevel`.
+- Model switches without an explicit favorite tier restore the remembered
+  `defaultThinkingLevel` before clamping it to the selected model.
+
+### Why
+
+- Switching from a max-capable model to a basic reasoning model persisted the
+  clamped `high` tier, so switching back no longer restored the user's last
+  selected `max` tier. Explicit favorite tiers could likewise replace the
+  global preference even though they are model-specific overrides.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` around `_switchActiveModel()`,
+  `_cycleFavoriteModel()`, and `_getThinkingLevelForModelSwitch()`.
+
 ## Thinking-level tier detection delegates to packages/ai (2026-07-30)
 
 ### What changed

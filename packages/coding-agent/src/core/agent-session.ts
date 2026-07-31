@@ -3296,8 +3296,6 @@ export class AgentSession {
 
 		if (opts.ephemeralThinkingLevel !== undefined) {
 			this._applyEphemeralThinkingLevel(thinkingLevel);
-		} else if (opts.persistDefault) {
-			this.setThinkingLevel(thinkingLevel);
 		} else {
 			this.setSessionThinkingLevel(thinkingLevel);
 		}
@@ -3360,10 +3358,10 @@ export class AgentSession {
 		this._currentServiceTier = this._resolveServiceTier(next.model, next.serviceTier);
 
 		// Apply thinking level.
-		// - Explicit favorite model thinking level overrides current session level
-		// - Undefined favorite model thinking level inherits the current session preference
-		// setThinkingLevel clamps to model capabilities.
-		this.setThinkingLevel(thinkingLevel);
+		// - Explicit favorite model thinking level overrides the effective session level
+		// - Undefined favorite model thinking level restores the remembered user preference
+		// setSessionThinkingLevel clamps without replacing that preference.
+		this.setSessionThinkingLevel(thinkingLevel);
 
 		const systemPromptChange = await this._emitModelSelect(next.model, currentModel, "cycle");
 
@@ -3494,10 +3492,7 @@ export class AgentSession {
 		if (explicitLevel !== undefined) {
 			return explicitLevel;
 		}
-		if (!this.supportsThinking()) {
-			return this.settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
-		}
-		return this.thinkingLevel;
+		return this.settingsManager.getDefaultThinkingLevel() ?? this.thinkingLevel ?? DEFAULT_THINKING_LEVEL;
 	}
 
 	private _clampThinkingLevel(level: ThinkingLevel, availableLevels: ThinkingLevel[]): ThinkingLevel {
