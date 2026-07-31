@@ -87,7 +87,7 @@ C5 will use the senpi-qa isolation helpers and a PTY/tmux drive of the built CLI
 - [x] Run all affected tests directly and save combined evidence.
 - [x] Run root `npm run check` and `git diff --check`.
 - [x] Build and run real senpi-qa CLI proof; capture `/ttsr` builtin listing.
-- [ ] Commit atomic Part B increment with plan footer.
+- [x] Commit atomic Part B increment with plan footer.
 - [x] Audit diff, evidence, plan checklist, XML escaping, per-request state, and disabled-rule path.
 - [ ] Push branch and open reviewer-readable PR; report URL immediately.
 - [ ] Monitor CI, address review/CI findings with additional atomic green commits if needed.
