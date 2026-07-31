@@ -110,7 +110,7 @@ export class SessionRegistryResourceLimitError extends Error {
 	}
 }
 
-function uuidv7(now: number): string {
+export function createSessionUuid(now = Date.now()): `${string}-${string}-${string}-${string}-${string}` {
 	const ts = BigInt(Math.trunc(now));
 	const bytes = randomBytes(10);
 	const hex = [
@@ -155,11 +155,15 @@ export class ClaudeSdkOauthSessionRegistry {
 		this.ensureCapacity();
 		const now = activeSessionRegistryBoundary.now();
 		const generation = (this.generations.get(input.senpiSessionId) ?? 0) + 1;
-		const sdkSessionId = uuidv7(now);
+		const sdkSessionId = createSessionUuid(now);
 		const inputController = new StreamingInputController();
 		const query = activeSessionRegistryBoundary.queryFactory({
 			prompt: inputController,
-			options: { ...input.options, sessionId: sdkSessionId },
+			options: {
+				...input.options,
+				sessionId: sdkSessionId,
+				extraArgs: { ...input.options.extraArgs, "replay-user-messages": "" },
+			},
 		});
 		const entry: ClaudeSdkOauthSessionEntry = {
 			...input,

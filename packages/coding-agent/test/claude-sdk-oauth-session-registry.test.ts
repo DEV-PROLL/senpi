@@ -1,4 +1,4 @@
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AccountSlot } from "../src/core/extensions/builtin/claude-sdk-oauth/accounts.ts";
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
@@ -10,7 +10,99 @@ import {
 	SESSION_REGISTRY_IDLE_TTL_MS,
 	SessionRegistryResourceLimitError,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
+import {
+	ConcurrentSessionTurnAdmissionError,
+	submitSessionTurn,
+} from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-pump.ts";
 import { transitionSessionState } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-state.ts";
+
+class ScriptedQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
+	readonly emitted: SDKMessage[] = [];
+	interrupts = 0;
+	closes = 0;
+	private done = false;
+	private readonly queued: SDKMessage[] = [];
+	private readonly readers: Array<(value: IteratorResult<SDKMessage>) => void> = [];
+
+	[Symbol.asyncIterator](): AsyncIterator<SDKMessage> {
+		return this;
+	}
+
+	next(): Promise<IteratorResult<SDKMessage>> {
+		const value = this.queued.shift();
+		if (value) return Promise.resolve({ value, done: false });
+		if (this.done) return Promise.resolve({ value: undefined, done: true });
+		return new Promise((resolve) => this.readers.push(resolve));
+	}
+
+	emit(message: SDKMessage): void {
+		this.emitted.push(message);
+		const reader = this.readers.shift();
+		if (reader) reader({ value: message, done: false });
+		else this.queued.push(message);
+	}
+
+	finish(): void {
+		this.done = true;
+		for (const reader of this.readers.splice(0)) reader({ value: undefined, done: true });
+	}
+
+	async interrupt(): Promise<void> {
+		this.interrupts++;
+	}
+
+	close(): void {
+		this.closes++;
+	}
+}
+
+const userContent = { role: "user", content: "hello" } as const;
+const replay = (uuid: string, sessionId: string): SDKMessage =>
+	({
+		type: "user",
+		message: userContent,
+		parent_tool_use_id: null,
+		uuid,
+		session_id: sessionId,
+		isReplay: true,
+	}) as SDKMessage;
+const streamEvent = (uuid: string, sessionId: string): SDKMessage =>
+	({
+		type: "stream_event",
+		event: { type: "message_stop" },
+		parent_tool_use_id: null,
+		uuid,
+		session_id: sessionId,
+	}) as SDKMessage;
+const result = (uuid: string | undefined, sessionId: string): SDKMessage =>
+	({
+		type: "result",
+		subtype: "success",
+		user_message_uuid: uuid,
+		result: "done",
+		uuid: "result",
+		session_id: sessionId,
+	}) as unknown as SDKMessage;
+
+function pumpFixture() {
+	const query = new ScriptedQuery();
+	let replayEnabled = false;
+	overrideSessionRegistryBoundary({
+		queryFactory: ({ options }) => {
+			replayEnabled = options?.extraArgs?.["replay-user-messages"] === "";
+			return query;
+		},
+	});
+	const registry = new ClaudeSdkOauthSessionRegistry();
+	const entry = registry.getOrCreate(input("pump-session"));
+	return { query, registry, entry, replayEnabled };
+}
+
+async function submittedMessage(entry: { inputController: AsyncIterable<SDKUserMessage> }): Promise<SDKUserMessage> {
+	const item = await entry.inputController[Symbol.asyncIterator]().next();
+	if (item.done) throw new Error("Expected a submitted user message");
+	return item.value;
+}
 
 function input(senpiSessionId: string) {
 	return {
@@ -196,5 +288,112 @@ describe("Claude SDK OAuth session registry", () => {
 		expect(isBoundAccountTokenExpiring(entry, accounts)).toBe(true);
 		now--;
 		expect(isBoundAccountTokenExpiring(entry, accounts)).toBe(false);
+	});
+
+	it("claims a turn from the replayed submitted uuid", async () => {
+		const { query, registry, entry, replayEnabled } = pumpFixture();
+		const turn = submitSessionTurn(registry, entry, { message: userContent });
+		const submitted = await submittedMessage(entry);
+		expect(replayEnabled).toBe(true);
+		expect(submitted.uuid).toMatch(/-7[0-9a-f]{3}-/);
+		expect(submitted.session_id).toBe(entry.sdkSessionId);
+		query.emit(replay(submitted.uuid!, entry.sdkSessionId));
+		query.emit(result(submitted.uuid, entry.sdkSessionId));
+		expect((await turn).messages).toEqual([query.emitted[1]]);
+	});
+
+	it("buffers pre-replay stream events and flushes them in order", async () => {
+		const { query, registry, entry } = pumpFixture();
+		const turn = submitSessionTurn(registry, entry, { message: userContent });
+		const submitted = await submittedMessage(entry);
+		const first = streamEvent("stream-1", entry.sdkSessionId);
+		const second = streamEvent("stream-2", entry.sdkSessionId);
+		query.emit(first);
+		query.emit(second);
+		query.emit(replay(submitted.uuid!, entry.sdkSessionId));
+		const terminal = result(submitted.uuid, entry.sdkSessionId);
+		query.emit(terminal);
+		expect((await turn).messages).toEqual([first, second, terminal]);
+	});
+
+	it("closes the query when the pre-replay buffer overflows", async () => {
+		const { query, registry, entry } = pumpFixture();
+		const turn = submitSessionTurn(registry, entry, { message: userContent }, { maxMessages: 1, maxBytes: 10_000 });
+		query.emit(streamEvent("stream-1", entry.sdkSessionId));
+		query.emit(streamEvent("stream-2", entry.sdkSessionId));
+		await expect(turn).rejects.toThrow(/pre-replay buffer/i);
+		expect(query.closes).toBe(1);
+	});
+
+	it("ends a claimed turn only at its result and returns to idle", async () => {
+		const { query, registry, entry } = pumpFixture();
+		const turn = submitSessionTurn(registry, entry, { message: userContent });
+		const submitted = await submittedMessage(entry);
+		query.emit(replay(submitted.uuid!, entry.sdkSessionId));
+		query.emit(streamEvent("stream", entry.sdkSessionId));
+		expect(entry.activeTurn).not.toBeNull();
+		query.emit(result(submitted.uuid, entry.sdkSessionId));
+		await turn;
+		expect(entry.state).toBe("IDLE_SYNCED");
+		expect(entry.activeTurn).toBeNull();
+	});
+
+	it("closes the query for a mismatched result user_message_uuid", async () => {
+		const { query, registry, entry } = pumpFixture();
+		const turn = submitSessionTurn(registry, entry, { message: userContent });
+		const submitted = await submittedMessage(entry);
+		query.emit(replay(submitted.uuid!, entry.sdkSessionId));
+		query.emit(result("other-turn", entry.sdkSessionId));
+		await expect(turn).rejects.toThrow(/result.*uuid/i);
+		expect(query.closes).toBe(1);
+	});
+
+	it("interrupts once, finishes the aborted turn with partial content, and taints the entry", async () => {
+		const { query, registry, entry } = pumpFixture();
+		const abort = new AbortController();
+		const turn = submitSessionTurn(registry, entry, { message: userContent, signal: abort.signal });
+		const submitted = await submittedMessage(entry);
+		query.emit(replay(submitted.uuid!, entry.sdkSessionId));
+		const partial = streamEvent("partial", entry.sdkSessionId);
+		query.emit(partial);
+		abort.abort();
+		abort.abort();
+		query.emit(result(submitted.uuid, entry.sdkSessionId));
+		const completed = await turn;
+		expect(completed).toMatchObject({ aborted: true, messages: [partial] });
+		expect(query.interrupts).toBe(1);
+		expect(entry.state).toBe("TAINTED");
+	});
+
+	it("throws on a second concurrent turn admission", () => {
+		const { registry, entry } = pumpFixture();
+		void submitSessionTurn(registry, entry, { message: userContent });
+		expect(() => submitSessionTurn(registry, entry, { message: userContent })).toThrow(
+			ConcurrentSessionTurnAdmissionError,
+		);
+	});
+
+	it("discards messages from a superseded generation", async () => {
+		const oldQuery = new ScriptedQuery();
+		const newQuery = new ScriptedQuery();
+		let created = 0;
+		overrideSessionRegistryBoundary({ queryFactory: () => (created++ === 0 ? oldQuery : newQuery) });
+		const registry = new ClaudeSdkOauthSessionRegistry();
+		const entry = registry.getOrCreate(input("superseded"));
+		const delivered: SDKMessage[] = [];
+		const turn = submitSessionTurn(registry, entry, {
+			message: userContent,
+			onMessage: (message) => delivered.push(message),
+		});
+		const submitted = await submittedMessage(entry);
+		registry.closeSession(entry.senpiSessionId, "superseded");
+		registry.getOrCreate(input(entry.senpiSessionId));
+		oldQuery.emit(replay(submitted.uuid!, entry.sdkSessionId));
+		oldQuery.emit(streamEvent("stale", entry.sdkSessionId));
+		oldQuery.emit(result(submitted.uuid, entry.sdkSessionId));
+		oldQuery.finish();
+		await expect(turn).rejects.toThrow(/ended/i);
+		expect(delivered).toEqual([]);
+		expect(newQuery.closes).toBe(0);
 	});
 });
