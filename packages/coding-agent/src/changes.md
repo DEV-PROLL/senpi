@@ -1,3 +1,9 @@
+## Required-compaction recovery and queue chronology (2026-07-31)
+
+- Targeted required-compaction summarization failures can recover from a deterministic, suffix-safe local checkpoint without a second provider request; unfit recovery remains fail-closed and preserves the latest request.
+- Recovery retains task intent, todo/checkpoint metadata, and UTF-8-safe bounded text.
+- Terminal queue restoration now follows global submission chronology across native and compaction-owned input through a non-enumerable compatibility side channel, without changing native steer priority or abort-state semantics.
+
 ## Claude SDK OAuth provider identity (2026-07-31)
 
 ### What changed
