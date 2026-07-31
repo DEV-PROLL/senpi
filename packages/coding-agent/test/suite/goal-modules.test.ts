@@ -151,7 +151,6 @@ describe("goal continuation gating", () => {
 			consecutiveLengthRecoveries: 0,
 			recentNormalizedOutputHashes: [],
 			toollessContinuationStreak: 0,
-			endedTurnWasUserInitiated: false,
 			continuationPending: false,
 		} satisfies Omit<GoalContinuationInput, "path">;
 
