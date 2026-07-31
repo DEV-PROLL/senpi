@@ -1,5 +1,31 @@
 # goal Extension Changes
 
+## Monitor-delayed continuations consume the persisted cap (2026-07-31)
+
+### What changed
+
+- `continuation.ts` applies the inclusive eight-delivery cap to every automatic
+  continuation path, including `monitorDelayed`.
+- `lifecycle-helpers.ts` now requires a continuation signature and persists the
+  delivery before queueing its hidden prompt. Missing or failed persistence
+  therefore fails closed instead of delivering an unaccounted continuation.
+- Coverage adds the issue #506 monitor-delay regression, proves the eighth
+  delayed delivery is persisted and the next is blocked, and keeps delayed test
+  synchronization tied to exact persistence writes rather than timer luck.
+
+### Why
+
+- Monitor-delayed delivery was exempt from both cap admission and persistence
+  accounting. Repeated monitor wakeups could therefore queue hidden Goal turns
+  without consuming the restart-safe delivery budget introduced for #447.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `continuation.ts` around the cap verdict and in
+  `lifecycle-helpers.ts` around continuation delivery ordering.
+- LOW in monitor continuation tests that observe delayed persistence.
+- NONE in the goal store schema, public extension API, or status transitions.
+
 ## Observable progress resets the persisted continuation cap streak (2026-07-30)
 
 ### What changed

@@ -122,7 +122,9 @@ describe("goal continuation while a monitor is active", () => {
 
 		await vi.advanceTimersByTimeAsync(239_999);
 		expect(sent).toHaveLength(0);
+		const delayedDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
 		await vi.advanceTimersByTimeAsync(1);
+		await delayedDeliveryRecorded;
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
 	});
@@ -258,7 +260,9 @@ describe("goal continuation while a monitor is active", () => {
 				goal,
 				messages: [cleanAssistantStopWithText("unchanged monitor output")],
 			});
+			const delayedDeliveryRecorded = waitForGoalContinuationCount(ctx, turn);
 			await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
+			await delayedDeliveryRecorded;
 		}
 
 		const paused = await updateGoal(goalStoreRef(ctx), { status: "paused" }, "user");
@@ -270,7 +274,9 @@ describe("goal continuation while a monitor is active", () => {
 			goal: resumed,
 			messages: [cleanAssistantStopWithText("unchanged monitor output")],
 		});
+		const resumedDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
 		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
+		await resumedDeliveryRecorded;
 
 		expect(sent).toHaveLength(3);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active" });
@@ -541,7 +547,7 @@ describe("goal continuation while a monitor is active", () => {
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 1 });
 	});
 
-	it("delivers an unsigned immediate continuation without recording its streak", async () => {
+	it("fails closed instead of delivering an unsigned continuation", async () => {
 		const notices: string[] = [];
 		const { tools } = createGoalHarness();
 		const ctx = await makeGoalContext(notices, "thread-unsigned-continuation");
@@ -552,35 +558,41 @@ describe("goal continuation while a monitor is active", () => {
 		if (goal === null) throw new Error("Expected persisted goal");
 
 		let continuationMarked = false;
-		const result = await admitAndQueueGoalContinuation(
-			{ sendMessage: () => {} } as unknown as ExtensionAPI,
-			ctx,
-			goal,
-			{
-				input: {
-					isIdle: true,
-					hasPendingMessages: false,
-					path: "immediate",
-					lastStopReason: "stop",
-					consecutiveContinuations: goal.consecutiveContinuations ?? 0,
-					lastContinuationSignature: goal.lastContinuationSignature,
-					currentSignature: undefined,
-					consecutiveLengthRecoveries: 0,
-					recentNormalizedOutputHashes: [],
-					toollessContinuationStreak: 0,
-					endedTurnWasUserInitiated: false,
-					continuationPending: false,
+		let queued = false;
+		await expect(
+			admitAndQueueGoalContinuation(
+				{
+					sendMessage: () => {
+						queued = true;
+					},
+				} as unknown as ExtensionAPI,
+				ctx,
+				goal,
+				{
+					input: {
+						isIdle: true,
+						hasPendingMessages: false,
+						path: "immediate",
+						lastStopReason: "stop",
+						consecutiveContinuations: goal.consecutiveContinuations ?? 0,
+						lastContinuationSignature: goal.lastContinuationSignature,
+						currentSignature: undefined,
+						consecutiveLengthRecoveries: 0,
+						recentNormalizedOutputHashes: [],
+						toollessContinuationStreak: 0,
+						endedTurnWasUserInitiated: false,
+						continuationPending: false,
+					},
+					content: () => "Continue",
+					markContinuationPending: () => {
+						continuationMarked = true;
+					},
 				},
-				content: () => "Continue",
-				markContinuationPending: () => {
-					continuationMarked = true;
-				},
-			},
-		);
+			),
+		).rejects.toThrow("without a progress signature");
 
-		expect(continuationMarked).toBe(true);
-		expect(result.consecutiveContinuations ?? 0).toBe(0);
-		expect(result.lastContinuationSignature).toBeUndefined();
+		expect(queued).toBe(false);
+		expect(continuationMarked).toBe(false);
 		expect((await readGoal(goalStoreRef(ctx)))?.consecutiveContinuations ?? 0).toBe(0);
 	});
 });

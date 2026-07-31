@@ -7,6 +7,7 @@ import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
 import { goalFilePath, readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "../../src/core/extensions/types.ts";
 import type { SessionEntry } from "../../src/core/session-manager.ts";
+import { waitForGoalContinuationCount } from "./goal-monitor-test-harness.ts";
 
 type AnyTool = ToolDefinition<any, any, any>;
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
@@ -635,7 +636,9 @@ describe("goal extension session_start migration-lite admission", () => {
 		// A user-initiated turn end triggers the 60s grace delay (todo 6), so nothing
 		// is queued immediately. The continuation fires after the grace window.
 		expect(sent).toHaveLength(0);
+		const graceDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
 		await vi.advanceTimersByTimeAsync(60_000);
+		await graceDeliveryRecorded;
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
 		vi.useRealTimers();
