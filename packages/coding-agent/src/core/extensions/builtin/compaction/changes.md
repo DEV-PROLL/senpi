@@ -1,5 +1,27 @@
 # Builtin compaction extension changes
 
+## Idle compaction warms without committing a transcript boundary (2026-07-31)
+
+### What changed
+
+- The `agent_end` idle trigger now starts speculative summary generation instead of applying compaction immediately.
+- The next `before_agent_start` consumes and applies the warmed result through the existing blocking-admission path.
+- Issue #561 regression coverage pins normal idle and queued-follow-up idle behavior, plus the disabled control.
+
+### Why
+
+- A durable compaction entry created at idle could become the branch leaf before the next user prompt. If the context
+  remained near the limit, the last-entry guard prevented normal pre-prompt compaction and later recovery could place
+  another compaction after the fresh prompt, corrupting the apparent boundary and risking duplicate or lost intent.
+- Summary generation remains off the user's critical path, while durable apply now happens only at the admission
+  boundary that includes the pending prompt and existing staleness/overflow checks.
+
+### Scope
+
+- The change is isolated to the builtin extension's idle trigger. Core compaction preparation, abort ordering,
+  queued-message ownership, and overflow recovery are unchanged.
+- Expected upstream conflict zone: `builtin/compaction/index.ts` around the `agent_end` idle trigger.
+
 ## Runtime provider dispatch for summarization (2026-07-31)
 
 ### What changed
