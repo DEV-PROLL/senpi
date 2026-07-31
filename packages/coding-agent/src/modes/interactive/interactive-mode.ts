@@ -4702,7 +4702,7 @@ export class InteractiveMode {
 				const thinkingStr =
 					result.model.reasoning && result.thinkingLevel !== "off" ? ` (thinking: ${result.thinkingLevel})` : "";
 				const systemPromptStr = result.systemPromptChange?.systemPromptName
-					? `, system prompt: ${result.systemPromptChange.systemPromptName}`
+					? `, optimized system prompt applied: ${result.systemPromptChange.systemPromptName}`
 					: "";
 				this.showStatus(`Switched to ${result.model.name || result.model.id}${thinkingStr}${systemPromptStr}`);
 				this.showRiskyMainModelWarning(result.model);
@@ -5366,7 +5366,7 @@ export class InteractiveMode {
 			this.updateEditorBorderColor();
 			done?.();
 			const systemPromptStr = systemPromptChange?.systemPromptName
-				? ` (system prompt: ${systemPromptChange.systemPromptName})`
+				? ` (optimized system prompt applied: ${systemPromptChange.systemPromptName})`
 				: "";
 			this.showStatus(`Model: ${model.id}${systemPromptStr}`);
 			this.showRiskyMainModelWarning(model);
