@@ -4,13 +4,83 @@
 
 ### New Features
 
+- Add the builtin loop guard, which canonicalizes tool-call signatures and detects byte-identical repetitions,
+  high-similarity same-tool runs, and short repeating cycles. It injects one detector-specific system reminder
+  without blocking tool execution, prioritizes identical over cycle over similar matches, and resets after
+  observable progress.
+
+- Make Claude SDK OAuth a native persistent provider lane: deliver Senpi's complete composed system prompt, reuse one
+  resident SDK query per session, serialize turn drains through a single consumer, fence stale generations, and
+  enforce lifecycle and idle bounds while retaining the hardened fallback path.
+
+- Show live elapsed time for active monitor watches in the terminal footer and publish monitor start metadata through
+  RPC state events. Paused-state formatting, the existing width budget, and `+N more` packing remain intact.
+
+- Make `/fast` switch ChatGPT-subscription Codex sessions to the priority service tier, and show a footer bolt for
+  both session-selected priority mode and model-configured `-fast` variants.
+
+- Expose `xhigh` and `max` in the CLI thinking-level cycle for map-less GPT-5.6 Sol models while treating explicit
+  thinking maps as authoritative, so a missing mapped tier or `null` veto is never re-enabled by model-ID heuristics.
+
 ### Breaking Changes
+
+- Rename the SDK-backed Claude subscription provider from `claude-agent-sdk` to `claude-sdk-oauth`, including its
+  provider and model IDs, builtin path, settings key, account storage, TypeScript symbols, documentation, tests, and
+  QA surfaces. Anthropic's upstream package name and platform sidecar names remain unchanged.
 
 ### Added
 
 ### Changed
 
+- Deliver discovered project rules on every agent start and include the complete `## Project Instructions` region on
+  the Claude SDK OAuth lane, rather than silently dropping it after the first turn or rebuilding a partial prompt
+  that omits rules.
+
+- Announce `Optimized system prompt applied: <preset>` only when a real model preset matches. Unmatched models no
+  longer display a misleading `fallback (senpi-current)` preset at startup or after model selection.
+
+- Show a truncated objective and elapsed duration in the achieved-goal footer, and let the release script skip its
+  duplicate local `npm test` gate only when the exact `main` HEAD already has a successful `Check and test` CI run.
+  Lookup failures, non-green checks, and `--force-tests` continue to run the local gate.
+
 ### Fixed
+
+- Harden Claude SDK OAuth session reuse by draining each turn through the terminal SDK result, preserving final usage
+  and stop metadata, scrubbing `SENPI_*` variables from child processes, bounding aborts, applying idle TTL to real
+  usage, and failing closed when the resident transcript or reasoning configuration diverges.
+
+- Prevent unavailable-tool transcript imitation by demoting historical Anthropic calls to safe records and adding a
+  default TTSR detector that interrupts fabricated legacy and current unavailable-tool envelopes. `/ttsr` rule
+  disablement now applies consistently, and removed debug output can no longer corrupt terminal rendering.
+
+- Repair Anthropic `tool_use` / `tool_result` adjacency at the final provider boundary after pruning, interruption,
+  or model switching. Missing results become explicit error results, while misplaced and duplicate results are
+  removed before ordinary user content so Anthropic no longer rejects the request with HTTP 400.
+
+- Route compaction summarization through the active model runtime so extension-registered providers, header-auth
+  providers, and runtime-owned OpenAI remote transports compact through the same working transport as normal agent
+  turns instead of failing with an unregistered-provider or missing-API-key error.
+
+- Make required-compaction recovery durable and chronological: deterministic fallbacks retain the full suffix,
+  queued input preserves global order, recovery fails closed outside required paths, and legacy budget-limited goal
+  state migrates without overriding current-store data.
+
+- Defer idle-compaction application until the next admitted prompt, enforce breaker and per-turn cap guards on
+  blocking routes, admit valid prompts during breaker cooldown, and prevent queue-drain bookkeeping from leaking a
+  false abort state into a later idle session.
+
+- Pause stale goals only for accepted direct input, keep accepted-input goals active, cancel or defer monitor
+  continuations safely, migrate legacy goal stores, and correlate input-disposition events so hidden stale work
+  cannot resume after the user changes direction.
+
+- Make mechanical goal blocks recoverable from both idle and queued user prompts, explain the one-message recovery
+  path, count monitor-delayed continuations toward the durable cap, and clear repetition streaks whenever a turn
+  uses tools or records observable progress.
+
+- Reset exhausted classifier-refusal retry state and emit the matching retry-end event so Escape returns to normal
+  behavior and double-Escape can open Session Tree after a fallback abort.
+
+- Remove internal web-search strategy suffixes from displayed result labels.
 
 ### Removed
 

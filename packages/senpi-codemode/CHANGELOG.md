@@ -8,6 +8,9 @@
 
 ### Changed
 
+- Include a live elapsed label in detached `eval` footer status. The ticker updates only when the rendered duration
+  changes and is disposed when the cell completes, fails, or is stopped.
+
 ### Fixed
 
 ### Removed
