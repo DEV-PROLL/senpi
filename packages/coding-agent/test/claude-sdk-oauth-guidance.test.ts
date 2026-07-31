@@ -81,6 +81,35 @@ describe("preset-append deprecation guidance", () => {
 		expect(text).toContain("wins");
 	});
 
+	it("emits a conflict warning for full mode when conflict is true", () => {
+		resetPresetAppendDeprecation();
+		const text = presetAppendDeprecationGuidance({ mode: "full", conflict: true, sessionId: "s1" });
+		expect(text).toContain("systemPromptMode");
+		expect(text).toContain("wins");
+		expect(text).not.toContain("deprecated");
+	});
+
+	it("emits a conflict warning for override mode when conflict is true", () => {
+		resetPresetAppendDeprecation();
+		const text = presetAppendDeprecationGuidance({ mode: "override", conflict: true, sessionId: "s1" });
+		expect(text).toContain("systemPromptMode");
+		expect(text).toContain("wins");
+		expect(text).not.toContain("deprecated");
+	});
+
+	it("suppresses the conflict warning once per session", () => {
+		resetPresetAppendDeprecation();
+		const first = presetAppendDeprecationGuidance({ mode: "full", conflict: true, sessionId: "s1" });
+		const second = presetAppendDeprecationGuidance({ mode: "full", conflict: true, sessionId: "s1" });
+		expect(first).toContain("systemPromptMode");
+		expect(second).toBeUndefined();
+	});
+
+	it("returns undefined for full mode without conflict", () => {
+		resetPresetAppendDeprecation();
+		expect(presetAppendDeprecationGuidance({ mode: "full", sessionId: "s1" })).toBeUndefined();
+	});
+
 	it("reset re-arms the once-per-session guard for a specific session", () => {
 		resetPresetAppendDeprecation();
 		const first = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "s1" });

@@ -75,19 +75,24 @@ export function presetAppendDeprecationGuidance(options: {
 	conflict?: boolean;
 	sessionId: string;
 }): string | undefined {
-	if (options.mode !== "preset-append") {
-		return undefined;
-	}
 	if (armedSessions.has(options.sessionId)) {
 		return undefined;
 	}
-	armedSessions.add(options.sessionId);
-	const base =
-		"preset-append system-prompt mode is deprecated; " +
-		"`full` mode delivers the complete senpi system prompt; " +
-		"preset-append will be removed after one release.";
-	if (options.conflict) {
-		return `${base} systemPromptMode wins.`;
+	const isDeprecated = options.mode === "preset-append";
+	if (!options.conflict && !isDeprecated) {
+		return undefined;
 	}
-	return base;
+	armedSessions.add(options.sessionId);
+	const parts: string[] = [];
+	if (isDeprecated) {
+		parts.push(
+			"preset-append system-prompt mode is deprecated; " +
+				"`full` mode delivers the complete senpi system prompt; " +
+				"preset-append will be removed after one release.",
+		);
+	}
+	if (options.conflict) {
+		parts.push("systemPromptMode wins.");
+	}
+	return parts.join(" ");
 }
