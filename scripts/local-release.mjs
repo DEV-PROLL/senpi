@@ -14,6 +14,8 @@ const packages = [
 	{ directory: "packages/pty", name: "@earendil-works/pi-pty" },
 	{ directory: "packages/tui", name: "@earendil-works/pi-tui" },
 	{ directory: "packages/agent", name: "@earendil-works/pi-agent-core" },
+	{ directory: "packages/protocol", name: "@earendil-works/pi-protocol" },
+	{ directory: "packages/storage/sqlite-node", name: "@earendil-works/pi-storage-sqlite-node" },
 	{ directory: "packages/senpi-codemode", name: "@code-yeongyu/senpi-codemode" },
 	{ directory: "packages/coding-agent", name: "@code-yeongyu/senpi" },
 	{ directory: "packages/server", name: "@code-yeongyu/senpi-server" },

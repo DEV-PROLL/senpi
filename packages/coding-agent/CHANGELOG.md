@@ -11,6 +11,7 @@
 - Added warnings for risky main-model selections and high-reasoning GPT-5.6 Sol usage, including interactive TUI rendering.
 - Added OMO Senpi workflow tips and the `/list-tips` command.
 - Added proactive idle compaction after agent turns.
+- Added chainable `pi.registerMarkdownTransformer()` hooks for display-only transformation of user and assistant Markdown.
 - Added `--alt` to run interactive mode with the alternate-screen TUI ([#7304](https://github.com/earendil-works/pi/issues/7304)).
 
 ### Changed
@@ -25,6 +26,7 @@
 - Recovered Kimi XTML thinking channels and hardened recovery marker parsing.
 - Reported apply-patch failure reasons and serialized file mutations to avoid overlapping edits.
 - Limited the high-reasoning warning to GPT-5.6 Sol instead of every frontier model.
+- Fixed malformed resource arrays in package manifests crashing session startup ([#7187](https://github.com/earendil-works/pi/issues/7187)).
 - Fixed `setToolsExpanded(false)` to be a no-op when tool output is already collapsed, avoiding redundant `Tool output: collapsed` startup notices from extensions ([#7292](https://github.com/earendil-works/pi/issues/7292)).
 
 ### Removed

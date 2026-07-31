@@ -101,6 +101,8 @@ export type {
 	LoadExtensionsResult,
 	LsToolCallEvent,
 	McpServerDeclaration,
+	MarkdownTransformContext,
+	MarkdownTransformer,
 	MessageEndEvent,
 	MessageRenderer,
 	MessageRenderOptions,

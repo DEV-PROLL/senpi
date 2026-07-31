@@ -1,8 +1,10 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { type Component, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
+import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { formatDuration } from "../../../utils/duration.ts";
 import { formatProviderNativeBody, formatProviderNativeSummary } from "../../provider-native-rendering.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
+import { createMarkdownTransform } from "./markdown-transform.ts";
 import { createBoundedRenderSignature } from "./render-signature.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -42,11 +44,13 @@ export class AssistantMessageComponent extends Container {
 	private markdownTheme: MarkdownTheme;
 	private hiddenThinkingLabel: string;
 	private outputPad: number;
+	private markdownTransformers: readonly MarkdownTransformer[];
 	private lastMessage?: AssistantMessage;
 	private lastMessageSignature?: string;
 	private renderDescriptors: readonly RenderDescriptor[] = [];
 	private hasToolCalls = false;
 	private expanded = false;
+	private isStreaming = false;
 
 	constructor(
 		message?: AssistantMessage,
@@ -54,6 +58,7 @@ export class AssistantMessageComponent extends Container {
 		markdownTheme: MarkdownTheme = getMarkdownTheme(),
 		hiddenThinkingLabel = "Thinking...",
 		outputPad = 1,
+		markdownTransformers: readonly MarkdownTransformer[] = [],
 	) {
 		super();
 
@@ -61,8 +66,8 @@ export class AssistantMessageComponent extends Container {
 		this.markdownTheme = markdownTheme;
 		this.hiddenThinkingLabel = hiddenThinkingLabel;
 		this.outputPad = outputPad;
+		this.markdownTransformers = markdownTransformers;
 
-		// Container for text/thinking content
 		this.contentContainer = new Container();
 		this.addChild(this.contentContainer);
 
@@ -118,12 +123,17 @@ export class AssistantMessageComponent extends Container {
 		return lines;
 	}
 
-	updateContent(message: AssistantMessage): void {
+	updateContent(message: AssistantMessage, isStreaming = this.isStreaming): void {
 		const previousMessage = this.lastMessage;
+		const previousStreaming = this.isStreaming;
 		this.lastMessage = message;
+		this.isStreaming = isStreaming;
 		const messageSignature = this.createMessageSignature(message);
 		if (previousMessage === message && this.lastMessageSignature === messageSignature) {
 			return;
+		}
+		if (previousStreaming !== isStreaming) {
+			this.renderDescriptors = [];
 		}
 		this.lastMessageSignature = messageSignature;
 		this.renderCache = undefined;
@@ -269,12 +279,23 @@ export class AssistantMessageComponent extends Container {
 			case "spacer":
 				return new Spacer(1);
 			case "text-md":
-				return new Markdown(descriptor.text, this.outputPad, 0, this.markdownTheme);
-			case "thinking-md":
-				return new Markdown(descriptor.text, this.outputPad, 0, this.markdownTheme, {
-					color: (text: string) => theme.fg("thinkingText", text),
-					italic: true,
+				return new Markdown(descriptor.text, this.outputPad, 0, this.markdownTheme, undefined, {
+					transform: createMarkdownTransform("assistant", this.isStreaming, this.markdownTransformers),
 				});
+			case "thinking-md":
+				return new Markdown(
+					descriptor.text,
+					this.outputPad,
+					0,
+					this.markdownTheme,
+					{
+						color: (text: string) => theme.fg("thinkingText", text),
+						italic: true,
+					},
+					{
+						transform: createMarkdownTransform("assistant-thinking", this.isStreaming, this.markdownTransformers),
+					},
+				);
 			case "thinking-label":
 			case "error-text":
 				return new Text(descriptor.text, this.outputPad, 0);
@@ -290,8 +311,10 @@ export class AssistantMessageComponent extends Container {
 	private createMessageSignature(message: AssistantMessage): string {
 		return createBoundedRenderSignature({
 			content: message.content,
+			expanded: this.expanded,
 			hiddenThinkingLabel: this.hiddenThinkingLabel,
 			hideThinkingBlock: this.hideThinkingBlock,
+			isStreaming: this.isStreaming,
 			errorMessage: message.errorMessage,
 			stopReason: message.stopReason,
 		});

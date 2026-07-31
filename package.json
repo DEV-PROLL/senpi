@@ -15,6 +15,7 @@
 	"scripts": {
 		"clean": "shx rm -rf dist && npm run clean --workspaces",
 		"build": "node scripts/build-all.mjs",
+		"build:offline": "cd packages/tui && npm run build && cd ../ai && npm run build:offline && cd ../agent && npm run build && cd ../storage/sqlite-node && npm run build && cd ../../protocol && npm run build && cd ../coding-agent && npm run build && cd ../server && npm run build",
 		"build:npm": "node scripts/build-all.mjs --pm npm",
 		"build:bun": "node scripts/build-all.mjs --pm bun",
 		"build:pnpm": "node scripts/build-all.mjs --pm pnpm",

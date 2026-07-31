@@ -6,10 +6,14 @@
 
 ### Added
 
+- Exported the bundled `Marked` parser and token types.
+- Added width-aware source transforms to the `Markdown` component.
 - Added interface-compatible main-screen and alternate-screen TUI renderers with application-owned scrolling ([#7304](https://github.com/earendil-works/pi/issues/7304)).
 ### Changed
 
 ### Fixed
+
+- Fixed terminal width accounting for Indic conjunct grapheme clusters ([#6124](https://github.com/earendil-works/pi/issues/6124) by [@petrroll](https://github.com/petrroll)).
 
 ### Removed
 
