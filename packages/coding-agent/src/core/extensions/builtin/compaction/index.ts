@@ -683,7 +683,7 @@ export default function compactionExtension(
 			})
 		) {
 			getLogger(ctx).debug("idle_trigger", { contextWindow, tokens: usage?.tokens ?? 0 });
-			await applyBlockingCompaction(ctx, idle.IDLE_COMPACTION_INSTRUCTIONS);
+			startSpeculativeCompaction(ctx, idle.IDLE_COMPACTION_INSTRUCTIONS);
 		}
 	});
 
