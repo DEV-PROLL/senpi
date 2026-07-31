@@ -9,6 +9,7 @@ import {
 	PROJECT_RULES_REGION_START_MARKER,
 	PROJECT_RULES_START_MARKER,
 } from "../rules/rules/constants.ts";
+import { presetAppendDeprecationGuidance } from "./guidance.ts";
 import type { EffortLevel, Options, SettingSource, ThinkingConfig } from "./sdk-boundary.ts";
 import {
 	type ClaudeSdkOauthProviderSettings,
@@ -31,6 +32,8 @@ export interface ClaudeSdkOauthQueryOptionsInput {
 	readonly authLane?: ClaudeSdkOauthAuthLane;
 	readonly tools?: readonly string[];
 	readonly pathToClaudeCodeExecutable?: string;
+	readonly sessionId?: string;
+	readonly onGuidance?: (text: string) => void;
 }
 
 const ADAPTIVE_THINKING_MODEL_MARKERS = [
@@ -217,7 +220,16 @@ export function buildClaudeSdkOauthQueryOptions(input: ClaudeSdkOauthQueryOption
 	const cwd = input.cwd ?? process.cwd();
 	const providerSettings = input.providerSettings ?? loadClaudeSdkOauthProviderSettingsFromDisk(cwd);
 	const appendSystemPrompt = providerSettings.appendSystemPrompt !== false;
-	const mode = resolveSystemPromptMode(providerSettings).mode;
+	const resolvedMode = resolveSystemPromptMode(providerSettings);
+	const mode = resolvedMode.mode;
+	if (input.sessionId !== undefined && input.onGuidance !== undefined) {
+		const deprecation = presetAppendDeprecationGuidance({
+			mode,
+			conflict: resolvedMode.conflict,
+			sessionId: input.sessionId,
+		});
+		if (deprecation !== undefined) input.onGuidance(deprecation);
+	}
 	const authLane = input.authLane ?? providerSettings.tokenInjection ?? "oauth-slots";
 	const append =
 		mode === "preset-append"

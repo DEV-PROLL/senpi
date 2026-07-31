@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import { resetPresetAppendDeprecation } from "../src/core/extensions/builtin/claude-sdk-oauth/guidance.ts";
 import {
 	buildClaudeSdkOauthQueryOptions,
 	type ClaudeSdkOauthAuthLane,
@@ -123,6 +124,87 @@ describe("Claude SDK OAuth provider settings", () => {
 		).toEqual({
 			settingSources: [],
 		});
+	});
+});
+
+describe("preset-append deprecation warning in buildClaudeSdkOauthQueryOptions", () => {
+	it("surfaces the deprecation warning via onGuidance for preset-append mode", () => {
+		resetPresetAppendDeprecation();
+		const warnings: string[] = [];
+		buildClaudeSdkOauthQueryOptions({
+			model: model(),
+			context: context(),
+			cwd: temporaryDirectory(),
+			providerSettings: { systemPromptMode: "preset-append" },
+			sessionId: "deprecation-prod-1",
+			onGuidance: (text) => warnings.push(text),
+		});
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("deprecated");
+		expect(warnings[0]).toContain("preset-append");
+	});
+
+	it("surfaces the conflict warning via onGuidance when both keys are set", () => {
+		resetPresetAppendDeprecation();
+		const warnings: string[] = [];
+		buildClaudeSdkOauthQueryOptions({
+			model: model(),
+			context: context(),
+			cwd: temporaryDirectory(),
+			providerSettings: { systemPromptMode: "preset-append", appendSystemPrompt: false },
+			sessionId: "conflict-prod-1",
+			onGuidance: (text) => warnings.push(text),
+		});
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("systemPromptMode");
+		expect(warnings[0]).toContain("wins");
+	});
+
+	it("does not emit a warning in full mode", () => {
+		resetPresetAppendDeprecation();
+		const warnings: string[] = [];
+		buildClaudeSdkOauthQueryOptions({
+			model: model(),
+			context: context(),
+			cwd: temporaryDirectory(),
+			providerSettings: { systemPromptMode: "full" },
+			sessionId: "full-prod-1",
+			onGuidance: (text) => warnings.push(text),
+		});
+		expect(warnings).toHaveLength(0);
+	});
+
+	it("suppresses the warning once per session across multiple calls", () => {
+		resetPresetAppendDeprecation();
+		const warnings: string[] = [];
+		const cwd = temporaryDirectory();
+		buildClaudeSdkOauthQueryOptions({
+			model: model(),
+			context: context(),
+			cwd,
+			providerSettings: { systemPromptMode: "preset-append" },
+			sessionId: "suppress-prod-1",
+			onGuidance: (text) => warnings.push(text),
+		});
+		buildClaudeSdkOauthQueryOptions({
+			model: model(),
+			context: context(),
+			cwd,
+			providerSettings: { systemPromptMode: "preset-append" },
+			sessionId: "suppress-prod-1",
+			onGuidance: (text) => warnings.push(text),
+		});
+		buildClaudeSdkOauthQueryOptions({
+			model: model(),
+			context: context(),
+			cwd,
+			providerSettings: { systemPromptMode: "preset-append" },
+			sessionId: "suppress-prod-2",
+			onGuidance: (text) => warnings.push(text),
+		});
+		expect(warnings).toHaveLength(2);
+		expect(warnings[0]).toContain("deprecated");
+		expect(warnings[1]).toContain("deprecated");
 	});
 });
 

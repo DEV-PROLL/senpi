@@ -49,7 +49,7 @@ describe("claude-sdk-oauth auth guidance", () => {
 describe("preset-append deprecation guidance", () => {
 	it("emits a notice for preset-append mode", () => {
 		resetPresetAppendDeprecation();
-		const text = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		const text = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "s1" });
 		expect(text).toContain("deprecated");
 		expect(text).toContain("preset-append");
 		expect(text).toContain("full");
@@ -58,37 +58,56 @@ describe("preset-append deprecation guidance", () => {
 
 	it("returns undefined for full mode", () => {
 		resetPresetAppendDeprecation();
-		expect(presetAppendDeprecationGuidance({ mode: "full" })).toBeUndefined();
+		expect(presetAppendDeprecationGuidance({ mode: "full", sessionId: "s1" })).toBeUndefined();
 	});
 
 	it("returns undefined for override mode", () => {
 		resetPresetAppendDeprecation();
-		expect(presetAppendDeprecationGuidance({ mode: "override" })).toBeUndefined();
+		expect(presetAppendDeprecationGuidance({ mode: "override", sessionId: "s1" })).toBeUndefined();
 	});
 
 	it("emits at most once per session", () => {
 		resetPresetAppendDeprecation();
-		const first = presetAppendDeprecationGuidance({ mode: "preset-append" });
-		const second = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		const first = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "s1" });
+		const second = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "s1" });
 		expect(first).toContain("deprecated");
 		expect(second).toBeUndefined();
 	});
 
 	it("includes the extra sentence when conflict is true", () => {
 		resetPresetAppendDeprecation();
-		const text = presetAppendDeprecationGuidance({ mode: "preset-append", conflict: true });
+		const text = presetAppendDeprecationGuidance({ mode: "preset-append", conflict: true, sessionId: "s1" });
 		expect(text).toContain("systemPromptMode");
 		expect(text).toContain("wins");
 	});
 
-	it("reset re-arms the once-per-session guard", () => {
+	it("reset re-arms the once-per-session guard for a specific session", () => {
 		resetPresetAppendDeprecation();
-		const first = presetAppendDeprecationGuidance({ mode: "preset-append" });
-		const suppressed = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		const first = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "s1" });
+		const suppressed = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "s1" });
 		expect(first).toContain("deprecated");
 		expect(suppressed).toBeUndefined();
-		resetPresetAppendDeprecation();
-		const reArmed = presetAppendDeprecationGuidance({ mode: "preset-append" });
+		resetPresetAppendDeprecation("s1");
+		const reArmed = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "s1" });
 		expect(reArmed).toContain("deprecated");
+	});
+
+	it("suppresses once per session, not once per process", () => {
+		resetPresetAppendDeprecation();
+		const sessionA = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "session-a" });
+		const sessionASecond = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "session-a" });
+		const sessionB = presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "session-b" });
+		expect(sessionA).toContain("deprecated");
+		expect(sessionASecond).toBeUndefined();
+		expect(sessionB).toContain("deprecated");
+	});
+
+	it("reset with no argument re-arms all sessions", () => {
+		resetPresetAppendDeprecation();
+		presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "a" });
+		presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "b" });
+		resetPresetAppendDeprecation();
+		expect(presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "a" })).toContain("deprecated");
+		expect(presetAppendDeprecationGuidance({ mode: "preset-append", sessionId: "b" })).toContain("deprecated");
 	});
 });

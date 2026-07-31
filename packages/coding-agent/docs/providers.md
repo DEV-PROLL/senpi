@@ -45,20 +45,20 @@ The `claude-sdk-oauth` provider routes LLM calls through the official [Claude Ag
 - Settings (`claudeSdkOauthProvider`):
   - `systemPromptMode` — controls how the system prompt is delivered. **`full`** (default) sends senpi's composed system prompt verbatim; the lane no longer rebuilds from the SDK `claude_code` preset, so all prompt regions (project rules, response-language instructions, etc.) reach the model. **`preset-append`** is the previous behaviour (deprecated, kept for one release; emits a one-time warning). **`override`** loads the system prompt from a file (`systemPromptFile`). The legacy `appendSystemPrompt` key still works: `false` → `preset-append`, `true`/unset → `full`; setting both keys makes `systemPromptMode` win and warns.
   - In `full` and `override` modes, `settingSources` defaults to `[]` on every lane because senpi's prompt already carries project context — loading the SDK's own CLAUDE.md would double-inject it. The CLI always prepends its own `"You are a Claude agent, built on Anthropic's Claude Agent SDK."` block, which senpi cannot suppress; `full` means the prompt is delivered intact, not that it is the only system-prompt text.
-  - `settingSources` (filesystem settings load only in the ambient lane, so they cannot override your selected account), `strictMcpConfig`, `pinnedAccount`, `tokenInjection` (`oauth-slots` | `config-dir` | `ambient`), `resumeMode` (`on` default | `off` restores per-turn sessions), `systemPromptFile`.
+  - `settingSources` (filesystem settings load only in the ambient lane, so they cannot override your selected account), `strictMcpConfig`, `pinnedAccount`, `tokenInjection` (`oauth-slots` | `config-dir` | `ambient`), `resumeMode` (`auto` default | `off` restores per-turn sessions), `systemPromptFile`.
 - **Environment overrides** (precedence: `env > project settings > global settings > default`; no new CLI flags):
 
   | Variable | Purpose |
   |----------|---------|
   | `SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_MODE` | `full` \| `preset-append` \| `override` |
   | `SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_FILE` | Path to the system prompt file (used with `override` mode) |
-  | `SENPI_CLAUDE_SDK_OAUTH_RESUME` | `on` (default) \| `off` — disables session reuse, restoring per-turn SDK queries |
+  | `SENPI_CLAUDE_SDK_OAUTH_RESUME` | `auto` (default) \| `off` — disables session reuse, restoring per-turn SDK queries |
   | `SENPI_CLAUDE_SDK_OAUTH_TOKEN_INJECTION` | `oauth-slots` \| `config-dir` \| `ambient` |
   | `SENPI_CLAUDE_SDK_OAUTH_SETTING_SOURCES` | Overrides `settingSources` |
   | `SENPI_CLAUDE_SDK_OAUTH_PINNED_ACCOUNT` | Overrides `pinnedAccount` |
 
   Every `SENPI_*` variable is stripped from the Claude Code subprocess environment on all three lanes; other inherited variables are preserved.
-- **Session reuse.** By default one long-lived SDK query spans the entire senpi session instead of a fresh one per turn, so conversations continue with only the new delta sent. Reuse fails closed to a fresh session on compaction, branch/fork navigation, account failover, an aborted turn, or any configuration change. Idle sessions retire after 30 minutes (max 32 resident); a session with an in-flight turn is never evicted. After a senpi process restart the lane always starts fresh. Set `resumeMode: "off"` (or `SENPI_CLAUDE_SDK_OAUTH_RESUME=off`) to restore the old per-turn behaviour.
+- **Session reuse.** By default one long-lived SDK query spans the entire senpi session instead of a fresh one per turn, so conversations continue with only the new delta sent. Reuse fails closed to a fresh session on compaction, branch/fork navigation, account failover, an aborted turn, or any configuration change. Idle sessions retire after 30 minutes (max 32 resident); a session with an in-flight turn is never evicted. After a senpi process restart the lane always starts fresh. Set `resumeMode: "off"` (or `SENPI_CLAUDE_SDK_OAUTH_RESUME=off`) to restore the old per-turn behaviour. Accepted values are `"auto"` (default) and `"off"`; any other value is silently ignored.
 - Account state is exposed to desktop/automation clients: RPC `get_provider_accounts`, `account_pin`, `account_remove` and the `auth_accounts_changed` / `account_failover` events, mirrored through the app-server protocol. Token material is never included.
 
 ### GitHub Copilot

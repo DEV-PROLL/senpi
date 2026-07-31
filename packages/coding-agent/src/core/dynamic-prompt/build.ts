@@ -112,7 +112,10 @@ export function buildDynamicSystemPrompt(options: BuildDynamicSystemPromptOption
 		}),
 	);
 
-	// The claude-sdk-oauth lane splits the composed prompt at this exact line for its prompt-cache boundary.
+	// The claude-sdk-oauth lane appends these dynamic lines after the stable sections so the composed
+	// prompt is a single string. An earlier draft split at this point for prompt-cache scoping, but a
+	// wire-level probe proved the installed CLI joins array elements into one system block, so the
+	// split was removed (the sentinel leaked to the model as literal text).
 	sections.push("", `Current date: ${date}`, `Current working directory: ${promptCwd}`);
 
 	return sections.join("\n");

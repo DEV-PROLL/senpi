@@ -84,6 +84,13 @@ export function streamClaudeSdkOauth(
 					authLane,
 					tools: resolvedTools.sdkTools,
 					pathToClaudeCodeExecutable: executable,
+					sessionId: options?.sessionId,
+					onGuidance: (text) => {
+						output.diagnostics = [
+							...(output.diagnostics ?? []),
+							createAssistantMessageDiagnostic("claude_sdk_oauth_deprecation", text),
+						];
+					},
 				});
 				if (mcpServers) queryOptions.mcpServers = mcpServers;
 				return queryOptions;

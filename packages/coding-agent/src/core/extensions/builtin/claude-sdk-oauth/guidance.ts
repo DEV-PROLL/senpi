@@ -60,24 +60,28 @@ export function overrideSystemPromptGuidance(path: string | undefined, reason: s
 	].join(" ");
 }
 
-const DEFAULT_PRESET_APPEND_DEPRECATION_ARMED = true;
-let presetAppendDeprecationArmed = DEFAULT_PRESET_APPEND_DEPRECATION_ARMED;
+const armedSessions = new Set<string>();
 
-export function resetPresetAppendDeprecation(): void {
-	presetAppendDeprecationArmed = DEFAULT_PRESET_APPEND_DEPRECATION_ARMED;
+export function resetPresetAppendDeprecation(sessionId?: string): void {
+	if (sessionId !== undefined) {
+		armedSessions.delete(sessionId);
+	} else {
+		armedSessions.clear();
+	}
 }
 
 export function presetAppendDeprecationGuidance(options: {
 	mode: SystemPromptMode;
 	conflict?: boolean;
+	sessionId: string;
 }): string | undefined {
 	if (options.mode !== "preset-append") {
 		return undefined;
 	}
-	if (!presetAppendDeprecationArmed) {
+	if (armedSessions.has(options.sessionId)) {
 		return undefined;
 	}
-	presetAppendDeprecationArmed = false;
+	armedSessions.add(options.sessionId);
 	const base =
 		"preset-append system-prompt mode is deprecated; " +
 		"`full` mode delivers the complete senpi system prompt; " +
