@@ -123,6 +123,7 @@ type OpenAiRemoteCompactionContext = {
 					error: string;
 			  }
 		>;
+		modelRuntime?: { streamSimple: OpenAiResponsesStreamRunner };
 	};
 	serviceTier: ServiceTier | undefined;
 	sessionManager: {
@@ -545,6 +546,21 @@ function isOpenAiCompactBody(value: unknown): value is OpenAiCompactBody {
 	);
 }
 
+/**
+ * A provider registered through `pi.registerProvider()` owns its own transport for
+ * its api id and is absent from compat's builtin api-registry, so the remote route
+ * dispatches through the model runtime whenever it is reachable.
+ */
+function resolveRemoteStreamRunner(
+	ctx: OpenAiRemoteCompactionContext,
+	dependencies: OpenAiRemoteCompactionDependencies,
+): OpenAiResponsesStreamRunner {
+	if (dependencies.streamRunner) return dependencies.streamRunner;
+	const runtime = ctx.modelRegistry.modelRuntime;
+	if (runtime) return (model, context, options) => runtime.streamSimple(model, context, options);
+	return (model, context, options) => streamSimple(model, context, options);
+}
+
 export async function runOpenAiRemoteCompaction(
 	ctx: OpenAiRemoteCompactionContext,
 	event: SessionBeforeCompactEvent,
@@ -661,9 +677,7 @@ export async function runOpenAiRemoteCompaction(
 				request,
 				requestId: event.requestId,
 				sessionId: ctx.sessionManager.getSessionId(),
-				stream:
-					dependencies.streamRunner ??
-					((streamModel, context, options) => streamSimple(streamModel, context, options)),
+				stream: resolveRemoteStreamRunner(ctx, dependencies),
 				systemPrompt: ctx.getSystemPrompt(),
 				timeoutMs: remoteTimeoutMs,
 			});
@@ -704,9 +718,7 @@ export async function runOpenAiRemoteCompaction(
 						now: dependencies.now ?? Date.now,
 						request,
 						signal,
-						streamRunner:
-							dependencies.streamRunner ??
-							((streamModel, context, options) => streamSimple(streamModel, context, options)),
+						streamRunner: resolveRemoteStreamRunner(ctx, dependencies),
 						systemPrompt: ctx.getSystemPrompt(),
 						headers: websocketHeaders,
 						providerRequest,
