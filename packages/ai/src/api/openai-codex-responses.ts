@@ -50,7 +50,7 @@ import { extractOpenAiCodexAccountId } from "../utils/openai-codex-auth.ts";
 import { uuidv7 } from "../utils/uuid.ts";
 import { createGrammarToolInputProperties } from "./constrained-sampling.ts";
 import { buildCodexReasoning, type CodexReasoningSummaryInput } from "./openai-codex-responses/reasoning.ts";
-import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
+import { applyOpenAICodexCacheAffinityHeaders, clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
 import {
 	applyExtraBody,
@@ -1692,10 +1692,7 @@ function buildSSEHeaders(
 	headers.set("accept", "text/event-stream");
 	headers.set("content-type", "application/json");
 
-	if (sessionId) {
-		headers.set("session-id", sessionId);
-		headers.set("x-client-request-id", sessionId);
-	}
+	applyOpenAICodexCacheAffinityHeaders(headers, sessionId);
 
 	return headers;
 }
@@ -1713,7 +1710,6 @@ function buildWebSocketHeaders(
 	headers.delete("OpenAI-Beta");
 	headers.delete("openai-beta");
 	headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
-	headers.set("x-client-request-id", requestId);
-	headers.set("session-id", requestId);
+	applyOpenAICodexCacheAffinityHeaders(headers, requestId);
 	return headers;
 }
