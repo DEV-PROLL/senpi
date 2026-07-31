@@ -1,5 +1,26 @@
 # changes
 
+## Thinking-level tier detection delegates to packages/ai (2026-07-30)
+
+### What changed
+
+- `thinking-levels.ts` no longer re-implements the `xhigh` / `max` model-id lists. `supportsXhigh`,
+  `supportsMax`, and `getSupportedThinkingLevels` now wrap the canonical `@earendil-works/pi-ai` helpers
+  and only keep the coding-agent's `ThinkingLevel` vocabulary plus the non-empty `["off"]` fallback.
+- The local `ModelWithThinkingLevelMap` cast is gone: `Model.thinkingLevelMap` is already part of the
+  public `pi-ai` model type.
+
+### Why
+
+- Tier rules belong to `packages/ai`; delegating removes the coding-agent's duplicate model-id lists and
+  precedence logic so future capability changes have one implementation. Generated catalog models retain
+  their explicit maps, so behavior for real catalog models is intentionally unchanged.
+
+### Why extension system couldn't handle this alone
+
+- Tier detection feeds session thinking-level clamping and the model/RPC surfaces inside core; it is not
+  reachable from an extension.
+
 ## Codex fast-variant service-tier metadata lookup (2026-07-29)
 
 ### What changed
