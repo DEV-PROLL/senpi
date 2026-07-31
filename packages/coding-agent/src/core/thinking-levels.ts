@@ -4,6 +4,11 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 const THINKING_LEVELS_WITH_MAX: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 export function supportsXhigh(model: Model<Api>): boolean {
+	const mappedLevel = model.thinkingLevelMap?.xhigh;
+	if (mappedLevel === null) return false;
+	if (mappedLevel !== undefined) return true;
+	if (model.thinkingLevelMap !== undefined) return false;
+
 	return (
 		model.id.includes("gpt-5.2") ||
 		model.id.includes("gpt-5.3") ||

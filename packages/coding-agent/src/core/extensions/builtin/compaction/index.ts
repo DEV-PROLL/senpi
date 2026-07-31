@@ -460,18 +460,22 @@ export default function compactionExtension(
 			const failureKind = classifyRequiredCompactionFallbackFailure(error, message);
 			if (event.reason !== "manual" && failureKind !== undefined && !event.signal.aborted) {
 				const metadata = pendingMetadata.get(event.requestId);
+				const fallback = createRequiredCompactionFallback(
+					snapshot.preparation,
+					snapshot.contextWindow,
+					failureKind,
+					{
+						taskIntent: resolveInheritedTaskIntent(event.branchEntries),
+						todoSnapshot: metadata?.todoSnapshot,
+						checkpoint: metadata?.checkpoint,
+					},
+					event.branchEntries,
+				);
+				if (fallback) return { compaction: fallback };
+				pendingMetadata.delete(event.requestId);
 				return {
-					compaction: createRequiredCompactionFallback(
-						snapshot.preparation,
-						snapshot.contextWindow,
-						failureKind,
-						{
-							taskIntent: resolveInheritedTaskIntent(event.branchEntries),
-							todoSnapshot: metadata?.todoSnapshot,
-							checkpoint: metadata?.checkpoint,
-						},
-						event.branchEntries,
-					),
+					cancel: true,
+					reason: "deterministic compaction fallback cannot retain the prepared suffix",
 				};
 			}
 			pendingMetadata.delete(event.requestId);

@@ -9,7 +9,7 @@ import {
 import { createBlockingContext, createCompactionHandlers } from "../helpers/blocking-compaction-harness.ts";
 
 describe("required compaction deterministic fallback", () => {
-	it("returns one durable fallback after an upstream truncated summary stream", async () => {
+	it("cancels when the prepared suffix cannot fit without dropping the latest request", async () => {
 		const handlers = createCompactionHandlers();
 		const harness = createBlockingContext({ usageTokens: 9_900 });
 		harness.registration.setResponses([
@@ -35,18 +35,9 @@ describe("required compaction deterministic fallback", () => {
 			harness.ctx,
 		);
 
-		expect(result).not.toHaveProperty("cancel");
-		expect(result?.compaction).toMatchObject({
-			firstKeptEntryId: "",
-			tokensBefore: preparation?.tokensBefore,
-			details: {
-				schema: "senpi.compaction.deterministic-fallback.v1",
-				origin: "required-compaction-recovery",
-				failureKind: "upstream-stream-truncated",
-				retainedSuffix: "none",
-			},
-		});
-		expect(result?.compaction?.summary).toContain("Deterministic compaction recovery checkpoint");
+		expect(result).toMatchObject({ cancel: true });
+		expect(result).not.toHaveProperty("compaction");
+		expect(JSON.stringify(harness.ctx.sessionManager.buildSessionContext().messages)).toContain("Keep latest request");
 		expect(harness.registration.getCallLog()).toHaveLength(1);
 	});
 
@@ -97,8 +88,13 @@ describe("required compaction deterministic fallback", () => {
 			true,
 		);
 		expect(preparation).toBeDefined();
+		const branchEntries = harness.ctx.sessionManager.getBranch();
 		const result = createRequiredCompactionFallback(
-			{ ...preparation!, previousSummary: "진행상황 ".repeat(10_000) },
+			{
+				...preparation!,
+				firstKeptEntryId: branchEntries.at(-1)?.id ?? "",
+				previousSummary: "진행상황 ".repeat(10_000),
+			},
 			10_000,
 			"summarization-timeout",
 			{
@@ -106,14 +102,24 @@ describe("required compaction deterministic fallback", () => {
 				todoSnapshot: { items: ["verify recovery"] },
 				checkpoint: { files: ["agent-session.ts"] },
 			},
+			branchEntries,
 		);
 
-		expect(Buffer.byteLength(result.summary)).toBeLessThanOrEqual(4_000);
-		expect(result.summary).not.toContain("\uFFFD");
-		expect(result.details).toMatchObject({
+		expect(result).toBeDefined();
+		expect(Buffer.byteLength(result!.summary)).toBeLessThanOrEqual(4_000);
+		expect(result!.summary).not.toContain("\uFFFD");
+		expect(result!.details).toMatchObject({
 			taskIntent: "Finish the current repair",
 			todoSnapshot: { items: ["verify recovery"] },
 			checkpoint: { files: ["agent-session.ts"] },
 		});
+		harness.ctx.sessionManager.appendCompaction(
+			result!.summary,
+			result!.firstKeptEntryId,
+			result!.tokensBefore,
+			result!.details,
+			true,
+		);
+		expect(JSON.stringify(harness.ctx.sessionManager.buildSessionContext().messages)).toContain("Keep latest request");
 	});
 });

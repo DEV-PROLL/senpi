@@ -1,5 +1,21 @@
 # Builtin compaction extension changes
 
+## Deterministic fallback retains a real suffix or cancels (2026-07-31)
+
+### What changed
+
+- `deterministic-fallback.ts` now returns no fallback unless the prepared cut point names a real branch entry and the resulting summary plus retained suffix fit provider admission.
+- `index.ts` converts an unavailable deterministic fallback into a cancelled compaction, preserving pending input instead of appending a checkpoint with an empty `firstKeptEntryId`.
+- Regression coverage asserts that accepted fallback context retains the latest user message and that an unfit suffix produces no compaction entry.
+
+### Why
+
+- An empty `firstKeptEntryId` matched no session entry during context reconstruction, silently dropping the entire pre-checkpoint transcript, including the newest user request.
+
+### Expected merge conflict zones
+
+- LOW in `deterministic-fallback.ts` around retained-suffix admission and in `index.ts` around terminal required-compaction recovery.
+
 ## Deterministic recovery after terminal required-compaction failure (2026-07-30)
 
 ### What changed

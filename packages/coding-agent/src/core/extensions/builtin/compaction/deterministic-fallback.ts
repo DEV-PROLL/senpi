@@ -15,7 +15,7 @@ interface DeterministicFallbackDetails extends RecoveryMetadata {
 	schema: "senpi.compaction.deterministic-fallback.v1";
 	origin: "required-compaction-recovery";
 	failureKind: RequiredCompactionFallbackFailure;
-	retainedSuffix?: "prepared" | "none";
+	retainedSuffix?: "prepared";
 }
 
 export function classifyRequiredCompactionFallbackFailure(
@@ -37,7 +37,14 @@ export function createRequiredCompactionFallback(
 	failureKind: RequiredCompactionFallbackFailure,
 	metadata: RecoveryMetadata,
 	branchEntries: SessionEntry[] = [],
-): CompactionResult<DeterministicFallbackDetails> {
+): CompactionResult<DeterministicFallbackDetails> | undefined {
+	if (
+		!preparation.firstKeptEntryId ||
+		!branchEntries.some((entry) => entry.id === preparation.firstKeptEntryId)
+	) {
+		return undefined;
+	}
+
 	const marker = [
 		"[Deterministic compaction recovery checkpoint]",
 		"Generated summarization did not complete, so older context was reduced without another provider request.",
@@ -75,7 +82,6 @@ export function createRequiredCompactionFallback(
 		tokensBefore: preparation.tokensBefore,
 		details: baseDetails,
 	};
-	if (branchEntries.length === 0) return result;
 
 	const maxInputTokens = contextWindow - preparation.settings.reserveTokens;
 	const projectTokens = (candidate: CompactionResult<DeterministicFallbackDetails>): number => {
@@ -101,13 +107,5 @@ export function createRequiredCompactionFallback(
 		};
 	}
 
-	const noSuffixResult: CompactionResult<DeterministicFallbackDetails> = {
-		...result,
-		firstKeptEntryId: "",
-		details: { ...baseDetails, retainedSuffix: "none" },
-	};
-	return {
-		...noSuffixResult,
-		estimatedTokensAfter: projectTokens(noSuffixResult),
-	};
+	return undefined;
 }

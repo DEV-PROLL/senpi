@@ -49,6 +49,15 @@ describe("thinking level tier detection for map-less models", () => {
 		expect(getSupportedThinkingLevels(model)).not.toContain("max");
 	});
 
+	it("treats a map containing max but omitting xhigh as authoritative", () => {
+		const model = maplessModel("gpt-5.6-sol");
+		model.thinkingLevelMap = { max: "max" };
+		expect(supportsXhigh(model)).toBe(false);
+		expect(supportsMax(model)).toBe(true);
+		expect(getSupportedThinkingLevels(model)).not.toContain("xhigh");
+		expect(getSupportedThinkingLevels(model)).toContain("max");
+	});
+
 	it("exposes neither tier for Sonnet 4.5", () => {
 		const model = maplessModel("claude-sonnet-4-5");
 		expect(supportsXhigh(model)).toBe(false);

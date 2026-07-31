@@ -540,9 +540,9 @@ describe("AgentSession compaction characterization", () => {
 				failureKind: "upstream-stream-truncated",
 			},
 		});
-		expect(estimateContextTokens(harness.sessionManager.buildSessionContext().messages).tokens).toBeLessThan(
-			contextWindow - reserveTokens,
-		);
+		const compactedContext = harness.sessionManager.buildSessionContext().messages;
+		expect(estimateContextTokens(compactedContext).tokens).toBeLessThan(contextWindow - reserveTokens);
+		expect(JSON.stringify(compactedContext)).toContain("continue the retained turn");
 
 		harness.appendResponses([fauxAssistantMessage("continued after fallback")]);
 		await harness.session.prompt("next admission");
@@ -554,7 +554,7 @@ describe("AgentSession compaction characterization", () => {
 		});
 	});
 
-	it("drops an unfit retained suffix instead of repeating required compaction", async () => {
+	it("cancels an unfit deterministic fallback without dropping the latest user request", async () => {
 		const reserveTokens = 1_000;
 		const harness = await createHarness({
 			settings: { compaction: { keepRecentTokens: 1, reserveTokens } },
@@ -592,16 +592,9 @@ describe("AgentSession compaction characterization", () => {
 		await runAutoCompaction(harness.session, "threshold", false);
 
 		const compactionEntries = harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction");
-		expect(compactionEntries).toHaveLength(1);
-		expect(compactionEntries[0]).toMatchObject({
-			firstKeptEntryId: "",
-			details: {
-				schema: "senpi.compaction.deterministic-fallback.v1",
-				retainedSuffix: "none",
-			},
-		});
-		expect(estimateContextTokens(harness.sessionManager.buildSessionContext().messages).tokens).toBeLessThan(
-			contextWindow - reserveTokens,
+		expect(compactionEntries).toHaveLength(0);
+		expect(JSON.stringify(harness.sessionManager.buildSessionContext().messages)).toContain(
+			"mandatory latest payload",
 		);
 	});
 
