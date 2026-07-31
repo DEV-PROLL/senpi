@@ -19,7 +19,7 @@ Ship and merge one PR that removes Anthropic unavailable-tool context poisoning 
 
 1. Add a dedicated builtin-rule module returning a typed `TtsrRule` with source `builtin`. Register builtin rules in `ensureInitialized()` before discovered global/project rules.
 2. Duplicate-name precedence is deliberate: builtin names are reserved and win because `TtsrManager.addRule()` is first-wins. A project/global file with the same name is inspectable on disk but cannot weaken the shipped safety rule. Record this policy in the TTSR changes file.
-3. Add two regex conditions: one for `<unavailable-tool-call ...>` (including full and self-closing forms) and one for the persisted legacy `[Called tool "..." (no longer available in this session)` prefix. Do not add a raw `*** Begin Patch` condition because it would false-positive on legitimate prose explaining patch syntax.
+3. Add two case-insensitive regex conditions using a leading `(?i)` group: one for `<unavailable-tool-call ...>` (including full and self-closing forms) and one for the persisted legacy `[Called tool "..." (no longer available in this session)` prefix. Case-insensitivity is deliberate because model-authored transcript imitations are not trustworthy XML and uppercase/mixed-case variants remain equally imitable. Do not add a raw `*** Begin Patch` condition because it would false-positive on legitimate prose explaining patch syntax.
 4. Scope the rule explicitly to text only: `allowText: true`, `allowThinking: false`, `toolScopes: []`. Use `interruptMode: "always"` and action-oriented content telling the model to call its real tools and redo the interrupted step.
 5. Make `TtsrManager.addRule()` reject names present in `settings.disabledRules`. Existing `StreamWatcher.disabledBuiltin` continues to gate the two detector-only builtins; manager-backed builtin/project/global rules use the settings gate. This makes `--ttsr-rules-disabled=<name>` work for the new builtin through the real registration path.
 6. Remove both `TTSRDBG` `console.log` calls. Partition manager-held rules by `source` in `/ttsr`: manager builtins appear in the builtin section clearly labeled as stream rules, while only project/global rules feed `USER RULES`. This preserves the truthful `USER RULES\n(none)` contract when no user files exist.
@@ -28,7 +28,7 @@ Ship and merge one PR that removes Anthropic unavailable-tool context poisoning 
 
 - **disabledRules gap:** `TtsrManager.addRule()` will reject names in `settings.disabledRules`. Registration-time gating is chosen so `/ttsr` truthfully shows only loaded/active manager rules, and the same repair makes the existing flag effective for project/global rules as well as the new builtin. C3 tests will drive the identical fabricated text with the flag unset (abort + nudge) and set (no abort, no nudge).
 - **per-request state:** first-vs-later tracking is a `Set<string>` allocated inside each `demoteUnavailableToolReferences()` invocation. No module-level mutable state is introduced, so concurrent and sequential requests cannot contaminate one another.
-- **result-text escaping:** ordinary result text remains verbatim, but every literal `</unavailable-tool-result` closing-tag opener is narrowly neutralized to `&lt;/unavailable-tool-result`. This blocks attacker-controlled file/stdout/web content from escaping the envelope while preserving normal text such as `dragged to 10,20` unchanged.
+- **result-text escaping:** ordinary result text remains verbatim, but every case-insensitive `</unavailable-tool-result` closing-tag opener is narrowly neutralized by escaping only its leading `<` while preserving the author's original casing. This blocks attacker-controlled file/stdout/web content from escaping the envelope while preserving normal text such as `dragged to 10,20` unchanged.
 - **non-public helper extraction:** demotion builders live in `src/utils/unavailable-tool-text.ts`, not wildcard-exported `src/api/`, so `anthropic-messages.ts` shrinks instead of growing.
 - **status partition:** `/ttsr` separates manager builtins from project/global user rules. Existing `USER RULES\n(none)` behavior remains correct and the C5 CLI proof can visibly identify the new builtin stream rule.
 
@@ -75,7 +75,10 @@ C5 will use the senpi-qa isolation helpers and a PTY/tmux drive of the built CLI
 - [x] Add Part A failing tests only; capture C1 RED.
 - [x] Implement Part A and changes entry; capture C1/C2 GREEN.
 - [x] Run Part A package build/format validation.
-- [ ] Commit atomic increment 1.
+- [x] Commit atomic increment 1.
+- [x] Add uppercase/mixed-case result-forgery coverage; capture bypass RED.
+- [x] Fix the case-insensitive result opener neutralizer; capture GREEN.
+- [ ] Commit the case-insensitive bypass fix separately.
 - [ ] Add Part B failing tests only; capture C3 RED.
 - [ ] Capture C5 pre-change CLI RED proof.
 - [ ] Implement Part B, debug-log cleanup, and changes entry.

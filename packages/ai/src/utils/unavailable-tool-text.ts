@@ -1,5 +1,4 @@
 const MAX_LISTED_TOOLS = 8;
-const RESULT_CLOSING_TAG = "</unavailable-tool-result";
 
 function escapeXmlAttribute(value: string): string {
 	return value
@@ -38,6 +37,6 @@ export function demotedToolCallText(
 
 export function demotedToolResultText(name: string, content: string): string {
 	const escapedName = escapeXmlAttribute(name);
-	const safeContent = content.replaceAll(RESULT_CLOSING_TAG, `&lt;${RESULT_CLOSING_TAG.slice(1)}`);
+	const safeContent = content.replace(/<\/unavailable-tool-result/gi, (match) => `&lt;${match.slice(1)}`);
 	return `<unavailable-tool-result name="${escapedName}">${safeContent}</unavailable-tool-result>`;
 }
