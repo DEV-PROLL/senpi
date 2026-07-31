@@ -110,7 +110,7 @@ describe("TUI overlay options", () => {
 			const terminal = new VirtualTerminal(80, 24);
 			const tui = new TUI(terminal);
 			// Wide chars (each takes 2 columns) at the edge of declared width
-			const wideCharLine = "中文日本語한글テスト漢字"; // Mix of CJK chars
+			const wideCharLine = "中文日本語汉字テスト漢字"; // Mix of CJK chars
 			const overlay = new StaticOverlay([wideCharLine]);
 
 			tui.addChild(new EmptyContent());
