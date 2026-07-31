@@ -6,7 +6,8 @@
 
 - Runtime capability detection now recognizes `max` for map-less OpenAI-compatible `gpt-5.6-sol` models while
   preserving explicit map omissions and `null` vetoes.
-- OpenAI-compatible request builders serialize the selected level as `reasoning.effort: "max"`.
+- OpenAI-compatible request builders serialize the selected level as `reasoning.effort: "max"`
+  (`reasoning_effort: "max"` on Completions).
 
 ### Why
 

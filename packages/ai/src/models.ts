@@ -697,6 +697,13 @@ export function clampThinkingLevel<TApi extends Api>(
 	return availableLevels[0] ?? "off";
 }
 
+/**
+ * Whether the model exposes the `xhigh` tier.
+ *
+ * An explicit `thinkingLevelMap` is authoritative: `null` vetoes the tier and a map that omits
+ * `xhigh` disables it. Only map-less models fall back to id-based inference, so custom providers
+ * that ship a reasoning model without generated catalog metadata still surface the tier.
+ */
 export function supportsXhigh<TApi extends Api>(model: Model<TApi>): boolean {
 	const mapped = model.thinkingLevelMap?.xhigh;
 	if (mapped === null) return false;
@@ -705,28 +712,35 @@ export function supportsXhigh<TApi extends Api>(model: Model<TApi>): boolean {
 	return model.reasoning && supportsXhighModelId(model.id);
 }
 
+const XHIGH_MODEL_IDS = [
+	"gpt-5.2",
+	"gpt-5.3",
+	"gpt-5.4",
+	"gpt-5.5",
+	"gpt-5.6",
+	"deepseek-v4-pro",
+	"deepseek-v4-flash",
+	"opus-4-6",
+	"opus-4.6",
+	"opus-4-7",
+	"opus-4.7",
+	"opus-4-8",
+	"opus-4.8",
+	"opus-5",
+	"sonnet-5",
+	"fable-5",
+];
+
 function supportsXhighModelId(modelId: string): boolean {
-	const xhighModelIds = [
-		"gpt-5.2",
-		"gpt-5.3",
-		"gpt-5.4",
-		"gpt-5.5",
-		"gpt-5.6",
-		"deepseek-v4-pro",
-		"deepseek-v4-flash",
-		"opus-4-6",
-		"opus-4.6",
-		"opus-4-7",
-		"opus-4.7",
-		"opus-4-8",
-		"opus-4.8",
-		"opus-5",
-		"sonnet-5",
-		"fable-5",
-	];
-	return xhighModelIds.some((id) => modelId.includes(id));
+	return XHIGH_MODEL_IDS.some((id) => modelId.includes(id));
 }
 
+/**
+ * Whether the model exposes the `max` tier.
+ *
+ * Mirrors {@link supportsXhigh}: an explicit `thinkingLevelMap` wins, and only map-less models
+ * are inferred from the id.
+ */
 export function supportsMax<TApi extends Api>(model: Model<TApi>): boolean {
 	const mapped = model.thinkingLevelMap?.max;
 	if (mapped === null) return false;
@@ -735,31 +749,33 @@ export function supportsMax<TApi extends Api>(model: Model<TApi>): boolean {
 	return supportsMaxModel(model);
 }
 
+/** OpenAI-compatible APIs that accept a native `max` reasoning effort on the wire. */
+const OPENAI_MAX_APIS: Api[] = [
+	"openai-responses",
+	"azure-openai-responses",
+	"openai-codex-responses",
+	"openai-completions",
+];
+
+/** Matches `gpt-5.6-sol` and its suffixed variants, with or without a provider path prefix. */
+const GPT_56_SOL_ID = /(?:^|\/)gpt-5\.6-sol(?:$|-)/;
+
+const MAX_MODEL_IDS = [
+	"opus-4-6",
+	"opus-4.6",
+	"opus-4-7",
+	"opus-4.7",
+	"opus-4-8",
+	"opus-4.8",
+	"opus-5",
+	"sonnet-5",
+	"fable-5",
+];
+
 function supportsMaxModel<TApi extends Api>(model: Model<TApi>): boolean {
 	if (!model.reasoning) return false;
-
-	const openAiMaxApis: Api[] = [
-		"openai-responses",
-		"azure-openai-responses",
-		"openai-codex-responses",
-		"openai-completions",
-	];
-	if (openAiMaxApis.includes(model.api) && /(?:^|\/)gpt-5\.6-sol(?:$|-)/.test(model.id)) {
-		return true;
-	}
-
-	const maxModelIds = [
-		"opus-4-6",
-		"opus-4.6",
-		"opus-4-7",
-		"opus-4.7",
-		"opus-4-8",
-		"opus-4.8",
-		"opus-5",
-		"sonnet-5",
-		"fable-5",
-	];
-	return maxModelIds.some((id) => model.id.includes(id));
+	if (OPENAI_MAX_APIS.includes(model.api) && GPT_56_SOL_ID.test(model.id)) return true;
+	return MAX_MODEL_IDS.some((id) => model.id.includes(id));
 }
 
 /**

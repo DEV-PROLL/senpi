@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { getModel, getSupportedThinkingLevels, supportsXhigh } from "../src/compat.ts";
+import { getModel, getSupportedThinkingLevels, supportsMax, supportsXhigh } from "../src/compat.ts";
+import type { Model } from "../src/model.ts";
+import type { Api } from "../src/types.ts";
 
 describe("getSupportedThinkingLevels", () => {
 	it("includes max but not xhigh for Anthropic Opus 4.6 on anthropic-messages API", () => {
@@ -194,4 +196,79 @@ describe("supportsXhigh tier detection for map-less models", () => {
 			"max",
 		);
 	});
+});
+
+describe("supportsMax tier detection for map-less models", () => {
+	/** A custom-provider model with no thinkingLevelMap: tier detection must come from api + id. */
+	function maplessModel<TApi extends Api>(api: TApi, id: string, overrides: Partial<Model<TApi>> = {}): Model<TApi> {
+		return {
+			id,
+			name: id,
+			api,
+			provider: "codex-lb",
+			baseUrl: "https://example.invalid",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400000,
+			maxTokens: 128000,
+			...overrides,
+		};
+	}
+
+	it.each(["openai-responses", "azure-openai-responses", "openai-codex-responses", "openai-completions"] as const)(
+		"infers max for a map-less gpt-5.6-sol model on %s",
+		(api) => {
+			const model = maplessModel(api, "gpt-5.6-sol");
+			expect(supportsMax(model)).toBe(true);
+			expect(getSupportedThinkingLevels(model)).toContain("max");
+		},
+	);
+
+	it.each(["gpt-5.6-sol-fast", "openai/gpt-5.6-sol"])("infers max for the map-less Sol variant %s", (id) => {
+		expect(supportsMax(maplessModel("openai-responses", id))).toBe(true);
+	});
+
+	it("does not infer max for a map-less gpt-5.6-sol model on a non-OpenAI-compatible api", () => {
+		expect(supportsMax(maplessModel("anthropic-messages", "gpt-5.6-sol"))).toBe(false);
+	});
+
+	it.each(["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6", "gpt-5.5", "upstage/solar-pro-3"])(
+		"does not infer max for a map-less non-Sol %s model",
+		(id) => {
+			expect(supportsMax(maplessModel("openai-responses", id))).toBe(false);
+		},
+	);
+
+	it("does not infer max for a map-less non-reasoning gpt-5.6-sol model", () => {
+		expect(supportsMax(maplessModel("openai-responses", "gpt-5.6-sol", { reasoning: false }))).toBe(false);
+	});
+
+	it("honors an explicit max veto on gpt-5.6-sol", () => {
+		const model = maplessModel("openai-responses", "gpt-5.6-sol", { thinkingLevelMap: { max: null } });
+		expect(supportsMax(model)).toBe(false);
+		expect(getSupportedThinkingLevels(model)).not.toContain("max");
+	});
+
+	it("treats a map omitting max as authoritative for gpt-5.6-sol", () => {
+		const model = maplessModel("openai-responses", "gpt-5.6-sol", { thinkingLevelMap: { xhigh: "xhigh" } });
+		expect(supportsMax(model)).toBe(false);
+		expect(getSupportedThinkingLevels(model)).not.toContain("max");
+		expect(getSupportedThinkingLevels(model)).toContain("xhigh");
+	});
+
+	it("treats a map omitting xhigh as authoritative for gpt-5.6-sol", () => {
+		const model = maplessModel("openai-responses", "gpt-5.6-sol", { thinkingLevelMap: { max: "max" } });
+		expect(supportsXhigh(model)).toBe(false);
+		expect(supportsMax(model)).toBe(true);
+		expect(getSupportedThinkingLevels(model)).not.toContain("xhigh");
+		expect(getSupportedThinkingLevels(model)).toContain("max");
+	});
+
+	it.each(["claude-opus-4-8", "claude-opus-5", "claude-sonnet-5", "claude-fable-5"])(
+		"keeps inferring max for map-less Anthropic %s",
+		(id) => {
+			expect(supportsMax(maplessModel("anthropic-messages", id))).toBe(true);
+		},
+	);
 });
