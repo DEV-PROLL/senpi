@@ -42,7 +42,23 @@ The `claude-sdk-oauth` provider routes LLM calls through the official [Claude Ag
 - Multiple accounts: each `/login claude-sdk-oauth` adds another named account. `CLAUDE_CODE_OAUTH_TOKEN` (and `_2`..`_N`) are honored as read-only env accounts. `/claude-account` lists, adds, removes, and pins accounts; `--claude-account <name>` pins one for the session; `claudeSdkOauthProvider.pinnedAccount` pins one in settings.
 - Session affinity: one senpi session sticks to one account (rendezvous hashing), which keeps Anthropic's prompt cache warm - accounts never rotate mid-session except on automatic failover. Rate limits and auth errors block the account (with cooldown) and retry on the next account, before any visible output; once output has started, the error surfaces instead of replaying.
 - Default lane: **ambient** - with no `tokenInjection` setting the provider inherits the environment like the upstream extension (Claude Code CLI login or `ANTHROPIC_API_KEY`). Managed lanes (`oauth-slots`, `config-dir`) are opt-in via one settings line until the live subscription spike proves a managed default.
-- Settings (`claudeSdkOauthProvider`): `appendSystemPrompt`, `settingSources` (filesystem settings load only in the ambient lane, so they cannot override your selected account), `strictMcpConfig`, `pinnedAccount`, `tokenInjection` (`oauth-slots` | `config-dir` | `ambient`).
+- Settings (`claudeSdkOauthProvider`):
+  - `systemPromptMode` — controls how the system prompt is delivered. **`full`** (default) sends senpi's composed system prompt verbatim; the lane no longer rebuilds from the SDK `claude_code` preset, so all prompt regions (project rules, response-language instructions, etc.) reach the model. **`preset-append`** is the previous behaviour (deprecated, kept for one release; emits a one-time warning). **`override`** loads the system prompt from a file (`systemPromptFile`). The legacy `appendSystemPrompt` key still works: `false` → `preset-append`, `true`/unset → `full`; setting both keys makes `systemPromptMode` win and warns.
+  - In `full` and `override` modes, `settingSources` defaults to `[]` on every lane because senpi's prompt already carries project context — loading the SDK's own CLAUDE.md would double-inject it. The CLI always prepends its own `"You are a Claude agent, built on Anthropic's Claude Agent SDK."` block, which senpi cannot suppress; `full` means the prompt is delivered intact, not that it is the only system-prompt text.
+  - `settingSources` (filesystem settings load only in the ambient lane, so they cannot override your selected account), `strictMcpConfig`, `pinnedAccount`, `tokenInjection` (`oauth-slots` | `config-dir` | `ambient`), `resumeMode` (`on` default | `off` restores per-turn sessions), `systemPromptFile`.
+- **Environment overrides** (precedence: `env > project settings > global settings > default`; no new CLI flags):
+
+  | Variable | Purpose |
+  |----------|---------|
+  | `SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_MODE` | `full` \| `preset-append` \| `override` |
+  | `SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_FILE` | Path to the system prompt file (used with `override` mode) |
+  | `SENPI_CLAUDE_SDK_OAUTH_RESUME` | `on` (default) \| `off` — disables session reuse, restoring per-turn SDK queries |
+  | `SENPI_CLAUDE_SDK_OAUTH_TOKEN_INJECTION` | `oauth-slots` \| `config-dir` \| `ambient` |
+  | `SENPI_CLAUDE_SDK_OAUTH_SETTING_SOURCES` | Overrides `settingSources` |
+  | `SENPI_CLAUDE_SDK_OAUTH_PINNED_ACCOUNT` | Overrides `pinnedAccount` |
+
+  Every `SENPI_*` variable is stripped from the Claude Code subprocess environment on all three lanes; other inherited variables are preserved.
+- **Session reuse.** By default one long-lived SDK query spans the entire senpi session instead of a fresh one per turn, so conversations continue with only the new delta sent. Reuse fails closed to a fresh session on compaction, branch/fork navigation, account failover, an aborted turn, or any configuration change. Idle sessions retire after 30 minutes (max 32 resident); a session with an in-flight turn is never evicted. After a senpi process restart the lane always starts fresh. Set `resumeMode: "off"` (or `SENPI_CLAUDE_SDK_OAUTH_RESUME=off`) to restore the old per-turn behaviour.
 - Account state is exposed to desktop/automation clients: RPC `get_provider_accounts`, `account_pin`, `account_remove` and the `auth_accounts_changed` / `account_failover` events, mirrored through the app-server protocol. Token material is never included.
 
 ### GitHub Copilot
