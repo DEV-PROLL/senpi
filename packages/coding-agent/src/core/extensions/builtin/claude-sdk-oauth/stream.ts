@@ -2,22 +2,22 @@ import {
 	type Api,
 	type AssistantMessageEventStream,
 	type Context,
+	createAssistantMessageDiagnostic,
 	createAssistantMessageEventStream,
 	type Model,
 	parseStreamingJson,
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { getSessionClaudeAccountPin } from "./account-command.ts";
-import { AllAccountsBlockedError } from "./affinity.ts";
 import { queryWithAuthLane } from "./auth-lane.ts";
 import { buildCustomToolServers } from "./custom-tools.ts";
-import { classifySdkError } from "./errors.ts";
 import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable.ts";
-import { allAccountsBlockedGuidance, sdkErrorGuidance } from "./guidance.ts";
 import { buildClaudeSdkOauthQueryOptions } from "./options.ts";
 import { buildPromptBlocks, buildPromptStream } from "./prompt-bridge.ts";
 import { getSdkBoundary, type SdkQueryHandle } from "./sdk-boundary.ts";
+import { residentSessionMessages } from "./session-stream.ts";
 import { loadClaudeSdkOauthProviderSettingsFromDisk } from "./settings.ts";
+import { withAuthGuidance } from "./stream-guidance.ts";
 import {
 	asRecord,
 	emptyOutput,
@@ -75,30 +75,52 @@ export function streamClaudeSdkOauth(
 			const providerSettings = loadClaudeSdkOauthProviderSettingsFromDisk(process.cwd());
 			const mcpServers = buildCustomToolServers(resolvedTools.customTools);
 			const executable = resolveClaudeCodeExecutable(defaultExecutableDeps());
-			const messages = queryWithAuthLane({
-				prompt: buildPromptStream(buildPromptBlocks(context, resolvedTools.customToolNameToSdk, toolWatchNote)),
-				query: getSdkBoundary().query,
-				providerSettings,
-				sessionId: affinityKey,
-				pinnedAccount: getSessionClaudeAccountPin(options?.sessionId),
-				onQuery: (query) => {
-					sdkQuery = query;
-					if (wasAborted) requestAbort();
-				},
-				buildOptions: (authLane) => {
-					const queryOptions = buildClaudeSdkOauthQueryOptions({
+			const buildOptions = (authLane: Parameters<typeof buildClaudeSdkOauthQueryOptions>[0]["authLane"]) => {
+				const queryOptions = buildClaudeSdkOauthQueryOptions({
+					model,
+					context,
+					streamOptions: options,
+					providerSettings,
+					authLane,
+					tools: resolvedTools.sdkTools,
+					pathToClaudeCodeExecutable: executable,
+				});
+				if (mcpServers) queryOptions.mcpServers = mcpServers;
+				return queryOptions;
+			};
+			const useResidentSession =
+				options?.streamKind === "main" && providerSettings.resumeMode !== "off" && options.sessionId !== undefined;
+			const messages = useResidentSession
+				? residentSessionMessages({
 						model,
 						context,
 						streamOptions: options,
 						providerSettings,
-						authLane,
-						tools: resolvedTools.sdkTools,
-						pathToClaudeCodeExecutable: executable,
+						pinnedAccount: getSessionClaudeAccountPin(options.sessionId),
+						buildOptions,
+						customToolNameToSdk: resolvedTools.customToolNameToSdk,
+						toolWatchNote,
+						onResumeFallback: (error) => {
+							output.diagnostics = [
+								...(output.diagnostics ?? []),
+								createAssistantMessageDiagnostic("claude_sdk_oauth_resume_fallback", error),
+							];
+						},
+					})
+				: queryWithAuthLane({
+						prompt: buildPromptStream(
+							buildPromptBlocks(context, resolvedTools.customToolNameToSdk, toolWatchNote),
+						),
+						query: getSdkBoundary().query,
+						providerSettings,
+						sessionId: affinityKey,
+						pinnedAccount: getSessionClaudeAccountPin(options?.sessionId),
+						onQuery: (query) => {
+							sdkQuery = query;
+							if (wasAborted) requestAbort();
+						},
+						buildOptions,
 					});
-					if (mcpServers) queryOptions.mcpServers = mcpServers;
-					return queryOptions;
-				},
-			});
 
 			for await (const message of messages) {
 				if (!started) {
@@ -226,12 +248,4 @@ export function streamClaudeSdkOauth(
 		}
 	})();
 	return stream;
-}
-
-function withAuthGuidance(error: unknown, message: string): string {
-	if (error instanceof AllAccountsBlockedError) {
-		return allAccountsBlockedGuidance(error.soonestUnblockAt);
-	}
-	const guidance = sdkErrorGuidance(classifySdkError(error).kind);
-	return guidance ? `${message}\n${guidance}` : message;
 }

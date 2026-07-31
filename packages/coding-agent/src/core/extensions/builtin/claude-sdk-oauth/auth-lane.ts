@@ -17,6 +17,7 @@ import {
 	type SlotRefresher,
 } from "./accounts.ts";
 import { selectAccount } from "./affinity.ts";
+import { type AuthenticatedAttemptInput, createAttemptMessages, type RetainableAttempt } from "./auth-attempt.ts";
 import { classifySdkError } from "./errors.ts";
 import { runFailover } from "./failover.ts";
 import type { Options, SDKMessage, SdkQuery } from "./sdk-boundary.ts";
@@ -65,6 +66,8 @@ export function resetAuthLaneBoundary(): void {
 	activeBoundary = defaultBoundary;
 }
 
+export type { AuthenticatedAttemptInput } from "./auth-attempt.ts";
+
 export type AuthenticatedQueryInput = {
 	prompt: Parameters<SdkQuery>[0]["prompt"];
 	query: SdkQuery;
@@ -74,6 +77,9 @@ export type AuthenticatedQueryInput = {
 	/** Request-scoped CLI pin; takes precedence over persistent settings and account pins. */
 	pinnedAccount?: string;
 	onQuery?: (query: ReturnType<SdkQuery>) => void;
+	createAttempt?: (
+		input: AuthenticatedAttemptInput,
+	) => RetainableAttempt<SDKMessage> | Promise<RetainableAttempt<SDKMessage>>;
 };
 
 type ManagedPool = {
@@ -202,14 +208,6 @@ function visibleSdkMessage(message: SDKMessage): boolean {
 	return /^(?:content_block_start|content_block_delta|content_block_stop)$/.test(message.event.type);
 }
 
-async function* messagesFrom(query: ReturnType<SdkQuery>): AsyncGenerator<SDKMessage> {
-	try {
-		for await (const message of query) yield message;
-	} finally {
-		query.close();
-	}
-}
-
 /** Resolves managed OAuth immediately before each subprocess spawn and retries only pre-delta failures. */
 export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncGenerator<SDKMessage> {
 	const pool = await managedPool(input.providerSettings);
@@ -221,9 +219,12 @@ export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncG
 			if (name.startsWith("SENPI_")) delete ambientEnvironment[name];
 		}
 		options.env = ambientEnvironment;
-		const query = input.query({ prompt: input.prompt, options });
-		input.onQuery?.(query);
-		yield* messagesFrom(query);
+		yield* await createAttemptMessages(input, {
+			accountName: "ambient",
+			accounts: [],
+			authLane: "ambient",
+			options,
+		});
 		return;
 	}
 	yield* runFailover({
@@ -236,10 +237,14 @@ export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncG
 			}),
 		runAttempt: async (slot) => {
 			const options = input.buildOptions(pool.lane);
+			const accounts = pool.accounts.map((account) => ({ ...account }));
 			options.env = await prepareSlot(pool, slot);
-			const query = input.query({ prompt: input.prompt, options });
-			input.onQuery?.(query);
-			return messagesFrom(query);
+			return createAttemptMessages(input, {
+				accountName: slot.name,
+				accounts,
+				authLane: pool.lane,
+				options,
+			});
 		},
 		classify: classifySdkError,
 		store: pool.store,
