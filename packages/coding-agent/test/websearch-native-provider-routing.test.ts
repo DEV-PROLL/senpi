@@ -162,6 +162,53 @@ describe("vendored websearch provider-aware native routing", () => {
 		expect(authProviders).toEqual(["z-ai"]);
 	});
 
+	it("#given an active deepseek model and deepseek candidates #when native routes are discovered #then keeps the matching deepseek/native route first", async () => {
+		// given
+		const activeModel = nativeModel(
+			"deepseek",
+			"deepseek-v4-flash",
+			"openai-completions",
+			"https://api.deepseek.com",
+		);
+		const authProviders: string[] = [];
+		const modelRegistry = ModelRegistry.inMemory(AuthStorage.inMemory());
+		vi.spyOn(modelRegistry, "getApiKeyAndHeaders").mockImplementation(async (model) => {
+			authProviders.push(model.provider);
+			return { ok: true, apiKey: `${model.provider}-native-key` };
+		});
+		vi.spyOn(modelRegistry, "getAvailable").mockReturnValue([
+			nativeModel("deepseek", "deepseek-v4-pro", "openai-completions", "https://api.deepseek.com"),
+		]);
+		const progress: SearchProgressDetails[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 })),
+		);
+		const tool = createWebSearchTool(() => ({ ok: true, config: autoConfig(), source: "test" }));
+
+		// when
+		await tool.execute(
+			"matching-deepseek-native",
+			{ query: "matching deepseek native" },
+			undefined,
+			(update) => {
+				if (update.details && "phase" in update.details && update.details.phase === "searching") {
+					progress.push(update.details);
+				}
+			},
+			toolContext(activeModel, modelRegistry),
+		);
+
+		// then
+		expect(progress[0]?.providerLabels).toEqual([
+			"deepseek/native",
+			"duckduckgo-html/configured-first",
+			"z-ai/configured-second",
+		]);
+		expect(progress[1]?.currentProvider).toBe("deepseek/native");
+		expect(authProviders).toEqual(["deepseek"]);
+	});
+
 	it.each([
 		{
 			provider: "openai",
