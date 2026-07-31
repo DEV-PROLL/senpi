@@ -164,7 +164,12 @@ describe("vendored websearch provider-aware native routing", () => {
 
 	it("#given an active deepseek model and deepseek candidates #when native routes are discovered #then keeps the matching deepseek/native route first", async () => {
 		// given
-		const activeModel = nativeModel("deepseek", "deepseek-v4-flash", "openai-completions", "https://api.deepseek.com");
+		const activeModel = nativeModel(
+			"deepseek",
+			"deepseek-v4-flash",
+			"openai-completions",
+			"https://api.deepseek.com",
+		);
 		const authProviders: string[] = [];
 		const modelRegistry = ModelRegistry.inMemory(AuthStorage.inMemory());
 		vi.spyOn(modelRegistry, "getApiKeyAndHeaders").mockImplementation(async (model) => {
@@ -207,7 +212,6 @@ describe("vendored websearch provider-aware native routing", () => {
 	it.each([
 		{
 			provider: "openai",
-			id: "gpt-5.5",
 			id: "gpt-5.5",
 			api: "openai-responses" as const,
 			baseUrl: "https://api.openai.com/v1",
