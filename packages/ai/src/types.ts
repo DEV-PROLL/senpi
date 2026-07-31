@@ -143,6 +143,11 @@ export interface StreamOptions {
 	 */
 	affinitySessionId?: string;
 	/**
+	 * Identifies whether the stream belongs to the main agent loop or an auxiliary request.
+	 * An absent value must be treated as auxiliary as a fail-safe.
+	 */
+	streamKind?: "main" | "auxiliary";
+	/**
 	 * Preferred transport for providers that support multiple transports.
 	 * Providers that do not support this option ignore it.
 	 */

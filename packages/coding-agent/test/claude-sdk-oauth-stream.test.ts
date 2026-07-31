@@ -28,12 +28,15 @@ function sdkMessage(value: unknown): SDKMessage {
 
 function scriptedQuery(
 	messages: readonly SDKMessage[],
-	callbacks: { interrupted?: () => void; closed?: () => void } = {},
+	callbacks: { interrupted?: () => void; closed?: () => void; consumed?: (message: SDKMessage) => void } = {},
 ): SdkQuery {
 	return () => {
 		const query: SdkQueryHandle = {
 			async *[Symbol.asyncIterator]() {
-				for (const message of messages) yield message;
+				for (const message of messages) {
+					callbacks.consumed?.(message);
+					yield message;
+				}
 			},
 			async interrupt() {
 				callbacks.interrupted?.();
@@ -114,13 +117,27 @@ const scriptedMessages = [
 		},
 	}),
 	sdkMessage({ type: "stream_event", event: { type: "message_stop" } }),
+	sdkMessage({
+		type: "result",
+		subtype: "success",
+		result: "",
+		stop_reason: "tool_use",
+		usage: { input_tokens: 13, output_tokens: 9, cache_read_input_tokens: 6, cache_creation_input_tokens: 3 },
+	}),
 ];
 
 afterEach(() => resetSdkBoundary());
 
 describe("Claude SDK OAuth stream events", () => {
-	it("maps stream events, partial tool JSON, usage, cost, and tool-use stopping", async () => {
-		overrideSdkBoundary({ query: scriptedQuery(scriptedMessages) });
+	it("maps stream events, drains through the terminal result, and uses its usage and stop reason", async () => {
+		let consumedTerminalResult = false;
+		overrideSdkBoundary({
+			query: scriptedQuery(scriptedMessages, {
+				consumed: (message) => {
+					if (message.type === "result") consumedTerminalResult = true;
+				},
+			}),
+		});
 		const stream = streamClaudeSdkOauth(model, { messages: [] });
 		const events = await collect(stream);
 		const result = await stream.result();
@@ -134,14 +151,28 @@ describe("Claude SDK OAuth stream events", () => {
 				arguments: { path: "src/main.ts", offset: undefined, limit: undefined },
 			},
 		]);
+		expect(consumedTerminalResult).toBe(true);
 		expect(result.stopReason).toBe("toolUse");
-		expect(result.usage).toMatchObject({ input: 11, output: 7, cacheRead: 5, cacheWrite: 2, totalTokens: 25 });
-		expect(result.usage.cost.total).toBeCloseTo(0.0001455);
+		expect(result.usage).toMatchObject({ input: 13, output: 9, cacheRead: 6, cacheWrite: 3, totalTokens: 31 });
+		expect(result.usage.cost.total).toBeCloseTo(0.0001848);
 	});
 
 	it("uses successful results as a fallback when no stream events arrive", async () => {
 		overrideSdkBoundary({
-			query: scriptedQuery([sdkMessage({ type: "result", subtype: "success", result: "fallback" })]),
+			query: scriptedQuery([
+				sdkMessage({
+					type: "result",
+					subtype: "success",
+					result: "fallback",
+					stop_reason: "end_turn",
+					usage: {
+						input_tokens: 0,
+						output_tokens: 0,
+						cache_read_input_tokens: 0,
+						cache_creation_input_tokens: 0,
+					},
+				}),
+			]),
 		});
 		const stream = streamClaudeSdkOauth(model, { messages: [] });
 		const result = await stream.result();

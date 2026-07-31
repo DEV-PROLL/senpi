@@ -47,8 +47,6 @@ export function streamClaudeSdkOauth(
 		let wasAborted = false;
 		let started = false;
 		let sawStreamEvent = false;
-		let sawToolCall = false;
-		let shouldStopEarly = false;
 		const closeQuery = (): void => {
 			if (closed || !sdkQuery) return;
 			closed = true;
@@ -129,7 +127,6 @@ export function streamClaudeSdkOauth(
 							output.content.push(block);
 							stream.push({ type: "thinking_start", contentIndex: output.content.length - 1, partial: output });
 						} else if (event.content_block.type === "tool_use") {
-							sawToolCall = true;
 							const block: ToolBlock = {
 								type: "toolCall",
 								id: event.content_block.id,
@@ -187,20 +184,24 @@ export function streamClaudeSdkOauth(
 					} else if (event.type === "message_delta") {
 						output.stopReason = mapStopReason(event.delta.stop_reason);
 						updateUsage(model, output, event.usage);
-					} else if (event.type === "message_stop" && sawToolCall) {
-						output.stopReason = "toolUse";
-						shouldStopEarly = true;
 					}
-				} else if (message.type === "result" && message.subtype === "success" && !sawStreamEvent) {
-					output.content.push({ type: "text", text: message.result });
-				} else if (message.type === "result" && message.subtype !== "success") {
+				} else if (message.type === "result" && message.subtype === "success") {
+					// Both fields are optional on the wire, so only adopt them when present.
+					// A terminal result must never downgrade a toolUse turn that the stream
+					// already established, or the agent loop would stop instead of running
+					// the tool call sitting in `output.content`.
+					if (message.usage) updateUsage(model, output, message.usage);
+					if (message.stop_reason != null && output.stopReason !== "toolUse") {
+						output.stopReason = mapStopReason(message.stop_reason);
+					}
+					if (!sawStreamEvent) output.content.push({ type: "text", text: message.result });
+				} else if (message.type === "result") {
 					const reason =
 						"errors" in message && Array.isArray(message.errors) && message.errors.length > 0
 							? String(message.errors[0])
 							: `Claude Code ${message.subtype}`;
 					throw new Error(reason);
 				}
-				if (shouldStopEarly) break;
 			}
 
 			if (wasAborted || options?.signal?.aborted) {

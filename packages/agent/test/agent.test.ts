@@ -98,6 +98,28 @@ function getStreamStartTimeoutMs(options: unknown): number | undefined {
 }
 
 describe("Agent", () => {
+	it("marks main agent-loop streams while leaving unmarked invocations auxiliary", async () => {
+		const streamKinds: unknown[] = [];
+		const streamFn: StreamFn = (_model, _context, options) => {
+			streamKinds.push(
+				options && typeof options === "object" && "streamKind" in options ? options.streamKind : undefined,
+			);
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				const message = createAssistantMessage("ok");
+				stream.push({ type: "done", reason: "stop", message });
+			});
+			return stream;
+		};
+		const agent = new Agent({ streamFn });
+
+		await agent.prompt("main turn");
+		const auxiliaryStream = await streamFn(agent.state.model, { messages: [] }, {});
+		await auxiliaryStream.result();
+
+		expect(streamKinds).toEqual(["main", undefined]);
+	});
+
 	it("uses the configured default when a legacy caller omits streamFn", async () => {
 		let calls = 0;
 		setDefaultStreamFn(() => {
