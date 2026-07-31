@@ -1,6 +1,4 @@
-import { watch } from "node:fs";
 import { join } from "node:path";
-import { clearTimeout as clearRealTimeout, setTimeout as setRealTimeout } from "node:timers";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOAL_USER_GRACE_DELAY_MS } from "../../src/core/extensions/builtin/goal/continuation.ts";
@@ -25,6 +23,7 @@ import {
 	makeGoalContext,
 	runGoalHandlers,
 	TestEventBus,
+	waitForGoalContinuationCount,
 } from "./goal-monitor-test-harness.ts";
 
 function goalStoreRef(ctx: ExtensionContext) {
@@ -32,35 +31,6 @@ function goalStoreRef(ctx: ExtensionContext) {
 		baseDir: join(ctx.sessionManager.getSessionDir(), "extensions", "goal"),
 		threadId: ctx.sessionManager.getSessionId(),
 	};
-}
-
-function waitForGoalContinuationCount(ctx: ExtensionContext, expectedCount: number): Promise<void> {
-	const ref = goalStoreRef(ctx);
-	const goalFileName = `${encodeURIComponent(ref.threadId)}.json`;
-	return new Promise((resolve, reject) => {
-		let completed = false;
-		let timeout: ReturnType<typeof setRealTimeout> | undefined;
-		const watcher = watch(ref.baseDir, { encoding: "utf8" }, (_eventType, changedFileName) => {
-			if (changedFileName !== goalFileName) return;
-			void readGoal(ref).then((goal) => {
-				if (goal?.consecutiveContinuations === expectedCount) complete();
-			}, complete);
-		});
-		timeout = setRealTimeout(
-			() => complete(new Error(`Timed out waiting for continuation count ${expectedCount}`)),
-			5_000,
-		);
-		watcher.once("error", complete);
-
-		function complete(error: Error | undefined = undefined): void {
-			if (completed) return;
-			completed = true;
-			if (timeout !== undefined) clearRealTimeout(timeout);
-			watcher.close();
-			if (error === undefined) resolve();
-			else reject(error);
-		}
-	});
 }
 
 function cleanAssistantStopWithText(text: string): AgentMessage {
@@ -176,52 +146,24 @@ describe("goal continuation while a monitor is active", () => {
 	it("counts user grace delivery toward the continuation cap", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
-		const { tools, handlers, sent, events } = createGoalHarness();
+		const { tools, handlers, sent } = createGoalHarness();
 		const ctx = await makeGoalContext(notices, "thread-user-grace-counted");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
 		await runUserInitiatedTurn(handlers, ctx);
 		expect(sent).toHaveLength(0);
+		const goal = await readGoal(goalStoreRef(ctx));
+		if (goal === null) throw new Error("Expected persisted goal");
+		await writeGoal(goalStoreRef(ctx), { ...goal, consecutiveContinuations: 7 });
 		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS - 1);
 		expect(sent).toHaveLength(0);
-		const graceDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
+		const graceDeliveryRecorded = waitForGoalContinuationCount(ctx, 8);
 		await vi.advanceTimersByTimeAsync(1);
 		await graceDeliveryRecorded;
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
-		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ consecutiveContinuations: 1 });
-
-		for (let turn = 2; turn <= 8; turn++) {
-			await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
-			await runGoalHandlers(
-				handlers,
-				"agent_end",
-				{ type: "agent_end", messages: [cleanAssistantStopWithText(`progress ${turn}`)] },
-				ctx,
-			);
-		}
-
-		expect(sent).toHaveLength(8);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 8 });
-
-		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
-		await runGoalHandlers(
-			handlers,
-			"agent_end",
-			{ type: "agent_end", messages: [cleanAssistantStopWithText("progress 9")] },
-			ctx,
-		);
-
-		expect(sent).toHaveLength(8);
-		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
-			status: "blocked",
-			blockedReason: "continuation cap reached",
-		});
-		expect(events.emitted).toContainEqual({
-			channel: "goal_continuation_guard_tripped",
-			data: expect.objectContaining({ reason: "cap", count: 8 }),
-		});
 	});
 
 	it("continues after user grace even when an active monitor settles", async () => {
@@ -497,14 +439,14 @@ describe("goal continuation while a monitor is active", () => {
 		);
 	});
 
-	it("blocks the ninth clean immediate continuation without queuing a ninth hidden prompt", async () => {
+	it("keeps admitting distinct progress beyond the continuation cap", async () => {
 		const notices: string[] = [];
 		const { tools, handlers, sent, events } = createGoalHarness();
-		const ctx = await makeGoalContext(notices, "thread-immediate-cap");
+		const ctx = await makeGoalContext(notices, "thread-immediate-distinct-progress");
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
-		for (let turn = 1; turn <= 8; turn++) {
+		for (let turn = 1; turn <= 9; turn++) {
 			await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
 			await runGoalHandlers(
 				handlers,
@@ -514,26 +456,17 @@ describe("goal continuation while a monitor is active", () => {
 			);
 		}
 
-		expect(sent).toHaveLength(8);
-		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 8 });
-
-		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
-		await runGoalHandlers(
-			handlers,
-			"agent_end",
-			{ type: "agent_end", messages: [cleanAssistantStopWithText("progress 9")] },
-			ctx,
-		);
-
-		expect(sent).toHaveLength(8);
+		expect(sent).toHaveLength(9);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
-			status: "blocked",
-			blockedReason: "continuation cap reached",
+			status: "active",
+			consecutiveContinuations: 1,
 		});
-		expect(events.emitted).toContainEqual({
-			channel: "goal_continuation_guard_tripped",
-			data: expect.objectContaining({ reason: "cap", count: 8 }),
-		});
+		expect(events.emitted).not.toContainEqual(
+			expect.objectContaining({
+				channel: "goal_continuation_guard_tripped",
+				data: expect.objectContaining({ reason: "cap" }),
+			}),
+		);
 	});
 
 	it("silently skips a stale continuation after two real agent_end cycles with unchanged progress", async () => {

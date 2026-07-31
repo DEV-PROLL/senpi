@@ -12,6 +12,10 @@
 					"path": "quickstart.md"
 				},
 				{
+					"title": "Release and installation guide",
+					"path": "release-guide.md"
+				},
+				{
 					"title": "Using Pi",
 					"path": "usage.md"
 				},

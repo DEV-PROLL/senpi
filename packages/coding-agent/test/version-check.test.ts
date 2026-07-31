@@ -35,6 +35,14 @@ describe("version checks", () => {
 		expect(isNewerPackageVersion("0.70.6", "0.70.5")).toBe(true);
 	});
 
+	it("orders same-day Senpi CalVer revisions after the bare release", () => {
+		expect(comparePackageVersions("2026.7.30-2", "2026.7.30")).toBeGreaterThan(0);
+		expect(comparePackageVersions("2026.7.30", "2026.7.30-2")).toBeLessThan(0);
+		expect(comparePackageVersions("2026.7.31", "2026.7.30-99")).toBeGreaterThan(0);
+		expect(isNewerPackageVersion("2026.7.30", "2026.7.30-2")).toBe(false);
+		expect(isNewerPackageVersion("2026.7.30-2", "2026.7.30")).toBe(true);
+	});
+
 	it("returns only newer versions", async () => {
 		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.3" }));
 		vi.stubGlobal("fetch", fetchMock);
