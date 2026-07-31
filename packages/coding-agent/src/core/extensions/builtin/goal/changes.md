@@ -15,8 +15,11 @@
   `budgetLimited` / `budget_limited` statuses to `active`. Migrated goals still
   pass the normal `isGoal` validation and `sanitizeContinuationState`.
 - Precedence is absolute: an existing current file short-circuits the migration
-  and is never overwritten. A missing legacy file is a silent no-op, and a
-  legacy file holding an explicit `null` goal migrates nothing.
+  and is never overwritten. Publication writes a restrictive `0600` private temp
+  sibling, then atomically hard-links it to the current path without replacement;
+  `EEXIST` means a concurrent current writer won and migration returns no import.
+  A missing legacy file is a silent no-op, and a legacy file holding an explicit
+  `null` goal migrates nothing.
 - The legacy directory is derived by replacing the `goal` path segment itself
   (`legacyBaseDirFor`), which is correct for both store layouts:
   `<sessionDir>/extensions/goal` and the print/in-memory fallback
@@ -30,6 +33,10 @@
 
 - Users upgrading from standalone `pi-goal` silently lost an in-flight goal: the
   builtin reads a different directory, so the legacy file was never seen.
+- A destination absence check followed by ordinary POSIX `rename` was racy:
+  `rename` replaces a current file created between the check and publication.
+  Same-directory hard-link publication gives macOS/Linux an atomic no-clobber
+  operation while retaining private temp cleanup and exact-file writes.
 - Normalization is deliberately confined to the legacy read path. Applying it to
   every current-store read (the alternative considered) is destructive: it
   strips the inert `tokenBudget` that `00571304e` added as required app-server

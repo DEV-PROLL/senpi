@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import { InvalidGoalStoreError, UnsupportedGoalStoreVersionError } from "./errors.ts";
 import type { Goal, GoalFile, GoalStatus, GoalStoreRef } from "./types.ts";
@@ -57,8 +57,7 @@ export async function migrateLegacyGoalFile(ref: GoalStoreRef): Promise<Goal | n
 		throw error;
 	}
 	if (legacyGoal === null) return null;
-	await writeGoalFile(ref, legacyGoal);
-	return legacyGoal;
+	return (await publishMigratedGoalFile(ref, legacyGoal)) ? legacyGoal : null;
 }
 
 /**
@@ -104,6 +103,40 @@ async function writeGoalFileAtomic(filePath: string, contents: string): Promise<
 		}
 		throw error;
 	}
+}
+
+async function publishMigratedGoalFile(ref: GoalStoreRef, goal: Goal): Promise<boolean> {
+	const filePath = goalFilePath(ref);
+	await mkdir(dirname(filePath), { recursive: true });
+	const contents = `${JSON.stringify({ version: STORE_VERSION, goal }, null, 2)}\n`;
+	const tempPath = join(dirname(filePath), `.goal-${randomUUID()}.tmp`);
+	let published = false;
+	let publicationFailed = false;
+	let publicationError: unknown;
+	try {
+		await writeFile(tempPath, contents, { encoding: "utf8", mode: 0o600 });
+		await link(tempPath, filePath);
+		published = true;
+	} catch (error) {
+		if (!isFileSystemError(error, "EEXIST")) {
+			publicationFailed = true;
+			publicationError = error;
+		}
+	}
+
+	try {
+		await rm(tempPath, { force: true });
+	} catch (cleanupError) {
+		if (publicationFailed) {
+			throw new AggregateError(
+				[publicationError, cleanupError],
+				"goal migration publication failed and its temporary file could not be removed",
+			);
+		}
+		throw cleanupError;
+	}
+	if (publicationFailed) throw publicationError;
+	return published;
 }
 
 function parseGoalFile(raw: string, { legacy = false }: { legacy?: boolean } = {}): GoalFile {
@@ -219,5 +252,9 @@ function sanitizeContinuationState(goal: Goal): Goal {
 }
 
 function isMissingFile(error: unknown): boolean {
-	return error instanceof Error && "code" in error && error.code === "ENOENT";
+	return isFileSystemError(error, "ENOENT");
+}
+
+function isFileSystemError(error: unknown, code: string): boolean {
+	return error instanceof Error && "code" in error && error.code === code;
 }

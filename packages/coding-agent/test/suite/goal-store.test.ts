@@ -1,7 +1,29 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const migrationRace = vi.hoisted(() => ({
+	legacyPath: undefined as string | undefined,
+	beforeLegacyRead: undefined as (() => Promise<void>) | undefined,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs/promises")>();
+	return {
+		...actual,
+		readFile: async (...args: Parameters<typeof actual.readFile>) => {
+			if (String(args[0]) === migrationRace.legacyPath) {
+				const beforeLegacyRead = migrationRace.beforeLegacyRead;
+				migrationRace.legacyPath = undefined;
+				migrationRace.beforeLegacyRead = undefined;
+				await beforeLegacyRead?.();
+			}
+			return actual.readFile(...args);
+		},
+	};
+});
+
 import { migrateLegacyGoalFile } from "../../src/core/extensions/builtin/goal/persistence.ts";
 import {
 	accountGoalUsage,
@@ -232,6 +254,44 @@ describe("legacy pi-goal store migration", () => {
 		expect(migrated).not.toHaveProperty("consecutiveContinuations");
 		expect(migrated).not.toHaveProperty("lastContinuationSignature");
 		expect(await readGoal(ref)).toEqual(migrated);
+	});
+
+	it("gives a current goal created during migration precedence over the legacy goal", async () => {
+		// Given: migration has observed no current file and is about to consume legacy state.
+		const ref = await tempStore("thread-current-race-wins");
+		await writeLegacyGoalFile(ref, legacyGoalRecord(ref));
+		let currentGoal: Awaited<ReturnType<typeof createGoal>> | undefined;
+		migrationRace.legacyPath = goalFilePath(legacyStoreRef(ref));
+		migrationRace.beforeLegacyRead = async () => {
+			currentGoal = await createGoal(ref, "Current goal created during migration");
+		};
+
+		// When: the exact legacy-read boundary creates current state after migration's
+		// initial destination check but before it publishes the migrated bytes.
+		const migrated = await migrateLegacyGoalFile(ref);
+
+		// Then: publication must not clobber the current writer that won the race.
+		expect(currentGoal).toBeDefined();
+		expect(migrated).toBeNull();
+		expect(await readGoal(ref)).toEqual(currentGoal);
+		expect(await readdir(ref.baseDir)).toEqual([basename(goalFilePath(ref))]);
+	});
+
+	it.skipIf(process.platform === "win32")("publishes a migrated goal with mode 0600", async () => {
+		// Given
+		const ref = await tempStore("thread-private-migration");
+		await writeLegacyGoalFile(ref, legacyGoalRecord(ref));
+		const previousUmask = process.umask(0o022);
+
+		// When
+		try {
+			await migrateLegacyGoalFile(ref);
+		} finally {
+			process.umask(previousUmask);
+		}
+
+		// Then
+		expect((await stat(goalFilePath(ref))).mode & 0o777).toBe(0o600);
 	});
 
 	it("never overwrites an existing current goal with a legacy file", async () => {
