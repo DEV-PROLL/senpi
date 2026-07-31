@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Preserved structured metadata for Bedrock provider errors.
+- Supported provider streams that end without finish reasons.
 - Updated GPT-5.6 Terra and Luna pricing across OpenAI and passthrough model catalogs.
 - Recovered Kimi XTML response channels from thinking output and hardened recovery marker parsing.
 - Corrected the OpenCode Go provider display name.

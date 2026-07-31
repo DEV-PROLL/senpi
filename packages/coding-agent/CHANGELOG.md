@@ -26,6 +26,9 @@
 - Recovered Kimi XTML thinking channels and hardened recovery marker parsing.
 - Reported apply-patch failure reasons and serialized file mutations to avoid overlapping edits.
 - Limited the high-reasoning warning to GPT-5.6 Sol instead of every frontier model.
+- Preserved structured metadata for Bedrock provider errors.
+- Supported provider streams that end without finish reasons.
+- Fixed terminal width accounting for Indic conjunct grapheme clusters.
 - Fixed malformed resource arrays in package manifests crashing session startup ([#7187](https://github.com/earendil-works/pi/issues/7187)).
 - Fixed `setToolsExpanded(false)` to be a no-op when tool output is already collapsed, avoiding redundant `Tool output: collapsed` startup notices from extensions ([#7292](https://github.com/earendil-works/pi/issues/7292)).
 
