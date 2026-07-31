@@ -3,11 +3,11 @@
  *
  * Drives a real sandboxed TUI through node-pty, with tmux as the POSIX fallback,
  * then asserts text from the captured transcript. Scenario defaults describe the
- * intended Claude Agent SDK surface; --expect overrides them while that surface
+ * intended Claude SDK OAuth surface; --expect overrides them while that surface
  * is still under construction.
  *
  * Usage:
- *   node tui-scenario.mjs --scenario login-claude-agent-sdk --evidence SLUG
+ *   node tui-scenario.mjs --scenario login-claude-sdk-oauth --evidence SLUG
  *   node tui-scenario.mjs --scenario claude-account --expect "account-a" --expect "pinned"
  *   node tui-scenario.mjs --self-test [--driver pty|tmux|auto] [--evidence SLUG]
  */
@@ -29,9 +29,9 @@ import {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const SCENARIOS = {
-	"login-claude-agent-sdk": {
+	"login-claude-sdk-oauth": {
 		steps: [{ text: "/login", key: "Enter", waitFor: "Select authentication method:" }, { key: "Enter" }],
-		assertions: [{ name: "provider row", expected: "Claude Agent SDK (Claude Pro/Max)" }],
+		assertions: [{ name: "provider row", expected: "Claude SDK OAuth (Claude Pro/Max)" }],
 	},
 	"claude-account": {
 		steps: [{ text: "/claude-account", key: "Enter" }],
@@ -137,10 +137,10 @@ function seedClaudeAccountScenario(box, scenario) {
 	writeFileSync(
 		join(box.agentDir, "auth.json"),
 		JSON.stringify({
-			"claude-agent-sdk": {
+			"claude-sdk-oauth": {
 				type: "oauth",
-				access: "claude-agent-sdk-managed",
-				refresh: "claude-agent-sdk-managed",
+				access: "claude-sdk-oauth-managed",
+				refresh: "claude-sdk-oauth-managed",
 				expires: 4_102_444_800_000,
 				accounts: [
 					{ name: "default", source: "login", access: "", refresh: "", expires: 4_102_444_800_000 },
@@ -268,9 +268,9 @@ async function runScenario({ scenario, expected, driver, evidence }) {
 
 async function selfTest(options) {
 	const checks = createChecks("tui-scenario.mjs --self-test");
-	checks.ok("login scenario declares the Claude Agent SDK provider row", assertionsFor("login-claude-agent-sdk", []).some((item) => item.expected === "Claude Agent SDK (Claude Pro/Max)"));
+	checks.ok("login scenario declares the Claude SDK OAuth provider row", assertionsFor("login-claude-sdk-oauth", []).some((item) => item.expected === "Claude SDK OAuth (Claude Pro/Max)"));
 	checks.ok("custom expectation list replaces scenario defaults", assertionsFor("claude-account", ["account-a", "pinned"]).map((item) => item.expected).join("|") === "account-a|pinned");
-	const passed = await runScenario({ ...options, scenario: "login-claude-agent-sdk", expected: ["Select provider to configure:"] });
+	const passed = await runScenario({ ...options, scenario: "login-claude-sdk-oauth", expected: ["Select provider to configure:"] });
 	checks.ok("scripted /login capture passes a known selector assertion", passed);
 	return checks.finish();
 }
@@ -279,7 +279,7 @@ function usage() {
 	process.stdout.write(
 		[
 			"senpi-qa Channel 2 — scripted TUI scenarios",
-			"  node tui-scenario.mjs --scenario login-claude-agent-sdk --evidence SLUG [--expect TEXT ...]",
+			"  node tui-scenario.mjs --scenario login-claude-sdk-oauth --evidence SLUG [--expect TEXT ...]",
 			"  node tui-scenario.mjs --scenario claude-account --evidence SLUG [--expect TEXT ...]",
 			"  node tui-scenario.mjs --self-test [--driver pty|tmux|auto] [--evidence SLUG]",
 			"  --expected '[\"TEXT\", \"TEXT\"]' is a JSON-list alternative to repeated --expect.",
