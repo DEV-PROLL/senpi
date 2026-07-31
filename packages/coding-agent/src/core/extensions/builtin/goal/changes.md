@@ -1,5 +1,29 @@
 # goal Extension Changes
 
+## Mechanically blocked goals resume on a prompt queued while streaming (2026-07-31)
+
+### What changed
+
+- `index.ts` adds an `input` handler that reactivates a mechanically blocked goal
+  (cap, repetition, truncation) from a direct prompt even when that prompt is
+  queued as steer/follow-up while the agent is streaming.
+- The idle path already unblocks in `before_agent_start`, but a queued prompt
+  returns from `prompt()` before that hook runs, so a message sent mid-turn left
+  the goal blocked. The new handler covers it; extension-sourced input is ignored.
+
+### Why
+
+- The recovery hint added in #562 tells the user "Send any message to resume",
+  but a message typed while the agent was streaming was queued and returned
+  before `before_agent_start`, so it did not resume. Users who act on the hint
+  at the most natural moment saw no recovery.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `index.ts` around the new `input` handler.
+- NONE in the verdict engine, goal store schema, persistence, or public extension API.
+
+||||||| 9da987f51
 ## Tool-using turns clear the output-repetition window (2026-07-31)
 
 ### What changed

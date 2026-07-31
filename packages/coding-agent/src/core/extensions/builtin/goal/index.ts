@@ -5,6 +5,7 @@ import { GOAL_CACHE_WARMUP_ENTRY_TYPE } from "./cache-warm.ts";
 import { renderGoalCacheWarmupEntry } from "./cache-warm-renderer.ts";
 import { registerGoalCommand } from "./command-registration.ts";
 import { GOAL_CONTINUATION_CAP } from "./continuation.ts";
+import { isMechanicalContinuationBlock } from "./continuation-recovery.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
 import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
@@ -104,6 +105,17 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			} else {
 				await queueGoalContinuationForCurrentSession(pi, ctx, goal);
 			}
+		}
+	});
+
+	pi.on("input", async (event, ctx) => {
+		// The input event fires for queued steer/followUp prompts too, which return before
+		// before_agent_start ever runs. Resume a mechanically blocked goal here as well so a
+		// message sent while the agent is streaming resumes it the same as an idle one.
+		if (event.source === "extension") return;
+		const goal = await resetContinuationStreak(goalStoreRef(ctx));
+		if (goal?.status === "blocked" && isMechanicalContinuationBlock(goal.blockedReason)) {
+			await updateGoal(goalStoreRef(ctx), { status: "active" }, "user");
 		}
 	});
 
