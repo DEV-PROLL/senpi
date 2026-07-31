@@ -21,6 +21,9 @@
 - The visible hardware cursor and fake cursor were both drawn at the editor
   insertion point, making Korean IME composition look duplicated. The same
   ownership conflict affected search, selector, login, and extension inputs.
+- This cannot be implemented as an extension: cursor-marker extraction,
+  synchronized-frame boundaries, and final ANSI cursor writes are renderer
+  invariants below the extension API.
 
 ### Expected merge conflict zones
 
