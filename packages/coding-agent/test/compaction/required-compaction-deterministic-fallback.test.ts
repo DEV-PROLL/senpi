@@ -6,6 +6,8 @@ import {
 	classifyRequiredCompactionFallbackFailure,
 	createRequiredCompactionFallback,
 } from "../../src/core/extensions/builtin/compaction/deterministic-fallback.ts";
+import { SummaryRequestError } from "../../src/core/extensions/builtin/compaction/speculative.ts";
+import type { CompactionReason } from "../../src/core/extensions/types.ts";
 import { createBlockingContext, createCompactionHandlers } from "../helpers/blocking-compaction-harness.ts";
 
 describe("required compaction deterministic fallback", () => {
@@ -35,7 +37,10 @@ describe("required compaction deterministic fallback", () => {
 			harness.ctx,
 		);
 
-		expect(result).toMatchObject({ cancel: true });
+		expect(result).toMatchObject({
+			cancel: true,
+			reason: "deterministic compaction fallback cannot retain the prepared suffix",
+		});
 		expect(result).not.toHaveProperty("compaction");
 		expect(JSON.stringify(harness.sessionManager.buildSessionContext().messages)).toContain("Keep latest request");
 		expect(harness.registration.getCallLog()).toHaveLength(1);
@@ -43,14 +48,19 @@ describe("required compaction deterministic fallback", () => {
 
 	it("does not recover manual, aborted, or unrelated failures", async () => {
 		for (const testCase of [
-			{ reason: "manual" as const, message: "upstream_stream_truncated", aborted: false },
-			{ reason: "threshold" as const, message: "upstream_stream_truncated", aborted: true },
-			{ reason: "threshold" as const, message: "unrelated provider refusal", aborted: false },
+			{ reason: "manual" as const, message: "upstream_stream_truncated", aborted: false, refusal: false },
+			{ reason: "threshold" as const, message: "upstream_stream_truncated", aborted: true, refusal: false },
+			{ reason: "threshold" as const, message: "unrelated provider refusal", aborted: false, refusal: false },
+			{ reason: "threshold" as const, message: "upstream_stream_truncated", aborted: false, refusal: true },
 		]) {
 			const handlers = createCompactionHandlers();
 			const harness = createBlockingContext({ usageTokens: 9_900 });
 			harness.registration.setResponses([
-				fauxAssistantMessage("", { stopReason: "error", errorMessage: testCase.message }),
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: testCase.message,
+					...(testCase.refusal ? { stopDetails: { type: "refusal" as const } } : {}),
+				}),
 			]);
 			const branchEntries = harness.ctx.sessionManager.getBranch();
 			const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true);
@@ -73,16 +83,78 @@ describe("required compaction deterministic fallback", () => {
 		}
 	});
 
-	it("classifies a duration watchdog without sleeping", () => {
-		expect(
-			classifyRequiredCompactionFallbackFailure(
-				new StreamDurationBudgetError(120_000),
-				"Summarization stream exceeded its 120000ms wall-clock budget",
-			),
-		).toBe("summarization-timeout");
+	it("fails closed for every non-required reason even when typed truncation recovery would fit", async () => {
+		const nonRequiredReasons = ["manual", "pre_prompt", "branch", "extension"] satisfies CompactionReason[];
+		for (const reason of nonRequiredReasons) {
+			const handlers = createCompactionHandlers();
+			const harness = createBlockingContext({ usageTokens: 9_900 });
+			harness.registration.setResponses([
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "upstream_stream_truncated: Responses stream ended before a terminal event",
+				}),
+			]);
+			const branchEntries = harness.ctx.sessionManager.getBranch();
+			const preparation = {
+				...prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!,
+				firstKeptEntryId: branchEntries.at(-1)?.id ?? "",
+			};
+			expect(
+				createRequiredCompactionFallback(
+					preparation,
+					10_000,
+					"upstream-stream-truncated",
+					{},
+					branchEntries,
+				),
+			).toBeDefined();
+
+			const result = await handlers.sessionBeforeCompact(
+				{
+					type: "session_before_compact",
+					reason,
+					willRetry: false,
+					requestId: `non-required-${reason}`,
+					preparation,
+					branchEntries,
+					signal: new AbortController().signal,
+				},
+				harness.ctx,
+			);
+
+			expect(result).toMatchObject({
+				cancel: true,
+				reason: "compaction generator failed: upstream_stream_truncated: Responses stream ended before a terminal event",
+			});
+			expect(result).not.toHaveProperty("compaction");
+			expect(harness.registration.getCallLog()).toHaveLength(1);
+		}
 	});
 
-	it("requires a real retained suffix, preserves metadata, and uses UTF-8-safe bounds", () => {
+	it("classifies a duration watchdog without sleeping", () => {
+		expect(classifyRequiredCompactionFallbackFailure(new StreamDurationBudgetError(120_000))).toBe(
+			"summarization-timeout",
+		);
+	});
+
+	it("rejects truncation-looking generic errors and requires structured summary-request provenance", () => {
+		const truncationMessage = "upstream_stream_truncated: Responses stream ended before a terminal event";
+		for (const error of [
+			new Error(truncationMessage),
+			new Error("provider wrapper saw upstream-stream-truncated while handling another failure"),
+			new SummaryRequestError(truncationMessage, true),
+			new SummaryRequestError(truncationMessage, false, "upstream-stream-truncated"),
+		]) {
+			expect(classifyRequiredCompactionFallbackFailure(error)).toBeUndefined();
+		}
+		expect(
+			classifyRequiredCompactionFallbackFailure(
+				new SummaryRequestError(truncationMessage, true, "upstream-stream-truncated"),
+			),
+		).toBe("upstream-stream-truncated");
+	});
+
+	it("requires a real retained suffix, keeps only canonical detail metadata, and uses UTF-8-safe bounds", () => {
 		const harness = createBlockingContext({ usageTokens: 9_900 });
 		const branchEntries = harness.ctx.sessionManager.getBranch();
 		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true);
@@ -117,10 +189,10 @@ describe("required compaction deterministic fallback", () => {
 		expect(result!.summary).not.toContain("�");
 		expect(result!.details).toMatchObject({
 			taskIntent: "Finish the current repair",
-			todoSnapshot: { items: ["verify recovery"] },
-			checkpoint: { files: ["agent-session.ts"] },
 			retainedSuffix: "prepared",
 		});
+		expect(result!.details).not.toHaveProperty("todoSnapshot");
+		expect(result!.details).not.toHaveProperty("checkpoint");
 		harness.sessionManager.appendCompaction(
 			result!.summary,
 			result!.firstKeptEntryId,

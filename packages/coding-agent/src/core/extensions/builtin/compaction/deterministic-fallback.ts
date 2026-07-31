@@ -1,6 +1,7 @@
 import { type CompactionPreparation, type CompactionResult, estimateContextTokens } from "../../../compaction/index.ts";
 import { StreamDurationBudgetError, StreamIdleTimeoutError } from "../../../compaction/stream-watchdog.ts";
 import { buildSessionContext, type CompactionEntry, type SessionEntry } from "../../../session-manager.ts";
+import { SummaryRequestError } from "./speculative.ts";
 import { capUtf8Bytes } from "./task-intent.ts";
 
 export type RequiredCompactionFallbackFailure = "summarization-timeout" | "upstream-stream-truncated";
@@ -11,7 +12,7 @@ interface RecoveryMetadata {
 	checkpoint?: unknown;
 }
 
-interface DeterministicFallbackDetails extends RecoveryMetadata {
+interface DeterministicFallbackDetails {
 	schema: "senpi.compaction.deterministic-fallback.v1";
 	origin: "required-compaction-recovery";
 	failureKind: RequiredCompactionFallbackFailure;
@@ -20,12 +21,11 @@ interface DeterministicFallbackDetails extends RecoveryMetadata {
 
 export function classifyRequiredCompactionFallbackFailure(
 	error: unknown,
-	displayMessage: string,
 ): RequiredCompactionFallbackFailure | undefined {
 	if (error instanceof StreamDurationBudgetError || error instanceof StreamIdleTimeoutError) {
 		return "summarization-timeout";
 	}
-	if (/(?:^|[^A-Za-z0-9_])upstream_stream_truncated(?:[^A-Za-z0-9_]|$)/.test(displayMessage)) {
+	if (error instanceof SummaryRequestError && error.transient && error.failureKind === "upstream-stream-truncated") {
 		return "upstream-stream-truncated";
 	}
 	return undefined;
@@ -67,8 +67,6 @@ export function createRequiredCompactionFallback(
 		origin: "required-compaction-recovery",
 		failureKind,
 		...(taskIntent ? { taskIntent } : {}),
-		...(metadata.todoSnapshot ? { todoSnapshot: metadata.todoSnapshot } : {}),
-		...(metadata.checkpoint ? { checkpoint: metadata.checkpoint } : {}),
 	};
 	const result: CompactionResult<DeterministicFallbackDetails> = {
 		summary,

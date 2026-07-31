@@ -19,8 +19,6 @@ import { SummaryRequestError } from "./speculative.ts";
 
 export function isTransientSummarizationFailure(error: unknown, message: string): boolean {
 	if (error instanceof StreamDurationBudgetError || error instanceof StreamIdleTimeoutError) return true;
-	if (error instanceof SummaryRequestError) {
-		return error.transient || /(?:^|[^A-Za-z0-9_])upstream_stream_truncated(?:[^A-Za-z0-9_]|$)/.test(message);
-	}
+	if (error instanceof SummaryRequestError) return error.transient;
 	return isRetryableErrorMessage(message);
 }

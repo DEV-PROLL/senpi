@@ -112,6 +112,10 @@ function isAbortedAssistantMessage(event: { message: AgentMessage }): boolean {
 	return event.message.role === "assistant" && "stopReason" in event.message && event.message.stopReason === "aborted";
 }
 
+function isRequiredCompactionFallbackReason(reason: SessionBeforeCompactEvent["reason"]): boolean {
+	return reason === "threshold" || reason === "overflow";
+}
+
 function recentCheckpoint(ctx: ExtensionContext): checkpointState.AgentCheckpoint | null {
 	const checkpoint = checkpointState.getLatestCheckpoint(ctx);
 	if (!checkpoint?.timestamp) return null;
@@ -461,18 +465,13 @@ export default function compactionExtension(
 			);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			const failureKind = classifyRequiredCompactionFallbackFailure(error, message);
-			if (event.reason !== "manual" && failureKind !== undefined && !event.signal.aborted) {
-				const metadata = pendingMetadata.get(event.requestId);
+			const failureKind = classifyRequiredCompactionFallbackFailure(error);
+			if (isRequiredCompactionFallbackReason(event.reason) && failureKind !== undefined && !event.signal.aborted) {
 				const fallback = createRequiredCompactionFallback(
 					snapshot.preparation,
 					snapshot.contextWindow,
 					failureKind,
-					{
-						taskIntent: resolveInheritedTaskIntent(event.branchEntries),
-						todoSnapshot: metadata?.todoSnapshot,
-						checkpoint: metadata?.checkpoint,
-					},
+					{ taskIntent: resolveInheritedTaskIntent(event.branchEntries) },
 					event.branchEntries,
 				);
 				if (fallback) return { compaction: fallback };

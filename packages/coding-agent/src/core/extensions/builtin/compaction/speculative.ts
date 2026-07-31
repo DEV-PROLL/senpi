@@ -101,14 +101,25 @@ function approxTokens(text: string): number {
  * text happens to look retryable must still surface loudly; the message
  * string alone cannot encode that.
  */
+export type SummaryRequestFailureKind = "upstream-stream-truncated";
+
 export class SummaryRequestError extends Error {
 	readonly transient: boolean;
+	readonly failureKind?: SummaryRequestFailureKind;
 
-	constructor(message: string, transient: boolean) {
+	constructor(message: string, transient: boolean, failureKind?: SummaryRequestFailureKind) {
 		super(message);
 		this.name = "SummaryRequestError";
 		this.transient = transient;
+		this.failureKind = failureKind;
 	}
+}
+
+const UPSTREAM_STREAM_TRUNCATED_PATTERN = /(?:^|[^A-Za-z0-9_])upstream_stream_truncated(?:[^A-Za-z0-9_]|$)/;
+
+function summaryRequestFailureKind(response: AssistantMessage): SummaryRequestFailureKind | undefined {
+	if (response.stopDetails?.type === "refusal" || response.stopDetails?.type === "sensitive") return undefined;
+	return UPSTREAM_STREAM_TRUNCATED_PATTERN.test(response.errorMessage ?? "") ? "upstream-stream-truncated" : undefined;
 }
 
 export class SummaryGenerationError extends Error {
@@ -552,10 +563,14 @@ export async function runExtensionCompaction(
 
 		if (isAssistantMessage(response) && response.stopReason === "error") {
 			// Surface the real provider failure instead of silently degrading
-			// into a generic "Compaction cancelled".
+			// into a generic "Compaction cancelled". Preserve the structured
+			// truncation class here so downstream recovery never trusts arbitrary
+			// thrown error text as authorization for destructive context reduction.
+			const failureKind = summaryRequestFailureKind(response);
 			throw new SummaryRequestError(
 				response.errorMessage || "Compaction summary request failed",
-				isRetryableAssistantError(response),
+				failureKind !== undefined || isRetryableAssistantError(response),
+				failureKind,
 			);
 		}
 
