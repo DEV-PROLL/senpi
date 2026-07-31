@@ -1,5 +1,17 @@
 # Builtin compaction extension changes
 
+## Deterministic required-compaction recovery (2026-07-31)
+
+- Required threshold/overflow recovery may synthesize one local checkpoint after a summarization watchdog or exact `upstream_stream_truncated` failure, without issuing another provider request.
+- Recovery is accepted only with a real non-empty retained boundary whose fully reconstructed context fits `contextWindow - reserveTokens`, including the exact cap boundary. An absent or unfit suffix cancels without appending a compaction entry or dropping the latest request.
+- The checkpoint carries parsed or inherited task intent, todo and agent checkpoint metadata, and a UTF-8-safe bounded prior summary. Manual, aborted, and unrelated failures remain fail-closed.
+- Local summaries now persist parsed task intent and inherit it through subsequent local compactions while ignoring remote checkpoint metadata.
+- Coverage: `test/compaction/required-compaction-deterministic-fallback.test.ts`, `test/compaction/task-intent-anchor.test.ts`, and the existing blocking/runtime-provider suites.
+
+### Expected merge conflict zones
+
+- MEDIUM: `index.ts` around `session_before_compact`; `speculative.ts` snapshot and summary result assembly.
+
 ## Runtime provider dispatch for summarization (2026-07-31)
 
 ### What changed

@@ -24,6 +24,10 @@ import {
 	RECOVERY_INSTRUCTIONS,
 	resetOnSessionCompact,
 } from "./degradation-monitor.ts";
+import {
+	classifyRequiredCompactionFallbackFailure,
+	createRequiredCompactionFallback,
+} from "./deterministic-fallback.ts";
 import * as idle from "./idle.ts";
 import { type CompactionLogger, createCompactionLogger } from "./log.ts";
 import {
@@ -54,6 +58,7 @@ import {
 	SummaryGenerationError,
 } from "./speculative.ts";
 import { type CompactionExtensionState, createInitialState, resetTurnCounter } from "./state.ts";
+import { resolveInheritedTaskIntent } from "./task-intent.ts";
 import * as todoBridge from "./todo-bridge.ts";
 import { isTransientSummarizationFailure } from "./transient-failure.ts";
 import { isIneffectiveCompaction } from "./yield.ts";
@@ -442,6 +447,7 @@ export default function compactionExtension(
 			model,
 			contextWindow: ctx.getContextUsage()?.contextWindow ?? model.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
 			preparation: event.preparation,
+			branchEntries: event.branchEntries,
 			promptVariant: getPromptVariant(event),
 			origin: "core-route" as const,
 			customInstructions: event.customInstructions,
@@ -454,11 +460,32 @@ export default function compactionExtension(
 				ctx.updateCompaction?.({ reason: event.reason, signal: event.signal, delta }),
 			);
 		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const failureKind = classifyRequiredCompactionFallbackFailure(error, message);
+			if (event.reason !== "manual" && failureKind !== undefined && !event.signal.aborted) {
+				const metadata = pendingMetadata.get(event.requestId);
+				const fallback = createRequiredCompactionFallback(
+					snapshot.preparation,
+					snapshot.contextWindow,
+					failureKind,
+					{
+						taskIntent: resolveInheritedTaskIntent(event.branchEntries),
+						todoSnapshot: metadata?.todoSnapshot,
+						checkpoint: metadata?.checkpoint,
+					},
+					event.branchEntries,
+				);
+				if (fallback) return { compaction: fallback };
+				pendingMetadata.delete(event.requestId);
+				return {
+					cancel: true,
+					reason: "deterministic compaction fallback cannot retain the prepared suffix",
+				};
+			}
 			pendingMetadata.delete(event.requestId);
 			if (error instanceof SummaryGenerationError) {
 				return { cancel: true, reason: error.message };
 			}
-			const message = error instanceof Error ? error.message : String(error);
 			return { cancel: true, reason: `compaction generator failed: ${message}` };
 		}
 		if (!compaction) {
