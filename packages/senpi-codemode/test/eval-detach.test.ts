@@ -408,7 +408,9 @@ describe("eval detached cell status emissions", () => {
 		await vi.advanceTimersByTimeAsync(1_000);
 		await execution;
 
-		expect(status.emissions).toEqual([[{ cellId: "untitled-cell", language: "js", startedAtMs: expect.any(Number) }]]);
+		expect(status.emissions).toEqual([
+			[{ cellId: "untitled-cell", language: "js", startedAtMs: expect.any(Number) }],
+		]);
 		await manager.stop("untitled-cell");
 		await manager.flushNotifications();
 	});

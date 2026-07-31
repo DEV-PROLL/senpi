@@ -100,13 +100,7 @@ describe("required compaction deterministic fallback", () => {
 				firstKeptEntryId: branchEntries.at(-1)?.id ?? "",
 			};
 			expect(
-				createRequiredCompactionFallback(
-					preparation,
-					10_000,
-					"upstream-stream-truncated",
-					{},
-					branchEntries,
-				),
+				createRequiredCompactionFallback(preparation, 10_000, "upstream-stream-truncated", {}, branchEntries),
 			).toBeDefined();
 
 			const result = await handlers.sessionBeforeCompact(
@@ -124,7 +118,8 @@ describe("required compaction deterministic fallback", () => {
 
 			expect(result).toMatchObject({
 				cancel: true,
-				reason: "compaction generator failed: upstream_stream_truncated: Responses stream ended before a terminal event",
+				reason:
+					"compaction generator failed: upstream_stream_truncated: Responses stream ended before a terminal event",
 			});
 			expect(result).not.toHaveProperty("compaction");
 			expect(harness.registration.getCallLog()).toHaveLength(1);

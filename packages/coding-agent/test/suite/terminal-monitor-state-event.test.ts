@@ -38,10 +38,10 @@ describe("terminal monitor liveness event", () => {
 								typeof data.activeCount === "number"
 							) {
 								const monitors =
-							"monitors" in data && Array.isArray(data.monitors)
-								? (data.monitors as MonitorStateEvent["monitors"])
-								: undefined;
-						states.push({ activeCount: data.activeCount, ...(monitors === undefined ? {} : { monitors }) });
+									"monitors" in data && Array.isArray(data.monitors)
+										? (data.monitors as MonitorStateEvent["monitors"])
+										: undefined;
+								states.push({ activeCount: data.activeCount, ...(monitors === undefined ? {} : { monitors }) });
 							}
 						});
 					});

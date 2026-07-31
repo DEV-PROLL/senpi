@@ -61,7 +61,10 @@ export function evalCellElapsedSeconds(entries: readonly EvalDetachedCellStatusE
 }
 
 /** Brief footer text for the cells still running detached; undefined clears the status. */
-export function formatEvalCellStatus(entries: readonly EvalDetachedCellStatusEntry[], nowMs: number): string | undefined {
+export function formatEvalCellStatus(
+	entries: readonly EvalDetachedCellStatusEntry[],
+	nowMs: number,
+): string | undefined {
 	const first = entries[0];
 	if (first === undefined) return undefined;
 	const suffix = ` (${formatElapsedSeconds(evalCellElapsedSeconds(entries, nowMs))})`;

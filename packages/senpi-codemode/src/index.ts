@@ -123,7 +123,11 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			listTools: () => pi.getAllTools(),
 			complete,
 			settings: defaultCodemodeSettings,
-			cellManager: new EvalDetachedCellManager({ notifier, onStatusChange: showDetachedCells, ...(options.now === undefined ? {} : { now: options.now }) }),
+			cellManager: new EvalDetachedCellManager({
+				notifier,
+				onStatusChange: showDetachedCells,
+				...(options.now === undefined ? {} : { now: options.now }),
+			}),
 			executionTracker: manager,
 			renderers,
 			hostLine: hostLine(),
