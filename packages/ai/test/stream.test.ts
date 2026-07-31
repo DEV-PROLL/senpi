@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "child_process";
+import { type ChildProcess, execSync, spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { Type } from "typebox";
