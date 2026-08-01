@@ -92,7 +92,12 @@ try {
 				} catch {
 					body = { messages: [] };
 				}
-				providerRequests.push({ bytes: raw.length, messages: Array.isArray(body.messages) ? body.messages.length : 0 });
+				// Buffer.byteLength, not raw.length: the column is labeled bytes, and
+				// raw.length counts UTF-16 code units, not HTTP body bytes.
+				providerRequests.push({
+					bytes: Buffer.byteLength(raw, "utf8"),
+					messages: Array.isArray(body.messages) ? body.messages.length : 0,
+				});
 				response.writeHead(200, {
 					"content-type": "text/event-stream",
 					"cache-control": "no-cache",
@@ -234,10 +239,18 @@ if (infrastructureFailure) {
 process.stdout.write(formatTurnTable(turns));
 const lineages = new Set(creations.map((record) => record.sessionId ?? "none"));
 const flattenTurns = turns.filter((turn) => turn.kind === "flatten").length;
+// Gate the ROUTE, not just the payload shape: a bootstrap payload on a
+// non-resident (flatten-stream) query must not masquerade as resident-path.
+const nonResidentTurns = turns.filter((turn) => turn.path !== "resident-registry").length;
 const passed =
-	!fatal && turns.length === TURNS && creations.length === 1 && lineages.size === 1 && flattenTurns === 0;
+	!fatal &&
+	turns.length === TURNS &&
+	creations.length === 1 &&
+	lineages.size === 1 &&
+	flattenTurns === 0 &&
+	nonResidentTurns === 0;
 if (fatal) process.stderr.write(`PROBE ERROR: ${safeDetail(fatal.stack ?? fatal.message)}\n`);
 process.stdout.write(
-	`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} lineages=${lineages.size} flatten_turns=${flattenTurns}\n`,
+	`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} lineages=${lineages.size} flatten_turns=${flattenTurns} non_resident=${nonResidentTurns}\n`,
 );
 process.exit(BASELINE ? 0 : passed ? 0 : 1);

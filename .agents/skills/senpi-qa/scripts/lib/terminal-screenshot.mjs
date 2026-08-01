@@ -109,8 +109,8 @@ async function connectCdp(url) {
 			socket.addEventListener("open", resolve, { once: true });
 			socket.addEventListener("error", reject, { once: true });
 		}),
-		10_000,
 		"Chrome DevTools socket",
+		10_000,
 	);
 	let sequence = 0;
 	const pending = new Map();
@@ -153,18 +153,3 @@ async function stopProcess(child) {
 	}
 }
 
-function withTimeout(promise, timeoutMs, label) {
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), timeoutMs);
-		promise.then(
-			(value) => {
-				clearTimeout(timer);
-				resolve(value);
-			},
-			(error) => {
-				clearTimeout(timer);
-				reject(error);
-			},
-		);
-	});
-}

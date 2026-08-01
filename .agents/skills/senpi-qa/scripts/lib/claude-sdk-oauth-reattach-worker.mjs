@@ -50,7 +50,11 @@ async function staticRead(sessionId) {
  */
 export async function runTurns(request) {
 	const result = { sessionId: null, coherent: false, usage: undefined };
+	// An absent configDir must mean the SDK DEFAULT root: an operator-set
+	// CLAUDE_CONFIG_DIR inherited from the spike's shell would silently
+	// re-address the "default-root" reads and corrupt the config-root verdict.
 	if (request.configDir) process.env.CLAUDE_CONFIG_DIR = request.configDir;
+	else delete process.env.CLAUDE_CONFIG_DIR;
 	if (request.staticRead) result.staticFound = await staticRead(request.staticRead);
 	// A static-only probe answers "is this session visible under this config
 	// root?" without spawning Claude Code or spending quota at all.

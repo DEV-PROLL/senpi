@@ -150,7 +150,7 @@ async function consume() {
 			recordModel(message);
 			if (message.error) state.failure ??= "assistant_error";
 			if (message.message?.model === "<synthetic>") state.failure ??= "synthetic_assistant";
-			if (state.turn === 3) {
+			if (state.turn === 3 && !state.interruptIssued) {
 				// The turn finalized without a single streamed delta to interrupt
 				// from. Interrupting now would cancel an already-complete turn, and
 				// an accepted receipt would be a false positive — the spike proved
@@ -158,6 +158,10 @@ async function consume() {
 				state.failure ??= "interrupt_delta_absent";
 				break;
 			}
+			// When the interrupt WAS issued, the residual turn-3 assistant message
+			// is expected: it is recorded as turn 3 above and skipped here — never
+			// fed through the turn-4 coherence scan below.
+			if (state.turn === 3) continue;
 			if (state.turn === 4 && assistantText(message).includes(MEMORY_TOKEN)) state.coherent = true;
 		}
 		if (message.type === "auth_status" && message.error) state.failure ??= "authentication_failed";

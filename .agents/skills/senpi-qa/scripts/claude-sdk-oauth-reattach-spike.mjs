@@ -23,10 +23,12 @@
  *     node .agents/skills/senpi-qa/scripts/claude-sdk-oauth-reattach-spike.mjs
  *
  * Outcomes (final line):
- *   exit 0 "ACCEPTED resume=<ok> cache_read_ratio=<r> cross_account=<ok|denied|unseeded> config_root=<env-honored|default-only>"
+ *   exit 0 "ACCEPTED resume=<ok> cache_read_ratio=<r> cross_account=<ok|denied|incoherent|unseeded> config_root=<env-honored|default-only>"
  *   exit 2 "REJECTED signal=<sanitized>"   (e.g. resume_not_found)
  * cross_account is `unseeded` — never `ok` — when no distinct second account slot
- * (claude-sdk-oauth-spike-b) was seeded, so an untested arm cannot read as proven.
+ * (claude-sdk-oauth-spike-b) was seeded, so an untested arm cannot read as proven;
+ * it is `denied` only when the resume itself errors — a model recall miss on a
+ * successful resume is `incoherent`, never folded into the security verdict.
  * Never prints token material.
  */
 import { execFileSync, fork } from "node:child_process";
@@ -69,6 +71,27 @@ if (process.argv.includes(WORKER_FLAG)) {
 	const secondary = loadCredentialStrict(sandbox, "claude-sdk-oauth-spike-b");
 	const token = `REATTACH_${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
 
+	const activeChildren = new Set();
+	const scopedRoots = new Set();
+	// Signal-aware cleanup: an interrupted spike must take every live worker
+	// (and its Claude Code grandchild) down and remove temp config roots BEFORE
+	// exiting — a detached child outliving the parent keeps burning quota.
+	const cleanupRuntime = () => {
+		for (const child of activeChildren) terminateChild(child);
+		for (const root of scopedRoots) {
+			try {
+				rmSync(root, { recursive: true, force: true });
+			} catch {}
+		}
+	};
+	process.once("exit", cleanupRuntime);
+	for (const signal of ["SIGINT", "SIGTERM"]) {
+		process.once(signal, () => {
+			cleanupRuntime();
+			reject(`interrupted_${signal.toLowerCase()}`);
+		});
+	}
+
 	const runChild = (request) => {
 		let child;
 		const run = new Promise((resolve, rejectRun) => {
@@ -76,6 +99,7 @@ if (process.argv.includes(WORKER_FLAG)) {
 			// take its Claude Code grandchild down with it instead of orphaning
 			// the grandchild to keep burning subscription quota.
 			child = fork(SELF, [WORKER_FLAG], { silent: true, detached: process.platform !== "win32" });
+			activeChildren.add(child);
 			child.send(request);
 			let received;
 			child.once("message", (message) => {
@@ -86,11 +110,14 @@ if (process.argv.includes(WORKER_FLAG)) {
 				received ? resolve(received) : rejectRun(new Error(`worker_${signal ?? code ?? "exit"}`)),
 			);
 		});
-		return withTimeout(run, "worker", 240_000).finally(() => terminateChild(child));
+		return withTimeout(run, "worker", 240_000).finally(() => {
+			activeChildren.delete(child);
+			terminateChild(child);
+		});
 	};
 
 	try {
-		await main(runChild, primary, secondary, token);
+		await main(runChild, primary, secondary, token, scopedRoots);
 	} catch (error) {
 		// Spawn/IPC failures and worker timeouts must surface through the same
 		// sanitized REJECTED contract as in-spike failures, never a raw exit 1.
@@ -116,7 +143,7 @@ function terminateChild(child) {
 	}
 }
 
-async function main(runChild, primary, secondary, token) {
+async function main(runChild, primary, secondary, token, scopedRoots) {
 	// (a) seed the session in a child process, then let that process die.
 	const seeded = await runChild({
 		access: primary.credential.access,
@@ -153,17 +180,16 @@ async function main(runChild, primary, secondary, token) {
 			prompts: ["Repeat the token I gave you at the start, prefixed with RECALL."],
 			expectToken: token,
 		});
-		crossAccount = crossed.error || !crossed.coherent ? "denied" : "ok";
+		// `denied` is the security verdict and requires the resume itself to fail;
+		// a successful resume whose model simply misses the recall is inconclusive
+		// evidence about cross-account addressing, not a denial.
+		crossAccount = crossed.error ? "denied" : crossed.coherent ? "ok" : "incoherent";
 	}
 
 	// (c) config-root addressing: seed INTO the scoped root, then check both
 	// roots. The default-root read is static-only (no Claude Code spawn).
 	const scopedRoot = mkdtempSync(join(tmpdir(), "claude-sdk-oauth-config-root-"));
-	process.once("exit", () => {
-		try {
-			rmSync(scopedRoot, { recursive: true, force: true });
-		} catch {}
-	});
+	scopedRoots.add(scopedRoot);
 	const scopedSeed = await runChild({
 		access: primary.credential.access,
 		configDir: scopedRoot,
@@ -185,7 +211,11 @@ async function main(runChild, primary, secondary, token) {
 		prompts: ["Repeat the token I gave you at the start, prefixed with RECALL."],
 		expectToken: token,
 	});
-	const scopedFound = !scoped.error && scoped.staticFound !== false && scoped.coherent === true;
+	// staticFound is the direct visibility measurement; a resume that executes
+	// without error already proves the session was addressable. A model recall
+	// miss would be a coherence observation, not a config-root verdict, so it
+	// stays out of this gate.
+	const scopedFound = !scoped.error && scoped.staticFound === true;
 	let configRoot;
 	if (defaultRead.staticFound === true) {
 		// Visible under the default root: the SDK ignored CLAUDE_CONFIG_DIR.

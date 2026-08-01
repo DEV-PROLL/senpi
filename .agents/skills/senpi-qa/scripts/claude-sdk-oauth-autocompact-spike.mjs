@@ -112,7 +112,6 @@ async function runArm({ settings, probeManual }) {
 		sessionIds: new Set(),
 		boundaries: [],
 		autoBoundaryTurn: null,
-		manualBoundary: false,
 		manualCompactSent: false,
 		coherent: false,
 		failure: null,
@@ -136,8 +135,7 @@ async function runArm({ settings, probeManual }) {
 					postTokens: message.compact_metadata?.post_tokens ?? null,
 					phase: state.phase,
 				});
-				if (state.phase === "manual") state.manualBoundary = true;
-				else state.autoBoundaryTurn ??= state.turn;
+				if (state.phase !== "manual") state.autoBoundaryTurn ??= state.turn;
 			}
 			if (message.type === "assistant") {
 				if (message.error) state.failure ??= "assistant_error";
@@ -187,13 +185,20 @@ const armB = await runArm({
 	probeManual: false,
 });
 
-const autoA = armA.boundaries.some((boundary) => boundary.phase !== "manual");
-const autoB = armB.boundaries.some((boundary) => boundary.phase !== "manual");
+// The verdict reads the SDK-provided compact_metadata.trigger, not the spike's
+// own phase bookkeeping — a boundary's origin (native auto vs /compact) is what
+// the arms measure. `unknown` (metadata absent) falls back to the phase.
+const isAutoBoundary = (boundary) =>
+	boundary.trigger === "unknown" ? boundary.phase !== "manual" : boundary.trigger === "auto";
+const isManualBoundary = (boundary) =>
+	boundary.trigger === "unknown" ? boundary.phase === "manual" : boundary.trigger === "manual";
+const autoA = armA.boundaries.some(isAutoBoundary);
+const autoB = armB.boundaries.some(isAutoBoundary);
 // arm B (no enabled key) firing proves default-on; only arm A firing proves the
 // explicit autoCompactEnabled key is required; neither means absent.
 const autocompact = autoB ? "default-on" : autoA ? "settings:autoCompactEnabled" : "absent";
 const boundary = autoA || autoB ? "received" : "absent";
-const manual = armA.manualBoundary ? "slash-ok" : "absent";
+const manual = armA.boundaries.some(isManualBoundary) ? "slash-ok" : "absent";
 process.stdout.write(
 	`armA boundaries=${JSON.stringify(armA.boundaries)} turns=${armA.turn} coherent=${armA.coherent}\n`,
 );

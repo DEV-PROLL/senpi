@@ -35,7 +35,13 @@ export function requireSandbox() {
 
 function readAuthFile(sandbox) {
 	try {
-		return { stored: JSON.parse(readFileSync(join(sandbox, "auth.json"), "utf8")) };
+		const stored = JSON.parse(readFileSync(join(sandbox, "auth.json"), "utf8"));
+		// Valid JSON is not enough: a null/array/primitive auth.json must produce
+		// the documented credential rejection, not a raw TypeError on indexing.
+		if (typeof stored !== "object" || stored === null || Array.isArray(stored)) {
+			return { error: "credential_unreadable" };
+		}
+		return { stored };
 	} catch {
 		return { error: "credential_unreadable" };
 	}
@@ -107,6 +113,10 @@ export function stripCredentialEnvironment(env) {
 /** Child env with every ambient credential channel removed and the spike token pinned. */
 export function managedEnvironment(access, extra = {}) {
 	const env = stripCredentialEnvironment({ ...process.env });
+	// CLAUDE_CONFIG_DIR is a config-root channel, not a credential, but an
+	// operator-set value would silently re-address every grandchild, so it is
+	// cleared here too; callers re-add a scoped root deliberately via `extra`.
+	delete env.CLAUDE_CONFIG_DIR;
 	return { ...env, CLAUDE_CODE_OAUTH_TOKEN: access, ...extra };
 }
 
@@ -122,6 +132,9 @@ export function controlledInput(initialMessage) {
 	let closed = false;
 	return {
 		push(message) {
+			// A closed input is terminal: late pushes (timeout/cleanup races) must
+			// not be yielded to the query after close().
+			if (closed) return;
 			const waiter = waiters.shift();
 			if (waiter) waiter({ value: message, done: false });
 			else pending.push(message);
