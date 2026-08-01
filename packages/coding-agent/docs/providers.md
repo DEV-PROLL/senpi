@@ -66,7 +66,10 @@ The `claude-sdk-oauth` provider routes LLM calls through the official [Claude Ag
 Every main turn records one continuity decision. Healthy turns are silent in the transcript; degraded turns print a muted one-line notice. To watch the decisions directly, tail the session log and filter on the event prefix:
 
 ```bash
+# Global agent dir (default):
 tail -f "${SENPI_CODING_AGENT_DIR:-$HOME/.senpi/agent}/logs/session.log" | rg claude_sdk_oauth_session_
+# Project-local agent dir (when the session uses one — getAgentDir prefers it):
+# tail -f .senpi/agent/logs/session.log | rg claude_sdk_oauth_session_
 ```
 
 Each line is JSON with `kind` (`bootstrap`, `delta`, `reattach`, `fork`, `flatten`, `disabled`), a sanitized `reason`, and `count` (messages submitted this turn). A healthy conversation shows one `bootstrap` followed by `delta` lines; repeated `flatten` lines mean the lane is resending the whole conversation and losing prompt-cache hits. `SENPI_SESSION_DEBUG=1` mirrors the same lines to stderr.

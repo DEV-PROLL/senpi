@@ -4325,6 +4325,11 @@ export class InteractiveMode {
 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
 	): void {
 		this.clearPendingTools();
+		// The rebuilt transcript re-derives continuity notices from persisted
+		// messages, so the tracker's suppression state must not survive the
+		// rebuild (or a session switch) — otherwise the first disabled notice
+		// would silently disappear from the rebuilt transcript.
+		this.continuityNotices.reset();
 		const renderedPendingTools = new Map<string, ToolExecutionComponent>();
 		// Cache-miss notices are not persisted; re-derive them from the full entry
 		// list and re-inject them after the assistant messages that paid for them.
@@ -4371,6 +4376,10 @@ export class InteractiveMode {
 					const miss = cacheMisses.get(message);
 					if (miss) this.addCacheMissNotice(miss);
 				}
+				// Continuity notices are not persisted either; re-inject them while
+				// rendering persisted assistant messages the same way the live
+				// streaming path does.
+				this.addContinuityNotice(message);
 			} else if (message.role === "toolResult") {
 				// Match tool results to pending tool components
 				const component = renderedPendingTools.get(message.toolCallId);
