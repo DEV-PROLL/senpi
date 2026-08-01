@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import type { SDKMessage, SDKUserMessage } from "./sdk-boundary.ts";
 import { evaluateAbortOutcome } from "./session-reattach.ts";
 import {
@@ -8,12 +7,14 @@ import {
 } from "./session-registry.ts";
 import {
 	transitionToIdleSynced,
-	transitionToTurnClaimed,
 	transitionToTurnResultSeen,
 	transitionToTurnSent,
 	transitionToTurnStreaming,
 	transitionToTurnWaiting,
 } from "./session-registry-state.ts";
+import { bufferBeforeReplay, claimTurn, deliver, isReplayFor, resultMatchesTurn } from "./session-turn-claim.ts";
+import type { ActiveTurn, PreReplayBufferLimits } from "./session-turn-types.ts";
+import { SessionTurnAttributionError } from "./session-turn-types.ts";
 
 export const DEFAULT_PRE_REPLAY_MAX_MESSAGES = 64;
 export const DEFAULT_PRE_REPLAY_MAX_BYTES = 256 * 1024;
@@ -32,29 +33,6 @@ export interface SessionTurnResult {
 	aborted: boolean;
 }
 
-export interface PreReplayBufferLimits {
-	maxMessages: number;
-	maxBytes: number;
-}
-
-interface ActiveTurn {
-	uuid: string;
-	generation: number;
-	messages: SDKMessage[];
-	preReplay: SDKMessage[];
-	preReplayBytes: number;
-	claimed: boolean;
-	aborted: boolean;
-	interruptReceipt?: unknown;
-	onMessage?: (message: SDKMessage) => void;
-	signal?: AbortSignal;
-	onAbort: () => void;
-	cancelAbort?: () => void;
-	resolve: (result: SessionTurnResult) => void;
-	reject: (error: Error) => void;
-	limits: PreReplayBufferLimits;
-}
-
 export class ConcurrentSessionTurnAdmissionError extends Error {
 	readonly code = "claude_sdk_oauth_concurrent_turn_admission";
 
@@ -64,44 +42,8 @@ export class ConcurrentSessionTurnAdmissionError extends Error {
 	}
 }
 
-export class SessionTurnAttributionError extends Error {
-	readonly code = "claude_sdk_oauth_turn_attribution";
-
-	constructor(message: string) {
-		super(message);
-		this.name = "SessionTurnAttributionError";
-	}
-}
-
 function currentTurn(entry: ClaudeSdkOauthSessionEntry): ActiveTurn | null {
 	return entry.activeTurn as ActiveTurn | null;
-}
-
-function isReplayFor(message: SDKMessage, uuid: string): boolean {
-	return message.type === "user" && "isReplay" in message && message.isReplay === true && message.uuid === uuid;
-}
-
-function isAutonomousResult(message: Extract<SDKMessage, { type: "result" }>): boolean {
-	if (message.origin && message.origin.kind !== "human") return true;
-	const wire = message as SDKMessage & {
-		parent_tool_use_id?: unknown;
-		subagent_type?: unknown;
-		isSynthetic?: unknown;
-	};
-	return wire.parent_tool_use_id != null || wire.subagent_type != null || wire.isSynthetic === true;
-}
-
-function resultMatchesTurn(message: Extract<SDKMessage, { type: "result" }>, turn: ActiveTurn): boolean {
-	if ("user_message_uuid" in message && message.user_message_uuid !== undefined) {
-		return message.user_message_uuid === turn.uuid;
-	}
-	return turn.claimed && !isAutonomousResult(message);
-}
-
-function deliver(entry: ClaudeSdkOauthSessionEntry, turn: ActiveTurn, message: SDKMessage): void {
-	if (entry.state === "TURN_CLAIMED") transitionToTurnStreaming(entry);
-	turn.messages.push(message);
-	turn.onMessage?.(message);
 }
 
 function scheduleAbort(callback: () => void, delayMs: number): () => void {
@@ -137,28 +79,6 @@ function abortTurn(
 	if (currentTurn(entry) === turn && registry.isCurrentGeneration(entry.senpiSessionId, turn.generation)) {
 		failTurn(registry, entry, error);
 	}
-}
-
-function bufferBeforeReplay(
-	registry: ClaudeSdkOauthSessionRegistry,
-	entry: ClaudeSdkOauthSessionEntry,
-	turn: ActiveTurn,
-	message: SDKMessage,
-): void {
-	turn.preReplay.push(message);
-	turn.preReplayBytes += Buffer.byteLength(JSON.stringify(message));
-	if (turn.preReplay.length > turn.limits.maxMessages || turn.preReplayBytes > turn.limits.maxBytes) {
-		throw new SessionTurnAttributionError("Claude SDK OAuth pre-replay buffer overflow");
-	}
-	if (!registry.isCurrentGeneration(entry.senpiSessionId, turn.generation)) turn.preReplay.length = 0;
-}
-
-function claimTurn(entry: ClaudeSdkOauthSessionEntry, turn: ActiveTurn): void {
-	turn.claimed = true;
-	transitionToTurnClaimed(entry);
-	for (const buffered of turn.preReplay) deliver(entry, turn, buffered);
-	turn.preReplay.length = 0;
-	turn.preReplayBytes = 0;
 }
 
 function finishTurn(
