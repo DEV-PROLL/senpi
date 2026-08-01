@@ -8,7 +8,7 @@ import {
 	isBoundAccountTokenExpiring,
 	SESSION_REGISTRY_IDLE_TTL_MS,
 } from "./session-registry.ts";
-import { mapPiToolNameToSdk } from "./tools.ts";
+import { HOST_TOOL_POLICY_FINGERPRINT, mapPiToolNameToSdk } from "./tools.ts";
 
 export type SentMessage = Extract<Message, { role: "user" | "toolResult" }>;
 
@@ -48,13 +48,16 @@ function stableValue(value: unknown, seen = new WeakSet<object>()): unknown {
 	if (value === null || typeof value !== "object") return value;
 	if (seen.has(value)) return "[circular]";
 	seen.add(value);
-	if (Array.isArray(value)) return value.map((item) => stableValue(item, seen));
-	return Object.fromEntries(
-		Object.entries(value as Record<string, unknown>)
-			.filter(([, item]) => item !== undefined)
-			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([key, item]) => [key, stableValue(item, seen)]),
-	);
+	const normalized = Array.isArray(value)
+		? value.map((item) => stableValue(item, seen))
+		: Object.fromEntries(
+				Object.entries(value as Record<string, unknown>)
+					.filter(([, item]) => item !== undefined)
+					.sort(([left], [right]) => left.localeCompare(right))
+					.map(([key, item]) => [key, stableValue(item, seen)]),
+			);
+	seen.delete(value);
+	return normalized;
 }
 
 function digest(value: unknown): string {
@@ -196,6 +199,19 @@ export function primeResumedEntry(
 	}
 }
 
+const GENERATED_DATE_LINE = /\nCurrent date: \d{4}-\d{2}-\d{2}(?=\nCurrent working directory: [^\n]*$)/;
+
+/**
+ * The generated date line advances at UTC midnight while the conversation is
+ * unchanged; hashing it verbatim retires a live session at midnight for no
+ * semantic reason. Only that exact terminal line is neutralized - cwd and every
+ * other prompt region stay fail-closed.
+ */
+function fingerprintSystemPrompt(systemPrompt: Options["systemPrompt"]): unknown {
+	if (typeof systemPrompt !== "string") return systemPrompt ?? null;
+	return systemPrompt.replace(GENERATED_DATE_LINE, "\nCurrent date: <session-date>");
+}
+
 export function configFingerprint(
 	options: Options,
 	context: Context,
@@ -203,7 +219,7 @@ export function configFingerprint(
 	accountName: string,
 ): SessionConfigFingerprint {
 	return {
-		systemPromptHash: digest(options.systemPrompt ?? null),
+		systemPromptHash: digest(fingerprintSystemPrompt(options.systemPrompt)),
 		toolsetHash: digest({
 			tools: options.tools ?? [],
 			reasoning: {
@@ -220,10 +236,11 @@ export function configFingerprint(
 			authLane,
 			accountName,
 			permissionMode: options.permissionMode,
-			canUseTool: options.canUseTool,
-			hooks: options.hooks,
+			hostToolPolicy: HOST_TOOL_POLICY_FINGERPRINT,
 			settingSources: options.settingSources,
 			extraArgs: options.extraArgs,
+			pathToClaudeCodeExecutable: options.pathToClaudeCodeExecutable,
+			includePartialMessages: options.includePartialMessages,
 		}),
 	};
 }

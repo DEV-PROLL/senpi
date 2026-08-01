@@ -10,6 +10,7 @@ import {
 	overrideSessionRegistryBoundary,
 	resetSessionRegistryBoundary,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
+import { decideNativeContinuity } from "../src/core/extensions/builtin/claude-sdk-oauth/session-continuity.ts";
 import { registerSessionRegistry } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-wiring.ts";
 import {
 	configFingerprint,
@@ -178,20 +179,13 @@ describe("Claude SDK OAuth session registry lifecycle wiring", () => {
 		expect(closes).toBe(1);
 	});
 
-	it("does not continue incrementally after an assistant-only context transformation", async () => {
+	it("forks instead of continuing after an assistant-only context transformation", async () => {
 		const extension = fakeExtension();
 		registerSessionRegistry(extension.api);
 		const entry = createEntry("assistant-transform");
 		const user1 = { role: "user" as const, content: "one", timestamp: 1 };
-		const user2 = { role: "user" as const, content: "two", timestamp: 3 };
 		const originalAssistant = assistant("the original full answer", 2);
 		recordSyncedStream(entry, hashes({ messages: [user1] }));
-		await emitOnce(
-			extension,
-			"message_start",
-			{ type: "message_start", message: originalAssistant },
-			entry.senpiSessionId,
-		);
 		await emitOnce(
 			extension,
 			"message_update",
@@ -201,35 +195,38 @@ describe("Claude SDK OAuth session registry lifecycle wiring", () => {
 		await emitOnce(
 			extension,
 			"message_end",
-			{ type: "message_end", message: originalAssistant },
+			{
+				type: "message_end",
+				message: { ...originalAssistant, content: [{ type: "text", text: "the truncated answer" }] },
+			},
 			entry.senpiSessionId,
 		);
 
-		const baseInput = {
-			entry,
-			accountName: "default",
-			modelId: "claude-test",
-			fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
-			tokenExpiring: false,
-		};
-		expect(
-			decideSessionSync({
-				...baseInput,
-				currentHashes: hashes({ messages: [user1, originalAssistant, user2] }),
-			}),
-		).toMatchObject({ kind: "incremental" });
-		expect(
-			decideSessionSync({
-				...baseInput,
-				currentHashes: hashes({
-					messages: [
-						user1,
-						{ ...originalAssistant, content: [{ type: "text", text: "the truncated answer" }] },
-						user2,
-					],
-				}),
-			}),
-		).toMatchObject({ kind: "cold-seed" });
+		expect(getSession("assistant-transform")).toMatchObject({ pendingForkReason: "assistant_rewritten" });
+
+		const decision = decideNativeContinuity({
+			entry: {
+				sdkSessionId: entry.sdkSessionId,
+				accountName: entry.accountName,
+				modelId: entry.modelId,
+				systemPromptHash: entry.systemPromptHash,
+				toolsetHash: entry.toolsetHash,
+				sentCount: entry.sentCount,
+				sentHashes: hashes({ messages: [user1] }),
+				lastAssistantUuid: "uuid-boundary",
+				assistantUuidByIndex: new Map([[1, "uuid-boundary"]]),
+				pendingForkReason: entry.pendingForkReason,
+			},
+			binding: undefined,
+			currentHashes: hashes({ messages: [user1] }),
+			accountName: entry.accountName,
+			modelId: entry.modelId,
+			fingerprint: { systemPromptHash: entry.systemPromptHash, toolsetHash: entry.toolsetHash },
+			transcriptAvailable: true,
+		});
+
+		expect(decision).toMatchObject({ kind: "fork", reason: "assistant_rewritten" });
+		expect(decision.kind).not.toBe("flatten");
 	});
 
 	it("does not continue incrementally after the reasoning configuration changes", () => {
@@ -252,24 +249,24 @@ describe("Claude SDK OAuth session registry lifecycle wiring", () => {
 		expect(decision).toMatchObject({ kind: "cold-seed" });
 	});
 
-	it("taints a compacted session idempotently", async () => {
+	it("records a compaction fork boundary idempotently", async () => {
 		const extension = fakeExtension();
 		registerSessionRegistry(extension.api);
 		createEntry("compact-session");
 
 		await emitTwice(extension, "session_compact", { type: "session_compact" }, "compact-session");
 
-		expect(getSession("compact-session")).toMatchObject({ state: "TAINTED", taintedReason: "compaction" });
+		expect(getSession("compact-session")).toMatchObject({ pendingForkReason: "compaction" });
 	});
 
-	it("taints a session before fork idempotently", async () => {
+	it("records a fork boundary before fork idempotently", async () => {
 		const extension = fakeExtension();
 		registerSessionRegistry(extension.api);
 		createEntry("fork-session");
 
 		await emitTwice(extension, "session_before_fork", { type: "session_before_fork" }, "fork-session");
 
-		expect(getSession("fork-session")).toMatchObject({ state: "TAINTED", taintedReason: "fork" });
+		expect(getSession("fork-session")).toMatchObject({ pendingForkReason: "fork" });
 	});
 
 	it("records tree branch boundaries without tainting", async () => {
@@ -333,7 +330,6 @@ describe("Claude SDK OAuth session registry lifecycle wiring", () => {
 		expect(extension.handlers.get("session_tree")).toHaveLength(1);
 		expect(extension.handlers.get("model_select")).toHaveLength(1);
 		expect(extension.handlers.get("thinking_level_select")).toHaveLength(1);
-		expect(extension.handlers.get("message_start")).toHaveLength(1);
 		expect(extension.handlers.get("message_update")).toHaveLength(1);
 		expect(extension.handlers.get("message_end")).toHaveLength(1);
 		expect(extension.handlers.get("session_extensions_removed")).toHaveLength(1);
