@@ -72,6 +72,8 @@ const state = {
 	boundaries: [],
 	autoBoundaryTurn: null,
 	manualBoundary: false,
+	/** Guards the manual arm to exactly one `/compact` send. */
+	manualCompactSent: false,
 	coherent: false,
 	failure: null,
 	turn: 0,
@@ -87,9 +89,17 @@ function nextAutoPrompt() {
 		state.phase = "recall";
 		return "Repeat the token I gave you at the very start, prefixed with RECALL.";
 	}
-	if (state.turn >= MAX_FILLER_TURNS) {
+	// Exactly ONE `/compact` may be sent: a second one would compact an
+	// already-compacted transcript and make the manual_compact observation
+	// unattributable to either send.
+	if (state.turn >= MAX_FILLER_TURNS && !state.manualCompactSent) {
 		state.phase = "manual";
+		state.manualCompactSent = true;
 		return "/compact";
+	}
+	if (state.manualCompactSent) {
+		state.phase = "recall";
+		return "Repeat the token I gave you at the very start, prefixed with RECALL.";
 	}
 	return FILLER;
 }
@@ -123,13 +133,8 @@ async function consume() {
 		}
 		state.turn += 1;
 		if (state.phase === "recall") break;
-		if (state.phase === "manual" && state.turn > MAX_FILLER_TURNS + 1) {
-			state.phase = "recall";
-			input.push(
-				userMessage("Repeat the token I gave you at the very start, prefixed with RECALL.", randomUUID()),
-			);
-			continue;
-		}
+		// nextAutoPrompt() owns the manual->recall transition, so the `/compact`
+		// send happens in exactly one place.
 		input.push(userMessage(nextAutoPrompt(), randomUUID()));
 	}
 	resolveDone();

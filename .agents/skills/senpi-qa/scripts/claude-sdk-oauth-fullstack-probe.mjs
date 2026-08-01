@@ -17,9 +17,11 @@
  *
  * Run with:
  *   node .agents/skills/senpi-qa/scripts/claude-sdk-oauth-fullstack-probe.mjs --baseline
+ *   node .agents/skills/senpi-qa/scripts/claude-sdk-oauth-fullstack-probe.mjs --matrix
  *
  * Modes:
  *   --baseline  always exits 0 — the per-turn table IS the deliverable
+ *   --matrix    the permanent continuity scenario matrix (every phase in ONE run)
  *   (default)   gate mode: VERDICT FAIL exits 1
  * Exit 2 is reserved for probe-infrastructure failures (e.g. loopback down).
  */
@@ -28,7 +30,9 @@ import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { Buffer } from "node:buffer";
 import { guardRealAuth, installCleanupHooks, makeSandbox, repoRoot, track } from "./lib/common.mjs";
+import { applyHermeticEnvironment, assertHermeticEnvironment } from "./lib/claude-sdk-oauth-hermetic-env.mjs";
 import {
 	classifyPayload,
 	formatTurnTable,
@@ -41,6 +45,7 @@ import {
 const ROOT = repoRoot();
 const INNER_FLAG = "SENPI_CLAUDE_SDK_FULLSTACK_PROBE_INNER";
 const BASELINE = process.argv.includes("--baseline");
+const MATRIX = process.argv.includes("--matrix");
 const TURNS = 6;
 const MODEL_ID = "claude-haiku-4-5";
 
@@ -58,6 +63,11 @@ if (process.env[INNER_FLAG] !== "1") {
 }
 
 installCleanupHooks();
+
+if (MATRIX) {
+	const { runContinuityMatrix } = await import("./lib/claude-sdk-oauth-matrix.mjs");
+	process.exit(await runContinuityMatrix({ gate: !BASELINE }));
+}
 
 const authGuard = guardRealAuth();
 const box = makeSandbox("claude-sdk-fullstack-probe");
@@ -91,7 +101,12 @@ try {
 				} catch {
 					body = { messages: [] };
 				}
-				providerRequests.push({ bytes: raw.length, messages: Array.isArray(body.messages) ? body.messages.length : 0 });
+				// Byte length, not code-unit length: a multibyte payload would otherwise
+				// under-report the bytes actually put on the wire.
+				providerRequests.push({
+					bytes: Buffer.byteLength(raw, "utf8"),
+					messages: Array.isArray(body.messages) ? body.messages.length : 0,
+				});
 				response.writeHead(200, {
 					"content-type": "text/event-stream",
 					"cache-control": "no-cache",
@@ -112,7 +127,9 @@ try {
 	const baseUrl = `http://127.0.0.1:${address.port}`;
 
 	seedProbeAgentDir(box.agentDir);
-	Object.assign(process.env, {
+	// The ambient auth lane forwards this process's environment to the Claude Code
+	// subprocess, so inherited credentials/proxies are scrubbed before pinning.
+	applyHermeticEnvironment(process.env, {
 		HOME: box.dir,
 		USERPROFILE: box.dir,
 		TMPDIR: box.dir,
@@ -129,6 +146,7 @@ try {
 		NO_PROXY: "127.0.0.1,localhost",
 		no_proxy: "127.0.0.1,localhost",
 	});
+	assertHermeticEnvironment(process.env, baseUrl);
 
 	const sourceRoot = join(ROOT, "packages", "coding-agent", "src");
 	const boundaryModule = await import(

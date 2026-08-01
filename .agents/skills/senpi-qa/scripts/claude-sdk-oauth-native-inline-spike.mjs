@@ -7,8 +7,11 @@
  *   turn 1  normal exchange, records the system/init session_id + capabilities
  *   setModel(<other claude model>) between turns
  *   turn 2  asserts the SAME session_id and that the response model changed
- *   turn 3  interrupted mid-flight; the interrupt receipt shape is recorded
- *           (still_queued present => interrupt_receipt_v1, undefined => legacy)
+ *   turn 3  interrupted mid-flight — the interrupt is issued from the FIRST
+ *           streamed content delta, while the model is still producing output,
+ *           so the spike actually exercises interruption instead of cancelling
+ *           an already-finished turn; the receipt shape is recorded
+ *           (still_queued present => v1, undefined => legacy, throw => failed)
  *   turn 4  continuation on the SAME query; coherence is proven by the model
  *           recalling the turn-1 token
  *
@@ -19,6 +22,8 @@
  * Outcomes (final line):
  *   exit 0 "ACCEPTED setmodel=<ok|absent> interrupt_receipt=<v1|legacy> continue=<coherent|degraded>"
  *   exit 2 "REJECTED signal=<sanitized>"
+ * An interrupt that never happened REJECTS (interrupt_failed) instead of being
+ * reported as a legacy receipt — a spike that proved nothing must not ACCEPT.
  * Never prints token material.
  */
 import { randomUUID } from "node:crypto";
@@ -46,30 +51,42 @@ const FIRST_MODEL = "claude-haiku-4-5";
 const SECOND_MODEL = "claude-sonnet-4-5";
 const MEMORY_TOKEN = `SPIKE_${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
 
-const { query } = await importClaudeSdk();
-const input = controlledInput(
-	userMessage(`Remember this token for later: ${MEMORY_TOKEN}. Reply with exactly: ACK`, randomUUID()),
-);
-
-const stream = query({
-	prompt: input,
-	options: {
-		model: FIRST_MODEL,
-		tools: [],
-		permissionMode: "dontAsk",
-		settingSources: [],
-		includePartialMessages: true,
-		systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
-		pathToClaudeCodeExecutable: claudeExecutable(),
-		env: managedEnvironment(loaded.credential.access),
-	},
-});
+// Setup runs inside the guarded path: an SDK import, a missing Claude binary or
+// a query-construction failure must exit through the sanitized REJECTED
+// contract, never as a raw stack trace on exit 1.
+let query;
+let input;
+let stream;
+try {
+	({ query } = await importClaudeSdk());
+	input = controlledInput(
+		userMessage(`Remember this token for later: ${MEMORY_TOKEN}. Reply with exactly: ACK`, randomUUID()),
+	);
+	stream = query({
+		prompt: input,
+		options: {
+			model: FIRST_MODEL,
+			tools: [],
+			permissionMode: "dontAsk",
+			settingSources: [],
+			includePartialMessages: true,
+			systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
+			pathToClaudeCodeExecutable: claudeExecutable(),
+			env: managedEnvironment(loaded.credential.access),
+		},
+	});
+} catch (error) {
+	reject(error instanceof Error ? error.message : String(error));
+}
 
 const state = {
 	sessionIds: new Set(),
 	models: [],
-	interruptReceipt: "legacy",
+	// "pending" until an interrupt actually resolves; a throw records "failed" so
+	// a failed interrupt can never masquerade as a supported legacy receipt.
+	interruptReceipt: "pending",
 	interruptError: null,
+	interruptIssued: false,
 	setModelError: false,
 	pendingInterruptResult: false,
 	coherent: false,
@@ -88,11 +105,15 @@ function recordModel(message) {
 }
 
 async function interruptTurn3() {
+	if (state.interruptIssued) return;
+	state.interruptIssued = true;
 	try {
 		const receipt = await stream.interrupt();
 		state.interruptReceipt = receipt && Array.isArray(receipt.still_queued) ? "v1" : "legacy";
 	} catch (error) {
-		state.interruptReceipt = "legacy";
+		// Distinct from "legacy": interruption never happened, so nothing downstream
+		// can be trusted and the spike must REJECT rather than ACCEPT.
+		state.interruptReceipt = "failed";
 		state.interruptError = error instanceof Error ? error.message : String(error);
 	}
 	state.turn = 4;
@@ -110,11 +131,24 @@ async function consume() {
 		if (message.type === "system" && message.subtype === "init" && typeof message.session_id === "string") {
 			state.sessionIds.add(message.session_id);
 		}
+		// Interrupt from the first STREAMED content delta of turn 3: the model is
+		// mid-output there. Waiting for the finalized assistant message would cancel
+		// an already-complete turn and prove nothing about interruption.
+		if (
+			state.turn === 3 &&
+			message.type === "stream_event" &&
+			message.event?.type === "content_block_delta" &&
+			!state.interruptIssued
+		) {
+			await interruptTurn3();
+			continue;
+		}
 		if (message.type === "assistant") {
 			recordModel(message);
 			if (message.error) state.failure ??= "assistant_error";
 			if (message.message?.model === "<synthetic>") state.failure ??= "synthetic_assistant";
 			if (state.turn === 3) {
+				// The turn finalized without a single streamed delta to interrupt from.
 				await interruptTurn3();
 				continue;
 			}
@@ -155,8 +189,9 @@ async function consume() {
 
 let outcome = null;
 try {
-	void consume();
-	await withDeadline(done, "spike", 240_000);
+	// Await the consumer itself, not just `done`: a rejected consumer would
+	// otherwise be dropped and surface 240s later as a meaningless timeout.
+	await withDeadline(Promise.race([consume(), done]), "spike", 240_000);
 } catch (error) {
 	outcome = error instanceof Error ? error.message : String(error);
 } finally {
@@ -167,6 +202,8 @@ try {
 if (outcome) reject(outcome);
 if (state.failure) reject(state.failure);
 if (state.sessionIds.size !== 1) reject("session_lineage_split");
+if (state.interruptReceipt === "failed") reject("interrupt_failed");
+if (state.interruptReceipt === "pending") reject("interrupt_never_issued");
 
 const setModel =
 	state.setModelError || state.models[2] === undefined
