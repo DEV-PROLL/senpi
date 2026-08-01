@@ -83,14 +83,18 @@ function turnAttempt(
 				() => queue.close(),
 				(error: unknown) => queue.fail(error),
 			);
-			for await (const sdkMessage of queue) yield sdkMessage;
-			const turn = await completion;
-			if (!turn.aborted && successfulTurn(turn.messages)) {
-				recordSyncedStream(entry, hashes);
-				rememberBinding(bindingFromEntry(entry, hashes));
+			try {
+				for await (const sdkMessage of queue) yield sdkMessage;
+				const turn = await completion;
+				if (!turn.aborted && successfulTurn(turn.messages)) {
+					recordSyncedStream(entry, hashes);
+					rememberBinding(bindingFromEntry(entry, hashes));
+				}
+			} finally {
+				// Every admitted turn reports exactly one decision, including one that
+				// ended by abort or interrupt failure.
+				staged.emit();
 			}
-			// Retained by the auth-lane wrapper only once this generator completes.
-			staged.emit();
 		})(),
 		discard: (): void => {
 			if (isCurrentGeneration(entry.senpiSessionId, generation))

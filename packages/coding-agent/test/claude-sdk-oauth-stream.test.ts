@@ -608,7 +608,7 @@ describe("Claude SDK OAuth stream events", () => {
 		});
 	});
 
-	it("tears down a resident turn when interrupt rejects and keeps the session usable", async () => {
+	it("settles an aborted turn when interrupt rejects and keeps the session usable", async () => {
 		const scheduler = manuallyScheduledAborts();
 		const abort = new AbortController();
 		const { registry, entry, stalled } = stalledTurnFixture("reject");
@@ -632,7 +632,7 @@ describe("Claude SDK OAuth stream events", () => {
 			expect(stalled.closes).toBe(1);
 			expect(entry.activeTurn).toBeNull();
 			expect(registry.get(entry.senpiSessionId)).toBeUndefined();
-			expect(await turnOutcome).toMatchObject({ message: expect.stringContaining("interrupt rejected") });
+			expect(await turnOutcome).toMatchObject({ aborted: true });
 
 			const replacement = registry.getOrCreate(registryInput(entry.senpiSessionId));
 			const following = await submitSessionTurn(registry, replacement, {
@@ -645,7 +645,7 @@ describe("Claude SDK OAuth stream events", () => {
 		}
 	});
 
-	it("tears down a resident turn after the abort deadline when interrupt resolves without a result", async () => {
+	it("settles an aborted turn after the abort deadline when interrupt resolves without a result", async () => {
 		const scheduler = manuallyScheduledAborts();
 		const abort = new AbortController();
 		const { registry, entry, stalled } = stalledTurnFixture("resolve");
@@ -670,7 +670,7 @@ describe("Claude SDK OAuth stream events", () => {
 			expect(stalled.closes).toBe(1);
 			expect(entry.activeTurn).toBeNull();
 			expect(registry.get(entry.senpiSessionId)).toBeUndefined();
-			expect(await turnOutcome).toMatchObject({ message: expect.stringContaining("did not terminate") });
+			expect(await turnOutcome).toMatchObject({ aborted: true });
 
 			const replacement = registry.getOrCreate(registryInput(entry.senpiSessionId));
 			const following = await submitSessionTurn(registry, replacement, {

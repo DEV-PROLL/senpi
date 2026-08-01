@@ -67,15 +67,23 @@ function failTurn(registry: ClaudeSdkOauthSessionRegistry, entry: ClaudeSdkOauth
 	}
 }
 
+/**
+ * An interrupt that never produces a terminal result still ends the user's turn:
+ * settle it as aborted and close only the query, so the binding survives and the
+ * next turn reattaches. Rejecting here would drop the turn's continuity
+ * observation and hand the following turn two.
+ */
 function abortTurn(
 	registry: ClaudeSdkOauthSessionRegistry,
 	entry: ClaudeSdkOauthSessionEntry,
 	turn: ActiveTurn,
-	error: Error,
+	_error: Error,
 ): void {
-	if (currentTurn(entry) === turn && registry.isCurrentGeneration(entry.senpiSessionId, turn.generation)) {
-		failTurn(registry, entry, error);
-	}
+	if (currentTurn(entry) !== turn || !registry.isCurrentGeneration(entry.senpiSessionId, turn.generation)) return;
+	removeAbortListener(turn);
+	entry.activeTurn = null;
+	registry.closeSession(entry.senpiSessionId, "abort_uncertain");
+	turn.resolve({ uuid: turn.uuid, messages: turn.messages, aborted: true });
 }
 
 function finishTurn(
