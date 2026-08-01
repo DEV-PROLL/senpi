@@ -20,7 +20,9 @@ import type {
 	OverlayHandle,
 	OverlayOptions,
 	SlashCommand,
+	Terminal,
 } from "@earendil-works/pi-tui";
+import * as TuiLayouts from "@earendil-works/pi-tui";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -38,7 +40,9 @@ import {
 	setKeybindings,
 	Text,
 	TruncatedText,
-	TUI,
+	type TUI,
+	TuiAltScreen,
+	TuiMainScreen,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -74,6 +78,7 @@ import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
+	MarkdownTransformer,
 	ProjectTrustContext,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
@@ -94,6 +99,7 @@ import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { createSessionLogger, type SessionLogger } from "../../core/session-log.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
+import type { UiMode } from "../../core/settings-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
@@ -110,6 +116,7 @@ import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelo
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
+import { openBrowser } from "../../utils/open-browser.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
@@ -430,6 +437,8 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
  * Options for InteractiveMode initialization.
  */
 export interface InteractiveModeOptions {
+	/** Renderer mode for the interactive terminal. */
+	uiMode?: UiMode;
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
 	/** Warning message if session model couldn't be restored */
@@ -449,6 +458,22 @@ export interface InteractiveModeOptions {
 	chrome?: InteractiveChrome | "grok";
 }
 
+interface InteractiveTuiOptions {
+	uiMode: UiMode;
+	showHardwareCursor: boolean;
+	logDirectory: string;
+	terminal?: Terminal;
+}
+
+/** Composition root for selecting the interactive terminal renderer. */
+export function createInteractiveTui(options: InteractiveTuiOptions): TUI {
+	const terminal = options.terminal ?? new ProcessTerminal({ onExternalStdoutWrite: appendHiddenTuiStdout });
+	if (options.uiMode === "fullscreen") {
+		return new TuiAltScreen(terminal, options.showHardwareCursor, options.logDirectory, { openUrl: openBrowser });
+	}
+	return new TuiMainScreen(terminal, options.showHardwareCursor, options.logDirectory);
+}
+
 export class InteractiveMode {
 	private static restoreCompactionEscapeOverride(host: InteractiveMode): void {
 		if (!host.compactionEscapeOverrideActive) return;
@@ -463,6 +488,8 @@ export class InteractiveMode {
 	private ui: TUI;
 	private loadedResourcesContainer: Container;
 	private chatContainer: Container;
+	private documentContainer: Container;
+	private transcriptScrollView: TuiLayouts.ScrollView | undefined;
 	private pendingMessagesContainer: Container;
 	private statusContainer: Container;
 	private readonly sessionShownTipIds = new Set<string>();
@@ -481,6 +508,7 @@ export class InteractiveMode {
 	private fdPath: string | undefined;
 	private editorContainer: Container;
 	private footer: InteractiveFooter;
+	private footerContainer: Container;
 	private footerDataProvider: FooterDataProvider;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
 	private keybindings: KeybindingsManager;
@@ -617,7 +645,8 @@ export class InteractiveMode {
 
 	constructor(runtimeHost: AgentSessionRuntime, options: InteractiveModeOptions = {}) {
 		this.runtimeHost = runtimeHost;
-		this.options = options;
+		const uiMode = options.uiMode ?? runtimeHost.session.settingsManager.getUiMode();
+		this.options = { ...options, uiMode };
 		this.chrome = options.chrome === "grok" ? new GrokChrome() : options.chrome;
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
@@ -628,10 +657,11 @@ export class InteractiveMode {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
 		this.version = VERSION;
-		this.ui = new TUI(
-			new ProcessTerminal({ onExternalStdoutWrite: appendHiddenTuiStdout }),
-			this.settingsManager.getShowHardwareCursor(),
-		);
+		this.ui = createInteractiveTui({
+			uiMode,
+			showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
+			logDirectory: getAgentDir(),
+		});
 		this.streamingReveal = new StreamingRevealController({
 			getSmoothStreaming: () => this.settingsManager.getSmoothStreaming(),
 			getSmoothStreamingFps: () => this.settingsManager.getSmoothStreamingFps(),
@@ -653,6 +683,10 @@ export class InteractiveMode {
 		this.headerContainer = new Container();
 		this.loadedResourcesContainer = new Container();
 		this.chatContainer = new Container();
+		this.documentContainer = new Container();
+		this.documentContainer.addChild(this.headerContainer);
+		this.documentContainer.addChild(this.loadedResourcesContainer);
+		this.documentContainer.addChild(this.chatContainer);
 		this.pendingMessagesContainer = new Container();
 		this.statusContainer = new Container();
 		this.hookStatusContainer = new Container();
@@ -683,6 +717,8 @@ export class InteractiveMode {
 			? this.chrome.createFooter(this.session, this.footerDataProvider)
 			: new FooterComponent(this.session, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+		this.footerContainer = new Container();
+		this.footerContainer.addChild(this.footer);
 
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
@@ -922,25 +958,47 @@ export class InteractiveMode {
 					this.widgetContainerAbove,
 					this.editorContainer,
 					this.widgetContainerBelow,
-					this.footer,
+					this.footerContainer,
 				],
 				this.ui,
 			)) {
 				this.ui.addChild(component);
 			}
 		} else {
-			this.ui.addChild(this.headerContainer);
-			this.ui.addChild(this.loadedResourcesContainer);
-
-			this.ui.addChild(this.chatContainer);
-			this.ui.addChild(this.pendingMessagesContainer);
-			this.ui.addChild(this.statusContainer);
-			this.ui.addChild(this.hookStatusContainer);
 			this.renderWidgets(); // Initialize with default spacer
-			this.ui.addChild(this.widgetContainerAbove);
-			this.ui.addChild(this.editorContainer);
-			this.ui.addChild(this.widgetContainerBelow);
-			this.ui.addChild(this.footer);
+			if (TuiLayouts.isViewportTUI(this.ui)) {
+				this.transcriptScrollView = new TuiLayouts.ScrollView(this.documentContainer, {
+					follow: "end",
+					primary: true,
+					overscroll: "chain",
+					scrollbar: this.settingsManager.getFullscreenScrollbar(),
+					scrollbarStyle: (text) => theme.bg("selectedBg", text),
+				});
+				const dock = new TuiLayouts.VStack([
+					{ component: this.pendingMessagesContainer, shrink: 1, minSize: 0 },
+					{ component: this.statusContainer, shrink: 1, minSize: 0 },
+					{ component: this.hookStatusContainer, shrink: 1, minSize: 0 },
+					{ component: this.widgetContainerAbove, shrink: 1, minSize: 0 },
+					{ component: this.editorContainer, shrink: 1, minSize: 3 },
+					{ component: this.widgetContainerBelow, shrink: 1, minSize: 0 },
+					{ component: this.footerContainer, shrink: 1, minSize: 1 },
+				]);
+				this.ui.setLayoutRoot(
+					new TuiLayouts.VStack([
+						{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+						{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+					]),
+				);
+			} else {
+				this.ui.addChild(this.documentContainer);
+				this.ui.addChild(this.pendingMessagesContainer);
+				this.ui.addChild(this.statusContainer);
+				this.ui.addChild(this.hookStatusContainer);
+				this.ui.addChild(this.widgetContainerAbove);
+				this.ui.addChild(this.editorContainer);
+				this.ui.addChild(this.widgetContainerBelow);
+				this.ui.addChild(this.footerContainer);
+			}
 		}
 		this.ui.setFocus(this.editor);
 
@@ -1838,7 +1896,12 @@ export class InteractiveMode {
 		}
 
 		if (showListing) {
-			const contextFiles = this.session.resourceLoader.getAgentsFiles().agentsFiles;
+			const systemPromptSource = this.session.resourceLoader.getSystemPromptSource();
+			const contextFiles = [
+				...(systemPromptSource ? [systemPromptSource] : []),
+				...this.session.resourceLoader.getAppendSystemPromptSources(),
+				...this.session.resourceLoader.getAgentsFiles().agentsFiles,
+			];
 			if (contextFiles.length > 0) {
 				this.loadedResourcesContainer.addChild(new Spacer(1));
 				const contextList = contextFiles
@@ -2052,8 +2115,13 @@ export class InteractiveMode {
 		this.showStartupNoticesIfNeeded();
 	}
 
+	private applyFullscreenScrollbarSetting(): void {
+		this.transcriptScrollView?.setScrollbar(this.settingsManager.getFullscreenScrollbar());
+	}
+
 	private applyRuntimeSettings(): void {
 		configureHttpDispatcher(this.settingsManager.getHttpIdleTimeoutMs());
+		this.applyFullscreenScrollbarSetting();
 		this.footer.setSession(this.session);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
@@ -2078,15 +2146,23 @@ export class InteractiveMode {
 
 	private async rebindCurrentSession(options: { renderBeforeBind?: boolean } = {}): Promise<void> {
 		InteractiveMode.restoreCompactionEscapeOverride(this);
+		const session = this.session;
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
 		this.applyRuntimeSettings();
+
 		if (options.renderBeforeBind) {
 			this.renderCurrentSessionState();
 			this.subscribeToAgent();
-			await this.bindCurrentSessionExtensions();
-		} else {
-			await this.bindCurrentSessionExtensions();
+		}
+
+		await this.bindCurrentSessionExtensions();
+
+		if (this.session !== session) {
+			return;
+		}
+
+		if (!options.renderBeforeBind) {
 			this.subscribeToAgent();
 		}
 		this.updateAvailableProviderCount();
@@ -2128,6 +2204,10 @@ export class InteractiveMode {
 		return this.session.getToolDefinition(toolName);
 	}
 
+	private getMarkdownTransformers(): MarkdownTransformer[] {
+		return this.session.extensionRunner.getMarkdownTransformers();
+	}
+
 	/**
 	 * Set up keyboard shortcuts registered by extensions.
 	 */
@@ -2145,6 +2225,7 @@ export class InteractiveMode {
 			modelRegistry: extensionRunner.getModelRegistry(),
 			model: this.session.model,
 			serviceTier: this.session.serviceTier,
+			scopedModels: this.session.scopedModels,
 			thinkingLevel: this.session.thinkingLevel,
 			isIdle: () => this.session.isIdle,
 			isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
@@ -2479,7 +2560,7 @@ export class InteractiveMode {
 			this.workingStartedAt = undefined;
 		}
 		this.statusContainer.clear();
-		if (hadActiveStatusIndicator && this.ui.getClearOnShrink()) {
+		if (hadActiveStatusIndicator && this.options.uiMode === "regular" && this.ui.getClearOnShrink()) {
 			this.statusContainer.addChild(this.idleStatus);
 		}
 	}
@@ -2670,21 +2751,15 @@ export class InteractiveMode {
 			this.customFooter.dispose();
 		}
 
-		// Remove current footer from UI
-		if (this.customFooter) {
-			this.ui.removeChild(this.customFooter);
-		} else {
-			this.ui.removeChild(this.footer);
-		}
-
+		this.footerContainer.clear();
 		if (factory) {
 			// Create and add custom footer, passing the data provider
 			this.customFooter = factory(this.ui, theme, this.footerDataProvider);
-			this.ui.addChild(this.customFooter);
+			this.footerContainer.addChild(this.customFooter);
 		} else {
 			// Restore built-in footer
 			this.customFooter = undefined;
-			this.ui.addChild(this.footer);
+			this.footerContainer.addChild(this.footer);
 		}
 
 		this.ui.requestRender();
@@ -3048,6 +3123,9 @@ export class InteractiveMode {
 			}
 			if (newEditor.setPaddingX !== undefined) {
 				newEditor.setPaddingX(this.defaultEditor.getPaddingX());
+			}
+			if (newEditor.setAutocompleteMaxVisible !== undefined) {
+				newEditor.setAutocompleteMaxVisible(this.defaultEditor.getAutocompleteMaxVisible());
 			}
 
 			// Set autocomplete if supported
@@ -3641,6 +3719,7 @@ export class InteractiveMode {
 						this.getMarkdownThemeWithSettings(),
 						this.hiddenThinkingLabel,
 						this.outputPad,
+						this.getMarkdownTransformers(),
 					);
 					this.streamingComponent.setExpanded(this.toolOutputExpanded);
 					this.streamingMessage = event.message;
@@ -3695,7 +3774,7 @@ export class InteractiveMode {
 						errorMessage = abortedErrorLabel(undefined, this.session.retryAttempt);
 						this.streamingMessage.errorMessage = errorMessage;
 					}
-					this.streamingComponent.updateContent(this.streamingMessage);
+					this.streamingComponent.updateContent(this.streamingMessage, false);
 					this.addContinuityNotice(this.streamingMessage);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
@@ -4168,6 +4247,7 @@ export class InteractiveMode {
 								skillBlock.userMessage,
 								this.getMarkdownThemeWithSettings(),
 								this.outputPad,
+								this.getMarkdownTransformers(),
 							);
 							this.chatContainer.addChild(userComponent);
 						}
@@ -4176,6 +4256,7 @@ export class InteractiveMode {
 							textContent,
 							this.getMarkdownThemeWithSettings(),
 							this.outputPad,
+							this.getMarkdownTransformers(),
 						);
 						this.chatContainer.addChild(userComponent);
 					}
@@ -4192,6 +4273,7 @@ export class InteractiveMode {
 					this.getMarkdownThemeWithSettings(),
 					this.hiddenThinkingLabel,
 					this.outputPad,
+					this.getMarkdownTransformers(),
 				);
 				assistantComponent.setExpanded(this.toolOutputExpanded);
 				this.chatContainer.addChild(assistantComponent);
@@ -4729,6 +4811,8 @@ export class InteractiveMode {
 	}
 
 	private setToolsExpanded(expanded: boolean): void {
+		if (expanded === this.toolOutputExpanded) return;
+
 		this.toolOutputExpanded = expanded;
 		const activeHeader = this.customHeader ?? this.builtInHeader;
 		if (isExpandable(activeHeader)) {
@@ -4741,7 +4825,7 @@ export class InteractiveMode {
 				}
 			}
 		}
-		this.ui.requestRender();
+		this.showStatus(`Tool output: ${expanded ? "expanded" : "collapsed"}`);
 	}
 
 	private toggleThinkingBlockVisibility(): void {
@@ -5181,6 +5265,8 @@ export class InteractiveMode {
 					quietStartup: this.settingsManager.getQuietStartup(),
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
 					showTerminalProgress: this.settingsManager.getShowTerminalProgress(),
+					uiMode: this.settingsManager.getUiMode(),
+					fullscreenScrollbar: this.settingsManager.getFullscreenScrollbar(),
 					warnings: this.settingsManager.getWarnings(),
 				},
 				{
@@ -5349,6 +5435,14 @@ export class InteractiveMode {
 					},
 					onShowTerminalProgressChange: (enabled) => {
 						this.settingsManager.setShowTerminalProgress(enabled);
+					},
+					onUiModeChange: (mode) => {
+						this.settingsManager.setUiMode(mode);
+						this.showStatus(`UI mode: ${mode} (restart required)`);
+					},
+					onFullscreenScrollbarChange: (mode) => {
+						this.settingsManager.setFullscreenScrollbar(mode);
+						this.applyFullscreenScrollbarSetting();
 					},
 					onWarningsChange: (warnings) => {
 						this.settingsManager.setWarnings(warnings);
@@ -5706,7 +5800,7 @@ export class InteractiveMode {
 				this.ui.terminal.rows,
 				async (entryId) => {
 					// Selecting the current leaf is a no-op (already there)
-					if (entryId === realLeafId) {
+					if (entryId === this.sessionManager.getLeafId()) {
 						done();
 						this.showStatus("Already at this point");
 						return;
@@ -5747,6 +5841,12 @@ export class InteractiveMode {
 							// User made a complete choice
 							break;
 						}
+					}
+
+					// The user committed to navigating: stop the active response first.
+					if (this.session.isStreaming) {
+						this.restoreQueuedMessagesToEditor();
+						await this.session.abort();
 					}
 
 					// Set up escape handler and status indicator if summarizing
@@ -6447,7 +6547,6 @@ export class InteractiveMode {
 				return;
 			}
 			restoreChatBeforeSessionStart();
-			configureHttpDispatcher(this.settingsManager.getHttpIdleTimeoutMs());
 			this.keybindings.reload();
 			const activeHeader = this.customHeader ?? this.builtInHeader;
 			if (isExpandable(activeHeader)) {
@@ -6455,20 +6554,7 @@ export class InteractiveMode {
 			}
 			setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
 			await this.themeController.applyFromSettings();
-			const editorPaddingX = this.settingsManager.getEditorPaddingX();
-			const autocompleteMaxVisible = this.settingsManager.getAutocompleteMaxVisible();
-			this.defaultEditor.setPaddingX(editorPaddingX);
-			this.defaultEditor.setAutocompleteMaxVisible(autocompleteMaxVisible);
-			if (this.editor !== this.defaultEditor) {
-				this.editor.setPaddingX?.(editorPaddingX);
-				this.editor.setAutocompleteMaxVisible?.(autocompleteMaxVisible);
-			}
-			this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
-			const clearOnShrink = this.settingsManager.getClearOnShrink();
-			this.ui.setClearOnShrink(clearOnShrink);
-			if (!clearOnShrink && !this.activeStatusIndicator) {
-				this.statusContainer.clear();
-			}
+			this.applyRuntimeSettings();
 			this.setupAutocompleteProvider();
 			const runner = this.session.extensionRunner;
 			this.setupExtensionShortcuts(runner);
