@@ -31,8 +31,8 @@ import { pathToFileURL } from "node:url";
 import { guardRealAuth, installCleanupHooks, makeSandbox, repoRoot, track } from "./lib/common.mjs";
 import {
 	classifyPayload,
+	createModelCaptureHandler,
 	formatTurnTable,
-	loopbackSseBody,
 	safeDetail,
 	seedProbeAgentDir,
 	withTimeout,
@@ -53,9 +53,11 @@ if (process.env[INNER_FLAG] !== "1") {
 	});
 	if (child.error) {
 		process.stderr.write(`probe launcher failed: ${child.error.message}\n`);
-		process.exit(2);
+		// exitCode, not exit(): a forced exit can truncate the diagnostic on a pipe.
+		process.exitCode = 2;
+	} else {
+		process.exitCode = child.status ?? 2;
 	}
-	process.exit(child.status ?? 2);
 }
 
 installCleanupHooks();
@@ -73,58 +75,7 @@ const creations = [];
 let currentTurn = null;
 
 try {
-	server = track(
-		createServer((request, response) => {
-			if (request.method !== "POST") {
-				response.writeHead(200);
-				response.end();
-				return;
-			}
-			// Route-check POSTs: the fixture exists only for Anthropic messages
-			// calls — answering any other POST with a 200 fixture would manufacture
-			// false continuity evidence.
-			if (!request.url?.includes("/messages")) {
-				response.writeHead(404, { "content-type": "application/json" });
-				response.end(JSON.stringify({ error: "unknown_route" }));
-				return;
-			}
-			let raw = "";
-			request.setEncoding("utf8");
-			request.on("data", (chunk) => {
-				raw += chunk;
-			});
-			request.on("end", () => {
-				let body;
-				try {
-					body = JSON.parse(raw);
-				} catch {
-					// Fail closed: a malformed POST must not be answered with the SSE
-					// fixture — that would manufacture false continuity evidence for a
-					// broken request path.
-					response.writeHead(400, { "content-type": "application/json" });
-					response.end(JSON.stringify({ error: "malformed_request" }));
-					return;
-				}
-				if (typeof body.model !== "string" || !Array.isArray(body.messages)) {
-					response.writeHead(400, { "content-type": "application/json" });
-					response.end(JSON.stringify({ error: "malformed_shape" }));
-					return;
-				}
-				// Buffer.byteLength, not raw.length: the column is labeled bytes, and
-				// raw.length counts UTF-16 code units, not HTTP body bytes.
-				providerRequests.push({
-					bytes: Buffer.byteLength(raw, "utf8"),
-					messages: Array.isArray(body.messages) ? body.messages.length : 0,
-				});
-				response.writeHead(200, {
-					"content-type": "text/event-stream",
-					"cache-control": "no-cache",
-					connection: "keep-alive",
-				});
-				response.end(loopbackSseBody(`probe-reply-${providerRequests.length}`, providerRequests.length));
-			});
-		}),
-	);
+	server = track(createServer(createModelCaptureHandler((entry) => providerRequests.push(entry))));
 	await new Promise((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(0, "127.0.0.1", resolve);
@@ -220,13 +171,20 @@ try {
 			120_000,
 		);
 		const newQueries = creations.slice(creationsBefore);
+		// Classify EVERY payload in the turn: the LAST one alone cannot surface a
+		// divergence buried mid-turn. A turn is flatten if ANY payload is, then
+		// bootstrap if ANY is, else delta.
 		const classified = currentTurn.payloads.map((entry) => classifyPayload(entry.message));
 		turns.push({
 			index,
 			queries: newQueries.length,
 			path: currentTurn.payloads.at(-1)?.path ?? newQueries.at(-1)?.path ?? "none",
 			lineage: creations.at(-1)?.sessionId ?? "none",
-			kind: classified.at(-1)?.kind ?? "none",
+			kind: classified.some((item) => item.kind === "flatten")
+				? "flatten"
+				: classified.some((item) => item.kind === "bootstrap")
+					? "bootstrap"
+					: (classified.at(-1)?.kind ?? "none"),
 			bytes: classified.reduce((total, item) => total + item.bytes, 0),
 			wireRequests: providerRequests.length - requestsBefore,
 			wireBytes: providerRequests.slice(requestsBefore).reduce((total, item) => total + item.bytes, 0),

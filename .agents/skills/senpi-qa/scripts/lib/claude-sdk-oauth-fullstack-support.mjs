@@ -16,6 +16,61 @@ export const FLATTEN_MARKER = "<conversation_history>";
 /** Trailer buildPromptBlocks always appends, even when there is no history yet. */
 export const FLATTEN_TRAILER = "The above is the conversation history so far";
 
+/**
+ * Loopback Anthropic-messages handler for the fullstack probe.
+ *
+ * Route-checks POSTs (/messages only, 404 otherwise), fails closed on
+ * malformed JSON or a wrong request shape (400), records byte-accurate
+ * metrics through onModelRequest, and answers with the SSE fixture — a
+ * wrong-route or wrong-shape request can never receive a 200 fixture and
+ * manufacture false continuity evidence.
+ */
+export function createModelCaptureHandler(onModelRequest) {
+	let count = 0;
+	return (request, response) => {
+		if (request.method !== "POST") {
+			response.writeHead(200);
+			response.end();
+			return;
+		}
+		if (!request.url?.includes("/messages")) {
+			response.writeHead(404, { "content-type": "application/json" });
+			response.end(JSON.stringify({ error: "unknown_route" }));
+			return;
+		}
+		let raw = "";
+		request.setEncoding("utf8");
+		request.on("data", (chunk) => {
+			raw += chunk;
+		});
+		request.on("end", () => {
+			let body;
+			try {
+				body = JSON.parse(raw);
+			} catch {
+				response.writeHead(400, { "content-type": "application/json" });
+				response.end(JSON.stringify({ error: "malformed_request" }));
+				return;
+			}
+			if (typeof body.model !== "string" || !Array.isArray(body.messages)) {
+				response.writeHead(400, { "content-type": "application/json" });
+				response.end(JSON.stringify({ error: "malformed_shape" }));
+				return;
+			}
+			count += 1;
+			// Buffer.byteLength, not raw.length: the column is labeled bytes, and
+			// raw.length counts UTF-16 code units, not HTTP body bytes.
+			onModelRequest({ bytes: Buffer.byteLength(raw, "utf8"), messages: body.messages.length });
+			response.writeHead(200, {
+				"content-type": "text/event-stream",
+				"cache-control": "no-cache",
+				connection: "keep-alive",
+			});
+			response.end(loopbackSseBody(`probe-reply-${count}`, count));
+		});
+	};
+}
+
 export function safeDetail(value) {
 	return String(value)
 		.replace(/[\r\n]+/g, " ")

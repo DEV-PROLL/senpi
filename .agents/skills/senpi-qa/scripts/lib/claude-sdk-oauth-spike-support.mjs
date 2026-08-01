@@ -118,7 +118,9 @@ export function managedEnvironment(access, extra = {}) {
 	// operator-set value would silently re-address every grandchild, so it is
 	// cleared here too; callers re-add a scoped root deliberately via `extra`.
 	delete env.CLAUDE_CONFIG_DIR;
-	return { ...env, CLAUDE_CODE_OAUTH_TOKEN: access, ...extra };
+	// The token pin is applied LAST so nothing a caller re-adds through `extra`
+	// can silently overwrite it — the pin is the function's contract.
+	return { ...env, ...extra, CLAUDE_CODE_OAUTH_TOKEN: access };
 }
 
 /** SDKUserMessage envelope for streaming input. */
@@ -272,7 +274,14 @@ export async function startGuardedQuery({ firstMessage, options, secrets }) {
 	try {
 		const { query } = await importClaudeSdk();
 		input = controlledInput(firstMessage);
-		stream = query({ prompt: input, options });
+		// The executable is resolved INSIDE the guarded path: resolving it at the
+		// call site would throw a missing-binary error outside the REJECTED
+		// contract.
+		const resolved = {
+			...options,
+			pathToClaudeCodeExecutable: options.pathToClaudeCodeExecutable ?? claudeExecutable(),
+		};
+		stream = query({ prompt: input, options: resolved });
 	} catch (error) {
 		reject(error instanceof Error ? error.message : String(error), "", secrets);
 	}

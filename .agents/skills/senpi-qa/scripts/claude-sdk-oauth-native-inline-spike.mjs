@@ -20,7 +20,7 @@
  *     node .agents/skills/senpi-qa/scripts/claude-sdk-oauth-native-inline-spike.mjs
  *
  * Outcomes (final line):
- *   exit 0 "ACCEPTED setmodel=<ok|absent> interrupt_receipt=<v1|legacy> continue=<coherent|degraded>"
+ *   exit 0 "ACCEPTED setmodel=<ok|absent> interrupt_receipt=<v1|legacy> continue=coherent"
  *   exit 2 "REJECTED signal=<sanitized>"
  * An interrupt that never happened REJECTS (interrupt_failed) instead of being
  * reported as a legacy receipt — a spike that proved nothing must not ACCEPT.
@@ -29,13 +29,14 @@
 import { randomUUID } from "node:crypto";
 import {
 	assistantText,
-	claudeExecutable,
 	closeQuietly,
 	loadCredential,
 	managedEnvironment,
+	redactSecrets,
 	reject,
 	requireLiveGate,
 	requireSandbox,
+	safeSignal,
 	startGuardedQuery,
 	userMessage,
 	withTimeout,
@@ -70,7 +71,6 @@ const { input, stream } = await startGuardedQuery({
 		settingSources: [],
 		includePartialMessages: true,
 		systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
-		pathToClaudeCodeExecutable: claudeExecutable(),
 		env: managedEnvironment(loaded.credential.access),
 	},
 	secrets: SECRETS,
@@ -88,6 +88,7 @@ const state = {
 	pendingInterruptResult: false,
 	coherent: false,
 	continuationResult: false,
+	interruptAbortedEvidence: false,
 	failure: null,
 	turn: 1,
 };
@@ -166,8 +167,13 @@ async function consume() {
 			}
 			// When the interrupt WAS issued, the residual turn-3 assistant message
 			// is expected: it is recorded as turn 3 above and skipped here — never
-			// fed through the turn-4 coherence scan below.
-			if (state.turn === 3) continue;
+			// fed through the turn-4 coherence scan below. Its aborted:true marker
+			// (sdk.d.ts:2873) is the interrupt-specific evidence that separates a
+			// real cancellation from a turn-3 refusal/execution failure.
+			if (state.turn === 3) {
+				if (message.aborted === true) state.interruptAbortedEvidence = true;
+				continue;
+			}
 			if (state.turn === 4 && assistantText(message).includes(MEMORY_TOKEN)) state.coherent = true;
 		}
 		if (message.type === "auth_status" && message.error) state.failure ??= "authentication_failed";
@@ -182,6 +188,13 @@ async function consume() {
 			// nothing, so the receipt would be a false positive.
 			if (message.subtype === "success" && message.is_error !== true) {
 				state.failure ??= "interrupt_ineffective";
+				break;
+			}
+			// A non-success alone is not interrupt evidence: a turn-3 refusal or
+			// execution failure would also be non-success. The residual assistant
+			// message must carry the SDK's aborted:true marker.
+			if (!state.interruptAbortedEvidence) {
+				state.failure ??= "interrupt_evidence_absent";
 				break;
 			}
 			state.turn = 4;
@@ -235,7 +248,15 @@ try {
 if (outcome) reject(outcome, "", SECRETS);
 if (state.failure) reject(state.failure, "", SECRETS);
 if (state.sessionIds.size !== 1) reject("session_lineage_split");
-if (state.interruptReceipt === "failed") reject("interrupt_failed");
+if (state.interruptReceipt === "failed") {
+	// Surface the captured interrupt error (redacted + sanitized) instead of a
+	// bare interrupt_failed that hides the actual cause.
+	reject(
+		"interrupt_failed",
+		state.interruptError ? `detail=${safeSignal(redactSecrets(state.interruptError, SECRETS))}` : "",
+		SECRETS,
+	);
+}
 if (state.interruptReceipt === "pending") reject("interrupt_never_issued");
 // A coherent turn-4 assistant message is not enough: the iterator ending
 // before turn 4's successful terminal result means the continuation never
@@ -251,9 +272,10 @@ const setModel =
 		: state.models[2] !== state.models[1]
 			? "ok"
 			: "absent";
-const continueOutcome = state.coherent ? "coherent" : "degraded";
+// continue is always coherent here: a failed recall rejected above, so the
+// degraded branch is unreachable by construction.
 console.log(
-	`ACCEPTED setmodel=${setModel} interrupt_receipt=${state.interruptReceipt} continue=${continueOutcome}`,
+	`ACCEPTED setmodel=${setModel} interrupt_receipt=${state.interruptReceipt} continue=coherent`,
 );
 // exitCode, not exit(): a forced exit can truncate the ACCEPTED line when
 // stdout is a pipe; assigning lets Node flush the QA output first.

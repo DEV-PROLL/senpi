@@ -38,7 +38,6 @@
 import { randomUUID } from "node:crypto";
 import {
 	assistantText,
-	claudeExecutable,
 	closeQuietly,
 	loadCredential,
 	managedEnvironment,
@@ -102,7 +101,6 @@ async function runArm({ settings, probeManual }) {
 			settingSources: [],
 			systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
 			settings,
-			pathToClaudeCodeExecutable: claudeExecutable(),
 			env: managedEnvironment(loaded.credential.access),
 		},
 		secrets,

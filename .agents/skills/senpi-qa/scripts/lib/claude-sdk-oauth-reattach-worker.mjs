@@ -91,7 +91,11 @@ export async function runTurns(request) {
 	let completedTurns = 0;
 
 	const drain = (async () => {
+		const sessionIds = new Set();
 		for await (const message of stream) {
+			// Record EVERY session id the stream reports: a mid-run lineage split
+			// must surface to the supervisor, not hide behind the first init id.
+			if (typeof message.session_id === "string") sessionIds.add(message.session_id);
 			if (message.type === "system" && message.subtype === "init" && typeof message.session_id === "string") {
 				result.sessionId ??= message.session_id;
 			}
@@ -131,6 +135,7 @@ export async function runTurns(request) {
 		// An iterator that ends before every requested prompt completed its
 		// terminal result means the seed/resume is incomplete — never accept it.
 		if (completedTurns < expectedTurns) throw new Error("turns_incomplete");
+		if (sessionIds.size > 1) throw new Error("lineage_split");
 	})();
 
 	try {
