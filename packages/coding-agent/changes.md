@@ -1,5 +1,25 @@
 # Local fork changes
 
+## 2026-08-01 — Backfill local release and publish hardening
+
+### What changed
+
+- Local release tests build packages first and run smoke tests serially.
+- Release output prints the exact npm publish command and permits authenticated local publishing.
+- Provenance metadata, publish roots, and publish directories now match the fork's declared package layout.
+
+### Why
+
+- Local release evidence must exercise built artifacts and produce commands that work from the actual fork package roots.
+
+### Why this cannot be expressed externally
+
+- The behavior is owned by repository release, publish, provenance, and smoke-test scripts.
+
+### Expected merge conflict zones
+
+- `scripts/local-release.mjs`, `scripts/publish.mjs`, release smoke helpers, and package publish metadata.
+
 ## 2026-07-31 — Claude SDK OAuth provider identity
 
 - Changed: renamed Senpi's SDK-backed Claude subscription provider and every active internal surface from `claude-agent-sdk` to `claude-sdk-oauth`, including auth storage, settings, commands, RPC/app-server account routing, tests, docs, and QA scenarios.

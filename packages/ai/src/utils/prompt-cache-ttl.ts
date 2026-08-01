@@ -133,6 +133,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Reso
 		supportsReasoningEffort:
 			!isGrok && !isZai && !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia && !isAntLing,
 		supportsUsageInStreaming: true,
+		supportsFinishReason: true,
 		maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
 		requiresToolResultName: false,
 		requiresAssistantAfterToolResult: false,
@@ -185,6 +186,7 @@ export function getOpenAICompletionsCompat(model: Model<"openai-completions">): 
 		supportsDeveloperRole: model.compat.supportsDeveloperRole ?? detected.supportsDeveloperRole,
 		supportsReasoningEffort: model.compat.supportsReasoningEffort ?? detected.supportsReasoningEffort,
 		supportsUsageInStreaming: model.compat.supportsUsageInStreaming ?? detected.supportsUsageInStreaming,
+		supportsFinishReason: model.compat.supportsFinishReason ?? detected.supportsFinishReason,
 		maxTokensField: model.compat.maxTokensField ?? detected.maxTokensField,
 		requiresToolResultName: model.compat.requiresToolResultName ?? detected.requiresToolResultName,
 		requiresAssistantAfterToolResult:
