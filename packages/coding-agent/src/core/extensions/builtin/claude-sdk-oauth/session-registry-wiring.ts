@@ -1,11 +1,7 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "../../types.ts";
 import { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
-import {
-	AssistantCommitBoundary,
-	isResidentAssistant,
-	isTerminalFailure,
-} from "./session-commit-boundary.ts";
+import { AssistantCommitBoundary, isResidentAssistant, isTerminalFailure } from "./session-commit-boundary.ts";
 import { bindingFromEntry, rememberBinding } from "./session-reattach.ts";
 import {
 	closeSession,
