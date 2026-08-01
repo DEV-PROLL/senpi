@@ -259,6 +259,9 @@ if (state.interruptReceipt === "pending") reject("interrupt_never_issued");
 // before turn 4's successful terminal result means the continuation never
 // completed, so the spike cannot ACCEPT.
 if (!state.continuationResult) reject("continuation_incomplete");
+// A failed turn-4 recall means the continuation did not prove continuity —
+// the spike must not ACCEPT a degraded continuation as success.
+if (!state.coherent) reject("continuation_incoherent", "", SECRETS);
 
 const setModel =
 	state.setModelError || state.models[2] === undefined

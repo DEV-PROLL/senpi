@@ -252,16 +252,21 @@ if (infrastructureFailure) {
 	// Gate the ROUTE, not just the payload shape: a bootstrap payload on a
 	// non-resident (flatten-stream) query must not masquerade as resident-path.
 	const nonResidentTurns = turns.filter((turn) => turn.path !== "resident-registry").length;
+	// The resident happy path is delta-only after turn 1 (bootstrap is the
+	// legitimate first-payload shape): any later non-delta submission means
+	// history was re-synthesized inside a resident session.
+	const nonDeltaContinuations = turns.filter((turn) => turn.index !== 1 && turn.kind !== "delta").length;
 	const passed =
 		!fatal &&
 		turns.length === TURNS &&
 		creations.length === 1 &&
 		lineages.size === 1 &&
 		flattenTurns === 0 &&
-		nonResidentTurns === 0;
+		nonResidentTurns === 0 &&
+		nonDeltaContinuations === 0;
 	if (fatal) process.stderr.write(`PROBE ERROR: ${safeDetail(fatal.stack ?? fatal.message)}\n`);
 	process.stdout.write(
-		`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} lineages=${lineages.size} flatten_turns=${flattenTurns} non_resident=${nonResidentTurns}\n`,
+		`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} lineages=${lineages.size} flatten_turns=${flattenTurns} non_resident=${nonResidentTurns} non_delta=${nonDeltaContinuations}\n`,
 	);
 	// exitCode, not exit(): a forced exit can truncate the table/verdict when
 	// stdout is a pipe; assigning lets Node flush the QA output first.

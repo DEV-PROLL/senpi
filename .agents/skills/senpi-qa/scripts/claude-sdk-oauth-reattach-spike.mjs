@@ -229,6 +229,12 @@ async function main(runChild, primary, secondary, token, scopedRoots, secrets) {
 	// Turn-level resume failures (subscription, model refusal, worker timeout)
 	// are infrastructure too — only resume_failed is addressing evidence.
 	if (scoped.error && scoped.error !== "resume_failed") reject(scoped.error, "", secrets);
+	// A successful scoped static read followed by resume_failed is contradictory
+	// evidence (visible but not resumable): reject it instead of letting it
+	// collapse into config_root_unaddressable.
+	if (scoped.error === "resume_failed" && scoped.staticFound === true) {
+		reject("config_root_contradictory");
+	}
 	// staticFound is the direct visibility measurement; a model recall miss
 	// would be a coherence observation, not a config-root verdict, so it stays
 	// out of this gate.

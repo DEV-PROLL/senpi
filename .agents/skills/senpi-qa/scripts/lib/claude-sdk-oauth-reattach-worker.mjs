@@ -73,6 +73,9 @@ export async function runTurns(request) {
 
 	const { query } = await importClaudeSdk();
 	const prompts = [...request.prompts];
+	// Count BEFORE the initial shift: every requested prompt — including the
+	// first — must reach a successful terminal result for the run to be whole.
+	const expectedTurns = prompts.length;
 	const input = controlledInput(userMessage(prompts.shift(), randomUUID()));
 	const options = {
 		model: "claude-haiku-4-5",
@@ -85,7 +88,6 @@ export async function runTurns(request) {
 	};
 	if (request.resume) options.resume = request.resume;
 	const stream = query({ prompt: input, options });
-	const expectedTurns = prompts.length;
 	let completedTurns = 0;
 
 	const drain = (async () => {
@@ -109,13 +111,18 @@ export async function runTurns(request) {
 			// Result envelopes can carry usage directly — record before the gates.
 			result.usage = readUsage(message) ?? result.usage;
 			// A 401/refusal arrives as subtype:"success" with is_error:true; that
-			// combination must map to result_error, never to signal=success.
+			// shape on a resume IS the addressing/auth denial (resume_failed).
+			// Any other non-success (quota, refusal, content filter) is a
+			// turn-level error and must NOT be folded into the denial signal.
 			if (message.subtype !== "success" || message.is_error === true) {
 				const reason =
 					message.is_error === true && message.subtype === "success"
 						? "result_error"
 						: (message.subtype ?? "result_error");
-				throw new Error(request.resume ? "resume_failed" : reason);
+				if (request.resume) {
+					throw new Error(message.is_error === true ? "resume_failed" : `resume_error_${reason}`);
+				}
+				throw new Error(reason);
 			}
 			completedTurns += 1;
 			if (prompts.length === 0) break;
