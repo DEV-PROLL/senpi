@@ -261,6 +261,15 @@ export class ClaudeSdkOauthSessionRegistry {
 		this.touch(entry);
 	}
 
+	async switchModel(senpiSessionId: string, modelId: string): Promise<boolean> {
+		const entry = this.entries.get(senpiSessionId);
+		if (!entry?.query.setModel) return false;
+		await entry.query.setModel(modelId);
+		entry.modelId = modelId;
+		this.touch(entry);
+		return true;
+	}
+
 	recordPendingFork(senpiSessionId: string, reason: string): void {
 		const entry = this.entries.get(senpiSessionId);
 		if (!entry) return;
@@ -321,6 +330,10 @@ export function closeSession(senpiSessionId: string, reason: string): void {
 
 export function markTainted(senpiSessionId: string, reason: string): void {
 	sessionRegistry.markTainted(senpiSessionId, reason);
+}
+
+export async function switchSessionModel(senpiSessionId: string, modelId: string): Promise<boolean> {
+	return sessionRegistry.switchModel(senpiSessionId, modelId);
 }
 
 export function recordPendingFork(senpiSessionId: string, reason: string): void {
