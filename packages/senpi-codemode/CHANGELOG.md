@@ -13,7 +13,8 @@
 - Preserve rich live and terminal `eval` details when peeking detached cells,
   including code, title, output, phase, status events, tool-call summaries,
   duration, and structured displays; cancellation now remains authoritative
-  over late completion races.
+  over late completion races
+  ([#603](https://github.com/code-yeongyu/senpi/pull/603)).
 
 ### Removed
 
