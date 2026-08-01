@@ -1,0 +1,178 @@
+/**
+ * Shared harness for the live claude-sdk-oauth spikes (Wave A todos 2-4).
+ *
+ * Every spike is gated on SENPI_LIVE_CLAUDE_SDK_OAUTH=1 and reads its OAuth
+ * credential from the seeded sandbox pointed at by SENPI_CODING_AGENT_DIR.
+ * Nothing here ever prints token material.
+ */
+
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { repoRoot } from "./common.mjs";
+
+export const LIVE_GATE = "SENPI_LIVE_CLAUDE_SDK_OAUTH";
+
+/** Print SKIPPED + exit 0 unless the live gate is set. Keeps default suites token-free. */
+export function requireLiveGate() {
+	if (process.env[LIVE_GATE] === "1") return;
+	console.log(`SKIPPED: set ${LIVE_GATE}=1 to run the live spike`);
+	process.exit(0);
+}
+
+/** Sandbox agent dir (SENPI_CODING_AGENT_DIR); rejects when absent. */
+export function requireSandbox() {
+	const sandbox = process.env.SENPI_CODING_AGENT_DIR;
+	if (sandbox) return sandbox;
+	console.error("REJECTED signal=sandbox_missing");
+	process.exit(2);
+}
+
+/** Load a dummy-safe oauth credential from <sandbox>/auth.json. Never logs it. */
+export function loadCredential(sandbox, slot = "claude-sdk-oauth-spike") {
+	let stored;
+	try {
+		stored = JSON.parse(readFileSync(join(sandbox, "auth.json"), "utf8"));
+	} catch {
+		return { error: "credential_unreadable" };
+	}
+	const credential = stored[slot] ?? stored["claude-sdk-oauth"] ?? stored.anthropic;
+	if (!credential || credential.type !== "oauth" || typeof credential.access !== "string") {
+		return { error: "credential_unavailable" };
+	}
+	return { credential };
+}
+
+/** Sanitize any signal/reason into the fixed terminal-line vocabulary shape. */
+export function safeSignal(value) {
+	return String(value ?? "unknown")
+		.toLowerCase()
+		.replace(/[^a-z0-9_.-]+/g, "_")
+		.slice(0, 80);
+}
+
+/** Parent env with every ambient Anthropic/Claude credential channel removed. */
+export function managedEnvironment(access, extra = {}) {
+	const env = { ...process.env };
+	delete env.ANTHROPIC_API_KEY;
+	delete env.ANTHROPIC_AUTH_TOKEN;
+	delete env.ANTHROPIC_BASE_URL;
+	delete env.ANTHROPIC_CUSTOM_HEADERS;
+	delete env.CLAUDECODE;
+	delete env.CLAUDE_CODE_USE_BEDROCK;
+	delete env.CLAUDE_CODE_USE_FOUNDRY;
+	delete env.CLAUDE_CODE_USE_GATEWAY;
+	delete env.CLAUDE_CODE_USE_VERTEX;
+	for (const name of Object.keys(env)) {
+		if (/^CLAUDE_CODE_OAUTH_TOKEN(?:_\d+)?$/.test(name)) delete env[name];
+	}
+	return { ...env, CLAUDE_CODE_OAUTH_TOKEN: access, ...extra };
+}
+
+/** SDKUserMessage envelope for streaming input. */
+export function userMessage(text, uuid) {
+	return { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, uuid };
+}
+
+/** Push-driven async iterable used as a streaming-input prompt. */
+export function controlledInput(initialMessage) {
+	const pending = initialMessage ? [initialMessage] : [];
+	const waiters = [];
+	let closed = false;
+	return {
+		push(message) {
+			const waiter = waiters.shift();
+			if (waiter) waiter({ value: message, done: false });
+			else pending.push(message);
+		},
+		close() {
+			closed = true;
+			for (const waiter of waiters.splice(0)) waiter({ value: undefined, done: true });
+		},
+		[Symbol.asyncIterator]() {
+			return {
+				next() {
+					const message = pending.shift();
+					if (message) return Promise.resolve({ value: message, done: false });
+					if (closed) return Promise.resolve({ value: undefined, done: true });
+					return new Promise((resolve) => waiters.push(resolve));
+				},
+			};
+		},
+	};
+}
+
+function codingAgentRequire() {
+	return createRequire(join(repoRoot(), "packages/coding-agent/package.json"));
+}
+
+/**
+ * Import the SAME @anthropic-ai/claude-agent-sdk build senpi runs against.
+ * A bare specifier would resolve against the script's own directory and can
+ * pick up an unrelated globally installed SDK.
+ */
+export async function importClaudeSdk() {
+	return import(pathToFileURL(codingAgentRequire().resolve("@anthropic-ai/claude-agent-sdk")).href);
+}
+
+/**
+ * Resolve the real Claude Code binary the same way senpi's executable.ts does
+ * (platform package first, CLAUDE_CODE_EXECUTABLE override wins). Resolved here
+ * rather than by importing the TypeScript module so the spikes run under plain
+ * `node`, without tsx.
+ */
+export function claudeExecutable() {
+	const override = process.env.CLAUDE_CODE_EXECUTABLE;
+	if (override) return override;
+	const require_ = codingAgentRequire();
+	const extension = process.platform === "win32" ? ".exe" : "";
+	const candidates =
+		process.platform === "linux"
+			? [
+					`@anthropic-ai/claude-agent-sdk-linux-${process.arch}-musl/claude${extension}`,
+					`@anthropic-ai/claude-agent-sdk-linux-${process.arch}/claude${extension}`,
+				]
+			: [`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/claude${extension}`];
+	for (const candidate of candidates) {
+		try {
+			return require_.resolve(candidate);
+		} catch {
+			// try the next platform package
+		}
+	}
+	throw new Error("claude_binary_not_found");
+}
+
+/** Concatenated assistant text of an SDK assistant message. */
+export function assistantText(message) {
+	if (message?.type !== "assistant" || !Array.isArray(message.message?.content)) return "";
+	return message.message.content
+		.filter((block) => block?.type === "text" && typeof block.text === "string")
+		.map((block) => block.text)
+		.join("\n");
+}
+
+/** Reject with a sanitized signal and exit 2. */
+export function reject(signal, extra = "") {
+	console.error(`REJECTED signal=${safeSignal(signal)}${extra ? ` ${extra}` : ""}`);
+	process.exit(2);
+}
+
+/** Race a promise against a bounded deadline (no polling, no fixed sleeps). */
+export function withDeadline(promise, label, timeoutMs) {
+	let timer;
+	const deadline = new Promise((_resolve, reject_) => {
+		timer = setTimeout(() => reject_(new Error(`${label}_timeout`)), timeoutMs);
+	});
+	return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
+/** Close a query handle without letting a close error mask the real outcome. */
+export function closeQuietly(handle) {
+	try {
+		handle?.close?.();
+	} catch {
+		// best-effort teardown
+	}
+}
