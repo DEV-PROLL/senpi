@@ -8,6 +8,17 @@
 
 ### Changed
 
+- Refresh generated provider catalogs from their live sources. OpenRouter now
+  removes 29 no-longer-advertised `:batch` variants plus retired
+  `mistralai/devstral-2512` and `openai/gpt-5.1-chat`, and adds
+  `thinkingmachines/inkling-small`; Vercel AI Gateway adds
+  `deepseek/deepseek-v4-flash-0731`; Z.AI and Z.AI Coding CN replace
+  `glm-4.5-air`, `glm-5.1`, and `glm-5v-turbo` with
+  `glm-5.2-highspeed[1m]`. Static provider tests now use the still-published
+  `glm-4.7` fixture or explicit compatibility overrides, and Z.AI defaults now
+  resolve to `glm-5.2`, so future catalog removals cannot leave release-time
+  type checking or default selection silently stale.
+
 ### Fixed
 
 - Make explicit reasoning capability metadata authoritative across model

@@ -332,7 +332,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("enables tool_stream for supported z.ai models with tools", async () => {
-		const model = getModel("zai", "glm-5.1")!;
+		const model = getModel("zai", "glm-4.7")!;
 		const tools: Tool[] = [
 			{
 				name: "ping",
@@ -369,10 +369,9 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("stores z.ai tool_stream support in model compat metadata", () => {
-		expect(getModel("zai", "glm-5.1")?.compat?.zaiToolStream).toBe(true);
 		expect(getModel("zai", "glm-4.7")?.compat?.zaiToolStream).toBe(true);
 		expect(getModel("zai", "glm-5-turbo")?.compat?.zaiToolStream).toBe(true);
-		expect(getModel("zai", "glm-4.5-air")?.compat?.zaiToolStream).toBeUndefined();
+		expect(getModel("zai", "glm-5.2")?.compat?.zaiToolStream).toBe(true);
 	});
 
 	it("stores z.ai GLM-5.2 effort metadata", () => {
@@ -515,8 +514,15 @@ describe("openai-completions tool_choice", () => {
 		expect(params.reasoning_effort).toBeUndefined();
 	});
 
-	it("omits tool_stream for unsupported z.ai models", async () => {
-		const model = getModel("zai", "glm-4.5-air")!;
+	it("honors z.ai compat override that disables tool_stream", async () => {
+		const baseModel = getModel("zai", "glm-4.7")!;
+		const model = {
+			...baseModel,
+			compat: {
+				...baseModel.compat,
+				zaiToolStream: undefined,
+			},
+		} as const;
 		const tools: Tool[] = [
 			{
 				name: "ping",
@@ -553,7 +559,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("respects explicit z.ai tool_stream compat override", async () => {
-		const baseModel = getModel("zai", "glm-4.5-air")!;
+		const baseModel = getModel("zai", "glm-4.7")!;
 		const model = {
 			...baseModel,
 			compat: {
@@ -597,7 +603,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("omits tool_stream when no tools are provided", async () => {
-		const model = getModel("zai", "glm-5.1")!;
+		const model = getModel("zai", "glm-4.7")!;
 		let payload: unknown;
 
 		await streamSimple(
@@ -638,7 +644,7 @@ describe("openai-completions tool_choice", () => {
 				},
 			},
 		];
-		const model = getModel("zai", "glm-5.1")!;
+		const model = getModel("zai", "glm-4.7")!;
 		const response = await streamSimple(
 			model,
 			{
