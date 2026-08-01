@@ -113,7 +113,12 @@ async function managedPool(
 	const configuredLane = resolveEffectiveLane(settings, accounts);
 	const lane =
 		configuredLane === "config-dir" && hasRequestOauthToken(requestEnvironment) ? "oauth-slots" : configuredLane;
-	if (lane === "ambient" || accounts.length === 0) return undefined;
+	if (lane === "ambient") return undefined;
+	if (accounts.length === 0) {
+		throw new Error(
+			"authentication_failed: No Claude SDK OAuth accounts configured. Add one with /claude-account add.",
+		);
+	}
 	const stored = credential?.type === "oauth" ? (credential as ClaudeSdkOauthCredential) : undefined;
 	return { accounts, environment, lane, pinnedAccount: settings.pinnedAccount ?? stored?.pinned, store };
 }
