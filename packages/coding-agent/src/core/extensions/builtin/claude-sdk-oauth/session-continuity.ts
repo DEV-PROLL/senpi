@@ -98,6 +98,40 @@ function decideFromBinding(input: ContinuityDecisionInput, binding: ContinuityBi
 	};
 }
 
+export type FailoverLane = "oauth-slots" | "ambient" | "config-dir";
+
+export type FailoverContinuityInput = {
+	authLane: FailoverLane;
+	crossAccountResumeSupported: boolean;
+	entry: { sdkSessionId: string; sentCount: number; lastAssistantUuid: string | null };
+};
+
+/**
+ * The config-dir lane keeps each account's credentials inside its own
+ * CLAUDE_CONFIG_DIR, and no official SDK API moves a transcript across roots, so
+ * its failover is the one declared residual that must still flatten.
+ */
+export function decideFailoverContinuity(input: FailoverContinuityInput): ContinuityDecision {
+	const { entry } = input;
+	if (input.authLane === "config-dir") return { kind: "flatten", reason: "cross_root_unsupported" };
+	if (input.crossAccountResumeSupported) {
+		return {
+			kind: "reattach",
+			sdkSessionId: entry.sdkSessionId,
+			from: entry.sentCount,
+			reason: "account_changed",
+		};
+	}
+	if (!entry.lastAssistantUuid) return { kind: "flatten", reason: "branch_boundary_unavailable" };
+	return {
+		kind: "fork",
+		sdkSessionId: entry.sdkSessionId,
+		atUuid: entry.lastAssistantUuid,
+		from: entry.sentCount,
+		reason: "account_changed",
+	};
+}
+
 /**
  * Resume-first: a live session is never abandoned for a flattened re-send. Only a
  * missing transcript or an unrecoverable boundary reaches `flatten`; every other

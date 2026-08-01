@@ -31,6 +31,7 @@ export type ContinuityReason =
 	| "history_rolled_back"
 	| "assistant_rewritten"
 	| "transcript_missing"
+	| "cross_root_unsupported"
 	| "branch_diverged"
 	| "branch_boundary_unavailable"
 	| "branch_resume"
@@ -76,6 +77,7 @@ const SANITIZED_REASONS = new Set<string>([
 	"history_rolled_back",
 	"assistant_rewritten",
 	"transcript_missing",
+	"cross_root_unsupported",
 	"sent_stream_diverged",
 	"branch_diverged",
 	"branch_boundary_unavailable",
