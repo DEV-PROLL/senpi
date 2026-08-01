@@ -23,6 +23,7 @@ import {
 	repoRoot,
 	track,
 } from "./lib/common.mjs";
+import { withTimeout } from "./lib/with-timeout.mjs";
 
 const ROOT = repoRoot();
 const INNER_FLAG = "SENPI_CLAUDE_SDK_REGISTRY_PROBE_INNER";
@@ -155,14 +156,6 @@ function outputText(messages) {
 	return parts.join("\n");
 }
 
-function withTimeout(promise, label, timeoutMs = 45_000) {
-	let timer;
-	const timeout = new Promise((_, reject) => {
-		timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
-	});
-	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
 function safeDetail(value) {
 	return String(value).replace(/[\r\n]+/g, " ").slice(0, 500);
 }
@@ -284,7 +277,11 @@ try {
 	});
 
 	const firstMessage = { role: "user", content: [{ type: "text", text: FIRST_TOKEN }] };
-	firstTurn = await withTimeout(submitSessionTurn(registry, entry, { message: firstMessage }), "first registry turn");
+	firstTurn = await withTimeout(
+		submitSessionTurn(registry, entry, { message: firstMessage }),
+		"first registry turn",
+		45_000,
+	);
 
 	const firstContextMessages = [{ role: "user", content: FIRST_TOKEN }];
 	const firstHashes = sync.sentMessageHashes(firstContextMessages);
@@ -323,6 +320,7 @@ try {
 	secondTurn = await withTimeout(
 		submitSessionTurn(registry, secondLookup, { message: { role: "user", content: secondBlocks } }),
 		"second registry turn",
+		45_000,
 	);
 
 	const requestWithFirst = providerRequests.find((body) => requestUserTexts(body).some((text) => text.includes(FIRST_TOKEN)));

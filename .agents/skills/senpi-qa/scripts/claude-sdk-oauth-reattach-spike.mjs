@@ -29,7 +29,7 @@
  * (claude-sdk-oauth-spike-b) was seeded, so an untested arm cannot read as proven.
  * Never prints token material.
  */
-import { fork } from "node:child_process";
+import { execFileSync, fork } from "node:child_process";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
@@ -98,12 +98,17 @@ if (process.argv.includes(WORKER_FLAG)) {
 	}
 }
 
-/** Kill a timed-out/failed worker AND its Claude Code grandchild (process group on POSIX). */
+/** Kill a timed-out/failed worker AND its Claude Code grandchild (process group on POSIX, process tree on Windows). */
 function terminateChild(child) {
 	if (!child || child.exitCode !== null || child.signalCode !== null) return;
 	try {
-		if (process.platform === "win32") child.kill("SIGKILL");
-		else process.kill(-child.pid, "SIGKILL");
+		if (process.platform === "win32") {
+			// child.kill() cannot reach the grandchild on Windows — there is no
+			// process group to signal — so take the whole tree down instead.
+			execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+		} else {
+			process.kill(-child.pid, "SIGKILL");
+		}
 	} catch {
 		try {
 			child.kill("SIGKILL");

@@ -107,6 +107,11 @@ function recordModel(message) {
 async function interruptTurn3() {
 	if (state.interruptIssued) return;
 	state.interruptIssued = true;
+	// Mark the pending interrupted result BEFORE awaiting the receipt, and leave
+	// state.turn at 3: the counter only advances on terminal results, so the
+	// interrupted turn's residual assistant message is recorded as turn 3 (not
+	// misfiled as turn 4) and never fed through the turn-4 coherence scan.
+	state.pendingInterruptResult = true;
 	try {
 		const receipt = await stream.interrupt();
 		state.interruptReceipt = receipt && Array.isArray(receipt.still_queued) ? "v1" : "legacy";
@@ -116,8 +121,6 @@ async function interruptTurn3() {
 		state.interruptReceipt = "failed";
 		state.interruptError = error instanceof Error ? error.message : String(error);
 	}
-	state.turn = 4;
-	state.pendingInterruptResult = true;
 	input.push(
 		userMessage(
 			"Stop counting. Repeat the token I asked you to remember at the very start, prefixed with RECALL.",
@@ -160,11 +163,21 @@ async function consume() {
 		if (message.type === "auth_status" && message.error) state.failure ??= "authentication_failed";
 		if (message.type !== "result") continue;
 		// A 401/refusal arrives as subtype:"success" with is_error:true, so both
-		// fields gate the turn. The interrupted turn's own terminal result is
-		// expected to be non-success and is consumed once.
+		// fields gate the turn.
 		const interrupted = state.pendingInterruptResult;
 		state.pendingInterruptResult = false;
-		if ((message.subtype !== "success" || message.is_error === true) && !interrupted) {
+		if (interrupted) {
+			// The interrupted turn's terminal result must be NON-success: a clean
+			// success means the turn completed normally and the interrupt cancelled
+			// nothing, so the receipt would be a false positive.
+			if (message.subtype === "success" && message.is_error !== true) {
+				state.failure ??= "interrupt_ineffective";
+				break;
+			}
+			state.turn = 4;
+			continue;
+		}
+		if (message.subtype !== "success" || message.is_error === true) {
 			state.failure ??= message.subtype ?? message.terminal_reason ?? "result_error";
 			break;
 		}
@@ -185,7 +198,7 @@ async function consume() {
 			);
 			continue;
 		}
-		if (state.turn === 4 && !interrupted) break;
+		if (state.turn === 4) break;
 	}
 	resolveDone();
 }
