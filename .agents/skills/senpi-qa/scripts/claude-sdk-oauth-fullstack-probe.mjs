@@ -33,6 +33,7 @@ import { guardRealAuth, installCleanupHooks, makeSandbox, repoRoot, track } from
 import {
 	classifyPayload,
 	createModelCaptureHandler,
+	extractPayloadText,
 	formatTurnTable,
 	seedProbeAgentDir,
 	withTimeout,
@@ -115,6 +116,11 @@ try {
 	});
 
 	const sourceRoot = join(ROOT, "packages", "coding-agent", "src");
+	// Imported eagerly so BOTH the normal-path finally and the signal-path
+	// cleanup shim can close the resident registry entry.
+	const { closeSession } = await import(
+		pathToFileURL(join(sourceRoot, "core", "extensions", "builtin", "claude-sdk-oauth", "session-registry.ts")).href
+	);
 	const boundaryModule = await import(
 		pathToFileURL(join(sourceRoot, "core", "extensions", "builtin", "claude-sdk-oauth", "sdk-boundary.ts")).href
 	);
@@ -160,9 +166,18 @@ try {
 	});
 	session = created.session;
 	// Register the session with the cleanup harness: an interrupt after the
-	// Claude session starts must dispose it (reaping the real Claude Code
-	// subprocess) — the finally path only runs on normal completion.
-	track({ exitCode: null, kill: () => session.dispose() });
+	// Claude session starts must close the resident registry entry AND dispose
+	// the session (reaping both Claude Code subprocesses) — the finally path
+	// only runs on normal completion.
+	track({
+		exitCode: null,
+		kill: () => {
+			try {
+				if (session?.id) closeSession(session.id, "probe_shutdown");
+			} catch {}
+			session.dispose();
+		},
+	});
 	const model = session.modelRuntime.getModel("claude-sdk-oauth", MODEL_ID);
 	if (!model) throw new Error("claude-sdk-oauth provider did not register its models");
 	await session.setModel(model);
@@ -184,6 +199,8 @@ try {
 		turns.push({
 			index,
 			queries: newQueries.length,
+			// The submitted payload text, for the wire-evidence digest gate.
+			payloadText: extractPayloadText(currentTurn.payloads.map((entry) => entry.message)),
 			path: currentTurn.payloads.at(-1)?.path ?? newQueries.at(-1)?.path ?? "none",
 			lineage: creations.at(-1)?.sessionId ?? "none",
 			kind: classified.some((item) => item.kind === "flatten")
@@ -210,9 +227,6 @@ try {
 	// resident OAuth query owns its own Claude Code subprocess, and disposing
 	// the session alone does not guarantee that subprocess is reaped.
 	try {
-		const { closeSession } = await import(
-			pathToFileURL(join(sourceRoot, "core", "extensions", "builtin", "claude-sdk-oauth", "session-registry.ts")).href
-		);
 		if (session?.id) closeSession(session.id, "probe_shutdown");
 	} catch {}
 	try {
@@ -249,9 +263,17 @@ if (infrastructureFailure) {
 	const nonDeltaContinuations = turns.filter((turn) => turn.index !== 1 && turn.kind !== "delta").length;
 	// Wire evidence is gated, not just tabled: the classified user payload must
 	// actually reach the provider — exactly one loopback request per turn,
-	// each carrying at least one message.
+	// each carrying at least one message, and each turn's submitted payload
+	// text must appear in the corresponding wire request (a dropped or
+	// replaced prompt can no longer masquerade as continuity success).
 	const wireEvidence =
-		providerRequests.length === TURNS && providerRequests.every((request) => request.messages >= 1);
+		providerRequests.length === TURNS &&
+		providerRequests.every((request) => request.messages >= 1) &&
+		turns.every((turn) => {
+			const request = providerRequests[turn.index - 1];
+			const slice = (turn.payloadText ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+			return slice.length === 0 || (request?.text ?? "").includes(slice);
+		});
 	const passed =
 		!fatal &&
 		turns.length === TURNS &&

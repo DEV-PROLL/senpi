@@ -25,6 +25,30 @@ export const FLATTEN_TRAILER = "The above is the conversation history so far";
  * wrong-route or wrong-shape request can never receive a 200 fixture and
  * manufacture false continuity evidence.
  */
+/**
+ * Extract concatenated text from Anthropic API messages (string or block
+ * content) or SDK user messages ({message: {content}}). Used to prove the
+ * classified user payload actually reached the provider on the wire.
+ */
+export function extractPayloadText(input) {
+	const texts = [];
+	const visit = (content) => {
+		if (typeof content === "string") {
+			texts.push(content);
+			return;
+		}
+		if (Array.isArray(content)) {
+			for (const block of content) {
+				if (block && typeof block === "object" && typeof block.text === "string") texts.push(block.text);
+			}
+		}
+	};
+	for (const message of Array.isArray(input) ? input : [input]) {
+		visit(message?.content ?? message?.message?.content);
+	}
+	return texts.join("\n");
+}
+
 export function createModelCaptureHandler(onModelRequest) {
 	let count = 0;
 	return (request, response) => {
@@ -79,7 +103,13 @@ export function createModelCaptureHandler(onModelRequest) {
 			count += 1;
 			// Buffer.byteLength, not raw.length: the column is labeled bytes, and
 			// raw.length counts UTF-16 code units, not HTTP body bytes.
-			onModelRequest({ bytes: Buffer.byteLength(raw, "utf8"), messages: body.messages.length });
+			// The text digest lets the probe prove the classified payload reached
+			// the wire, not just that some nonempty request arrived.
+			onModelRequest({
+				bytes: Buffer.byteLength(raw, "utf8"),
+				messages: body.messages.length,
+				text: extractPayloadText(body.messages).slice(0, 4_000),
+			});
 			response.writeHead(200, {
 				"content-type": "text/event-stream",
 				"cache-control": "no-cache",
