@@ -53,6 +53,16 @@
   data. No identifiers, settings keys, or runtime control flow changed
   ([#613](https://github.com/code-yeongyu/senpi/pull/613)).
 
+- Refresh the model inventory surfaced by `senpi --list-models` and model
+  selection from the current OpenRouter, Vercel AI Gateway, Z.AI, and Z.AI
+  Coding CN catalogs. The update removes retired OpenRouter batch aliases and
+  three unavailable Z.AI model IDs, adds
+  `thinkingmachines/inkling-small`,
+  `deepseek/deepseek-v4-flash-0731`, and
+  `glm-5.2-highspeed[1m]`, moves both Z.AI provider defaults and browser key
+  validation to surviving `glm-5.2`, and adds a catalog-membership guard so
+  external removals cannot silently strand a provider default.
+
 ### Fixed
 
 - Treat explicit model reasoning metadata as the single source of truth for
@@ -236,16 +246,6 @@
 ### Added
 
 ### Changed
-
-- Refresh the model inventory surfaced by `senpi --list-models` and model
-  selection from the current OpenRouter, Vercel AI Gateway, Z.AI, and Z.AI
-  Coding CN catalogs. The update removes retired OpenRouter batch aliases and
-  three unavailable Z.AI model IDs, adds
-  `thinkingmachines/inkling-small`,
-  `deepseek/deepseek-v4-flash-0731`, and
-  `glm-5.2-highspeed[1m]`, moves both Z.AI provider defaults and browser key
-  validation to surviving `glm-5.2`, and adds a catalog-membership guard so
-  external removals cannot silently strand a provider default.
 
 ### Fixed
 
