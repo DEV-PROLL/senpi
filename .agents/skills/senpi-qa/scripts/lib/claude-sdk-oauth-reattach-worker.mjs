@@ -101,9 +101,13 @@ export async function runTurns(request) {
 			}
 			if (message.type === "assistant") {
 				// An assistant-level SDK failure must fail the turn, not pass
-				// through as usage/coherence evidence.
+				// through as usage/coherence evidence. On a resume, a synthetic
+				// assistant message is the cross-account/session-invisibility
+				// denial shape, so it maps to the denial signal.
 				if (message.error) throw new Error("assistant_error");
-				if (message.message?.model === "<synthetic>") throw new Error("synthetic_assistant");
+				if (message.message?.model === "<synthetic>") {
+					throw new Error(request.resume ? "resume_failed" : "synthetic_assistant");
+				}
 				// Pass the whole message: usage can live on the assistant envelope OR
 				// directly on the message (result shape) — nested-only reads silently
 				// fall back to a 0.00 cache ratio.
@@ -140,6 +144,12 @@ export async function runTurns(request) {
 
 	try {
 		await withTimeout(drain, "worker_turns", 210_000);
+	} catch (error) {
+		// Attach the error to the result instead of throwing: the supervisor's
+		// verdicts need the static-read evidence (staticFound/staticError) even
+		// when the turn phase fails — dropping it would make contradictory
+		// evidence indistinguishable from absence.
+		result.error = error instanceof Error ? error.message : String(error);
 	} finally {
 		input.close();
 		closeQuietly(stream);

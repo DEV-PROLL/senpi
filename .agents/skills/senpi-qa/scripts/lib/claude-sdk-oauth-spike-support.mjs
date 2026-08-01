@@ -233,8 +233,11 @@ export function redactSecrets(text, secrets = []) {
 /** Reject with a sanitized, secret-redacted signal and exit 2. */
 export function reject(signal, extra = "", secrets = []) {
 	// writeSync: the REJECTED line is the spike's machine-readable contract and
-	// a forced exit after an async pipe write can truncate it.
-	writeSync(2, `REJECTED signal=${safeSignal(redactSecrets(signal, secrets))}${extra ? ` ${extra}` : ""}\n`);
+	// a forced exit after an async pipe write can truncate it. The extra detail
+	// is sanitized/redacted by the helper itself — no caller may append raw
+	// error text to the contract line.
+	const detail = extra ? ` ${safeSignal(redactSecrets(extra, secrets))}` : "";
+	writeSync(2, `REJECTED signal=${safeSignal(redactSecrets(signal, secrets))}${detail}\n`);
 	process.exit(2);
 }
 

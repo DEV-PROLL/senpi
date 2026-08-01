@@ -32,11 +32,9 @@ import {
 	closeQuietly,
 	loadCredential,
 	managedEnvironment,
-	redactSecrets,
 	reject,
 	requireLiveGate,
 	requireSandbox,
-	safeSignal,
 	startGuardedQuery,
 	userMessage,
 	withTimeout,
@@ -252,11 +250,9 @@ if (outcome) reject(outcome, "", SECRETS);
 // branch would otherwise emit a bare interrupt_failed and drop the captured
 // (redacted + sanitized) diagnostic.
 if (state.interruptReceipt === "failed") {
-	reject(
-		"interrupt_failed",
-		state.interruptError ? `detail=${safeSignal(redactSecrets(state.interruptError, SECRETS))}` : "",
-		SECRETS,
-	);
+	// reject() sanitizes and redacts the detail itself — no caller may append
+	// raw error text to the contract line.
+	reject("interrupt_failed", state.interruptError ?? "", SECRETS);
 }
 if (state.failure) reject(state.failure, "", SECRETS);
 if (state.sessionIds.size !== 1) reject("session_lineage_split");

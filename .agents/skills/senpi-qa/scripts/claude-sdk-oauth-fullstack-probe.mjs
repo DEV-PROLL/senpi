@@ -159,6 +159,10 @@ try {
 		autoTitleSessions: false,
 	});
 	session = created.session;
+	// Register the session with the cleanup harness: an interrupt after the
+	// Claude session starts must dispose it (reaping the real Claude Code
+	// subprocess) — the finally path only runs on normal completion.
+	track({ exitCode: null, kill: () => session.dispose() });
 	const model = session.modelRuntime.getModel("claude-sdk-oauth", MODEL_ID);
 	if (!model) throw new Error("claude-sdk-oauth provider did not register its models");
 	await session.setModel(model);

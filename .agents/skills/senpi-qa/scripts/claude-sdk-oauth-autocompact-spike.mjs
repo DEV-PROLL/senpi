@@ -58,11 +58,13 @@ if (loaded.error) reject(loaded.error);
 // must RELIABLY overflow that window: a repeated phrase compresses under BPE
 // ("context filler. " collapses to ~3 tokens per repetition, which would land
 // the message BELOW the window and produce a false autocompact=absent), so
-// each repetition carries a unique hex segment. 18,000 varied repetitions at
-// ~8 tokens each ~= 144k tokens — over the window, under the 200k context.
+// each repetition carries a unique hex segment. Estimates for the varied
+// repetition range ~5-7 tokens (compressed prefix + incompressible hex), so
+// 24,000 repetitions land ~120-170k tokens by any estimate — comfortably
+// over the window, under the 200k context.
 const AUTO_COMPACT_WINDOW = 100_000;
 const FILLER = "Summarize this instruction back to me in one sentence: ".concat(
-	Array.from({ length: 18_000 }, (_, index) => `context filler ${index.toString(16)}${randomUUID().slice(0, 6)}`).join(" "),
+	Array.from({ length: 24_000 }, (_, index) => `context filler ${index.toString(16)}${randomUUID().slice(0, 6)}`).join(" "),
 );
 
 function nextPrompt(state, probeManual) {
