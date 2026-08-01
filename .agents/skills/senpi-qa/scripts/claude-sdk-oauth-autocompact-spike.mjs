@@ -176,9 +176,12 @@ async function runArm({ settings, probeManual }) {
 	if (outcome) reject(outcome, "", secrets);
 	if (state.failure) reject(state.failure, "", secrets);
 	if (state.sessionIds.size !== 1) reject("session_lineage_split");
-	// Coherence is enforced, not just recorded: the arm exists to prove
-	// post-compaction turn continuity, and a failed recall must not ACCEPT.
-	if (!state.coherent) reject("recall_incoherent", "", secrets);
+	// Coherence is enforced only when compaction actually happened: the arm
+	// exists to prove POST-COMPACTION continuity. With no boundary, the recall
+	// must survive ~130k tokens of uncompacted filler — a genuinely hard model
+	// task whose failure would mask the actual finding (autocompact=absent),
+	// so it is recorded in the evidence line but not gated.
+	if (!state.coherent && state.boundaries.length > 0) reject("recall_incoherent", "", secrets);
 	return state;
 }
 

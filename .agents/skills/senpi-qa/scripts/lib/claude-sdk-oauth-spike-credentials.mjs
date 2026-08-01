@@ -40,8 +40,13 @@ function asOauthCredential(credential) {
 export function loadCredential(sandbox, slot = "claude-sdk-oauth-spike") {
 	const { stored, error } = readAuthFile(sandbox);
 	if (error) return { error };
-	const credential = asOauthCredential(stored[slot] ?? stored["claude-sdk-oauth"] ?? stored.anthropic);
-	return credential ? { credential } : { error: "credential_unavailable" };
+	// Try each candidate in order and take the first USABLE one: a present but
+	// malformed primary slot must not shadow a valid fallback.
+	for (const candidate of [stored[slot], stored["claude-sdk-oauth"], stored.anthropic]) {
+		const credential = asOauthCredential(candidate);
+		if (credential) return { credential };
+	}
+	return { error: "credential_unavailable" };
 }
 
 /**

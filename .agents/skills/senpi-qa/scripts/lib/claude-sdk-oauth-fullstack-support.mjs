@@ -33,7 +33,11 @@ export function createModelCaptureHandler(onModelRequest) {
 			response.end();
 			return;
 		}
-		if (!request.url?.includes("/messages")) {
+		// Match the parsed pathname exactly (query parameters allowed): a
+		// substring check would treat a mistyped route containing "/messages"
+		// as a valid model request and manufacture false continuity evidence.
+		const pathname = new URL(request.url ?? "/", "http://loopback.invalid").pathname;
+		if (pathname !== "/v1/messages") {
 			response.writeHead(404, { "content-type": "application/json" });
 			response.end(JSON.stringify({ error: "unknown_route" }));
 			return;
@@ -43,6 +47,13 @@ export function createModelCaptureHandler(onModelRequest) {
 		request.on("data", (chunk) => {
 			raw += chunk;
 		});
+		// A dropped mid-upload connection must settle the response: without an
+		// error listener the 'end' handler never runs and the probe hangs to
+		// the turn timeout instead of failing fast with diagnostics.
+		request.on("error", () => {
+			if (!response.headersSent) response.writeHead(400, { "content-type": "application/json" });
+			response.end(JSON.stringify({ error: "request_dropped" }));
+		});
 		request.on("end", () => {
 			let body;
 			try {
@@ -50,6 +61,14 @@ export function createModelCaptureHandler(onModelRequest) {
 			} catch {
 				response.writeHead(400, { "content-type": "application/json" });
 				response.end(JSON.stringify({ error: "malformed_request" }));
+				return;
+			}
+			// JSON.parse can yield a primitive: validate the container before
+			// reading properties, or a malformed body crashes the handler
+			// instead of producing the fail-closed 400.
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				response.writeHead(400, { "content-type": "application/json" });
+				response.end(JSON.stringify({ error: "malformed_shape" }));
 				return;
 			}
 			if (typeof body.model !== "string" || !Array.isArray(body.messages)) {

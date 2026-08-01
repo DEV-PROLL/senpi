@@ -233,6 +233,11 @@ if (infrastructureFailure) {
 	// legitimate first-payload shape): any later non-delta submission means
 	// history was re-synthesized inside a resident session.
 	const nonDeltaContinuations = turns.filter((turn) => turn.index !== 1 && turn.kind !== "delta").length;
+	// Wire evidence is gated, not just tabled: the classified user payload must
+	// actually reach the provider — exactly one loopback request per turn,
+	// each carrying at least one message.
+	const wireEvidence =
+		providerRequests.length === TURNS && providerRequests.every((request) => request.messages >= 1);
 	const passed =
 		!fatal &&
 		turns.length === TURNS &&
@@ -240,10 +245,11 @@ if (infrastructureFailure) {
 		lineages.size === 1 &&
 		flattenTurns === 0 &&
 		nonResidentTurns === 0 &&
-		nonDeltaContinuations === 0;
+		nonDeltaContinuations === 0 &&
+		wireEvidence;
 	if (fatal) process.stderr.write(`PROBE ERROR: ${safeDetail(fatal.stack ?? fatal.message)}\n`);
 	process.stdout.write(
-		`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} lineages=${lineages.size} flatten_turns=${flattenTurns} non_resident=${nonResidentTurns} non_delta=${nonDeltaContinuations}\n`,
+		`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} lineages=${lineages.size} flatten_turns=${flattenTurns} non_resident=${nonResidentTurns} non_delta=${nonDeltaContinuations} wire_reqs=${providerRequests.length}\n`,
 	);
 	// exitCode, not exit(): a forced exit can truncate the table/verdict when
 	// stdout is a pipe; assigning lets Node flush the QA output first.
