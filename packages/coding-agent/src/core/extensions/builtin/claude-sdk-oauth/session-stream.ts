@@ -219,6 +219,7 @@ async function createResidentAttempt(
 					...source,
 					sentCount: decision.from,
 					sentHashes: source.sentHashes.slice(0, decision.from),
+					assistantUuidByIndex: (source.assistantUuidByIndex ?? []).filter(([index]) => index <= decision.from),
 					...(decision.kind === "fork" ? { lastAssistantUuid: decision.atUuid } : {}),
 				}
 			: undefined;

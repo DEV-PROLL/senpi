@@ -4,8 +4,8 @@ import type { Options, SdkQueryHandle } from "../src/core/extensions/builtin/cla
 import {
 	forgetBinding,
 	getBinding,
-	rememberBinding,
 	reattachSession,
+	rememberBinding,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
 import {
 	closeSession,
@@ -102,6 +102,21 @@ describe("claude-sdk-oauth session reattach", () => {
 
 		expect(entry.sentCount).toBe(2);
 		expect(getSession(SESSION_ID)).toBeDefined();
+	});
+
+	it("carries the assistant boundary history across a reattach", async () => {
+		overrideSessionRegistryBoundary({ queryFactory: () => fakeQuery() });
+
+		const entry = await reattachSession({
+			binding: { ...binding(), assistantUuidByIndex: [
+				[1, "uuid-a1"],
+				[2, "uuid-a2"],
+			] },
+			options: options(),
+		});
+
+		expect(entry.assistantUuidByIndex.get(1)).toBe("uuid-a1");
+		expect(entry.assistantUuidByIndex.get(2)).toBe("uuid-a2");
 	});
 
 	it("propagates an initialization failure so the caller can fall back", async () => {

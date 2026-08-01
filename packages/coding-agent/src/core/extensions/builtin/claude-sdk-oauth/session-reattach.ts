@@ -1,9 +1,5 @@
 import type { Options } from "./sdk-boundary.ts";
-import {
-	type ClaudeSdkOauthSessionEntry,
-	closeSession,
-	getOrCreateSession,
-} from "./session-registry.ts";
+import { type ClaudeSdkOauthSessionEntry, closeSession, getOrCreateSession } from "./session-registry.ts";
 import { recordSyncedStream } from "./session-sync.ts";
 
 export type ContinuityBinding = {
@@ -16,6 +12,8 @@ export type ContinuityBinding = {
 	modelId: string;
 	systemPromptHash: string;
 	toolsetHash: string;
+	/** Assistant boundaries kept as entries so a later fork still has a resume point. */
+	assistantUuidByIndex?: readonly (readonly [number, string])[];
 };
 
 export type ReattachInput = {
@@ -67,6 +65,7 @@ export function bindingFromEntry(
 		sentCount: entry.sentCount,
 		sentHashes: [...sentHashes],
 		lastAssistantUuid: entry.assistantUuidByIndex.get(entry.sentCount) ?? null,
+		assistantUuidByIndex: [...entry.assistantUuidByIndex.entries()],
 		accountName: entry.accountName,
 		modelId: entry.modelId,
 		systemPromptHash: entry.systemPromptHash,
@@ -118,6 +117,7 @@ export async function reattachSession(input: ReattachInput): Promise<ClaudeSdkOa
 	}
 
 	recordSyncedStream(entry, binding.sentHashes);
+	for (const [index, uuid] of binding.assistantUuidByIndex ?? []) entry.assistantUuidByIndex.set(index, uuid);
 	if (binding.lastAssistantUuid) entry.assistantUuidByIndex.set(binding.sentCount, binding.lastAssistantUuid);
 	rememberBinding({ ...binding, sdkSessionId: entry.sdkSessionId });
 	return entry;
