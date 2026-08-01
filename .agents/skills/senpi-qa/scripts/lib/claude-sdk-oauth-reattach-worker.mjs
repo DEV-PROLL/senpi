@@ -92,6 +92,9 @@ export async function runTurns(request) {
 				result.sessionId ??= message.session_id;
 			}
 			if (message.type === "assistant") {
+				// An assistant-level SDK failure must fail the turn, not pass
+				// through as usage/coherence evidence.
+				if (message.error) throw new Error("assistant_error");
 				if (message.message?.model === "<synthetic>") throw new Error("synthetic_assistant");
 				result.usage = readUsage(message.message) ?? result.usage;
 				if (request.expectToken && assistantText(message).includes(request.expectToken)) result.coherent = true;

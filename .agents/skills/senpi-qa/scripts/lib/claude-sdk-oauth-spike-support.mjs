@@ -141,6 +141,10 @@ export function controlledInput(initialMessage) {
 		},
 		close() {
 			closed = true;
+			// Buffered-but-undelivered prompts must not reach the query after
+			// close: cleanup racing a turn boundary would otherwise drive one
+			// more SDK turn after the spike considers the stream closed.
+			pending.length = 0;
 			for (const waiter of waiters.splice(0)) waiter({ value: undefined, done: true });
 		},
 		[Symbol.asyncIterator]() {
@@ -216,7 +220,9 @@ export function assistantText(message) {
 export function redactSecrets(text, secrets = []) {
 	let out = String(text ?? "");
 	for (const secret of secrets) {
-		if (typeof secret === "string" && secret.length >= 8) out = out.split(secret).join("[redacted]");
+		// Every non-empty secret is redacted — a length cutoff would let short
+		// credentials through the no-token-material contract.
+		if (typeof secret === "string" && secret.length > 0) out = out.split(secret).join("[redacted]");
 	}
 	return out;
 }

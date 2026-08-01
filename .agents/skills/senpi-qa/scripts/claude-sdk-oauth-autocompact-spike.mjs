@@ -135,6 +135,10 @@ async function runArm({ settings, probeManual }) {
 	};
 	async function consume() {
 		for await (const message of stream) {
+			// Record the session id from EVERY message that carries one — a lineage
+			// split during compaction (compact_boundary/result messages) must trip
+			// the stability assertion, not slip past an init-only set.
+			if (typeof message.session_id === "string") state.sessionIds.add(message.session_id);
 			if (message.type === "system" && message.subtype === "init" && typeof message.session_id === "string") {
 				state.sessionIds.add(message.session_id);
 			}
@@ -182,6 +186,9 @@ async function runArm({ settings, probeManual }) {
 	if (outcome) reject(outcome, "", secrets);
 	if (state.failure) reject(state.failure, "", secrets);
 	if (state.sessionIds.size !== 1) reject("session_lineage_split");
+	// Coherence is enforced, not just recorded: the arm exists to prove
+	// post-compaction turn continuity, and a failed recall must not ACCEPT.
+	if (!state.coherent) reject("recall_incoherent", "", secrets);
 	return state;
 }
 
@@ -215,4 +222,6 @@ process.stdout.write(
 	`armB boundaries=${JSON.stringify(armB.boundaries)} turns=${armB.turn} coherent=${armB.coherent}\n`,
 );
 console.log(`ACCEPTED autocompact=${autocompact} boundary=${boundary} manual_compact=${manual}`);
-process.exit(0);
+// exitCode, not exit(): a forced exit can truncate the per-arm evidence or the
+// ACCEPTED line when stdout is a pipe; assigning lets Node flush it first.
+process.exitCode = 0;

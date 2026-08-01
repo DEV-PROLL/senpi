@@ -165,6 +165,9 @@ async function main(runChild, primary, secondary, token, scopedRoots, secrets) {
 	});
 	if (resumed.error) reject(resumed.error === "resume_failed" ? "resume_not_found" : resumed.error, "", secrets);
 	if (!resumed.coherent) reject("resume_incoherent");
+	// The resumed query must report the SEEDED session id — a new or different
+	// lineage cannot pass on model text alone.
+	if (resumed.sessionId !== seeded.sessionId) reject("resume_lineage_mismatch");
 	const cacheRead = resumed.usage?.cacheRead ?? 0;
 	const promptTokens = Math.max(1, (resumed.usage?.input ?? 0) + cacheRead + (resumed.usage?.cacheCreation ?? 0));
 	const ratio = (cacheRead / promptTokens).toFixed(2);
@@ -184,8 +187,12 @@ async function main(runChild, primary, secondary, token, scopedRoots, secrets) {
 			prompts: ["Repeat the token I gave you at the start, prefixed with RECALL."],
 			expectToken: token,
 		});
-		// `denied` is the security verdict and requires the resume itself to fail;
-		// a successful resume whose model simply misses the recall is inconclusive
+		// `denied` is the security verdict and is reserved for known resume/auth
+		// failures; infrastructure failures (worker spawn/IPC/timeout) and other
+		// turn-level errors reject the spike instead of masquerading as a denial.
+		const denial = crossed.error === "resume_failed" || crossed.error === "authentication_failed";
+		if (crossed.error && !denial) reject(crossed.error, "", secrets);
+		// A successful resume whose model simply misses the recall is inconclusive
 		// evidence about cross-account addressing, not a denial.
 		crossAccount = crossed.error ? "denied" : crossed.coherent ? "ok" : "incoherent";
 	}
@@ -219,10 +226,12 @@ async function main(runChild, primary, secondary, token, scopedRoots, secrets) {
 	});
 	// A static-read FAILURE is infrastructure, not evidence of absence.
 	if (scoped.staticError) reject(scoped.staticError, "", secrets);
-	// staticFound is the direct visibility measurement; a resume that executes
-	// without error already proves the session was addressable. A model recall
-	// miss would be a coherence observation, not a config-root verdict, so it
-	// stays out of this gate.
+	// Turn-level resume failures (subscription, model refusal, worker timeout)
+	// are infrastructure too — only resume_failed is addressing evidence.
+	if (scoped.error && scoped.error !== "resume_failed") reject(scoped.error, "", secrets);
+	// staticFound is the direct visibility measurement; a model recall miss
+	// would be a coherence observation, not a config-root verdict, so it stays
+	// out of this gate.
 	const scopedFound = !scoped.error && scoped.staticFound === true;
 	let configRoot;
 	if (defaultRead.staticFound === true) {
@@ -237,5 +246,7 @@ async function main(runChild, primary, secondary, token, scopedRoots, secrets) {
 	console.log(
 		`ACCEPTED resume=ok cache_read_ratio=${ratio} cross_account=${safeSignal(crossAccount)} config_root=${configRoot}`,
 	);
-	process.exit(0);
+	// exitCode, not exit(): a forced exit can truncate the ACCEPTED line when
+	// stdout is a pipe; assigning lets Node flush the QA output first.
+	process.exitCode = 0;
 }

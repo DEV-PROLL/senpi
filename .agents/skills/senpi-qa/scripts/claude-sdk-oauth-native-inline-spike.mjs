@@ -105,6 +105,7 @@ const state = {
 	setModelError: false,
 	pendingInterruptResult: false,
 	coherent: false,
+	continuationResult: false,
 	failure: null,
 	turn: 1,
 };
@@ -127,9 +128,15 @@ async function interruptTurn3() {
 		state.interruptReceipt = receipt && Array.isArray(receipt.still_queued) ? "v1" : "legacy";
 	} catch (error) {
 		// Distinct from "legacy": interruption never happened, so nothing downstream
-		// can be trusted and the spike must REJECT rather than ACCEPT.
+		// can be trusted and the spike must REJECT rather than ACCEPT. Stop driving
+		// the query immediately — queueing the continuation would spend a live
+		// model call (and can hang) before the intended interrupt_failed rejection.
 		state.interruptReceipt = "failed";
 		state.interruptError = error instanceof Error ? error.message : String(error);
+		state.pendingInterruptResult = false;
+		state.failure ??= "interrupt_failed";
+		input.close();
+		return;
 	}
 	input.push(
 		userMessage(
@@ -212,7 +219,10 @@ async function consume() {
 			);
 			continue;
 		}
-		if (state.turn === 4) break;
+		if (state.turn === 4) {
+			state.continuationResult = true;
+			break;
+		}
 	}
 }
 
@@ -233,6 +243,10 @@ if (state.failure) reject(state.failure, "", SECRETS);
 if (state.sessionIds.size !== 1) reject("session_lineage_split");
 if (state.interruptReceipt === "failed") reject("interrupt_failed");
 if (state.interruptReceipt === "pending") reject("interrupt_never_issued");
+// A coherent turn-4 assistant message is not enough: the iterator ending
+// before turn 4's successful terminal result means the continuation never
+// completed, so the spike cannot ACCEPT.
+if (!state.continuationResult) reject("continuation_incomplete");
 
 const setModel =
 	state.setModelError || state.models[2] === undefined
@@ -244,4 +258,6 @@ const continueOutcome = state.coherent ? "coherent" : "degraded";
 console.log(
 	`ACCEPTED setmodel=${setModel} interrupt_receipt=${state.interruptReceipt} continue=${continueOutcome}`,
 );
-process.exit(0);
+// exitCode, not exit(): a forced exit can truncate the ACCEPTED line when
+// stdout is a pipe; assigning lets Node flush the QA output first.
+process.exitCode = 0;
