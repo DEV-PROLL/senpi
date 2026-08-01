@@ -222,7 +222,7 @@ try {
 	}
 } catch (error) {
 	fatal = error instanceof Error ? error : new Error(String(error));
-	infrastructureFailure = /loopback|ECONNREFUSED|did not bind/i.test(fatal.message);
+	infrastructureFailure = /loopback|ECONNREFUSED|EADDRINUSE|EACCES|did not bind/i.test(fatal.message);
 } finally {
 	// Close the resident SDK session first so the Claude Code subprocess exits
 	// instead of recreating the sandbox dir right after cleanup.

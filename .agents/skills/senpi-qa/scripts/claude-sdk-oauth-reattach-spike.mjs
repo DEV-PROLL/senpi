@@ -24,6 +24,7 @@
  * Never prints token material.
  */
 import { fork } from "node:child_process";
+import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,7 +45,10 @@ const WORKER_FLAG = "--reattach-worker";
 const SELF = fileURLToPath(import.meta.url);
 
 if (process.argv.includes(WORKER_FLAG)) {
-	const request = JSON.parse(process.env.SENPI_REATTACH_WORKER_REQUEST ?? "{}");
+	// The request carries an OAuth access token, so it arrives over the IPC channel
+	// rather than the environment: env is inherited by the Claude Code subprocess
+	// this worker spawns, which would put the token in that process's environment.
+	const request = await new Promise((resolve) => process.once("message", resolve));
 	const result = await runTurns(request).catch((error) => ({
 		error: error instanceof Error ? error.message : String(error),
 	}));
@@ -62,10 +66,8 @@ if (process.argv.includes(WORKER_FLAG)) {
 	const runChild = (request) =>
 		withDeadline(
 			new Promise((resolve, rejectRun) => {
-				const child = fork(SELF, [WORKER_FLAG], {
-					env: { ...process.env, SENPI_REATTACH_WORKER_REQUEST: JSON.stringify(request) },
-					silent: true,
-				});
+				const child = fork(SELF, [WORKER_FLAG], { silent: true });
+				child.send(request);
 				let received;
 				child.once("message", (message) => {
 					received = message;
@@ -120,6 +122,11 @@ if (process.argv.includes(WORKER_FLAG)) {
 
 	// (c) config-root addressing through an env-scoped child.
 	const scopedRoot = mkdtempSync(join(tmpdir(), "claude-sdk-oauth-config-root-"));
+	process.once("exit", () => {
+		try {
+			rmSync(scopedRoot, { recursive: true, force: true });
+		} catch {}
+	});
 	const scoped = await runChild({
 		access: primary.credential.access,
 		configDir: scopedRoot,
