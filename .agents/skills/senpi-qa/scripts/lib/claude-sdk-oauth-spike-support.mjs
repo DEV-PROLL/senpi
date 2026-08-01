@@ -6,7 +6,7 @@
  * Nothing here ever prints token material.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,7 +21,8 @@ export const LIVE_GATE = "SENPI_LIVE_CLAUDE_SDK_OAUTH";
 /** Print SKIPPED + exit 0 unless the live gate is set. Keeps default suites token-free. */
 export function requireLiveGate() {
 	if (process.env[LIVE_GATE] === "1") return;
-	console.log(`SKIPPED: set ${LIVE_GATE}=1 to run the live spike`);
+	// writeSync: a forced exit after an async pipe write can truncate the line.
+	writeSync(1, `SKIPPED: set ${LIVE_GATE}=1 to run the live spike\n`);
 	process.exit(0);
 }
 
@@ -29,7 +30,7 @@ export function requireLiveGate() {
 export function requireSandbox() {
 	const sandbox = process.env.SENPI_CODING_AGENT_DIR;
 	if (sandbox) return sandbox;
-	console.error("REJECTED signal=sandbox_missing");
+	writeSync(2, "REJECTED signal=sandbox_missing\n");
 	process.exit(2);
 }
 
@@ -229,7 +230,9 @@ export function redactSecrets(text, secrets = []) {
 
 /** Reject with a sanitized, secret-redacted signal and exit 2. */
 export function reject(signal, extra = "", secrets = []) {
-	console.error(`REJECTED signal=${safeSignal(redactSecrets(signal, secrets))}${extra ? ` ${extra}` : ""}`);
+	// writeSync: the REJECTED line is the spike's machine-readable contract and
+	// a forced exit after an async pipe write can truncate it.
+	writeSync(2, `REJECTED signal=${safeSignal(redactSecrets(signal, secrets))}${extra ? ` ${extra}` : ""}\n`);
 	process.exit(2);
 }
 

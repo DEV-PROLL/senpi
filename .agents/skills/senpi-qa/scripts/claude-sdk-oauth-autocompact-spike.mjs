@@ -56,11 +56,16 @@ const sandbox = requireSandbox();
 const loaded = loadCredential(sandbox);
 if (loaded.error) reject(loaded.error);
 
-// 100,000 is the minimum autoCompactWindow SDK 0.3.220 honors; the stimulus
-// below is sized ~130k tokens (16 chars ~= 4 tokens) so one user message
-// overflows the window and auto-compaction cannot be skipped.
+// 100,000 is the minimum autoCompactWindow SDK 0.3.220 honors. The stimulus
+// must RELIABLY overflow that window: a repeated phrase compresses under BPE
+// ("context filler. " collapses to ~3 tokens per repetition, which would land
+// the message BELOW the window and produce a false autocompact=absent), so
+// each repetition carries a unique hex segment. 18,000 varied repetitions at
+// ~8 tokens each ~= 144k tokens — over the window, under the 200k context.
 const AUTO_COMPACT_WINDOW = 100_000;
-const FILLER = "Summarize this instruction back to me in one sentence: ".concat("context filler. ".repeat(33_000));
+const FILLER = "Summarize this instruction back to me in one sentence: ".concat(
+	Array.from({ length: 18_000 }, (_, index) => `context filler ${index.toString(16)}${randomUUID().slice(0, 6)}`).join(" "),
+);
 
 function nextPrompt(state, probeManual) {
 	// Turn 2 is the single oversized stimulus that overflows the 100k window.

@@ -85,6 +85,8 @@ export async function runTurns(request) {
 	};
 	if (request.resume) options.resume = request.resume;
 	const stream = query({ prompt: input, options });
+	const expectedTurns = prompts.length;
+	let completedTurns = 0;
 
 	const drain = (async () => {
 		for await (const message of stream) {
