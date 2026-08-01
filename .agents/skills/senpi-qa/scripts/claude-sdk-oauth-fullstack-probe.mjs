@@ -25,6 +25,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { writeSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -52,12 +53,13 @@ if (process.env[INNER_FLAG] !== "1") {
 		stdio: "inherit",
 	});
 	if (child.error) {
-		process.stderr.write(`probe launcher failed: ${child.error.message}\n`);
-		// exitCode, not exit(): a forced exit can truncate the diagnostic on a pipe.
-		process.exitCode = 2;
-	} else {
-		process.exitCode = child.status ?? 2;
+		// writeSync: a forced exit after an async pipe write can truncate the line.
+		writeSync(2, `probe launcher failed: ${child.error.message}\n`);
+		process.exit(2);
 	}
+	// The outer process must EXIT here: continuing past the launcher would
+	// re-execute the entire probe body (sandbox, server, session, verdict).
+	process.exit(child.status ?? 2);
 }
 
 installCleanupHooks();

@@ -59,7 +59,7 @@ const SECRETS = [loaded.credential.access, MEMORY_TOKEN];
 // installed BEFORE setup (a signal during SDK import/binary resolution is
 // covered), setup failures exit through the sanitized REJECTED contract, and
 // the handlers reap the subprocess before exiting.
-const { input, stream } = await startGuardedQuery({
+const { input, stream, disarm } = await startGuardedQuery({
 	firstMessage: userMessage(
 		`Remember this token for later: ${MEMORY_TOKEN}. Reply with exactly: ACK`,
 		randomUUID(),
@@ -243,20 +243,23 @@ try {
 } finally {
 	input.close();
 	closeQuietly(stream);
+	disarm();
 }
 
 if (outcome) reject(outcome, "", SECRETS);
-if (state.failure) reject(state.failure, "", SECRETS);
-if (state.sessionIds.size !== 1) reject("session_lineage_split");
+// The dedicated interrupt-failure branch runs BEFORE the generic failure
+// rejection: state.failure is also set on interrupt failure, and the generic
+// branch would otherwise emit a bare interrupt_failed and drop the captured
+// (redacted + sanitized) diagnostic.
 if (state.interruptReceipt === "failed") {
-	// Surface the captured interrupt error (redacted + sanitized) instead of a
-	// bare interrupt_failed that hides the actual cause.
 	reject(
 		"interrupt_failed",
 		state.interruptError ? `detail=${safeSignal(redactSecrets(state.interruptError, SECRETS))}` : "",
 		SECRETS,
 	);
 }
+if (state.failure) reject(state.failure, "", SECRETS);
+if (state.sessionIds.size !== 1) reject("session_lineage_split");
 if (state.interruptReceipt === "pending") reject("interrupt_never_issued");
 // A coherent turn-4 assistant message is not enough: the iterator ending
 // before turn 4's successful terminal result means the continuation never
