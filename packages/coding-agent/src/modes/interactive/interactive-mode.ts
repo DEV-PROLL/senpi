@@ -126,6 +126,7 @@ import { BashExecutionComponent } from "./components/bash-execution.ts";
 import { BorderedLoader } from "./components/bordered-loader.ts";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.ts";
 import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message.ts";
+import { ContinuityNoticeTracker } from "./components/continuity-notice.ts";
 import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
@@ -469,6 +470,7 @@ export class InteractiveMode {
 	private lastEditorText = "";
 	private lastInputWasPaste = false;
 	private sessionLogger: SessionLogger | undefined;
+	private readonly continuityNotices = new ContinuityNoticeTracker();
 	private readonly turnWorkingTip = new WorkingTipCache();
 	private hookStatusContainer: Container;
 	private defaultEditor: CustomEditor;
@@ -3694,6 +3696,7 @@ export class InteractiveMode {
 						this.streamingMessage.errorMessage = errorMessage;
 					}
 					this.streamingComponent.updateContent(this.streamingMessage);
+					this.addContinuityNotice(this.streamingMessage);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
 						if (!errorMessage) {
@@ -4329,6 +4332,14 @@ export class InteractiveMode {
 	 * significant cache miss. Only states observable facts: the miss itself,
 	 * a model switch, or an idle gap past the cache TTL.
 	 */
+	/** Muted single-line notice for degraded session continuity; healthy turns stay silent. */
+	private addContinuityNotice(message: AssistantMessage): void {
+		const notice = this.continuityNotices.noticeFor(message);
+		if (!notice) return;
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(notice, 1, 0));
+	}
+
 	private maybeShowCacheMissNotice(message: AssistantMessage): void {
 		if (!this.settingsManager.getShowCacheMissNotices()) return;
 

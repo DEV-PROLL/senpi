@@ -15,6 +15,7 @@ import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable
 import { buildClaudeSdkOauthQueryOptions } from "./options.ts";
 import { buildPromptBlocks, buildPromptStream } from "./prompt-bridge.ts";
 import { getSdkBoundary, type SdkQueryHandle } from "./sdk-boundary.ts";
+import { type ContinuityObservation, emitContinuityObservation } from "./session-observability.ts";
 import { residentSessionMessages } from "./session-stream.ts";
 import { loadClaudeSdkOauthProviderSettingsFromDisk } from "./settings.ts";
 import { withAuthGuidance } from "./stream-guidance.ts";
@@ -95,8 +96,22 @@ export function streamClaudeSdkOauth(
 				if (mcpServers) queryOptions.mcpServers = mcpServers;
 				return queryOptions;
 			};
+			const recordContinuity = (observation: ContinuityObservation): void => {
+				// Not a failure: carry the observation as details only, with no synthesized error.
+				output.diagnostics = [
+					...(output.diagnostics ?? []),
+					{
+						type: "claude_sdk_oauth_session_continuity",
+						timestamp: Date.now(),
+						details: { ...observation },
+					},
+				];
+			};
 			const useResidentSession =
 				options?.streamKind === "main" && providerSettings.resumeMode !== "off" && options.sessionId !== undefined;
+			if (options?.streamKind === "main" && !useResidentSession) {
+				emitContinuityObservation({ kind: "disabled", reason: "resume_mode_off" }, recordContinuity);
+			}
 			const messages = useResidentSession
 				? residentSessionMessages({
 						model,
@@ -107,6 +122,7 @@ export function streamClaudeSdkOauth(
 						buildOptions,
 						customToolNameToSdk: resolvedTools.customToolNameToSdk,
 						toolWatchNote,
+						onContinuityDecision: recordContinuity,
 						onResumeFallback: (error) => {
 							output.diagnostics = [
 								...(output.diagnostics ?? []),

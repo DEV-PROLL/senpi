@@ -861,6 +861,10 @@ describe("Claude SDK OAuth stream events", () => {
 				type: "claude_sdk_oauth_resume_fallback",
 				error: expect.objectContaining({ message: "resume initialization failed" }),
 			}),
+			expect.objectContaining({
+				type: "claude_sdk_oauth_session_continuity",
+				details: expect.objectContaining({ kind: "flatten", reason: "resume_initialization_failed" }),
+			}),
 		]);
 	});
 
