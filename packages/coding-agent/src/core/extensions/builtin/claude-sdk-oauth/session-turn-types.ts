@@ -1,5 +1,11 @@
 import type { SDKMessage } from "./sdk-boundary.ts";
 
+export interface SessionTurnResult {
+	uuid: string;
+	messages: SDKMessage[];
+	aborted: boolean;
+}
+
 export interface ActiveTurn {
 	uuid: string;
 	generation: number;

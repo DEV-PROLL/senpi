@@ -13,7 +13,10 @@ import {
 	transitionToTurnWaiting,
 } from "./session-registry-state.ts";
 import { bufferBeforeReplay, claimTurn, deliver, isReplayFor, resultMatchesTurn } from "./session-turn-claim.ts";
-import type { ActiveTurn, PreReplayBufferLimits } from "./session-turn-types.ts";
+import type { ActiveTurn, PreReplayBufferLimits, SessionTurnResult } from "./session-turn-types.ts";
+
+export type { SessionTurnResult } from "./session-turn-types.ts";
+
 import { SessionTurnAttributionError } from "./session-turn-types.ts";
 
 export const DEFAULT_PRE_REPLAY_MAX_MESSAGES = 64;
@@ -25,12 +28,6 @@ export interface SessionTurnRequest {
 	signal?: AbortSignal;
 	onMessage?: (message: SDKMessage) => void;
 	scheduleAbort?: (callback: () => void, delayMs: number) => () => void;
-}
-
-export interface SessionTurnResult {
-	uuid: string;
-	messages: SDKMessage[];
-	aborted: boolean;
 }
 
 export class ConcurrentSessionTurnAdmissionError extends Error {
