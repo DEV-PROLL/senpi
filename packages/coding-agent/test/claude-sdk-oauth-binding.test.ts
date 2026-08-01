@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-	type BindingCheckpoint,
 	BINDING_ENTRY_TYPE,
+	type BindingCheckpoint,
 	latestBindingOnBranch,
 	verifyBindingAgainstTranscript,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-binding.ts";

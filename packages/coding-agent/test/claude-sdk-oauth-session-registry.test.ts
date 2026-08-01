@@ -2,6 +2,11 @@ import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { afterEach, describe, expect, it } from "vitest";
 import type { AccountSlot } from "../src/core/extensions/builtin/claude-sdk-oauth/accounts.ts";
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
+import { decideNativeContinuity } from "../src/core/extensions/builtin/claude-sdk-oauth/session-continuity.ts";
+import {
+	annotateBranchInfo,
+	annotateTainted,
+} from "../src/core/extensions/builtin/claude-sdk-oauth/session-entry-annotations.ts";
 import {
 	ClaudeSdkOauthSessionRegistry,
 	closeSession,
@@ -13,11 +18,6 @@ import {
 	SESSION_REGISTRY_IDLE_TTL_MS,
 	SessionRegistryResourceLimitError,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
-import { decideNativeContinuity } from "../src/core/extensions/builtin/claude-sdk-oauth/session-continuity.ts";
-import {
-	annotateBranchInfo,
-	annotateTainted,
-} from "../src/core/extensions/builtin/claude-sdk-oauth/session-entry-annotations.ts";
 import {
 	ConcurrentSessionTurnAdmissionError,
 	submitSessionTurn,

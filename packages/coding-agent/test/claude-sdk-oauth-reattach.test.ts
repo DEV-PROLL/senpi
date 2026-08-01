@@ -108,10 +108,13 @@ describe("claude-sdk-oauth session reattach", () => {
 		overrideSessionRegistryBoundary({ queryFactory: () => fakeQuery() });
 
 		const entry = await reattachSession({
-			binding: { ...binding(), assistantUuidByIndex: [
-				[1, "uuid-a1"],
-				[2, "uuid-a2"],
-			] },
+			binding: {
+				...binding(),
+				assistantUuidByIndex: [
+					[1, "uuid-a1"],
+					[2, "uuid-a2"],
+				],
+			},
 			options: options(),
 		});
 
