@@ -23,7 +23,7 @@
  *     node .agents/skills/senpi-qa/scripts/claude-sdk-oauth-reattach-spike.mjs
  *
  * Outcomes (final line):
- *   exit 0 "ACCEPTED resume=<ok> cache_read_ratio=<r> cross_account=<ok|denied|incoherent|unseeded> config_root=<env-honored|default-only>"
+ *   exit 0 "ACCEPTED resume=<ok> cache_read_ratio=<r> cross_account=<ok|denied|incoherent|lineage_mismatch|unseeded> config_root=<env-honored|default-only>"
  *   exit 2 "REJECTED signal=<sanitized>"   (e.g. resume_not_found)
  * cross_account is `unseeded` — never `ok` — when no distinct second account slot
  * (claude-sdk-oauth-spike-b) was seeded, so an untested arm cannot read as proven;
@@ -83,6 +83,8 @@ if (process.argv.includes(WORKER_FLAG)) {
 	// Signal-aware cleanup: an interrupted spike must take every live worker
 	// (and its Claude Code grandchild) down and remove temp config roots BEFORE
 	// exiting — a detached child outliving the parent keeps burning quota.
+	// SIGHUP is included: a closed terminal would otherwise orphan the detached
+	// worker and its grandchild.
 	const cleanupRuntime = () => {
 		for (const child of activeChildren) terminateChild(child);
 		for (const root of scopedRoots) {
@@ -92,7 +94,7 @@ if (process.argv.includes(WORKER_FLAG)) {
 		}
 	};
 	process.once("exit", cleanupRuntime);
-	for (const signal of ["SIGINT", "SIGTERM"]) {
+	for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 		process.once(signal, () => {
 			cleanupRuntime();
 			reject(`interrupted_${signal.toLowerCase()}`);
@@ -134,13 +136,17 @@ if (process.argv.includes(WORKER_FLAG)) {
 
 /** Kill a timed-out/failed worker AND its Claude Code grandchild (process group on POSIX, process tree on Windows). */
 function terminateChild(child) {
-	if (!child || child.exitCode !== null || child.signalCode !== null) return;
+	if (!child || child.pid === undefined) return;
 	try {
 		if (process.platform === "win32") {
 			// child.kill() cannot reach the grandchild on Windows — there is no
 			// process group to signal — so take the whole tree down instead.
+			// taskkill on an exited worker fails harmlessly into the catch.
 			execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
 		} else {
+			// Group-kill even when the worker already exited: a grandchild in the
+			// detached group can outlive the worker, and an exited group leader
+			// leaves the group addressable until the last member dies.
 			process.kill(-child.pid, "SIGKILL");
 		}
 	} catch {
@@ -196,8 +202,16 @@ async function main(runChild, primary, secondary, token, scopedRoots, secrets) {
 		const denial = crossed.error === "resume_failed" || crossed.error === "authentication_failed";
 		if (crossed.error && !denial) reject(crossed.error, "", secrets);
 		// A successful resume whose model simply misses the recall is inconclusive
-		// evidence about cross-account addressing, not a denial.
-		crossAccount = crossed.error ? "denied" : crossed.coherent ? "ok" : "incoherent";
+		// evidence about cross-account addressing, not a denial. And ok requires
+		// the SAME lineage: a cross-account resume that silently became a fresh
+		// session proves neither denial nor continuity.
+		crossAccount = crossed.error
+			? "denied"
+			: crossed.sessionId !== seeded.sessionId
+				? "lineage_mismatch"
+				: crossed.coherent
+					? "ok"
+					: "incoherent";
 	}
 
 	// (c) config-root addressing: seed INTO the scoped root, then check both
@@ -240,8 +254,10 @@ async function main(runChild, primary, secondary, token, scopedRoots, secrets) {
 	}
 	// staticFound is the direct visibility measurement; a model recall miss
 	// would be a coherence observation, not a config-root verdict, so it stays
-	// out of this gate.
-	const scopedFound = !scoped.error && scoped.staticFound === true;
+	// out of this gate. The resumed query must also report the SCOPED-SEEDED
+	// session id — a fresh lineage proves addressing failed even when the
+	// static read and the turn both succeeded.
+	const scopedFound = !scoped.error && scoped.staticFound === true && scoped.sessionId === scopedSeed.sessionId;
 	let configRoot;
 	if (defaultRead.staticFound === true) {
 		// Visible under the default root: the SDK ignored CLAUDE_CONFIG_DIR.

@@ -213,7 +213,10 @@ try {
 	try {
 		authGuard.assertUnchanged();
 	} catch (error) {
-		fatal = error instanceof Error ? error : new Error(String(error));
+		// Preserve the original error: an auth-assertion failure in teardown
+		// must not overwrite an earlier probe/turn failure (and with it the
+		// already-computed infrastructure classification).
+		fatal = fatal ?? (error instanceof Error ? error : new Error(String(error)));
 	}
 	box.cleanup();
 }
