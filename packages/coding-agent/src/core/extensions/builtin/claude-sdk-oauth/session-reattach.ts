@@ -27,6 +27,14 @@ export type ReattachInput = {
 
 const bindings = new Map<string, ContinuityBinding>();
 
+export type AbortOutcome = "keep" | "reattach";
+
+export function evaluateAbortOutcome(receipt: unknown): AbortOutcome {
+	if (!receipt || typeof receipt !== "object") return "reattach";
+	const queued = (receipt as { still_queued?: unknown }).still_queued;
+	return Array.isArray(queued) && queued.length === 0 ? "keep" : "reattach";
+}
+
 export function rememberBinding(binding: ContinuityBinding): void {
 	bindings.set(binding.senpiSessionId, { ...binding, sentHashes: [...binding.sentHashes] });
 }

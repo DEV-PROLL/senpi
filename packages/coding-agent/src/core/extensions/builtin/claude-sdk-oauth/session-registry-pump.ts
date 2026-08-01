@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import type { SDKMessage, SDKUserMessage } from "./sdk-boundary.ts";
+import { evaluateAbortOutcome } from "./session-reattach.ts";
 import {
 	type ClaudeSdkOauthSessionEntry,
 	type ClaudeSdkOauthSessionRegistry,
@@ -44,6 +45,7 @@ interface ActiveTurn {
 	preReplayBytes: number;
 	claimed: boolean;
 	aborted: boolean;
+	interruptReceipt?: unknown;
 	onMessage?: (message: SDKMessage) => void;
 	signal?: AbortSignal;
 	onAbort: () => void;
@@ -173,8 +175,8 @@ function finishTurn(
 	transitionToTurnResultSeen(entry);
 	removeAbortListener(turn);
 	entry.activeTurn = null;
-	if (turn.aborted) registry.markTainted(entry.senpiSessionId, "abort");
-	else transitionToIdleSynced(entry);
+	if (!turn.aborted || evaluateAbortOutcome(turn.interruptReceipt) === "keep") transitionToIdleSynced(entry);
+	else registry.closeSession(entry.senpiSessionId, "abort_uncertain");
 	turn.resolve({ uuid: turn.uuid, messages: turn.messages, aborted: turn.aborted });
 }
 
@@ -236,10 +238,15 @@ export function submitSessionTurn(
 				() => abortTurn(registry, entry, turn, new Error("Claude SDK OAuth interrupted turn did not terminate")),
 				SESSION_TURN_ABORT_GRACE_MS,
 			);
-			void entry.query.interrupt().catch((error: unknown) => {
-				const detail = error instanceof Error ? error.message : String(error);
-				abortTurn(registry, entry, turn, new Error(`Claude SDK OAuth query interrupt failed: ${detail}`));
-			});
+			void entry.query
+				.interrupt()
+				.then((receipt: unknown) => {
+					turn.interruptReceipt = receipt;
+				})
+				.catch((error: unknown) => {
+					const detail = error instanceof Error ? error.message : String(error);
+					abortTurn(registry, entry, turn, new Error(`Claude SDK OAuth query interrupt failed: ${detail}`));
+				});
 		};
 		turn = {
 			uuid,

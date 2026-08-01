@@ -555,7 +555,7 @@ describe("Claude SDK OAuth session registry", () => {
 		expect(query.closes).toBe(1);
 	});
 
-	it("interrupts once, finishes the aborted turn with partial content, and taints the entry", async () => {
+	it("interrupts once, finishes the aborted turn with partial content, and keeps the lineage", async () => {
 		const { query, registry, entry } = pumpFixture();
 		const abort = new AbortController();
 		const turn = submitSessionTurn(registry, entry, { message: userContent, signal: abort.signal });
@@ -569,7 +569,7 @@ describe("Claude SDK OAuth session registry", () => {
 		const completed = await turn;
 		expect(completed).toMatchObject({ aborted: true, messages: [partial] });
 		expect(query.interrupts).toBe(1);
-		expect(entry.state).toBe("TAINTED");
+		expect(entry.taintedReason).toBeNull();
 	});
 
 	it("throws on a second concurrent turn admission", () => {
