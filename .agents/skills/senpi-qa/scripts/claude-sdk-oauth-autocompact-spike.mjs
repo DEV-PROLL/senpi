@@ -62,7 +62,7 @@ if (loaded.error) reject(loaded.error);
 const AUTO_COMPACT_WINDOW = 100_000;
 const FILLER = "Summarize this instruction back to me in one sentence: ".concat("context filler. ".repeat(33_000));
 
-function nextPrompt(state, probeManual, token) {
+function nextPrompt(state, probeManual) {
 	// Turn 2 is the single oversized stimulus that overflows the 100k window.
 	if (state.turn === 1) return FILLER;
 	if (state.autoBoundaryTurn !== null || !probeManual || state.manualCompactSent) {
@@ -80,6 +80,10 @@ function nextPrompt(state, probeManual, token) {
 
 async function runArm({ settings, probeManual }) {
 	const token = `COMPACT_${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
+	// Every reject path that can carry an SDK error string redacts the access
+	// token and the generated recall token first — safeSignal is a shape
+	// sanitizer, not a secret redactor.
+	const secrets = [loaded.credential.access, token];
 	// Setup runs inside the guarded path: an SDK import, a missing Claude binary
 	// or a query-construction failure must exit through the sanitized REJECTED
 	// contract, never as a raw stack trace on exit 1.
@@ -105,7 +109,18 @@ async function runArm({ settings, probeManual }) {
 			},
 		});
 	} catch (error) {
-		reject(error instanceof Error ? error.message : String(error));
+		reject(error instanceof Error ? error.message : String(error), "", secrets);
+	}
+
+	// Signal-aware cleanup: Ctrl-C/SIGTERM skips `finally`, so without a handler
+	// the Claude Code subprocess would be orphaned mid-arm and keep burning
+	// quota. Closing the query handle reaps the subprocess before exiting.
+	for (const signal of ["SIGINT", "SIGTERM"]) {
+		process.once(signal, () => {
+			input.close();
+			closeQuietly(stream);
+			reject(`interrupted_${signal.toLowerCase()}`, "", secrets);
+		});
 	}
 
 	const state = {
@@ -118,11 +133,6 @@ async function runArm({ settings, probeManual }) {
 		turn: 0,
 		phase: "auto",
 	};
-	let resolveDone;
-	const done = new Promise((resolve) => {
-		resolveDone = resolve;
-	});
-
 	async function consume() {
 		for await (const message of stream) {
 			if (message.type === "system" && message.subtype === "init" && typeof message.session_id === "string") {
@@ -153,16 +163,15 @@ async function runArm({ settings, probeManual }) {
 			if (state.phase === "recall") break;
 			// nextPrompt() owns the manual->recall transition, so the `/compact`
 			// send happens in exactly one place.
-			input.push(userMessage(nextPrompt(state, probeManual, token), randomUUID()));
+			input.push(userMessage(nextPrompt(state, probeManual), randomUUID()));
 		}
-		resolveDone();
 	}
 
 	let outcome = null;
 	try {
-		// Await the consumer itself, not just `done`: a rejected consumer would
-		// otherwise hang to the deadline and misreport the real failure as a timeout.
-		await withTimeout(Promise.race([consume(), done]), "spike", 600_000);
+		// Await the consumer itself: a rejected consumer surfaces its real error
+		// immediately, and withTimeout is what actually bounds a hang.
+		await withTimeout(consume(), "spike", 600_000);
 	} catch (error) {
 		outcome = error instanceof Error ? error.message : String(error);
 	} finally {
@@ -170,8 +179,8 @@ async function runArm({ settings, probeManual }) {
 		closeQuietly(stream);
 	}
 
-	if (outcome) reject(outcome);
-	if (state.failure) reject(state.failure);
+	if (outcome) reject(outcome, "", secrets);
+	if (state.failure) reject(state.failure, "", secrets);
 	if (state.sessionIds.size !== 1) reject("session_lineage_split");
 	return state;
 }

@@ -50,6 +50,10 @@ if (loaded.error) reject(loaded.error);
 const FIRST_MODEL = "claude-haiku-4-5";
 const SECOND_MODEL = "claude-sonnet-4-5";
 const MEMORY_TOKEN = `SPIKE_${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
+// Every reject path that can carry an SDK error string redacts the access
+// token and the generated recall token first — safeSignal is a shape
+// sanitizer, not a secret redactor.
+const SECRETS = [loaded.credential.access, MEMORY_TOKEN];
 
 // Setup runs inside the guarded path: an SDK import, a missing Claude binary or
 // a query-construction failure must exit through the sanitized REJECTED
@@ -76,7 +80,18 @@ try {
 		},
 	});
 } catch (error) {
-	reject(error instanceof Error ? error.message : String(error));
+	reject(error instanceof Error ? error.message : String(error), "", SECRETS);
+}
+
+// Signal-aware cleanup: Ctrl-C/SIGTERM skips `finally`, so without a handler
+// the Claude Code subprocess would be orphaned mid-turn and keep burning
+// quota. Closing the query handle reaps the subprocess before exiting.
+for (const signal of ["SIGINT", "SIGTERM"]) {
+	process.once(signal, () => {
+		input.close();
+		closeQuietly(stream);
+		reject(`interrupted_${signal.toLowerCase()}`, "", SECRETS);
+	});
 }
 
 const state = {
@@ -93,11 +108,6 @@ const state = {
 	failure: null,
 	turn: 1,
 };
-let resolveDone;
-const done = new Promise((resolve) => {
-	resolveDone = resolve;
-});
-
 function recordModel(message) {
 	if (message.type === "assistant" && typeof message.message?.model === "string") {
 		state.models[state.turn] = message.message.model;
@@ -204,14 +214,13 @@ async function consume() {
 		}
 		if (state.turn === 4) break;
 	}
-	resolveDone();
 }
 
 let outcome = null;
 try {
-	// Await the consumer itself, not just `done`: a rejected consumer would
-	// otherwise be dropped and surface 240s later as a meaningless timeout.
-	await withTimeout(Promise.race([consume(), done]), "spike", 240_000);
+	// Await the consumer itself: a rejected consumer surfaces its real error
+	// immediately, and withTimeout is what actually bounds a hang.
+	await withTimeout(consume(), "spike", 240_000);
 } catch (error) {
 	outcome = error instanceof Error ? error.message : String(error);
 } finally {
@@ -219,8 +228,8 @@ try {
 	closeQuietly(stream);
 }
 
-if (outcome) reject(outcome);
-if (state.failure) reject(state.failure);
+if (outcome) reject(outcome, "", SECRETS);
+if (state.failure) reject(state.failure, "", SECRETS);
 if (state.sessionIds.size !== 1) reject("session_lineage_split");
 if (state.interruptReceipt === "failed") reject("interrupt_failed");
 if (state.interruptReceipt === "pending") reject("interrupt_never_issued");

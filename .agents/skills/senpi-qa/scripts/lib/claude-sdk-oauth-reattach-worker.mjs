@@ -38,9 +38,13 @@ async function staticRead(sessionId) {
 	try {
 		const info = await sdk.getSessionInfo(sessionId);
 		const messages = await sdk.getSessionMessages(sessionId, { includeSystemMessages: true });
-		return info !== undefined || messages.length > 0;
-	} catch {
-		return false;
+		return { found: info !== undefined || messages.length > 0 };
+	} catch (error) {
+		// A read FAILURE (SDK method missing, permission denied, malformed
+		// response) is not evidence of absence — report it separately so the
+		// config-root verdict cannot mistake an infrastructure error for
+		// "not found under this root".
+		return { found: false, error: error instanceof Error ? error.message : String(error) };
 	}
 }
 
@@ -55,7 +59,11 @@ export async function runTurns(request) {
 	// re-address the "default-root" reads and corrupt the config-root verdict.
 	if (request.configDir) process.env.CLAUDE_CONFIG_DIR = request.configDir;
 	else delete process.env.CLAUDE_CONFIG_DIR;
-	if (request.staticRead) result.staticFound = await staticRead(request.staticRead);
+	if (request.staticRead) {
+		const read = await staticRead(request.staticRead);
+		result.staticFound = read.found;
+		if (read.error) result.staticError = read.error;
+	}
 	// A static-only probe answers "is this session visible under this config
 	// root?" without spawning Claude Code or spending quota at all.
 	if (request.staticOnly) {

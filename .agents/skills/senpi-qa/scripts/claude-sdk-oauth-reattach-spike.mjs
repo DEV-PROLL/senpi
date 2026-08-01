@@ -70,6 +70,10 @@ if (process.argv.includes(WORKER_FLAG)) {
 	// the cross-account arm report `ok` without ever using a second account.
 	const secondary = loadCredentialStrict(sandbox, "claude-sdk-oauth-spike-b");
 	const token = `REATTACH_${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
+	// Every reject path that can carry an SDK/worker error string redacts the
+	// access token and the generated recall token first — safeSignal is a shape
+	// sanitizer, not a secret redactor.
+	const secrets = [primary.credential.access, token];
 
 	const activeChildren = new Set();
 	const scopedRoots = new Set();
@@ -117,11 +121,11 @@ if (process.argv.includes(WORKER_FLAG)) {
 	};
 
 	try {
-		await main(runChild, primary, secondary, token, scopedRoots);
+		await main(runChild, primary, secondary, token, scopedRoots, secrets);
 	} catch (error) {
 		// Spawn/IPC failures and worker timeouts must surface through the same
 		// sanitized REJECTED contract as in-spike failures, never a raw exit 1.
-		reject(error instanceof Error ? error.message : String(error));
+		reject(error instanceof Error ? error.message : String(error), "", secrets);
 	}
 }
 
@@ -143,13 +147,13 @@ function terminateChild(child) {
 	}
 }
 
-async function main(runChild, primary, secondary, token, scopedRoots) {
+async function main(runChild, primary, secondary, token, scopedRoots, secrets) {
 	// (a) seed the session in a child process, then let that process die.
 	const seeded = await runChild({
 		access: primary.credential.access,
 		prompts: [TOKEN_PROMPT(token), "Reply with exactly: SECOND"],
 	});
-	if (seeded.error) reject(seeded.error);
+	if (seeded.error) reject(seeded.error, "", secrets);
 	if (!seeded.sessionId) reject("session_id_absent");
 
 	// (a) resume the dead session from this process.
@@ -159,7 +163,7 @@ async function main(runChild, primary, secondary, token, scopedRoots) {
 		prompts: ["Repeat the token I gave you at the start, prefixed with RECALL."],
 		expectToken: token,
 	});
-	if (resumed.error) reject(resumed.error === "resume_failed" ? "resume_not_found" : resumed.error);
+	if (resumed.error) reject(resumed.error === "resume_failed" ? "resume_not_found" : resumed.error, "", secrets);
 	if (!resumed.coherent) reject("resume_incoherent");
 	const cacheRead = resumed.usage?.cacheRead ?? 0;
 	const promptTokens = Math.max(1, (resumed.usage?.input ?? 0) + cacheRead + (resumed.usage?.cacheCreation ?? 0));
@@ -195,14 +199,16 @@ async function main(runChild, primary, secondary, token, scopedRoots) {
 		configDir: scopedRoot,
 		prompts: [TOKEN_PROMPT(token)],
 	});
-	if (scopedSeed.error) reject(scopedSeed.error);
+	if (scopedSeed.error) reject(scopedSeed.error, "", secrets);
 	if (!scopedSeed.sessionId) reject("session_id_absent");
 	const defaultRead = await runChild({
 		access: primary.credential.access,
 		staticRead: scopedSeed.sessionId,
 		staticOnly: true,
 	});
-	if (defaultRead.error) reject(defaultRead.error);
+	if (defaultRead.error) reject(defaultRead.error, "", secrets);
+	// A static-read FAILURE is infrastructure, not evidence of absence.
+	if (defaultRead.staticError) reject(defaultRead.staticError, "", secrets);
 	const scoped = await runChild({
 		access: primary.credential.access,
 		configDir: scopedRoot,
@@ -211,6 +217,8 @@ async function main(runChild, primary, secondary, token, scopedRoots) {
 		prompts: ["Repeat the token I gave you at the start, prefixed with RECALL."],
 		expectToken: token,
 	});
+	// A static-read FAILURE is infrastructure, not evidence of absence.
+	if (scoped.staticError) reject(scoped.staticError, "", secrets);
 	// staticFound is the direct visibility measurement; a resume that executes
 	// without error already proves the session was addressable. A model recall
 	// miss would be a coherence observation, not a config-root verdict, so it

@@ -233,24 +233,27 @@ try {
 
 if (infrastructureFailure) {
 	process.stdout.write(`REJECTED signal=loopback_unreachable detail=${safeDetail(fatal.message)}\n`);
-	process.exit(2);
+	// exitCode, not exit(): a forced exit can truncate piped QA output.
+	process.exitCode = 2;
+} else {
+	process.stdout.write(formatTurnTable(turns));
+	const lineages = new Set(creations.map((record) => record.sessionId ?? "none"));
+	const flattenTurns = turns.filter((turn) => turn.kind === "flatten").length;
+	// Gate the ROUTE, not just the payload shape: a bootstrap payload on a
+	// non-resident (flatten-stream) query must not masquerade as resident-path.
+	const nonResidentTurns = turns.filter((turn) => turn.path !== "resident-registry").length;
+	const passed =
+		!fatal &&
+		turns.length === TURNS &&
+		creations.length === 1 &&
+		lineages.size === 1 &&
+		flattenTurns === 0 &&
+		nonResidentTurns === 0;
+	if (fatal) process.stderr.write(`PROBE ERROR: ${safeDetail(fatal.stack ?? fatal.message)}\n`);
+	process.stdout.write(
+		`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} lineages=${lineages.size} flatten_turns=${flattenTurns} non_resident=${nonResidentTurns}\n`,
+	);
+	// exitCode, not exit(): a forced exit can truncate the table/verdict when
+	// stdout is a pipe; assigning lets Node flush the QA output first.
+	process.exitCode = BASELINE ? 0 : passed ? 0 : 1;
 }
-
-process.stdout.write(formatTurnTable(turns));
-const lineages = new Set(creations.map((record) => record.sessionId ?? "none"));
-const flattenTurns = turns.filter((turn) => turn.kind === "flatten").length;
-// Gate the ROUTE, not just the payload shape: a bootstrap payload on a
-// non-resident (flatten-stream) query must not masquerade as resident-path.
-const nonResidentTurns = turns.filter((turn) => turn.path !== "resident-registry").length;
-const passed =
-	!fatal &&
-	turns.length === TURNS &&
-	creations.length === 1 &&
-	lineages.size === 1 &&
-	flattenTurns === 0 &&
-	nonResidentTurns === 0;
-if (fatal) process.stderr.write(`PROBE ERROR: ${safeDetail(fatal.stack ?? fatal.message)}\n`);
-process.stdout.write(
-	`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} lineages=${lineages.size} flatten_turns=${flattenTurns} non_resident=${nonResidentTurns}\n`,
-);
-process.exit(BASELINE ? 0 : passed ? 0 : 1);

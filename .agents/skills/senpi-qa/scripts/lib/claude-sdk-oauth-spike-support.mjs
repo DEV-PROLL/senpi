@@ -206,9 +206,24 @@ export function assistantText(message) {
 		.join("\n");
 }
 
-/** Reject with a sanitized signal and exit 2. */
-export function reject(signal, extra = "") {
-	console.error(`REJECTED signal=${safeSignal(signal)}${extra ? ` ${extra}` : ""}`);
+/**
+ * Redact known secret values from an arbitrary error string.
+ *
+ * safeSignal() is a shape sanitizer, NOT a secret redactor: hyphenated
+ * credential material and generated recall tokens survive it. Any error text
+ * that could echo a prompt or a credential must pass through here first.
+ */
+export function redactSecrets(text, secrets = []) {
+	let out = String(text ?? "");
+	for (const secret of secrets) {
+		if (typeof secret === "string" && secret.length >= 8) out = out.split(secret).join("[redacted]");
+	}
+	return out;
+}
+
+/** Reject with a sanitized, secret-redacted signal and exit 2. */
+export function reject(signal, extra = "", secrets = []) {
+	console.error(`REJECTED signal=${safeSignal(redactSecrets(signal, secrets))}${extra ? ` ${extra}` : ""}`);
 	process.exit(2);
 }
 
