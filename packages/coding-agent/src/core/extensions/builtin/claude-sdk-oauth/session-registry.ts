@@ -108,6 +108,7 @@ export interface CreateSessionRegistryEntryInput {
 	toolsetHash: string;
 	systemPromptHash: string;
 	options: Options;
+	resume?: { sdkSessionId: string; atUuid?: string };
 }
 
 export class SessionRegistryResourceLimitError extends Error {
@@ -181,18 +182,25 @@ export class ClaudeSdkOauthSessionRegistry {
 		this.ensureCapacity();
 		const now = activeSessionRegistryBoundary.now();
 		const generation = (this.generations.get(input.senpiSessionId) ?? 0) + 1;
-		const sdkSessionId = createSessionUuid(now);
+		const sdkSessionId = input.resume?.sdkSessionId ?? createSessionUuid(now);
 		const inputController = new StreamingInputController();
+		const lineageOptions = input.resume
+			? {
+					resume: input.resume.sdkSessionId,
+					...(input.resume.atUuid ? { resumeSessionAt: input.resume.atUuid, forkSession: true } : {}),
+				}
+			: { sessionId: sdkSessionId };
 		const query = activeSessionRegistryBoundary.queryFactory({
 			prompt: inputController,
 			options: {
 				...input.options,
-				sessionId: sdkSessionId,
+				...lineageOptions,
 				extraArgs: { ...input.options.extraArgs, "replay-user-messages": "" },
 			},
 		});
+		const { resume: _resume, ...entryInput } = input;
 		const target: ClaudeSdkOauthSessionEntry = {
-			...input,
+			...entryInput,
 			sdkSessionId,
 			generation,
 			query,
