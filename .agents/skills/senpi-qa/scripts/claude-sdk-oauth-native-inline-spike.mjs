@@ -206,7 +206,7 @@ if (state.interruptReceipt === "failed") reject("interrupt_failed");
 if (state.interruptReceipt === "pending") reject("interrupt_never_issued");
 
 const setModel =
-	state.setModelError || state.models[2] === undefined
+	state.setModelError || state.models[1] === undefined || state.models[2] === undefined
 		? "absent"
 		: state.models[2] !== state.models[1]
 			? "ok"

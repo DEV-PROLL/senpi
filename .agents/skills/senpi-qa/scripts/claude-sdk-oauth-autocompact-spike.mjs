@@ -44,7 +44,9 @@ const sandbox = requireSandbox();
 const loaded = loadCredential(sandbox);
 if (loaded.error) reject(loaded.error);
 
-const AUTO_COMPACT_WINDOW = 4_000;
+// SDK 0.3.220 rejects autoCompactWindow below 100_000 and silently drops it,
+// so a smaller value would report a result the run never actually exercised.
+const AUTO_COMPACT_WINDOW = 100_000;
 const MAX_FILLER_TURNS = 12;
 const MEMORY_TOKEN = `COMPACT_${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
 const FILLER = "Summarize this instruction back to me in one sentence: ".concat("context filler. ".repeat(60));
