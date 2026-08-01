@@ -29,19 +29,41 @@ export function requireSandbox() {
 	process.exit(2);
 }
 
-/** Load a dummy-safe oauth credential from <sandbox>/auth.json. Never logs it. */
-export function loadCredential(sandbox, slot = "claude-sdk-oauth-spike") {
-	let stored;
+function readAuthFile(sandbox) {
 	try {
-		stored = JSON.parse(readFileSync(join(sandbox, "auth.json"), "utf8"));
+		return { stored: JSON.parse(readFileSync(join(sandbox, "auth.json"), "utf8")) };
 	} catch {
 		return { error: "credential_unreadable" };
 	}
-	const credential = stored[slot] ?? stored["claude-sdk-oauth"] ?? stored.anthropic;
-	if (!credential || credential.type !== "oauth" || typeof credential.access !== "string") {
-		return { error: "credential_unavailable" };
-	}
-	return { credential };
+}
+
+function asOauthCredential(credential) {
+	if (!credential || credential.type !== "oauth" || typeof credential.access !== "string") return undefined;
+	return credential;
+}
+
+/** Load a dummy-safe oauth credential from <sandbox>/auth.json. Never logs it. */
+export function loadCredential(sandbox, slot = "claude-sdk-oauth-spike") {
+	const { stored, error } = readAuthFile(sandbox);
+	if (error) return { error };
+	const credential = asOauthCredential(stored[slot] ?? stored["claude-sdk-oauth"] ?? stored.anthropic);
+	return credential ? { credential } : { error: "credential_unavailable" };
+}
+
+/**
+ * Load a credential from EXACTLY the named slot, with no fallback.
+ *
+ * The forgiving `loadCredential` fallback is wrong for multi-account scenarios:
+ * it silently returns the primary slot when the second one was never seeded, so
+ * a cross-account assertion would report success without ever exercising a
+ * second account. Callers that need a distinct account must use this.
+ */
+export function loadCredentialStrict(sandbox, slot) {
+	const { stored, error } = readAuthFile(sandbox);
+	if (error) return { error };
+	if (stored[slot] === undefined) return { error: `slot_missing_${slot}` };
+	const credential = asOauthCredential(stored[slot]);
+	return credential ? { credential } : { error: `slot_unusable_${slot}` };
 }
 
 /** Sanitize any signal/reason into the fixed terminal-line vocabulary shape. */

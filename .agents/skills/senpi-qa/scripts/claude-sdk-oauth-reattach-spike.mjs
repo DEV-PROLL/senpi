@@ -17,8 +17,10 @@
  *     node .agents/skills/senpi-qa/scripts/claude-sdk-oauth-reattach-spike.mjs
  *
  * Outcomes (final line):
- *   exit 0 "ACCEPTED resume=<ok> cache_read_ratio=<r> cross_account=<ok|denied> config_root=<env-honored|default-only>"
+ *   exit 0 "ACCEPTED resume=<ok> cache_read_ratio=<r> cross_account=<ok|denied|unseeded> config_root=<env-honored|default-only>"
  *   exit 2 "REJECTED signal=<sanitized>"   (e.g. resume_not_found)
+ * cross_account is `unseeded` — never `ok` — when no distinct second account slot
+ * (claude-sdk-oauth-spike-b) was seeded, so an untested arm cannot read as proven.
  * Never prints token material.
  */
 import { fork } from "node:child_process";
@@ -29,6 +31,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	loadCredential,
+	loadCredentialStrict,
 	reject,
 	requireLiveGate,
 	requireSandbox,
@@ -51,7 +54,9 @@ if (process.argv.includes(WORKER_FLAG)) {
 	const sandbox = requireSandbox();
 	const primary = loadCredential(sandbox);
 	if (primary.error) reject(primary.error);
-	const secondary = loadCredential(sandbox, "claude-sdk-oauth-spike-b");
+	// STRICT: the forgiving loader falls back to the primary slot, which would let
+	// the cross-account arm report `ok` without ever using a second account.
+	const secondary = loadCredentialStrict(sandbox, "claude-sdk-oauth-spike-b");
 	const token = `REATTACH_${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
 
 	const runChild = (request) =>
@@ -95,9 +100,15 @@ if (process.argv.includes(WORKER_FLAG)) {
 	const promptTokens = Math.max(1, (resumed.usage?.input ?? 0) + cacheRead + (resumed.usage?.cacheCreation ?? 0));
 	const ratio = (cacheRead / promptTokens).toFixed(2);
 
-	// (b) cross-account resume under the same config root.
+	// (b) cross-account resume under the same config root. Without a genuinely
+	// distinct slot B the arm is reported as `unseeded` — never as `ok` — so a
+	// missing second account can never be mistaken for a proven capability.
 	let crossAccount = "unseeded";
-	if (!secondary.error) {
+	if (secondary.error) {
+		if (!secondary.error.startsWith("slot_missing_")) reject(secondary.error);
+	} else if (secondary.credential.access === primary.credential.access) {
+		reject("cross_account_slots_identical");
+	} else {
 		const crossed = await runChild({
 			access: secondary.credential.access,
 			resume: seeded.sessionId,
