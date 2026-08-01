@@ -14,7 +14,6 @@ import { decideNativeContinuity } from "../src/core/extensions/builtin/claude-sd
 import { registerSessionRegistry } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-wiring.ts";
 import {
 	configFingerprint,
-	decideSessionSync,
 	recordSyncedStream,
 	sentMessageHashes,
 	sentMessages,
@@ -166,16 +165,19 @@ describe("Claude SDK OAuth session registry lifecycle wiring", () => {
 				{ role: "user", content: "back on Claude", timestamp: 3 },
 			],
 		};
-		expect(
-			decideSessionSync({
-				entry: getSession("provider-switch"),
-				currentHashes: hashes(current),
-				accountName: "default",
-				modelId: "claude-test",
-				fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
-				tokenExpiring: false,
-			}),
-		).toMatchObject({ kind: "cold-seed" });
+		const decision = decideNativeContinuity({
+			entry: undefined,
+			binding: undefined,
+			currentHashes: hashes(current),
+			accountName: "default",
+			modelId: "claude-test",
+			fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
+			transcriptAvailable: true,
+		});
+
+		expect(getSession("provider-switch")).toBeUndefined();
+		expect(decision).toEqual({ kind: "bootstrap" });
+		expect(decision.kind).not.toBe("delta");
 		expect(closes).toBe(1);
 	});
 
@@ -238,18 +240,32 @@ describe("Claude SDK OAuth session registry lifecycle wiring", () => {
 		const entry = createEntry("thinking-change", undefined, initialFingerprint);
 		recordSyncedStream(entry, hashes(resident));
 
-		const decision = decideSessionSync({
-			entry,
+		const decision = decideNativeContinuity({
+			entry: {
+				sdkSessionId: entry.sdkSessionId,
+				accountName: "default",
+				modelId: "claude-test",
+				systemPromptHash: initialFingerprint.systemPromptHash,
+				toolsetHash: initialFingerprint.toolsetHash,
+				sentCount: entry.sentCount,
+				sentHashes: hashes(resident),
+				lastAssistantUuid: null,
+				assistantUuidByIndex: entry.assistantUuidByIndex,
+				pendingForkReason: null,
+				taintedReason: null,
+			},
+			binding: undefined,
 			currentHashes: hashes({
 				messages: [resident.messages[0]!, { role: "user", content: "two", timestamp: 2 }],
 			}),
 			accountName: "default",
 			modelId: "claude-test",
 			fingerprint: configFingerprint({ maxThinkingTokens: 8_192 }, resident, "oauth-slots", "default"),
-			tokenExpiring: false,
+			transcriptAvailable: true,
 		});
 
-		expect(decision).toMatchObject({ kind: "cold-seed" });
+		expect(decision).toMatchObject({ kind: "reattach", reason: "options_changed" });
+		expect(decision.kind).not.toBe("flatten");
 	});
 
 	it("records a compaction fork boundary idempotently", async () => {

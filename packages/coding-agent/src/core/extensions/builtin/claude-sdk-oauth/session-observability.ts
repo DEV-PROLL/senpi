@@ -173,8 +173,8 @@ export function consumePendingCloseCause(senpiSessionId: string): ContinuityReas
 }
 
 /**
- * Pre-todo-8 vocabulary mapping: the current decideSessionSync outcomes map onto
- * the observation vocabulary as incremental→delta, resume→fork, cold-seed→flatten.
+ * Maps the continuity decision families onto the observation vocabulary:
+ * incremental→delta, resume→fork, cold-seed→flatten.
  */
 export function observeSessionSyncDecision(input: {
 	kind: "incremental" | "resume" | "cold-seed";

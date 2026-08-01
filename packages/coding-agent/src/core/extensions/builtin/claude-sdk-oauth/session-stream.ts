@@ -16,6 +16,7 @@ import {
 	getOrCreateSession,
 	getSession,
 	isBoundAccountTokenExpiring,
+	isIdleExpired,
 	isCurrentGeneration,
 	sessionRegistry,
 } from "./session-registry.ts";
@@ -235,6 +236,7 @@ async function createResidentAttempt(
 		modelId: input.model.id,
 		fingerprint,
 		transcriptAvailable: true,
+		idleExpired: existing ? isIdleExpired(existing) : false,
 	});
 	const firstTurn = existing === undefined && getBinding(sessionId) === undefined && hashes.length <= 1;
 	let observedReason = "reason" in decision ? decision.reason : decision.kind === "bootstrap" ? "registry_miss" : undefined;

@@ -33,6 +33,7 @@ export type ContinuityDecisionInput = {
 	modelId: string;
 	fingerprint: { systemPromptHash: string; toolsetHash: string };
 	transcriptAvailable: boolean;
+	idleExpired?: boolean;
 };
 
 export type ContinuityDecision =
@@ -167,6 +168,10 @@ export function decideNativeContinuity(input: ContinuityDecisionInput): Continui
 		return rolledBack
 			? forkOrFlatten(entry, input.currentHashes.length, "history_rolled_back")
 			: forkOrFlatten(entry, shared + 1, "sent_stream_diverged");
+	}
+
+	if (input.idleExpired) {
+		return { kind: "reattach", sdkSessionId: entry.sdkSessionId, from: entry.sentCount, reason: "idle_ttl" };
 	}
 
 	const drift = identityDrift(input, entry);

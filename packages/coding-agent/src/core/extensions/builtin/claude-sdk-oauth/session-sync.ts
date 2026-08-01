@@ -17,30 +17,7 @@ export type SessionConfigFingerprint = {
 	toolsetHash: string;
 };
 
-export type SessionSyncDecision =
-	| { kind: "cold-seed"; reason: string }
-	| { kind: "incremental"; from: number }
-	| { kind: "resume"; from: number; resumeSessionAt: string; previousSdkSessionId: string };
-
-export type SessionSyncDecisionInput = {
-	entry: ClaudeSdkOauthSessionEntry | undefined;
-	currentHashes: readonly string[];
-	accountName: string;
-	modelId: string;
-	fingerprint: SessionConfigFingerprint;
-	tokenExpiring: boolean;
-};
-
-export type SessionAssistantProvenanceHooks = {
-	captureMessages(context: Context, messages: readonly SentMessage[]): void;
-	captureHashes(messages: readonly SentMessage[], hashes: readonly string[]): void;
-	matches(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[], branchPrefix: boolean): boolean;
-	record(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[]): void;
-	prime(entry: ClaudeSdkOauthSessionEntry, previous: ClaudeSdkOauthSessionEntry, from: number): void;
-};
-
 const sentHashesByEntry = new WeakMap<ClaudeSdkOauthSessionEntry, string[]>();
-let assistantProvenanceHooks: SessionAssistantProvenanceHooks | undefined;
 
 function stableValue(value: unknown, seen = new WeakSet<object>()): unknown {
 	if (typeof value === "function") return `[function:${value.name}:${value.toString()}]`;
@@ -66,10 +43,6 @@ function digest(value: unknown): string {
 		.digest("hex");
 }
 
-export function installAssistantProvenanceHooks(hooks: SessionAssistantProvenanceHooks): void {
-	assistantProvenanceHooks = hooks;
-}
-
 export function sessionSyncDigest(value: unknown): string {
 	return digest(value);
 }
@@ -78,7 +51,6 @@ export function sentMessages(context: Context): SentMessage[] {
 	const messages = context.messages.filter(
 		(message): message is SentMessage => message.role === "user" || message.role === "toolResult",
 	);
-	assistantProvenanceHooks?.captureMessages(context, messages);
 	return messages;
 }
 
@@ -95,7 +67,6 @@ export function sentMessageHashes(messages: readonly SentMessage[]): string[] {
 					},
 		),
 	);
-	assistantProvenanceHooks?.captureHashes(messages, hashes);
 	return hashes;
 }
 
@@ -103,77 +74,7 @@ function prefixDigest(hashes: readonly string[], count = hashes.length): string 
 	return digest(hashes.slice(0, count));
 }
 
-function samePrefix(left: readonly string[], right: readonly string[], count: number): boolean {
-	if (left.length < count || right.length < count) return false;
-	for (let index = 0; index < count; index++) {
-		if (left[index] !== right[index]) return false;
-	}
-	return true;
-}
-
-function resumeBoundary(
-	entry: ClaudeSdkOauthSessionEntry,
-	currentCount: number,
-): { index: number; uuid: string } | undefined {
-	return [...entry.assistantUuidByIndex.entries()]
-		.filter(([index]) => index < currentCount)
-		.sort(([left], [right]) => right - left)
-		.map(([index, uuid]) => ({ index, uuid }))[0];
-}
-
-function idleTtlExpired(entry: ClaudeSdkOauthSessionEntry): boolean {
-	if (entry.activeTurn !== null || (entry.state !== "IDLE_SYNCED" && entry.state !== "TAINTED")) return false;
-	return isBoundAccountTokenExpiring(entry, [
-		{
-			name: entry.accountName,
-			expires: entry.lastUsedAt + SESSION_REGISTRY_IDLE_TTL_MS + EXPIRING_WITHIN_MS,
-			source: "login",
-		},
-	]);
-}
-
 /** Pure divergence guard: every non-proven continuation resolves to cold-seed. */
-export function decideSessionSync(input: SessionSyncDecisionInput): SessionSyncDecision {
-	const { entry } = input;
-	if (!entry) return { kind: "cold-seed", reason: "registry_miss" };
-	if (idleTtlExpired(entry)) return { kind: "cold-seed", reason: "idle_ttl" };
-	if (input.tokenExpiring) return { kind: "cold-seed", reason: "bound_account_token_expiring" };
-	if (entry.taintedReason) return { kind: "cold-seed", reason: `tainted:${entry.taintedReason}` };
-	if (entry.accountName !== input.accountName) return { kind: "cold-seed", reason: "account_changed" };
-	if (entry.modelId !== input.modelId) return { kind: "cold-seed", reason: "model_changed" };
-	if (entry.toolsetHash !== input.fingerprint.toolsetHash) return { kind: "cold-seed", reason: "toolset_changed" };
-	if (entry.systemPromptHash !== input.fingerprint.systemPromptHash) {
-		return { kind: "cold-seed", reason: "system_prompt_changed" };
-	}
-	if (
-		assistantProvenanceHooks &&
-		!assistantProvenanceHooks.matches(entry, input.currentHashes, entry.branchInfo !== null)
-	) {
-		return { kind: "cold-seed", reason: "assistant_stream_diverged" };
-	}
-	const residentHashes = sentHashesByEntry.get(entry) ?? [];
-	if (entry.branchInfo) {
-		const strictPrefix =
-			input.currentHashes.length < entry.sentCount &&
-			samePrefix(input.currentHashes, residentHashes, input.currentHashes.length);
-		const boundary = strictPrefix ? resumeBoundary(entry, input.currentHashes.length) : undefined;
-		return boundary
-			? {
-					kind: "resume",
-					from: boundary.index,
-					resumeSessionAt: boundary.uuid,
-					previousSdkSessionId: entry.sdkSessionId,
-				}
-			: { kind: "cold-seed", reason: strictPrefix ? "branch_boundary_unavailable" : "branch_diverged" };
-	}
-	const prefixMatches =
-		entry.sentCount <= input.currentHashes.length &&
-		entry.syncedPrefixHash === prefixDigest(input.currentHashes, entry.sentCount) &&
-		samePrefix(input.currentHashes, residentHashes, entry.sentCount);
-	return prefixMatches
-		? { kind: "incremental", from: entry.sentCount }
-		: { kind: "cold-seed", reason: "sent_stream_diverged" };
-}
 
 export function sentHashesForEntry(entry: ClaudeSdkOauthSessionEntry): readonly string[] | undefined {
 	return sentHashesByEntry.get(entry);
@@ -181,26 +82,10 @@ export function sentHashesForEntry(entry: ClaudeSdkOauthSessionEntry): readonly 
 
 export function recordSyncedStream(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[]): void {
 	const copy = [...hashes];
-	assistantProvenanceHooks?.record(entry, hashes);
 	sentHashesByEntry.set(entry, copy);
 	entry.sentCount = copy.length;
 	entry.syncedPrefixHash = prefixDigest(copy);
 	entry.branchInfo = null;
-}
-
-export function primeResumedEntry(
-	entry: ClaudeSdkOauthSessionEntry,
-	previous: ClaudeSdkOauthSessionEntry,
-	from: number,
-): void {
-	const hashes = (sentHashesByEntry.get(previous) ?? []).slice(0, from);
-	assistantProvenanceHooks?.prime(entry, previous, from);
-	sentHashesByEntry.set(entry, hashes);
-	entry.sentCount = from;
-	entry.syncedPrefixHash = prefixDigest(hashes);
-	for (const [index, uuid] of previous.assistantUuidByIndex) {
-		if (index <= from) entry.assistantUuidByIndex.set(index, uuid);
-	}
 }
 
 const GENERATED_DATE_LINE = /\nCurrent date: \d{4}-\d{2}-\d{2}(?=\nCurrent working directory: [^\n]*$)/;

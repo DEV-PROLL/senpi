@@ -303,6 +303,10 @@ export function closeSession(senpiSessionId: string, reason: string): void {
 	sessionRegistry.closeSession(senpiSessionId, reason);
 }
 
+export function isIdleExpired(entry: Pick<ClaudeSdkOauthSessionEntry, "lastUsedAt">): boolean {
+	return activeSessionRegistryBoundary.now() - entry.lastUsedAt >= SESSION_REGISTRY_IDLE_TTL_MS;
+}
+
 export function markTainted(senpiSessionId: string, reason: string): void {
 	annotateTainted(sessionRegistry, senpiSessionId, reason);
 }
