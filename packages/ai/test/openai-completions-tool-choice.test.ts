@@ -514,7 +514,7 @@ describe("openai-completions tool_choice", () => {
 		expect(params.reasoning_effort).toBeUndefined();
 	});
 
-	it("omits tool_stream for unsupported z.ai models", async () => {
+	it("honors z.ai compat override that disables tool_stream", async () => {
 		const baseModel = getModel("zai", "glm-4.7")!;
 		const model = {
 			...baseModel,
