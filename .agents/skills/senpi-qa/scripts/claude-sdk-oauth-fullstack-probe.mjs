@@ -224,6 +224,18 @@ try {
 	fatal = error instanceof Error ? error : new Error(String(error));
 	infrastructureFailure = /loopback|ECONNREFUSED|did not bind/i.test(fatal.message);
 } finally {
+	// Close the resident SDK session first so the Claude Code subprocess exits
+	// instead of recreating the sandbox dir right after cleanup.
+	try {
+		const sessionId = session?.sessionManager?.getSessionId?.();
+		const registryModule = await import(
+			pathToFileURL(
+				join(ROOT, "packages", "coding-agent", "src", "core", "extensions", "builtin", "claude-sdk-oauth", "session-registry.ts"),
+			).href
+		);
+		if (sessionId) registryModule.closeSession(sessionId, "session_shutdown");
+		for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setImmediate(resolve));
+	} catch {}
 	try {
 		session?.dispose?.();
 	} catch {}

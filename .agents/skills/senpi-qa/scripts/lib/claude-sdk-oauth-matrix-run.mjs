@@ -35,6 +35,9 @@ export class MatrixRun {
 	observePayload(entry) {
 		if (!this.currentTurn) return;
 		this.currentTurn.payloads.push(entry);
+		// The payload just entered the SDK query, so the pump's active turn exists
+		// and its claim transition can be watched.
+		this.currentTurn.watchForClaim?.();
 	}
 
 	/**
@@ -55,29 +58,49 @@ export class MatrixRun {
 		const sessionId = this.session.sessionManager.getSessionId();
 		turn.abortPromise = new Promise((resolve) => {
 			let settled = false;
-			const unsubscribe = this.session.subscribe((event) => {
-				if (event.type !== "message_update" || settled) return;
-				// The abort must land on a turn the SDK has actually claimed and not yet
-				// finished; anything else is not a mid-turn abort and would make the
-				// phase depend on timing. Later message_updates re-check until it is.
-				const sdkTurn = this.stack.registryModule.getSession(sessionId)?.activeTurn;
-				if (!sdkTurn?.claimed) return;
+			const fire = (sdkTurn) => {
+				if (settled) return;
 				settled = true;
-				unsubscribe();
 				turn.abortFired = true;
 				// Snapshot the live turn so the interrupt receipt the REAL CLI returns
 				// can be scored by production's own evaluateAbortOutcome.
 				turn.activeSdkTurn = sdkTurn;
+				// Release only after the abort settles: while the terminating SSE events
+				// are held the turn cannot finish, so the interrupt is guaranteed to land
+				// on a live turn.
 				resolve(
 					this.session.abort().finally(() => {
 						turn.releaseResponse?.();
 					}),
 				);
-			});
+			};
+			// The claim is the authoritative "turn is live and streaming" signal, and
+			// it is observed as an EVENT: the pump's own `claimed` flag is wrapped in
+			// an accessor that fires the abort the moment production sets it. The
+			// held tail guarantees the turn cannot complete before that happens, so
+			// there is no polling, no sleeping, and no race with turn completion.
+			const watched = new WeakSet();
+			turn.watchForClaim = () => {
+				const sdkTurn = this.stack.registryModule.getSession(sessionId)?.activeTurn;
+				if (!sdkTurn || watched.has(sdkTurn) || settled) return;
+				watched.add(sdkTurn);
+				if (sdkTurn.claimed === true) {
+					fire(sdkTurn);
+					return;
+				}
+				let value = sdkTurn.claimed;
+				Object.defineProperty(sdkTurn, "claimed", {
+					configurable: true,
+					get: () => value,
+					set: (next) => {
+						value = next;
+						if (next === true) fire(sdkTurn);
+					},
+				});
+			};
 			turn.disarmAbort = () => {
 				if (settled) return;
 				settled = true;
-				unsubscribe();
 				turn.releaseResponse?.();
 				resolve(undefined);
 			};
