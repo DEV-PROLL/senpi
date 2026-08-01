@@ -148,6 +148,10 @@ async function consume() {
 			!state.interruptIssued
 		) {
 			await interruptTurn3();
+			// A failed interrupt closes the input and the stream: iterating
+			// further would surface the SDK's closed-stream rejection as the
+			// outcome and bury the actual interrupt_failed signal.
+			if (state.failure) break;
 			continue;
 		}
 		if (message.type === "assistant") {

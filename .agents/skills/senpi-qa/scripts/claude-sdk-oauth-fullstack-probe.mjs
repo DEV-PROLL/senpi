@@ -224,7 +224,9 @@ if (infrastructureFailure) {
 	process.exitCode = 2;
 } else {
 	process.stdout.write(formatTurnTable(turns));
-	const lineages = new Set(creations.map((record) => record.sessionId ?? "none"));
+	// The single-query budget (creations.length === 1) IS the lineage gate:
+	// with one SDK query creation there is exactly one lineage by
+	// construction, so a separate lineages.size check would be redundant.
 	const flattenTurns = turns.filter((turn) => turn.kind === "flatten").length;
 	// Gate the ROUTE, not just the payload shape: a bootstrap payload on a
 	// non-resident (flatten-stream) query must not masquerade as resident-path.
@@ -242,14 +244,13 @@ if (infrastructureFailure) {
 		!fatal &&
 		turns.length === TURNS &&
 		creations.length === 1 &&
-		lineages.size === 1 &&
 		flattenTurns === 0 &&
 		nonResidentTurns === 0 &&
 		nonDeltaContinuations === 0 &&
 		wireEvidence;
 	if (fatal) process.stderr.write(`PROBE ERROR: ${safeDetail(fatal.stack ?? fatal.message)}\n`);
 	process.stdout.write(
-		`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} lineages=${lineages.size} flatten_turns=${flattenTurns} non_resident=${nonResidentTurns} non_delta=${nonDeltaContinuations} wire_reqs=${providerRequests.length}\n`,
+		`VERDICT: ${passed ? "PASS" : "FAIL"} fullstack-baseline queries=${creations.length} flatten_turns=${flattenTurns} non_resident=${nonResidentTurns} non_delta=${nonDeltaContinuations} wire_reqs=${providerRequests.length}\n`,
 	);
 	// exitCode, not exit(): a forced exit can truncate the table/verdict when
 	// stdout is a pipe; assigning lets Node flush the QA output first.
