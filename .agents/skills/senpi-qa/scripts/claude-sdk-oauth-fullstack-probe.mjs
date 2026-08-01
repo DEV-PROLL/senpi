@@ -37,6 +37,7 @@ import {
 	seedProbeAgentDir,
 	withTimeout,
 } from "./lib/claude-sdk-oauth-fullstack-support.mjs";
+import { stripCredentialEnvironment } from "./lib/claude-sdk-oauth-spike-support.mjs";
 
 const ROOT = repoRoot();
 const INNER_FLAG = "SENPI_CLAUDE_SDK_FULLSTACK_PROBE_INNER";
@@ -112,6 +113,13 @@ try {
 	const baseUrl = `http://127.0.0.1:${address.port}`;
 
 	seedProbeAgentDir(box.agentDir);
+	// Hermetic no-credentials contract: ambient Anthropic/OAuth credential and
+	// custom-header channels (inherited from the operator's shell) would
+	// otherwise be sent to the loopback capture server. ANTHROPIC_API_KEY and
+	// ANTHROPIC_BASE_URL are pinned to dummy loopback values below; every other
+	// credential channel is stripped first. The probe re-adds exactly the
+	// SENPI_* surface it needs in the assignment that follows.
+	stripCredentialEnvironment(process.env);
 	Object.assign(process.env, {
 		HOME: box.dir,
 		USERPROFILE: box.dir,

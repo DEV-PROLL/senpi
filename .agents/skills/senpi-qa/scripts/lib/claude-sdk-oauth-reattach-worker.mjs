@@ -17,7 +17,7 @@ import {
 	importClaudeSdk,
 	managedEnvironment,
 	userMessage,
-	withDeadline,
+	withTimeout,
 } from "./claude-sdk-oauth-spike-support.mjs";
 
 export const TOKEN_PROMPT = (token) => `Remember this token for later: ${token}. Reply with exactly: ACK`;
@@ -45,13 +45,19 @@ async function staticRead(sessionId) {
 }
 
 /**
- * @param {{access: string, prompts: string[], resume?: string, configDir?: string,
- *          expectToken?: string, staticRead?: string}} request
+ * @param {{access: string, prompts?: string[], resume?: string, configDir?: string,
+ *          expectToken?: string, staticRead?: string, staticOnly?: boolean}} request
  */
 export async function runTurns(request) {
 	const result = { sessionId: null, coherent: false, usage: undefined };
 	if (request.configDir) process.env.CLAUDE_CONFIG_DIR = request.configDir;
 	if (request.staticRead) result.staticFound = await staticRead(request.staticRead);
+	// A static-only probe answers "is this session visible under this config
+	// root?" without spawning Claude Code or spending quota at all.
+	if (request.staticOnly) {
+		result.coherent = true;
+		return result;
+	}
 
 	const { query } = await importClaudeSdk();
 	const prompts = [...request.prompts];
@@ -91,7 +97,7 @@ export async function runTurns(request) {
 	})();
 
 	try {
-		await withDeadline(drain, "worker_turns", 210_000);
+		await withTimeout(drain, "worker_turns", 210_000);
 	} finally {
 		input.close();
 		closeQuietly(stream);

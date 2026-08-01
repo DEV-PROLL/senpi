@@ -7,6 +7,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+// Canonical timeout helper lives in with-timeout.mjs; re-exported so existing
+// probe imports keep working and no second copy of the pattern drifts.
+export { withTimeout } from "./with-timeout.mjs";
+
 /** Marker emitted by prompt-bridge.ts buildPromptBlocks when senpi flattens history. */
 export const FLATTEN_MARKER = "<conversation_history>";
 /** Trailer buildPromptBlocks always appends, even when there is no history yet. */
@@ -16,14 +20,6 @@ export function safeDetail(value) {
 	return String(value)
 		.replace(/[\r\n]+/g, " ")
 		.slice(0, 500);
-}
-
-export function withTimeout(promise, label, timeoutMs = 60_000) {
-	let timer;
-	const timeout = new Promise((_resolve, reject) => {
-		timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
-	});
-	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function payloadText(message) {

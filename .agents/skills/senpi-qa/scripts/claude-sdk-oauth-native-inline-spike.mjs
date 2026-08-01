@@ -39,7 +39,7 @@ import {
 	requireLiveGate,
 	requireSandbox,
 	userMessage,
-	withDeadline,
+	withTimeout,
 } from "./lib/claude-sdk-oauth-spike-support.mjs";
 
 requireLiveGate();
@@ -148,9 +148,12 @@ async function consume() {
 			if (message.error) state.failure ??= "assistant_error";
 			if (message.message?.model === "<synthetic>") state.failure ??= "synthetic_assistant";
 			if (state.turn === 3) {
-				// The turn finalized without a single streamed delta to interrupt from.
-				await interruptTurn3();
-				continue;
+				// The turn finalized without a single streamed delta to interrupt
+				// from. Interrupting now would cancel an already-complete turn, and
+				// an accepted receipt would be a false positive — the spike proved
+				// nothing about interruption, so it must REJECT.
+				state.failure ??= "interrupt_delta_absent";
+				break;
 			}
 			if (state.turn === 4 && assistantText(message).includes(MEMORY_TOKEN)) state.coherent = true;
 		}
@@ -191,7 +194,7 @@ let outcome = null;
 try {
 	// Await the consumer itself, not just `done`: a rejected consumer would
 	// otherwise be dropped and surface 240s later as a meaningless timeout.
-	await withDeadline(Promise.race([consume(), done]), "spike", 240_000);
+	await withTimeout(Promise.race([consume(), done]), "spike", 240_000);
 } catch (error) {
 	outcome = error instanceof Error ? error.message : String(error);
 } finally {

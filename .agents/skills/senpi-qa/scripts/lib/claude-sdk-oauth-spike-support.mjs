@@ -12,6 +12,10 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { repoRoot } from "./common.mjs";
 
+// Canonical timeout helper lives in with-timeout.mjs; re-exported so the spikes
+// share ONE race-a-promise-against-a-timer implementation instead of drifting copies.
+export { withTimeout } from "./with-timeout.mjs";
+
 export const LIVE_GATE = "SENPI_LIVE_CLAUDE_SDK_OAUTH";
 
 /** Print SKIPPED + exit 0 unless the live gate is set. Keeps default suites token-free. */
@@ -74,9 +78,16 @@ export function safeSignal(value) {
 		.slice(0, 80);
 }
 
-/** Parent env with every ambient Anthropic/Claude credential channel removed. */
-export function managedEnvironment(access, extra = {}) {
-	const env = { ...process.env };
+/**
+ * Remove every ambient Anthropic/Claude/senpi credential channel from `env`.
+ *
+ * Known credential names are not enough: token-bearing SENPI_* variables
+ * (spike harness internals) would otherwise be inherited by the Claude Code
+ * subprocess, so the whole SENPI_ prefix is stripped — matching the
+ * production OAuth lane, which never forwards senpi internals either.
+ * Callers re-add exactly what the child needs via the `extra` argument.
+ */
+export function stripCredentialEnvironment(env) {
 	delete env.ANTHROPIC_API_KEY;
 	delete env.ANTHROPIC_AUTH_TOKEN;
 	delete env.ANTHROPIC_BASE_URL;
@@ -88,7 +99,14 @@ export function managedEnvironment(access, extra = {}) {
 	delete env.CLAUDE_CODE_USE_VERTEX;
 	for (const name of Object.keys(env)) {
 		if (/^CLAUDE_CODE_OAUTH_TOKEN(?:_\d+)?$/.test(name)) delete env[name];
+		if (name.startsWith("SENPI_")) delete env[name];
 	}
+	return env;
+}
+
+/** Child env with every ambient credential channel removed and the spike token pinned. */
+export function managedEnvironment(access, extra = {}) {
+	const env = stripCredentialEnvironment({ ...process.env });
 	return { ...env, CLAUDE_CODE_OAUTH_TOKEN: access, ...extra };
 }
 
@@ -179,15 +197,6 @@ export function assistantText(message) {
 export function reject(signal, extra = "") {
 	console.error(`REJECTED signal=${safeSignal(signal)}${extra ? ` ${extra}` : ""}`);
 	process.exit(2);
-}
-
-/** Race a promise against a bounded deadline (no polling, no fixed sleeps). */
-export function withDeadline(promise, label, timeoutMs) {
-	let timer;
-	const deadline = new Promise((_resolve, reject_) => {
-		timer = setTimeout(() => reject_(new Error(`${label}_timeout`)), timeoutMs);
-	});
-	return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
 /** Close a query handle without letting a close error mask the real outcome. */
