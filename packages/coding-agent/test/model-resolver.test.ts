@@ -656,7 +656,7 @@ describe("default model selection", () => {
 			if (provider === "radius") continue;
 			const defaultModelId = defaultModelPerProvider[provider];
 			const modelIds = getModels(provider).map((model) => model.id);
-			if (modelIds.length === 0) continue;
+			expect(modelIds.length, `${provider} should expose a bundled catalog`).toBeGreaterThan(0);
 			expect(modelIds, `${provider} should include its default ${defaultModelId}`).toContain(defaultModelId);
 		}
 	});
