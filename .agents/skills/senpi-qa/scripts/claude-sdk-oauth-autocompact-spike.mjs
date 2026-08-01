@@ -215,7 +215,10 @@ const autoB = armB.boundaries.some(isAutoBoundary);
 // arm B (no enabled key) firing proves default-on; only arm A firing proves the
 // explicit autoCompactEnabled key is required; neither means absent.
 const autocompact = autoB ? "default-on" : autoA ? "settings:autoCompactEnabled" : "absent";
-const boundary = autoA || autoB ? "received" : "absent";
+// boundary=received means a compact_boundary was OBSERVED, regardless of
+// whether its trigger metadata allowed auto/manual attribution — a
+// trigger-absent boundary must never report absent.
+const boundary = armA.boundaries.length > 0 || armB.boundaries.length > 0 ? "received" : "absent";
 const manual = armA.boundaries.some(isManualBoundary) ? "slash-ok" : "absent";
 process.stdout.write(
 	`armA boundaries=${JSON.stringify(armA.boundaries)} turns=${armA.turn} coherent=${armA.coherent}\n`,

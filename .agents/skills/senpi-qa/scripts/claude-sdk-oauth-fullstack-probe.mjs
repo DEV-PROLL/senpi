@@ -206,6 +206,15 @@ try {
 			fatal.message,
 		);
 } finally {
+	// Close the resident registry entry BEFORE disposing the session: the
+	// resident OAuth query owns its own Claude Code subprocess, and disposing
+	// the session alone does not guarantee that subprocess is reaped.
+	try {
+		const { closeSession } = await import(
+			pathToFileURL(join(sourceRoot, "core", "extensions", "builtin", "claude-sdk-oauth", "session-registry.ts")).href
+		);
+		if (session?.id) closeSession(session.id, "probe_shutdown");
+	} catch {}
 	try {
 		session?.dispose?.();
 	} catch {}
