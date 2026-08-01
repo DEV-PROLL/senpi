@@ -32,6 +32,18 @@ function readUsage(message) {
 	};
 }
 
+/** Merge per-field by max: a later message carrying no cache fields must not
+ * overwrite an earlier message's cacheRead evidence with zeros. */
+function mergeUsage(current, next) {
+	if (!next) return current;
+	if (!current) return next;
+	return {
+		input: Math.max(current.input, next.input),
+		cacheRead: Math.max(current.cacheRead, next.cacheRead),
+		cacheCreation: Math.max(current.cacheCreation, next.cacheCreation),
+	};
+}
+
 /** Static read of a session transcript under whatever config root this process has. */
 async function staticRead(sessionId) {
 	const sdk = await importClaudeSdk();
@@ -124,16 +136,16 @@ export async function runTurns(request) {
 				if (message.message?.model === "<synthetic>") {
 					throw new Error(request.resume ? "resume_failed" : "synthetic_assistant");
 				}
-				// Pass the whole message: usage can live on the assistant envelope OR
-				// directly on the message (result shape) — nested-only reads silently
-				// fall back to a 0.00 cache ratio.
-				result.usage = readUsage(message) ?? result.usage;
+				// Pass the whole message and MERGE by max per field: a later message
+				// carrying no cache fields must not zero out earlier cacheRead
+				// evidence (the ratio would fall back to 0.00).
+				result.usage = mergeUsage(result.usage, readUsage(message));
 				if (request.expectToken && assistantText(message).includes(request.expectToken)) result.coherent = true;
 			}
 			if (message.type === "auth_status" && message.error) throw new Error("authentication_failed");
 			if (message.type !== "result") continue;
-			// Result envelopes can carry usage directly — record before the gates.
-			result.usage = readUsage(message) ?? result.usage;
+			// Result envelopes can carry usage directly — merge before the gates.
+			result.usage = mergeUsage(result.usage, readUsage(message));
 			// A 401/refusal arrives as subtype:"success" with is_error:true; that
 			// shape on a resume IS the addressing/auth denial (resume_failed).
 			// Any other non-success (quota, refusal, content filter) is a

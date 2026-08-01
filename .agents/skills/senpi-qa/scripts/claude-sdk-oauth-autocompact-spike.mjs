@@ -114,6 +114,7 @@ async function runArm({ settings, probeManual }) {
 		autoBoundaryTurn: null,
 		manualCompactSent: false,
 		coherent: false,
+		recallResult: false,
 		failure: null,
 		turn: 0,
 		phase: "auto",
@@ -153,7 +154,12 @@ async function runArm({ settings, probeManual }) {
 				break;
 			}
 			state.turn += 1;
-			if (state.phase === "recall") break;
+			if (state.phase === "recall") {
+				// The recall turn's terminal result is what proves the arm completed
+				// — a prematurely ended stream must not ACCEPT on prompts alone.
+				state.recallResult = true;
+				break;
+			}
 			// nextPrompt() owns the manual->recall transition, so the `/compact`
 			// send happens in exactly one place.
 			input.push(userMessage(nextPrompt(state, probeManual), randomUUID()));
@@ -182,6 +188,9 @@ async function runArm({ settings, probeManual }) {
 	// task whose failure would mask the actual finding (autocompact=absent),
 	// so it is recorded in the evidence line but not gated.
 	if (!state.coherent && state.boundaries.length > 0) reject("recall_incoherent", "", secrets);
+	// A prematurely ended stream (recall prompt pushed, terminal result never
+	// received) must not ACCEPT — the arm proved nothing about recall.
+	if (!state.recallResult) reject("recall_incomplete", "", secrets);
 	return state;
 }
 

@@ -239,6 +239,14 @@ async function consume() {
 			);
 			continue;
 		}
+		if (state.turn === 3) {
+			// A turn-3 success that never went through the interrupt path (no
+			// delta, no assistant content) means the spike never exercised
+			// interruption — reject with the precise signal, not a downstream
+			// continuation_incomplete.
+			state.failure ??= "interrupt_never_issued";
+			break;
+		}
 		if (state.turn === 4) {
 			state.continuationResult = true;
 			break;
