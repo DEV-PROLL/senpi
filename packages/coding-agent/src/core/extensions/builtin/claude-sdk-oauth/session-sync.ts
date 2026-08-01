@@ -1,13 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Context, ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
-import { EXPIRING_WITHIN_MS } from "./auth-lane.ts";
 import type { ClaudeSdkOauthAuthLane } from "./options.ts";
 import type { Base64ImageSource, ContentBlockParam, Options } from "./sdk-boundary.ts";
-import {
-	type ClaudeSdkOauthSessionEntry,
-	isBoundAccountTokenExpiring,
-	SESSION_REGISTRY_IDLE_TTL_MS,
-} from "./session-registry.ts";
+import type { ClaudeSdkOauthSessionEntry } from "./session-registry.ts";
 import { HOST_TOOL_POLICY_FINGERPRINT, mapPiToolNameToSdk } from "./tools.ts";
 
 export type SentMessage = Extract<Message, { role: "user" | "toolResult" }>;

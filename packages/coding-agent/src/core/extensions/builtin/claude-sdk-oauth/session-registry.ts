@@ -3,20 +3,15 @@ import type { AccountSlot } from "./accounts.ts";
 import { EXPIRING_WITHIN_MS } from "./auth-lane.ts";
 import type { Options, SDKUserMessage, SdkQuery, SdkQueryHandle } from "./sdk-boundary.ts";
 import { getSdkBoundary } from "./sdk-boundary.ts";
-import { recordPendingCloseCause } from "./session-observability.ts";
 import {
 	annotateBranchInfo,
 	annotatePendingFork,
 	annotateTainted,
 	switchEntryModel,
 } from "./session-entry-annotations.ts";
-import { type SessionRegistryReapHandle, SessionReapScheduler } from "./session-reaper.ts";
-import {
-	type ClaudeSdkOauthSessionState,
-	transitionToClosed,
-	transitionToClosing,
-	transitionToTainted,
-} from "./session-registry-state.ts";
+import { recordPendingCloseCause } from "./session-observability.ts";
+import { SessionReapScheduler, type SessionRegistryReapHandle } from "./session-reaper.ts";
+import { type ClaudeSdkOauthSessionState, transitionToClosed, transitionToClosing } from "./session-registry-state.ts";
 
 export const SESSION_REGISTRY_IDLE_TTL_MS = 30 * 60_000;
 export const SESSION_REGISTRY_MAX_ENTRIES = 32;
