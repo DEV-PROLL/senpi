@@ -567,7 +567,7 @@ function createExtensionModuleImporter(): ExtensionModuleImporter {
 		...(isBunBinary
 			? { virtualModules: VIRTUAL_MODULES, tryNative: false }
 			: isTypeScriptSourceRuntime
-				? { virtualModules: VIRTUAL_MODULES, tsconfigPaths: true }
+				? { alias: getAliases(), virtualModules: VIRTUAL_MODULES, tsconfigPaths: true }
 				: { alias: getAliases() }),
 	});
 }
