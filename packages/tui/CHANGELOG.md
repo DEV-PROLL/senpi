@@ -8,6 +8,14 @@
 
 ### Changed
 
+- Reuse normalized terminal-line strings across frames and make
+  viewport-bounded normalization and diffing the default for ordinary
+  rendering. Memoized state remains bounded to the current transcript, image
+  lines continue to bypass normalization, and full-frame fallbacks remain for
+  resize and recovery paths, reducing large-session lag without changing
+  visible output
+  ([#604](https://github.com/code-yeongyu/senpi/pull/604)).
+
 ### Fixed
 
 ### Removed

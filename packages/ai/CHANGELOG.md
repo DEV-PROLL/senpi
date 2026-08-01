@@ -10,6 +10,29 @@
 
 ### Fixed
 
+- Make explicit reasoning capability metadata authoritative across model
+  discovery and request construction: a present `thinkingLevelMap` now
+  supports only the listed levels, `null` remains an explicit veto, and
+  model-ID inference applies only to map-less models. This prevents the CLI
+  and provider payload from advertising `xhigh` or `max` when catalog metadata
+  intentionally omits them
+  ([#586](https://github.com/code-yeongyu/senpi/pull/586) by
+  [@realsigridjin](https://github.com/realsigridjin)).
+
+- Align Codex SSE and WebSocket prompt-cache affinity with the official client
+  by sending one stable session tuple across `prompt_cache_key`, `session-id`,
+  `thread-id`, and `x-client-request-id`. The no-affinity SSE boundary for
+  `cacheRetention: "none"` remains unchanged, while ordinary sessions avoid
+  repeatedly re-uploading large uncached prefixes
+  ([#597](https://github.com/code-yeongyu/senpi/pull/597)).
+
+- Recover Codex WebSocket sessions after transient transport degradation.
+  Immediate follow-up requests stay on SSE during a 60-second cooldown, the
+  next fresh request may probe WebSocket again, production cleanup clears the
+  degraded-route state, and the existing post-start billing guard still
+  prevents replaying a response that may already have started
+  ([#600](https://github.com/code-yeongyu/senpi/pull/600)).
+
 ### Removed
 
 ## [2026.7.31-2] - 2026-07-31
