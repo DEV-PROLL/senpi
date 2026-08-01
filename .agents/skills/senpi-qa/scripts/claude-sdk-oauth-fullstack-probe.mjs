@@ -34,10 +34,10 @@ import {
 	classifyPayload,
 	createModelCaptureHandler,
 	formatTurnTable,
-	safeDetail,
 	seedProbeAgentDir,
 	withTimeout,
 } from "./lib/claude-sdk-oauth-fullstack-support.mjs";
+import { safeDetail } from "./lib/output-safety.mjs";
 import { stripCredentialEnvironment } from "./lib/claude-sdk-oauth-spike-support.mjs";
 
 const ROOT = repoRoot();
@@ -202,7 +202,7 @@ try {
 	// A missing Claude binary is setup failure (REJECTED exit 2), not a
 	// behavioral continuity FAIL — keep the two distinguishable in CI.
 	infrastructureFailure =
-		/loopback|ECONNREFUSED|EADDRINUSE|EACCES|did not bind|claude_binary_not_found|Native CLI binary.*not found/i.test(
+		/loopback|ECONNREFUSED|EADDRINUSE|EACCES|did not bind|claude_binary_not_found|Native CLI binary.*not found|Claude native binary.*not found/i.test(
 			fatal.message,
 		);
 } finally {

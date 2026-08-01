@@ -23,7 +23,7 @@ import {
 	repoRoot,
 	track,
 } from "./lib/common.mjs";
-import { safeDetail } from "./lib/claude-sdk-oauth-fullstack-support.mjs";
+import { safeDetail } from "./lib/output-safety.mjs";
 import { withTimeout } from "./lib/with-timeout.mjs";
 
 const ROOT = repoRoot();

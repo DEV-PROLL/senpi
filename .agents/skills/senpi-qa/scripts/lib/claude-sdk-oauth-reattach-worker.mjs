@@ -128,7 +128,12 @@ export async function runTurns(request) {
 						? "result_error"
 						: (message.subtype ?? "result_error");
 				if (request.resume) {
-					throw new Error(message.is_error === true ? "resume_failed" : `resume_error_${reason}`);
+					// resume_failed is reserved for the documented denial shape
+					// (subtype:success + is_error:true — a refusal-class envelope).
+					// A non-success subtype (quota/execution/timeout) is a turn-level
+					// failure and must never read as an addressing/auth denial.
+					const denial = message.subtype === "success" && message.is_error === true;
+					throw new Error(denial ? "resume_failed" : `resume_error_${reason}`);
 				}
 				throw new Error(reason);
 			}

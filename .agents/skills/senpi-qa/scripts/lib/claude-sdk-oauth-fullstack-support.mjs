@@ -71,12 +71,6 @@ export function createModelCaptureHandler(onModelRequest) {
 	};
 }
 
-export function safeDetail(value) {
-	return String(value)
-		.replace(/[\r\n]+/g, " ")
-		.slice(0, 500);
-}
-
 function payloadText(message) {
 	const content = message?.message?.content;
 	if (typeof content === "string") return content;
