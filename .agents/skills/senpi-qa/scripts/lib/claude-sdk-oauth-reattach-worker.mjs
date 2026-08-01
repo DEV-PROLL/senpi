@@ -71,23 +71,39 @@ export async function runTurns(request) {
 		return result;
 	}
 
-	const { query } = await importClaudeSdk();
+	// Setup failures (SDK import, executable resolution, query construction)
+	// attach to the result like turn-phase failures: the supervisor's verdicts
+	// need the static-read evidence even when setup fails.
+	let query;
+	try {
+		({ query } = await importClaudeSdk());
+	} catch (error) {
+		result.error = error instanceof Error ? error.message : String(error);
+		return result;
+	}
 	const prompts = [...request.prompts];
 	// Count BEFORE the initial shift: every requested prompt — including the
 	// first — must reach a successful terminal result for the run to be whole.
 	const expectedTurns = prompts.length;
 	const input = controlledInput(userMessage(prompts.shift(), randomUUID()));
-	const options = {
-		model: "claude-haiku-4-5",
-		tools: [],
-		permissionMode: "dontAsk",
-		settingSources: [],
-		systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
-		pathToClaudeCodeExecutable: claudeExecutable(),
-		env: managedEnvironment(request.access, request.configDir ? { CLAUDE_CONFIG_DIR: request.configDir } : {}),
-	};
-	if (request.resume) options.resume = request.resume;
-	const stream = query({ prompt: input, options });
+	let stream;
+	try {
+		const options = {
+			model: "claude-haiku-4-5",
+			tools: [],
+			permissionMode: "dontAsk",
+			settingSources: [],
+			systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
+			pathToClaudeCodeExecutable: claudeExecutable(),
+			env: managedEnvironment(request.access, request.configDir ? { CLAUDE_CONFIG_DIR: request.configDir } : {}),
+		};
+		if (request.resume) options.resume = request.resume;
+		stream = query({ prompt: input, options });
+	} catch (error) {
+		input.close();
+		result.error = error instanceof Error ? error.message : String(error);
+		return result;
+	}
 	let completedTurns = 0;
 
 	const drain = (async () => {

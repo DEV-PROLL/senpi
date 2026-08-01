@@ -85,6 +85,7 @@ const state = {
 	setModelError: false,
 	pendingInterruptResult: false,
 	coherent: false,
+	continuationQueued: false,
 	continuationResult: false,
 	interruptAbortedEvidence: false,
 	failure: null,
@@ -122,12 +123,10 @@ async function interruptTurn3() {
 		closeQuietly(stream);
 		return;
 	}
-	input.push(
-		userMessage(
-			"Stop counting. Repeat the token I asked you to remember at the very start, prefixed with RECALL.",
-			randomUUID(),
-		),
-	);
+	// The continuation is NOT pushed here: it is queued only when the
+	// interrupted turn's terminal result arrives (see the result gate), so the
+	// handoff never depends on SDK message-ordering assumptions.
+	state.continuationQueued = true;
 }
 
 async function consume() {
@@ -196,6 +195,18 @@ async function consume() {
 				break;
 			}
 			state.turn = 4;
+			// The continuation is queued HERE — after the interrupted turn's
+			// terminal result — so turn bookkeeping never assumes the SDK
+			// delivers queued input after the current turn's result.
+			if (state.continuationQueued) {
+				state.continuationQueued = false;
+				input.push(
+					userMessage(
+						"Stop counting. Repeat the token I asked you to remember at the very start, prefixed with RECALL.",
+						randomUUID(),
+					),
+				);
+			}
 			continue;
 		}
 		if (message.subtype !== "success" || message.is_error === true) {
