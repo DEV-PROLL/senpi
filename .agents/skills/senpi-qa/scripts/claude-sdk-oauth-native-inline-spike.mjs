@@ -31,13 +31,12 @@ import {
 	assistantText,
 	claudeExecutable,
 	closeQuietly,
-	controlledInput,
-	importClaudeSdk,
 	loadCredential,
 	managedEnvironment,
 	reject,
 	requireLiveGate,
 	requireSandbox,
+	startGuardedQuery,
 	userMessage,
 	withTimeout,
 } from "./lib/claude-sdk-oauth-spike-support.mjs";
@@ -55,44 +54,27 @@ const MEMORY_TOKEN = `SPIKE_${randomUUID().replaceAll("-", "").slice(0, 10).toUp
 // sanitizer, not a secret redactor.
 const SECRETS = [loaded.credential.access, MEMORY_TOKEN];
 
-// Setup runs inside the guarded path: an SDK import, a missing Claude binary or
-// a query-construction failure must exit through the sanitized REJECTED
-// contract, never as a raw stack trace on exit 1.
-let query;
-let input;
-let stream;
-try {
-	({ query } = await importClaudeSdk());
-	input = controlledInput(
-		userMessage(`Remember this token for later: ${MEMORY_TOKEN}. Reply with exactly: ACK`, randomUUID()),
-	);
-	stream = query({
-		prompt: input,
-		options: {
-			model: FIRST_MODEL,
-			tools: [],
-			permissionMode: "dontAsk",
-			settingSources: [],
-			includePartialMessages: true,
-			systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
-			pathToClaudeCodeExecutable: claudeExecutable(),
-			env: managedEnvironment(loaded.credential.access),
-		},
-	});
-} catch (error) {
-	reject(error instanceof Error ? error.message : String(error), "", SECRETS);
-}
-
-// Signal-aware cleanup: Ctrl-C/SIGTERM skips `finally`, so without a handler
-// the Claude Code subprocess would be orphaned mid-turn and keep burning
-// quota. Closing the query handle reaps the subprocess before exiting.
-for (const signal of ["SIGINT", "SIGTERM"]) {
-	process.once(signal, () => {
-		input.close();
-		closeQuietly(stream);
-		reject(`interrupted_${signal.toLowerCase()}`, "", SECRETS);
-	});
-}
+// Guarded setup + signal-aware cleanup live in spike-support: handlers are
+// installed BEFORE setup (a signal during SDK import/binary resolution is
+// covered), setup failures exit through the sanitized REJECTED contract, and
+// the handlers reap the subprocess before exiting.
+const { input, stream } = await startGuardedQuery({
+	firstMessage: userMessage(
+		`Remember this token for later: ${MEMORY_TOKEN}. Reply with exactly: ACK`,
+		randomUUID(),
+	),
+	options: {
+		model: FIRST_MODEL,
+		tools: [],
+		permissionMode: "dontAsk",
+		settingSources: [],
+		includePartialMessages: true,
+		systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
+		pathToClaudeCodeExecutable: claudeExecutable(),
+		env: managedEnvironment(loaded.credential.access),
+	},
+	secrets: SECRETS,
+});
 
 const state = {
 	sessionIds: new Set(),

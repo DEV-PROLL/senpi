@@ -40,13 +40,12 @@ import {
 	assistantText,
 	claudeExecutable,
 	closeQuietly,
-	controlledInput,
-	importClaudeSdk,
 	loadCredential,
 	managedEnvironment,
 	reject,
 	requireLiveGate,
 	requireSandbox,
+	startGuardedQuery,
 	userMessage,
 	withTimeout,
 } from "./lib/claude-sdk-oauth-spike-support.mjs";
@@ -89,49 +88,25 @@ async function runArm({ settings, probeManual }) {
 	// token and the generated recall token first — safeSignal is a shape
 	// sanitizer, not a secret redactor.
 	const secrets = [loaded.credential.access, token];
-	// Setup runs inside the guarded path: an SDK import, a missing Claude binary
-	// or a query-construction failure must exit through the sanitized REJECTED
-	// contract, never as a raw stack trace on exit 1.
-	let query;
-	let input;
-	let stream;
-	try {
-		({ query } = await importClaudeSdk());
-		input = controlledInput(
-			userMessage(`Remember this token for later: ${token}. Reply with exactly: ACK`, randomUUID()),
-		);
-		stream = query({
-			prompt: input,
-			options: {
-				model: "claude-haiku-4-5",
-				tools: [],
-				permissionMode: "dontAsk",
-				settingSources: [],
-				systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
-				settings,
-				pathToClaudeCodeExecutable: claudeExecutable(),
-				env: managedEnvironment(loaded.credential.access),
-			},
-		});
-	} catch (error) {
-		reject(error instanceof Error ? error.message : String(error), "", secrets);
-	}
-
-	// Signal-aware cleanup: Ctrl-C/SIGTERM skips `finally`, so without a handler
-	// the Claude Code subprocess would be orphaned mid-arm and keep burning
-	// quota. Closing the query handle reaps the subprocess before exiting. The
-	// handlers are removed when the arm finishes — a stale arm-A listener would
-	// otherwise fire during arm B and exit before arm B's stream is reaped.
-	const signalHandlers = [];
-	for (const signal of ["SIGINT", "SIGTERM"]) {
-		const handler = () => {
-			input.close();
-			closeQuietly(stream);
-			reject(`interrupted_${signal.toLowerCase()}`, "", secrets);
-		};
-		process.once(signal, handler);
-		signalHandlers.push([signal, handler]);
-	}
+	// Guarded setup + signal-aware cleanup live in spike-support: handlers are
+	// installed BEFORE setup (a signal during SDK import/binary resolution is
+	// covered), setup failures exit through the sanitized REJECTED contract,
+	// and disarm() removes the handlers at arm end so a stale arm-A listener
+	// cannot fire during arm B and exit before arm B's stream is reaped.
+	const { input, stream, disarm } = await startGuardedQuery({
+		firstMessage: userMessage(`Remember this token for later: ${token}. Reply with exactly: ACK`, randomUUID()),
+		options: {
+			model: "claude-haiku-4-5",
+			tools: [],
+			permissionMode: "dontAsk",
+			settingSources: [],
+			systemPrompt: "Answer briefly. Obey the exact reply format the user asks for.",
+			settings,
+			pathToClaudeCodeExecutable: claudeExecutable(),
+			env: managedEnvironment(loaded.credential.access),
+		},
+		secrets,
+	});
 
 	const state = {
 		sessionIds: new Set(),
@@ -195,7 +170,7 @@ async function runArm({ settings, probeManual }) {
 	} finally {
 		input.close();
 		closeQuietly(stream);
-		for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
+		disarm();
 	}
 
 	if (outcome) reject(outcome, "", secrets);

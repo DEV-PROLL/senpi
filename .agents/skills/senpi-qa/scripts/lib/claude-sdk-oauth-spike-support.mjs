@@ -244,3 +244,43 @@ export function closeQuietly(handle) {
 		// best-effort teardown
 	}
 }
+
+/**
+ * Guarded spike query setup shared by the live spikes.
+ *
+ * SIGINT/SIGTERM handlers are installed BEFORE setup so the whole arm
+ * lifecycle is covered (a signal during SDK import/binary resolution would
+ * otherwise bypass cleanup); they tolerate a not-yet-created input/stream.
+ * SDK import, missing-binary, and query-construction failures exit through
+ * the sanitized REJECTED contract, never a raw exit 1. The returned disarm()
+ * removes the handlers at arm end so a stale listener cannot fire during a
+ * later arm and exit before that arm's stream is reaped.
+ */
+export async function startGuardedQuery({ firstMessage, options, secrets }) {
+	let input;
+	let stream;
+	const signalHandlers = [];
+	for (const signal of ["SIGINT", "SIGTERM"]) {
+		const handler = () => {
+			input?.close();
+			closeQuietly(stream);
+			reject(`interrupted_${signal.toLowerCase()}`, "", secrets);
+		};
+		process.once(signal, handler);
+		signalHandlers.push([signal, handler]);
+	}
+	try {
+		const { query } = await importClaudeSdk();
+		input = controlledInput(firstMessage);
+		stream = query({ prompt: input, options });
+	} catch (error) {
+		reject(error instanceof Error ? error.message : String(error), "", secrets);
+	}
+	return {
+		input,
+		stream,
+		disarm() {
+			for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
+		},
+	};
+}

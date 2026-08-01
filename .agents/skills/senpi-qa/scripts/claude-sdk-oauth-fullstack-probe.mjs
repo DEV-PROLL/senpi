@@ -80,6 +80,14 @@ try {
 				response.end();
 				return;
 			}
+			// Route-check POSTs: the fixture exists only for Anthropic messages
+			// calls — answering any other POST with a 200 fixture would manufacture
+			// false continuity evidence.
+			if (!request.url?.includes("/messages")) {
+				response.writeHead(404, { "content-type": "application/json" });
+				response.end(JSON.stringify({ error: "unknown_route" }));
+				return;
+			}
 			let raw = "";
 			request.setEncoding("utf8");
 			request.on("data", (chunk) => {
@@ -95,6 +103,11 @@ try {
 					// broken request path.
 					response.writeHead(400, { "content-type": "application/json" });
 					response.end(JSON.stringify({ error: "malformed_request" }));
+					return;
+				}
+				if (typeof body.model !== "string" || !Array.isArray(body.messages)) {
+					response.writeHead(400, { "content-type": "application/json" });
+					response.end(JSON.stringify({ error: "malformed_shape" }));
 					return;
 				}
 				// Buffer.byteLength, not raw.length: the column is labeled bytes, and

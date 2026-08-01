@@ -23,6 +23,7 @@ import {
 	repoRoot,
 	track,
 } from "./lib/common.mjs";
+import { safeDetail } from "./lib/claude-sdk-oauth-fullstack-support.mjs";
 import { withTimeout } from "./lib/with-timeout.mjs";
 
 const ROOT = repoRoot();
@@ -154,10 +155,6 @@ function outputText(messages) {
 		}
 	}
 	return parts.join("\n");
-}
-
-function safeDetail(value) {
-	return String(value).replace(/[\r\n]+/g, " ").slice(0, 500);
 }
 
 const facts = new Map();

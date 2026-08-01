@@ -74,6 +74,9 @@ if (process.argv.includes(WORKER_FLAG)) {
 	// access token and the generated recall token first — safeSignal is a shape
 	// sanitizer, not a secret redactor.
 	const secrets = [primary.credential.access, token];
+	// The secondary account's token must be redacted too — a cross-account SDK
+	// error string could otherwise echo it into the REJECTED line.
+	if (!secondary.error) secrets.push(secondary.credential.access);
 
 	const activeChildren = new Set();
 	const scopedRoots = new Set();
