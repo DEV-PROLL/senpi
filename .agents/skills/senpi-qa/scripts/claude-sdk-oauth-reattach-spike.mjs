@@ -56,8 +56,18 @@ if (process.argv.includes(WORKER_FLAG)) {
 	// The request carries an OAuth access token, so it arrives over the IPC channel
 	// rather than the environment: env is inherited by the Claude Code subprocess
 	// this worker spawns, which would put the token in that process's environment.
+	// The exit hook is the last-resort grandchild reap: a worker dying by any
+	// path (including a hard crash) closes its query handle so the Claude Code
+	// subprocess cannot outlive it. The worker's own 210s turn timeout bounds
+	// the grandchild even in the worst case.
+	let activeStream;
+	process.once("exit", () => {
+		closeQuietly(activeStream);
+	});
 	const request = await new Promise((resolve) => process.once("message", resolve));
-	const result = await runTurns(request).catch((error) => ({
+	const result = await runTurns(request, (stream) => {
+		activeStream = stream;
+	}).catch((error) => ({
 		error: error instanceof Error ? error.message : String(error),
 	}));
 	process.send?.(result, () => process.exit(0));
@@ -101,13 +111,25 @@ if (process.argv.includes(WORKER_FLAG)) {
 		});
 	}
 
+	// Every worker runs with an isolated HOME/USERPROFILE: when the SDK
+	// ignores CLAUDE_CONFIG_DIR (the default-only outcome), the seeded session
+	// must land in a THROWAWAY default root — never the operator's real
+	// ~/.claude — and the default-root control read must measure that same
+	// isolated root.
+	const sandboxHome = mkdtempSync(join(tmpdir(), "claude-sdk-oauth-home-"));
+	scopedRoots.add(sandboxHome);
+
 	const runChild = (request) => {
 		let child;
 		const run = new Promise((resolve, rejectRun) => {
 			// detached: the worker gets its own process group so a timeout can
 			// take its Claude Code grandchild down with it instead of orphaning
 			// the grandchild to keep burning subscription quota.
-			child = fork(SELF, [WORKER_FLAG], { silent: true, detached: process.platform !== "win32" });
+			child = fork(SELF, [WORKER_FLAG], {
+				silent: true,
+				detached: process.platform !== "win32",
+				env: { ...process.env, HOME: sandboxHome, USERPROFILE: sandboxHome },
+			});
 			activeChildren.add(child);
 			child.send(request);
 			let received;

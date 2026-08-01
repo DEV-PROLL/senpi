@@ -203,13 +203,13 @@ const armB = await runArm({
 	probeManual: false,
 });
 
-// The verdict reads the SDK-provided compact_metadata.trigger, not the spike's
-// own phase bookkeeping — a boundary's origin (native auto vs /compact) is what
-// the arms measure. `unknown` (metadata absent) falls back to the phase.
-const isAutoBoundary = (boundary) =>
-	boundary.trigger === "unknown" ? boundary.phase !== "manual" : boundary.trigger === "auto";
-const isManualBoundary = (boundary) =>
-	boundary.trigger === "unknown" ? boundary.phase === "manual" : boundary.trigger === "manual";
+// The verdict reads ONLY the SDK-provided compact_metadata.trigger — never
+// the spike's own mutable phase bookkeeping. A boundary whose trigger is
+// absent counts toward boundary=received but is attributed to NEITHER arm:
+// attributing it via the phase field could misreport a late auto-compaction
+// as the /compact send (or vice versa).
+const isAutoBoundary = (boundary) => boundary.trigger === "auto";
+const isManualBoundary = (boundary) => boundary.trigger === "manual";
 const autoA = armA.boundaries.some(isAutoBoundary);
 const autoB = armB.boundaries.some(isAutoBoundary);
 // arm B (no enabled key) firing proves default-on; only arm A firing proves the

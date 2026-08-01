@@ -59,6 +59,7 @@ export function safeSignal(value) {
 export function stripCredentialEnvironment(env) {
 	delete env.ANTHROPIC_API_KEY;
 	delete env.ANTHROPIC_AUTH_TOKEN;
+	delete env.ANTHROPIC_OAUTH_TOKEN;
 	delete env.ANTHROPIC_BASE_URL;
 	delete env.ANTHROPIC_CUSTOM_HEADERS;
 	delete env.CLAUDECODE;

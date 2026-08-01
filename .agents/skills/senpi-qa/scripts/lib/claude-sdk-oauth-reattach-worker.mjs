@@ -64,7 +64,7 @@ async function staticRead(sessionId) {
  * @param {{access: string, prompts?: string[], resume?: string, configDir?: string,
  *          expectToken?: string, staticRead?: string, staticOnly?: boolean}} request
  */
-export async function runTurns(request) {
+export async function runTurns(request, onStream) {
 	const result = { sessionId: null, coherent: false, usage: undefined };
 	// An absent configDir must mean the SDK DEFAULT root: an operator-set
 	// CLAUDE_CONFIG_DIR inherited from the spike's shell would silently
@@ -116,6 +116,9 @@ export async function runTurns(request) {
 		result.error = error instanceof Error ? error.message : String(error);
 		return result;
 	}
+	// Hand the live stream to the worker's exit hook so a dying worker reaps
+	// its Claude Code subprocess instead of orphaning it.
+	onStream?.(stream);
 	let completedTurns = 0;
 
 	const drain = (async () => {
