@@ -136,6 +136,9 @@ async function interruptTurn3() {
 		state.pendingInterruptResult = false;
 		state.failure ??= "interrupt_failed";
 		input.close();
+		// Reap the query handle immediately: without this the live query keeps
+		// running (and burning quota) until the 240s spike deadline.
+		closeQuietly(stream);
 		return;
 	}
 	input.push(
@@ -148,6 +151,10 @@ async function interruptTurn3() {
 
 async function consume() {
 	for await (const message of stream) {
+		// Record the session id from EVERY message that carries one — a lineage
+		// split on a non-init message must trip the stability assertion, not
+		// slip past an init-only set.
+		if (typeof message.session_id === "string") state.sessionIds.add(message.session_id);
 		if (message.type === "system" && message.subtype === "init" && typeof message.session_id === "string") {
 			state.sessionIds.add(message.session_id);
 		}
@@ -199,7 +206,12 @@ async function consume() {
 			continue;
 		}
 		if (message.subtype !== "success" || message.is_error === true) {
-			state.failure ??= message.subtype ?? message.terminal_reason ?? "result_error";
+			// subtype:"success" + is_error:true (a 401/refusal) must map to
+			// result_error, never to signal=success.
+			state.failure ??=
+				message.is_error === true && message.subtype === "success"
+					? "result_error"
+					: (message.subtype ?? message.terminal_reason ?? "result_error");
 			break;
 		}
 		if (state.turn === 1) {

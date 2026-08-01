@@ -96,19 +96,32 @@ export async function runTurns(request) {
 				// through as usage/coherence evidence.
 				if (message.error) throw new Error("assistant_error");
 				if (message.message?.model === "<synthetic>") throw new Error("synthetic_assistant");
-				result.usage = readUsage(message.message) ?? result.usage;
+				// Pass the whole message: usage can live on the assistant envelope OR
+				// directly on the message (result shape) — nested-only reads silently
+				// fall back to a 0.00 cache ratio.
+				result.usage = readUsage(message) ?? result.usage;
 				if (request.expectToken && assistantText(message).includes(request.expectToken)) result.coherent = true;
 			}
 			if (message.type === "auth_status" && message.error) throw new Error("authentication_failed");
 			if (message.type !== "result") continue;
-			// A 401/refusal arrives as subtype:"success" with is_error:true and a
-			// <synthetic> assistant message, so both must be checked.
+			// Result envelopes can carry usage directly — record before the gates.
+			result.usage = readUsage(message) ?? result.usage;
+			// A 401/refusal arrives as subtype:"success" with is_error:true; that
+			// combination must map to result_error, never to signal=success.
 			if (message.subtype !== "success" || message.is_error === true) {
-				throw new Error(request.resume ? "resume_failed" : (message.subtype ?? "result_error"));
+				const reason =
+					message.is_error === true && message.subtype === "success"
+						? "result_error"
+						: (message.subtype ?? "result_error");
+				throw new Error(request.resume ? "resume_failed" : reason);
 			}
+			completedTurns += 1;
 			if (prompts.length === 0) break;
 			input.push(userMessage(prompts.shift(), randomUUID()));
 		}
+		// An iterator that ends before every requested prompt completed its
+		// terminal result means the seed/resume is incomplete — never accept it.
+		if (completedTurns < expectedTurns) throw new Error("turns_incomplete");
 	})();
 
 	try {

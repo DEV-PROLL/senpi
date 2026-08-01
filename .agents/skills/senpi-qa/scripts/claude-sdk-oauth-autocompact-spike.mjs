@@ -114,13 +114,18 @@ async function runArm({ settings, probeManual }) {
 
 	// Signal-aware cleanup: Ctrl-C/SIGTERM skips `finally`, so without a handler
 	// the Claude Code subprocess would be orphaned mid-arm and keep burning
-	// quota. Closing the query handle reaps the subprocess before exiting.
+	// quota. Closing the query handle reaps the subprocess before exiting. The
+	// handlers are removed when the arm finishes — a stale arm-A listener would
+	// otherwise fire during arm B and exit before arm B's stream is reaped.
+	const signalHandlers = [];
 	for (const signal of ["SIGINT", "SIGTERM"]) {
-		process.once(signal, () => {
+		const handler = () => {
 			input.close();
 			closeQuietly(stream);
 			reject(`interrupted_${signal.toLowerCase()}`, "", secrets);
-		});
+		};
+		process.once(signal, handler);
+		signalHandlers.push([signal, handler]);
 	}
 
 	const state = {
@@ -158,9 +163,13 @@ async function runArm({ settings, probeManual }) {
 			}
 			if (message.type === "auth_status" && message.error) state.failure ??= "authentication_failed";
 			if (message.type !== "result") continue;
-			// A 401/refusal arrives as subtype:"success" with is_error:true.
+			// A 401/refusal arrives as subtype:"success" with is_error:true; that
+			// combination must map to result_error, never to signal=success.
 			if (message.subtype !== "success" || message.is_error === true) {
-				state.failure ??= message.subtype ?? message.terminal_reason ?? "result_error";
+				state.failure ??=
+					message.is_error === true && message.subtype === "success"
+						? "result_error"
+						: (message.subtype ?? message.terminal_reason ?? "result_error");
 				break;
 			}
 			state.turn += 1;
@@ -181,6 +190,7 @@ async function runArm({ settings, probeManual }) {
 	} finally {
 		input.close();
 		closeQuietly(stream);
+		for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
 	}
 
 	if (outcome) reject(outcome, "", secrets);

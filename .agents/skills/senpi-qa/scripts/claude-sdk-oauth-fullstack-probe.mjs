@@ -90,7 +90,12 @@ try {
 				try {
 					body = JSON.parse(raw);
 				} catch {
-					body = { messages: [] };
+					// Fail closed: a malformed POST must not be answered with the SSE
+					// fixture — that would manufacture false continuity evidence for a
+					// broken request path.
+					response.writeHead(400, { "content-type": "application/json" });
+					response.end(JSON.stringify({ error: "malformed_request" }));
+					return;
 				}
 				// Buffer.byteLength, not raw.length: the column is labeled bytes, and
 				// raw.length counts UTF-16 code units, not HTTP body bytes.
@@ -217,7 +222,12 @@ try {
 	}
 } catch (error) {
 	fatal = error instanceof Error ? error : new Error(String(error));
-	infrastructureFailure = /loopback|ECONNREFUSED|EADDRINUSE|EACCES|did not bind/i.test(fatal.message);
+	// A missing Claude binary is setup failure (REJECTED exit 2), not a
+	// behavioral continuity FAIL — keep the two distinguishable in CI.
+	infrastructureFailure =
+		/loopback|ECONNREFUSED|EADDRINUSE|EACCES|did not bind|claude_binary_not_found|Native CLI binary.*not found/i.test(
+			fatal.message,
+		);
 } finally {
 	try {
 		session?.dispose?.();
