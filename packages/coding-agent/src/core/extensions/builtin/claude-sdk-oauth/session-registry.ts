@@ -4,6 +4,12 @@ import { EXPIRING_WITHIN_MS } from "./auth-lane.ts";
 import type { Options, SDKUserMessage, SdkQuery, SdkQueryHandle } from "./sdk-boundary.ts";
 import { getSdkBoundary } from "./sdk-boundary.ts";
 import { recordPendingCloseCause } from "./session-observability.ts";
+import {
+	annotateBranchInfo,
+	annotatePendingFork,
+	annotateTainted,
+	switchEntryModel,
+} from "./session-entry-annotations.ts";
 import { type SessionRegistryReapHandle, SessionReapScheduler } from "./session-reaper.ts";
 import {
 	type ClaudeSdkOauthSessionState,
@@ -253,37 +259,6 @@ export class ClaudeSdkOauthSessionRegistry {
 		}
 	}
 
-	markTainted(senpiSessionId: string, reason: string): void {
-		const entry = this.entries.get(senpiSessionId);
-		if (!entry) return;
-		entry.taintedReason = reason;
-		if (entry.state !== "TAINTED") transitionToTainted(entry);
-		this.touch(entry);
-	}
-
-	async switchModel(senpiSessionId: string, modelId: string): Promise<boolean> {
-		const entry = this.entries.get(senpiSessionId);
-		if (!entry?.query.setModel) return false;
-		await entry.query.setModel(modelId);
-		entry.modelId = modelId;
-		this.touch(entry);
-		return true;
-	}
-
-	recordPendingFork(senpiSessionId: string, reason: string): void {
-		const entry = this.entries.get(senpiSessionId);
-		if (!entry) return;
-		entry.pendingForkReason = reason;
-		this.touch(entry);
-	}
-
-	recordBranchInfo(senpiSessionId: string, info: SessionBranchInfo): void {
-		const entry = this.entries.get(senpiSessionId);
-		if (!entry) return;
-		entry.branchInfo = { ...info };
-		this.touch(entry);
-	}
-
 	isCurrentGeneration(senpiSessionId: string, generation: number): boolean {
 		return this.entries.get(senpiSessionId)?.generation === generation;
 	}
@@ -329,19 +304,19 @@ export function closeSession(senpiSessionId: string, reason: string): void {
 }
 
 export function markTainted(senpiSessionId: string, reason: string): void {
-	sessionRegistry.markTainted(senpiSessionId, reason);
+	annotateTainted(sessionRegistry, senpiSessionId, reason);
 }
 
 export async function switchSessionModel(senpiSessionId: string, modelId: string): Promise<boolean> {
-	return sessionRegistry.switchModel(senpiSessionId, modelId);
+	return switchEntryModel(sessionRegistry, senpiSessionId, modelId);
 }
 
 export function recordPendingFork(senpiSessionId: string, reason: string): void {
-	sessionRegistry.recordPendingFork(senpiSessionId, reason);
+	annotatePendingFork(sessionRegistry, senpiSessionId, reason);
 }
 
 export function recordBranchInfo(senpiSessionId: string, info: SessionBranchInfo): void {
-	sessionRegistry.recordBranchInfo(senpiSessionId, info);
+	annotateBranchInfo(sessionRegistry, senpiSessionId, info);
 }
 
 export function isCurrentGeneration(senpiSessionId: string, generation: number): boolean {

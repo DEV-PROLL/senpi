@@ -14,6 +14,10 @@ import {
 	SessionRegistryResourceLimitError,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
 import {
+	annotateBranchInfo,
+	annotateTainted,
+} from "../src/core/extensions/builtin/claude-sdk-oauth/session-entry-annotations.ts";
+import {
 	ConcurrentSessionTurnAdmissionError,
 	submitSessionTurn,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-pump.ts";
@@ -409,7 +413,7 @@ describe("Claude SDK OAuth session registry", () => {
 		for (let index = 0; index < 32; index++) {
 			const entry = registry.getOrCreate(input(`session-${index}`));
 			transitionSessionState(entry, "IDLE_SYNCED");
-			if (index === 0) registry.markTainted(entry.senpiSessionId, "branch changed");
+			if (index === 0) annotateTainted(registry, entry.senpiSessionId, "branch changed");
 			now++;
 		}
 
@@ -478,7 +482,7 @@ describe("Claude SDK OAuth session registry", () => {
 		const registry = new ClaudeSdkOauthSessionRegistry();
 		const entry = registry.getOrCreate(input("session-a"));
 		entry.assistantUuidByIndex.set(3, "assistant-uuid");
-		registry.recordBranchInfo("session-a", { oldLeafId: "old", newLeafId: "new" });
+		annotateBranchInfo(registry, "session-a", { oldLeafId: "old", newLeafId: "new" });
 
 		expect(entry.assistantUuidByIndex.get(3)).toBe("assistant-uuid");
 		expect(entry.branchInfo).toEqual({ oldLeafId: "old", newLeafId: "new" });
