@@ -18,7 +18,11 @@ type ScheduledReap = { generation: number; token: symbol; handle: SessionRegistr
 export class SessionReapScheduler {
 	private readonly scheduled = new Map<string, ScheduledReap>();
 
-	constructor(private readonly deps: SessionReapDeps) {}
+	private readonly deps: SessionReapDeps;
+
+	constructor(deps: SessionReapDeps) {
+		this.deps = deps;
+	}
 
 	arm(senpiSessionId: string, generation: number, delayMs = this.deps.idleTtlMs): void {
 		const token = Symbol("session-reap");
