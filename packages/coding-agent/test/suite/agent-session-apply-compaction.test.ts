@@ -162,11 +162,16 @@ describe("AgentSession applyCompaction", () => {
 			(event) => event.type === "compaction_start" || event.type === "compaction_end",
 		);
 		expect(compactionEvents).toHaveLength(2);
-		expect(compactionEvents[0]).toEqual({ type: "compaction_start", reason: "extension" });
+		expect(compactionEvents[0]).toMatchObject({
+			type: "compaction_start",
+			reason: "extension",
+			requestId: expect.any(String),
+		});
 		expect(compactionEvents[1]).toMatchObject({
 			type: "compaction_end",
 			reason: "extension",
 			aborted: false,
+			requestId: compactionEvents[0]?.requestId,
 		});
 		expect(observedCompactionStates).toEqual(["running"]);
 	});
