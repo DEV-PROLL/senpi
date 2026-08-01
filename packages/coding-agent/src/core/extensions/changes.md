@@ -1,5 +1,22 @@
 # Core Extensions Changes
 
+## 2026-08-01 - recommended-models respects an explicitly saved system default
+
+### What changed and why
+
+- The `recommended-models` builtin no longer auto-switches when the startup model comes from the user's own `settings` provenance. It now auto-switches only on implicit fallback paths (`provider-default` and `first-available`), so an explicitly configured `defaultProvider`/`defaultModel` is never silently overridden by a recommendation.
+- Previously a user who had set a non-recommended system default still got switched to the recommended model on every start (with the notice `Switched to recommended model '...'.`), in TUI persisting the recommendation back over their chosen default.
+- Explicit CLI and scoped selections were already excluded; `settings` (an explicitly configured system default) is now excluded too, aligning the extension with the original intent of preserving explicit user choice.
+
+### Files modified
+
+- `builtin/recommended-models/index.ts` (`AUTO_SWITCH_PROVENANCE`)
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `builtin/recommended-models/index.ts` if upstream re-introduces `settings` as an auto-switch path; keep it out of `AUTO_SWITCH_PROVENANCE`.
+
+
 ## 2026-07-31 - Correlated input dispositions
 
 ### What changed and why
