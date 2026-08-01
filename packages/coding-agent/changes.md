@@ -7,13 +7,14 @@
 - Updated Grok themes for the merged scrollbar color contract while preserving their non-palette inheritance.
 - Kept implicit legacy `SYSTEM.md` and `APPEND_SYSTEM.md` files excluded from both prompt content and source metadata.
 - Restored source-runtime extension aliases, Alt Screen help grouping, and package-declared hook discovery.
+- Added the merged protocol and client workspaces to the root build graph in dependency order so clean CI runners produce their declarations before dependent packages compile.
 - Updated deterministic test hosts for merged session abort, Markdown transformer, UI mode, fullscreen scrollbar, and offline-network contracts.
 - Made the `/btw` concurrent snapshot test wait for the exact side-provider entry signal instead of relying on provider-call timing.
 
 ### Why
 
 - Upstream added runtime capabilities and lifecycle requirements on surfaces that also carry fork-only behavior. The merge preserved most production code but omitted three fork integration fields and left several fork tests modeling the pre-merge runtime shape.
-- The resulting full package suite had 25 coding-agent failures despite narrower focused suites being green.
+- The resulting full package suite had 25 coding-agent failures despite narrower focused suites being green, and clean CI builds could not resolve the newly merged client and protocol workspaces because local validation had pre-existing `dist` artifacts.
 
 ### Why this cannot be expressed externally
 
@@ -21,7 +22,7 @@
 
 ### Expected merge conflict zones
 
-- `src/core/extensions/loader.ts`, `src/core/pi-manifest.ts`, `src/core/resource-loader.ts`, `src/modes/interactive/help-content.ts`, Grok theme JSON, `interactive-mode.ts` test hosts, session-runtime tests, model-network policy tests, and `/btw` concurrency coverage.
+- `scripts/build-all.mjs`, `src/core/extensions/loader.ts`, `src/core/pi-manifest.ts`, `src/core/resource-loader.ts`, `src/modes/interactive/help-content.ts`, Grok theme JSON, `interactive-mode.ts` test hosts, session-runtime tests, model-network policy tests, and `/btw` concurrency coverage.
 
 ## 2026-08-01 — Preserve the no-shipped-shrinkwrap install contract
 
