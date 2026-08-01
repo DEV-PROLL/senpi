@@ -11,6 +11,7 @@ export type ContinuityEntrySnapshot = {
 	lastAssistantUuid: string | null;
 	assistantUuidByIndex: ReadonlyMap<number, string>;
 	pendingForkReason: string | null;
+	taintedReason?: string | null;
 };
 
 export type ContinuityBindingSnapshot = {
@@ -55,23 +56,33 @@ function commonPrefixLength(left: readonly string[], right: readonly string[]): 
 	return index;
 }
 
-function boundaryUuid(entry: ContinuityEntrySnapshot, index: number): string | null {
-	if (index >= entry.sentCount && entry.lastAssistantUuid) return entry.lastAssistantUuid;
-	for (let candidate = index; candidate > 0; candidate -= 1) {
+/**
+ * The fork point is the last assistant boundary STRICTLY BEFORE the divergence:
+ * forking at the diverged turn itself would carry the stale assistant into the new
+ * branch and leave nothing to re-send.
+ */
+function boundaryBefore(entry: ContinuityEntrySnapshot, count: number): { index: number; uuid: string } | undefined {
+	for (let candidate = count - 1; candidate >= 1; candidate -= 1) {
 		const uuid = entry.assistantUuidByIndex.get(candidate);
-		if (uuid) return uuid;
+		if (uuid) return { index: candidate, uuid };
 	}
-	return entry.lastAssistantUuid;
+	return undefined;
 }
 
 function forkOrFlatten(
 	entry: ContinuityEntrySnapshot,
-	index: number,
+	divergesAt: number,
 	reason: ContinuityReason,
 ): ContinuityDecision {
-	const atUuid = boundaryUuid(entry, index);
-	if (!atUuid) return { kind: "flatten", reason: "branch_boundary_unavailable" };
-	return { kind: "fork", sdkSessionId: entry.sdkSessionId, atUuid, from: index, reason };
+	const boundary = boundaryBefore(entry, divergesAt);
+	if (!boundary) return { kind: "flatten", reason };
+	return {
+		kind: "fork",
+		sdkSessionId: entry.sdkSessionId,
+		atUuid: boundary.uuid,
+		from: boundary.index,
+		reason,
+	};
 }
 
 function identityDrift(input: ContinuityDecisionInput, entry: ContinuityEntrySnapshot): ContinuityReason | null {
@@ -88,7 +99,7 @@ function decideFromBinding(input: ContinuityDecisionInput, binding: ContinuityBi
 	if (shared === binding.sentCount) {
 		return { kind: "reattach", sdkSessionId: binding.sdkSessionId, from: binding.sentCount, reason: "registry_miss" };
 	}
-	if (!binding.lastAssistantUuid) return { kind: "flatten", reason: "branch_boundary_unavailable" };
+	if (!binding.lastAssistantUuid) return { kind: "flatten", reason: "registry_miss" };
 	return {
 		kind: "fork",
 		sdkSessionId: binding.sdkSessionId,
@@ -145,15 +156,17 @@ export function decideNativeContinuity(input: ContinuityDecisionInput): Continui
 		return decideFromBinding(input, binding);
 	}
 
-	if (entry.pendingForkReason) {
-		const reason = PENDING_FORK_REASONS[entry.pendingForkReason] ?? "other";
-		return forkOrFlatten(entry, entry.sentCount, reason);
+	const divergence = entry.pendingForkReason ?? entry.taintedReason;
+	if (divergence) {
+		return forkOrFlatten(entry, entry.sentCount, PENDING_FORK_REASONS[divergence] ?? "other");
 	}
 
 	const shared = commonPrefixLength(entry.sentHashes, input.currentHashes);
 	if (shared < entry.sentCount) {
 		const rolledBack = input.currentHashes.length < entry.sentCount && shared === input.currentHashes.length;
-		return forkOrFlatten(entry, shared, rolledBack ? "history_rolled_back" : "sent_stream_diverged");
+		return rolledBack
+			? forkOrFlatten(entry, input.currentHashes.length, "history_rolled_back")
+			: forkOrFlatten(entry, shared + 1, "sent_stream_diverged");
 	}
 
 	const drift = identityDrift(input, entry);

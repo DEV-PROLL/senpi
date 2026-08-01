@@ -784,7 +784,7 @@ describe("Claude SDK OAuth stream events", () => {
 		expect(textFrom(queries[1]!.submitted[0]!)).toBe("two");
 	});
 
-	it("cold-seeds after tree navigation when the sent stream is not a prefix", async () => {
+	it("forks after tree navigation when the sent stream is not a prefix", async () => {
 		const queries = residentBoundary();
 		const sessionId = "resident-diverged-branch";
 		const user1 = { role: "user" as const, content: "one", timestamp: 1 };
@@ -804,9 +804,9 @@ describe("Claude SDK OAuth stream events", () => {
 		).result();
 
 		expect(queries).toHaveLength(2);
-		expect(queries[1]?.options.resume).toBeUndefined();
-		expect(textFrom(queries[1]!.submitted[0]!)).toContain("one");
+		expect(queries[1]?.options).toMatchObject({ resume: expect.any(String), forkSession: true });
 		expect(textFrom(queries[1]!.submitted[0]!)).toContain("other");
+		expect(textFrom(queries[1]!.submitted[0]!)).not.toContain("<conversation_history>");
 	});
 
 	it("cold-seeds the next turn after compaction taints a resident query", async () => {

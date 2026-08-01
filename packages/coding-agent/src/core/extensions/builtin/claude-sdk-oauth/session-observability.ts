@@ -187,7 +187,13 @@ export function observeSessionSyncDecision(input: {
 		return { kind: "delta", reason: "prefix_matched", deltaMessages: input.deltaMessages };
 	}
 	if (input.kind === "resume") {
-		return { kind: "fork", reason: "branch_resume", deltaMessages: input.deltaMessages };
+		const retainedCause =
+			input.reason === "registry_miss" ? consumePendingCloseCause(input.senpiSessionId) : undefined;
+		return {
+			kind: "fork",
+			reason: retainedCause ?? (input.reason === undefined ? "branch_resume" : sanitizeReason(input.reason)),
+			deltaMessages: input.deltaMessages,
+		};
 	}
 	const retained = input.reason === "registry_miss" ? consumePendingCloseCause(input.senpiSessionId) : undefined;
 	const reason = retained ?? sanitizeReason(input.reason);

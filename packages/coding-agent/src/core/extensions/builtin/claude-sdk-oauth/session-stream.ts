@@ -20,11 +20,13 @@ import {
 	sessionRegistry,
 } from "./session-registry.ts";
 import { submitSessionTurn } from "./session-registry-pump.ts";
+import { type ContinuityDecision, decideNativeContinuity } from "./session-continuity.ts";
+import { bindingFromEntry, getBinding, reattachSession, rememberBinding } from "./session-reattach.ts";
 import {
 	buildDeltaPromptBlocks,
 	configFingerprint,
-	decideSessionSync,
 	primeResumedEntry,
+	sentHashesForEntry,
 	recordSyncedStream,
 	sentMessageHashes,
 	sentMessages,
@@ -177,7 +179,10 @@ function turnAttempt(
 			);
 			for await (const sdkMessage of queue) yield sdkMessage;
 			const turn = await completion;
-			if (!turn.aborted && successfulTurn(turn.messages)) recordSyncedStream(entry, hashes);
+			if (!turn.aborted && successfulTurn(turn.messages)) {
+				recordSyncedStream(entry, hashes);
+				rememberBinding(bindingFromEntry(entry, hashes));
+			}
 			// Retained by the auth-lane wrapper only once this generator completes.
 			staged.emit();
 		})(),
@@ -185,6 +190,30 @@ function turnAttempt(
 			if (isCurrentGeneration(entry.senpiSessionId, generation))
 				closeSession(entry.senpiSessionId, "attempt_discarded");
 		},
+	};
+}
+
+const OBSERVED_KIND: Record<ContinuityDecision["kind"], "incremental" | "resume" | "cold-seed"> = {
+	delta: "incremental",
+	reattach: "resume",
+	fork: "resume",
+	flatten: "cold-seed",
+	bootstrap: "cold-seed",
+};
+
+function entrySnapshot(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[]) {
+	return {
+		sdkSessionId: entry.sdkSessionId,
+		accountName: entry.accountName,
+		modelId: entry.modelId,
+		systemPromptHash: entry.systemPromptHash,
+		toolsetHash: entry.toolsetHash,
+		sentCount: entry.sentCount,
+		sentHashes: hashes.slice(0, entry.sentCount),
+		lastAssistantUuid: entry.assistantUuidByIndex.get(entry.sentCount) ?? null,
+		assistantUuidByIndex: entry.assistantUuidByIndex,
+		pendingForkReason: entry.pendingForkReason,
+		taintedReason: entry.taintedReason,
 	};
 }
 
@@ -197,50 +226,51 @@ async function createResidentAttempt(
 	const hashes = sentMessageHashes(messages);
 	const existing = getSession(sessionId);
 	const fingerprint = configFingerprint(auth.options, input.context, auth.authLane, auth.accountName);
-	const decision = decideSessionSync({
-		entry: existing,
+	const residentHashes = existing ? (sentHashesForEntry(existing) ?? hashes) : hashes;
+	const decision = decideNativeContinuity({
+		entry: existing ? entrySnapshot(existing, residentHashes) : undefined,
+		binding: getBinding(sessionId),
 		currentHashes: hashes,
 		accountName: auth.accountName,
 		modelId: input.model.id,
 		fingerprint,
-		tokenExpiring: existing ? isBoundAccountTokenExpiring(existing, auth.accounts) : false,
+		transcriptAvailable: true,
 	});
-	const firstTurn = existing === undefined && hashes.length <= 1;
-	let observedReason = decision.kind === "cold-seed" ? decision.reason : undefined;
-	let observedKind = decision.kind;
+	const firstTurn = existing === undefined && getBinding(sessionId) === undefined && hashes.length <= 1;
+	let observedReason = "reason" in decision ? decision.reason : decision.kind === "bootstrap" ? "registry_miss" : undefined;
+	let observedKind: "incremental" | "resume" | "cold-seed" = OBSERVED_KIND[decision.kind];
 	let entry: ClaudeSdkOauthSessionEntry;
 	let from = 0;
-	let coldSeed = decision.kind === "cold-seed";
-	if (decision.kind === "incremental") {
-		entry = existing!;
+	let flatten = decision.kind === "flatten" || decision.kind === "bootstrap";
+
+	if (decision.kind === "delta" && existing) {
+		entry = existing;
 		from = decision.from;
-	} else if (decision.kind === "resume") {
-		const previous = existing!;
-		closeSession(sessionId, "branch_resume");
-		entry = getOrCreateSession({
-			senpiSessionId: sessionId,
-			accountName: auth.accountName,
-			modelId: input.model.id,
-			...fingerprint,
-			options: {
-				...auth.options,
-				resume: decision.previousSdkSessionId,
-				resumeSessionAt: decision.resumeSessionAt,
-				forkSession: true,
-			},
-		});
-		primeResumedEntry(entry, previous, decision.from);
+	} else if (decision.kind === "reattach" || decision.kind === "fork") {
+		const source = getBinding(sessionId) ?? (existing ? bindingFromEntry(existing, residentHashes) : undefined);
+		const binding = source
+			? {
+					...source,
+					sentCount: decision.from,
+					sentHashes: source.sentHashes.slice(0, decision.from),
+					...(decision.kind === "fork" ? { lastAssistantUuid: decision.atUuid } : {}),
+				}
+			: undefined;
 		try {
-			await initializeResumedEntry(entry, input.streamOptions.signal);
+			if (!binding) throw new Error("Claude SDK OAuth continuity binding is unavailable");
+			entry = await reattachSession({
+				binding,
+				options: auth.options,
+				...(decision.kind === "fork" ? { atUuid: decision.atUuid } : {}),
+				...(input.streamOptions.signal ? { signal: input.streamOptions.signal } : {}),
+			});
 			from = decision.from;
-			coldSeed = false;
 		} catch (error) {
-			closeSession(sessionId, "resume_initialization_failed");
 			if (input.streamOptions.signal?.aborted) throw error;
 			input.onResumeFallback(error);
 			observedKind = "cold-seed";
 			observedReason = "resume_initialization_failed";
-			coldSeed = true;
+			flatten = true;
 			entry = getOrCreateSession({
 				senpiSessionId: sessionId,
 				accountName: auth.accountName,
@@ -250,7 +280,7 @@ async function createResidentAttempt(
 			});
 		}
 	} else {
-		if (existing) closeSession(sessionId, decision.reason);
+		if (existing) closeSession(sessionId, observedReason ?? "registry_miss");
 		entry = getOrCreateSession({
 			senpiSessionId: sessionId,
 			accountName: auth.accountName,
@@ -259,14 +289,15 @@ async function createResidentAttempt(
 			options: auth.options,
 		});
 	}
-	const blocks = coldSeed
+
+	const blocks = flatten
 		? buildPromptBlocks(input.context, input.customToolNameToSdk, input.toolWatchNote)
 		: buildDeltaPromptBlocks(messages.slice(from), input.customToolNameToSdk);
 	const staged = stageContinuityDecision(
 		observeSessionSyncDecision({
 			kind: observedKind,
 			reason: observedReason,
-			deltaMessages: coldSeed ? hashes.length : hashes.length - from,
+			deltaMessages: flatten ? hashes.length : hashes.length - from,
 			firstTurn,
 			senpiSessionId: sessionId,
 		}),

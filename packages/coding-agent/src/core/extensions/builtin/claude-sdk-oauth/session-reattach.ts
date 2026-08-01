@@ -82,7 +82,10 @@ async function awaitInitialization(entry: ClaudeSdkOauthSessionEntry, signal?: A
 		return;
 	}
 	const aborted = new Promise<never>((_resolve, reject) => {
-		const onAbort = (): void => reject(new Error("Claude SDK OAuth reattach aborted"));
+		const onAbort = (): void => {
+			closeSession(entry.senpiSessionId, "resume_initialization_aborted");
+			reject(new Error("Claude SDK OAuth reattach aborted"));
+		};
 		if (signal.aborted) onAbort();
 		else signal.addEventListener("abort", onAbort, { once: true });
 	});

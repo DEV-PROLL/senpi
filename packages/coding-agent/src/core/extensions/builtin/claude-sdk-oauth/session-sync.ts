@@ -175,6 +175,10 @@ export function decideSessionSync(input: SessionSyncDecisionInput): SessionSyncD
 		: { kind: "cold-seed", reason: "sent_stream_diverged" };
 }
 
+export function sentHashesForEntry(entry: ClaudeSdkOauthSessionEntry): readonly string[] | undefined {
+	return sentHashesByEntry.get(entry);
+}
+
 export function recordSyncedStream(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[]): void {
 	const copy = [...hashes];
 	assistantProvenanceHooks?.record(entry, hashes);
