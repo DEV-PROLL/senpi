@@ -2,12 +2,12 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import { evaluateAbortOutcome } from "../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
-import { submitSessionTurn } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-pump.ts";
 import {
 	ClaudeSdkOauthSessionRegistry,
 	overrideSessionRegistryBoundary,
 	resetSessionRegistryBoundary,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
+import { submitSessionTurn } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-pump.ts";
 
 describe("claude-sdk-oauth abort continuity", () => {
 	it("keeps the live session when the interrupt receipt proves nothing is still queued", () => {
@@ -68,8 +68,13 @@ describe("claude-sdk-oauth abort continuity", () => {
 		await Promise.resolve();
 		fireGrace();
 
-		const result = await turn;
-		expect(result.aborted).toBe(true);
-		resetSessionRegistryBoundary();
+		// The boundary override must be restored even when an assertion fails,
+		// or it leaks into the next test.
+		try {
+			const result = await turn;
+			expect(result.aborted).toBe(true);
+		} finally {
+			resetSessionRegistryBoundary();
+		}
 	});
 });
