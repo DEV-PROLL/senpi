@@ -154,6 +154,26 @@ export function streamClaudeSdkOauth(
 						{ model, output, blocks, stream, customToolNameToPi: resolvedTools.customToolNameToPi },
 						message.event,
 					);
+				} else if (message.type === "system" && message.subtype === "compact_boundary") {
+					// Native compactions must reach the ledger: attach the boundary as a
+					// diagnostic so the lane-policy collector can build a ledger entry
+					// instead of the boundary being discarded in the stream.
+					output.diagnostics = [
+						...(output.diagnostics ?? []),
+						{
+							type: "claude_sdk_oauth_compact_boundary",
+							timestamp: Date.now(),
+							details: {
+								boundary: {
+									trigger: message.compact_metadata?.trigger ?? "unknown",
+									preTokens: message.compact_metadata?.pre_tokens ?? 0,
+									postTokens: message.compact_metadata?.post_tokens ?? 0,
+									lineageId: message.session_id ?? "",
+									observedAt: Date.now(),
+								},
+							},
+						},
+					];
 				} else if (message.type === "result" && message.subtype === "success") {
 					// Both fields are optional on the wire, so only adopt them when present.
 					// A terminal result must never downgrade a toolUse turn that the stream

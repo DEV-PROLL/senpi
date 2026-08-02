@@ -23,6 +23,10 @@ const SCRUBBED_EXACT = [
 	"ANTHROPIC_MODEL",
 	"ANTHROPIC_SMALL_FAST_MODEL",
 	"AWS_BEARER_TOKEN_BEDROCK",
+	// A binary-override channel is as credential-bearing as a token: an ambient
+	// CLAUDE_CODE_EXECUTABLE would make the probe launch an arbitrary binary
+	// instead of the SDK-pinned one.
+	"CLAUDE_CODE_EXECUTABLE",
 	"CLAUDE_CODE_OAUTH_TOKEN",
 	"CLAUDE_CODE_USE_BEDROCK",
 	"CLAUDE_CODE_USE_FOUNDRY",

@@ -671,7 +671,13 @@ export default function compactionExtension(
 		})
 			? reduceContextMessages(event.messages, BUILTIN_CONTEXT_REDUCTION_OPTIONS).messages
 			: event.messages;
-		const emergency = hardLimitEmergencyPrune(sourceMessages, promptContextWindow, emergencyPruneLatch);
+		// The claude-sdk-oauth lane stands down from senpi compaction entirely:
+		// destructively pruning the provider context near the hard limit would
+		// break the resident SDK session's continuity the same way the gated
+		// reduction lane would.
+		const emergency = lanePolicy.disablesSenpiCompaction(ctx)
+			? { messages: sourceMessages, needsAggressiveCompaction: false }
+			: hardLimitEmergencyPrune(sourceMessages, promptContextWindow, emergencyPruneLatch);
 		const marked = markOpenAiRemoteReplayBoundary(emergency.messages, {
 			model: ctx.model,
 			branchEntries: ctx.sessionManager.getBranch(),

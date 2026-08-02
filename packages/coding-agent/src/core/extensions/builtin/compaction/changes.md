@@ -1,5 +1,30 @@
 # Builtin compaction extension changes
 
+## Lane-policy hardening: prune stand-down, live resumeMode, boundary ledger (2026-08-01)
+
+### What changed
+
+- `hardLimitEmergencyPrune` now stands down when `lanePolicy.disablesSenpiCompaction(ctx)` is true, matching the
+  reduction-lane gate: destructively pruning the provider context near the hard limit would break the resident
+  claude-sdk-oauth session's continuity the same way the gated reduction lane would.
+- `disablesSenpiCompaction` re-reads `resumeMode` on every decision instead of caching it per-cwd, so a mid-session
+  switch between flattened and resident modes cannot leave the gate stuck in the old mode.
+- SDK `compact_boundary` messages are converted into ledger entries in the lane-policy collector so native
+  compactions are recorded instead of discarded.
+
+### Why
+
+Cubic review on PR #637: the prune path defeated the claude-sdk-oauth stand-down, the cached resumeMode could go
+stale mid-session, and native compact_boundary events never reached the ledger.
+
+### Why not an extension
+
+These are corrections to the lane-policy gate itself, not new behavior an extension could provide.
+
+### Merge-conflict zones
+
+- `index.ts` (prune gate), `lane-policy.ts` (resumeMode read, boundary collection).
+
 ## SDK-native lane opt-out + one-shot checkpoint directive (2026-08-01)
 
 ### What changed
