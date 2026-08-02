@@ -2,7 +2,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "../src/core/extensions/builtin/claude-sdk-oauth/account-management.ts";
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
-import { getBinding, forgetBinding } from "../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
+import { forgetBinding, getBinding } from "../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
 import {
 	closeSession,
 	getOrCreateSession,

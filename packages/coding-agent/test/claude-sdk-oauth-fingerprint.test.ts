@@ -1,8 +1,8 @@
 import type { Context } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { HOST_TOOL_POLICY_FINGERPRINT } from "../src/core/extensions/builtin/claude-sdk-oauth/tools.ts";
 import type { Options } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import { configFingerprint } from "../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
+import { HOST_TOOL_POLICY_FINGERPRINT } from "../src/core/extensions/builtin/claude-sdk-oauth/tools.ts";
 
 const STABLE_PROMPT_BODY = [
 	"You are senpi, a coding agent.",
@@ -32,9 +32,7 @@ function context(): Context {
 	return {
 		systemPrompt: promptWith("2026-07-31"),
 		messages: [],
-		tools: [
-			{ name: "read", description: "Read file contents", parameters: { type: "object", properties: {} } },
-		],
+		tools: [{ name: "read", description: "Read file contents", parameters: { type: "object", properties: {} } }],
 	} as unknown as Context;
 }
 
@@ -93,7 +91,9 @@ describe("claude-sdk-oauth config fingerprint stability", () => {
 		const changed = {
 			systemPrompt: promptWith("2026-07-31"),
 			messages: [],
-			tools: [{ name: "read", description: "Read files differently", parameters: { type: "object", properties: {} } }],
+			tools: [
+				{ name: "read", description: "Read files differently", parameters: { type: "object", properties: {} } },
+			],
 		} as unknown as Context;
 
 		const before = configFingerprint(options(), context(), "oauth-slots", "primary");

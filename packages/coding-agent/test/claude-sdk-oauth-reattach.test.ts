@@ -4,8 +4,8 @@ import type { Options, SdkQueryHandle } from "../src/core/extensions/builtin/cla
 import {
 	forgetBinding,
 	getBinding,
-	rememberBinding,
 	reattachSession,
+	rememberBinding,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
 import {
 	closeSession,

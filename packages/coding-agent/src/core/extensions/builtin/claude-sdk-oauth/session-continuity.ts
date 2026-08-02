@@ -64,11 +64,7 @@ function boundaryUuid(entry: ContinuityEntrySnapshot, index: number): string | n
 	return entry.lastAssistantUuid;
 }
 
-function forkOrFlatten(
-	entry: ContinuityEntrySnapshot,
-	index: number,
-	reason: ContinuityReason,
-): ContinuityDecision {
+function forkOrFlatten(entry: ContinuityEntrySnapshot, index: number, reason: ContinuityReason): ContinuityDecision {
 	const atUuid = boundaryUuid(entry, index);
 	if (!atUuid) return { kind: "flatten", reason: "branch_boundary_unavailable" };
 	return { kind: "fork", sdkSessionId: entry.sdkSessionId, atUuid, from: index, reason };

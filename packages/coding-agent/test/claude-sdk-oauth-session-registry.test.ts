@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AccountSlot } from "../src/core/extensions/builtin/claude-sdk-oauth/accounts.ts";
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import {
+	annotateBranchInfo,
+	annotateTainted,
+} from "../src/core/extensions/builtin/claude-sdk-oauth/session-entry-annotations.ts";
+import {
 	ClaudeSdkOauthSessionRegistry,
 	closeSession,
 	getOrCreateSession,
@@ -13,10 +17,6 @@ import {
 	SESSION_REGISTRY_IDLE_TTL_MS,
 	SessionRegistryResourceLimitError,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
-import {
-	annotateBranchInfo,
-	annotateTainted,
-} from "../src/core/extensions/builtin/claude-sdk-oauth/session-entry-annotations.ts";
 import {
 	ConcurrentSessionTurnAdmissionError,
 	submitSessionTurn,

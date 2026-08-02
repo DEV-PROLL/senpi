@@ -1,9 +1,5 @@
 import type { Options } from "./sdk-boundary.ts";
-import {
-	type ClaudeSdkOauthSessionEntry,
-	closeSession,
-	getOrCreateSession,
-} from "./session-registry.ts";
+import { type ClaudeSdkOauthSessionEntry, closeSession, getOrCreateSession } from "./session-registry.ts";
 import { recordSyncedStream } from "./session-sync.ts";
 
 export type ContinuityBinding = {

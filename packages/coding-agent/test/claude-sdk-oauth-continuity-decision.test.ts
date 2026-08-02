@@ -85,9 +85,7 @@ describe("claude-sdk-oauth native continuity decisions", () => {
 	});
 
 	it("forks at the recorded boundary when a rewrite was committed", () => {
-		const decision = decideNativeContinuity(
-			input({ entry: resident({ pendingForkReason: "assistant_rewritten" }) }),
-		);
+		const decision = decideNativeContinuity(input({ entry: resident({ pendingForkReason: "assistant_rewritten" }) }));
 
 		expect(decision).toMatchObject({
 			kind: "fork",

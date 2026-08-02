@@ -3,6 +3,7 @@ import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import claudeSdkOauthExtension from "../src/core/extensions/builtin/claude-sdk-oauth/index.ts";
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
+import { decideNativeContinuity } from "../src/core/extensions/builtin/claude-sdk-oauth/session-continuity.ts";
 import {
 	closeSession,
 	getOrCreateSession,
@@ -10,7 +11,6 @@ import {
 	overrideSessionRegistryBoundary,
 	resetSessionRegistryBoundary,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
-import { decideNativeContinuity } from "../src/core/extensions/builtin/claude-sdk-oauth/session-continuity.ts";
 import { registerSessionRegistry } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-wiring.ts";
 import {
 	configFingerprint,
