@@ -276,6 +276,8 @@ case "$host_os:$host_arch" in
     Darwin:x86_64) host_target="darwin-x64" ;;
     Linux:x86_64) host_target="linux-x64" ;;
     Linux:aarch64) host_target="linux-arm64" ;;
+    MINGW*:x86_64 | MSYS*:x86_64 | CYGWIN*:x86_64 | Windows_NT:x86_64) host_target="windows-x64" ;;
+    MINGW*:arm64 | MSYS*:arm64 | CYGWIN*:arm64 | Windows_NT:arm64) host_target="windows-arm64" ;;
 esac
 
 if [[ -n "$host_target" ]]; then
@@ -289,7 +291,11 @@ if [[ -n "$host_target" ]]; then
 
     if [[ "$host_built" == true ]]; then
         echo "==> Running binary smoke test for $host_target..."
-        host_binary="$OUTPUT_DIR/$host_target/pi"
+        if [[ "$host_target" == windows-* ]]; then
+            host_binary="$OUTPUT_DIR/$host_target/pi.exe"
+        else
+            host_binary="$OUTPUT_DIR/$host_target/pi"
+        fi
         if [[ ! -x "$host_binary" ]]; then
             echo "ERROR: host binary missing: $host_binary" >&2
             exit 1
