@@ -1041,6 +1041,10 @@ export class AgentSession {
 
 	/** Mirror stuck-prone lifecycle transitions into logs/session.log (content-free). */
 	private _logSessionEvent(event: AgentSessionEvent): void {
+		if (event.type === "compaction_start") {
+			this._sessionLogger.info("compaction_start", { reason: event.reason });
+			return;
+		}
 		if (event.type === "compaction_end") {
 			this._sessionLogger.info("compaction_decision", {
 				reason: event.reason,

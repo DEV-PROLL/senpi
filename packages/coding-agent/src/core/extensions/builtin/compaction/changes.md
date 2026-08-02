@@ -1,5 +1,52 @@
 # Builtin compaction extension changes
 
+## Bounded summarization overflow retries (2026-08-03)
+
+### What changed
+
+- New `overflow-retry.ts`: the summarization overflow-retry policy extracted from `speculative.ts`.
+  `MAX_SUMMARIZATION_OVERFLOW_RETRIES` (3), `SUMMARIZATION_OVERFLOW_TOTAL_BUDGET_MS` (240s across
+  retries), `SUMMARIZATION_INPUT_BUDGET_RATIO` (0.6 of the window), `SummarizationOverflowExhaustedError`,
+  `boundSummarizationInput` (pre-sizes the summarization input, prompt-token aware), and
+  `shrinkSummarizationInputForOverflowRetry` (halves the estimated input per retry instead of dropping
+  one history item, keeping the drop-oldest fallback when every message sits at the turn boundary).
+  The old-message pruning helpers moved here unchanged.
+- `speculative.ts` `runExtensionCompaction`: pre-sizes the summarization input before the first billed
+  attempt and bounds the overflow-retry loop by attempt cap and cumulative wall-clock budget; exhaustion
+  throws the typed error instead of looping or falling through a generic `Error`.
+- `deterministic-fallback.ts` classifies the exhaustion as `summarization-overflow-exhausted`, so
+  required compaction degrades to the deterministic fallback; `transient-failure.ts` treats it as a
+  transient lane failure so the circuit breaker records it and the next run starts pre-sized.
+
+### Why
+
+- Issue #650: on openai-codex/gpt-5.6-sol a blocking compaction wedged for ~48 minutes on
+  "Compacting...". The retry loop removed exactly one history item per FULL billed summarization attempt
+  with no attempt cap, no cumulative budget, and no session.log evidence; the summarization input itself
+  was unbudgeted (only tool results were pruned), so a session whose provider-side input exceeded the real
+  window drew an overflow verdict on every completed attempt. Observed cost: ~13.5M tokens for a
+  compaction that never landed; ESC was the only exit.
+
+### Why not an extension
+
+- This IS the builtin compaction extension; the bound belongs in the retry policy itself.
+
+### Merge-conflict zones
+
+- LOW: `speculative.ts` around `runExtensionCompaction`; `overflow-retry.ts` is fork-owned.
+
+## Session-log visibility for compaction start (2026-08-03)
+
+### What changed
+
+- `core/agent-session.ts` `_logSessionEvent` mirrors `compaction_start` (reason only) into
+  `logs/session.log`; previously only `compaction_end` was mirrored, so a wedged compaction left zero
+  log evidence for its entire lifetime (issue #650).
+
+### Merge-conflict zones
+
+- LOW: `_logSessionEvent` early-return chain.
+
 ## Lane-policy hardening: prune stand-down, live resumeMode, boundary ledger (2026-08-01)
 
 ### What changed
