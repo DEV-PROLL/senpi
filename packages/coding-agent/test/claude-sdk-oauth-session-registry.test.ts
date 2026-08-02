@@ -8,10 +8,6 @@ import {
 	annotateTainted,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-entry-annotations.ts";
 import {
-	annotateBranchInfo,
-	annotateTainted,
-} from "../src/core/extensions/builtin/claude-sdk-oauth/session-entry-annotations.ts";
-import {
 	ClaudeSdkOauthSessionRegistry,
 	closeSession,
 	getOrCreateSession,

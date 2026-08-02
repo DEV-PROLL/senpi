@@ -137,6 +137,12 @@ export async function bootHermeticStack({ sandboxLabel = "claude-sdk-fullstack-p
 
 	const creations = [];
 	let forkCount = 0;
+	// After a fork, the entry adopts the fork's newly-minted id (the fork-id
+	// persistence fix), so the NEXT query resumes that id instead of the fork's
+	// parent. The alias map ties the adopted id back to the fork's lineage so a
+	// reattach resuming it reads as the SAME lineage, not a new one.
+	const forkAliases = new Map();
+	let lastFork = null;
 	const boundaryModule = await import(extensionModule("sdk-boundary"));
 	const baseQuery = boundaryModule.getSdkBoundary().query;
 	boundaryModule.overrideSdkBoundary({
@@ -150,12 +156,26 @@ export async function bootHermeticStack({ sandboxLabel = "claude-sdk-fullstack-p
 			// a new lineage. `lineage` is the probe's own branch label built from that.
 			const forked = options.forkSession === true;
 			const transcriptId = options.sessionId ?? options.resume ?? null;
-			if (forked) forkCount += 1;
+			let lineage;
+			if (forked) {
+				forkCount += 1;
+				lineage = `${transcriptId}#fork${forkCount}`;
+				lastFork = { parent: transcriptId, lineage };
+			} else if (transcriptId && forkAliases.has(transcriptId)) {
+				lineage = forkAliases.get(transcriptId);
+			} else if (transcriptId && lastFork && transcriptId !== lastFork.parent) {
+				// A new resume target right after a fork is that fork's minted
+				// branch: alias it to the fork's lineage.
+				forkAliases.set(transcriptId, lastFork.lineage);
+				lineage = lastFork.lineage;
+			} else {
+				lineage = forkCount === 0 ? transcriptId : `${transcriptId}#fork${forkCount}`;
+			}
 			const record = {
 				index: creations.length + 1,
 				path: resident ? "resident-registry" : "flatten-stream",
 				sessionId: transcriptId,
-				lineage: forkCount === 0 ? transcriptId : `${transcriptId}#fork${forkCount}`,
+				lineage,
 				resume: options.resume ?? null,
 				resumeAt: options.resumeSessionAt ?? null,
 				forked,

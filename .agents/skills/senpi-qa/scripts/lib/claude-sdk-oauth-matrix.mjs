@@ -9,7 +9,7 @@
 
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
-import { safeDetail } from "./claude-sdk-oauth-fullstack-support.mjs";
+import { safeDetail } from "./output-safety.mjs";
 import { bootHermeticStack, resolveMatrixModels, SOURCE_ROOT } from "./claude-sdk-oauth-fullstack-harness.mjs";
 import { assertMatrix } from "./claude-sdk-oauth-matrix-assert.mjs";
 import { VERDICT_LABEL } from "./claude-sdk-oauth-matrix-constants.mjs";
