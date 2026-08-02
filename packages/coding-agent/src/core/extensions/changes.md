@@ -1,5 +1,18 @@
 # Core Extensions Changes
 
+## 2026-08-02 - Completed apply_patch details have fixed retention bounds
+
+### What changed and why
+
+- The builtin `apply_patch` tool stores the same bounded diff used by the TUI in its top-level preview and retains complete unified patches only up to 16 KiB per file.
+- Oversized unified patches are omitted rather than persisting old/new file bodies or exposing malformed truncated diffs; app-server file-change projection remains complete for patches within budget.
+- Nested applied-operation previews and fail-fast error recovery results retain paths, move destinations, operation types, line counts, operation indexes, fuzz, and failure/recovery metadata without full patch bodies.
+- Projection and persistence receive the same completed result object, with no extension-owned post-projection persistence hook, so the explicit byte budget is the narrowest boundary that also removes source-size scaling.
+
+### Expected merge conflict zones
+
+- LOW: `builtin/gpt-apply-patch/apply.ts` and `tool.ts` result construction.
+
 ## 2026-08-01 - Anthropic pair guards share the provider-final sanitizer
 
 ### What changed and why
