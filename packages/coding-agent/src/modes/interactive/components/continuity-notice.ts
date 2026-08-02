@@ -29,6 +29,16 @@ function continuityDetails(diagnostic: AssistantMessageDiagnostic): { kind: stri
 export class ContinuityNoticeTracker {
 	private renderedDisabled = false;
 
+	/**
+	 * Clear the suppression state. Called when the transcript is rebuilt
+	 * (initial load, post-compaction rebuild, session switch): the rebuilt
+	 * transcript re-derives notices from persisted messages, so the first
+	 * disabled notice must be allowed to render again.
+	 */
+	reset(): void {
+		this.renderedDisabled = false;
+	}
+
 	noticeFor(message: AssistantMessage): string | undefined {
 		for (const diagnostic of message.diagnostics ?? []) {
 			if (diagnostic.type === RESUME_FALLBACK_DIAGNOSTIC_TYPE) return this.format(RESUME_FALLBACK_LABEL);

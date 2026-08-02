@@ -5,6 +5,7 @@ import type { SDKMessage, SDKUserMessage } from "./sdk-boundary.ts";
 import { getSdkBoundary } from "./sdk-boundary.ts";
 import {
 	type ContinuityObservation,
+	consumePendingCloseCause,
 	emitContinuityObservation,
 	observeSessionSyncDecision,
 	sanitizeTerminalFailure,
@@ -271,6 +272,10 @@ async function createResidentAttempt(
 			senpiSessionId: sessionId,
 		}),
 		input.onContinuityDecision,
+		// The pending close cause is consumed only when the staged observation
+		// actually emits (attempt retained) — a discarded attempt leaves the
+		// cause pending for the next admission.
+		() => consumePendingCloseCause(sessionId),
 	);
 	return turnAttempt(entry, userMessage(blocks), hashes, input.streamOptions.signal, staged);
 }
