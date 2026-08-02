@@ -282,6 +282,7 @@ const JSON_SCHEMA_META_DECLARATIONS = new Set([
 	"$comment",
 	"$defs",
 	"definitions", // pre-draft-2019-09 equivalent of $defs
+	"optional",
 ]);
 
 /**
@@ -296,6 +297,26 @@ function sanitizeForOpenApi(schema: unknown): unknown {
 	for (const [key, value] of Object.entries(schema)) {
 		if (JSON_SCHEMA_META_DECLARATIONS.has(key)) continue;
 		result[key] = sanitizeForOpenApi(value);
+	}
+	return result;
+}
+
+/**
+ * Strip non-standard 'optional' keyword recursively from a JSON schema object.
+ */
+function stripOptional(schema: unknown): unknown {
+	if (typeof schema !== "object" || schema === null) {
+		return schema;
+	}
+
+	if (Array.isArray(schema)) {
+		return schema.map(stripOptional);
+	}
+
+	const result: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(schema)) {
+		if (key === "optional") continue;
+		result[key] = stripOptional(value);
 	}
 	return result;
 }
@@ -320,7 +341,7 @@ export function convertTools(
 				description: tool.description,
 				...(useParameters
 					? { parameters: sanitizeForOpenApi(tool.parameters) }
-					: { parametersJsonSchema: tool.parameters }),
+					: { parametersJsonSchema: stripOptional(tool.parameters) }),
 			})),
 		},
 	];

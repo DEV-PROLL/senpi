@@ -145,6 +145,8 @@ function normalizeNode(node: unknown): unknown {
 		return node;
 	}
 
+	delete node.optional;
+
 	const hasCombiner = COMBINER_KEYS.some((key) => Array.isArray(node[key]));
 	if (hasCombiner) {
 		moveTypeIntoCombinerBranches(node);
