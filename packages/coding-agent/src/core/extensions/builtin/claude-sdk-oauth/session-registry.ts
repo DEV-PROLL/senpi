@@ -3,12 +3,18 @@ import type { AccountSlot } from "./accounts.ts";
 import { EXPIRING_WITHIN_MS } from "./auth-lane.ts";
 import type { Options, SDKUserMessage, SdkQuery, SdkQueryHandle } from "./sdk-boundary.ts";
 import { getSdkBoundary } from "./sdk-boundary.ts";
+import {
+	annotateBranchInfo,
+	annotatePendingFork,
+	annotateTainted,
+	switchEntryModel,
+} from "./session-entry-annotations.ts";
 import { recordPendingCloseCause } from "./session-observability.ts";
+import { SessionReapScheduler, type SessionRegistryReapHandle } from "./session-reaper.ts";
 import {
 	type ClaudeSdkOauthSessionState,
 	transitionToClosed,
 	transitionToClosing,
-	transitionToTainted,
 } from "./session-registry-state.ts";
 
 export const SESSION_REGISTRY_IDLE_TTL_MS = 30 * 60_000;
@@ -49,11 +55,6 @@ class StreamingInputController implements SessionInputController, AsyncIterator<
 	}
 }
 
-export interface SessionRegistryReapHandle {
-	cancel(): void;
-	unref(): void;
-}
-
 export type SessionRegistryBoundary = {
 	now: () => number;
 	queryFactory: SdkQuery;
@@ -77,6 +78,8 @@ export function overrideSessionRegistryBoundary(override: Partial<SessionRegistr
 export function resetSessionRegistryBoundary(): void {
 	activeSessionRegistryBoundary = defaultSessionRegistryBoundary;
 }
+
+export type { SessionRegistryReapHandle };
 
 export type SessionBranchInfo = { oldLeafId: string; newLeafId: string };
 
@@ -110,6 +113,7 @@ export interface CreateSessionRegistryEntryInput {
 	toolsetHash: string;
 	systemPromptHash: string;
 	options: Options;
+	resume?: { sdkSessionId: string; atUuid?: string };
 }
 
 export class SessionRegistryResourceLimitError extends Error {
@@ -146,12 +150,20 @@ function evictable(entry: ClaudeSdkOauthSessionEntry): boolean {
 	return (entry.state === "IDLE_SYNCED" || entry.state === "TAINTED") && entry.activeTurn === null;
 }
 
-type ScheduledReap = { generation: number; token: symbol; handle: SessionRegistryReapHandle };
-
 export class ClaudeSdkOauthSessionRegistry {
 	private readonly entries = new Map<string, ClaudeSdkOauthSessionEntry>();
 	private readonly generations = new Map<string, number>();
-	private readonly scheduledReaps = new Map<string, ScheduledReap>();
+	private readonly reaper = new SessionReapScheduler({
+		now: () => activeSessionRegistryBoundary.now(),
+		scheduleTimer: (callback, delayMs) => activeSessionRegistryBoundary.scheduleReap(callback, delayMs),
+		idleTtlMs: SESSION_REGISTRY_IDLE_TTL_MS,
+		candidate: (senpiSessionId, generation) => {
+			const entry = this.entries.get(senpiSessionId);
+			if (!entry || entry.generation !== generation || !evictable(entry)) return undefined;
+			return { generation: entry.generation, lastUsedAt: entry.lastUsedAt };
+		},
+		expire: (senpiSessionId) => this.closeSession(senpiSessionId, "idle_ttl"),
+	});
 
 	get size(): number {
 		return this.entries.size;
@@ -175,18 +187,25 @@ export class ClaudeSdkOauthSessionRegistry {
 		this.ensureCapacity();
 		const now = activeSessionRegistryBoundary.now();
 		const generation = (this.generations.get(input.senpiSessionId) ?? 0) + 1;
-		const sdkSessionId = createSessionUuid(now);
+		const sdkSessionId = input.resume?.sdkSessionId ?? createSessionUuid(now);
 		const inputController = new StreamingInputController();
+		const lineageOptions = input.resume
+			? {
+					resume: input.resume.sdkSessionId,
+					...(input.resume.atUuid ? { resumeSessionAt: input.resume.atUuid, forkSession: true } : {}),
+				}
+			: { sessionId: sdkSessionId };
 		const query = activeSessionRegistryBoundary.queryFactory({
 			prompt: inputController,
 			options: {
 				...input.options,
-				sessionId: sdkSessionId,
+				...lineageOptions,
 				extraArgs: { ...input.options.extraArgs, "replay-user-messages": "" },
 			},
 		});
+		const { resume: _resume, ...entryInput } = input;
 		const target: ClaudeSdkOauthSessionEntry = {
-			...input,
+			...entryInput,
 			sdkSessionId,
 			generation,
 			query,
@@ -227,38 +246,16 @@ export class ClaudeSdkOauthSessionRegistry {
 		const entry = this.entries.get(senpiSessionId);
 		if (!entry) return;
 		recordPendingCloseCause(senpiSessionId, reason);
-		this.cancelReap(entry);
+		this.reaper.cancel(senpiSessionId, entry.generation);
 		transitionToClosing(entry);
 		entry.inputController.close();
 		try {
 			entry.query.close();
 		} finally {
 			transitionToClosed(entry);
-			this.cancelReap(entry);
+			this.reaper.cancel(senpiSessionId, entry.generation);
 			this.entries.delete(senpiSessionId);
 		}
-	}
-
-	markTainted(senpiSessionId: string, reason: string): void {
-		const entry = this.entries.get(senpiSessionId);
-		if (!entry) return;
-		entry.taintedReason = reason;
-		if (entry.state !== "TAINTED") transitionToTainted(entry);
-		this.touch(entry);
-	}
-
-	recordPendingFork(senpiSessionId: string, reason: string): void {
-		const entry = this.entries.get(senpiSessionId);
-		if (!entry) return;
-		entry.pendingForkReason = reason;
-		this.touch(entry);
-	}
-
-	recordBranchInfo(senpiSessionId: string, info: SessionBranchInfo): void {
-		const entry = this.entries.get(senpiSessionId);
-		if (!entry) return;
-		entry.branchInfo = { ...info };
-		this.touch(entry);
 	}
 
 	isCurrentGeneration(senpiSessionId: string, generation: number): boolean {
@@ -277,36 +274,8 @@ export class ClaudeSdkOauthSessionRegistry {
 	private recordUse(entry: ClaudeSdkOauthSessionEntry, scheduleReap: boolean): void {
 		if (this.entries.get(entry.senpiSessionId) !== entry) return;
 		entry.lastUsedAt = activeSessionRegistryBoundary.now();
-		this.cancelReap(entry);
-		if (scheduleReap) this.scheduleReap(entry);
-	}
-
-	private scheduleReap(entry: ClaudeSdkOauthSessionEntry, delayMs = SESSION_REGISTRY_IDLE_TTL_MS): void {
-		const token = Symbol("session-reap");
-		const handle = activeSessionRegistryBoundary.scheduleReap(
-			() => this.reap(entry.senpiSessionId, entry.generation, token),
-			delayMs,
-		);
-		this.scheduledReaps.set(entry.senpiSessionId, { generation: entry.generation, token, handle });
-		handle.unref();
-	}
-
-	private reap(senpiSessionId: string, generation: number, token: symbol): void {
-		const scheduled = this.scheduledReaps.get(senpiSessionId);
-		if (!scheduled || scheduled.generation !== generation || scheduled.token !== token) return;
-		this.scheduledReaps.delete(senpiSessionId);
-		const entry = this.entries.get(senpiSessionId);
-		if (!entry || entry.generation !== generation || !evictable(entry)) return;
-		const remaining = entry.lastUsedAt + SESSION_REGISTRY_IDLE_TTL_MS - activeSessionRegistryBoundary.now();
-		if (remaining <= 0) this.closeSession(senpiSessionId, "idle_ttl");
-		else this.scheduleReap(entry, remaining);
-	}
-
-	private cancelReap(entry: ClaudeSdkOauthSessionEntry): void {
-		const scheduled = this.scheduledReaps.get(entry.senpiSessionId);
-		if (!scheduled || scheduled.generation !== entry.generation) return;
-		scheduled.handle.cancel();
-		this.scheduledReaps.delete(entry.senpiSessionId);
+		this.reaper.cancel(entry.senpiSessionId, entry.generation);
+		if (scheduleReap) this.reaper.arm(entry.senpiSessionId, entry.generation);
 	}
 
 	private ensureCapacity(): void {
@@ -334,15 +303,19 @@ export function closeSession(senpiSessionId: string, reason: string): void {
 }
 
 export function markTainted(senpiSessionId: string, reason: string): void {
-	sessionRegistry.markTainted(senpiSessionId, reason);
+	annotateTainted(sessionRegistry, senpiSessionId, reason);
+}
+
+export async function switchSessionModel(senpiSessionId: string, modelId: string): Promise<boolean> {
+	return switchEntryModel(sessionRegistry, senpiSessionId, modelId);
 }
 
 export function recordPendingFork(senpiSessionId: string, reason: string): void {
-	sessionRegistry.recordPendingFork(senpiSessionId, reason);
+	annotatePendingFork(sessionRegistry, senpiSessionId, reason);
 }
 
 export function recordBranchInfo(senpiSessionId: string, info: SessionBranchInfo): void {
-	sessionRegistry.recordBranchInfo(senpiSessionId, info);
+	annotateBranchInfo(sessionRegistry, senpiSessionId, info);
 }
 
 export function isCurrentGeneration(senpiSessionId: string, generation: number): boolean {
