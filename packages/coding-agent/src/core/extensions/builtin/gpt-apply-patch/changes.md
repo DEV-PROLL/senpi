@@ -4,21 +4,22 @@
 
 ### What changed
 
-- `tool.ts`: completed previews persist `truncatePreview()` output while preserving each top-level unified `patch`.
-- Nested `result.details.appliedOperations` entries retain only operation indexes, paths, move destinations, operation types, and line counts.
-- Regression coverage verifies bounded visible diffs, preserved unified patches, and metadata-only nested operations.
+- `tool.ts`: completed previews persist `truncatePreview()` output and retain a complete unified `patch` only when it is at most 16 KiB per file; oversized patches are omitted instead of retaining source-sized bodies or producing malformed truncations.
+- `apply.ts`: pure result compaction uses destructuring omission so nested applied operations keep indexes and preview metadata, including future optional fields, while dropping full patch bodies and emptying diffs. The fail-fast `ApplyPatchError` path uses the same compaction.
+- Regression coverage uses a 3,000-line fixture to cap serialized completed details below 12,000 bytes, while existing app-server projection tests pin complete diffs for patches within budget.
 
 ### Why
 
-- Completed results retained full operation diffs in both the visible preview and nested result details, duplicating large payloads in append-only sessions.
+- After visible-diff and nested-operation compaction, `preview.files[].patch` still contained both old and new file contents and accounted for effectively all retained bytes on large updates, additions, and deletions.
+- App-server projection runs from the same result object later copied into the persisted tool-result message. There is no builtin-extension seam after projection but before persistence, so a documented fixed budget is the smallest safe retention boundary; omission is preferable to an invalid partial unified diff.
 
 ### Why extension system couldn't handle this
 
-- The redundant payload is assembled by the builtin tool before the session manager persists the tool result.
+- The source-backed patch payload is assembled by the builtin tool before both app-server projection and session persistence.
 
 ### Expected merge conflict zones
 
-- LOW: `tool.ts` completed-result construction.
+- LOW: `apply.ts` result compaction and `tool.ts` completed-preview construction.
 
 ## Failed apply_patch outcomes are explicit errors (2026-07-31)
 

@@ -19,7 +19,10 @@ describe("apply_patch result retention", () => {
 		const tempDir = await mkdtemp(path.join(tmpdir(), "senpi-apply-patch-retention-"));
 		tempDirs.push(tempDir);
 		const targetPath = path.join(tempDir, "sample.txt");
-		const before = Array.from({ length: 24 }, (_, index) => `line ${index + 1} before`);
+		const before = Array.from(
+			{ length: 3000 },
+			(_, index) => `line ${index + 1} before with padding that makes unbounded retained patches observable`,
+		);
 		const after = before.map((line) => line.replace("before", "after"));
 		await writeFile(targetPath, `${before.join("\n")}\n`, "utf-8");
 
@@ -48,10 +51,9 @@ ${after.map((line) => `+${line}`).join("\n")}
 		expect(visibleFile.diff.length).toBeLessThanOrEqual(PATCH_PREVIEW_MAX_CHARS);
 		expect(visibleFile.diff).toContain("line 1 before");
 		expect(visibleFile.diff).toContain("…");
-		expect(visibleFile.patch).toContain("--- sample.txt");
-		expect(visibleFile.patch).toContain("+++ sample.txt");
-		expect(visibleFile.patch).toContain("-line 24 before");
-		expect(visibleFile.patch).toContain("+line 24 after");
+		const persistedBytes = Buffer.byteLength(JSON.stringify(result.details), "utf8");
+		expect(persistedBytes).toBeLessThan(12_000);
+		expect(visibleFile).not.toHaveProperty("patch");
 
 		expect(patchResult.details.appliedOperations).toEqual([
 			{
@@ -60,8 +62,8 @@ ${after.map((line) => `+${line}`).join("\n")}
 					filePath: "sample.txt",
 					operation: "update",
 					diff: "",
-					added: 24,
-					removed: 24,
+					added: 3000,
+					removed: 3000,
 				},
 			},
 		]);
