@@ -37,14 +37,13 @@ describe("build-all", () => {
 			"packages/agent",
 			"packages/client",
 			"packages/coding-agent",
-			"packages/web-ui",
 			"packages/server",
 		]);
 		assert.ok(index("packages/agent") > index("packages/ai"));
 		assert.ok(index("packages/client") > index("packages/protocol"));
 		assert.ok(index("packages/coding-agent") > index("packages/client"));
 		assert.ok(index("packages/coding-agent") > index("packages/agent"));
-		assert.ok(index("packages/web-ui") > index("packages/agent"));
+
 		assert.ok(index("packages/server") > index("packages/coding-agent"));
 	});
 

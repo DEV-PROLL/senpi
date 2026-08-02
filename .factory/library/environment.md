@@ -11,7 +11,7 @@ Environment variables, external dependencies, and platform notes for this missio
 
 - **Node.js:** >= 20.6.0 (required by `packages/coding-agent`).
 - **Package manager:** npm workspaces.
-- **TypeScript compiler:** `tsgo` (`@typescript/native-preview`), via `npm run build` / `npm run check`. The `coding-agent` package uses tsgo exclusively. Web-ui uses vanilla `tsc`, but it is not in this mission's scope.
+- **TypeScript compiler:** `tsgo` (`@typescript/native-preview`), via `npm run build` / `npm run check`. The `coding-agent` package uses tsgo exclusively.
 - **Test runner:** Vitest, invoked via `npx tsx ../../node_modules/vitest/dist/cli.js --run` from package root.
 - **Lint/format:** Biome 2.3.5, configured in `biome.json` at the repo root. Enforces 3-space indent (tabs in source) and 120-char lines.
 

@@ -99,7 +99,7 @@ This release uses CalVer:
 2026.7.30-2
 ```
 
-The eight lockstep package manifests are:
+The seven lockstep package manifests are:
 
 - `packages/ai/package.json`
 - `packages/agent/package.json`
@@ -108,7 +108,6 @@ The eight lockstep package manifests are:
 - `packages/pty/package.json`
 - `packages/senpi-codemode/package.json`
 - `packages/tui/package.json`
-- `packages/web-ui/package.json`
 
 `@earendil-works/pi-storage-sqlite-node` remains on its independent semver line and is not
 part of the CalVer bump.
@@ -624,7 +623,7 @@ For the next release:
 4. Duplicate user-facing AI, agent, and TUI changes into the coding-agent changelog.
 5. Query registry-verifiable plugin dependencies for newer exact versions.
 6. Preserve vendored snapshots when no authoritative upstream source is available.
-7. Update the eight lockstep package versions.
+7. Update the seven lockstep package versions.
 8. Regenerate package-lock, publish-deps lock, and install lock.
 9. Run focused plugin tests.
 10. Run `check`, `build`, and the full test suite.
