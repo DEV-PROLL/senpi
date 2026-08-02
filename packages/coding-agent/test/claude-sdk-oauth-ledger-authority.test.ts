@@ -134,7 +134,7 @@ describe("claude-sdk-oauth ledger authority (SDK transcript is authoritative)", 
 		expect(entry.pendingForkReason).toBeNull();
 	});
 
-	it("records a pending fork for an aborted turn instead of tainting", async () => {
+	it("does not taint the ledger for an aborted turn", async () => {
 		overrideSessionRegistryBoundary({ queryFactory: () => fakeQuery() });
 		const { api, handlers } = fakeExtension();
 		registerSessionRegistry(api);
@@ -145,6 +145,9 @@ describe("claude-sdk-oauth ledger authority (SDK transcript is authoritative)", 
 		await emit(handlers, "message_start", { message: aborted }, ctx);
 		await emit(handlers, "message_end", { message: aborted }, ctx);
 
+		// An aborted turn leaves the ledger clean (no taint) — the abort →
+		// pending-fork wiring is a follow-up, so the title must not promise it.
 		expect(entry.taintedReason).toBeNull();
+		expect(entry.pendingForkReason).toBeNull();
 	});
 });

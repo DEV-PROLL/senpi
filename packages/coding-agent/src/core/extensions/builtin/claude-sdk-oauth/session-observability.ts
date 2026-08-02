@@ -159,11 +159,26 @@ export function sanitizeTerminalFailure(value: unknown): ContinuityReason {
  * `registry_miss` is attributed to the real cause instead.
  */
 const pendingCloseCauses = new Map<string, ContinuityReason>();
+// Long-running processes can stage many closes: the map is FIFO-bounded so it
+// cannot grow without limit. 256 pending causes per process is far beyond any
+// realistic session count; the oldest entry is evicted first.
+const PENDING_CLOSE_CAUSE_LIMIT = 256;
 
 export function recordPendingCloseCause(senpiSessionId: string, reason: unknown): void {
 	const cause = sanitizeReason(reason);
+	// Delete first so a re-recorded cause moves to the newest position.
+	pendingCloseCauses.delete(senpiSessionId);
+	if (pendingCloseCauses.size >= PENDING_CLOSE_CAUSE_LIMIT) {
+		const oldest = pendingCloseCauses.keys().next().value;
+		if (oldest !== undefined) pendingCloseCauses.delete(oldest);
+	}
 	pendingCloseCauses.set(senpiSessionId, cause);
 	activeBoundary.log("claude_sdk_oauth_session_close", { reason: cause });
+}
+
+/** Read the pending close cause WITHOUT consuming it (consumed at emit time). */
+export function peekPendingCloseCause(senpiSessionId: string): ContinuityReason | undefined {
+	return pendingCloseCauses.get(senpiSessionId);
 }
 
 export function consumePendingCloseCause(senpiSessionId: string): ContinuityReason | undefined {
@@ -195,7 +210,10 @@ export function observeSessionSyncDecision(input: {
 			deltaMessages: input.deltaMessages,
 		};
 	}
-	const retained = input.reason === "registry_miss" ? consumePendingCloseCause(input.senpiSessionId) : undefined;
+	// Peek, not consume: the staged observation is emitted only when the
+	// auth-lane RETAINS this attempt. Consuming here would lose the cause when
+	// the attempt is discarded; the emit path consumes it (session-stream.ts).
+	const retained = input.reason === "registry_miss" ? peekPendingCloseCause(input.senpiSessionId) : undefined;
 	const reason = retained ?? sanitizeReason(input.reason);
 	return {
 		kind: input.firstTurn && reason === "registry_miss" ? "bootstrap" : "flatten",
@@ -213,6 +231,7 @@ export type StagedContinuityDecision = {
 export function stageContinuityDecision(
 	observation: ContinuityObservation,
 	onDecision?: (observation: ContinuityObservation) => void,
+	beforeEmit?: () => void,
 ): StagedContinuityDecision {
 	let emitted = false;
 	return {
@@ -220,6 +239,7 @@ export function stageContinuityDecision(
 		emit: () => {
 			if (emitted) return;
 			emitted = true;
+			beforeEmit?.();
 			emitContinuityObservation(observation, onDecision);
 		},
 	};

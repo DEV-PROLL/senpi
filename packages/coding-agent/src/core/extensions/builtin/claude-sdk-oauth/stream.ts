@@ -99,7 +99,16 @@ export function streamClaudeSdkOauth(
 			const useResidentSession =
 				options?.streamKind === "main" && providerSettings.resumeMode !== "off" && options.sessionId !== undefined;
 			if (options?.streamKind === "main" && !useResidentSession) {
-				emitContinuityObservation({ kind: "disabled", reason: "resume_mode_off" }, recordContinuity);
+				// The reason must reflect the ACTUAL cause: resume mode "off"
+				// disables the lane by setting, while any other mode simply has no
+				// resident session to reuse yet.
+				emitContinuityObservation(
+					{
+						kind: "disabled",
+						reason: providerSettings.resumeMode === "off" ? "resume_mode_off" : "registry_miss",
+					},
+					recordContinuity,
+				);
 			}
 			const messages = useResidentSession
 				? residentSessionMessages({
