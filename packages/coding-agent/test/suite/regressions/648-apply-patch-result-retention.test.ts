@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	APPLY_PATCH_RESULT_PATCH_MAX_BYTES,
 	createApplyPatchTool,
 	PATCH_PREVIEW_MAX_CHARS,
 	PATCH_PREVIEW_MAX_LINES,
@@ -52,7 +53,7 @@ ${after.map((line) => `+${line}`).join("\n")}
 		expect(visibleFile.diff).toContain("line 1 before");
 		expect(visibleFile.diff).toContain("…");
 		const persistedBytes = Buffer.byteLength(JSON.stringify(result.details), "utf8");
-		expect(persistedBytes).toBeLessThan(12_000);
+		expect(persistedBytes).toBeLessThan(APPLY_PATCH_RESULT_PATCH_MAX_BYTES / 2);
 		expect(visibleFile).not.toHaveProperty("patch");
 
 		expect(patchResult.details.appliedOperations).toEqual([

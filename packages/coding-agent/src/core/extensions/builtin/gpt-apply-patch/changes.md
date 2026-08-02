@@ -5,8 +5,9 @@
 ### What changed
 
 - `tool.ts`: completed previews persist `truncatePreview()` output and retain a complete unified `patch` only when it is at most 16 KiB per file; oversized patches are omitted instead of retaining source-sized bodies or producing malformed truncations.
+- `index.ts`: the public barrel exports `APPLY_PATCH_RESULT_PATCH_MAX_BYTES` alongside the tool factory and preview limits so retention-contract tests share the production budget.
 - `apply.ts`: pure result compaction uses destructuring omission so nested applied operations keep indexes and preview metadata, including future optional fields, while dropping full patch bodies and emptying diffs. The fail-fast `ApplyPatchError` path uses the same compaction.
-- Regression coverage uses a 3,000-line fixture to cap serialized completed details below 12,000 bytes, while existing app-server projection tests pin complete diffs for patches within budget.
+- Regression coverage uses a 3,000-line fixture to cap serialized completed details below half the per-file patch budget. App-server projection tests pin complete diffs within budget and an empty projection when a patch exceeds it.
 
 ### Why
 
