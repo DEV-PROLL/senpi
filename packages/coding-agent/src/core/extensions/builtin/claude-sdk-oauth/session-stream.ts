@@ -4,6 +4,14 @@ import { buildPromptBlocks } from "./prompt-bridge.ts";
 import type { SDKMessage, SDKUserMessage } from "./sdk-boundary.ts";
 import { getSdkBoundary } from "./sdk-boundary.ts";
 import {
+	type ContinuityObservation,
+	consumePendingCloseCause,
+	emitContinuityObservation,
+	observeSessionSyncDecision,
+	sanitizeTerminalFailure,
+	stageContinuityDecision,
+} from "./session-observability.ts";
+import {
 	type ClaudeSdkOauthSessionEntry,
 	closeSession,
 	getOrCreateSession,
@@ -93,6 +101,7 @@ export type ResidentSessionStreamInput = {
 	customToolNameToSdk: ReadonlyMap<string, string>;
 	toolWatchNote?: string;
 	onResumeFallback: (error: unknown) => void;
+	onContinuityDecision?: (observation: ContinuityObservation) => void;
 };
 
 function userMessage(content: SDKUserMessage["message"]["content"]): SDKUserMessage["message"] {
@@ -149,6 +158,7 @@ function turnAttempt(
 	message: SDKUserMessage["message"],
 	hashes: readonly string[],
 	signal: AbortSignal | undefined,
+	staged: ReturnType<typeof stageContinuityDecision>,
 ) {
 	const generation = entry.generation;
 	return {
@@ -169,6 +179,8 @@ function turnAttempt(
 			for await (const sdkMessage of queue) yield sdkMessage;
 			const turn = await completion;
 			if (!turn.aborted && successfulTurn(turn.messages)) recordSyncedStream(entry, hashes);
+			// Retained by the auth-lane wrapper only once this generator completes.
+			staged.emit();
 		})(),
 		discard: (): void => {
 			if (isCurrentGeneration(entry.senpiSessionId, generation))
@@ -194,6 +206,9 @@ async function createResidentAttempt(
 		fingerprint,
 		tokenExpiring: existing ? isBoundAccountTokenExpiring(existing, auth.accounts) : false,
 	});
+	const firstTurn = existing === undefined && hashes.length <= 1;
+	let observedReason = decision.kind === "cold-seed" ? decision.reason : undefined;
+	let observedKind = decision.kind;
 	let entry: ClaudeSdkOauthSessionEntry;
 	let from = 0;
 	let coldSeed = decision.kind === "cold-seed";
@@ -224,6 +239,8 @@ async function createResidentAttempt(
 			closeSession(sessionId, "resume_initialization_failed");
 			if (input.streamOptions.signal?.aborted) throw error;
 			input.onResumeFallback(error);
+			observedKind = "cold-seed";
+			observedReason = "resume_initialization_failed";
 			coldSeed = true;
 			entry = getOrCreateSession({
 				senpiSessionId: sessionId,
@@ -246,10 +263,37 @@ async function createResidentAttempt(
 	const blocks = coldSeed
 		? buildPromptBlocks(input.context, input.customToolNameToSdk, input.toolWatchNote)
 		: buildDeltaPromptBlocks(messages.slice(from), input.customToolNameToSdk);
-	return turnAttempt(entry, userMessage(blocks), hashes, input.streamOptions.signal);
+	const staged = stageContinuityDecision(
+		observeSessionSyncDecision({
+			kind: observedKind,
+			reason: observedReason,
+			deltaMessages: coldSeed ? hashes.length : hashes.length - from,
+			firstTurn,
+			senpiSessionId: sessionId,
+		}),
+		input.onContinuityDecision,
+		// The pending close cause is consumed only when the staged observation
+		// actually emits (attempt retained) — a discarded attempt leaves the
+		// cause pending for the next admission.
+		() => consumePendingCloseCause(sessionId),
+	);
+	return turnAttempt(entry, userMessage(blocks), hashes, input.streamOptions.signal, staged);
 }
 
-export function residentSessionMessages(input: ResidentSessionStreamInput): AsyncIterable<SDKMessage> {
+export async function* residentSessionMessages(input: ResidentSessionStreamInput): AsyncGenerator<SDKMessage> {
+	try {
+		yield* residentAuthLaneMessages(input);
+	} catch (error) {
+		// Every attempt failed: the turn yields exactly one terminal observation.
+		emitContinuityObservation(
+			{ kind: "flatten", reason: sanitizeTerminalFailure(error) },
+			input.onContinuityDecision,
+		);
+		throw error;
+	}
+}
+
+function residentAuthLaneMessages(input: ResidentSessionStreamInput): AsyncIterable<SDKMessage> {
 	return queryWithAuthLane({
 		prompt: "",
 		query: getSdkBoundary().query,

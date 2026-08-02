@@ -3,6 +3,7 @@ import type { AccountSlot } from "./accounts.ts";
 import { EXPIRING_WITHIN_MS } from "./auth-lane.ts";
 import type { Options, SDKUserMessage, SdkQuery, SdkQueryHandle } from "./sdk-boundary.ts";
 import { getSdkBoundary } from "./sdk-boundary.ts";
+import { recordPendingCloseCause } from "./session-observability.ts";
 import {
 	type ClaudeSdkOauthSessionState,
 	transitionToClosed,
@@ -97,6 +98,8 @@ export interface ClaudeSdkOauthSessionEntry {
 	assistantUuidByIndex: Map<number, string>;
 	branchInfo: SessionBranchInfo | null;
 	taintedReason: string | null;
+	/** Wave C seam: a divergence boundary recorded for the next continuity decision. */
+	pendingForkReason: string | null;
 	lastUsedAt: number;
 }
 
@@ -196,6 +199,7 @@ export class ClaudeSdkOauthSessionRegistry {
 			assistantUuidByIndex: new Map(),
 			branchInfo: null,
 			taintedReason: null,
+			pendingForkReason: null,
 			lastUsedAt: now,
 		};
 		let entry!: ClaudeSdkOauthSessionEntry;
@@ -219,9 +223,10 @@ export class ClaudeSdkOauthSessionRegistry {
 		this.recordUse(entry, entry.activeTurn === null && evictable(entry));
 	}
 
-	closeSession(senpiSessionId: string, _reason: string): void {
+	closeSession(senpiSessionId: string, reason: string): void {
 		const entry = this.entries.get(senpiSessionId);
 		if (!entry) return;
+		recordPendingCloseCause(senpiSessionId, reason);
 		this.cancelReap(entry);
 		transitionToClosing(entry);
 		entry.inputController.close();
@@ -239,6 +244,13 @@ export class ClaudeSdkOauthSessionRegistry {
 		if (!entry) return;
 		entry.taintedReason = reason;
 		if (entry.state !== "TAINTED") transitionToTainted(entry);
+		this.touch(entry);
+	}
+
+	recordPendingFork(senpiSessionId: string, reason: string): void {
+		const entry = this.entries.get(senpiSessionId);
+		if (!entry) return;
+		entry.pendingForkReason = reason;
 		this.touch(entry);
 	}
 
@@ -323,6 +335,10 @@ export function closeSession(senpiSessionId: string, reason: string): void {
 
 export function markTainted(senpiSessionId: string, reason: string): void {
 	sessionRegistry.markTainted(senpiSessionId, reason);
+}
+
+export function recordPendingFork(senpiSessionId: string, reason: string): void {
+	sessionRegistry.recordPendingFork(senpiSessionId, reason);
 }
 
 export function recordBranchInfo(senpiSessionId: string, info: SessionBranchInfo): void {
