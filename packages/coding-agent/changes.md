@@ -445,3 +445,24 @@
 - What changed: test-only package coverage; runtime seams are documented in the matching core and RPC change logs.
 - Why the extension system could not handle this: the RPC process, wire response, and model registry are package-owned surfaces.
 - Merge-conflict risk: low. The test file is fork-only.
+
+## 2026-08-02 — TypeScript native tsc migration
+
+### What changed
+
+- Replaced `tsgo` with `tsc` in the `dev` and `build` scripts; flags and arguments remain unchanged.
+- Bumped the root `typescript` pin from `6.0.3` to `7.0.2`.
+- Dropped the `@typescript/native-preview` toolchain dependency.
+
+### Why
+
+- Adopt a stable-first toolchain policy: use the released `typescript@7.0.2` native compiler for package builds and typechecks instead of the experimental `tsgo` dev build.
+- The `native-preview` compiler has been retired upstream in favor of `typescript@next`.
+
+### Why this cannot be expressed externally
+
+- Build scripts and `devDependencies` are package infrastructure, not runtime behavior; extensions cannot rewrite another package's manifest scripts or compiler selection.
+
+### Expected merge conflict zones
+
+- `package.json` `scripts` and `devDependencies` versus upstream `tsgo` usage.

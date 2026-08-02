@@ -28,7 +28,7 @@ You are implementing exactly ONE feature from `features.json` in the senpi-mono 
 - **Only commit files you touched in this session.** Inspect `git status` before staging.
 - **No emojis** in code, commits, test names, or PR comments.
 - **Biome enforced:** 3-space / tab indent matching the existing file style, 120-char line width.
-- **`tsgo` enforced:** all code compiles cleanly with no diagnostics.
+- **`tsc` enforced:** all code compiles cleanly with no diagnostics.
 
 ## Procedure
 
