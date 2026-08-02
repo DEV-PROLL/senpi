@@ -100,7 +100,10 @@ describe("claude-sdk-oauth session reattach", () => {
 
 		const entry = await reattachSession({ binding: binding(), options: options() });
 
+		// The title promises the synchronized prefix is restored: assert the
+		// restored assistant boundary, not just the count.
 		expect(entry.sentCount).toBe(2);
+		expect(entry.assistantUuidByIndex.get(2)).toBe("uuid-a2");
 		expect(getSession(SESSION_ID)).toBeDefined();
 	});
 
