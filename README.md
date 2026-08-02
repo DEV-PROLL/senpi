@@ -314,7 +314,6 @@ npm test             # Run tests (skips LLM-dependent tests without API keys)
 npm run publish      # Publish npm workspaces, including @code-yeongyu/senpi
 ```
 
-
 ## Supply-chain hardening
 
 We treat npm dependency changes as reviewed code changes.
