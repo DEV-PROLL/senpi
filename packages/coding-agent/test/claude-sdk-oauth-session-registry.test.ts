@@ -513,6 +513,30 @@ describe("Claude SDK OAuth session registry", () => {
 		expect((await turn).messages).toEqual([query.emitted[1]]);
 	});
 
+	it("persists the forked session id from the init message", async () => {
+		const { query, registry, entry } = pumpFixture();
+		const originalId = entry.sdkSessionId;
+		const forkedId = crypto.randomUUID();
+		// A forked query (forkSession: true + resume) mints a NEW session id,
+		// delivered in the init message. The entry must adopt it — otherwise the
+		// next reattach targets the original session and the fork is lost.
+		const turn = submitSessionTurn(registry, entry, { message: userContent });
+		const submitted = await submittedMessage(entry);
+		// The init message arrives before the replayed user message in a real
+		// query; the session-id adoption must not depend on the turn being
+		// claimed yet.
+		query.emit({
+			type: "system",
+			subtype: "init",
+			session_id: forkedId,
+		} as unknown as SDKMessage);
+		query.emit(replay(submitted.uuid!, forkedId));
+		query.emit(result(submitted.uuid, forkedId));
+		await turn;
+		expect(entry.sdkSessionId).toBe(forkedId);
+		expect(entry.sdkSessionId).not.toBe(originalId);
+	});
+
 	it("buffers pre-replay stream events and flushes them in order", async () => {
 		const { query, registry, entry } = pumpFixture();
 		const turn = submitSessionTurn(registry, entry, { message: userContent });
