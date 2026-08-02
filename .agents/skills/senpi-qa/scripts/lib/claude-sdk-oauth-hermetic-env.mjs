@@ -84,6 +84,10 @@ export function assertHermeticEnvironment(env, baseUrl) {
 		if (/^CLAUDE_CODE_OAUTH_TOKEN(_\d+)?$/.test(name)) violations.push(`${name} would forward a real OAuth token`);
 	}
 	if (env.ANTHROPIC_AUTH_TOKEN) violations.push("ANTHROPIC_AUTH_TOKEN would forward a real credential");
+	// The scrub removes CLAUDE_CODE_EXECUTABLE, but only the assertion makes the
+	// guarantee enforceable: a pinned or leaked value would launch an arbitrary
+	// binary instead of the SDK-pinned one.
+	if (env.CLAUDE_CODE_EXECUTABLE) violations.push("CLAUDE_CODE_EXECUTABLE would launch an unpinned binary");
 	if (env.ANTHROPIC_API_KEY !== undefined && !env.ANTHROPIC_API_KEY.includes("probe-dummy")) {
 		violations.push("ANTHROPIC_API_KEY is not the probe's dummy value");
 	}
