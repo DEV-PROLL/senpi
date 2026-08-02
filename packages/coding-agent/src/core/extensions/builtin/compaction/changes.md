@@ -7,15 +7,16 @@
 - `hardLimitEmergencyPrune` now stands down when `lanePolicy.disablesSenpiCompaction(ctx)` is true, matching the
   reduction-lane gate: destructively pruning the provider context near the hard limit would break the resident
   claude-sdk-oauth session's continuity the same way the gated reduction lane would.
-- `disablesSenpiCompaction` re-reads `resumeMode` on every decision instead of caching it per-cwd, so a mid-session
-  switch between flattened and resident modes cannot leave the gate stuck in the old mode.
+- `disablesSenpiCompaction` keeps the per-cwd `resumeMode` cache (the intended contract pinned by
+  `lane-policy.test.ts`); a mid-session mode switch takes effect on the next cwd or session.
 - SDK `compact_boundary` messages are converted into ledger entries in the lane-policy collector so native
   compactions are recorded instead of discarded.
 
 ### Why
 
-Cubic review on PR #637: the prune path defeated the claude-sdk-oauth stand-down, the cached resumeMode could go
-stale mid-session, and native compact_boundary events never reached the ledger.
+Cubic review on PR #637: the prune path defeated the claude-sdk-oauth stand-down, and native compact_boundary
+events never reached the ledger. (The cached-resumeMode concern was assessed against the pinned per-cwd contract
+and left as intended.)
 
 ### Why not an extension
 

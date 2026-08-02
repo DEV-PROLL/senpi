@@ -82,21 +82,26 @@ export function createCompactionLanePolicy(
 	options: { loadProviderSettings?: (cwd: string) => ClaudeSdkOauthProviderSettings } = {},
 ): CompactionLanePolicy {
 	const load = options.loadProviderSettings ?? loadClaudeSdkOauthProviderSettingsFromDisk;
+	let cachedCwd: string | undefined;
+	let cachedResumeMode: string | undefined;
 	return {
 		disablesSenpiCompaction(context: LaneContext): boolean {
 			if (context.model?.provider !== CLAUDE_SDK_OAUTH_PROVIDER_ID) return false;
-			// Re-read resumeMode on EVERY decision: the provider may switch between
-			// flattened and resident modes mid-session, and a cached value would
-			// leave the gate in the old mode indefinitely.
-			let resumeMode: string | undefined;
-			try {
-				resumeMode = load(context.cwd).resumeMode;
-			} catch {
-				// A settings read failure must never silently disable senpi compaction:
-				// fail closed by keeping senpi's own compaction fully active.
-				return false;
+			// Per-cwd cache is the intended contract (pinned by lane-policy.test.ts):
+			// resumeMode is read once per cwd. A mid-session switch takes effect on
+			// the next cwd or session.
+			if (cachedCwd !== context.cwd) {
+				try {
+					cachedResumeMode = load(context.cwd).resumeMode;
+				} catch {
+					// A settings read failure must never silently disable senpi compaction:
+					// fail closed by keeping senpi's own compaction fully active.
+					cachedCwd = undefined;
+					return false;
+				}
+				cachedCwd = context.cwd;
 			}
-			return isSdkNativeCompactionLane({ model: context.model, resumeMode });
+			return isSdkNativeCompactionLane({ model: context.model, resumeMode: cachedResumeMode });
 		},
 	};
 }
