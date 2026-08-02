@@ -2,6 +2,7 @@ import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { afterEach, describe, expect, it } from "vitest";
 import type { AccountSlot } from "../src/core/extensions/builtin/claude-sdk-oauth/accounts.ts";
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
+import { decideNativeContinuity } from "../src/core/extensions/builtin/claude-sdk-oauth/session-continuity.ts";
 import {
 	annotateBranchInfo,
 	annotateTainted,
@@ -22,7 +23,7 @@ import {
 	submitSessionTurn,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-pump.ts";
 import { transitionSessionState } from "../src/core/extensions/builtin/claude-sdk-oauth/session-registry-state.ts";
-import { decideSessionSync, recordSyncedStream } from "../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
+import { recordSyncedStream } from "../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
 
 class ScriptedQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
 	readonly emitted: SDKMessage[] = [];
@@ -158,6 +159,32 @@ afterEach(() => {
 	resetSessionRegistryBoundary();
 });
 
+function continuityFor(sessionId: string, extra: { idleExpired: boolean }) {
+	const entry = getSession(sessionId)!;
+	return decideNativeContinuity({
+		entry: {
+			sdkSessionId: entry.sdkSessionId,
+			accountName: entry.accountName,
+			modelId: entry.modelId,
+			systemPromptHash: "prompt-v1",
+			toolsetHash: "tools-v1",
+			sentCount: entry.sentCount,
+			sentHashes: ["resident"],
+			lastAssistantUuid: null,
+			assistantUuidByIndex: entry.assistantUuidByIndex,
+			pendingForkReason: entry.pendingForkReason,
+			taintedReason: entry.taintedReason,
+		},
+		binding: undefined,
+		currentHashes: ["resident", "next"],
+		accountName: "default",
+		modelId: "claude-test",
+		fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
+		transcriptAvailable: true,
+		...extra,
+	});
+}
+
 describe("Claude SDK OAuth session registry", () => {
 	it("creates queries lazily and reuses the resident entry", () => {
 		let queries = 0;
@@ -237,16 +264,9 @@ describe("Claude SDK OAuth session registry", () => {
 		transitionSessionState(entry, "IDLE_SYNCED");
 		now += SESSION_REGISTRY_IDLE_TTL_MS;
 
-		const decision = decideSessionSync({
-			entry: getSession("decision-expired"),
-			currentHashes: ["resident", "next"],
-			accountName: "default",
-			modelId: "claude-test",
-			fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
-			tokenExpiring: false,
-		});
+		const decision = continuityFor("decision-expired", { idleExpired: true });
 
-		expect(decision).toEqual({ kind: "cold-seed", reason: "idle_ttl" });
+		expect(decision).toMatchObject({ kind: "reattach", reason: "idle_ttl" });
 	});
 
 	it("keeps a recently used resident entry incremental on the admission decision path", () => {
@@ -257,16 +277,9 @@ describe("Claude SDK OAuth session registry", () => {
 		transitionSessionState(entry, "IDLE_SYNCED");
 		now += SESSION_REGISTRY_IDLE_TTL_MS - 1;
 
-		const decision = decideSessionSync({
-			entry: getSession("decision-recent"),
-			currentHashes: ["resident", "next"],
-			accountName: "default",
-			modelId: "claude-test",
-			fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
-			tokenExpiring: false,
-		});
+		const decision = continuityFor("decision-recent", { idleExpired: false });
 
-		expect(decision).toEqual({ kind: "incremental", from: 1 });
+		expect(decision).toEqual({ kind: "delta", from: 1 });
 	});
 
 	it("does not retire an entry with a turn in flight after the idle TTL", () => {

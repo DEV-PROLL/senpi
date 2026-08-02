@@ -39,11 +39,12 @@ import {
 	withTimeout,
 } from "./lib/claude-sdk-oauth-fullstack-support.mjs";
 import { safeDetail } from "./lib/output-safety.mjs";
-import { stripCredentialEnvironment } from "./lib/claude-sdk-oauth-spike-support.mjs";
+import { applyHermeticEnvironment, assertHermeticEnvironment } from "./lib/claude-sdk-oauth-hermetic-env.mjs";
 
 const ROOT = repoRoot();
 const INNER_FLAG = "SENPI_CLAUDE_SDK_FULLSTACK_PROBE_INNER";
 const BASELINE = process.argv.includes("--baseline");
+const MATRIX = process.argv.includes("--matrix");
 const TURNS = 6;
 const MODEL_ID = "claude-haiku-4-5";
 
@@ -64,6 +65,13 @@ if (process.env[INNER_FLAG] !== "1") {
 }
 
 installCleanupHooks();
+
+// --matrix runs the todo-16 scenario matrix and exits: the loopback server,
+// the captured queries, and the per-turn payloads are the matrix's evidence.
+if (MATRIX) {
+	const { runContinuityMatrix } = await import("./lib/claude-sdk-oauth-matrix.mjs");
+	process.exit(await runContinuityMatrix({ gate: !BASELINE }));
+}
 
 const authGuard = guardRealAuth();
 const box = makeSandbox("claude-sdk-fullstack-probe");
@@ -92,12 +100,10 @@ try {
 	seedProbeAgentDir(box.agentDir);
 	// Hermetic no-credentials contract: ambient Anthropic/OAuth credential and
 	// custom-header channels (inherited from the operator's shell) would
-	// otherwise be sent to the loopback capture server. ANTHROPIC_API_KEY and
-	// ANTHROPIC_BASE_URL are pinned to dummy loopback values below; every other
-	// credential channel is stripped first. The probe re-adds exactly the
-	// SENPI_* surface it needs in the assignment that follows.
-	stripCredentialEnvironment(process.env);
-	Object.assign(process.env, {
+	// otherwise be sent to the loopback capture server. The hermetic helper
+	// scrubs every credential channel and pins the loopback surface; the
+	// assertion keeps the contract honest if a new channel appears.
+	applyHermeticEnvironment(process.env, {
 		HOME: box.dir,
 		USERPROFILE: box.dir,
 		TMPDIR: box.dir,
@@ -114,6 +120,7 @@ try {
 		NO_PROXY: "127.0.0.1,localhost",
 		no_proxy: "127.0.0.1,localhost",
 	});
+	assertHermeticEnvironment(process.env, baseUrl);
 
 	const sourceRoot = join(ROOT, "packages", "coding-agent", "src");
 	// Imported eagerly so BOTH the normal-path finally and the signal-path

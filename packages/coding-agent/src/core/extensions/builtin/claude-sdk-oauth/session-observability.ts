@@ -188,8 +188,8 @@ export function consumePendingCloseCause(senpiSessionId: string): ContinuityReas
 }
 
 /**
- * Pre-todo-8 vocabulary mapping: the current decideSessionSync outcomes map onto
- * the observation vocabulary as incremental→delta, resume→fork, cold-seed→flatten.
+ * Maps the continuity decision families onto the observation vocabulary:
+ * incremental→delta, resume→fork, cold-seed→flatten.
  */
 export function observeSessionSyncDecision(input: {
 	kind: "incremental" | "resume" | "cold-seed";
@@ -202,7 +202,13 @@ export function observeSessionSyncDecision(input: {
 		return { kind: "delta", reason: "prefix_matched", deltaMessages: input.deltaMessages };
 	}
 	if (input.kind === "resume") {
-		return { kind: "fork", reason: "branch_resume", deltaMessages: input.deltaMessages };
+		const retainedCause =
+			input.reason === "registry_miss" ? consumePendingCloseCause(input.senpiSessionId) : undefined;
+		return {
+			kind: "fork",
+			reason: retainedCause ?? (input.reason === undefined ? "branch_resume" : sanitizeReason(input.reason)),
+			deltaMessages: input.deltaMessages,
+		};
 	}
 	// Peek, not consume: the staged observation is emitted only when the
 	// auth-lane RETAINS this attempt. Consuming here would lose the cause when

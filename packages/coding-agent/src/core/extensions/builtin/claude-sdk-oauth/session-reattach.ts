@@ -12,6 +12,8 @@ export type ContinuityBinding = {
 	modelId: string;
 	systemPromptHash: string;
 	toolsetHash: string;
+	/** Assistant boundaries kept as entries so a later fork still has a resume point. */
+	assistantUuidByIndex?: readonly (readonly [number, string])[];
 };
 
 export type ReattachInput = {
@@ -63,6 +65,7 @@ export function bindingFromEntry(
 		sentCount: entry.sentCount,
 		sentHashes: [...sentHashes],
 		lastAssistantUuid: entry.assistantUuidByIndex.get(entry.sentCount) ?? null,
+		assistantUuidByIndex: [...entry.assistantUuidByIndex.entries()],
 		accountName: entry.accountName,
 		modelId: entry.modelId,
 		systemPromptHash: entry.systemPromptHash,
@@ -78,7 +81,10 @@ async function awaitInitialization(entry: ClaudeSdkOauthSessionEntry, signal?: A
 		return;
 	}
 	const aborted = new Promise<never>((_resolve, reject) => {
-		const onAbort = (): void => reject(new Error("Claude SDK OAuth reattach aborted"));
+		const onAbort = (): void => {
+			closeSession(entry.senpiSessionId, "resume_initialization_aborted");
+			reject(new Error("Claude SDK OAuth reattach aborted"));
+		};
 		if (signal.aborted) onAbort();
 		else signal.addEventListener("abort", onAbort, { once: true });
 	});
@@ -111,6 +117,7 @@ export async function reattachSession(input: ReattachInput): Promise<ClaudeSdkOa
 	}
 
 	recordSyncedStream(entry, binding.sentHashes);
+	for (const [index, uuid] of binding.assistantUuidByIndex ?? []) entry.assistantUuidByIndex.set(index, uuid);
 	if (binding.lastAssistantUuid) entry.assistantUuidByIndex.set(binding.sentCount, binding.lastAssistantUuid);
 	rememberBinding({ ...binding, sdkSessionId: entry.sdkSessionId });
 	return entry;

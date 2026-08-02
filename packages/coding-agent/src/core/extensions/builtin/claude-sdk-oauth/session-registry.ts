@@ -11,11 +11,7 @@ import {
 } from "./session-entry-annotations.ts";
 import { recordPendingCloseCause } from "./session-observability.ts";
 import { SessionReapScheduler, type SessionRegistryReapHandle } from "./session-reaper.ts";
-import {
-	type ClaudeSdkOauthSessionState,
-	transitionToClosed,
-	transitionToClosing,
-} from "./session-registry-state.ts";
+import { type ClaudeSdkOauthSessionState, transitionToClosed, transitionToClosing } from "./session-registry-state.ts";
 
 export const SESSION_REGISTRY_IDLE_TTL_MS = 30 * 60_000;
 export const SESSION_REGISTRY_MAX_ENTRIES = 32;
@@ -300,6 +296,10 @@ export function getSession(senpiSessionId: string): ClaudeSdkOauthSessionEntry |
 
 export function closeSession(senpiSessionId: string, reason: string): void {
 	sessionRegistry.closeSession(senpiSessionId, reason);
+}
+
+export function isIdleExpired(entry: Pick<ClaudeSdkOauthSessionEntry, "lastUsedAt">): boolean {
+	return activeSessionRegistryBoundary.now() - entry.lastUsedAt >= SESSION_REGISTRY_IDLE_TTL_MS;
 }
 
 export function markTainted(senpiSessionId: string, reason: string): void {

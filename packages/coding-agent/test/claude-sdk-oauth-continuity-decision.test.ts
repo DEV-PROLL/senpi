@@ -90,13 +90,27 @@ describe("claude-sdk-oauth native continuity decisions", () => {
 		expect(decision).toMatchObject({
 			kind: "fork",
 			reason: "assistant_rewritten",
-			atUuid: "uuid-a2",
-			from: 2,
+			atUuid: "uuid-a1",
+			from: 1,
 		});
 	});
 
 	it("forks at the last shared boundary when history was rolled back", () => {
-		const decision = decideNativeContinuity(input({ currentHashes: ["h1"] }));
+		const decision = decideNativeContinuity(
+			input({
+				entry: resident({
+					sentCount: 3,
+					sentHashes: ["h1", "h2", "h3"],
+					lastAssistantUuid: "uuid-a3",
+					assistantUuidByIndex: new Map([
+						[1, "uuid-a1"],
+						[2, "uuid-a2"],
+						[3, "uuid-a3"],
+					]),
+				}),
+				currentHashes: ["h1", "h2"],
+			}),
+		);
 
 		expect(decision).toMatchObject({ kind: "fork", reason: "history_rolled_back", atUuid: "uuid-a1", from: 1 });
 	});

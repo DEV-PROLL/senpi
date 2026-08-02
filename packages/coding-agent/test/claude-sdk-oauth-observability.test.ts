@@ -221,7 +221,7 @@ describe("Claude SDK OAuth continuity observations", () => {
 			mainOptions(sessionId),
 		).result();
 
-		expect(sink.observations.at(-1)).toMatchObject({ kind: "flatten", reason: "model_selected" });
+		expect(sink.observations.at(-1)).toMatchObject({ kind: "fork", reason: "model_selected" });
 	});
 
 	it("emits exactly one observation per turn on the resume-fallback path", async () => {
