@@ -10,6 +10,7 @@ compaction/
 ├── state.ts                  # In-memory compaction state + persistence shape
 ├── policy.ts                 # Adaptive threshold + decision matrix
 ├── speculative.ts            # Parallel speculative compaction during next turn
+├── overflow-retry.ts         # Bounded overflow-retry policy: input presize, geometric shrink, attempt cap + wall-clock budget
 ├── idle.ts                   # Proactive idle compaction predicate + instructions (agent_end trigger)
 ├── context-reduction.ts      # Deterministic no-LLM reductions (collapse tool-result runs, shrink old answers, clear old tool results)
 ├── openai-remote.ts          # OpenAI Responses remote-compaction route (`senpi.compaction.openai-remote.v1` schema)
