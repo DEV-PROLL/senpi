@@ -41,17 +41,28 @@ If you're migrating from [OMO (oh-my-openagent)](https://github.com/code-yeongyu
 | **Compaction-safe tool pairing** | [`tool-pair-guard`](packages/coding-agent/src/core/extensions/builtin/tool-pair-guard/) — strips orphan `tool_result` blocks. |
 | **Permission system** (opencode-style allow/deny) | [`permission-system`](packages/coding-agent/src/core/extensions/builtin/permission-system/) — rules, JSONL storage, TUI prompts, parser-aware patterns. |
 
-### Install these pi-extension packages for the OMO-shaped senpi
+### Choose extensions for your OMO setup
+
+Senpi builtins, standalone `pi-*` extensions, and the
+[OMO Senpi plugin](https://github.com/code-yeongyu/oh-my-openagent/tree/dev/packages/omo-senpi/plugin)
+overlap. Do not install every standalone package when the capability is already provided by Senpi or the plugin.
+
+| Capability | Senpi without the OMO plugin | Senpi with the OMO plugin |
+|---|---|---|
+| LSP | Install [`pi-lsp-client`](https://github.com/code-yeongyu/pi-lsp-client). | The plugin registers six LSP tools through its packaged daemon. Install `pi-lsp-client` only if you specifically need its `/lsp` inspector. |
+| AST-grep | Install [`pi-ast-grep`](https://github.com/code-yeongyu/pi-ast-grep). | The plugin ships an AST-grep skill, helper, and installer scripts. `pi-ast-grep` remains optional when you want the native `ast_grep_search` and `ast_grep_replace` tools. |
+| Comment checking | Install [`pi-comment-checker`](https://github.com/code-yeongyu/pi-comment-checker). | The plugin registers its own comment-checker component; do not install the standalone extension too. |
+| Rules and nested `AGENTS.md` | Already provided by the `rules` and `nested-agents-md` builtins. | Same; no standalone extension is required. |
+| Web search and fetch | Already provided by the `websearch` and `webfetch` builtins. | Same; no standalone extension is required. |
+| Persistent goals | Already provided by the `goal` builtin. | Same; no standalone extension is required. |
+| Subagent profiles | [`pi-agent-system`](https://github.com/code-yeongyu/pi-agent-system) supports external launchers that set `PI_AGENT_TYPE` or `SANEPI_AGENT_TYPE`. | The plugin owns task/member routing and tool filtering, so `pi-agent-system` is normally unnecessary. Keep it only when another launcher relies on its environment-variable contract. |
+
+For standalone Senpi without the OMO plugin, install only the non-builtin capabilities you need:
 
 ```bash
 senpi install git:github.com/code-yeongyu/pi-lsp-client            # 🛠️  LSP: rename / goto / refs / diagnostics + /lsp inspector
 senpi install git:github.com/code-yeongyu/pi-ast-grep              # 🛠️  AST-Grep across 25 languages (auto-downloads sg)
 senpi install git:github.com/code-yeongyu/pi-comment-checker       # 💬  Comment Checker — the standalone pi port of OMO's hook
-senpi install git:github.com/code-yeongyu/pi-rules                 #     Context injection: .claude/rules, .cursor/rules, .github/instructions, AGENTS.md, CLAUDE.md
-senpi install git:github.com/code-yeongyu/pi-nested-agents-md      # 🔍  Auto-injects nearby AGENTS.md (the runtime half of /init-deep)
-senpi install git:github.com/code-yeongyu/pi-websearch             # 📚  Provider-backed web search (fills the Exa-style slot)
-senpi install git:github.com/code-yeongyu/pi-webfetch              #     web_fetch tool (markdown / text / HTML, bounded time + size)
-senpi install git:github.com/code-yeongyu/pi-goal                  #     Persistent goal tracking + continuation prompts (closest thing to Sisyphus discipline)
 
 # Optional — only if you used the matching OMO surface:
 senpi install git:github.com/code-yeongyu/pi-cua-integration                 # 🖥️  Computer-use bindings (desktop / browser)
@@ -67,7 +78,7 @@ senpi install git:github.com/code-yeongyu/pi-google-url-context              #  
 senpi install git:github.com/code-yeongyu/pi-openai-api-parallel-tool-calls  #     OpenAI parallel_tool_calls payload support
 ```
 
-Each package is also installable by git URL, e.g. `senpi install git:github.com/code-yeongyu/pi-comment-checker`. See [Senpi Packages](packages/coding-agent/README.md#pi-packages) for the full install / update / remove flow.
+See [Senpi Packages](packages/coding-agent/README.md#pi-packages) for the full install / update / remove flow.
 
 ### Allow all permissions (OMO-style)
 
