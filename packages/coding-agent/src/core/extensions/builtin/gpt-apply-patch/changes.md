@@ -1,5 +1,25 @@
 # changes
 
+## Compact completed result retention (2026-08-02)
+
+### What changed
+
+- `tool.ts`: completed previews persist `truncatePreview()` output while preserving each top-level unified `patch`.
+- Nested `result.details.appliedOperations` entries retain only operation indexes, paths, move destinations, operation types, and line counts.
+- Regression coverage verifies bounded visible diffs, preserved unified patches, and metadata-only nested operations.
+
+### Why
+
+- Completed results retained full operation diffs in both the visible preview and nested result details, duplicating large payloads in append-only sessions.
+
+### Why extension system couldn't handle this
+
+- The redundant payload is assembled by the builtin tool before the session manager persists the tool result.
+
+### Expected merge conflict zones
+
+- LOW: `tool.ts` completed-result construction.
+
 ## Failed apply_patch outcomes are explicit errors (2026-07-31)
 
 ### What changed

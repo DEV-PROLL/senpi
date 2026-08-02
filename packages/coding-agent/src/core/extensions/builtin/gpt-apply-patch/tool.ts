@@ -11,7 +11,7 @@ import {
 import { normalizeApplyPatchArguments } from "./params.ts";
 import { parsePatch } from "./parser.ts";
 import { createPendingPatchUpdate } from "./preview.ts";
-import { getApplyPatchRenderState, renderPatchPreview } from "./preview-format.ts";
+import { getApplyPatchRenderState, renderPatchPreview, truncatePreview } from "./preview-format.ts";
 import { renderStreamingPatchCall } from "./streaming-render.ts";
 import type {
 	ApplyPatchPreview,
@@ -26,7 +26,10 @@ import type {
 function appliedPreview(result: ApplyPatchResult): ApplyPatchPreview | undefined {
 	const files = [...result.details.appliedOperations]
 		.sort((left, right) => left.operationIndex - right.operationIndex)
-		.map((operation) => operation.preview);
+		.map((operation) => ({
+			...operation.preview,
+			diff: truncatePreview(operation.preview.diff),
+		}));
 	if (files.length === 0) return undefined;
 	return {
 		files,
@@ -100,6 +103,20 @@ function renderFailureBox(
 	return component;
 }
 
+function compactAppliedOperations(result: ApplyPatchResult): void {
+	result.details.appliedOperations = result.details.appliedOperations.map(({ operationIndex, preview }) => ({
+		operationIndex,
+		preview: {
+			filePath: preview.filePath,
+			...(preview.movePath === undefined ? {} : { movePath: preview.movePath }),
+			operation: preview.operation,
+			diff: "",
+			added: preview.added,
+			removed: preview.removed,
+		},
+	}));
+}
+
 export function createApplyPatchTool(variant: "freeform" | "json" = "freeform"): ApplyPatchToolDefinition {
 	const tool = defineTool<typeof APPLY_PATCH_PARAMS, ApplyPatchToolDetails | undefined, ApplyPatchRenderState>({
 		name: "apply_patch",
@@ -136,6 +153,7 @@ export function createApplyPatchTool(variant: "freeform" | "json" = "freeform"):
 				onUpdate?.({ content: [{ type: "text", text: progressUpdate.text }], details: progressUpdate.details });
 			});
 			const resultPreview = appliedPreview(result);
+			compactAppliedOperations(result);
 			if (result.failures.length > 0) {
 				return {
 					content: [{ type: "text", text: buildPartialFailureText(result) }],

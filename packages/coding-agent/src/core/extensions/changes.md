@@ -1,5 +1,17 @@
 # Core Extensions Changes
 
+## 2026-08-02 - Completed apply_patch details avoid duplicate full diffs
+
+### What changed and why
+
+- The builtin `apply_patch` tool stores the same bounded diff used by the TUI in its top-level preview.
+- Nested applied-operation previews retain paths, operation types, line counts, and operation indexes but no longer duplicate full diffs.
+- Unified patches remain available for app-server file-change projection.
+
+### Expected merge conflict zones
+
+- LOW: `builtin/gpt-apply-patch/tool.ts` completed-result construction.
+
 ## 2026-08-01 - Anthropic pair guards share the provider-final sanitizer
 
 ### What changed and why

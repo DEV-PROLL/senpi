@@ -1,3 +1,21 @@
+## Compact completed apply_patch result details (2026-08-02)
+
+### What changed
+
+- Completed `apply_patch` results retain the bounded visible diff and unified patch while replacing nested applied-operation previews with lightweight metadata.
+
+### Why
+
+- Full file diffs were persisted twice in tool-result details, causing session files and resident memory to grow unnecessarily.
+
+### Why this cannot be expressed externally
+
+- The duplicate payload is constructed inside the builtin `apply_patch` tool before session persistence.
+
+### Expected merge conflict zones
+
+- LOW: `core/extensions/builtin/gpt-apply-patch/tool.ts`.
+
 ## Backfill: injected app-server turns (2026-08-01)
 
 ### What changed
