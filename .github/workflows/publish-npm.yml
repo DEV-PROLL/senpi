@@ -53,7 +53,17 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
         with:
-          bun-version: 1.2.20
+          bun-version: canary
+
+      - name: Assert bun canary channel
+        run: |
+          set -euo pipefail
+          v=$(bun --version)
+          r=$(bun --revision)
+          case "$r" in *canary*) : ;; *) echo "::error::expected bun canary channel, got revision $r"; exit 1;; esac
+          maj=${v%%.*}; rest=${v#*.}; min=${rest%%.*}
+          if [ "$maj" -lt 1 ] || { [ "$maj" -eq 1 ] && [ "$min" -lt 4 ]; }; then echo "::error::expected bun >= 1.4 (canary), got $v"; exit 1; fi
+          echo "bun: $v rev $r" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund

@@ -72,6 +72,8 @@ The source machine additionally needs:
 - the repository dependencies
 - `tmux` for the POSIX TUI smoke channel
 
+Binary builds use the Bun 1.4+ canary channel. Local builders should run `bun upgrade --canary` first to ensure the toolchain matches CI.
+
 Verify the local toolchain:
 
 ```bash
@@ -79,6 +81,7 @@ cd /Users/yeongyu/local-workspaces/senpi
 uname -m
 node --version
 npm --version
+bun upgrade --canary
 bun --version
 git status --short --branch
 ```
