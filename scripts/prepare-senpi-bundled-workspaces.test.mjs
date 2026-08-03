@@ -129,6 +129,7 @@ describe("stagePublishManifest", () => {
 		writeJson(join(root, "packages", "coding-agent", "package.json"), {
 			name: "@code-yeongyu/senpi",
 			version: "2026.7.22",
+			files: ["dist", "README.md"],
 			dependencies: {
 				"@earendil-works/pi-ai": "^2026.7.22",
 				"cross-spawn": "7.0.6",
@@ -188,7 +189,7 @@ describe("stagePublishManifest", () => {
 		// resolves the alias target from the fork-owned scope instead of upstream.
 		const manifest = readStagedManifest(tempDir);
 		assert.deepEqual(manifest.dependencies, {
-			"@earendil-works/pi-ai": "npm:@code-yeongyu/senpi-ai@^2026.7.22",
+			"@earendil-works/pi-ai": "npm:@code-yeongyu/senpi-ai@2026.7.22",
 			"cross-spawn": "7.0.6",
 		});
 		assert.deepEqual(manifest.optionalDependencies, { "@mariozechner/clipboard": "0.3.9" });

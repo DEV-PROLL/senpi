@@ -4,11 +4,19 @@ import { join } from "node:path";
 export const ownedRegistryAliases = new Map([
 	["@earendil-works/pi-ai", "@code-yeongyu/senpi-ai"],
 	["@earendil-works/pi-agent-core", "@code-yeongyu/senpi-agent-core"],
-	["@earendil-works/pi-client", "@code-yeongyu/senpi-client"],
-	["@earendil-works/pi-protocol", "@code-yeongyu/senpi-protocol"],
 	["@earendil-works/pi-tui", "@code-yeongyu/senpi-tui"],
 	["@earendil-works/pi-pty", "@code-yeongyu/senpi-pty"],
 ]);
+const ownedRegistryPackageNames = new Set([...ownedRegistryAliases.values(), "@code-yeongyu/senpi-codemode"]);
+const vendoredOnlyPackageNames = ["@earendil-works/pi-client", "@earendil-works/pi-protocol"];
+
+function exactVersionSpec(spec) {
+	const exact = spec.replace(/^[~^]/, "");
+	if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(exact)) {
+		throw new Error(`Internal publish dependency must use an exact version, received ${spec}`);
+	}
+	return exact;
+}
 
 export function rewriteOwnedRegistryAliases(manifest) {
 	for (const dependencyField of ["dependencies", "optionalDependencies"]) {
@@ -19,11 +27,30 @@ export function rewriteOwnedRegistryAliases(manifest) {
 		for (const [packageName, aliasName] of ownedRegistryAliases) {
 			const version = dependencies[packageName];
 			if (typeof version === "string" && !version.startsWith("npm:")) {
-				dependencies[packageName] = `npm:${aliasName}@${version}`;
+				dependencies[packageName] = `npm:${aliasName}@${exactVersionSpec(version)}`;
+			}
+		}
+		for (const [packageName, version] of Object.entries(dependencies)) {
+			if (ownedRegistryPackageNames.has(packageName) && typeof version === "string" && !version.startsWith("npm:")) {
+				dependencies[packageName] = exactVersionSpec(version);
 			}
 		}
 	}
 	return manifest;
+}
+
+function prepareVendoredPublishManifest(manifest) {
+	for (const dependencyField of ["dependencies", "optionalDependencies"]) {
+		const dependencies = manifest[dependencyField];
+		if (!dependencies) continue;
+		for (const packageName of vendoredOnlyPackageNames) {
+			delete dependencies[packageName];
+		}
+	}
+	if (!Array.isArray(manifest.files)) {
+		throw new Error("@code-yeongyu/senpi publish manifest must declare files before adding vendor output");
+	}
+	manifest.files = [...new Set([...manifest.files, "vendor"])];
 }
 
 export function listStagedPublishPackageNames(codingAgentNodeModules) {
@@ -125,6 +152,7 @@ export function stagePublishManifest(repoRoot) {
 	const codingAgentNodeModules = join(codingAgentDir, "node_modules");
 	const stagedPackageNames = listStagedPublishPackageNames(codingAgentNodeModules);
 	const stagedSet = new Set(stagedPackageNames);
+	prepareVendoredPublishManifest(manifest);
 
 	const runtimeDependencyFields = ["dependencies", "optionalDependencies"];
 	const missing = [];
