@@ -154,6 +154,7 @@ export function isFocusable(component: Component | null): component is Component
 export const CURSOR_MARKER = "\x1b_pi:c\x07";
 const FAKE_CURSOR_START = "\x1b[7m";
 const FAKE_CURSOR_END = "\x1b[27m";
+const FAKE_CURSOR_RESET = "\x1b[0m";
 
 export { visibleWidth };
 
@@ -982,7 +983,8 @@ export abstract class TuiBase extends Container {
 		this.beforeTerminalStop();
 		// Move cursor to the end of the content to prevent overwriting/artifacts on exit
 		if (this.previousLines.length > 0) {
-			// Clear only a fake cursor from the last published frame; a pending mode change must not erase content.
+			// Only overwrite the cursor cell when the last published frame kept the hardware cursor hidden;
+			// a pending visibility change has not rendered yet and must not erase content.
 			if (this.#lastCursorVisibility === false) {
 				this.terminal.write(" ");
 			}
@@ -1920,7 +1922,11 @@ export abstract class TuiBase extends Container {
 				let afterMarker = line.slice(markerIndex + CURSOR_MARKER.length);
 				if (this.showHardwareCursor && afterMarker.startsWith(FAKE_CURSOR_START)) {
 					const fakeCursorEnd = afterMarker.indexOf(FAKE_CURSOR_END, FAKE_CURSOR_START.length);
-					if (fakeCursorEnd !== -1) {
+					const fakeCursorReset = afterMarker.indexOf(FAKE_CURSOR_RESET, FAKE_CURSOR_START.length);
+					if (fakeCursorReset !== -1 && (fakeCursorEnd === -1 || fakeCursorReset < fakeCursorEnd)) {
+						// Keep a full reset because it may also terminate styles surrounding the fake cursor.
+						afterMarker = afterMarker.slice(FAKE_CURSOR_START.length);
+					} else if (fakeCursorEnd !== -1) {
 						afterMarker =
 							afterMarker.slice(FAKE_CURSOR_START.length, fakeCursorEnd) +
 							afterMarker.slice(fakeCursorEnd + FAKE_CURSOR_END.length);

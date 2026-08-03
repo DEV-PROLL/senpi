@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
+import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import { Input } from "../src/components/input.ts";
 import { setCapabilities } from "../src/terminal-image.ts";
 import { type Component, CURSOR_MARKER, type Focusable, TUI } from "../src/tui.ts";
@@ -63,6 +64,40 @@ class StyledCursorComponent implements Component, Focusable {
 	}
 
 	invalidate(): void {}
+}
+
+class FullResetStyledCursorComponent implements Component, Focusable {
+	focused = false;
+
+	render(_width: number): string[] {
+		const marker = this.focused ? CURSOR_MARKER : "";
+		return [`\x1b[1;31mA${marker}\x1b[7mX\x1b[0mB`];
+	}
+
+	invalidate(): void {}
+}
+
+function isXtermTerminal(value: unknown): value is XtermTerminalType {
+	return typeof value === "object" && value !== null && "buffer" in value;
+}
+
+function getCellStyle(
+	terminal: VirtualTerminal,
+	row: number,
+	col: number,
+): { readonly chars: string; readonly inverse: number; readonly bold: number; readonly fgMode: number } {
+	const xtermValue: unknown = Reflect.get(terminal, "xterm");
+	assert.ok(isXtermTerminal(xtermValue), "VirtualTerminal should expose an xterm instance in tests");
+	const line = xtermValue.buffer.active.getLine(xtermValue.buffer.active.viewportY + row);
+	assert.ok(line, `Missing buffer line at row ${row}`);
+	const cell = line.getCell(col);
+	assert.ok(cell, `Missing cell at row ${row} col ${col}`);
+	return {
+		chars: cell.getChars(),
+		inverse: cell.isInverse(),
+		bold: cell.isBold(),
+		fgMode: cell.getFgColorMode(),
+	};
 }
 
 function countOccurrences(text: string, needle: string): number {
@@ -208,6 +243,29 @@ describe("cursor write hygiene", () => {
 		assert.doesNotMatch(rendered, /\x1b\[(?:7|27)m/);
 		const [line] = await terminal.flushAndGetViewport();
 		assert.strictEqual(line?.trimEnd(), "A한B");
+
+		tui.stop();
+	});
+
+	it("removes fake cursor styling terminated by a full SGR reset", async () => {
+		const terminal = new LoggingVirtualTerminal(40, 6);
+		const tui = new TUI(terminal, true);
+		const component = new FullResetStyledCursorComponent();
+		tui.addChild(component);
+		tui.setFocus(component);
+
+		tui.start();
+		await terminal.waitForRender();
+
+		const [line] = terminal.getViewport();
+		assert.strictEqual(line?.trimEnd(), "AXB");
+		const cursorCell = getCellStyle(terminal, 0, 1);
+		assert.strictEqual(cursorCell.chars, "X");
+		assert.strictEqual(cursorCell.inverse, 0);
+		assert.notStrictEqual(cursorCell.bold, 0);
+		assert.notStrictEqual(cursorCell.fgMode, 0);
+		const trailingCell = getCellStyle(terminal, 0, 2);
+		assert.deepStrictEqual(trailingCell, { chars: "B", inverse: 0, bold: 0, fgMode: 0 });
 
 		tui.stop();
 	});

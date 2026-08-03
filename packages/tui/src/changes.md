@@ -9,7 +9,9 @@
 - The editor stops drawing its inverse-video fake cursor when the hardware
   cursor is visible; it still emits `CURSOR_MARKER` for IME placement.
 - The renderer also removes a colocated inverse-video cursor after
-  `CURSOR_MARKER`, covering focused single-line `Input` consumers.
+  `CURSOR_MARKER`, covering focused single-line `Input` consumers and both
+  inverse-off (`CSI 27 m`) and full-reset (`CSI 0 m`) terminators without
+  discarding full-reset semantics.
 - Runtime cursor-mode toggles defer visibility changes to the replacement
   frame, and shutdown no longer blanks content beneath a hardware cursor.
 
