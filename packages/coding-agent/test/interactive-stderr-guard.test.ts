@@ -11,9 +11,18 @@ import {
 
 const originalStderrWrite = process.stderr.write;
 const originalAgentDir = process.env[ENV_AGENT_DIR];
+const consoleLevels = ["error", "info", "warn"] as const;
+const originalConsoleMethods = {
+	error: console.error,
+	info: console.info,
+	warn: console.warn,
+};
 const githubFineGrainedPat = "github_pat_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 const tempDirs: string[] = [];
+
+type ConsoleLevel = keyof typeof originalConsoleMethods;
+type ConsoleMethod = (...data: unknown[]) => void;
 
 function replaceStderrWrite(write: typeof process.stderr.write): void {
 	Object.defineProperty(process.stderr, "write", {
@@ -39,10 +48,21 @@ function createCapturingStderrWrite(capture: (text: string) => void): typeof pro
 	}) satisfies typeof process.stderr.write;
 }
 
+function replaceConsoleMethod(level: ConsoleLevel, method: ConsoleMethod): void {
+	Object.defineProperty(console, level, {
+		configurable: true,
+		value: method,
+		writable: true,
+	});
+}
+
 afterEach(() => {
 	restoreInteractiveStderr();
 	restoreStderr();
 	replaceStderrWrite(originalStderrWrite);
+	for (const level of consoleLevels) {
+		replaceConsoleMethod(level, originalConsoleMethods[level]);
+	}
 	if (originalAgentDir === undefined) {
 		delete process.env[ENV_AGENT_DIR];
 	} else {
@@ -145,5 +165,35 @@ describe("interactive stderr guard", () => {
 		expect(log).not.toContain("stderr-secret");
 		expect(log).not.toContain(githubFineGrainedPat);
 		expect((statSync(debugLogPath).mode & 0o777).toString(8)).toBe("600");
+	});
+
+	it("hides Bun-style console diagnostics while the TUI owns the terminal and restores them afterwards", () => {
+		const agentDir = mkdtempSync(join(tmpdir(), "pi-hidden-console-"));
+		tempDirs.push(agentDir);
+		process.env[ENV_AGENT_DIR] = agentDir;
+		let terminalText = "";
+		const bunConsoleWrite = (...data: unknown[]) => {
+			terminalText += `${data.map(String).join(" ")}\n`;
+		};
+		for (const level of consoleLevels) {
+			replaceConsoleMethod(level, bunConsoleWrite);
+		}
+
+		takeOverInteractiveStderr();
+		console.info("omo-senpi start-work-continuation skipped SECRET_TOKEN=console-secret");
+		console.warn("omo-senpi ulw-loop status ignored", { reason: "non-zero-exit" });
+		console.error("omo-senpi component registration failed");
+
+		expect(terminalText).toBe("");
+		restoreInteractiveStderr();
+		console.info("visible after restore");
+		expect(terminalText).toBe("visible after restore\n");
+
+		const log = readFileSync(getDebugLogPath(), "utf8");
+		expect(log).toContain("start-work-continuation skipped");
+		expect(log).toContain("ulw-loop status ignored");
+		expect(log).toContain("component registration failed");
+		expect(log).toContain("SECRET_TOKEN=[REDACTED]");
+		expect(log).not.toContain("console-secret");
 	});
 });
