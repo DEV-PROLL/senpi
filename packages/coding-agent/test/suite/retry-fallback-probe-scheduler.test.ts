@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type ProbeBackEvent, ProbeBackScheduler } from "../../src/core/retry-fallback/probe-scheduler.ts";
 
 // Controllable timer harness: captures setTimeout callbacks so tests can fire
@@ -21,7 +21,8 @@ function createTimerHarness() {
 	};
 
 	const fakeClearTimeout = (handle: unknown): void => {
-		timers.delete(handle as number);
+		if (typeof handle !== "number") throw new Error("Unexpected timer handle");
+		timers.delete(handle);
 	};
 
 	return {
@@ -47,20 +48,6 @@ function createTimerHarness() {
 			}
 			return count;
 		},
-		/** Fire all pending timers in order. */
-		fireAll(): void {
-			const pending = [...timers.values()].filter((e) => !e.fired).sort((a, b) => a.id - b.id);
-			for (const entry of pending) {
-				entry.fired = true;
-				timers.delete(entry.id);
-				entry.callback();
-			}
-		},
-		/** Check if a specific timer handle is still pending (not cleared, not fired). */
-		isPending(handle: unknown): boolean {
-			const entry = timers.get(handle as number);
-			return entry !== undefined && !entry.fired;
-		},
 	};
 }
 
@@ -72,10 +59,6 @@ function createCapture() {
 		runProbeCalls,
 		emit(event: ProbeBackEvent): void {
 			events.push(event);
-		},
-		reset(): void {
-			events.length = 0;
-			runProbeCalls.length = 0;
 		},
 	};
 }
@@ -115,19 +98,11 @@ function defaultInput(
 }
 
 describe("ProbeBackScheduler", () => {
-	const harnesses: Array<ReturnType<typeof createTimerHarness>> = [];
-
-	afterEach(() => {
-		while (harnesses.length) harnesses.pop();
-		vi.useRealTimers();
-	});
-
 	// (1) arm -> first probe fires, failure -> second at deadline, failure ->
 	// exactly 2 runProbe calls, result ok:false emitted.
 	it("fires two probes on consecutive failures and emits ok:false", async () => {
 		const now = 0;
 		const th = createTimerHarness();
-		harnesses.push(th);
 		const capture = createCapture();
 		const { input } = defaultInput(capture, { firstAtMs: 500, deadlineMs: 1000 });
 
@@ -180,7 +155,6 @@ describe("ProbeBackScheduler", () => {
 	it("clears cooldown and emits ok:true on first probe success", async () => {
 		const now = 0;
 		const th = createTimerHarness();
-		harnesses.push(th);
 		const capture = createCapture();
 		const { input, onClearedCalls } = defaultInput(capture, {
 			firstAtMs: 500,
@@ -195,7 +169,7 @@ describe("ProbeBackScheduler", () => {
 		});
 
 		scheduler.arm(input);
-		expect(th.pendingCount()).toBe(1);
+		expect(th.pendingCount()).toBe(2);
 
 		th.fireFirst();
 		await vi.waitFor(() => expect(capture.events.some((e) => e.type === "retry_probe_result" && e.ok)).toBe(true));
@@ -218,7 +192,6 @@ describe("ProbeBackScheduler", () => {
 	it("cancel prevents all probe execution when called before first timer fires", async () => {
 		const now = 0;
 		const th = createTimerHarness();
-		harnesses.push(th);
 		const capture = createCapture();
 		const { input } = defaultInput(capture, { firstAtMs: 500, deadlineMs: 1000 });
 
@@ -229,7 +202,7 @@ describe("ProbeBackScheduler", () => {
 		});
 
 		scheduler.arm(input);
-		expect(th.pendingCount()).toBe(1);
+		expect(th.pendingCount()).toBe(2);
 
 		// Cancel before any timer fires.
 		scheduler.cancel("dispose");
@@ -246,7 +219,6 @@ describe("ProbeBackScheduler", () => {
 	it("second arm supersedes the first; old timers never fire", async () => {
 		const now = 0;
 		const th = createTimerHarness();
-		harnesses.push(th);
 		const capture = createCapture();
 		const { input: input1 } = defaultInput(capture, {
 			selector: "faux/faux-1",
@@ -267,12 +239,12 @@ describe("ProbeBackScheduler", () => {
 		});
 
 		scheduler.arm(input1);
-		expect(th.pendingCount()).toBe(1);
+		expect(th.pendingCount()).toBe(2);
 
 		// Supersede with a second arm.
 		scheduler.arm(input2);
 		expect(scheduler.active).toBe(true);
-		expect(th.pendingCount()).toBe(1); // only the new timer
+		expect(th.pendingCount()).toBe(2); // only the new arm's timers
 
 		// Fire the new timer -> probe for faux-2 runs, succeeds.
 		th.fireFirst();
@@ -291,7 +263,6 @@ describe("ProbeBackScheduler", () => {
 		const now = 0;
 		let authOk = true;
 		const th = createTimerHarness();
-		harnesses.push(th);
 		const capture = createCapture();
 		const { input } = defaultInput(capture, {
 			firstAtMs: 500,
@@ -328,7 +299,6 @@ describe("ProbeBackScheduler", () => {
 	it("stale probe result after cancel does not call onCleared", async () => {
 		const now = 0;
 		const th = createTimerHarness();
-		harnesses.push(th);
 		const capture = createCapture();
 		let resolveProbe: ((value: boolean) => void) | undefined;
 		const onClearedCalls: string[] = [];
@@ -361,8 +331,10 @@ describe("ProbeBackScheduler", () => {
 		th.fireFirst();
 		await vi.waitFor(() => expect(capture.runProbeCalls.length).toBe(1));
 
-		// Cancel while probe is in-flight.
+		// Cancel while probe is in-flight. Both timers are cleared and the probe is aborted.
 		scheduler.cancel("dispose");
+		expect(capture.runProbeCalls[0]?.aborted).toBe(true);
+		expect(th.pendingCount()).toBe(0);
 
 		// Now resolve the probe as success — but scheduler is disarmed, onCleared must NOT fire.
 		resolveProbe?.(true);
@@ -379,7 +351,6 @@ describe("ProbeBackScheduler", () => {
 	it("arm during in-flight probe swallows the old result and preserves cancellation", async () => {
 		const now = 0;
 		const th = createTimerHarness();
-		harnesses.push(th);
 		const capture = createCapture();
 		let resolveOldProbe: ((value: boolean) => void) | undefined;
 		let resolveNewProbe: ((value: boolean) => void) | undefined;
@@ -417,7 +388,7 @@ describe("ProbeBackScheduler", () => {
 		expect(oldOnClearedCalls).toEqual([]);
 		expect(capture.events.filter((event) => event.type === "retry_probe_result")).toEqual([]);
 		expect(scheduler.active).toBe(true);
-		expect(th.pendingCount()).toBe(1);
+		expect(th.pendingCount()).toBe(2);
 
 		th.fireFirst();
 		await vi.waitFor(() => expect(capture.runProbeCalls).toHaveLength(2));
@@ -434,8 +405,49 @@ describe("ProbeBackScheduler", () => {
 
 		scheduler.cancel("dispose");
 		expect(th.pendingCount()).toBe(0);
-		th.fireAll();
 		expect(capture.runProbeCalls).toHaveLength(2);
+	});
+
+	it("aborts a hanging first probe at the deadline and runs the final probe", async () => {
+		const th = createTimerHarness();
+		const capture = createCapture();
+		let attempt = 0;
+		let resolveCleared: ((selector: string) => void) | undefined;
+		const cleared = new Promise<string>((resolve) => {
+			resolveCleared = resolve;
+		});
+		const { input } = defaultInput(capture, {
+			runProbe: (signal) => {
+				attempt++;
+				if (attempt === 1) return new Promise<boolean>(() => undefined);
+				return Promise.resolve(!signal.aborted);
+			},
+			onCleared: (selector) => resolveCleared?.(selector),
+		});
+		const scheduler = new ProbeBackScheduler({
+			now: () => 0,
+			setTimeout: th.setTimeout,
+			clearTimeout: th.clearTimeout,
+		});
+
+		scheduler.arm(input);
+		expect(th.pendingCount()).toBe(2);
+		th.fireFirst();
+		expect(capture.runProbeCalls).toHaveLength(1);
+		expect(capture.runProbeCalls[0]?.aborted).toBe(false);
+
+		th.fireFirst();
+		expect(capture.runProbeCalls[0]?.aborted).toBe(true);
+		expect(capture.runProbeCalls).toHaveLength(2);
+		await expect(cleared).resolves.toBe("faux/faux-1");
+
+		expect(capture.events).toContainEqual({
+			type: "retry_probe_result",
+			selector: "faux/faux-1",
+			ok: true,
+		});
+		expect(scheduler.active).toBe(false);
+		expect(th.pendingCount()).toBe(0);
 	});
 
 	// (7) Second probe (at deadline) succeeds -> onCleared + ok:true.
@@ -443,7 +455,6 @@ describe("ProbeBackScheduler", () => {
 		const now = 0;
 		let probeAttempt = 0;
 		const th = createTimerHarness();
-		harnesses.push(th);
 		const capture = createCapture();
 		const onClearedCalls: string[] = [];
 		const input = {

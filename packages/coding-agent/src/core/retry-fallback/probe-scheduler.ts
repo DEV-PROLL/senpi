@@ -40,6 +40,8 @@ export class ProbeBackScheduler {
 	private _firstTimer: ScheduledTimer | undefined;
 	private _deadlineTimer: ScheduledTimer | undefined;
 	private _abortController: AbortController | undefined;
+	private _activeProbeIndex: 1 | 2 | undefined;
+	private _secondProbeAnnounced = false;
 
 	constructor(opts: {
 		now: () => number;
@@ -68,6 +70,8 @@ export class ProbeBackScheduler {
 		this._armed = true;
 		this._firstTimer = { handle: undefined };
 		this._deadlineTimer = { handle: undefined };
+		this._activeProbeIndex = undefined;
+		this._secondProbeAnnounced = false;
 
 		// Emit scheduled event for probe 1.
 		if (gen !== this._generation) return;
@@ -79,11 +83,19 @@ export class ProbeBackScheduler {
 		});
 		if (gen !== this._generation) return;
 
-		const delay = Math.max(0, input.firstAtMs - this._now());
+		const firstDelay = Math.max(0, input.firstAtMs - this._now());
 		if (this._firstTimer) {
 			this._firstTimer.handle = this._setTimeout(() => {
 				void this._runProbe(input, 1, gen);
-			}, delay);
+			}, firstDelay);
+		}
+
+		const deadlineDelay = Math.max(0, input.deadlineMs - this._now());
+		if (gen !== this._generation) return;
+		if (this._deadlineTimer) {
+			this._deadlineTimer.handle = this._setTimeout(() => {
+				this._runDeadlineProbe(input, gen);
+			}, deadlineDelay);
 		}
 	}
 
@@ -110,6 +122,7 @@ export class ProbeBackScheduler {
 			this._abortController.abort();
 			this._abortController = undefined;
 		}
+		this._activeProbeIndex = undefined;
 	}
 
 	private _disarm(): void {
@@ -117,11 +130,42 @@ export class ProbeBackScheduler {
 		this._firstTimer = undefined;
 		this._deadlineTimer = undefined;
 		this._abortController = undefined;
+		this._activeProbeIndex = undefined;
+		this._secondProbeAnnounced = false;
+	}
+
+	private _finish(): void {
+		this._clearTimers();
+		this._disarm();
+	}
+
+	private _announceSecondProbe(input: ProbeBackArmInput, generation: number): void {
+		if (generation !== this._generation || this._secondProbeAnnounced) return;
+		this._secondProbeAnnounced = true;
+		input.emit({
+			type: "retry_probe_scheduled",
+			selector: input.selector,
+			atMs: input.deadlineMs,
+			probeIndex: 2,
+		});
+	}
+
+	private _runDeadlineProbe(input: ProbeBackArmInput, generation: number): void {
+		if (generation !== this._generation || !this._armed) return;
+		if (this._deadlineTimer) this._deadlineTimer.handle = undefined;
+		if (this._firstTimer?.handle !== undefined) {
+			this._clearTimeout(this._firstTimer.handle);
+			this._firstTimer.handle = undefined;
+		}
+		if (this._activeProbeIndex === 1) this._abortInFlight("superseded");
+		this._announceSecondProbe(input, generation);
+		if (generation !== this._generation) return;
+		void this._runProbe(input, 2, generation);
 	}
 
 	private async _runProbe(input: ProbeBackArmInput, probeIndex: 1 | 2, generation: number): Promise<void> {
 		const gen = generation;
-		if (gen !== this._generation) return;
+		if (gen !== this._generation || !this._armed) return;
 
 		// Clear the timer that just fired so cancel doesn't try to clear a stale handle.
 		if (probeIndex === 1 && this._firstTimer) {
@@ -140,14 +184,15 @@ export class ProbeBackScheduler {
 				errorMessage: "auth-unavailable",
 			});
 			if (gen !== this._generation) return;
-			this._disarm();
+			this._finish();
 			return;
 		}
 
 		// Set up abort controller for the in-flight probe.
-		if (gen !== this._generation) return;
+		if (gen !== this._generation || this._activeProbeIndex !== undefined) return;
 		const abortController = new AbortController();
 		this._abortController = abortController;
+		this._activeProbeIndex = probeIndex;
 
 		let success: boolean;
 		try {
@@ -156,8 +201,15 @@ export class ProbeBackScheduler {
 			success = false;
 		}
 
-		if (gen !== this._generation) return;
+		if (
+			gen !== this._generation ||
+			this._activeProbeIndex !== probeIndex ||
+			this._abortController !== abortController
+		) {
+			return;
+		}
 		this._abortController = undefined;
+		this._activeProbeIndex = undefined;
 
 		if (success) {
 			if (gen !== this._generation) return;
@@ -169,29 +221,13 @@ export class ProbeBackScheduler {
 				ok: true,
 			});
 			if (gen !== this._generation) return;
-			this._disarm();
+			this._finish();
 			return;
 		}
 
-		// First probe failed — schedule the deadline probe if we haven't used both slots.
+		// First probe failed — the already-armed deadline timer owns the final attempt.
 		if (probeIndex === 1) {
-			// Emit scheduled event for probe 2.
-			if (gen !== this._generation) return;
-			input.emit({
-				type: "retry_probe_scheduled",
-				selector: input.selector,
-				atMs: input.deadlineMs,
-				probeIndex: 2,
-			});
-			if (gen !== this._generation) return;
-
-			const delay = Math.max(0, input.deadlineMs - this._now());
-			if (this._deadlineTimer) {
-				if (gen !== this._generation) return;
-				this._deadlineTimer.handle = this._setTimeout(() => {
-					void this._runProbe(input, 2, gen);
-				}, delay);
-			}
+			this._announceSecondProbe(input, gen);
 			return;
 		}
 
@@ -203,6 +239,6 @@ export class ProbeBackScheduler {
 			ok: false,
 		});
 		if (gen !== this._generation) return;
-		this._disarm();
+		this._finish();
 	}
 }
