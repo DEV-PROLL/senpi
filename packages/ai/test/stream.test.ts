@@ -13,7 +13,7 @@ import { StringEnum } from "../src/utils/typebox-helpers.ts";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.ts";
 import { hasBedrockCredentials } from "./bedrock-utils.ts";
 import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.ts";
-import { getLiveEnvApiKey, OPENROUTER_LIVE_TEST_FLAG } from "./live-api-gates.ts";
+import { getLiveEnvApiKey, isOllamaLiveTestAvailable, OPENROUTER_LIVE_TEST_FLAG } from "./live-api-gates.ts";
 import { resolveApiKey } from "./oauth.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -921,8 +921,8 @@ describe("Generate E2E Tests", () => {
 		},
 	);
 
-	describe.skipIf(!process.env.ZAI_API_KEY)("zAI Provider (glm-4.7 via OpenAI Completions)", () => {
-		const llm = getModel("zai", "glm-4.7");
+	describe.skipIf(!process.env.ZAI_API_KEY)("zAI Provider (glm-5.2 via OpenAI Completions)", () => {
+		const llm = getModel("zai", "glm-5.2");
 
 		it("should complete basic text generation", { retry: 3 }, async () => {
 			await basicTextGeneration(llm);
@@ -1622,16 +1622,7 @@ describe("Generate E2E Tests", () => {
 		});
 	});
 
-	// Check if ollama is installed and local LLM tests are enabled
-	let ollamaInstalled = false;
-	if (!process.env.PI_NO_LOCAL_LLM) {
-		try {
-			execSync("which ollama", { stdio: "ignore" });
-			ollamaInstalled = true;
-		} catch {
-			ollamaInstalled = false;
-		}
-	}
+	const ollamaInstalled = isOllamaLiveTestAvailable();
 
 	describe.skipIf(!ollamaInstalled)("Ollama Provider (gpt-oss-20b via OpenAI Completions)", () => {
 		let llm: Model<"openai-completions">;

@@ -8,7 +8,23 @@ import {
 	nativePrebuildTarget,
 } from "./prepare-senpi-bundled-workspaces.mjs";
 
+function clientProtocolFiles(prefix = "package/") {
+	return [
+		{ path: `${prefix}node_modules/@earendil-works/pi-client/package.json` },
+		{ path: `${prefix}node_modules/@earendil-works/pi-client/dist/index.js` },
+		{ path: `${prefix}node_modules/@earendil-works/pi-protocol/package.json` },
+		{ path: `${prefix}node_modules/@earendil-works/pi-protocol/dist/index.js` },
+	];
+}
+
 describe("assertSenpiPackedWorkspaceFiles", () => {
+	it("includes client and protocol in bundled workspace checks", () => {
+		const packageNames = bundledWorkspacePackageChecks().map((check) => check.packageName);
+
+		assert.ok(packageNames.includes("@earendil-works/pi-client"));
+		assert.ok(packageNames.includes("@earendil-works/pi-protocol"));
+	});
+
 	it("rejects senpi package metadata that omits bundled workspace files", () => {
 		// Given
 		const packed = {
@@ -28,6 +44,7 @@ describe("assertSenpiPackedWorkspaceFiles", () => {
 		const packed = {
 			files: [
 				{ path: "package/dist/cli.js" },
+				...clientProtocolFiles(),
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
 				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
@@ -58,6 +75,7 @@ describe("assertSenpiPackedWorkspaceFiles", () => {
 		const packed = {
 			files: [
 				{ path: "package/dist/cli.js" },
+				...clientProtocolFiles(),
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
 				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
@@ -90,6 +108,7 @@ describe("assertSenpiPackedWorkspaceFiles", () => {
 		const packed = {
 			files: [
 				{ path: "package/dist/cli.js" },
+				...clientProtocolFiles(),
 				{ path: "package/npm-shrinkwrap.json" },
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
@@ -120,6 +139,7 @@ describe("assertSenpiPackedWorkspaceFiles", () => {
 		const packed = {
 			files: [
 				{ path: "package/dist/cli.js" },
+				...clientProtocolFiles(),
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
 				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
@@ -146,6 +166,7 @@ describe("assertSenpiPackedWorkspaceFiles", () => {
 		const packed = {
 			files: [
 				{ path: "dist/cli.js" },
+				...clientProtocolFiles(""),
 				{ path: "node_modules/@earendil-works/pi-agent-core/package.json" },
 				{ path: "node_modules/@earendil-works/pi-agent-core/dist/index.js" },
 				{ path: "node_modules/@earendil-works/pi-ai/package.json" },
@@ -171,6 +192,7 @@ describe("assertSenpiPackedWorkspaceFiles", () => {
 		const packed = {
 			files: [
 				{ path: "package/dist/cli.js" },
+				...clientProtocolFiles(),
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
 				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
@@ -194,6 +216,7 @@ describe("assertSenpiPackedWorkspaceFiles", () => {
 		const packed = {
 			files: [
 				{ path: "package/dist/cli.js" },
+				...clientProtocolFiles(),
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
 				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },
@@ -225,6 +248,7 @@ describe("assertSenpiPackedWorkspaceFiles", () => {
 		const packed = {
 			files: [
 				{ path: "package/dist/cli.js" },
+				...clientProtocolFiles(),
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/package.json" },
 				{ path: "package/node_modules/@earendil-works/pi-agent-core/dist/index.js" },
 				{ path: "package/node_modules/@earendil-works/pi-ai/package.json" },

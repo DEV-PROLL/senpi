@@ -39,6 +39,7 @@ import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts"
 import { getAnthropicCompat, isAnthropicApiBaseUrl } from "../utils/prompt-cache-ttl.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
+import { appendRetryAfterMsMarker, extract429RetryAfterMs } from "../utils/retry-hint.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import {
 	applyServerFallbackAbort,
@@ -49,7 +50,7 @@ import {
 import { normalizeToolCallId } from "../utils/tool-call-id.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
 import { demotedToolCallText, demotedToolResultText } from "../utils/unavailable-tool-text.ts";
-
+import { sanitizeAnthropicToolPairs } from "./anthropic-tool-pairs.ts";
 import { resolveCloudflareBaseUrl } from "./cloudflare.ts";
 import { resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
@@ -1143,7 +1144,12 @@ async function* iterateAnthropicEvents(
 
 	for await (const sse of iterateSseMessages(response.body, signal)) {
 		if (sse.event === "error") {
-			throw new Error(sse.data);
+			let errorText = sse.data;
+			const hintMs = extract429RetryAfterMs({ bodyText: sse.data });
+			if (hintMs !== undefined) {
+				errorText = appendRetryAfterMsMarker(errorText, hintMs);
+			}
+			throw new Error(errorText);
 		}
 
 		if (!ANTHROPIC_MESSAGE_EVENTS.has(sse.event ?? "")) {
@@ -1193,7 +1199,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				totalTokens: 0,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
-			stopReason: "stop",
+			stopReason: "pending",
 			timestamp: Date.now(),
 		};
 
@@ -1237,6 +1243,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					options?.interleavedThinking ?? true,
 					shouldUseFineGrainedToolStreamingBeta(model, context),
 					optionsHeaders,
+					options?.fetch,
 					copilotDynamicHeaders,
 					cacheSessionId,
 					options?.env,
@@ -1257,7 +1264,9 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				}
 				params = sanitizeAdaptiveThinkingPayload(model, params, options);
 				params = sanitizeUnsupportedNativeTools(model, params);
-				params = demoteUnavailableToolReferences(params);
+				params = sanitizeAnthropicToolPairs(
+					demoteUnavailableToolReferences(params),
+				) as MessageCreateParamsStreaming;
 				const payloadRequestMetadata = extractPayloadRequestMetadata(params);
 				params = payloadRequestMetadata.params;
 				const requestOptions = {
@@ -1345,7 +1354,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					if (event.content_block.type === "text") {
 						const block: Block = {
 							type: "text",
-							text: "",
+							text: event.content_block.text ?? "",
 							index: event.index,
 						};
 						output.content.push(block);
@@ -1353,8 +1362,8 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					} else if (event.content_block.type === "thinking") {
 						const block: Block = {
 							type: "thinking",
-							thinking: "",
-							thinkingSignature: "",
+							thinking: event.content_block.thinking ?? "",
+							thinkingSignature: event.content_block.signature ?? "",
 							index: event.index,
 						};
 						output.content.push(block);
@@ -1483,6 +1492,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					}
 				} else if (event.type === "message_delta") {
 					if (event.delta.stop_reason) {
+						output.rawStopReason = event.delta.stop_reason;
 						const stopReasonResult = mapStopReason(event.delta.stop_reason, event.delta.stop_details);
 						output.stopReason = stopReasonResult.stopReason;
 						if (stopReasonResult.errorMessage) {
@@ -1531,6 +1541,9 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				applyServerFallbackAbort(output, serverFallbackReceipt);
 			}
 
+			if (output.stopReason === "pending") {
+				throw new Error("Anthropic stream ended without a stop reason");
+			}
 			if (output.stopReason === "aborted" || output.stopReason === "error") {
 				throw new Error(output.errorMessage || "An unknown error occurred");
 			}
@@ -1553,7 +1566,24 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				delete (block as { partialJson?: string }).partialJson;
 			}
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+			let errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+			// When a 429 SDK error carries response headers, extract the server's
+			// retry-after hint and append the canonical marker so the orchestration
+			// layer can recover the full delay.
+			if (error instanceof Error && (error as { status?: unknown }).status === 429) {
+				const sdkHeaders = (error as { headers?: Headers }).headers;
+				if (sdkHeaders instanceof Headers) {
+					const hintMs = extract429RetryAfterMs({
+						status: 429,
+						headers: sdkHeaders,
+						bodyText: errorMessage,
+					});
+					if (hintMs !== undefined) {
+						errorMessage = appendRetryAfterMsMarker(errorMessage, hintMs);
+					}
+				}
+			}
+			output.errorMessage = errorMessage;
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
 		}
@@ -1705,6 +1735,7 @@ function createClient(
 	interleavedThinking: boolean,
 	useFineGrainedToolStreamingBeta: boolean,
 	optionsHeaders?: Record<string, string>,
+	fetch?: typeof globalThis.fetch,
 	dynamicHeaders?: Record<string, string>,
 	sessionId?: string,
 	env?: ProviderEnv,
@@ -1725,6 +1756,7 @@ function createClient(
 			authToken: null,
 			baseURL: resolveCloudflareBaseUrl(model, env),
 			dangerouslyAllowBrowser: true,
+			fetch,
 			defaultHeaders: sanitizeAdaptiveThinkingHeaders(
 				model,
 				mergeHeaders(
@@ -1752,6 +1784,7 @@ function createClient(
 			authToken: apiKey,
 			baseURL: model.baseUrl,
 			dangerouslyAllowBrowser: true,
+			fetch,
 			defaultHeaders: sanitizeAdaptiveThinkingHeaders(
 				model,
 				mergeHeaders(
@@ -1777,6 +1810,7 @@ function createClient(
 			authToken: apiKey,
 			baseURL: model.baseUrl,
 			dangerouslyAllowBrowser: true,
+			fetch,
 			defaultHeaders: sanitizeAdaptiveThinkingHeaders(
 				model,
 				mergeHeaders(
@@ -1804,6 +1838,7 @@ function createClient(
 		authToken: null,
 		baseURL: model.baseUrl,
 		dangerouslyAllowBrowser: true,
+		fetch,
 		defaultHeaders: sanitizeAdaptiveThinkingHeaders(
 			model,
 			mergeHeaders(
@@ -2344,7 +2379,11 @@ function mapStopReason(
 		case "stop_sequence":
 			return { stopReason: "stop" }; // We don't supply stop sequences, so this should never happen
 		case "sensitive": // Content flagged by safety filters (not yet in SDK types)
-			return { stopReason: "error", stopDetails: { type: "sensitive" } };
+			return {
+				stopReason: "error",
+				errorMessage: "Provider stopped with: sensitive",
+				stopDetails: { type: "sensitive" },
+			};
 		default:
 			// Handle unknown stop reasons gracefully (API may add new values)
 			throw new Error(`Unhandled stop reason: ${reason}`);

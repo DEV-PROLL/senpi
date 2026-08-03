@@ -10,6 +10,15 @@ import {
 import { meanAdjacentSimilarity } from "./similarity.ts";
 import type { ToolCallRecord } from "./tracker.ts";
 
+const TARGET_FIELDS = new Map<string, readonly string[]>([
+	["read", ["path"]],
+	["bash_output", ["bash_id"]],
+	["task_output", ["task_id", "name"]],
+	["task_update", ["task_id"]],
+	["task_send", ["to"]],
+	["lsp_diagnostics", ["filePath"]],
+]);
+
 export type LoopGuardDetection =
 	| { readonly kind: "identical"; readonly toolName: string; readonly count: number; readonly fingerprint: string }
 	| {
@@ -28,6 +37,33 @@ export type LoopGuardDetection =
 	  };
 
 export type LoopGuardKind = LoopGuardDetection["kind"];
+
+function targetIdentity(record: ToolCallRecord): string | undefined {
+	const fields = TARGET_FIELDS.get(record.toolName);
+	if (fields === undefined) return undefined;
+	let args: unknown;
+	try {
+		args = JSON.parse(record.argsJson);
+	} catch {
+		return undefined;
+	}
+	if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+	for (const field of fields) {
+		const value: unknown = Reflect.get(args, field);
+		if (typeof value === "string" && value.length > 0) return value;
+	}
+	return undefined;
+}
+
+function hasAllDistinctTargets(records: readonly ToolCallRecord[]): boolean {
+	const identities: string[] = [];
+	for (const record of records) {
+		const identity = targetIdentity(record);
+		if (identity === undefined) return false;
+		identities.push(identity);
+	}
+	return new Set(identities).size === identities.length;
+}
 
 export function detectIdenticalRun(records: readonly ToolCallRecord[]): LoopGuardDetection | undefined {
 	const last = records[records.length - 1];
@@ -50,8 +86,10 @@ export function detectSimilarRun(records: readonly ToolCallRecord[]): LoopGuardD
 		run++;
 	}
 	if (run < SIMILAR_RUN_THRESHOLD) return undefined;
-	const argStrings = records.slice(records.length - run).map((record) => record.argsJson);
+	const runRecords = records.slice(records.length - run);
+	const argStrings = runRecords.map((record) => record.argsJson);
 	if (new Set(argStrings).size === 1) return undefined;
+	if (hasAllDistinctTargets(runRecords)) return undefined;
 	const similarity = meanAdjacentSimilarity(argStrings);
 	if (similarity < SIMILARITY_THRESHOLD) return undefined;
 	return { kind: "similar", toolName: last.toolName, count: run, similarity, fingerprint: last.toolName };

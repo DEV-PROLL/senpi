@@ -36,6 +36,13 @@
 // clarifying question instead of an invented assumption. The Style section's
 // permission-begging ban carves that question out so the two rules cannot
 // collide.
+//
+// 2026-08-03: the Verification section opens with a test-proportionality
+// terminal condition (one focused test at the touched seam; prose, docs, and
+// visual-only work take review + real-surface QA instead of tests). The
+// session corpus showed K3 writing more test files than any other model, and
+// the K2-line guidance prescribes terminal conditions over prohibitions, so
+// the rule names when checking stops instead of forbidding tests.
 
 import type { DynamicPromptCoreContext } from "../../../dynamic-prompt/build.ts";
 import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "../../../dynamic-prompt/build.ts";
@@ -88,7 +95,7 @@ Tier the scope, never the rigor.
 - V2 — single-domain behavioral edits: diagnostics on changed files in parallel, related tests, one execution of the affected runnable entry point when one exists.
 - V3 — multi-file or cross-cutting work: diagnostics on every changed file, related tests, build, manual exercise of user-visible behavior through its real surface.
 
-"Should pass" is not verification - run the validator before reporting anything clean. Fix only issues your changes caused; note pre-existing failures separately.
+One successful verification command ends the check - stop unless it fails. Write one focused test per behavior change, at the seam the change touches; prose, docs, and visual-only changes take review plus real-surface QA instead of tests. "Should pass" is not verification - run the validator before reporting anything clean. Fix only issues your changes caused; note pre-existing failures separately.
 
 ${buildTestDisciplineSection()}
 

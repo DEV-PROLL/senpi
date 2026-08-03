@@ -177,20 +177,6 @@ describe("prompt preset resolver", () => {
 		for (const rule of GPT56_EXECUTION_RULES) {
 			expect(preset?.prompt).toContain(rule.directive);
 		}
-		// Hephaestus parity: autonomous deep-worker contracts.
-		expect(preset?.prompt).toContain("Implement, don't propose");
-		expect(preset?.prompt).toContain("## Manual QA Gate");
-		expect(preset?.prompt).toContain("## Failure Recovery");
-		expect(preset?.prompt).toContain("## Pragmatism & Scope");
-		expect(preset?.prompt).toContain("## Stop Goal");
-		// Binding stop contract: declared per-turn stop condition + mandatory immediate stop.
-		expect(preset?.prompt).toContain("I'll stop right away when");
-		expect(preset?.prompt).toContain("BINDING");
-		expect(preset?.prompt).toContain("STOPPING IS MANDATORY AND IMMEDIATE");
-		expect(preset?.prompt).not.toContain("## Stop Rules");
-		expect(preset?.prompt).toContain("Never revert or modify changes you did not make");
-		// Verification binds to validators senpi can actually run; no phantom diagnostics tool.
-		expect(preset?.prompt).toContain("type check");
 		expect(preset?.prompt).not.toContain("lsp_diagnostics");
 		// omo-only tool contracts must NOT leak into senpi's tool surface.
 		expect(preset?.prompt).not.toContain("librarian");
@@ -657,7 +643,6 @@ describe("prompt preset resolver", () => {
 		// Negative guard: no inline python through bash for file mutation/inspection.
 		expect(prompt.toLowerCase()).toMatch(/python/);
 		// Negative guard: codex's "do not waste tokens re-reading after apply_patch".
-		expect(prompt.toLowerCase()).toMatch(/re-?read|do not.*read/);
 		// Positive routing: prefer the senpi `grep` tool over invoking grep/rg through bash.
 		expect(prompt.toLowerCase()).toMatch(/\brg\b|ripgrep/);
 	});

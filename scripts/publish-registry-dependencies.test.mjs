@@ -15,6 +15,8 @@ const PRIVATE_UPSTREAM_WORKSPACES = [
 const OWNED_REGISTRY_ALIASES = [
 	"@code-yeongyu/senpi-ai",
 	"@code-yeongyu/senpi-agent-core",
+	"@code-yeongyu/senpi-client",
+	"@code-yeongyu/senpi-protocol",
 	"@code-yeongyu/senpi-tui",
 	"@code-yeongyu/senpi-pty",
 	"@code-yeongyu/senpi-codemode",

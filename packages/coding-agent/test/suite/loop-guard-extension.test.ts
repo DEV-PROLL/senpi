@@ -105,6 +105,16 @@ describe("loop-guard extension", () => {
 		expect(harness.sent[0]?.message.content).not.toContain("LOOP GUARD - IDENTICAL TOOL CALLS");
 	});
 
+	it("stays silent for near-identical reads targeting distinct paths", () => {
+		const harness = createLoopGuardHarness();
+		const basePath =
+			"/Users/yeongyu/local-workspaces/senpi/packages/coding-agent/src/core/extensions/builtin/loop-guard";
+		for (const fileName of ["detectors.ts", "notice.ts", "policy.ts", "similarity.ts", "tracker.ts"]) {
+			toolStart(harness.fire, "read", { path: `${basePath}/${fileName}` });
+		}
+		expect(harness.sent).toHaveLength(0);
+	});
+
 	it("uses the distinct cycle prompt for repeating rotations", () => {
 		const harness = createLoopGuardHarness();
 		for (let i = 0; i < 3; i++) {

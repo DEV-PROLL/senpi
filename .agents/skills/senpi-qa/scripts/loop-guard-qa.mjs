@@ -32,6 +32,23 @@ function rawBody(request) {
 	return request.raw ?? JSON.stringify(request.body ?? {});
 }
 
+function hasReminder(request, headline) {
+	const messages = request.body?.messages;
+	if (!Array.isArray(messages)) return false;
+	return messages.some(
+		(message) =>
+			message.role === "user" &&
+			Array.isArray(message.content) &&
+			message.content.some(
+				(part) =>
+					part?.type === "text" &&
+					typeof part.text === "string" &&
+					part.text.startsWith("<system-reminder>") &&
+					(headline === undefined || part.text.includes(headline)),
+			),
+	);
+}
+
 async function drive({ turns, extraArgs = [] }) {
 	const preset = API_PRESETS[API];
 	const box = makeSandbox("loop-guard-qa");
@@ -54,8 +71,7 @@ async function drive({ turns, extraArgs = [] }) {
 
 async function expectReminder(checks, { name, turns, headline, minRequests, extraArgs }) {
 	const { box, server, result } = await drive({ turns, extraArgs });
-	const bodies = server.requests.map(rawBody);
-	const hitIndex = bodies.findIndex((body, index) => index >= 1 && body.includes(headline));
+	const hitIndex = server.requests.findIndex((request, index) => index >= 1 && hasReminder(request, headline));
 	const pass = result.code === 0 && server.requests.length >= minRequests && hitIndex >= 1;
 	checks.ok(
 		`${name}: reminder steered into a later provider request`,
@@ -129,6 +145,48 @@ async function selfTest() {
 		extraArgs: ["--approve"],
 		turns: cycleTurns,
 	});
+
+	{
+		const loopGuardDir = join(
+			process.cwd(),
+			"packages/coding-agent/src/core/extensions/builtin/loop-guard",
+		);
+		const turns = ["detectors.ts", "notice.ts", "policy.ts", "similarity.ts", "tracker.ts"].map((fileName) => ({
+			toolCalls: [{ name: "read", args: { path: join(loopGuardDir, fileName) } }],
+		}));
+		turns.push({ text: "done" });
+		const { box, server, result } = await drive({ extraArgs: ["--approve"], turns });
+		const leaked = server.requests.some((request) => hasReminder(request));
+		const complete = server.requests.length >= turns.length;
+		checks.ok(
+			"distinct read targets: productive fan-out fires no reminder",
+			result.code === 0 && complete && !leaked,
+			`code=${result.code} requests=${server.requests.length} complete=${complete} leaked=${leaked}`,
+		);
+		if (evidenceSlug !== undefined) {
+			const dir = evidenceDir(evidenceSlug);
+			writeFileSync(
+				join(dir, "distinct-read-targets.json"),
+				JSON.stringify(
+					{
+						requestCount: server.requests.length,
+						exitCode: result.code,
+						complete,
+						leaked,
+						requestBodies: server.requests.map((request, index) => ({
+							index,
+							url: request.url,
+							raw: rawBody(request),
+						})),
+					},
+					null,
+					2,
+				),
+			);
+		}
+		await server.stop();
+		box.cleanup();
+	}
 
 	{
 		const { box, server, result } = await drive({
