@@ -3,15 +3,10 @@ import {
 	detectCycle,
 	detectIdenticalRun,
 	detectLoop,
-	detectSimilarRun,
 	NoticeGate,
 } from "../../src/core/extensions/builtin/loop-guard/detectors.ts";
 import { buildLoopGuardReminder } from "../../src/core/extensions/builtin/loop-guard/notice.ts";
-import {
-	IDENTICAL_RUN_THRESHOLD,
-	SIMILAR_RUN_THRESHOLD,
-	SIMILARITY_THRESHOLD,
-} from "../../src/core/extensions/builtin/loop-guard/policy.ts";
+import { IDENTICAL_RUN_THRESHOLD, SIMILARITY_THRESHOLD } from "../../src/core/extensions/builtin/loop-guard/policy.ts";
 import {
 	bigramCounts,
 	diceSimilarity,
@@ -91,42 +86,6 @@ describe("detectIdenticalRun", () => {
 			["read", { path: "a.ts", limit: 50 }],
 		);
 		expect(detectIdenticalRun(records)?.count).toBe(3);
-	});
-});
-
-describe("detectSimilarRun", () => {
-	it("returns undefined for productive runs with distinct args", () => {
-		const records = recs(
-			["bash", { command: "vitest run test/a.test.ts" }],
-			["bash", { command: "git status --short" }],
-			["bash", { command: "npm run check" }],
-			["bash", { command: "rg -n 'loopGuard' packages" }],
-			["bash", { command: "node scripts/build.mjs --watch" }],
-		);
-		expect(detectSimilarRun(records)).toBeUndefined();
-	});
-
-	it("returns undefined while the run is all-identical (identical detector owns it)", () => {
-		const records = recs(
-			...Array.from({ length: SIMILAR_RUN_THRESHOLD }, () => ["read", { path: "a.ts" }] as [string, unknown]),
-		);
-		expect(detectSimilarRun(records)).toBeUndefined();
-	});
-
-	it("fires for near-identical pagination runs at the threshold", () => {
-		const records = recs(
-			["read", { path: "src/app.ts", offset: 1, limit: 200 }],
-			["read", { path: "src/app.ts", offset: 201, limit: 200 }],
-			["read", { path: "src/app.ts", offset: 401, limit: 200 }],
-			["read", { path: "src/app.ts", offset: 601, limit: 200 }],
-			["read", { path: "src/app.ts", offset: 801, limit: 200 }],
-		);
-		const detection = detectSimilarRun(records);
-		expect(detection?.kind).toBe("similar");
-		expect(detection?.count).toBe(SIMILAR_RUN_THRESHOLD);
-		if (detection?.kind === "similar") {
-			expect(detection.similarity).toBeGreaterThanOrEqual(SIMILARITY_THRESHOLD);
-		}
 	});
 });
 

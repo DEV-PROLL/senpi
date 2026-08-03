@@ -1,5 +1,32 @@
 # loop-guard changes
 
+## loop-guard: suppress distinct-target similarity false positives (2026-08-03)
+
+- `similar` detection now recognizes stable target fields for `read`,
+  `bash_output`, `task_output`, `task_update`, `task_send`, and
+  `lsp_diagnostics`. When every call in the trailing same-tool run exposes a
+  target and all targets are distinct, the run is productive fan-out and the
+  similar warning stays silent. Missing or malformed target data falls through
+  to the existing bigram-Dice detector.
+- Same-target behavior is unchanged: pagination of one `read.path`, polling one
+  task or terminal session, byte-identical calls, and repeating cycles continue
+  to warn at the existing thresholds.
+- Why: a scan of local senpi sessions found the false positives concentrated in
+  the `similar` detector, especially long-common-prefix paths and IDs. The
+  `identical` and `cycle` detectors were precise, so broad threshold tuning would
+  weaken useful protections instead of fixing target identity.
+- This cannot be implemented as a separate public extension: the builtin owns
+  the private tracker/detector state and steers its reminder during
+  `tool_execution_start`; another extension cannot override that policy or
+  retract an already-steered custom message.
+- Tests: distinct-target RED→GREEN coverage moved into the focused
+  `loop-guard-similar-detector.test.ts` suite to keep test modules below the
+  250-pure-LOC ceiling. Extension wiring coverage proves distinct reads produce
+  no message while existing same-target, identical, and cycle cases stay green.
+- Expected merge conflict zones: LOW in `detectors.ts` (one target-identity
+  predicate in the similar detector); LOW in the loop-guard test suites; NONE in
+  public extension APIs, tracker signatures, policy thresholds, or renderer.
+
 ## loop-guard: tool-call loop detection with steered reminders (2026-07-31)
 
 - New builtin extension `loop-guard` that observes the pure tool-call stream
