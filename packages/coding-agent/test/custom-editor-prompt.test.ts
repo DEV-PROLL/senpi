@@ -24,6 +24,7 @@ describe("CustomEditor prompt marker", () => {
 
 		const rendered = editor.render(12);
 
+		expect(editor.getPaddingX()).toBe(0);
 		expect(rendered[1]?.startsWith(`${accent("❯")} abcdefgh`)).toBe(true);
 		expect(rendered[2]).toMatch(/^ {2}ij/);
 		expect(rendered.map((line) => visibleWidth(line))).toEqual([12, 12, 12, 12]);

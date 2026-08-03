@@ -7,6 +7,7 @@
 - Reserved a two-column prompt gutter in the coding-agent `CustomEditor`.
 - Rendered an accent-styled `❯` on the first editable row and aligned wrapped rows beneath the text column.
 - Preserved that gutter when session/settings reloads reapply an `editorPaddingX` value below two.
+- Kept `getPaddingX()` reporting the configured value so existing editor construction and extension handoff contracts remain stable.
 - Kept sub-five-column rendering on the previous no-marker fallback to avoid narrow-terminal overflow.
 
 ### Why this lives in the fork
