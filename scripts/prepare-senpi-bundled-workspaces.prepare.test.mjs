@@ -186,8 +186,8 @@ describe("prepareSenpiBundledWorkspaces", () => {
 			"@code-yeongyu/senpi-codemode": "^2026.7.22",
 			"@earendil-works/pi-agent-core": "npm:@code-yeongyu/senpi-agent-core@^2026.7.22",
 			"@earendil-works/pi-ai": "npm:@code-yeongyu/senpi-ai@^2026.7.22",
-			"@earendil-works/pi-client": "^2026.7.22",
-			"@earendil-works/pi-protocol": "^2026.7.22",
+			"@earendil-works/pi-client": "npm:@code-yeongyu/senpi-client@^2026.7.22",
+			"@earendil-works/pi-protocol": "npm:@code-yeongyu/senpi-protocol@^2026.7.22",
 			"@earendil-works/pi-pty": "npm:@code-yeongyu/senpi-pty@^2026.7.22",
 			"@earendil-works/pi-tui": "npm:@code-yeongyu/senpi-tui@^2026.7.22",
 		});
