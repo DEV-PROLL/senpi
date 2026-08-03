@@ -106,7 +106,7 @@ export interface TruncationResult {
 }
 
 /**
- * Configuration knobs resolved from env vars and package.json.
+ * Configuration knobs resolved from environment variables.
  */
 export interface PiRulesConfig {
 	disabled: boolean;

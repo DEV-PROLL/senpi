@@ -23,6 +23,24 @@ function formatRule(rule: TruncatedRule): string {
 	return `Instructions from: ${rule.path}\n${rule.body}`;
 }
 
+function formatWithinResultBudget(
+	rules: ReadonlyArray<LoadedRule>,
+	options: FormatOptions,
+	render: (truncatedRules: ReadonlyArray<TruncatedRule>) => string,
+): string {
+	let bodyBudget = options.maxResultChars;
+	while (bodyBudget > 0) {
+		const truncatedRules = truncateRules(rules, { ...options, maxResultChars: bodyBudget });
+		if (truncatedRules.length === 0) return "";
+
+		const block = render(truncatedRules);
+		const overflow = block.length - options.maxResultChars;
+		if (overflow <= 0) return block;
+		bodyBudget = Math.max(0, bodyBudget - overflow);
+	}
+	return "";
+}
+
 function truncateRules(rules: ReadonlyArray<LoadedRule>, options: FormatOptions): TruncatedRule[] {
 	const perRuleTruncated = rules.map((rule) => ({
 		path: rule.path,
@@ -57,11 +75,13 @@ export function formatStaticBlock(rules: ReadonlyArray<LoadedRule>, options: For
 		return "";
 	}
 
-	const body = neutralizeEnvelopeMarkers(
-		`${PROJECT_RULES_HEADING}\n${truncateRules(rules, options).map(formatRule).join("\n\n")}`,
-	);
-	const envelope = `${PROJECT_RULES_START_MARKER}\n${body}\n${PROJECT_RULES_END_MARKER}`;
-	return `\n\n${PROJECT_RULES_REGION_START_MARKER}\n${envelope}\n${PROJECT_RULES_REGION_END_MARKER}`;
+	return formatWithinResultBudget(rules, options, (truncatedRules) => {
+		const body = neutralizeEnvelopeMarkers(
+			`${PROJECT_RULES_HEADING}\n${truncatedRules.map(formatRule).join("\n\n")}`,
+		);
+		const envelope = `${PROJECT_RULES_START_MARKER}\n${body}\n${PROJECT_RULES_END_MARKER}`;
+		return `\n\n${PROJECT_RULES_REGION_START_MARKER}\n${envelope}\n${PROJECT_RULES_REGION_END_MARKER}`;
+	});
 }
 
 /**
@@ -85,7 +105,12 @@ export function formatDynamicBlock(
 		return "";
 	}
 
-	return `\n\nAdditional project instructions matched for ${targetRelativePath}:\n\n${truncateRules(rules, options)
-		.map(formatRule)
-		.join("\n\n")}`;
+	return formatWithinResultBudget(
+		rules,
+		options,
+		(truncatedRules) =>
+			`\n\nAdditional project instructions matched for ${targetRelativePath}:\n\n${truncatedRules
+				.map(formatRule)
+				.join("\n\n")}`,
+	);
 }

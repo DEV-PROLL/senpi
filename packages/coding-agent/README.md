@@ -720,7 +720,15 @@ pi --thinking high "Solve this complex problem"
 | `PI_SKIP_VERSION_CHECK` | Skip the Pi version update check at startup. This prevents the `pi.dev` latest-version request |
 | `PI_TELEMETRY` | Override install/update telemetry and provider attribution headers. Use `1`/`true`/`yes` to enable or `0`/`false`/`no` to disable. This does not disable update checks |
 | `PI_CACHE_RETENTION` | Set to `long` for extended prompt cache (Anthropic: 1h, OpenAI: 24h) |
+| `PI_RULES_DISABLED` | Disable the built-in rules extension when set to `1`, `true`, `yes`, or `on` (case-insensitive) |
+| `PI_RULES_MAX_RULE_CHARS` | Set the positive-integer character cap for each formatted rule payload (default: `12000`) |
+| `PI_RULES_MAX_RESULT_CHARS` | Set the positive-integer character cap for each complete static or dynamic rules block (default: `40000`) |
 | `VISUAL`, `EDITOR` | Fallback external editor for Ctrl+G when `externalEditor` is unset; defaults to Notepad on Windows and `nano` elsewhere |
+
+Rules limits are resolved when the built-in extension is registered. Empty,
+zero, negative, fractional, partially numeric, scientific, hexadecimal,
+signed, non-ASCII-digit, and unsafe-integer values preserve the documented
+defaults.
 
 Commands run by the LLM-callable bash tool also receive current session metadata:
 
