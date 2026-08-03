@@ -4,6 +4,8 @@ import { join } from "node:path";
 export const ownedRegistryAliases = new Map([
 	["@earendil-works/pi-ai", "@code-yeongyu/senpi-ai"],
 	["@earendil-works/pi-agent-core", "@code-yeongyu/senpi-agent-core"],
+	["@earendil-works/pi-client", "@code-yeongyu/senpi-client"],
+	["@earendil-works/pi-protocol", "@code-yeongyu/senpi-protocol"],
 	["@earendil-works/pi-tui", "@code-yeongyu/senpi-tui"],
 	["@earendil-works/pi-pty", "@code-yeongyu/senpi-pty"],
 ]);
