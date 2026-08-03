@@ -1,11 +1,16 @@
 import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
 
+function promptPadding(padding: number | undefined): number {
+	return Number.isFinite(padding) ? Math.max(2, Math.floor(padding ?? 0)) : 2;
+}
+
 /**
  * Custom editor that handles app-level keybindings for coding-agent.
  */
 export class CustomEditor extends Editor {
 	private keybindings: KeybindingsManager;
+	private promptPaddingX: number;
 	public actionHandlers: Map<AppKeybinding, () => void> = new Map();
 
 	// Special handlers that can be dynamically replaced
@@ -16,8 +21,23 @@ export class CustomEditor extends Editor {
 	public onExtensionShortcut?: (data: string) => boolean;
 
 	constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, options?: EditorOptions) {
-		super(tui, theme, options);
+		const promptPaddingX = promptPadding(options?.paddingX);
+		super(tui, theme, { ...options, paddingX: promptPaddingX });
 		this.keybindings = keybindings;
+		this.promptPaddingX = promptPaddingX;
+	}
+
+	override setPaddingX(padding: number): void {
+		this.promptPaddingX = promptPadding(padding);
+		super.setPaddingX(this.promptPaddingX);
+	}
+
+	override render(width: number): string[] {
+		const lines = super.render(width);
+		if (width < 5) return lines;
+		return lines.map((line, index) =>
+			index === 1 ? `${this.borderColor("❯")} ${line.slice(this.promptPaddingX)}` : line,
+		);
 	}
 
 	/**
