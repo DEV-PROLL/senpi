@@ -1,5 +1,26 @@
 # changes
 
+## Durable compaction telemetry correlation (2026-08-03)
+
+### What changed
+
+- `agent-session.ts` retains superseded compaction attempt IDs until their stale terminal event arrives, rather than evicting the oldest ID after 64 supersessions.
+- A `compaction_end` event without a request ID is now logged as an uncorrelated skipped/no-attempt decision and cannot consume an active same-reason attempt. Request-bearing terminals still require an exact attempt-ID match.
+- `test/session-log-routes.test.ts` covers an early stale accepted terminal after more than 64 supersessions and no-ID retry exhaustion while another overflow attempt remains active.
+
+### Why
+
+- FIFO tombstone eviction allowed a late accepted terminal from an old attempt to reappear as a committed compaction after enough supersessions.
+- Reason-only fallback correlation let retry exhaustion, which starts no compaction and carries no request ID, falsely mark an unrelated active overflow attempt as failed/compact.
+
+### Why this cannot be expressed externally
+
+- Attempt ownership and session-log emission meet inside `AgentSession._logSessionEvent()` before external telemetry consumers receive the content-free lifecycle record.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` compaction start/end logging correlation and `test/session-log-routes.test.ts` lifecycle telemetry coverage.
+
 ## Prefer configured client fallback chains over server substitutions (2026-08-03)
 
 ### What changed

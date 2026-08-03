@@ -1313,6 +1313,8 @@ The retry budget, abortable retry sleep, provider continuation, and active model
 
 - `core/session-log.ts`: new rotating content-free JSONL logger writing `<agentDir>/logs/session.log` (5MB rotate, allow-listed scalar fields, secret redaction, `SENPI_SESSION_DEBUG=1` stderr mirror), following the existing `retry-fallback/log.ts` pattern.
 - `core/agent-session.ts`: mirrors stuck-prone lifecycle transitions into `session.log`: `compaction_decision` on every terminal `compaction_end` (reason/accepted/aborted/willRetry/rejectionCause/error), `provider_error` on assistant `message_end` errors classified as stall/timeout/error, `queue_enqueue` on native steer/followUp queueing, and `prompt_rejected` when a `RequiredCompactionError` rejects prompt admission.
+- Compaction lifecycle records now correlate start/terminal events with propagated UUID request IDs; classify committed/rejected/failed/skipped/aborted/superseded outcomes; record content-free before/after token estimates; preserve retry exhaustion as a skipped no-attempt action; and ignore stale ends from superseded same-reason attempts instead of attributing them to a newer compaction.
+- `test/session-log-routes.test.ts` and the compaction lifecycle suites cover unmatched accepted ends, retry exhaustion, rollback snapshots, extension feedback failures, supersession, same-reason stale ends, consecutive compactions, and start/end request-ID parity without real provider calls.
 - `modes/interactive/interactive-mode.ts`: logs `compaction_queue_enqueue` when input is parked during compaction, `compaction_queue_deferred` when a failed compaction defers queued input to the native queues, and `clipboard_error` on clipboard paste failures.
 
 ### Why extension system couldn't handle this
