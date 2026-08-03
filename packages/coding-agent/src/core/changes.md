@@ -1,5 +1,42 @@
 # changes
 
+## Resume queued messages after non-auto compaction; retain admission-rejected custom messages (2026-08-03)
+
+### What changed
+
+- `agent-session.ts` gained `_resumeQueuedMessagesAfterCompaction()`, mirroring
+  `_runAutoCompaction`'s accepted-path recovery, and calls it on the success
+  paths of `applyCompaction()`, the extension `compact` context action, and
+  manual `compact()`.
+- `sendCustomMessage()`'s non-streaming `triggerTurn` path now retains the
+  message in the matching agent-level queue (`followUp`/`steer`) before
+  rethrowing when provider admission (`_enforceCompactionBeforeProvider` /
+  `_enforceFinalProviderAdmission`) rejects, mirroring `sendUserMessage`'s
+  documented retention contract.
+
+### Why
+
+- A custom `triggerTurn` message sent while a non-auto compaction owned the
+  session (extension feedback stage via `beginCompaction`, extension `compact`
+  action, manual `/compact`) was parked in the agent-level queues without a
+  turn and nothing resumed it afterwards; an admission rejection dropped the
+  message entirely because the fire-and-forget extension `sendMessage` action
+  swallows the rejection. Hidden goal continuations were the primary victim:
+  their single-flight latch clears only on `agent_start`, so the goal silently
+  idled at "Pursuing goal (...)" until manual user input.
+
+### Why this cannot be expressed externally
+
+- Both fixes depend on internal compaction lifecycle ownership, agent-level
+  queue state, and the private continuation scheduler; no extension hook can
+  observe or reschedule them.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` around `compact()` / `applyCompaction()` / the
+  extension `compact` action finally blocks, `sendCustomMessage()`'s
+  triggerTurn branch, and `_scheduleContinuationAfterCurrentEvent()`.
+
 ## Backfill: eval bridge deadlock prevention (2026-08-01)
 
 ### What changed
