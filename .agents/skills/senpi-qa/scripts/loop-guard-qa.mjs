@@ -157,10 +157,11 @@ async function selfTest() {
 		turns.push({ text: "done" });
 		const { box, server, result } = await drive({ extraArgs: ["--approve"], turns });
 		const leaked = server.requests.some((request) => hasReminder(request));
+		const complete = server.requests.length >= turns.length;
 		checks.ok(
 			"distinct read targets: productive fan-out fires no reminder",
-			result.code === 0 && !leaked,
-			`code=${result.code} requests=${server.requests.length} leaked=${leaked}`,
+			result.code === 0 && complete && !leaked,
+			`code=${result.code} requests=${server.requests.length} complete=${complete} leaked=${leaked}`,
 		);
 		if (evidenceSlug !== undefined) {
 			const dir = evidenceDir(evidenceSlug);
@@ -170,6 +171,7 @@ async function selfTest() {
 					{
 						requestCount: server.requests.length,
 						exitCode: result.code,
+						complete,
 						leaked,
 						requestBodies: server.requests.map((request, index) => ({
 							index,
