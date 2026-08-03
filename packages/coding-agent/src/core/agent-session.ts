@@ -3059,8 +3059,21 @@ export class AgentSession {
 					this.agent.steer(appMessage);
 				}
 			} else if (options?.triggerTurn) {
-				await this._enforceCompactionBeforeProvider(this._findLastAssistantMessage(), false, "pre_prompt");
-				await this._enforceFinalProviderAdmission([appMessage]);
+				try {
+					await this._enforceCompactionBeforeProvider(this._findLastAssistantMessage(), false, "pre_prompt");
+					await this._enforceFinalProviderAdmission([appMessage]);
+				} catch (error) {
+					// Mirror sendUserMessage's retention contract: an admission
+					// rejection must retain the message for later delivery instead
+					// of silently dropping it (the fire-and-forget extension action
+					// swallows this rejection).
+					if (options.deliverAs === "followUp") {
+						this.agent.followUp(appMessage);
+					} else {
+						this.agent.steer(appMessage);
+					}
+					throw error;
+				}
 				await this._promptAgent(appMessage);
 			} else {
 				this.agent.state.messages.push(appMessage);
@@ -3795,6 +3808,7 @@ export class AgentSession {
 			}
 			this._releasePendingCompactionAdmission(admission, outcome);
 			if (disconnected && !this.isCompacting) this._reconnectToAgent();
+			if (outcome === "completed") this._resumeQueuedMessagesAfterCompaction();
 		}
 	}
 
@@ -3829,6 +3843,7 @@ export class AgentSession {
 			if (!execution.accepted) {
 				return { applied: false, reason: "rejected" };
 			}
+			this._resumeQueuedMessagesAfterCompaction();
 			return { applied: true, reason: "ok" };
 		} catch (error) {
 			if (!compactionExecutionOwnsTerminalTransition(error)) {
@@ -4685,6 +4700,19 @@ export class AgentSession {
 		}
 	}
 
+	/**
+	 * Mirror _runAutoCompaction's post-success recovery for non-auto compaction
+	 * owners (manual, extension action, extension apply): a custom triggerTurn
+	 * message sent while the compaction was running is parked in the agent-level
+	 * queues without starting a turn, so a settled compaction must deliver it or
+	 * hidden continuations (e.g. goal) wedge until manual user input.
+	 */
+	private _resumeQueuedMessagesAfterCompaction(): void {
+		if (this.pendingMessageCount > 0 || this.agent.hasQueuedMessages()) {
+			this._scheduleContinuationAfterCurrentEvent();
+		}
+	}
+
 	private _scheduleContinuationAfterCurrentEvent(
 		options: AgentContinuationOptions = {},
 		retryContinuation = false,
@@ -5124,6 +5152,7 @@ export class AgentSession {
 					const controller = admission.controller;
 					void (async () => {
 						let outcome: "completed" | "failed" | "aborted" = "failed";
+						let compactionCompleted = false;
 						let disconnected = false;
 
 						try {
@@ -5140,6 +5169,7 @@ export class AgentSession {
 							});
 							if (execution.accepted) {
 								outcome = "completed";
+								compactionCompleted = true;
 								options?.onComplete?.(execution.result);
 							} else {
 								outcome = "failed";
@@ -5171,6 +5201,9 @@ export class AgentSession {
 							}
 							this._releasePendingCompactionAdmission(admission, outcome);
 							if (disconnected && !this.isCompacting) this._reconnectToAgent();
+							// A throwing onComplete consumer overwrites outcome in the catch
+							// block, so recovery keys off whether compaction itself succeeded.
+							if (compactionCompleted) this._resumeQueuedMessagesAfterCompaction();
 						}
 					})();
 				},
