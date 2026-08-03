@@ -1,5 +1,37 @@
 # TUI delta rendering fork changes
 
+## 2026-07-31: atomic visible-cursor frames for IME and animations
+
+### What changed
+
+- Cursor restoration and visibility bytes now stay inside each synchronized
+  render frame instead of being written after `FRAME_END`.
+- The editor stops drawing its inverse-video fake cursor when the hardware
+  cursor is visible; it still emits `CURSOR_MARKER` for IME placement.
+- The renderer also removes a colocated inverse-video cursor after
+  `CURSOR_MARKER`, covering focused single-line `Input` consumers and both
+  inverse-off (`CSI 27 m`) and full-reset (`CSI 0 m`) terminators without
+  discarding full-reset semantics.
+- Runtime cursor-mode toggles defer visibility changes to the replacement
+  frame, and shutdown no longer blanks content beneath a hardware cursor.
+
+### Why
+
+- With `showHardwareCursor: true`, animated Working updates briefly published
+  the real cursor on the loader row before a second write returned it to the
+  editor, producing rapid flicker.
+- The visible hardware cursor and fake cursor were both drawn at the editor
+  insertion point, making Korean IME composition look duplicated. The same
+  ownership conflict affected search, selector, login, and extension inputs.
+- This cannot be implemented as an extension: cursor-marker extraction,
+  synchronized-frame boundaries, and final ANSI cursor writes are renderer
+  invariants below the extension API.
+
+### Expected merge conflict zones
+
+- HIGH: `tui.ts` synchronized render exits and cursor positioning.
+- LOW: `components/editor.ts` cursor rendering.
+
 ## 2026-07-31: memoized line normalization and viewport-bounded rendering by default
 
 ### What changed
