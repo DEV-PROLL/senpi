@@ -108,12 +108,12 @@ These are part of OMO's opencode harness shape and are intentionally **not** in 
 - **Hashline / hash-anchored edit tool** — senpi stays with pi's standard `edit` / `multiedit` / `apply_patch`. `pi-comment-checker` covers the post-edit validation slot OMO uses Hashline for, just without `LINE#ID` content-hash identifiers.
 - **Skill system** and **skill-embedded MCPs** — skills as a first-class concept (`SKILL.md`, scoped per-skill MCP servers) do not exist in senpi.
 - **Prometheus interview-mode planner** and the **Ralph Loop / `/ulw-loop`** self-referential loop.
-- **`/init-deep`** — there is no in-tree generator. Generate the hierarchical `AGENTS.md` tree manually (or with a normal agent prompt), then install `pi-nested-agents-md` so the agent actually reads them.
+- **`/init-deep`** — there is no in-tree generator. Generate the hierarchical `AGENTS.md` tree manually (or with a normal agent prompt); the builtin `nested-agents-md` extension will read the resulting files.
 - **Built-in `doctor` command**, **Claude Code hook/command/skill/plugin compatibility layer**, and the **agent category router** (`visual-engineering` / `deep` / `quick` / `ultrabrain`).
 
 ## Want more? Try the pi-extensions ecosystem
 
-senpi ships a fixed set of builtin extensions and stops there. The [`code-yeongyu/pi-*`](https://github.com/code-yeongyu?tab=repositories&q=pi-) GitHub repos contain the full extension ecosystem: some packages are vendored into senpi as builtins, while the rest can be installed on top when you want extra capabilities like LSP, AST-grep, goal tracking, web search/fetch, or rule loading.
+senpi ships a fixed set of builtin extensions and stops there. The [`code-yeongyu/pi-*`](https://github.com/code-yeongyu?tab=repositories&q=pi-) GitHub repos contain the full extension ecosystem: some packages are vendored into senpi as builtins, while the rest can be installed on top when you want extra capabilities such as LSP or AST-grep.
 
 ### Installable extensions
 
@@ -129,17 +129,12 @@ These [`code-yeongyu/pi-*`](https://github.com/code-yeongyu?tab=repositories&q=p
 | [`pi-ast-grep`](https://github.com/code-yeongyu/pi-ast-grep) | AST-aware code search/replace across 25 languages. Auto-downloads `sg` on first use. |
 | [`pi-comment-checker`](https://github.com/code-yeongyu/pi-comment-checker) | Runs comment-quality checks after file-editing tools and shows warnings in the TUI. |
 | [`pi-cua-integration`](https://github.com/code-yeongyu/pi-cua-integration) | Computer-use action wiring for desktop/browser interaction surfaces. |
-| [`pi-goal`](https://github.com/code-yeongyu/pi-goal) | Persistent goal tracking with Codex-style goal tools, TUI footer, and continuation prompts. |
 | [`pi-google-code-execution`](https://github.com/code-yeongyu/pi-google-code-execution) | Google native code execution. |
 | [`pi-google-google-search`](https://github.com/code-yeongyu/pi-google-google-search) | Google Search grounding. |
 | [`pi-google-url-context`](https://github.com/code-yeongyu/pi-google-url-context) | Google URL grounding. |
 | [`pi-lsp-client`](https://github.com/code-yeongyu/pi-lsp-client) | LSP integration: `lsp_rename`, `lsp_goto_definition`, `lsp_find_references`, `lsp_diagnostics`, plus a `/lsp` inspector. |
-| [`pi-nested-agents-md`](https://github.com/code-yeongyu/pi-nested-agents-md) | Auto-injects nearby `AGENTS.md` files when the agent reads from a nested directory. |
 | [`pi-openai-api-parallel-tool-calls`](https://github.com/code-yeongyu/pi-openai-api-parallel-tool-calls) | OpenAI `parallel_tool_calls` payload support. |
 | [`pi-openai-code-interpreter`](https://github.com/code-yeongyu/pi-openai-code-interpreter) | OpenAI Code Interpreter. |
-| [`pi-rules`](https://github.com/code-yeongyu/pi-rules) | Auto-discovers rule files from `.sisyphus/rules/`, `.claude/rules/`, `.cursor/rules/`, `.github/instructions/`, `AGENTS.md`, and `CLAUDE.md`. |
-| [`pi-webfetch`](https://github.com/code-yeongyu/pi-webfetch) | `web_fetch` tool: URL content as markdown, plain text, or HTML with bounded time and size. |
-| [`pi-websearch`](https://github.com/code-yeongyu/pi-websearch) | Provider-backed web search with config-gated activation, TUI status, and source-aware results. |
 
 Install any of them with:
 
@@ -160,10 +155,15 @@ You do **not** need to install these packages for normal senpi use; their functi
 | [`pi-anthropic-web-search`](https://github.com/code-yeongyu/pi-anthropic-web-search) | `anthropic-web-search` | Anthropic-native web search support. |
 | [`pi-apply-patch`](https://github.com/code-yeongyu/pi-apply-patch) | `gpt-apply-patch` | Codex-style `apply_patch` tool for GPT-family runs. |
 | [`pi-bash-timeout`](https://github.com/code-yeongyu/pi-bash-timeout) | `bash-timeout` | Bash timeout defaults, max timeout enforcement, and prompt policy. |
+| [`pi-goal`](https://github.com/code-yeongyu/pi-goal) | `goal` | Persistent goal tracking, TUI status, and continuation prompts. |
+| [`pi-nested-agents-md`](https://github.com/code-yeongyu/pi-nested-agents-md) | `nested-agents-md` | Auto-injects nearby `AGENTS.md` files for nested directories. |
 | [`pi-openai-web-search`](https://github.com/code-yeongyu/pi-openai-web-search) | `openai-web-search` | OpenAI Responses native web search. |
+| [`pi-rules`](https://github.com/code-yeongyu/pi-rules) | `rules` | Discovers project and user rule files, including `AGENTS.md` and `CLAUDE.md`. |
 | [`pi-todotools`](https://github.com/code-yeongyu/pi-todotools) | `todowrite` | `todowrite` / `todoread`, todo sidebar state, workflow prompt guidance, and continuation follow-ups. |
+| [`pi-webfetch`](https://github.com/code-yeongyu/pi-webfetch) | `webfetch` | Fetches URL content as markdown, text, or HTML with bounded time and size. |
+| [`pi-websearch`](https://github.com/code-yeongyu/pi-websearch) | `websearch` | Provider-backed web search with config-gated activation and source-aware results. |
 
-Other builtins such as `permission-system`, `prompt-preset`, `anthropic-bash`, `service-tier`, `tool-pair-guard`, `compaction`, `history-search`, `session-observer`, `websearch`, `webfetch`, `nested-agents-md`, `rules`, and `goal` are senpi-owned builtin extensions, not installable sibling packages.
+Other builtins such as `permission-system`, `prompt-preset`, `anthropic-bash`, `service-tier`, `tool-pair-guard`, `compaction`, `history-search`, and `session-observer` are senpi-owned builtin extensions without installable sibling packages.
 
 ## Why "senpi"
 
