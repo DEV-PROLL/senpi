@@ -21,6 +21,8 @@ vi.mock("@earendil-works/pi-ai/compat", async (importOriginal) => {
 				const message = (await completeMock(model, context, options)) as AssistantMessage;
 				if (message.stopReason === "error" || message.stopReason === "aborted") {
 					output.push({ type: "error", reason: message.stopReason, error: message });
+				} else if (message.stopReason === "pending") {
+					throw new Error("complete() returned a pending assistant message");
 				} else {
 					output.push({ type: "done", reason: message.stopReason, message });
 				}
@@ -258,6 +260,7 @@ function createExtensionContext(overrides: Partial<ExtensionContext>): Extension
 		mode: "print",
 		ui: {} as ExtensionContext["ui"],
 		cwd: process.cwd(),
+		agentDir: "/tmp/senpi-test-agent",
 		isProjectTrusted: () => true,
 		sessionManager: Object.assign(Object.create(null), {
 			getEntries: () => [],
@@ -281,6 +284,7 @@ function createExtensionContext(overrides: Partial<ExtensionContext>): Extension
 		endCompaction: vi.fn(),
 		getSystemPrompt: () => "",
 		...overrides,
+		scopedModels: overrides.scopedModels ?? [],
 		sessionSettings: overrides.sessionSettings ?? createInMemoryExtensionSessionSettings(),
 	};
 }

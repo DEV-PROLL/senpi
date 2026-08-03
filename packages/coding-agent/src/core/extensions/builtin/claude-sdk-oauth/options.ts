@@ -9,12 +9,16 @@ import {
 	PROJECT_RULES_REGION_START_MARKER,
 	PROJECT_RULES_START_MARKER,
 } from "../rules/rules/constants.ts";
+import { presetAppendDeprecationGuidance } from "./guidance.ts";
 import type { EffortLevel, Options, SettingSource, ThinkingConfig } from "./sdk-boundary.ts";
 import {
 	type ClaudeSdkOauthProviderSettings,
+	type ClaudeSdkOauthSystemPromptMode,
 	type ClaudeSdkOauthTokenInjection,
 	loadClaudeSdkOauthProviderSettingsFromDisk,
+	resolveSystemPromptMode,
 } from "./settings.ts";
+import { loadOverrideSystemPrompt, resolveCustomSystemPrompt } from "./system-prompt.ts";
 import { BUILTIN_SDK_TOOLS, canUseTool, HOST_TOOL_DENIAL_HOOKS } from "./tools.ts";
 
 export type ClaudeSdkOauthAuthLane = ClaudeSdkOauthTokenInjection;
@@ -28,6 +32,8 @@ export interface ClaudeSdkOauthQueryOptionsInput {
 	readonly authLane?: ClaudeSdkOauthAuthLane;
 	readonly tools?: readonly string[];
 	readonly pathToClaudeCodeExecutable?: string;
+	readonly sessionId?: string;
+	readonly onGuidance?: (text: string) => void;
 }
 
 const ADAPTIVE_THINKING_MODEL_MARKERS = [
@@ -202,25 +208,43 @@ function isProjectRulesEnvelope(region: string): boolean {
 
 function resolveSettingSources(
 	providerSettings: ClaudeSdkOauthProviderSettings,
-	appendSystemPrompt: boolean,
+	mode: ClaudeSdkOauthSystemPromptMode,
 	authLane: ClaudeSdkOauthAuthLane,
 ): SettingSource[] {
-	if (authLane !== "ambient") return [];
-	return providerSettings.settingSources ?? (appendSystemPrompt ? [] : ["user", "project"]);
+	if (providerSettings.settingSources !== undefined) return [...providerSettings.settingSources];
+	if (mode !== "preset-append" || authLane !== "ambient") return [];
+	return ["user", "project"];
 }
 
 export function buildClaudeSdkOauthQueryOptions(input: ClaudeSdkOauthQueryOptionsInput): Options {
 	const cwd = input.cwd ?? process.cwd();
 	const providerSettings = input.providerSettings ?? loadClaudeSdkOauthProviderSettingsFromDisk(cwd);
 	const appendSystemPrompt = providerSettings.appendSystemPrompt !== false;
+	const resolvedMode = resolveSystemPromptMode(providerSettings);
+	const mode = resolvedMode.mode;
+	if (input.sessionId !== undefined && input.onGuidance !== undefined) {
+		const deprecation = presetAppendDeprecationGuidance({
+			mode,
+			conflict: resolvedMode.conflict,
+			sessionId: input.sessionId,
+		});
+		if (deprecation !== undefined) input.onGuidance(deprecation);
+	}
 	const authLane = input.authLane ?? providerSettings.tokenInjection ?? "oauth-slots";
-	const append = appendSystemPrompt
-		? [
-				extractAgentsAppend(cwd),
-				extractSkillsAppend(input.context.systemPrompt, cwd),
-				extractProjectRulesAppend(input.context.systemPrompt),
-			].filter((part): part is string => part !== undefined)
-		: [];
+	const append =
+		mode === "preset-append"
+			? [
+					extractAgentsAppend(cwd),
+					extractSkillsAppend(input.context.systemPrompt, cwd),
+					extractProjectRulesAppend(input.context.systemPrompt),
+				].filter((part): part is string => part !== undefined)
+			: [];
+	const systemPrompt =
+		mode === "preset-append"
+			? { type: "preset" as const, preset: "claude_code" as const, append: append.join("\n\n") || undefined }
+			: mode === "override"
+				? loadOverrideSystemPrompt(providerSettings.systemPromptFile)
+				: resolveCustomSystemPrompt(input.context.systemPrompt);
 	const strictMcpConfig = providerSettings.strictMcpConfig ?? !appendSystemPrompt;
 	const queryOptions: Options = {
 		cwd,
@@ -230,8 +254,8 @@ export function buildClaudeSdkOauthQueryOptions(input: ClaudeSdkOauthQueryOption
 		includePartialMessages: true,
 		canUseTool,
 		hooks: HOST_TOOL_DENIAL_HOOKS,
-		systemPrompt: { type: "preset", preset: "claude_code", append: append.join("\n\n") || undefined },
-		settingSources: resolveSettingSources(providerSettings, appendSystemPrompt, authLane),
+		systemPrompt,
+		settingSources: resolveSettingSources(providerSettings, mode, authLane),
 	};
 	if (input.pathToClaudeCodeExecutable) queryOptions.pathToClaudeCodeExecutable = input.pathToClaudeCodeExecutable;
 	if (strictMcpConfig) queryOptions.extraArgs = { "strict-mcp-config": null };

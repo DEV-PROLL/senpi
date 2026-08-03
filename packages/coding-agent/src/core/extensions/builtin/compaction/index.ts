@@ -24,7 +24,18 @@ import {
 	RECOVERY_INSTRUCTIONS,
 	resetOnSessionCompact,
 } from "./degradation-monitor.ts";
+import {
+	classifyRequiredCompactionFallbackFailure,
+	createRequiredCompactionFallback,
+} from "./deterministic-fallback.ts";
 import * as idle from "./idle.ts";
+import * as idleRetry from "./idle-retry.ts";
+import {
+	CLAUDE_SDK_OAUTH_COMPACT_ENTRY_TYPE,
+	collectCompactBoundaryEntries,
+	createCompactionLanePolicy,
+	SDK_NATIVE_LANE_REJECTION_REASON,
+} from "./lane-policy.ts";
 import { type CompactionLogger, createCompactionLogger } from "./log.ts";
 import {
 	markOpenAiRemoteReplayBoundary,
@@ -54,6 +65,7 @@ import {
 	SummaryGenerationError,
 } from "./speculative.ts";
 import { type CompactionExtensionState, createInitialState, resetTurnCounter } from "./state.ts";
+import { resolveInheritedTaskIntent } from "./task-intent.ts";
 import * as todoBridge from "./todo-bridge.ts";
 import { isTransientSummarizationFailure } from "./transient-failure.ts";
 import { isIneffectiveCompaction } from "./yield.ts";
@@ -105,6 +117,10 @@ function isMonitorableMessageEvent(event: { message: AgentMessage }): event is {
 
 function isAbortedAssistantMessage(event: { message: AgentMessage }): boolean {
 	return event.message.role === "assistant" && "stopReason" in event.message && event.message.stopReason === "aborted";
+}
+
+function isRequiredCompactionFallbackReason(reason: SessionBeforeCompactEvent["reason"]): boolean {
+	return reason === "threshold" || reason === "overflow";
 }
 
 function recentCheckpoint(ctx: ExtensionContext): checkpointState.AgentCheckpoint | null {
@@ -161,6 +177,8 @@ export default function compactionExtension(
 	remoteCompactionDependencies: OpenAiRemoteCompactionDependencies = {},
 ): void {
 	let state: CompactionExtensionState = createInitialState();
+	const lanePolicy = createCompactionLanePolicy();
+	const restorationDirectiveState = checkpointState.createRestorationDirectiveState();
 	const emergencyPruneLatch = createEmergencyPruneLatch();
 	const degradationState = createDegradationMonitorState();
 	const restorationState = state.restoration ?? restoration.createRestorationTrackerState();
@@ -177,10 +195,7 @@ export default function compactionExtension(
 		| undefined;
 	const pendingMetadata = new Map<string, PendingCompactionMetadata>();
 	let logger: CompactionLogger | undefined;
-	interface CompactionContext extends ExtensionContext {
-		agentDir?: string;
-	}
-	const getLogger = (ctx: CompactionContext): CompactionLogger => (logger ??= createCompactionLogger(ctx.agentDir));
+	const getLogger = (ctx: ExtensionContext): CompactionLogger => (logger ??= createCompactionLogger(ctx.agentDir));
 
 	function getSummarizationTools(): Tool[] {
 		if (typeof pi.getAllTools !== "function" || typeof pi.getActiveTools !== "function") return [];
@@ -193,6 +208,61 @@ export default function compactionExtension(
 		} catch {
 			return [];
 		}
+	}
+
+	let idleWarmupTimer: ReturnType<typeof setTimeout> | undefined;
+	let idleWarmupAttempt = 0;
+
+	function cancelIdleWarmupRetry(): void {
+		if (idleWarmupTimer === undefined) return;
+		clearTimeout(idleWarmupTimer);
+		idleWarmupTimer = undefined;
+	}
+
+	// Fenced on the observed job: a prompt, invalidation, or newer warm-up
+	// stands this watcher down before it can start a duplicate summarization.
+	function armIdleWarmupRetry(ctx: ExtensionContext): void {
+		const job = speculativeJob;
+		if (!job) return;
+		void job.failure.then((failure) => {
+			if (failure === undefined) {
+				idleWarmupAttempt = 0;
+				return;
+			}
+			if (speculativeJob !== job) return;
+			const usage = ctx.getContextUsage();
+			const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+			const retryDecision: idleRetry.IdleWarmupRetryDecision = {
+				attempt: idleWarmupAttempt,
+				transient: isTransientSummarizationFailure(failure, failure.message),
+				isIdle: ctx.isIdle(),
+				breakerTripped: breaker.isTripped(state, Date.now()),
+				stillOverThreshold:
+					usage !== undefined &&
+					policy.shouldTriggerCompaction(
+						usage,
+						contextWindow,
+						ctx.getCompactionSettings(),
+						state.lastYield ?? undefined,
+					),
+			};
+			if (!idleRetry.shouldRetryIdleWarmup(retryDecision)) return;
+			cancelIdleWarmupRetry();
+			idleWarmupTimer = setTimeout(() => {
+				idleWarmupTimer = undefined;
+				if (speculativeJob !== job) return;
+				if (!ctx.isIdle()) return;
+				idleWarmupAttempt += 1;
+				getLogger(ctx).debug("idle_trigger", {
+					contextWindow,
+					tokens: usage?.tokens ?? 0,
+					count: idleWarmupAttempt,
+				});
+				invalidateSpeculativeCompaction(ctx);
+				startSpeculativeCompaction(ctx, idle.IDLE_COMPACTION_INSTRUCTIONS);
+				armIdleWarmupRetry(ctx);
+			}, idleRetry.IDLE_WARMUP_RETRY_DELAY_MS);
+		});
 	}
 
 	function invalidateSpeculativeCompaction(ctx: ExtensionContext): void {
@@ -402,6 +472,9 @@ export default function compactionExtension(
 
 	pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx) => {
 		invalidateSpeculativeCompaction(ctx);
+		if (lanePolicy.disablesSenpiCompaction(ctx)) {
+			return { cancel: true, reason: SDK_NATIVE_LANE_REJECTION_REASON };
+		}
 		if (cap.shouldRejectByCap(state, { reason: event.reason }).cancel) {
 			getLogger(ctx).debug("skip_cap", { reason: event.reason, count: state.acceptedThisTurn });
 			return {
@@ -442,6 +515,7 @@ export default function compactionExtension(
 			model,
 			contextWindow: ctx.getContextUsage()?.contextWindow ?? model.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
 			preparation: event.preparation,
+			branchEntries: event.branchEntries,
 			promptVariant: getPromptVariant(event),
 			origin: "core-route" as const,
 			customInstructions: event.customInstructions,
@@ -454,11 +528,27 @@ export default function compactionExtension(
 				ctx.updateCompaction?.({ reason: event.reason, signal: event.signal, delta }),
 			);
 		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const failureKind = classifyRequiredCompactionFallbackFailure(error);
+			if (isRequiredCompactionFallbackReason(event.reason) && failureKind !== undefined && !event.signal.aborted) {
+				const fallback = createRequiredCompactionFallback(
+					snapshot.preparation,
+					snapshot.contextWindow,
+					failureKind,
+					{ taskIntent: resolveInheritedTaskIntent(event.branchEntries) },
+					event.branchEntries,
+				);
+				if (fallback) return { compaction: fallback };
+				pendingMetadata.delete(event.requestId);
+				return {
+					cancel: true,
+					reason: "deterministic compaction fallback cannot retain the prepared suffix",
+				};
+			}
 			pendingMetadata.delete(event.requestId);
 			if (error instanceof SummaryGenerationError) {
 				return { cancel: true, reason: error.message };
 			}
-			const message = error instanceof Error ? error.message : String(error);
 			return { cancel: true, reason: `compaction generator failed: ${message}` };
 		}
 		if (!compaction) {
@@ -475,6 +565,10 @@ export default function compactionExtension(
 	});
 
 	pi.on("model_select", (event, ctx) => {
+		if (lanePolicy.disablesSenpiCompaction(ctx)) {
+			invalidateSpeculativeCompaction(ctx);
+			return;
+		}
 		const jobModel = speculativeJob?.snapshot.model;
 		const selectedModel = ctx.model;
 		const alreadySpeculatingForSelectedModel =
@@ -561,18 +655,27 @@ export default function compactionExtension(
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		let systemPrompt = event.systemPrompt;
-		const message = restoration.consumePendingPayload(restorationState);
-		const checkpoint = recentCheckpoint(ctx);
-		if (checkpoint) systemPrompt = checkpointState.injectRestorationDirective(systemPrompt, checkpoint);
+		cancelIdleWarmupRetry();
+		const message = checkpointState.attachRestorationDirective(
+			restorationDirectiveState,
+			recentCheckpoint(ctx),
+			restoration.consumePendingPayload(restorationState),
+		);
 
 		const usage = ctx.getContextUsage();
 		const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 		const settings = ctx.getCompactionSettings();
 		const pendingPromptTokens = estimatePendingPromptTokens(event);
 		const usageWithPendingPrompt = usage ? withAdditionalTokens(usage, pendingPromptTokens) : undefined;
-		const breakerCoolingDown = breaker.isTripped(state, Date.now());
-		if (usage && policy.isAtHardLimit(usage, contextWindow, settings.reserveTokens, pendingPromptTokens)) {
+		// The SDK owns this lane's context entirely, so even the hard-limit valve stands down;
+		// the circuit breaker never blocks that valve for senpi-owned lanes.
+		const laneOwnsCompaction = lanePolicy.disablesSenpiCompaction(ctx);
+		const breakerCoolingDown = breaker.isTripped(state, Date.now()) || laneOwnsCompaction;
+		if (
+			!laneOwnsCompaction &&
+			usage &&
+			policy.isAtHardLimit(usage, contextWindow, settings.reserveTokens, pendingPromptTokens)
+		) {
 			getLogger(ctx).debug("hard_limit_trigger", {
 				contextWindow,
 				tokens: usage.tokens ?? 0,
@@ -607,8 +710,7 @@ export default function compactionExtension(
 			startSpeculativeCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
 		}
 
-		if (systemPrompt === event.systemPrompt && !message) return undefined;
-		return message ? { systemPrompt, message } : { systemPrompt };
+		return message ? { message } : undefined;
 	});
 
 	pi.on("context", (event, ctx) => {
@@ -618,11 +720,18 @@ export default function compactionExtension(
 		const sourceMessages = shouldApplyContextReduction({
 			usageTokens: usage?.tokens ?? null,
 			contextWindow,
-			isProviderNativeCompactionPath: isOpenAiRemoteCompactionModel(ctx.model),
+			isProviderNativeCompactionPath:
+				isOpenAiRemoteCompactionModel(ctx.model) || lanePolicy.disablesSenpiCompaction(ctx),
 		})
 			? reduceContextMessages(event.messages, BUILTIN_CONTEXT_REDUCTION_OPTIONS).messages
 			: event.messages;
-		const emergency = hardLimitEmergencyPrune(sourceMessages, promptContextWindow, emergencyPruneLatch);
+		// The claude-sdk-oauth lane stands down from senpi compaction entirely:
+		// destructively pruning the provider context near the hard limit would
+		// break the resident SDK session's continuity the same way the gated
+		// reduction lane would.
+		const emergency = lanePolicy.disablesSenpiCompaction(ctx)
+			? { messages: sourceMessages, needsAggressiveCompaction: false }
+			: hardLimitEmergencyPrune(sourceMessages, promptContextWindow, emergencyPruneLatch);
 		const marked = markOpenAiRemoteReplayBoundary(emergency.messages, {
 			model: ctx.model,
 			branchEntries: ctx.sessionManager.getBranch(),
@@ -658,6 +767,7 @@ export default function compactionExtension(
 	});
 
 	pi.on("turn_end", async (_event, ctx) => {
+		if (lanePolicy.disablesSenpiCompaction(ctx)) return;
 		handleTurnEnd(degradationState);
 		if (degradationState.recoveryTriggeredThisCycle) return;
 		if (state.lastYield && state.lastYield.savedTokens <= 0) {
@@ -667,6 +777,7 @@ export default function compactionExtension(
 
 	pi.on("agent_end", async (event, ctx) => {
 		state = resetTurnCounter(state, "");
+		if (lanePolicy.disablesSenpiCompaction(ctx)) return;
 		const usage = ctx.getContextUsage();
 		const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 		const settings = ctx.getCompactionSettings();
@@ -683,15 +794,20 @@ export default function compactionExtension(
 			})
 		) {
 			getLogger(ctx).debug("idle_trigger", { contextWindow, tokens: usage?.tokens ?? 0 });
-			await applyBlockingCompaction(ctx, idle.IDLE_COMPACTION_INSTRUCTIONS);
+			idleWarmupAttempt = 0;
+			startSpeculativeCompaction(ctx, idle.IDLE_COMPACTION_INSTRUCTIONS);
+			armIdleWarmupRetry(ctx);
 		}
 	});
 
 	pi.on("message_end", async (event, ctx) => {
+		for (const entry of collectCompactBoundaryEntries(event.message)) {
+			pi.appendEntry(CLAUDE_SDK_OAUTH_COMPACT_ENTRY_TYPE, entry);
+		}
 		if (isAbortedAssistantMessage(event)) {
 			invalidateSpeculativeCompaction(ctx);
 		}
-		if (isMonitorableMessageEvent(event)) {
+		if (isMonitorableMessageEvent(event) && !lanePolicy.disablesSenpiCompaction(ctx)) {
 			await handleMessageEnd(degradationState, event, {
 				applyCompaction: async (options) => {
 					return await applyBlockingCompaction(ctx, options.customInstructions);

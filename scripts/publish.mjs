@@ -21,6 +21,8 @@ import { rewritePublishManifest } from "./publish-manifest.mjs";
 const packages = [
 	{ directory: "packages/ai", name: "@code-yeongyu/senpi-ai", rewriteManifest: true },
 	{ directory: "packages/agent", name: "@code-yeongyu/senpi-agent-core", rewriteManifest: true },
+	{ directory: "packages/client", name: "@code-yeongyu/senpi-client", rewriteManifest: true },
+	{ directory: "packages/protocol", name: "@code-yeongyu/senpi-protocol", rewriteManifest: true },
 	{ directory: "packages/tui", name: "@code-yeongyu/senpi-tui", rewriteManifest: true },
 	{ directory: "packages/pty", name: "@code-yeongyu/senpi-pty", rewriteManifest: true },
 	{ directory: "packages/senpi-codemode", name: "@code-yeongyu/senpi-codemode", rewriteManifest: true },

@@ -23,7 +23,9 @@ export type {
 export type SdkQueryInput = Parameters<typeof query>[0];
 export type SdkQueryHandle = AsyncIterable<SDKMessage> & {
 	interrupt(): Promise<unknown>;
+	setModel?: (model?: string) => Promise<void>;
 	close(): void;
+	initializationResult?: () => Promise<unknown>;
 };
 export type SdkQuery = (input: SdkQueryInput) => SdkQueryHandle;
 

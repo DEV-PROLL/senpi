@@ -456,6 +456,7 @@ async function streamAssistantResponse(
 
 		const response = await streamFunction(config.model, llmContext, {
 			...config,
+			streamKind: "main",
 			apiKey: resolvedApiKey,
 			signal: requestAbortController.signal,
 		});

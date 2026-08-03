@@ -12,6 +12,63 @@
 
 ### Removed
 
+## [2026.8.3-2] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.3] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.1] - 2026-08-01
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Preserve rich live and terminal `eval` details when peeking detached cells,
+  including code, title, output, phase, status events, tool-call summaries,
+  duration, and structured displays; cancellation now remains authoritative
+  over late completion races
+  ([#603](https://github.com/code-yeongyu/senpi/pull/603)).
+
+### Removed
+
+## [2026.7.31-2] - 2026-07-31
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Include a live elapsed label in detached `eval` footer status. The ticker updates only when the rendered duration
+  changes and is disposed when the cell completes, fails, or is stopped.
+
+### Fixed
+
+### Removed
+
 ## [2026.7.31] - 2026-07-31
 
 ### Breaking Changes

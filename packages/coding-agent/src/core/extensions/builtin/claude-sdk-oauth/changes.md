@@ -1,5 +1,50 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-01 - Resume-first session continuity (SDK ledger is authoritative)
+
+- **One SDK session lineage per senpi conversation.** A new `query()` is no longer a new session: every query replacement re-attaches with `resume: <sdkSessionId>`, so normal turns, model switches, thinking-level switches, ESC aborts, idle expiry, and shared-root account failover all continue the same lineage. Flattening the transcript into a `<conversation_history>` envelope is demoted to a last resort, reachable only when the SDK transcript is genuinely unusable.
+- **Why this mattered.** A full-stack probe against the previous code showed a plain 6-turn conversation already reused one session (`queries=1 lineages=1 flatten_turns=0`). The reported cache-hit decay therefore came from divergence boundaries — compaction, abort, model switch, restart, midnight fingerprint churn, failover — which a long conversation hits constantly, each one re-sending the entire history. Those boundaries are what this change removes.
+- **Decision table.** `decideNativeContinuity` (session-continuity.ts) replaces the retired `decideSessionSync` and resolves every admission to `delta` | `reattach` | `fork` | `flatten` | `bootstrap`. `flatten` is reserved for a missing transcript or an unusable binding; a live session is never abandoned for a flattened re-send. The fork point is the last assistant boundary STRICTLY BEFORE the divergence, because forking at the diverged turn would carry the stale assistant into the new branch and leave nothing to re-send.
+- **SDK ledger authority.** Assistant-provenance staging is deleted. Divergence is decided at a `message_end` commit boundary (session-commit-boundary.ts) comparing what the provider streamed against what the ledger committed. The previous in-flight staging reported false divergence on result-only turns — a supported SDK response shape — which tainted the session and cold-seeded the next turn.
+- **Option intake.** Non-fork reattach passes `resume` and MUST omit `sessionId`; the SDK rejects that pair (sdk.d.ts:1805-1808) and would otherwise start an unrelated session. Fork adds `resumeSessionAt` + `forkSession`.
+- **Abort.** `interrupt()` receipts gate the outcome: `still_queued: []` keeps the live session; a legacy or uncertain receipt closes the query but keeps the binding for reattach. Abort never taints and never flattens. Teardown during resume-initialization is synchronous, so an aborted initialization is torn down before the next assertion point.
+- **Fingerprint.** The generated `Current date:` line is normalized before hashing, so a UTC midnight rollover no longer retires a live conversation; cwd and every other prompt region stay fail-closed. Host tool policy is fingerprinted by an explicit `HOST_TOOL_POLICY_FINGERPRINT` version instead of callback source text, and the executable path plus `includePartialMessages` now participate.
+- **Account failover.** Shared-root lanes (`oauth-slots`, `ambient`) reattach, or fork at the last verified boundary when cross-account resume is denied. The `config-dir` lane keeps per-account credentials inside its own `CLAUDE_CONFIG_DIR` and no official SDK API moves a transcript across roots, so its failover is the one declared residual that still flattens.
+- **Restart.** A branch-local binding checkpoint records `{sdkSessionId, sentCount, sentPrefixHash, lastAssistantUuid, accountName, claudeConfigDir, modelId}`; on the first turn after a restart it is verified against the SDK transcript before resuming, forks at the boundary when the local prefix advanced, and flattens only when the transcript or boundary is gone.
+- **Observability.** Every main turn emits exactly one continuity observation (kind + sanitized reason + delta count) as an assistant diagnostic and a structured `claude_sdk_oauth_session_continuity` `session.log` event (paired with `claude_sdk_oauth_session_close`); the TUI shows a muted notice only for degradations. `closeSession` no longer discards its reason — the retained cause is attributed to the next admission.
+- **Escape hatch.** `resumeMode: "off"` (or `SENPI_CLAUDE_SDK_OAUTH_RESUME=off`) still restores the legacy per-turn behaviour and reports `disabled` observations.
+- Merge-conflict risk: high across this directory. New modules: session-continuity.ts, session-reattach.ts, session-binding.ts, session-commit-boundary.ts, session-observability.ts, session-reaper.ts, session-entry-annotations.ts.
+
+||||||| 3b8a5f828
+## 2026-08-01 - Subscription-limit failover classification
+
+### What changed
+
+- Claude subscription-limit responses are classified as account-failover conditions rather than terminal provider errors.
+
+### Why
+
+- Multi-account OAuth sessions should move to an available account when one subscription lane is exhausted.
+
+### Why this cannot be expressed externally
+
+- Classification feeds the built-in auth lane, account affinity, and stream-safe retry state.
+
+### Expected merge conflict zones
+
+- `auth-lane.ts`, provider error classification, and account failover tests.
+
+## 2026-07-31 - Native system prompt, session reuse, env overrides, and transcript hardening
+
+- **System prompt modes (new default: `full`).** Added a `systemPromptMode` setting with three values. `full` (new default) sends senpi's own composed system prompt verbatim — previously the lane rebuilt a prompt from the SDK `claude_code` preset plus three extracted regions, so any region without a dedicated extractor was silently dropped (a persistent response-language instruction never reached the model). `preset-append` is the previous behaviour, now DEPRECATED and kept for one release; selecting it emits a one-time warning. `override` loads the system prompt verbatim from a file (`systemPromptFile`). The legacy `appendSystemPrompt` key still works and maps onto the modes: `false` → `preset-append`, `true`/unset → `full`. Setting both `appendSystemPrompt` and `systemPromptMode` makes `systemPromptMode` win and emits a warning.
+- `full` and `override` default `settingSources` to `[]` on every lane, because senpi's prompt already carries project context and loading the SDK's own CLAUDE.md would double-inject it.
+- Honest limitation: the CLI always prepends its own `"You are a Claude agent, built on Anthropic's Claude Agent SDK."` block, which senpi cannot suppress. `full` means senpi's prompt is delivered intact, not that it is the only text in the system prompt.
+- **No prompt-cache benefit from array splitting.** An earlier draft split the prompt into a `string[]` around a `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` sentinel to keep the stable prefix cacheable. A wire-level probe against the installed CLI (`cc_version=2.1.220.04c`) proved the CLI joins all array elements into a single system block and never honours the sentinel, so the marker reached the model as literal text. The marker has been removed. Per-element cache scoping is not supported by the current CLI.
+- **Environment overrides.** Six variables, precedence `env > project settings > global settings > default`. No new CLI flags: `SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_MODE`, `SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_FILE`, `SENPI_CLAUDE_SDK_OAUTH_RESUME`, `SENPI_CLAUDE_SDK_OAUTH_TOKEN_INJECTION`, `SENPI_CLAUDE_SDK_OAUTH_SETTING_SOURCES`, `SENPI_CLAUDE_SDK_OAUTH_PINNED_ACCOUNT`. Every `SENPI_*` variable is now stripped from the Claude Code subprocess environment on all three lanes (oauth-slots, config-dir, ambient); other inherited variables are preserved.
+- **Session reuse.** One long-lived SDK query per senpi session instead of a fresh one per turn, so a conversation continues instead of cold-starting each turn and only the new delta is sent. Always fails closed to a fresh session when the conversation diverges: compaction, branch/fork navigation, account failover, an aborted turn, or a configuration change. Idle sessions are retired after 30 minutes and at most 32 sessions stay resident; a session with a turn in flight is never evicted. After a senpi process restart the lane always starts a fresh SDK session rather than trying to re-attach. `resumeMode` accepts `"auto"` (default) and `"off"`; set `resumeMode: "off"` (or `SENPI_CLAUDE_SDK_OAUTH_RESUME=off`) to restore the old per-turn behaviour. Any other value is silently ignored (falls back to `"auto"`).
+- **Fallback transcript hardening.** When a full re-send is unavoidable, the flattened history is wrapped in a `<conversation_history>` envelope with an explicit anchor instruction and the real user message placed last and unlabelled. Previously the flat `USER:`/`ASSISTANT:` transcript read as a continuable document and baited the model into fabricating its own turns.
+- Merge-conflict risk: low. The only overlap surface is the settings/env-resolution block in `buildClaudeSdkOauthQueryOptions`, which the concurrent `stream.ts` / `auth-lane.ts` work also touches.
+
 ## 2026-07-31 - Rename the internal provider identity
 
 - Renamed the builtin path, provider/model ID, storage sentinels, account directory, settings key, TypeScript symbols, commands, tests, and QA scenarios from `claude-agent-sdk` to `claude-sdk-oauth`.

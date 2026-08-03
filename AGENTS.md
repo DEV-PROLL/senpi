@@ -8,6 +8,30 @@ Metadata above records the source state used for this generation pass.
 
 Senpi is an extension-first coding-agent monorepo. Keep changes scoped, preserve upstream mergeability, and read the nearest `AGENTS.md` plus every applicable `changes.md` before editing.
 
+## MANDATORY EXECUTION PROTOCOLS — NON-NEGOTIABLE
+
+### PROTOCOL 1 — EXPLICITLY REQUESTED MODIFICATIONS
+
+**WHEN A PATCH MUST BE MADE TO THIS REPOSITORY AND THE USER HAS EXPLICITLY INSTRUCTED THE MODIFICATION, THE FOLLOWING SEQUENCE IS ABSOLUTE AND BINDING. EXECUTE EVERY STEP, IN THIS EXACT ORDER. SKIPPING, REORDERING, OR ABBREVIATING ANY STEP IS A DEFECT:**
+
+1. **EXPLORE** — SURVEY THE CODEBASE FIRST. READ EVERY FILE, SYMBOL, AND TEST THE CHANGE TOUCHES BEFORE WRITING A SINGLE LINE.
+2. **MAKE A PLAN** — WRITE A DECISION-COMPLETE PLAN BEFORE ANY IMPLEMENTATION. NO CODE BEFORE THE PLAN EXISTS.
+3. **ADD TODOS IN ULTRA-DETAIL** — MIRROR EVERY ATOMIC STEP OF THE PLAN INTO THE TODO LIST. NO STEP IS TOO SMALL TO TRACK.
+4. **MAKE A NEW WORKTREE** — NEVER IMPLEMENT IN THE SHARED WORKTREE. ALL IMPLEMENTATION HAPPENS IN A DEDICATED GIT WORKTREE.
+5. **MAKE A PR AND WORK UNTIL IT GETS MERGED** — SHIP THROUGH A REVIEWER-READABLE PR AND DRIVE IT RELENTLESSLY UNTIL IT IS MERGED. AN UNMERGED PR IS UNFINISHED WORK.
+6. **SET A GOAL AND RUN THE ULW LOOP** — REGISTER A BINDING GOAL AND EXECUTE UNDER THE ULW LOOP UNTIL EVERY SUCCESS CRITERION PASSES WITH CAPTURED EVIDENCE.
+7. **MANAGE TODOS OBSESSIVELY** — UPDATE THE TODO LIST ON EVERY STATE TRANSITION, THE INSTANT IT HAPPENS. A STALE TODO LIST IS A DEFECT.
+
+**DELIVERY STOP INVARIANT:** UNDER PROTOCOL 1, “PR OPENED” IS NEVER A VALID STOP CONDITION, GOAL SUCCESS CRITERION, OR FINAL TODO. DELIVERY ENDS ONLY WHEN GITHUB REPORTS `MERGED` AND THE TASK WORKTREE IS REMOVED. WHILE GATES ARE PENDING, KEEP MERGE/CLEANUP TODOS OPEN, MONITOR TO COMPLETION, THEN MERGE-COMMIT AND CLEAN UP BEFORE THE FINAL RESPONSE.
+
+### PROTOCOL 2 — USER-REQUESTED PR REVIEWS
+
+**WHEN THE USER REQUESTS A PR REVIEW, YOU MUST:**
+
+1. **MAKE A NEW WORKTREE** — CREATE A DEDICATED GIT WORKTREE AND PULL THE PR BRANCH INTO IT. NEVER CHECK THE PR OUT IN THE SHARED WORKTREE.
+2. **REVIEW INSIDE THAT WORKTREE** — RUN THE FULL REVIEW (READ, BUILD, TEST, QA) THERE.
+3. **CLEAN UP WHEN THE REVIEW IS DONE** — THE MOMENT THE REVIEW IS FINISHED, REMOVE THE WORKTREE (`git worktree remove` THEN `git worktree prune`). A LEFTOVER REVIEW WORKTREE IS A DEFECT.
+
 ## STRUCTURE
 
 | Area | Purpose |
@@ -16,7 +40,6 @@ Senpi is an extension-first coding-agent monorepo. Keep changes scoped, preserve
 | `packages/agent/` | Browser-safe agent loop plus optional Node harness |
 | `packages/coding-agent/` | `senpi` CLI, sessions, extensions, RPC, interactive mode |
 | `packages/tui/` | Differential terminal renderer and editor primitives |
-| `packages/web-ui/` | Lit browser components, storage, sandboxed artifacts |
 | `packages/server/` | Experimental daemon, IPC, RPC-process supervision |
 | `packages/pty/` | TypeScript PTY loader, sessions, registry, pipe fallback |
 | `packages/senpi-codemode/` | Source-only persistent-kernel `eval` extension |
@@ -51,7 +74,7 @@ Agent state -> packages/agent/src/agent-loop.ts
                                          |
 CLI/session -> packages/coding-agent/src/core -> interactive | print | RPC
                                          |
-Terminal UI -> packages/tui     Browser UI -> packages/web-ui
+Terminal UI -> packages/tui
 Persistent terminals -> packages/pty -> crates/senpi-pty
 ```
 
@@ -71,7 +94,8 @@ Persistent terminals -> packages/pty -> crates/senpi-pty
 - Do not hardcode TUI keys. Add defaults to `packages/tui/src/keybindings.ts` or `packages/coding-agent/src/core/keybindings.ts`.
 - Do not hand-edit `packages/ai/src/models.generated.ts`; update `packages/ai/scripts/generate-models.ts` and regenerate.
 - Ask before removing intentional functionality. Backward compatibility is opt-in, not automatic.
-- Fork-specific source changes belong in the nearest `changes.md`; read it before rebasing or changing the same surface.
+- Changing fork-specific source behavior means reading the nearest `changes.md` first and updating it in the same verified increment, not in a follow-up.
+- Each entry records what changed, why, why an extension couldn't do it, and the expected merge-conflict zones. Merges resolve these files to `ours`, so a stale entry misleads the next upstream sync.
 - Changelog edits are release/audit work only. Follow `.github/agent/commands/cl.md` and never edit released sections.
 
 ## QUALITY GATES
@@ -96,13 +120,13 @@ Persistent terminals -> packages/pty -> crates/senpi-pty
 - Multiple agents share this worktree. Stage only files changed in the current session with explicit `git add <path>` commands.
 - Do not commit speculatively; commit only when the user asks or a delegated workflow already ends in commit/push.
 - Never use `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`, `git add -A`, `git add .`, `git commit --no-verify`, or force-push.
-- Review incoming PRs without switching this shared worktree; inspect refs and diffs in place unless the user explicitly requests checkout.
+- Review incoming PRs without switching this shared worktree; when the user requests a PR review, follow PROTOCOL 2 above (dedicated worktree, removed after the review).
 - Commit format: `{feat,fix,docs}[(scope)]: concise message`; include `fixes #N` or `closes #N` when applicable.
 - Normal work ships through a feature branch and reviewer-readable PR with evidence. Merge PRs with a merge commit, never squash or rebase merge.
 - Resolve rebase conflicts only in files owned by the current session; otherwise abort and ask.
 
 ## RELEASE NOTES
 
-- Releases use CalVer and lockstep-version eight packages listed in `scripts/release-packages.mjs`.
+- Releases use CalVer and lockstep-version nine packages listed in `scripts/release-packages.mjs`.
 - Release only from clean `main` after changelog audit and local release smoke tests. `scripts/release.mjs` owns versioning, generated artifacts, checks, commits, tag, and push.
 - Never rerun the release script after its tag is pushed; failed publishing is retried from the existing tag workflow.

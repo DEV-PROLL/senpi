@@ -12,6 +12,61 @@
 
 ### Removed
 
+## [2026.8.3-2] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.3] - 2026-08-03
+
+### Breaking Changes
+
+- Changed `Session` into the sole opened-session aggregate and replaced `SessionStorage`, `SessionRepo`, and concrete per-session persistence classes with a non-owning `SessionRepository` and caller-owned, async-disposable `SessionStore` instances. Create stores with `createInMemorySessionStore()` or `createJsonlSessionStore()`, compose them with `createSessionRepository({ store, search: createScanningSessionSearch(store) })`, and dispose the store after draining harness and session work.
+- `Session` instances are now created by `SessionRepository`; direct construction from an independently supplied store and snapshot was removed.
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.1] - 2026-08-01
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.7.31-2] - 2026-07-31
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Mark every primary agent-loop model request with `streamKind: "main"`, allowing providers to reserve persistent
+  session state for real conversation turns while treating unlabeled compaction, title, and helper streams as
+  auxiliary one-shot work.
+
+### Fixed
+
+### Removed
+
 ## [2026.7.31] - 2026-07-31
 
 ### Breaking Changes

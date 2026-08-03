@@ -1,5 +1,42 @@
 # Builtin extensions changes
 
+## tps: monotonic elapsed-time source for assistant intervals (2026-07-31)
+
+- `tps.ts` now derives assistant-message elapsed time from the monotonic
+  `performance.now()` clock instead of wall-clock `Date.now()`. A wall-clock
+  jump backward (NTP skew or manual time change) between `message_start` and
+  `message_end` previously produced a non-positive `Date.now() - start`
+  interval, which the `> 0` guard dropped, suppressing a valid TPS notice.
+- Preserved: the stream-open start timestamp is still recorded at
+  `message_start`; `finishActiveAssistantTiming` still runs at every
+  `message_start`/`message_end`/`agent_end` so tool and permission waits stay
+  excluded; the output numerator, notification text, and the `agent_start`
+  reset behavior are unchanged.
+- Coverage: `test/suite/tps-extension.test.ts` adds a deterministic regression
+  where one second of fake monotonic time elapses but wall time is moved
+  backward between `message_start` and `message_end`; the existing lockstep
+  fake-timer case still pins TPS/token/elapsed text.
+- Expected merge conflict zones: LOW in `tps.ts` around the two
+  `performance.now()` call sites; NONE in the public extension API.
+
+## loop-guard: tool-call loop detection with steered reminders (2026-07-31)
+
+- New builtin extension `loop-guard` (registered before `config-reload`; MCP stays last)
+  that watches the pure `tool_execution_start` stream and steers a
+  `<system-reminder>` CustomMessage into the running turn on three loop shapes:
+  identical calls (trailing run >= 3 of byte-identical tool+canonical-args),
+  near-identical same-tool runs (>= 5 calls at mean adjacent bigram-Dice >= 0.85),
+  and cyclic rotations (period 2..6 repeated >= 3 times). Each kind gets its own
+  reminder prompt; a shared gate re-fires only at 2x the last notified count and
+  resets on `session_start` / real user input.
+- TUI notice via `pi.registerMessageRenderer("loop-guard:notice", ...)` in the goal
+  cache-warm Box style. Threshold rationale (gemini-cli / OpenHands prior art plus a
+  400-session local corpus) is recorded in `loop-guard/changes.md` and `policy.ts`.
+- Tests: `test/suite/loop-guard-detectors.test.ts` and
+  `test/suite/loop-guard-extension.test.ts` (fake-pi harness, zero tokens).
+- Expected merge conflict zones: LOW in `builtin/index.ts` (one import + one array
+  entry before `config-reload`); NONE in `types.ts` (no public API change).
+
 ## service-tier: mirror the Codex fast toggle into the session indicator (2026-07-31)
 
 - The session toggle added on 2026-07-31 lived only inside this extension, so no host surface could

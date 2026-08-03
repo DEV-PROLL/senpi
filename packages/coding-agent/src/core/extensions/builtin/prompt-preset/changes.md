@@ -1,5 +1,67 @@
 # prompt-preset Extension Changes
 
+## Kimi K3 + GPT-5.6: test-proportionality rules (2026-08-03)
+
+### What changed
+
+- `kimi-k3.ts`: the Verification section opens with a terminal condition — one successful verification command ends the check; one focused test per behavior change at the touched seam; prose, docs, and visual-only changes take review + real-surface QA instead of tests.
+- `gpt-5.6.ts`: `TEST_FIRST` scoped — the failing test is written at the seam the change touches; prose, doc, and visual-only changes take review plus real-surface QA, not tests. Header comment updated: the deleted blanket "default to not adding tests" rule returns as a scoped seam rule inside test-first.
+- Prose-pinning assertions stripped from `test/suite/prompt-presets-*.test.ts` and other prompt test files; what remains asserts machine-consumed behavior (preset resolution, model matching, rule ids/concerns, tool-name sentinels).
+
+### Why
+
+The 2026-08-03 session-corpus investigation showed K3 writing more test files than any other model (636 writes) and GPT-5.6's preset having deleted its upstream scope rule. kimi.md prescribes terminal conditions over prohibitions; claude-opus-5.md warns explicit verification instructions compound into over-verification. The prose-pinning test removals follow the repo's own convention (`prompt-behavior-coverage`: parsed rule data, never pinned sentences).
+
+### Why extension system couldn't handle this
+
+Presets are core-owned prompt builders; the proportionality rule belongs in the prompt text itself.
+
+### Expected merge conflict zones
+
+- `kimi-k3.ts` Verification section, `gpt-5.6.ts` `TEST_FIRST` constant. Resolution: keep the scoping sentences.
+
+## DeepSeek V4 presets: flash, flash-0731, pro (2026-07-31)
+
+### What changed
+
+- New presets `deepseek-v4-flash`, `deepseek-v4-flash-0731`, and `deepseek-v4-pro`: thin `tuningSection` wrappers over the shared dynamic core (post-2026-04-30 architecture), with the family's shared behavior carried as typed rule data in `deepseek-v4.ts` (`DEEPSEEK_V4_RULES`, gpt-5.6 `GPT56_EXECUTION_RULES` precedent). Rules: `injected-directive-authority` + `todo-discipline` + `missing-info` (all three presets), `settled-reading` (flash line), `reasoning-aim` (pro). Workstation dialect: `claude`.
+- `presets.ts`: three matchers on normalized id OR display name with `[/@:._-]` boundaries, verified against the OpenRouter live API, models.dev, and senpi's generated catalogs (official `deepseek-v4-flash`/`deepseek-v4-pro`, OpenRouter `deepseek/deepseek-v4-flash-0731`, HF-style `deepseek-ai/DeepSeek-V4-*`, fireworks `accounts/fireworks/models/deepseek-v4-*`, aihubmix `alicloud-`/`deep-` prefixes, trailing `:free`/`-free`/`:thinking`/`-nothinking`/`-cheaper`/`-lightning`/`-el` tags). The dated 0731 snapshot resolves before the generic flash alias.
+- `settings.ts`: `PromptPresetName` + `VALID_PRESETS` gain the three names; `docs/settings.md` value list updated.
+- `test/suite/prompt-presets-deepseek-v4.test.ts` (new): table-driven matcher cases from the researched real-world ID shapes, a catalog sweep asserting zero misses across every built-in catalog model with a DeepSeek V4 signal, rule-data placement (each directive rendered exactly once per owning preset, zero leakage into kimi-k3 / gpt-5.6 / glm-5.2), and settings-override coverage.
+
+### Why
+
+- DeepSeek-V4-Flash-0731 running senpi's fallback prompt showed reproducible failure modes: it audits the provenance of harness-injected directives ("the user didn't say ulw-loop... probably residual context"), downsizes mandated workflows as too heavy, oscillates on settled readings ("Actually wait - let me reconsider"), and never updates the todo list. Each rule replaces one of those trained priors with a positive decision rule; the chat-deep.ai DeepSeek prompt guide's structure-compliance findings motivated keeping the presets as decision-rule tuning over the shared structured core rather than a full-core rewrite.
+
+### Why extension system couldn't handle this differently
+
+- Entirely inside the builtin `prompt-preset` extension; no core prompt code changed.
+
+### Expected merge conflict zones on next upstream sync
+
+- NONE expected: `deepseek-v4*.ts` and `prompt-presets-deepseek-v4.test.ts` are fork-only files. `presets.ts`/`settings.ts` additions sit in fork-owned lists that upstream does not carry.
+
+## Preset messaging: optimized-prompt wording, silent fallback (2026-07-31)
+
+### What changed
+
+- `index.ts` startup/model-select header now renders `Optimized system prompt applied: <preset>` only when `resolvePresetName()` matches a real preset (including an explicit `promptPreset` settings override); when nothing matches, the header is cleared via `setHeader(undefined)` instead of showing `Prompt preset: fallback (senpi-current)`.
+- `index.ts` `model_select` result now returns `systemPromptName: preset?.name` (undefined on fallback) instead of the `"fallback (senpi-current)"` placeholder, so `agent-session._emitModelSelect` emits `system_prompt_change` without a name and the interactive status line stays silent for unmatched models.
+- `interactive-mode.ts` switch statuses (`cycleModel`, `selectModelFromUi`) reworded from `system prompt: <name>` to `optimized system prompt applied: <name>`.
+- Tests: `prompt-presets-startup-header.test.ts` pins the new wording plus header-clearing on fallback (session_start and model_select paths); `prompt-presets-model-switch.test.ts` now expects `systemPromptName` undefined when switching from a preset model to an unmatched one.
+
+### Why
+
+- User request: the header and switch messages should read as "a system prompt optimized for this model was applied", and models without a matching preset should show nothing at all. The fallback placeholder advertised an implementation detail (the senpi dynamic prompt) as if it were a model preset.
+
+### Why extension system couldn't handle this differently
+
+- The header and `model_select` result already live in this extension; only the two status-line format strings required touching upstream `interactive-mode.ts`.
+
+### Expected merge conflict zones on next upstream sync
+
+- `interactive-mode.ts` `cycleModel` / `selectModelFromUi` status string assembly — two single-line format expressions; re-apply the `optimized system prompt applied:` wording if upstream touches those lines.
+
 ## Kimi K3 ambiguity reflect-then-ask gate (2026-07-27)
 
 ### What changed
