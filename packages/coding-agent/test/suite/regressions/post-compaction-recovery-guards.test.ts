@@ -64,6 +64,72 @@ describe("post-compaction recovery guards", () => {
 		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
 	});
 
+	it("does not inherit stale provenance into a later run with the same provider error text", async () => {
+		let compactionRequest = 0;
+		const harness = await createHarness({
+			models: [{ id: "stale-provenance-recovery", contextWindow: 5_000, maxTokens: 1_000 }],
+			settings: {
+				compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 1_000 },
+				retry: { enabled: false, maxRetries: 0, baseDelayMs: 1 },
+			},
+			tools: [largeResultTool()],
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", (event) => {
+						compactionRequest++;
+						if (compactionRequest === 1) {
+							return {
+								cancel: true,
+								rejectionCause: "cancelled-by-extension",
+								reason: "reject the first recovery only",
+							} as const;
+						}
+						return {
+							compaction: {
+								summary: "later recovery accepted",
+								firstKeptEntryId: event.preparation.firstKeptEntryId,
+								tokensBefore: event.preparation.tokensBefore,
+								details: {},
+							},
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage(fauxToolCall("large_result", {}), { stopReason: "toolUse" })]);
+
+		// Run 1: a real required-compaction admission sets provenance, then fails.
+		await harness.session.prompt("start provenance-setting run").then(
+			() => undefined,
+			() => undefined,
+		);
+		await harness.session.waitForSettledSessionWork();
+		const callsAfterRun1 = harness.faux.state.callCount;
+
+		// Run 2: provider returns an error with the SAME text. Stale provenance
+		// would misclassify it as required-compaction and trigger another
+		// compaction/admission cycle; the agent_start clear must prevent that.
+		harness.setResponses([
+			fauxAssistantMessage("provider lookalike error", {
+				stopReason: "error",
+				errorMessage: REQUIRED_COMPACTION_ERROR,
+			}),
+			fauxAssistantMessage("must not continue"),
+		]);
+		await harness.session.prompt("provider lookalike run").then(
+			() => undefined,
+			() => undefined,
+		);
+		await harness.session.waitForSettledSessionWork();
+
+		expect(harness.faux.state.callCount).toBe(callsAfterRun1 + 1);
+		expect(getAssistantTexts(harness)).not.toContain("must not continue");
+		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
+		const run2CompactionEnds = harness.eventsOfType("compaction_end").filter((event) => event.reason === "threshold");
+		expect(run2CompactionEnds.length).toBeLessThanOrEqual(2);
+	});
+
 	it("retains queued input when required recovery compaction is rejected", async () => {
 		let compactionRequest = 0;
 		let queuedAtErrorEnd = false;

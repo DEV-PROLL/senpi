@@ -1,3 +1,34 @@
+## Required-recovery admission supersession and bounded fallback sizing (2026-08-03)
+
+### What changed
+
+- An accepted required-compaction recovery now clears the stored admission rejection when its queued
+  continuation is scheduled, so the originating `prompt()` resolves after the queued steer/follow-up
+  completes instead of throwing the superseded `RequiredCompactionError`.
+- Deterministic recovery sizing no longer materializes `JSON.stringify` for every retained message
+  without a bound: the estimator fails closed on accessor-bearing, non-plain, cyclic, or callable
+  values and exits early once the remaining `contextWindow - reserveTokens` budget is exceeded.
+- Regression coverage pins the turn-end soft-cap reset across degradation-recovery early returns,
+  accepted-recovery queued-steer supersession, accessor-safe fallback rejection, and the three-call
+  continuation flow (previously ending in an unasserted faux queue-exhaustion error).
+
+### Why
+
+- Review of #679 reproduced a contradiction: queued continuation completed and both queues drained,
+  yet the originating prompt still rejected with the stale required-compaction error.
+- The same review measured ~207 MiB peak amplification from a 32 MiB retained message and observed
+  property getters executing on persisted tool-call arguments during recovery sizing.
+
+### Why this cannot be expressed externally
+
+- Supersession lives in `AgentSession`'s internal compaction admission/continuation ownership; the
+  sizing guard is a fail-closed property of the builtin deterministic-fallback estimator.
+
+### Expected merge conflict zones
+
+- `core/agent-session.ts` retry/continuation scheduling around `_checkCompaction` and `agent_end`.
+- `core/extensions/builtin/compaction/deterministic-fallback.ts` estimator and projection call site.
+
 ## Keep long-running compaction recovery progressing (2026-08-03)
 
 ### What changed
