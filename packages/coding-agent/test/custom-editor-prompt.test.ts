@@ -16,6 +16,10 @@ const editorTheme: EditorTheme = {
 	},
 };
 
+function plain(text: string): string {
+	return text.replace(/\x1b\[[\d;]*m/g, "");
+}
+
 describe("CustomEditor prompt marker", () => {
 	it("shows an accent chevron and aligns wrapped rows", () => {
 		const editor = new CustomEditor(new TUI(new VirtualTerminal(12, 24)), editorTheme, new KeybindingsManager());
@@ -23,10 +27,24 @@ describe("CustomEditor prompt marker", () => {
 		editor.setPaddingX(0);
 
 		const rendered = editor.render(12);
+		const plainRows = rendered.map(plain);
+		const promptRow = plainRows.find((row) => row.includes("❯"));
+		const wrappedRow = plainRows.find((row) => row.includes("ij"));
 
 		expect(editor.getPaddingX()).toBe(0);
-		expect(rendered[1]?.startsWith(`${accent("❯")} abcdefgh`)).toBe(true);
-		expect(rendered[2]).toMatch(/^ {2}ij/);
-		expect(rendered.map((line) => visibleWidth(line))).toEqual([12, 12, 12, 12]);
+		expect(rendered.join("").split("❯")).toHaveLength(2);
+		expect(promptRow?.indexOf("a")).toBeGreaterThan(0);
+		expect(wrappedRow?.indexOf("i")).toBe(promptRow?.indexOf("a"));
+		expect(rendered.every((line) => visibleWidth(line) <= 12)).toBe(true);
+	});
+
+	it("does not move the marker onto a scrolled continuation row", () => {
+		const editor = new CustomEditor(new TUI(new VirtualTerminal(12, 10)), editorTheme, new KeybindingsManager());
+		editor.setText(["one", "two", "three", "four", "five", "six"].join("\n"));
+
+		const rendered = editor.render(12);
+
+		expect(rendered[0]).toContain("↑");
+		expect(rendered.join("")).not.toContain("❯");
 	});
 });

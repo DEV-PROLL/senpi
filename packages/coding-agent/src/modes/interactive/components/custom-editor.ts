@@ -42,7 +42,7 @@ export class CustomEditor extends Editor {
 
 	override render(width: number): string[] {
 		const lines = super.render(width);
-		if (width < 5) return lines;
+		if (width < 5 || lines[0]?.includes("↑")) return lines;
 		return lines.map((line, index) =>
 			index === 1 ? `${this.borderColor("❯")} ${line.slice(this.promptPaddingX)}` : line,
 		);
