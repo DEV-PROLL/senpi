@@ -4128,6 +4128,12 @@ export class InteractiveMode {
 			case "retry_probe_result": {
 				if (event.ok) {
 					this.showStatus(`Recovered ${sanitizeTerminalLabel(event.selector)} - will restore on next turn`);
+				} else if (event.errorMessage === "auth-unavailable") {
+					this.showStatus(
+						`Probe for ${sanitizeTerminalLabel(event.selector)} skipped - auth unavailable, staying on fallback`,
+					);
+				} else {
+					this.showStatus(`Probe for ${sanitizeTerminalLabel(event.selector)} failed - staying on fallback`);
 				}
 				this.ui.requestRender();
 				break;

@@ -131,6 +131,53 @@ describe("InteractiveMode fallback lifecycle", () => {
 	});
 });
 
+it("renders a failure status line when retry_probe_result has ok === false", async () => {
+	const fixture = createFixture();
+	const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+
+	try {
+		await handleEvent.call(fixture, {
+			type: "retry_probe_scheduled",
+			selector: "faux/faux-1",
+			atMs: 6000,
+			probeIndex: 2,
+		});
+		await handleEvent.call(fixture, {
+			type: "retry_probe_result",
+			selector: "faux/faux-1",
+			ok: false,
+		});
+		expect(fixture.showStatus).toHaveBeenLastCalledWith("Probe for faux/faux-1 failed - staying on fallback");
+	} finally {
+		now.mockRestore();
+	}
+});
+
+it("renders an auth-unavailable skip line when errorMessage is auth-unavailable", async () => {
+	const fixture = createFixture();
+	const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+
+	try {
+		await handleEvent.call(fixture, {
+			type: "retry_probe_scheduled",
+			selector: "faux/faux-1",
+			atMs: 6000,
+			probeIndex: 2,
+		});
+		await handleEvent.call(fixture, {
+			type: "retry_probe_result",
+			selector: "faux/faux-1",
+			ok: false,
+			errorMessage: "auth-unavailable",
+		});
+		expect(fixture.showStatus).toHaveBeenLastCalledWith(
+			"Probe for faux/faux-1 skipped - auth unavailable, staying on fallback",
+		);
+	} finally {
+		now.mockRestore();
+	}
+});
+
 describe("shouldShowRetryIndicator", () => {
 	it("suppresses only zero-delay retries that immediately apply a fallback", () => {
 		expect(shouldShowRetryIndicator(0, true)).toBe(false);
