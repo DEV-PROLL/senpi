@@ -32,8 +32,9 @@
 - `ModelRuntime` leaves builtins that already implement `refreshModels` unwrapped instead of replacing their
   refresh path with the static `pi.dev` catalog overlay. This preserves both Radius and the new Ollama Cloud
   `/api/tags` + `/api/show` discovery path.
-- An `ollama` provider with an explicit models.json catalog does not run the Cloud builtin refresh first, preserving
-  the documented local configuration without affecting dynamic discovery for Radius or other providers.
+- An `ollama` provider with an explicit models.json catalog does not run the Cloud builtin refresh first and replaces
+  rather than augments any in-memory Cloud catalog. Hot reload therefore removes stale Cloud tags instead of rebinding
+  them to the local base URL, without affecting dynamic discovery for Radius or other providers.
 - The CLI recognizes `ollama` as `Ollama Cloud`, documents `OLLAMA_API_KEY`, and uses
   `qwen3.5:397b` as the current default when it is present in the refreshed catalog.
 - `test/ollama-provider.test.ts` drives `ModelRuntime.create()` with a mocked Ollama host and proves the

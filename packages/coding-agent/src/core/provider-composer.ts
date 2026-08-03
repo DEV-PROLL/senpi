@@ -212,7 +212,9 @@ function applyModelsJson(
 		);
 	}
 
-	const models: Model<Api>[] = baseModels.map((model) => ({
+	// An explicit local Ollama catalog replaces Cloud discovery instead of rebinding its dynamic tags to localhost.
+	const configuredBaseModels = providerId === "ollama" && config.models?.length ? [] : baseModels;
+	const models: Model<Api>[] = configuredBaseModels.map((model) => ({
 		...model,
 		baseUrl: config.oauth === "radius" ? model.baseUrl : (config.baseUrl ?? model.baseUrl),
 		compat: mergeCompat(model.compat, config.compat),

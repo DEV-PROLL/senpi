@@ -605,7 +605,7 @@ export function createProvider<TApi extends Api = Api>(input: CreateProviderOpti
 							}
 							if (!context.allowNetwork || context.signal?.aborted) return;
 							const refreshed = await fetchModels(context);
-							if (context.signal?.aborted) return;
+							if (context.signal?.aborted || refreshed.length === 0) return;
 							dynamicModels = refreshed;
 							await context.store.write({ models: refreshed, checkedAt: Date.now() });
 						} finally {

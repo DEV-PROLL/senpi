@@ -9,10 +9,12 @@
 - The provider discovers the current Cloud catalog from `/api/tags`, enriches each entry through `/api/show`,
   exposes only tool-capable models, and derives thinking, vision, and architecture-specific context metadata.
 - Per-model inspection uses bounded concurrency and retains a last-known tool model when that tag's inspection
-  fails beside usable results; complete inspection failure, an empty usable result, and aborts fail the refresh
-  without replacing the cache.
-- Catalog reads use the shared auth-aware `ModelsStore` refresh lifecycle, so successful data is persisted and a
-  failed refresh cannot replace the last-known list. Subscription usage has no stable per-token dollar rate, so
+  fails beside usable results; complete inspection failure and aborts fail the refresh without replacing the cache.
+  A successful discovery with no usable tool models also preserves the last-known catalog instead of publishing or
+  persisting an empty replacement.
+- Catalog reads use the shared auth-aware `ModelsStore` refresh lifecycle, so only a non-empty successful result is
+  persisted and failed or empty refreshes cannot replace the last-known list. Subscription usage has no stable
+  per-token dollar rate, so
   discovered models report zero cost instead of fabricating prices.
 - Ollama's OpenAI-compatible endpoint does not accept OpenAI-only storage/developer/strict-tool fields; the model
   compatibility projection uses `max_tokens`, and Senpi's `max` reasoning level clamps to Ollama's supported
