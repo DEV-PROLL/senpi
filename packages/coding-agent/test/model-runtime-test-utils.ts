@@ -14,6 +14,14 @@ export async function createModelRegistry(credentials: CredentialStore, modelsPa
 	return wrap(await ModelRuntime.create({ credentials, modelsPath, allowModelNetwork: false }));
 }
 
+export async function createAuthenticatedModelRegistry(
+	credentials: CredentialStore,
+	modelsPath?: string,
+): Promise<ModelRegistry> {
+	await credentials.modify("anthropic", async () => ({ type: "api_key", key: "test-key" }));
+	return createModelRegistry(credentials, modelsPath);
+}
+
 export async function createInMemoryModelRegistry(credentials: CredentialStore): Promise<ModelRegistry> {
 	return wrap(await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false }));
 }
