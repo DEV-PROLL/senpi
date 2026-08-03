@@ -5,6 +5,9 @@ import { CombinedAutocompleteProvider } from "../src/autocomplete.ts";
 const getSuggestions = (provider: CombinedAutocompleteProvider, line: string) =>
 	provider.getSuggestions([line], 0, line.length, { signal: new AbortController().signal });
 
+const getSuggestionValues = async (provider: CombinedAutocompleteProvider, line: string) =>
+	(await getSuggestions(provider, line))?.items.map((item) => item.value) ?? [];
+
 describe("CombinedAutocompleteProvider slash command suggestions", () => {
 	it("ranks longer prefix matches before shorter commands when the typed slash command is ambiguous", async () => {
 		// Given
@@ -44,6 +47,25 @@ describe("CombinedAutocompleteProvider slash command suggestions", () => {
 			result?.items.map((item) => item.value),
 			["session", "sessions"],
 		);
+	});
+
+	it("keeps skill discovery contextual without leaving the namespace prefix empty", async () => {
+		const provider = new CombinedAutocompleteProvider(
+			[
+				{ name: "model", description: "Select a model" },
+				{ name: "skill:debugging", description: "Debug runtime failures" },
+				{ name: "skill:frontend", description: "Build web interfaces" },
+				{ name: "skill:ulw-plan", description: "Create an implementation plan" },
+			],
+			"/tmp",
+		);
+		const allSkills = ["skill:debugging", "skill:frontend", "skill:ulw-plan"];
+
+		assert.deepStrictEqual(await getSuggestionValues(provider, "/"), ["model"]);
+		assert.deepStrictEqual(await getSuggestionValues(provider, "/skill"), ["skill:"]);
+		assert.deepStrictEqual(await getSuggestionValues(provider, "/SKILL:"), allSkills);
+		assert.deepStrictEqual(await getSuggestionValues(provider, "/skill:"), allSkills);
+		assert.deepStrictEqual(await getSuggestionValues(provider, "/ul"), ["skill:ulw-plan"]);
 	});
 
 	it("reopens only skill suggestions for an executable second leading skill command", async () => {

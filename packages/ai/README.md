@@ -82,11 +82,12 @@ Unified LLM API with provider collections, automatic auth resolution, token and 
 - **Amazon Bedrock**
 - **OpenCode Zen**
 - **OpenCode Go**
+- **Ollama Cloud** (dynamic tool-capable model catalog)
 - **Fireworks** (uses OpenAI- and Anthropic-compatible APIs)
 - **Kimi For Coding** (Moonshot AI subscription endpoint, uses Anthropic-compatible API)
 - **Xiaomi MiMo** (defaults to API billing endpoint, with separate Token Plan providers for `cn`/`ams`/`sgp` regions)
 - **Alibaba Token Plan** (Alibaba Cloud Model Studio prepaid Token Plan, OpenAI-compatible `ap-southeast-1` endpoint)
-- **Any OpenAI-compatible API**: Ollama, vLLM, LM Studio, etc.
+- **Any other OpenAI-compatible API**: local Ollama, vLLM, LM Studio, etc.
 
 ## Installation
 
@@ -410,6 +411,7 @@ Built-in providers resolve these env vars (Node.js; in browsers pass `apiKey` ex
 | Provider | Environment Variable(s) |
 |----------|------------------------|
 | OpenAI | `OPENAI_API_KEY` |
+| Ollama Cloud | `OLLAMA_API_KEY` |
 | Ant Ling | `ANT_LING_API_KEY` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_BASE_URL` (e.g. `https://{resource}.ai.azure.com`) or `AZURE_OPENAI_RESOURCE_NAME`. Supports `*.openai.azure.com`, `*.cognitiveservices.azure.com` and `*.ai.azure.com`; root endpoints auto-normalize to `/openai/v1`. Optional: `AZURE_OPENAI_API_VERSION` (default `v1`), `AZURE_OPENAI_DEPLOYMENT_NAME_MAP`. |
 | Anthropic | `ANTHROPIC_API_KEY` or `ANTHROPIC_OAUTH_TOKEN` |

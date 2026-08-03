@@ -17,6 +17,9 @@
 		"OPENAI_API_KEY": {
 			"description": "(Optional) OpenAI API key."
 		},
+		"OLLAMA_API_KEY": {
+			"description": "(Optional) Ollama Cloud API key."
+		},
 		"OPENROUTER_API_KEY": {
 			"description": "(Optional) OpenRouter API key."
 		},

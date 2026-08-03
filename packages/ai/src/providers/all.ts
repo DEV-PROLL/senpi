@@ -25,6 +25,7 @@ import { mistralProvider } from "./mistral.ts";
 import { moonshotaiProvider } from "./moonshotai.ts";
 import { moonshotaiCnProvider } from "./moonshotai-cn.ts";
 import { nvidiaProvider } from "./nvidia.ts";
+import { ollamaProvider } from "./ollama.ts";
 import { openaiProvider } from "./openai.ts";
 import { openaiCodexProvider } from "./openai-codex.ts";
 import { opencodeProvider } from "./opencode.ts";
@@ -44,7 +45,7 @@ import { xiaomiTokenPlanSgpProvider } from "./xiaomi-token-plan-sgp.ts";
 import { zaiProvider } from "./zai.ts";
 import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
 
-export { radiusProvider };
+export { ollamaProvider, radiusProvider };
 
 /** Providers present in the generated catalog. `KnownProvider` additionally
  * includes purely dynamic providers (e.g. "radius") that have no static
@@ -150,6 +151,7 @@ export function builtinProviders(): Provider[] {
 		nvidiaProvider(),
 		openaiProvider(),
 		openaiCodexProvider(),
+		ollamaProvider(),
 		opencodeProvider(),
 		opencodeGoProvider(),
 		openrouterProvider(),

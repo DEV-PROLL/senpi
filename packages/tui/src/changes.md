@@ -65,6 +65,29 @@ default without owning that state.
 - LOW: `mux.ts` `viewportRenderEnabled()`, `test/mux.test.ts`, `test/viewport-render.test.ts`,
   `scripts/perf-trend-local.sh` bench lanes.
 
+## 2026-07-31: Contextual skill slash-command discovery
+
+### What changed
+
+- Bare `/` no longer lists every `skill:<name>` command, and partial `/skill` input exposes one `skill:` namespace hint
+  instead of flooding the palette with every child skill.
+- `/skill:` and case variants such as `/SKILL:` open the full skill namespace, while `/` followed by a skill's full
+  name or leading letters finds matching child skills directly.
+
+### Why
+
+- The shared `skill:` prefix flooded the root slash-command overview and obscured the smaller set of general commands,
+  while filtering every child also left `/skill` as a discoverability dead end.
+
+### Why this cannot be expressed externally
+
+The shared autocomplete provider owns slash-command filtering before coding-agent extensions receive input, so an
+extension cannot change which registered skill commands appear for each typed prefix.
+
+### Expected merge conflict zones
+
+- LOW: `slash-command-autocomplete.ts` skill filtering and its focused autocomplete regression test.
+
 ## 2026-07-29: Native Unicode LaTeX in Markdown conversations
 
 ### What changed
