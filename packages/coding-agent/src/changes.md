@@ -203,6 +203,31 @@
 
 - LOW: `agent-session.ts` `_switchActiveModel`/`_setThinkingLevel` and the `AgentSessionEvent` union.
 
+## Ollama Cloud keeps its provider-owned dynamic catalog (2026-07-30)
+
+### What changed
+
+- `ModelRuntime` leaves builtins that already implement `refreshModels` unwrapped instead of replacing their
+  refresh path with the static `pi.dev` catalog overlay. This preserves both Radius and the new Ollama Cloud
+  `/api/tags` + `/api/show` discovery path.
+- An `ollama` provider with an explicit models.json catalog does not run the Cloud builtin refresh first and replaces
+  rather than augments any in-memory Cloud catalog. Hot reload therefore removes stale Cloud tags instead of rebinding
+  them to the local base URL, without affecting dynamic discovery for Radius or other providers.
+- The CLI recognizes `ollama` as `Ollama Cloud`, documents `OLLAMA_API_KEY`, and uses
+  `qwen3.5:397b` as the current default when it is present in the refreshed catalog.
+- `test/ollama-provider.test.ts` drives `ModelRuntime.create()` with a mocked Ollama host and proves the
+  provider-owned catalog reaches the runtime and persisted model store.
+
+### Why this belongs in core
+
+- Builtin catalog wrapping happens before extensions and models.json overlays are composed. A provider factory
+  cannot preserve its own refresh implementation after the runtime has replaced it.
+
+### Expected merge conflict zones
+
+- LOW: builtin wrapping predicates in the async and sync `ModelRuntime` constructors.
+- LOW: additive provider display/default/help entries.
+
 ## Bun self-updates preserve the Bun launcher (2026-07-30)
 
 - Bun-managed global self-updates now replace Bun's generated Node-shebang symlink with a small launcher that
@@ -1288,6 +1313,8 @@ The retry budget, abortable retry sleep, provider continuation, and active model
 
 - `core/session-log.ts`: new rotating content-free JSONL logger writing `<agentDir>/logs/session.log` (5MB rotate, allow-listed scalar fields, secret redaction, `SENPI_SESSION_DEBUG=1` stderr mirror), following the existing `retry-fallback/log.ts` pattern.
 - `core/agent-session.ts`: mirrors stuck-prone lifecycle transitions into `session.log`: `compaction_decision` on every terminal `compaction_end` (reason/accepted/aborted/willRetry/rejectionCause/error), `provider_error` on assistant `message_end` errors classified as stall/timeout/error, `queue_enqueue` on native steer/followUp queueing, and `prompt_rejected` when a `RequiredCompactionError` rejects prompt admission.
+- Compaction lifecycle records now correlate start/terminal events with propagated UUID request IDs; classify committed/rejected/failed/skipped/aborted/superseded outcomes; record content-free before/after token estimates; preserve retry exhaustion as a skipped no-attempt action; and ignore stale ends from superseded same-reason attempts instead of attributing them to a newer compaction.
+- `test/session-log-routes.test.ts` and the compaction lifecycle suites cover unmatched accepted ends, retry exhaustion, rollback snapshots, extension feedback failures, supersession, same-reason stale ends, consecutive compactions, and start/end request-ID parity without real provider calls.
 - `modes/interactive/interactive-mode.ts`: logs `compaction_queue_enqueue` when input is parked during compaction, `compaction_queue_deferred` when a failed compaction defers queued input to the native queues, and `clipboard_error` on clipboard paste failures.
 
 ### Why extension system couldn't handle this

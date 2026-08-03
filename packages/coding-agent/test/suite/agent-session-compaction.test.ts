@@ -470,15 +470,21 @@ describe("AgentSession compaction characterization", () => {
 			(event) => event.type === "compaction_start" || event.type === "compaction_end",
 		);
 		expect(compactionEvents).toEqual([
-			{ type: "compaction_start", reason: "threshold" },
+			expect.objectContaining({
+				type: "compaction_start",
+				reason: "threshold",
+				requestId: expect.any(String),
+			}),
 			expect.objectContaining({
 				type: "compaction_end",
 				reason: "threshold",
 				result: undefined,
 				aborted: false,
 				willRetry: false,
+				requestId: expect.any(String),
 			}),
 		]);
+		expect(compactionEvents[1]?.requestId).toBe(compactionEvents[0]?.requestId);
 	});
 
 	it("publishes an aborted preflight end after a start listener aborts auto-compaction", async () => {
@@ -494,7 +500,13 @@ describe("AgentSession compaction characterization", () => {
 
 		// Consumers open UI state (progress indicator, Escape override) on compaction_start and
 		// close it only on compaction_end, so a same-controller abort must stay balanced.
-		expect(harness.eventsOfType("compaction_start")).toEqual([{ type: "compaction_start", reason: "threshold" }]);
+		expect(harness.eventsOfType("compaction_start")).toEqual([
+			expect.objectContaining({
+				type: "compaction_start",
+				reason: "threshold",
+				requestId: expect.any(String),
+			}),
+		]);
 		expect(harness.eventsOfType("compaction_end")).toEqual([
 			expect.objectContaining({
 				type: "compaction_end",
@@ -502,6 +514,7 @@ describe("AgentSession compaction characterization", () => {
 				result: undefined,
 				aborted: true,
 				willRetry: false,
+				requestId: harness.eventsOfType("compaction_start")[0]?.requestId,
 			}),
 		]);
 	});
