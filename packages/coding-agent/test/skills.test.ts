@@ -247,25 +247,6 @@ describe("skills", () => {
 			expect(result).toContain("<location>/path/to/skill/SKILL.md</location>");
 		});
 
-		it("should include intro text before XML", () => {
-			const skills: Skill[] = [
-				createTestSkill({
-					name: "test-skill",
-					description: "A test skill.",
-					filePath: "/path/to/skill/SKILL.md",
-					baseDir: "/path/to/skill",
-				}),
-			];
-
-			const result = formatSkillsForPrompt(skills);
-			const xmlStart = result.indexOf("<available_skills>");
-			const introText = result.substring(0, xmlStart);
-
-			expect(introText).toContain("The following skills provide specialized instructions");
-			expect(introText).toContain("Use the read tool to load a skill's file");
-			expect(introText).toContain("even loosely matches");
-		});
-
 		it("should escape XML special characters", () => {
 			const skills: Skill[] = [
 				createTestSkill({

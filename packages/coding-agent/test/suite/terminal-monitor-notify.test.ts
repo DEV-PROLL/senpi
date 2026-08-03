@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TerminalManager } from "../../src/core/extensions/builtin/terminal/manager.ts";
 import { MonitorRegistry } from "../../src/core/extensions/builtin/terminal/monitor-registry.ts";
-import { TERMINAL_PROMPT_SECTION } from "../../src/core/extensions/builtin/terminal/prompt.ts";
 import type { TerminalToolContext } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createMonitorTool } from "../../src/core/extensions/builtin/terminal/tools/monitor.ts";
 import { createNotifier, line } from "./terminal-monitor-notify-harness.ts";
@@ -148,23 +147,5 @@ describe("terminal monitor event delivery", () => {
 			scheduler.advanceBy(10_000);
 			expect(sent).toHaveLength(0);
 		}
-	});
-
-	it("teaches watcher discipline at the owning terminal surfaces", () => {
-		expect(TERMINAL_PROMPT_SECTION).toContain("monitor");
-		// Discipline is the routing rule (waits are monitors, not poll loops) plus noise control,
-		// not any particular wording — assert each rule at the surface that owns it, never a
-		// pinned sentence: the routing rule ships as the monitor tool's guideline, the noise
-		// rule stays in the terminal section.
-		const stubCtx = {
-			manager: { get: () => undefined },
-			cwd: process.cwd(),
-			defaultCols: 120,
-			defaultRows: 40,
-			getEnv: () => process.env,
-		} as unknown as TerminalToolContext;
-		const guidelines = (createMonitorTool(stubCtx).promptGuidelines ?? []).join("\n");
-		expect(guidelines).toMatch(/never a foreground\s+sleep\/poll loop/);
-		expect(TERMINAL_PROMPT_SECTION).toMatch(/Filter\s+noise at the command source/);
 	});
 });

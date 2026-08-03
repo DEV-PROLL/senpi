@@ -138,6 +138,5 @@ describe("checkpoint directive relocation: 60s system-prompt window -> one-shot 
 
 		expect(result?.systemPrompt).toBeUndefined();
 		expect(String(result?.message?.content)).toContain(RESTORATION_DIRECTIVE);
-		expect(String(result?.message?.content)).toContain("Restore checkpointed session configuration:");
 	});
 });

@@ -36,8 +36,10 @@
 // its point of use, replacing the weaker text it supersedes rather than being
 // appended as a trailer: the old "independent calls run in the same message" /
 // "each shell command is its own bash call" pair, the mid-paragraph todo
-// mechanics, and the "default to not adding tests" rule (deleted - it directly
-// contradicts test-first). The GPT-5.6 guide's Programmatic-Tool-Calling
+// mechanics, and the "default to not adding tests" rule (re-scoped into
+// test-first itself: tests at the touched seam, prose and visual work via
+// real-surface QA - the blanket version contradicted test-first, the scoped
+// version bounds it). The GPT-5.6 guide's Programmatic-Tool-Calling
 // section drives the shape: a bounded routing contract naming the stage,
 // eligible surface, output, and what stays direct beats generic "use PTC
 // efficiently" wording, which does not route.
@@ -96,7 +98,7 @@ const TODO_GRANULARITY =
 	"Split the work to the finest actionable grain - one item per edit plus the check that proves it - and drive every transition the moment it happens: start it, complete it, append newly discovered steps, drop abandoned ones, never batch the updates.";
 
 const TEST_FIRST =
-	"Work test-first on behavior changes: write the failing test, watch it fail for the right reason, then make the smallest change that turns it green. Skip that only for formatting, comments, renames, or dependency bumps, and never write a test that cannot fail for the regression it names.";
+	"Work test-first on behavior changes: write the one failing test at the seam the change touches, watch it fail for the right reason, then make the smallest change that turns it green. Prose, doc, and visual-only changes take review plus real-surface QA, not tests. Skip test-first also for formatting, comments, renames, or dependency bumps, and never write a test that cannot fail for the regression it names.";
 
 const ATOMIC_COMMITS =
 	"When commits are authorized, commit atomically per verified increment, in the repository's existing message convention, each commit green on its own - never one omnibus commit at the end.";

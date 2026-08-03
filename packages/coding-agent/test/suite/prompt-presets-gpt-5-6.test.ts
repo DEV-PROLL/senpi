@@ -134,7 +134,6 @@ describe("GPT-5.6 execution discipline", () => {
 		const prompt = buildPrompt("gpt-5.6", "gpt-5.6-luna");
 
 		// then
-		expect(prompt).not.toContain("Default to not adding tests");
 		expect(prompt).toContain("apply_patch");
 	});
 

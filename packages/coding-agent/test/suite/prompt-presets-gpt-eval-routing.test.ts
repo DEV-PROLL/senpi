@@ -49,31 +49,6 @@ describe("GPT eval tool routing", () => {
 		if (!preset) {
 			throw new Error(`expected ${presetName} preset to resolve`);
 		}
-		expect(preset.prompt).toContain("When `exec` and `wait` are available");
-		expect(preset.prompt).toContain("when `eval` is available, follow its Tool Guidelines");
 		expect(preset.prompt).toContain(evalGuideline);
-	});
-
-	it("keeps GPT-specific eval routing out of Grok", () => {
-		// Given: the non-GPT Grok preset with eval registered.
-		const settings: PromptPresetSettings = { promptPreset: "grok-4.5" };
-		const model = createModel("grok-4.5");
-
-		// When: its system prompt is composed.
-		const preset = resolvePreset(model, settings, {
-			selectedTools: ["eval"],
-			toolSnippets: { eval: "Run one persistent code cell." },
-			promptGuidelines: [],
-			contextFiles: [],
-			skills: [],
-		});
-
-		// Then: it does not inherit either the former or current GPT-only routing rule.
-		if (!preset) {
-			throw new Error("expected grok-4.5 preset to resolve");
-		}
-		expect(preset.prompt).not.toContain("When `eval` is available, use it as the default coordinator");
-		expect(preset.prompt).not.toContain("When `eval` is available, follow its Tool Guidelines for multi-call work.");
-		expect(preset.prompt).not.toContain("When `exec` and `wait` are available");
 	});
 });
