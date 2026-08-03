@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Pinned compiled binary release builds to Bun 1.3.14 instead of the moving canary, keeping all six cross-compilation target executables downloadable during release recovery.
+
 ### Removed
 
 ## [2026.8.3-3] - 2026-08-03
