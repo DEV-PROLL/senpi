@@ -129,10 +129,17 @@ import { PROMPT_CACHE_SAFE_WAIT_ENV, resolvePromptCacheSafeWaitSeconds } from ".
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { isBillingErrorMessage } from "./retry-fallback/billing.ts";
+import { formatSelector } from "./retry-fallback/chains.ts";
 import { RetryFallbackController } from "./retry-fallback/controller.ts";
 import { SelectorCooldowns } from "./retry-fallback/cooldown.ts";
-import { classifyRateLimitedWait, nextInTurnDelayMs, type ProbePhase } from "./retry-fallback/hint-policy.ts";
+import {
+	classifyRateLimitedWait,
+	nextInTurnDelayMs,
+	type ProbePhase,
+	probeBackSchedule,
+} from "./retry-fallback/hint-policy.ts";
 import { createFallbackLogger } from "./retry-fallback/log.ts";
+import { ProbeBackScheduler } from "./retry-fallback/probe-scheduler.ts";
 import { validateFallbackChains } from "./retry-fallback/validate.ts";
 import { createSessionLogger, type SessionLogger } from "./session-log.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
@@ -249,6 +256,8 @@ export type AgentSessionEvent =
 			reason: CompactionReason;
 	  }
 	| { type: "summarization_retry_finished" }
+	| { type: "retry_probe_scheduled"; selector: string; atMs: number; probeIndex: 1 | 2 }
+	| { type: "retry_probe_result"; selector: string; ok: boolean; errorMessage?: string }
 	| { type: "bash_execution_update"; id?: string; delta: string };
 
 /** Listener function for agent session events */
@@ -660,6 +669,9 @@ export class AgentSession {
 	private _modelRegistry: ModelRegistry;
 	private readonly _fallbackValidationWarnings: readonly string[];
 	private readonly _retryFallback: RetryFallbackController;
+	private readonly _selectorCooldowns: SelectorCooldowns;
+	private readonly _probeBackScheduler: ProbeBackScheduler;
+	private readonly _fallbackNow: () => number;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -707,10 +719,12 @@ export class AgentSession {
 		for (const warning of this._fallbackValidationWarnings) {
 			fallbackLogger.warn("validation_warning", { warning });
 		}
+		this._selectorCooldowns = new SelectorCooldowns(config.fallbackNow ?? (() => Date.now()));
+		this._fallbackNow = config.fallbackNow ?? (() => Date.now());
 		this._retryFallback = new RetryFallbackController({
 			getSettings: () => this.settingsManager.getRetryFallbackSettings(),
 			registry: this._modelRegistry,
-			cooldowns: new SelectorCooldowns(config.fallbackNow ?? (() => Date.now())),
+			cooldowns: this._selectorCooldowns,
 			logger: fallbackLogger,
 			switchModel: async (model, thinking, reason) => {
 				await this._switchActiveModel(model, {
@@ -726,6 +740,9 @@ export class AgentSession {
 			emit: (event) => this._emit(event),
 			getCurrentSelector: () => (this.model ? { model: this.model, thinkingLevel: this.thinkingLevel } : undefined),
 			isAuthAvailable: (provider) => this._modelRuntime.hasConfiguredAuth(provider),
+		});
+		this._probeBackScheduler = new ProbeBackScheduler({
+			now: this._fallbackNow,
 		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -1673,9 +1690,72 @@ export class AgentSession {
 		this._cumulativeHintedWaitMs = 0;
 	}
 
-	// TODO(todo-7): implement probe-back scheduling for tier2 demoted selectors.
-	private _armProbeBackForDemotedSelector(_selector: string, _hintMs: number): void {
-		// No-op seam — probe scheduling is todo 7.
+	/**
+	 * Arm the probe-back scheduler for a tier-2 demoted selector. The scheduler
+	 * will fire at most two probes (half-hint, then deadline) and clear the
+	 * selector cooldown on success so maybeRestorePrimary reverts at the next
+	 * turn boundary.
+	 */
+	private _armProbeBackForDemotedSelector(selector: string, hintMs: number): void {
+		if (!selector) return;
+
+		// Guard: skip when the demoted selector is the ACTIVE model.
+		const currentModel = this.model;
+		if (currentModel && formatSelector(currentModel) === selector) return;
+
+		// Guard: skip when auth is unavailable at arm time.
+		const parts = selector.split("/");
+		if (parts.length < 2) return;
+		const provider = parts[0];
+		if (!this._modelRuntime.hasConfiguredAuth(provider)) return;
+
+		const now = this._fallbackNow();
+		const schedule = probeBackSchedule(hintMs, now);
+		const modelId = parts.slice(1).join("/");
+		const demotedModel = this._modelRuntime.getModel(provider, modelId);
+		if (!demotedModel) return;
+
+		this._probeBackScheduler.arm({
+			selector,
+			firstAtMs: schedule.firstAtMs,
+			deadlineMs: schedule.deadlineMs,
+			authAvailable: () => this._modelRuntime.hasConfiguredAuth(provider),
+			runProbe: async (signal: AbortSignal): Promise<boolean> => {
+				try {
+					const result = await this._modelRuntime.completeSimple(
+						demotedModel,
+						{
+							systemPrompt: "Reply with OK.",
+							messages: [{ role: "user", content: [{ type: "text", text: "OK" }], timestamp: now }],
+						},
+						{ maxTokens: 1, signal },
+					);
+					return result.stopReason !== "error" && result.stopReason !== "aborted";
+				} catch {
+					return false;
+				}
+			},
+			onCleared: (sel: string) => {
+				this._selectorCooldowns.clear(sel);
+			},
+			emit: (event) => {
+				if (event.type === "retry_probe_scheduled") {
+					this._emit({
+						type: "retry_probe_scheduled",
+						selector: event.selector,
+						atMs: event.atMs,
+						probeIndex: event.probeIndex,
+					});
+				} else {
+					this._emit({
+						type: "retry_probe_result",
+						selector: event.selector,
+						ok: event.ok,
+						errorMessage: event.errorMessage,
+					});
+				}
+			},
+		});
 	}
 
 	/** Find the last assistant message in agent state (including aborted ones) */
@@ -1889,6 +1969,7 @@ export class AgentSession {
 	 */
 	dispose(): void {
 		try {
+			this._probeBackScheduler.cancel("dispose");
 			this.abortRetry();
 			this.abortCompaction();
 			this.abortBranchSummary();
@@ -3258,6 +3339,7 @@ export class AgentSession {
 		// A manual model change abandons any active fallback window; if a fallback
 		// retry sleep is still pending, cancel it so no surprise continuation fires.
 		const hadActiveFallback = this._retryFallback.activeState !== undefined;
+		this._probeBackScheduler.cancel("manual-model-change");
 		this._retryFallback.clearForManualModelChange(model);
 		if (hadActiveFallback && this._retryAbortController) {
 			this.abortRetry();
@@ -3370,6 +3452,7 @@ export class AgentSession {
 		if (invalidatesCompaction) {
 			this._invalidateCompactionForModelSelection();
 		}
+		this._probeBackScheduler.cancel("manual-model-change");
 		this._retryFallback.clearForManualModelChange(next.model);
 		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.thinkingLevel);
 
@@ -5675,7 +5758,7 @@ export class AgentSession {
 					if (switchedFallback) {
 						this._retryAttempt = 1;
 						if (tier === "tier2-fallback-probe-back") {
-							const selector = this.model ? `${this.model.provider}/${this.model.id}` : "";
+							const selector = this._retryFallback.activeState?.originalSelector ?? "";
 							this._armProbeBackForDemotedSelector(selector, remainingHintMs);
 						}
 					} else {

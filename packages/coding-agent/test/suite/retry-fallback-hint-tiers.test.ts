@@ -233,4 +233,39 @@ describe("hint-aware 429 tier routing", () => {
 		expect(harness.eventsOfType("auto_retry_end").map((e) => e.success)).toEqual([true]);
 		expect(harness.faux.state.callCount).toBe(2);
 	});
+
+	// (7) Tier-2 fallback arms the probe scheduler (retry_probe_scheduled emitted with probeIndex 1).
+	it("tier2 fallback emits retry_probe_scheduled with probeIndex 1", async () => {
+		const now = 0;
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			fallbackNow: () => now,
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 3,
+					baseDelayMs: 1,
+					fallbackChains: { [primary]: [fallback] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([errorTurn(hint1258s), fauxAssistantMessage("fallback answer")]);
+
+		await harness.session.prompt("hello");
+
+		// Fallback was applied (tier2).
+		expect(harness.eventsOfType("retry_fallback_applied")).toMatchObject([
+			{ from: primary, to: fallback, reason: "transient" },
+		]);
+
+		// Probe scheduler was armed — retry_probe_scheduled emitted with probeIndex 1.
+		const scheduled = harness.eventsOfType("retry_probe_scheduled");
+		expect(scheduled.length).toBeGreaterThanOrEqual(1);
+		expect(scheduled[0]).toMatchObject({
+			selector: primary,
+			probeIndex: 1,
+		});
+		expect(scheduled[0].atMs).toBeGreaterThan(now);
+	});
 });
