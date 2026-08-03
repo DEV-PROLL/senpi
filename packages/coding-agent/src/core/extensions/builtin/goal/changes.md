@@ -110,54 +110,56 @@
 - LOW in monitor continuation tests that observe delayed persistence.
 - NONE in the goal store schema, public extension API, or status transitions.
 
-## PROPOSAL: continuation-wait countdown render layer (2026-07-31)
-
-Status: **render layer only.** The wiring that drives this into the footer is deliberately
-not part of this change and is open for maintainer direction.
+## Visible continuation-wait countdown (2026-08-03)
 
 ### What changed
 
-- New `wait-progress.ts` exports `GOAL_WAIT_BAR_CELLS` (12), `renderGoalWaitBar(elapsedRatio)`
-  and `formatGoalWaitLabel({ kind, remainingMs, totalMs, activeMonitorCount })`. It reuses
-  `formatWakeDuration` from `cache-warm.ts` so a wait countdown reads identically to the
-  existing cache-warm notices.
-- `kind: "userGrace"` renders `▰▰▰▱▱▱▱▱▱▱▱▱ goal resumes in 47s`;
-  `kind: "monitor"` renders `… goal continues in 3m 12s · 2 monitors on duty` with
-  singular/plural monitor wording. Ratios are clamped, so a late timer never overflows the bar
-  and a negative remaining time renders `0s` rather than a minus sign.
-- Nothing imports the module yet: no scheduler, event, entry, or footer behavior changes here.
+- `wait-progress.ts` exports the clamped 12-cell progress bar and the user-grace / monitor
+  wait-label formatter, reusing `formatWakeDuration` so countdowns match existing cache-warm
+  notices.
+- New `wait-ticker.ts` follows the existing `GoalElapsedTicker` / `MonitorStatusTicker` pattern:
+  it renders a dedicated `goal-wait` footer status immediately, refreshes once per second on an
+  unref'd interval, skips unchanged labels, and clears the status when its timer ends or is
+  cancelled.
+- `monitor-continuation.ts` now drives that ticker from the real delayed-continuation lifecycle.
+  It restores the 60-second `userGrace` continuation after a clean accepted user turn, keeps the
+  existing four-minute monitor delay, freezes both timers while direct-input admission is
+  unresolved, resumes rejected/handled holds with their remaining time, and clears the footer on
+  delivery, accepted replacement input, goal state changes, monitor settlement, reload, and
+  shutdown.
+- The countdown is footer-only and transient. It does not append a durable entry: a transcript
+  line per user-grace window would be permanent noise for a state whose value changes every
+  second. The existing durable `goal-cache-warmup` story remains unchanged for monitor waits.
+- Coverage keeps the nine pure rendering tests and adds lifecycle wiring assertions that observe
+  the real user-grace status before triggering the turn, advance it with fake time, then await
+  exact delivery/clear signals; cancellation is likewise observed before accepted input and
+  proves no later delivery or status tick leaks.
 
 ### Why
 
-`#schedule()` in `monitor-continuation.ts` treats its two waits asymmetrically. The `monitor`
-branch (`GOAL_MONITOR_CONTINUATION_DELAY_MS`, 240s) emits `ui.notify` plus a durable
-`goal-cache-warmup` entry, so the wait is visible. The `userGrace` branch
-(`GOAL_USER_GRACE_DELAY_MS`, `continuation.ts:11`, 60s) emits nothing at all — no notify, no
-event, no entry. A session that is waiting out the grace window is therefore
-indistinguishable from a hung one for a full minute.
+The original 60-second grace path left an active Goal silent and visually indistinguishable from
+an idle or hung session. PR #553 later removed that timer while improving correlated direct-input
+admission. This change intentionally restores the grace continuation requested here without
+removing those safeguards: accepted input still cancels an already-armed wait synchronously, and
+only the clean end of that accepted user turn starts a fresh visible grace window.
 
-Session forensics on a real transcript show the shape: gaps of 60.0s / 60.3s / 60.5s / 61.6s
-each begin immediately after a `senpi.hooks.stop-state {count:0}` record and end with a
-`goal-continuation` injection, with no rendered output in between. The 240s monitor wait in the
-same session did produce visible `goal-cache-warmup` scheduled→resumed entries. Tool calls
-paired 170/170 and child-task wakes delivered 11/11 in that transcript, so the silence is the
-unrendered wait itself and not a lost result or a dropped wake.
+A dedicated footer ticker matches the TUI's established live-status mechanism and keeps the
+countdown independent from cumulative `Pursuing goal (…)` elapsed time. Durable timeline entries
+cannot represent per-second state without transcript spam, so they are the wrong rendering
+surface for this wait.
 
-### Open questions for maintainers
+### Why the extension system could not handle this differently
 
-- Should the `userGrace` branch emit a durable entry (symmetric with `goal-cache-warmup`), a
-  transient footer segment only, or both?
-- If footer-only: extend `GoalElapsedTicker`, or add a second ticker so the wait countdown and
-  the `Pursuing goal (…)` elapsed segment stay independent?
-- Is a 12-cell bar the right footer budget, or should this be text-only?
+The scheduler and footer status are already private implementation details of the builtin Goal
+extension. The wiring stays entirely inside that builtin and uses the public `ctx.ui.setStatus`
+surface; no core extension API change is required.
 
-### Expected merge conflict zones on next upstream sync
+### Expected merge conflict zones on the next sync
 
-- NONE for `wait-progress.ts` — new fork-only file with no importers.
-- LOW in `AGENTS.md` (FILES table + tests list, additive lines only).
-- Wiring, once agreed, would touch `monitor-continuation.ts` `#schedule()` and the footer
-  status surface; both are fork-owned but `#schedule()` is actively edited, so that follow-up
-  carries real conflict risk and is intentionally left out of this change.
+- MEDIUM in `monitor-continuation.ts` around delayed timer ownership and direct-input holds.
+- LOW in `continuation.ts` for the restored `userGrace` path and in `index.ts` for ticker wiring.
+- LOW in the focused Goal monitor lifecycle tests and harness status signal.
+- NONE in the Goal store schema, public extension API, or durable cache-warm entry contract.
 
 ## Observable progress resets the persisted continuation cap streak (2026-07-30)
 

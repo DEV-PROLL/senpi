@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GOAL_WAIT_STATUS_KEY } from "../../src/core/extensions/builtin/goal/wait-ticker.ts";
 import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
 	cleanAssistantStop,
 	cleanupGoalMonitorTempDirs,
 	createGoalHarness,
+	createGoalStatusHarness,
 	type GoalContextState,
 	type GoalHarness,
+	type GoalStatusHarness,
 	makeGoalContext,
 	runGoalHandlers,
+	waitForGoalStatus,
 	waitForSentCount,
 } from "./goal-monitor-test-harness.ts";
 
@@ -16,11 +20,13 @@ interface ActiveMonitorHarness {
 	readonly ctx: ExtensionContext;
 	readonly notices: string[];
 	readonly state: GoalContextState;
+	readonly status: GoalStatusHarness;
 }
 
 async function createActiveMonitorHarness(threadId: string): Promise<ActiveMonitorHarness> {
 	const notices: string[] = [];
-	const state: GoalContextState = { pendingMessages: false };
+	const status = createGoalStatusHarness();
+	const state: GoalContextState = { pendingMessages: false, status };
 	const harness = createGoalHarness();
 	const ctx = await makeGoalContext(notices, threadId, state);
 	await harness.tools
@@ -29,7 +35,7 @@ async function createActiveMonitorHarness(threadId: string): Promise<ActiveMonit
 	await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 	harness.events.emit("terminal_monitor_state", { activeCount: 1 });
 	await harness.events.flush();
-	return { harness, ctx, notices, state };
+	return { harness, ctx, notices, state, status };
 }
 
 async function endCleanTurn(harness: GoalHarness, ctx: ExtensionContext): Promise<void> {
@@ -102,14 +108,21 @@ describe("goal monitor continuation lifecycle", () => {
 
 	it("disposes the delayed continuation on session reload", async () => {
 		vi.useFakeTimers();
-		const { harness, ctx } = await createActiveMonitorHarness("thread-monitor-reload");
-		const baselineTimerCount = vi.getTimerCount();
+		const { harness, ctx, status } = await createActiveMonitorHarness("thread-monitor-reload");
+		const countdownStarted = waitForGoalStatus(
+			status,
+			(update) => update.key === GOAL_WAIT_STATUS_KEY && update.text?.includes("goal continues in 4m") === true,
+		);
 		await endCleanTurn(harness, ctx);
-		expect(vi.getTimerCount()).toBe(baselineTimerCount + 1);
+		await countdownStarted;
 
+		const countdownCleared = waitForGoalStatus(
+			status,
+			(update) => update.key === GOAL_WAIT_STATUS_KEY && update.text === undefined,
+		);
 		await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+		await countdownCleared;
 
-		expect(vi.getTimerCount()).toBe(baselineTimerCount);
 		await vi.advanceTimersByTimeAsync(240_000);
 		expect(harness.sent).toHaveLength(0);
 	});
