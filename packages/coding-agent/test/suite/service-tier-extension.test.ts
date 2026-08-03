@@ -23,6 +23,22 @@ describe("service-tier builtin extension", () => {
 		vi.restoreAllMocks();
 	});
 
+	async function createSessionFastModeHarness(provider: string) {
+		const harness = await createHarness({
+			api: CODEX_API,
+			provider,
+			models: [{ id: BASE_MODEL_ID }, { id: FAST_MODEL_ID }],
+			extensionFactories: [serviceTierExtension],
+		});
+		harnesses.push(harness);
+		const runner = harness.getExtensionRunner();
+		return {
+			harness,
+			runner,
+			notify: vi.spyOn(runner.getUIContext(), "notify"),
+		};
+	}
+
 	it("leaves payload unchanged when service tier is unset", () => {
 		// given
 		const payload = {
@@ -127,22 +143,14 @@ describe("service-tier builtin extension", () => {
 		expect(notify).toHaveBeenCalledWith("Fast mode is only available for OpenAI Codex models.", "warning");
 	});
 
-	it("toggles a session-level priority tier when the Codex model has no compatible fast variant", async () => {
+	it("toggles a session-level priority tier for the built-in Codex provider", async () => {
 		// given
 		// chatgpt.com/backend-api/codex/models advertises
 		// service_tiers [{ id: "priority", name: "Fast" }] to subscription accounts, and the
 		// first-party Codex CLI sends service_tier=priority over that same OAuth, so a missing
 		// `-fast` catalog sibling must fall back to a session tier toggle rather than declaring
 		// fast mode unavailable. See issue #545.
-		const harness = await createHarness({
-			api: CODEX_API,
-			provider: CODEX_PROVIDER,
-			models: [{ id: BASE_MODEL_ID }, { id: FAST_MODEL_ID }],
-			extensionFactories: [serviceTierExtension],
-		});
-		harnesses.push(harness);
-		const runner = harness.getExtensionRunner();
-		const notify = vi.spyOn(runner.getUIContext(), "notify");
+		const { harness, runner, notify } = await createSessionFastModeHarness(CODEX_PROVIDER);
 		const initialModel = harness.session.model;
 
 		// when
@@ -167,24 +175,29 @@ describe("service-tier builtin extension", () => {
 		expect(await runner.emitBeforeProviderRequest(defaultPayload)).toBe(defaultPayload);
 	});
 
-	it("toggles the priority tier for extension providers using the Codex responses API", async () => {
-		const harness = await createHarness({
-			api: CODEX_API,
-			provider: CODEX_POOL_PROVIDER,
-			models: [{ id: BASE_MODEL_ID }],
-			extensionFactories: [serviceTierExtension],
-		});
-		harnesses.push(harness);
-		const runner = harness.getExtensionRunner();
-		const notify = vi.spyOn(runner.getUIContext(), "notify");
+	it("toggles a session-level priority tier for Codex API extension providers", async () => {
+		// given
+		const { harness, runner, notify } = await createSessionFastModeHarness(CODEX_POOL_PROVIDER);
 
+		// when
 		await harness.session.prompt("/fast");
 
+		// then
 		expect(notify).toHaveBeenCalledWith(`Fast mode enabled: ${BASE_MODEL_ID}`, "info");
 		expect(harness.session.isFastModeActive()).toBe(true);
 		expect(await runner.emitBeforeProviderRequest({ model: BASE_MODEL_ID })).toEqual({
 			model: BASE_MODEL_ID,
 			service_tier: "priority",
+		});
+
+		// when
+		await harness.session.prompt("/fast");
+
+		// then
+		expect(notify).toHaveBeenCalledWith(`Fast mode disabled: ${BASE_MODEL_ID}`, "info");
+		expect(harness.session.isFastModeActive()).toBe(false);
+		expect(await runner.emitBeforeProviderRequest({ model: BASE_MODEL_ID })).toEqual({
+			model: BASE_MODEL_ID,
 		});
 	});
 

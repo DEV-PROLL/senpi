@@ -8,8 +8,9 @@
   `service_tier: "priority"` path without shadowing the stock command.
 - Non-Codex providers remain unchanged and still receive the existing warning.
 - Coverage: `test/suite/service-tier-extension.test.ts` registers a
-  `codex-pool` model on the Codex responses API, toggles `/fast`, and verifies
-  both the session indicator and request payload.
+  `codex-pool` model on the Codex responses API, toggles `/fast` on and off,
+  and verifies both the session indicator and the corresponding addition and
+  removal of `service_tier: "priority"` in the emitted request payload.
 - Expected merge conflict zones: LOW in `service-tier.ts` at the two Codex
   eligibility guards; LOW in `service-tier-extension.test.ts`.
 
