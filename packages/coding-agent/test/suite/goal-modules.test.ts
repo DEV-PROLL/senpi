@@ -156,6 +156,7 @@ describe("goal continuation gating", () => {
 
 		expect(evaluateGoalContinuation({ ...input, path: "immediate" })).toEqual({ kind: "deny", reason: "cap" });
 		expect(evaluateGoalContinuation({ ...input, path: "sessionStart" })).toEqual({ kind: "deny", reason: "cap" });
+		expect(evaluateGoalContinuation({ ...input, path: "userGrace" })).toEqual({ kind: "deny", reason: "cap" });
 		expect(evaluateGoalContinuation({ ...input, path: "monitorDelayed" })).toEqual({
 			kind: "deny",
 			reason: "cap",

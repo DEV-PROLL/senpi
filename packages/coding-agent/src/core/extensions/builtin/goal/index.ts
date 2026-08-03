@@ -18,6 +18,7 @@ import { registerGoalTools } from "./tool-registration.ts";
 import { TurnUsageTracker } from "./turn-usage.ts";
 import type { Goal, GoalAccountingMode, GoalStoreRef } from "./types.ts";
 import { updateGoalUi } from "./ui.ts";
+import { GOAL_WAIT_STATUS_KEY, GoalWaitTicker } from "./wait-ticker.ts";
 
 const RESUME_GOAL_CHOICE = "Resume goal";
 const LEAVE_GOAL_PAUSED_CHOICE = "Leave paused";
@@ -36,12 +37,23 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	let completedThisTurnGoalId: string | null = null;
 	let continuationPending = false;
 	const turnUsage = new TurnUsageTracker();
+	const goalWaitTicker = new GoalWaitTicker({
+		render: (renderCtx, status) => {
+			try {
+				renderCtx.ui.setStatus(GOAL_WAIT_STATUS_KEY, status);
+			} catch (error) {
+				if (error instanceof Error && error.message.startsWith(STALE_EXTENSION_CONTEXT_ERROR_PREFIX)) return;
+				throw error;
+			}
+		},
+	});
 	const monitorContinuation = new MonitorAwareGoalContinuation(
 		pi,
 		() => continuationPending,
 		() => {
 			continuationPending = true;
 		},
+		goalWaitTicker,
 	);
 	const directInputLifecycle = new GoalDirectInputLifecycle({
 		monitor: monitorContinuation,

@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GOAL_USER_GRACE_DELAY_MS } from "../../src/core/extensions/builtin/goal/continuation.ts";
 import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
 import { goalFilePath, readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "../../src/core/extensions/types.ts";
 import type { SessionEntry } from "../../src/core/session-manager.ts";
+import { waitForGoalContinuationCount } from "./goal-monitor-test-harness.ts";
 
 type AnyTool = ToolDefinition<any, any, any>;
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
@@ -627,11 +629,12 @@ describe("goal extension session_start migration-lite admission", () => {
 			{ type: "agent_end", messages: [assistantMessageWithStopReason("stop")] },
 			ctx,
 		);
-		// Accepted direct input consumes continuation eligibility for this turn. The
-		// Goal remains active, but no delayed continuation resurrects it afterward.
 		expect(sent).toHaveLength(0);
-		await vi.advanceTimersByTimeAsync(60_000);
-		expect(sent).toHaveLength(0);
+		const graceDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
+		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
+		await graceDeliveryRecorded;
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
 		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
 		vi.useRealTimers();
 	});
