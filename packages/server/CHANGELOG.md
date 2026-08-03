@@ -4,6 +4,14 @@
 
 ### Breaking Changes
 
+### Changed
+
+### Fixed
+
+## [2026.8.3] - 2026-08-03
+
+### Breaking Changes
+
 - Changed `toProtocolToolResultMessage()` to require the original `ToolCall` and verify tool result association.
 
 ### Changed
