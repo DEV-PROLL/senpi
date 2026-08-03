@@ -12,7 +12,7 @@
 
 ### Fixed
 
-- Pinned compiled binary release builds to Bun 1.3.14 instead of the moving canary, keeping all six cross-compilation target executables downloadable during release recovery.
+- Pinned compiled binary release builds to Bun 1.3.14 instead of the moving canary, keeping all six cross-compilation target executables downloadable during release recovery ([#674](https://github.com/code-yeongyu/senpi/pull/674)).
 
 ### Removed
 
