@@ -1,5 +1,35 @@
 # Builtin compaction extension changes
 
+## Treat caller-aborted summary stream failures as cancellation (2026-08-03)
+
+### What changed
+
+- `runExtensionCompaction()` now converts a summary-generation rejection to the existing
+  `undefined` cancellation result when its caller signal has been aborted.
+- Non-abort stream and provider failures are still rethrown unchanged.
+- A focused regression test reproduces the late stream-result rejection seen after ESC and
+  separately proves an ordinary stream failure remains visible.
+
+### Why
+
+- The compaction watchdog can stop waiting as soon as ESC aborts the caller signal, while the
+  provider stream's final result rejects a moment later with
+  `Assistant message stream consumption was cancelled`.
+- That late rejection escaped the documented `runExtensionCompaction()` cancellation contract,
+  causing the builtin extension runner to print an error and stack trace after the normal
+  `Auto-compaction cancelled` notice.
+
+### Why an extension could not do this
+
+- This is the builtin compaction extension's own summary-stream consumption boundary. No external
+  extension hook can intercept the private stream result before `runExtensionCompaction()` returns
+  to the extension runner.
+
+### Expected merge-conflict zones
+
+- `speculative.ts` around `runExtensionCompaction()` and its call to `generateSummaryMessage()`.
+- Compaction stream cancellation tests under `test/compaction/`.
+
 ## Reset the cap per provider turn and retain a safe deterministic suffix (2026-08-03)
 
 ### What changed

@@ -461,19 +461,25 @@ export async function runExtensionCompaction(
 
 	while (true) {
 		if (signal?.aborted) return undefined;
-		const response = await generateSummaryMessage({
-			context,
-			messages,
-			onProgress,
-			prompt,
-			signal,
-			snapshot,
-			auth: {
-				apiKey: auth.apiKey,
-				headers: auth.headers,
-				extraBody: auth.extraBody,
-			},
-		});
+		let response: Message | undefined;
+		try {
+			response = await generateSummaryMessage({
+				context,
+				messages,
+				onProgress,
+				prompt,
+				signal,
+				snapshot,
+				auth: {
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					extraBody: auth.extraBody,
+				},
+			});
+		} catch (error) {
+			if (signal?.aborted) return undefined;
+			throw error;
+		}
 		if (!response) return undefined;
 
 		if (isAssistantMessage(response) && isContextOverflow(response, snapshot.contextWindow)) {
