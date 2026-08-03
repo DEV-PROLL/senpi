@@ -19,7 +19,7 @@ async function main(): Promise<void> {
 	await delaySlowStart(options);
 
 	const sessions = new Map<string, SessionEntry>();
-	let toolCallCount = 0;
+	let firstToolCallExpired = false;
 	const httpServer = createServer(async (req, res) => {
 		try {
 			if (options.bearerToken && req.headers.authorization !== `Bearer ${options.bearerToken}`) {
@@ -41,10 +41,11 @@ async function main(): Promise<void> {
 				return;
 			}
 			if (isToolCallRequest(body)) {
-				toolCallCount += 1;
+				const expiresFirstCall = options.expireFirstToolCall && !firstToolCallExpired;
+				if (expiresFirstCall) firstToolCallExpired = true;
 				if (
 					options.alwaysExpireToolCalls ||
-					(options.expireFirstToolCall && toolCallCount === 1) ||
+					expiresFirstCall ||
 					(options.requireListBeforeToolCall && !entry.listedTools)
 				) {
 					writeJson(res, 404, { error: "fixture tool call session expired" });
