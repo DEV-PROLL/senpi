@@ -144,6 +144,7 @@ describe("required-compaction recovery bounds", () => {
 		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("large_result", {}), { stopReason: "toolUse" }),
+			fauxAssistantMessage("interrupted continuation resumed"),
 			fauxAssistantMessage("queued input handled after effective recovery"),
 		]);
 
@@ -158,7 +159,9 @@ describe("required-compaction recovery bounds", () => {
 			}),
 		);
 		expect(harness.faux.state.callCount).toBe(3);
+		expect(getAssistantTexts(harness)).toContain("interrupted continuation resumed");
 		expect(getAssistantTexts(harness)).toContain("queued input handled after effective recovery");
+		expect(getAssistantTexts(harness)).not.toContain("No more faux responses queued");
 		expect(getUserTexts(harness).filter((text) => text === queuedMarker)).toHaveLength(1);
 		expect(
 			harness.sessionManager
@@ -172,5 +175,70 @@ describe("required-compaction recovery bounds", () => {
 		).toHaveLength(1);
 		expect(harness.session.getSteeringMessages()).toEqual([]);
 		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
+	});
+
+	it("resolves the originating prompt after accepted recovery completes a queued steer", async () => {
+		let compactionRequest = 0;
+		const queuedMarker = "steer queued before failed inline admission";
+		const harness = await createHarness({
+			models: [{ id: "queued-recovery-admission", contextWindow: 5_000, maxTokens: 1_000 }],
+			settings: {
+				compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 1_000 },
+				retry: { enabled: false, maxRetries: 0, baseDelayMs: 1 },
+			},
+			tools: [textResultTool(2_000)],
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", (event) => {
+						compactionRequest++;
+						if (compactionRequest === 1) {
+							return {
+								cancel: true,
+								rejectionCause: "cancelled-by-extension",
+								reason: "reject inline compaction once",
+							} as const;
+						}
+						return {
+							compaction: {
+								summary: "accepted required recovery summary",
+								firstKeptEntryId: event.preparation.firstKeptEntryId,
+								tokensBefore: event.preparation.tokensBefore,
+								details: {},
+							},
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+
+		let releaseFirstTurn: (() => void) | undefined;
+		const firstTurnReady = new Promise<void>((resolve) => {
+			releaseFirstTurn = resolve;
+		});
+		harness.setResponses([
+			async () => {
+				releaseFirstTurn?.();
+				return fauxAssistantMessage(fauxToolCall("large_result", {}), { stopReason: "toolUse" });
+			},
+			fauxAssistantMessage("queued steer completed after recovery"),
+		]);
+
+		const origin = harness.session.prompt("start queued admission recovery");
+		await firstTurnReady;
+		const queued = harness.session.prompt(queuedMarker, { streamingBehavior: "steer" });
+
+		// The originating prompt must resolve once the accepted recovery has
+		// admitted the queued steer; the superseded admission error must not leak.
+		await origin;
+		await queued;
+		await harness.session.waitForSettledSessionWork();
+
+		expect(harness.eventsOfType("compaction_end")).toContainEqual(
+			expect.objectContaining({ reason: "threshold", accepted: true, willRetry: true }),
+		);
+		expect(getAssistantTexts(harness)).toContain("queued steer completed after recovery");
+		expect(getUserTexts(harness).filter((text) => text === queuedMarker)).toHaveLength(1);
+		expect(harness.session.getSteeringMessages()).toEqual([]);
 	});
 });

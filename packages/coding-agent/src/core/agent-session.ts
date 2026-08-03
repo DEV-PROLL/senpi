@@ -1742,10 +1742,19 @@ export class AgentSession {
 			retryContinuationBlocked ||= retryOutcome === "blocked";
 			if (!retryContinuationBlocked) {
 				if (compactedBeforeRetry && this.agent.hasQueuedMessages()) {
+					// Accepted recovery supersedes the stored admission rejection: the
+					// queued continuation is about to run, so the originating prompt must
+					// not observe the stale RequiredCompactionError.
+					this._requiredCompactionAdmissionError = undefined;
 					this._scheduleContinuationAfterCurrentEvent();
 					launchedContinuation = true;
 				} else {
 					launchedContinuation = await this._checkCompaction(msg, true, undefined, retryAfterRequiredCompaction);
+					if (launchedContinuation && this.agent.hasQueuedMessages()) {
+						// Same supersession on the post-check path: an accepted recovery
+						// compaction owns the continuation now.
+						this._requiredCompactionAdmissionError = undefined;
+					}
 					allowsPostCompactionUsageExemptContinuation = this._postCompactionUsageExemptAssistants.has(msg);
 					if (allowsPostCompactionUsageExemptContinuation) {
 						this._flushPostCompactionDeferredMessages();
@@ -1773,6 +1782,9 @@ export class AgentSession {
 				(allowsQueuedContinuation || allowsPostCompactionUsageExemptContinuation) &&
 				this.agent.hasQueuedMessages()
 			) {
+				// A scheduled continuation owns the queue now; the stored admission
+				// rejection from a superseded required compaction must not surface.
+				this._requiredCompactionAdmissionError = undefined;
 				this._scheduleContinuationAfterCurrentEvent();
 				launchedContinuation = true;
 			}
