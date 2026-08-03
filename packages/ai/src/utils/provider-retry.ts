@@ -61,9 +61,9 @@ function validateServerRetryDelayMs(
 
 function getRetryDelayMs(error: ProviderError, retryIndex: number, maxRetryDelayMs: number | undefined): number {
 	const hintMs = extract429RetryAfterMs({
-		status: error.status,
+		status: 429,
 		headers: error.headers,
-		bodyText: error.message,
+		bodyText: "",
 	});
 	if (hintMs !== undefined) {
 		return validateServerRetryDelayMs(hintMs, maxRetryDelayMs, error.message);

@@ -154,6 +154,22 @@ describe("structured retry-after hint propagation", () => {
 		expect(request).toHaveBeenCalledTimes(2);
 	});
 
+	it("honors retry-after-ms header on non-429 (500) errors", async () => {
+		vi.useFakeTimers();
+		const request = vi
+			.fn<() => Promise<string>>()
+			.mockRejectedValueOnce(providerError(500, { "retry-after-ms": "100" }))
+			.mockResolvedValue("ok");
+
+		const result = retryProviderRequest(request, { maxRetries: 1 });
+		// Should sleep ~100ms honoring the header, not the ~1000ms exponential fallback.
+		await vi.advanceTimersByTimeAsync(99);
+		expect(request).toHaveBeenCalledTimes(1); // not retried yet
+		await vi.advanceTimersByTimeAsync(1);
+		await expect(result).resolves.toBe("ok");
+		expect(request).toHaveBeenCalledTimes(2);
+	});
+
 	it("uses exponential path for non-429 (500) errors — characterization pin", async () => {
 		vi.useFakeTimers();
 		const request = vi
