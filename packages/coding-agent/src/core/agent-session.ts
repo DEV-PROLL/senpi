@@ -5152,6 +5152,7 @@ export class AgentSession {
 					const controller = admission.controller;
 					void (async () => {
 						let outcome: "completed" | "failed" | "aborted" = "failed";
+						let compactionCompleted = false;
 						let disconnected = false;
 
 						try {
@@ -5168,6 +5169,7 @@ export class AgentSession {
 							});
 							if (execution.accepted) {
 								outcome = "completed";
+								compactionCompleted = true;
 								options?.onComplete?.(execution.result);
 							} else {
 								outcome = "failed";
@@ -5199,7 +5201,9 @@ export class AgentSession {
 							}
 							this._releasePendingCompactionAdmission(admission, outcome);
 							if (disconnected && !this.isCompacting) this._reconnectToAgent();
-							if (outcome === "completed") this._resumeQueuedMessagesAfterCompaction();
+							// A throwing onComplete consumer overwrites outcome in the catch
+							// block, so recovery keys off whether compaction itself succeeded.
+							if (compactionCompleted) this._resumeQueuedMessagesAfterCompaction();
 						}
 					})();
 				},

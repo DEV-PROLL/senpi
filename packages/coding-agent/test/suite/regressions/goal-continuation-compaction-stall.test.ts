@@ -213,6 +213,50 @@ describe("goal continuation compaction stall regression", () => {
 		expect(harness.session.agent.hasQueuedMessages()).toBe(false);
 	});
 
+	it("resumes queued messages when the compact action onComplete callback throws", async () => {
+		let ctxRef: ExtensionContext | undefined;
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 10_000, maxTokens: 1_000 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_start", async (_event, ctx) => {
+						ctxRef = ctx;
+					});
+					pi.on("session_before_compact", async (event) => ({
+						compaction: {
+							summary: "extension summary",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+							details: {},
+						},
+					}));
+				},
+			],
+		});
+		harnesses.push(harness);
+		await harness.session.bindExtensions({});
+		seedConversation(harness);
+		if (!ctxRef) throw new Error("extension context was not captured");
+
+		harness.setResponses([fauxAssistantMessage("continuation turn ran")]);
+		harness.session.agent.followUp(wedgedContinuationMessage());
+		expect(harness.session.agent.hasQueuedMessages()).toBe(true);
+
+		const completed = createDeferred();
+		ctxRef.compact({
+			onComplete: () => {
+				completed.resolve();
+				throw new Error("onComplete consumer failed");
+			},
+		});
+		await completed.promise;
+		await harness.session.waitForSettledSessionWork();
+
+		expect(harness.faux.state.callCount).toBe(1);
+		expect(harness.session.agent.hasQueuedMessages()).toBe(false);
+	});
+
 	it("retains a custom triggerTurn message when required compaction is rejected", async () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1", contextWindow: 10_000, maxTokens: 1_000 }],
