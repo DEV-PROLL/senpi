@@ -1,6 +1,8 @@
 import type { AutocompleteItem, SlashCommand } from "./autocomplete.ts";
 import { fuzzyFilter } from "./fuzzy.ts";
 
+const SKILL_COMMAND_PREFIX = "skill:";
+
 type CommandItem = {
 	readonly name: string;
 	readonly label: string;
@@ -31,12 +33,16 @@ export function getSlashCommandSuggestions(
 	commands: readonly (SlashCommand | AutocompleteItem)[],
 	prefix: string,
 ): AutocompleteItem[] {
-	const explicitSkillNamespace = prefix.startsWith("skill:");
 	const normalizedPrefix = prefix.toLowerCase();
+	const explicitSkillNamespace = normalizedPrefix.startsWith(SKILL_COMMAND_PREFIX);
+	const hasSkillCommands = commands.some((cmd) => {
+		const name = "name" in cmd ? cmd.name : cmd.value;
+		return name.startsWith(SKILL_COMMAND_PREFIX);
+	});
 	const commandItems: CommandItem[] = commands.flatMap((cmd) => {
 		const name = "name" in cmd ? cmd.name : cmd.value;
-		const isSkill = name.startsWith("skill:");
-		const skillName = isSkill ? name.slice("skill:".length) : "";
+		const isSkill = name.startsWith(SKILL_COMMAND_PREFIX);
+		const skillName = isSkill ? name.slice(SKILL_COMMAND_PREFIX.length) : "";
 		if (
 			isSkill &&
 			!explicitSkillNamespace &&
@@ -58,6 +64,20 @@ export function getSlashCommandSuggestions(
 		];
 	});
 
+	if (
+		hasSkillCommands &&
+		!explicitSkillNamespace &&
+		normalizedPrefix.length > 0 &&
+		SKILL_COMMAND_PREFIX.startsWith(normalizedPrefix)
+	) {
+		commandItems.push({
+			name: SKILL_COMMAND_PREFIX,
+			label: SKILL_COMMAND_PREFIX,
+			description: "Browse available skills",
+			searchText: SKILL_COMMAND_PREFIX,
+		});
+	}
+
 	return fuzzyFilter(commandItems, prefix, (item) => item.searchText)
 		.map((item, index) => ({
 			value: item.name,
@@ -65,6 +85,6 @@ export function getSlashCommandSuggestions(
 			...(item.description && { description: item.description }),
 			index,
 		}))
-		.sort((left, right) => compareSlashCommandSuggestion(prefix, left, right))
+		.sort((left, right) => compareSlashCommandSuggestion(normalizedPrefix, left, right))
 		.map(({ index: _index, ...item }) => item);
 }
