@@ -1,5 +1,24 @@
 # changes.md — dynamic-prompt
 
+## Test-discipline rules: prose-pinning prohibition + behavior wording (2026-08-03)
+
+### What changed
+
+- `verification.ts`: `prompt-behavior-coverage` rewritten as a prohibition — never pin prose, prompt wording, or doc text with a test; test only machine-consumed values (parsed fields, sentinel tokens, shipped-copy equality); a pure-prose change ships with no new test. `mock-contract-integrity` directive now says "behavior being asserted" instead of "contract being asserted" (id and concern unchanged; ids are not rendered into prompts).
+- Prose-pinning assertions removed from the prompt test suites in the same increment; remaining prompt coverage asserts parsed rule data and machine-consumed sentinels only.
+
+### Why
+
+A full session-corpus investigation (2026-08-03) found the old wording normalized prompt-text contract tests across every model: 113 sessions used contract-test vocabulary, and docs-only changes grew prose-pinning tests (e.g. `check-mcp-docs.test.mjs`). The rule now forbids the pattern at the source instead of merely preferring behavior assertions, and the word "contract" stops seeding contract-test naming.
+
+### Why extension system couldn't handle this
+
+The Test Discipline section is core prompt assembly (`buildTestDisciplineSection()`), single-sourced into every preset and the fallback prompt; no extension hook rewrites it.
+
+### Expected merge conflict zones
+
+- `verification.ts` rule directives. Resolution: keep the prohibition/behavior wording; re-apply upstream rule additions on top.
+
 ## CLI system-prompt overrides reapplied in `_rebuildSystemPrompt()` (2026-07-18)
 
 ### What changed

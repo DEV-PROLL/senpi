@@ -206,61 +206,14 @@ describe("goal continuation prompt (budget-free)", () => {
 		expect(prompt.toLowerCase()).not.toContain("tokens remaining");
 		expect(prompt.toLowerCase()).not.toContain("budget_limited");
 	});
-
-	it("carries a decisive completion audit that must flip to update_goal complete", () => {
-		const prompt = buildContinuationPrompt(makeGoal());
-		expect(prompt).toMatch(/completion audit/i);
-		expect(prompt).toMatch(/call update_goal with status "complete" in this same turn/i);
-		expect(prompt).toMatch(/leaving the goal active/i);
-		expect(prompt).toMatch(/todo task/i);
-		expect(prompt).toMatch(/completed or dropped/i);
-	});
-
-	it("carries a conservative blocked audit gated on a recurring, unmistakable impasse", () => {
-		const prompt = buildContinuationPrompt(makeGoal());
-		expect(prompt).toMatch(/blocked audit/i);
-		expect(prompt).toMatch(/unmistakably clear/i);
-		expect(prompt).toMatch(/three consecutive goal turns/i);
-		expect(prompt).toMatch(/hard, slow, uncertain/i);
-		expect(prompt).toMatch(/user input or an external-state change/i);
-	});
-
-	it("treats waiting on a live resumption channel as a legal turn ending, never as blocked", () => {
-		const prompt = buildContinuationPrompt(makeGoal());
-		expect(prompt).toMatch(/live resumption channel/i);
-		expect(prompt).toMatch(/wait.*not an impasse|never grounds a blocked/i);
-	});
-
-	it("gates the blocked audit on having no live resumption channel", () => {
-		const prompt = buildContinuationPrompt(makeGoal());
-		expect(prompt).toMatch(/no active monitor/i);
-		expect(prompt).toMatch(/end the turn and let it wake/i);
-	});
-
-	it("forbids ending a goal turn with narration instead of action or an update_goal call", () => {
-		const prompt = buildContinuationPrompt(makeGoal());
-		expect(prompt).toMatch(/exactly one/i);
-		expect(prompt).toMatch(/status report|done-claim/i);
-		expect(prompt).not.toMatch(/wait_for/);
-		expect(prompt).not.toMatch(/tmux/i);
-	});
 });
 
 describe("goal truncation recovery prompt", () => {
 	it("stays short and re-injects no objective text or audit blocks", () => {
 		const prompt = buildTruncationRecoveryPrompt();
-		expect(prompt.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(120);
 		expect(prompt).not.toContain("<untrusted_objective>");
 		expect(prompt.toLowerCase()).not.toContain("objective");
 		expect(prompt.toLowerCase()).not.toContain("audit");
-	});
-
-	it("tells the model to continue from the cut point without restarting or restating", () => {
-		const prompt = buildTruncationRecoveryPrompt();
-		expect(prompt).toMatch(/output[- ]token limit|token limit/i);
-		expect(prompt).toMatch(/continue/i);
-		expect(prompt).toMatch(/do not restart|not restart|without restarting/i);
-		expect(prompt).toMatch(/restate/i);
 	});
 });
 
@@ -272,10 +225,6 @@ describe("goal stall notice", () => {
 		expect(notice).toContain("3");
 		expect(notice).not.toContain("bash_output");
 		expect(notice).not.toContain("kill_bash");
-		expect(notice).toMatch(/todo list/i);
-		expect(notice).toMatch(/concrete action/i);
-		expect(notice).toMatch(/blocked audit/i);
-		expect(notice).toMatch(/do not end/i);
 	});
 
 	it("keeps the monitor-investigation bullets while monitors are active", () => {

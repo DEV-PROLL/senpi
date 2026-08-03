@@ -1,5 +1,25 @@
 # prompt-preset Extension Changes
 
+## Kimi K3 + GPT-5.6: test-proportionality rules (2026-08-03)
+
+### What changed
+
+- `kimi-k3.ts`: the Verification section opens with a terminal condition — one successful verification command ends the check; one focused test per behavior change at the touched seam; prose, docs, and visual-only changes take review + real-surface QA instead of tests.
+- `gpt-5.6.ts`: `TEST_FIRST` scoped — the failing test is written at the seam the change touches; prose, doc, and visual-only changes take review plus real-surface QA, not tests. Header comment updated: the deleted blanket "default to not adding tests" rule returns as a scoped seam rule inside test-first.
+- Prose-pinning assertions stripped from `test/suite/prompt-presets-*.test.ts` and other prompt test files; what remains asserts machine-consumed behavior (preset resolution, model matching, rule ids/concerns, tool-name sentinels).
+
+### Why
+
+The 2026-08-03 session-corpus investigation showed K3 writing more test files than any other model (636 writes) and GPT-5.6's preset having deleted its upstream scope rule. kimi.md prescribes terminal conditions over prohibitions; claude-opus-5.md warns explicit verification instructions compound into over-verification. The prose-pinning test removals follow the repo's own convention (`prompt-behavior-coverage`: parsed rule data, never pinned sentences).
+
+### Why extension system couldn't handle this
+
+Presets are core-owned prompt builders; the proportionality rule belongs in the prompt text itself.
+
+### Expected merge conflict zones
+
+- `kimi-k3.ts` Verification section, `gpt-5.6.ts` `TEST_FIRST` constant. Resolution: keep the scoping sentences.
+
 ## DeepSeek V4 presets: flash, flash-0731, pro (2026-07-31)
 
 ### What changed
