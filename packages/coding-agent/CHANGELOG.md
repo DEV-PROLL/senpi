@@ -8,11 +8,30 @@
 
 ### Added
 
+- Added resume-first continuity for Claude SDK OAuth sessions, including lineage reattachment across aborts, account failover, restarts, model changes, and thinking-level changes ([#634](https://github.com/code-yeongyu/senpi/pull/634), [#635](https://github.com/code-yeongyu/senpi/pull/635), [#636](https://github.com/code-yeongyu/senpi/pull/636), [#637](https://github.com/code-yeongyu/senpi/pull/637)).
+- Added hint-aware 429 retry routing with tier classification, probe-back scheduling, and visible retry-probe events in interactive and RPC modes ([#657](https://github.com/code-yeongyu/senpi/pull/657)).
+- Added retries for transient idle-compaction warm-up failures while the agent remains idle ([#661](https://github.com/code-yeongyu/senpi/pull/661)).
+
 ### Changed
+
+- Migrated the build toolchain to TypeScript 7.0.2 stable with native `tsc`, replacing experimental `tsgo`/`@typescript/native-preview` usage and retaining the TypeScript 6 API bridge required by the relative-import checker ([#651](https://github.com/code-yeongyu/senpi/pull/651)).
+- Moved compiled Senpi binary builds and npm publication to the Bun 1.4+ canary runtime, guarded by revision-aware assertions and cross-platform runtime smoke tests ([#651](https://github.com/code-yeongyu/senpi/pull/651)).
+- Aligned compaction and assistant-boundary restoration with Claude SDK OAuth session lineages ([#636](https://github.com/code-yeongyu/senpi/pull/636)).
 
 ### Fixed
 
+- Fixed Claude SDK OAuth abort settlement and persistence of forked session identifiers ([#634](https://github.com/code-yeongyu/senpi/pull/634), [#637](https://github.com/code-yeongyu/senpi/pull/637)).
+- Fixed Anthropic tool-use/tool-result pairing after pruning, interruption, or model switching ([#641](https://github.com/code-yeongyu/senpi/pull/641)).
+- Compacted persisted apply-patch previews and bounded patch bodies to prevent oversized transcript artifacts ([#649](https://github.com/code-yeongyu/senpi/pull/649)).
+- Bounded summarization overflow retries to prevent unbounded compaction loops ([#652](https://github.com/code-yeongyu/senpi/pull/652)).
+- Fully reconnected expired MCP sessions instead of reusing stale transport handles ([#655](https://github.com/code-yeongyu/senpi/pull/655)).
+- Rearmed wake delivery for fresh terminal monitors ([#658](https://github.com/code-yeongyu/senpi/pull/658)).
+- Prevented loop-guard repetition detection from conflating distinct targets ([#659](https://github.com/code-yeongyu/senpi/pull/659)).
+- Unwedged goal continuations after non-automatic compaction and resumed queued messages even when compaction completion hooks throw ([#660](https://github.com/code-yeongyu/senpi/pull/660)).
+
 ### Removed
+
+- Removed the legacy `web-ui` workspace from the monorepo ([#651](https://github.com/code-yeongyu/senpi/pull/651)).
 
 ## [2026.8.1] - 2026-08-01
 
