@@ -1,5 +1,163 @@
 # changes
 
+## Resume queued messages after non-auto compaction; retain admission-rejected custom messages (2026-08-03)
+
+### What changed
+
+- `agent-session.ts` gained `_resumeQueuedMessagesAfterCompaction()`, mirroring
+  `_runAutoCompaction`'s accepted-path recovery, and calls it on the success
+  paths of `applyCompaction()`, the extension `compact` context action, and
+  manual `compact()`.
+- `sendCustomMessage()`'s non-streaming `triggerTurn` path now retains the
+  message in the matching agent-level queue (`followUp`/`steer`) before
+  rethrowing when provider admission (`_enforceCompactionBeforeProvider` /
+  `_enforceFinalProviderAdmission`) rejects, mirroring `sendUserMessage`'s
+  documented retention contract.
+
+### Why
+
+- A custom `triggerTurn` message sent while a non-auto compaction owned the
+  session (extension feedback stage via `beginCompaction`, extension `compact`
+  action, manual `/compact`) was parked in the agent-level queues without a
+  turn and nothing resumed it afterwards; an admission rejection dropped the
+  message entirely because the fire-and-forget extension `sendMessage` action
+  swallows the rejection. Hidden goal continuations were the primary victim:
+  their single-flight latch clears only on `agent_start`, so the goal silently
+  idled at "Pursuing goal (...)" until manual user input.
+
+### Why this cannot be expressed externally
+
+- Both fixes depend on internal compaction lifecycle ownership, agent-level
+  queue state, and the private continuation scheduler; no extension hook can
+  observe or reschedule them.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` around `compact()` / `applyCompaction()` / the
+  extension `compact` action finally blocks, `sendCustomMessage()`'s
+  triggerTurn branch, and `_scheduleContinuationAfterCurrentEvent()`.
+
+## Hint-aware 429 retry tier routing (2026-08-03)
+
+### What changed
+
+- `agent-session.ts` retry orchestration classifies 429-class errors into three tiers using the structured
+  hint from `packages/ai`: no-hint 429 falls back immediately with zero same-model retries; tier 1 (hint ≤
+  `hintedWaitCapMs`, default 300 000 ms) performs in-turn half/full probes via `nextInTurnDelayMs` with
+  cumulative-cap demotion; tier 2 (`hintedWaitCapMs` < hint < `probeBackMaxMs`) falls back and schedules
+  at most two `ProbeBackScheduler` probes at half/deadline, clearing cooldown on success so
+  `maybeRestorePrimary` reverts next turn; tier 3 (hint ≥ `probeBackMaxMs`) falls back only with a
+  remaining-hint cooldown.
+- `retry-fallback/probe-scheduler.ts` (new) owns the tier 2 probe schedule. `retry-fallback/controller.ts`
+  and `retry-fallback/cooldown.ts` carry the tier decision and cooldown state.
+  `retry-fallback/settings.ts` adds `resolveHintPolicySettings` with `hintedWaitCapMs` and `probeBackMaxMs`
+  (defaults 300 000 / 3 600 000 ms).
+- New session events `retry_probe_scheduled` and `retry_probe_result` surface probe lifecycle to the client.
+- `retry-fallback-long-delay.test.ts` has two intentionally updated assertions: tier routing replaces the
+  legacy over-budget gate for 429-class errors, so the expected retry/fallback behavior changes accordingly.
+
+### Why
+
+- A blind exponential backoff on 429 wastes a turn when the provider says “retry now,” and retries
+  immediately when the provider says “wait an hour.” Structured hints let the agent respect the provider's
+  guidance instead of guessing.
+
+### Why this cannot be expressed externally
+
+- The tier decision must intercept the retry sleep and fallback switch inside agent-session's orchestration
+  loop, between the provider error and the retry/fallback decision. The extension API exposes no hook at that
+  point — extensions see only post-decision error strings.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts` retry orchestration (approximately lines 5380–5705).
+- MEDIUM: `retry-fallback/*` (controller, cooldown, settings, probe-scheduler).
+- LOW: `settings-manager.ts` for the new `hintedWaitCapMs` / `probeBackMaxMs` settings.
+
+## Backfill: eval bridge deadlock prevention (2026-08-01)
+
+### What changed
+
+- Eval bridge requests no longer deadlock the session when completion and bridge delivery race.
+
+### Why
+
+- A blocked bridge stalls the entire agent turn and leaves no safe continuation path.
+
+### Why this cannot be expressed externally
+
+- The fix depends on internal agent-session bridge ordering and completion ownership.
+
+### Expected merge conflict zones
+
+- Agent-session eval bridge handlers, pending request state, and completion/error cleanup.
+
+## Deduplicate high-reasoning warnings per session model (2026-07-31)
+
+### What changed
+
+- `agent-session.ts` now remembers every sensitive provider/model identity that
+  already displayed the high-reasoning warning during the current session.
+- Moving between `xhigh`, `max`, lower reasoning levels, or another model no
+  longer re-arms the warning for an identity the user already saw.
+- A different sensitive provider/model identity still receives its own first
+  warning.
+
+### Why
+
+- The previous single last-key value was cleared whenever the active state was
+  not warnable and included the reasoning level in its key. Cycling reasoning
+  levels or switching away and back therefore appended the same large warning
+  box repeatedly.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` warning-dedup state and
+  `_emitHighReasoningWarningIfNeeded()`.
+
+## Preserve the user's reasoning preference across model switches (2026-07-31)
+
+### What changed
+
+- `agent-session.ts`: manual model selection and favorite-model cycling now
+  apply model-specific overrides and capability clamps as session-effective
+  levels without replacing `defaultThinkingLevel`.
+- Model switches without an explicit favorite tier restore the remembered
+  `defaultThinkingLevel` before clamping it to the selected model.
+
+### Why
+
+- Switching from a max-capable model to a basic reasoning model persisted the
+  clamped `high` tier, so switching back no longer restored the user's last
+  selected `max` tier. Explicit favorite tiers could likewise replace the
+  global preference even though they are model-specific overrides.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` around `_switchActiveModel()`,
+  `_cycleFavoriteModel()`, and `_getThinkingLevelForModelSwitch()`.
+
+## Thinking-level tier detection delegates to packages/ai (2026-07-30)
+
+### What changed
+
+- `thinking-levels.ts` no longer re-implements the `xhigh` / `max` model-id lists. `supportsXhigh`,
+  `supportsMax`, and `getSupportedThinkingLevels` now wrap the canonical `@earendil-works/pi-ai` helpers
+  and only keep the coding-agent's `ThinkingLevel` vocabulary plus the non-empty `["off"]` fallback.
+- The local `ModelWithThinkingLevelMap` cast is gone: `Model.thinkingLevelMap` is already part of the
+  public `pi-ai` model type.
+
+### Why
+
+- Tier rules belong to `packages/ai`; delegating removes the coding-agent's duplicate model-id lists and
+  precedence logic so future capability changes have one implementation. Generated catalog models retain
+  their explicit maps, so behavior for real catalog models is intentionally unchanged.
+
+### Why extension system couldn't handle this alone
+
+- Tier detection feeds session thinking-level clamping and the model/RPC surfaces inside core; it is not
+  reachable from an extension.
+
 ## Codex fast-variant service-tier metadata lookup (2026-07-29)
 
 ### What changed

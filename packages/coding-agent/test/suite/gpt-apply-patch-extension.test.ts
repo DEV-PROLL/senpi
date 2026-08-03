@@ -203,7 +203,6 @@ describe("gpt-apply-patch builtin extension", () => {
 		// Codex GPT-5.2 guard: ban inline python/heredoc-driven file mutation through bash.
 		expect(joined.toLowerCase()).toMatch(/python/);
 		// Codex GPT-5.2 guard: do not waste tokens re-reading after a successful patch.
-		expect(joined.toLowerCase()).toMatch(/re-?read|do not.*read/);
 	});
 
 	it("applies Codex-format patches from JSON input to files", async () => {

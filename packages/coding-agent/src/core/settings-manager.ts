@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
+import type { ScrollViewScrollbar } from "@earendil-works/pi-tui";
 import { createHash, randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
@@ -10,9 +11,11 @@ import { findNearestParentConfigDir } from "../nearest-parent-config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import {
+	type ResolvedHintPolicySettings,
 	type ResolvedRetryFallbackSettings,
 	type RetrySettings as RetrySettingsConfig,
 	resolveAbortServerSideFallback,
+	resolveHintPolicySettings,
 	resolveRetryFallbackSettings,
 } from "./retry-fallback/settings.ts";
 
@@ -20,6 +23,8 @@ export type { ProviderRetrySettings, RetrySettings } from "./retry-fallback/sett
 
 export const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
 export const DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS = 30_000;
+
+export type UiMode = "regular" | "fullscreen";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -175,6 +180,8 @@ export interface Settings {
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Pi-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
+	uiMode?: UiMode; // default: "regular"
+	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular UI mode
 }
 
 /**
@@ -1007,6 +1014,10 @@ export class SettingsManager {
 		return resolveRetryFallbackSettings(this.settings.retry);
 	}
 
+	getHintPolicySettings(): ResolvedHintPolicySettings {
+		return resolveHintPolicySettings(this.settings.retry);
+	}
+
 	setFallbackChain(key: string, entries: string[]): void {
 		if (!this.globalSettings.retry) {
 			this.globalSettings.retry = {};
@@ -1472,6 +1483,27 @@ export class SettingsManager {
 		}
 		this.globalSettings.terminal.showTerminalProgress = enabled;
 		this.markModified("terminal", "showTerminalProgress");
+		this.save();
+	}
+
+	getUiMode(): UiMode {
+		return this.settings.uiMode === "fullscreen" ? "fullscreen" : "regular";
+	}
+
+	setUiMode(mode: UiMode): void {
+		this.globalSettings.uiMode = mode;
+		this.markModified("uiMode");
+		this.save();
+	}
+
+	getFullscreenScrollbar(): ScrollViewScrollbar {
+		const mode = this.settings.fullscreenScrollbar;
+		return mode === "always" || mode === "hidden" ? mode : "auto";
+	}
+
+	setFullscreenScrollbar(mode: ScrollViewScrollbar): void {
+		this.globalSettings.fullscreenScrollbar = mode;
+		this.markModified("fullscreenScrollbar");
 		this.save();
 	}
 

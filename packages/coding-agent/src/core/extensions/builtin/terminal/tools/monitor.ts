@@ -94,6 +94,7 @@ async function createMonitor(
 		cwd: execCtx?.cwd,
 		...(input.persistent ? {} : { timeoutMs: resolveTimeoutMs(input.timeout_ms) }),
 	});
+	ctx.onMonitorRearmed?.(id);
 	registry.register({ id, description: input.description, runtime, filter });
 	return textResult(`Monitor started with ID: ${id}`, { details: { bash_id: id, monitor: true } });
 }
@@ -111,7 +112,7 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 		name: TERMINAL_MONITOR_TOOL,
 		label: "monitor",
 		description:
-			"Subscribe to events from a command instead of polling for them: each stdout line arrives as an injected event while you keep working. Returns a bash_id immediately; peek with bash_output, stop with kill_bash.",
+			"Subscribe to events from a command instead of polling for them: each stdout line arrives as an injected event while you keep working. Updates identical to a monitor's previous batch are dropped, so a watcher reprinting unchanged status does not re-wake the session. Returns a bash_id immediately; peek with bash_output, stop with kill_bash.",
 		promptSnippet: "Subscribe to a command's stdout lines as injected events instead of polling",
 		promptGuidelines: [
 			"Waiting on observable state (CI checks, builds, log patterns, deploys) means a monitor, never a foreground sleep/poll loop.",

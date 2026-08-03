@@ -1,5 +1,94 @@
 # changes
 
+## Backfill: exit alias and footer provider priority (2026-08-01)
+
+### What changed
+
+- Interactive slash-command dispatch accepts the fork's exit-command alias.
+- Provider counts appear immediately and provider prefixes win the footer layout priority they need.
+
+### Why
+
+- Exit behavior must remain discoverable and the active provider must stay visible under constrained terminal width.
+
+### Why this cannot be expressed externally
+
+- Both behaviors depend on the built-in command registry and interactive footer layout scheduler.
+
+### Expected merge conflict zones
+
+- `interactive-mode.ts`, slash-command registration, and footer/status layout code.
+
+## Global queue chronology for compaction recovery (2026-07-31)
+
+- Queue submissions reserve one monotonic order across native steer/follow-up buckets and TUI-owned compaction input. Native delivery priority remains unchanged.
+- `AgentSession.clearQueue()` preserves its enumerable `{ steering, followUp }` shape and exposes global recovery chronology through a non-enumerable `ordered` side channel.
+- Retry handoff carries reserved order into native queues; legacy messages without order retain deterministic compatibility ordering. Matching records leave chronology when native delivery starts.
+- The existing `clearQueue({ abortWillFollow })` contract remains intact, so terminal restore does not leak abort state.
+- Coverage: `test/suite/regressions/compaction-terminal-queue-order.test.ts`, `535-terminal-compaction-abort-flag.test.ts`, and `post-compaction-queued-input-resume.test.ts`.
+
+### Expected merge conflict zones
+
+- MEDIUM: `core/agent-session.ts` queue bookkeeping and `interactive-mode.ts` compaction transfer/restoration.
+
+## Model-switch status uses optimized-prompt wording (2026-07-31)
+
+### What changed
+
+- `cycleModel` and `selectModelFromUi` status lines now read `optimized system prompt applied: <preset>` instead of `system prompt: <preset>`, and stay silent when the switch emits no preset name (unmatched models fall back to the senpi dynamic prompt without announcement). Behavior counterpart: `builtin/prompt-preset` (see its changes.md, 2026-07-31).
+
+### Why
+
+- User request: switch messages should convey that a model-optimized system prompt was applied, and say nothing for models without one.
+## Queue restoration does not leak abort state (2026-07-31)
+
+### What changed
+
+- Native queue draining now records cleared messages for `session_abort` only when the caller will immediately abort the session.
+- Terminal compaction restoration and manual dequeue-to-editor drains leave later idle aborts silent, while the deliberate clear-then-abort paths retain their existing `session_abort` behavior.
+- Coverage: `test/suite/regressions/535-terminal-compaction-abort-flag.test.ts` drives terminal `compaction_end` restoration with native steer and follow-up messages and pins both sides of the abort-event distinction.
+
+### Why
+
+- Terminal compaction failure restoration previously left `_hadClearedQueuedMessages` set indefinitely. A later unrelated idle abort emitted `session_abort`, which extensions can interpret as a control-plane instruction such as blocking an active goal.
+
+### Expected merge conflict zones
+
+- LOW: queue draining in `core/agent-session.ts` and the queue restoration helpers in `interactive-mode.ts`.
+
+## Footer marks fast mode on the model label (2026-07-31)
+
+### What changed
+
+- `components/footer.ts` prefixes the right-hand model label with a lightning bolt whenever
+  `session.isFastModeActive()` is true, so a priority-tier session is visible without running
+  `/fast` again to check. The glyph is part of the `FooterSegment` plain text, so the width ladder
+  in `footer-layout.ts` accounts for it instead of overflowing narrow terminals, and
+  `colorRightSide()` paints it `warning` while the model keeps `accent` and `:thinking` keeps `dim`.
+- Coverage: `test/footer-fast-mode-icon.test.ts` pins the indicator, its absence when fast mode is
+  off, and width safety with a wide CJK model id at width 60.
+
+### Why
+
+- Both fast paths (an `openai` `-fast` catalog variant and the Codex session toggle) were invisible
+  in the footer, which is the only always-on surface showing the active model.
+
+## Double-Escape history recovers after refusal fallback exhaustion (2026-07-31)
+
+### What changed
+
+- Terminal classifier-refusal fallback exhaustion now returns `AgentSession.retryAttempt` to zero and emits the failed `auto_retry_end` event consumed by interactive retry cleanup.
+- The existing empty-editor double-Escape handler therefore reaches the session tree again after the final `Aborted after N retry attempts` result; no keybinding or timing semantics changed.
+- Coverage: `test/suite/regressions/fallback-abort-double-escape-session-history.test.ts`.
+
+### Why
+
+- The interactive Escape handler intentionally prioritizes active retry cancellation over session history. A stale positive retry attempt made that active-retry branch permanent even after the turn had settled.
+
+### Expected merge conflict zones
+
+- NONE in interactive source; the behavioral fix is isolated to `core/agent-session.ts` retry lifecycle cleanup.
+
 ## Failed compaction restores queued input (2026-07-30)
 
 ### What changed

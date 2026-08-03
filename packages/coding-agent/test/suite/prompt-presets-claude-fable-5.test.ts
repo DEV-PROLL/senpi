@@ -51,11 +51,6 @@ describe("Claude Fable 5 prompt preset", () => {
 		// then
 		expect(preset?.name).toBe("claude-fable-5");
 		expect(preset?.prompt).toContain("You are senpi");
-		expect(preset?.prompt).toContain("## Intent Gate");
-		expect(preset?.prompt).toContain("a recommendation, not a survey");
-		expect(preset?.prompt).toContain("audit each claim against a tool result");
-		expect(preset?.prompt).toContain("on account of context limits");
-		expect(preset?.prompt.length).toBeGreaterThan(2_000);
 	});
 
 	it.each(["claude-opus-4-8", "~anthropic/claude-fable-latest", "some-fable-compatible-router"])(
@@ -83,7 +78,6 @@ describe("Claude Fable 5 prompt preset", () => {
 
 		// then
 		expect(preset?.name).toBe("claude-fable-5");
-		expect(preset?.prompt).toContain("audit each claim against a tool result");
 	});
 
 	it("keeps every shared test-discipline rule after the dieted core rewrite", () => {
@@ -98,19 +92,6 @@ describe("Claude Fable 5 prompt preset", () => {
 		for (const rule of TEST_DISCIPLINE_RULES) {
 			expect(preset?.prompt).toContain(rule.directive);
 		}
-	});
-
-	it("declares the binding stop condition in the routing line", () => {
-		// given
-		const settings: PromptPresetSettings = { promptPreset: "auto" };
-		const model = createModel("claude-fable-5", "anthropic");
-
-		// when
-		const preset = resolvePreset(model, settings);
-
-		// then
-		expect(preset?.prompt).toContain("I'll stop when [the exact, observable condition that ends this turn].");
-		expect(preset?.prompt).toContain("defect, not diligence");
 	});
 
 	it("does not include GPT or Kimi tuning in the claude-fable-5 preset", () => {

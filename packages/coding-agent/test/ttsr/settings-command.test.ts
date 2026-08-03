@@ -65,8 +65,16 @@ function thinkingTextOf(message: PersistedMessage | undefined): string {
 	return message.content.map(thinkingOf).join("");
 }
 
-function sampleUserRules(): TtsrRule[] {
+function sampleRules(): TtsrRule[] {
 	return [
+		{
+			name: "fabricated-unavailable-tool-call",
+			content: "Call real tools instead of printing transcript records.",
+			condition: ["unavailable-tool-call"],
+			scope: { allowText: true, allowThinking: false, toolScopes: [] },
+			interruptMode: "always",
+			source: "builtin",
+		},
 		{
 			name: "no-secrets",
 			content: "Never print credential material.",
@@ -118,7 +126,7 @@ describe("/ttsr command", () => {
 
 	it("lists builtin detectors, user rules, injected rules, and enabled status", async () => {
 		const output = await runTtsrCommand({
-			rules: sampleUserRules(),
+			rules: sampleRules(),
 			injectedRuleNames: ["no-secrets"],
 			disabled: false,
 		});
@@ -130,7 +138,11 @@ describe("/ttsr command", () => {
 		expect(output).toContain("control-token-leak");
 		expect(output).toContain("detector: collapse");
 		expect(output).toContain("detector: control-leak");
+		const builtinSection = output.slice(output.indexOf("BUILTIN RULES"), output.indexOf("USER RULES"));
+		expect(builtinSection).toContain("fabricated-unavailable-tool-call [stream rule, scope: text]");
 		expect(output).toContain("USER RULES");
+		const userSection = output.slice(output.indexOf("USER RULES"), output.indexOf("INJECTED"));
+		expect(userSection).not.toContain("fabricated-unavailable-tool-call");
 		expect(output).toContain("no-secrets [project, scope: text]");
 		expect(output).toContain("calm-edits [global, scope: tool:edit(**/*.ts)]");
 		expect(output).toContain("INJECTED");

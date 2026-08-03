@@ -32,13 +32,13 @@ export const TEST_DISCIPLINE_RULES = [
 		id: "mock-contract-integrity",
 		concern: "mock-contracts",
 		directive:
-			"Mocks must preserve the contract being asserted; do not isolate so heavily that the integration under test cannot fail.",
+			"Mocks must preserve the behavior being asserted; do not isolate so heavily that the integration under test cannot fail.",
 	},
 	{
 		id: "prompt-behavior-coverage",
 		concern: "prompt-tests",
 		directive:
-			"Prompt tests must assert behavior, decisions, structure, or parsed rule data rather than merely pinning an exact prompt sentence.",
+			"Never pin prose, prompt wording, or doc text with a test; test only machine-consumed values (parsed fields, sentinel tokens, shipped-copy equality). A pure-prose change ships with no new test.",
 	},
 	{
 		id: "single-pass-runner",

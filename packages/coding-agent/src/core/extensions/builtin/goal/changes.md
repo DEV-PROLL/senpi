@@ -1,5 +1,115 @@
 # goal Extension Changes
 
+## Legacy `pi-goal` state is imported once at session start (2026-07-31)
+
+### What changed
+
+- `persistence.ts` exports `migrateLegacyGoalFile(ref)`, and `index.ts` awaits it
+  before the session's first `readGoal`, so imported state participates
+  immediately.
+- Legacy-only parsing deletes the old `tokenBudget` enforcement input and maps
+  `budgetLimited` / `budget_limited` to `active`. Current-store reads do not run
+  that normalization, so inert wire metadata and existing typed validation errors
+  are preserved.
+- Migration publication now uses `writeFile` with `flag: "wx"` and mode `0600`.
+  This keeps atomic exclusive-create precedence without hard-link support, temp
+  cleanup machinery, or a temp sibling that can be orphaned by `SIGKILL`.
+- Invalid, unsupported-version, and malformed legacy files are best-effort dead
+  data: they remain on disk, return no import, and do not brick the live current
+  store. Unexpected filesystem errors still propagate.
+- Successfully imported files, explicit-null files, and files that lose the
+  exclusive-create race are renamed to a sibling `.migrated` archive on a
+  best-effort basis, so completed migration is not retried on every startup.
+- Segment-aware `goal` -> `pi-goal` mapping accepts both `/` and `\\` separators
+  while retaining exact path-segment matching; names such as `my-goal` are never
+  rewritten.
+- Session-backed migration keeps its stable thread-id lookup. No-session migration
+  instead enumerates the cwd-keyed `*.json` bucket because ephemeral sessions get
+  a new id on every run. It searches both the legacy bucket beside the redirected
+  Senpi root and `PI_CODING_AGENT_DIR` (default `~/.pi/agent`), and reports an
+  explicit conflict when multiple valid live goals exist rather than guessing.
+
+### Why
+
+- Standalone `pi-goal` and the builtin can use different agent roots, and
+  no-session filenames contain an old ephemeral session id. Rewriting only the
+  current Senpi path and looking up the new id silently missed the headline
+  print/in-memory upgrade path.
+- Hard links fail on common non-POSIX and network filesystems. Exclusive `wx`
+  creation provides the same no-clobber result portably and removes the crash-time
+  orphan-temp-file durability wart.
+- A stale corrupt migration source is not authoritative live state. Ignoring its
+  expected parse/schema failures keeps goal creation usable while preserving the
+  source for manual recovery.
+- Retiring a consumed source makes migration genuinely one-shot without deleting
+  the user's old data.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `persistence.ts` around legacy candidate discovery and `parseGoalFile`'s
+  `legacy` option; standalone `pi-goal` has no migration path.
+- LOW in `index.ts` at the `session_start` migration call.
+- NONE in the store schema, tool schemas, status transitions, or public API.
+
+## Mechanical continuation blocks tell the user how to resume (2026-07-31)
+
+### What changed
+
+- New `continuation-recovery.ts` owns the three mechanical continuation-guard
+  reasons (`continuation cap reached`, `repeated assistant output`,
+  `output truncation repeated`) as exported constants, classifies them with
+  `isMechanicalContinuationBlock`, and builds the user notice with
+  `continuationCapRecoveryHint`.
+- `lifecycle-helpers.ts` consumes both: `blockedReasonForContinuationGuard`
+  returns the named constants, and the blocked notify now renders
+  `Goal continuation blocked: <reason>. Send any message to resume.` for
+  mechanical guards only.
+- Intentional blocks (`user interrupted the turn`, provider-error exhaustion,
+  model-authored blocks) keep the bare notice; no resume guidance is implied
+  where a message does not clear the block.
+
+### Why
+
+- A user reported that `continuation cap reached` "stops the session so much"
+  and "is not an easy guardrail to pass". The cap is a deliberate runaway
+  backstop and already resets on tool use or observable progress, and
+  `before_agent_start` already reactivates a cap-blocked goal on any real user
+  prompt. The gap was purely informational: the warning named the guard without
+  saying that one ordinary message clears it, so the state read as terminal.
+- Behavior of the guard itself is unchanged: `GOAL_CONTINUATION_CAP` stays 8,
+  admission logic is untouched, and the existing prompt-based recovery path is
+  preserved rather than replaced.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `lifecycle-helpers.ts` around the guard-reason switch and the notify call.
+- NONE in the verdict engine, goal store schema, persistence, or public extension API.
+## Monitor-delayed continuations consume the persisted cap (2026-07-31)
+
+### What changed
+
+- `continuation.ts` applies the inclusive eight-delivery cap to every automatic
+  continuation path, including `monitorDelayed`.
+- `lifecycle-helpers.ts` now requires a continuation signature and persists the
+  delivery before queueing its hidden prompt. Missing or failed persistence
+  therefore fails closed instead of delivering an unaccounted continuation.
+- Coverage adds the issue #506 monitor-delay regression, proves the eighth
+  delayed delivery is persisted and the next is blocked, and keeps delayed test
+  synchronization tied to exact persistence writes rather than timer luck.
+
+### Why
+
+- Monitor-delayed delivery was exempt from both cap admission and persistence
+  accounting. Repeated monitor wakeups could therefore queue hidden Goal turns
+  without consuming the restart-safe delivery budget introduced for #447.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `continuation.ts` around the cap verdict and in
+  `lifecycle-helpers.ts` around continuation delivery ordering.
+- LOW in monitor continuation tests that observe delayed persistence.
+- NONE in the goal store schema, public extension API, or status transitions.
+
 ## Observable progress resets the persisted continuation cap streak (2026-07-30)
 
 ### What changed

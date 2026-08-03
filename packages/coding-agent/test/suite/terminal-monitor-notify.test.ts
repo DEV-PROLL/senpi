@@ -1,104 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
-import {
-	type MonitorNotificationScheduler,
-	MonitorNotifier,
-} from "../../src/core/extensions/builtin/terminal/monitor-notify.ts";
-import type { MonitorEvent } from "../../src/core/extensions/builtin/terminal/monitor-registry.ts";
-import { TERMINAL_PROMPT_SECTION } from "../../src/core/extensions/builtin/terminal/prompt.ts";
+import { describe, expect, it } from "vitest";
+import { TerminalManager } from "../../src/core/extensions/builtin/terminal/manager.ts";
+import { MonitorRegistry } from "../../src/core/extensions/builtin/terminal/monitor-registry.ts";
 import type { TerminalToolContext } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createMonitorTool } from "../../src/core/extensions/builtin/terminal/tools/monitor.ts";
-
-type SentMessage = {
-	readonly message: {
-		readonly customType: string;
-		readonly content: string;
-		readonly display: boolean;
-	};
-	readonly options:
-		| {
-				readonly triggerTurn?: boolean;
-				readonly deliverAs?: "steer" | "followUp";
-		  }
-		| undefined;
-};
-
-type ScheduledTask = { readonly at: number; readonly callback: () => void; cancelled: boolean };
-
-class FakeScheduler implements MonitorNotificationScheduler {
-	#now = 0;
-	#tasks: ScheduledTask[] = [];
-
-	now(): number {
-		return this.#now;
-	}
-
-	setTimeout(callback: () => void, delayMs: number): ScheduledTask {
-		const task: ScheduledTask = { at: this.#now + delayMs, callback, cancelled: false };
-		this.#tasks.push(task);
-		return task;
-	}
-
-	clearTimeout(task: ScheduledTask): void {
-		task.cancelled = true;
-	}
-
-	advanceBy(ms: number): void {
-		const deadline = this.#now + ms;
-		for (;;) {
-			const task = this.#tasks
-				.filter((candidate) => !candidate.cancelled && candidate.at <= deadline)
-				.sort((left, right) => left.at - right.at)[0];
-			if (!task) break;
-			this.#tasks = this.#tasks.filter((candidate) => candidate !== task);
-			this.#now = task.at;
-			task.callback();
-		}
-		this.#now = deadline;
-	}
-}
-
-function line(id: string, description: string, value: string): MonitorEvent {
-	return { type: "line", id, description, line: value };
-}
-
-function createNotifier(
-	overrides: {
-		mode?: "wake" | "next-turn" | "off";
-		ctxMode?: string;
-		hasModel?: boolean;
-		settings?: Partial<{
-			coalesceWindowMs: number;
-			rateLimitMs: number;
-			maxLinesPerInjection: number;
-			maxCharsPerInjection: number;
-			wakeBudget: number;
-		}>;
-	} = {},
-) {
-	const scheduler = new FakeScheduler();
-	const sent: SentMessage[] = [];
-	const pauseMonitors = vi.fn(() => ["bash_budget"]);
-	const notifier = new MonitorNotifier({
-		sendMessage: (message, options) => sent.push({ message, options }),
-		getContext: () =>
-			({
-				mode: overrides.ctxMode ?? "tui",
-				model: overrides.hasModel === false ? undefined : { id: "mock", api: "openai-completions" },
-			}) as never,
-		getMode: () => overrides.mode ?? "wake",
-		getSettings: () => ({
-			coalesceWindowMs: 2000,
-			rateLimitMs: 5000,
-			maxLinesPerInjection: 50,
-			maxCharsPerInjection: 4096,
-			wakeBudget: 5,
-			...overrides.settings,
-		}),
-		pauseMonitors,
-		scheduler,
-	});
-	return { notifier, pauseMonitors, scheduler, sent };
-}
+import { createNotifier, line } from "./terminal-monitor-notify-harness.ts";
 
 describe("terminal monitor event delivery", () => {
 	it("coalesces a burst into one wake containing each event line", () => {
@@ -184,6 +89,52 @@ describe("terminal monitor event delivery", () => {
 		expect(sent[5]?.message.content).toContain("resumed");
 	});
 
+	it("delivers completion from a new monitor after the prior wake budget paused", async () => {
+		const { notifier, scheduler, sent } = createNotifier({ settings: { wakeBudget: 1 } });
+		notifier.notifyEvent(line("bash_prior", "prior", "budget exhausted"));
+		scheduler.advanceBy(2000);
+		expect(sent).toHaveLength(1);
+
+		const manager = new TerminalManager();
+		const savedForcePipe = process.env.SENPI_PTY_FORCE_PIPE;
+		process.env.SENPI_PTY_FORCE_PIPE = "1";
+		try {
+			let resolveSummary: (() => void) | undefined;
+			const summary = new Promise<void>((resolve) => {
+				resolveSummary = resolve;
+			});
+			const registry = new MonitorRegistry((event) => {
+				notifier.notifyEvent(event);
+				if (event.type === "summary") resolveSummary?.();
+			});
+			const ctx = {
+				manager,
+				monitorRegistry: registry,
+				onMonitorRearmed: (id: string) => notifier.rearm(id),
+				cwd: process.cwd(),
+				defaultCols: 120,
+				defaultRows: 40,
+				getEnv: () => ({ ...process.env }),
+			} satisfies TerminalToolContext;
+
+			await createMonitorTool(ctx).execute("fresh-monitor", {
+				description: "fresh completion",
+				command: "printf 'done\\n'",
+			});
+			await summary;
+			scheduler.advanceBy(2000);
+
+			expect(sent).toHaveLength(2);
+			expect(sent[1]?.message.content).toContain("Monitor event(fresh completion): done");
+			expect(sent[1]?.message.content).toContain("watcher completed (exit code 0)");
+			expect(sent[1]?.options).toMatchObject({ triggerTurn: true });
+		} finally {
+			await manager.teardown();
+			if (savedForcePipe === undefined) delete process.env.SENPI_PTY_FORCE_PIPE;
+			else process.env.SENPI_PTY_FORCE_PIPE = savedForcePipe;
+		}
+	});
+
 	it("never injects monitor events in off, print, or json modes", () => {
 		for (const options of [
 			{ mode: "off" as const },
@@ -196,23 +147,5 @@ describe("terminal monitor event delivery", () => {
 			scheduler.advanceBy(10_000);
 			expect(sent).toHaveLength(0);
 		}
-	});
-
-	it("teaches watcher discipline at the owning terminal surfaces", () => {
-		expect(TERMINAL_PROMPT_SECTION).toContain("monitor");
-		// Discipline is the routing rule (waits are monitors, not poll loops) plus noise control,
-		// not any particular wording — assert each rule at the surface that owns it, never a
-		// pinned sentence: the routing rule ships as the monitor tool's guideline, the noise
-		// rule stays in the terminal section.
-		const stubCtx = {
-			manager: { get: () => undefined },
-			cwd: process.cwd(),
-			defaultCols: 120,
-			defaultRows: 40,
-			getEnv: () => process.env,
-		} as unknown as TerminalToolContext;
-		const guidelines = (createMonitorTool(stubCtx).promptGuidelines ?? []).join("\n");
-		expect(guidelines).toMatch(/never a foreground\s+sleep\/poll loop/);
-		expect(TERMINAL_PROMPT_SECTION).toMatch(/Filter\s+noise at the command source/);
 	});
 });

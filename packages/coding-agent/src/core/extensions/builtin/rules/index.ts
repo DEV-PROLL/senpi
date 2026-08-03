@@ -4,7 +4,8 @@ import { isAbsolute, relative } from "node:path";
 import type { ExtensionAPI } from "../../types.ts";
 
 import { registerSlashCommands } from "./commands.ts";
-import { createEngine, defaultConfig } from "./rules/engine.ts";
+import { configFromEnvironment } from "./config.ts";
+import { createEngine } from "./rules/engine.ts";
 import { findRuleCandidates } from "./rules/finder.ts";
 import { findProjectRoot } from "./rules/project-root.ts";
 import { extractToolPaths } from "./rules/tool-paths.ts";
@@ -25,7 +26,8 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 		default: "both",
 		description: "Rule injection mode: static, dynamic, both, or off.",
 	});
-	const config = defaultConfig();
+	const config = configFromEnvironment();
+	const envDisabled = config.disabled;
 	const engine = createEngine(config, {
 		findCandidates: findRuleCandidates,
 		readFile: (path) => {
@@ -45,7 +47,7 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 		const mode = pi.getFlag("pi-rules-mode");
 
 		if (typeof disabled === "boolean") {
-			engine.config.disabled = disabled;
+			engine.config.disabled = disabled || envDisabled;
 		}
 		if (typeof mode === "string" && isPiRulesMode(mode)) {
 			engine.config.mode = mode;
@@ -86,11 +88,11 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 				engine.markStaticInjected(rule);
 			}
 		}
+		// Deliberately NOT gated on isStaticInjected: the host re-emits this from the BASE prompt
+		// every user prompt, so a prior turn's mark would drop the block from turn 2 onward. The
+		// marks below serve only the dynamic tool_result path.
 		const rules = loaded.rules.filter(
-			(rule) =>
-				!nativeContextPaths.has(rule.path) &&
-				!nativeContextPaths.has(rule.realPath) &&
-				!engine.isStaticInjected(rule),
+			(rule) => !nativeContextPaths.has(rule.path) && !nativeContextPaths.has(rule.realPath),
 		);
 
 		if (rules.length === 0) {

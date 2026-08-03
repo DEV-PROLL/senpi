@@ -8,10 +8,7 @@ import {
 
 const execSync = vi.hoisted(() => vi.fn());
 
-vi.mock("child_process", async (importOriginal) => ({
-	...(await importOriginal<typeof import("child_process")>()),
-	execSync,
-}));
+vi.mock("child_process", () => ({ execSync }));
 
 describe("live API test gates", () => {
 	afterEach(() => {
@@ -58,11 +55,10 @@ describe("live API test gates", () => {
 		expect(apiKey).toBe("sk-or-global");
 	});
 
-	it("given local LLM server without opt-in when checking live tests then disables local probing", () => {
+	it("given no live opt-in env vars when checking Ollama then does not probe", () => {
 		// given
-		vi.stubEnv("PI_NO_LOCAL_LLM", "");
-		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, "");
-		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", "");
+		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, undefined);
+		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", undefined);
 
 		// when
 		const available = isOllamaLiveTestAvailable();
@@ -72,29 +68,31 @@ describe("live API test gates", () => {
 		expect(execSync).not.toHaveBeenCalled();
 	});
 
-	it("given local LLM opt-in when checking live tests then enables local probing", () => {
+	it("given local LLM opt-in on Unix when checking Ollama then uses which", () => {
 		// given
 		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, "1");
-		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", "");
+		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", undefined);
 
 		// when
-		const available = isOllamaLiveTestAvailable();
+		const available = isOllamaLiveTestAvailable("linux");
 
 		// then
 		expect(available).toBe(true);
+		expect(execSync).toHaveBeenCalledOnce();
 		expect(execSync).toHaveBeenCalledWith("which ollama", { stdio: "ignore" });
 	});
 
-	it("given global live opt-in when checking live tests then enables local probing", () => {
+	it("given global live opt-in on Windows when checking Ollama then uses where", () => {
 		// given
-		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, "");
+		vi.stubEnv(LOCAL_LLM_LIVE_TEST_FLAG, undefined);
 		vi.stubEnv("PI_ENABLE_LIVE_API_TESTS", "1");
 
 		// when
-		const available = isOllamaLiveTestAvailable();
+		const available = isOllamaLiveTestAvailable("win32");
 
 		// then
 		expect(available).toBe(true);
-		expect(execSync).toHaveBeenCalledWith("which ollama", { stdio: "ignore" });
+		expect(execSync).toHaveBeenCalledOnce();
+		expect(execSync).toHaveBeenCalledWith("where ollama", { stdio: "ignore" });
 	});
 });

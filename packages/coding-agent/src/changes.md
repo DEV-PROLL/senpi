@@ -1,3 +1,134 @@
+## Compact completed apply_patch result details (2026-08-02)
+
+### What changed
+
+- Completed `apply_patch` previews retain the TUI's bounded diff and retain a complete unified patch only when it is at most 16 KiB per file; larger patch bodies are omitted rather than persisted or emitted as malformed truncated diffs.
+- Nested applied-operation previews are rebuilt as lightweight metadata without full diff or patch bodies, including the fail-fast `ApplyPatchError` recovery result.
+- App-server file-change projection keeps its complete unified-diff contract for retained patches within the 16 KiB budget; oversized patches do not produce a file-change diff from persisted result details.
+
+### Why
+
+- Full old/new file contents in unified patches dominated completed tool-result details after diff compaction, so large add, delete, and update operations still scaled with source size in session files and resident memory.
+- App-server projection and session persistence consume the same completed result object with no extension-scoped post-projection persistence seam. A fixed budget is therefore required to bound retention without storing a second live-only copy; omitting oversized patches avoids sending invalid partial unified diffs.
+
+### Why this cannot be expressed externally
+
+- The payload and its source-backed unified patches are constructed inside the builtin `apply_patch` tool before app-server projection and session persistence.
+
+### Expected merge conflict zones
+
+- LOW: `core/extensions/builtin/gpt-apply-patch/apply.ts` and `tool.ts` completed-result construction.
+
+## Backfill: injected app-server turns (2026-08-01)
+
+### What changed
+
+- App-server clients can inject turns through the runtime and thread handlers while preserving the normal turn lifecycle.
+
+### Why
+
+- Remote session controllers need a first-class path that behaves like an ordinary user turn.
+
+### Why this cannot be expressed externally
+
+- Injection crosses app-server runtime, thread state, turn scheduling, and session event emission.
+
+### Expected merge conflict zones
+
+- `modes/app-server/runtime.ts`, `threads/handlers.ts`, and `threads/turn-runtime.ts`.
+
+## Supersede level-scoped high-reasoning warning deduplication (2026-07-31)
+
+### What changed
+
+- High-reasoning warnings are now deduplicated once per provider/model identity
+  for the lifetime of an `AgentSession`, rather than once per
+  provider/model/reasoning-level tuple.
+- Moving between `xhigh`, `max`, lower reasoning levels, or another model and
+  back does not append the same warning again.
+- A different sensitive provider/model identity still receives its own first
+  warning.
+
+### Why
+
+- The released provider/model/level behavior caused the large warning box to
+  reappear while the user was only changing reasoning effort. This follow-up
+  intentionally supersedes that earlier contract.
+
+### Why extension system couldn't handle this
+
+- Warning deduplication is session-owned state inside `AgentSession` and must
+  apply consistently before TUI and RPC consumers receive the event.
+
+### Expected merge conflict zones
+
+- LOW: `core/agent-session.ts` high-reasoning warning state and emission.
+
+## Required-compaction recovery and queue chronology (2026-07-31)
+
+- Targeted required-compaction summarization failures can recover from a deterministic, suffix-safe local checkpoint without a second provider request; unfit recovery remains fail-closed and preserves the latest request.
+- Truncation recovery requires structured transient `SummaryRequestError` provenance; generic error text cannot authorize fallback.
+- Recovery retains task intent and UTF-8-safe bounded text while todo/checkpoint snapshots remain only in their separately persisted canonical entries, not duplicated in compaction details.
+- Terminal queue restoration now follows global submission chronology across native and compaction-owned input through a non-enumerable compatibility side channel, without changing native steer priority or abort-state semantics.
+
+## Refusal fallback exhaustion resets retry state (2026-07-31)
+
+### What changed
+
+- `core/agent-session.ts`: terminal classifier-refusal fallback exits now emit the matching failed `auto_retry_end` event and reset the retry attempt counter when a retry actually started.
+- The zero-attempt refusal path remains event-free, so `auto_retry_end` still pairs only with a prior `auto_retry_start`.
+- Regression coverage drives every configured fallback to refusal, then proves the session is idle and the interactive double-Escape history action works again.
+
+### Why
+
+- Refusal exhaustion previously resolved the retry promise without clearing `_retryAttempt`. The TUI therefore kept treating an idle session as retrying, so every Escape re-entered abort cleanup instead of arming the double-Escape session-history shortcut.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` in `_handleRetryableError()`'s classifier-refusal terminal branches.
+
+## Claude SDK OAuth provider identity (2026-07-31)
+
+### What changed
+
+- Renamed the SDK-backed Claude Pro/Max builtin provider, extension directory, runtime/model ID, OAuth storage sentinels, settings key, account directory, imports, tests, QA scenarios, and public commands from `claude-agent-sdk` to `claude-sdk-oauth`.
+- Renamed the provider-local TypeScript symbols to the same identity while preserving the upstream npm dependency and executable packages under `@anthropic-ai/claude-agent-sdk`.
+- Split the oversized stream test into prompt-bridge and stream-event suites without changing its five pinned behaviors.
+
+### Why
+
+- `claude-agent-sdk` conflated Senpi's provider identity with Anthropic's upstream package name and obscured that this lane is specifically the subscription OAuth surface.
+- There was no separate `claude-oauth` implementation to retain; the renamed provider is the sole SDK-backed OAuth implementation.
+
+### Why extension system couldn't handle this alone
+
+- The extension owns the provider implementation, but host registration order, RPC/app-server account imports, persisted auth keys, settings, and QA surfaces all reference its identity outside the extension directory.
+
+### Expected merge conflict zones
+
+- HIGH: the renamed builtin extension directory and provider-focused tests.
+- MEDIUM: builtin registration, RPC/app-server account imports, provider docs, and QA scenario names.
+
+## Breaker-cancelled opportunistic compaction no longer blocks admission (2026-07-31)
+
+### What changed
+
+- `core/agent-session.ts`: prompt, final-payload, scheduled-continuation, and retry admission now proceed without opportunistic compaction when the latest compaction rejection is `circuit-breaker`.
+- Final-payload admission still fails closed when the provider payload is actually oversized, and overflow-triggered compaction remains fail-closed.
+- Regression and real-CLI coverage prove breaker cooldown does not permanently reject prompts while non-breaker cancellation remains blocking.
+
+### Why
+
+- The circuit breaker stops repeated summarization spend during provider outages. Converting its cooldown rejection into `RequiredCompactionError` permanently bricked sessions above the soft threshold instead of allowing the provider or existing overflow recovery to make the real admission decision.
+
+### Why extension system couldn't handle this alone
+
+- Extensions report the rejection cause, but core owns every provider-admission site and decides whether a failed opportunistic compaction blocks the turn.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` compaction admission and retry-continuation paths.
+
 ## Failed pre-prompt compaction reports terminal recovery (2026-07-30)
 
 ### What changed

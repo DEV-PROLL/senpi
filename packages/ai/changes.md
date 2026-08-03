@@ -1,13 +1,35 @@
 # changes.md — ai
 
+## OpenAI compatibility resolver merge repair (2026-08-01)
+
+### What changed
+
+- Restored `getOpenAICompletionsCompat` as the single compatibility resolver used and exported by the OpenAI Completions adapter.
+- Ported upstream Z.AI `max_tokens` selection into the shared resolver.
+- Preserved both automatically detected and explicitly configured `toolSchemaFlavor` values, with focused Moonshot coverage.
+
+### Why
+
+- The merge restored an upstream-local adapter resolver beside the fork's shared browser-safe resolver. The duplicate omitted Moonshot schema flavor selection, so wire-bound tool schemas retained an unsupported root `anyOf` wrapper.
+- Keeping one resolver prevents API and browser-safe compatibility decisions from diverging again.
+
+### Why this cannot be expressed externally
+
+- Provider compatibility selection and final wire-payload schema normalization occur inside the provider adapter before extension hooks can safely compensate.
+
+### Expected merge conflict zones
+
+- `src/api/openai-completions.ts`, `src/utils/prompt-cache-ttl.ts`, OpenAI compatibility types, and tool-schema/prompt-cache tests.
+
 ## Require explicit opt-in before probing Ollama in stream tests (2026-07-31)
 
 ### What changed
 
-- `test/live-api-gates.ts`: owns Ollama discovery behind a gate that short-circuits before running `which ollama`
-  unless `PI_ENABLE_LOCAL_LLM=1` or `PI_ENABLE_LIVE_API_TESTS=1`.
-- `test/live-api-gates.test.ts`: mocks the command boundary and covers the default no-probe behavior plus both
-  explicit opt-in paths.
+- `test/live-api-gates.ts`: owns Ollama discovery behind a gate that short-circuits before probing unless
+  `PI_ENABLE_LOCAL_LLM=1` or `PI_ENABLE_LIVE_API_TESTS=1`, using `where ollama` on Windows and `which ollama`
+  elsewhere.
+- `test/live-api-gates.test.ts`: mocks the command boundary and covers the default no-probe behavior, both
+  explicit opt-in paths, and both platform-specific lookup commands.
 - `test/stream.test.ts`: uses the gated Ollama discovery function instead of treating the absence of
   `PI_NO_LOCAL_LLM` as permission to probe and run the live suite.
 - `../../test.sh`: clears the two opt-in flags instead of exporting the retired `PI_NO_LOCAL_LLM` opt-out flag.
@@ -36,6 +58,21 @@
 - MEDIUM: the Ollama discovery and setup block in `test/stream.test.ts` may conflict if upstream changes how
   the local OpenAI-compatible test server is detected or started.
 - LOW: `../../test.sh` may conflict if upstream changes its isolated live-test environment variables.
+
+## Shared reasoning-tier capability detection (2026-07-30)
+
+### What changed
+
+- Shared `xhigh` / `max` model-family constants are hoisted in `models.ts`, and map-less inference now uses
+  one case-normalized, boundary-aware family matcher instead of unbounded substring checks.
+- `getSupportedThinkingLevels` delegates extended-tier precedence to the exported `supportsXhigh` and
+  `supportsMax` predicates rather than duplicating their map-omission and `null`-veto rules.
+
+### Why
+
+- Capability inference for custom map-less models should reject unrelated ids and case-normalize legitimate
+  aliases while keeping one precedence implementation. Generated catalog models retain their explicit maps,
+  so behavior for real catalog models is intentionally unchanged.
 
 ## Browser-safe prompt-cache TTL resolver (2026-07-28)
 
@@ -362,3 +399,26 @@ These failures are in upstream `packages/ai` live integration tests, not in the 
 - `test/bedrock-utils.ts`: credential gating may need re-merging if upstream changes how Bedrock test auth is detected.
 - `test/context-overflow.test.ts`: OpenRouter overflow handling and local-LM opt-in logic may need re-merging if upstream revises those E2E expectations.
 - `test/openrouter-cache-write-repro.test.ts` and `test/total-tokens.test.ts`: explicit opt-in guards may need re-merging if the affected OpenRouter backends become stable again.
+
+## TypeScript native tsc migration (2026-08-02)
+
+### What changed
+
+- Replaced the `tsgo` compiler invocation with `tsc` in the `build`, `build:offline`, `dev`, `dev:tsc`, and `prepublishOnly` scripts; all flags and arguments remain unchanged.
+- Bumped the root `typescript` pin from `6.0.3` to `7.0.2`.
+- Dropped the `@typescript/native-preview` toolchain dependency.
+- Added `@typescript/typescript6@6.0.2` (Microsoft's official TypeScript-6 API bridge) so `scripts/check-ts-relative-imports.mjs` keeps working: TypeScript 7 removed the classic programmatic JS API it imported.
+- Added `@typescript/native: npm:typescript@7.0.2` as a scoped alias. The `typescript6` package publicly depends on `@typescript/old` (typescript 6.x), and npm hoists it; alphabetically `@typescript/old` beats `typescript` for the `node_modules/.bin/tsc` link, which would make every bare `tsc` invocation (root check and all package builds) silently run the TypeScript 6 compiler. The alias sorts after `@typescript/old`, so it deterministically wins the `.bin/tsc` link to the 7.0.2 native compiler. It is a bin-ownership pin, not an import target.
+
+### Why
+
+- Adopt a stable-first toolchain policy: use the released `typescript@7.0.2` native compiler for package builds and typechecks instead of the experimental `tsgo` dev build.
+- The `native-preview` compiler has been retired upstream in favor of `typescript@next`.
+
+### Why this cannot be expressed externally
+
+- Build scripts and `devDependencies` are package infrastructure, not runtime behavior; extensions cannot rewrite another package's manifest scripts or compiler selection.
+
+### Expected merge conflict zones
+
+- `package.json` `scripts` blocks and `devDependencies` anywhere upstream still references `tsgo` or `@typescript/native-preview`.

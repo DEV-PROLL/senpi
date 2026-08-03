@@ -56,7 +56,7 @@ import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
 import type { KeybindingsManager } from "../keybindings.ts";
 import type { CustomMessage } from "../messages.ts";
 import type { ModelRegistry } from "../model-registry.ts";
-import type { InitialModelProvenance } from "../model-resolver.ts";
+import type { InitialModelProvenance, ScopedModel } from "../model-resolver.ts";
 import type {
 	BranchSummaryEntry,
 	CompactionEntry,
@@ -377,6 +377,8 @@ export interface ExtensionContext {
 	hasUI: boolean;
 	/** Current working directory */
 	cwd: string;
+	/** Agent state directory (settings, logs, sessions) resolved for this session. */
+	agentDir: string;
 	/** Session manager (read-only) */
 	sessionManager: ReadonlySessionManager;
 	/** Model registry for API key resolution */
@@ -385,6 +387,8 @@ export interface ExtensionContext {
 	model: Model<any> | undefined;
 	/** Current service tier for the active model (from -fast suffix or scoped model config) */
 	serviceTier: ServiceTier | undefined;
+	/** Models scoped to this session. Empty when all available models are usable. */
+	scopedModels: readonly ScopedModel[];
 	/** Current thinking level, when provided by the session runtime. */
 	thinkingLevel?: ThinkingLevel;
 	/** Whether the agent is idle (not streaming) */
@@ -1057,6 +1061,8 @@ export type InputSource = "interactive" | "rpc" | "extension";
 /** Fired when user input is received, before agent processing */
 export interface InputEvent {
 	type: "input";
+	/** Correlates this input with its eventual disposition within the session. */
+	inputId: string;
 	/** The input text */
 	text: string;
 	/** Attached images, if any */
@@ -1065,6 +1071,14 @@ export interface InputEvent {
 	source: InputSource;
 	/** How the input will be delivered during streaming, or undefined when idle */
 	streamingBehavior?: "steer" | "followUp";
+}
+
+/** Fired after interception and admission determine ownership of an input. */
+export interface InputDispositionEvent {
+	type: "input_disposition";
+	/** Matches the originating InputEvent. */
+	inputId: string;
+	disposition: "handled" | "queued" | "started" | "rejected";
 }
 
 /** Result from input event handler */
@@ -1283,6 +1297,7 @@ export type ExtensionEvent =
 	| ThinkingLevelSelectEvent
 	| UserBashEvent
 	| InputEvent
+	| InputDispositionEvent
 	| ToolCallEvent
 	| ToolResultEvent;
 
@@ -1397,6 +1412,14 @@ export interface MessageRenderOptions {
 	outputPad: number;
 }
 
+export interface MarkdownTransformContext {
+	messageType: "user" | "assistant" | "assistant-thinking";
+	isStreaming: boolean;
+	availableWidth: number;
+}
+
+export type MarkdownTransformer = (markdown: string, context: MarkdownTransformContext) => string;
+
 export interface EntryRenderOptions {
 	expanded: boolean;
 }
@@ -1496,6 +1519,7 @@ export interface ExtensionAPI {
 	on(event: "tool_result", handler: ExtensionHandler<ToolResultEvent, ToolResultEventResult>): void;
 	on(event: "user_bash", handler: ExtensionHandler<UserBashEvent, UserBashEventResult>): void;
 	on(event: "input", handler: ExtensionHandler<InputEvent, InputEventResult>): void;
+	on(event: "input_disposition", handler: ExtensionHandler<InputDispositionEvent>): void;
 
 	// =========================================================================
 	// Tool Registration
@@ -1556,6 +1580,9 @@ export interface ExtensionAPI {
 
 	/** Register a custom renderer for CustomMessageEntry. */
 	registerMessageRenderer<T = unknown>(customType: string, renderer: MessageRenderer<T>): void;
+
+	/** Register a transformer for user and assistant Markdown before Pi renders it in the interactive transcript. */
+	registerMarkdownTransformer(transformer: MarkdownTransformer): void;
 
 	/** Register a custom renderer for CustomEntry. Custom entries do not participate in LLM context. */
 	registerEntryRenderer<T = unknown>(customType: string, renderer: EntryRenderer<T>): void;
@@ -1641,6 +1668,16 @@ export interface ExtensionAPI {
 
 	/** Set thinking level for this session only (clamped), leaving the persisted default untouched. */
 	setSessionThinkingLevel(level: ThinkingLevel): void;
+
+	/**
+	 * Mark this session as running in fast mode so the host can surface it (the TUI
+	 * footer stamps a ⚡ on the model label). Session-scoped and never persisted.
+	 *
+	 * Purely an indicator: it does not add `service_tier` to any request. An extension
+	 * that wants the priority tier on the wire still returns it from
+	 * `before_provider_request`.
+	 */
+	setSessionFastMode(enabled: boolean): void;
 
 	// =========================================================================
 	// Provider Registration
@@ -1920,6 +1957,8 @@ export type GetThinkingLevelHandler = () => ThinkingLevel;
 
 export type SetThinkingLevelHandler = (level: ThinkingLevel) => void;
 
+export type SetSessionFastModeHandler = (enabled: boolean) => void;
+
 export type SetLabelHandler = (entryId: string, label: string | undefined) => void;
 
 /**
@@ -1999,6 +2038,7 @@ export interface ExtensionActions {
 	setThinkingLevel: SetThinkingLevelHandler;
 	setSessionModel: SetModelHandler;
 	setSessionThinkingLevel: SetThinkingLevelHandler;
+	setSessionFastMode: SetSessionFastModeHandler;
 }
 
 /**
@@ -2008,6 +2048,8 @@ export interface ExtensionActions {
 export interface ExtensionContextActions {
 	getModel: () => Model<any> | undefined;
 	getServiceTier: () => ServiceTier | undefined;
+	getScopedModels: () => readonly ScopedModel[];
+	getAgentDir?: () => string;
 	isIdle: () => boolean;
 	isProjectTrusted: () => boolean;
 	getSignal: () => AbortSignal | undefined;
@@ -2097,6 +2139,7 @@ export interface Extension {
 	removedToolHints?: Map<string, string>;
 	lazyToolActivators?: LazyToolActivator[];
 	messageRenderers: Map<string, MessageRenderer>;
+	markdownTransformer?: MarkdownTransformer;
 	entryRenderers?: Map<string, EntryRenderer>;
 	commands: Map<string, RegisteredCommand>;
 	flags: Map<string, ExtensionFlag>;

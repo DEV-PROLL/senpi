@@ -95,6 +95,19 @@ export const TRUNCATION_NOTICE = "\n\n[Rule truncated. Read full rule: {path}]";
 export const TRACKED_BUILTIN_TOOLS: readonly string[] = ["read", "edit", "write"];
 export const TRACKED_BUILTIN_TOOL_SET: ReadonlySet<string> = new Set(TRACKED_BUILTIN_TOOLS);
 
+/** Addressed to the model; never used to locate the block. */
+export const PROJECT_RULES_START_MARKER = "<project_rules>";
+export const PROJECT_RULES_END_MARKER = "</project_rules>";
+export const PROJECT_RULES_HEADING = "## Project Instructions";
+
+/**
+ * How provider lanes that rebuild the system prompt (see the Claude SDK OAuth builtin) locate the
+ * block. The semantic markers cannot: prompt content this builtin does not own - context files
+ * before it, extensions appending after it - may legitimately contain them and be extracted instead.
+ */
+export const PROJECT_RULES_REGION_START_MARKER = "<!--senpi:project-rules:1:start-->";
+export const PROJECT_RULES_REGION_END_MARKER = "<!--senpi:project-rules:1:end-->";
+
 /**
  * Directories excluded by the recursive scanner regardless of glob settings.
  */

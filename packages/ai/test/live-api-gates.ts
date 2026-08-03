@@ -14,10 +14,11 @@ export function isLiveApiTestEnabled(providerFlag: string): boolean {
 	return process.env[LIVE_API_TESTS_FLAG] === "1" || process.env[providerFlag] === "1";
 }
 
-export function isOllamaLiveTestAvailable(): boolean {
+export function isOllamaLiveTestAvailable(platform: NodeJS.Platform = process.platform): boolean {
 	if (!isLiveApiTestEnabled(LOCAL_LLM_LIVE_TEST_FLAG)) return false;
+	const command = platform === "win32" ? "where ollama" : "which ollama";
 	try {
-		execSync("which ollama", { stdio: "ignore" });
+		execSync(command, { stdio: "ignore" });
 		return true;
 	} catch {
 		return false;

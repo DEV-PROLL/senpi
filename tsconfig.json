@@ -39,6 +39,18 @@
 			"@earendil-works/pi-coding-agent/*": [
 				"./packages/coding-agent/src/*"
 			],
+			"@earendil-works/pi-protocol": [
+				"./packages/protocol/src/index.ts"
+			],
+			"@earendil-works/pi-protocol/*": [
+				"./packages/protocol/src/*"
+			],
+			"@earendil-works/pi-client": [
+				"./packages/client/src/index.ts"
+			],
+			"@earendil-works/pi-client/*": [
+				"./packages/client/src/*"
+			],
 			"@earendil-works/pi-server": [
 				"./packages/server/src/index.ts"
 			],
@@ -66,12 +78,6 @@
 			"@earendil-works/pi-pty/*": [
 				"./packages/pty/src/*"
 			],
-			"@earendil-works/pi-web-ui": [
-				"./packages/web-ui/src/index.ts"
-			],
-			"@earendil-works/pi-web-ui/*": [
-				"./packages/web-ui/src/*"
-			],
 			"@earendil-works/pi-agent-old": [
 				"./packages/agent-old/src/index.ts"
 			],
@@ -97,7 +103,6 @@
 		"packages/coding-agent/examples/**/*"
 	],
 	"exclude": [
-		"packages/web-ui/**/*",
 		"**/dist/**",
 		"packages/coding-agent/examples/extensions/gondolin/**"
 	]

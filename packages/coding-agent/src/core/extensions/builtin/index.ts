@@ -3,7 +3,7 @@ import anthropicBashExtension from "./anthropic-bash/index.ts";
 import anthropicWebSearchExtension from "./anthropic-web-search/index.ts";
 import bashTimeoutExtension from "./bash-timeout/index.ts";
 import btwExtension from "./btw/index.ts";
-import claudeAgentSdkExtension from "./claude-agent-sdk/index.ts";
+import claudeSdkOauthExtension from "./claude-sdk-oauth/index.ts";
 import compactionExtension from "./compaction/index.ts";
 import configReloadExtension from "./config-reload/index.ts";
 import diffExtension from "./diff.ts";
@@ -15,6 +15,7 @@ import historySearchExtension from "./history-search/index.ts";
 import hooksExtension from "./hooks/index.ts";
 import importReproExtension from "./import-repro.ts";
 import lookAtExtension from "./look-at/index.ts";
+import loopGuardExtension from "./loop-guard/index.ts";
 import mcpExtension from "./mcp/index.ts";
 import modelFallbackExtension from "./model-fallback/index.ts";
 import nestedAgentsMdExtension from "./nested-agents-md/index.ts";
@@ -80,7 +81,9 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "goal", factory: goalExtension },
 	{ id: "ttsr", factory: ttsrExtension },
 	{ id: "btw", factory: btwExtension },
-	{ id: "claude-agent-sdk", factory: claudeAgentSdkExtension },
+	{ id: "claude-sdk-oauth", factory: claudeSdkOauthExtension },
+	// Loop guard is a pure observer of tool_execution_start; it never mutates payloads, so it slots before config-reload and leaves MCP last.
+	{ id: "loop-guard", factory: loopGuardExtension },
 	// Config reload follows settings-dependent builtins so reloads rebuild their resolved settings before MCP observes them.
 	{ id: "config-reload", factory: configReloadExtension },
 	// Keep MCP last so its eventual provider-payload tap observes all co-resident builtin mutations.

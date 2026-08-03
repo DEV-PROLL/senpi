@@ -98,6 +98,7 @@ export type {
 	GrepToolResultEvent,
 	InlineExtension,
 	// Events - Input
+	InputDispositionEvent,
 	InputEvent,
 	InputEventResult,
 	InputSource,
@@ -105,6 +106,8 @@ export type {
 	LoadExtensionsResult,
 	LsToolCallEvent,
 	LsToolResultEvent,
+	MarkdownTransformContext,
+	MarkdownTransformer,
 	// Events - Message
 	MessageEndEvent,
 	MessageRenderer,

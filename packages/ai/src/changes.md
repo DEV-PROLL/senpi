@@ -1,5 +1,139 @@
 # AI Source Changes
 
+## 2026-08-03 - Hint-aware 429 retry-after propagation
+
+### What changed and why
+
+- `utils/retry-hint.ts` (new) owns the strict 429 retry-hint extractor: `extract429RetryAfterMs` plus
+  canonical marker helpers. It parses `retry-after` / `retry-after-ms` headers, `x-ratelimit-reset*` epoch
+  headers, recursive JSON `retryDelay` fields (Google RPC style), body prose ("try again in N s", "resets at
+  <ISO8601>"), and SSE `event: error` payloads, normalizing every shape to a millisecond delay or a sentinel for
+  absent hint. Explicit-zero (retry immediately) is distinct from absent-hint (no guidance), so callers never
+  conflate “server said now” with “server said nothing.”
+- `utils/provider-retry.ts` propagates the extracted hint as a structured `ProviderRetryDelayError` carrying
+  the canonical marker, instead of leaving the delay embedded in an opaque error string. Non-429 retry-loop
+  behavior (forced-eligibility, backoff) is intentionally preserved — the hint path only augments 429-class
+  errors.
+- `api/anthropic-messages.ts` and `api/openai-codex-responses.ts` emit the canonical markers at both the
+  HTTP-status boundary and the SSE in-stream `event: error` boundary, so hints survive regardless of whether
+  the 429 arrives as a status response or a mid-stream error event.
+
+### Expected merge conflict zones
+
+- MEDIUM: `utils/provider-retry.ts` around the 429 hint propagation and `ProviderRetryDelayError`.
+- MEDIUM: `api/anthropic-messages.ts` and `api/openai-codex-responses.ts` at the status/SSE error
+  boundaries.
+- LOW: `utils/retry-hint.ts` (new file) and `package.json` `./utils/*` export.
+
+## 2026-08-01 - Final Anthropic tool-pair normalization
+
+### What changed and why
+
+- `api/anthropic-tool-pairs.ts` owns the browser-safe wire sanitizer for Anthropic client `tool_use` /
+  `tool_result` adjacency, deduplication, orphan removal, and interrupted-result synthesis.
+- `api/anthropic-messages.ts` applies that sanitizer after `onPayload` and every built-in Anthropic request
+  rewrite, immediately before request metadata extraction and SDK submission.
+- The final boundary no longer depends on extension-runner liveness or hook registration order. A reload,
+  extension, or late payload transform can remove one result from a parallel tool-call turn without sending an
+  invalid request to Anthropic.
+- `test/anthropic-final-tool-pair-guard.test.ts` deterministically removes one result in the last payload hook
+  and asserts that the SDK receives both immediate result blocks, including a synthetic error result.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/anthropic-messages.ts` around the final request-sanitization pipeline.
+- LOW: `api/anthropic-tool-pairs.ts` if upstream adds equivalent Anthropic wire normalization.
+
+## 2026-07-31 - Recover Codex WebSocket fallback sessions
+
+### What changed and why
+
+- A transient pre-start Codex WebSocket failure no longer pins the session to
+  SSE for the rest of the process lifetime. The fallback circuit now keeps
+  immediate requests on SSE for 60 seconds, then lets the next fresh request
+  probe WebSocket again.
+- Recovery changes only a future request. The existing guard still propagates
+  transport failures after the response stream starts, so no already-started
+  or potentially billed response is retried through SSE.
+- Production session cleanup now removes both live WebSocket resources and
+  the session's fallback/debug state. Long-lived app-server processes no
+  longer retain degraded routing after a session is closed.
+- Fallback and debug-state ownership moved into
+  `api/openai-codex-responses/fallback-state.ts`, reducing the oversized
+  adapter while keeping the public debug API stable.
+
+### Coverage
+
+- `../test/openai-codex-fallback-recovery.test.ts` proves the immediate SSE
+  cooldown boundary, post-cooldown WebSocket recovery, and immediate recovery
+  after production cleanup.
+- Existing Codex stream tests retain the post-start no-fallback guard,
+  continuation recovery, connection-limit handling, and one-shot
+  `cacheRetention: "none"` behavior.
+
+### Expected merge conflict zones
+
+- MEDIUM: Codex WebSocket debug/fallback state and session cleanup.
+
+## 2026-07-31 - Align Codex prompt-cache affinity headers
+
+### What changed and why
+
+- Issue #589's donated 25-hour session contained an 8.5-minute HTTP/SSE
+  fallback burst where 18 requests reused only 22,016 cached tokens and resent
+  roughly 175k-180k uncached tokens, interleaved with 10 normal roughly
+  196k-199k cache hits. No model, thinking-level, compaction, or custom-message
+  transition occurred inside the burst.
+- The session had previously recorded Codex WebSocket transport failures and
+  fallen back to SSE. Senpi's Codex adapter sent the stable session ID as
+  `prompt_cache_key`, `session-id`, and `x-client-request-id`, but omitted the
+  official Codex `thread-id` affinity header on both SSE and WebSocket.
+- `api/openai-prompt-cache.ts` now applies the complete stable affinity tuple,
+  and both transports use it. Senpi has one durable conversation identifier at
+  this layer, so `session-id`, `thread-id`, and `x-client-request-id` all carry
+  the clamped Senpi session ID while `prompt_cache_key` remains unchanged.
+- `cacheRetention: "none"` keeps its existing no-affinity SSE behavior.
+- This fixes the client-controlled protocol divergence. Open upstream Codex
+  reports show that the provider cache can still miss intermittently with
+  byte-identical bodies and stable keys, so the change does not claim that a
+  best-effort upstream cache becomes deterministic.
+
+### Coverage
+
+- `../test/openai-codex-cache-affinity.test.ts` drives the real SSE and
+  WebSocket request builders, pins the complete header/body mapping, and
+  preserves the disabled-cache boundary.
+
+### Expected merge conflict zones
+
+- LOW: additive prompt-cache header helper and the two Codex header builders.
+
+## 2026-07-31 - Reshape unavailable Anthropic tool transcript records
+
+### What changed and why
+
+- Unavailable Anthropic `tool_use` history is still demoted to satisfy Anthropic's same-request tool-reference validation, but the assistant-role text now uses explicit `<unavailable-tool-call>` transcript records instead of an imitable `[Called tool ... with input: ...]` pseudo-action.
+- The first record for each missing tool name in a request explains that the call is historical and lists a capped, request-derived set of tools actually available now; later records for that name are terse self-closing elements. Tracking is request-local, so concurrent requests cannot interfere.
+- Historical call inputs are omitted entirely, removing large replayed patch bodies. Tool-result text remains available in `<unavailable-tool-result>` records; only literal closing-tag openers are narrowly neutralized so attacker-influenced output cannot escape the envelope.
+- XML attribute values are escaped for exotic tool names. The text builders live in the non-public `utils/` surface rather than growing the already-large Anthropic adapter.
+- Coverage drives the real fake-client request path for first/later behavior, request-derived list capping, input omission, exotic-name escaping, result preservation, and closing-tag neutralization. The existing tool-reference integrity test remains unchanged.
+
+### Expected merge conflict zones
+
+- LOW: unavailable-tool rewriting inside `api/anthropic-messages.ts` and its internal text helper import.
+
+## 2026-07-30 - Map-less GPT-5.6 Sol preserves max reasoning
+
+### What changed and why
+
+- OpenAI-compatible map-less `gpt-5.6-sol` models now expose `xhigh` and `max` without requiring a generated
+  `thinkingLevelMap`.
+- Explicit maps remain authoritative: a missing level on an existing map stays unavailable, and `null` vetoes the
+  heuristic. `supportsXhigh` and `supportsMax` share that precedence.
+- `supportsMax` is exported from `models.ts` so OpenAI Responses, Azure Responses, Codex Responses, and
+  Completions send `max` on the wire instead of clamping a UI-selected map-less Sol level to `high`.
+- Coverage pins capability, negative non-Sol boundaries, and captured request payloads without live tokens.
+
 ## 2026-07-30 - Recover Kimi XTML response channels from thinking
 
 ### What changed and why
