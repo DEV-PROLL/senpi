@@ -49,9 +49,20 @@ export class TestEventBus {
 export type AppendedGoalEntry = { readonly customType: string; readonly data: unknown };
 
 const sentCountWaiters = Symbol("sentCountWaiters");
+const statusWaiters = Symbol("statusWaiters");
 
 type SentCountWaiter = {
 	readonly expectedCount: number;
+	readonly complete: (error?: Error) => void;
+};
+
+export type GoalStatusUpdate = {
+	readonly key: string;
+	readonly text: string | undefined;
+};
+
+type StatusWaiter = {
+	readonly matches: (update: GoalStatusUpdate) => boolean;
 	readonly complete: (error?: Error) => void;
 };
 
@@ -59,6 +70,12 @@ export interface SentMessageHarness {
 	readonly sent: SentGoalMessage[];
 	readonly sendMessage: (message: SentGoalMessage["message"], options: unknown) => void;
 	readonly [sentCountWaiters]: Set<SentCountWaiter>;
+}
+
+export interface GoalStatusHarness {
+	readonly updates: GoalStatusUpdate[];
+	readonly setStatus: (key: string, text: string | undefined) => void;
+	readonly [statusWaiters]: Set<StatusWaiter>;
 }
 
 export interface GoalHarness extends SentMessageHarness {
@@ -71,6 +88,7 @@ export interface GoalHarness extends SentMessageHarness {
 export interface GoalContextState {
 	pendingMessages: boolean;
 	model?: Model<Api>;
+	status?: GoalStatusHarness;
 }
 
 export function createSentMessageHarness(): SentMessageHarness {
@@ -83,6 +101,19 @@ export function createSentMessageHarness(): SentMessageHarness {
 		}
 	};
 	return { sent, sendMessage, [sentCountWaiters]: waiters };
+}
+
+export function createGoalStatusHarness(): GoalStatusHarness {
+	const updates: GoalStatusUpdate[] = [];
+	const waiters = new Set<StatusWaiter>();
+	const setStatus = (key: string, text: string | undefined): void => {
+		const update = { key, text };
+		updates.push(update);
+		for (const waiter of waiters) {
+			if (waiter.matches(update)) waiter.complete();
+		}
+	};
+	return { updates, setStatus, [statusWaiters]: waiters };
 }
 
 export function createGoalHarness(): GoalHarness {
@@ -126,7 +157,7 @@ export async function makeGoalContext(
 		ui: {
 			notify: (message: string) => notices.push(message),
 			select: async () => undefined,
-			setStatus: () => {},
+			setStatus: state.status?.setStatus ?? (() => {}),
 		},
 		sessionManager: {
 			getSessionFile: () => join(dir, "session.jsonl"),
@@ -139,6 +170,33 @@ export async function makeGoalContext(
 
 export async function cleanupGoalMonitorTempDirs(): Promise<void> {
 	await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+}
+
+export function waitForGoalStatus(
+	harness: GoalStatusHarness,
+	matches: (update: GoalStatusUpdate) => boolean,
+	options: { readonly timeoutMs?: number } = {},
+): Promise<void> {
+	const waiters = harness[statusWaiters];
+	return new Promise((resolve, reject) => {
+		let completed = false;
+		let timeout: ReturnType<typeof setRealTimeout> | undefined;
+		const waiter: StatusWaiter = { matches, complete };
+		waiters.add(waiter);
+		timeout = setRealTimeout(
+			() => complete(new Error("Timed out waiting for Goal status update")),
+			options.timeoutMs ?? 5_000,
+		);
+
+		function complete(error: Error | undefined = undefined): void {
+			if (completed) return;
+			completed = true;
+			if (timeout !== undefined) clearRealTimeout(timeout);
+			waiters.delete(waiter);
+			if (error === undefined) resolve();
+			else reject(error);
+		}
+	});
 }
 
 export function waitForSentCount(

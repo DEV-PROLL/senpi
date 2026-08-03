@@ -110,6 +110,57 @@
 - LOW in monitor continuation tests that observe delayed persistence.
 - NONE in the goal store schema, public extension API, or status transitions.
 
+## Visible continuation-wait countdown (2026-08-03)
+
+### What changed
+
+- `wait-progress.ts` exports the clamped 12-cell progress bar and the user-grace / monitor
+  wait-label formatter, reusing `formatWakeDuration` so countdowns match existing cache-warm
+  notices.
+- New `wait-ticker.ts` follows the existing `GoalElapsedTicker` / `MonitorStatusTicker` pattern:
+  it renders a dedicated `goal-wait` footer status immediately, refreshes once per second on an
+  unref'd interval, skips unchanged labels, and clears the status when its timer ends or is
+  cancelled.
+- `monitor-continuation.ts` now drives that ticker from the real delayed-continuation lifecycle.
+  It restores the 60-second `userGrace` continuation after a clean accepted user turn, keeps the
+  existing four-minute monitor delay, freezes both timers while direct-input admission is
+  unresolved, resumes rejected/handled holds with their remaining time, and clears the footer on
+  delivery, accepted replacement input, goal state changes, monitor settlement, reload, and
+  shutdown.
+- The countdown is footer-only and transient. It does not append a durable entry: a transcript
+  line per user-grace window would be permanent noise for a state whose value changes every
+  second. The existing durable `goal-cache-warmup` story remains unchanged for monitor waits.
+- Coverage keeps the nine pure rendering tests and adds lifecycle wiring assertions that observe
+  the real user-grace status before triggering the turn, advance it with fake time, then await
+  exact delivery/clear signals; cancellation is likewise observed before accepted input and
+  proves no later delivery or status tick leaks.
+
+### Why
+
+The original 60-second grace path left an active Goal silent and visually indistinguishable from
+an idle or hung session. PR #553 later removed that timer while improving correlated direct-input
+admission. This change intentionally restores the grace continuation requested here without
+removing those safeguards: accepted input still cancels an already-armed wait synchronously, and
+only the clean end of that accepted user turn starts a fresh visible grace window.
+
+A dedicated footer ticker matches the TUI's established live-status mechanism and keeps the
+countdown independent from cumulative `Pursuing goal (…)` elapsed time. Durable timeline entries
+cannot represent per-second state without transcript spam, so they are the wrong rendering
+surface for this wait.
+
+### Why the extension system could not handle this differently
+
+The scheduler and footer status are already private implementation details of the builtin Goal
+extension. The wiring stays entirely inside that builtin and uses the public `ctx.ui.setStatus`
+surface; no core extension API change is required.
+
+### Expected merge conflict zones on the next sync
+
+- MEDIUM in `monitor-continuation.ts` around delayed timer ownership and direct-input holds.
+- LOW in `continuation.ts` for the restored `userGrace` path and in `index.ts` for ticker wiring.
+- LOW in the focused Goal monitor lifecycle tests and harness status signal.
+- NONE in the Goal store schema, public extension API, or durable cache-warm entry contract.
+
 ## Observable progress resets the persisted continuation cap streak (2026-07-30)
 
 ### What changed
@@ -679,4 +730,3 @@ codex-aligned tool naming, and budget-driven behavior removed. An optional
 - LOW in `types.ts` around the `SessionEvent` union and `on()` overloads (additive).
 - LOW in `agent-session.ts` around `abort()` and the `AgentSessionEvent` union (additive).
 - LOW in `goal/index.ts` around the session_start handler and the new session_abort handler.
-

@@ -23,6 +23,8 @@ goal/
 ├── cache-warm.ts     # Cache-warm metrics estimator + scheduled/resumed notices + goal-cache-warmup entry contract
 ├── cache-warm-renderer.ts # TUI entry renderer for goal-cache-warmup custom entries
 ├── elapsed-ticker.ts # GoalElapsedTicker + goalLiveElapsedSeconds (live footer refresh)
+├── wait-progress.ts  # Pure continuation-wait progress bar + label formatting
+├── wait-ticker.ts    # GoalWaitTicker (live footer countdown lifecycle)
 ├── errors.ts         # Goal{AlreadyExists,NotFound}/store error classes
 └── changes.md        # Fork tracker (port + budget behavior removal + wire compatibility)
 ```
@@ -43,9 +45,10 @@ a stale-signature check on immediate re-entry, and a single-flight latch so only
 hidden continuation can be queued at a time. The stall notice is goal-wide: from the
 3rd consecutive toolless continuation turn it prefixes the prompt with `<goal_stall_check>`
 and switches between monitor-flavored bullets while monitors are active and generic
-recovery bullets otherwise. Accepted direct input disarms pending continuation
-and leaves an active Goal active but idle after the user turn; it reactivates only mechanically
-blocked Goals, including admitted steering. A `length` stop gets exactly one minimal truncation recovery before the goal
+recovery bullets otherwise. Accepted direct input disarms a pending continuation,
+and a clean accepted user turn arms a visible 60-second grace countdown before the Goal
+resumes; mechanically blocked Goals are reactivated on accepted input, including admitted
+steering. A `length` stop gets exactly one minimal truncation recovery before the goal
 blocks on repetition, terminal provider errors block the goal only when `AgentEndEvent.willRetry`
 is false, and resumed sessions with 8+ trailing historical continuation entries suppress
 session-start auto-resume. `tokenBudget` remains inert compatibility metadata only; this
@@ -74,6 +77,7 @@ Do not return an `isError` property; it is ignored.
 | Tune the continuation prompt | `prompt.ts` |
 | Change the footer status text | `ui.ts` |
 | Change the live footer elapsed ticker | `elapsed-ticker.ts` (+ `refreshGoalUi` in `index.ts`) |
+| Change the continuation-wait countdown | `wait-progress.ts`, `wait-ticker.ts`, and `monitor-continuation.ts` |
 | `/goal` argument parsing | `command.ts` |
 
 ## CONVENTIONS
@@ -88,13 +92,14 @@ Do not return an `isError` property; it is ignored.
   `tokensUsed`/`timeUsedSeconds`; it never changes status.
 - **Live footer is ticker-driven**: `refreshGoalUi` (index.ts) drives
   `GoalElapsedTicker` to refresh `Pursuing goal (…)` once per second while a goal
-  is `active` and its accounting window is open, so the footer advances live
-  instead of freezing between `agent_end` accounting checkpoints. The ticker only
-  runs when `ctx.hasUI` and is stopped on pause/complete/clear and session shutdown.
+  is `active` and its accounting window is open. `GoalWaitTicker` independently
+  refreshes the transient continuation countdown while a monitor or user-grace
+  timer is armed. Both tickers only run with a TUI context and stop on their owning
+  lifecycle cleanup.
 
 ## NOTES
 
 - Tests: `test/suite/goal-store.test.ts`, `goal-modules.test.ts`,
-  `goal-extension.test.ts`, `goal-elapsed-ticker.test.ts` (faux/mocked `pi`, temp-file store, no real APIs).
+  `goal-extension.test.ts`, `goal-elapsed-ticker.test.ts`, `goal-wait-progress.test.ts` (faux/mocked `pi`, temp-file store, no real APIs).
 - Registered last in `builtin/index.ts` `builtinExtensions`; inert until a goal
   is created.
