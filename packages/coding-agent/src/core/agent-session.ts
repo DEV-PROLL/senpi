@@ -650,6 +650,7 @@ export class AgentSession {
 	private _customTools: ToolDefinition[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
 	private _cwd: string;
+	private _agentDir: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
@@ -710,8 +711,9 @@ export class AgentSession {
 		}
 		this._modelRuntime = modelRuntime;
 		this._modelRegistry = config.modelRegistry ?? new ModelRegistry(modelRuntime);
-		const fallbackLogger = createFallbackLogger(config.agentDir ?? getAgentDir());
-		this._sessionLogger = createSessionLogger(config.agentDir ?? getAgentDir());
+		this._agentDir = config.agentDir ?? getAgentDir();
+		const fallbackLogger = createFallbackLogger(this._agentDir);
+		this._sessionLogger = createSessionLogger(this._agentDir);
 		this._fallbackValidationWarnings = validateFallbackChains(
 			this.settingsManager.getRawFallbackChains(),
 			this._modelRegistry,
@@ -1105,6 +1107,11 @@ export class AgentSession {
 
 	getMessageRevision(): number {
 		return this._messageRevision;
+	}
+
+	/** Resolved agent state directory for this session. */
+	get agentDir(): string {
+		return this._agentDir;
 	}
 
 	private async _waitForSettledSessionWork(): Promise<void> {
@@ -5087,6 +5094,7 @@ export class AgentSession {
 				getServiceTier: () => this.serviceTier,
 				getScopedModels: () => this._scopedModels,
 				isIdle: () => this.isIdle,
+				getAgentDir: () => this._agentDir,
 				isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
 				getSignal: () => this._extensionEventSignal ?? this.agent.signal,
 				abort: () => {

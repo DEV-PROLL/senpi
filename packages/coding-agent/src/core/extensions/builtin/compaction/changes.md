@@ -1,5 +1,57 @@
 # Builtin compaction extension changes
 
+## Idle warm-up retries transient failures while the session stays idle (2026-08-03)
+
+### What changed
+
+- New `idle-retry.ts`: pure retry policy (`shouldRetryIdleWarmup`, `MAX_IDLE_WARMUP_RETRIES` = 2,
+  `IDLE_WARMUP_RETRY_DELAY_MS` = 15s). A retry requires: transient failure, session still idle, breaker
+  untripped, context still over the soft threshold, attempts under the cap.
+- `index.ts` `agent_end` idle trigger arms a watcher on the warm job's `failure` promise. On a transient
+  failure it schedules a delayed re-warm that invalidates the dead job and starts a fresh speculative
+  snapshot (fresh message revision), then re-arms. Every path is fenced on the observed job reference,
+  `ctx.isIdle()`, and a `before_agent_start` cancel, so a prompt or newer warm-up stands the watcher down.
+- Retries log `idle_trigger` with `count` = attempt number.
+
+### Why
+
+- Since #561 the idle trigger only warms (apply is deferred to the next prompt). A transient summarization
+  failure (stream stall, wall-clock budget, 429) left a dead warm job for the whole idle period, and the
+  next prompt paid a full blocking summarization - or an outright failed compaction - on the user's
+  critical path (2026-08-03 incident: visible "Compacting context..." stall at message time).
+
+### Why not an extension
+
+- This IS the builtin compaction extension.
+
+### Merge-conflict zones
+
+- `index.ts` around the `agent_end` idle trigger and the `before_agent_start` entry; `idle-retry.ts` is
+  fork-owned.
+
+## Compaction log actually writes; idle_trigger enters the allowlist (2026-08-03)
+
+### What changed
+
+- `getLogger` reads the typed `ctx.agentDir` that core now provides instead of casting for a property that
+  never existed, so `logs/compaction.log` is written for the first time since the logger shipped.
+- `log.ts` EVENTS allowlist gains `"idle_trigger"`; the type union already declared it, so every idle warm-up
+  decision was silently dropped by the `EVENTS.has(event)` guard even with a live logger.
+
+### Why
+
+- The 2026-08-03 incident (session 019fc4cb, gpt-5.6-sol-fast at 63% of a 372k window) could not be diagnosed
+  from logs: no compaction.log existed anywhere on the machine and the idle trigger had no logging path at all.
+
+### Why not an extension
+
+- This IS the builtin compaction extension; the missing context field was a core seam gap fixed via the
+  public `ExtensionContext` contract (see `../../changes.md`).
+
+### Merge-conflict zones
+
+- LOW: `index.ts` `getLogger` definition; `log.ts` EVENTS set.
+
 ## Bounded summarization overflow retries (2026-08-03)
 
 ### What changed
