@@ -1,5 +1,39 @@
 # changes
 
+## Prefer configured client fallback chains over server substitutions (2026-08-03)
+
+### What changed
+
+- `agent-session.ts` now enables Anthropic's server-fallback abort only when the
+  current model has a configured client fallback chain.
+- The policy refreshes before each prompt and after every active-model switch,
+  so `/fallback` edits, manual model changes, retry fallbacks, and primary
+  restoration cannot carry stale precedence into the next provider request.
+- An explicit `retry.abortServerSideFallback: false` still opts out even when a
+  client chain exists.
+
+### Why
+
+- The previous session bootstrap enabled the abort unconditionally by default.
+  When Anthropic substituted `claude-opus-4-8` for `claude-opus-5` and no client
+  chain existed, Senpi discarded the valid substitute response and surfaced an
+  error plus a warning telling the user to configure `/fallback`.
+- Server fallback should be the default recovery when the user has not selected
+  a client policy; an explicit client chain should remain authoritative when it
+  exists.
+
+### Why this cannot be expressed externally
+
+- The decision must be forwarded in request-local provider options before the
+  Anthropic stream parses a fallback receipt. Extensions can configure chains
+  and observe events, but cannot change the agent loop's provider option after
+  model selection and before each internal retry continuation.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` around `_promptAgent()` and `_switchActiveModel()`.
+- LOW: server-fallback option/routing tests.
+
 ## Resume queued messages after non-auto compaction; retain admission-rejected custom messages (2026-08-03)
 
 ### What changed
