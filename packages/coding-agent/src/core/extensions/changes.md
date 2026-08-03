@@ -1,5 +1,22 @@
 # Core Extensions Changes
 
+## 2026-08-03 - ExtensionContext exposes the resolved agent dir
+
+### What changed and why
+
+- `ExtensionContext` gains `agentDir: string` and `ExtensionContextActions` gains optional `getAgentDir`.
+  `AgentSession.bindCore` supplies its resolved agent dir (`config.agentDir ?? getAgentDir()`); the runner
+  falls back to `getAgentDir()` when unbound.
+- The builtin compaction extension previously read `ctx.agentDir` through a local cast that core never
+  populated, so its "always-on" `logs/compaction.log` was a permanent noop on every install. Extensions that
+  need the agent state directory now have a typed context getter instead of a global lookup.
+
+### Expected merge conflict zones
+
+- LOW: `types.ts` `ExtensionContext`/`ExtensionContextActions` member lists.
+- LOW: `runner.ts` context getter block and `bindCore` context-action wiring.
+- LOW: `core/agent-session.ts` bindCore context-action object.
+
 ## 2026-08-02 - Completed apply_patch details have fixed retention bounds
 
 ### What changed and why

@@ -194,10 +194,7 @@ export default function compactionExtension(
 		| undefined;
 	const pendingMetadata = new Map<string, PendingCompactionMetadata>();
 	let logger: CompactionLogger | undefined;
-	interface CompactionContext extends ExtensionContext {
-		agentDir?: string;
-	}
-	const getLogger = (ctx: CompactionContext): CompactionLogger => (logger ??= createCompactionLogger(ctx.agentDir));
+	const getLogger = (ctx: ExtensionContext): CompactionLogger => (logger ??= createCompactionLogger(ctx.agentDir));
 
 	function getSummarizationTools(): Tool[] {
 		if (typeof pi.getAllTools !== "function" || typeof pi.getActiveTools !== "function") return [];

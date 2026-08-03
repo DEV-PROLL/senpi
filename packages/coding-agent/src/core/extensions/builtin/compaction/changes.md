@@ -1,5 +1,28 @@
 # Builtin compaction extension changes
 
+## Compaction log actually writes; idle_trigger enters the allowlist (2026-08-03)
+
+### What changed
+
+- `getLogger` reads the typed `ctx.agentDir` that core now provides instead of casting for a property that
+  never existed, so `logs/compaction.log` is written for the first time since the logger shipped.
+- `log.ts` EVENTS allowlist gains `"idle_trigger"`; the type union already declared it, so every idle warm-up
+  decision was silently dropped by the `EVENTS.has(event)` guard even with a live logger.
+
+### Why
+
+- The 2026-08-03 incident (session 019fc4cb, gpt-5.6-sol-fast at 63% of a 372k window) could not be diagnosed
+  from logs: no compaction.log existed anywhere on the machine and the idle trigger had no logging path at all.
+
+### Why not an extension
+
+- This IS the builtin compaction extension; the missing context field was a core seam gap fixed via the
+  public `ExtensionContext` contract (see `../../changes.md`).
+
+### Merge-conflict zones
+
+- LOW: `index.ts` `getLogger` definition; `log.ts` EVENTS set.
+
 ## Bounded summarization overflow retries (2026-08-03)
 
 ### What changed
