@@ -693,7 +693,6 @@ export class AgentSession {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
-		this.agent.abortServerSideFallback = this.settingsManager.getAbortServerSideFallback();
 		const noModelFallback =
 			config.resourceLoader.getExtensions().runtime.flagValues.get("no-model-fallback") === true ||
 			process.env.SENPI_NO_FALLBACK === "1";
@@ -1178,6 +1177,8 @@ export class AgentSession {
 	private async _promptAgent(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
 		this._requiredCompactionAdmissionError = undefined;
+		this.agent.abortServerSideFallback =
+			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
 		try {
 			await this.agent.prompt(messages);
 			// AgentSession's subscriber intentionally queues event work instead of
@@ -3401,6 +3402,8 @@ export class AgentSession {
 		}
 		const thinkingLevel = this._getThinkingLevelForModelSwitch(opts.ephemeralThinkingLevel);
 		this.agent.state.model = model;
+		this.agent.abortServerSideFallback =
+			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
 		if (opts.appendSessionEntry) {
 			this.sessionManager.appendModelChange(
 				model.provider,

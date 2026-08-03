@@ -21,18 +21,52 @@ describe("abortServerSideFallback reaches the provider options", () => {
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
 	});
 
-	it("forwards the default (enabled) to the stream function", async () => {
-		const harness = await createHarness({});
+	it("enables the abort when the current model has a configured chain", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			settings: { retry: { fallbackChains: { "faux/faux-1": ["faux/faux-2"] } } },
+		});
 		harnesses.push(harness);
 		const captured = await captureStreamOptions(harness);
 		expect(captured).toHaveLength(1);
 		expect(captured[0]?.abortServerSideFallback).toBe(true);
 	});
 
-	it("forwards an explicit opt-out", async () => {
-		const harness = await createHarness({ settings: { retry: { abortServerSideFallback: false } } });
+	it("follows the server fallback when the current model has no configured chain", async () => {
+		const harness = await createHarness({ settings: { retry: { fallbackChains: {} } } });
 		harnesses.push(harness);
 		const captured = await captureStreamOptions(harness);
+		expect(captured[0]?.abortServerSideFallback).toBe(false);
+	});
+
+	it("forwards an explicit opt-out", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			settings: {
+				retry: {
+					abortServerSideFallback: false,
+					fallbackChains: { "faux/faux-1": ["faux/faux-2"] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		const captured = await captureStreamOptions(harness);
+		expect(captured[0]?.abortServerSideFallback).toBe(false);
+	});
+
+	it("refreshes the policy after a model switch", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			settings: { retry: { fallbackChains: { "faux/faux-1": ["faux/faux-2"] } } },
+		});
+		harnesses.push(harness);
+		const fallbackModel = harness.getModel("faux-2");
+		expect(fallbackModel).toBeDefined();
+		if (!fallbackModel) return;
+
+		await harness.session.setModel(fallbackModel);
+		const captured = await captureStreamOptions(harness);
+
 		expect(captured[0]?.abortServerSideFallback).toBe(false);
 	});
 });
