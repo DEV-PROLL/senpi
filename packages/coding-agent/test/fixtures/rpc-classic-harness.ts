@@ -31,7 +31,7 @@ import type { AgentSessionRuntime } from "../../src/core/agent-session-runtime.t
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
-import { createModelRegistry, getModelRuntime } from "../model-runtime-test-utils.ts";
+import { createAuthenticatedModelRegistry, createModelRegistry, getModelRuntime } from "../model-runtime-test-utils.ts";
 import { createTestResourceLoader } from "../utilities.ts";
 
 /** Captured wire state shared between the mocked modules and the test. */
@@ -120,10 +120,9 @@ async function createAgentSession(
 
 	const sessionManager = SessionManager.inMemory();
 	const settingsManager = SettingsManager.create(tempDir, tempDir);
-	const modelRegistry = await createModelRegistry(authStorage, tempDir);
-	if (withAuth) {
-		await authStorage.modify("anthropic", async () => ({ type: "api_key", key: "test-key" }));
-	}
+	const modelRegistry = withAuth
+		? await createAuthenticatedModelRegistry(authStorage, tempDir)
+		: await createModelRegistry(authStorage, tempDir);
 
 	const session = new AgentSession({
 		agent,
