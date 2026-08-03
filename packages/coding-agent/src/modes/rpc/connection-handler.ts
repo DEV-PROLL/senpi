@@ -22,13 +22,13 @@ import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
 import {
 	emitProviderAccountsChanged,
 	subscribeProviderAccountEvents,
-} from "../../core/extensions/builtin/claude-agent-sdk/account-events.ts";
+} from "../../core/extensions/builtin/claude-sdk-oauth/account-events.ts";
 import {
-	CLAUDE_AGENT_SDK_PROVIDER_ID,
+	CLAUDE_SDK_OAUTH_PROVIDER_ID,
 	getProviderAccounts,
 	pinProviderAccount,
 	removeProviderAccount,
-} from "../../core/extensions/builtin/claude-agent-sdk/account-management.ts";
+} from "../../core/extensions/builtin/claude-sdk-oauth/account-management.ts";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -486,7 +486,7 @@ export function createRpcConnectionHandler(
 				signal: controller.signal,
 			});
 			session.modelRegistry.refresh();
-			if (provider === CLAUDE_AGENT_SDK_PROVIDER_ID) emitProviderAccountsChanged(provider);
+			if (provider === CLAUDE_SDK_OAUTH_PROVIDER_ID) emitProviderAccountsChanged(provider);
 			outputEvent({ type: "auth_login_end", provider, success: true });
 		} catch (loginError: unknown) {
 			const message = loginError instanceof Error ? loginError.message : String(loginError);
@@ -708,8 +708,21 @@ export function createRpcConnectionHandler(
 			// =================================================================
 
 			case "bash": {
+				const eventResult = await session.extensionRunner.emitUserBash({
+					type: "user_bash",
+					command: command.command,
+					excludeFromContext: command.excludeFromContext ?? false,
+					cwd: session.sessionManager.getCwd(),
+				});
+				if (eventResult?.result) {
+					session.recordBashResult(command.command, eventResult.result, {
+						excludeFromContext: command.excludeFromContext,
+					});
+					return success(id, "bash", eventResult.result);
+				}
 				const result = await session.executeBash(command.command, undefined, {
 					excludeFromContext: command.excludeFromContext,
+					operations: eventResult?.operations,
 				});
 				return success(id, "bash", result);
 			}

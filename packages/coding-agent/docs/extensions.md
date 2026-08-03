@@ -1034,9 +1034,11 @@ ctx.sessionManager.buildContextEntries()    // Active branch entries with compac
 ctx.sessionManager.getLeafId()              // Current leaf entry ID
 ```
 
-### ctx.modelRegistry / ctx.model / ctx.thinkingLevel
+### ctx.modelRegistry / ctx.model / ctx.thinkingLevel / ctx.scopedModels
 
 Access to models, providers, and resolved authentication. `ctx.modelRegistry.getProvider(id)` returns the effective pi-ai provider, while `getProviderAuth(id)` resolves its current API key, headers, base URL, and provider-scoped environment without requiring a loaded model. `ctx.model` is the active model, and `ctx.thinkingLevel` is its current effective thinking level.
+
+`ctx.scopedModels` is the read-only list of models scoped to the current session — the same set the `/scoped-models` command shows. It is resolved at session start from the `--models` CLI flag and the `enabledModels` setting (matched against the available catalogue with minimatch on `provider/modelId` or a bare `modelId`). It is empty when no scoping is configured, meaning every available model is usable. Each entry is `{ model, thinkingLevel? }`, where `thinkingLevel` is set only when a pattern pinned it (e.g. `anthropic/*:high`). Use it to populate a model picker that mirrors the built-in one instead of enumerating the whole catalogue via `ctx.modelRegistry.getAvailable()`.
 
 ### ctx.signal
 
@@ -1658,6 +1660,27 @@ mode and would not execute if sent via `prompt`.
 
 Register a custom TUI renderer for custom messages with your `customType`. Custom messages are created with `pi.sendMessage()` and participate in LLM context. See [Custom UI](#custom-ui).
 
+### pi.registerMarkdownTransformer(transformer)
+
+Register a transformer for the Markdown in normal user text, assistant text, and thinking blocks. Transformers run in extension load order, and each transformer receives the Markdown returned by the previous transformer. After the chain finishes, Pi renders the transformed content with its built-in renderer.
+
+The transformer receives the Markdown string and a context with:
+
+- `messageType` — `"user"`, `"assistant"`, or `"assistant-thinking"`
+- `isStreaming` — `true` for partial assistant updates; `false` for user, finalized assistant, and restored messages
+- `availableWidth` — exact terminal columns available for the transformed Markdown content
+
+Return the transformed Markdown:
+
+```typescript
+pi.registerMarkdownTransformer((markdown, { messageType, isStreaming }) => {
+  if (isStreaming || messageType === "assistant-thinking") return markdown;
+  return markdown.replaceAll("-->", "→");
+});
+```
+
+If a transformer throws, Pi keeps the Markdown produced so far and continues with the next transformer. The hook is display-only: the original message remains unchanged in the session and model context. It runs for new user messages, assistant streaming updates, restored session messages, and terminal width changes, so transformers should remain synchronous and inexpensive.
+
 ### pi.registerEntryRenderer(customType, renderer)
 
 Register a custom TUI renderer for custom entries with your `customType`. Custom entries are created with `pi.appendEntry()` and do not participate in LLM context.
@@ -1765,6 +1788,16 @@ Get or set the thinking level. Level is clamped to model capabilities (non-reaso
 ```typescript
 const current = pi.getThinkingLevel();  // "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 pi.setThinkingLevel("high");
+```
+
+### pi.setSessionFastMode(enabled)
+
+Mark the session as running in fast mode so host surfaces can show it — the TUI footer stamps a ⚡ on the model label. Session-scoped and never persisted; it is also true on its own whenever the active model is configured for the priority tier (an `openai` `-fast` catalog variant, a scoped `provider/id:priority`).
+
+This is only an indicator. It does not add `service_tier` to any request, so an extension that wants the priority tier on the wire still returns it from `before_provider_request`.
+
+```typescript
+pi.setSessionFastMode(true);
 ```
 
 ### pi.events

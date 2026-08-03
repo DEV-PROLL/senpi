@@ -26,9 +26,9 @@ class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMe
 	}
 }
 
-function sensitiveModel(): Model<Api> {
+function modelWithId(id: string): Model<Api> {
 	return {
-		id: "claude-fable-5",
+		id,
 		provider: "anthropic",
 		reasoning: true,
 		api: "anthropic-messages",
@@ -37,7 +37,27 @@ function sensitiveModel(): Model<Api> {
 	} as unknown as Model<Api>;
 }
 
-describe("RPC publishes high_reasoning_warning", () => {
+function mockAssistantMessage(): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text: "ok" }],
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "mock",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+		timestamp: Date.now(),
+	};
+}
+
+describe("RPC publish of high_reasoning_warning", () => {
 	let session: AgentSession;
 	let tempDir: string;
 
@@ -51,38 +71,21 @@ describe("RPC publishes high_reasoning_warning", () => {
 		if (tempDir && existsSync(tempDir)) rmSync(tempDir, { recursive: true });
 	});
 
-	it("serializes the event onto the RPC stdout sink via the real output buffer", async () => {
+	async function captureRpcRecords(modelId: string): Promise<Array<Record<string, unknown>>> {
 		const sinkChunks: string[] = [];
 		const scheduledFlushes: Array<() => void> = [];
 		const eventOutput = createRpcEventOutputBuffer(
 			(chunk) => sinkChunks.push(chunk),
 			(flush) => scheduledFlushes.push(flush),
 		);
-		const outputEvent = (event: object) => eventOutput.enqueueEvent(event);
 
 		const agent = new Agent({
 			getApiKey: () => "test-key",
-			initialState: { model: sensitiveModel(), systemPrompt: "Test", tools: [] },
+			initialState: { model: modelWithId(modelId), systemPrompt: "Test", tools: [] },
 			streamFn: () => {
 				const stream = new MockAssistantStream();
 				queueMicrotask(() => {
-					const msg: AssistantMessage = {
-						role: "assistant",
-						content: [{ type: "text", text: "ok" }],
-						api: "anthropic-messages",
-						provider: "anthropic",
-						model: "mock",
-						usage: {
-							input: 0,
-							output: 0,
-							cacheRead: 0,
-							cacheWrite: 0,
-							totalTokens: 0,
-							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-						},
-						stopReason: "stop",
-						timestamp: Date.now(),
-					};
+					const msg = mockAssistantMessage();
 					stream.push({ type: "start", partial: msg });
 					stream.push({ type: "done", reason: "stop", message: msg });
 				});
@@ -105,21 +108,30 @@ describe("RPC publishes high_reasoning_warning", () => {
 			resourceLoader: createTestResourceLoader(),
 		});
 
-		session.subscribe((event) => outputEvent(event));
+		session.subscribe((event) => eventOutput.enqueueEvent(event));
 		session.setThinkingLevel("xhigh");
 		for (const flush of scheduledFlushes) flush();
 
-		const lines = sinkChunks
+		return sinkChunks
 			.join("")
 			.split("\n")
-			.filter((line) => line.length > 0);
-		const warning = lines
-			.map((line) => JSON.parse(line) as Record<string, unknown>)
-			.find((record) => record.type === "high_reasoning_warning");
+			.filter((line) => line.length > 0)
+			.map((line) => JSON.parse(line) as Record<string, unknown>);
+	}
+
+	it("serializes the warning onto the RPC stdout sink for gpt-5.6-sol", async () => {
+		const records = await captureRpcRecords("gpt-5.6-sol");
+		const warning = records.find((record) => record.type === "high_reasoning_warning");
 
 		expect(warning).toBeDefined();
-		expect(warning?.modelId).toBe("claude-fable-5");
+		expect(warning?.modelId).toBe("gpt-5.6-sol");
 		expect(warning?.provider).toBe("anthropic");
 		expect(warning?.thinkingLevel).toBe("xhigh");
+	});
+
+	it("emits NO warning line on the RPC stdout sink for claude-fable-5 (reported bug)", async () => {
+		const records = await captureRpcRecords("claude-fable-5");
+		expect(records.find((record) => record.type === "high_reasoning_warning")).toBeUndefined();
+		expect(records.some((record) => record.type === "thinking_level_changed")).toBe(true);
 	});
 });

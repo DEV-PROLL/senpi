@@ -55,6 +55,7 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
+import { extract429RetryAfterMs, parseRetryAfterMsMarker } from "@earendil-works/pi-ai/utils/retry-hint";
 import { getAgentDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
@@ -128,9 +129,17 @@ import { PROMPT_CACHE_SAFE_WAIT_ENV, resolvePromptCacheSafeWaitSeconds } from ".
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { isBillingErrorMessage } from "./retry-fallback/billing.ts";
+import { formatSelector } from "./retry-fallback/chains.ts";
 import { RetryFallbackController } from "./retry-fallback/controller.ts";
 import { SelectorCooldowns } from "./retry-fallback/cooldown.ts";
+import {
+	classifyRateLimitedWait,
+	nextInTurnDelayMs,
+	type ProbePhase,
+	probeBackSchedule,
+} from "./retry-fallback/hint-policy.ts";
 import { createFallbackLogger } from "./retry-fallback/log.ts";
+import { ProbeBackScheduler } from "./retry-fallback/probe-scheduler.ts";
 import { validateFallbackChains } from "./retry-fallback/validate.ts";
 import { createSessionLogger, type SessionLogger } from "./session-log.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
@@ -247,6 +256,8 @@ export type AgentSessionEvent =
 			reason: CompactionReason;
 	  }
 	| { type: "summarization_retry_finished" }
+	| { type: "retry_probe_scheduled"; selector: string; atMs: number; probeIndex: 1 | 2 }
+	| { type: "retry_probe_result"; selector: string; ok: boolean; errorMessage?: string }
 	| { type: "bash_execution_update"; id?: string; delta: string };
 
 /** Listener function for agent session events */
@@ -442,6 +453,19 @@ export interface ExtensionBindings {
 /** Options for AgentSession.prompt() */
 export type PromptDisposition = "handled" | "queued" | "started";
 
+export type QueuedInput = {
+	readonly text: string;
+	readonly mode: "steer" | "followUp";
+	readonly enqueueOrder: number;
+};
+
+export type ClearedQueue = {
+	steering: string[];
+	followUp: string[];
+	/** Global enqueue order, independent of native delivery priority. */
+	readonly ordered: readonly QueuedInput[];
+};
+
 export interface PromptOptions {
 	/** Whether to expand file-based prompt templates (default: true) */
 	expandPromptTemplates?: boolean;
@@ -553,6 +577,7 @@ export class AgentSession {
 	private _isAgentRunActive = false;
 	private _toolExecutionDepth = 0;
 	private _promptStartPending = false;
+	private _nextInputId = 0;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
 
@@ -560,6 +585,9 @@ export class AgentSession {
 	private _steeringMessages: string[] = [];
 	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
 	private _followUpMessages: string[] = [];
+	/** Recovery-only order across both native queue modes and TUI compaction ownership. */
+	private _queuedInputOrder: QueuedInput[] = [];
+	private _nextQueuedInputOrder = 0;
 	private _sessionLogger: SessionLogger;
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
@@ -598,17 +626,20 @@ export class AgentSession {
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
 	private _consecutiveProviderStreamStalls = 0;
+	private _probePhase: ProbePhase = "idle";
+	private _hintDeadlineMs: number | undefined = undefined;
+	private _cumulativeHintedWaitMs = 0;
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _userAbortPromise: Promise<void> | undefined = undefined;
 	private _agentAbortSource: "user" | "system" | undefined = undefined;
 	private _suppressQueuedContinuationAfterUserAbort = false;
-	/** Set when clearQueue() drains non-empty queues, so abort() can detect the gap even after queues are cleared. */
+	/** Set when clearQueue({ abortWillFollow: true }) drains queues immediately before abort(). */
 	private _hadClearedQueuedMessages = false;
 	private _extensionEventSignal: AbortSignal | undefined = undefined;
 
 	// Bash execution state
-	private _bashAbortController: AbortController | undefined = undefined;
+	private readonly _bashAbortControllers = new Set<AbortController>();
 	private _pendingBashMessages: BashExecutionMessage[] = [];
 
 	// Extension system
@@ -619,6 +650,7 @@ export class AgentSession {
 	private _customTools: ToolDefinition[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
 	private _cwd: string;
+	private _agentDir: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
@@ -638,6 +670,9 @@ export class AgentSession {
 	private _modelRegistry: ModelRegistry;
 	private readonly _fallbackValidationWarnings: readonly string[];
 	private readonly _retryFallback: RetryFallbackController;
+	private readonly _selectorCooldowns: SelectorCooldowns;
+	private readonly _probeBackScheduler: ProbeBackScheduler;
+	private readonly _fallbackNow: () => number;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -649,7 +684,8 @@ export class AgentSession {
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
 	private _currentServiceTier: ServiceTier | undefined = undefined;
-	private _lastHighReasoningWarningKey: string | undefined = undefined;
+	private _sessionFastMode = false;
+	private readonly _shownHighReasoningWarningKeys = new Set<string>();
 	private _baseSystemPromptOptions!: BuildDynamicSystemPromptOptions;
 	private _systemPromptOverride?: string;
 
@@ -657,7 +693,6 @@ export class AgentSession {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
-		this.agent.abortServerSideFallback = this.settingsManager.getAbortServerSideFallback();
 		const noModelFallback =
 			config.resourceLoader.getExtensions().runtime.flagValues.get("no-model-fallback") === true ||
 			process.env.SENPI_NO_FALLBACK === "1";
@@ -675,8 +710,9 @@ export class AgentSession {
 		}
 		this._modelRuntime = modelRuntime;
 		this._modelRegistry = config.modelRegistry ?? new ModelRegistry(modelRuntime);
-		const fallbackLogger = createFallbackLogger(config.agentDir ?? getAgentDir());
-		this._sessionLogger = createSessionLogger(config.agentDir ?? getAgentDir());
+		this._agentDir = config.agentDir ?? getAgentDir();
+		const fallbackLogger = createFallbackLogger(this._agentDir);
+		this._sessionLogger = createSessionLogger(this._agentDir);
 		this._fallbackValidationWarnings = validateFallbackChains(
 			this.settingsManager.getRawFallbackChains(),
 			this._modelRegistry,
@@ -684,10 +720,12 @@ export class AgentSession {
 		for (const warning of this._fallbackValidationWarnings) {
 			fallbackLogger.warn("validation_warning", { warning });
 		}
+		this._selectorCooldowns = new SelectorCooldowns(config.fallbackNow ?? (() => Date.now()));
+		this._fallbackNow = config.fallbackNow ?? (() => Date.now());
 		this._retryFallback = new RetryFallbackController({
 			getSettings: () => this.settingsManager.getRetryFallbackSettings(),
 			registry: this._modelRegistry,
-			cooldowns: new SelectorCooldowns(config.fallbackNow ?? (() => Date.now())),
+			cooldowns: this._selectorCooldowns,
 			logger: fallbackLogger,
 			switchModel: async (model, thinking, reason) => {
 				await this._switchActiveModel(model, {
@@ -703,6 +741,9 @@ export class AgentSession {
 			emit: (event) => this._emit(event),
 			getCurrentSelector: () => (this.model ? { model: this.model, thinkingLevel: this.thinkingLevel } : undefined),
 			isAuthAvailable: (provider) => this._modelRuntime.hasConfiguredAuth(provider),
+		});
+		this._probeBackScheduler = new ProbeBackScheduler({
+			now: this._fallbackNow,
 		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -1023,6 +1064,10 @@ export class AgentSession {
 
 	/** Mirror stuck-prone lifecycle transitions into logs/session.log (content-free). */
 	private _logSessionEvent(event: AgentSessionEvent): void {
+		if (event.type === "compaction_start") {
+			this._sessionLogger.info("compaction_start", { reason: event.reason });
+			return;
+		}
 		if (event.type === "compaction_end") {
 			this._sessionLogger.info("compaction_decision", {
 				reason: event.reason,
@@ -1061,6 +1106,11 @@ export class AgentSession {
 
 	getMessageRevision(): number {
 		return this._messageRevision;
+	}
+
+	/** Resolved agent state directory for this session. */
+	get agentDir(): string {
+		return this._agentDir;
 	}
 
 	private async _waitForSettledSessionWork(): Promise<void> {
@@ -1127,6 +1177,8 @@ export class AgentSession {
 	private async _promptAgent(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
 		this._requiredCompactionAdmissionError = undefined;
+		this.agent.abortServerSideFallback =
+			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
 		try {
 			await this.agent.prompt(messages);
 			// AgentSession's subscriber intentionally queues event work instead of
@@ -1149,7 +1201,9 @@ export class AgentSession {
 				for (const message of queuedMessages) this.agent.steer(message);
 				const userMessage = queuedMessages.find((message) => message.role === "user");
 				if (userMessage?.role === "user") {
-					this._steeringMessages.push(this._extractUserMessageText(userMessage.content));
+					const text = this._extractUserMessageText(userMessage.content);
+					this._steeringMessages.push(text);
+					this._recordQueuedInput(text, "steer");
 					this._emitQueueUpdate();
 				}
 				return;
@@ -1453,12 +1507,14 @@ export class AgentSession {
 				const steeringIndex = this._steeringMessages.indexOf(messageText);
 				if (steeringIndex !== -1) {
 					this._steeringMessages.splice(steeringIndex, 1);
+					this._removeQueuedInput(messageText, "steer");
 					this._emitQueueUpdate();
 				} else {
 					// Check follow-up queue
 					const followUpIndex = this._followUpMessages.indexOf(messageText);
 					if (followUpIndex !== -1) {
 						this._followUpMessages.splice(followUpIndex, 1);
+						this._removeQueuedInput(messageText, "followUp");
 						this._emitQueueUpdate();
 					}
 				}
@@ -1533,6 +1589,7 @@ export class AgentSession {
 						attempt: this._retryAttempt,
 					});
 					this._retryAttempt = 0;
+					this._resetHintTierState();
 				}
 			}
 		}
@@ -1633,6 +1690,80 @@ export class AgentSession {
 			this._retryResolve = undefined;
 			this._retryPromise = undefined;
 		}
+	}
+
+	private _resetHintTierState(): void {
+		this._probePhase = "idle";
+		this._hintDeadlineMs = undefined;
+		this._cumulativeHintedWaitMs = 0;
+	}
+
+	/**
+	 * Arm the probe-back scheduler for a tier-2 demoted selector. The scheduler
+	 * will fire at most two probes (half-hint, then deadline) and clear the
+	 * selector cooldown on success so maybeRestorePrimary reverts at the next
+	 * turn boundary.
+	 */
+	private _armProbeBackForDemotedSelector(selector: string, hintMs: number): void {
+		if (!selector) return;
+
+		// Guard: skip when the demoted selector is the ACTIVE model.
+		const currentModel = this.model;
+		if (currentModel && formatSelector(currentModel) === selector) return;
+
+		// Guard: skip when auth is unavailable at arm time.
+		const parts = selector.split("/");
+		if (parts.length < 2) return;
+		const provider = parts[0];
+		if (!this._modelRuntime.hasConfiguredAuth(provider)) return;
+
+		const now = this._fallbackNow();
+		const schedule = probeBackSchedule(hintMs, now);
+		const modelId = parts.slice(1).join("/");
+		const demotedModel = this._modelRuntime.getModel(provider, modelId);
+		if (!demotedModel) return;
+
+		this._probeBackScheduler.arm({
+			selector,
+			firstAtMs: schedule.firstAtMs,
+			deadlineMs: schedule.deadlineMs,
+			authAvailable: () => this._modelRuntime.hasConfiguredAuth(provider),
+			runProbe: async (signal: AbortSignal): Promise<boolean> => {
+				try {
+					const result = await this._modelRuntime.completeSimple(
+						demotedModel,
+						{
+							systemPrompt: "Reply with OK.",
+							messages: [{ role: "user", content: [{ type: "text", text: "OK" }], timestamp: now }],
+						},
+						{ maxTokens: 1, signal },
+					);
+					return result.stopReason !== "error" && result.stopReason !== "aborted";
+				} catch {
+					return false;
+				}
+			},
+			onCleared: (sel: string) => {
+				this._selectorCooldowns.clear(sel);
+			},
+			emit: (event) => {
+				if (event.type === "retry_probe_scheduled") {
+					this._emit({
+						type: "retry_probe_scheduled",
+						selector: event.selector,
+						atMs: event.atMs,
+						probeIndex: event.probeIndex,
+					});
+				} else {
+					this._emit({
+						type: "retry_probe_result",
+						selector: event.selector,
+						ok: event.ok,
+						errorMessage: event.errorMessage,
+					});
+				}
+			},
+		});
 	}
 
 	/** Find the last assistant message in agent state (including aborted ones) */
@@ -1846,6 +1977,7 @@ export class AgentSession {
 	 */
 	dispose(): void {
 		try {
+			this._probeBackScheduler.cancel("dispose");
 			this.abortRetry();
 			this.abortCompaction();
 			this.abortBranchSummary();
@@ -1885,6 +2017,24 @@ export class AgentSession {
 
 	get serviceTier(): ServiceTier | undefined {
 		return this._currentServiceTier;
+	}
+
+	/**
+	 * True when the active model is served at the priority ("fast") tier: either the model
+	 * itself is configured for it (an `openai` `-fast` catalog variant, a scoped
+	 * `provider/id:priority`) or an extension turned fast mode on for this session.
+	 *
+	 * Display-only: it never feeds request composition, so an extension toggling fast mode
+	 * for one provider cannot leak `service_tier` into another provider's payload.
+	 * `serviceTier` stays the single request-side source.
+	 */
+	isFastModeActive(): boolean {
+		return this._sessionFastMode || this._currentServiceTier === "priority";
+	}
+
+	/** Session-scoped fast-mode indicator; never persisted, reset on session start. */
+	setSessionFastMode(enabled: boolean): void {
+		this._sessionFastMode = enabled;
 	}
 
 	/**
@@ -2310,6 +2460,13 @@ export class AgentSession {
 		let messages: AgentMessage[] | undefined;
 		let titlePrompt: string | undefined;
 		let consumedNextTurnMessages: CustomMessage[] | undefined;
+		let inputId: string | undefined;
+		const emitInputDisposition = async (
+			disposition: "handled" | "queued" | "started" | "rejected",
+		): Promise<void> => {
+			if (inputId === undefined) return;
+			await this._extensionRunner.emit({ type: "input_disposition", inputId, disposition });
+		};
 
 		try {
 			// Handle extension commands first (execute immediately, even during streaming)
@@ -2329,14 +2486,17 @@ export class AgentSession {
 			let currentText = text;
 			let currentImages = options?.images;
 			if (this._extensionRunner.hasHandlers("input")) {
+				inputId = `${this.sessionManager.getSessionId()}:${++this._nextInputId}`;
 				const inputResult = await this._extensionRunner.emitInput(
 					currentText,
 					currentImages,
 					options?.source ?? "interactive",
 					this.isStreaming ? options?.streamingBehavior : undefined,
+					inputId,
 				);
 				throwIfCancelled();
 				if (inputResult.action === "handled") {
+					await emitInputDisposition("handled");
 					promptDisposition?.("handled");
 					preflightResult?.(true);
 					return;
@@ -2370,6 +2530,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				await emitInputDisposition("queued");
 				promptDisposition?.("queued");
 				preflightResult?.(true);
 				return;
@@ -2387,6 +2548,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				await emitInputDisposition("queued");
 				promptDisposition?.("queued");
 				preflightResult?.(true);
 				return;
@@ -2414,6 +2576,7 @@ export class AgentSession {
 					} else {
 						await this._queueSteer(expandedText, currentImages);
 					}
+					await emitInputDisposition("queued");
 					promptDisposition?.("queued");
 					preflightResult?.(true);
 					return;
@@ -2436,6 +2599,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				await emitInputDisposition("queued");
 				promptDisposition?.("queued");
 				preflightResult?.(true);
 				return;
@@ -2525,7 +2689,10 @@ export class AgentSession {
 			// next-turn, and before_agent_start additions are also provider-visible,
 			// so make one final admission decision against the complete request.
 			await this._enforceFinalProviderAdmission(messages);
+			throwIfCancelled();
+			await emitInputDisposition("started");
 		} catch (error) {
+			await emitInputDisposition("rejected");
 			if (consumedNextTurnMessages && consumedNextTurnMessages.length > 0) {
 				this._pendingNextTurnMessages = [...consumedNextTurnMessages, ...this._pendingNextTurnMessages];
 			}
@@ -2539,7 +2706,6 @@ export class AgentSession {
 			return;
 		}
 
-		throwIfCancelled();
 		promptDisposition?.("started");
 		preflightResult?.(true);
 		if (options?.thinkingLevel !== undefined) {
@@ -2666,7 +2832,7 @@ export class AgentSession {
 	 * @param images Optional image attachments to include with the message
 	 * @throws Error if text is an extension command
 	 */
-	async steer(text: string, images?: ImageContent[]): Promise<void> {
+	async steer(text: string, images?: ImageContent[], recovery?: { enqueueOrder?: number }): Promise<void> {
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -2676,7 +2842,7 @@ export class AgentSession {
 		let expandedText = this._expandSkillCommand(text);
 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 
-		await this._queueSteer(expandedText, images);
+		await this._queueSteer(expandedText, images, recovery?.enqueueOrder);
 	}
 
 	/**
@@ -2686,7 +2852,7 @@ export class AgentSession {
 	 * @param images Optional image attachments to include with the message
 	 * @throws Error if text is an extension command
 	 */
-	async followUp(text: string, images?: ImageContent[]): Promise<void> {
+	async followUp(text: string, images?: ImageContent[], recovery?: { enqueueOrder?: number }): Promise<void> {
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -2696,7 +2862,7 @@ export class AgentSession {
 		let expandedText = this._expandSkillCommand(text);
 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 
-		await this._queueFollowUp(expandedText, images);
+		await this._queueFollowUp(expandedText, images, recovery?.enqueueOrder);
 	}
 
 	private _startSessionTitleGeneration(firstPrompt: string): void {
@@ -2777,8 +2943,9 @@ export class AgentSession {
 	/**
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
-	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
+	private async _queueSteer(text: string, images?: ImageContent[], enqueueOrder?: number): Promise<void> {
 		this._steeringMessages.push(text);
+		this._recordQueuedInput(text, "steer", enqueueOrder);
 		this._sessionLogger.debug("queue_enqueue", { mode: "steer", count: this._steeringMessages.length });
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -2796,8 +2963,9 @@ export class AgentSession {
 	/**
 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
 	 */
-	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
+	private async _queueFollowUp(text: string, images?: ImageContent[], enqueueOrder?: number): Promise<void> {
 		this._followUpMessages.push(text);
+		this._recordQueuedInput(text, "followUp", enqueueOrder);
 		this._sessionLogger.debug("queue_enqueue", { mode: "followUp", count: this._followUpMessages.length });
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -2899,8 +3067,21 @@ export class AgentSession {
 					this.agent.steer(appMessage);
 				}
 			} else if (options?.triggerTurn) {
-				await this._enforceCompactionBeforeProvider(this._findLastAssistantMessage(), false, "pre_prompt");
-				await this._enforceFinalProviderAdmission([appMessage]);
+				try {
+					await this._enforceCompactionBeforeProvider(this._findLastAssistantMessage(), false, "pre_prompt");
+					await this._enforceFinalProviderAdmission([appMessage]);
+				} catch (error) {
+					// Mirror sendUserMessage's retention contract: an admission
+					// rejection must retain the message for later delivery instead
+					// of silently dropping it (the fire-and-forget extension action
+					// swallows this rejection).
+					if (options.deliverAs === "followUp") {
+						this.agent.followUp(appMessage);
+					} else {
+						this.agent.steer(appMessage);
+					}
+					throw error;
+				}
 				await this._promptAgent(appMessage);
 			} else {
 				this.agent.state.messages.push(appMessage);
@@ -3002,25 +3183,48 @@ export class AgentSession {
 		}
 	}
 
+	/** Reserve a global order for input temporarily owned outside the native queues. */
+	reserveQueuedInputOrder(): number {
+		this._nextQueuedInputOrder += 1;
+		return this._nextQueuedInputOrder;
+	}
+
+	private _recordQueuedInput(text: string, mode: QueuedInput["mode"], enqueueOrder?: number): void {
+		const order = enqueueOrder ?? this.reserveQueuedInputOrder();
+		this._nextQueuedInputOrder = Math.max(this._nextQueuedInputOrder, order);
+		this._queuedInputOrder.push({ text, mode, enqueueOrder: order });
+	}
+
+	private _removeQueuedInput(text: string, mode: QueuedInput["mode"]): void {
+		const index = this._queuedInputOrder.findIndex((message) => message.mode === mode && message.text === text);
+		if (index !== -1) this._queuedInputOrder.splice(index, 1);
+	}
+
 	/**
-	 * Clear all queued messages and return them.
-	 * Useful for restoring to editor when user aborts.
-	 * @returns Object with steering and followUp arrays
+	 * Clear all queued messages and return them. The non-enumerable `ordered`
+	 * view preserves legacy object equality and native queue semantics.
+	 * @param options.abortWillFollow Mark a non-empty drain so an immediately following abort can emit session_abort.
 	 */
-	clearQueue(): { steering: string[]; followUp: string[] } {
+	clearQueue(options: { abortWillFollow: boolean } = { abortWillFollow: false }): ClearedQueue {
 		const steering = [...this._steeringMessages];
 		const followUp = [...this._followUpMessages];
-		if (steering.length > 0 || followUp.length > 0) this._hadClearedQueuedMessages = true;
+		const ordered = [...this._queuedInputOrder].sort((a, b) => a.enqueueOrder - b.enqueueOrder);
+		if (options.abortWillFollow && (steering.length > 0 || followUp.length > 0)) {
+			this._hadClearedQueuedMessages = true;
+		}
 		// Clear every queue synchronously. Deferred post-compaction messages are
 		// already represented in visible bookkeeping, so they must not be returned
 		// a second time or later resurrected into Agent's native queues.
 		this._steeringMessages = [];
 		this._followUpMessages = [];
+		this._queuedInputOrder = [];
 		this._postCompactionDeferredSteeringMessages = [];
 		this._postCompactionDeferredFollowUpMessages = [];
 		this.agent.clearAllQueues();
 		this._emitQueueUpdate();
-		return { steering, followUp };
+		const cleared = { steering, followUp } as ClearedQueue;
+		Object.defineProperty(cleared, "ordered", { value: ordered, enumerable: false });
+		return cleared;
 	}
 
 	/** Number of pending messages (includes both steering and follow-up) */
@@ -3156,6 +3360,7 @@ export class AgentSession {
 		// A manual model change abandons any active fallback window; if a fallback
 		// retry sleep is still pending, cancel it so no surprise continuation fires.
 		const hadActiveFallback = this._retryFallback.activeState !== undefined;
+		this._probeBackScheduler.cancel("manual-model-change");
 		this._retryFallback.clearForManualModelChange(model);
 		if (hadActiveFallback && this._retryAbortController) {
 			this.abortRetry();
@@ -3197,6 +3402,8 @@ export class AgentSession {
 		}
 		const thinkingLevel = this._getThinkingLevelForModelSwitch(opts.ephemeralThinkingLevel);
 		this.agent.state.model = model;
+		this.agent.abortServerSideFallback =
+			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
 		if (opts.appendSessionEntry) {
 			this.sessionManager.appendModelChange(
 				model.provider,
@@ -3215,8 +3422,6 @@ export class AgentSession {
 
 		if (opts.ephemeralThinkingLevel !== undefined) {
 			this._applyEphemeralThinkingLevel(thinkingLevel);
-		} else if (opts.persistDefault) {
-			this.setThinkingLevel(thinkingLevel);
 		} else {
 			this.setSessionThinkingLevel(thinkingLevel);
 		}
@@ -3270,6 +3475,7 @@ export class AgentSession {
 		if (invalidatesCompaction) {
 			this._invalidateCompactionForModelSelection();
 		}
+		this._probeBackScheduler.cancel("manual-model-change");
 		this._retryFallback.clearForManualModelChange(next.model);
 		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.thinkingLevel);
 
@@ -3279,10 +3485,10 @@ export class AgentSession {
 		this._currentServiceTier = this._resolveServiceTier(next.model, next.serviceTier);
 
 		// Apply thinking level.
-		// - Explicit favorite model thinking level overrides current session level
-		// - Undefined favorite model thinking level inherits the current session preference
-		// setThinkingLevel clamps to model capabilities.
-		this.setThinkingLevel(thinkingLevel);
+		// - Explicit favorite model thinking level overrides the effective session level
+		// - Undefined favorite model thinking level restores the remembered user preference
+		// setSessionThinkingLevel clamps without replacing that preference.
+		this.setSessionThinkingLevel(thinkingLevel);
 
 		const systemPromptChange = await this._emitModelSelect(next.model, currentModel, "cycle");
 
@@ -3345,15 +3551,10 @@ export class AgentSession {
 	private _emitHighReasoningWarningIfNeeded(): void {
 		const model = this.model;
 		const level = this.thinkingLevel;
-		if (!model || !shouldWarnHighReasoning(model, level)) {
-			this._lastHighReasoningWarningKey = undefined;
-			return;
-		}
-		const key = `${model.provider}/${model.id}:${level}`;
-		if (this._lastHighReasoningWarningKey === key) {
-			return;
-		}
-		this._lastHighReasoningWarningKey = key;
+		if (!model || !shouldWarnHighReasoning(model, level)) return;
+		const key = `${model.provider}/${model.id}`;
+		if (this._shownHighReasoningWarningKeys.has(key)) return;
+		this._shownHighReasoningWarningKeys.add(key);
 		this._emit({
 			type: "high_reasoning_warning",
 			modelId: model.id,
@@ -3413,10 +3614,7 @@ export class AgentSession {
 		if (explicitLevel !== undefined) {
 			return explicitLevel;
 		}
-		if (!this.supportsThinking()) {
-			return this.settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
-		}
-		return this.thinkingLevel;
+		return this.settingsManager.getDefaultThinkingLevel() ?? this.thinkingLevel ?? DEFAULT_THINKING_LEVEL;
 	}
 
 	private _clampThinkingLevel(level: ThinkingLevel, availableLevels: ThinkingLevel[]): ThinkingLevel {
@@ -3620,6 +3818,7 @@ export class AgentSession {
 			}
 			this._releasePendingCompactionAdmission(admission, outcome);
 			if (disconnected && !this.isCompacting) this._reconnectToAgent();
+			if (outcome === "completed") this._resumeQueuedMessagesAfterCompaction();
 		}
 	}
 
@@ -3654,6 +3853,7 @@ export class AgentSession {
 			if (!execution.accepted) {
 				return { applied: false, reason: "rejected" };
 			}
+			this._resumeQueuedMessagesAfterCompaction();
 			return { applied: true, reason: "ok" };
 		} catch (error) {
 			if (!compactionExecutionOwnsTerminalTransition(error)) {
@@ -4173,6 +4373,7 @@ export class AgentSession {
 			const compacted = await this._runPrePromptCompaction(assistantMessage, skipAbortedCheck, inlineReason);
 			if (compacted) return true;
 		}
+		if (this._isCompactionOnCooldown()) return false;
 		throw new RequiredCompactionError();
 	}
 
@@ -4214,6 +4415,7 @@ export class AgentSession {
 		}
 
 		const compacted = await this._runPrePromptCompaction(lastAssistantMessage, false, "pre_prompt");
+		if (!compacted && !isOversized() && this._isCompactionOnCooldown()) return;
 		if (!compacted || isOversized()) {
 			throw new RequiredCompactionError();
 		}
@@ -4389,6 +4591,11 @@ export class AgentSession {
 		return false;
 	}
 
+	private _isCompactionOnCooldown(): boolean {
+		const state = this._compactionLifecycle.state;
+		return state.status === "failed" && state.rejectionCause === "circuit-breaker";
+	}
+
 	private async _runPrePromptCompaction(
 		lastAssistantMessage: AssistantMessage | undefined,
 		skipAbortedCheck: boolean,
@@ -4432,7 +4639,7 @@ export class AgentSession {
 				reason,
 				result: undefined,
 				aborted,
-				willRetry,
+				willRetry: false,
 				errorMessage: aborted ? undefined : `Pre-prompt compaction failed: ${errorMessage}`,
 			});
 			return false;
@@ -4458,7 +4665,10 @@ export class AgentSession {
 		if (!shouldCompact(contextTokens, model.contextWindow, settings)) return;
 
 		const compacted = await this._runPrePromptCompaction(this._findLastAssistantMessage(), true, "pre_prompt");
-		if (!compacted) throw new RequiredCompactionError();
+		if (!compacted) {
+			if (this._isCompactionOnCooldown()) return;
+			throw new RequiredCompactionError();
+		}
 		this._scheduledContinuationRecompacted = true;
 	}
 
@@ -4497,6 +4707,19 @@ export class AgentSession {
 			throw error;
 		} finally {
 			this._scheduledContinuationRecompacted = false;
+		}
+	}
+
+	/**
+	 * Mirror _runAutoCompaction's post-success recovery for non-auto compaction
+	 * owners (manual, extension action, extension apply): a custom triggerTurn
+	 * message sent while the compaction was running is parked in the agent-level
+	 * queues without starting a turn, so a settled compaction must deliver it or
+	 * hidden continuations (e.g. goal) wedge until manual user input.
+	 */
+	private _resumeQueuedMessagesAfterCompaction(): void {
+		if (this.pendingMessageCount > 0 || this.agent.hasQueuedMessages()) {
+			this._scheduleContinuationAfterCurrentEvent();
 		}
 	}
 
@@ -4867,11 +5090,14 @@ export class AgentSession {
 					return true;
 				},
 				setSessionThinkingLevel: (level) => this.setSessionThinkingLevel(level),
+				setSessionFastMode: (enabled) => this.setSessionFastMode(enabled),
 			},
 			{
 				getModel: () => this.model,
 				getServiceTier: () => this.serviceTier,
+				getScopedModels: () => this._scopedModels,
 				isIdle: () => this.isIdle,
+				getAgentDir: () => this._agentDir,
 				isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
 				getSignal: () => this._extensionEventSignal ?? this.agent.signal,
 				abort: () => {
@@ -4937,6 +5163,7 @@ export class AgentSession {
 					const controller = admission.controller;
 					void (async () => {
 						let outcome: "completed" | "failed" | "aborted" = "failed";
+						let compactionCompleted = false;
 						let disconnected = false;
 
 						try {
@@ -4953,6 +5180,7 @@ export class AgentSession {
 							});
 							if (execution.accepted) {
 								outcome = "completed";
+								compactionCompleted = true;
 								options?.onComplete?.(execution.result);
 							} else {
 								outcome = "failed";
@@ -4984,6 +5212,9 @@ export class AgentSession {
 							}
 							this._releasePendingCompactionAdmission(admission, outcome);
 							if (disconnected && !this.isCompacting) this._reconnectToAgent();
+							// A throwing onComplete consumer overwrites outcome in the catch
+							// block, so recovery keys off whether compaction itself succeeded.
+							if (compactionCompleted) this._resumeQueuedMessagesAfterCompaction();
 						}
 					})();
 				},
@@ -5305,38 +5536,10 @@ export class AgentSession {
 	}
 
 	private _getProviderRetryDelayMs(errorMessage: string): number | undefined {
-		const retryAfterMsMatch = errorMessage.match(/\bretry[-_ ]?after[-_ ]?ms\s*[:=]\s*(\d+(?:\.\d+)?)/i);
-		if (retryAfterMsMatch) {
-			const delayMs = Math.ceil(Number(retryAfterMsMatch[1]));
-			return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : undefined;
-		}
-
-		const retryAfterSecondsMatch = errorMessage.match(/\bretry[-_ ]?after\s*[:=]\s*(\d+(?:\.\d+)?)/i);
-		if (retryAfterSecondsMatch) {
-			const delayMs = Math.ceil(Number(retryAfterSecondsMatch[1]) * 1000);
-			return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : undefined;
-		}
-
-		const retryInMatch = errorMessage.match(
-			/\b(?:retry|try again|wait)\s+(?:after|in)\s*(\d+(?:\.\d+)?)\s*(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m)\b/i,
-		);
-		if (!retryInMatch) {
-			return undefined;
-		}
-
-		const value = Number(retryInMatch[1]);
-		if (!Number.isFinite(value) || value <= 0) {
-			return undefined;
-		}
-
-		const unit = retryInMatch[2].toLowerCase();
-		if (unit === "m" || unit.startsWith("min")) {
-			return Math.ceil(value * 60_000);
-		}
-		if (unit.startsWith("s")) {
-			return Math.ceil(value * 1000);
-		}
-		return Math.ceil(value);
+		const markerMs = parseRetryAfterMsMarker(errorMessage);
+		if (markerMs !== undefined) return markerMs;
+		const hintMs = extract429RetryAfterMs({ bodyText: errorMessage });
+		return hintMs;
 	}
 
 	private _getProviderTimeoutRetryOptions(message: AssistantMessage): AgentContinuationOptions {
@@ -5413,6 +5616,8 @@ export class AgentSession {
 		const isRefusal = isClassifierRefusal(message);
 		const hardErrorFallback = options.hardErrorFallback === true;
 		let switchedFallback = false;
+		let is429TierRouted = false;
+		let hintTierDelayMs: number | undefined;
 		if (hardErrorFallback) {
 			// A non-retryable provider failure must never replay on the same model.
 			// Billing-class failures never recover on this account, so the fallback
@@ -5429,6 +5634,16 @@ export class AgentSession {
 			// Refusals are only retried through a new chain candidate. They never use
 			// same-model retries or the transient over-budget fallback escape hatch.
 			if (this._retryAttempt + 1 > settings.maxRetries) {
+				if (this._retryAttempt > 0) {
+					this._emit({
+						type: "auto_retry_end",
+						success: false,
+						attempt: this._retryAttempt,
+						finalError: message.errorMessage,
+					});
+				}
+				this._retryAttempt = 0;
+				this._resetHintTierState();
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -5438,6 +5653,16 @@ export class AgentSession {
 				if (exhaustedChainKey) {
 					this._emit({ type: "retry_fallback_exhausted", chainKey: exhaustedChainKey, lastError: errorMessage });
 				}
+				if (this._retryAttempt > 0) {
+					this._emit({
+						type: "auto_retry_end",
+						success: false,
+						attempt: this._retryAttempt,
+						finalError: message.errorMessage,
+					});
+				}
+				this._retryAttempt = 0;
+				this._resetHintTierState();
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -5456,8 +5681,160 @@ export class AgentSession {
 			const stallError = isProviderStreamStallError(message);
 			const escalateAfterRepeatedStall = stallError && this._consecutiveProviderStreamStalls > 0;
 			this._consecutiveProviderStreamStalls = stallError ? this._consecutiveProviderStreamStalls + 1 : 0;
-			this._retryAttempt++;
-			if (this._retryAttempt > settings.maxRetries || escalateAfterRepeatedStall) {
+			// 429-class detection: retryable AND message carries rate-limit markers.
+			const is429Class =
+				!stallError &&
+				/rate.?limit|(?:^429(?=\s+\{)|(?:\bHTTP\/1\.[01]\s+|\bHTTP\s+|\bstatus(?:\s+code)?\s+|\berror\s+|\bcode\s+)429\b)|too many requests|resource.?exhausted/i.test(
+					errorMessage,
+				);
+			if (is429Class) {
+				const hintMs = this._getProviderRetryDelayMs(errorMessage);
+				const hintSettings = this.settingsManager.getHintPolicySettings();
+				const tier = classifyRateLimitedWait(hintMs, hintSettings);
+				is429TierRouted = true;
+				if (tier === "no-hint-fast-fallback") {
+					// Skip same-model retries entirely; fall back immediately.
+					switchedFallback = await this._retryFallback.tryFallback("transient", { errorMessage });
+					if (switchedFallback) {
+						this._retryAttempt = 1;
+					} else {
+						const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+						if (exhaustedChainKey) {
+							this._emit({
+								type: "retry_fallback_exhausted",
+								chainKey: exhaustedChainKey,
+								lastError: errorMessage,
+							});
+						}
+						this._emit({
+							type: "auto_retry_end",
+							success: false,
+							attempt: 0,
+							finalError: message.errorMessage,
+						});
+						this._retryAttempt = 0;
+						this._resetHintTierState();
+						this._resolveRetry();
+						return "not-handled";
+					}
+				} else if (tier === "tier1-in-turn") {
+					this._retryAttempt++;
+					if (this._retryAttempt > settings.maxRetries) {
+						// Budget exhausted within tier1; fall back.
+						switchedFallback = await this._retryFallback.tryFallback("transient", {
+							errorMessage,
+							retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
+						});
+						if (switchedFallback) {
+							this._retryAttempt = 1;
+						} else {
+							const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+							if (exhaustedChainKey) {
+								this._emit({
+									type: "retry_fallback_exhausted",
+									chainKey: exhaustedChainKey,
+									lastError: errorMessage,
+								});
+							}
+							this._emit({
+								type: "auto_retry_end",
+								success: false,
+								attempt: this._retryAttempt - 1,
+								finalError: message.errorMessage,
+							});
+							this._retryAttempt = 0;
+							this._resetHintTierState();
+							this._resolveRetry();
+							return "not-handled";
+						}
+					} else {
+						const inTurnResult = nextInTurnDelayMs(
+							{
+								probePhase: this._probePhase,
+								hintDeadlineMs: this._hintDeadlineMs,
+								attempt: this._retryAttempt,
+								cumulativeHintedWaitMs: this._cumulativeHintedWaitMs,
+							},
+							hintMs,
+							settings.baseDelayMs,
+							hintSettings.hintedWaitCapMs,
+							Date.now(),
+						);
+						this._probePhase = inTurnResult.probePhase;
+						this._hintDeadlineMs = inTurnResult.hintDeadlineMs;
+						this._cumulativeHintedWaitMs = inTurnResult.cumulativeHintedWaitMs;
+						if (inTurnResult.demoteToProbeBack) {
+							// Cumulative hinted wait exceeded cap; demote to tier2 fallback path.
+							const remainingHintMs = Math.max(0, (this._hintDeadlineMs ?? Date.now()) - Date.now());
+							switchedFallback = await this._retryFallback.tryFallback("transient", {
+								errorMessage,
+								retryAfterMs: remainingHintMs,
+							});
+							if (switchedFallback) {
+								this._retryAttempt = 1;
+							} else {
+								const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+								if (exhaustedChainKey) {
+									this._emit({
+										type: "retry_fallback_exhausted",
+										chainKey: exhaustedChainKey,
+										lastError: errorMessage,
+									});
+								}
+								this._emit({
+									type: "auto_retry_end",
+									success: false,
+									attempt: this._retryAttempt - 1,
+									finalError: message.errorMessage,
+								});
+								this._retryAttempt = 0;
+								this._resetHintTierState();
+								this._resolveRetry();
+								return "not-handled";
+							}
+						} else {
+							hintTierDelayMs = inTurnResult.delayMs;
+						}
+					}
+				} else {
+					// tier2-fallback-probe-back or tier3-fallback-only: immediate fallback.
+					const remainingHintMs = hintMs ?? 0;
+					switchedFallback = await this._retryFallback.tryFallback("transient", {
+						errorMessage,
+						retryAfterMs: remainingHintMs,
+					});
+					if (switchedFallback) {
+						this._retryAttempt = 1;
+						if (tier === "tier2-fallback-probe-back") {
+							const selector = this._retryFallback.activeState?.originalSelector ?? "";
+							this._armProbeBackForDemotedSelector(selector, remainingHintMs);
+						}
+					} else {
+						const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+						if (exhaustedChainKey) {
+							this._emit({
+								type: "retry_fallback_exhausted",
+								chainKey: exhaustedChainKey,
+								lastError: errorMessage,
+							});
+						}
+						this._emit({
+							type: "auto_retry_end",
+							success: false,
+							attempt: 0,
+							finalError: message.errorMessage,
+						});
+						this._retryAttempt = 0;
+						this._resetHintTierState();
+						this._resolveRetry();
+						return "not-handled";
+					}
+				}
+			}
+			if (!is429TierRouted) {
+				this._retryAttempt++;
+			}
+			if (!is429TierRouted && (this._retryAttempt > settings.maxRetries || escalateAfterRepeatedStall)) {
 				switchedFallback = await this._retryFallback.tryFallback("transient", {
 					errorMessage,
 					retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
@@ -5481,6 +5858,7 @@ export class AgentSession {
 						finalError: message.errorMessage,
 					});
 					this._retryAttempt = 0;
+					this._resetHintTierState();
 					this._resolveRetry();
 					return "not-handled";
 				}
@@ -5493,7 +5871,8 @@ export class AgentSession {
 
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
 		const maxRetryDelayMs = this.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
-		if (providerDelayMs !== undefined && providerDelayMs > maxRetryDelayMs) {
+		// For 429-class failures the tier routing replaces the over-budget gate.
+		if (!is429TierRouted && providerDelayMs !== undefined && providerDelayMs > maxRetryDelayMs) {
 			// A wait this long means the model is unavailable rather than busy, so the
 			// configured chain beats failing the turn. The switch is gated: the over-budget
 			// branch above may have already switched on this same error, and hopping again
@@ -5515,6 +5894,7 @@ export class AgentSession {
 					finalError: `Provider requested retry delay ${providerDelayMs}ms, exceeding configured maximum ${maxRetryDelayMs}ms`,
 				});
 				this._retryAttempt = 0;
+				this._resetHintTierState();
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -5525,7 +5905,12 @@ export class AgentSession {
 		// reach this point with a fallback already applied (hard-error, refusal) set
 		// switchedFallback first and force providerDelayMs undefined, so no branch may
 		// be reordered to fall through here expecting an implicit switch.
-		const delayMs = switchedFallback ? 0 : (providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
+		const nonTierProviderDelayMs = providerDelayMs === 0 ? undefined : providerDelayMs;
+		const delayMs = switchedFallback
+			? 0
+			: is429TierRouted
+				? (hintTierDelayMs ?? providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1))
+				: (nonTierProviderDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
 		// Prepare before auto_retry_start so an immediate Esc can cancel the retry sleep.
 		this._retryAbortController = new AbortController();
 
@@ -5551,6 +5936,7 @@ export class AgentSession {
 			// Aborted during sleep - emit end event so UI can clean up
 			const attempt = this._retryAttempt;
 			this._retryAttempt = 0;
+			this._resetHintTierState();
 			this._retryAbortController = undefined;
 			await this._emitAgentSettled();
 			this._emit({
@@ -5581,9 +5967,11 @@ export class AgentSession {
 			model &&
 			shouldCompact(contextTokens, model.contextWindow, compactionSettings)
 		) {
-			if (!(await this._runPrePromptCompaction(message, true, "threshold", true, true))) {
+			const preRetryCompaction = await this._runPrePromptCompaction(message, true, "threshold", true, true);
+			if (!preRetryCompaction && !this._isCompactionOnCooldown()) {
 				const attempt = this._retryAttempt;
 				this._retryAttempt = 0;
+				this._resetHintTierState();
 				this._emit({
 					type: "auto_retry_end",
 					success: false,
@@ -5666,7 +6054,8 @@ export class AgentSession {
 		onChunk?: (chunk: string) => void,
 		options?: { excludeFromContext?: boolean; id?: string; operations?: BashOperations },
 	): Promise<BashResult> {
-		this._bashAbortController = new AbortController();
+		const abortController = new AbortController();
+		this._bashAbortControllers.add(abortController);
 
 		// Apply command prefix if configured (e.g., "shopt -s expand_aliases" for alias support)
 		const prefix = this.settingsManager.getShellCommandPrefix();
@@ -5683,14 +6072,14 @@ export class AgentSession {
 						onChunk?.(delta);
 						this._emit({ type: "bash_execution_update", id: options?.id, delta });
 					},
-					signal: this._bashAbortController.signal,
+					signal: abortController.signal,
 				},
 			);
 
 			this.recordBashResult(command, result, options);
 			return result;
 		} finally {
-			this._bashAbortController = undefined;
+			this._bashAbortControllers.delete(abortController);
 		}
 	}
 
@@ -5729,12 +6118,14 @@ export class AgentSession {
 	 * Cancel running bash command.
 	 */
 	abortBash(): void {
-		this._bashAbortController?.abort();
+		for (const abortController of [...this._bashAbortControllers]) {
+			abortController.abort();
+		}
 	}
 
 	/** Whether a bash command is currently running */
 	get isBashRunning(): boolean {
-		return this._bashAbortController !== undefined;
+		return this._bashAbortControllers.size > 0;
 	}
 
 	/** Whether there are pending bash messages waiting to be flushed */
@@ -5794,6 +6185,10 @@ export class AgentSession {
 		targetId: string,
 		options: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string } = {},
 	): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: BranchSummaryEntry }> {
+		if (this.isStreaming) {
+			throw new Error("Wait for the current response to finish before navigating the session tree.");
+		}
+
 		const oldLeafId = this.sessionManager.getLeafId();
 
 		// No-op if already at target

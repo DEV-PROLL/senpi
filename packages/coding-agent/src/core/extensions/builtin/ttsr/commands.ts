@@ -46,6 +46,8 @@ export function registerTtsrCommands(pi: ExtensionAPI, getState: () => TtsrPubli
 }
 
 function formatTtsrStatus(state: TtsrPublicState): string {
+	const builtinRules = state.rules.filter((rule) => rule.source === "builtin");
+	const userRules = state.rules.filter((rule) => rule.source !== "builtin");
 	return [
 		"TTSR stream rules",
 		"",
@@ -53,10 +55,13 @@ function formatTtsrStatus(state: TtsrPublicState): string {
 		state.disabled ? "disabled (ttsr-disabled flag set)" : "enabled",
 		"",
 		"BUILTIN RULES",
+		"DETECTORS",
 		...BUILTIN_RULES.map(formatBuiltinRule),
+		"STREAM RULES",
+		...(builtinRules.length === 0 ? ["(none)"] : builtinRules.map(formatBuiltinStreamRule)),
 		"",
 		"USER RULES",
-		...formatUserRules(state.rules),
+		...formatUserRules(userRules),
 		"",
 		"INJECTED",
 		state.injectedRuleNames.length === 0 ? "(none)" : state.injectedRuleNames.join(", "),
@@ -69,6 +74,10 @@ function formatBuiltinRule(rule: BuiltinRuleStatus): string {
 		`remediation: ${rule.summary}`,
 		`(mode: ${rule.remediation.retryMode}, scope: ${rule.remediation.corruptionScope})`,
 	].join(" ");
+}
+
+function formatBuiltinStreamRule(rule: TtsrRule): string {
+	return `${rule.name} [stream rule, scope: ${formatScope(rule.scope)}]`;
 }
 
 function formatUserRules(rules: readonly TtsrRule[]): string[] {

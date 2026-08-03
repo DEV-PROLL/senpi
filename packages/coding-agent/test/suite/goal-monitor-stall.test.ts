@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetContinuationStreak } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
 	cleanAssistantStop,
@@ -8,6 +10,7 @@ import {
 	type GoalHarness,
 	makeGoalContext,
 	runGoalHandlers,
+	waitForSentCount,
 } from "./goal-monitor-test-harness.ts";
 
 const STALL_MARKER = "<goal_stall_check>";
@@ -72,7 +75,9 @@ async function runContinuationCycle(
 
 async function runMonitorContinuationCycle(harness: GoalHarness, ctx: ExtensionContext): Promise<void> {
 	await runContinuationCycle(harness, ctx);
+	const delayedDeliveryRecorded = waitForSentCount(harness, harness.sent.length + 1);
 	await vi.advanceTimersByTimeAsync(240_000);
+	await delayedDeliveryRecorded;
 }
 
 function stallEvents(harness: GoalHarness): unknown[] {
@@ -167,8 +172,23 @@ describe("goal monitor continuation stall check", () => {
 
 		await runMonitorContinuationCycle(harness, ctx);
 		await runMonitorContinuationCycle(harness, ctx);
+		await resetContinuationStreak({
+			baseDir: join(ctx.sessionManager.getSessionDir(), "extensions", "goal"),
+			threadId: ctx.sessionManager.getSessionId(),
+		});
 
-		await runGoalHandlers(harness.handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+		await runGoalHandlers(
+			harness.handlers,
+			"input",
+			{ type: "input", inputId: "stall-reset", text: "continue", source: "interactive" },
+			ctx,
+		);
+		await runGoalHandlers(
+			harness.handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "stall-reset", disposition: "started" },
+			ctx,
+		);
 
 		await runMonitorContinuationCycle(harness, ctx);
 		expect(harness.sent).toHaveLength(3);

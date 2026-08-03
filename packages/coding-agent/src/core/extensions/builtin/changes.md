@@ -1,5 +1,82 @@
 # Builtin extensions changes
 
+## tps: monotonic elapsed-time source for assistant intervals (2026-07-31)
+
+- `tps.ts` now derives assistant-message elapsed time from the monotonic
+  `performance.now()` clock instead of wall-clock `Date.now()`. A wall-clock
+  jump backward (NTP skew or manual time change) between `message_start` and
+  `message_end` previously produced a non-positive `Date.now() - start`
+  interval, which the `> 0` guard dropped, suppressing a valid TPS notice.
+- Preserved: the stream-open start timestamp is still recorded at
+  `message_start`; `finishActiveAssistantTiming` still runs at every
+  `message_start`/`message_end`/`agent_end` so tool and permission waits stay
+  excluded; the output numerator, notification text, and the `agent_start`
+  reset behavior are unchanged.
+- Coverage: `test/suite/tps-extension.test.ts` adds a deterministic regression
+  where one second of fake monotonic time elapses but wall time is moved
+  backward between `message_start` and `message_end`; the existing lockstep
+  fake-timer case still pins TPS/token/elapsed text.
+- Expected merge conflict zones: LOW in `tps.ts` around the two
+  `performance.now()` call sites; NONE in the public extension API.
+
+## loop-guard: tool-call loop detection with steered reminders (2026-07-31)
+
+- New builtin extension `loop-guard` (registered before `config-reload`; MCP stays last)
+  that watches the pure `tool_execution_start` stream and steers a
+  `<system-reminder>` CustomMessage into the running turn on three loop shapes:
+  identical calls (trailing run >= 3 of byte-identical tool+canonical-args),
+  near-identical same-tool runs (>= 5 calls at mean adjacent bigram-Dice >= 0.85),
+  and cyclic rotations (period 2..6 repeated >= 3 times). Each kind gets its own
+  reminder prompt; a shared gate re-fires only at 2x the last notified count and
+  resets on `session_start` / real user input.
+- TUI notice via `pi.registerMessageRenderer("loop-guard:notice", ...)` in the goal
+  cache-warm Box style. Threshold rationale (gemini-cli / OpenHands prior art plus a
+  400-session local corpus) is recorded in `loop-guard/changes.md` and `policy.ts`.
+- Tests: `test/suite/loop-guard-detectors.test.ts` and
+  `test/suite/loop-guard-extension.test.ts` (fake-pi harness, zero tokens).
+- Expected merge conflict zones: LOW in `builtin/index.ts` (one import + one array
+  entry before `config-reload`); NONE in `types.ts` (no public API change).
+
+## service-tier: mirror the Codex fast toggle into the session indicator (2026-07-31)
+
+- The session toggle added on 2026-07-31 lived only inside this extension, so no host surface could
+  tell that fast mode was on. It now calls `pi.setSessionFastMode()` on every toggle and clears the
+  flag on `session_start`, which is what lights the TUI footer's lightning indicator.
+- `test/suite/service-tier-extension.test.ts` asserts `session.isFastModeActive()` across the
+  toggle and the `session_start` reset.
+- Expected merge conflict zones: LOW in `service-tier.ts` around the no-variant toggle branch and
+  the `session_start` handler.
+
+## service-tier: `/fast` toggles a session priority tier on subscription Codex models (2026-07-31)
+
+- Fixes issue #545 and reverses the conclusion of the 2026-07-30 entry below. `/fast`
+  on an `openai-codex` model has no `-fast` catalog sibling to switch to, and the
+  previous change turned that into a "priority tier is not available on a ChatGPT
+  subscription" notice. That premise was wrong.
+- Measured with a live ChatGPT Pro token:
+  `chatgpt.com/backend-api/codex/models?client_version=0.145.0` (originator
+  `codex_cli_rs`) advertises
+  `service_tiers: [{ id: "priority", name: "Fast", description: "1.5x speed, increased usage" }]`
+  and `additional_speed_tiers: ["fast"]` for gpt-5.6-sol/terra/luna, gpt-5.5 and
+  gpt-5.4 (empty for gpt-5.4-mini and gpt-5.3-codex-spark). The first-party Codex
+  CLI 0.145.0, routed through a logging proxy on subscription OAuth, sends
+  `service_tier: "priority"` in the `POST /backend-api/codex/responses` body.
+- The earlier "served at normal tier" reading came from the SSE echo, which is not
+  a confirmation channel: `response.created` reports `auto` and
+  `response.completed` reports `default` whether `priority` was sent or nothing was.
+- The no-variant branch now toggles a session-scoped priority tier that the
+  existing `before_provider_request` handler injects, so `/fast` reports
+  `Fast mode enabled: <model>` and the next Codex request carries
+  `service_tier: "priority"`. The tier is session-only (never persisted) and
+  resets on `session_start`; an explicit model/scoped tier still wins.
+- `test/suite/service-tier-extension.test.ts` replaces the "clear no-op" case with
+  the toggle assertion on the payload, and covers a mid-session switch to another
+  Codex model keeping the tier, a hop to a non-OpenAI model dropping it,
+  explicit-tier precedence, and the `session_start` reset.
+- Expected merge conflict zones: LOW in `service-tier.ts` around the
+  `sessionFastMode` flag, the no-variant branch, and the
+  `before_provider_request` tier resolution.
+
 ## service-tier: explain why `/fast` is unavailable on a subscription (2026-07-30)
 
 - Fixes the misleading notice reported in issue #499. `/fast` is registered only

@@ -2,6 +2,9 @@
 
 This page gets you from install to a useful first senpi session.
 
+For the verified source build, plugin checks, config-neutral upgrade, and two-machine installation
+procedure, see the [release and installation guide](release-guide.md).
+
 ## Install
 
 Senpi is distributed as an npm package:

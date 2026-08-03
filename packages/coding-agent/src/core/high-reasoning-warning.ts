@@ -1,12 +1,17 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { supportsMax, supportsXhigh } from "./thinking-levels.ts";
 
-export function isSensitiveHighReasoningModel(model: Model<Api>): boolean {
-	return supportsXhigh(model) || supportsMax(model);
+// Matches only the gpt-5.x "sol" variants (gpt-5.6-sol, -sol-fast, -sol-pro and
+// provider-prefixed forms such as openai/ or openai.). The trailing negative
+// lookahead stops unrelated ids that merely continue with letters after "sol" —
+// notably upstage/solar-pro-3 — from matching.
+const SOL_MODEL_ID_PATTERN = /gpt-5(?:\.\d+)?-sol(?![a-z])/i;
+
+export function isSensitiveHighReasoningModel(model: Pick<Model<Api>, "id">): boolean {
+	return SOL_MODEL_ID_PATTERN.test(model.id);
 }
 
-export function shouldWarnHighReasoning(model: Model<Api>, thinkingLevel: ThinkingLevel): boolean {
+export function shouldWarnHighReasoning(model: Pick<Model<Api>, "id">, thinkingLevel: ThinkingLevel): boolean {
 	return (thinkingLevel === "xhigh" || thinkingLevel === "max") && isSensitiveHighReasoningModel(model);
 }
 

@@ -13,6 +13,9 @@ export default mergeConfig(
 			environment: "node",
 			testTimeout: 30000,
 			setupFiles: ["./test/setup.ts"],
+			// Tests run offline by default; opt in with allowNetwork() from test/test-network-env.ts.
+			env: { PI_OFFLINE: "1" },
+			unstubEnvs: true,
 			reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 			silent: "passed-only",
 			// Cap fork concurrency when CI is set. This suite's subprocess-lifecycle tests
@@ -25,12 +28,17 @@ export default mergeConfig(
 			// The same oversubscription flakes the local owner release, whose parallel forks
 			// contend with the release build for CPU (app-server spawn timeouts, perf-bound
 			// and race-control tests). A per-test timeout cannot fix a pool-shutdown hang.
-			// Serialize to a single fork whenever `CI` is set — GitHub Actions sets it, and
-			// `scripts/release.mjs` sets it for its test gate so the local release reproduces
-			// CI's deterministic run. Plain local `npm test` (no `CI`) keeps the default pool
-			// for speed.
+			// Cap the forks pool to two workers whenever `CI` is set — GitHub Actions sets it,
+			// and `scripts/release.mjs` sets it for its test gate so the local release
+			// reproduces CI's run. Two workers keeps the subprocess-heavy suites isolated in
+			// separate fork processes (no shared-event-loop contention, bounded CPU/IO on the
+			// 4-vCPU runner) while halving the per-file re-import cost that dominated the
+			// single-fork wall time (measured: 1364s at maxWorkers 1, ~60% import). One
+			// worker was the deterministic-hang fix; two is the measured sweet spot between
+			// that safety and suite wall time. Plain local `npm test` (no `CI`) keeps the
+			// default pool for speed.
 			...(process.env.CI || process.env.GITHUB_ACTIONS
-				? { pool: "forks" as const, maxWorkers: 1, teardownTimeout: 20000 }
+				? { pool: "forks" as const, maxWorkers: 2, teardownTimeout: 20000 }
 				: {}),
 			server: {
 				deps: {
@@ -42,6 +50,14 @@ export default mergeConfig(
 			alias: [
 				{ find: /^@earendil-works\/pi-ai\/node\/provider-scope$/, replacement: aiSrcProviderScope },
 				{ find: /^@earendil-works\/pi-pty$/, replacement: ptySrcIndex },
+				{
+					find: /^@earendil-works\/pi-client$/,
+					replacement: fileURLToPath(new URL("../client/src/index.ts", import.meta.url)),
+				},
+				{
+					find: /^@earendil-works\/pi-protocol$/,
+					replacement: fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
+				},
 				{ find: /^@mariozechner\/pi-ai$/, replacement: workspaceSourcePaths.aiIndex },
 				{ find: /^@mariozechner\/pi-ai\/oauth$/, replacement: workspaceSourcePaths.aiOAuth },
 				{ find: /^@mariozechner\/pi-agent-core$/, replacement: workspaceSourcePaths.agentIndex },

@@ -19,10 +19,12 @@ function minimalToolContext(): ExtensionContext {
 		mode: "print",
 		hasUI: false,
 		cwd: process.cwd(),
+		agentDir: "/tmp/senpi-test-agent",
 		sessionManager: Object.create(null) as ExtensionContext["sessionManager"],
 		modelRegistry: ModelRegistry.inMemory(AuthStorage.inMemory()),
 		model: undefined,
 		serviceTier: undefined,
+		scopedModels: [],
 		isIdle: () => true,
 		isProjectTrusted: () => true,
 		signal: undefined,
@@ -137,7 +139,8 @@ describe("websearch per-attempt progress", () => {
 			.join("\n");
 
 		// then
-		expect(collapsed).toContain('Searching "attempt progress" via exa/backup (max 10)');
+		expect(collapsed).toContain('Searching "attempt progress" via exa/backup');
+		expect(collapsed).not.toContain("(max ");
 		expect(collapsed).not.toMatch(/\[\d+\/\d+\]/);
 		expect(collapsed).not.toContain("exa/primary ->");
 		expect(expanded).toContain("route exa/primary:failed -> exa/backup:searching");
@@ -224,7 +227,8 @@ describe("websearch native entry label collapse", () => {
 		const text = formatSearchText(nativeDetails);
 
 		// then
-		expect(text).toContain("via openai/native (priority)");
+		expect(text).toContain("via openai/native");
+		expect(text).not.toContain("(priority)");
 		expect(text).not.toContain("native-openai-abc123");
 	});
 });

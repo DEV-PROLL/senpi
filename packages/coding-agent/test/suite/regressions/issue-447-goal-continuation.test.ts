@@ -15,8 +15,6 @@ import {
 import { createHarness, getMessageText, type Harness } from "../harness.ts";
 
 const GOAL_CONTINUATION_MESSAGE_TYPE = "goal-continuation";
-const GOAL_CONTINUATION_CAP = 8;
-const GOAL_USER_GRACE_DELAY_MS = 60_000;
 
 const harnesses: Harness[] = [];
 
@@ -95,10 +93,10 @@ function contextWithBranch(ctx: ExtensionContext, branch: SessionEntry[]): Exten
 }
 
 describe("issue #447: goal continuation guardrails", () => {
-	it("caps 50 clean synthetic goal turns at eight and never queues more than one pending continuation", async () => {
+	it("keeps 50 distinct progress turns active and never queues more than one pending continuation", async () => {
 		const notices: string[] = [];
 		const harness = createGoalHarness();
-		const ctx = await makeGoalContext(notices, "issue-447-cap");
+		const ctx = await makeGoalContext(notices, "issue-447-distinct-progress");
 		await createActiveGoal(harness, ctx, "Finish the issue #447 regression");
 		await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
@@ -111,12 +109,12 @@ describe("issue #447: goal continuation guardrails", () => {
 			expect(harness.sent.length - promptsBeforeTurn).toBeLessThanOrEqual(1);
 		}
 
-		expect(harness.sent).toHaveLength(GOAL_CONTINUATION_CAP);
+		expect(harness.sent).toHaveLength(50);
 		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({
-			status: "blocked",
-			blockedReason: "continuation cap reached",
+			status: "active",
+			consecutiveContinuations: 1,
 		});
-		expect(notices).toContainEqual(expect.stringContaining("continuation cap reached"));
+		expect(notices).not.toContainEqual(expect.stringContaining("continuation cap reached"));
 	});
 
 	it("does not send consumed goal-continuation prompts in the next faux-provider request", async () => {
@@ -164,7 +162,7 @@ describe("issue #447: goal continuation guardrails", () => {
 		});
 	});
 
-	it("waits the full 60-second grace window after a direct user message before resuming", async () => {
+	it("leaves an active Goal idle after a direct user message without a delayed resurrection", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
 		const harness = createGoalHarness();
@@ -172,7 +170,18 @@ describe("issue #447: goal continuation guardrails", () => {
 		await createActiveGoal(harness, ctx, "Answer the direct user question first");
 		await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
-		await runGoalHandlers(harness.handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+		await runGoalHandlers(
+			harness.handlers,
+			"input",
+			{ type: "input", inputId: "grace-turn", text: "continue", source: "interactive" },
+			ctx,
+		);
+		await runGoalHandlers(
+			harness.handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "grace-turn", disposition: "started" },
+			ctx,
+		);
 		await runGoalHandlers(harness.handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runGoalHandlers(
 			harness.handlers,
@@ -182,11 +191,9 @@ describe("issue #447: goal continuation guardrails", () => {
 		);
 
 		expect(harness.sent).toHaveLength(0);
-		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS - 1);
+		await vi.advanceTimersByTimeAsync(60_000);
 		expect(harness.sent).toHaveLength(0);
-		await vi.advanceTimersByTimeAsync(1);
-		expect(harness.sent).toHaveLength(1);
-		expect(harness.sent[0]?.message.customType).toBe(GOAL_CONTINUATION_MESSAGE_TYPE);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 0 });
 	});
 
 	it("blocks the goal when a terminal provider error has no retry remaining", async () => {

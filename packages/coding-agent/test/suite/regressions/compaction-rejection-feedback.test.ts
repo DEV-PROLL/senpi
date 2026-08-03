@@ -138,6 +138,7 @@ describe("Regression: interactive-mode compaction_end fallback", () => {
 			flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
 			compactionQueuedMessages: [] as string[],
 			getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+			restoreQueuedMessagesToEditor: vi.fn(),
 			settingsManager: { getShowTerminalProgress: () => false },
 			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
 		};
@@ -169,5 +170,6 @@ describe("Regression: interactive-mode compaction_end fallback", () => {
 		const message = String(fakeThis.showError.mock.calls[0]?.[0] ?? "");
 		expect(message).toMatch(/compaction/i);
 		expect(message).toMatch(/would-overflow|unknown|no result/i);
+		expect(fakeThis.restoreQueuedMessagesToEditor).toHaveBeenCalledTimes(1);
 	});
 });

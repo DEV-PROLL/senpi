@@ -1,5 +1,255 @@
 # Builtin compaction extension changes
 
+## Idle warm-up retries transient failures while the session stays idle (2026-08-03)
+
+### What changed
+
+- New `idle-retry.ts`: pure retry policy (`shouldRetryIdleWarmup`, `MAX_IDLE_WARMUP_RETRIES` = 2,
+  `IDLE_WARMUP_RETRY_DELAY_MS` = 15s). A retry requires: transient failure, session still idle, breaker
+  untripped, context still over the soft threshold, attempts under the cap.
+- `index.ts` `agent_end` idle trigger arms a watcher on the warm job's `failure` promise. On a transient
+  failure it schedules a delayed re-warm that invalidates the dead job and starts a fresh speculative
+  snapshot (fresh message revision), then re-arms. Every path is fenced on the observed job reference,
+  `ctx.isIdle()`, and a `before_agent_start` cancel, so a prompt or newer warm-up stands the watcher down.
+- Retries log `idle_trigger` with `count` = attempt number.
+
+### Why
+
+- Since #561 the idle trigger only warms (apply is deferred to the next prompt). A transient summarization
+  failure (stream stall, wall-clock budget, 429) left a dead warm job for the whole idle period, and the
+  next prompt paid a full blocking summarization - or an outright failed compaction - on the user's
+  critical path (2026-08-03 incident: visible "Compacting context..." stall at message time).
+
+### Why not an extension
+
+- This IS the builtin compaction extension.
+
+### Merge-conflict zones
+
+- `index.ts` around the `agent_end` idle trigger and the `before_agent_start` entry; `idle-retry.ts` is
+  fork-owned.
+
+## Compaction log actually writes; idle_trigger enters the allowlist (2026-08-03)
+
+### What changed
+
+- `getLogger` reads the typed `ctx.agentDir` that core now provides instead of casting for a property that
+  never existed, so `logs/compaction.log` is written for the first time since the logger shipped.
+- `log.ts` EVENTS allowlist gains `"idle_trigger"`; the type union already declared it, so every idle warm-up
+  decision was silently dropped by the `EVENTS.has(event)` guard even with a live logger.
+
+### Why
+
+- The 2026-08-03 incident (session 019fc4cb, gpt-5.6-sol-fast at 63% of a 372k window) could not be diagnosed
+  from logs: no compaction.log existed anywhere on the machine and the idle trigger had no logging path at all.
+
+### Why not an extension
+
+- This IS the builtin compaction extension; the missing context field was a core seam gap fixed via the
+  public `ExtensionContext` contract (see `../../changes.md`).
+
+### Merge-conflict zones
+
+- LOW: `index.ts` `getLogger` definition; `log.ts` EVENTS set.
+
+## Bounded summarization overflow retries (2026-08-03)
+
+### What changed
+
+- New `overflow-retry.ts`: the summarization overflow-retry policy extracted from `speculative.ts`.
+  `MAX_SUMMARIZATION_OVERFLOW_RETRIES` (3), `SUMMARIZATION_OVERFLOW_TOTAL_BUDGET_MS` (240s across
+  retries), `SUMMARIZATION_INPUT_BUDGET_RATIO` (0.6 of the window), `SummarizationOverflowExhaustedError`,
+  `boundSummarizationInput` (pre-sizes the summarization input, prompt-token aware), and
+  `shrinkSummarizationInputForOverflowRetry` (halves the estimated input per retry instead of dropping
+  one history item, keeping the drop-oldest fallback when every message sits at the turn boundary).
+  The old-message pruning helpers moved here unchanged.
+- `speculative.ts` `runExtensionCompaction`: pre-sizes the summarization input before the first billed
+  attempt and bounds the overflow-retry loop by attempt cap and cumulative wall-clock budget; exhaustion
+  throws the typed error instead of looping or falling through a generic `Error`.
+- `deterministic-fallback.ts` classifies the exhaustion as `summarization-overflow-exhausted`, so
+  required compaction degrades to the deterministic fallback; `transient-failure.ts` treats it as a
+  transient lane failure so the circuit breaker records it and the next run starts pre-sized.
+
+### Why
+
+- Issue #650: on openai-codex/gpt-5.6-sol a blocking compaction wedged for ~48 minutes on
+  "Compacting...". The retry loop removed exactly one history item per FULL billed summarization attempt
+  with no attempt cap, no cumulative budget, and no session.log evidence; the summarization input itself
+  was unbudgeted (only tool results were pruned), so a session whose provider-side input exceeded the real
+  window drew an overflow verdict on every completed attempt. Observed cost: ~13.5M tokens for a
+  compaction that never landed; ESC was the only exit.
+
+### Why not an extension
+
+- This IS the builtin compaction extension; the bound belongs in the retry policy itself.
+
+### Merge-conflict zones
+
+- LOW: `speculative.ts` around `runExtensionCompaction`; `overflow-retry.ts` is fork-owned.
+
+## Session-log visibility for compaction start (2026-08-03)
+
+### What changed
+
+- `core/agent-session.ts` `_logSessionEvent` mirrors `compaction_start` (reason only) into
+  `logs/session.log`; previously only `compaction_end` was mirrored, so a wedged compaction left zero
+  log evidence for its entire lifetime (issue #650).
+
+### Merge-conflict zones
+
+- LOW: `_logSessionEvent` early-return chain.
+
+## Lane-policy hardening: prune stand-down, live resumeMode, boundary ledger (2026-08-01)
+
+### What changed
+
+- `hardLimitEmergencyPrune` now stands down when `lanePolicy.disablesSenpiCompaction(ctx)` is true, matching the
+  reduction-lane gate: destructively pruning the provider context near the hard limit would break the resident
+  claude-sdk-oauth session's continuity the same way the gated reduction lane would.
+- `disablesSenpiCompaction` keeps the per-cwd `resumeMode` cache (the intended contract pinned by
+  `lane-policy.test.ts`); a mid-session mode switch takes effect on the next cwd or session.
+- SDK `compact_boundary` messages are converted into ledger entries in the lane-policy collector so native
+  compactions are recorded instead of discarded.
+
+### Why
+
+Cubic review on PR #637: the prune path defeated the claude-sdk-oauth stand-down, and native compact_boundary
+events never reached the ledger. (The cached-resumeMode concern was assessed against the pinned per-cwd contract
+and left as intended.)
+
+### Why not an extension
+
+These are corrections to the lane-policy gate itself, not new behavior an extension could provide.
+
+### Merge-conflict zones
+
+- `index.ts` (prune gate), `lane-policy.ts` (resumeMode read, boundary collection).
+
+## SDK-native lane opt-out + one-shot checkpoint directive (2026-08-01)
+
+### What changed
+
+- New `lane-policy.ts`: provider-scoped opt-out for the `claude-sdk-oauth` main lane. When that provider is active and
+  its `resumeMode` is not the `off` escape hatch, senpi's auto-compaction and context reduction stand down: the
+  `before_agent_start` triggers (hard limit, threshold, speculative), the `agent_end` idle warm-up, the `turn_end`
+  degradation recovery, the `model_select` warm-up, the degradation monitor, and the `context` reduction pass all skip,
+  and a requested `session_before_compact` is cancelled with the reason "the Claude Agent SDK owns compaction for this
+  session". `index.ts` only gained call-site guards and `context-reduction.ts` was not touched at all: the lane verdict
+  feeds its existing `shouldApplyContextReduction({ isProviderNativeCompactionPath })` gate. All net-new logic lives in
+  `lane-policy.ts`.
+- `lane-policy.ts` also owns the mirrored SDK compaction boundary: a `compact_boundary` system message transported as the
+  `claude_sdk_oauth_compact_boundary` assistant-message diagnostic is appended to the senpi session as a
+  `claude-sdk-oauth-compact` custom entry (schema `senpi.claude-sdk-oauth.compact-boundary.v1`, storing the SDK
+  `compact_metadata` verbatim) from the `message_end` hook, so SDK-native compactions stay visible in UI/history.
+
+### INTENTIONAL cross-lane change: the checkpoint restoration directive is now one-shot
+
+- **Before**: `before_agent_start` appended the restoration directive to the *system prompt* on EVERY request while the
+  latest agent checkpoint was younger than 60s. N requests inside that window carried N copies, and the base system
+  prompt was not byte-identical while the window stayed open (prompt-cache churn, repeated directive).
+- **After**: the system prompt is never rewritten. The directive rides the existing one-shot hidden post-compact
+  restoration message (`compaction.post-compact-restoration`, `display: false`) exactly once per checkpoint; when no
+  restoration payload is pending, the directive is delivered as that message on its own. A checkpoint older than 60s
+  still delivers nothing.
+- This applies to ALL provider lanes, not just `claude-sdk-oauth`, and is a deliberate semantic change rather than a
+  behavior-preserving refactor. Both sides are pinned:
+  `test/compaction/checkpoint-directive-characterization.test.ts` states each pre-change behavior next to the assertion
+  that replaced it (the pre-change run was captured green before the change), and
+  `test/compaction-checkpoint-oneshot.test.ts` pins the one-shot delivery.
+
+### Why
+
+- The `claude-sdk-oauth` lane keeps one resident SDK session per senpi session and the Claude Agent SDK runs its own
+  native auto-compaction over that transcript. Senpi compacting on top of it would rewrite a history senpi no longer
+  owns. The opt-out is conditional on residency: with `resumeMode: "off"` senpi flattens its own history into every
+  request, so its compaction must stay fully active there.
+- Repeating the checkpoint directive on every request inside the 60s window bought nothing over delivering it once with
+  the restoration payload, and it mutated the system prompt (the most cache-sensitive prefix) for up to a minute.
+
+### Scope
+
+- Senpi compaction remains FULLY active for every non-`claude-sdk-oauth` provider; that is pinned by the
+  characterization block in `test/claude-sdk-oauth-compaction-alignment.test.ts`.
+- Coverage: `test/compaction/lane-policy.test.ts`, `test/claude-sdk-oauth-compaction-alignment.test.ts`,
+  `test/compaction-checkpoint-oneshot.test.ts`, `test/compaction/checkpoint-directive-characterization.test.ts`.
+
+### Expected merge conflict zones
+
+- MEDIUM: `index.ts` around the `before_agent_start`, `context`, `agent_end`, `turn_end`, `model_select`, `message_end`
+  and `session_before_compact` hooks (call-site guards only).
+- LOW: `checkpoint-state.ts` around `injectRestorationDirective` (kept for its legacy overloads) and the new
+  `attachRestorationDirective`.
+
+## Blocking compaction route guards (2026-08-01)
+
+### What changed
+
+- Blocking compaction routes reject unsupported states before attempting a compaction transition.
+
+### Why
+
+- Unsupported route/state combinations otherwise strand the session or apply compaction through the wrong lifecycle.
+
+### Why this cannot be expressed externally
+
+- The guards depend on built-in compaction state, route ownership, and session transition timing.
+
+### Expected merge conflict zones
+
+- `index.ts` blocking route selection and blocking-compaction route guard tests.
+
+## Deterministic required-compaction recovery (2026-07-31)
+
+- Required threshold/overflow recovery may synthesize one local checkpoint after a summarization watchdog or a transient `SummaryRequestError` carrying the structured `upstream-stream-truncated` failure kind, without issuing another provider request. Generic thrown text is never fallback authorization, even when it contains truncation-like markers.
+- Recovery is accepted only with a real non-empty retained boundary whose fully reconstructed context fits `contextWindow - reserveTokens`, including the exact cap boundary. An absent or unfit suffix cancels without appending a compaction entry or dropping the latest request.
+- The checkpoint carries parsed or inherited task intent and a UTF-8-safe bounded prior summary. Todo and agent-checkpoint snapshots remain solely in their canonical custom entries persisted after acceptance, avoiding duplicate unbounded objects in compaction details. Manual, aborted, and unrelated failures remain fail-closed.
+- Local summaries now persist parsed task intent and inherit it through subsequent local compactions while ignoring remote checkpoint metadata.
+- Coverage: `test/compaction/required-compaction-deterministic-fallback.test.ts`, `test/compaction/task-intent-anchor.test.ts`, and the existing blocking/runtime-provider suites.
+
+### Expected merge conflict zones
+
+- MEDIUM: `index.ts` around `session_before_compact`; `speculative.ts` snapshot and summary result assembly.
+## Idle compaction warms without committing a transcript boundary (2026-07-31)
+
+### What changed
+
+- The `agent_end` idle trigger now starts speculative summary generation instead of applying compaction immediately.
+- The next `before_agent_start` consumes and applies the warmed result through the existing blocking-admission path.
+- Issue #561 regression coverage pins normal idle and queued-follow-up idle behavior, plus the disabled control.
+
+### Why
+
+- A durable compaction entry created at idle could become the branch leaf before the next user prompt. If the context
+  remained near the limit, the last-entry guard prevented normal pre-prompt compaction and later recovery could place
+  another compaction after the fresh prompt, corrupting the apparent boundary and risking duplicate or lost intent.
+- Summary generation remains off the user's critical path, while durable apply now happens only at the admission
+  boundary that includes the pending prompt and existing staleness/overflow checks.
+
+### Scope
+
+- The change is isolated to the builtin extension's idle trigger. Core compaction preparation, abort ordering,
+  queued-message ownership, and overflow recovery are unchanged.
+- Expected upstream conflict zone: `builtin/compaction/index.ts` around the `agent_end` idle trigger.
+
+## Runtime provider dispatch for summarization (2026-07-31)
+
+### What changed
+
+- `speculative.ts` dispatches the summarization request through `context.modelRegistry.modelRuntime.stream()` when a registry is present, and only falls back to the compat `stream()` when a `SpeculativeCompactionContext` is built without one.
+- `openai-remote.ts` resolves its stream runner the same way (`resolveRemoteStreamRunner`): an injected `dependencies.streamRunner` still wins, otherwise the model runtime serves the native remote-compaction request and compat is the last resort.
+- Summarization auth now accepts a credential request header as resolved auth instead of requiring an `apiKey`, so `headers`-authenticated providers (models.json `headers`, extension `headers`) can compact.
+- Issue #543 regression coverage: `test/suite/regressions/543-compaction-runtime-provider.test.ts` (runtime-only api id, plus a header-authenticated provider) and `test/suite/regressions/543-remote-compaction-runtime-provider.test.ts` (native remote route through the runtime).
+
+### Why
+
+- Providers registered through `pi.registerProvider()` (builtin `claude-agent-sdk`, extension providers such as `senpi-accounts`' Kiro) never land in compat's builtin api-registry, so every compaction attempt failed with `compaction generator failed: No API provider registered for api: <api>` while normal agent turns on the same model worked. Same bug class as #488 for `/btw`.
+- The two follow-on holes had the same shape: a provider that senpi considers fully authenticated and fully routable for normal turns must be equally compactable. A header-only credential resolved `{ok: true, apiKey: undefined}` and died as "credentials unavailable"; an extension `openai-responses` proxy opting into `supportsRemoteCompactionV2` had its own transport bypassed on the remote route.
+
+### Merge-conflict zones
+
+- `speculative.ts` import block, the single `stream(...)` call site in `generateSummaryMessage`, and the auth guard at the top of `runExtensionCompaction`.
+- `openai-remote.ts` `OpenAiRemoteCompactionContext.modelRegistry` shape plus the two stream-runner defaults.
+
 ## Proactive idle compaction (2026-07-30)
 
 ### What changed

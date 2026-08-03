@@ -89,6 +89,14 @@ describe("addRule registration", () => {
 		expect(manager.checkDelta("needle", ctx())).toEqual([]);
 		expect(manager.getRules()).toEqual([]);
 	});
+
+	it("does not register rules named in disabledRules", () => {
+		const manager = makeManager({ ...DEFAULT_TTSR_SETTINGS, disabledRules: ["disabled-rule"] });
+		expect(manager.addRule(makeRule("disabled-rule"))).toBe(false);
+		expect(manager.addRule(makeRule("enabled-rule"))).toBe(true);
+		expect(names(manager.getRules())).toEqual(["enabled-rule"]);
+		expect(names(manager.checkDelta("needle", ctx()))).toEqual(["enabled-rule"]);
+	});
 });
 
 describe("stream buffers", () => {

@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { DEFAULT_COMPACTION_SETTINGS } from "../../src/core/compaction/index.ts";
 import compactionExtension from "../../src/core/extensions/builtin/compaction/index.ts";
-import type { AgentEndEvent, ExtensionAPI, ExtensionContext } from "../../src/core/extensions/index.ts";
+import type {
+	AgentEndEvent,
+	BeforeAgentStartEvent,
+	ExtensionAPI,
+	ExtensionContext,
+} from "../../src/core/extensions/index.ts";
 import { ModelRegistry } from "../../src/core/model-registry.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 
@@ -15,10 +20,20 @@ afterEach(() => {
 
 interface IdleHarness {
 	agentEnd: (event: AgentEndEvent, ctx: ExtensionContext) => Promise<void> | void;
+	beforeAgentStart: (event: BeforeAgentStartEvent, ctx: ExtensionContext) => Promise<unknown> | unknown;
 	registration: Registration;
 	ctx: ExtensionContext;
 	applyCompaction: ReturnType<typeof vi.fn>;
 	beginCompaction: ReturnType<typeof vi.fn>;
+}
+
+function createDeferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve: (() => void) | undefined;
+	const promise = new Promise<void>((next) => {
+		resolve = next;
+	});
+	if (!resolve) throw new Error("deferred resolver was not initialized");
+	return { promise, resolve };
 }
 
 function createIdleHarness(options: {
@@ -65,9 +80,11 @@ function createIdleHarness(options: {
 	sessionManager.appendMessage({ role: "user", content: [{ type: "text", text: "keep" }], timestamp: now });
 
 	let agentEnd: IdleHarness["agentEnd"] | undefined;
+	let beforeAgentStart: IdleHarness["beforeAgentStart"] | undefined;
 	const api = Object.assign(Object.create(null), {
 		on: (event: string, handler: unknown) => {
 			if (event === "agent_end") agentEnd = handler as IdleHarness["agentEnd"];
+			if (event === "before_agent_start") beforeAgentStart = handler as IdleHarness["beforeAgentStart"];
 		},
 		appendEntry: vi.fn(),
 		getActiveTools: () => [],
@@ -78,6 +95,7 @@ function createIdleHarness(options: {
 	}) as ExtensionAPI;
 	compactionExtension(api);
 	if (!agentEnd) throw new Error("agent_end handler was not registered");
+	if (!beforeAgentStart) throw new Error("before_agent_start handler was not registered");
 
 	const applyCompaction = vi.fn(async () => ({ applied: true, reason: "ok" }));
 	const beginCompaction = vi.fn(() => undefined);
@@ -110,7 +128,7 @@ function createIdleHarness(options: {
 		getSystemPrompt: () => "TEST AGENT SYSTEM PROMPT",
 	} as unknown as ExtensionContext;
 
-	return { agentEnd, registration, ctx, applyCompaction, beginCompaction };
+	return { agentEnd, beforeAgentStart, registration, ctx, applyCompaction, beginCompaction };
 }
 
 function createAgentEndEvent(overrides?: Partial<AgentEndEvent>): AgentEndEvent {
@@ -118,11 +136,32 @@ function createAgentEndEvent(overrides?: Partial<AgentEndEvent>): AgentEndEvent 
 }
 
 describe("proactive idle compaction (agent_end wiring)", () => {
-	it("compacts at idle when the next turn would trigger compaction", async () => {
+	it("warms compaction at idle without committing a durable boundary", async () => {
 		const harness = createIdleHarness({});
-		harness.registration.setResponses([fauxAssistantMessage("idle compaction summary")]);
+		const summaryRequested = createDeferred();
+		harness.registration.setResponses([
+			() => {
+				summaryRequested.resolve();
+				return fauxAssistantMessage("idle compaction summary");
+			},
+		]);
 
 		await harness.agentEnd(createAgentEndEvent(), harness.ctx);
+		await summaryRequested.promise;
+
+		expect(harness.registration.state.callCount).toBe(1);
+		expect(harness.beginCompaction).not.toHaveBeenCalled();
+		expect(harness.applyCompaction).not.toHaveBeenCalled();
+
+		await harness.beforeAgentStart(
+			{
+				type: "before_agent_start",
+				prompt: "next prompt",
+				systemPrompt: "TEST AGENT SYSTEM PROMPT",
+				systemPromptOptions: { cwd: process.cwd() },
+			},
+			harness.ctx,
+		);
 
 		expect(harness.beginCompaction).toHaveBeenCalledTimes(1);
 		expect(harness.applyCompaction).toHaveBeenCalledTimes(1);
@@ -181,5 +220,106 @@ describe("proactive idle compaction (agent_end wiring)", () => {
 		await harness.agentEnd(createAgentEndEvent(), harness.ctx);
 
 		expect(harness.beginCompaction).not.toHaveBeenCalled();
+	});
+});
+
+// Upper bound covering IDLE_WARMUP_RETRY_DELAY_MS; the retry must fire within this window.
+const RETRY_ADVANCE_MS = 60_000;
+
+function createBeforeAgentStartEvent(): BeforeAgentStartEvent {
+	return {
+		type: "before_agent_start",
+		prompt: "next prompt",
+		systemPrompt: "TEST AGENT SYSTEM PROMPT",
+		systemPromptOptions: { cwd: process.cwd() },
+	};
+}
+
+describe("idle warm-up retry", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("retries a transient idle warm-up failure while the session stays idle", async () => {
+		vi.useFakeTimers();
+		const harness = createIdleHarness({});
+		const firstRequested = createDeferred();
+		const secondRequested = createDeferred();
+		harness.registration.setResponses([
+			() => {
+				firstRequested.resolve();
+				return fauxAssistantMessage("summary failure", {
+					stopReason: "error",
+					errorMessage: "provider overloaded",
+				});
+			},
+			() => {
+				secondRequested.resolve();
+				return fauxAssistantMessage("warm summary after retry");
+			},
+		]);
+
+		await harness.agentEnd(createAgentEndEvent(), harness.ctx);
+		await firstRequested.promise;
+		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(RETRY_ADVANCE_MS);
+		await secondRequested.promise;
+
+		expect(harness.registration.state.callCount).toBe(2);
+		expect(harness.applyCompaction).not.toHaveBeenCalled();
+
+		await harness.beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx);
+
+		expect(harness.applyCompaction).toHaveBeenCalledTimes(1);
+		expect(harness.registration.state.callCount).toBe(2);
+	});
+
+	it("cancels the pending idle retry when a prompt arrives first", async () => {
+		vi.useFakeTimers();
+		const harness = createIdleHarness({});
+		const firstRequested = createDeferred();
+		harness.registration.setResponses([
+			() => {
+				firstRequested.resolve();
+				return fauxAssistantMessage("summary failure", {
+					stopReason: "error",
+					errorMessage: "provider overloaded",
+				});
+			},
+			() => fauxAssistantMessage("should never be requested"),
+		]);
+
+		await harness.agentEnd(createAgentEndEvent(), harness.ctx);
+		await firstRequested.promise;
+		await vi.advanceTimersByTimeAsync(0);
+
+		await harness.beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx);
+		const callsAfterPrompt = harness.registration.state.callCount;
+
+		await vi.advanceTimersByTimeAsync(RETRY_ADVANCE_MS * 3);
+
+		expect(harness.registration.state.callCount).toBe(callsAfterPrompt);
+	});
+
+	it("does not retry a non-transient idle warm-up failure", async () => {
+		vi.useFakeTimers();
+		const harness = createIdleHarness({});
+		const firstRequested = createDeferred();
+		harness.registration.setResponses([
+			() => {
+				firstRequested.resolve();
+				return fauxAssistantMessage("summary failure", {
+					stopReason: "error",
+					errorMessage: "summarization request rejected: invalid schema",
+				});
+			},
+			() => fauxAssistantMessage("should never be requested"),
+		]);
+
+		await harness.agentEnd(createAgentEndEvent(), harness.ctx);
+		await firstRequested.promise;
+		await vi.advanceTimersByTimeAsync(RETRY_ADVANCE_MS * 3);
+
+		expect(harness.registration.state.callCount).toBe(1);
 	});
 });

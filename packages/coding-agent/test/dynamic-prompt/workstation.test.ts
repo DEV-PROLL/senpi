@@ -55,14 +55,12 @@ describe("buildWorkstationSection", () => {
 
 		expect(section).toContain("<execution_context>");
 		expect(section).toContain("</execution_context>");
-		expect(section).toContain("Code you write may target any machine; code you run always runs here.");
 	});
 
 	test("codex dialect is terse without tags or shouting", () => {
 		const section = buildWorkstationSection({ selectedTools: ["bash", "eval"], dialect: "codex", facts: FACTS });
 		const instruction = section.slice(section.indexOf("</workstation>"));
 
-		expect(instruction).toContain("executed code runs here");
 		expect(instruction).not.toContain("<execution_context>");
 		expect(instruction).not.toContain("MUST");
 		expect(instruction).not.toContain("EXECUTION HAPPENS HERE");

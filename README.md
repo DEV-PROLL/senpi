@@ -41,17 +41,28 @@ If you're migrating from [OMO (oh-my-openagent)](https://github.com/code-yeongyu
 | **Compaction-safe tool pairing** | [`tool-pair-guard`](packages/coding-agent/src/core/extensions/builtin/tool-pair-guard/) — strips orphan `tool_result` blocks. |
 | **Permission system** (opencode-style allow/deny) | [`permission-system`](packages/coding-agent/src/core/extensions/builtin/permission-system/) — rules, JSONL storage, TUI prompts, parser-aware patterns. |
 
-### Install these pi-extension packages for the OMO-shaped senpi
+### Choose extensions for your OMO setup
+
+Senpi builtins, standalone `pi-*` extensions, and the
+[OMO Senpi plugin](https://github.com/code-yeongyu/oh-my-openagent/tree/dev/packages/omo-senpi/plugin)
+overlap. Do not install every standalone package when the capability is already provided by Senpi or the plugin.
+
+| Capability | Senpi without the OMO plugin | Senpi with the OMO plugin |
+|---|---|---|
+| LSP | Install [`pi-lsp-client`](https://github.com/code-yeongyu/pi-lsp-client). | The plugin registers six LSP tools through its packaged daemon. Install `pi-lsp-client` only if you specifically need its `/lsp` inspector. |
+| AST-grep | Install [`pi-ast-grep`](https://github.com/code-yeongyu/pi-ast-grep). | The plugin ships an AST-grep skill, helper, and installer scripts. `pi-ast-grep` remains optional when you want the native `ast_grep_search` and `ast_grep_replace` tools. |
+| Comment checking | Install [`pi-comment-checker`](https://github.com/code-yeongyu/pi-comment-checker). | The plugin registers its own comment-checker component; do not install the standalone extension too. |
+| Rules and nested `AGENTS.md` | Already provided by the `rules` and `nested-agents-md` builtins. | Same; no standalone extension is required. |
+| Web search and fetch | Already provided by the `websearch` and `webfetch` builtins. | Same; no standalone extension is required. |
+| Persistent goals | Already provided by the `goal` builtin. | Same; no standalone extension is required. |
+| Subagent profiles | [`pi-agent-system`](https://github.com/code-yeongyu/pi-agent-system) supports external launchers that set `PI_AGENT_TYPE` or `SANEPI_AGENT_TYPE`. | The plugin owns task/member routing and tool filtering, so `pi-agent-system` is normally unnecessary. Keep it only when another launcher relies on its environment-variable contract. |
+
+For standalone Senpi without the OMO plugin, install only the non-builtin capabilities you need:
 
 ```bash
 senpi install git:github.com/code-yeongyu/pi-lsp-client            # 🛠️  LSP: rename / goto / refs / diagnostics + /lsp inspector
 senpi install git:github.com/code-yeongyu/pi-ast-grep              # 🛠️  AST-Grep across 25 languages (auto-downloads sg)
 senpi install git:github.com/code-yeongyu/pi-comment-checker       # 💬  Comment Checker — the standalone pi port of OMO's hook
-senpi install git:github.com/code-yeongyu/pi-rules                 #     Context injection: .claude/rules, .cursor/rules, .github/instructions, AGENTS.md, CLAUDE.md
-senpi install git:github.com/code-yeongyu/pi-nested-agents-md      # 🔍  Auto-injects nearby AGENTS.md (the runtime half of /init-deep)
-senpi install git:github.com/code-yeongyu/pi-websearch             # 📚  Provider-backed web search (fills the Exa-style slot)
-senpi install git:github.com/code-yeongyu/pi-webfetch              #     web_fetch tool (markdown / text / HTML, bounded time + size)
-senpi install git:github.com/code-yeongyu/pi-goal                  #     Persistent goal tracking + continuation prompts (closest thing to Sisyphus discipline)
 
 # Optional — only if you used the matching OMO surface:
 senpi install git:github.com/code-yeongyu/pi-cua-integration                 # 🖥️  Computer-use bindings (desktop / browser)
@@ -67,7 +78,7 @@ senpi install git:github.com/code-yeongyu/pi-google-url-context              #  
 senpi install git:github.com/code-yeongyu/pi-openai-api-parallel-tool-calls  #     OpenAI parallel_tool_calls payload support
 ```
 
-Each package is also installable by git URL, e.g. `senpi install git:github.com/code-yeongyu/pi-comment-checker`. See [Senpi Packages](packages/coding-agent/README.md#pi-packages) for the full install / update / remove flow.
+See [Senpi Packages](packages/coding-agent/README.md#pi-packages) for the full install / update / remove flow.
 
 ### Allow all permissions (OMO-style)
 
@@ -97,12 +108,12 @@ These are part of OMO's opencode harness shape and are intentionally **not** in 
 - **Hashline / hash-anchored edit tool** — senpi stays with pi's standard `edit` / `multiedit` / `apply_patch`. `pi-comment-checker` covers the post-edit validation slot OMO uses Hashline for, just without `LINE#ID` content-hash identifiers.
 - **Skill system** and **skill-embedded MCPs** — skills as a first-class concept (`SKILL.md`, scoped per-skill MCP servers) do not exist in senpi.
 - **Prometheus interview-mode planner** and the **Ralph Loop / `/ulw-loop`** self-referential loop.
-- **`/init-deep`** — there is no in-tree generator. Generate the hierarchical `AGENTS.md` tree manually (or with a normal agent prompt), then install `pi-nested-agents-md` so the agent actually reads them.
+- **`/init-deep`** — there is no in-tree generator. Generate the hierarchical `AGENTS.md` tree manually (or with a normal agent prompt); the builtin `nested-agents-md` extension will read the resulting files.
 - **Built-in `doctor` command**, **Claude Code hook/command/skill/plugin compatibility layer**, and the **agent category router** (`visual-engineering` / `deep` / `quick` / `ultrabrain`).
 
 ## Want more? Try the pi-extensions ecosystem
 
-senpi ships a fixed set of builtin extensions and stops there. The [`code-yeongyu/pi-*`](https://github.com/code-yeongyu?tab=repositories&q=pi-) GitHub repos contain the full extension ecosystem: some packages are vendored into senpi as builtins, while the rest can be installed on top when you want extra capabilities like LSP, AST-grep, goal tracking, web search/fetch, or rule loading.
+senpi ships a fixed set of builtin extensions and stops there. The [`code-yeongyu/pi-*`](https://github.com/code-yeongyu?tab=repositories&q=pi-) GitHub repos contain the full extension ecosystem: some packages are vendored into senpi as builtins, while the rest can be installed on top when you want extra capabilities such as LSP or AST-grep.
 
 ### Installable extensions
 
@@ -118,17 +129,12 @@ These [`code-yeongyu/pi-*`](https://github.com/code-yeongyu?tab=repositories&q=p
 | [`pi-ast-grep`](https://github.com/code-yeongyu/pi-ast-grep) | AST-aware code search/replace across 25 languages. Auto-downloads `sg` on first use. |
 | [`pi-comment-checker`](https://github.com/code-yeongyu/pi-comment-checker) | Runs comment-quality checks after file-editing tools and shows warnings in the TUI. |
 | [`pi-cua-integration`](https://github.com/code-yeongyu/pi-cua-integration) | Computer-use action wiring for desktop/browser interaction surfaces. |
-| [`pi-goal`](https://github.com/code-yeongyu/pi-goal) | Persistent goal tracking with Codex-style goal tools, TUI footer, and continuation prompts. |
 | [`pi-google-code-execution`](https://github.com/code-yeongyu/pi-google-code-execution) | Google native code execution. |
 | [`pi-google-google-search`](https://github.com/code-yeongyu/pi-google-google-search) | Google Search grounding. |
 | [`pi-google-url-context`](https://github.com/code-yeongyu/pi-google-url-context) | Google URL grounding. |
 | [`pi-lsp-client`](https://github.com/code-yeongyu/pi-lsp-client) | LSP integration: `lsp_rename`, `lsp_goto_definition`, `lsp_find_references`, `lsp_diagnostics`, plus a `/lsp` inspector. |
-| [`pi-nested-agents-md`](https://github.com/code-yeongyu/pi-nested-agents-md) | Auto-injects nearby `AGENTS.md` files when the agent reads from a nested directory. |
 | [`pi-openai-api-parallel-tool-calls`](https://github.com/code-yeongyu/pi-openai-api-parallel-tool-calls) | OpenAI `parallel_tool_calls` payload support. |
 | [`pi-openai-code-interpreter`](https://github.com/code-yeongyu/pi-openai-code-interpreter) | OpenAI Code Interpreter. |
-| [`pi-rules`](https://github.com/code-yeongyu/pi-rules) | Auto-discovers rule files from `.sisyphus/rules/`, `.claude/rules/`, `.cursor/rules/`, `.github/instructions/`, `AGENTS.md`, and `CLAUDE.md`. |
-| [`pi-webfetch`](https://github.com/code-yeongyu/pi-webfetch) | `web_fetch` tool: URL content as markdown, plain text, or HTML with bounded time and size. |
-| [`pi-websearch`](https://github.com/code-yeongyu/pi-websearch) | Provider-backed web search with config-gated activation, TUI status, and source-aware results. |
 
 Install any of them with:
 
@@ -149,10 +155,15 @@ You do **not** need to install these packages for normal senpi use; their functi
 | [`pi-anthropic-web-search`](https://github.com/code-yeongyu/pi-anthropic-web-search) | `anthropic-web-search` | Anthropic-native web search support. |
 | [`pi-apply-patch`](https://github.com/code-yeongyu/pi-apply-patch) | `gpt-apply-patch` | Codex-style `apply_patch` tool for GPT-family runs. |
 | [`pi-bash-timeout`](https://github.com/code-yeongyu/pi-bash-timeout) | `bash-timeout` | Bash timeout defaults, max timeout enforcement, and prompt policy. |
+| [`pi-goal`](https://github.com/code-yeongyu/pi-goal) | `goal` | Persistent goal tracking, TUI status, and continuation prompts. |
+| [`pi-nested-agents-md`](https://github.com/code-yeongyu/pi-nested-agents-md) | `nested-agents-md` | Auto-injects nearby `AGENTS.md` files for nested directories. |
 | [`pi-openai-web-search`](https://github.com/code-yeongyu/pi-openai-web-search) | `openai-web-search` | OpenAI Responses native web search. |
+| [`pi-rules`](https://github.com/code-yeongyu/pi-rules) | `rules` | Discovers project and user rule files, including `AGENTS.md` and `CLAUDE.md`. |
 | [`pi-todotools`](https://github.com/code-yeongyu/pi-todotools) | `todowrite` | `todowrite` / `todoread`, todo sidebar state, workflow prompt guidance, and continuation follow-ups. |
+| [`pi-webfetch`](https://github.com/code-yeongyu/pi-webfetch) | `webfetch` | Fetches URL content as markdown, text, or HTML with bounded time and size. |
+| [`pi-websearch`](https://github.com/code-yeongyu/pi-websearch) | `websearch` | Provider-backed web search with config-gated activation and source-aware results. |
 
-Other builtins such as `permission-system`, `prompt-preset`, `anthropic-bash`, `service-tier`, `tool-pair-guard`, `compaction`, `history-search`, `session-observer`, `websearch`, `webfetch`, `nested-agents-md`, `rules`, and `goal` are senpi-owned builtin extensions, not installable sibling packages.
+Other builtins such as `permission-system`, `prompt-preset`, `anthropic-bash`, `service-tier`, `tool-pair-guard`, `compaction`, `history-search`, and `session-observer` are senpi-owned builtin extensions without installable sibling packages.
 
 ## Why "senpi"
 
@@ -286,7 +297,6 @@ I regularly publish my own `pi-mono` work sessions here:
 | **[senpi](packages/coding-agent)** | Interactive coding agent CLI, rebranded as senpi |
 | **[@code-yeongyu/senpi-codemode](packages/senpi-codemode)** | Source-only codemode extension package with settings, kernel, bridge, and prelude building blocks |
 | **[@earendil-works/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-| **[@earendil-works/pi-web-ui](packages/web-ui)** | Web UI components for AI chat interfaces (private, not published) |
 
 For Slack/chat automation and workflows see [earendil-works/pi-chat](https://github.com/earendil-works/pi-chat).
 
@@ -315,8 +325,6 @@ npm test             # Run tests (skips LLM-dependent tests without API keys)
 npm run publish      # Publish npm workspaces, including @code-yeongyu/senpi
 ```
 
-> `npm run check` requires `npm run build` first. The web-ui package uses `tsc` which needs compiled `.d.ts` files from dependencies.
-
 ## Supply-chain hardening
 
 We treat npm dependency changes as reviewed code changes.
@@ -324,8 +332,8 @@ We treat npm dependency changes as reviewed code changes.
 - Direct external dependencies are pinned to exact versions. Internal workspace packages remain version-ranged.
 - `.npmrc` sets `save-exact=true` and `min-release-age=2` to avoid same-day dependency releases during npm resolution.
 - `package-lock.json` is the dependency ground truth. Pre-commit blocks accidental lockfile commits unless `PI_ALLOW_LOCKFILE_CHANGE=1` is set.
-- `npm run check` verifies pinned direct deps, native TypeScript import compatibility, and the generated coding-agent shrinkwrap.
-- The published CLI package includes `packages/coding-agent/npm-shrinkwrap.json`, generated from the root lockfile, to pin transitive deps for npm users.
+- `npm run check` verifies pinned direct deps, native TypeScript import compatibility, and the generated coding-agent publish dependency manifest.
+- `packages/coding-agent/publish-deps.lock.json` is generated from the root lockfile for publish staging but is never shipped; publishing an `npm-shrinkwrap.json` beside bundled dependencies breaks npm installs.
 - Release smoke tests use `npm run release:local` to build, pack, and create isolated npm and Bun installs outside the repo before tagging a release.
 - Local release installs, documented npm installs, and `senpi update senpi` use `--ignore-scripts` where supported.
 - CI installs with `npm ci --ignore-scripts`, and a scheduled GitHub workflow runs `npm audit --omit=dev` plus `npm audit signatures --omit=dev`.

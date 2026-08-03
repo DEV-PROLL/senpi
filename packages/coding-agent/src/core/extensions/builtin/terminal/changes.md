@@ -1,7 +1,110 @@
 # terminal builtin extension — fork surface
 
+## Fresh monitors reset a spent wake budget (2026-08-03)
+
+### What changed
+
+- Creating a monitor now resets the session-global monitor notification pause before
+  the new runtime can emit output or its completion summary.
+- A regression drives a real monitor after a prior watch exhausts the wake budget and
+  proves the fresh monitor's completion still triggers a model-visible wake.
+
+### Why
+
+- The wake budget intentionally pauses noisy watches, but that pause previously leaked
+  into later monitors. A newly requested watch could run and disappear from the TUI
+  without delivering its completion, leaving deferred goal work looking stopped.
+
+### Why this cannot be expressed externally
+
+- The fix depends on the built-in monitor tool's ordering relative to the
+  session-scoped notifier and monitor registry.
+
+### Expected merge conflict zones
+
+- `tools/monitor.ts` around monitor creation and `tools/context.ts` around notifier
+  callbacks.
+- `test/suite/terminal-monitor-notify.test.ts` around wake-budget coverage.
+
+## Backfill: Anthropic availability monitoring (2026-08-01)
+
+### What changed
+
+- Persistent terminal monitoring recognizes Anthropic availability and reports it through the existing observable-state channel.
+
+### Why
+
+- Agents must distinguish a provider becoming usable from arbitrary terminal output.
+
+### Why this cannot be expressed externally
+
+- The signal is produced inside the built-in monitor process and terminal event parser.
+
+### Expected merge conflict zones
+
+- Monitor event parsing, provider availability matching, and terminal status tests.
+
 The persistent-terminal tool suite (`bash` swapped to PTY-backed + `bash_output`,
 `kill_bash`, `bash_input`, `bash_resize`). Backed by `@earendil-works/pi-pty`.
+
+## Duplicate monitor batches no longer re-wake the session (2026-07-31)
+
+### What changed
+
+- `monitor-notify.ts`: `MonitorNotifier.#flush` now fingerprints each ready monitor's
+  line-only batch (joined sanitized bodies) and compares it with that monitor's previous
+  injection. A byte-identical batch is dropped silently: no injection, no wake, no
+  wake-budget tick, and `#lastInjectionAt` is left untouched so a real change delivers at
+  the next flush. Fingerprints are recorded per monitor on every actual injection,
+  cleared on `rearm` and `dispose`, and skipped entirely for batches containing a
+  summary (exit) event or overflow, which always deliver.
+- `tools/monitor.ts`: the tool description now tells the model that unchanged repeats
+  are dropped instead of re-waking the session.
+- `test/suite/terminal-monitor-notify-harness.ts` (new): the `FakeScheduler` +
+  `createNotifier` fixtures extracted from `terminal-monitor-notify.test.ts`, shared with
+  the new `terminal-monitor-dup-suppression.test.ts` describe cluster (dup drop, change
+  wake, multi-line batch, per-monitor independence, summary exemption, wake-budget
+  neutrality, rearm reset).
+
+### Why
+
+Observed live (session 019fb7da-e8a1, "watching PR 603 CI checks"): a
+`gh pr checks --watch --interval 10` monitor with a status filter reprinted the same
+summary every refresh, waking the idle session every ~10.5s for byte-identical content
+(29 injections, only 14 unique bodies; each wake replayed ~240K cached context). The
+wake budget paused the flood every 5 wakes, but each explicit rearm reset it and the
+cycle repeated. Waking a full-context session for zero new information is waste the
+harness can prevent deterministically.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: fork-owned `monitor-notify.ts` flush path and the monitor tool description.
+
+## Live elapsed footer for monitors + enriched monitor state event (2026-07-31)
+
+### What changed
+
+- `monitor-registry.ts`: `MonitorSnapshotEntry` gains `startedAtMs` (epoch ms at registration).
+- `monitor-status.ts`: `formatMonitorStatus(snapshot, nowMs)` renders a goal-style compact
+  elapsed label (`5s`/`3m`/`2h 30m`) for the oldest live watch, merged with the paused suffix
+  as `(3m, paused)` / `(3m, 1 paused)`. 48-char budget and `+N more` packing unchanged.
+- `monitor-status-ticker.ts` (new): `MonitorStatusTicker` mirrors the goal builtin's
+  `GoalElapsedTicker` — 1s unref'd interval, renders only when the formatted label changes,
+  stops and clears the status when the last watch settles. The extension's `onMonitorState`
+  sink now drives the ticker instead of formatting inline; `session_shutdown` stops it.
+- `builtin/monitor-state-event.ts`: `TerminalMonitorStateEvent` gains an additive optional
+  `monitors` array (`{ id, description, paused, startedAtMs }`) so event-bus consumers (and
+  RPC clients, which already receive footer statuses through the `setStatus`
+  `extension_ui_request` bridge) can render their own elapsed views. `activeCount` and the
+  type guard are unchanged; old payloads still validate.
+
+### Tests
+
+- `test/suite/terminal-monitor-footer.test.ts`: elapsed rendering, oldest-watch selection,
+  clock-skew clamp, paused-suffix merge, budget preservation, `startedAtMs` in snapshots.
+- `test/suite/terminal-monitor-status-ticker.test.ts` (new): unref'd 1s interval, label
+  dedupe, stop-on-settle, re-sync without leaking intervals.
+- `test/suite/terminal-monitor-state-event.test.ts`: `monitors[]` payload assertions.
 
 ## Background sessions and monitors survive session reload (2026-07-29)
 

@@ -9,6 +9,8 @@ import {
 	type GoalHarness,
 	makeGoalContext,
 	runGoalHandlers,
+	waitForEventCount,
+	waitForSentCount,
 } from "./goal-monitor-test-harness.ts";
 
 const ENTRY_TYPE = "goal-cache-warmup";
@@ -28,7 +30,9 @@ function cacheModel(): Model<Api> {
 	} as Model<Api>;
 }
 
-async function setupWarmHarness(threadId: string): Promise<{ harness: GoalHarness; notices: string[] }> {
+async function setupWarmHarness(
+	threadId: string,
+): Promise<{ harness: GoalHarness; notices: string[]; ctx: Awaited<ReturnType<typeof makeGoalContext>> }> {
 	const notices: string[] = [];
 	const harness = createGoalHarness();
 	const ctx = await makeGoalContext(notices, threadId, { pendingMessages: false, model: cacheModel() });
@@ -43,7 +47,7 @@ async function setupWarmHarness(threadId: string): Promise<{ harness: GoalHarnes
 		{ type: "agent_end", messages: [cleanAssistantStop({ cacheRead: 100_000, cacheWrite: 20_000 })] },
 		ctx,
 	);
-	return { harness, notices };
+	return { harness, notices, ctx };
 }
 
 function warmupEntryData(harness: GoalHarness): GoalCacheWarmupEntryData[] {
@@ -96,7 +100,10 @@ describe("goal cache-warm continuation story", () => {
 		vi.useFakeTimers();
 		const { harness, notices } = await setupWarmHarness("thread-cache-warm-resumed");
 
+		const delayedDeliveryRecorded = waitForSentCount(harness, 1);
+		const resumedEventRecorded = waitForEventCount(harness.events, "goal_continuation_resumed", 1);
 		await vi.advanceTimersByTimeAsync(240_000);
+		await Promise.all([delayedDeliveryRecorded, resumedEventRecorded]);
 
 		expect(harness.sent).toHaveLength(1);
 		expect(harness.sent[0]?.message.customType).toBe("goal-continuation");

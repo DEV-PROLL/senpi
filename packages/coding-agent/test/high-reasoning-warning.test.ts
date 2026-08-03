@@ -5,52 +5,95 @@ import {
 	isSensitiveHighReasoningModel,
 	shouldWarnHighReasoning,
 } from "../src/core/high-reasoning-warning.ts";
+import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "../src/core/thinking-levels.ts";
 
 function mkModel(id: string, provider = "openai"): Model<Api> {
 	return { id, provider, reasoning: true, api: "openai-responses" } as unknown as Model<Api>;
 }
 
+const SOL_MODEL_IDS = [
+	"gpt-5.6-sol",
+	"gpt-5.6-sol-fast",
+	"openai.gpt-5.6-sol",
+	"openai/gpt-5.6-sol",
+	"openai/gpt-5.6-sol-pro",
+];
+
+const NON_SOL_MODEL_IDS = [
+	"upstage/solar-pro-3",
+	"gpt-5.6-luna",
+	"gpt-5.6-luna-fast",
+	"gpt-5.6-terra",
+	"gpt-5.6",
+	"gpt-5.5",
+	"gpt-5.2",
+	"gpt-5.3-codex-spark",
+	"gpt-4o",
+	"claude-fable-5",
+	"claude-opus-4-8",
+	"opus-4.7",
+	"opus-5",
+	"claude-sonnet-5",
+	"deepseek-v4-pro",
+	"deepseek-v4-flash",
+];
+
 describe("high-reasoning-warning", () => {
 	describe("isSensitiveHighReasoningModel", () => {
-		it("flags gpt-5.6-sol-like frontier models (provider-agnostic, name-based)", () => {
-			expect(isSensitiveHighReasoningModel(mkModel("gpt-5.6-sol"))).toBe(true);
-			expect(isSensitiveHighReasoningModel(mkModel("gpt-5.6"))).toBe(true);
-			expect(isSensitiveHighReasoningModel(mkModel("gpt-5.2-mini"))).toBe(true);
-			expect(isSensitiveHighReasoningModel(mkModel("claude-opus-4-8"))).toBe(true);
-			expect(isSensitiveHighReasoningModel(mkModel("opus-4.7"))).toBe(true);
-			expect(isSensitiveHighReasoningModel(mkModel("fable-5"))).toBe(true);
-			expect(isSensitiveHighReasoningModel(mkModel("deepseek-v4-pro"))).toBe(true);
-			expect(isSensitiveHighReasoningModel(mkModel("deepseek-v4-flash"))).toBe(true);
-			expect(isSensitiveHighReasoningModel(mkModel("gpt-5.6-sol", "openrouter"))).toBe(true);
+		it.each(SOL_MODEL_IDS)("flags the gpt-5.6-sol variant %s", (id) => {
+			expect(isSensitiveHighReasoningModel(mkModel(id))).toBe(true);
 		});
 
-		it("does not flag non-frontier models", () => {
-			expect(isSensitiveHighReasoningModel(mkModel("gpt-4o"))).toBe(false);
-			expect(isSensitiveHighReasoningModel(mkModel("claude-3-5-sonnet"))).toBe(false);
-			expect(isSensitiveHighReasoningModel(mkModel("gpt-5"))).toBe(false);
-			expect(isSensitiveHighReasoningModel(mkModel("llama-3.3-70b"))).toBe(false);
+		it.each(["openai", "openrouter", "azure", "anthropic"])("is provider-agnostic for provider %s", (provider) => {
+			expect(isSensitiveHighReasoningModel(mkModel("gpt-5.6-sol", provider))).toBe(true);
+		});
+
+		it.each(NON_SOL_MODEL_IDS)("does NOT flag %s", (id) => {
+			expect(isSensitiveHighReasoningModel(mkModel(id))).toBe(false);
 		});
 	});
 
 	describe("shouldWarnHighReasoning", () => {
-		it("warns for a sensitive model driven at xhigh or max", () => {
+		it("warns for a gpt-5.6-sol variant at xhigh or max", () => {
 			expect(shouldWarnHighReasoning(mkModel("gpt-5.6-sol"), "xhigh")).toBe(true);
 			expect(shouldWarnHighReasoning(mkModel("gpt-5.6-sol"), "max")).toBe(true);
-			expect(shouldWarnHighReasoning(mkModel("claude-opus-4-8"), "max")).toBe(true);
-			expect(shouldWarnHighReasoning(mkModel("fable-5"), "xhigh")).toBe(true);
+			expect(shouldWarnHighReasoning(mkModel("openai/gpt-5.6-sol-pro"), "xhigh")).toBe(true);
 		});
 
-		it("does not warn for a non-sensitive model even at xhigh/max", () => {
-			expect(shouldWarnHighReasoning(mkModel("gpt-4o"), "xhigh")).toBe(false);
-			expect(shouldWarnHighReasoning(mkModel("gpt-4o"), "max")).toBe(false);
+		it("does NOT warn for claude-fable-5 at xhigh or max (reported bug)", () => {
+			expect(shouldWarnHighReasoning(mkModel("claude-fable-5", "anthropic"), "xhigh")).toBe(false);
+			expect(shouldWarnHighReasoning(mkModel("claude-fable-5", "anthropic"), "max")).toBe(false);
 		});
 
-		it("does not warn for a sensitive model at or below high", () => {
-			expect(shouldWarnHighReasoning(mkModel("gpt-5.6-sol"), "high")).toBe(false);
-			expect(shouldWarnHighReasoning(mkModel("gpt-5.6-sol"), "medium")).toBe(false);
-			expect(shouldWarnHighReasoning(mkModel("gpt-5.6-sol"), "low")).toBe(false);
-			expect(shouldWarnHighReasoning(mkModel("gpt-5.6-sol"), "minimal")).toBe(false);
-			expect(shouldWarnHighReasoning(mkModel("gpt-5.6-sol"), "off")).toBe(false);
+		it.each(NON_SOL_MODEL_IDS)("does NOT warn for non-sol model %s at xhigh", (id) => {
+			expect(shouldWarnHighReasoning(mkModel(id), "xhigh")).toBe(false);
+			expect(shouldWarnHighReasoning(mkModel(id), "max")).toBe(false);
+		});
+
+		it.each(["high", "medium", "low", "minimal", "off"] as const)(
+			"does NOT warn for gpt-5.6-sol at level %s",
+			(level) => {
+				expect(shouldWarnHighReasoning(mkModel("gpt-5.6-sol"), level)).toBe(false);
+			},
+		);
+	});
+
+	describe("capability gating is untouched by the warning narrowing", () => {
+		it("keeps xhigh/max capability for claude-fable-5 even though it no longer warns", () => {
+			const fable = mkModel("claude-fable-5", "anthropic");
+			expect(supportsXhigh(fable)).toBe(true);
+			expect(supportsMax(fable)).toBe(true);
+			const levels = getSupportedThinkingLevels(fable);
+			expect(levels).toContain("xhigh");
+			expect(levels).toContain("max");
+			expect(shouldWarnHighReasoning(fable, "xhigh")).toBe(false);
+		});
+
+		it("keeps xhigh capability for gpt-5.6-sol, which also warns", () => {
+			const sol = mkModel("gpt-5.6-sol");
+			expect(supportsXhigh(sol)).toBe(true);
+			expect(getSupportedThinkingLevels(sol)).toContain("xhigh");
+			expect(shouldWarnHighReasoning(sol, "xhigh")).toBe(true);
 		});
 	});
 
@@ -68,12 +111,6 @@ describe("high-reasoning-warning", () => {
 			expect(body).toMatch(/risk|irreversible|dangerous/i);
 			expect(body).toMatch(/query ultrabrain|delegate|subagent|sub-agent/i);
 			expect(body.length).toBeGreaterThan(200);
-		});
-
-		it("reflects the max level in the title when max is selected", () => {
-			const w = buildHighReasoningWarning(mkModel("claude-opus-4-8", "anthropic"), "max");
-			expect(w.title).toContain("max");
-			expect(w.title).toContain("claude-opus-4-8");
 		});
 	});
 });

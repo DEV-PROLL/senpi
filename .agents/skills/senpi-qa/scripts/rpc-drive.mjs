@@ -31,6 +31,9 @@ import {
 	writeMockModelsJson,
 } from "./lib/mock-loop-support.mjs";
 
+const SCENARIO_PROVIDER = "claude-sdk-oauth";
+const SCENARIO_MODEL_ID = "claude-sonnet-4-5";
+
 /**
  * Minimal JSON-lines RPC client over a spawned `--mode rpc` child.
  * Resolves send() promises by matching the response `id`; buffers events.
@@ -166,6 +169,100 @@ async function selfTest() {
 	process.exit(passed ? 0 : 1);
 }
 
+async function driveScenarioClaudeSdkOauthAccounts() {
+	installCleanupHooks();
+	const guard = guardRealAuth();
+	const checks = createChecks("rpc-drive.mjs --scenario claude-sdk-oauth-accounts");
+	const box = makeSandbox("rpc-csdk-oauth");
+	const client = new RpcClient({ env: box.env, cwd: box.cwd });
+
+	try {
+		// Ensure the RPC session has booted before issuing model/account commands.
+		await client.send({ type: "get_state" });
+
+		// --- get_provider_accounts (rpc-types.ts line ~94) ---
+		// Request shape: { type: "get_provider_accounts", provider: string }
+		// Response shape: { type: "response", command: "get_provider_accounts",
+		//                   success: true, data: { accounts: RpcProviderAccount[] } }
+		// RpcProviderAccount = { name, source: "login"|"import"|"env", blocked, pinned }
+		// — no credential fields, but we redact defensively in case of schema drift.
+		let accountsRes;
+		await checks.run("get_provider_accounts returns a success response", async () => {
+			accountsRes = await client.send({ type: "get_provider_accounts", provider: SCENARIO_PROVIDER });
+			if (accountsRes.type !== "response" || accountsRes.command !== "get_provider_accounts" || accountsRes.success !== true) {
+				throw new Error(`unexpected response: ${JSON.stringify(accountsRes)}`);
+			}
+			return `command=${accountsRes.command} accounts=${accountsRes.data?.accounts?.length ?? "?"}`;
+		});
+
+		checks.ok(
+			"accounts is an array (empty is valid on a machine with no configured accounts)",
+			Array.isArray(accountsRes?.data?.accounts),
+			`count=${accountsRes?.data?.accounts?.length ?? "?"}`,
+		);
+
+		// Redact defensively: RpcProviderAccount has no credential fields, but if
+		// the schema ever leaks one, we never print it. Print name/source/blocked/pinned only.
+		const safeAccounts = (accountsRes?.data?.accounts ?? []).map((a) => ({
+			name: a.name,
+			source: a.source,
+			blocked: a.blocked,
+			pinned: a.pinned,
+		}));
+		process.stdout.write(`get_provider_accounts [${SCENARIO_PROVIDER}] -> ${JSON.stringify(safeAccounts)}\n`);
+
+		// --- set_model (rpc-types.ts line ~39) ---
+		// Request shape: { type: "set_model", provider: string, modelId: string }
+		// Response shape: { type: "response", command: "set_model",
+		//                   success: true, data: Model<any> }
+		// or { success: false, error: string }
+		let modelRes;
+		await checks.run("set_model selects a claude-sdk-oauth model", async () => {
+			modelRes = await client.send({
+				type: "set_model",
+				provider: SCENARIO_PROVIDER,
+				modelId: SCENARIO_MODEL_ID,
+			});
+			if (modelRes.type !== "response" || modelRes.command !== "set_model" || modelRes.success !== true) {
+				throw new Error(`set_model failed: ${JSON.stringify(modelRes)}`);
+			}
+			return `provider=${modelRes.data?.provider} modelId=${modelRes.data?.id}`;
+		});
+
+		checks.ok(
+			"set_model response contains the selected provider and model id",
+			modelRes?.data?.provider === SCENARIO_PROVIDER && modelRes?.data?.id === SCENARIO_MODEL_ID,
+			`provider=${modelRes?.data?.provider ?? "?"} id=${modelRes?.data?.id ?? "?"}`,
+		);
+
+		// Redact defensively: Model<any> has no credential fields, but strip anything
+		// that is not a known-safe top-level key.
+		const safeModel = (() => {
+			if (!modelRes?.data) return null;
+			const { provider, id, name, reasoning, input, contextWindow, maxTokens } = modelRes.data;
+			return { provider, id, name, reasoning, input, contextWindow, maxTokens };
+		})();
+		process.stdout.write(`set_model [${SCENARIO_PROVIDER}/${SCENARIO_MODEL_ID}] -> ${JSON.stringify(safeModel)}\n`);
+
+		client.close();
+		await new Promise((r) => setTimeout(r, 300));
+	} finally {
+		client?.close();
+		checks.ok("real auth unchanged", (() => {
+			try {
+				return guard.assertUnchanged();
+			} catch {
+				return false;
+			}
+		})(), guard.path);
+		box.cleanup();
+	}
+
+	const passed = checks.finish();
+	process.stdout.write(`VERDICT: ${passed ? "PASS" : "FAIL"} claude-sdk-oauth-accounts scenario ${passed ? "completed" : "failed"}\n`);
+	process.exit(passed ? 0 : 1);
+}
+
 async function driveState() {
 	installCleanupHooks();
 	const box = makeSandbox("rpc-state");
@@ -251,6 +348,11 @@ if (argv[0] === "--self-test") {
 	selfTest();
 } else if (argv[0] === "--state") {
 	driveState();
+} else if (argv[0] === "--scenario" && argv[1] === "claude-sdk-oauth-accounts") {
+	driveScenarioClaudeSdkOauthAccounts().catch((e) => {
+		process.stderr.write(`${e instanceof Error ? e.stack : String(e)}\n`);
+		process.exit(1);
+	});
 } else if (argv.includes("--prompt")) {
 	const message = flag("--prompt");
 	const withReasoning = argv.includes("--with-reasoning");
@@ -278,6 +380,8 @@ if (argv[0] === "--self-test") {
 			"senpi-qa Channel 1 — Remote RPC",
 			"  node rpc-drive.mjs --self-test            verify get_state round-trips (no API)",
 			"  node rpc-drive.mjs --state               print live RpcSessionState",
+			"  node rpc-drive.mjs --scenario claude-sdk-oauth-accounts",
+			"                                           # verify claude-sdk-oauth provider accounts + model selection over RPC",
 			"  node rpc-drive.mjs --prompt <msg> ...    drive a real turn (needs a model)",
 			"  node rpc-drive.mjs --with-mock <api> --with-reasoning --prompt <msg> [--evidence SLUG]",
 			"",

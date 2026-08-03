@@ -14,6 +14,388 @@
 
 ### Removed
 
+## [2026.8.3-2] - 2026-08-03
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.3] - 2026-08-03
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+- Added resume-first continuity for Claude SDK OAuth sessions, including lineage reattachment across aborts, account failover, restarts, model changes, and thinking-level changes ([#634](https://github.com/code-yeongyu/senpi/pull/634), [#635](https://github.com/code-yeongyu/senpi/pull/635), [#636](https://github.com/code-yeongyu/senpi/pull/636), [#637](https://github.com/code-yeongyu/senpi/pull/637)).
+- Added hint-aware 429 retry routing with tier classification, probe-back scheduling, and visible retry-probe events in interactive and RPC modes ([#657](https://github.com/code-yeongyu/senpi/pull/657)).
+- Added retries for transient idle-compaction warm-up failures while the agent remains idle ([#661](https://github.com/code-yeongyu/senpi/pull/661)).
+
+### Changed
+
+- Migrated the build toolchain to TypeScript 7.0.2 stable with native `tsc`, replacing experimental `tsgo`/`@typescript/native-preview` usage and retaining the TypeScript 6 API bridge required by the relative-import checker ([#651](https://github.com/code-yeongyu/senpi/pull/651)).
+- Moved compiled Senpi binary builds and npm publication to the Bun 1.4+ canary runtime, guarded by revision-aware assertions and cross-platform runtime smoke tests ([#651](https://github.com/code-yeongyu/senpi/pull/651)).
+- Aligned compaction and assistant-boundary restoration with Claude SDK OAuth session lineages ([#636](https://github.com/code-yeongyu/senpi/pull/636)).
+
+### Fixed
+
+- Fixed Claude SDK OAuth abort settlement and persistence of forked session identifiers ([#634](https://github.com/code-yeongyu/senpi/pull/634), [#637](https://github.com/code-yeongyu/senpi/pull/637)).
+- Fixed Anthropic tool-use/tool-result pairing after pruning, interruption, or model switching ([#641](https://github.com/code-yeongyu/senpi/pull/641)).
+- Compacted persisted apply-patch previews and bounded patch bodies to prevent oversized transcript artifacts ([#649](https://github.com/code-yeongyu/senpi/pull/649)).
+- Bounded summarization overflow retries to prevent unbounded compaction loops ([#652](https://github.com/code-yeongyu/senpi/pull/652)).
+- Fully reconnected expired MCP sessions instead of reusing stale transport handles ([#655](https://github.com/code-yeongyu/senpi/pull/655)).
+- Rearmed wake delivery for fresh terminal monitors ([#658](https://github.com/code-yeongyu/senpi/pull/658)).
+- Prevented loop-guard repetition detection from conflating distinct targets ([#659](https://github.com/code-yeongyu/senpi/pull/659)).
+- Unwedged goal continuations after non-automatic compaction and resumed queued messages even when compaction completion hooks throw ([#660](https://github.com/code-yeongyu/senpi/pull/660)).
+
+### Removed
+
+- Removed the legacy `web-ui` workspace from the monorepo ([#651](https://github.com/code-yeongyu/senpi/pull/651)).
+
+## [2026.8.1] - 2026-08-01
+
+### New Features
+
+- Add model-optimized prompt presets for `deepseek-v4-flash`,
+  `deepseek-v4-flash-0731`, and `deepseek-v4-pro`. The presets use typed
+  family rules over the shared dynamic prompt core to preserve harness
+  authority, todo discipline, grounded missing-information handling, and the
+  distinct concise-versus-deliberative reasoning behavior expected from each
+  DeepSeek V4 variant
+  ([#593](https://github.com/code-yeongyu/senpi/pull/593)).
+
+- Add DeepSeek's official API as a first-party `web_search` provider and route
+  official `deepseek-v4-*` models to the native DeepSeek search tool only when
+  the active model provider is actually `deepseek`. The integration uses the
+  Anthropic-compatible Messages endpoint, normalizes native citations and
+  results into Senpi's common search format, and prevents proxied or foreign
+  models from accidentally binding the DeepSeek route
+  ([#595](https://github.com/code-yeongyu/senpi/pull/595)).
+
+- Animate visible todo rows when they complete inside the still-active phase.
+  The widget reuses the code-point-safe bounded strikethrough reveal, keeps the
+  next active task highlighted, skips restored and prior-phase completions,
+  and disposes its unreferenced timer after the short animation finishes
+  ([#602](https://github.com/code-yeongyu/senpi/pull/602)).
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Override the development/build-time PostCSS dependency to patched `8.5.18`,
+  removing the repository's high-severity
+  [GHSA-r28c-9q8g-f849](https://github.com/advisories/GHSA-r28c-9q8g-f849)
+  path-traversal advisory without changing runtime package behavior or adding
+  lifecycle scripts
+  ([#601](https://github.com/code-yeongyu/senpi/pull/601)).
+
+- Reduce large-session terminal rendering work by reusing normalized line
+  strings across frames and making viewport-bounded normalization and diffing
+  the default. The renderer retains full fallback passes for resize and
+  recovery paths, preserves image handling, bounds memoized state to the live
+  transcript, and keeps output behavior unchanged while restoring cheap
+  reference-equality comparisons
+  ([#604](https://github.com/code-yeongyu/senpi/pull/604)).
+
+- Translate the remaining user-visible risky-model warning and tracked Korean
+  fixtures to English while preserving wide-character, UTF-8 framing, IME,
+  Markdown, and terminal-width coverage with equivalent non-Korean CJK sample
+  data. No identifiers, settings keys, or runtime control flow changed
+  ([#613](https://github.com/code-yeongyu/senpi/pull/613)).
+
+- Refresh the model inventory surfaced by `senpi --list-models` and model
+  selection from the current OpenRouter, Vercel AI Gateway, Z.AI, and Z.AI
+  Coding CN catalogs. The update removes retired OpenRouter batch aliases and
+  three unavailable Z.AI model IDs, adds
+  `thinkingmachines/inkling-small`,
+  `deepseek/deepseek-v4-flash-0731`, and
+  `glm-5.2-highspeed[1m]`, moves both Z.AI provider defaults and browser key
+  validation to surviving `glm-5.2`, and adds a catalog-membership guard so
+  external removals cannot silently strand a provider default.
+
+### Fixed
+
+- Treat explicit model reasoning metadata as the single source of truth for
+  `xhigh` and `max` support. The model picker, favorite cycling, and provider
+  request path now agree that omitted mapped levels are unsupported, `null`
+  vetoes inference, and model-ID heuristics apply only when no map exists
+  ([#586](https://github.com/code-yeongyu/senpi/pull/586) by
+  [@realsigridjin](https://github.com/realsigridjin)).
+
+- Complete legacy goal-store migration without rewriting current-format goals
+  or overwriting an existing destination. Legacy normalization is restricted
+  to legacy reads, migration derives the correct legacy directory for session
+  and no-session layouts, publication is atomic, and inert wire-compatible
+  fields such as `tokenBudget` survive ordinary current-store round trips
+  ([#587](https://github.com/code-yeongyu/senpi/pull/587) by
+  [@realsigridjin](https://github.com/realsigridjin)).
+
+- Scope automatic native web-search route discovery to the active model's
+  provider for every provider family, preventing unrelated models from
+  inheriting routes such as `z-ai/native`. Search progress labels also stop
+  exposing the internal `(max N)` planning suffix while retaining result-count
+  progress and explicit user-configured routes
+  ([#592](https://github.com/code-yeongyu/senpi/pull/592)).
+
+- Preserve the user's preferred reasoning effort across `/model`, Ctrl+P, and
+  favorite-model switches. Senpi now separates the remembered global
+  preference from the effective level clamped for the current model, so
+  temporarily selecting a lower-capability model or a favorite override no
+  longer permanently replaces a preference such as `max`
+  ([#594](https://github.com/code-yeongyu/senpi/pull/594)).
+
+- Stabilize Codex prompt caching by applying the official stable affinity tuple
+  to both SSE and WebSocket requests. Long-running sessions retain one
+  `prompt_cache_key`, `session-id`, `thread-id`, and `x-client-request-id`
+  identity instead of intermittently re-sending large uncached histories;
+  explicit no-retention requests still disable affinity
+  ([#597](https://github.com/code-yeongyu/senpi/pull/597)).
+
+- Measure the builtin TPS indicator with a monotonic clock rather than wall
+  time. Backward system-clock adjustments can no longer produce a
+  non-positive interval that silently suppresses a valid throughput
+  notification, while stream-open timing and tool-wait exclusion remain
+  unchanged
+  ([#598](https://github.com/code-yeongyu/senpi/pull/598)).
+
+- Show the prominent high-reasoning warning only once per sensitive
+  provider/model identity during an `AgentSession`. Cycling among `xhigh`,
+  `max`, and lower efforts or switching away and back no longer re-arms the
+  same warning, while selecting a different sensitive model still produces its
+  own first warning
+  ([#599](https://github.com/code-yeongyu/senpi/pull/599)).
+
+- Let Codex sessions recover from transient WebSocket fallback instead of
+  remaining pinned to SSE for the rest of the process. Requests inside the
+  60-second degradation window continue safely on SSE, later fresh requests
+  can probe WebSocket, cleanup clears fallback state, and potentially billed
+  started responses are never replayed
+  ([#600](https://github.com/code-yeongyu/senpi/pull/600)).
+
+- Preserve rich detached `eval` peeks from the bundled codemode extension,
+  including the submitted code and title, live output, phase, structured
+  status events, nested tool-call summaries, elapsed duration, and structured
+  displays. Terminal settlement is first-writer-wins and an explicit
+  cancellation remains authoritative over a late kernel completion
+  ([#603](https://github.com/code-yeongyu/senpi/pull/603)).
+
+- Surface failed and partially failed `apply_patch` operations as actual tool
+  errors to both the model loop and interactive renderer. Complete failures no
+  longer remain styled as a successful or indefinitely applying patch, while
+  partial results retain successful diffs together with concrete recovery
+  guidance for the failed operations
+  ([#605](https://github.com/code-yeongyu/senpi/pull/605)).
+
+- Suppress byte-identical monitor notification batches before they wake an
+  idle session. Repeated status redraws from commands such as
+  `gh pr checks --watch` no longer replay the full agent context every refresh;
+  genuinely changed output still resets duplicate suppression, and explicit
+  `rearm` keeps its existing wake-budget semantics
+  ([#612](https://github.com/code-yeongyu/senpi/pull/612)).
+
+- Respect an explicitly saved system `defaultModel` when the
+  `recommended-models` builtin starts. Automatic recommendation switching now
+  applies only to implicit `provider-default` and `first-available` fallback
+  selections; models chosen through saved settings, CLI input, or scoped
+  configuration are kept without a notification or persistence write that
+  could overwrite the user's choice
+  ([#625](https://github.com/code-yeongyu/senpi/pull/625)).
+
+### Removed
+
+## [2026.7.31-2] - 2026-07-31
+
+### New Features
+
+- Add the builtin loop guard, which canonicalizes tool-call signatures and detects byte-identical repetitions,
+  high-similarity same-tool runs, and short repeating cycles. It injects one detector-specific system reminder
+  without blocking tool execution, prioritizes identical over cycle over similar matches, and resets after
+  observable progress.
+
+- Make Claude SDK OAuth a native persistent provider lane: deliver Senpi's complete composed system prompt, reuse one
+  resident SDK query per session, serialize turn drains through a single consumer, fence stale generations, and
+  enforce lifecycle and idle bounds while retaining the hardened fallback path.
+
+- Show live elapsed time for active monitor watches in the terminal footer and publish monitor start metadata through
+  RPC state events. Paused-state formatting, the existing width budget, and `+N more` packing remain intact.
+
+- Make `/fast` switch ChatGPT-subscription Codex sessions to the priority service tier, and show a footer bolt for
+  both session-selected priority mode and model-configured `-fast` variants.
+
+- Expose `xhigh` and `max` in the CLI thinking-level cycle for map-less GPT-5.6 Sol models while treating explicit
+  thinking maps as authoritative, so a missing mapped tier or `null` veto is never re-enabled by model-ID heuristics.
+
+### Breaking Changes
+
+- Rename the SDK-backed Claude subscription provider from `claude-agent-sdk` to `claude-sdk-oauth`, including its
+  provider and model IDs, builtin path, settings key, account storage, TypeScript symbols, documentation, tests, and
+  QA surfaces. Anthropic's upstream package name and platform sidecar names remain unchanged.
+
+### Added
+
+### Changed
+
+- Deliver discovered project rules on every agent start and include the complete `## Project Instructions` region on
+  the Claude SDK OAuth lane, rather than silently dropping it after the first turn or rebuilding a partial prompt
+  that omits rules.
+
+- Announce `Optimized system prompt applied: <preset>` only when a real model preset matches. Unmatched models no
+  longer display a misleading `fallback (senpi-current)` preset at startup or after model selection.
+
+- Show a truncated objective and elapsed duration in the achieved-goal footer, and let the release script skip its
+  duplicate local `npm test` gate only when the exact `main` HEAD already has a successful `Check and test` CI run.
+  Lookup failures, non-green checks, and `--force-tests` continue to run the local gate.
+
+### Fixed
+
+- Harden Claude SDK OAuth session reuse by draining each turn through the terminal SDK result, preserving final usage
+  and stop metadata, scrubbing `SENPI_*` variables from child processes, bounding aborts, applying idle TTL to real
+  usage, and failing closed when the resident transcript or reasoning configuration diverges.
+
+- Prevent unavailable-tool transcript imitation by demoting historical Anthropic calls to safe records and adding a
+  default TTSR detector that interrupts fabricated legacy and current unavailable-tool envelopes. `/ttsr` rule
+  disablement now applies consistently, and removed debug output can no longer corrupt terminal rendering.
+
+- Repair Anthropic `tool_use` / `tool_result` adjacency at the final provider boundary after pruning, interruption,
+  or model switching. Missing results become explicit error results, while misplaced and duplicate results are
+  removed before ordinary user content so Anthropic no longer rejects the request with HTTP 400.
+
+- Route compaction summarization through the active model runtime so extension-registered providers, header-auth
+  providers, and runtime-owned OpenAI remote transports compact through the same working transport as normal agent
+  turns instead of failing with an unregistered-provider or missing-API-key error.
+
+- Make required-compaction recovery durable and chronological: deterministic fallbacks retain the full suffix,
+  queued input preserves global order, recovery fails closed outside required paths, and legacy budget-limited goal
+  state migrates without overriding current-store data.
+
+- Defer idle-compaction application until the next admitted prompt, enforce breaker and per-turn cap guards on
+  blocking routes, admit valid prompts during breaker cooldown, and prevent queue-drain bookkeeping from leaking a
+  false abort state into a later idle session.
+
+- Pause stale goals only for accepted direct input, keep accepted-input goals active, cancel or defer monitor
+  continuations safely, migrate legacy goal stores, and correlate input-disposition events so hidden stale work
+  cannot resume after the user changes direction.
+
+- Make mechanical goal blocks recoverable from both idle and queued user prompts, explain the one-message recovery
+  path, count monitor-delayed continuations toward the durable cap, and clear repetition streaks whenever a turn
+  uses tools or records observable progress.
+
+- Reset exhausted classifier-refusal retry state and emit the matching retry-end event so Escape returns to normal
+  behavior and double-Escape can open Session Tree after a fallback abort.
+
+- Remove internal web-search strategy suffixes from displayed result labels.
+
+### Removed
+
+## [2026.7.31] - 2026-07-31
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Publish the CalVer-aware update comparison in a semver-forward bare-date release so clients still running
+  `2026.7.30` can bootstrap through `senpi update`. npm semver considers same-day suffixed revisions prereleases, so
+  `2026.7.30-2` contains the comparator fix but cannot be discovered by the affected old comparator; `2026.7.31`
+  restores an update path that both the old semver comparator and the corrected Senpi CalVer comparator recognize as
+  newer.
+
+### Removed
+
+## [2026.7.30-2] - 2026-07-30
+
+### New Features
+
+- **Safer main-model selection** — Warn interactively when a main-session provider, model id, or display name selects
+  Minimax or Qwen, including startup, `/model`, exact references, favorite rotation, and post-auth defaults. The
+  prominent Korean/CJK warning remains scoped to the main session; subagent routing and safe model families are
+  unchanged ([#530](https://github.com/code-yeongyu/senpi/pull/530)).
+- **High-reasoning risk signal** — Emit `high_reasoning_warning` through the session API, RPC JSONL, and interactive
+  red warning box when GPT-5.x `-sol` models run at `xhigh` or `max`. Detection is intentionally narrower than
+  capability support, so Claude, DeepSeek, ordinary GPT, and unrelated `solar` ids do not inherit the warning.
+  Events are deduplicated by provider, model, and level
+  ([#517](https://github.com/code-yeongyu/senpi/pull/517),
+  [#526](https://github.com/code-yeongyu/senpi/pull/526)).
+- **Broader OMO workflow tips** — Add discoverable tips for `init-deep`, debugging, refactor,
+  remove-ai-slops, and visual QA alongside the existing planning, ultrawork, research, and review guidance. The
+  additions keep the existing task-extension availability gate
+  ([#521](https://github.com/code-yeongyu/senpi/pull/521)).
+
+### Breaking Changes
+
+### Added
+
+- Add `packages/coding-agent/docs/release-guide.md`, the authoritative config-neutral build, plugin verification,
+  local installation, Jobdori installation, troubleshooting, rollback, cleanup, and maintenance guide for
+  `2026.7.30-2`.
+
+### Changed
+
+- Compact proactively at agent idle when the persisted context is over threshold, rather than waiting for the next
+  user prompt to discover the same required compaction. The idle path reuses existing admission, lifecycle,
+  cancellation, and stale-revision safeguards; below-threshold and already-running sessions remain unchanged
+  ([#522](https://github.com/code-yeongyu/senpi/pull/522)).
+- Update the bundled MCP runtime dependency from `@modelcontextprotocol/sdk` `1.29.0` to `1.30.0`. Builtin registration
+  order, the `mcp`-last invariant, user MCP configuration format, and the separate hooks plugin-manifest loader are
+  unchanged.
+- Override the bundled `brace-expansion` runtime from `5.0.7` to patched `5.0.8`, closing
+  [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg), an unbounded expansion-length
+  denial-of-service reachable transitively through `glob` and `minimatch`. This is dependency-only: glob matching,
+  extension discovery, configuration formats, and command behavior are unchanged.
+### Fixed
+
+- Compare Senpi CalVer releases by the repository's `YYYY.M.D-N` contract instead of npm prerelease ordering when
+  deciding whether an update is newer. The unsuffixed date is revision 1, so `2026.7.30-2` now correctly sorts after
+  `2026.7.30`; clients on a same-day revision no longer accept the registry's older bare-date release as an update
+  and downgrade themselves. Cross-day CalVer ordering and ordinary semver package versions retain their prior
+  behavior.
+- Continue a goal immediately when `create_goal` is the final tool action of the user’s turn. Freshly created goals
+  are now marked goal-driven before the turn ends, so the first hidden continuation starts at once instead of being
+  mistaken for a side question and waiting for the 60-second user-grace timer. User grace still applies to real
+  messages sent while a goal was already active, and monitor delays, continuation caps, stale/repetition guards,
+  single-flight delivery, and completion handling are unchanged.
+- Reset the goal continuation progress cap after an observable tool action. Long-running goals can therefore continue
+  after real progress instead of exhausting a lifetime counter and stopping despite new work, while no-progress
+  repetition detection, stale-turn fencing, monitor waits, and single-flight continuation delivery remain bounded
+  ([#534](https://github.com/code-yeongyu/senpi/pull/534)).
+- Restore user input that was queued while pre-prompt compaction failed, was rejected, or was aborted back into the
+  interactive editor instead of allowing terminal recovery to consume or strand it. Failure metadata is scoped to
+  the matching compaction attempt, terminal pre-prompt recovery is marked complete exactly once, and successful
+  compaction keeps the existing queued-input admission path
+  ([#535](https://github.com/code-yeongyu/senpi/pull/535) by
+  [@realsigridjin](https://github.com/realsigridjin)).
+- Recover Kimi XTML response channels through the shared model-runtime boundary even when no tools are registered,
+  and retry one terminal empty Kimi response once. Structural markers no longer leak into final output; successful
+  recovery appears exactly once, and repeated emptiness fails visibly and finitely
+  ([#523](https://github.com/code-yeongyu/senpi/pull/523),
+  [#537](https://github.com/code-yeongyu/senpi/pull/537)).
+- Reuse the active turn’s runtime API key for automatic session-title generation before resolving provider headers
+  and compatibility options. A CLI `--api-key` turn and its background title request therefore use the same
+  credential instead of allowing the title request to fall back to a configured key and fail with 401
+  ([#519](https://github.com/code-yeongyu/senpi/pull/519)).
+- Serialize apply-patch file mutations and disclose concrete parse, seek, file-operation, and partial-success failure
+  reasons. Multi-file patches no longer race concurrent writes, and callers receive the successful source-backed
+  patch details together with an actionable failure instead of a generic unsuccessful result
+  ([#524](https://github.com/code-yeongyu/senpi/pull/524)).
+
+### Removed
+
 ## [2026.7.30] - 2026-07-30
 
 ### New Features

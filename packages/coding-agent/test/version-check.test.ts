@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	checkForNewPiVersion,
 	comparePackageVersions,
@@ -7,9 +7,13 @@ import {
 	getReleaseChangelogUrl,
 	isNewerPackageVersion,
 } from "../src/utils/version-check.ts";
+import { allowNetwork } from "./test-network-env.ts";
 
 const originalSkipVersionCheck = process.env.PI_SKIP_VERSION_CHECK;
-const originalOffline = process.env.PI_OFFLINE;
+
+beforeEach(() => {
+	allowNetwork();
+});
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -17,11 +21,6 @@ afterEach(() => {
 		delete process.env.PI_SKIP_VERSION_CHECK;
 	} else {
 		process.env.PI_SKIP_VERSION_CHECK = originalSkipVersionCheck;
-	}
-	if (originalOffline === undefined) {
-		delete process.env.PI_OFFLINE;
-	} else {
-		process.env.PI_OFFLINE = originalOffline;
 	}
 });
 
@@ -33,6 +32,14 @@ describe("version checks", () => {
 		expect(comparePackageVersions("5.0.0-beta.20", "5.0.0-beta.9")).toBeGreaterThan(0);
 		expect(isNewerPackageVersion("0.70.5", "0.70.5")).toBe(false);
 		expect(isNewerPackageVersion("0.70.6", "0.70.5")).toBe(true);
+	});
+
+	it("orders same-day Senpi CalVer revisions after the bare release", () => {
+		expect(comparePackageVersions("2026.7.30-2", "2026.7.30")).toBeGreaterThan(0);
+		expect(comparePackageVersions("2026.7.30", "2026.7.30-2")).toBeLessThan(0);
+		expect(comparePackageVersions("2026.7.31", "2026.7.30-99")).toBeGreaterThan(0);
+		expect(isNewerPackageVersion("2026.7.30", "2026.7.30-2")).toBe(false);
+		expect(isNewerPackageVersion("2026.7.30-2", "2026.7.30")).toBe(true);
 	});
 
 	it("returns only newer versions", async () => {

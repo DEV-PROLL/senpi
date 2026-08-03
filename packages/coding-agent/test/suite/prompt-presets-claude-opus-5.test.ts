@@ -50,12 +50,6 @@ describe("Claude Opus 5 prompt preset", () => {
 		// then
 		expect(preset?.name).toBe("claude-opus-5");
 		expect(preset?.prompt).toContain("You are senpi");
-		expect(preset?.prompt).toContain("## Intent Gate");
-		expect(preset?.prompt).toContain("I'll stop when [the exact, observable condition that ends this turn]");
-		expect(preset?.prompt).toContain("a defect, not diligence");
-		expect(preset?.prompt).toContain("narrowing, widening, or transforming");
-		expect(preset?.prompt).toContain("auto-compacts context");
-		expect(preset?.prompt.length).toBeGreaterThan(2_000);
 	});
 
 	it.each(["claude-opus-4-5", "claude-opus-4.5", "claude-opus-4-8", "claude-fable-5", "some-opus-compatible-router"])(
@@ -110,7 +104,6 @@ describe("Claude Opus 5 prompt preset", () => {
 
 		// then
 		expect(preset?.name).toBe("claude-opus-5");
-		expect(preset?.prompt).toContain("a defect, not diligence");
 	});
 
 	it("does not include GPT or Kimi tuning in the claude-opus-5 preset", () => {
@@ -124,20 +117,6 @@ describe("Claude Opus 5 prompt preset", () => {
 		// then
 		expect(preset?.name).toBe("claude-opus-5");
 		expect(preset?.prompt).not.toContain("apply_patch");
-		expect(preset?.prompt).not.toContain("filler verification language");
-	});
-
-	it("does not carry the 4.7/4.8 scope-literalism or house-style tuning", () => {
-		// given
-		const settings: PromptPresetSettings = { promptPreset: "auto" };
-		const model = createModel("claude-opus-5", "anthropic");
-
-		// when
-		const preset = resolvePreset(model, settings);
-
-		// then
-		expect(preset?.prompt).not.toContain('"every", "all", and "each" mean the full set');
-		expect(preset?.prompt).not.toContain("cream/serif/terracotta");
 	});
 
 	it("returns claude-opus-5 preset for every Claude Opus 5 built-in catalog model", () => {

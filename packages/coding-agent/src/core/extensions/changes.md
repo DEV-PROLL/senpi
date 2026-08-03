@@ -1,5 +1,150 @@
 # Core Extensions Changes
 
+## 2026-08-03 - ExtensionContext exposes the resolved agent dir
+
+### What changed and why
+
+- `ExtensionContext` gains `agentDir: string` and `ExtensionContextActions` gains optional `getAgentDir`.
+  `AgentSession.bindCore` supplies its resolved agent dir (`config.agentDir ?? getAgentDir()`); the runner
+  falls back to `getAgentDir()` when unbound.
+- The builtin compaction extension previously read `ctx.agentDir` through a local cast that core never
+  populated, so its "always-on" `logs/compaction.log` was a permanent noop on every install. Extensions that
+  need the agent state directory now have a typed context getter instead of a global lookup.
+
+### Expected merge conflict zones
+
+- LOW: `types.ts` `ExtensionContext`/`ExtensionContextActions` member lists.
+- LOW: `runner.ts` context getter block and `bindCore` context-action wiring.
+- LOW: `core/agent-session.ts` bindCore context-action object.
+
+## 2026-08-02 - Completed apply_patch details have fixed retention bounds
+
+### What changed and why
+
+- The builtin `apply_patch` tool stores the same bounded diff used by the TUI in its top-level preview and retains complete unified patches only up to 16 KiB per file.
+- Oversized unified patches are omitted rather than persisting old/new file bodies or exposing malformed truncated diffs; app-server file-change projection remains complete for patches within budget.
+- Nested applied-operation previews and fail-fast error recovery results retain paths, move destinations, operation types, line counts, operation indexes, fuzz, and failure/recovery metadata without full patch bodies.
+- Projection and persistence receive the same completed result object, with no extension-owned post-projection persistence hook, so the explicit byte budget is the narrowest boundary that also removes source-size scaling.
+
+### Expected merge conflict zones
+
+- LOW: `builtin/gpt-apply-patch/apply.ts` and `tool.ts` result construction.
+
+## 2026-08-01 - Anthropic pair guards share the provider-final sanitizer
+
+### What changed and why
+
+- The `tool-pair-guard` request hook and direct compaction summarization now use the browser-safe
+  `sanitizeAnthropicToolPairs` export from `@earendil-works/pi-ai`.
+- The duplicate coding-agent sanitizer was removed so normal turns, extension hooks, and direct summarization
+  cannot drift across separate Anthropic repair implementations.
+- The coding-agent hook remains an early defensive repair, while the pi-ai Anthropic adapter owns the final
+  pre-SDK invariant after all payload mutations.
+
+### Expected merge conflict zones
+
+- LOW: `builtin/tool-pair-guard/index.ts` and `builtin/compaction/speculative.ts` if upstream changes direct
+  provider-request hooks.
+- LOW: `test/tool-pair-guard/sanitize-anthropic-payload.test.ts` if upstream relocates wire sanitizer coverage.
+
+## Backfill: extension context and reload stability (2026-08-01)
+
+### What changed
+
+- Session replacement no longer leaves extensions holding stale `ExtensionContext` instances.
+- Config reload watches stay scoped to the intended config source instead of widening across unrelated paths.
+- Global/default compatibility shims no longer bounce state back and forth during reloads.
+
+### Why
+
+- These fixes keep long-lived extension processes aligned with the current session and configuration.
+
+### Why this cannot be expressed externally
+
+- The behavior lives inside extension runner lifecycle, SDK context replacement, and config-watch ownership.
+
+### Expected merge conflict zones
+
+- `runner.ts`, `sdk.ts`, extension config reload/watch wiring, and global/default shim normalization.
+
+## 2026-08-01 - recommended-models respects an explicitly saved system default
+
+### What changed and why
+
+- The `recommended-models` builtin no longer auto-switches when the startup model comes from the user's own `settings` provenance. It now auto-switches only on implicit fallback paths (`provider-default` and `first-available`), so an explicitly configured `defaultProvider`/`defaultModel` is never silently overridden by a recommendation.
+- Previously a user who had set a non-recommended system default still got switched to the recommended model on every start (with the notice `Switched to recommended model '...'.`), in TUI persisting the recommendation back over their chosen default.
+- Explicit CLI and scoped selections were already excluded; `settings` (an explicitly configured system default) is now excluded too, aligning the extension with the original intent of preserving explicit user choice.
+
+### Files modified
+
+- `builtin/recommended-models/index.ts` (`AUTO_SWITCH_PROVENANCE`)
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `builtin/recommended-models/index.ts` if upstream re-introduces `settings` as an auto-switch path; keep it out of `AUTO_SWITCH_PROVENANCE`.
+
+
+## 2026-07-31 - Correlated input dispositions
+
+### What changed and why
+
+- `InputEvent` now carries a session-local `inputId`; the new `input_disposition` event repeats that ID with `handled`, `queued`, `started`, or `rejected` after interception and final admission resolve.
+- Goal lifecycle state can therefore wait for accepted input instead of mutating persistence from raw input, while concurrent prompts retain independent ownership.
+
+### Expected merge conflict zones
+
+- MEDIUM: additive input event types/exports and `AgentSession.prompt()` admission exits.
+- LOW: `ExtensionRunner.emitInput()` event assembly.
+
+## 2026-07-31 - Anthropic tool-pair guard repairs missing immediate results
+
+### What changed
+
+- The tool-pair guard sanitizer pairs client `tool_use` blocks only with
+  `tool_result` blocks in the immediately following user message, removes misplaced or duplicate results,
+  and synthesizes error results for calls whose outputs were interrupted or pruned.
+- Repaired result blocks are placed before ordinary user content, including when the following user message
+  originally used string content.
+- `test/tool-pair-guard/sanitize-anthropic-payload.test.ts` covers the observed Kimi-to-Opus `bash_14`
+  replay failure plus payload-end, partial-result, duplicate, misplaced, and string-content cases.
+
+### Why
+
+- Anthropic rejects a request when any client `tool_use` lacks a matching `tool_result` in the next user
+  message. A persisted session can be valid before context hooks run but lose one result during pruning or
+  payload transformation, so switching from a larger-context non-Anthropic model to Claude could wedge every
+  follow-up request with HTTP 400.
+- The provider-request hook repairs after context reduction and wire conversion without changing the durable
+  transcript. The 2026-08-01 provider-final guard supersedes the earlier assumption that no later payload
+  mutation could invalidate the pair.
+
+### Expected merge conflict zones
+
+- LOW: `@earendil-works/pi-ai` `sanitizeAnthropicToolPairs` if upstream adds equivalent Anthropic tool-pair
+  normalization.
+- LOW: `test/tool-pair-guard/sanitize-anthropic-payload.test.ts` if upstream expands the same sanitizer cases.
+
+## 2026-07-31 - `pi.setSessionFastMode()` for the fast-mode indicator
+
+### What changed and why
+
+- `ExtensionAPI` gains `setSessionFastMode(enabled: boolean)` (with the matching
+  `SetSessionFastModeHandler` type and `ExtensionActions.setSessionFastMode`). It flips a
+  session-scoped, never-persisted flag on `AgentSession` that hosts can surface; the TUI footer
+  stamps a lightning bolt on the model label while it is set.
+- The flag is display-only and deliberately separate from `serviceTier`. `serviceTier` feeds
+  request composition (`service-tier.ts` for non-Codex apis, `compaction/openai-remote.ts`), so
+  folding a provider-scoped fast toggle into it would inject `service_tier: "priority"` into
+  API-key-billed `openai-responses` traffic. `AgentSession.isFastModeActive()` ORs the flag with
+  `serviceTier === "priority"`, so a configured `-fast` catalog variant lights the indicator too.
+- The `service-tier` builtin mirrors its Codex session toggle through the new API and clears it on
+  `session_start`.
+
+### Expected merge conflict zones
+
+- MEDIUM: `types.ts` around the `setSession*` block in `ExtensionAPI` and `ExtensionActions`.
+- LOW: `loader.ts` stub table and `pi` implementation, `runner.ts` `bindCore` assignment.
+
 ## 2026-07-30 - Linux recursive config watches leave the interactive main thread
 
 ### What changed and why

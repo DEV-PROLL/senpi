@@ -5,7 +5,7 @@ import {
 	SERVER_FALLBACK_ABORTED_DIAGNOSTIC,
 } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { createHarness, type Harness } from "./harness.ts";
+import { createHarness, getAssistantTexts, type Harness } from "./harness.ts";
 
 const primary = "faux/faux-1";
 const fallback = "faux/faux-2";
@@ -71,21 +71,28 @@ describe("server-side fallback abort routing", () => {
 		).toEqual([]);
 	});
 
-	it("reports that no chain is configured so the UI can point at /fallback", async () => {
-		const harness = await createHarness({ settings: { retry: { enabled: true, baseDelayMs: 1 } } });
+	it("keeps the server-selected response when no client chain is configured", async () => {
+		const harness = await createHarness({
+			settings: { retry: { enabled: true, baseDelayMs: 1, fallbackChains: {} } },
+		});
 		harnesses.push(harness);
-		harness.setResponses([abortedByServerFallback("claude-opus-5", "claude-opus-4-6")]);
+		const inner = harness.session.agent.streamFunction;
+		harness.session.agent.streamFunction = (model, context, options) => {
+			harness.setResponses([
+				options?.abortServerSideFallback === true
+					? abortedByServerFallback("claude-opus-5", "claude-opus-4-8")
+					: fauxAssistantMessage("server fallback answer"),
+			]);
+			return inner(model, context, options);
+		};
 
 		await harness.session.prompt("audit this");
 
-		expect(harness.eventsOfType("server_fallback_aborted")).toMatchObject([
-			{ from: "claude-opus-5", to: "claude-opus-4-6", chainConfigured: false },
-		]);
-		// A refusal with no chain settles without exhaustion, so the abort event is
-		// the only signal the UI gets for the missing-chain case.
+		expect(harness.eventsOfType("server_fallback_aborted")).toEqual([]);
 		expect(harness.eventsOfType("retry_fallback_exhausted")).toEqual([]);
 		expect(harness.eventsOfType("agent_settled")).toHaveLength(1);
 		expect(harness.faux.state.callCount).toBe(1);
+		expect(getAssistantTexts(harness)).toContain("server fallback answer");
 	});
 
 	it("keeps the abort diagnostics on the persisted turn", async () => {

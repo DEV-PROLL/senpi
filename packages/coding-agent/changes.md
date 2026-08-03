@@ -1,5 +1,104 @@
 # Local fork changes
 
+## 2026-08-03 — Make the editor prompt marker visually explicit
+
+### What changed
+
+- Reserved a two-column prompt gutter in the coding-agent `CustomEditor`.
+- Rendered an accent-styled `❯` on the first editable row and aligned wrapped rows beneath the text column.
+- Preserved that gutter when session/settings reloads reapply an `editorPaddingX` value below two.
+- Kept `getPaddingX()` reporting the configured value so existing editor construction and extension handoff contracts remain stable.
+- Hid the marker when the editor is vertically scrolled so it never appears beside a continuation row.
+- Kept sub-five-column rendering on the previous no-marker fallback to avoid narrow-terminal overflow.
+
+### Why this lives in the fork
+
+- The marker is part of the coding-agent interactive composer layout, including width reservation, wrapping, cursor placement, and autocomplete alignment.
+- Extensions can replace the editor but cannot decorate the built-in editor's private render loop without reimplementing its editing behavior.
+
+### Expected upstream merge-conflict zones
+
+- `packages/coding-agent/src/modes/interactive/components/custom-editor.ts` around `CustomEditor` construction and rendering.
+- `packages/coding-agent/test/custom-editor-prompt.test.ts` around built-in composer rendering assertions.
+
+## 2026-08-01 — Reconcile fork runtime contracts after the upstream merge
+
+### What changed
+
+- Updated Grok themes for the merged scrollbar color contract while preserving their non-palette inheritance.
+- Kept implicit legacy `SYSTEM.md` and `APPEND_SYSTEM.md` files excluded from both prompt content and source metadata.
+- Restored source-runtime extension aliases, Alt Screen help grouping, and package-declared hook discovery.
+- Added the merged protocol and client workspaces to the root build graph in dependency order so clean CI runners produce their declarations before dependent packages compile.
+- Updated deterministic test hosts for merged session abort, Markdown transformer, UI mode, fullscreen scrollbar, and offline-network contracts.
+- Made the `/btw` concurrent snapshot test wait for the exact side-provider entry signal instead of relying on provider-call timing.
+
+### Why
+
+- Upstream added runtime capabilities and lifecycle requirements on surfaces that also carry fork-only behavior. The merge preserved most production code but omitted three fork integration fields and left several fork tests modeling the pre-merge runtime shape.
+- The resulting full package suite had 25 coding-agent failures despite narrower focused suites being green, and clean CI builds could not resolve the newly merged client and protocol workspaces because local validation had pre-existing `dist` artifacts.
+
+### Why this cannot be expressed externally
+
+- These behaviors span package loading, built-in help, manifest parsing, session lifecycle, interactive rendering, and the repository's deterministic faux-provider tests before extension-level customization can repair them.
+
+### Expected merge conflict zones
+
+- `scripts/build-all.mjs`, `src/core/extensions/loader.ts`, `src/core/pi-manifest.ts`, `src/core/resource-loader.ts`, `src/modes/interactive/help-content.ts`, Grok theme JSON, `interactive-mode.ts` test hosts, session-runtime tests, model-network policy tests, and `/btw` concurrency coverage.
+
+## 2026-08-01 — Preserve the no-shipped-shrinkwrap install contract
+
+### What changed
+
+- Removed the upstream `packages/coding-agent/npm-shrinkwrap.json` that was reintroduced by the merge.
+- Updated the root supply-chain documentation to identify `publish-deps.lock.json` as the staging-only generated manifest and to state that `npm-shrinkwrap.json` must not ship.
+
+### Why
+
+- The fork deliberately removed the npm shrinkwrap because npm force-packs that filename and treats it as the complete locked bundled tree, skipping non-bundled direct dependencies and leaving installed CLIs broken with `ERR_MODULE_NOT_FOUND`.
+- Keeping the reintroduced file or the stale README claim would contradict the existing pack guard and misdirect the next release or upstream merge.
+
+### Why this cannot be expressed externally
+
+- Package tarball contents, publish staging metadata, and repository release documentation are owned before the Senpi runtime and extension system start.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/npm-shrinkwrap.json`, root `README.md` supply-chain documentation, `scripts/generate-coding-agent-shrinkwrap.mjs`, and publish pack guards.
+
+## 2026-08-01 — Backfill local release and publish hardening
+
+### What changed
+
+- Local release tests build packages first and run smoke tests serially.
+- Release output prints the exact npm publish command and permits authenticated local publishing.
+- Provenance metadata, publish roots, and publish directories now match the fork's declared package layout.
+
+### Why
+
+- Local release evidence must exercise built artifacts and produce commands that work from the actual fork package roots.
+
+### Why this cannot be expressed externally
+
+- The behavior is owned by repository release, publish, provenance, and smoke-test scripts.
+
+### Expected merge conflict zones
+
+- `scripts/local-release.mjs`, `scripts/publish.mjs`, release smoke helpers, and package publish metadata.
+
+## 2026-07-31 — Claude SDK OAuth provider identity
+
+- Changed: renamed Senpi's SDK-backed Claude subscription provider and every active internal surface from `claude-agent-sdk` to `claude-sdk-oauth`, including auth storage, settings, commands, RPC/app-server account routing, tests, docs, and QA scenarios.
+- Preserved: Anthropic's upstream package and platform sidecar names remain `@anthropic-ai/claude-agent-sdk`.
+- Coverage: three captured RED→GREEN contracts pin registry/login/path behavior; focused provider tests and real CLI/TUI QA cover the renamed surface.
+- Merge-conflict risk: high in the provider directory and its tests; medium in builtin registration and account protocol imports.
+
+## 2026-07-30 — CalVer-aware update ordering
+
+- Changed: package update checks now compare Senpi's `YYYY.M.D-N` same-day revisions using the release contract, where the bare date is revision 1 and `-2`, `-3`, and later suffixes are newer releases.
+- Why: npm semver treats `2026.7.30-2` as a prerelease older than `2026.7.30`, so a client on the second same-day release could incorrectly "update" back to the first release.
+- Coverage: `test/version-check.test.ts` proves same-day revision ordering, cross-day ordering, and both update-detection directions while preserving normal semver comparisons.
+- Merge-conflict risk: low. The change is isolated to the shared package-version comparator and its focused tests.
+
 ## 2026-07-30 — Root-owned consumer sidecar installation (#446)
 
 - Changed: publish staging now removes promoted platform optional-dependency edges from the bundled portable package manifest after copying the complete family to Senpi's root optional dependencies.
@@ -367,3 +466,26 @@
 - What changed: test-only package coverage; runtime seams are documented in the matching core and RPC change logs.
 - Why the extension system could not handle this: the RPC process, wire response, and model registry are package-owned surfaces.
 - Merge-conflict risk: low. The test file is fork-only.
+
+## 2026-08-02 — TypeScript native tsc migration
+
+### What changed
+
+- Replaced `tsgo` with `tsc` in the `dev` and `build` scripts; flags and arguments remain unchanged.
+- Bumped the root `typescript` pin from `6.0.3` to `7.0.2`.
+- Dropped the `@typescript/native-preview` toolchain dependency.
+- Added `@typescript/typescript6@6.0.2` (Microsoft's official TypeScript-6 API bridge) so `scripts/check-ts-relative-imports.mjs` keeps working: TypeScript 7 removed the classic programmatic JS API it imported.
+- Added `@typescript/native: npm:typescript@7.0.2` as a scoped alias. The `typescript6` package publicly depends on `@typescript/old` (typescript 6.x), and npm hoists it; alphabetically `@typescript/old` beats `typescript` for the `node_modules/.bin/tsc` link, which would make every bare `tsc` invocation (root check and all package builds) silently run the TypeScript 6 compiler. The alias sorts after `@typescript/old`, so it deterministically wins the `.bin/tsc` link to the 7.0.2 native compiler. It is a bin-ownership pin, not an import target.
+
+### Why
+
+- Adopt a stable-first toolchain policy: use the released `typescript@7.0.2` native compiler for package builds and typechecks instead of the experimental `tsgo` dev build.
+- The `native-preview` compiler has been retired upstream in favor of `typescript@next`.
+
+### Why this cannot be expressed externally
+
+- Build scripts and `devDependencies` are package infrastructure, not runtime behavior; extensions cannot rewrite another package's manifest scripts or compiler selection.
+
+### Expected merge conflict zones
+
+- `package.json` `scripts` and `devDependencies` versus upstream `tsgo` usage.

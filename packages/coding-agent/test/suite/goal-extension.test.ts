@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -138,27 +138,11 @@ describe("goal extension contract (budget-free)", () => {
 		const serialized = JSON.stringify(update).toLowerCase();
 		expect(create?.description).toMatch(/4,000.*file/i);
 		expect(JSON.stringify(create?.parameters)).toMatch(/4,000.*file/i);
-		expect(create?.description).toMatch(/complete.*archive.*unfinished/i);
 		expect(serialized).toContain("complete");
 		expect(serialized).toContain("blocked");
 		expect(serialized).toContain("reason");
-		expect(update?.description).toMatch(/3 consecutive goal turns/i);
-		expect(update?.description).toMatch(/no live resumption channel|no live monitor/i);
-		expect(update?.description).toMatch(/wait.*not an impasse/i);
-		expect(update?.description).toMatch(/fresh blocked audit after resume/i);
-		expect(update?.description).toMatch(/hard, slow, or uncertain/i);
 		expect(serialized).not.toContain("budget");
 		expect(JSON.stringify(tools.get("get_goal")).toLowerCase()).not.toContain("budget");
-	});
-
-	it("documents the todo gate and decisive completion in the update_goal description", () => {
-		const { tools } = createGoalHarness();
-		const description = tools.get("update_goal")?.description ?? "";
-		expect(description).toMatch(/completion audit/i);
-		expect(description).toMatch(/todo/i);
-		expect(description).toMatch(/rejected while/i);
-		expect(description).toMatch(/same turn/i);
-		expect(description).toMatch(/unmistakably clear/i);
 	});
 
 	it("creates, reads, and completes a goal through the tools and file store", async () => {
@@ -624,7 +608,18 @@ describe("goal extension session_start migration-lite admission", () => {
 		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
 		expect(sent).toHaveLength(0);
 
-		await runHandlers(handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"input",
+			{ type: "input", inputId: "suppressed-resume", text: "continue", source: "interactive" },
+			ctx,
+		);
+		await runHandlers(
+			handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "suppressed-resume", disposition: "started" },
+			ctx,
+		);
 		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
 		await runHandlers(
 			handlers,
@@ -632,12 +627,12 @@ describe("goal extension session_start migration-lite admission", () => {
 			{ type: "agent_end", messages: [assistantMessageWithStopReason("stop")] },
 			ctx,
 		);
-		// A user-initiated turn end triggers the 60s grace delay (todo 6), so nothing
-		// is queued immediately. The continuation fires after the grace window.
+		// Accepted direct input consumes continuation eligibility for this turn. The
+		// Goal remains active, but no delayed continuation resurrects it afterward.
 		expect(sent).toHaveLength(0);
 		await vi.advanceTimersByTimeAsync(60_000);
-		expect(sent).toHaveLength(1);
-		expect(sent[0]?.message.customType).toBe("goal-continuation");
+		expect(sent).toHaveLength(0);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
 		vi.useRealTimers();
 	});
 
@@ -655,6 +650,78 @@ describe("goal extension session_start migration-lite admission", () => {
 		expect(sent).toHaveLength(0);
 		expect(notices).toEqual([]);
 		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+	});
+});
+
+describe("goal extension session_start legacy pi-goal migration", () => {
+	async function writeLegacyGoalFile(ctx: ExtensionContext, goal: Record<string, unknown>): Promise<void> {
+		const legacyDir = join(ctx.sessionManager.getSessionDir(), "extensions", "pi-goal");
+		await mkdir(legacyDir, { recursive: true });
+		await writeFile(
+			join(legacyDir, `${encodeURIComponent(ctx.sessionManager.getSessionId())}.json`),
+			`${JSON.stringify({ version: 1, goal })}\n`,
+			"utf8",
+		);
+	}
+
+	function legacyGoal(ctx: ExtensionContext, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+		return {
+			id: "legacy-goal-id",
+			threadId: ctx.sessionManager.getSessionId(),
+			objective: "Finish the legacy goal",
+			status: "budgetLimited",
+			tokenBudget: 100,
+			tokensUsed: 40,
+			timeUsedSeconds: 8,
+			createdAt: 1,
+			updatedAt: 2,
+			...overrides,
+		};
+	}
+
+	it("imports a legacy budget-limited goal at startup and resumes it as active", async () => {
+		const { handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-legacy-startup");
+		await writeLegacyGoalFile(ctx, legacyGoal(ctx));
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
+
+		const migrated = await readGoal(storeRefFor(ctx));
+		expect(migrated).toMatchObject({ id: "legacy-goal-id", status: "active", tokensUsed: 40 });
+		expect(migrated).not.toHaveProperty("tokenBudget");
+		// Migration runs before startup accounting, so the imported goal is picked up this session.
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+	});
+
+	it("keeps an existing current goal instead of the legacy file", async () => {
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeCtx("thread-legacy-current-wins");
+		await tools.get("create_goal")?.execute("c1", { objective: "Current goal" }, undefined, undefined, ctx);
+		const current = await readGoal(storeRefFor(ctx));
+		await writeLegacyGoalFile(ctx, legacyGoal(ctx));
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
+
+		// The current goal keeps its identity and objective; only ordinary continuation
+		// bookkeeping may advance. The legacy goal is never imported over it.
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({
+			id: current?.id,
+			objective: "Current goal",
+			status: "active",
+			tokensUsed: 0,
+		});
+		expect((await readGoal(storeRefFor(ctx)))?.id).not.toBe("legacy-goal-id");
+	});
+
+	it("starts cleanly when no legacy file exists", async () => {
+		const { handlers, sent } = createGoalHarness();
+		const ctx = await makeCtx("thread-legacy-absent");
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "startup" }, ctx);
+
+		expect(await readGoal(storeRefFor(ctx))).toBeNull();
+		expect(sent).toHaveLength(0);
 	});
 });
 
