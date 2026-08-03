@@ -1,3 +1,36 @@
+## Keep long-running compaction recovery progressing (2026-08-03)
+
+### What changed
+
+- The automatic-compaction soft cap now resets after each provider turn instead of lasting for the
+  whole multi-tool agent run. The completed turn's zero-yield recovery still observes its original cap
+  before the reset, while the absolute session cap remains authoritative for every route.
+- Required-compaction failures now resume queued work after an accepted recovery compaction without a
+  synthetic `continue`, while rejected recovery remains terminal.
+- Provenance-confirmed required recovery uses the persisted byte-derived estimate when no valid
+  provider usage sample exists.
+- Deterministic recovery measures the reconstructed suffix instead of stale cumulative assistant usage.
+  It keeps the prepared boundary when safe and otherwise advances to the latest complete persisted user
+  turn, including expanded skill text and its chronological suffix, with strict retained-message schemas.
+
+### Why
+
+- Long `ulw` runs could complete three valid compactions and then reject every later threshold
+  compaction as if the whole agent run were one provider turn.
+- When summarization then failed, a fitting skill-bearing suffix could be rejected because provider
+  usage still described the discarded pre-compaction prefix. Repeated continuations surfaced the same
+  threshold error instead of recovering.
+
+### Why this cannot be expressed externally
+
+- The fix depends on internal provider-turn lifecycle state, exact session entry boundaries, compaction
+  admission, and continuation ownership.
+
+### Expected merge conflict zones
+
+- `src/core/agent-session.ts` compaction retry/continuation ownership and upstream telemetry lifecycle.
+- `src/core/extensions/builtin/compaction/` admission, fallback, and provider-turn accounting.
+
 ## Compact completed apply_patch result details (2026-08-02)
 
 ### What changed

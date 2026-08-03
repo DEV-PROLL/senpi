@@ -89,6 +89,30 @@ describe("blocking compaction route guards (issue #527)", () => {
 		expect((harness.ctx.applyCompaction as ReturnType<typeof vi.fn>).mock.calls.length).toBe(softCap);
 	});
 
+	it("admits compaction again after the provider turn ends", async () => {
+		const handlers = captureHandlers();
+		const beforeAgentStart = handlers.get("before_agent_start");
+		const sessionCompact = handlers.get("session_compact");
+		const turnEnd = handlers.get("turn_end");
+		expect(beforeAgentStart).toBeDefined();
+		expect(sessionCompact).toBeDefined();
+		expect(turnEnd).toBeDefined();
+		const harness = createBlockingContext({ usageTokens: 9_950 });
+		registrations.push(harness.registration);
+		harness.registration.setResponses(
+			Array.from({ length: softCap + 1 }, () => fauxAssistantMessage("## Goal\ncompact summary")),
+		);
+
+		for (let round = 0; round < softCap; round++) {
+			await beforeAgentStart?.(createBeforeAgentStartEvent() as never, harness.ctx);
+			await sessionCompact?.(acceptedCompactionEvent(round, 8_000) as never, harness.ctx);
+		}
+		await turnEnd?.({ type: "turn_end" } as never, harness.ctx);
+		await beforeAgentStart?.(createBeforeAgentStartEvent() as never, harness.ctx);
+
+		expect((harness.ctx.applyCompaction as ReturnType<typeof vi.fn>).mock.calls.length).toBe(softCap + 1);
+	});
+
 	it("counts zero-yield attempts before admitting turn-end recovery", async () => {
 		const handlers = captureHandlers();
 		const turnEnd = handlers.get("turn_end");

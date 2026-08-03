@@ -1,7 +1,9 @@
-import { type CompactionPreparation, type CompactionResult, estimateContextTokens } from "../../../compaction/index.ts";
+import { type CompactionPreparation, type CompactionResult, estimateTokens } from "../../../compaction/index.ts";
 import { StreamDurationBudgetError, StreamIdleTimeoutError } from "../../../compaction/stream-watchdog.ts";
+import { filterContextExcludedMessages } from "../../../messages.ts";
 import { buildSessionContext, type CompactionEntry, type SessionEntry } from "../../../session-manager.ts";
 import { SummarizationOverflowExhaustedError } from "./overflow-retry.ts";
+import { hasUnsafeRetainedContent } from "./retained-message-safety.ts";
 import { SummaryRequestError } from "./speculative.ts";
 import { capUtf8Bytes } from "./task-intent.ts";
 
@@ -20,7 +22,36 @@ interface DeterministicFallbackDetails {
 	schema: "senpi.compaction.deterministic-fallback.v1";
 	origin: "required-compaction-recovery";
 	failureKind: RequiredCompactionFallbackFailure;
-	retainedSuffix?: "prepared";
+	taskIntent?: string;
+	retainedSuffix?: "prepared" | "latest-user-turn";
+}
+
+const NON_VISIBLE_USER_TEXT = /[\p{White_Space}\p{Default_Ignorable_Code_Point}]/gu;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function hasMeaningfulUserText(entry: SessionEntry): boolean {
+	if (entry.type !== "message" || !isRecord(entry.message) || entry.message.role !== "user") return false;
+	const content = entry.message.content;
+	const hasVisibleText = (text: unknown): boolean =>
+		typeof text === "string" && text.normalize("NFKC").replace(NON_VISIBLE_USER_TEXT, "").length > 0;
+	if (typeof content === "string") return hasVisibleText(content);
+	if (!Array.isArray(content)) return false;
+	return content.some((block) => isRecord(block) && block.type === "text" && hasVisibleText(block.text));
+}
+
+function estimateConservativeTokens(messages: ReturnType<typeof filterContextExcludedMessages>): number {
+	try {
+		return messages.reduce((tokens, message) => {
+			const serialized = JSON.stringify(message);
+			if (serialized === undefined) return Number.POSITIVE_INFINITY;
+			return tokens + Math.max(estimateTokens(message), Buffer.byteLength(serialized));
+		}, 0);
+	} catch {
+		return Number.POSITIVE_INFINITY;
+	}
 }
 
 export function classifyRequiredCompactionFallbackFailure(
@@ -45,7 +76,8 @@ export function createRequiredCompactionFallback(
 	metadata: RecoveryMetadata,
 	branchEntries: SessionEntry[] = [],
 ): CompactionResult<DeterministicFallbackDetails> | undefined {
-	if (!preparation.firstKeptEntryId || !branchEntries.some((entry) => entry.id === preparation.firstKeptEntryId)) {
+	const preparedBoundaryIndex = branchEntries.findIndex((entry) => entry.id === preparation.firstKeptEntryId);
+	if (!preparation.firstKeptEntryId || preparedBoundaryIndex === -1) {
 		return undefined;
 	}
 
@@ -75,30 +107,49 @@ export function createRequiredCompactionFallback(
 		failureKind,
 		...(taskIntent ? { taskIntent } : {}),
 	};
-	const result: CompactionResult<DeterministicFallbackDetails> = {
-		summary,
-		firstKeptEntryId: preparation.firstKeptEntryId,
-		tokensBefore: preparation.tokensBefore,
-		details: baseDetails,
+	const projectCandidate = (
+		firstKeptEntryId: string,
+		retainedSuffix: NonNullable<DeterministicFallbackDetails["retainedSuffix"]>,
+	): CompactionResult<DeterministicFallbackDetails> | undefined => {
+		const details = { ...baseDetails, retainedSuffix };
+		const result: CompactionResult<DeterministicFallbackDetails> = {
+			summary,
+			firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details,
+		};
+		const syntheticCompaction: CompactionEntry = {
+			type: "compaction",
+			id: "__senpi_deterministic_fallback_preview__",
+			parentId: branchEntries.at(-1)?.id ?? null,
+			timestamp: new Date(0).toISOString(),
+			summary: result.summary,
+			firstKeptEntryId: result.firstKeptEntryId,
+			tokensBefore: result.tokensBefore,
+			details: result.details,
+			fromHook: true,
+		};
+		let retainedMessages: ReturnType<typeof filterContextExcludedMessages>;
+		try {
+			retainedMessages = filterContextExcludedMessages(
+				buildSessionContext([...branchEntries, syntheticCompaction]).messages,
+			);
+		} catch {
+			return undefined;
+		}
+		if (hasUnsafeRetainedContent(retainedMessages)) return undefined;
+		const retainedTokens = estimateConservativeTokens(retainedMessages);
+		if (retainedTokens > contextWindow - preparation.settings.reserveTokens) return undefined;
+		return { ...result, estimatedTokensAfter: retainedTokens };
 	};
-	const syntheticCompaction: CompactionEntry = {
-		type: "compaction",
-		id: "__senpi_deterministic_fallback_preview__",
-		parentId: branchEntries.at(-1)?.id ?? null,
-		timestamp: new Date(0).toISOString(),
-		summary: result.summary,
-		firstKeptEntryId: result.firstKeptEntryId,
-		tokensBefore: result.tokensBefore,
-		details: result.details,
-		fromHook: true,
-	};
-	const retainedTokens = estimateContextTokens(
-		buildSessionContext([...branchEntries, syntheticCompaction]).messages,
-	).tokens;
-	if (retainedTokens > contextWindow - preparation.settings.reserveTokens) return undefined;
-	return {
-		...result,
-		estimatedTokensAfter: retainedTokens,
-		details: { ...baseDetails, retainedSuffix: "prepared" },
-	};
+
+	const prepared = projectCandidate(preparation.firstKeptEntryId, "prepared");
+	if (prepared) return prepared;
+
+	for (let index = branchEntries.length - 1; index > preparedBoundaryIndex; index--) {
+		const entry = branchEntries[index];
+		if (!hasMeaningfulUserText(entry)) continue;
+		return projectCandidate(entry.id, "latest-user-turn");
+	}
+	return undefined;
 }
