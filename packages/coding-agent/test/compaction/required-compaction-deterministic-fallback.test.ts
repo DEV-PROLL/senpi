@@ -412,4 +412,39 @@ describe("required compaction deterministic fallback", () => {
 		expect(exact?.estimatedTokensAfter).toBe(roomy.estimatedTokensAfter);
 		expect(below).toBeUndefined();
 	});
+
+	it("rejects accessor-bearing retained tool-call arguments without executing them", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!;
+		const boundary = branchEntries.at(-1)!;
+
+		let getterCalls = 0;
+		const argumentsWithAccessor = {};
+		Object.defineProperty(argumentsWithAccessor, "payload", {
+			enumerable: true,
+			get() {
+				getterCalls++;
+				return "x".repeat(1_024);
+			},
+		});
+		const toolMessage = {
+			...fauxAssistantMessage("", { timestamp: 4, stopReason: "toolUse" }),
+			content: [{ type: "toolCall" as const, id: "probe", name: "probe", arguments: argumentsWithAccessor }],
+		};
+		const observedBranch = branchEntries.map((entry) =>
+			entry.id === boundary.id ? { ...entry, message: toolMessage } : entry,
+		);
+
+		const result = createRequiredCompactionFallback(
+			{ ...preparation, firstKeptEntryId: boundary.id },
+			100_000,
+			"summarization-timeout",
+			{},
+			observedBranch,
+		);
+
+		expect(result).toBeUndefined();
+		expect(getterCalls).toBe(0);
+	});
 });

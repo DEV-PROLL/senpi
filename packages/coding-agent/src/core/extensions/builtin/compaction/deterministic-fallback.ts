@@ -42,16 +42,57 @@ function hasMeaningfulUserText(entry: SessionEntry): boolean {
 	return content.some((block) => isRecord(block) && block.type === "text" && hasVisibleText(block.text));
 }
 
-function estimateConservativeTokens(messages: ReturnType<typeof filterContextExcludedMessages>): number {
-	try {
-		return messages.reduce((tokens, message) => {
-			const serialized = JSON.stringify(message);
-			if (serialized === undefined) return Number.POSITIVE_INFINITY;
-			return tokens + Math.max(estimateTokens(message), Buffer.byteLength(serialized));
-		}, 0);
-	} catch {
-		return Number.POSITIVE_INFINITY;
+/**
+ * Bound a value graph that came from persisted, potentially hostile session data.
+ * Returns false when the graph contains anything we must not read (accessors,
+ * non-plain prototypes, cycles, functions, symbols) so callers fail closed
+ * instead of executing persisted code or walking unbounded structures.
+ */
+function isSafeBoundedValue(value: unknown, seen = new Set<object>(), depth = 0): boolean {
+	if (depth > 32) return false;
+	if (value === null || value === undefined) return true;
+	const kind = typeof value;
+	if (kind === "string" || kind === "number" || kind === "boolean") return true;
+	if (kind !== "object") return false;
+	if (seen.has(value as object)) return false;
+	seen.add(value as object);
+	if (Array.isArray(value)) {
+		for (const item of value) if (!isSafeBoundedValue(item, seen, depth + 1)) return false;
+		return true;
 	}
+	const proto = Object.getPrototypeOf(value);
+	if (proto !== Object.prototype && proto !== null) return false;
+	for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+		if (descriptor.get !== undefined || descriptor.set !== undefined) return false;
+		if (typeof descriptor.value === "function" || typeof descriptor.value === "symbol") return false;
+		if (!isSafeBoundedValue(descriptor.value, seen, depth + 1)) return false;
+	}
+	return true;
+}
+
+/**
+ * Conservative retained-context size. Fails closed (Infinity) on any unsafe or
+ * un-serializable value, and exits early once `budget` is exceeded so an
+ * oversized retained message cannot force an allocation-heavy full scan.
+ */
+function estimateConservativeTokens(
+	messages: ReturnType<typeof filterContextExcludedMessages>,
+	budget: number,
+): number {
+	let total = 0;
+	for (const message of messages) {
+		if (!isSafeBoundedValue(message)) return Number.POSITIVE_INFINITY;
+		let serialized: string | undefined;
+		try {
+			serialized = JSON.stringify(message);
+		} catch {
+			return Number.POSITIVE_INFINITY;
+		}
+		if (serialized === undefined) return Number.POSITIVE_INFINITY;
+		total += Math.max(estimateTokens(message), Buffer.byteLength(serialized));
+		if (total > budget) return total;
+	}
+	return total;
 }
 
 export function classifyRequiredCompactionFallbackFailure(
@@ -138,8 +179,9 @@ export function createRequiredCompactionFallback(
 			return undefined;
 		}
 		if (hasUnsafeRetainedContent(retainedMessages)) return undefined;
-		const retainedTokens = estimateConservativeTokens(retainedMessages);
-		if (retainedTokens > contextWindow - preparation.settings.reserveTokens) return undefined;
+		const budget = contextWindow - preparation.settings.reserveTokens;
+		const retainedTokens = estimateConservativeTokens(retainedMessages, budget);
+		if (retainedTokens > budget) return undefined;
 		return { ...result, estimatedTokensAfter: retainedTokens };
 	};
 
