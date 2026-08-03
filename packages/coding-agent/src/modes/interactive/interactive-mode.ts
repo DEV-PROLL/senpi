@@ -4118,14 +4118,16 @@ export class InteractiveMode {
 
 			case "retry_probe_scheduled": {
 				const secondsAway = Math.max(0, Math.round((event.atMs - Date.now()) / 1000));
-				this.showStatus(`Probing ${event.selector} at +${secondsAway}s (#${event.probeIndex})`);
+				this.showStatus(
+					`Probing ${sanitizeTerminalLabel(event.selector)} at +${secondsAway}s (#${event.probeIndex})`,
+				);
 				this.ui.requestRender();
 				break;
 			}
 
 			case "retry_probe_result": {
 				if (event.ok) {
-					this.showStatus(`Recovered ${event.selector} - will restore on next turn`);
+					this.showStatus(`Recovered ${sanitizeTerminalLabel(event.selector)} - will restore on next turn`);
 				}
 				this.ui.requestRender();
 				break;

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import type { Context, Model } from "../src/types.ts";
 
@@ -73,6 +73,10 @@ function makeStream(text: string): ReadableStream<Uint8Array> {
 /* ------------------------------------------------------------------ */
 /* Tests                                                               */
 /* ------------------------------------------------------------------ */
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 describe("anthropic 429 retry-hint marker", () => {
 	it("HTTP 429 with retry-after: 1258 -> stream error message ends with (retry-after-ms: 1258000)", async () => {

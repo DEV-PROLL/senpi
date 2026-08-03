@@ -3,7 +3,11 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CONFIG_DIR_NAME } from "../src/config.ts";
-import { DEFAULT_HINTED_WAIT_CAP_MS, DEFAULT_PROBE_BACK_MAX_MS } from "../src/core/retry-fallback/settings.ts";
+import {
+	DEFAULT_HINTED_WAIT_CAP_MS,
+	DEFAULT_PROBE_BACK_MAX_MS,
+	resolveHintPolicySettings,
+} from "../src/core/retry-fallback/settings.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 
 const tempDirs: string[] = [];
@@ -140,7 +144,14 @@ describe("SettingsManager retry fallback settings", () => {
 		});
 	});
 
-	it("getHintPolicySettings falls back to defaults for malformed (string/NaN/negative)", () => {
+	it("file round-trip falls back to defaults for malformed (string/negative); resolver guard rejects NaN directly", () => {
+		// JSON.stringify(NaN) -> null, so the file round-trip cannot exercise the
+		// NaN guard in resolveHintPolicySettings. Test it directly:
+		expect(resolveHintPolicySettings({ hintedWaitCapMs: Number.NaN, probeBackMaxMs: Number.NaN })).toEqual({
+			hintedWaitCapMs: DEFAULT_HINTED_WAIT_CAP_MS,
+			probeBackMaxMs: DEFAULT_PROBE_BACK_MAX_MS,
+		});
+
 		const { agentDir, projectDir } = createPaths();
 		writeFileSync(
 			join(agentDir, "settings.json"),

@@ -17,10 +17,19 @@
  */
 
 import { createServer } from "node:http";
+import { API_PRESETS } from "./mock-loop-support.mjs";
 
-export const HINT_429_PRIMARY_MODEL_ID = "mock-claude";
+// Derive from the shared preset so changing the anthropic modelId in one place
+// does not silently break the 429 scripted path.
+export const HINT_429_PRIMARY_MODEL_ID = API_PRESETS["anthropic-messages"].modelId;
 export const HINT_429_FALLBACK_MODEL_ID = "mock-claude-fallback";
 
+// readRequestBody + writeSse are also defined in anthropic-policy-refusal-server.mjs
+// and fallback-abort-server.mjs. No shared helper module exists yet; if a fourth
+// call site appears, extract one.
+
+// NOTE: readRequestBody + writeSse are duplicated from anthropic-policy-refusal-server.mjs.
+// See the module-load comment above for the rationale on not extracting a shared helper yet.
 function readRequestBody(request) {
 	return new Promise((resolve, reject) => {
 		let body = "";
