@@ -1,5 +1,26 @@
 # Local fork changes
 
+## 2026-08-03 — Make the editor prompt marker visually explicit
+
+### What changed
+
+- Reserved a two-column prompt gutter in the coding-agent `CustomEditor`.
+- Rendered an accent-styled `❯` on the first editable row and aligned wrapped rows beneath the text column.
+- Preserved that gutter when session/settings reloads reapply an `editorPaddingX` value below two.
+- Kept `getPaddingX()` reporting the configured value so existing editor construction and extension handoff contracts remain stable.
+- Hid the marker when the editor is vertically scrolled so it never appears beside a continuation row.
+- Kept sub-five-column rendering on the previous no-marker fallback to avoid narrow-terminal overflow.
+
+### Why this lives in the fork
+
+- The marker is part of the coding-agent interactive composer layout, including width reservation, wrapping, cursor placement, and autocomplete alignment.
+- Extensions can replace the editor but cannot decorate the built-in editor's private render loop without reimplementing its editing behavior.
+
+### Expected upstream merge-conflict zones
+
+- `packages/coding-agent/src/modes/interactive/components/custom-editor.ts` around `CustomEditor` construction and rendering.
+- `packages/coding-agent/test/custom-editor-prompt.test.ts` around built-in composer rendering assertions.
+
 ## 2026-08-01 — Reconcile fork runtime contracts after the upstream merge
 
 ### What changed

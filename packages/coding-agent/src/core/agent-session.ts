@@ -55,6 +55,7 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
+import { extract429RetryAfterMs, parseRetryAfterMsMarker } from "@earendil-works/pi-ai/utils/retry-hint";
 import { getAgentDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
@@ -128,9 +129,17 @@ import { PROMPT_CACHE_SAFE_WAIT_ENV, resolvePromptCacheSafeWaitSeconds } from ".
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { isBillingErrorMessage } from "./retry-fallback/billing.ts";
+import { formatSelector } from "./retry-fallback/chains.ts";
 import { RetryFallbackController } from "./retry-fallback/controller.ts";
 import { SelectorCooldowns } from "./retry-fallback/cooldown.ts";
+import {
+	classifyRateLimitedWait,
+	nextInTurnDelayMs,
+	type ProbePhase,
+	probeBackSchedule,
+} from "./retry-fallback/hint-policy.ts";
 import { createFallbackLogger } from "./retry-fallback/log.ts";
+import { ProbeBackScheduler } from "./retry-fallback/probe-scheduler.ts";
 import { validateFallbackChains } from "./retry-fallback/validate.ts";
 import { createSessionLogger, type SessionLogger } from "./session-log.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
@@ -247,6 +256,8 @@ export type AgentSessionEvent =
 			reason: CompactionReason;
 	  }
 	| { type: "summarization_retry_finished" }
+	| { type: "retry_probe_scheduled"; selector: string; atMs: number; probeIndex: 1 | 2 }
+	| { type: "retry_probe_result"; selector: string; ok: boolean; errorMessage?: string }
 	| { type: "bash_execution_update"; id?: string; delta: string };
 
 /** Listener function for agent session events */
@@ -615,6 +626,9 @@ export class AgentSession {
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
 	private _consecutiveProviderStreamStalls = 0;
+	private _probePhase: ProbePhase = "idle";
+	private _hintDeadlineMs: number | undefined = undefined;
+	private _cumulativeHintedWaitMs = 0;
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _userAbortPromise: Promise<void> | undefined = undefined;
@@ -636,6 +650,7 @@ export class AgentSession {
 	private _customTools: ToolDefinition[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
 	private _cwd: string;
+	private _agentDir: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
@@ -655,6 +670,9 @@ export class AgentSession {
 	private _modelRegistry: ModelRegistry;
 	private readonly _fallbackValidationWarnings: readonly string[];
 	private readonly _retryFallback: RetryFallbackController;
+	private readonly _selectorCooldowns: SelectorCooldowns;
+	private readonly _probeBackScheduler: ProbeBackScheduler;
+	private readonly _fallbackNow: () => number;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -693,8 +711,9 @@ export class AgentSession {
 		}
 		this._modelRuntime = modelRuntime;
 		this._modelRegistry = config.modelRegistry ?? new ModelRegistry(modelRuntime);
-		const fallbackLogger = createFallbackLogger(config.agentDir ?? getAgentDir());
-		this._sessionLogger = createSessionLogger(config.agentDir ?? getAgentDir());
+		this._agentDir = config.agentDir ?? getAgentDir();
+		const fallbackLogger = createFallbackLogger(this._agentDir);
+		this._sessionLogger = createSessionLogger(this._agentDir);
 		this._fallbackValidationWarnings = validateFallbackChains(
 			this.settingsManager.getRawFallbackChains(),
 			this._modelRegistry,
@@ -702,10 +721,12 @@ export class AgentSession {
 		for (const warning of this._fallbackValidationWarnings) {
 			fallbackLogger.warn("validation_warning", { warning });
 		}
+		this._selectorCooldowns = new SelectorCooldowns(config.fallbackNow ?? (() => Date.now()));
+		this._fallbackNow = config.fallbackNow ?? (() => Date.now());
 		this._retryFallback = new RetryFallbackController({
 			getSettings: () => this.settingsManager.getRetryFallbackSettings(),
 			registry: this._modelRegistry,
-			cooldowns: new SelectorCooldowns(config.fallbackNow ?? (() => Date.now())),
+			cooldowns: this._selectorCooldowns,
 			logger: fallbackLogger,
 			switchModel: async (model, thinking, reason) => {
 				await this._switchActiveModel(model, {
@@ -721,6 +742,9 @@ export class AgentSession {
 			emit: (event) => this._emit(event),
 			getCurrentSelector: () => (this.model ? { model: this.model, thinkingLevel: this.thinkingLevel } : undefined),
 			isAuthAvailable: (provider) => this._modelRuntime.hasConfiguredAuth(provider),
+		});
+		this._probeBackScheduler = new ProbeBackScheduler({
+			now: this._fallbackNow,
 		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -1083,6 +1107,11 @@ export class AgentSession {
 
 	getMessageRevision(): number {
 		return this._messageRevision;
+	}
+
+	/** Resolved agent state directory for this session. */
+	get agentDir(): string {
+		return this._agentDir;
 	}
 
 	private async _waitForSettledSessionWork(): Promise<void> {
@@ -1559,6 +1588,7 @@ export class AgentSession {
 						attempt: this._retryAttempt,
 					});
 					this._retryAttempt = 0;
+					this._resetHintTierState();
 				}
 			}
 		}
@@ -1659,6 +1689,80 @@ export class AgentSession {
 			this._retryResolve = undefined;
 			this._retryPromise = undefined;
 		}
+	}
+
+	private _resetHintTierState(): void {
+		this._probePhase = "idle";
+		this._hintDeadlineMs = undefined;
+		this._cumulativeHintedWaitMs = 0;
+	}
+
+	/**
+	 * Arm the probe-back scheduler for a tier-2 demoted selector. The scheduler
+	 * will fire at most two probes (half-hint, then deadline) and clear the
+	 * selector cooldown on success so maybeRestorePrimary reverts at the next
+	 * turn boundary.
+	 */
+	private _armProbeBackForDemotedSelector(selector: string, hintMs: number): void {
+		if (!selector) return;
+
+		// Guard: skip when the demoted selector is the ACTIVE model.
+		const currentModel = this.model;
+		if (currentModel && formatSelector(currentModel) === selector) return;
+
+		// Guard: skip when auth is unavailable at arm time.
+		const parts = selector.split("/");
+		if (parts.length < 2) return;
+		const provider = parts[0];
+		if (!this._modelRuntime.hasConfiguredAuth(provider)) return;
+
+		const now = this._fallbackNow();
+		const schedule = probeBackSchedule(hintMs, now);
+		const modelId = parts.slice(1).join("/");
+		const demotedModel = this._modelRuntime.getModel(provider, modelId);
+		if (!demotedModel) return;
+
+		this._probeBackScheduler.arm({
+			selector,
+			firstAtMs: schedule.firstAtMs,
+			deadlineMs: schedule.deadlineMs,
+			authAvailable: () => this._modelRuntime.hasConfiguredAuth(provider),
+			runProbe: async (signal: AbortSignal): Promise<boolean> => {
+				try {
+					const result = await this._modelRuntime.completeSimple(
+						demotedModel,
+						{
+							systemPrompt: "Reply with OK.",
+							messages: [{ role: "user", content: [{ type: "text", text: "OK" }], timestamp: now }],
+						},
+						{ maxTokens: 1, signal },
+					);
+					return result.stopReason !== "error" && result.stopReason !== "aborted";
+				} catch {
+					return false;
+				}
+			},
+			onCleared: (sel: string) => {
+				this._selectorCooldowns.clear(sel);
+			},
+			emit: (event) => {
+				if (event.type === "retry_probe_scheduled") {
+					this._emit({
+						type: "retry_probe_scheduled",
+						selector: event.selector,
+						atMs: event.atMs,
+						probeIndex: event.probeIndex,
+					});
+				} else {
+					this._emit({
+						type: "retry_probe_result",
+						selector: event.selector,
+						ok: event.ok,
+						errorMessage: event.errorMessage,
+					});
+				}
+			},
+		});
 	}
 
 	/** Find the last assistant message in agent state (including aborted ones) */
@@ -1872,6 +1976,7 @@ export class AgentSession {
 	 */
 	dispose(): void {
 		try {
+			this._probeBackScheduler.cancel("dispose");
 			this.abortRetry();
 			this.abortCompaction();
 			this.abortBranchSummary();
@@ -2961,8 +3066,21 @@ export class AgentSession {
 					this.agent.steer(appMessage);
 				}
 			} else if (options?.triggerTurn) {
-				await this._enforceCompactionBeforeProvider(this._findLastAssistantMessage(), false, "pre_prompt");
-				await this._enforceFinalProviderAdmission([appMessage]);
+				try {
+					await this._enforceCompactionBeforeProvider(this._findLastAssistantMessage(), false, "pre_prompt");
+					await this._enforceFinalProviderAdmission([appMessage]);
+				} catch (error) {
+					// Mirror sendUserMessage's retention contract: an admission
+					// rejection must retain the message for later delivery instead
+					// of silently dropping it (the fire-and-forget extension action
+					// swallows this rejection).
+					if (options.deliverAs === "followUp") {
+						this.agent.followUp(appMessage);
+					} else {
+						this.agent.steer(appMessage);
+					}
+					throw error;
+				}
 				await this._promptAgent(appMessage);
 			} else {
 				this.agent.state.messages.push(appMessage);
@@ -3241,6 +3359,7 @@ export class AgentSession {
 		// A manual model change abandons any active fallback window; if a fallback
 		// retry sleep is still pending, cancel it so no surprise continuation fires.
 		const hadActiveFallback = this._retryFallback.activeState !== undefined;
+		this._probeBackScheduler.cancel("manual-model-change");
 		this._retryFallback.clearForManualModelChange(model);
 		if (hadActiveFallback && this._retryAbortController) {
 			this.abortRetry();
@@ -3353,6 +3472,7 @@ export class AgentSession {
 		if (invalidatesCompaction) {
 			this._invalidateCompactionForModelSelection();
 		}
+		this._probeBackScheduler.cancel("manual-model-change");
 		this._retryFallback.clearForManualModelChange(next.model);
 		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.thinkingLevel);
 
@@ -3695,6 +3815,7 @@ export class AgentSession {
 			}
 			this._releasePendingCompactionAdmission(admission, outcome);
 			if (disconnected && !this.isCompacting) this._reconnectToAgent();
+			if (outcome === "completed") this._resumeQueuedMessagesAfterCompaction();
 		}
 	}
 
@@ -3729,6 +3850,7 @@ export class AgentSession {
 			if (!execution.accepted) {
 				return { applied: false, reason: "rejected" };
 			}
+			this._resumeQueuedMessagesAfterCompaction();
 			return { applied: true, reason: "ok" };
 		} catch (error) {
 			if (!compactionExecutionOwnsTerminalTransition(error)) {
@@ -4585,6 +4707,19 @@ export class AgentSession {
 		}
 	}
 
+	/**
+	 * Mirror _runAutoCompaction's post-success recovery for non-auto compaction
+	 * owners (manual, extension action, extension apply): a custom triggerTurn
+	 * message sent while the compaction was running is parked in the agent-level
+	 * queues without starting a turn, so a settled compaction must deliver it or
+	 * hidden continuations (e.g. goal) wedge until manual user input.
+	 */
+	private _resumeQueuedMessagesAfterCompaction(): void {
+		if (this.pendingMessageCount > 0 || this.agent.hasQueuedMessages()) {
+			this._scheduleContinuationAfterCurrentEvent();
+		}
+	}
+
 	private _scheduleContinuationAfterCurrentEvent(
 		options: AgentContinuationOptions = {},
 		retryContinuation = false,
@@ -4959,6 +5094,7 @@ export class AgentSession {
 				getServiceTier: () => this.serviceTier,
 				getScopedModels: () => this._scopedModels,
 				isIdle: () => this.isIdle,
+				getAgentDir: () => this._agentDir,
 				isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
 				getSignal: () => this._extensionEventSignal ?? this.agent.signal,
 				abort: () => {
@@ -5024,6 +5160,7 @@ export class AgentSession {
 					const controller = admission.controller;
 					void (async () => {
 						let outcome: "completed" | "failed" | "aborted" = "failed";
+						let compactionCompleted = false;
 						let disconnected = false;
 
 						try {
@@ -5040,6 +5177,7 @@ export class AgentSession {
 							});
 							if (execution.accepted) {
 								outcome = "completed";
+								compactionCompleted = true;
 								options?.onComplete?.(execution.result);
 							} else {
 								outcome = "failed";
@@ -5071,6 +5209,9 @@ export class AgentSession {
 							}
 							this._releasePendingCompactionAdmission(admission, outcome);
 							if (disconnected && !this.isCompacting) this._reconnectToAgent();
+							// A throwing onComplete consumer overwrites outcome in the catch
+							// block, so recovery keys off whether compaction itself succeeded.
+							if (compactionCompleted) this._resumeQueuedMessagesAfterCompaction();
 						}
 					})();
 				},
@@ -5392,38 +5533,10 @@ export class AgentSession {
 	}
 
 	private _getProviderRetryDelayMs(errorMessage: string): number | undefined {
-		const retryAfterMsMatch = errorMessage.match(/\bretry[-_ ]?after[-_ ]?ms\s*[:=]\s*(\d+(?:\.\d+)?)/i);
-		if (retryAfterMsMatch) {
-			const delayMs = Math.ceil(Number(retryAfterMsMatch[1]));
-			return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : undefined;
-		}
-
-		const retryAfterSecondsMatch = errorMessage.match(/\bretry[-_ ]?after\s*[:=]\s*(\d+(?:\.\d+)?)/i);
-		if (retryAfterSecondsMatch) {
-			const delayMs = Math.ceil(Number(retryAfterSecondsMatch[1]) * 1000);
-			return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : undefined;
-		}
-
-		const retryInMatch = errorMessage.match(
-			/\b(?:retry|try again|wait)\s+(?:after|in)\s*(\d+(?:\.\d+)?)\s*(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m)\b/i,
-		);
-		if (!retryInMatch) {
-			return undefined;
-		}
-
-		const value = Number(retryInMatch[1]);
-		if (!Number.isFinite(value) || value <= 0) {
-			return undefined;
-		}
-
-		const unit = retryInMatch[2].toLowerCase();
-		if (unit === "m" || unit.startsWith("min")) {
-			return Math.ceil(value * 60_000);
-		}
-		if (unit.startsWith("s")) {
-			return Math.ceil(value * 1000);
-		}
-		return Math.ceil(value);
+		const markerMs = parseRetryAfterMsMarker(errorMessage);
+		if (markerMs !== undefined) return markerMs;
+		const hintMs = extract429RetryAfterMs({ bodyText: errorMessage });
+		return hintMs;
 	}
 
 	private _getProviderTimeoutRetryOptions(message: AssistantMessage): AgentContinuationOptions {
@@ -5500,6 +5613,8 @@ export class AgentSession {
 		const isRefusal = isClassifierRefusal(message);
 		const hardErrorFallback = options.hardErrorFallback === true;
 		let switchedFallback = false;
+		let is429TierRouted = false;
+		let hintTierDelayMs: number | undefined;
 		if (hardErrorFallback) {
 			// A non-retryable provider failure must never replay on the same model.
 			// Billing-class failures never recover on this account, so the fallback
@@ -5525,6 +5640,7 @@ export class AgentSession {
 					});
 				}
 				this._retryAttempt = 0;
+				this._resetHintTierState();
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -5543,6 +5659,7 @@ export class AgentSession {
 					});
 				}
 				this._retryAttempt = 0;
+				this._resetHintTierState();
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -5561,8 +5678,160 @@ export class AgentSession {
 			const stallError = isProviderStreamStallError(message);
 			const escalateAfterRepeatedStall = stallError && this._consecutiveProviderStreamStalls > 0;
 			this._consecutiveProviderStreamStalls = stallError ? this._consecutiveProviderStreamStalls + 1 : 0;
-			this._retryAttempt++;
-			if (this._retryAttempt > settings.maxRetries || escalateAfterRepeatedStall) {
+			// 429-class detection: retryable AND message carries rate-limit markers.
+			const is429Class =
+				!stallError &&
+				/rate.?limit|(?:^429(?=\s+\{)|(?:\bHTTP\/1\.[01]\s+|\bHTTP\s+|\bstatus(?:\s+code)?\s+|\berror\s+|\bcode\s+)429\b)|too many requests|resource.?exhausted/i.test(
+					errorMessage,
+				);
+			if (is429Class) {
+				const hintMs = this._getProviderRetryDelayMs(errorMessage);
+				const hintSettings = this.settingsManager.getHintPolicySettings();
+				const tier = classifyRateLimitedWait(hintMs, hintSettings);
+				is429TierRouted = true;
+				if (tier === "no-hint-fast-fallback") {
+					// Skip same-model retries entirely; fall back immediately.
+					switchedFallback = await this._retryFallback.tryFallback("transient", { errorMessage });
+					if (switchedFallback) {
+						this._retryAttempt = 1;
+					} else {
+						const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+						if (exhaustedChainKey) {
+							this._emit({
+								type: "retry_fallback_exhausted",
+								chainKey: exhaustedChainKey,
+								lastError: errorMessage,
+							});
+						}
+						this._emit({
+							type: "auto_retry_end",
+							success: false,
+							attempt: 0,
+							finalError: message.errorMessage,
+						});
+						this._retryAttempt = 0;
+						this._resetHintTierState();
+						this._resolveRetry();
+						return "not-handled";
+					}
+				} else if (tier === "tier1-in-turn") {
+					this._retryAttempt++;
+					if (this._retryAttempt > settings.maxRetries) {
+						// Budget exhausted within tier1; fall back.
+						switchedFallback = await this._retryFallback.tryFallback("transient", {
+							errorMessage,
+							retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
+						});
+						if (switchedFallback) {
+							this._retryAttempt = 1;
+						} else {
+							const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+							if (exhaustedChainKey) {
+								this._emit({
+									type: "retry_fallback_exhausted",
+									chainKey: exhaustedChainKey,
+									lastError: errorMessage,
+								});
+							}
+							this._emit({
+								type: "auto_retry_end",
+								success: false,
+								attempt: this._retryAttempt - 1,
+								finalError: message.errorMessage,
+							});
+							this._retryAttempt = 0;
+							this._resetHintTierState();
+							this._resolveRetry();
+							return "not-handled";
+						}
+					} else {
+						const inTurnResult = nextInTurnDelayMs(
+							{
+								probePhase: this._probePhase,
+								hintDeadlineMs: this._hintDeadlineMs,
+								attempt: this._retryAttempt,
+								cumulativeHintedWaitMs: this._cumulativeHintedWaitMs,
+							},
+							hintMs,
+							settings.baseDelayMs,
+							hintSettings.hintedWaitCapMs,
+							Date.now(),
+						);
+						this._probePhase = inTurnResult.probePhase;
+						this._hintDeadlineMs = inTurnResult.hintDeadlineMs;
+						this._cumulativeHintedWaitMs = inTurnResult.cumulativeHintedWaitMs;
+						if (inTurnResult.demoteToProbeBack) {
+							// Cumulative hinted wait exceeded cap; demote to tier2 fallback path.
+							const remainingHintMs = Math.max(0, (this._hintDeadlineMs ?? Date.now()) - Date.now());
+							switchedFallback = await this._retryFallback.tryFallback("transient", {
+								errorMessage,
+								retryAfterMs: remainingHintMs,
+							});
+							if (switchedFallback) {
+								this._retryAttempt = 1;
+							} else {
+								const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+								if (exhaustedChainKey) {
+									this._emit({
+										type: "retry_fallback_exhausted",
+										chainKey: exhaustedChainKey,
+										lastError: errorMessage,
+									});
+								}
+								this._emit({
+									type: "auto_retry_end",
+									success: false,
+									attempt: this._retryAttempt - 1,
+									finalError: message.errorMessage,
+								});
+								this._retryAttempt = 0;
+								this._resetHintTierState();
+								this._resolveRetry();
+								return "not-handled";
+							}
+						} else {
+							hintTierDelayMs = inTurnResult.delayMs;
+						}
+					}
+				} else {
+					// tier2-fallback-probe-back or tier3-fallback-only: immediate fallback.
+					const remainingHintMs = hintMs ?? 0;
+					switchedFallback = await this._retryFallback.tryFallback("transient", {
+						errorMessage,
+						retryAfterMs: remainingHintMs,
+					});
+					if (switchedFallback) {
+						this._retryAttempt = 1;
+						if (tier === "tier2-fallback-probe-back") {
+							const selector = this._retryFallback.activeState?.originalSelector ?? "";
+							this._armProbeBackForDemotedSelector(selector, remainingHintMs);
+						}
+					} else {
+						const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+						if (exhaustedChainKey) {
+							this._emit({
+								type: "retry_fallback_exhausted",
+								chainKey: exhaustedChainKey,
+								lastError: errorMessage,
+							});
+						}
+						this._emit({
+							type: "auto_retry_end",
+							success: false,
+							attempt: 0,
+							finalError: message.errorMessage,
+						});
+						this._retryAttempt = 0;
+						this._resetHintTierState();
+						this._resolveRetry();
+						return "not-handled";
+					}
+				}
+			}
+			if (!is429TierRouted) {
+				this._retryAttempt++;
+			}
+			if (!is429TierRouted && (this._retryAttempt > settings.maxRetries || escalateAfterRepeatedStall)) {
 				switchedFallback = await this._retryFallback.tryFallback("transient", {
 					errorMessage,
 					retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
@@ -5586,6 +5855,7 @@ export class AgentSession {
 						finalError: message.errorMessage,
 					});
 					this._retryAttempt = 0;
+					this._resetHintTierState();
 					this._resolveRetry();
 					return "not-handled";
 				}
@@ -5598,7 +5868,8 @@ export class AgentSession {
 
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
 		const maxRetryDelayMs = this.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
-		if (providerDelayMs !== undefined && providerDelayMs > maxRetryDelayMs) {
+		// For 429-class failures the tier routing replaces the over-budget gate.
+		if (!is429TierRouted && providerDelayMs !== undefined && providerDelayMs > maxRetryDelayMs) {
 			// A wait this long means the model is unavailable rather than busy, so the
 			// configured chain beats failing the turn. The switch is gated: the over-budget
 			// branch above may have already switched on this same error, and hopping again
@@ -5620,6 +5891,7 @@ export class AgentSession {
 					finalError: `Provider requested retry delay ${providerDelayMs}ms, exceeding configured maximum ${maxRetryDelayMs}ms`,
 				});
 				this._retryAttempt = 0;
+				this._resetHintTierState();
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -5630,7 +5902,12 @@ export class AgentSession {
 		// reach this point with a fallback already applied (hard-error, refusal) set
 		// switchedFallback first and force providerDelayMs undefined, so no branch may
 		// be reordered to fall through here expecting an implicit switch.
-		const delayMs = switchedFallback ? 0 : (providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
+		const nonTierProviderDelayMs = providerDelayMs === 0 ? undefined : providerDelayMs;
+		const delayMs = switchedFallback
+			? 0
+			: is429TierRouted
+				? (hintTierDelayMs ?? providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1))
+				: (nonTierProviderDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
 		// Prepare before auto_retry_start so an immediate Esc can cancel the retry sleep.
 		this._retryAbortController = new AbortController();
 
@@ -5656,6 +5933,7 @@ export class AgentSession {
 			// Aborted during sleep - emit end event so UI can clean up
 			const attempt = this._retryAttempt;
 			this._retryAttempt = 0;
+			this._resetHintTierState();
 			this._retryAbortController = undefined;
 			await this._emitAgentSettled();
 			this._emit({
@@ -5690,6 +5968,7 @@ export class AgentSession {
 			if (!preRetryCompaction && !this._isCompactionOnCooldown()) {
 				const attempt = this._retryAttempt;
 				this._retryAttempt = 0;
+				this._resetHintTierState();
 				this._emit({
 					type: "auto_retry_end",
 					success: false,

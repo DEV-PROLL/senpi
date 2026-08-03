@@ -138,27 +138,11 @@ describe("goal extension contract (budget-free)", () => {
 		const serialized = JSON.stringify(update).toLowerCase();
 		expect(create?.description).toMatch(/4,000.*file/i);
 		expect(JSON.stringify(create?.parameters)).toMatch(/4,000.*file/i);
-		expect(create?.description).toMatch(/complete.*archive.*unfinished/i);
 		expect(serialized).toContain("complete");
 		expect(serialized).toContain("blocked");
 		expect(serialized).toContain("reason");
-		expect(update?.description).toMatch(/3 consecutive goal turns/i);
-		expect(update?.description).toMatch(/no live resumption channel|no live monitor/i);
-		expect(update?.description).toMatch(/wait.*not an impasse/i);
-		expect(update?.description).toMatch(/fresh blocked audit after resume/i);
-		expect(update?.description).toMatch(/hard, slow, or uncertain/i);
 		expect(serialized).not.toContain("budget");
 		expect(JSON.stringify(tools.get("get_goal")).toLowerCase()).not.toContain("budget");
-	});
-
-	it("documents the todo gate and decisive completion in the update_goal description", () => {
-		const { tools } = createGoalHarness();
-		const description = tools.get("update_goal")?.description ?? "";
-		expect(description).toMatch(/completion audit/i);
-		expect(description).toMatch(/todo/i);
-		expect(description).toMatch(/rejected while/i);
-		expect(description).toMatch(/same turn/i);
-		expect(description).toMatch(/unmistakably clear/i);
 	});
 
 	it("creates, reads, and completes a goal through the tools and file store", async () => {

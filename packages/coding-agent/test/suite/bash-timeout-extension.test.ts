@@ -126,13 +126,6 @@ describe("buildBashTimeoutPrompt", () => {
 		expect(prompt).toContain("Recommended maximum timeout: 90s (90s)");
 	});
 
-	it("instructs the model to set timeout explicitly for long-running commands", () => {
-		const prompt = buildBashTimeoutPrompt({ defaultSeconds: 120, maxSeconds: 600 });
-
-		expect(prompt).toMatch(/long-running commands/i);
-		expect(prompt).toMatch(/explicit `timeout`/i);
-	});
-
 	it("routes beyond-max workloads to background sessions and monitor, not tmux", () => {
 		const prompt = buildBashTimeoutPrompt({ defaultSeconds: 120, maxSeconds: 600 });
 

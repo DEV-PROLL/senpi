@@ -13,6 +13,10 @@ import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+for (const key of ["PI_RULES_DISABLED", "PI_RULES_MAX_RULE_CHARS", "PI_RULES_MAX_RESULT_CHARS"] as const) {
+	delete process.env[key];
+}
+
 // Guarded so an explicit `SENPI_CODING_AGENT_DIR=...` env (CI / opt-in) wins.
 if (!process.env.SENPI_CODING_AGENT_DIR) {
 	const quarantineDir = join(

@@ -10,6 +10,34 @@
 
 ### Fixed
 
+### Removed
+
+## [2026.8.3-2] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.3] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+- Added strict 429 retry-hint extraction with canonical markers at Anthropic and Codex API boundaries, and propagated structured `retry-after` hints through provider retries ([#657](https://github.com/code-yeongyu/senpi/pull/657)).
+
+### Changed
+
+### Fixed
+
+- Enforced final Anthropic tool-use/tool-result pairing after pruning, interruption, or model switching ([#641](https://github.com/code-yeongyu/senpi/pull/641)).
+- Restored non-429 `retry-after` handling displaced during the hint-aware 429 retry migration ([#657](https://github.com/code-yeongyu/senpi/pull/657)).
 - Updated GPT-5.6 Terra and Luna pricing across OpenAI and passthrough model catalogs.
 - Fixed Fireworks Kimi K3 models to use the OpenAI-compatible API with native reasoning-effort levels and deferred tools ([#7199](https://github.com/earendil-works/pi/issues/7199), [#7230](https://github.com/earendil-works/pi/pull/7230) by [@XBeg9](https://github.com/XBeg9)).
 
