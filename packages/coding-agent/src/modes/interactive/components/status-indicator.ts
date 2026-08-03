@@ -11,7 +11,7 @@ import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";
 import { keyText } from "./keybinding-hints.ts";
 
-export type StatusIndicatorKind = "working" | "retry" | "compaction" | "branchSummary" | "probe";
+export type StatusIndicatorKind = "working" | "retry" | "compaction" | "branchSummary";
 
 export class StatusIndicator extends Loader {
 	readonly kind: StatusIndicatorKind;
@@ -141,18 +141,6 @@ export class CompactionStatusIndicator extends StatusIndicator {
 				? sliceByColumn(this.progressText, totalProgressWidth - progressWidth, progressWidth)
 				: this.progressText;
 		return [truncateToWidth(`${status} ${theme.fg("muted", progressTail)}`, width)];
-	}
-}
-
-export class ProbeStatusIndicator extends StatusIndicator {
-	constructor(ui: TUI, message: string) {
-		super(
-			"probe",
-			ui,
-			(spinner) => theme.fg("accent", spinner),
-			(text) => theme.fg("muted", text),
-			message,
-		);
 	}
 }
 

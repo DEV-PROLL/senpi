@@ -36,6 +36,7 @@ export class ProbeBackScheduler {
 	private readonly _clearTimeout: (handle: unknown) => void;
 
 	private _armed = false;
+	private _generation = 0;
 	private _firstTimer: ScheduledTimer | undefined;
 	private _deadlineTimer: ScheduledTimer | undefined;
 	private _abortController: AbortController | undefined;
@@ -47,6 +48,7 @@ export class ProbeBackScheduler {
 	}) {
 		this._now = opts.now;
 		this._setTimeout = opts.setTimeout ?? ((cb, d) => setTimeout(cb, d));
+		// boundary narrowing: injected handle type
 		this._clearTimeout = opts.clearTimeout ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
 	}
 
@@ -55,10 +57,12 @@ export class ProbeBackScheduler {
 	}
 
 	arm(input: ProbeBackArmInput): void {
+		const gen = ++this._generation;
 		// Supersede any existing plan silently.
 		if (this._armed) {
 			this._clearTimers();
 			this._abortInFlight("superseded");
+			this._disarm();
 		}
 
 		this._armed = true;
@@ -66,21 +70,25 @@ export class ProbeBackScheduler {
 		this._deadlineTimer = { handle: undefined };
 
 		// Emit scheduled event for probe 1.
+		if (gen !== this._generation) return;
 		input.emit({
 			type: "retry_probe_scheduled",
 			selector: input.selector,
 			atMs: input.firstAtMs,
 			probeIndex: 1,
 		});
+		if (gen !== this._generation) return;
 
 		const delay = Math.max(0, input.firstAtMs - this._now());
-		this._firstTimer.handle = this._setTimeout(() => {
-			void this._runProbe(input, 1);
-		}, delay);
+		if (this._firstTimer) {
+			this._firstTimer.handle = this._setTimeout(() => {
+				void this._runProbe(input, 1, gen);
+			}, delay);
+		}
 	}
 
 	cancel(reason: ProbeBackCancelReason): void {
-		if (!this._armed) return;
+		this._generation++;
 		this._clearTimers();
 		this._abortInFlight(reason);
 		this._disarm();
@@ -111,7 +119,10 @@ export class ProbeBackScheduler {
 		this._abortController = undefined;
 	}
 
-	private async _runProbe(input: ProbeBackArmInput, probeIndex: 1 | 2): Promise<void> {
+	private async _runProbe(input: ProbeBackArmInput, probeIndex: 1 | 2, generation: number): Promise<void> {
+		const gen = generation;
+		if (gen !== this._generation) return;
+
 		// Clear the timer that just fired so cancel doesn't try to clear a stale handle.
 		if (probeIndex === 1 && this._firstTimer) {
 			this._firstTimer.handle = undefined;
@@ -121,39 +132,43 @@ export class ProbeBackScheduler {
 
 		// Guard: auth unavailable -> fail immediately, disarm.
 		if (!input.authAvailable()) {
+			if (gen !== this._generation) return;
 			input.emit({
 				type: "retry_probe_result",
 				selector: input.selector,
 				ok: false,
 				errorMessage: "auth-unavailable",
 			});
+			if (gen !== this._generation) return;
 			this._disarm();
 			return;
 		}
 
 		// Set up abort controller for the in-flight probe.
-		this._abortController = new AbortController();
+		if (gen !== this._generation) return;
+		const abortController = new AbortController();
+		this._abortController = abortController;
 
 		let success: boolean;
 		try {
-			success = await input.runProbe(this._abortController.signal);
+			success = await input.runProbe(abortController.signal);
 		} catch {
 			success = false;
 		}
 
-		// If cancelled during the probe, abortController is already cleaned by cancel.
-		// Check if we're still armed (cancel may have fired mid-flight).
-		if (!this._armed) return;
-
+		if (gen !== this._generation) return;
 		this._abortController = undefined;
 
 		if (success) {
+			if (gen !== this._generation) return;
 			input.onCleared(input.selector);
+			if (gen !== this._generation) return;
 			input.emit({
 				type: "retry_probe_result",
 				selector: input.selector,
 				ok: true,
 			});
+			if (gen !== this._generation) return;
 			this._disarm();
 			return;
 		}
@@ -161,28 +176,33 @@ export class ProbeBackScheduler {
 		// First probe failed — schedule the deadline probe if we haven't used both slots.
 		if (probeIndex === 1) {
 			// Emit scheduled event for probe 2.
+			if (gen !== this._generation) return;
 			input.emit({
 				type: "retry_probe_scheduled",
 				selector: input.selector,
 				atMs: input.deadlineMs,
 				probeIndex: 2,
 			});
+			if (gen !== this._generation) return;
 
 			const delay = Math.max(0, input.deadlineMs - this._now());
 			if (this._deadlineTimer) {
+				if (gen !== this._generation) return;
 				this._deadlineTimer.handle = this._setTimeout(() => {
-					void this._runProbe(input, 2);
+					void this._runProbe(input, 2, gen);
 				}, delay);
 			}
 			return;
 		}
 
 		// Second probe failed — final result, disarm.
+		if (gen !== this._generation) return;
 		input.emit({
 			type: "retry_probe_result",
 			selector: input.selector,
 			ok: false,
 		});
+		if (gen !== this._generation) return;
 		this._disarm();
 	}
 }

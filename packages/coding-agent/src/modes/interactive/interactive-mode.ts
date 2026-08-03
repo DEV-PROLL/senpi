@@ -162,7 +162,6 @@ import {
 	BranchSummaryStatusIndicator,
 	CompactionStatusIndicator,
 	IdleStatus,
-	ProbeStatusIndicator,
 	RetryStatusIndicator,
 	type StatusIndicator,
 	WorkingStatusIndicator,
@@ -4119,18 +4118,12 @@ export class InteractiveMode {
 
 			case "retry_probe_scheduled": {
 				const secondsAway = Math.max(0, Math.round((event.atMs - Date.now()) / 1000));
-				this.showStatusIndicator(
-					new ProbeStatusIndicator(
-						this.ui,
-						`Probing ${event.selector} at +${secondsAway}s (#${event.probeIndex})`,
-					),
-				);
+				this.showStatus(`Probing ${event.selector} at +${secondsAway}s (#${event.probeIndex})`);
 				this.ui.requestRender();
 				break;
 			}
 
 			case "retry_probe_result": {
-				this.clearStatusIndicator("probe");
 				if (event.ok) {
 					this.showStatus(`Recovered ${event.selector} - will restore on next turn`);
 				}

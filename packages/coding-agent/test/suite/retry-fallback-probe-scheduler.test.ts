@@ -376,6 +376,68 @@ describe("ProbeBackScheduler", () => {
 		expect(scheduler.active).toBe(false);
 	});
 
+	it("arm during in-flight probe swallows the old result and preserves cancellation", async () => {
+		const now = 0;
+		const th = createTimerHarness();
+		harnesses.push(th);
+		const capture = createCapture();
+		let resolveOldProbe: ((value: boolean) => void) | undefined;
+		let resolveNewProbe: ((value: boolean) => void) | undefined;
+		const { input: oldInput, onClearedCalls: oldOnClearedCalls } = defaultInput(capture, {
+			selector: "faux/faux-1",
+			runProbe: () =>
+				new Promise<boolean>((resolve) => {
+					resolveOldProbe = resolve;
+				}),
+		});
+		const { input: newInput } = defaultInput(capture, {
+			selector: "faux/faux-2",
+			firstAtMs: 300,
+			deadlineMs: 600,
+			runProbe: () =>
+				new Promise<boolean>((resolve) => {
+					resolveNewProbe = resolve;
+				}),
+		});
+		const scheduler = new ProbeBackScheduler({
+			now: () => now,
+			setTimeout: th.setTimeout,
+			clearTimeout: th.clearTimeout,
+		});
+
+		scheduler.arm(oldInput);
+		th.fireFirst();
+		await vi.waitFor(() => expect(capture.runProbeCalls).toHaveLength(1));
+
+		scheduler.arm(newInput);
+		resolveOldProbe?.(true);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(oldOnClearedCalls).toEqual([]);
+		expect(capture.events.filter((event) => event.type === "retry_probe_result")).toEqual([]);
+		expect(scheduler.active).toBe(true);
+		expect(th.pendingCount()).toBe(1);
+
+		th.fireFirst();
+		await vi.waitFor(() => expect(capture.runProbeCalls).toHaveLength(2));
+		resolveNewProbe?.(false);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(capture.events).toContainEqual({
+			type: "retry_probe_scheduled",
+			selector: "faux/faux-2",
+			atMs: 600,
+			probeIndex: 2,
+		});
+		expect(th.pendingCount()).toBe(1);
+
+		scheduler.cancel("dispose");
+		expect(th.pendingCount()).toBe(0);
+		th.fireAll();
+		expect(capture.runProbeCalls).toHaveLength(2);
+	});
+
 	// (7) Second probe (at deadline) succeeds -> onCleared + ok:true.
 	it("second probe at deadline succeeds and clears cooldown", async () => {
 		const now = 0;

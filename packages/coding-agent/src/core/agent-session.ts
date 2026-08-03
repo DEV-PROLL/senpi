@@ -5638,7 +5638,11 @@ export class AgentSession {
 			const escalateAfterRepeatedStall = stallError && this._consecutiveProviderStreamStalls > 0;
 			this._consecutiveProviderStreamStalls = stallError ? this._consecutiveProviderStreamStalls + 1 : 0;
 			// 429-class detection: retryable AND message carries rate-limit markers.
-			const is429Class = !stallError && /rate.?limit|429|too many requests|resource.?exhausted/i.test(errorMessage);
+			const is429Class =
+				!stallError &&
+				/rate.?limit|(?:^429(?=\s+\{)|(?:\bHTTP\/1\.[01]\s+|\bHTTP\s+|\bstatus(?:\s+code)?\s+|\berror\s+|\bcode\s+)429\b)|too many requests|resource.?exhausted/i.test(
+					errorMessage,
+				);
 			if (is429Class) {
 				const hintMs = this._getProviderRetryDelayMs(errorMessage);
 				const hintSettings = this.settingsManager.getHintPolicySettings();
@@ -5857,11 +5861,12 @@ export class AgentSession {
 		// reach this point with a fallback already applied (hard-error, refusal) set
 		// switchedFallback first and force providerDelayMs undefined, so no branch may
 		// be reordered to fall through here expecting an implicit switch.
+		const nonTierProviderDelayMs = providerDelayMs === 0 ? undefined : providerDelayMs;
 		const delayMs = switchedFallback
 			? 0
 			: is429TierRouted
 				? (hintTierDelayMs ?? providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1))
-				: (providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
+				: (nonTierProviderDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
 		// Prepare before auto_retry_start so an immediate Esc can cancel the retry sleep.
 		this._retryAbortController = new AbortController();
 

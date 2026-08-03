@@ -234,6 +234,80 @@ describe("hint-aware 429 tier routing", () => {
 		expect(harness.faux.state.callCount).toBe(2);
 	});
 
+	it("does not tier-route a transient error with 429 only inside a request id", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 3,
+					baseDelayMs: 1000,
+					fallbackChains: { [primary]: [fallback] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			errorTurn("request req_429429429 failed with HTTP 500 socket timeout"),
+			fauxAssistantMessage("primary recovered"),
+		]);
+
+		await harness.session.prompt("hello");
+
+		expect(harness.eventsOfType("retry_fallback_applied")).toEqual([]);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toEqual([1000]);
+		expect(harness.faux.getCallLog().filter((call) => call.modelId === "faux-1")).toHaveLength(2);
+	});
+
+	it("tier-routes an HTTP 429 rate limit control", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 3,
+					baseDelayMs: 1000,
+					fallbackChains: { [primary]: [fallback] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([errorTurn("HTTP 429 rate limit"), fauxAssistantMessage("fallback recovered")]);
+
+		await harness.session.prompt("hello");
+
+		expect(harness.eventsOfType("retry_fallback_applied")).toMatchObject([
+			{ from: primary, to: fallback, reason: "transient" },
+		]);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toEqual([0]);
+		expect(harness.faux.getCallLog().filter((call) => call.modelId === "faux-1")).toHaveLength(1);
+	});
+
+	it("uses exponential backoff for a non-429 transient with an explicit zero hint", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 3,
+					baseDelayMs: 1000,
+					fallbackChains: { [primary]: [fallback] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			errorTurn("HTTP 500 internal_error (retry-after-ms: 0)"),
+			fauxAssistantMessage("primary recovered"),
+		]);
+
+		await harness.session.prompt("hello");
+
+		expect(harness.eventsOfType("retry_fallback_applied")).toEqual([]);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toEqual([1000]);
+		expect(harness.faux.getCallLog().filter((call) => call.modelId === "faux-1")).toHaveLength(2);
+	});
+
 	// (7) Tier-2 fallback arms the probe scheduler (retry_probe_scheduled emitted with probeIndex 1).
 	it("tier2 fallback emits retry_probe_scheduled with probeIndex 1", async () => {
 		const now = 0;
