@@ -10,10 +10,47 @@
 
 ### Fixed
 
+### Removed
+
+## [2026.8.3-2] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.3] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.1] - 2026-08-01
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
 - Preserve rich live and terminal `eval` details when peeking detached cells,
   including code, title, output, phase, status events, tool-call summaries,
   duration, and structured displays; cancellation now remains authoritative
-  over late completion races.
+  over late completion races
+  ([#603](https://github.com/code-yeongyu/senpi/pull/603)).
 
 ### Removed
 
