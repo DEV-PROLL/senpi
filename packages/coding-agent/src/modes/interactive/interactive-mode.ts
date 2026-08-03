@@ -4115,6 +4115,29 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 			}
+
+			case "retry_probe_scheduled": {
+				const secondsAway = Math.max(0, Math.round((event.atMs - Date.now()) / 1000));
+				this.showStatus(
+					`Probing ${sanitizeTerminalLabel(event.selector)} at +${secondsAway}s (#${event.probeIndex})`,
+				);
+				this.ui.requestRender();
+				break;
+			}
+
+			case "retry_probe_result": {
+				if (event.ok) {
+					this.showStatus(`Recovered ${sanitizeTerminalLabel(event.selector)} - will restore on next turn`);
+				} else if (event.errorMessage === "auth-unavailable") {
+					this.showStatus(
+						`Probe for ${sanitizeTerminalLabel(event.selector)} skipped - auth unavailable, staying on fallback`,
+					);
+				} else {
+					this.showStatus(`Probe for ${sanitizeTerminalLabel(event.selector)} failed - staying on fallback`);
+				}
+				this.ui.requestRender();
+				break;
+			}
 		}
 	}
 
