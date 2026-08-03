@@ -1087,10 +1087,6 @@ export class AgentSession {
 					tokensAfter,
 				});
 				this._supersededCompactionLogAttemptIds.add(previousAttempt.id);
-				if (this._supersededCompactionLogAttemptIds.size > 64) {
-					const oldestAttemptId = this._supersededCompactionLogAttemptIds.values().next().value;
-					if (oldestAttemptId) this._supersededCompactionLogAttemptIds.delete(oldestAttemptId);
-				}
 			}
 			const attempt = {
 				id: event.requestId ?? randomUUID(),
@@ -1111,13 +1107,7 @@ export class AgentSession {
 			if (event.requestId && this._supersededCompactionLogAttemptIds.delete(event.requestId)) return;
 			const activeAttempt = this._activeCompactionLogAttempt;
 			const attempt =
-				event.requestId !== undefined
-					? activeAttempt?.id === event.requestId
-						? activeAttempt
-						: undefined
-					: activeAttempt?.reason === event.reason
-						? activeAttempt
-						: undefined;
+				event.requestId !== undefined && activeAttempt?.id === event.requestId ? activeAttempt : undefined;
 			const accepted = event.accepted ?? event.result !== undefined;
 			const rejected = event.rejectionCause !== undefined;
 			const skipped = !accepted && (attempt === undefined || (!rejected && !event.aborted && !event.errorMessage));

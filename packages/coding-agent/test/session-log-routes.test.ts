@@ -176,11 +176,13 @@ describe("session.log stuck-route instrumentation", () => {
 		const expectedTokens = estimateContextTokens(
 			filterContextExcludedMessages(harness.sessionManager.buildSessionContext().messages),
 		).tokens;
+		const attemptId = "33333333-3333-4333-8333-333333333333";
 
-		emitSessionEvent(harness, { type: "compaction_start", reason: "overflow" });
+		emitSessionEvent(harness, { type: "compaction_start", reason: "overflow", requestId: attemptId });
 		emitSessionEvent(harness, {
 			type: "compaction_end",
 			reason: "overflow",
+			requestId: attemptId,
 			result: undefined,
 			aborted: true,
 			willRetry: false,
@@ -223,12 +225,23 @@ describe("session.log stuck-route instrumentation", () => {
 	it("correlates superseded starts with distinct attempt identifiers", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
+		const thresholdAttemptId = "44444444-4444-4444-8444-444444444444";
+		const overflowAttemptId = "55555555-5555-4555-8555-555555555555";
 
-		emitSessionEvent(harness, { type: "compaction_start", reason: "threshold" });
-		emitSessionEvent(harness, { type: "compaction_start", reason: "overflow" });
+		emitSessionEvent(harness, {
+			type: "compaction_start",
+			reason: "threshold",
+			requestId: thresholdAttemptId,
+		});
+		emitSessionEvent(harness, {
+			type: "compaction_start",
+			reason: "overflow",
+			requestId: overflowAttemptId,
+		});
 		emitSessionEvent(harness, {
 			type: "compaction_end",
 			reason: "overflow",
+			requestId: overflowAttemptId,
 			result: undefined,
 			aborted: false,
 			willRetry: false,
@@ -293,6 +306,87 @@ describe("session.log stuck-route instrumentation", () => {
 			expect.objectContaining({ disposition: "superseded", accepted: false }),
 		]);
 		expect(decisions.filter((line) => line.attemptId === secondAttemptId)).toEqual([
+			expect.objectContaining({ disposition: "committed", accepted: true }),
+		]);
+	});
+
+	it("suppresses an early stale terminal after more than 64 supersessions", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const attemptIds = Array.from(
+			{ length: 66 },
+			(_, index) => `00000000-0000-4000-8000-${index.toString().padStart(12, "0")}`,
+		);
+
+		for (const requestId of attemptIds) {
+			emitSessionEvent(harness, { type: "compaction_start", reason: "threshold", requestId });
+		}
+		emitSessionEvent(harness, {
+			type: "compaction_end",
+			reason: "threshold",
+			requestId: attemptIds[0],
+			result: undefined,
+			accepted: true,
+			aborted: false,
+			willRetry: false,
+		});
+		emitSessionEvent(harness, {
+			type: "compaction_end",
+			reason: "threshold",
+			requestId: attemptIds.at(-1),
+			result: undefined,
+			accepted: true,
+			aborted: false,
+			willRetry: false,
+		});
+
+		const decisions = readSessionLog(harness).filter((line) => line.event === "compaction_decision");
+		expect(decisions.filter((line) => line.attemptId === attemptIds[0])).toEqual([
+			expect.objectContaining({ disposition: "superseded", accepted: false }),
+		]);
+		expect(decisions.filter((line) => line.attemptId === attemptIds.at(-1))).toEqual([
+			expect.objectContaining({ disposition: "committed", accepted: true }),
+		]);
+	});
+
+	it("does not attach no-ID retry exhaustion to an active same-reason attempt", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const activeAttemptId = "66666666-6666-4666-8666-666666666666";
+
+		emitSessionEvent(harness, {
+			type: "compaction_start",
+			reason: "overflow",
+			requestId: activeAttemptId,
+		});
+		emitSessionEvent(harness, {
+			type: "compaction_end",
+			reason: "overflow",
+			result: undefined,
+			aborted: false,
+			willRetry: false,
+			errorMessage: "Context overflow recovery was already attempted",
+		});
+		emitSessionEvent(harness, {
+			type: "compaction_end",
+			reason: "overflow",
+			requestId: activeAttemptId,
+			result: undefined,
+			accepted: true,
+			aborted: false,
+			willRetry: false,
+		});
+
+		const decisions = readSessionLog(harness).filter((line) => line.event === "compaction_decision");
+		expect(decisions.find((line) => line.attemptId === undefined)).toMatchObject({
+			reason: "overflow",
+			action: "none",
+			disposition: "skipped",
+			accepted: false,
+			skipped: true,
+			error: "Context overflow recovery was already attempted",
+		});
+		expect(decisions.filter((line) => line.attemptId === activeAttemptId)).toEqual([
 			expect.objectContaining({ disposition: "committed", accepted: true }),
 		]);
 	});
