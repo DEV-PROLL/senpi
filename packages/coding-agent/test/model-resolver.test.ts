@@ -653,7 +653,7 @@ describe("default model selection", () => {
 
 	test("every bundled provider default resolves in its catalog", () => {
 		for (const provider of Object.keys(defaultModelPerProvider) as KnownProvider[]) {
-			if (provider === "radius") continue;
+			if (provider === "radius" || provider === "ollama") continue;
 			const defaultModelId = defaultModelPerProvider[provider];
 			const modelIds = getModels(provider).map((model) => model.id);
 			expect(modelIds.length, `${provider} should expose a bundled catalog`).toBeGreaterThan(0);
@@ -663,6 +663,10 @@ describe("default model selection", () => {
 
 	test("ai-gateway default tracks current model", () => {
 		expect(defaultModelPerProvider["vercel-ai-gateway"]).toBe("zai/glm-5.1");
+	});
+
+	test("ollama defaults to its current coding model", () => {
+		expect(defaultModelPerProvider.ollama).toBe("qwen3.5:397b");
 	});
 
 	test("findInitialModel accepts explicit provider custom model ids", async () => {

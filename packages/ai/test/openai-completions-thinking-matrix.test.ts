@@ -176,7 +176,7 @@ describe("OpenAI Completions thinking ladder fallbacks", () => {
 		}
 	});
 
-	it("uses Ollama's none off sentinel and max wire tier when no catalog map is present", async () => {
+	it("uses Ollama's none off sentinel and clamps max to its highest supported wire tier", async () => {
 		const model = {
 			id: "qwen3",
 			name: "Qwen3",
@@ -191,7 +191,7 @@ describe("OpenAI Completions thinking ladder fallbacks", () => {
 		} satisfies Model<"openai-completions">;
 
 		expect(await capturePayload(model)).toMatchObject({ reasoning_effort: "none" });
-		expect(await capturePayload(model, "max")).toMatchObject({ reasoning_effort: "max" });
+		expect(await capturePayload(model, "max")).toMatchObject({ reasoning_effort: "high" });
 	});
 
 	it("does not send OpenRouter's none sentinel for mandatory Kimi K3 thinking", async () => {
