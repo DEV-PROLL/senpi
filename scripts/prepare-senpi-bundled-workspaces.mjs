@@ -38,6 +38,8 @@ export function nativePrebuildFile(target) {
 const bundledWorkspaces = [
 	{ source: "packages/agent", packageName: "@earendil-works/pi-agent-core", targetParts: ["@earendil-works", "pi-agent-core"], sourceOnly: false },
 	{ source: "packages/ai", packageName: "@earendil-works/pi-ai", targetParts: ["@earendil-works", "pi-ai"], sourceOnly: false },
+	{ source: "packages/client", packageName: "@earendil-works/pi-client", targetParts: ["@earendil-works", "pi-client"], sourceOnly: false },
+	{ source: "packages/protocol", packageName: "@earendil-works/pi-protocol", targetParts: ["@earendil-works", "pi-protocol"], sourceOnly: false },
 	{
 		source: "packages/pty",
 		packageName: "@earendil-works/pi-pty",
