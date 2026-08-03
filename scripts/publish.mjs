@@ -12,17 +12,15 @@ import {
 import { buildPublishArgs } from "./publish-command.mjs";
 import { rewritePublishManifest } from "./publish-manifest.mjs";
 
-// Source packages retain their upstream names and private guard. Each is published
-// from a temporary manifest under our scope, while every source import continues to
-// resolve through the original @earendil-works key and its owned npm alias.
+// Source packages retain their upstream names and private guard. Registry-backed
+// packages are published from temporary manifests under our scope, while bundled-only
+// client/protocol imports keep their original @earendil-works keys in the Senpi tarball.
 //
 // @code-yeongyu/senpi-server remains excluded because it is `private: true`, and
 // @earendil-works/pi-storage-sqlite-node keeps upstream's independent semver line.
 const packages = [
 	{ directory: "packages/ai", name: "@code-yeongyu/senpi-ai", rewriteManifest: true },
 	{ directory: "packages/agent", name: "@code-yeongyu/senpi-agent-core", rewriteManifest: true },
-	{ directory: "packages/client", name: "@code-yeongyu/senpi-client", rewriteManifest: true },
-	{ directory: "packages/protocol", name: "@code-yeongyu/senpi-protocol", rewriteManifest: true },
 	{ directory: "packages/tui", name: "@code-yeongyu/senpi-tui", rewriteManifest: true },
 	{ directory: "packages/pty", name: "@code-yeongyu/senpi-pty", rewriteManifest: true },
 	{ directory: "packages/senpi-codemode", name: "@code-yeongyu/senpi-codemode", rewriteManifest: true },

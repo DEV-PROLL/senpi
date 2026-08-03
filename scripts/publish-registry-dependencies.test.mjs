@@ -15,13 +15,12 @@ const PRIVATE_UPSTREAM_WORKSPACES = [
 const OWNED_REGISTRY_ALIASES = [
 	"@code-yeongyu/senpi-ai",
 	"@code-yeongyu/senpi-agent-core",
-	"@code-yeongyu/senpi-client",
-	"@code-yeongyu/senpi-protocol",
 	"@code-yeongyu/senpi-tui",
 	"@code-yeongyu/senpi-pty",
 	"@code-yeongyu/senpi-codemode",
 	"@code-yeongyu/senpi",
 ];
+const BUNDLED_ONLY_WORKSPACES = ["@code-yeongyu/senpi-client", "@code-yeongyu/senpi-protocol"];
 
 function readJson(path) {
 	return JSON.parse(readFileSync(path, "utf8"));
@@ -39,6 +38,9 @@ describe("npm publish dependency graph", () => {
 		}
 		for (const packageName of OWNED_REGISTRY_ALIASES) {
 			assert.match(publishScript, new RegExp(`name: "${packageName}"`));
+		}
+		for (const packageName of BUNDLED_ONLY_WORKSPACES) {
+			assert.doesNotMatch(publishScript, new RegExp(`name: "${packageName}"`));
 		}
 	});
 });

@@ -10,19 +10,30 @@ import {
 
 function clientProtocolFiles(prefix = "package/") {
 	return [
-		{ path: `${prefix}node_modules/@earendil-works/pi-client/package.json` },
-		{ path: `${prefix}node_modules/@earendil-works/pi-client/dist/index.js` },
-		{ path: `${prefix}node_modules/@earendil-works/pi-protocol/package.json` },
-		{ path: `${prefix}node_modules/@earendil-works/pi-protocol/dist/index.js` },
+		{ path: `${prefix}vendor/pi-client/index.js` },
+		{ path: `${prefix}vendor/pi-client/index.d.ts` },
+		{ path: `${prefix}vendor/pi-protocol/index.js` },
+		{ path: `${prefix}vendor/pi-protocol/index.d.ts` },
 	];
 }
 
 describe("assertSenpiPackedWorkspaceFiles", () => {
-	it("includes client and protocol in bundled workspace checks", () => {
+	it("keeps client and protocol outside bundled workspace checks", () => {
 		const packageNames = bundledWorkspacePackageChecks().map((check) => check.packageName);
 
-		assert.ok(packageNames.includes("@earendil-works/pi-client"));
-		assert.ok(packageNames.includes("@earendil-works/pi-protocol"));
+		assert.equal(packageNames.includes("@earendil-works/pi-client"), false);
+		assert.equal(packageNames.includes("@earendil-works/pi-protocol"), false);
+	});
+
+	it("rejects resolver-visible client or protocol package paths", () => {
+		const packed = {
+			files: [{ path: "package/node_modules/@earendil-works/pi-client/package.json" }],
+		};
+
+		assert.throws(
+			() => assertSenpiPackedWorkspaceFiles(packed),
+			/must keep client\/protocol outside package-manager node_modules/,
+		);
 	});
 
 	it("rejects senpi package metadata that omits bundled workspace files", () => {
