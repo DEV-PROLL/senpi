@@ -1,5 +1,45 @@
 # goal Extension Changes
 
+## Restart resume prompt covers every stopped-but-unfinished goal (2026-08-04)
+
+### What changed
+
+- `lifecycle-helpers.ts` renames `isResumeOfPausedGoal` to `isResumeOfStoppedGoal`
+  and admits the whole stopped-but-unfinished set (`paused` and `blocked`) instead
+  of `paused` alone. The idle / has-UI / no-pending-messages guards and the
+  `"resume"` session-start reason are unchanged.
+- `index.ts` renames `maybePromptResumePausedGoal` to
+  `maybePromptResumeStoppedGoal`, renames the `LEAVE_GOAL_PAUSED_CHOICE` constant
+  to `LEAVE_GOAL_STOPPED_CHOICE` (`"Leave stopped"`), and interpolates the goal's
+  real status into the prompt title (`Resume blocked goal?` / `Resume paused
+  goal?`) so the dialog names the state the user is actually resuming from.
+- Accepting the prompt is unchanged: the goal flips to `active` via a `"user"`
+  mutation, accounting restarts, the footer refreshes, and a continuation is
+  queued through the same admission path.
+
+### Why
+
+- Ports the upstream codex rule in
+  `codex-rs/tui/src/app/thread_goal_actions.rs`
+  (`maybe_prompt_resume_paused_goal_after_resume`), which prompts on resume for
+  `Paused | Blocked | UsageLimited` — every status that stopped the goal without
+  finishing it. senpi previously ported only the `paused` arm.
+- A `blocked` goal was unrecoverable on restart: no prompt fired, and the
+  session-start auto-continuation denied it with `not-eligible` because the
+  status is not `active`. The goal stayed blocked with no user-visible
+  affordance, even though `blocked` is reached by ordinary events — a user
+  interrupt, a terminal provider error, or a tripped continuation guard.
+- senpi stays budget-free, so codex's `UsageLimited` arm has no counterpart and
+  no budget status is introduced. The senpi stopped set is exactly
+  `paused | blocked`; `complete` and `active` are untouched.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `lifecycle-helpers.ts` around the renamed predicate and its status set;
+  standalone `pi-goal` has no restart resume prompt.
+- LOW in `index.ts` around the `session_start` handler's resume-prompt call and
+  the choice constants.
+
 ## Legacy `pi-goal` state is imported once at session start (2026-07-31)
 
 ### What changed

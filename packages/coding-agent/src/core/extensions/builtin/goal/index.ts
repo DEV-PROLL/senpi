@@ -8,7 +8,7 @@ import { GOAL_CONTINUATION_CAP } from "./continuation.ts";
 import { GoalDirectInputLifecycle } from "./direct-input-lifecycle.ts";
 import { GoalElapsedTicker } from "./elapsed-ticker.ts";
 import { formatGoalForTool, goalStatusLabel } from "./format.ts";
-import { isResumeOfPausedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
+import { isResumeOfStoppedGoal, queueGoalContinuation } from "./lifecycle-helpers.ts";
 import { MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
 import { migrateLegacyGoalFile } from "./persistence.ts";
 import { accountGoalUsage, readGoal, updateGoal } from "./store.ts";
@@ -21,7 +21,7 @@ import { updateGoalUi } from "./ui.ts";
 import { GOAL_WAIT_STATUS_KEY, GoalWaitTicker } from "./wait-ticker.ts";
 
 const RESUME_GOAL_CHOICE = "Resume goal";
-const LEAVE_GOAL_PAUSED_CHOICE = "Leave paused";
+const LEAVE_GOAL_STOPPED_CHOICE = "Leave stopped";
 const STALE_EXTENSION_CONTEXT_ERROR_PREFIX = "This extension ctx is stale after session replacement or reload.";
 
 type AgentGoalAccounting = {
@@ -109,7 +109,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			clearAgentGoalAccounting();
 		}
 		refreshGoalUi(ctx, goal);
-		if (await maybePromptResumePausedGoal(pi, ctx, event.reason, goal)) {
+		if (await maybePromptResumeStoppedGoal(pi, ctx, event.reason, goal)) {
 			return;
 		}
 		// A config reload must not auto-start an agent that was stopped. Only a fresh
@@ -241,19 +241,19 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		monitorContinuation.dispose();
 	});
 
-	async function maybePromptResumePausedGoal(
+	async function maybePromptResumeStoppedGoal(
 		pi: ExtensionAPI,
 		ctx: ExtensionContext,
 		sessionStartReason: string,
 		goal: Goal | null,
 	): Promise<boolean> {
-		if (!isResumeOfPausedGoal(ctx, sessionStartReason, goal)) {
+		if (!isResumeOfStoppedGoal(ctx, sessionStartReason, goal)) {
 			return false;
 		}
 
-		const choice = await ctx.ui.select(`Resume paused goal?\nGoal: ${goal.objective}`, [
+		const choice = await ctx.ui.select(`Resume ${goal.status} goal?\nGoal: ${goal.objective}`, [
 			RESUME_GOAL_CHOICE,
-			LEAVE_GOAL_PAUSED_CHOICE,
+			LEAVE_GOAL_STOPPED_CHOICE,
 		]);
 		if (choice !== RESUME_GOAL_CHOICE) return true;
 
