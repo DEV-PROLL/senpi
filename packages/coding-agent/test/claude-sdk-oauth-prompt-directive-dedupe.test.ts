@@ -1,3 +1,4 @@
+import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages.js";
 import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { buildPromptBlocks } from "../src/core/extensions/builtin/claude-sdk-oauth/prompt-bridge.ts";
