@@ -142,7 +142,7 @@ describe("claude-sdk-oauth native continuity decisions", () => {
 		expect(decision).toEqual({ kind: "flatten", reason: "transcript_missing" });
 	});
 
-	it("never flattens while a live resident session exists", () => {
+	it("never flattens while a live resident session exists with boundaries", () => {
 		const kinds = [
 			decideNativeContinuity(input({ accountName: "secondary" })),
 			decideNativeContinuity(input({ modelId: "other" })),
@@ -151,5 +151,38 @@ describe("claude-sdk-oauth native continuity decisions", () => {
 		].map((decision) => decision.kind);
 
 		expect(kinds).not.toContain("flatten");
+	});
+
+	it("flattens with registry_miss when a diverged binding has no assistant boundary", () => {
+		const decision = decideNativeContinuity(
+			input({
+				entry: undefined,
+				binding: {
+					sdkSessionId: "sdk-gone",
+					sentCount: 2,
+					sentHashes: ["h1", "h2"],
+					lastAssistantUuid: null,
+					accountName: "primary",
+					modelId: "claude-opus-4-5",
+					systemPromptHash: FINGERPRINT.systemPromptHash,
+					toolsetHash: FINGERPRINT.toolsetHash,
+				},
+				transcriptAvailable: true,
+				currentHashes: ["h1", "h2-rewritten", "h3"],
+			}),
+		);
+
+		expect(decision).toEqual({ kind: "flatten", reason: "registry_miss" });
+	});
+
+	it("flattens when a hash divergence has no assistant boundary to fork at", () => {
+		const decision = decideNativeContinuity(
+			input({
+				entry: resident({ assistantUuidByIndex: new Map() }),
+				currentHashes: ["h1", "h2-rewritten", "h3"],
+			}),
+		);
+
+		expect(decision).toMatchObject({ kind: "flatten", reason: "sent_stream_diverged" });
 	});
 });
