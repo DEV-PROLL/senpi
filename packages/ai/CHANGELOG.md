@@ -10,6 +10,12 @@
 
 ### Fixed
 
+- Fixed strict release-time model regeneration after Groq replaced `qwen/qwen3-32b` with
+  `qwen/qwen3.6-27b`: the active multimodal model now receives Groq's documented
+  `reasoning_effort` compatibility (`off` to `none`, thinking mode to `default`), the typed request regression
+  follows the replacement catalog ID, and reviewed provider snapshots are refreshed so live generation no longer
+  breaks root TypeScript validation before a release can be committed.
+
 ### Removed
 
 ## [2026.8.4] - 2026-08-04

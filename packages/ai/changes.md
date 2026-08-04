@@ -1,5 +1,40 @@
 # changes.md — ai
 
+## Follow Groq Qwen catalog replacement during generation (2026-08-04)
+
+### What changed
+
+- `scripts/generate-models.ts`: moved the Groq Qwen reasoning-level compatibility override from the removed
+  `qwen/qwen3-32b` catalog entry to the active multimodal `qwen/qwen3.6-27b` replacement.
+- `test/openai-completions-tool-choice.test.ts`: moved the focused `reasoning_effort` request regression to the
+  same generated model ID.
+- `src/providers/data/*.json`: refreshed the reviewed live provider snapshots so strict release generation and
+  checked-in model-ID types agree.
+
+### Why
+
+- models.dev removed Qwen 3.2 after Groq's first-party model endpoint replaced it with Qwen 3.6. The release
+  generator therefore removed the old typed ID, while the compatibility regression still referenced it, causing
+  the `2026.8.4-2` release to fail during root TypeScript validation before any commit or tag was created.
+- Groq documents Qwen 3.6 thinking mode as `reasoning_effort: "default"` and non-thinking mode as `"none"`, so
+  the existing compatibility mapping remains required on the replacement model.
+
+### Why this cannot be expressed as an extension
+
+- Model inventory and provider-specific reasoning metadata are generated before the coding-agent extension runtime
+  loads, and the typed built-in model IDs are consumed by the AI package itself.
+
+### Modified upstream files
+
+- `scripts/generate-models.ts`
+- `test/openai-completions-tool-choice.test.ts`
+- `src/providers/data/*.json`
+
+### Expected merge conflict zones
+
+- MEDIUM: the Groq branch of `applyThinkingLevelMetadata()` when upstream changes Qwen reasoning controls.
+- MEDIUM: generated provider JSON whenever models.dev, OpenRouter, or OpenCode metadata changes again.
+
 ## OpenAI compatibility resolver merge repair (2026-08-01)
 
 ### What changed
