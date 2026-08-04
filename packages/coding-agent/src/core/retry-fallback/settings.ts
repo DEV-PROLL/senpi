@@ -51,13 +51,28 @@ function isStringArray(value: unknown): value is string[] {
 	return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
+/**
+ * User chains layer over the shipped defaults per key instead of replacing the
+ * whole map. Configuring an unrelated model must not silently delete a default
+ * chain: that left the defaulted model with no client chain at all, which in
+ * turn disabled the server-fallback abort and handed model choice back to the
+ * provider. A same-named key still replaces that default outright (never a
+ * union), and an explicit empty array removes a default the user does not want.
+ *
+ * Cross-scope replacement (global vs project) stays wholesale and is handled by
+ * `deepMergeSettings`; this only resolves defaults against the merged result.
+ */
 function resolveFallbackChains(value: unknown): FallbackChains {
 	if (value === undefined) return cloneDefaultFallbackChains();
 	if (!isPlainObject(value)) return cloneDefaultFallbackChains();
 
-	const chains: Record<string, readonly string[]> = {};
+	const chains: Record<string, readonly string[]> = cloneDefaultFallbackChains();
 	for (const [key, entries] of Object.entries(value)) {
 		if (!isStringArray(entries)) return cloneDefaultFallbackChains();
+		if (entries.length === 0) {
+			delete chains[key];
+			continue;
+		}
 		chains[key] = [...entries];
 	}
 	return chains;

@@ -93,9 +93,51 @@ describe("SettingsManager retry fallback settings", () => {
 		await reloaded.flush();
 		expect(existsSync(join(projectDir, CONFIG_DIR_NAME, "settings.json"))).toBe(false);
 
+		// Removing the user's override restores the shipped default for that key
+		// rather than leaving the model with no chain at all.
 		reloaded.removeFallbackChain("anthropic/claude-fable-5");
 		await reloaded.flush();
-		expect(SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings().chains).toEqual({});
+		expect(SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings().chains).toEqual(defaultChains);
+	});
+
+	it("keeps default chains for models the user did not configure", () => {
+		const { agentDir, projectDir } = createPaths();
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({
+				retry: {
+					fallbackChains: {
+						"apitopia/kimi-k3-unlocked": ["apitopia/kimi-k3-ultrafast-unlocked:max"],
+					},
+				},
+			}),
+		);
+
+		const chains = SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings().chains;
+
+		expect(chains["apitopia/kimi-k3-unlocked"]).toEqual(["apitopia/kimi-k3-ultrafast-unlocked:max"]);
+		expect(chains["anthropic/claude-fable-5"]).toEqual(defaultChains["anthropic/claude-fable-5"]);
+	});
+
+	it("lets a user chain replace a default outright and an empty array delete it", () => {
+		const { agentDir, projectDir } = createPaths();
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({
+				retry: { fallbackChains: { "anthropic/claude-fable-5": ["ccapi/kimi-k3:max"] } },
+			}),
+		);
+		expect(
+			SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings().chains["anthropic/claude-fable-5"],
+		).toEqual(["ccapi/kimi-k3:max"]);
+
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({ retry: { fallbackChains: { "anthropic/claude-fable-5": [] } } }),
+		);
+		expect(SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings().chains).not.toHaveProperty(
+			"anthropic/claude-fable-5",
+		);
 	});
 
 	it("uses project retry settings over global settings, replacing chains wholesale", () => {
@@ -116,11 +158,13 @@ describe("SettingsManager retry fallback settings", () => {
 			JSON.stringify({ retry: { fallbackChains: { "anthropic/project": ["ccapi/project"] } } }),
 		);
 
-		expect(SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings()).toEqual({
-			modelFallback: false,
-			chains: { "anthropic/project": ["ccapi/project"] },
-			revertPolicy: "never",
-		});
+		const resolved = SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings();
+		expect(resolved.modelFallback).toBe(false);
+		expect(resolved.revertPolicy).toBe("never");
+		// Project scope replaces the global scope's chain map wholesale: the global
+		// "anthropic/primary" entry must not survive into the project-scoped result.
+		expect(resolved.chains["anthropic/project"]).toEqual(["ccapi/project"]);
+		expect(resolved.chains).not.toHaveProperty("anthropic/primary");
 		expect(readFileSync(join(projectSettingsDir, "settings.json"), "utf-8")).toContain("anthropic/project");
 	});
 
