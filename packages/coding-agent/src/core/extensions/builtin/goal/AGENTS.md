@@ -50,7 +50,9 @@ and a clean accepted user turn arms a visible 10-second grace countdown before t
 resumes; mechanically blocked Goals are reactivated on accepted input, including admitted
 steering. A `length` stop gets exactly one minimal truncation recovery before the goal
 blocks on repetition, terminal provider errors block the goal only when `AgentEndEvent.willRetry`
-is false, and resumed sessions with 8+ trailing historical continuation entries suppress
+is false and count as mechanical (a new user message resumes the goal, and the blocked notice
+says so), while intentional blocks — a user interrupt or a model-declared `update_goal` block —
+stay non-recoverable. Resumed sessions with 8+ trailing historical continuation entries suppress
 session-start auto-resume. `tokenBudget` remains inert compatibility metadata only; this
 policy is budget-free by design.
 

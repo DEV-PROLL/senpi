@@ -1,5 +1,40 @@
 # goal Extension Changes
 
+## A terminal provider error is a prompt-recoverable block (2026-08-04)
+
+### What changed
+
+- `continuation-recovery.ts` exports `PROVIDER_ERROR_BLOCKED_REASON` and adds it to
+  `MECHANICAL_CONTINUATION_BLOCKS`, so `isMechanicalContinuationBlock` classifies a
+  retries-exhausted provider error alongside the cap, repetition, and length guards.
+- `index.ts` writes that shared constant instead of repeating the literal reason and
+  appends `continuationCapRecoveryHint(...)` to the blocked notice, so the TUI warning
+  now ends with `Send any message to resume.` instead of only naming the failure.
+- `GoalDirectInputLifecycle.onDisposition` needed no change: reactivating a mechanically
+  blocked goal on accepted direct input already existed, and the provider-error reason
+  now flows through it.
+
+### Why
+
+- A terminal provider error is infrastructure, not a decision. The user's next message is
+  exactly the retry signal, so leaving the goal blocked stranded a live run behind a state
+  only `/goal resume` could clear, while the notice never said so.
+- Intentional blocks stay non-recoverable: `user interrupted the turn` and model-declared
+  `update_goal` blocks are still excluded, because those encode a decision to stop.
+- This is the in-session counterpart to the restart resume prompt below: that entry recovers
+  a stopped goal when a new session loads it, this one recovers it mid-session without a
+  restart or a prompt.
+
+### Why an extension couldn't do it
+
+- Both the block-reason writer and the mechanical-block classifier live inside this builtin;
+  the policy has no public extension hook.
+
+### Expected merge-conflict zones
+
+- `continuation-recovery.ts` `MECHANICAL_CONTINUATION_BLOCKS` and its exported reason constants.
+- `index.ts` `agent_end` terminal-provider-error branch and its import block.
+
 ## Restart resume prompt covers every stopped-but-unfinished goal (2026-08-04)
 
 ### What changed
