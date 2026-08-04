@@ -152,6 +152,7 @@ function resolveRefs(value: unknown, root: unknown, seenRefs: Set<string>, warni
 
 	const result: Record<string, unknown> = {};
 	for (const [key, child] of Object.entries(value)) {
+		if (key === "type" && child === null) continue;
 		result[key] = resolveRefs(child, root, seenRefs, warnings);
 	}
 	return result;
