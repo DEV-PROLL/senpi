@@ -9,7 +9,7 @@ import {
 	resetMcpPromptCommandsForTests,
 } from "../../src/core/extensions/builtin/mcp/prompts.ts";
 import { getMcpService, resetMcpServiceForTests } from "../../src/core/extensions/builtin/mcp/service.ts";
-import { attach, awaitMcpToolRegistration, capturingPi, mcpRoot as makeMcpRoot } from "./fixtures/register-call.ts";
+import { attach, awaitMcpPromptRegistration, capturingPi, mcpRoot as makeMcpRoot } from "./fixtures/register-call.ts";
 import { cleanupRoots, setConfig, stdioServer, type TestRoot } from "./fixtures/service-lifecycle.ts";
 
 const cleanupTasks: Array<() => Promise<void>> = [];
@@ -67,8 +67,9 @@ describe("mcp prompts as slash commands", () => {
 		const root = mcpRoot("prompts-live");
 		setConfig(root, { fx: stdioServer(["--tools", "1"]) });
 		const pi = capturingPi();
+		const promptRegistration = awaitMcpPromptRegistration("fx", "fixture_prompt");
 		await attach(root, pi);
-		await awaitMcpToolRegistration("fx");
+		await promptRegistration;
 
 		const recorder = commandRecorder();
 		const added = registerMcpPromptCommands(recorder as never, getMcpService().getMcpPromptServers());

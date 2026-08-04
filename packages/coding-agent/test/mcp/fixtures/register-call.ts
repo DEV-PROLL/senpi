@@ -59,6 +59,33 @@ export async function awaitMcpToolRegistration(
 	);
 }
 
+/** Subscribe before attach and await the exact prompt catalog registration.
+ * Tool registration is not a sufficient barrier: during a startup-raced cold
+ * connect, listTools can finish before the cache refresh has listed prompts. */
+export function awaitMcpPromptRegistration(serverName: string, promptName: string, timeoutMs = 10_000): Promise<void> {
+	const service = getMcpService();
+	return new Promise((resolve, reject) => {
+		let unsubscribe = (): void => {};
+		const timeout = setTimeout(() => {
+			unsubscribe();
+			reject(new Error(`MCP prompt registration timed out: ${serverName}/${promptName}`));
+		}, timeoutMs);
+		const check = (): void => {
+			const registered = service
+				.getMcpPromptServers()
+				.some(
+					(server) => server.server === serverName && server.prompts.some((prompt) => prompt.name === promptName),
+				);
+			if (!registered) return;
+			clearTimeout(timeout);
+			unsubscribe();
+			resolve();
+		};
+		unsubscribe = service.onMcpRegistrationChanged(check);
+		check();
+	});
+}
+
 /** Await registration of one specific tool on a capturing pi (use for proxy
  * gateways / zero-searchable-tool servers where getTierBSearchable stays empty). */
 export async function awaitMcpTool(pi: CapturingPi, toolName: string, timeoutMs = 10_000): Promise<void> {

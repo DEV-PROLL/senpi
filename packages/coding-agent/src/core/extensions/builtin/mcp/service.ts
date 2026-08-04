@@ -72,6 +72,7 @@ export class McpService {
 	readonly #pendingAuth = new Map<string, import("./auth/oauth-provider.ts").McpOAuthProvider>();
 	readonly #interactiveAuthServers = new Set<string>();
 	readonly #promptCommandNames = new Set<string>();
+	readonly #registrationListeners = new Set<() => void>();
 	#refreshActiveSetWhenNoTools = false;
 	#tierBRegistration: McpSessionRegistration | undefined;
 	#historyScanned = false;
@@ -181,6 +182,14 @@ export class McpService {
 		return this.#tierBRegistration?.resourceServers ?? [];
 	}
 
+	/** Subscribe to completed catalog registrations. Consumers must inspect the
+	 * resulting snapshot because tool, resource, and prompt catalogs can become
+	 * available in different startup-race generations. */
+	onMcpRegistrationChanged(listener: () => void): () => void {
+		this.#registrationListeners.add(listener);
+		return () => this.#registrationListeners.delete(listener);
+	}
+
 	/** Reveal skill-owned tools (todo 37): activation is effective the next
 	 * turn, exactly like an tool_search promotion. Unknown names are ignored. */
 	activateSkillMcpTools(names: readonly string[]): void {
@@ -209,6 +218,7 @@ export class McpService {
 		this.#pendingAuth.clear();
 		this.#interactiveAuthServers.clear();
 		this.#promptCommandNames.clear();
+		this.#registrationListeners.clear();
 		this.#wireStatusBySession.clear();
 		this.#latestWireStatus = { servers: [] };
 		const entries = [...this.#connections.values()];
@@ -449,6 +459,7 @@ export class McpService {
 		this.#tierBRegistration = await registerMcpServiceDirectTools(pi, config, this.#connections.values(), {
 			refreshActiveSetWhenEmpty: this.#refreshActiveSetWhenNoTools,
 		});
+		for (const listener of this.#registrationListeners) listener();
 		// A (re-)registration recomputes the active set from config alone, so any
 		// promotions recorded in history are worth replaying on the next scan.
 		this.#historyScanned = false;
