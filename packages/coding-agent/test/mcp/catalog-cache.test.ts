@@ -65,7 +65,7 @@ describe("MCP disk metadata cache", () => {
 
 		await attach(root, pi);
 		await awaitMcpToolRegistration("fx");
-		await awaitCacheTools(root, 2);
+		await awaitCacheTools(root, ["tool_1", "tool_2"]);
 
 		expect(dedupedRegisteredTools(pi)).toEqual(["mcp_fx_tool_1", "mcp_fx_tool_2"]);
 		expect(await readCounter(counterFile)).toBe(1);
@@ -82,7 +82,7 @@ describe("MCP disk metadata cache", () => {
 
 		await attach(root, pi);
 		await awaitMcpToolRegistration("fx");
-		await awaitCacheTools(root, 1);
+		await awaitCacheTools(root, ["tool_1"]);
 
 		expect(dedupedRegisteredTools(pi)).toEqual(["mcp_fx_tool_1"]);
 		const cache = await readCache(root);
@@ -98,7 +98,7 @@ describe("MCP disk metadata cache", () => {
 
 		await attach(root, pi);
 		await awaitMcpToolRegistration("fx");
-		await awaitCacheTools(root, 1);
+		await awaitCacheTools(root, ["tool_1"]);
 
 		expect(dedupedRegisteredTools(pi)).toEqual(["mcp_fx_tool_1"]);
 		expect(withoutMcpUtilityTools(pi.registeredTools)).not.toContain("mcp_fx_fake_999");
@@ -120,6 +120,7 @@ describe("MCP disk metadata cache", () => {
 		await attach(root, pi);
 
 		await waitForCondition(() => withoutMcpUtilityTools(pi.activeTools).includes("mcp_fx_tool_2"), 10_000);
+		await awaitCacheTools(root, ["tool_1", "tool_2"]);
 		expect(await readCounter(counterFile)).toBe(1);
 		expect(withoutMcpUtilityTools(pi.activeTools)).toEqual(["mcp_fx_tool_1", "mcp_fx_tool_2"]);
 		expect(withoutMcpUtilityTools(pi.activeTools)).not.toContain("mcp_fx_stale_cached");
@@ -143,13 +144,7 @@ describe("MCP disk metadata cache", () => {
 			]);
 			// Both attaches are race-bounded; the cache refresh completes in the
 			// background continuation, so await the torn-write window closing.
-			await waitForCondition(async () => {
-				try {
-					return (await readCache(root)).servers.fx.tools.length === 3;
-				} catch {
-					return false;
-				}
-			}, 10_000);
+			await awaitCacheTools(root, ["tool_1", "tool_2", "tool_3"]);
 			const cache = await readCache(root);
 			expect(cache.servers.fx.tools.map((tool) => tool.name)).toEqual(["tool_1", "tool_2", "tool_3"]);
 		} finally {
@@ -184,11 +179,15 @@ function dedupedRegisteredTools(pi: ReturnType<typeof capturingPi>): string[] {
 }
 
 /** The raced background continuation writes the disk cache after the in-memory
- * catalog is set; await the file landing before asserting its contents. */
-async function awaitCacheTools(root: TestRoot, count: number): Promise<void> {
+ * catalog is set; await the file landing before asserting its contents. Match
+ * the exact refreshed tool names, never a count: a stale entry can coincide
+ * with the fresh catalog's size (a poisoned 1-tool cache vs a fresh 1-tool
+ * catalog), so a count-only barrier can pass on pre-refresh data. */
+async function awaitCacheTools(root: TestRoot, expectedNames: string[]): Promise<void> {
 	await waitForCondition(async () => {
 		try {
-			return (await readCache(root)).servers.fx.tools.length === count;
+			const names = (await readCache(root)).servers.fx.tools.map((tool) => tool.name);
+			return names.length === expectedNames.length && names.every((name, index) => name === expectedNames[index]);
 		} catch {
 			return false;
 		}
