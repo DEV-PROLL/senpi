@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Fixed MCP prompt slash commands going missing after startup-raced server connections: the MCP service now emits a catalog-registration signal after publishing each snapshot, and prompt command registration waits for the server's prompt metadata instead of inferring readiness from tool registration ([#706](https://github.com/code-yeongyu/senpi/pull/706)).
+
 ### Removed
 
 ## [2026.8.4] - 2026-08-04
