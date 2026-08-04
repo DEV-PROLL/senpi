@@ -1,5 +1,12 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-04 - Surface flatten payload size and collapsed directive count in continuity observations
+
+- Extended `ContinuityObservation` (`session-observability.ts`) with optional `payloadBytes` and `collapsedDirectives` fields, surfaced only on `flatten` and `bootstrap` observations (not delta/fork/reattach).
+- Threaded from `createResidentAttempt` (`session-stream.ts`): the dedupe result's `collapsedDirectives` and the serialized block byte total are passed to `observeSessionSyncDecision` when the lane flattens, so users can see the re-send cost and how many directive blocks were collapsed.
+- Updated diagnostic-render and observability tests to use `expect.objectContaining` for flatten/bootstrap observations (the shape intentionally grew).
+- Merge-conflict risk: low. Expected conflict zones are `session-observability.ts` (ContinuityObservation type + observeSessionSyncDecision) and `session-stream.ts` (createResidentAttempt observation call).
+
 ## 2026-08-04 - Collapse repeated ultrawork directive blocks in flatten serialization
 
 - Added `dedupeUltraworkBlocks` (`prompt-directive-dedupe.ts`), a pure post-process over `buildPromptBlocks` output that collapses repeated `<ultrawork-mode>...</ultrawork-mode>` directive spans to the single most recent copy, replacing earlier copies with a one-line placeholder. Wired into both flatten call sites: the resident lane (`session-stream.ts` `createResidentAttempt`, the primary burner path) and the non-resident lane (`stream.ts`).

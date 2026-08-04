@@ -145,7 +145,7 @@ describe("Claude SDK OAuth continuity diagnostics", () => {
 		expect(result.diagnostics).toEqual([
 			expect.objectContaining({
 				type: "claude_sdk_oauth_session_continuity",
-				details: { kind: "flatten", reason: "tainted_compaction", deltaMessages: 2 },
+				details: expect.objectContaining({ kind: "flatten", reason: "tainted_compaction", deltaMessages: 2 }),
 			}),
 		]);
 		expect(result.diagnostics?.[0]?.error).toBeUndefined();

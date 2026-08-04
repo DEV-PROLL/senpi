@@ -205,9 +205,15 @@ async function createResidentAttempt(
 		});
 	}
 
-	const blocks = flatten
-		? dedupeUltraworkBlocks(buildPromptBlocks(input.context, input.customToolNameToSdk, input.toolWatchNote)).blocks
+	const flattenResult = flatten
+		? dedupeUltraworkBlocks(buildPromptBlocks(input.context, input.customToolNameToSdk, input.toolWatchNote))
+		: undefined;
+	const blocks = flattenResult
+		? flattenResult.blocks
 		: buildDeltaPromptBlocks(messages.slice(from), input.customToolNameToSdk);
+	const payloadBytes = flattenResult
+		? flattenResult.blocks.reduce((sum, block) => sum + (block.type === "text" ? block.text.length : 0), 0)
+		: undefined;
 	const staged = stageContinuityDecision(
 		observeSessionSyncDecision({
 			kind: observedKind,
@@ -215,6 +221,10 @@ async function createResidentAttempt(
 			deltaMessages: flatten ? hashes.length : hashes.length - from,
 			firstTurn,
 			senpiSessionId: sessionId,
+			...(payloadBytes !== undefined ? { payloadBytes } : {}),
+			...(flattenResult?.collapsedDirectives !== undefined
+				? { collapsedDirectives: flattenResult.collapsedDirectives }
+				: {}),
 		}),
 		input.onContinuityDecision,
 		// The pending close cause is consumed only when the staged observation

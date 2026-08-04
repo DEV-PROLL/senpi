@@ -53,6 +53,8 @@ export type ContinuityObservation = {
 	kind: ContinuityKind;
 	reason: ContinuityReason;
 	deltaMessages?: number;
+	payloadBytes?: number;
+	collapsedDirectives?: number;
 };
 
 export type ContinuityObservabilityBoundary = {
@@ -197,6 +199,8 @@ export function observeSessionSyncDecision(input: {
 	deltaMessages: number;
 	firstTurn: boolean;
 	senpiSessionId: string;
+	payloadBytes?: number;
+	collapsedDirectives?: number;
 }): ContinuityObservation {
 	if (input.kind === "incremental") {
 		return { kind: "delta", reason: "prefix_matched", deltaMessages: input.deltaMessages };
@@ -219,6 +223,8 @@ export function observeSessionSyncDecision(input: {
 		kind: input.firstTurn && reason === "registry_miss" ? "bootstrap" : "flatten",
 		reason,
 		deltaMessages: input.deltaMessages,
+		...(input.payloadBytes !== undefined ? { payloadBytes: input.payloadBytes } : {}),
+		...(input.collapsedDirectives !== undefined ? { collapsedDirectives: input.collapsedDirectives } : {}),
 	};
 }
 
