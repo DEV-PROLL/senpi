@@ -17,6 +17,9 @@
 
 ### Fixed
 
+- Fixed paused terminal monitors discarding their own completion summary and forcing
+  repeated wake-budget rearms; completion now wakes the session automatically while
+  intermediate line noise remains suppressed ([#717](https://github.com/code-yeongyu/senpi/pull/717)).
 - Fixed Claude SDK OAuth full-history re-sends repeatedly billing accumulated `<ultrawork-mode>` directives by
   post-processing both resident flatten/bootstrap prompts and the non-resident full-prompt path: every earlier
   complete directive becomes a one-line superseded marker while the most recent copy, surrounding text, non-text
