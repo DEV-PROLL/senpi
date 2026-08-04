@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import ttsrExtension from "../../src/core/extensions/builtin/ttsr/index.ts";
 import { LEAK_ERROR_MESSAGE } from "../../src/core/extensions/builtin/ttsr/prompts.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
+import { expectTtsrActivation } from "./ttsr-activation-assertions.ts";
 
 const FABRICATED_TOOL_CALL_RULE_NAME = "fabricated-unavailable-tool-call";
 
@@ -148,7 +149,12 @@ describe("collapse remediation persistence", () => {
 		const lines = readSessionLines(harness);
 		const entries = readSessionEntries(harness);
 		expect(lines.length).toBe(entries.length);
-		expect(lines.length).toBe(6);
+		expect(lines.length).toBe(7);
+		expectTtsrActivation(entries, {
+			owner: "collapse-repetition",
+			rules: ["collapse-repetition"],
+			remediation: "nudge",
+		});
 
 		const assistantEntries = entries.filter((e) => e.type === "message" && e.message?.role === "assistant");
 		expect(assistantEntries.length).toBe(2);
@@ -205,7 +211,12 @@ describe("leakage remediation retry", () => {
 
 		const lines = readSessionLines(harness);
 		const entries = readSessionEntries(harness);
-		expect(lines.length).toBe(5);
+		expect(lines.length).toBe(6);
+		expectTtsrActivation(entries, {
+			owner: "control-token-leak",
+			rules: ["control-token-leak"],
+			remediation: "provider-error",
+		});
 
 		const assistantEntries = entries.filter((e) => e.type === "message" && e.message?.role === "assistant");
 		expect(assistantEntries.length).toBe(2);
