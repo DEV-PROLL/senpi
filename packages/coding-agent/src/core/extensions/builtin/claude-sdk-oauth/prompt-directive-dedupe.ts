@@ -13,20 +13,42 @@ const ULTRAWORK_SPAN_PATTERN = new RegExp(
 	"g",
 );
 
+/** Every opening and closing tag, in order, for depth tracking across blocks. */
+const ULTRAWORK_TAG_PATTERN = new RegExp(
+	`${escapeRegExp(ULTRAWORK_MODE_OPEN_TAG)}|${escapeRegExp(ULTRAWORK_MODE_CLOSE_TAG)}`,
+	"g",
+);
+
 function countSpans(text: string): number {
 	return (text.match(ULTRAWORK_SPAN_PATTERN) ?? []).length;
 }
 
 /**
- * True when a matched span itself contains another opening tag. The span regex
- * is non-greedy, so nested directives would match from the outer open to the
- * INNER close and leave the outer open tag stranded in the output. Nesting is
- * pathological rather than expected, so callers fail closed on it instead of
- * emitting a corrupted prompt.
+ * True when the serialized blocks contain a nested directive, tracking tag depth
+ * across the WHOLE block sequence rather than per block. `buildPromptBlocks`
+ * splits turns and content chunks into separate blocks, so a nested directive
+ * can straddle them (`<ultrawork-mode>outer ` | `<ultrawork-mode>inner</...>` |
+ * ` tail</...>`); a per-block scan misses that and the non-greedy span regex then
+ * pairs the outer open with the inner close, stranding tags and silently eating
+ * an earlier directive. Nesting is pathological rather than expected, so callers
+ * fail closed on it instead of emitting a corrupted prompt.
+ *
+ * Unmatched lone tags are NOT nesting: a close with no open is ignored, and a
+ * trailing unclosed open leaves depth high without ever exceeding one. Both are
+ * left byte-identical by contract.
  */
-function hasNestedDirective(text: string): boolean {
-	for (const match of text.matchAll(ULTRAWORK_SPAN_PATTERN)) {
-		if (match[0].includes(ULTRAWORK_MODE_OPEN_TAG, ULTRAWORK_MODE_OPEN_TAG.length)) return true;
+function hasNestedDirective(blocks: readonly ContentBlockParam[]): boolean {
+	let depth = 0;
+	for (const block of blocks) {
+		if (block.type !== "text") continue;
+		for (const token of block.text.matchAll(ULTRAWORK_TAG_PATTERN)) {
+			if (token[0] === ULTRAWORK_MODE_OPEN_TAG) {
+				depth += 1;
+				if (depth > 1) return true;
+			} else if (depth > 0) {
+				depth -= 1;
+			}
+		}
 	}
 	return false;
 }
@@ -63,11 +85,11 @@ export function serializedPayloadBytes(blocks: readonly ContentBlockParam[]): nu
  * from this serialized output) are unaffected.
  */
 export function dedupeUltraworkBlocks(blocks: readonly ContentBlockParam[]): DedupeResult {
+	if (hasNestedDirective(blocks)) return { blocks: [...blocks], collapsedDirectives: 0 };
+
 	let total = 0;
 	for (const block of blocks) {
-		if (block.type !== "text") continue;
-		if (hasNestedDirective(block.text)) return { blocks: [...blocks], collapsedDirectives: 0 };
-		total += countSpans(block.text);
+		if (block.type === "text") total += countSpans(block.text);
 	}
 	if (total === 0) return { blocks: [...blocks], collapsedDirectives: 0 };
 

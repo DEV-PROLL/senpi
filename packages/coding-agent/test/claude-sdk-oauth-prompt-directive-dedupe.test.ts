@@ -125,6 +125,35 @@ describe("Claude SDK OAuth prompt directive dedupe", () => {
 		expect(full).not.toContain(second);
 	});
 
+	it("fails closed when nesting is split across separate text blocks", () => {
+		const blocks: ContentBlockParam[] = [
+			{ type: "text", text: `${OPEN}PRIOR-FLAT${CLOSE}` },
+			{ type: "text", text: `${OPEN}outer ` },
+			{ type: "text", text: `${OPEN}inner${CLOSE}` },
+			{ type: "text", text: ` tail${CLOSE}` },
+		];
+		const { blocks: out, collapsedDirectives } = dedupeUltraworkBlocks(blocks);
+		const full = blocksToText(out);
+
+		expect(collapsedDirectives).toBe(0);
+		expect(full).toContain("PRIOR-FLAT");
+		expect((full.match(/ultrawork directive superseded/g) ?? []).length).toBe(0);
+	});
+
+	it("still collapses flat directives that merely span separate blocks", () => {
+		const blocks: ContentBlockParam[] = [
+			{ type: "text", text: `${OPEN}EARLIER-FLAT${CLOSE}` },
+			{ type: "text", text: "interleaved prose" },
+			{ type: "text", text: `${OPEN}LATEST-FLAT${CLOSE}` },
+		];
+		const { blocks: out, collapsedDirectives } = dedupeUltraworkBlocks(blocks);
+		const full = blocksToText(out);
+
+		expect(collapsedDirectives).toBe(1);
+		expect(full).toContain("LATEST-FLAT");
+		expect(full).not.toContain("EARLIER-FLAT");
+	});
+
 	it("leaves nested directive tags untouched, failing closed rather than corrupting them", () => {
 		const nested = `${OPEN}outer ${OPEN}inner${CLOSE} tail${CLOSE}`;
 		const context: Context = {
