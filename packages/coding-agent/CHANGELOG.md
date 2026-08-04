@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Aligned the isolated local-release smoke package set with the actual Senpi release boundary: it no longer builds or packs the independently versioned SQLite storage workspace or the private server workspace, preventing unrelated upstream API drift in those packages from blocking validation of the eight packages that the local Senpi artifact actually installs.
 - Pinned compiled binary release builds to Bun 1.3.14 instead of the moving canary, keeping all six cross-compilation target executables downloadable during release recovery ([#674](https://github.com/code-yeongyu/senpi/pull/674)).
 - Hid extension and runtime diagnostics emitted through Bun's native `console.info`, `console.warn`, and `console.error` while the interactive TUI owns the terminal, routing them through the existing hidden/redacted stderr sink and restoring the exact original console methods when terminal ownership ends so internal warnings no longer corrupt the transcript ([#677](https://github.com/code-yeongyu/senpi/pull/677)).
 - Recovered required compactions instead of leaving the session in a retry loop or stalled state: failed required compactions can now re-enter recovery, an accepted recovery supersedes the earlier admission error, deterministic fallback sizing is bounded, and stale terminal events remain associated with the superseded attempt rather than poisoning the active recovery ([#684](https://github.com/code-yeongyu/senpi/pull/684)).
