@@ -1,0 +1,230 @@
+name: Releasability gate
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-main:
+    name: Check (main, no autofix)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install system dependencies
+        run: |
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y \
+            libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
+          sudo ln -sf "$(which fdfind)" /usr/local/bin/fd
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # `npm run check` leads with `biome check --write`, which would silently
+      # fix format drift (#697) instead of failing on it. Run biome read-only,
+      # then the remaining check sub-scripts verbatim from the check script.
+      - name: Biome check (read-only)
+        run: npx biome check --error-on-warnings .
+
+      - name: Remaining check sub-scripts
+        run: >
+          npm run check:pinned-deps
+          && npm run check:ts-imports
+          && npm run check:shrinkwrap
+          && npm run check:install-lock:coding-agent
+          && npx tsc --noEmit
+          && node scripts/check-browser-smoke.mjs
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Check (main, no autofix)"
+            echo "- Status: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  model-catalog-regen:
+    name: Model catalog regeneration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install system dependencies
+        run: |
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y \
+            libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
+          sudo ln -sf "$(which fdfind)" /usr/local/bin/fd
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Same invocation scripts/release.mjs and scripts/local-release.mjs use.
+      # Needs network: the generator queries provider model APIs with --strict.
+      - name: Regenerate model catalog
+        run: npm --prefix packages/ai run generate-models
+
+      # #698: regeneration removed a model and the drift only surfaced at
+      # release time. Fail the moment the committed catalog goes stale.
+      - name: Fail on generated drift
+        run: git diff --exit-code packages/ai/src/models.generated.ts
+
+      # A removed model breaks typecheck where code/tests still reference it.
+      - name: Typecheck against regenerated catalog
+        run: npx tsc --noEmit
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Model catalog regeneration"
+            echo "- Status: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  local-release-coherence:
+    name: Local release coherence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install system dependencies
+        run: |
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y \
+            libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
+          sudo ln -sf "$(which fdfind)" /usr/local/bin/fd
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # #700: local-release.mjs built packages that do not compile. The script
+      # tests pin the package set without paying for a full smoke run.
+      - name: Local release script tests
+        run: node --test scripts/local-release.test.mjs
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Local release coherence"
+            echo "- Status: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  report-failure:
+    name: Report failure
+    needs: [check-main, model-catalog-regen, local-release-coherence]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update releasability issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CHECK_MAIN_RESULT: ${{ needs.check-main.result }}
+          MODEL_CATALOG_REGEN_RESULT: ${{ needs.model-catalog-regen.result }}
+          LOCAL_RELEASE_COHERENCE_RESULT: ${{ needs.local-release-coherence.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const label = 'releasability';
+            const date = new Date().toISOString().slice(0, 10);
+            const results = [
+              ['check-main', process.env.CHECK_MAIN_RESULT],
+              ['model-catalog-regen', process.env.MODEL_CATALOG_REGEN_RESULT],
+              ['local-release-coherence', process.env.LOCAL_RELEASE_COHERENCE_RESULT],
+            ];
+            const failed = results
+              .filter(([, result]) => result !== 'success')
+              .map(([name, result]) => `${name} (${result})`);
+            const body = [
+              `Nightly releasability gate failed on ${date}.`,
+              '',
+              `Failed job(s): ${failed.join(', ')}`,
+              `Run: ${process.env.RUN_URL}`,
+            ].join('\n');
+
+            // Ensure the label exists so issue creation cannot validation-fail.
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: 'b60205',
+                description: 'Nightly releasability gate failures',
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error;
+            }
+
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+              per_page: 1,
+            });
+
+            if (existing.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing[0].number,
+                body,
+              });
+              core.info(`Commented on existing issue #${existing[0].number}`);
+            } else {
+              const { data: issue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Releasability gate failed: ${date}`,
+                body,
+                labels: [label],
+              });
+              core.info(`Opened issue #${issue.number}`);
+            }
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Report failure"
+            echo "- Status: ${{ job.status }}"
+            echo "- check-main: ${{ needs.check-main.result }}"
+            echo "- model-catalog-regen: ${{ needs.model-catalog-regen.result }}"
+            echo "- local-release-coherence: ${{ needs.local-release-coherence.result }}"
+          } >> "$GITHUB_STEP_SUMMARY"
