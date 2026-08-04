@@ -38,7 +38,11 @@ describe("tool-schema-compat", () => {
 			});
 		});
 
-		it("moves a parent type into untyped combiner branches", () => {
+		it("merges a root object union instead of hoisting the root type into branches", () => {
+			// A root union used to be rewritten to a branches-only schema with no root
+			// `type`, which OpenAI-compatible gateways reject outright. The root of a
+			// tool's parameters must stay an object schema, so the branches are merged
+			// into it instead.
 			const schema = {
 				type: "object",
 				anyOf: [{ properties: { a: { type: "string" } } }, { properties: { b: { type: "number" } } }],
@@ -47,10 +51,34 @@ describe("tool-schema-compat", () => {
 			const normalized = normalizeToolParametersForOpenAICompat(schema);
 
 			expect(normalized).toEqual({
-				anyOf: [
-					{ type: "object", properties: { a: { type: "string" } } },
-					{ type: "object", properties: { b: { type: "number" } } },
-				],
+				type: "object",
+				properties: { a: { type: "string" }, b: { type: "number" } },
+			});
+		});
+
+		it("still moves a parent type into untyped combiner branches below the root", () => {
+			const schema = {
+				type: "object",
+				properties: {
+					variant: {
+						type: "object",
+						anyOf: [{ properties: { a: { type: "string" } } }, { properties: { b: { type: "number" } } }],
+					},
+				},
+			};
+
+			const normalized = normalizeToolParametersForOpenAICompat(schema);
+
+			expect(normalized).toEqual({
+				type: "object",
+				properties: {
+					variant: {
+						anyOf: [
+							{ type: "object", properties: { a: { type: "string" } } },
+							{ type: "object", properties: { b: { type: "number" } } },
+						],
+					},
+				},
 			});
 		});
 
@@ -261,6 +289,177 @@ describe("tool-schema-compat", () => {
 						},
 					},
 				]);
+			} finally {
+				server.close();
+				await once(server, "close");
+			}
+		});
+	});
+	describe("root combiner schemas (regression: gateway rejects missing root type)", () => {
+		// Apitopia -> Kimi replied `500 server_error: Invalid request:
+		// tools.function.parameters.type is required and must be "object"` because
+		// the root `type: "object"` was deleted whenever the root carried a combiner.
+		// A tool's root parameters schema must always stay a valid object schema.
+		const monitorShape = {
+			type: "object",
+			properties: {
+				action: { type: "string" },
+				command: { type: "string" },
+				bash_id: { type: "string" },
+			},
+			anyOf: [{ required: ["command"] }, { required: ["bash_id"] }],
+		};
+
+		it("keeps the root type on an OpenAI-compatible root combiner schema", () => {
+			const normalized = normalizeToolParametersForOpenAICompat(structuredClone(monitorShape));
+
+			expect(normalized.type).toBe("object");
+		});
+
+		it("keeps the root type on a Moonshot-flavored root combiner schema", () => {
+			const normalized = normalizeToolParametersForMoonshot(structuredClone(monitorShape));
+
+			expect(normalized.type).toBe("object");
+		});
+
+		it("preserves root-level properties when merging a root object union", () => {
+			const normalized = normalizeToolParametersForMoonshot(structuredClone(monitorShape));
+
+			expect(Object.keys(normalized.properties as Record<string, unknown>).sort()).toEqual([
+				"action",
+				"bash_id",
+				"command",
+			]);
+		});
+
+		it("keeps root-level required entries that every branch shares", () => {
+			const schema = {
+				type: "object",
+				required: ["to"],
+				properties: {
+					to: { type: "string" },
+					message: { type: "string" },
+					payload: { type: "object" },
+				},
+				oneOf: [{ required: ["message"] }, { required: ["payload"] }],
+			};
+
+			const normalized = normalizeToolParametersForMoonshot(structuredClone(schema));
+
+			expect(normalized.type).toBe("object");
+			expect(normalized.required).toEqual(["to"]);
+			expect(Object.keys(normalized.properties as Record<string, unknown>).sort()).toEqual([
+				"message",
+				"payload",
+				"to",
+			]);
+		});
+
+		it("merges branch properties into the root object union without dropping root properties", () => {
+			const schema = {
+				type: "object",
+				properties: { app: { type: "string" } },
+				anyOf: [
+					{
+						type: "object",
+						required: ["app", "element_index"],
+						properties: { element_index: { type: "integer" } },
+					},
+					{ type: "object", required: ["app", "x"], properties: { x: { type: "number" } } },
+				],
+			};
+
+			const normalized = normalizeToolParametersForMoonshot(structuredClone(schema));
+
+			expect(normalized.type).toBe("object");
+			expect(Object.keys(normalized.properties as Record<string, unknown>).sort()).toEqual([
+				"app",
+				"element_index",
+				"x",
+			]);
+			expect(normalized.required).toEqual(["app"]);
+		});
+	});
+	describe("wire payload (real request builder)", () => {
+		it("never sends a tool whose root parameters lack type object", async () => {
+			const requestBodies: Array<Record<string, unknown>> = [];
+			const server = http.createServer(async (req, res) => {
+				let body = "";
+				for await (const chunk of req) body += chunk.toString();
+				requestBodies.push(JSON.parse(body) as Record<string, unknown>);
+				res.writeHead(200, { "content-type": "text/event-stream" });
+				res.write(
+					`data: ${JSON.stringify({
+						id: "chatcmpl-root",
+						object: "chat.completion.chunk",
+						created: 0,
+						model: "kimi-test",
+						choices: [{ index: 0, delta: { content: "ok" }, finish_reason: null }],
+					})}\n\n`,
+				);
+				res.write(
+					`data: ${JSON.stringify({
+						id: "chatcmpl-root",
+						object: "chat.completion.chunk",
+						created: 0,
+						model: "kimi-test",
+						choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+					})}\n\n`,
+				);
+				res.write("data: [DONE]\n\n");
+				res.end();
+			});
+			server.listen(0, "127.0.0.1");
+			await once(server, "listening");
+
+			try {
+				const { port } = server.address() as AddressInfo;
+				const model: Model<"openai-completions"> = {
+					id: "kimi-test",
+					name: "Kimi Test",
+					api: "openai-completions",
+					provider: "moonshotai",
+					baseUrl: `http://127.0.0.1:${port}`,
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 128000,
+					maxTokens: 4096,
+				};
+				const context: Context = {
+					messages: [{ role: "user", content: "hello", timestamp: 1 }],
+					tools: [
+						{
+							name: "monitor",
+							description: "Subscribe to a command's output",
+							parameters: {
+								type: "object",
+								properties: {
+									action: { type: "string" },
+									command: { type: "string" },
+									bash_id: { type: "string" },
+								},
+								anyOf: [{ required: ["command"] }, { required: ["bash_id"] }],
+							},
+						},
+					],
+				};
+
+				const result = await streamOpenAICompletions(model, context, { apiKey: "test-key" }).result();
+
+				expect(result.stopReason).toBe("stop");
+				const tools = requestBodies[0]?.tools as Array<{
+					function: { parameters: Record<string, unknown> };
+				}>;
+				expect(tools).toHaveLength(1);
+				for (const tool of tools) {
+					expect(tool.function.parameters.type).toBe("object");
+					expect(Object.keys(tool.function.parameters.properties as Record<string, unknown>).sort()).toEqual([
+						"action",
+						"bash_id",
+						"command",
+					]);
+				}
 			} finally {
 				server.close();
 				await once(server, "close");

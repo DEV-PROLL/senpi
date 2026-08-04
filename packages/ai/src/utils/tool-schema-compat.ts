@@ -90,19 +90,34 @@ function collapseConstUnion(node: Record<string, unknown>): void {
 	node.enum = values;
 }
 
+/**
+ * Collapse a root-level object union into one object schema.
+ *
+ * A tool's root parameters schema must be a plain `{"type":"object"}` schema:
+ * OpenAI-compatible gateways reject a root that only carries `anyOf`/`oneOf`
+ * with `tools.function.parameters.type is required and must be "object"`. The
+ * merge is intentionally lossy in the direction of permissiveness — branch
+ * exclusivity becomes advisory — but it must never lose a declared parameter,
+ * so the root's own `properties` and `required` are merged with the branches'
+ * rather than replaced by them.
+ */
 function mergeRootObjectUnion(schema: Record<string, unknown>): Record<string, unknown> | undefined {
 	const branches = Array.isArray(schema.anyOf) ? schema.anyOf : Array.isArray(schema.oneOf) ? schema.oneOf : undefined;
 	if (branches === undefined || branches.length === 0) return undefined;
+	if (schema.properties !== undefined && !isJsonObject(schema.properties)) return undefined;
+	if (schema.required !== undefined && !Array.isArray(schema.required)) return undefined;
 
 	const objectBranches: Record<string, unknown>[] = [];
 	for (const branch of branches) {
-		if (!isJsonObject(branch) || branch.type !== "object") return undefined;
+		// An untyped branch is a constraint-only variant (e.g. `{ required: [...] }`)
+		// over the root's own properties, so it merges like an object branch.
+		if (!isJsonObject(branch) || (branch.type !== "object" && branch.type !== undefined)) return undefined;
 		if (branch.properties !== undefined && !isJsonObject(branch.properties)) return undefined;
 		if (branch.required !== undefined && !Array.isArray(branch.required)) return undefined;
 		objectBranches.push(branch);
 	}
 
-	const properties: Record<string, unknown> = {};
+	const properties: Record<string, unknown> = isJsonObject(schema.properties) ? { ...schema.properties } : {};
 	for (const branch of objectBranches) {
 		if (!isJsonObject(branch.properties)) continue;
 		for (const [name, propertySchema] of Object.entries(branch.properties)) {
@@ -114,29 +129,36 @@ function mergeRootObjectUnion(schema: Record<string, unknown>): Record<string, u
 		}
 	}
 
-	const firstRequired = objectBranches[0]?.required;
-	let commonRequired = Array.isArray(firstRequired)
-		? firstRequired.filter((name): name is string => typeof name === "string")
+	// Only names required by EVERY branch stay required; a name required by one
+	// branch alone would reject payloads the union accepts. Root-level `required`
+	// applies to all branches, so it is unioned back in.
+	const rootRequired = Array.isArray(schema.required)
+		? schema.required.filter((name): name is string => typeof name === "string")
 		: [];
-	for (const branch of objectBranches.slice(1)) {
-		const branchRequired = new Set(
-			Array.isArray(branch.required)
-				? branch.required.filter((name): name is string => typeof name === "string")
-				: [],
-		);
-		commonRequired = commonRequired.filter((name) => branchRequired.has(name));
-	}
+	const branchRequiredSets = objectBranches.map(
+		(branch) =>
+			new Set(
+				Array.isArray(branch.required)
+					? branch.required.filter((name): name is string => typeof name === "string")
+					: [],
+			),
+	);
+	const firstBranchRequired = branchRequiredSets[0];
+	const commonBranchRequired = firstBranchRequired
+		? [...firstBranchRequired].filter((name) => branchRequiredSets.every((names) => names.has(name)))
+		: [];
+	const required = [...new Set([...rootRequired, ...commonBranchRequired])];
 
 	const { anyOf: _anyOf, oneOf: _oneOf, ...rest } = schema;
 	return {
 		...rest,
 		type: "object",
 		properties,
-		...(commonRequired.length > 0 ? { required: commonRequired } : {}),
+		...(required.length > 0 ? { required } : {}),
 	};
 }
 
-function normalizeNode(node: unknown): unknown {
+function normalizeNode(node: unknown, isRoot = false): unknown {
 	if (Array.isArray(node)) {
 		return node.map((child) => normalizeNode(child));
 	}
@@ -146,7 +168,9 @@ function normalizeNode(node: unknown): unknown {
 	}
 
 	const hasCombiner = COMBINER_KEYS.some((key) => Array.isArray(node[key]));
-	if (hasCombiner) {
+	// The root of a tool's parameters must keep `type: "object"`; hoisting it into
+	// the branches leaves a typeless root that gateways reject outright.
+	if (hasCombiner && !isRoot) {
 		moveTypeIntoCombinerBranches(node);
 	}
 
@@ -183,7 +207,20 @@ function normalizeNode(node: unknown): unknown {
  * for OpenAI-compatible Chat Completions backends.
  */
 export function normalizeToolParametersForOpenAICompat(schema: Record<string, unknown>): Record<string, unknown> {
-	return normalizeNode(structuredClone(schema)) as Record<string, unknown>;
+	const normalized = normalizeNode(structuredClone(schema), true) as Record<string, unknown>;
+	return ensureRootObjectSchema(normalized);
+}
+
+/**
+ * Guarantee the wire shape every OpenAI-compatible backend requires for tool
+ * parameters: a root object schema. A root union is merged into one object
+ * schema; a root that merely lost its `type` gets it restored.
+ */
+function ensureRootObjectSchema(schema: Record<string, unknown>): Record<string, unknown> {
+	const merged = mergeRootObjectUnion(schema);
+	if (merged) return merged;
+	if (schema.type === undefined) return { ...schema, type: "object" };
+	return schema;
 }
 
 /**
@@ -191,8 +228,7 @@ export function normalizeToolParametersForOpenAICompat(schema: Record<string, un
  * normalization, drop non-structural annotation keywords that Moonshot rejects.
  */
 export function normalizeToolParametersForMoonshot(schema: Record<string, unknown>): Record<string, unknown> {
-	const normalized = normalizeToolParametersForOpenAICompat(schema);
-	return stripMoonshotAnnotations(mergeRootObjectUnion(normalized) ?? normalized);
+	return stripMoonshotAnnotations(normalizeToolParametersForOpenAICompat(schema));
 }
 
 function stripMoonshotAnnotations(node: unknown): Record<string, unknown> {
