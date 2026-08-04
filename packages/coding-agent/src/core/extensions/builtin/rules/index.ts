@@ -15,6 +15,7 @@ import type { PiRulesConfig } from "./rules/types.ts";
 type PiRulesMode = PiRulesConfig["mode"];
 
 const MODE_VALUES = new Set<string>(["static", "dynamic", "both", "off"]);
+const DYNAMIC_CONTEXT_SCOPE = "live-context";
 
 export default function piRulesExtension(pi: ExtensionAPI): void {
 	pi.registerFlag("pi-rules-disabled", {
@@ -134,7 +135,7 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 		);
 		engine.commitDynamicTargetFingerprints(fingerprints);
 		const rules = loaded.rules.filter(
-			(rule) => !engine.isStaticInjected(rule) && !engine.isDynamicInjected(firstTargetPath, rule),
+			(rule) => !engine.isStaticInjected(rule) && !engine.isDynamicInjected(DYNAMIC_CONTEXT_SCOPE, rule),
 		);
 		if (rules.length === 0) {
 			return undefined;
@@ -144,7 +145,7 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 		const targetPath = displayPath(ctx.cwd, firstPendingTarget);
 		const block = engine.formatDynamic(rules, targetPath);
 		for (const rule of rules) {
-			engine.markDynamicInjected(firstTargetPath, rule);
+			engine.markDynamicInjected(DYNAMIC_CONTEXT_SCOPE, rule);
 		}
 		appendRuleActivation(pi, {
 			kind: "project-rules",
