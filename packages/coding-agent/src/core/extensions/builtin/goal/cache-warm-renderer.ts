@@ -1,4 +1,4 @@
-import { Box, Text } from "@earendil-works/pi-tui";
+import { noticeEntryRenderer } from "../../notice/index.ts";
 import type { EntryRenderer } from "../../types.ts";
 import {
 	formatCacheTtl,
@@ -10,24 +10,17 @@ import {
 	type GoalCacheWarmupPhase,
 } from "./cache-warm.ts";
 
-const BOLD = "\u001b[1m";
-const BOLD_OFF = "\u001b[22m";
-
-export const renderGoalCacheWarmupEntry: EntryRenderer<GoalCacheWarmupEntryData> = (entry, options, theme) => {
+export const renderGoalCacheWarmupEntry: EntryRenderer<GoalCacheWarmupEntryData> = noticeEntryRenderer((entry) => {
 	const data = entry.data;
 	if (data === undefined) return undefined;
-	const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
-	box.addChild(new Text(theme.fg("accent", `${BOLD}${titleLine(data)}${BOLD_OFF}`), 0, 0));
-	box.addChild(new Text(theme.fg("dim", whyLine(data)), 0, 0));
 	const warm = warmLine(data.phase, data.cache);
-	if (warm !== undefined) box.addChild(new Text(theme.fg("success", warm), 0, 0));
-	if (options.expanded) {
-		box.addChild(
-			new Text(theme.fg("dim", `goal ${data.goalId} · planned delay ${formatWakeDuration(data.delayMs)}`), 0, 0),
-		);
-	}
-	return box;
-};
+	return {
+		title: titleLine(data),
+		why: whyLine(data),
+		extra: warm === undefined ? [] : [{ text: warm, tone: "success" }],
+		expandedLine: `goal ${data.goalId} · planned delay ${formatWakeDuration(data.delayMs)}`,
+	};
+});
 
 function titleLine(data: GoalCacheWarmupEntryData): string {
 	const monitors = data.activeMonitorCount === 1 ? "1 monitor on duty" : `${data.activeMonitorCount} monitors on duty`;

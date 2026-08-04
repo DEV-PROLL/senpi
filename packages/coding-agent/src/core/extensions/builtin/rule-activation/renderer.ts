@@ -1,21 +1,12 @@
-import { Box, Text } from "@earendil-works/pi-tui";
+import { noticeEntryRenderer } from "../../notice/index.ts";
 import type { EntryRenderer } from "../../types.ts";
 import { parseRuleActivationDetails, type RuleActivationDetails } from "./types.ts";
 
-const BOLD = "\u001b[1m";
-const BOLD_OFF = "\u001b[22m";
-
-export const renderRuleActivationEntry: EntryRenderer<unknown> = (entry, options, theme) => {
+export const renderRuleActivationEntry: EntryRenderer<unknown> = noticeEntryRenderer((entry) => {
 	const details = parseRuleActivationDetails(entry.data);
 	if (details === undefined) return undefined;
-	const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
-	box.addChild(new Text(theme.fg("accent", `${BOLD}${titleLine(details)}${BOLD_OFF}`), 0, 0));
-	box.addChild(new Text(theme.fg("dim", summaryLine(details)), 0, 0));
-	if (options.expanded) {
-		box.addChild(new Text(theme.fg("dim", detailLine(details)), 0, 0));
-	}
-	return box;
-};
+	return { title: titleLine(details), why: summaryLine(details), expandedLine: detailLine(details) };
+});
 
 function titleLine(details: RuleActivationDetails): string {
 	switch (details.kind) {

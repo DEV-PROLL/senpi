@@ -1,5 +1,15 @@
 # goal Extension Changes
 
+## Cache-warm entry renderer delegates to the shared notice kit (2026-08-04)
+
+### What changed
+
+- `cache-warm-renderer.ts` now renders through `noticeEntryRenderer` from `src/core/extensions/notice/`. The exported `renderGoalCacheWarmupEntry` symbol, registration, title/why/warm/expanded text, accent and success tones, and expand behavior are unchanged; `goal-cache-warm-renderer.test.ts` passes unmodified.
+
+### Expected merge conflict zones
+
+- LOW in `cache-warm-renderer.ts`; NONE in cache-warm metrics, continuation, or persistence.
+
 ## A terminal provider error is a prompt-recoverable block (2026-08-04)
 
 ### What changed

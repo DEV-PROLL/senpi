@@ -1,5 +1,11 @@
 # loop-guard changes
 
+## loop-guard: notice renderer delegates to the shared notice kit (2026-08-04)
+
+- `renderer.ts` now builds its box through `noticeMessageRenderer` from `src/core/extensions/notice/`. The exported `renderLoopGuardNotice` symbol, registration, title/why/expanded text, accent tone, and expand behavior are unchanged; existing suites pass unmodified.
+- Why: one visual contract (`NoticeSpec`) is now shared with ttsr injections, goal cache-warm entries, and fallback transitions, so notice styling drifts in one place instead of four.
+- Expected merge conflict zones: LOW in `renderer.ts` (imports and the spec mapping); NONE in detectors, tracker, policy, or the steered reminder text.
+
 ## loop-guard: suppress distinct-target similarity false positives (2026-08-03)
 
 - `similar` detection now recognizes stable target fields for `read`,
