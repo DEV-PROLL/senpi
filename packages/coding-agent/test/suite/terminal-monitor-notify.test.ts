@@ -3,7 +3,7 @@ import { TerminalManager } from "../../src/core/extensions/builtin/terminal/mana
 import { MonitorRegistry } from "../../src/core/extensions/builtin/terminal/monitor-registry.ts";
 import type { TerminalToolContext } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createMonitorTool } from "../../src/core/extensions/builtin/terminal/tools/monitor.ts";
-import { createNotifier, line } from "./terminal-monitor-notify-harness.ts";
+import { createNotifier, line, summary } from "./terminal-monitor-notify-harness.ts";
 
 describe("terminal monitor event delivery", () => {
 	it("coalesces a burst into one wake containing each event line", () => {
@@ -80,13 +80,34 @@ describe("terminal monitor event delivery", () => {
 		}
 
 		expect(sent).toHaveLength(5);
-		expect(sent[4]?.message.content).toContain("paused - peek bash_output or re-arm");
+		expect(sent[4]?.message.content).toContain("Monitor event(budget): wake-5");
 		expect(pauseMonitors).toHaveBeenCalledTimes(1);
 		notifier.rearm("bash_budget");
 		notifier.notifyEvent(line("bash_budget", "budget", "resumed"));
 		scheduler.advanceBy(2000);
 		expect(sent).toHaveLength(6);
 		expect(sent[5]?.message.content).toContain("resumed");
+	});
+
+	it("delivers a paused monitor completion without rearm", () => {
+		const { notifier, pauseMonitors, scheduler, sent } = createNotifier({
+			settings: { coalesceWindowMs: 10, rateLimitMs: 5000, wakeBudget: 1 },
+		});
+		notifier.notifyEvent(line("bash_wait", "wait", "still running"));
+		scheduler.advanceBy(10);
+		expect(sent).toHaveLength(1);
+
+		notifier.notifyEvent(line("bash_wait", "wait", "still running"));
+		scheduler.advanceBy(10);
+		expect(sent).toHaveLength(1);
+
+		notifier.notifyEvent(summary("bash_wait", "wait", "watcher completed (exit code 0)"));
+		scheduler.advanceBy(10);
+
+		expect(sent).toHaveLength(2);
+		expect(sent[1]?.message.content).toContain("watcher completed (exit code 0)");
+		expect(sent[1]?.options).toMatchObject({ triggerTurn: true });
+		expect(pauseMonitors).toHaveBeenCalledTimes(1);
 	});
 
 	it("delivers completion from a new monitor after the prior wake budget paused", async () => {

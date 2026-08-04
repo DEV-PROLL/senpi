@@ -1,5 +1,39 @@
 # terminal builtin extension — fork surface
 
+## Paused monitors still deliver completion (2026-08-04)
+
+### What changed
+
+- `MonitorNotifier.notifyEvent()` keeps dropping intermediate line events after the
+  session wake budget pauses live monitors, but a terminal summary now releases the
+  notifier pause, resets the consecutive-wake streak, and bypasses the prior line
+  injection's rate-limit timestamp. Summary delivery does not consume the wake budget
+  or emit another pause notice after the monitor has exited.
+- The wake-budget notice now says completion still wakes automatically and limits
+  explicit rearm guidance to callers that need intermediate events.
+- A regression exhausts the wake budget, proves another line stays suppressed, and
+  then proves the same monitor's completion wakes the session without `rearm()`.
+
+### Why
+
+- Session `019fceb6-df3a-7a90-ac5f-cfcb0de5fba2` used a noisy `gh run watch`
+  monitor. The wake budget correctly paused repeated status updates, but the notifier
+  also discarded the monitor's exit summary. The agent therefore had to rearm to learn
+  completion, which reset the wake budget and recreated the wake loop.
+- A paused monitor is still a live resumption channel. Pausing must suppress
+  intermediate noise without hiding the terminal event the session is waiting for.
+
+### Why this cannot be expressed externally
+
+- Wake-budget state, notification rate limits, and monitor summaries meet inside the
+  built-in session-scoped `MonitorNotifier`; extensions cannot intercept or reorder
+  that delivery transition.
+
+### Expected merge conflict zones
+
+- LOW: `monitor-notify.ts` around `notifyEvent()`, wake-budget wording, and the
+  notification regression tests.
+
 ## Fresh monitors reset a spent wake budget (2026-08-03)
 
 ### What changed

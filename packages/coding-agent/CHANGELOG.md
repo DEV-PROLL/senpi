@@ -31,6 +31,9 @@
 
 ### Fixed
 
+- Fixed paused terminal monitors discarding their own completion summary and forcing
+  repeated wake-budget rearms; completion now wakes the session automatically while
+  intermediate line noise remains suppressed ([#717](https://github.com/code-yeongyu/senpi/pull/717)).
 - Fixed release preparation failing after Groq replaced `qwen/qwen3-32b` with the multimodal
   `qwen/qwen3.6-27b`: Senpi's generated model catalog and typed request regression now follow the active model,
   preserve Groq's `none`/`default` reasoning controls, and include the reviewed live provider metadata refresh so
