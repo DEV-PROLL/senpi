@@ -8,11 +8,21 @@
 
 ### Added
 
+- Added one shared transcript notice system for rule-driven behavior: loop-guard, TTSR, goal continuation, and fallback handling now emit structured activation records and render them through the same notice kit, keeping transcript appearance, metadata, and activation history consistent instead of maintaining four divergent UI paths ([#689](https://github.com/code-yeongyu/senpi/pull/689), [#692](https://github.com/code-yeongyu/senpi/pull/692)).
+- Added cross-turn repetition protection to TTSR: the agent now compares bounded normalized content across consecutive turns, detects repeated response cycles that span turn boundaries, records the triggering pattern, and interrupts the loop before another duplicate turn can continue; deterministic unit coverage and a real mock-loop QA scenario pin the behavior ([#694](https://github.com/code-yeongyu/senpi/pull/694)).
+
 ### Changed
+
+- Shortened the goal continuation grace countdown after an accepted user turn from 60 seconds to 10 seconds, preserving the user's opportunity to cancel automatic continuation while avoiding a full minute of idle time before a goal resumes ([#682](https://github.com/code-yeongyu/senpi/pull/682)).
 
 ### Fixed
 
 - Pinned compiled binary release builds to Bun 1.3.14 instead of the moving canary, keeping all six cross-compilation target executables downloadable during release recovery ([#674](https://github.com/code-yeongyu/senpi/pull/674)).
+- Hid extension and runtime diagnostics emitted through Bun's native `console.info`, `console.warn`, and `console.error` while the interactive TUI owns the terminal, routing them through the existing hidden/redacted stderr sink and restoring the exact original console methods when terminal ownership ends so internal warnings no longer corrupt the transcript ([#677](https://github.com/code-yeongyu/senpi/pull/677)).
+- Recovered required compactions instead of leaving the session in a retry loop or stalled state: failed required compactions can now re-enter recovery, an accepted recovery supersedes the earlier admission error, deterministic fallback sizing is bounded, and stale terminal events remain associated with the superseded attempt rather than poisoning the active recovery ([#684](https://github.com/code-yeongyu/senpi/pull/684)).
+- Suppressed the stream error previously surfaced when a user cancels an in-progress compaction with Escape, treating the abort as an intentional terminal outcome while preserving cleanup and subsequent session usability ([#685](https://github.com/code-yeongyu/senpi/pull/685)).
+- Preserved built-in default fallback chains when users add their own configured chains instead of replacing the defaults wholesale, and identified the exact settings scope responsible when a fallback-chain warning is rendered so project, user, and runtime configuration conflicts can be diagnosed directly ([#686](https://github.com/code-yeongyu/senpi/pull/686)).
+- Restored blocked-goal continuation across interruption boundaries: sessions now prompt to resume goals that were already blocked when the process restarts, and a goal blocked by a provider error resumes on the next accepted user message instead of remaining permanently stuck ([#687](https://github.com/code-yeongyu/senpi/pull/687), [#688](https://github.com/code-yeongyu/senpi/pull/688)).
 
 ### Removed
 
