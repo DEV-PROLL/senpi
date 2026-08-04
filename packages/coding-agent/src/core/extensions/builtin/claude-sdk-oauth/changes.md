@@ -1,5 +1,13 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-04 - Collapse repeated ultrawork directive blocks in flatten serialization
+
+- Added `dedupeUltraworkBlocks` (`prompt-directive-dedupe.ts`), a pure post-process over `buildPromptBlocks` output that collapses repeated `<ultrawork-mode>...</ultrawork-mode>` directive spans to the single most recent copy, replacing earlier copies with a one-line placeholder. Wired into both flatten call sites: the resident lane (`session-stream.ts` `createResidentAttempt`, the primary burner path) and the non-resident lane (`stream.ts`).
+- Why: when continuity diverges (compaction, abort, model switch, restart, account failover) the lane flattens the full transcript into one prompt. The omo ultrawork hook re-injects the ~17KB directive on every trigger-matching input with only an input-scoped guard, so copies accumulated and were re-sent verbatim on every flatten — issue #494's 875KB prompt was 73% such duplicates.
+- Hash safety: `dedupeUltraworkBlocks` operates only on the serialized output and never mutates `context.messages`, so continuity hashes (derived in `session-sync.ts`) are unaffected. Spans match within a single text block only; a lone open tag in one block and a close tag in another never form a span.
+- Why an extension could not handle it: the dedupe must run inside the flatten serialization in `createResidentAttempt` / `stream.ts`, which no extension hook reaches.
+- Merge-conflict risk: low. Expected conflict zones are the `buildPromptBlocks` call sites in `stream.ts` and `session-stream.ts` and the new `prompt-directive-dedupe.ts` import.
+
 ## 2026-08-01 - Resume-first session continuity (SDK ledger is authoritative)
 
 - **One SDK session lineage per senpi conversation.** A new `query()` is no longer a new session: every query replacement re-attaches with `resume: <sdkSessionId>`, so normal turns, model switches, thinking-level switches, ESC aborts, idle expiry, and shared-root account failover all continue the same lineage. Flattening the transcript into a `<conversation_history>` envelope is demoted to a last resort, reachable only when the SDK transcript is genuinely unusable.

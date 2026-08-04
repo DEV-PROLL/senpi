@@ -2,6 +2,7 @@ import type { Api, Context, Model, SimpleStreamOptions } from "@earendil-works/p
 import { type AuthenticatedAttemptInput, queryWithAuthLane } from "./auth-lane.ts";
 import { BoundedAsyncQueue, SESSION_STREAM_QUEUE_CAPACITY } from "./bounded-queue.ts";
 import { buildPromptBlocks } from "./prompt-bridge.ts";
+import { dedupeUltraworkBlocks } from "./prompt-directive-dedupe.ts";
 import type { SDKMessage, SDKUserMessage } from "./sdk-boundary.ts";
 import { getSdkBoundary } from "./sdk-boundary.ts";
 import { type ContinuityDecision, decideNativeContinuity } from "./session-continuity.ts";
@@ -205,7 +206,7 @@ async function createResidentAttempt(
 	}
 
 	const blocks = flatten
-		? buildPromptBlocks(input.context, input.customToolNameToSdk, input.toolWatchNote)
+		? dedupeUltraworkBlocks(buildPromptBlocks(input.context, input.customToolNameToSdk, input.toolWatchNote)).blocks
 		: buildDeltaPromptBlocks(messages.slice(from), input.customToolNameToSdk);
 	const staged = stageContinuityDecision(
 		observeSessionSyncDecision({
