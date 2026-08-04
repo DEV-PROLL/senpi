@@ -287,3 +287,113 @@ describe("message_end fail-closed ordering", () => {
 		expect(harness.faux.getCallLog().length).toBe(2);
 	});
 });
+
+describe("repetitive turns remediation", () => {
+	let harness: Harness;
+
+	afterEach(() => {
+		harness.cleanup();
+	});
+
+	const STATUS_TURNS = [
+		"I read this as continue supervising the portable matrix; it has started cleanly with 1 check green and 8 still pending.",
+		"I read this as continue supervising the portable matrix; it has started cleanly with 2 checks green and 7 jobs pending.",
+		"I read this as continue supervising the portable matrix; it has started cleanly with 3 checks green and 6 gates pending.",
+		"I read this as continue supervising the portable matrix; it has started cleanly with 4 checks green and 5 builds pending.",
+	];
+
+	it("interrupts a cross-turn near-duplicate streak and injects a corrective nudge", async () => {
+		harness = await createHarness({ extensionFactories: [ttsrExtension], persistSession: true });
+		harness.setResponses([
+			fauxAssistantMessage([fauxText(STATUS_TURNS[0])]),
+			fauxAssistantMessage([fauxText(STATUS_TURNS[1])]),
+			fauxAssistantMessage([fauxText(STATUS_TURNS[2])]),
+			fauxAssistantMessage([fauxText(STATUS_TURNS[3])]),
+			fauxAssistantMessage([fauxText("breaking the loop: taking a concrete action now")]),
+		]);
+
+		await harness.session.prompt("watch the gates");
+		await harness.session.prompt("continue");
+		await harness.session.prompt("continue");
+
+		expect(harness.faux.getCallLog()).toHaveLength(5);
+		const nudges = ttsrNudges(harness);
+		expect(nudges.length).toBeGreaterThanOrEqual(1);
+		for (const nudge of nudges) {
+			expect(nudge).toContain('<system-interrupt reason="rule_violation" rule="repetitive-turns">');
+			expect(nudge).toMatch(/stop|break|concrete action|do not restate/i);
+		}
+		expect(getMessageText(harness.session.messages.at(-1))).toContain("breaking the loop");
+
+		const entries = readSessionEntries(harness);
+		const injectionEntries = entries.filter((e) => e.type === "custom" && e.customType === "ttsr-injection");
+		expect(injectionEntries.length).toBe(nudges.length);
+	});
+
+	it("detects repetition generically, not a baked-in phrase", async () => {
+		harness = await createHarness({ extensionFactories: [ttsrExtension], persistSession: true });
+		harness.setResponses([
+			fauxAssistantMessage([
+				fauxText("Still working on the frobnicate step. Pass 1 of 9 is done, queue drained here."),
+			]),
+			fauxAssistantMessage([
+				fauxText("Still working on the frobnicate step. Pass 2 of 9 is done, queue drained again."),
+			]),
+			fauxAssistantMessage([
+				fauxText("Still working on the frobnicate step. Pass 3 of 9 is done, queue drained fully."),
+			]),
+			fauxAssistantMessage([fauxText("frobnicate finished; moving to the deploy checklist")]),
+		]);
+
+		await harness.session.prompt("frob the widget");
+		await harness.session.prompt("continue");
+
+		expect(harness.faux.getCallLog()).toHaveLength(3);
+		const nudges = ttsrNudges(harness);
+		expect(nudges.length).toBeGreaterThanOrEqual(1);
+		expect(nudges[0]).toContain('rule="repetitive-turns"');
+	});
+
+	it("leaves genuinely progressing turns alone", async () => {
+		harness = await createHarness({ extensionFactories: [ttsrExtension], persistSession: true });
+		harness.setResponses([
+			fauxAssistantMessage([fauxText(STATUS_TURNS[0])]),
+			fauxAssistantMessage([
+				fauxText(
+					"The two reds are again Linux jobs while Windows and macOS remain active; switching to a run-level watcher.",
+				),
+			]),
+			fauxAssistantMessage([
+				fauxText(
+					"Windows now passes the integration binary; the store tests hardcode a shell path, so I am gating the live cases.",
+				),
+			]),
+			fauxAssistantMessage([fauxText("All checks green; merging the pull request and removing the worktree.")]),
+		]);
+
+		await harness.session.prompt("watch the gates");
+		await harness.session.prompt("continue");
+		await harness.session.prompt("continue");
+		await harness.session.prompt("continue");
+
+		expect(harness.faux.getCallLog()).toHaveLength(4);
+		expect(ttsrNudges(harness)).toEqual([]);
+	});
+
+	it("honors ttsr-rules-disabled for the repetitive-turns lane", async () => {
+		harness = await createHarness({
+			extensionFactories: [ttsrExtension],
+			extensionFlagValues: new Map([["ttsr-rules-disabled", "repetitive-turns"]]),
+			persistSession: true,
+		});
+		harness.setResponses(STATUS_TURNS.map((text) => fauxAssistantMessage([fauxText(text)])));
+
+		await harness.session.prompt("watch the gates");
+		await harness.session.prompt("continue");
+		await harness.session.prompt("continue");
+		await harness.session.prompt("continue");
+
+		expect(harness.faux.getCallLog()).toHaveLength(4);
+		expect(ttsrNudges(harness)).toEqual([]);
+	});
+});
