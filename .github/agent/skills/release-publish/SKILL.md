@@ -32,35 +32,26 @@ Run `scripts/release.mjs` from a clean `main` checkout.
 - [ ] Use a clean dedicated clone if the main checkout has foreign state.
 - [ ] Never clean, stash, or otherwise disturb other people's work.
 - [ ] Use the protected-main path when needed; `UPSTREAM_AUTOMATION_TOKEN` exists for authenticated protected-main pushes.
-- [ ] Known broken today: the tag pipeline's `publish-npm` job fails its OIDC publish with npm PUT 404 (observed on v2026.7.28-2 AND v2026.7.28-3, 2026-07-28): the job carries `environment: npm-publish`, whose OIDC subject does not match the npm trusted-publisher registration. Until the registration accepts the environment subject (or the environment is removed from the job), publish through `gh workflow run publish-npm.yml -f version=<v> -f publish-only=true` — the proven-working route used for v2026.7.28, -2, and -3.
+- [ ] npm publish is delegated: the tag pipeline's `publish-npm` job no longer publishes — it dispatches `publish-npm.yml` in publish-only mode (the proven route from the v2026.7.28-x and v2026.8.4 recoveries) and gates the public GitHub Release on that run's success. npm's trusted publisher matches the `publish-npm.yml` workflow identity only; never reintroduce a direct publish or an `environment:` on the publish path (the environment subject is what npm rejects).
 - [ ] Do not rerun `scripts/release.mjs` after the tag has been pushed.
 - [ ] If checks fail before the tag push, fix first, then re-release from the beginning.
 - [ ] Treat `E404` noise for `@code-yeongyu/senpi-orchestrator` as non-fatal.
 - [ ] Use `node scripts/release-notes.mjs` / the cl.md audit before publishing notes.
 - [ ] Keep release notes product-facing only.
 
-## Approval checkpoint
-
-This is the step past sessions risked forgetting.
+## Publish watch
 
 After tag push, watch the `build-binaries` workflow run (find the run id via `gh run list --workflow=build-binaries.yml --branch main --limit 1 --json databaseId -q '.[0].databaseId'`).
 
-After `stage-github-release`, check `publish-npm` for a pending `npm-publish` Environment deployment and approve it. Discover what is pending first, then approve:
+The `publish-npm` job dispatches `publish-npm.yml` in publish-only mode, prints the dispatched run URL, waits up to 60 minutes, and fails if the publish run fails. There is no environment approval gate on the publish path — the old `npm-publish` environment subject is exactly what npm's trusted-publisher registration rejects.
 
-```bash
-# List pending deployments for the run (shows environment name + id)
-gh api repos/code-yeongyu/senpi/actions/runs/<run_id>/pending_deployments
-# Approve the npm-publish deployment
-gh api repos/code-yeongyu/senpi/actions/runs/<run_id>/pending_deployments -X POST -F environment_ids[]=<id> -F comment="release approval"
-```
-
-Never consider the release done before `publish-npm` and `publish-github-release` complete and the GitHub Release is non-draft.
+Never consider the release done before `publish-npm` and `publish-github-release` complete and the GitHub Release is non-draft. If the publish job fails, recover with `gh workflow run publish-npm.yml -f version=<v> -f publish-only=true`, never by rerunning `release.mjs`.
 
 ## Gate disambiguation
 
 These are separate controls and must not be conflated:
 
-- GitHub Environment approval: the `npm-publish` pending deployment gate.
+- GitHub Environment approval: removed from the publish path (the `npm-publish` environment subject is what npm rejects); the unused environment may remain in repo settings harmlessly.
 - npm OIDC trusted publishing: the npm-side trusted publishing path used by the job.
 - npm lifecycle-script review: the `npm approve-scripts --allow-scripts-pending` trust review, which is not publish approval.
 - Protected-main authorization: the authenticated push path for protected `main`, which is distinct from publish approval.
@@ -68,7 +59,7 @@ These are separate controls and must not be conflated:
 ## Hazards and hard rules
 
 - Protected-main push failures are expected if the token path is wrong; use `UPSTREAM_AUTOMATION_TOKEN` for the authenticated release push path.
-- The tag pipeline's environment-gated `publish-npm` job currently 404s on OIDC (see Pre-flight checklist); `.github/workflows/publish-npm.yml` publish-only is the working publish route until the npm trusted-publisher registration accepts the `npm-publish` environment subject. Re-check after any npm-side config change.
+- The tag pipeline publishes only through the dispatched `publish-npm.yml` identity (see Pre-flight checklist). If npm-side config changes, re-verify with a `dry_run` dispatch before the next release.
 - Never rerun `scripts/release.mjs` after the tag is pushed. If publishing fails, recover from the existing tag workflow.
 - If a check or test fails before the tag push, stop and fix the issue, then re-release. Do not try to salvage a bad release by continuing past the failure.
 - `E404` noise for `@code-yeongyu/senpi-orchestrator` is not a release failure.
