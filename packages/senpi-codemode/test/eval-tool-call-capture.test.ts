@@ -30,7 +30,7 @@ describe("eval tool-call capture", () => {
 
 		const toolResult = await createTool(kernel, executeTool).execute(
 			"capture-success",
-			{ language: "js", code: "await tool.read({ path: '/tmp/x' })" },
+			{ language: "js", code: "await tool.read({ path: '/tmp/x' })", summary: "capture success" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -57,7 +57,7 @@ describe("eval tool-call capture", () => {
 
 		const toolResult = await createTool(kernel, executeTool).execute(
 			"capture-error-bit",
-			{ language: "js", code: "await tool.bash({ command: 'exit 1' })" },
+			{ language: "js", code: "await tool.bash({ command: 'exit 1' })", summary: "capture error bit" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -85,7 +85,7 @@ describe("eval tool-call capture", () => {
 
 		const toolResult = await createTool(kernel, executeTool).execute(
 			"capture-rejection",
-			{ language: "js", code: "await tool.blocked({ path: '/tmp/blocked' })" },
+			{ language: "js", code: "await tool.blocked({ path: '/tmp/blocked' })", summary: "capture rejection" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -110,7 +110,7 @@ describe("eval tool-call capture", () => {
 
 		const toolResult = await createTool(kernel, executeTool, () => []).execute(
 			"capture-reserved",
-			{ language: "js", code: "await tool.__schema__({})" },
+			{ language: "js", code: "await tool.__schema__({})", summary: "capture reserved" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -130,7 +130,7 @@ describe("eval tool-call capture", () => {
 
 		const toolResult = await createTool(kernel, executeTool).execute(
 			"capture-cap",
-			{ language: "js", code: "many calls" },
+			{ language: "js", code: "many calls", summary: "capture cap" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -164,7 +164,7 @@ describe("eval tool-call capture", () => {
 
 		await createTool(kernel, executeTool).execute(
 			"capture-stream",
-			{ language: "js", code: "await tool.read({ path: '/tmp/live' })" },
+			{ language: "js", code: "await tool.read({ path: '/tmp/live' })", summary: "capture stream" },
 			undefined,
 			onUpdate,
 			fakeExtensionContext(),

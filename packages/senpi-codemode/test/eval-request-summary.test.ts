@@ -130,7 +130,10 @@ describe("parseEvalRequest summary enforcement", () => {
 describe("eval tool schema", () => {
 	it("describes summary with the verbatim required-for-run guide", () => {
 		const tool = buildTool();
-		const summary = tool.parameters.properties.summary;
+		const summary = tool.parameters.properties.summary as unknown as {
+			readonly description?: string;
+			readonly maxLength?: number;
+		};
 		expect(summary.description).toContain(SUMMARY_SCHEMA_DESCRIPTION);
 		expect(summary.maxLength).toBe(EVAL_SUMMARY_MAX_LENGTH);
 	});
