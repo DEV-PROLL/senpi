@@ -54,6 +54,18 @@ is false, and resumed sessions with 8+ trailing historical continuation entries 
 session-start auto-resume. `tokenBudget` remains inert compatibility metadata only; this
 policy is budget-free by design.
 
+## RESTART RESUME PROMPT
+
+On `session_start` with reason `resume`, an idle TUI session with no pending
+messages prompts before doing anything else when the stored goal is stopped but
+unfinished — `paused` or `blocked`. `isResumeOfStoppedGoal` (lifecycle-helpers.ts)
+owns that admission and `maybePromptResumeStoppedGoal` (index.ts) renders it;
+the title names the actual status (`Resume blocked goal?`). Accepting flips the
+goal to `active` as a `"user"` mutation and queues a continuation; declining
+leaves the status untouched. `active` and `complete` goals never prompt. This
+mirrors codex `maybe_prompt_resume_paused_goal_after_resume`, minus its
+`UsageLimited` arm, which senpi has no counterpart for.
+
 ## PERSISTENCE
 
 `store.ts` writes `GoalFile{version:1, goal}` to

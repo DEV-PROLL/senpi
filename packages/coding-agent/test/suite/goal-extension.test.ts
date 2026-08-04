@@ -546,6 +546,74 @@ describe("goal extension reload does not auto-start a stopped agent", () => {
 	});
 });
 
+describe("goal extension resume-on-restart prompt (codex parity)", () => {
+	async function makeSelectingCtx(
+		prompts: string[],
+		choice: (options: string[]) => string | undefined,
+		threadId: string,
+	): Promise<ExtensionContext> {
+		const base = await makeCtx(threadId);
+		return {
+			...base,
+			hasUI: true,
+			ui: {
+				notify: () => {},
+				select: async (prompt: string, options: string[]) => {
+					prompts.push(prompt);
+					return choice(options);
+				},
+				setStatus: () => {},
+			},
+		} as unknown as ExtensionContext;
+	}
+
+	it("prompts to resume a blocked goal on session_start reason 'resume'", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const prompts: string[] = [];
+		const ctx = await makeSelectingCtx(prompts, (options) => options[0], "thread-blocked-resume");
+		await tools.get("create_goal")?.execute("c1", { objective: "Finish the migration" }, undefined, undefined, ctx);
+		await tools
+			.get("update_goal")
+			?.execute("u1", { status: "blocked", reason: "provider error" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "resume" }, ctx);
+
+		expect(prompts).toHaveLength(1);
+		expect(prompts[0]).toContain("Finish the migration");
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+		expect(sent.map((entry) => entry.message.customType)).toEqual(["goal-continuation"]);
+	});
+
+	it("leaves a blocked goal stopped when the user declines the resume prompt", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const prompts: string[] = [];
+		const ctx = await makeSelectingCtx(prompts, (options) => options[1], "thread-blocked-declined");
+		await tools.get("create_goal")?.execute("c1", { objective: "Finish the migration" }, undefined, undefined, ctx);
+		await tools
+			.get("update_goal")
+			?.execute("u1", { status: "blocked", reason: "provider error" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "resume" }, ctx);
+
+		expect(prompts).toHaveLength(1);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("blocked");
+		expect(sent).toHaveLength(0);
+	});
+
+	it("never prompts for a completed goal on resume", async () => {
+		const { tools, handlers } = createGoalHarness();
+		const prompts: string[] = [];
+		const ctx = await makeSelectingCtx(prompts, (options) => options[0], "thread-complete-resume");
+		await tools.get("create_goal")?.execute("c1", { objective: "Finish the migration" }, undefined, undefined, ctx);
+		await tools.get("update_goal")?.execute("u1", { status: "complete" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "resume" }, ctx);
+
+		expect(prompts).toHaveLength(0);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("complete");
+	});
+});
+
 describe("goal extension session_start migration-lite admission", () => {
 	it("suppresses auto-continuation and notifies when a resumed session ends in a continuation flood", async () => {
 		const { tools, handlers, sent } = createGoalHarness();
