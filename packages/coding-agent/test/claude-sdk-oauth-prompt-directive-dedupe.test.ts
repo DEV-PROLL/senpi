@@ -103,6 +103,43 @@ describe("Claude SDK OAuth prompt directive dedupe", () => {
 		expect(countDirectiveSpans(blocksToText(blocks))).toBe(1);
 	});
 
+	it("keeps the LAST copy intact and removes every earlier body", () => {
+		const first = "FIRST-BODY-SENTINEL";
+		const second = "SECOND-BODY-SENTINEL";
+		const last = "LAST-BODY-SENTINEL";
+		const context: Context = {
+			messages: [
+				userMsg(`${OPEN}${first}${CLOSE}`, 1),
+				assistantMessage([{ type: "text", text: "ok" }], 2),
+				userMsg(`${OPEN}${second}${CLOSE}`, 3),
+				assistantMessage([{ type: "text", text: "ok2" }], 4),
+				userMsg(`${OPEN}${last}${CLOSE}`, 5),
+			],
+		};
+		const { blocks, collapsedDirectives } = dedupeUltraworkBlocks(buildPromptBlocks(context));
+		const full = blocksToText(blocks);
+
+		expect(collapsedDirectives).toBe(2);
+		expect(full).toContain(last);
+		expect(full).not.toContain(first);
+		expect(full).not.toContain(second);
+	});
+
+	it("leaves nested directive tags untouched, failing closed rather than corrupting them", () => {
+		const nested = `${OPEN}outer ${OPEN}inner${CLOSE} tail${CLOSE}`;
+		const context: Context = {
+			messages: [userMsg(`${OPEN}${BODY}${CLOSE}`, 1), userMsg(nested, 2)],
+		};
+		const { blocks, collapsedDirectives } = dedupeUltraworkBlocks(buildPromptBlocks(context));
+		const full = blocksToText(blocks);
+
+		expect(collapsedDirectives).toBe(0);
+		expect(full).toContain(BODY);
+		expect(full).toContain("inner");
+		expect(full).toContain("tail");
+		expect((full.match(/ultrawork directive superseded/g) ?? []).length).toBe(0);
+	});
+
 	it("also collapses a directive copy echoed in an assistant message (superset of user-only)", () => {
 		const context: Context = {
 			messages: [

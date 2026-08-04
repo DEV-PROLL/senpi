@@ -17,6 +17,20 @@ function countSpans(text: string): number {
 	return (text.match(ULTRAWORK_SPAN_PATTERN) ?? []).length;
 }
 
+/**
+ * True when a matched span itself contains another opening tag. The span regex
+ * is non-greedy, so nested directives would match from the outer open to the
+ * INNER close and leave the outer open tag stranded in the output. Nesting is
+ * pathological rather than expected, so callers fail closed on it instead of
+ * emitting a corrupted prompt.
+ */
+function hasNestedDirective(text: string): boolean {
+	for (const match of text.matchAll(ULTRAWORK_SPAN_PATTERN)) {
+		if (match[0].includes(ULTRAWORK_MODE_OPEN_TAG, ULTRAWORK_MODE_OPEN_TAG.length)) return true;
+	}
+	return false;
+}
+
 export interface DedupeResult {
 	blocks: ContentBlockParam[];
 	collapsedDirectives: number;
@@ -51,7 +65,9 @@ export function serializedPayloadBytes(blocks: readonly ContentBlockParam[]): nu
 export function dedupeUltraworkBlocks(blocks: readonly ContentBlockParam[]): DedupeResult {
 	let total = 0;
 	for (const block of blocks) {
-		if (block.type === "text") total += countSpans(block.text);
+		if (block.type !== "text") continue;
+		if (hasNestedDirective(block.text)) return { blocks: [...blocks], collapsedDirectives: 0 };
+		total += countSpans(block.text);
 	}
 	if (total === 0) return { blocks: [...blocks], collapsedDirectives: 0 };
 
