@@ -40,7 +40,7 @@ try {
 		// Cooperative interrupt: the runner answers SIGINT, so state must survive and
 		// the timeout message must say the kernel remains running.
 		const cooperative = await tool
-			.execute("qa-coop", { language: "py", code: "x=42\nimport time\ntime.sleep(30)", on_timeout: "error", timeout: 1 }, undefined, undefined, ctx)
+			.execute("qa-coop", { language: "py", code: "x=42\nimport time\ntime.sleep(30)", on_timeout: "error", timeout: 1, summary: "Sleep 30s with 1s timeout to test cooperative interrupt and state preservation" }, undefined, undefined, ctx)
 			.then(() => "UNEXPECTED-SUCCESS", (error: Error) => `${error.name}: ${error.message}`);
 		console.log(`COOPERATIVE_TIMEOUT: ${cooperative}`);
 
