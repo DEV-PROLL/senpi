@@ -5,17 +5,14 @@ import { appendRuleActivation, registerRuleActivationRenderer } from "../rule-ac
 import { BUILTIN_TTSR_RULES } from "./builtin-rules.ts";
 import { registerTtsrCommands, type TtsrPublicState } from "./commands.ts";
 import { claimAbort, createGenerationState, markUserCancelled } from "./coordinator.ts";
+import { REPETITIVE_TURNS_RULE_NAME } from "./detectors/repetitive-turns.ts";
 import { discoverTtsrRulesSync } from "./discovery.ts";
 import { TtsrManager } from "./manager.ts";
-import { COLLAPSE_RULE_CONTENT } from "./prompts.ts";
-import {
-	buildErrorShellReplacement,
-	buildNudgeMessage,
-	buildTruncateReplacement,
-	type TruncatableAssistantMessage,
-	type TtsrNudgeMessage,
-} from "./remediation.ts";
+import { REPETITIVE_TURNS_RULE_CONTENT } from "./prompts.ts";
+import { buildNudgeMessage, type TtsrNudgeMessage } from "./remediation.ts";
+import { collectAssistantText, RepetitiveTurnsLane, readPersistedAssistantTexts } from "./repetitive-turns-lane.ts";
 import { compileRuleCondition } from "./rule-condition.ts";
+import { buildStreamRemediation } from "./stream-remediation.ts";
 import {
 	DEFAULT_TTSR_SETTINGS,
 	type DetectionResolution,
@@ -74,6 +71,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 	let pendingRuleNudge: PendingRuleNudge | null = null;
 	let pendingNudge: TtsrNudgeMessage | null = null;
 	let disabled = false;
+	const repetitiveTurns = new RepetitiveTurnsLane();
 
 	function cancelRemediation(): void {
 		if (pendingRemediation !== null || pendingNudge !== null || pendingRuleNudge !== null) {
@@ -81,6 +79,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 			pendingRemediation = null;
 			pendingRuleNudge = null;
 			pendingNudge = null;
+			repetitiveTurns.disarm();
 		}
 	}
 
@@ -112,6 +111,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		if (manager !== null) return;
 		disabled = pi.getFlag("ttsr-disabled") === true;
 		const disabledRules = parseDisabledRules(pi.getFlag("ttsr-rules-disabled"));
+		repetitiveTurns.configure(new Set(disabledRules));
 		const settings = { ...DEFAULT_TTSR_SETTINGS, enabled: !disabled, disabledRules };
 		manager = new TtsrManager(settings, (pattern) => compileRuleCondition(pattern).regex);
 		const injectedNames = ctx.sessionManager
@@ -132,6 +132,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 			manager.addRule(rule);
 		}
 		watcher = new StreamWatcher(manager, disabledRules);
+		repetitiveTurns.restoreFromHistory(readPersistedAssistantTexts(ctx));
 		if (ctx.mode === "tui") {
 			try {
 				ctx.ui.onTerminalInput((data) => {
@@ -171,6 +172,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		genState = createGenerationState();
 		pendingRemediation = null;
 		pendingRuleNudge = null;
+		repetitiveTurns.resetTurn();
 		watcher?.reset();
 	});
 
@@ -192,6 +194,17 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 			ctx.abort();
 			return;
 		}
+		if (source === "text") {
+			const canArm = pendingRuleNudge === null && !genState.abortClaimed;
+			if (repetitiveTurns.observeTextDelta(deltaEvent.delta, canArm) && !genState.abortClaimed) {
+				genState.abortClaimed = true;
+				genState.abortOwner = "collapse-repetition";
+				genState.selfAbortAt = Date.now();
+				notify(ctx, REPETITIVE_TURNS_RULE_NAME);
+				ctx.abort();
+				return;
+			}
+		}
 		const interrupting = outcome.ruleMatches.filter((rule) => rule.interruptMode === "always");
 		const rule = interrupting[0];
 		if (rule !== undefined && pendingRuleNudge === null && !genState.abortClaimed) {
@@ -207,6 +220,14 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 	pi.on("message_end", (event) => {
 		if (genState.userCancelled) return undefined;
 		if (event.message.role !== "assistant") return undefined;
+		const turnText = collectAssistantText(event.message);
+		if (repetitiveTurns.armed) {
+			repetitiveTurns.commitArmedTurn(turnText);
+			manager?.markInjectedByNames([REPETITIVE_TURNS_RULE_NAME]);
+			recordInjection(REPETITIVE_TURNS_RULE_NAME, [REPETITIVE_TURNS_RULE_NAME], "nudge");
+			pendingNudge = buildNudgeMessage(REPETITIVE_TURNS_RULE_NAME, REPETITIVE_TURNS_RULE_CONTENT);
+			return undefined;
+		}
 		if (pendingRuleNudge !== null) {
 			const pending = pendingRuleNudge;
 			pendingRuleNudge = null;
@@ -215,29 +236,28 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 			pendingNudge = buildNudgeMessage(pending.rule.name, pending.rule.content);
 			return undefined;
 		}
-		if (pendingRemediation === null) return undefined;
-		const pending = pendingRemediation;
-		pendingRemediation = null;
-		try {
-			if (pending.resolution.remediation.corruptionScope === "generation") {
-				recordInjection(pending.resolution.owner, pending.resolution.observedRules, "provider-error");
-				return { message: { ...event.message, ...buildErrorShellReplacement() } };
+		if (pendingRemediation !== null) {
+			if (turnText !== null) repetitiveTurns.recordCompletedTurn(turnText);
+			const pending = pendingRemediation;
+			pendingRemediation = null;
+			try {
+				const outcome = buildStreamRemediation(pending, event.message);
+				recordInjection(outcome.owner, outcome.observedRules, outcome.retryMode);
+				if (outcome.nudge !== null) {
+					pendingNudge = outcome.nudge;
+				}
+				const merged = { ...event.message, ...outcome.replacement };
+				return { message: merged as unknown as typeof event.message };
+			} catch (error) {
+				pi.appendEntry("ttsr-remediation-error", {
+					message: error instanceof Error ? error.message : String(error),
+					at: Date.now(),
+				});
+				return undefined;
 			}
-			const replaced = buildTruncateReplacement(
-				event.message as unknown as TruncatableAssistantMessage,
-				pending.resolution.match.garbageStartOffset,
-				pending.streamKind,
-			);
-			recordInjection(pending.resolution.owner, pending.resolution.observedRules, "nudge");
-			pendingNudge = buildNudgeMessage(pending.resolution.owner, COLLAPSE_RULE_CONTENT);
-			return { message: replaced as unknown as typeof event.message };
-		} catch (error) {
-			pi.appendEntry("ttsr-remediation-error", {
-				message: error instanceof Error ? error.message : String(error),
-				at: Date.now(),
-			});
-			return undefined;
 		}
+		if (turnText !== null) repetitiveTurns.recordCompletedTurn(turnText);
+		return undefined;
 	});
 
 	pi.on("agent_settled", () => {
