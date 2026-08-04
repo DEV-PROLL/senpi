@@ -26,6 +26,10 @@ const anthropicOrphanServerToolMessage =
 	'400 {"type":"error","error":{"type":"invalid_request_error","message":"messages.1: `web_search` tool use with id `srvtoolu_01Gchdhqw1UaCNUuVq2LhMH9` was found without a corresponding `web_search_tool_result` block"},"request_id":"req_011CdQL9JsEk5NWJxWQX4NiG"}';
 const anthropicInvalidMaxTokensMessage =
 	'400 {"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: must be greater than or equal to 1"}}';
+const apitopiaToolSchemaRejectionMessage =
+	'500 data: {"error":{"message":"500 server_error: Invalid request: tools.function.parameters.type is required and must be \\"object\\"","type":"server_error","code":500,"status":500,"statusCode":500,"isRetryable":true}}\n\ndata:[DONE]\n\n';
+const moonshotToolSchemaRejectionMessage =
+	"500 server_error: Invalid request: tools.0.function.parameters: invalid tool schema";
 
 describe("provider retry classification", () => {
 	it("matches explicit provider retry guidance", () => {
@@ -234,6 +238,39 @@ describe("provider retry classification", () => {
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: anthropicInvalidMaxTokensMessage }),
 			),
 		).toBe(false);
+	});
+
+	it("keeps gateway-wrapped tool-schema rejections non-retryable", () => {
+		// Apitopia wraps Kimi's deterministic request-shape rejection in a 500
+		// server_error envelope. The status text says transient, the semantics say
+		// permanent: the identical payload is rejected on every attempt and on every
+		// fallback model, so retrying only burns the turn (observed 2026-08-04).
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: apitopiaToolSchemaRejectionMessage }),
+			),
+		).toBe(false);
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: moonshotToolSchemaRejectionMessage }),
+			),
+		).toBe(false);
+	});
+
+	it("keeps genuine transient server errors retryable alongside schema rejections", () => {
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: openAIServerErrorMessage }),
+			),
+		).toBe(true);
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "500 server_error: internal error, please retry",
+				}),
+			),
+		).toBe(true);
 	});
 
 	it("keeps provider limit errors non-retryable", () => {
