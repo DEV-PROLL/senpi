@@ -105,7 +105,7 @@ describe("monitor duplicate-batch suppression", () => {
 		notifier.notifyEvent(line("bash_budget", "budget", "state B"));
 		scheduler.advanceBy(10_000);
 		expect(sent).toHaveLength(2);
-		expect(sent[1]?.message.content).toContain("paused - peek bash_output or re-arm");
+		expect(sent[1]?.message.content).toContain("state B");
 		expect(pauseMonitors).toHaveBeenCalledTimes(1);
 	});
 

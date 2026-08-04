@@ -95,7 +95,12 @@ export class MonitorNotifier {
 	}
 
 	notifyEvent(event: MonitorEvent): void {
-		if (this.#wakeBudgetPaused) return;
+		if (this.#wakeBudgetPaused) {
+			if (event.type === "line") return;
+			this.#wakeBudgetPaused = false;
+			this.#consecutiveWakes = 0;
+			this.#lastInjectionAt.delete(event.id);
+		}
 		if (!getTerminalNotificationDelivery(this.#deps, MONITOR_NOTIFICATION_CUSTOM_TYPE)) return;
 		const settings = resolveSettings(this.#deps.getSettings());
 		const rendered = `Monitor event(${event.description}): ${eventBody(event)}`;
@@ -114,7 +119,7 @@ export class MonitorNotifier {
 		this.#consecutiveWakes = 0;
 	}
 
-	/** Explicit rearm is the only operation that releases the session-global wake pause. */
+	/** Explicit rearm resumes intermediate line delivery after the session-global wake pause. */
 	rearm(id: string): void {
 		this.#wakeBudgetPaused = false;
 		this.#consecutiveWakes = 0;
@@ -190,8 +195,11 @@ export class MonitorNotifier {
 		const overflowCount = [...this.#overflow.values()]
 			.filter((overflow) => injectedIds.has(overflow.id))
 			.reduce((total, overflow) => total + overflow.count, 0);
-		const reachesBudget = this.#consecutiveWakes + 1 >= settings.wakeBudget;
-		const pauseNotice = reachesBudget ? "Monitor paused - peek bash_output or re-arm this monitor." : "";
+		const deliversSummary = selected.some((event) => event.type === "summary");
+		const reachesBudget = !deliversSummary && this.#consecutiveWakes + 1 >= settings.wakeBudget;
+		const pauseNotice = reachesBudget
+			? "Monitor paused after repeated updates. Completion still wakes this session; peek bash_output or re-arm only for intermediate events."
+			: "";
 		const content = this.#buildMessage(selected, overflowCount, pauseNotice, settings.maxCharsPerInjection);
 
 		delivery.send(content);
@@ -207,7 +215,7 @@ export class MonitorNotifier {
 			(total, event) => total + `Monitor event(${event.description}): ${eventBody(event)}`.length,
 			0,
 		);
-		this.#consecutiveWakes++;
+		this.#consecutiveWakes = deliversSummary ? 0 : this.#consecutiveWakes + 1;
 
 		if (reachesBudget) {
 			this.#wakeBudgetPaused = true;
