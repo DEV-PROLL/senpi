@@ -1,5 +1,12 @@
 # Builtin extensions changes
 
+## notice: shared transcript notice kit (2026-08-04)
+
+- New internal module `src/core/extensions/notice/` (`spec.ts`, `box.ts`, `adapters.ts`) owns the loop-guard visual family as a shared widget: a `NoticeSpec` contract (title/tone/why/extra/expandedLine), `buildNoticeBox`, and `noticeMessageRenderer`/`noticeEntryRenderer` adapters.
+- loop-guard and goal cache-warm renderers now delegate to the kit with visual parity; ttsr registers an entry renderer for `ttsr-injection` records so stream-rule interventions render as durable notice boxes (live and on resume) instead of only an ephemeral `Warning:` line.
+- Interactive fallback transitions (`retry_fallback_*`, `server_fallback_aborted`) render through `buildNoticeBox` via `InteractiveMode.showNoticeBox`, which sanitizes every line with `sanitizeTuiErrorMessage` (preserving the OSC/control-strip invariant the exhausted-error path relied on).
+- Why not an extension API addition: the kit is an internal module imported like `retry-fallback/*` helpers; `types.ts` is untouched. Expected merge conflict zones: LOW (new directory plus one import per consumer).
+
 ## tps: monotonic elapsed-time source for assistant intervals (2026-07-31)
 
 - `tps.ts` now derives assistant-message elapsed time from the monotonic

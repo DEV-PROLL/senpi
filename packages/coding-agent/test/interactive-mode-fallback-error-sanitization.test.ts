@@ -2,6 +2,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { Container } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
+import type { NoticeSpec } from "../src/core/extensions/notice/index.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { createHarness } from "./suite/harness.ts";
@@ -13,9 +14,11 @@ type FallbackErrorFixture = {
 	isInitialized: true;
 	footer: { invalidate: () => void };
 	fallbackAppliedBeforeRetryStart: boolean;
+	toolOutputExpanded: boolean;
 	showWarning: (message: string) => void;
 	showStatus: (message: string) => void;
 	showError: (message: string) => void;
+	showNoticeBox: (spec: NoticeSpec) => void;
 	setExtensionStatus: (key: string, text: string | undefined) => void;
 	chatContainer: Container;
 	ui: { requestRender: () => void };
@@ -65,10 +68,12 @@ describe("InteractiveMode fallback exhaustion errors", () => {
 				isInitialized: true,
 				footer: { invalidate: vi.fn() },
 				fallbackAppliedBeforeRetryStart: false,
+				toolOutputExpanded: false,
 				showWarning: vi.fn(),
 				showStatus: vi.fn(),
-				showError(message) {
-					InteractiveMode.prototype.showError.call(fixture, message);
+				showError: vi.fn(),
+				showNoticeBox(spec) {
+					InteractiveMode.prototype.showNoticeBox.call(fixture, spec);
 				},
 				setExtensionStatus: vi.fn(),
 				chatContainer: new Container(),
@@ -78,9 +83,9 @@ describe("InteractiveMode fallback exhaustion errors", () => {
 			await handleEvent.call(fixture, exhausted);
 
 			const rendered = stripSgr(fixture.chatContainer.children.flatMap((child) => child.render(320)).join(" "));
-			expect(rendered).toContain(
-				"Error: Fallback chain exhausted for faux/faux-1: fallback failed with hyperlink CSI C1",
-			);
+			expect(rendered).toContain("Fallback chain exhausted");
+			expect(rendered).toContain("faux/faux-1");
+			expect(rendered).toContain("fallback failed with hyperlink CSI C1");
 			expect(rendered).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
 			expect(rendered).not.toContain("c2VjcmV0");
 			expect(rendered).not.toContain("owned title");

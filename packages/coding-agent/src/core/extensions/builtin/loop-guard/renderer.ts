@@ -1,21 +1,12 @@
-import { Box, Text } from "@earendil-works/pi-tui";
+import { noticeMessageRenderer } from "../../notice/index.ts";
 import type { MessageRenderer } from "../../types.ts";
 import type { LoopGuardDetection } from "./detectors.ts";
 
-const BOLD = "\u001b[1m";
-const BOLD_OFF = "\u001b[22m";
-
-export const renderLoopGuardNotice: MessageRenderer<LoopGuardDetection> = (message, options, theme) => {
+export const renderLoopGuardNotice: MessageRenderer<LoopGuardDetection> = noticeMessageRenderer((message) => {
 	const details = message.details;
 	if (details === undefined) return undefined;
-	const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
-	box.addChild(new Text(theme.fg("accent", `${BOLD}${titleLine(details)}${BOLD_OFF}`), 0, 0));
-	box.addChild(new Text(theme.fg("dim", whyLine(details)), 0, 0));
-	if (options.expanded) {
-		box.addChild(new Text(theme.fg("dim", expandedLine(details)), 0, 0));
-	}
-	return box;
-};
+	return { title: titleLine(details), why: whyLine(details), expandedLine: expandedLine(details) };
+});
 
 function titleLine(detection: LoopGuardDetection): string {
 	switch (detection.kind) {

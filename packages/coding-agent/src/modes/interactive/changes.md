@@ -1,5 +1,20 @@
 # changes
 
+## Fallback transitions render as shared notice boxes (2026-08-04)
+
+### What changed
+
+- `retry_fallback_applied`/`succeeded`/`reverted`/`exhausted` and `server_fallback_aborted` now render through `InteractiveMode.showNoticeBox` (shared `buildNoticeBox` from `src/core/extensions/notice/`) as titled notice boxes with per-event tones, replacing the one-line `showWarning`/`showStatus`/`showError` texts. The `FALLBACK_STATUS_KEY` footer indicator is unchanged.
+- `showNoticeBox` sanitizes every rendered line with `sanitizeTuiErrorMessage`, preserving the OSC/control-strip invariant previously carried by the `showError` exhausted path; `interactive-mode-fallback-error-sanitization.test.ts` re-pins that property against the box.
+
+### Why
+
+- Fallback transitions join loop-guard detections, ttsr injections, and goal cache-warm entries on one notice widget, so transient one-liners no longer scroll away unnoticed.
+
+### Expected merge conflict zones
+
+- LOW: five `case` bodies in `handleEvent` and one additive method beside `showError` in `interactive-mode.ts`.
+
 ## Backfill: exit alias and footer provider priority (2026-08-01)
 
 ### What changed

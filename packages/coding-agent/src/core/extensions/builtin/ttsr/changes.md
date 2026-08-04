@@ -1,5 +1,17 @@
 # TTSR Fork Tracker
 
+## 2026-08-04 - Render ttsr-injection records as notice boxes
+
+### What changed and why
+
+- New `injection-renderer.ts` registers an `EntryRenderer` for `ttsr-injection` via the shared notice kit (`src/core/extensions/notice/`). Stream-rule interventions previously surfaced only as an ephemeral `Warning:` text line at detection time; the durable injection record appended at remediation was invisible in the TUI and on resume.
+- The record now renders as a warning-toned notice box: owner in the title, a remediation-specific why line (nudge truncation vs provider-error resample), and an expanded line with observed rules, remediation mode, and record time. Detection, abort, truncation, nudge, and retry flows are untouched; the pre-abort toast remains as the immediate signal.
+- Tests: `test/ttsr/injection-renderer.test.ts` covers the spec mapping (both remediations, expand gating, missing data) and proves the runner exposes the renderer under `ttsr-injection`; the full `test/ttsr/` suite stays green.
+
+### Expected merge conflict zones
+
+- LOW: one import and one `registerEntryRenderer` line in `index.ts`; additive renderer file.
+
 ## 2026-07-31 - Interrupt fabricated unavailable-tool calls
 
 ### What changed and why

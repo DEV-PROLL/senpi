@@ -5,6 +5,7 @@ import { BUILTIN_TTSR_RULES } from "./builtin-rules.ts";
 import { registerTtsrCommands, type TtsrPublicState } from "./commands.ts";
 import { claimAbort, createGenerationState, markUserCancelled } from "./coordinator.ts";
 import { discoverTtsrRulesSync } from "./discovery.ts";
+import { renderTtsrInjectionEntry } from "./injection-renderer.ts";
 import { TtsrManager } from "./manager.ts";
 import { COLLAPSE_RULE_CONTENT } from "./prompts.ts";
 import {
@@ -144,6 +145,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 	}
 
 	registerTtsrCommands(pi, publicState);
+	pi.registerEntryRenderer(TTSR_INJECTION_CUSTOM_TYPE, renderTtsrInjectionEntry);
 
 	pi.on("session_start", (_event, ctx) => {
 		ensureInitialized(ctx);
