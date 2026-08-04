@@ -8,7 +8,7 @@ name: Release
         required: false
         type: string
         default: ''
-      dry-run:
+      dry_run:
         description: 'Dry-run preview only (no publish or push)'
         required: false
         type: boolean
@@ -82,7 +82,7 @@ jobs:
           if [ -n "${{ inputs.version }}" ]; then
             ARGS+=(--version "${{ inputs.version }}")
           fi
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
             ARGS+=(--dry-run)
           fi
           npm run release -- "${ARGS[@]}"
@@ -91,6 +91,7 @@ jobs:
         if: inputs.publish-only == true
         env:
           EXPECTED_VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           test -n "$EXPECTED_VERSION" || {
             echo "publish-only requires an explicit version" >&2
@@ -101,7 +102,11 @@ jobs:
             echo "expected $EXPECTED_VERSION, found $ACTUAL_VERSION" >&2
             exit 1
           }
-          node scripts/publish.mjs
+          PUBLISH_ARGS=()
+          if [ "$DRY_RUN" = "true" ]; then
+            PUBLISH_ARGS+=(--dry-run)
+          fi
+          node scripts/publish.mjs "${PUBLISH_ARGS[@]}"
 
       - name: Workflow summary
         if: always()
@@ -114,6 +119,7 @@ jobs:
             echo "| --- | --- |"
             echo "| Job status | ${{ job.status }} |"
             echo "| Mode | ${{ inputs.publish-only && 'publish-only' || 'release' }} |"
+            echo "| Dry run | ${{ inputs.dry_run }} |"
             echo "| Version | ${{ inputs.version || 'auto' }} |"
             echo "| Commit | ${{ github.sha }} |"
           } >> "$GITHUB_STEP_SUMMARY"
