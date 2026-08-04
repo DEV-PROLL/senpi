@@ -36,7 +36,7 @@ async function detachPyCell(
 	const started = kernel.deferNextRun();
 	const execution = tool.execute(
 		cellId,
-		{ language: "py", code: "await forever", on_timeout: "detach" },
+		{ language: "py", code: "await forever", on_timeout: "detach", summary: "stop note probe" },
 		undefined,
 		undefined,
 		{ ...fakeExtensionContext(), mode: "tui" as const },
@@ -96,7 +96,7 @@ describe("eval stop reports true kernel state", () => {
 		const started = kernel.deferNextRun();
 		const execution = tool.execute(
 			"stop-js-cell",
-			{ language: "js", code: "await forever", on_timeout: "detach" },
+			{ language: "js", code: "await forever", on_timeout: "detach", summary: "stop note probe" },
 			undefined,
 			undefined,
 			{ ...fakeExtensionContext(), mode: "tui" as const },

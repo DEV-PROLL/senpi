@@ -51,7 +51,7 @@ describe("createEvalTool interrupt handling", () => {
 		const tool = createTool(manager);
 		const execution = tool.execute(
 			"cell-acquire-abort",
-			{ language: "js", code: "1" },
+			{ language: "js", code: "1", summary: "acquire abort" },
 			controller.signal,
 			undefined,
 			fakeExtensionContext(),
@@ -71,7 +71,7 @@ describe("createEvalTool interrupt handling", () => {
 		const tool = createTool(new FakeManager([["js", kernel]]));
 		const execution = tool.execute(
 			"cell-reset-timeout",
-			{ language: "js", code: "1", reset: true, timeout: 1 },
+			{ language: "js", code: "1", reset: true, timeout: 1, summary: "reset timeout" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -111,7 +111,7 @@ describe("createEvalTool interrupt handling", () => {
 		const tool = createTool(new FakeManager([["js", kernel]]), 30, executeTool);
 		const execution = tool.execute(
 			"cell-active-abort",
-			{ language: "js", code: "await tool.slow({})" },
+			{ language: "js", code: "await tool.slow({})", summary: "active abort" },
 			controller.signal,
 			undefined,
 			fakeExtensionContext(),
@@ -136,7 +136,7 @@ describe("createEvalTool interrupt handling", () => {
 		const outcome = tool
 			.execute(
 				"cell-pending-interrupt",
-				{ language: "js", code: "await pending" },
+				{ language: "js", code: "await pending", summary: "pending interrupt" },
 				controller.signal,
 				undefined,
 				fakeExtensionContext(),
@@ -179,7 +179,7 @@ describe("createEvalTool interrupt handling", () => {
 		const execution = tool
 			.execute(
 				"cell-interrupt-rejection",
-				{ language: "js", code: "await pending" },
+				{ language: "js", code: "await pending", summary: "interrupt rejection" },
 				controller.signal,
 				undefined,
 				fakeExtensionContext(),
@@ -207,7 +207,7 @@ describe("createEvalTool interrupt handling", () => {
 		const tool = createTool(new FakeManager([["js", kernel]]));
 		const toolResult = await tool.execute(
 			"cell-late-abort",
-			{ language: "js", code: "1" },
+			{ language: "js", code: "1", summary: "late abort" },
 			controller.signal,
 			undefined,
 			fakeExtensionContext(),
@@ -230,7 +230,7 @@ describe("createEvalTool interrupt handling", () => {
 		await expect(
 			tool.execute(
 				"cell-pre-abort",
-				{ language: "js", code: "return 42" },
+				{ language: "js", code: "return 42", summary: "pre abort" },
 				controller.signal,
 				undefined,
 				fakeExtensionContext(),
@@ -257,7 +257,7 @@ describe("createEvalTool interrupt handling", () => {
 
 		const toolResult = await tool.execute(
 			"cell-timeout-status",
-			{ language: "js", code: "await tool.slow({})" },
+			{ language: "js", code: "await tool.slow({})", summary: "timeout status" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),

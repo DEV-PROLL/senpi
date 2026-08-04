@@ -11,11 +11,13 @@ export function enabledLanguageList(enabled: EnabledEvalLanguages): EvalLanguage
 	return evalLanguageOrder.filter((language) => enabled[language]);
 }
 
+export const EVAL_SUMMARY_MAX_LENGTH = 80;
+
 export interface EvalToolInput {
 	readonly language: EvalLanguage;
 	readonly code: string;
 	readonly action?: "run";
-	readonly title?: string;
+	readonly summary: string;
 	readonly timeout?: number;
 	readonly on_timeout?: "detach" | "error";
 	readonly reset?: boolean;
@@ -38,7 +40,13 @@ const fullEvalInputSchema = Type.Object({
 		Type.Union([Type.Literal("py"), Type.Literal("js"), Type.Literal("rb"), Type.Literal("jl")]),
 	),
 	code: Type.Optional(Type.String({ description: "Cell body, verbatim." })),
-	title: Type.Optional(Type.String({ description: "Short transcript label." })),
+	summary: Type.Optional(
+		Type.String({
+			maxLength: EVAL_SUMMARY_MAX_LENGTH,
+			description:
+				"REQUIRED for run. ONE line in the USER'S conversational language (Korean conversation -> Korean summary) stating WHAT this cell does and FOR WHAT PURPOSE; shown in the TUI while the cell runs. Longer values are force-truncated to 80 chars.",
+		}),
+	),
 	timeout: Type.Optional(Type.Number({ minimum: 1, description: "Timeout in seconds." })),
 	on_timeout: Type.Optional(
 		Type.Union([Type.Literal("detach"), Type.Literal("error")], {
@@ -68,7 +76,13 @@ export function createEvalInputSchema(enabled: EnabledEvalLanguages): EvalInputS
 			),
 			language: Type.Optional(languageSchema),
 			code: Type.Optional(Type.String({ description: "Cell body, verbatim." })),
-			title: Type.Optional(Type.String({ description: "Short transcript label." })),
+			summary: Type.Optional(
+				Type.String({
+					maxLength: EVAL_SUMMARY_MAX_LENGTH,
+					description:
+						"REQUIRED for run. ONE line in the USER'S conversational language (Korean conversation -> Korean summary) stating WHAT this cell does and FOR WHAT PURPOSE; shown in the TUI while the cell runs. Longer values are force-truncated to 80 chars.",
+				}),
+			),
 			timeout: Type.Optional(Type.Number({ minimum: 1, description: "Timeout in seconds." })),
 			on_timeout: Type.Optional(
 				Type.Union([Type.Literal("detach"), Type.Literal("error")], {
@@ -134,7 +148,7 @@ export type EvalDisplayOutput =
 
 export type EvalCellResult = {
 	readonly index: number;
-	readonly title?: string;
+	readonly summary?: string;
 	readonly code: string;
 	readonly language: EvalLanguage;
 	readonly output: string;
@@ -148,7 +162,7 @@ export type EvalCellResult = {
 export interface EvalToolDetails {
 	readonly language: EvalLanguage;
 	readonly languages?: readonly EvalLanguage[];
-	readonly title?: string;
+	readonly summary?: string;
 	readonly durationMs: number;
 	readonly toolCalls: readonly EvalToolCallSummary[];
 	readonly truncated: boolean;

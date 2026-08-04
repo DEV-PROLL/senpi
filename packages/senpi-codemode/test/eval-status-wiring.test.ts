@@ -111,14 +111,14 @@ async function detachOne(
 	kernel: FakeKernel,
 	ctx: ExtensionContext,
 	cellId: string,
-	title: string,
+	summary: string,
 ): Promise<void> {
 	const tool = pi.registeredTool;
 	if (!tool) throw new Error("eval tool was not registered");
 	const started = kernel.deferNextRun();
 	const execution = tool.execute(
 		cellId,
-		{ language: "js", code: "await forever", title, on_timeout: "detach" },
+		{ language: "js", code: "await forever", summary, on_timeout: "detach" },
 		undefined,
 		undefined,
 		ctx,

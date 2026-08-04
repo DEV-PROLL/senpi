@@ -19,7 +19,7 @@ describe("eval renderer state", () => {
 		const givenResult = evalResult(
 			{
 				language: "js",
-				title: "analysis",
+				summary: "analysis",
 				phase: "summarizing",
 				durationMs: 11,
 				toolCalls: [],
@@ -42,8 +42,8 @@ describe("eval renderer state", () => {
 		const metadataText = lines.join("\n");
 		expect.soft(statusLine).toContain("eval");
 		expect.soft(statusLine).toContain("js");
-		expect.soft(statusLine).toContain("analysis");
 		expect.soft(statusLine).toContain("done");
+		expect.soft(metadataText).toContain("analysis");
 		expect.soft(metadataText).toContain("phase");
 		expect.soft(metadataText).toContain("summarizing");
 		expect.soft(metadataText).toContain("took 11ms");
@@ -262,7 +262,7 @@ describe("eval renderer state", () => {
 	it("Given call badges and cells in every lifecycle state when rendered then headers expose icons and formatted durations", () => {
 		// Given
 		const call = renderEvalCall(
-			{ language: "py", code: "work()", title: "resettable", reset: true, timeout: 3 },
+			{ language: "py", code: "work()", summary: "resettable", reset: true, timeout: 3 },
 			undefined,
 			callContext({ spinnerFrame: 0 }),
 		);
@@ -273,10 +273,10 @@ describe("eval renderer state", () => {
 				toolCalls: [],
 				truncated: false,
 				cells: [
-					{ index: 0, title: "queued", code: "queued()", language: "py", output: "", status: "pending" },
+					{ index: 0, summary: "queued", code: "queued()", language: "py", output: "", status: "pending" },
 					{
 						index: 1,
-						title: "active",
+						summary: "active",
 						code: "active()",
 						language: "py",
 						output: "",
@@ -285,7 +285,7 @@ describe("eval renderer state", () => {
 					},
 					{
 						index: 2,
-						title: "finished",
+						summary: "finished",
 						code: "finished()",
 						language: "py",
 						output: "ok",
@@ -294,7 +294,7 @@ describe("eval renderer state", () => {
 					},
 					{
 						index: 3,
-						title: "broken",
+						summary: "broken",
 						code: "broken()",
 						language: "py",
 						output: "boom",
@@ -318,12 +318,13 @@ describe("eval renderer state", () => {
 			.join("\n");
 
 		// Then
-		expect.soft(callText).toContain("eval py resettable running");
+		expect.soft(callText).toContain("eval py running");
+		expect.soft(callText).toContain("resettable");
 		expect.soft(callText).toContain("reset");
 		expect.soft(callText).toContain("timeout 3s");
-		expect.soft(resultText).toContain("eval py queued pending ○");
-		expect.soft(resultText).toMatch(/eval py active running [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u);
-		expect.soft(resultText).toContain("eval py finished done ✓ · 1m 1s");
-		expect.soft(resultText).toContain("eval py broken error ✗ · 1h 2m");
+		expect.soft(resultText).toContain("eval py pending ○");
+		expect.soft(resultText).toMatch(/eval py running [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u);
+		expect.soft(resultText).toContain("eval py done ✓ · 1m 1s");
+		expect.soft(resultText).toContain("eval py error ✗ · 1h 2m");
 	});
 });

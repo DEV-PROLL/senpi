@@ -28,7 +28,7 @@ async function runTimedOutCell(
 	const outcome = tool
 		.execute(
 			"timeout-cell",
-			{ language, code: "await forever", on_timeout: "error", timeout: 1 },
+			{ language, code: "await forever", on_timeout: "error", timeout: 1, summary: "timeout state" },
 			undefined,
 			undefined,
 			interactiveContext(),

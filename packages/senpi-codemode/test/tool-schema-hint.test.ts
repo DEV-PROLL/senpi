@@ -63,7 +63,7 @@ describe("kernel tool-call argument failures", () => {
 
 		await tool.execute(
 			"cell-1",
-			{ language: "js", code: 'await tool.mcp_computer_use_batch({app: "Safari"})' },
+			{ language: "js", code: 'await tool.mcp_computer_use_batch({app: "Safari"})', summary: "hint catalog" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -82,7 +82,7 @@ describe("kernel tool-call argument failures", () => {
 
 		await tool.execute(
 			"cell-1",
-			{ language: "js", code: "await tool.unlisted_tool({})" },
+			{ language: "js", code: "await tool.unlisted_tool({})", summary: "hint passthrough" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),

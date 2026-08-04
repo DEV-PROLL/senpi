@@ -90,7 +90,7 @@ describe("buildEvalPrompt", () => {
 
 		// When: their embedded reuse-chain examples are rendered.
 		// Then: only Python kernels carry examples, and those teach batch + tool bridging.
-		expect(python).toContain("collect targets");
+		expect(python).toContain("Count all TypeScript source files under src/ excluding tests");
 		expect(python).toContain("tool.grep");
 		expect(python).toContain("parallel([");
 		expect(ruby).not.toContain("<examples>");

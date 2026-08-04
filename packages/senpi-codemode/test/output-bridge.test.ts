@@ -222,7 +222,7 @@ describe("output bridge", () => {
 		// When
 		await tool.execute(
 			"cell-1",
-			{ language: "js", code: 'await output("st_123")' },
+			{ language: "js", code: 'await output("st_123")', summary: "output read" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -262,7 +262,11 @@ describe("output bridge", () => {
 			// When
 			const evalResult = await tool.execute(
 				"real-output-cell",
-				{ language: "js", code: 'const transcript = await output("st_123"); return transcript;' },
+				{
+					language: "js",
+					code: 'const transcript = await output("st_123"); return transcript;',
+					summary: "output echo",
+				},
 				undefined,
 				undefined,
 				fakeExtensionContext(),

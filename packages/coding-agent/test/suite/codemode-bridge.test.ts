@@ -110,7 +110,7 @@ async function createCodemodeHarness(options: {
 
 async function runEvalTurn(harness: Harness, code: string): Promise<string> {
 	harness.setResponses([
-		fauxAssistantMessage(fauxToolCall("eval", { language: "js", code }), { stopReason: "toolUse" }),
+		fauxAssistantMessage(fauxToolCall("eval", { language: "js", code, summary: "run eval through bridge hooks" }), { stopReason: "toolUse" }),
 		(context: FauxContext) => fauxAssistantMessage(extractToolResultText(context)),
 	]);
 

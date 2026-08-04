@@ -39,7 +39,7 @@ describe("eval display text parity", () => {
 		// When
 		const toolResult = await createTool(kernel).execute(
 			"display-order",
-			{ language: "js", code: "print('before'); display({answer: 42}); print('after')" },
+			{ language: "js", code: "print('before'); display({answer: 42}); print('after')", summary: "display order" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -58,7 +58,7 @@ describe("eval display text parity", () => {
 		// When
 		const toolResult = await createTool(kernel).execute(
 			"empty",
-			{ language: "js", code: "undefined" },
+			{ language: "js", code: "undefined", summary: "empty cell" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -82,7 +82,7 @@ describe("eval display text parity", () => {
 		// When
 		const toolResult = await createTool(kernel).execute(
 			"large-display",
-			{ language: "js", code: "display(value)" },
+			{ language: "js", code: "display(value)", summary: "large display" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),

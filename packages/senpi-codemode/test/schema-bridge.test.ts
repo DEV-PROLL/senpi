@@ -78,7 +78,7 @@ describe("cell-handler dispatch for the reserved schema tool", () => {
 
 		await tool.execute(
 			"cell-1",
-			{ language: "js", code: 'await tool_schema("mcp_computer_use_batch")' },
+			{ language: "js", code: 'await tool_schema("mcp_computer_use_batch")', summary: "schema probe" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),

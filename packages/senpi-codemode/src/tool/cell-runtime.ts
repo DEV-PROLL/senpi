@@ -119,7 +119,7 @@ export class CellResultBuilder {
 		return {
 			language: this.#state.input.language,
 			languages: [this.#state.input.language],
-			...(this.#state.input.title === undefined ? {} : { title: this.#state.input.title }),
+			...(this.#state.input.summary === undefined ? {} : { summary: this.#state.input.summary }),
 			durationMs: this.#state.durationMs,
 			toolCalls: [...this.#state.toolCalls],
 			truncated: output?.truncated ?? false,
@@ -128,7 +128,7 @@ export class CellResultBuilder {
 			cells: [
 				{
 					index: 0,
-					...(this.#state.input.title === undefined ? {} : { title: this.#state.input.title }),
+					...(this.#state.input.summary === undefined ? {} : { summary: this.#state.input.summary }),
 					code: this.#state.input.code,
 					language: this.#state.input.language,
 					output: this.#state.output,
@@ -146,12 +146,12 @@ export class CellResultBuilder {
 	}
 
 	#liveUpdateText(): string {
-		const title = this.#state.input.title === undefined ? "" : ` ${this.#state.input.title}`;
+		const summary = this.#state.input.summary === undefined ? "" : ` ${this.#state.input.summary}`;
 		const aggregateOutput = this.#output.aggregateText();
 		const outputLines = aggregateOutput.split("\n");
 		const hasTrailingNewline = aggregateOutput.endsWith("\n");
 		if (hasTrailingNewline) outputLines.pop();
 		const output = `${outputLines.slice(-8).join("\n")}${hasTrailingNewline ? "\n" : ""}`;
-		return `1/1 cells ${this.#state.status}\n[1] ${this.#state.input.language}${title} ${this.#state.status}${output.length === 0 ? "" : `\n${output}`}`;
+		return `1/1 cells ${this.#state.status}\n[1] ${this.#state.input.language}${summary} ${this.#state.status}${output.length === 0 ? "" : `\n${output}`}`;
 	}
 }
