@@ -27,6 +27,32 @@ describe("mcp schema compatibility", () => {
 		expect(Object.getOwnPropertyDescriptor(result.schema, "additionalProperties")).toBeUndefined();
 	});
 
+	it("strips null-valued type keywords recursively", () => {
+		const result = convertJsonSchemaToTypeBox({
+			type: null,
+			properties: {
+				pattern: { type: null, description: "ast-grep pattern" },
+				jsonNull: { type: "null" },
+				maybeText: { type: ["string", "null"] },
+				choice: {
+					anyOf: [{ type: null, const: "all" }, { type: "string" }],
+				},
+			},
+		});
+
+		expect(result.warnings).toEqual([]);
+		expect(JSON.parse(JSON.stringify(result.schema))).toEqual({
+			properties: {
+				pattern: { description: "ast-grep pattern" },
+				jsonNull: { type: "null" },
+				maybeText: { type: ["string", "null"] },
+				choice: {
+					anyOf: [{ const: "all" }, { type: "string" }],
+				},
+			},
+		});
+	});
+
 	it("falls back to a permissive object and warning for unresolvable refs", () => {
 		const result = convertJsonSchemaToTypeBox({
 			type: "object",

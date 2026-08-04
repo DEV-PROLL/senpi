@@ -1,5 +1,31 @@
 # mcp Extension Changes
 
+## Strip invalid null-valued MCP schema types (2026-08-04)
+
+### What changed
+- `expose/schema-compat.ts` now omits JSON-null `type` keywords while
+  recursively resolving MCP tool input schemas into TypeBox definitions.
+- Valid JSON Schema null types remain unchanged, including `type: "null"` and
+  union arrays such as `type: ["string", "null"]`.
+- `test/mcp/schema-compat.test.ts` covers root, nested property, and combiner
+  branch null values plus both valid null-type forms.
+
+### Why
+- Some MCP servers emit `type: null`. JSON Schema permits the string `"null"`
+  but not the JSON null value; strict OpenAI-compatible providers reject the
+  malformed tool definition with HTTP 400 before the model can answer.
+- Sanitizing at MCP conversion protects every provider adapter that receives
+  the registered tool, rather than patching one provider-specific wire path.
+
+### Why extension system couldn't handle this alone
+- The MCP builtin owns conversion from external `tools/list` schemas to the
+  registered `ToolDefinition`. Other extensions cannot rewrite that private
+  schema conversion before the tool enters the shared provider pipeline.
+
+### Expected merge conflict zones
+- LOW: `expose/schema-compat.ts` recursive `$ref` copy loop.
+- LOW: `test/mcp/schema-compat.test.ts` schema-conversion cases.
+
 ## Session-expiry retry uses the full service reconnect (2026-08-03)
 
 ### What changed
