@@ -1,5 +1,43 @@
 # changes
 
+## Bound provider-timeout retry continuations (2026-08-05)
+
+### What changed
+
+- Provider stream/transport timeout retries keep the existing first-request
+  option cap, including the rule that disabled ordinary stream guards stay
+  disabled.
+- A separate retry-continuation watchdog now uses the same positive
+  `retry.provider.streamRetryTimeoutMs` budget to abort only the Agent run whose
+  signal it captured. A later prompt or low-level takeover cannot be cancelled
+  by the stale timer.
+- Timeout option planning and watchdog ownership live in
+  `provider-timeout-retry.ts`; the oversized `AgentSession` delegates instead of
+  absorbing another retry responsibility.
+
+### Why
+
+- A transport error such as `Request timed out.` could start a retry while both
+  ordinary stream guards were disabled. If that retry emitted no provider
+  events, its detached continuation held the session work barrier and retry
+  promise forever, leaving the interactive session visibly Working until the
+  process restarted.
+- Re-enabling user-disabled stream guards would mask the wedge by changing an
+  intentional policy. The retry-owned watchdog supplies liveness without
+  changing provider call options.
+
+### Why this cannot be expressed externally
+
+- Only `AgentSession` owns the retry promise, scheduled-continuation barrier,
+  active Agent signal, and settled lifecycle. An extension cannot prove that a
+  timer still owns the same retry run before aborting it.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` scheduled continuation and retry admission wiring.
+- LOW: `provider-timeout-retry.ts` timeout option planning and owned-run abort.
+- LOW: provider timeout recovery regression file organization.
+
 ## Default fallback chains survive user chain configuration (2026-08-04)
 
 ### What changed

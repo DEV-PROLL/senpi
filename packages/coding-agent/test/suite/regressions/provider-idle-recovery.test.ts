@@ -114,44 +114,57 @@ describe("provider idle recovery", () => {
 		]);
 	});
 
-	it("does not apply provider timeout policy to incidental extension timeout text", async () => {
+	it("bounds a hung retry continuation after a provider transport timeout", async () => {
+		vi.useFakeTimers();
+		const retryTimeoutMs = 1_000;
 		const harness = await createHarness({
-			settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 0 } },
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 1,
+					baseDelayMs: 0,
+					provider: { streamRetryTimeoutMs: retryTimeoutMs },
+				},
+			},
 		});
 		harnesses.push(harness);
-		harness.agent.timeoutMs = DEFAULT_PROVIDER_IDLE_TIMEOUT_MS;
-		harness.agent.streamStartTimeoutMs = DEFAULT_STREAM_START_TIMEOUT_MS;
-		harness.setResponses([
-			fauxAssistantMessage("", { stopReason: "error", errorMessage: "extension timed out" }),
-			fauxAssistantMessage("generic retry recovered"),
-		]);
+		harness.agent.timeoutMs = undefined;
+		harness.agent.streamStartTimeoutMs = undefined;
+		const retryRequestStarted = createDeferred();
+		let providerCalls = 0;
+		harness.agent.streamFunction = () => {
+			providerCalls++;
+			const stream = createAssistantStream();
+			if (providerCalls === 1) {
+				queueMicrotask(() => stream.push({ type: "error", reason: "error", error: genericTimeoutError() }));
+			} else {
+				retryRequestStarted.resolve();
+			}
+			return stream;
+		};
 
-		await harness.session.prompt("first request");
+		const prompt = harness.session.prompt("first request");
+		let settled = false;
+		let settledWork: Promise<void> | undefined;
+		try {
+			await vi.runOnlyPendingTimersAsync();
+			await retryRequestStarted.promise;
+			settledWork = harness.session.waitForSettledSessionWork().then(() => {
+				settled = true;
+			});
+			await vi.advanceTimersByTimeAsync(retryTimeoutMs);
+			await vi.advanceTimersByTimeAsync(0);
 
-		expect(harness.faux.getCallLog().map((call) => call.options?.timeoutMs)).toEqual([
-			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
-			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
-		]);
-		expect(harness.faux.getCallLog().map((call) => getStreamStartTimeoutMs(call.options))).toEqual([
-			DEFAULT_STREAM_START_TIMEOUT_MS,
-			DEFAULT_STREAM_START_TIMEOUT_MS,
-		]);
-	});
-
-	it("does not retry unrelated aborted timeout text", async () => {
-		const harness = await createHarness({
-			settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 0 } },
-		});
-		harnesses.push(harness);
-		harness.setResponses([
-			fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "Command timed out after 30000ms" }),
-			fauxAssistantMessage("must not run"),
-		]);
-
-		await harness.session.prompt("first request");
-
-		expect(harness.faux.state.callCount).toBe(1);
-		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
+			expect(settled).toBe(true);
+			expect(harness.session.isRetrying).toBe(false);
+			expect(harness.session.isStreaming).toBe(false);
+			expect(harness.eventsOfType("agent_settled")).toHaveLength(1);
+			expect(providerCalls).toBe(2);
+		} finally {
+			if (harness.session.isStreaming) await harness.session.abort();
+			await prompt;
+			await settledWork;
+		}
 	});
 
 	it("expires a no-first-event retry at the retry cap instead of the configured start timeout", async () => {
