@@ -63,7 +63,7 @@ describe("agent bridge", () => {
 		// When
 		const evalResult = await tool.execute(
 			"cell-1",
-			{ language: "js", code: "await agent('summarize x')" },
+			{ language: "js", code: "await agent('summarize x')", summary: "spawn summarizer" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -117,7 +117,7 @@ describe("agent bridge", () => {
 		// When
 		await tool.execute(
 			"cell-invalid",
-			{ language: "js", code: "agent('')" },
+			{ language: "js", code: "agent('')", summary: "invalid agent call" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),

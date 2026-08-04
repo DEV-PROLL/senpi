@@ -89,7 +89,7 @@ if (fixture === undefined) throw new TypeError("--fixture is required");
 const input: EvalToolInput = {
 	language: "py",
 	code: fixture === "success" ? "config = read('/tmp/config.json')" : "print('korean-output-test')",
-	title: fixture === "success" ? "load config" : "failed cell",
+	summary: fixture === "success" ? "load config" : "failed cell",
 };
 const statusEvents =
 	fixture === "success"
@@ -105,7 +105,7 @@ const statusEvents =
 			];
 const details: EvalToolDetails = {
 	language: "py",
-	...(fixture === "success" ? { title: "load config" } : {}),
+	...(fixture === "success" ? { summary: "load config" } : {}),
 	durationMs: fixture === "success" ? 1_250 : 900,
 	toolCalls:
 		fixture === "success"
@@ -134,7 +134,7 @@ const details: EvalToolDetails = {
 	cells: [
 		{
 			index: 0,
-			title: fixture === "success" ? "load config" : "failed cell",
+			summary: fixture === "success" ? "load config" : "failed cell",
 			code: input.code,
 			language: "py",
 			output:

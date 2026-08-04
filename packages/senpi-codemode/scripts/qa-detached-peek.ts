@@ -137,7 +137,7 @@ async function main(): Promise<void> {
 			{
 				language: "py",
 				code,
-				title: "real detached peek",
+				summary: "real detached peek",
 				on_timeout: "detach",
 			},
 			undefined,

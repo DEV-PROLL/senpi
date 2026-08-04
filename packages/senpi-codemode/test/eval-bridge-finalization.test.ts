@@ -88,7 +88,7 @@ describe("eval bridge finalization", () => {
 		});
 		const execution = createTool(kernel, executeTool).execute(
 			"bridge-timeout",
-			{ language: "js", code: "await tool.demo({})" },
+			{ language: "js", code: "await tool.demo({})", summary: "bridge timeout" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -111,7 +111,7 @@ describe("eval bridge finalization", () => {
 				vi.fn(async () => ({ content: [], details: {} })),
 			).execute(
 				"bridge-rejection",
-				{ language: "js", code: "await tool.demo({})" },
+				{ language: "js", code: "await tool.demo({})", summary: "bridge rejection" },
 				undefined,
 				undefined,
 				fakeExtensionContext(),
@@ -142,7 +142,7 @@ describe("eval bridge finalization", () => {
 		});
 		const execution = createTool(kernel, executeTool).execute(
 			"bridge-success-timeout",
-			{ language: "js", code: "await tool.demo({})", timeout: 1 },
+			{ language: "js", code: "await tool.demo({})", timeout: 1, summary: "bridge success timeout" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),

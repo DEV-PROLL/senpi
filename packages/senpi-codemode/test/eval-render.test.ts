@@ -10,7 +10,7 @@ describe("eval renderer", () => {
 		const givenArgs = {
 			language: "py",
 			code: "  print('hello')\nprint('later')",
-			title: "setup",
+			summary: "setup",
 			reset: true,
 			timeout: 3,
 		} satisfies Parameters<typeof renderEvalCall>[0];
@@ -19,7 +19,12 @@ describe("eval renderer", () => {
 		const component = renderEvalCall(givenArgs, undefined, callContext());
 
 		// Then
-		expect(renderLines(component)).toEqual(["eval py setup reset timeout 3s", "  print('hello')", "print('later')"]);
+		expect(renderLines(component)).toEqual([
+			"eval py reset timeout 3s",
+			"setup",
+			"  print('hello')",
+			"print('later')",
+		]);
 	});
 
 	it("renders an ellipsis for empty call code", () => {
@@ -27,13 +32,14 @@ describe("eval renderer", () => {
 		const givenArgs = {
 			language: "jl",
 			code: "   ",
+			summary: "blank cell",
 		} satisfies Parameters<typeof renderEvalCall>[0];
 
 		// When
 		const component = renderEvalCall(givenArgs, undefined, callContext());
 
 		// Then
-		expect(renderLines(component)).toEqual(["eval jl", "..."]);
+		expect(renderLines(component)).toEqual(["eval jl", "blank cell", "..."]);
 	});
 
 	it("renders completed result text while hiding image placeholders when images are disabled", () => {
@@ -45,7 +51,7 @@ describe("eval renderer", () => {
 			],
 			details: {
 				language: "js",
-				title: "chart",
+				summary: "chart",
 				durationMs: 11,
 				toolCalls: [
 					{ name: "search", ok: true },
@@ -65,7 +71,8 @@ describe("eval renderer", () => {
 
 		// Then
 		expect(renderLines(component)).toEqual([
-			"eval js chart done",
+			"eval js done",
+			"chart",
 			"took 11ms",
 			"",
 			"stdout",
@@ -87,7 +94,7 @@ describe("eval renderer", () => {
 			],
 			details: {
 				language: "js",
-				title: "chart",
+				summary: "chart",
 				durationMs: 11,
 				toolCalls: [
 					{ name: "search", ok: true },
@@ -139,7 +146,7 @@ describe("eval renderer", () => {
 		const givenResult = evalResult(
 			{
 				language: "py",
-				title: "stream",
+				summary: "stream",
 				durationMs: 0,
 				toolCalls: [],
 				truncated: false,
@@ -156,19 +163,88 @@ describe("eval renderer", () => {
 		);
 
 		// Then
-		expect(renderLines(component)[0]).toBe("eval py stream running");
+		expect(renderLines(component)[0]).toBe("eval py running");
+		expect(renderLines(component)[1]).toBe("stream");
+	});
+
+	it("Given legacy stored details carrying title and no summary when rendered then no label line and no crash", () => {
+		// Given a pre-summary stored payload: title survived in old sessions, summary never existed.
+		// The cast simulates legacy data rehydrated into the current details shape.
+		const legacyCellDetails = {
+			language: "py",
+			title: "legacy label",
+			durationMs: 3,
+			toolCalls: [],
+			truncated: false,
+			cells: [
+				{
+					index: 0,
+					title: "legacy label",
+					code: "print('old')",
+					language: "py",
+					output: "old",
+					status: "complete",
+					durationMs: 3,
+				},
+			],
+		} as unknown as EvalToolDetails;
+		const legacyFallbackDetails = {
+			language: "py",
+			title: "legacy label",
+			durationMs: 3,
+			toolCalls: [],
+			truncated: false,
+		} as unknown as EvalToolDetails;
+
+		// When the cell frame and the fallback frame (no cells) render collapsed and expanded
+		const renders = [
+			...renderLines(
+				renderEvalResult(
+					evalResult(legacyCellDetails, "old"),
+					{ expanded: false, isPartial: false },
+					undefined,
+					resultContext(),
+				),
+			),
+			...renderEvalResult(
+				evalResult(legacyCellDetails, "old"),
+				{ expanded: true, isPartial: false },
+				undefined,
+				resultContext({ expanded: true }),
+			).render(80),
+			...renderLines(
+				renderEvalResult(
+					evalResult(legacyFallbackDetails, "old"),
+					{ expanded: false, isPartial: false },
+					undefined,
+					resultContext(),
+				),
+			),
+		];
+
+		// Then every frame renders without crashing and none emits a standalone label line
+		expect(renders.length).toBeGreaterThan(0);
+		expect(renders.some((line) => line.trim() === "legacy label")).toBe(false);
 	});
 
 	it("reuses the call component when a later call render receives it as lastComponent", () => {
 		// Given
-		const first = renderEvalCall({ language: "js", code: "first()" }, undefined, callContext());
+		const first = renderEvalCall(
+			{ language: "js", code: "first()", summary: "first pass" },
+			undefined,
+			callContext(),
+		);
 
 		// When
-		const second = renderEvalCall({ language: "js", code: "second()" }, undefined, callContext(first));
+		const second = renderEvalCall(
+			{ language: "js", code: "second()", summary: "second pass" },
+			undefined,
+			callContext(first),
+		);
 
 		// Then
 		expect(second).toBe(first);
-		expect(renderLines(second)).toEqual(["eval js", "second()"]);
+		expect(renderLines(second)).toEqual(["eval js", "second pass", "second()"]);
 	});
 
 	it("reuses the result component from partial to final result when it is passed as lastComponent", () => {
@@ -195,7 +271,7 @@ describe("eval renderer", () => {
 
 	it("keeps call and result lanes distinct when the result lane starts without lastComponent", () => {
 		// Given
-		const call = renderEvalCall({ language: "js", code: "1 + 1" }, undefined, callContext());
+		const call = renderEvalCall({ language: "js", code: "1 + 1", summary: "quick math" }, undefined, callContext());
 
 		// When
 		const result = renderEvalResult(
@@ -207,21 +283,21 @@ describe("eval renderer", () => {
 
 		// Then
 		expect(result).not.toBe(call);
-		expect(renderLines(call)).toEqual(["eval js", "1 + 1"]);
+		expect(renderLines(call)).toEqual(["eval js", "quick math", "1 + 1"]);
 		expect(renderLines(result)).toEqual(["eval js done", "took 1ms", "", "2"]);
 	});
 
 	it("Given a streaming result exists when the framed call lane renders then it yields an empty component", () => {
 		// Given a framed call render (spinnerFrame set) that would otherwise draw its own pending/running box
 		const withoutResult = renderEvalCall(
-			{ language: "py", code: "print('x')" },
+			{ language: "py", code: "print('x')", summary: "print probe" },
 			undefined,
 			callContext({ spinnerFrame: 0 }),
 		);
 
 		// When the same call lane renders after a result has arrived
 		const withResult = renderEvalCall(
-			{ language: "py", code: "print('x')" },
+			{ language: "py", code: "print('x')", summary: "print probe" },
 			undefined,
 			callContext({ spinnerFrame: 0, hasResult: true }),
 		);
@@ -233,11 +309,15 @@ describe("eval renderer", () => {
 
 	it("Given a result exists when the compact call lane renders then it also yields an empty component", () => {
 		// Given the compact call preview (no theme, no spinner) and the same lane once a result exists
-		const compact = renderEvalCall({ language: "js", code: "1 + 1" }, undefined, callContext());
-		const yielded = renderEvalCall({ language: "js", code: "1 + 1" }, undefined, callContext({ hasResult: true }));
+		const compact = renderEvalCall({ language: "js", code: "1 + 1", summary: "quick math" }, undefined, callContext());
+		const yielded = renderEvalCall(
+			{ language: "js", code: "1 + 1", summary: "quick math" },
+			undefined,
+			callContext({ hasResult: true }),
+		);
 
 		// Then the pre-result preview renders code while the post-result lane is empty
-		expect.soft(renderLines(compact)).toEqual(["eval js", "1 + 1"]);
+		expect.soft(renderLines(compact)).toEqual(["eval js", "quick math", "1 + 1"]);
 		expect.soft(renderLines(yielded)).toEqual([]);
 	});
 
@@ -246,14 +326,14 @@ describe("eval renderer", () => {
 		const givenResult = evalResult(
 			{
 				language: "py",
-				title: "load config",
+				summary: "load config",
 				durationMs: 1_250,
 				toolCalls: [],
 				truncated: false,
 				cells: [
 					{
 						index: 0,
-						title: "load config",
+						summary: "load config",
 						code: "config = {'a': 1}",
 						language: "py",
 						output: "loaded",
@@ -278,7 +358,8 @@ describe("eval renderer", () => {
 
 		// Then
 		expect.soft(lines[0]).toContain("╭─");
-		expect.soft(text).toContain("eval py load config done");
+		expect.soft(text).toContain("eval py done");
+		expect.soft(text).toContain("load config");
 		expect.soft(text).toContain("✓");
 		expect.soft(text).toContain("1s");
 		expect.soft(text).toContain("read 42 chars · from /tmp/config.json");

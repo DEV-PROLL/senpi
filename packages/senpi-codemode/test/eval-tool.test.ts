@@ -64,7 +64,7 @@ describe("createEvalTool", () => {
 		expect(tool.executionMode).toBe("sequential");
 		const toolResult = await tool.execute(
 			"cell-1",
-			{ language: "js", code: "return 42", title: "math" },
+			{ language: "js", code: "return 42", summary: "math" },
 			undefined,
 			onUpdate,
 			fakeExtensionContext(),
@@ -73,7 +73,7 @@ describe("createEvalTool", () => {
 		expect(tool.parameters.properties.language.anyOf).toEqual([{ const: "js", type: "string" }]);
 		expect(textOf(toolResult)).toContain("hello");
 		expect(textOf(toolResult)).toContain("42");
-		expect(toolResult.details).toMatchObject({ language: "js", title: "math", durationMs: 7, truncated: false });
+		expect(toolResult.details).toMatchObject({ language: "js", summary: "math", durationMs: 7, truncated: false });
 		expect(updates).toContainEqual(expect.objectContaining({ phase: "setup" }));
 	});
 
@@ -96,7 +96,7 @@ describe("createEvalTool", () => {
 
 		const toolResult = await tool.execute(
 			"cell-2",
-			{ language: "js", code: "await tool.demo({x:1})" },
+			{ language: "js", code: "await tool.demo({x:1})", summary: "demo tool call" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -129,7 +129,7 @@ describe("createEvalTool", () => {
 
 		const toolResult = await tool.execute(
 			"cell-3",
-			{ language: "js", code: "await tool.eval({})" },
+			{ language: "js", code: "await tool.eval({})", summary: "recursive eval" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -154,7 +154,13 @@ describe("createEvalTool", () => {
 		});
 
 		await expect(
-			tool.execute("cell-4", { language: "js", code: "1" }, undefined, undefined, fakeExtensionContext()),
+			tool.execute(
+				"cell-4",
+				{ language: "js", code: "1", summary: "unsupported language probe" },
+				undefined,
+				undefined,
+				fakeExtensionContext(),
+			),
 		).rejects.toThrow('Unsupported eval language "js". Enabled languages: py');
 	});
 
@@ -174,7 +180,7 @@ describe("createEvalTool", () => {
 
 		const toolResult = await tool.execute(
 			"cell-5",
-			{ language: "js", code: "heavy()", timeout: 2, reset: true },
+			{ language: "js", code: "heavy()", timeout: 2, reset: true, summary: "heavy run" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -204,7 +210,7 @@ describe("createEvalTool", () => {
 
 		const first = await tool.execute(
 			"cell-6",
-			{ language: "js", code: "await tool.blocked({})" },
+			{ language: "js", code: "await tool.blocked({})", summary: "blocked tool" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -213,7 +219,7 @@ describe("createEvalTool", () => {
 		kernel.replaceMessages([result("cell-7", "next-ok")]);
 		const second = await tool.execute(
 			"cell-7",
-			{ language: "js", code: "1 + 1" },
+			{ language: "js", code: "1 + 1", summary: "next cell" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -256,14 +262,17 @@ describe("createEvalTool", () => {
 		// When
 		const toolResult = await tool.execute(
 			"proxy-cell",
-			{ language: "js", code: "return 42" },
+			{ language: "js", code: "return 42", summary: "proxied run" },
 			controller.signal,
 			undefined,
 			fakeExtensionContext(),
 		);
 
 		// Then
-		expect(proxyExecutor).toHaveBeenCalledWith({ language: "js", code: "return 42" }, controller.signal);
+		expect(proxyExecutor).toHaveBeenCalledWith(
+			{ language: "js", code: "return 42", summary: "proxied run" },
+			controller.signal,
+		);
 		expect(getKernel).not.toHaveBeenCalled();
 		expect(textOf(toolResult)).toBe("proxied");
 	});

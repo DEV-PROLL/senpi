@@ -8,7 +8,7 @@ describe("eval renderer streaming reuse", () => {
 		const givenResult = evalResult(
 			{
 				language: "py",
-				title: "stream",
+				summary: "stream",
 				phase: "setup",
 				durationMs: 0,
 				toolCalls: [],
@@ -26,7 +26,13 @@ describe("eval renderer streaming reuse", () => {
 		);
 
 		// Then
-		expect(renderLines(component).slice(0, 4)).toEqual(["eval py stream running", "phase setup", "", "partial-one"]);
+		expect(renderLines(component).slice(0, 5)).toEqual([
+			"eval py running",
+			"stream",
+			"phase setup",
+			"",
+			"partial-one",
+		]);
 	});
 
 	it("Given second partial result when reused then stale output is replaced and nested tool rows render", () => {
@@ -35,7 +41,7 @@ describe("eval renderer streaming reuse", () => {
 			evalResult(
 				{
 					language: "py",
-					title: "stream",
+					summary: "stream",
 					phase: "setup",
 					durationMs: 0,
 					toolCalls: [],
@@ -53,7 +59,7 @@ describe("eval renderer streaming reuse", () => {
 			evalResult(
 				{
 					language: "py",
-					title: "stream",
+					summary: "stream",
 					phase: "calling tools",
 					durationMs: 0,
 					toolCalls: [
@@ -73,7 +79,7 @@ describe("eval renderer streaming reuse", () => {
 		const lines = renderLines(secondPartial);
 		const visibleText = lines.join("\n");
 		expect.soft(secondPartial).toBe(firstPartial);
-		expect.soft(lines.slice(0, 2)).toEqual(["eval py stream running", "phase calling tools"]);
+		expect.soft(lines.slice(0, 3)).toEqual(["eval py running", "stream", "phase calling tools"]);
 		expect.soft(lines).toContain("partial-two");
 		expect.soft(lines).toContain("- tool.search: ok");
 		expect.soft(lines).toContain("- tool.write: error (denied)");
@@ -87,7 +93,7 @@ describe("eval renderer streaming reuse", () => {
 			evalResult(
 				{
 					language: "py",
-					title: "stream",
+					summary: "stream",
 					phase: "calling tools",
 					durationMs: 0,
 					toolCalls: [{ name: "search", ok: true }],
@@ -105,7 +111,7 @@ describe("eval renderer streaming reuse", () => {
 			evalResult(
 				{
 					language: "py",
-					title: "stream",
+					summary: "stream",
 					phase: "complete",
 					durationMs: 9,
 					toolCalls: [],
@@ -122,7 +128,7 @@ describe("eval renderer streaming reuse", () => {
 		const lines = renderLines(final);
 		const visibleText = lines.join("\n");
 		expect.soft(final).toBe(partial);
-		expect.soft(lines.slice(0, 4)).toEqual(["eval py stream done", "phase complete | took 9ms", "", "final-only"]);
+		expect.soft(lines.slice(0, 5)).toEqual(["eval py done", "stream", "phase complete | took 9ms", "", "final-only"]);
 		expect.soft(visibleText).not.toContain("partial-two");
 		expect.soft(visibleText).not.toContain("running");
 		expect.soft(visibleText).not.toContain("tool.search");
@@ -200,7 +206,11 @@ describe("eval renderer streaming reuse", () => {
 
 	it("Given separate call component when result streams then call preview remains distinct and unchanged", () => {
 		// Given
-		const call = renderEvalCall({ language: "js", code: "const value = 1" }, undefined, callContext());
+		const call = renderEvalCall(
+			{ language: "js", code: "const value = 1", summary: "assign constant" },
+			undefined,
+			callContext(),
+		);
 		const callPreview = renderLines(call);
 		const partial = renderEvalResult(
 			evalResult(
@@ -239,7 +249,7 @@ describe("eval renderer streaming reuse", () => {
 		expect.soft(final).toBe(partial);
 		expect.soft(final).not.toBe(call);
 		expect.soft(renderLines(call)).toEqual(callPreview);
-		expect.soft(renderLines(call)).toEqual(["eval js", "const value = 1"]);
+		expect.soft(renderLines(call)).toEqual(["eval js", "assign constant", "const value = 1"]);
 		expect.soft(renderLines(final).slice(0, 4)).toEqual(["eval js done", "phase complete | took 3ms", "", "final"]);
 	});
 
