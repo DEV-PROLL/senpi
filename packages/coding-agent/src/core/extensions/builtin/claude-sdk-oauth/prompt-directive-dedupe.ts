@@ -23,6 +23,20 @@ export interface DedupeResult {
 }
 
 /**
+ * Total UTF-8 byte size of the serialized prompt's text blocks. Uses
+ * `Buffer.byteLength` rather than `String.length`, which counts UTF-16 code
+ * units and understates every multibyte payload (Korean, emoji, CJK) that the
+ * lane actually pays for on the wire.
+ */
+export function serializedPayloadBytes(blocks: readonly ContentBlockParam[]): number {
+	let total = 0;
+	for (const block of blocks) {
+		if (block.type === "text") total += Buffer.byteLength(block.text, "utf8");
+	}
+	return total;
+}
+
+/**
  * Collapse repeated `<ultrawork-mode>...</ultrawork-mode>` directive spans in a
  * serialized prompt to the single most recent copy; earlier spans become a
  * one-line placeholder. Without this, every flatten/bootstrap re-send bills
