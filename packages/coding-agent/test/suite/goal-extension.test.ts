@@ -364,6 +364,76 @@ describe("goal extension contract (budget-free)", () => {
 		expect(sent).toHaveLength(0);
 	});
 
+	it("resumes a provider-error-blocked goal when the user sends a new message", async () => {
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeCtx("thread-provider-error-resume");
+		await tools
+			.get("create_goal")
+			?.execute("c1", { objective: "Survive a provider outage" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [assistantMessageWithStopReason("error")], willRetry: false },
+			ctx,
+		);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("blocked");
+
+		await runHandlers(
+			handlers,
+			"input",
+			{ type: "input", inputId: "provider-error-resume", text: "keep going", source: "interactive" },
+			ctx,
+		);
+		await runHandlers(
+			handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "provider-error-resume", disposition: "started" },
+			ctx,
+		);
+
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({ status: "active" });
+	});
+
+	it("leaves a user-interrupted goal blocked when the user sends a new message", async () => {
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeCtx("thread-user-abort-no-resume");
+		await tools.get("create_goal")?.execute("c1", { objective: "Stay stopped" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{
+				type: "agent_end",
+				messages: [assistantMessageWithStopReason("aborted")],
+				aborted: true,
+				abortSource: "user",
+				willRetry: false,
+			},
+			ctx,
+		);
+
+		await runHandlers(
+			handlers,
+			"input",
+			{ type: "input", inputId: "user-abort-no-resume", text: "hello", source: "interactive" },
+			ctx,
+		);
+		await runHandlers(
+			handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "user-abort-no-resume", disposition: "started" },
+			ctx,
+		);
+
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "user interrupted the turn",
+		});
+	});
+
 	it("preserves the user-abort block reason", async () => {
 		const { tools, handlers } = createGoalHarness();
 		const ctx = await makeCtx("thread-user-abort-provider-guard");
