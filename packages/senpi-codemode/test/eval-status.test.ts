@@ -4,15 +4,8 @@ import type { EvalDetachedCellStatusEntry } from "../src/tool/detached-cell-mana
 
 const T0 = 1_000_000;
 
-function entry(
-	cellId: string,
-	language: "js" | "py",
-	summary?: string,
-	startedAtMs = T0,
-): EvalDetachedCellStatusEntry {
-	return summary === undefined
-		? { cellId, language, startedAtMs }
-		: { cellId, language, summary, startedAtMs };
+function entry(cellId: string, language: "js" | "py", summary?: string, startedAtMs = T0): EvalDetachedCellStatusEntry {
+	return summary === undefined ? { cellId, language, startedAtMs } : { cellId, language, summary, startedAtMs };
 }
 
 describe("formatEvalCellStatus", () => {

@@ -132,9 +132,9 @@ describe("resolveRetryFallbackSettings chain defaults", () => {
 	});
 
 	it("replaces a colliding default outright and removes one set to an empty array", () => {
-		expect(resolveRetryFallbackSettings({ fallbackChains: { [fableKey]: ["ccapi/kimi-k3:max"] } }).chains[fableKey]).toEqual(
-			["ccapi/kimi-k3:max"],
-		);
+		expect(
+			resolveRetryFallbackSettings({ fallbackChains: { [fableKey]: ["ccapi/kimi-k3:max"] } }).chains[fableKey],
+		).toEqual(["ccapi/kimi-k3:max"]);
 
 		expect(resolveRetryFallbackSettings({ fallbackChains: { [fableKey]: [] } }).chains).not.toHaveProperty(fableKey);
 	});

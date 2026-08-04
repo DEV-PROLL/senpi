@@ -141,7 +141,13 @@ describe("eval detached cells", () => {
 			),
 		).rejects.toThrow(/busy running detached cell busy-js[\s\S]*still computing/u);
 		await expect(
-			tool.execute("py-cell", { language: "py", code: "answer = 42", summary: "compute answer in python" }, undefined, undefined, interactiveContext()),
+			tool.execute(
+				"py-cell",
+				{ language: "py", code: "answer = 42", summary: "compute answer in python" },
+				undefined,
+				undefined,
+				interactiveContext(),
+			),
 		).resolves.toSatisfy((value: AgentToolResult<unknown>) => textOf(value).includes("py-ok"));
 
 		await manager.stop("busy-js");
@@ -390,7 +396,13 @@ describe("eval detached cell status emissions", () => {
 		const kernel = new FakeKernel([result("plain-cell", "1")]);
 		const tool = createTool(manager, [["js", kernel]]);
 
-		await tool.execute("plain-cell", { language: "js", code: "1", summary: "plain no detach" }, undefined, undefined, interactiveContext());
+		await tool.execute(
+			"plain-cell",
+			{ language: "js", code: "1", summary: "plain no detach" },
+			undefined,
+			undefined,
+			interactiveContext(),
+		);
 
 		expect(status.emissions).toEqual([]);
 

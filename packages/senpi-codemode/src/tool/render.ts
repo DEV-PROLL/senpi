@@ -783,9 +783,7 @@ export function renderEvalCall(
 		const timeout = args.timeout === undefined ? "" : ` timeout ${args.timeout}s`;
 		component.setBlocks([
 			{ kind: "text", text: style(theme, "toolTitle", `eval ${args.language}${reset}${timeout}`) },
-			...(args.summary === undefined
-				? []
-				: [{ kind: "text" as const, text: style(theme, "muted", args.summary) }]),
+			...(args.summary === undefined ? [] : [{ kind: "text" as const, text: style(theme, "muted", args.summary) }]),
 			{
 				kind: "text",
 				text: style(theme, "mdCodeBlock", args.code.trim().length > 0 ? args.code : "..."),

@@ -309,7 +309,11 @@ describe("eval renderer", () => {
 
 	it("Given a result exists when the compact call lane renders then it also yields an empty component", () => {
 		// Given the compact call preview (no theme, no spinner) and the same lane once a result exists
-		const compact = renderEvalCall({ language: "js", code: "1 + 1", summary: "quick math" }, undefined, callContext());
+		const compact = renderEvalCall(
+			{ language: "js", code: "1 + 1", summary: "quick math" },
+			undefined,
+			callContext(),
+		);
 		const yielded = renderEvalCall(
 			{ language: "js", code: "1 + 1", summary: "quick math" },
 			undefined,
