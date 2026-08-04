@@ -8,6 +8,7 @@ import {
 	parseFallbackSelector,
 	resolveChainKey,
 } from "../../src/core/retry-fallback/chains.ts";
+import { DEFAULT_FALLBACK_CHAINS, resolveRetryFallbackSettings } from "../../src/core/retry-fallback/settings.ts";
 
 const models = [
 	getModel("openai", "gpt-5.4"),
@@ -114,5 +115,33 @@ describe("fallback chain selectors", () => {
 		expect(candidatesAfter(entries, "openai/gpt-5.4:high")).toEqual([]);
 		expect(candidatesAfter(entries, "anthropic/claude-sonnet-4-5:high")).toEqual(entries.slice(1));
 		expect(candidatesAfter(entries, "unknown/model")).toEqual(entries);
+	});
+});
+
+describe("resolveRetryFallbackSettings chain defaults", () => {
+	const fableKey = "anthropic/claude-fable-5";
+
+	it("keeps a shipped default chain when the user configures an unrelated model", () => {
+		const resolved = resolveRetryFallbackSettings({
+			fallbackChains: { "apitopia/kimi-k3-unlocked": ["apitopia/kimi-k3-ultrafast-unlocked:max"] },
+		});
+
+		expect(resolved.chains["apitopia/kimi-k3-unlocked"]).toEqual(["apitopia/kimi-k3-ultrafast-unlocked:max"]);
+		expect(resolved.chains[fableKey]).toEqual(DEFAULT_FALLBACK_CHAINS[fableKey]);
+		expect(DEFAULT_FALLBACK_CHAINS[fableKey]).toHaveLength(3);
+	});
+
+	it("replaces a colliding default outright and removes one set to an empty array", () => {
+		expect(resolveRetryFallbackSettings({ fallbackChains: { [fableKey]: ["ccapi/kimi-k3:max"] } }).chains[fableKey]).toEqual(
+			["ccapi/kimi-k3:max"],
+		);
+
+		expect(resolveRetryFallbackSettings({ fallbackChains: { [fableKey]: [] } }).chains).not.toHaveProperty(fableKey);
+	});
+
+	it("falls back to the shipped defaults for a malformed chain map", () => {
+		expect(resolveRetryFallbackSettings({ fallbackChains: undefined }).chains[fableKey]).toEqual(
+			DEFAULT_FALLBACK_CHAINS[fableKey],
+		);
 	});
 });
