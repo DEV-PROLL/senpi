@@ -59,7 +59,7 @@ type Context = Readonly<Record<string, ContextValue>>;
 type EvalPromptExample = {
 	readonly caption: string;
 	readonly language: keyof EnabledLanguages;
-	readonly title: string;
+	readonly summary: string;
 	readonly code: string;
 };
 
@@ -71,19 +71,19 @@ const REUSE_CHAIN_EXAMPLES = [
 	{
 		caption: "First call — set up once",
 		language: "py",
-		title: "collect targets",
+		summary: "Count all TypeScript source files under src/ excluding tests",
 		code: "from pathlib import Path\nfrom collections import Counter\nfiles = [p for p in Path('src').rglob('*.ts') if 'test' not in p.parts]\nprint(len(files))",
 	},
 	{
 		caption: "Second call — reuse `files`, batch-read in one cell",
 		language: "py",
-		title: "scan usages",
+		summary: "Find which files reference legacyClient so we know what to migrate",
 		code: "hits = Counter()\nfor p in files:\n    hits[p.name] = read(p).count('legacyClient')\ndisplay({k: v for k, v in hits.items() if v})",
 	},
 	{
 		caption: "Third call — reuse results, fan out session tools in parallel",
 		language: "py",
-		title: "confirm callsites",
+		summary: "Confirm exact callsite lines in each directory to plan the refactor",
 		code: "dirs = ['src/core', 'src/tools']\ndisplay(parallel([lambda d=d: tool.grep({'pattern': 'legacyClient', 'path': d}) for d in dirs]))",
 	},
 ] as const satisfies readonly EvalPromptExample[];
@@ -122,7 +122,7 @@ Fields:
 
 - \`language\` — {{#if py}}\`"py"\` IPython kernel{{/if}}{{#ifAll py js}}, {{/ifAll}}{{#if js}}\`"js"\` persistent JavaScript VM{{/if}}{{#if rb}}{{#ifAny py js}}, {{/ifAny}}\`"rb"\` persistent Ruby kernel{{/if}}{{#if jl}}{{#ifAny py js rb}}, {{/ifAny}}\`"jl"\` persistent Julia kernel{{/if}}.
 - \`code\` — cell body, verbatim. Newlines/quotes JSON-encoded; no fences, no headers.
-- \`title\` (optional) — short transcript label (e.g. \`"imports"\`).
+- \`summary\` (REQUIRED for run) — ONE line in the USER'S conversational language stating WHAT this cell does and FOR WHAT PURPOSE (e.g. Korean conversation -> "src 전체에서 legacyClient 사용처 집계"); shown in the TUI while the cell runs; >80 chars is force-truncated.
 - \`timeout\` (optional) — seconds. Raise only for heavy compute or long{{#if spawns}} non-agent{{/if}} tool calls.
 - \`on_timeout\` (optional) — \`"detach"\` keeps pure computation running in interactive sessions (the default); \`"error"\` interrupts for deadline-sensitive work and is the print/json default.
 - \`reset\` (optional) — wipe this language's kernel first.{{#ifAll py js}} Per-language: a \`py\` reset never touches the JS VM.{{/ifAll}}
@@ -214,7 +214,7 @@ export function buildEvalPrompt(
 	};
 	const examples = REUSE_CHAIN_EXAMPLES.filter((example) => enabled[example.language])
 		.map((example) => {
-			const call = { language: example.language, title: example.title, code: example.code };
+			const call = { language: example.language, summary: example.summary, code: example.code };
 			return `### ${example.caption}\n\`\`\`json\n${JSON.stringify(call, null, 2)}\n\`\`\``;
 		})
 		.join("\n\n");

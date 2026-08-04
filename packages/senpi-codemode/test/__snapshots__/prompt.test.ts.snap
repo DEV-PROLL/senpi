@@ -18,7 +18,7 @@ Fields:
 
 - \`language\` — \`"py"\` IPython kernel, \`"js"\` persistent JavaScript VM, \`"rb"\` persistent Ruby kernel, \`"jl"\` persistent Julia kernel.
 - \`code\` — cell body, verbatim. Newlines/quotes JSON-encoded; no fences, no headers.
-- \`title\` (optional) — short transcript label (e.g. \`"imports"\`).
+- \`summary\` (REQUIRED for run) — ONE line in the USER'S conversational language stating WHAT this cell does and FOR WHAT PURPOSE (e.g. Korean conversation -> "src 전체에서 legacyClient 사용처 집계"); shown in the TUI while the cell runs; >80 chars is force-truncated.
 - \`timeout\` (optional) — seconds. Raise only for heavy compute or long non-agent tool calls.
 - \`on_timeout\` (optional) — \`"detach"\` keeps pure computation running in interactive sessions (the default); \`"error"\` interrupts for deadline-sensitive work and is the print/json default.
 - \`reset\` (optional) — wipe this language's kernel first. Per-language: a \`py\` reset never touches the JS VM.
@@ -89,7 +89,7 @@ Prior top-level names (\`data\`, \`sessions\`, helpers, imports) survive into th
 \`\`\`json
 {
   "language": "py",
-  "title": "collect targets",
+  "summary": "Count all TypeScript source files under src/ excluding tests",
   "code": "from pathlib import Path\\nfrom collections import Counter\\nfiles = [p for p in Path('src').rglob('*.ts') if 'test' not in p.parts]\\nprint(len(files))"
 }
 \`\`\`
@@ -98,7 +98,7 @@ Prior top-level names (\`data\`, \`sessions\`, helpers, imports) survive into th
 \`\`\`json
 {
   "language": "py",
-  "title": "scan usages",
+  "summary": "Find which files reference legacyClient so we know what to migrate",
   "code": "hits = Counter()\\nfor p in files:\\n    hits[p.name] = read(p).count('legacyClient')\\ndisplay({k: v for k, v in hits.items() if v})"
 }
 \`\`\`
@@ -107,7 +107,7 @@ Prior top-level names (\`data\`, \`sessions\`, helpers, imports) survive into th
 \`\`\`json
 {
   "language": "py",
-  "title": "confirm callsites",
+  "summary": "Confirm exact callsite lines in each directory to plan the refactor",
   "code": "dirs = ['src/core', 'src/tools']\\ndisplay(parallel([lambda d=d: tool.grep({'pattern': 'legacyClient', 'path': d}) for d in dirs]))"
 }
 \`\`\`
@@ -138,7 +138,7 @@ Fields:
 
 - \`language\` — \`"js"\` persistent JavaScript VM.
 - \`code\` — cell body, verbatim. Newlines/quotes JSON-encoded; no fences, no headers.
-- \`title\` (optional) — short transcript label (e.g. \`"imports"\`).
+- \`summary\` (REQUIRED for run) — ONE line in the USER'S conversational language stating WHAT this cell does and FOR WHAT PURPOSE (e.g. Korean conversation -> "src 전체에서 legacyClient 사용처 집계"); shown in the TUI while the cell runs; >80 chars is force-truncated.
 - \`timeout\` (optional) — seconds. Raise only for heavy compute or long tool calls.
 - \`on_timeout\` (optional) — \`"detach"\` keeps pure computation running in interactive sessions (the default); \`"error"\` interrupts for deadline-sensitive work and is the print/json default.
 - \`reset\` (optional) — wipe this language's kernel first.
@@ -213,7 +213,7 @@ Fields:
 
 - \`language\` — \`"py"\` IPython kernel, \`"js"\` persistent JavaScript VM.
 - \`code\` — cell body, verbatim. Newlines/quotes JSON-encoded; no fences, no headers.
-- \`title\` (optional) — short transcript label (e.g. \`"imports"\`).
+- \`summary\` (REQUIRED for run) — ONE line in the USER'S conversational language stating WHAT this cell does and FOR WHAT PURPOSE (e.g. Korean conversation -> "src 전체에서 legacyClient 사용처 집계"); shown in the TUI while the cell runs; >80 chars is force-truncated.
 - \`timeout\` (optional) — seconds. Raise only for heavy compute or long tool calls.
 - \`on_timeout\` (optional) — \`"detach"\` keeps pure computation running in interactive sessions (the default); \`"error"\` interrupts for deadline-sensitive work and is the print/json default.
 - \`reset\` (optional) — wipe this language's kernel first. Per-language: a \`py\` reset never touches the JS VM.
@@ -269,7 +269,7 @@ Prior top-level names (\`data\`, \`sessions\`, helpers, imports) survive into th
 \`\`\`json
 {
   "language": "py",
-  "title": "collect targets",
+  "summary": "Count all TypeScript source files under src/ excluding tests",
   "code": "from pathlib import Path\\nfrom collections import Counter\\nfiles = [p for p in Path('src').rglob('*.ts') if 'test' not in p.parts]\\nprint(len(files))"
 }
 \`\`\`
@@ -278,7 +278,7 @@ Prior top-level names (\`data\`, \`sessions\`, helpers, imports) survive into th
 \`\`\`json
 {
   "language": "py",
-  "title": "scan usages",
+  "summary": "Find which files reference legacyClient so we know what to migrate",
   "code": "hits = Counter()\\nfor p in files:\\n    hits[p.name] = read(p).count('legacyClient')\\ndisplay({k: v for k, v in hits.items() if v})"
 }
 \`\`\`
@@ -287,7 +287,7 @@ Prior top-level names (\`data\`, \`sessions\`, helpers, imports) survive into th
 \`\`\`json
 {
   "language": "py",
-  "title": "confirm callsites",
+  "summary": "Confirm exact callsite lines in each directory to plan the refactor",
   "code": "dirs = ['src/core', 'src/tools']\\ndisplay(parallel([lambda d=d: tool.grep({'pattern': 'legacyClient', 'path': d}) for d in dirs]))"
 }
 \`\`\`
