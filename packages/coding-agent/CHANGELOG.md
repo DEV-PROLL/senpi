@@ -8,16 +8,32 @@
 
 ### Added
 
-- Flatten and bootstrap continuity notices now report the re-sent payload size and how many duplicate ultrawork directive blocks were collapsed, so Claude SDK OAuth token cost is visible at the moment it is paid ([#705](https://github.com/code-yeongyu/senpi/pull/705))
+- Added Claude SDK OAuth full-prompt payload telemetry: flatten and bootstrap continuity diagnostics now carry
+  the UTF-8 byte size of serialized text blocks and the number of duplicate `<ultrawork-mode>` directives removed,
+  while interactive flatten notices render the transmitted size in B, KB, or MB and include the collapsed count
+  when it is non-zero ([#705](https://github.com/code-yeongyu/senpi/pull/705)).
 
 ### Changed
 
 ### Fixed
 
-- Collapsed repeated `<ultrawork-mode>` directive blocks to the single most recent copy when the Claude SDK OAuth lane flattens a conversation, cutting the re-sent prompt on a representative transcript from 85,890 to 18,094 bytes ([#705](https://github.com/code-yeongyu/senpi/pull/705))
-- Fixed dynamic project rules being re-injected for every distinct matching tool target: unchanged rule content now stays deduplicated while it remains in the live agent context, then becomes eligible again after accepted compaction or a rule-content change ([#712](https://github.com/code-yeongyu/senpi/pull/712)).
-- Fixed MCP prompt slash commands going missing after startup-raced server connections: the MCP service now emits a catalog-registration signal after publishing each snapshot, and prompt command registration waits for the server's prompt metadata instead of inferring readiness from tool registration ([#706](https://github.com/code-yeongyu/senpi/pull/706)).
-- Fixed HTTP 400 failures from MCP servers that emit invalid JSON-null `type` keywords by stripping only those malformed values at the shared MCP schema-conversion boundary while preserving valid JSON Schema null types ([#713](https://github.com/code-yeongyu/senpi/pull/713)).
+- Fixed Claude SDK OAuth full-history re-sends repeatedly billing accumulated `<ultrawork-mode>` directives by
+  post-processing both resident flatten/bootstrap prompts and the non-resident full-prompt path: every earlier
+  complete directive becomes a one-line superseded marker while the most recent copy, surrounding text, non-text
+  blocks, unmatched tags, source messages, and continuity hashes remain intact. Nested directives, including
+  nesting split across serialized text blocks, fail closed unchanged instead of producing a corrupted prompt. In
+  the ten-turn fixture with five 17,000-character directive bodies, serialization fell from 85,890 bytes and five
+  directive blocks to 18,094 bytes and one block ([#705](https://github.com/code-yeongyu/senpi/pull/705)).
+- Fixed unchanged dynamic project rules being appended again whenever a different tool target matched the same rule:
+  matching and target fingerprints remain target-specific, but delivered rule bodies now share one live-context
+  deduplication scope, preventing duplicate instructions and `Project rules` activation notices until an accepted
+  compaction clears the context boundary or a changed rule-content hash makes the updated body eligible for immediate
+  re-injection ([#712](https://github.com/code-yeongyu/senpi/pull/712)).
+- Fixed strict OpenAI-compatible providers rejecting MCP tool definitions with HTTP 400 when a server emits the
+  invalid JSON Schema form `type: null`: MCP schema conversion now recursively omits only JSON-null `type` keys at
+  the root, in nested properties, and inside combiner branches before registering the shared tool definition, while
+  preserving surrounding schema fields and valid null declarations such as `type: "null"` and
+  `type: ["string", "null"]` ([#713](https://github.com/code-yeongyu/senpi/pull/713)).
 
 ### Removed
 
