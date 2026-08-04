@@ -61,10 +61,14 @@ function hasApplyPatchFailures(details: unknown): boolean {
 function syncToolset(
 	pi: ApplyPatchExtensionAPI,
 	model: Model<string> | undefined,
-	state: ApplyPatchToolsetState & { activeVariant?: ApplyPatchToolVariant },
+	state: ApplyPatchToolsetState & {
+		activeVariant?: ApplyPatchToolVariant;
+		wireMode: ApplyPatchWireMode;
+	},
 	variants: Readonly<Record<ApplyPatchToolVariant, ReturnType<typeof createApplyPatchTool>>>,
 ): void {
 	const mode = getApplyPatchWireMode(model);
+	state.wireMode = mode;
 	const currentToolNames = pi.getActiveTools();
 	if (mode !== "none") {
 		if (state.activeVariant !== mode) {
@@ -87,14 +91,31 @@ function syncToolset(
 	pi.setActiveTools([...new Set(restored)]);
 }
 
+function registerApplyPatchLazyActivator(
+	pi: ApplyPatchExtensionAPI,
+	state: { readonly wireMode: ApplyPatchWireMode },
+): void {
+	pi.registerLazyToolActivator?.((toolName) => {
+		if (toolName !== APPLY_PATCH_NAME || state.wireMode === "none") return false;
+		const activeToolNames = pi.getActiveTools();
+		if (activeToolNames.includes(APPLY_PATCH_NAME)) return false;
+		pi.setActiveTools([...activeToolNames, APPLY_PATCH_NAME]);
+		return true;
+	});
+}
+
 export function registerApplyPatchExtension(pi: ApplyPatchExtensionAPI): void {
-	const state: ApplyPatchToolsetState & { activeVariant?: ApplyPatchToolVariant } = { removedEditToolNames: [] };
+	const state: ApplyPatchToolsetState & {
+		activeVariant?: ApplyPatchToolVariant;
+		wireMode: ApplyPatchWireMode;
+	} = { removedEditToolNames: [], wireMode: "none" };
 	const variants = {
 		freeform: createApplyPatchTool("freeform"),
 		json: createApplyPatchTool("json"),
 	} as const;
 	state.activeVariant = "freeform";
 	pi.registerTool(variants.freeform);
+	registerApplyPatchLazyActivator(pi, state);
 	pi.on("tool_result", async (event) => {
 		if (event.toolName !== APPLY_PATCH_NAME || event.isError || !hasApplyPatchFailures(event.details)) {
 			return undefined;
