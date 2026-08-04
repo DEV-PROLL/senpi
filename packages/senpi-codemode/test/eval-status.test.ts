@@ -4,8 +4,15 @@ import type { EvalDetachedCellStatusEntry } from "../src/tool/detached-cell-mana
 
 const T0 = 1_000_000;
 
-function entry(cellId: string, language: "js" | "py", title?: string, startedAtMs = T0): EvalDetachedCellStatusEntry {
-	return title === undefined ? { cellId, language, startedAtMs } : { cellId, language, title, startedAtMs };
+function entry(
+	cellId: string,
+	language: "js" | "py",
+	summary?: string,
+	startedAtMs = T0,
+): EvalDetachedCellStatusEntry {
+	return summary === undefined
+		? { cellId, language, startedAtMs }
+		: { cellId, language, summary, startedAtMs };
 }
 
 describe("formatEvalCellStatus", () => {
@@ -17,30 +24,42 @@ describe("formatEvalCellStatus", () => {
 		expect(formatEvalCellStatus([], T0)).toBeUndefined();
 	});
 
-	it("shows glyph, language, and title for a single detached cell", () => {
+	it("shows glyph, language, and summary for a single detached cell", () => {
 		expect(formatEvalCellStatus([entry("cell-1", "py", "numpy feather rerun")], T0 + 5_000)).toBe(
 			"↗ py · numpy feather rerun (5s)",
 		);
 	});
 
-	it("falls back to the cell id when the cell has no title", () => {
+	it("falls back to the cell id when the cell has no summary", () => {
 		expect(formatEvalCellStatus([entry("cell-123", "js")], T0 + 180_000)).toBe("↗ js · cell-123 (3m)");
 	});
 
-	it("truncates an overlong single title to the shared 48-char budget with an ellipsis", () => {
-		const longTitle = "x".repeat(80);
-		const status = formatEvalCellStatus([entry("cell-1", "py", longTitle)], T0);
+	it("falls back to the cell id when the summary is empty", () => {
+		expect(formatEvalCellStatus([entry("cell-123", "js", "")], T0)).toBe("↗ js · cell-123 (0s)");
+	});
+
+	it("truncates an overlong single summary to the shared 48-char budget with an ellipsis", () => {
+		const longSummary = "x".repeat(80);
+		const status = formatEvalCellStatus([entry("cell-1", "py", longSummary)], T0);
 		expect(status).toBe(`↗ py · ${"x".repeat(48 - "↗ py · ".length - " (0s)".length - 1)}… (0s)`);
 		expect(status?.length).toBe(48);
 	});
 
-	it("lists every title when multiple detached cells fit the budget", () => {
+	it("truncates a Korean summary to the length budget by code units", () => {
+		const koreanSummary = "src 전체에서 legacyClient 사용처 집계".repeat(3);
+		const status = formatEvalCellStatus([entry("cell-ko", "py", koreanSummary)], T0);
+		expect(status?.length).toBeLessThanOrEqual(48);
+		expect(status).toContain("src 전체에서");
+		expect(status).toMatch(/… \(0s\)$/u);
+	});
+
+	it("lists every summary when multiple detached cells fit the budget", () => {
 		expect(formatEvalCellStatus([entry("a", "js", "alpha"), entry("b", "py", "beta")], T0 + 60_000)).toBe(
 			"↗ eval 2: alpha, beta (1m)",
 		);
 	});
 
-	it("keeps only whole titles and folds the rest into a +N more tail", () => {
+	it("keeps only whole summaries and folds the rest into a +N more tail", () => {
 		const entries = [
 			entry("a", "js", "first-cell-title"),
 			entry("b", "py", "second-cell-title"),
@@ -51,7 +70,7 @@ describe("formatEvalCellStatus", () => {
 		expect(status?.length).toBeLessThanOrEqual(48);
 	});
 
-	it("keeps the +N more counter when not even one whole title fits", () => {
+	it("keeps the +N more counter when not even one whole summary fits", () => {
 		const entries = [
 			entry("a", "js", "a-very-long-cell-title-that-cannot-fit"),
 			entry("b", "py", "another-long-cell-title-that-cannot-fit"),

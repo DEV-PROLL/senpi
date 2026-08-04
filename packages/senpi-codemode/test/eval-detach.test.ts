@@ -64,7 +64,7 @@ async function detach(
 	const started = kernel.deferNextRun();
 	const execution = tool.execute(
 		cellId,
-		{ language, code: "await forever", on_timeout: "detach" },
+		{ language, code: "await forever", summary: "detach long-running cell", on_timeout: "detach" },
 		undefined,
 		undefined,
 		interactiveContext(),
@@ -134,14 +134,14 @@ describe("eval detached cells", () => {
 		await expect(
 			tool.execute(
 				"blocked-js",
-				{ language: "js", code: "sideEffect()" },
+				{ language: "js", code: "sideEffect()", summary: "blocked js side effect" },
 				undefined,
 				undefined,
 				interactiveContext(),
 			),
 		).rejects.toThrow(/busy running detached cell busy-js[\s\S]*still computing/u);
 		await expect(
-			tool.execute("py-cell", { language: "py", code: "answer = 42" }, undefined, undefined, interactiveContext()),
+			tool.execute("py-cell", { language: "py", code: "answer = 42", summary: "compute answer in python" }, undefined, undefined, interactiveContext()),
 		).resolves.toSatisfy((value: AgentToolResult<unknown>) => textOf(value).includes("py-ok"));
 
 		await manager.stop("busy-js");
@@ -201,7 +201,7 @@ describe("eval detached cells", () => {
 		const tool = createTool(new EvalDetachedCellManager(), [["js", kernel]]);
 		const execution = tool.execute(
 			"print-timeout",
-			{ language: "js", code: "await forever" },
+			{ language: "js", code: "await forever", summary: "print mode timeout" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -226,7 +226,7 @@ describe("eval detached cells", () => {
 		const completionStarted = completionKernel.deferNextRun();
 		const completion = completionTool.execute(
 			"completion-wins",
-			{ language: "js", code: "return 1", on_timeout: "detach" },
+			{ language: "js", code: "return 1", summary: "completion race", on_timeout: "detach" },
 			undefined,
 			undefined,
 			interactiveContext(),
@@ -306,17 +306,17 @@ describe("eval detached cell status emissions", () => {
 		return { emissions, onStatusChange: (entries) => emissions.push([...entries]) };
 	}
 
-	async function detachTitled(
+	async function detachSummarized(
 		tool: ReturnType<typeof createTool>,
 		kernel: FakeKernel,
 		cellId: string,
-		title: string,
+		summary: string,
 		language: "js" | "py" = "js",
 	): Promise<void> {
 		const started = kernel.deferNextRun();
 		const execution = tool.execute(
 			cellId,
-			{ language, code: "await forever", title, on_timeout: "detach" },
+			{ language, code: "await forever", summary, on_timeout: "detach" },
 			undefined,
 			undefined,
 			interactiveContext(),
@@ -336,10 +336,10 @@ describe("eval detached cell status emissions", () => {
 		const kernel = new FakeKernel([]);
 		const tool = createTool(manager, [["js", kernel]]);
 
-		await detachTitled(tool, kernel, "status-cell", "numpy feather rerun");
+		await detachSummarized(tool, kernel, "status-cell", "numpy feather rerun");
 
 		expect(status.emissions).toEqual([
-			[{ cellId: "status-cell", language: "js", title: "numpy feather rerun", startedAtMs: expect.any(Number) }],
+			[{ cellId: "status-cell", language: "js", summary: "numpy feather rerun", startedAtMs: expect.any(Number) }],
 		]);
 
 		kernel.completeDeferredRun(result("status-cell", "42"));
@@ -363,24 +363,24 @@ describe("eval detached cell status emissions", () => {
 			["py", py],
 		]);
 
-		await detachTitled(tool, js, "js-cell", "bundle build", "js");
-		await detachTitled(tool, py, "py-cell", "strip repairs", "py");
+		await detachSummarized(tool, js, "js-cell", "bundle build", "js");
+		await detachSummarized(tool, py, "py-cell", "strip repairs", "py");
 
 		expect(status.emissions.at(-1)).toEqual([
-			{ cellId: "js-cell", language: "js", title: "bundle build", startedAtMs: expect.any(Number) },
-			{ cellId: "py-cell", language: "py", title: "strip repairs", startedAtMs: expect.any(Number) },
+			{ cellId: "js-cell", language: "js", summary: "bundle build", startedAtMs: expect.any(Number) },
+			{ cellId: "py-cell", language: "py", summary: "strip repairs", startedAtMs: expect.any(Number) },
 		]);
 
 		await manager.stop("js-cell");
 
 		expect(status.emissions.at(-1)).toEqual([
-			{ cellId: "py-cell", language: "py", title: "strip repairs", startedAtMs: expect.any(Number) },
+			{ cellId: "py-cell", language: "py", summary: "strip repairs", startedAtMs: expect.any(Number) },
 		]);
 		await manager.stop("py-cell");
 		await manager.flushNotifications();
 	});
 
-	it("omits the title when the cell had none and stays silent for cells that never detach", async () => {
+	it("omits the summary when the cell had none and stays silent for cells that never detach", async () => {
 		vi.useFakeTimers();
 		const status = statusRecorder();
 		const manager = new EvalDetachedCellManager({
@@ -390,7 +390,7 @@ describe("eval detached cell status emissions", () => {
 		const kernel = new FakeKernel([result("plain-cell", "1")]);
 		const tool = createTool(manager, [["js", kernel]]);
 
-		await tool.execute("plain-cell", { language: "js", code: "1" }, undefined, undefined, interactiveContext());
+		await tool.execute("plain-cell", { language: "js", code: "1", summary: "plain no detach" }, undefined, undefined, interactiveContext());
 
 		expect(status.emissions).toEqual([]);
 
@@ -399,7 +399,7 @@ describe("eval detached cell status emissions", () => {
 		const started = detachedKernel.deferNextRun();
 		const execution = detachedTool.execute(
 			"untitled-cell",
-			{ language: "js", code: "await forever", on_timeout: "detach" },
+			{ language: "js", code: "await forever", summary: "untitled detached", on_timeout: "detach" },
 			undefined,
 			undefined,
 			interactiveContext(),
@@ -409,7 +409,7 @@ describe("eval detached cell status emissions", () => {
 		await execution;
 
 		expect(status.emissions).toEqual([
-			[{ cellId: "untitled-cell", language: "js", startedAtMs: expect.any(Number) }],
+			[{ cellId: "untitled-cell", language: "js", summary: "untitled detached", startedAtMs: expect.any(Number) }],
 		]);
 		await manager.stop("untitled-cell");
 		await manager.flushNotifications();

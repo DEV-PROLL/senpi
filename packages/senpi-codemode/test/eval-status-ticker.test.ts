@@ -3,10 +3,10 @@ import { EVAL_STATUS_TICK_INTERVAL_MS, EvalStatusTicker } from "../src/extension
 import type { EvalDetachedCellStatusEntry } from "../src/tool/detached-cell-manager.ts";
 
 const T0 = 1_000_000;
-const entry = (cellId: string, title: string, startedAtMs = T0): EvalDetachedCellStatusEntry => ({
+const entry = (cellId: string, summary: string, startedAtMs = T0): EvalDetachedCellStatusEntry => ({
 	cellId,
 	language: "py",
-	title,
+	summary,
 	startedAtMs,
 });
 

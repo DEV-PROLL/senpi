@@ -36,7 +36,7 @@ function requireCell(resultValue: AgentToolResult<EvalToolDetails>) {
 describe("detached eval settlement", () => {
 	it("stops reading the live provider after terminal settlement", () => {
 		const manager = new EvalDetachedCellManager();
-		const input = { language: "js" as const, code: "42", title: "provider" };
+		const input = { language: "js" as const, code: "42", summary: "provider" };
 		const cell = manager.create("provider-cell", input);
 		const provider = vi.fn(
 			(): AgentToolResult<EvalToolDetails> => ({
@@ -44,7 +44,7 @@ describe("detached eval settlement", () => {
 				details: {
 					language: "js",
 					languages: ["js"],
-					title: "provider",
+					summary: "provider",
 					durationMs: 0,
 					toolCalls: [],
 					truncated: false,
@@ -80,7 +80,7 @@ describe("detached eval settlement", () => {
 		const lateCompletion = new Deferred<void>();
 		const execution = tool.execute(
 			"cancelled-cell",
-			{ language: "js", code: "await forever", on_timeout: "detach" },
+			{ language: "js", code: "await forever", summary: "detach then settle", on_timeout: "detach" },
 			undefined,
 			(update) => {
 				if (update.details.cells?.[0]?.status === "complete") lateCompletion.resolve(undefined);

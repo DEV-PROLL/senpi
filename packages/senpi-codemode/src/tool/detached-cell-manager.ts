@@ -50,7 +50,7 @@ export interface EvalDetachedCellNotifier {
 export interface EvalDetachedCellStatusEntry {
 	readonly cellId: string;
 	readonly language: EvalLanguage;
-	readonly title?: string;
+	readonly summary?: string;
 	readonly startedAtMs: number;
 }
 
@@ -193,7 +193,7 @@ export class EvalDetachedCellManager {
 				cellId: cell.cellId,
 				language: cell.input.language,
 				startedAtMs: cell.startedAtMs,
-				...(cell.input.title === undefined ? {} : { title: cell.input.title }),
+				...(cell.input.summary === undefined ? {} : { summary: cell.input.summary }),
 			})),
 		);
 	}
