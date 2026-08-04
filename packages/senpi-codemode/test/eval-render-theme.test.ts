@@ -157,7 +157,9 @@ describe("eval renderer theme hierarchy", () => {
 
 		// When
 		const lines = [
-			...renderEvalCall({ language: "js", code, summary: "collapse previews" }, TEST_THEME, callContext()).render(80),
+			...renderEvalCall({ language: "js", code, summary: "collapse previews" }, TEST_THEME, callContext()).render(
+				80,
+			),
 			...renderEvalResult(result, { expanded: false, isPartial: false }, TEST_THEME, resultContext()).render(80),
 		];
 
