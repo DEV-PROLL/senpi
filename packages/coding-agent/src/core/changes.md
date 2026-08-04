@@ -1,5 +1,48 @@
 # changes
 
+## Default fallback chains survive user chain configuration (2026-08-04)
+
+### What changed
+
+- `retry-fallback/settings.ts` now layers user `retry.fallbackChains` over
+  `DEFAULT_FALLBACK_CHAINS` per key instead of replacing the whole map. A user
+  key of the same name still replaces that default outright (never a union), and
+  an explicit empty array removes a default the user does not want.
+- `retry-fallback/validate.ts` no longer warns that an empty chain "must contain
+  at least one entry", because an empty array is now the documented opt-out.
+- The malformed-map warning names the offending value
+  (`"...but got null."` / `"...but got an array."`) instead of being anonymous.
+- `SettingsManager.getFallbackChainsScope()` reports which scope supplied
+  `retry.fallbackChains` (project wins, since it replaces the map wholesale), and
+  every `validation_warning` log record now carries that scope as `source`, so a
+  single log line names the file to open. `source` is `"default"` when no scope
+  configured chains and the resolved map is the shipped defaults.
+
+### Why
+
+- Configuring an unrelated model silently deleted every shipped default chain.
+  A user who added only `apitopia/kimi-k3-*` chains lost the default
+  `anthropic/claude-fable-5` chain without any warning.
+- That loss then propagated into policy: with no chain for the active model,
+  `hasConfiguredChain()` returned false, the 2026-08-03 server-fallback policy
+  correctly disabled `abortServerSideFallback`, and Anthropic's server-side
+  substitution replaced the user's intended client fallback. The policy behaved
+  as designed; its input was wrong.
+- The anonymous "must be a plain object" warning fired repeatedly in real logs
+  with no way to identify which value produced it.
+
+### Why this cannot be expressed externally
+
+- Defaults-vs-user resolution happens inside settings resolution, before any
+  extension observes a session. An extension can add chains through
+  `setFallbackChain`, but cannot restore a default the resolver already dropped.
+
+### Expected merge conflict zones
+
+- LOW: `retry-fallback/settings.ts` `resolveFallbackChains()`.
+- LOW: `retry-fallback/validate.ts` empty-entry branch and the malformed-map string.
+- LOW: fallback settings/validate test expectations.
+
 ## Durable compaction telemetry correlation (2026-08-03)
 
 ### What changed

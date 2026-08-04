@@ -33,10 +33,21 @@ function validateThinkingLevel(
 	}
 }
 
+/**
+ * Names the offending value so a single log line identifies the producer. The
+ * bare form of this warning fired repeatedly in the wild with no way to tell
+ * which settings value caused it.
+ */
+function describeValue(value: unknown): string {
+	if (value === null) return "null";
+	if (Array.isArray(value)) return "an array";
+	return `a ${typeof value}`;
+}
+
 /** Returns configuration warnings without changing malformed fallback-chain settings. */
 export function validateFallbackChains(chains: unknown, registry: FallbackModelRegistry): string[] {
 	if (chains === undefined) return [];
-	if (!isPlainObject(chains)) return ["Fallback chains must be a plain object."];
+	if (!isPlainObject(chains)) return [`Fallback chains must be a plain object, but got ${describeValue(chains)}.`];
 
 	const warnings: string[] = [];
 	const models = registry.getAll();
@@ -62,8 +73,9 @@ export function validateFallbackChains(chains: unknown, registry: FallbackModelR
 			warnings.push(`Fallback chain "${key}" entries must be an array of strings.`);
 			continue;
 		}
+		// An empty array is the documented opt-out that removes a shipped default
+		// chain, so it is a valid instruction rather than a malformed entry.
 		if (entries.length === 0) {
-			warnings.push(`Fallback chain "${key}" must contain at least one entry.`);
 			continue;
 		}
 

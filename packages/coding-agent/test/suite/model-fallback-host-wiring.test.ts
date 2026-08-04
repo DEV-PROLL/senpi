@@ -48,7 +48,9 @@ describe("model fallback host wiring", () => {
 
 		expect(harness.settingsManager.getRawFallbackChains()).toBeUndefined();
 		await getFallbackCommand(harness).handler(`${primary} ${fallback}`, context);
-		expect(harness.settingsManager.getRetryFallbackSettings().chains).toEqual({ [primary]: [fallback] });
+		// The quick-set chain is what must reach the engine; shipped defaults for
+		// other models stay resolved alongside it.
+		expect(harness.settingsManager.getRetryFallbackSettings().chains[primary]).toEqual([fallback]);
 
 		harness.setResponses([
 			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),

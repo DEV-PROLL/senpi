@@ -39,21 +39,19 @@ describe("validateFallbackChains", () => {
 		{
 			name: "non-object values",
 			chains: null,
-			warnings: ["Fallback chains must be a plain object."],
+			warnings: ["Fallback chains must be a plain object, but got null."],
 		},
 		{
 			name: "arrays and nested garbage",
 			chains: ["openai/gpt-5.4"],
-			warnings: ["Fallback chains must be a plain object."],
+			warnings: ["Fallback chains must be a plain object, but got an array."],
 		},
 		{
 			name: "role and wildcard keys",
 			chains: { default: [], "openai/*": [] },
 			warnings: [
 				'Fallback chain key "default" must use a provider/model selector; roles are unsupported.',
-				'Fallback chain "default" must contain at least one entry.',
 				'Fallback chain key "openai/*" cannot contain wildcards.',
-				'Fallback chain "openai/*" must contain at least one entry.',
 			],
 		},
 		{
@@ -68,7 +66,7 @@ describe("validateFallbackChains", () => {
 			],
 		},
 		{
-			name: "non-string and empty entry lists",
+			name: "non-string entry lists, with an empty list accepted as a default opt-out",
 			chains: {
 				"openai/gpt-5.4": ["anthropic/claude-sonnet-4-5", 42],
 				"anthropic/claude-sonnet-4-5": [],
@@ -76,7 +74,6 @@ describe("validateFallbackChains", () => {
 			},
 			warnings: [
 				'Fallback chain "openai/gpt-5.4" entries must be an array of strings.',
-				'Fallback chain "anthropic/claude-sonnet-4-5" must contain at least one entry.',
 				'Fallback chain "test/no-reasoning" entries must be an array of strings.',
 			],
 		},

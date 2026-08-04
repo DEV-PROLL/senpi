@@ -726,8 +726,11 @@ export class AgentSession {
 			this.settingsManager.getRawFallbackChains(),
 			this._modelRegistry,
 		);
+		// `source` names the scope that supplied the chains so a single log line
+		// points at the file to open; "default" means no scope configured any.
+		const fallbackChainsSource = this.settingsManager.getFallbackChainsScope() ?? "default";
 		for (const warning of this._fallbackValidationWarnings) {
-			fallbackLogger.warn("validation_warning", { warning });
+			fallbackLogger.warn("validation_warning", { warning, source: fallbackChainsSource });
 		}
 		this._selectorCooldowns = new SelectorCooldowns(config.fallbackNow ?? (() => Date.now()));
 		this._fallbackNow = config.fallbackNow ?? (() => Date.now());
