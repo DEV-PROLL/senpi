@@ -89,8 +89,21 @@ describe("local release package list", () => {
 			.map((line) => JSON.parse(line));
 		const testIndex = npmCalls.findIndex((call) => call.args.join(" ") === "test");
 		const lastBuildIndex = npmCalls.findLastIndex((call) => call.args.join(" ") === "run build");
+		const excludedPackageSuffixes = [
+			`${sep}packages${sep}storage${sep}sqlite-node`,
+			`${sep}packages${sep}server`,
+		];
 		assert.ok(testIndex > lastBuildIndex, "expected local-release to build every package before running tests");
 		assert.equal(npmCalls[testIndex]?.ci, "1", "expected local-release tests to use deterministic CI concurrency");
+		assert.equal(
+			npmCalls.some(
+				(call) =>
+					excludedPackageSuffixes.some((suffix) => call.cwd.endsWith(suffix)) &&
+					(call.args.join(" ") === "run build" || call.args[0] === "pack"),
+			),
+			false,
+			"expected local-release to exclude independently versioned storage and private server packages",
+		);
 		assert.ok(
 			npmCalls.some((call) => call.cwd.endsWith(ptyDirectorySuffix) && call.args.join(" ") === "run build"),
 			"expected local-release to build packages/pty",
