@@ -1,5 +1,25 @@
 # changes
 
+## Codemode lazy activation (2026-08-04)
+
+### What changed
+
+- `extension.ts`: tracks the current apply-patch wire mode and registers an extension-owned lazy activator. When codemode requests the already-registered `apply_patch` tool through `executeTool(..., { activateInactiveTool: true })`, the activator adds it to the live tool set only for eligible GPT/OpenAI wire modes.
+- `types.ts`: the narrow apply-patch extension API accepts the runtime's lazy-activator registration hook while remaining usable by isolated extension stubs that do not provide it.
+
+### Why
+
+The apply-patch extension deliberately preserves an active tool set that contains neither `edit` nor `write`, so `apply_patch` can remain registered but inactive. Codemode exposes registered extension tool schemas and asks the owning extension to authorize lazy activation, but apply-patch did not register that authorization. Eval calls therefore failed with `Tool apply_patch is registered but inactive` even on eligible GPT/OpenAI models.
+
+### Why this belongs in the extension
+
+Inactive-tool eligibility is intentionally owned by the registering extension. A core fallback that activates every registered tool would bypass permission, tombstone, model-gating, and user-selection policies. The apply-patch extension can safely decide eligibility from its current wire mode without changing generic tool-registry behavior.
+
+### Expected upstream conflict zones
+
+- `extension.ts`: apply-patch model/session toolset synchronization, local state shape, and event registration order.
+- `types.ts`: the narrowed `ApplyPatchExtensionAPI` surface.
+
 ## Compact completed result retention (2026-08-02)
 
 ### What changed
