@@ -12,6 +12,11 @@
   at least one entry", because an empty array is now the documented opt-out.
 - The malformed-map warning names the offending value
   (`"...but got null."` / `"...but got an array."`) instead of being anonymous.
+- `SettingsManager.getFallbackChainsScope()` reports which scope supplied
+  `retry.fallbackChains` (project wins, since it replaces the map wholesale), and
+  every `validation_warning` log record now carries that scope as `source`, so a
+  single log line names the file to open. `source` is `"default"` when no scope
+  configured chains and the resolved map is the shipped defaults.
 
 ### Why
 

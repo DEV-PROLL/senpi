@@ -100,6 +100,33 @@ describe("SettingsManager retry fallback settings", () => {
 		expect(SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings().chains).toEqual(defaultChains);
 	});
 
+	it("reports which settings scope supplied the fallback chains", () => {
+		const { agentDir, projectDir } = createPaths();
+		// Nothing configured: the resolved chains are the shipped defaults, not a file.
+		expect(SettingsManager.create(projectDir, agentDir).getFallbackChainsScope()).toBeUndefined();
+
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({ retry: { fallbackChains: { "anthropic/claude-fable-5": ["ccapi/kimi-k3:max"] } } }),
+		);
+		expect(SettingsManager.create(projectDir, agentDir).getFallbackChainsScope()).toBe("global");
+
+		writeFileSync(
+			join(projectDir, CONFIG_DIR_NAME, "settings.json"),
+			JSON.stringify({ retry: { fallbackChains: { "anthropic/project": ["ccapi/project"] } } }),
+		);
+		expect(SettingsManager.create(projectDir, agentDir).getFallbackChainsScope()).toBe("project");
+	});
+
+	it("names a malformed chain map's offending type so one log line identifies it", () => {
+		const { agentDir, projectDir } = createPaths();
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ retry: { fallbackChains: null } }));
+		const manager = SettingsManager.create(projectDir, agentDir);
+		expect(manager.getFallbackChainsScope()).toBe("global");
+		// Malformed input still degrades to the shipped defaults rather than to nothing.
+		expect(manager.getRetryFallbackSettings().chains).toEqual(defaultChains);
+	});
+
 	it("keeps default chains for models the user did not configure", () => {
 		const { agentDir, projectDir } = createPaths();
 		writeFileSync(
