@@ -2,6 +2,23 @@
 
 Vendored from [`code-yeongyu/pi-rules`](https://github.com/code-yeongyu/pi-rules) (see `external-versions.json`).
 
+## 2026-08-04 - Shared activation notices for dynamic rules
+
+### What changed and why
+
+- The vendored extension now registers Senpi's shared `rule-activation` entry renderer and appends a typed, display-only activation entry after a newly matched dynamic rule block is added to a tool result.
+- The notice records the tool target and matched rule paths so the TUI can show a compact summary and expandable details instead of presenting the injected instruction block as undifferentiated tool output.
+- Static `before_agent_start` delivery, dynamic fingerprint deduplication, and the exact model-facing instruction block are unchanged.
+
+### Why this cannot stay upstream-only
+
+- Upstream pi-rules owns matching and prompt delivery but does not own Senpi's custom-entry renderer registry or shared TTSR presentation layer. The adapter therefore belongs at the Senpi builtin boundary.
+
+### Coverage and expected conflict zones
+
+- Coverage: `test/rules-before-agent-start.test.ts` verifies unchanged dynamic model delivery plus the typed activation entry; `test/suite/rule-activation-renderer.test.ts` verifies standalone renderer registration and malformed persisted-data handling.
+- Expected conflicts: `index.ts` around renderer registration and the dynamic `tool_result` return path. Preserve the shared activation append after `markDynamicInjected(...)` and before returning augmented tool content.
+
 ## Senpi adaptations vs upstream
 
 - Imports rewritten by `scripts/vendor-transform.mjs`: `@mariozechner/pi-tui` -> `@earendil-works/pi-tui`; `@mariozechner/pi-coding-agent` symbols -> `../../types.ts` (and `Theme` -> `modes/interactive/theme/theme.ts`); relative `.js` import suffixes -> `.ts`.

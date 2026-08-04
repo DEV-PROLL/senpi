@@ -1,5 +1,13 @@
 # Builtin extensions changes
 
+## rule-activation: shared project-rules and TTSR notices (2026-08-04)
+
+- Added `rule-activation/` as a presentation-only builtin module with a typed discriminated activation contract, defensive persisted-data parser, custom-entry append/registration helpers, and a compact/expandable Box/Text renderer.
+- Project-rules and TTSR both register the same renderer so either extension still works when loaded alone. Project-rules records successful dynamic tool-path matches; TTSR records committed remediation while preserving its separate persistence entry and hidden model nudge.
+- Why shared code is required: the two engines retain incompatible discovery, matching, deduplication, and remediation semantics, but the TUI needs one stable durable-entry contract instead of engine-specific raw transcript text.
+- Coverage: `test/rules-before-agent-start.test.ts`, `test/ttsr/extension-wiring.test.ts`, and `test/suite/rule-activation-renderer.test.ts`.
+- Expected merge conflict zones: the new `rule-activation/` directory and the small registration/append seams in `rules/index.ts` and `ttsr/index.ts`. Do not fold engine policy into the shared module during conflict resolution.
+
 ## service-tier: enable fast mode for Codex API extension providers (2026-08-03)
 
 - `/fast` now checks the model's `openai-codex-responses` API capability instead
