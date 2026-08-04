@@ -4,7 +4,11 @@
 
 ### Breaking Changes
 
+- Replaced the eval tool's optional presentation `title` with a required user-language `summary`: every eval call must now describe the cell's purpose in the user's language, callers using `title` must migrate to `summary`, and the generated tool schema, prompt contract, README examples, bridge fixtures, and test corpus all enforce the new argument ([#695](https://github.com/code-yeongyu/senpi/pull/695)).
+
 ### Added
+
+- Rendered each eval summary inside its transcript cell frame and used the same summary to label detached cells and their completion notices, so concurrent or long-running JavaScript and Python work remains identifiable after detachment and when results arrive asynchronously ([#695](https://github.com/code-yeongyu/senpi/pull/695)).
 
 ### Changed
 
