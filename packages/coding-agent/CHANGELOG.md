@@ -8,9 +8,13 @@
 
 ### Added
 
+- Flatten and bootstrap continuity notices now report the re-sent payload size and how many duplicate ultrawork directive blocks were collapsed, so Claude SDK OAuth token cost is visible at the moment it is paid ([#705](https://github.com/code-yeongyu/senpi/pull/705))
+
 ### Changed
 
 ### Fixed
+
+- Collapsed repeated `<ultrawork-mode>` directive blocks to the single most recent copy when the Claude SDK OAuth lane flattens a conversation, cutting the re-sent prompt on a representative transcript from 85,890 to 18,094 bytes ([#705](https://github.com/code-yeongyu/senpi/pull/705))
 
 ### Removed
 
