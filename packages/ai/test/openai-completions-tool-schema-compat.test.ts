@@ -355,6 +355,36 @@ describe("tool-schema-compat", () => {
 			]);
 		});
 
+		it("does not claim object type for a root union of non-object branches", () => {
+			// Forcing `type: "object"` here would contradict every branch. The root
+			// object guarantee only applies to schemas that really are objects.
+			const schema = { anyOf: [{ type: "string" }, { type: "number" }] };
+
+			const normalized = normalizeToolParametersForOpenAICompat(structuredClone(schema));
+
+			expect(normalized.type).toBeUndefined();
+			expect(normalized.anyOf).toEqual([{ type: "string" }, { type: "number" }]);
+		});
+
+		it("does not merge a root union whose branches are not all object shapes", () => {
+			const schema = {
+				type: "object",
+				properties: { a: { type: "string" } },
+				anyOf: [{ type: "object", properties: { x: { type: "string" } } }, { type: "string" }],
+			};
+
+			const normalized = normalizeToolParametersForMoonshot(structuredClone(schema));
+
+			expect(normalized.type).toBe("object");
+			expect(normalized.properties).toEqual({ a: { type: "string" } });
+		});
+
+		it("adds the object type back to a rootless-type schema with no combiner", () => {
+			const normalized = normalizeToolParametersForOpenAICompat({ properties: { a: { type: "string" } } });
+
+			expect(normalized.type).toBe("object");
+		});
+
 		it("merges branch properties into the root object union without dropping root properties", () => {
 			const schema = {
 				type: "object",
