@@ -1,5 +1,35 @@
 # TTSR Fork Tracker
 
+## 2026-08-04 - Cross-turn repetitive-turns detection
+
+### What changed and why
+
+- TTSR gained a third builtin detection lane, `repetitive-turns`, that watches assistant output ACROSS turns instead of within a single generation. The existing collapse and control-token-leak detectors only see one streamed message, so a model that emits a fresh but near-identical status message every turn (an "I read this as continue waiting; N green, M remain" supervision loop) never trips them and can burn an unbounded number of turns making no progress.
+- Detection is generic, not phrase-specific: each completed assistant text is normalized (lowercased, digit runs and hex-like ids folded to `#`, whitespace collapsed) and compared to the previous turn with word-trigram Jaccard similarity. Three consecutive turns at or above 0.55 similarity trip the lane, so numeric-only deltas between otherwise identical templates still match while genuinely progressing work does not.
+- Remediation reuses the shipped rule-nudge path: the next near-duplicate generation is aborted mid-stream via `ctx.abort()`, the injection is recorded through `recordInjection` (so both the `ttsr-injection` entry and the shared rule-activation record are emitted), and a `<system-interrupt rule="repetitive-turns">` nudge tells the model to stop restating status and take a different concrete action or declare what it is blocked on.
+- The lane latches after firing and only re-arms once a sufficiently dissimilar turn resets the streak, so a single loop yields exactly one interruption rather than one per repeated turn.
+- `--ttsr-rules-disabled=repetitive-turns` disables the lane end to end, matching the existing builtin-disable contract.
+
+### Why an extension-local change is required
+
+- Cross-turn state cannot live in `StreamWatcher`, which is reset at every `turn_start` by design; the detector is therefore held by the extension across turns and fed from `message_end`, using only the public `pi.*` surface. No `packages/ai`, `packages/agent`, or `agent-session.ts` change is involved.
+
+### Session-resume rehydration
+
+- Cross-turn state is rebuilt at init from persisted history (`ctx.sessionManager.getEntries()`, last 8 assistant texts) because each `--print` / `--continue` invocation is a fresh process. Without this, any resumed session — the long-running supervision sessions this lane targets — had no cross-turn protection at all; real-CLI QA caught it while the unit suite was green.
+
+### Coverage
+
+- `test/ttsr/repetitive-turns.test.ts` pins normalization, trigram similarity, the streak threshold, the minimum-length floor, and latch/reset behavior.
+- `test/suite/ttsr-extension.test.ts` proves through the faux provider that a near-duplicate streak aborts and injects exactly one `repetitive-turns` nudge with a persisted injection entry, that an unrelated repeated template also trips (genericity), that genuinely progressing turns are untouched, and that the disable flag silences the lane.
+
+- Real-CLI QA ships as `senpi-qa` mock-loop scenario `ttsr-repetitive-turns` (chained `--continue` runs against the local fake model server), alongside the existing `ttsr-collapse` and `ttsr-leak` scenarios.
+
+### Expected merge conflict zones
+
+- LOW: additive detector module and prompt constant.
+- MEDIUM: `index.ts` `message_update` / `message_end` handlers now carry the cross-turn arm/record steps alongside the existing collapse, leak, and manager-rule branches.
+
 ## 2026-08-04 - Shared visible activation records
 
 ### What changed and why
