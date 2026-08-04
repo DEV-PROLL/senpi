@@ -17,6 +17,11 @@
 
 ### Fixed
 
+- Fixed release preparation failing after Groq replaced `qwen/qwen3-32b` with the multimodal
+  `qwen/qwen3.6-27b`: Senpi's generated model catalog and typed request regression now follow the active model,
+  preserve Groq's `none`/`default` reasoning controls, and include the reviewed live provider metadata refresh so
+  `senpi --list-models` and release-time validation agree
+  ([#716](https://github.com/code-yeongyu/senpi/pull/716)).
 - Fixed Claude SDK OAuth full-history re-sends repeatedly billing accumulated `<ultrawork-mode>` directives by
   post-processing both resident flatten/bootstrap prompts and the non-resident full-prompt path: every earlier
   complete directive becomes a one-line superseded marker while the most recent copy, surrounding text, non-text
