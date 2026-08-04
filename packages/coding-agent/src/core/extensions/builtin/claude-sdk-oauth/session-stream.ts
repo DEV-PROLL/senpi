@@ -2,6 +2,7 @@ import type { Api, Context, Model, SimpleStreamOptions } from "@earendil-works/p
 import { type AuthenticatedAttemptInput, queryWithAuthLane } from "./auth-lane.ts";
 import { BoundedAsyncQueue, SESSION_STREAM_QUEUE_CAPACITY } from "./bounded-queue.ts";
 import { buildPromptBlocks } from "./prompt-bridge.ts";
+import { dedupeUltraworkBlocks, serializedPayloadBytes } from "./prompt-directive-dedupe.ts";
 import type { SDKMessage, SDKUserMessage } from "./sdk-boundary.ts";
 import { getSdkBoundary } from "./sdk-boundary.ts";
 import { type ContinuityDecision, decideNativeContinuity } from "./session-continuity.ts";
@@ -204,9 +205,13 @@ async function createResidentAttempt(
 		});
 	}
 
-	const blocks = flatten
-		? buildPromptBlocks(input.context, input.customToolNameToSdk, input.toolWatchNote)
+	const flattenResult = flatten
+		? dedupeUltraworkBlocks(buildPromptBlocks(input.context, input.customToolNameToSdk, input.toolWatchNote))
+		: undefined;
+	const blocks = flattenResult
+		? flattenResult.blocks
 		: buildDeltaPromptBlocks(messages.slice(from), input.customToolNameToSdk);
+	const payloadBytes = flattenResult ? serializedPayloadBytes(flattenResult.blocks) : undefined;
 	const staged = stageContinuityDecision(
 		observeSessionSyncDecision({
 			kind: observedKind,
@@ -214,6 +219,10 @@ async function createResidentAttempt(
 			deltaMessages: flatten ? hashes.length : hashes.length - from,
 			firstTurn,
 			senpiSessionId: sessionId,
+			...(payloadBytes !== undefined ? { payloadBytes } : {}),
+			...(flattenResult?.collapsedDirectives !== undefined
+				? { collapsedDirectives: flattenResult.collapsedDirectives }
+				: {}),
 		}),
 		input.onContinuityDecision,
 		// The pending close cause is consumed only when the staged observation

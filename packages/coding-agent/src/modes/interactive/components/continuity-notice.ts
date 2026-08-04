@@ -14,11 +14,44 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
 
 const RESUME_FALLBACK_LABEL = "Session continuity lost - resume failed, resent the full conversation";
 
-function continuityDetails(diagnostic: AssistantMessageDiagnostic): { kind: string; reason?: string } | undefined {
+type ContinuityDetails = {
+	kind: string;
+	reason?: string;
+	payloadBytes?: number;
+	collapsedDirectives?: number;
+};
+
+function continuityDetails(diagnostic: AssistantMessageDiagnostic): ContinuityDetails | undefined {
 	if (diagnostic.type !== CONTINUITY_DIAGNOSTIC_TYPE) return undefined;
 	const details = diagnostic.details;
 	if (!details || typeof details.kind !== "string") return undefined;
-	return { kind: details.kind, reason: typeof details.reason === "string" ? details.reason : undefined };
+	return {
+		kind: details.kind,
+		...(typeof details.reason === "string" ? { reason: details.reason } : {}),
+		...(typeof details.payloadBytes === "number" ? { payloadBytes: details.payloadBytes } : {}),
+		...(typeof details.collapsedDirectives === "number" ? { collapsedDirectives: details.collapsedDirectives } : {}),
+	};
+}
+
+/** Renders a byte count the way the transcript shows sizes: one decimal, KB/MB. */
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes}B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
+ * Appends the re-send cost to a degradation notice so the token bill is visible
+ * at the moment it is paid: how much was resent, and how many duplicate
+ * ultrawork directive blocks were collapsed out of it.
+ */
+function payloadSuffix(details: ContinuityDetails): string {
+	if (details.payloadBytes === undefined) return "";
+	const collapsed =
+		details.collapsedDirectives !== undefined && details.collapsedDirectives > 0
+			? `, ${details.collapsedDirectives} duplicate ultrawork blocks collapsed`
+			: "";
+	return ` - sent ${formatBytes(details.payloadBytes)}${collapsed}`;
 }
 
 /**
@@ -49,7 +82,8 @@ export class ContinuityNoticeTracker {
 				this.renderedDisabled = true;
 			}
 			const label = KIND_LABELS[details.kind] ?? "Session continuity degraded";
-			return this.format(details.reason ? `${label} (${details.reason})` : label);
+			const base = details.reason ? `${label} (${details.reason})` : label;
+			return this.format(`${base}${payloadSuffix(details)}`);
 		}
 		return undefined;
 	}

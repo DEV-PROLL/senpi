@@ -81,6 +81,16 @@ To confirm from the SDK side, list the transcript files Claude Code keeps per pr
 ls -lt ~/.claude/projects/*/ | head
 ```
 
+### Diagnosing Claude OAuth token consumption
+
+If your Claude Pro/Max subscription usage through `claude-sdk-oauth` feels unexpectedly high, check these in order:
+
+1. **Upgrade to v2026.8.3 or later.** Resume-first session continuity (#634-637) landed on 2026-08-03. On older builds, every turn after a divergence (compaction, abort, model switch, restart, failover) re-sends the entire conversation, which is the dominant token-burn mechanism.
+2. **Check which lane you are on.** The `ambient` lane (default) inherits the environment. `oauth-slots` and `config-dir` are managed lanes set via `SENPI_CLAUDE_SDK_OAUTH_TOKEN_INJECTION`. The `config-dir` lane keeps each account's credentials in its own `CLAUDE_CONFIG_DIR`; no official SDK API moves a transcript across roots, so account failover on that lane always flattens (re-sends the full history) — this is a declared residual, not a bug.
+3. **Read the continuity observations.** Tail the session log and filter for `flatten` — each `flatten` line means the lane re-sent the whole conversation and lost prompt-cache hits. A healthy conversation shows one `bootstrap` followed by `delta` lines. Common flatten reasons: `transcript_missing`, `registry_miss`, `resume_initialization_failed`, `cross_root_unsupported` (config-dir only).
+4. **Prompt-cache retention.** On the direct Anthropic API path (`anthropic` provider with an OAuth token), cache retention defaults to `long` with a 1-hour TTL on the native endpoint. Set `PI_CACHE_RETENTION=long` to ensure 1h caching. The SDK OAuth lane manages its own caching internally and senpi cannot add `cache_control` breakpoints to it.
+5. **Directive-block deduplication.** As of v2026.8.4, the flatten serialization collapses repeated `<ultrawork-mode>` directive blocks to a single copy, preventing the issue-#494 scenario where duplicated ~17KB directive blocks consumed up to 73% of the re-sent prompt. The continuity observation reports how many were collapsed and the payload size.
+
 ### GitHub Copilot
 
 - Press Enter for github.com, or enter your GitHub Enterprise Server domain

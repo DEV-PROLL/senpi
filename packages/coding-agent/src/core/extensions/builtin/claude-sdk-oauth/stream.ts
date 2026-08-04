@@ -13,6 +13,7 @@ import { buildCustomToolServers } from "./custom-tools.ts";
 import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable.ts";
 import { buildClaudeSdkOauthQueryOptions } from "./options.ts";
 import { buildPromptBlocks, buildPromptStream } from "./prompt-bridge.ts";
+import { dedupeUltraworkBlocks } from "./prompt-directive-dedupe.ts";
 import { getSdkBoundary, type SdkQueryHandle } from "./sdk-boundary.ts";
 import { type ContinuityObservation, emitContinuityObservation } from "./session-observability.ts";
 import { residentSessionMessages } from "./session-stream.ts";
@@ -130,7 +131,8 @@ export function streamClaudeSdkOauth(
 					})
 				: queryWithAuthLane({
 						prompt: buildPromptStream(
-							buildPromptBlocks(context, resolvedTools.customToolNameToSdk, toolWatchNote),
+							dedupeUltraworkBlocks(buildPromptBlocks(context, resolvedTools.customToolNameToSdk, toolWatchNote))
+								.blocks,
 						),
 						query: getSdkBoundary().query,
 						providerSettings,

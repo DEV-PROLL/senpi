@@ -187,8 +187,8 @@ describe("Claude SDK OAuth continuity observations", () => {
 		).result();
 
 		expect(sink.observations).toEqual([
-			{ kind: "bootstrap", reason: "registry_miss", deltaMessages: 1 },
-			{ kind: "delta", reason: "prefix_matched", deltaMessages: 1 },
+			expect.objectContaining({ kind: "bootstrap", reason: "registry_miss", deltaMessages: 1 }),
+			expect.objectContaining({ kind: "delta", reason: "prefix_matched", deltaMessages: 1 }),
 		]);
 	});
 
