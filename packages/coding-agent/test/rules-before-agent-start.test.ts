@@ -27,12 +27,21 @@ import { createModelRegistry } from "./model-runtime-test-utils.ts";
 
 const BASE_SYSTEM_PROMPT = "BASE SYSTEM PROMPT (rebuilt by the host on every user prompt)";
 const STATIC_BLOCK_HEADING = "## Project Instructions";
+const RULE_ACTIVATION_ENTRY_TYPE = "rule-activation";
+
+interface AppendedEntry {
+	readonly customType: string;
+	readonly data: unknown;
+}
 
 describe("rules builtin - before_agent_start delivery", () => {
 	let projectDir: string;
 	let canaryRulePath: string;
 	let canaryRuleContents: string;
 	let canaryToken: string;
+	let dynamicRuleToken: string;
+	let targetPath: string;
+	let appendedEntries: AppendedEntry[];
 	let sessionManager: SessionManager;
 	let modelRegistry: ModelRegistry;
 
@@ -40,7 +49,9 @@ describe("rules builtin - before_agent_start delivery", () => {
 		registerLazyToolActivator: () => {},
 		sendMessage: () => {},
 		sendUserMessage: () => {},
-		appendEntry: () => {},
+		appendEntry: (customType, data) => {
+			appendedEntries.push({ customType, data });
+		},
 		setSessionName: () => {},
 		getSessionName: () => undefined,
 		setLabel: () => {},
@@ -123,7 +134,17 @@ describe("rules builtin - before_agent_start delivery", () => {
 		canaryRuleContents = `---\nalwaysApply: true\n---\n\n# Canary rule\n\n${canaryToken}\n`;
 		canaryRulePath = join(projectDir, ".omo", "rules", "canary.md");
 		writeFileSync(canaryRulePath, canaryRuleContents, "utf-8");
+		dynamicRuleToken = `RULES-DYNAMIC-CANARY-${randomUUID()}`;
+		writeFileSync(
+			join(projectDir, ".omo", "rules", "typescript.md"),
+			`---\nglobs: src/**/*.ts\n---\n\n# TypeScript rule\n\n${dynamicRuleToken}\n`,
+			"utf-8",
+		);
+		targetPath = join(projectDir, "src", "lib", "proxy", "strategy.ts");
+		mkdirSync(join(projectDir, "src", "lib", "proxy"), { recursive: true });
+		writeFileSync(targetPath, "export const strategy = true;\n", "utf-8");
 
+		appendedEntries = [];
 		sessionManager = SessionManager.inMemory();
 		modelRegistry = await createModelRegistry(AuthStorage.create(join(projectDir, "auth.json")));
 	});
@@ -211,5 +232,40 @@ describe("rules builtin - before_agent_start delivery", () => {
 			result?.systemPrompt ?? "",
 			"a rule already present as a native context file must not be injected again",
 		).not.toContain(canaryToken);
+	});
+
+	it("#given a path-scoped rule #when a matching read tool result arrives #then the model block and display-only activation entry are both emitted", async () => {
+		const runner = await createRunner();
+		const prompt = await runner.emitBeforeAgentStart(
+			"Read the target TypeScript file",
+			undefined,
+			BASE_SYSTEM_PROMPT,
+			{
+				cwd: projectDir,
+			},
+		);
+		expect(prompt?.systemPrompt ?? "").not.toContain(dynamicRuleToken);
+
+		const toolResult = await runner.emitToolResult({
+			type: "tool_result",
+			toolName: "read",
+			toolCallId: "call-read-strategy",
+			input: { path: "src/lib/proxy/strategy.ts" },
+			content: [{ type: "text", text: "export const strategy = true;" }],
+			details: undefined,
+			isError: false,
+		});
+
+		expect(textOf(toolResult?.content)).toContain(dynamicRuleToken);
+		expect(appendedEntries).toContainEqual(
+			expect.objectContaining({
+				customType: RULE_ACTIVATION_ENTRY_TYPE,
+				data: expect.objectContaining({
+					kind: "project-rules",
+					targetPath: "src/lib/proxy/strategy.ts",
+					rules: expect.arrayContaining([".omo/rules/typescript.md"]),
+				}),
+			}),
+		);
 	});
 });

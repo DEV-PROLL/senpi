@@ -1,5 +1,23 @@
 # TTSR Fork Tracker
 
+## 2026-08-04 - Shared visible activation records
+
+### What changed and why
+
+- TTSR now registers Senpi's shared `rule-activation` entry renderer and appends a typed visible activation record whenever remediation is committed.
+- The new record reports the detector owner, observed rule ids, and whether the remediation used a hidden nudge or bounded provider-error retry.
+- The existing `ttsr-injection` persistence entry, hidden corrective `custom_message`, abort/truncation flow, provider retry, repeat gating, and session restoration are unchanged.
+
+### Why an extension-local change is required
+
+- TTSR remains the sole owner of the point where a detection becomes committed remediation. A generic TUI layer cannot infer that state safely from stream deltas or from the hidden nudge without coupling itself to the coordinator.
+- The shared module owns only typed presentation; TTSR still owns detection, interruption, transcript mutation, and retry policy.
+
+### Coverage and expected conflict zones
+
+- Coverage: `test/ttsr/extension-wiring.test.ts` verifies both remediation modes retain their existing records/messages and add the typed activation entry; `test/suite/rule-activation-renderer.test.ts` verifies standalone renderer registration and expanded TTSR details.
+- Expected conflicts: `index.ts` around extension registration and `recordInjection(...)`. Preserve both the original persistence append and the additional shared activation append.
+
 ## 2026-07-31 - Interrupt fabricated unavailable-tool calls
 
 ### What changed and why

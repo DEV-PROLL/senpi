@@ -3,6 +3,7 @@ import { isAbsolute, relative } from "node:path";
 
 import type { ExtensionAPI } from "../../types.ts";
 
+import { appendRuleActivation, registerRuleActivationRenderer } from "../rule-activation/index.ts";
 import { registerSlashCommands } from "./commands.ts";
 import { configFromEnvironment } from "./config.ts";
 import { createEngine } from "./rules/engine.ts";
@@ -41,6 +42,7 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 		extractToolPaths,
 	});
 	registerSlashCommands(pi, engine);
+	registerRuleActivationRenderer(pi);
 
 	function syncConfigFromFlags(): void {
 		const disabled = pi.getFlag("pi-rules-disabled");
@@ -139,10 +141,16 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 		}
 
 		const firstPendingTarget = pendingFingerprints[0]?.targetPath ?? firstTargetPath;
-		const block = engine.formatDynamic(rules, displayPath(ctx.cwd, firstPendingTarget));
+		const targetPath = displayPath(ctx.cwd, firstPendingTarget);
+		const block = engine.formatDynamic(rules, targetPath);
 		for (const rule of rules) {
 			engine.markDynamicInjected(firstTargetPath, rule);
 		}
+		appendRuleActivation(pi, {
+			kind: "project-rules",
+			targetPath,
+			rules: rules.map((rule) => rule.relativePath),
+		});
 
 		return { content: [...event.content, { type: "text", text: block }] };
 	});
