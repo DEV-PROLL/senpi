@@ -13,6 +13,7 @@
 ### Fixed
 
 - Fixed MCP prompt slash commands going missing after startup-raced server connections: the MCP service now emits a catalog-registration signal after publishing each snapshot, and prompt command registration waits for the server's prompt metadata instead of inferring readiness from tool registration ([#706](https://github.com/code-yeongyu/senpi/pull/706)).
+- Fixed HTTP 400 failures from MCP servers that emit invalid JSON-null `type` keywords by stripping only those malformed values at the shared MCP schema-conversion boundary while preserving valid JSON Schema null types ([#713](https://github.com/code-yeongyu/senpi/pull/713)).
 
 ### Removed
 
