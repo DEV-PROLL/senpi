@@ -1,5 +1,37 @@
 # TUI delta rendering fork changes
 
+## 2026-07-31: atomic visible-cursor frames for IME and animations
+
+### What changed
+
+- Cursor restoration and visibility bytes now stay inside each synchronized
+  render frame instead of being written after `FRAME_END`.
+- The editor stops drawing its inverse-video fake cursor when the hardware
+  cursor is visible; it still emits `CURSOR_MARKER` for IME placement.
+- The renderer also removes a colocated inverse-video cursor after
+  `CURSOR_MARKER`, covering focused single-line `Input` consumers and both
+  inverse-off (`CSI 27 m`) and full-reset (`CSI 0 m`) terminators without
+  discarding full-reset semantics.
+- Runtime cursor-mode toggles defer visibility changes to the replacement
+  frame, and shutdown no longer blanks content beneath a hardware cursor.
+
+### Why
+
+- With `showHardwareCursor: true`, animated Working updates briefly published
+  the real cursor on the loader row before a second write returned it to the
+  editor, producing rapid flicker.
+- The visible hardware cursor and fake cursor were both drawn at the editor
+  insertion point, making Korean IME composition look duplicated. The same
+  ownership conflict affected search, selector, login, and extension inputs.
+- This cannot be implemented as an extension: cursor-marker extraction,
+  synchronized-frame boundaries, and final ANSI cursor writes are renderer
+  invariants below the extension API.
+
+### Expected merge conflict zones
+
+- HIGH: `tui.ts` synchronized render exits and cursor positioning.
+- LOW: `components/editor.ts` cursor rendering.
+
 ## 2026-07-31: memoized line normalization and viewport-bounded rendering by default
 
 ### What changed
@@ -32,6 +64,29 @@ default without owning that state.
 - MEDIUM: `tui.ts` `normalizeLine()` / `applyLineResets()` bodies and the render-state field block.
 - LOW: `mux.ts` `viewportRenderEnabled()`, `test/mux.test.ts`, `test/viewport-render.test.ts`,
   `scripts/perf-trend-local.sh` bench lanes.
+
+## 2026-07-31: Contextual skill slash-command discovery
+
+### What changed
+
+- Bare `/` no longer lists every `skill:<name>` command, and partial `/skill` input exposes one `skill:` namespace hint
+  instead of flooding the palette with every child skill.
+- `/skill:` and case variants such as `/SKILL:` open the full skill namespace, while `/` followed by a skill's full
+  name or leading letters finds matching child skills directly.
+
+### Why
+
+- The shared `skill:` prefix flooded the root slash-command overview and obscured the smaller set of general commands,
+  while filtering every child also left `/skill` as a discoverability dead end.
+
+### Why this cannot be expressed externally
+
+The shared autocomplete provider owns slash-command filtering before coding-agent extensions receive input, so an
+extension cannot change which registered skill commands appear for each typed prefix.
+
+### Expected merge conflict zones
+
+- LOW: `slash-command-autocomplete.ts` skill filtering and its focused autocomplete regression test.
 
 ## 2026-07-29: Native Unicode LaTeX in Markdown conversations
 

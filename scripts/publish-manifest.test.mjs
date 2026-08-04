@@ -34,4 +34,23 @@ describe("publish manifest rewrite", () => {
 			},
 		});
 	});
+
+	it("pins the codemode peer to the exact CalVer revision", () => {
+		const manifest = {
+			name: "@code-yeongyu/senpi-codemode",
+			version: "2026.8.3-2",
+			peerDependencies: {
+				"@code-yeongyu/senpi": "*",
+			},
+		};
+
+		rewritePublishManifest(manifest, {
+			directory: "packages/senpi-codemode",
+			name: "@code-yeongyu/senpi-codemode",
+		});
+
+		assert.deepEqual(manifest.peerDependencies, {
+			"@code-yeongyu/senpi": "2026.8.3-2",
+		});
+	});
 });

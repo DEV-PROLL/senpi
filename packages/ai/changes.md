@@ -21,6 +21,44 @@
 
 - `src/api/openai-completions.ts`, `src/utils/prompt-cache-ttl.ts`, OpenAI compatibility types, and tool-schema/prompt-cache tests.
 
+## Require explicit opt-in before probing Ollama in stream tests (2026-07-31)
+
+### What changed
+
+- `test/live-api-gates.ts`: owns Ollama discovery behind a gate that short-circuits before probing unless
+  `PI_ENABLE_LOCAL_LLM=1` or `PI_ENABLE_LIVE_API_TESTS=1`, using `where ollama` on Windows and `which ollama`
+  elsewhere.
+- `test/live-api-gates.test.ts`: mocks the command boundary and covers the default no-probe behavior, both
+  explicit opt-in paths, and both platform-specific lookup commands.
+- `test/stream.test.ts`: uses the gated Ollama discovery function instead of treating the absence of
+  `PI_NO_LOCAL_LLM` as permission to probe and run the live suite.
+- `../../test.sh`: clears the two opt-in flags instead of exporting the retired `PI_NO_LOCAL_LLM` opt-out flag.
+
+### Why
+
+- A normal `npm test` on a machine with Ollama installed could enter the live suite, pull `gpt-oss:20b`, start
+  a local server, and load a large model without explicit consent. Default workspace tests must not probe or
+  start local model infrastructure.
+
+### Why extension system couldn't handle this
+
+- This behavior occurs during `packages/ai` Vitest discovery and setup, before the coding-agent extension
+  surface is involved.
+
+### Modified upstream files
+
+- `test/live-api-gates.test.ts`
+- `test/live-api-gates.ts`
+- `test/stream.test.ts`
+- `../../test.sh`
+
+### Expected merge conflict zones
+
+- LOW: `test/live-api-gates.ts` and its tests may conflict if upstream changes live-test activation helpers.
+- MEDIUM: the Ollama discovery and setup block in `test/stream.test.ts` may conflict if upstream changes how
+  the local OpenAI-compatible test server is detected or started.
+- LOW: `../../test.sh` may conflict if upstream changes its isolated live-test environment variables.
+
 ## Shared reasoning-tier capability detection (2026-07-30)
 
 ### What changed

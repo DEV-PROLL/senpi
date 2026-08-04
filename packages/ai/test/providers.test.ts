@@ -28,6 +28,7 @@ describe("builtin providers", () => {
 		const providers = models.getProviders();
 		expect(providers.length).toBe(builtinProviders().length);
 		expect(providers.map((p) => p.id)).toContain("anthropic");
+		expect(providers.map((p) => p.id)).toContain("ollama");
 
 		const anthropic = models.getModel("anthropic", "claude-haiku-4-5");
 		expect(anthropic?.api).toBe("anthropic-messages");
@@ -35,10 +36,10 @@ describe("builtin providers", () => {
 		const all = models.getModels();
 		expect(all.length).toBeGreaterThan(500);
 
-		// Static providers list models immediately; Radius is purely dynamic.
+		// Static providers list models immediately; Radius and Ollama are purely dynamic.
 		for (const provider of providers) {
 			const list = models.getModels(provider.id);
-			if (provider.id === "radius") expect(list).toEqual([]);
+			if (provider.id === "radius" || provider.id === "ollama") expect(list).toEqual([]);
 			else expect(list.length).toBeGreaterThan(0);
 			expect(list.every((m) => m.provider === provider.id)).toBe(true);
 		}

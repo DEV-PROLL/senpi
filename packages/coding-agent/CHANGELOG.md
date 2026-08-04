@@ -12,6 +12,49 @@
 
 ### Fixed
 
+- Pinned compiled binary release builds to Bun 1.3.14 instead of the moving canary, keeping all six cross-compilation target executables downloadable during release recovery ([#674](https://github.com/code-yeongyu/senpi/pull/674)).
+
+### Removed
+
+## [2026.8.3-3] - 2026-08-03
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+- Added a prompt chevron marker to the interactive composer's first editable row and preserved it across editor-padding reloads ([#666](https://github.com/code-yeongyu/senpi/pull/666)).
+- Added the official Ollama Cloud provider with `OLLAMA_API_KEY`, an `Ollama Cloud` display name, a `qwen3.5:397b` default model, and provider-owned dynamic catalog discovery preserved through `ModelRuntime`; an `ollama` entry in `models.json` with an explicit `models` catalog still takes precedence and replaces any in-memory Cloud catalog on reload ([#525](https://github.com/code-yeongyu/senpi/pull/525) by [@thisisjun786](https://github.com/thisisjun786)).
+- Added `PI_RULES_DISABLED`, `PI_RULES_MAX_RULE_CHARS`, and `PI_RULES_MAX_RESULT_CHARS` environment settings for the built-in rules extension, budgeting the complete rendered block — envelope, sentinels, headings, and separators included — against `maxResultChars` and preserving documented defaults for empty, zero, negative, fractional, or otherwise invalid values ([#670](https://github.com/code-yeongyu/senpi/pull/670)).
+
+### Changed
+
+- Proportioned prompt test-discipline rules to the changed seam across dynamic-prompt verification and the GPT-5.6/Kimi-K3 presets, prohibiting prose-pinning tests ([#665](https://github.com/code-yeongyu/senpi/pull/665)).
+- Scoped `/fast` eligibility to the `openai-codex-responses` API capability instead of the built-in `openai-codex` provider id, so extension-registered Codex providers such as `codex-pool` can toggle session-level `service_tier: "priority"` without shadowing the stock command ([#656](https://github.com/code-yeongyu/senpi/pull/656) by [@eddieparc](https://github.com/eddieparc)).
+- Filtered `skill:` slash commands out of the bare `/` palette so they surface only on a matching prefix or the explicit `skill:` namespace, with a `skill:` browse hint offered while the typed prefix is still a prefix of `skill:` ([#606](https://github.com/code-yeongyu/senpi/pull/606) by [@daniduro89](https://github.com/daniduro89)).
+
+### Fixed
+
+- Fixed Bun global installs and npm OIDC releases by moving the client and protocol payloads outside package-manager-owned `node_modules`, rewriting their public declaration imports to the vendored files, and pinning every internal registry dependency and Senpi peer to the exact CalVer revision ([#667](https://github.com/code-yeongyu/senpi/pull/667), [#668](https://github.com/code-yeongyu/senpi/pull/668), [#673](https://github.com/code-yeongyu/senpi/pull/673)).
+- Fixed Anthropic server-side model substitutions being discarded when no client fallback chain is configured; the server-fallback abort now activates only alongside a configured chain and refreshes before every prompt and after each active-model switch, while `retry.abortServerSideFallback: false` still opts out ([#671](https://github.com/code-yeongyu/senpi/pull/671)).
+- Fixed visible-cursor flicker and duplicated IME composition by keeping cursor restoration and visibility bytes inside each synchronized render frame, suppressing the editor's inverse-video fake cursor while the hardware cursor is visible, and stripping colocated fake cursors terminated by either inverse-off (`CSI 27 m`) or full reset (`CSI 0 m`) ([#571](https://github.com/code-yeongyu/senpi/pull/571) by [@stevenahhh](https://github.com/stevenahhh)).
+- Fixed `logs/session.log` compaction telemetry misattributing outcomes: lifecycle records now correlate start and terminal events through propagated request IDs, classify committed/rejected/failed/skipped/aborted/superseded dispositions, carry content-free before/after token estimates, retain superseded attempt IDs until their stale terminal arrives, and log request-less terminals such as retry exhaustion as uncorrelated no-attempt decisions instead of marking an unrelated active attempt failed ([#632](https://github.com/code-yeongyu/senpi/pull/632) by [@madgegja](https://github.com/madgegja)).
+
+### Removed
+
+## [2026.8.3-2] - 2026-08-03
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
 ### Removed
 
 ## [2026.8.3] - 2026-08-03

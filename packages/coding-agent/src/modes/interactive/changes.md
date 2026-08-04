@@ -15,6 +15,31 @@
 
 - LOW: five `case` bodies in `handleEvent` and one additive method beside `showError` in `interactive-mode.ts`.
 
+## Bun console diagnostics stay behind the interactive terminal guard (2026-08-03)
+
+### What changed
+
+- While the TUI owns the terminal, the interactive stderr guard now routes `console.info`, `console.warn`, and
+  `console.error` through its hidden, redacted debug-log sink and restores the exact console methods whenever the
+  terminal is released.
+- Coverage models Bun's native console behavior, which bypasses a replaced `process.stderr.write`, and pins
+  terminal silence, debug-log redaction, and restoration.
+
+### Why
+
+- omo-senpi emits ulw-loop and start-work diagnostics through `console.*`. Node routes those calls through the
+  patched stderr writer, but Bun writes them through its native console implementation, so the diagnostics could
+  corrupt the interactive footer even though direct `process.stderr.write` coverage was green.
+
+### Why this cannot be expressed externally
+
+- Extensions cannot protect the host TUI from runtime-specific console output before it reaches the terminal.
+  The host must own console interception for exactly the interval in which it owns the terminal.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-stderr-guard.ts` and its focused regression test.
+
 ## Backfill: exit alias and footer provider priority (2026-08-01)
 
 ### What changed

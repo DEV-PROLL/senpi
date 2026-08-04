@@ -7,6 +7,8 @@ import { LEAK_ERROR_MESSAGE } from "../../src/core/extensions/builtin/ttsr/promp
 import { TTSR_INJECTION_CUSTOM_TYPE } from "../../src/core/extensions/builtin/ttsr/types.ts";
 import { createHarness, getMessageText, type Harness } from "../suite/harness.ts";
 
+const RULE_ACTIVATION_ENTRY_TYPE = "rule-activation";
+
 interface PersistedMessage {
 	role?: string;
 	stopReason?: string;
@@ -19,6 +21,7 @@ interface PersistedEntry {
 	type?: string;
 	customType?: string;
 	message?: PersistedMessage;
+	data?: unknown;
 }
 
 function ctrlToken(name: string): string {
@@ -76,6 +79,18 @@ describe("ttsr extension wiring", () => {
 		const nudges = entries.filter((e) => e.type === "custom_message" && e.customType === TTSR_INJECTION_CUSTOM_TYPE);
 		expect(nudges.length).toBeGreaterThan(0);
 
+		const activations = entries.filter((e) => e.type === "custom" && e.customType === RULE_ACTIVATION_ENTRY_TYPE);
+		expect(activations).toContainEqual(
+			expect.objectContaining({
+				data: {
+					kind: "ttsr",
+					owner: "collapse-repetition",
+					rules: ["collapse-repetition"],
+					remediation: "nudge",
+				},
+			}),
+		);
+
 		expect(harness.faux.getCallLog().length).toBe(2);
 		const finalText = assistantEntries.map((e) => getMessageText(e.message)).join("\n");
 		expect(finalText).toContain("recovered answer");
@@ -99,6 +114,18 @@ describe("ttsr extension wiring", () => {
 
 		const injections = entries.filter((e) => e.type === "custom" && e.customType === TTSR_INJECTION_CUSTOM_TYPE);
 		expect(injections.length).toBeGreaterThan(0);
+
+		const activations = entries.filter((e) => e.type === "custom" && e.customType === RULE_ACTIVATION_ENTRY_TYPE);
+		expect(activations).toContainEqual(
+			expect.objectContaining({
+				data: {
+					kind: "ttsr",
+					owner: "control-token-leak",
+					rules: ["control-token-leak"],
+					remediation: "provider-error",
+				},
+			}),
+		);
 
 		expect(harness.faux.getCallLog().length).toBe(2);
 		const finalText = assistantEntries.map((e) => getMessageText(e.message)).join("\n");

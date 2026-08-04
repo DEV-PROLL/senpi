@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GOAL_USER_GRACE_DELAY_MS } from "../../src/core/extensions/builtin/goal/continuation.ts";
 import { admitAndQueueGoalContinuation } from "../../src/core/extensions/builtin/goal/lifecycle-helpers.ts";
 import {
 	GOAL_MONITOR_CONTINUATION_DELAY_MS,
@@ -15,16 +16,19 @@ import {
 	writeGoal,
 } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { Goal } from "../../src/core/extensions/builtin/goal/types.ts";
+import { GOAL_WAIT_STATUS_KEY } from "../../src/core/extensions/builtin/goal/wait-ticker.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
 	cleanAssistantStop,
 	cleanupGoalMonitorTempDirs,
 	createGoalHarness,
+	createGoalStatusHarness,
 	createSentMessageHarness,
 	type GoalHandler,
 	makeGoalContext,
 	runGoalHandlers,
 	TestEventBus,
+	waitForGoalStatus,
 	waitForSentCount,
 } from "./goal-monitor-test-harness.ts";
 
@@ -440,20 +444,88 @@ describe("goal continuation while a monitor is active", () => {
 		expect(notices).toHaveLength(0);
 	});
 
-	it("leaves an accepted user turn active but idle without arming a continuation timer", async () => {
+	it("renders the user-grace countdown until delivery, then clears it", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
-		const { tools, handlers, sent } = createGoalHarness();
-		const ctx = await makeGoalContext(notices, "thread-user-turn-idle");
+		const status = createGoalStatusHarness();
+		const harness = createGoalHarness();
+		const { tools, handlers, sent } = harness;
+		const ctx = await makeGoalContext(notices, "thread-user-grace-countdown", {
+			pendingMessages: false,
+			status,
+		});
 		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
 		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 
+		const countdownStarted = waitForGoalStatus(
+			status,
+			(update) => update.key === GOAL_WAIT_STATUS_KEY && update.text?.includes("goal resumes in 10s") === true,
+		);
 		await runUserInitiatedTurn(handlers, ctx);
+		await countdownStarted;
+		expect(sent).toHaveLength(0);
 
+		const countdownAdvanced = waitForGoalStatus(
+			status,
+			(update) => update.key === GOAL_WAIT_STATUS_KEY && update.text?.includes("goal resumes in 5s") === true,
+		);
+		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS / 2);
+		await countdownAdvanced;
+
+		const deliveryRecorded = waitForSentCount(harness, 1);
+		const countdownCleared = waitForGoalStatus(
+			status,
+			(update) => update.key === GOAL_WAIT_STATUS_KEY && update.text === undefined,
+		);
+		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS / 2);
+		await Promise.all([deliveryRecorded, countdownCleared]);
+
+		expect(sent[0]?.message.customType).toBe("goal-continuation");
+		expect(status.updates.filter((update) => update.key === GOAL_WAIT_STATUS_KEY).at(-1)?.text).toBeUndefined();
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 1 });
+	});
+
+	it("clears the user-grace countdown and cancels delivery when new input is accepted", async () => {
+		vi.useFakeTimers();
+		const notices: string[] = [];
+		const status = createGoalStatusHarness();
+		const { tools, handlers, sent } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-user-grace-countdown-cancel", {
+			pendingMessages: false,
+			status,
+		});
+		await tools.get("create_goal")?.execute("create", { objective: "Keep moving" }, undefined, undefined, ctx);
+		await runGoalHandlers(handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+
+		const countdownStarted = waitForGoalStatus(
+			status,
+			(update) => update.key === GOAL_WAIT_STATUS_KEY && update.text?.includes("goal resumes in 10s") === true,
+		);
+		await runUserInitiatedTurn(handlers, ctx);
+		await countdownStarted;
+
+		const countdownCleared = waitForGoalStatus(
+			status,
+			(update) => update.key === GOAL_WAIT_STATUS_KEY && update.text === undefined,
+		);
+		await runGoalHandlers(
+			handlers,
+			"input",
+			{ type: "input", inputId: "cancel-countdown", text: "new direction", source: "interactive" },
+			ctx,
+		);
+		await countdownCleared;
+		await runGoalHandlers(
+			handlers,
+			"input_disposition",
+			{ type: "input_disposition", inputId: "cancel-countdown", disposition: "started" },
+			ctx,
+		);
+
+		const waitStatusCount = status.updates.filter((update) => update.key === GOAL_WAIT_STATUS_KEY).length;
+		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
 		expect(sent).toHaveLength(0);
-		await vi.advanceTimersByTimeAsync(60_000);
-		expect(sent).toHaveLength(0);
-		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 0 });
+		expect(status.updates.filter((update) => update.key === GOAL_WAIT_STATUS_KEY)).toHaveLength(waitStatusCount);
 	});
 
 	it("resets monitor-delayed repetition state when a goal pauses and resumes", async () => {

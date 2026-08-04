@@ -3,9 +3,32 @@
 ## notice: shared transcript notice kit (2026-08-04)
 
 - New internal module `src/core/extensions/notice/` (`spec.ts`, `box.ts`, `adapters.ts`) owns the loop-guard visual family as a shared widget: a `NoticeSpec` contract (title/tone/why/extra/expandedLine), `buildNoticeBox`, and `noticeMessageRenderer`/`noticeEntryRenderer` adapters.
-- loop-guard and goal cache-warm renderers now delegate to the kit with visual parity; ttsr registers an entry renderer for `ttsr-injection` records so stream-rule interventions render as durable notice boxes (live and on resume) instead of only an ephemeral `Warning:` line.
+- loop-guard, goal cache-warm, and the shared rule-activation renderer (project-rules + ttsr activations) now delegate to the kit with visual parity; their existing renderer suites pass unmodified.
+- Reconciled with the concurrent rule-activation work below: this branch initially added a dedicated `ttsr-injection` entry renderer, but rule-activation records already give ttsr interventions a durable box, so that duplicate was dropped and `rule-activation/renderer.ts` now renders through the kit instead.
 - Interactive fallback transitions (`retry_fallback_*`, `server_fallback_aborted`) render through `buildNoticeBox` via `InteractiveMode.showNoticeBox`, which sanitizes every line with `sanitizeTuiErrorMessage` (preserving the OSC/control-strip invariant the exhausted-error path relied on).
 - Why not an extension API addition: the kit is an internal module imported like `retry-fallback/*` helpers; `types.ts` is untouched. Expected merge conflict zones: LOW (new directory plus one import per consumer).
+
+## rule-activation: shared project-rules and TTSR notices (2026-08-04)
+
+- Added `rule-activation/` as a presentation-only builtin module with a typed discriminated activation contract, defensive persisted-data parser, custom-entry append/registration helpers, and a compact/expandable Box/Text renderer.
+- Project-rules and TTSR both register the same renderer so either extension still works when loaded alone. Project-rules records successful dynamic tool-path matches; TTSR records committed remediation while preserving its separate persistence entry and hidden model nudge.
+- Why shared code is required: the two engines retain incompatible discovery, matching, deduplication, and remediation semantics, but the TUI needs one stable durable-entry contract instead of engine-specific raw transcript text.
+- Coverage: `test/rules-before-agent-start.test.ts`, `test/ttsr/extension-wiring.test.ts`, and `test/suite/rule-activation-renderer.test.ts`.
+- Expected merge conflict zones: the new `rule-activation/` directory and the small registration/append seams in `rules/index.ts` and `ttsr/index.ts`. Do not fold engine policy into the shared module during conflict resolution.
+
+## service-tier: enable fast mode for Codex API extension providers (2026-08-03)
+
+- `/fast` now checks the model's `openai-codex-responses` API capability instead
+  of requiring the built-in `openai-codex` provider id. Extension providers
+  such as `codex-pool` can therefore use the same session-level
+  `service_tier: "priority"` path without shadowing the stock command.
+- Non-Codex providers remain unchanged and still receive the existing warning.
+- Coverage: `test/suite/service-tier-extension.test.ts` registers a
+  `codex-pool` model on the Codex responses API, toggles `/fast` on and off,
+  and verifies both the session indicator and the corresponding addition and
+  removal of `service_tier: "priority"` in the emitted request payload.
+- Expected merge conflict zones: LOW in `service-tier.ts` at the two Codex
+  eligibility guards; LOW in `service-tier-extension.test.ts`.
 
 ## tps: monotonic elapsed-time source for assistant intervals (2026-07-31)
 

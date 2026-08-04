@@ -1,5 +1,56 @@
 # Local fork changes
 
+## 2026-08-03 — Keep Bun off unpublished workspace identities
+
+### What changed
+
+- Moved the built client and protocol payloads from the package-manager-owned `node_modules` bundle into flat `vendor/pi-client` and `vendor/pi-protocol` trees.
+- Rewrote coding-agent declaration/runtime imports and the vendored client package's protocol imports to relative paths inside that vendor tree.
+- Removed client/protocol registry edges from the published Senpi manifest while preserving their runtime and declaration surface in the tarball.
+- Pinned fork-owned registry aliases and the codemode Senpi peer to the exact CalVer revision instead of caret ranges that can select an older stable release over a `-N` revision.
+- Made the staging contract explicit: local publish validation rewrites emitted `dist` imports and must rebuild coding-agent after restoring the checked manifest.
+- Removed the uncreatable `@code-yeongyu/senpi-client` and `@code-yeongyu/senpi-protocol` entries from the publish matrix.
+- Added release-script coverage for exact resolver targets, the publish matrix, vendored package identities, peer pinning, and rewritten declarations.
+
+### Why this lives in the fork
+
+- Bun resolves npm registry metadata before consuming bundled dependencies, so unpublished workspace identities cannot remain in the effective package-manager graph even when their files are embedded in the tarball.
+- CalVer revisions such as `2026.8.3-2` are SemVer prereleases; a caret range can legally resolve to the older stable `2026.8.3`, reintroducing that release's broken dependency graph.
+- npm trusted publishing is configured per existing package and cannot bootstrap a new package name, so adding standalone client/protocol aliases made the release workflow fail before the Senpi package could publish.
+
+### Why this cannot be expressed externally
+
+- The resolver aliases, exact version pins, vendored declaration paths, bundle manifest, and package publication order are generated inside the repository release scripts; an extension cannot change npm metadata or the contents of the published tarball.
+
+### Expected merge conflict zones
+
+- `scripts/prepare-senpi-publish-manifest.mjs` registry alias and exact-version mapping.
+- `scripts/prepare-senpi-bundled-workspaces.mjs` bundled/vendored workspace staging and declaration rewriting.
+- `scripts/publish-manifest.mjs` codemode peer pinning.
+- `scripts/publish.mjs` package publication list.
+- `scripts/prepare-senpi-bundled-workspaces.prepare.test.mjs`, `scripts/prepare-senpi-publish-optionals.test.mjs`, `scripts/publish-manifest.test.mjs`, and `scripts/publish-registry-dependencies.test.mjs` release coverage.
+
+## 2026-08-03 — Make the editor prompt marker visually explicit
+
+### What changed
+
+- Reserved a two-column prompt gutter in the coding-agent `CustomEditor`.
+- Rendered an accent-styled `❯` on the first editable row and aligned wrapped rows beneath the text column.
+- Preserved that gutter when session/settings reloads reapply an `editorPaddingX` value below two.
+- Kept `getPaddingX()` reporting the configured value so existing editor construction and extension handoff contracts remain stable.
+- Hid the marker when the editor is vertically scrolled so it never appears beside a continuation row.
+- Kept sub-five-column rendering on the previous no-marker fallback to avoid narrow-terminal overflow.
+
+### Why this lives in the fork
+
+- The marker is part of the coding-agent interactive composer layout, including width reservation, wrapping, cursor placement, and autocomplete alignment.
+- Extensions can replace the editor but cannot decorate the built-in editor's private render loop without reimplementing its editing behavior.
+
+### Expected upstream merge-conflict zones
+
+- `packages/coding-agent/src/modes/interactive/components/custom-editor.ts` around `CustomEditor` construction and rendering.
+- `packages/coding-agent/test/custom-editor-prompt.test.ts` around built-in composer rendering assertions.
+
 ## 2026-08-01 — Reconcile fork runtime contracts after the upstream merge
 
 ### What changed

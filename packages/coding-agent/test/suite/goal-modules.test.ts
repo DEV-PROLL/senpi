@@ -13,6 +13,7 @@ import {
 	formatTokensCompact,
 	goalToolResponse,
 } from "../../src/core/extensions/builtin/goal/format.ts";
+import { isResumeOfStoppedGoal } from "../../src/core/extensions/builtin/goal/lifecycle-helpers.ts";
 import {
 	buildContinuationPrompt,
 	buildGoalStallNotice,
@@ -40,6 +41,48 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
 		...overrides,
 	};
 }
+
+function resumeCtx(overrides: { hasUI?: boolean; isIdle?: boolean; hasPendingMessages?: boolean } = {}) {
+	return {
+		hasUI: overrides.hasUI ?? true,
+		isIdle: () => overrides.isIdle ?? true,
+		hasPendingMessages: () => overrides.hasPendingMessages ?? false,
+	} as unknown as Parameters<typeof isResumeOfStoppedGoal>[0];
+}
+
+/**
+ * Mirrors codex `maybe_prompt_resume_paused_goal_after_resume`
+ * (codex-rs/tui/src/app/thread_goal_actions.rs), which prompts on resume for every
+ * stopped-but-unfinished status. senpi is budget-free, so its stopped set is
+ * `paused | blocked` — codex's `UsageLimited` has no senpi counterpart.
+ */
+describe("goal resume-on-restart admission (codex parity)", () => {
+	it("prompts on resume for every stopped-but-unfinished status", () => {
+		for (const status of ["paused", "blocked"] as const) {
+			expect(isResumeOfStoppedGoal(resumeCtx(), "resume", makeGoal({ status }))).toBe(true);
+		}
+	});
+
+	it("never prompts for goals that are not stopped-but-unfinished", () => {
+		for (const status of ["active", "complete"] as const) {
+			expect(isResumeOfStoppedGoal(resumeCtx(), "resume", makeGoal({ status }))).toBe(false);
+		}
+		expect(isResumeOfStoppedGoal(resumeCtx(), "resume", null)).toBe(false);
+	});
+
+	it("only prompts on the resume session-start reason", () => {
+		for (const reason of ["startup", "reload"]) {
+			expect(isResumeOfStoppedGoal(resumeCtx(), reason, makeGoal({ status: "blocked" }))).toBe(false);
+		}
+	});
+
+	it("requires an idle UI session with no pending messages", () => {
+		const blocked = makeGoal({ status: "blocked" });
+		expect(isResumeOfStoppedGoal(resumeCtx({ hasUI: false }), "resume", blocked)).toBe(false);
+		expect(isResumeOfStoppedGoal(resumeCtx({ isIdle: false }), "resume", blocked)).toBe(false);
+		expect(isResumeOfStoppedGoal(resumeCtx({ hasPendingMessages: true }), "resume", blocked)).toBe(false);
+	});
+});
 
 function assistantMessageWithStopReason(stopReason: "aborted" | "error" | "stop" | "toolUse"): AgentMessage {
 	return {
@@ -156,6 +199,7 @@ describe("goal continuation gating", () => {
 
 		expect(evaluateGoalContinuation({ ...input, path: "immediate" })).toEqual({ kind: "deny", reason: "cap" });
 		expect(evaluateGoalContinuation({ ...input, path: "sessionStart" })).toEqual({ kind: "deny", reason: "cap" });
+		expect(evaluateGoalContinuation({ ...input, path: "userGrace" })).toEqual({ kind: "deny", reason: "cap" });
 		expect(evaluateGoalContinuation({ ...input, path: "monitorDelayed" })).toEqual({
 			kind: "deny",
 			reason: "cap",

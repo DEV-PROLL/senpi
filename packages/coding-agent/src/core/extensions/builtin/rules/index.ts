@@ -3,8 +3,10 @@ import { isAbsolute, relative } from "node:path";
 
 import type { ExtensionAPI } from "../../types.ts";
 
+import { appendRuleActivation, registerRuleActivationRenderer } from "../rule-activation/index.ts";
 import { registerSlashCommands } from "./commands.ts";
-import { createEngine, defaultConfig } from "./rules/engine.ts";
+import { configFromEnvironment } from "./config.ts";
+import { createEngine } from "./rules/engine.ts";
 import { findRuleCandidates } from "./rules/finder.ts";
 import { findProjectRoot } from "./rules/project-root.ts";
 import { extractToolPaths } from "./rules/tool-paths.ts";
@@ -25,7 +27,8 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 		default: "both",
 		description: "Rule injection mode: static, dynamic, both, or off.",
 	});
-	const config = defaultConfig();
+	const config = configFromEnvironment();
+	const envDisabled = config.disabled;
 	const engine = createEngine(config, {
 		findCandidates: findRuleCandidates,
 		readFile: (path) => {
@@ -39,13 +42,14 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 		extractToolPaths,
 	});
 	registerSlashCommands(pi, engine);
+	registerRuleActivationRenderer(pi);
 
 	function syncConfigFromFlags(): void {
 		const disabled = pi.getFlag("pi-rules-disabled");
 		const mode = pi.getFlag("pi-rules-mode");
 
 		if (typeof disabled === "boolean") {
-			engine.config.disabled = disabled;
+			engine.config.disabled = disabled || envDisabled;
 		}
 		if (typeof mode === "string" && isPiRulesMode(mode)) {
 			engine.config.mode = mode;
@@ -137,10 +141,16 @@ export default function piRulesExtension(pi: ExtensionAPI): void {
 		}
 
 		const firstPendingTarget = pendingFingerprints[0]?.targetPath ?? firstTargetPath;
-		const block = engine.formatDynamic(rules, displayPath(ctx.cwd, firstPendingTarget));
+		const targetPath = displayPath(ctx.cwd, firstPendingTarget);
+		const block = engine.formatDynamic(rules, targetPath);
 		for (const rule of rules) {
 			engine.markDynamicInjected(firstTargetPath, rule);
 		}
+		appendRuleActivation(pi, {
+			kind: "project-rules",
+			targetPath,
+			rules: rules.map((rule) => rule.relativePath),
+		});
 
 		return { content: [...event.content, { type: "text", text: block }] };
 	});

@@ -1,3 +1,5 @@
+import { execSync } from "child_process";
+
 export const LIVE_API_TESTS_FLAG = "PI_ENABLE_LIVE_API_TESTS";
 export const LOCAL_LLM_LIVE_TEST_FLAG = "PI_ENABLE_LOCAL_LLM";
 export const OPENROUTER_LIVE_TEST_FLAG = "PI_ENABLE_OPENROUTER_LIVE";
@@ -10,6 +12,17 @@ const OAUTH_LIVE_TEST_FLAGS = {
 
 export function isLiveApiTestEnabled(providerFlag: string): boolean {
 	return process.env[LIVE_API_TESTS_FLAG] === "1" || process.env[providerFlag] === "1";
+}
+
+export function isOllamaLiveTestAvailable(platform: NodeJS.Platform = process.platform): boolean {
+	if (!isLiveApiTestEnabled(LOCAL_LLM_LIVE_TEST_FLAG)) return false;
+	const command = platform === "win32" ? "where ollama" : "which ollama";
+	try {
+		execSync(command, { stdio: "ignore" });
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 export function getLiveEnvApiKey(apiKeyEnvName: string, providerFlag: string): string | undefined {

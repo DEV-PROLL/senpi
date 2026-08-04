@@ -1,11 +1,11 @@
 import { getKeybindings } from "@earendil-works/pi-tui";
 
 import type { ExtensionAPI, ExtensionContext, MessageUpdateEvent } from "../../types.ts";
+import { appendRuleActivation, registerRuleActivationRenderer } from "../rule-activation/index.ts";
 import { BUILTIN_TTSR_RULES } from "./builtin-rules.ts";
 import { registerTtsrCommands, type TtsrPublicState } from "./commands.ts";
 import { claimAbort, createGenerationState, markUserCancelled } from "./coordinator.ts";
 import { discoverTtsrRulesSync } from "./discovery.ts";
-import { renderTtsrInjectionEntry } from "./injection-renderer.ts";
 import { TtsrManager } from "./manager.ts";
 import { COLLAPSE_RULE_CONTENT } from "./prompts.ts";
 import {
@@ -54,6 +54,7 @@ function parseDisabledRules(raw: boolean | string | undefined): string[] {
 }
 
 export default function ttsrExtension(pi: ExtensionAPI): void {
+	registerRuleActivationRenderer(pi);
 	pi.registerFlag("ttsr-disabled", {
 		type: "boolean",
 		default: false,
@@ -83,12 +84,18 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		}
 	}
 
-	function recordInjection(owner: string, observed: readonly string[], retryMode: string): void {
+	function recordInjection(owner: string, observed: readonly string[], retryMode: "nudge" | "provider-error"): void {
 		pi.appendEntry(TTSR_INJECTION_CUSTOM_TYPE, {
 			rules: observed,
 			owner,
 			remediation: retryMode,
 			at: Date.now(),
+		});
+		appendRuleActivation(pi, {
+			kind: "ttsr",
+			owner,
+			rules: observed,
+			remediation: retryMode,
 		});
 	}
 
@@ -145,7 +152,6 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 	}
 
 	registerTtsrCommands(pi, publicState);
-	pi.registerEntryRenderer(TTSR_INJECTION_CUSTOM_TYPE, renderTtsrInjectionEntry);
 
 	pi.on("session_start", (_event, ctx) => {
 		ensureInitialized(ctx);

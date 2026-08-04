@@ -35,14 +35,27 @@ export type SessionStartContinuationOptions = {
 	readonly markContinuationPending: () => void;
 };
 
-export function isResumeOfPausedGoal(
+/**
+ * Statuses that leave a goal stopped without finishing it. A restart is the only
+ * moment the user can act on them, so both earn the resume prompt.
+ */
+const STOPPED_UNFINISHED_GOAL_STATUSES: readonly Goal["status"][] = ["paused", "blocked"];
+
+/**
+ * Mirrors codex `maybe_prompt_resume_paused_goal_after_resume`
+ * (codex-rs/tui/src/app/thread_goal_actions.rs), which prompts on resume for every
+ * stopped-but-unfinished status. senpi is budget-free, so codex's `UsageLimited`
+ * has no counterpart here and the stopped set is `paused | blocked`.
+ */
+export function isResumeOfStoppedGoal(
 	ctx: ExtensionContext,
 	sessionStartReason: string,
 	goal: Goal | null,
 ): goal is Goal {
 	return (
 		sessionStartReason === "resume" &&
-		goal?.status === "paused" &&
+		goal !== null &&
+		STOPPED_UNFINISHED_GOAL_STATUSES.includes(goal.status) &&
 		ctx.hasUI &&
 		ctx.isIdle() &&
 		!ctx.hasPendingMessages()

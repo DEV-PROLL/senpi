@@ -152,9 +152,16 @@ function writeLocalReleaseFixture(repoRoot) {
 		["packages/coding-agent", "@code-yeongyu/senpi"],
 		["packages/server", "@code-yeongyu/senpi-server"],
 	]) {
-		writeJson(join(repoRoot, directory, "package.json"), { name, version: "0.0.0" });
+		writeJson(join(repoRoot, directory, "package.json"), {
+			name,
+			version: "0.0.0",
+			...(directory === "packages/coding-agent" ? { files: ["dist", "README.md"] } : {}),
+		});
 		mkdirSync(join(repoRoot, directory, "dist"), { recursive: true });
 		writeFileSync(join(repoRoot, directory, "dist", "index.js"), "");
+		if (directory === "packages/client" || directory === "packages/protocol") {
+			writeFileSync(join(repoRoot, directory, "dist", "index.d.ts"), "");
+		}
 	}
 
 	const nativeTarget = `${process.platform}-${process.arch}`;

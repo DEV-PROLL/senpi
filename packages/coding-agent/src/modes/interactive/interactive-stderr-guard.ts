@@ -1,8 +1,22 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { format } from "node:util";
 import { getDebugLogPath } from "../../config.ts";
 import { restoreStderr, takeOverStderr } from "../../core/output-guard.ts";
 import { redactSensitiveOutput } from "../../core/sensitive-output.ts";
+
+const consoleLevels = ["error", "info", "warn"] as const;
+
+type ConsoleLevel = (typeof consoleLevels)[number];
+type ConsoleMethod = (...data: unknown[]) => void;
+
+interface InteractiveConsoleState {
+	readonly error: ConsoleMethod;
+	readonly info: ConsoleMethod;
+	readonly warn: ConsoleMethod;
+}
+
+let interactiveConsoleState: InteractiveConsoleState | undefined;
 
 function appendHiddenInteractiveStderr(text: string): void {
 	if (text.length === 0) {
@@ -17,10 +31,47 @@ function appendHiddenInteractiveStderr(text: string): void {
 	fs.chmodSync(debugLogPath, 0o600);
 }
 
+function replaceConsoleMethod(level: ConsoleLevel, method: ConsoleMethod): void {
+	Object.defineProperty(console, level, {
+		configurable: true,
+		value: method,
+		writable: true,
+	});
+}
+
+function takeOverInteractiveConsole(): void {
+	if (interactiveConsoleState) {
+		return;
+	}
+	interactiveConsoleState = {
+		error: console.error,
+		info: console.info,
+		warn: console.warn,
+	};
+	const writeHiddenConsoleDiagnostic = (...data: unknown[]) => {
+		process.stderr.write(`${format(...data)}\n`);
+	};
+	for (const level of consoleLevels) {
+		replaceConsoleMethod(level, writeHiddenConsoleDiagnostic);
+	}
+}
+
+function restoreInteractiveConsole(): void {
+	if (!interactiveConsoleState) {
+		return;
+	}
+	for (const level of consoleLevels) {
+		replaceConsoleMethod(level, interactiveConsoleState[level]);
+	}
+	interactiveConsoleState = undefined;
+}
+
 export function takeOverInteractiveStderr(): void {
 	takeOverStderr(appendHiddenInteractiveStderr, redactSensitiveOutput);
+	takeOverInteractiveConsole();
 }
 
 export function restoreInteractiveStderr(): void {
+	restoreInteractiveConsole();
 	restoreStderr();
 }

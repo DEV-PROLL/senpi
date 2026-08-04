@@ -10,7 +10,7 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { createRpcEventOutputBuffer } from "../src/modes/rpc/event-output-buffer.ts";
-import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
+import { createAuthenticatedModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 import { createTestResourceLoader } from "./utilities.ts";
 
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -96,8 +96,7 @@ describe("RPC publish of high_reasoning_warning", () => {
 		const sessionManager = SessionManager.inMemory();
 		const settingsManager = SettingsManager.create(tempDir, tempDir);
 		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
-		const modelRegistry = await createModelRegistry(authStorage, tempDir);
-		await authStorage.modify("anthropic", async () => ({ type: "api_key", key: "test-key" }));
+		const modelRegistry = await createAuthenticatedModelRegistry(authStorage, tempDir);
 
 		session = new AgentSession({
 			agent,
