@@ -14,6 +14,11 @@ on:
         description: 'Source ref to build/publish (defaults to tag; use only for release recovery)'
         required: false
         type: string
+      dry_run:
+        description: 'Build and validate only: skip the GitHub Release upload and the npm publish dispatch'
+        required: false
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -41,10 +46,12 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: canary
+          # Cross-compilation downloads target executables matching the running Bun
+          # release. Canary can advance before those target artifacts are published.
+          bun-version: '1.3.14'
 
-      - name: Assert bun canary channel
-        run: bash scripts/assert-bun-canary.sh
+      - name: Report Bun compiler version
+        run: bun --version
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -110,6 +117,7 @@ jobs:
   stage-github-release:
     runs-on: ubuntu-latest
     needs: build
+    if: ${{ inputs.dry_run != true }}
     permissions:
       actions: read
       contents: write
@@ -193,54 +201,63 @@ jobs:
             exit 1
           fi
 
+  # npm trusted publishing is bound to the publish-npm.yml workflow identity
+  # (workflow_ref), so this workflow must never publish directly. Dispatch
+  # publish-npm.yml in publish-only mode — the same mechanism used for manual
+  # release recovery — and gate the public GitHub Release on its result.
   publish-npm:
     runs-on: ubuntu-latest
     needs: stage-github-release
-    environment: npm-publish
+    if: ${{ inputs.dry_run != true }}
     permissions:
-      contents: read
-      id-token: write
+      actions: write
     env:
+      GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      SOURCE_REF: ${{ github.event.inputs.source_ref || github.event.inputs.tag || github.ref_name }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-        with:
-          ref: ${{ env.SOURCE_REF }}
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-          cache: npm
-
-      - name: Install system dependencies
+      - name: Dispatch publish-npm.yml
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
-          sudo ln -s "$(which fdfind)" /usr/local/bin/fd
+          set -euo pipefail
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+          VERSION="${RELEASE_TAG#v}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          # One minute of lookback absorbs runner/GitHub clock skew when the
+          # await step matches the dispatched run by creation time.
+          echo "not_before=$(date -u -d '1 minute ago' +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
+          gh workflow run publish-npm.yml -f version="${VERSION}" -f publish-only=true
 
-      # Build only — the tagged commit already passed the required "Check and test"
-      # status gate on main (full `npm run check` + `npm test`). Re-running the whole
-      # workspace test suite here is redundant and, on this contended publish runner,
-      # its subprocess-heavy suites (app-server/daemon, MCP, PTY) leak handles and hang
-      # the job. Build produces the dist artifacts `scripts/publish.mjs` bundles.
-      - name: Build
-        run: npm run build
-
-      - name: Upgrade npm for trusted publishing
+      - name: Await publish-npm.yml completion
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOT_BEFORE: ${{ steps.dispatch.outputs.not_before }}
         run: |
-          npm install -g npm@11.16.0 --ignore-scripts
-          npm --version
+          set -euo pipefail
 
-      - name: Publish npm packages
-        run: node scripts/publish.mjs
+          # The dispatched run can take a few seconds to appear in the API.
+          run_id=""
+          for _ in $(seq 1 12); do
+            run_id="$(gh run list --workflow publish-npm.yml --event workflow_dispatch --limit 20 \
+              --json databaseId,createdAt \
+              --jq "[.[] | select(.createdAt >= \"${NOT_BEFORE}\")] | .[0].databaseId // empty")"
+            if [[ -n "${run_id}" ]]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [[ -z "${run_id}" ]]; then
+            echo "::error::Could not find the dispatched publish-npm.yml run."
+            exit 1
+          fi
+
+          echo "Watching publish-npm.yml run ${run_id}: https://github.com/${GH_REPO}/actions/runs/${run_id}"
+          if ! timeout 3600 gh run watch "${run_id}" --exit-status --interval 20; then
+            echo "::error::publish-npm.yml run ${run_id} failed or exceeded the 60 minute wait budget."
+            exit 1
+          fi
 
   publish-github-release:
     runs-on: ubuntu-latest

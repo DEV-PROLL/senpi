@@ -15,7 +15,77 @@
 ### Fixed
 
 - Collapsed repeated `<ultrawork-mode>` directive blocks to the single most recent copy when the Claude SDK OAuth lane flattens a conversation, cutting the re-sent prompt on a representative transcript from 85,890 to 18,094 bytes ([#705](https://github.com/code-yeongyu/senpi/pull/705))
+- Fixed MCP prompt slash commands going missing after startup-raced server connections: the MCP service now emits a catalog-registration signal after publishing each snapshot, and prompt command registration waits for the server's prompt metadata instead of inferring readiness from tool registration ([#706](https://github.com/code-yeongyu/senpi/pull/706)).
 
+### Removed
+
+## [2026.8.4] - 2026-08-04
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+- Added one shared transcript notice system for rule-driven behavior: loop-guard, TTSR, goal continuation, and fallback handling now emit structured activation records and render them through the same notice kit, keeping transcript appearance, metadata, and activation history consistent instead of maintaining four divergent UI paths ([#689](https://github.com/code-yeongyu/senpi/pull/689), [#692](https://github.com/code-yeongyu/senpi/pull/692)).
+- Added cross-turn repetition protection to TTSR: the agent now compares bounded normalized content across consecutive turns, detects repeated response cycles that span turn boundaries, records the triggering pattern, and interrupts the loop before another duplicate turn can continue; deterministic unit coverage and a real mock-loop QA scenario pin the behavior ([#694](https://github.com/code-yeongyu/senpi/pull/694)).
+
+### Changed
+
+- Shortened the goal continuation grace countdown after an accepted user turn from 60 seconds to 10 seconds, preserving the user's opportunity to cancel automatic continuation while avoiding a full minute of idle time before a goal resumes ([#682](https://github.com/code-yeongyu/senpi/pull/682)).
+
+### Fixed
+
+- Aligned the isolated local-release smoke package set with the actual Senpi release boundary: it no longer builds or packs the independently versioned SQLite storage workspace or the private server workspace, preventing unrelated upstream API drift in those packages from blocking validation of the eight packages that the local Senpi artifact actually installs.
+- Pinned compiled binary release builds to Bun 1.3.14 instead of the moving canary, keeping all six cross-compilation target executables downloadable during release recovery ([#674](https://github.com/code-yeongyu/senpi/pull/674)).
+- Hid extension and runtime diagnostics emitted through Bun's native `console.info`, `console.warn`, and `console.error` while the interactive TUI owns the terminal, routing them through the existing hidden/redacted stderr sink and restoring the exact original console methods when terminal ownership ends so internal warnings no longer corrupt the transcript ([#677](https://github.com/code-yeongyu/senpi/pull/677)).
+- Recovered required compactions instead of leaving the session in a retry loop or stalled state: failed required compactions can now re-enter recovery, an accepted recovery supersedes the earlier admission error, deterministic fallback sizing is bounded, and stale terminal events remain associated with the superseded attempt rather than poisoning the active recovery ([#684](https://github.com/code-yeongyu/senpi/pull/684)).
+- Suppressed the stream error previously surfaced when a user cancels an in-progress compaction with Escape, treating the abort as an intentional terminal outcome while preserving cleanup and subsequent session usability ([#685](https://github.com/code-yeongyu/senpi/pull/685)).
+- Preserved built-in default fallback chains when users add their own configured chains instead of replacing the defaults wholesale, and identified the exact settings scope responsible when a fallback-chain warning is rendered so project, user, and runtime configuration conflicts can be diagnosed directly ([#686](https://github.com/code-yeongyu/senpi/pull/686)).
+- Restored blocked-goal continuation across interruption boundaries: sessions now prompt to resume goals that were already blocked when the process restarts, and a goal blocked by a provider error resumes on the next accepted user message instead of remaining permanently stuck ([#687](https://github.com/code-yeongyu/senpi/pull/687), [#688](https://github.com/code-yeongyu/senpi/pull/688)).
+
+### Removed
+
+## [2026.8.3-3] - 2026-08-03
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+- Added a prompt chevron marker to the interactive composer's first editable row and preserved it across editor-padding reloads ([#666](https://github.com/code-yeongyu/senpi/pull/666)).
+- Added the official Ollama Cloud provider with `OLLAMA_API_KEY`, an `Ollama Cloud` display name, a `qwen3.5:397b` default model, and provider-owned dynamic catalog discovery preserved through `ModelRuntime`; an `ollama` entry in `models.json` with an explicit `models` catalog still takes precedence and replaces any in-memory Cloud catalog on reload ([#525](https://github.com/code-yeongyu/senpi/pull/525) by [@thisisjun786](https://github.com/thisisjun786)).
+- Added `PI_RULES_DISABLED`, `PI_RULES_MAX_RULE_CHARS`, and `PI_RULES_MAX_RESULT_CHARS` environment settings for the built-in rules extension, budgeting the complete rendered block — envelope, sentinels, headings, and separators included — against `maxResultChars` and preserving documented defaults for empty, zero, negative, fractional, or otherwise invalid values ([#670](https://github.com/code-yeongyu/senpi/pull/670)).
+
+### Changed
+
+- Proportioned prompt test-discipline rules to the changed seam across dynamic-prompt verification and the GPT-5.6/Kimi-K3 presets, prohibiting prose-pinning tests ([#665](https://github.com/code-yeongyu/senpi/pull/665)).
+- Scoped `/fast` eligibility to the `openai-codex-responses` API capability instead of the built-in `openai-codex` provider id, so extension-registered Codex providers such as `codex-pool` can toggle session-level `service_tier: "priority"` without shadowing the stock command ([#656](https://github.com/code-yeongyu/senpi/pull/656) by [@eddieparc](https://github.com/eddieparc)).
+- Filtered `skill:` slash commands out of the bare `/` palette so they surface only on a matching prefix or the explicit `skill:` namespace, with a `skill:` browse hint offered while the typed prefix is still a prefix of `skill:` ([#606](https://github.com/code-yeongyu/senpi/pull/606) by [@daniduro89](https://github.com/daniduro89)).
+
+### Fixed
+
+- Fixed Bun global installs and npm OIDC releases by moving the client and protocol payloads outside package-manager-owned `node_modules`, rewriting their public declaration imports to the vendored files, and pinning every internal registry dependency and Senpi peer to the exact CalVer revision ([#667](https://github.com/code-yeongyu/senpi/pull/667), [#668](https://github.com/code-yeongyu/senpi/pull/668), [#673](https://github.com/code-yeongyu/senpi/pull/673)).
+- Fixed Anthropic server-side model substitutions being discarded when no client fallback chain is configured; the server-fallback abort now activates only alongside a configured chain and refreshes before every prompt and after each active-model switch, while `retry.abortServerSideFallback: false` still opts out ([#671](https://github.com/code-yeongyu/senpi/pull/671)).
+- Fixed visible-cursor flicker and duplicated IME composition by keeping cursor restoration and visibility bytes inside each synchronized render frame, suppressing the editor's inverse-video fake cursor while the hardware cursor is visible, and stripping colocated fake cursors terminated by either inverse-off (`CSI 27 m`) or full reset (`CSI 0 m`) ([#571](https://github.com/code-yeongyu/senpi/pull/571) by [@stevenahhh](https://github.com/stevenahhh)).
+- Fixed `logs/session.log` compaction telemetry misattributing outcomes: lifecycle records now correlate start and terminal events through propagated request IDs, classify committed/rejected/failed/skipped/aborted/superseded dispositions, carry content-free before/after token estimates, retain superseded attempt IDs until their stale terminal arrives, and log request-less terminals such as retry exhaustion as uncorrelated no-attempt decisions instead of marking an unrelated active attempt failed ([#632](https://github.com/code-yeongyu/senpi/pull/632) by [@madgegja](https://github.com/madgegja)).
+
+### Removed
+
+## [2026.8.3-2] - 2026-08-03
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+>>>>>>> origin/main
 ### Removed
 
 ## [2026.8.3] - 2026-08-03

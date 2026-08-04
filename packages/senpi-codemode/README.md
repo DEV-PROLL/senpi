@@ -14,7 +14,7 @@ task-tool names are known.
 	handle and continue in their existing kernel. Completion is injected with the
 	final value/error and buffered output; use `eval({ action: "peek"|"stop",
 	cell_id })` to inspect or terminate a detached cell. A running peek preserves
-	the original code and title together with current output, phase, status
+	the original code and summary together with current output, phase, status
 	events, tool-call summaries, elapsed duration, and structured display state;
 	a terminal peek preserves the exact final result.
 - Loopback, bearer-authenticated kernel bridge with bounded JSONL frames.
@@ -127,6 +127,16 @@ updates, and transcripts remain owned by that engine.
 `isolated`, `apply`, and `merge` are accepted for compatibility but emit a
 warning because this task-engine integration has no isolation model.
 
+## Required summary
+
+Every `eval` run call MUST include a `summary` — one line in the user's
+conversational language stating what the cell does and for what purpose (e.g.
+a Korean conversation produces a Korean summary such as "src 전체에서
+legacyClient 사용처 집계"). The summary is shown in the TUI while the cell
+runs and in the finished result, so you can always tell what is running and
+why. Values longer than 80 characters are force-truncated. A run request
+without a `summary` fails with a teaching error.
+
 ## Detached cells
 
 `eval` accepts `on_timeout: "detach"|"error"`. The default is `"detach"` in
@@ -137,8 +147,8 @@ a busy error with its cell id and output tail; calls in other languages continue
 normally. Do not re-run the cell.
 
 While any cell is detached, the interactive footer shows a highlighted
-`↗ <language> · <title>` status on the extension status line (the cell id when
-the call had no title), clearing as soon as the last detached cell settles.
+`↗ <language> · <summary>` status on the extension status line (the cell id
+when the call had no summary), clearing as soon as the last detached cell settles.
 
 Use `eval({ action: "peek", cell_id })` for its state and buffered output, or
 `eval({ action: "stop", cell_id })` to cancel it. Python stop interrupts the

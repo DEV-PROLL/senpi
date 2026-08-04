@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GOAL_USER_GRACE_DELAY_MS } from "../../../src/core/extensions/builtin/goal/continuation.ts";
 import { readGoal } from "../../../src/core/extensions/builtin/goal/store.ts";
 import type { ExtensionContext } from "../../../src/core/extensions/types.ts";
 import type { SessionEntry } from "../../../src/core/session-manager.ts";
@@ -11,6 +12,7 @@ import {
 	createGoalHarness,
 	makeGoalContext,
 	runGoalHandlers,
+	waitForSentCount,
 } from "../goal-monitor-test-harness.ts";
 import { createHarness, getMessageText, type Harness } from "../harness.ts";
 
@@ -162,7 +164,7 @@ describe("issue #447: goal continuation guardrails", () => {
 		});
 	});
 
-	it("leaves an active Goal idle after a direct user message without a delayed resurrection", async () => {
+	it("resumes an active Goal after the direct-user grace window", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
 		const harness = createGoalHarness();
@@ -191,9 +193,11 @@ describe("issue #447: goal continuation guardrails", () => {
 		);
 
 		expect(harness.sent).toHaveLength(0);
-		await vi.advanceTimersByTimeAsync(60_000);
-		expect(harness.sent).toHaveLength(0);
-		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 0 });
+		const graceDeliveryRecorded = waitForSentCount(harness, 1);
+		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
+		await graceDeliveryRecorded;
+		expect(harness.sent[0]?.message.customType).toBe(GOAL_CONTINUATION_MESSAGE_TYPE);
+		expect(await readGoal(goalStoreRef(ctx))).toMatchObject({ status: "active", consecutiveContinuations: 1 });
 	});
 
 	it("blocks the goal when a terminal provider error has no retry remaining", async () => {

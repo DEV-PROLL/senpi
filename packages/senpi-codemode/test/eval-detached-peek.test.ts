@@ -53,7 +53,7 @@ async function startRichDetachedCell() {
 		{
 			language: "js",
 			code: source,
-			title: "collect progress",
+			summary: "collect progress",
 			on_timeout: "detach",
 		},
 		undefined,
@@ -97,7 +97,7 @@ describe("detached eval peek", () => {
 			code: source,
 			language: "js",
 			status: "detached",
-			title: "collect progress",
+			summary: "collect progress",
 		});
 		expect(cell.output).toContain("before detach");
 		expect(cell.durationMs).toBeGreaterThanOrEqual(1_000);
@@ -156,7 +156,7 @@ describe("detached eval peek", () => {
 			{
 				language: "js",
 				code: "display({ answer: 42 })",
-				title: "terminal result",
+				summary: "terminal result",
 				on_timeout: "detach",
 			},
 			undefined,
@@ -188,7 +188,7 @@ describe("detached eval peek", () => {
 			code: "display({ answer: 42 })",
 			durationMs: 75,
 			status: "complete",
-			title: "terminal result",
+			summary: "terminal result",
 		});
 		expect(peek.details.phase).toBe("finalizing");
 		expect(peek.details.jsonOutputs).toEqual([{ answer: 42 }]);

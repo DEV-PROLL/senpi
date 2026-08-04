@@ -1,11 +1,17 @@
 import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
 
+function configuredPadding(padding: number | undefined): number {
+	return Number.isFinite(padding) ? Math.max(0, Math.floor(padding ?? 0)) : 0;
+}
+
 /**
  * Custom editor that handles app-level keybindings for coding-agent.
  */
 export class CustomEditor extends Editor {
 	private keybindings: KeybindingsManager;
+	private configuredPaddingX: number;
+	private promptPaddingX: number;
 	public actionHandlers: Map<AppKeybinding, () => void> = new Map();
 
 	// Special handlers that can be dynamically replaced
@@ -16,8 +22,30 @@ export class CustomEditor extends Editor {
 	public onExtensionShortcut?: (data: string) => boolean;
 
 	constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, options?: EditorOptions) {
-		super(tui, theme, options);
+		const configuredPaddingX = configuredPadding(options?.paddingX);
+		const promptPaddingX = Math.max(2, configuredPaddingX);
+		super(tui, theme, { ...options, paddingX: promptPaddingX });
 		this.keybindings = keybindings;
+		this.configuredPaddingX = configuredPaddingX;
+		this.promptPaddingX = promptPaddingX;
+	}
+
+	override getPaddingX(): number {
+		return this.configuredPaddingX;
+	}
+
+	override setPaddingX(padding: number): void {
+		this.configuredPaddingX = configuredPadding(padding);
+		this.promptPaddingX = Math.max(2, this.configuredPaddingX);
+		super.setPaddingX(this.promptPaddingX);
+	}
+
+	override render(width: number): string[] {
+		const lines = super.render(width);
+		if (width < 5 || lines[0]?.includes("↑")) return lines;
+		return lines.map((line, index) =>
+			index === 1 ? `${this.borderColor("❯")} ${line.slice(this.promptPaddingX)}` : line,
+		);
 	}
 
 	/**

@@ -28,7 +28,7 @@ function packLabels(labels: readonly string[], budget: number): string {
 }
 
 function labelOf(entry: EvalDetachedCellStatusEntry): string {
-	return entry.title === undefined || entry.title.length === 0 ? entry.cellId : entry.title;
+	return entry.summary === undefined || entry.summary.length === 0 ? entry.cellId : entry.summary;
 }
 
 /**

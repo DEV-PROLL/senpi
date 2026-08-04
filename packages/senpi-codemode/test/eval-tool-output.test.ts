@@ -72,7 +72,7 @@ describe("eval tool output pipeline", () => {
 		// When
 		const toolResult = await tool.execute(
 			"sink-cell",
-			{ language: "js", code: "display({answer: 42})", title: "sink" },
+			{ language: "js", code: "display({answer: 42})", summary: "sink" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -82,7 +82,7 @@ describe("eval tool output pipeline", () => {
 		expect(toolResult.details).toMatchObject({
 			language: "js",
 			languages: ["js"],
-			title: "sink",
+			summary: "sink",
 			durationMs: 17,
 			truncated: true,
 			jsonOutputs: [jsonValue],
@@ -90,7 +90,7 @@ describe("eval tool output pipeline", () => {
 			cells: [
 				{
 					index: 0,
-					title: "sink",
+					summary: "sink",
 					code: "display({answer: 42})",
 					language: "js",
 					status: "complete",
@@ -130,7 +130,7 @@ describe("eval tool output pipeline", () => {
 		// When
 		const toolResult = await tool.execute(
 			"live-cell",
-			{ language: "js", code: "print('first'); print('second')" },
+			{ language: "js", code: "print('first'); print('second')", summary: "stream live tail" },
 			undefined,
 			onUpdate,
 			fakeExtensionContext(),
@@ -149,11 +149,11 @@ describe("eval tool output pipeline", () => {
 		const firstLiveUpdate = updates.find((update) => update.details.cells?.[0]?.output === "first\n");
 		const secondLiveUpdate = updates.find((update) => update.details.cells?.[0]?.output === "first\nsecond\n");
 		expect(firstLiveUpdate).toMatchObject({
-			content: [{ type: "text", text: "1/1 cells running\n[1] js running\nfirst\n" }],
+			content: [{ type: "text", text: "1/1 cells running\n[1] js stream live tail running\nfirst\n" }],
 			details: { cells: [{ output: "first\n", status: "running" }] },
 		});
 		expect(secondLiveUpdate).toMatchObject({
-			content: [{ type: "text", text: "1/1 cells running\n[1] js running\nfirst\nsecond\n" }],
+			content: [{ type: "text", text: "1/1 cells running\n[1] js stream live tail running\nfirst\nsecond\n" }],
 			details: { cells: [{ output: "first\nsecond\n", status: "running" }] },
 		});
 		expect(updates.at(-1)?.details.cells?.[0]?.status).toBe("complete");
@@ -178,7 +178,7 @@ describe("eval tool output pipeline", () => {
 		// When
 		await tool.execute(
 			"bounded-live-cell",
-			{ language: "js", code: "for (let i = 1; i <= 10; i++) print(i)" },
+			{ language: "js", code: "for (let i = 1; i <= 10; i++) print(i)", summary: "bounded live tail" },
 			undefined,
 			(update) => updates.push(update),
 			fakeExtensionContext(),
@@ -187,7 +187,9 @@ describe("eval tool output pipeline", () => {
 		// Then
 		const completeLiveUpdate = updates.find((update) => update.details.cells?.[0]?.output === lines.join(""));
 		expect(completeLiveUpdate).toMatchObject({
-			content: [{ type: "text", text: `1/1 cells running\n[1] js running\n${lines.slice(-8).join("")}` }],
+			content: [
+				{ type: "text", text: `1/1 cells running\n[1] js bounded live tail running\n${lines.slice(-8).join("")}` },
+			],
 			details: { cells: [{ output: lines.join(""), status: "running" }] },
 		});
 	});
@@ -213,7 +215,7 @@ describe("eval tool output pipeline", () => {
 		// When
 		const toolResult = await tool.execute(
 			"image-cell",
-			{ language: "js", code: "display(image)" },
+			{ language: "js", code: "display(image)", summary: "resize display" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -246,7 +248,7 @@ describe("eval tool output pipeline", () => {
 		// When
 		const toolResult = await tool.execute(
 			"error-cell",
-			{ language: "js", code: "throw new Error('boom')" },
+			{ language: "js", code: "throw new Error('boom')", summary: "error path" },
 			undefined,
 			undefined,
 			fakeExtensionContext(),
@@ -290,7 +292,7 @@ describe("eval tool output pipeline", () => {
 		// When
 		const toolResult = await tool.execute(
 			"status-history",
-			{ language: "js", code: "for (const path of paths) read(path)" },
+			{ language: "js", code: "for (const path of paths) read(path)", summary: "status history" },
 			undefined,
 			onUpdate,
 			fakeExtensionContext(),

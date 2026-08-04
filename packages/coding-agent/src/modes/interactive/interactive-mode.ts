@@ -82,6 +82,7 @@ import type {
 	ProjectTrustContext,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
+import { buildNoticeBox, type NoticeSpec } from "../../core/extensions/notice/index.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 import { appendHiddenTuiStdout } from "../../core/hidden-stdout-log.ts";
 import { buildHighReasoningWarning } from "../../core/high-reasoning-warning.ts";
@@ -4023,31 +4024,49 @@ export class InteractiveMode {
 				} else {
 					this.fallbackAppliedBeforeRetryStart = true;
 				}
-				this.showWarning(`Model fallback: ${event.from} -> ${event.to} (${event.reason})`);
+				this.showNoticeBox({
+					title: `⇄ Model fallback · ${event.from} → ${event.to}`,
+					tone: "warning",
+					why: `Retry switched models (${event.reason}); the turn continues on ${event.to}.`,
+				});
 				this.setExtensionStatus(FALLBACK_STATUS_KEY, `fallback: ${event.to}`);
 				break;
 			}
 
 			case "retry_fallback_succeeded":
-				this.showStatus(`Fallback model ${event.model} responded`);
+				this.showNoticeBox({
+					title: `✓ Fallback model responded · ${event.model}`,
+					tone: "success",
+					why: "The fallback chain answered; the session stays on it until the revert policy fires.",
+				});
 				break;
 
 			case "retry_fallback_reverted":
-				this.showStatus(`Reverted to ${event.to}`);
+				this.showNoticeBox({
+					title: `⇄ Reverted to ${event.to}`,
+					tone: "accent",
+					why: "The original model is back after its cooldown lapsed.",
+				});
 				this.setExtensionStatus(FALLBACK_STATUS_KEY, undefined);
 				break;
 
 			case "retry_fallback_exhausted":
-				this.showError(`Fallback chain exhausted for ${event.chainKey}: ${event.lastError}`);
+				this.showNoticeBox({
+					title: `✕ Fallback chain exhausted · ${event.chainKey}`,
+					tone: "error",
+					why: event.lastError,
+				});
 				this.setExtensionStatus(FALLBACK_STATUS_KEY, undefined);
 				break;
 
 			case "server_fallback_aborted":
-				this.showWarning(
-					event.chainConfigured
-						? `Server fallback ${event.from} -> ${event.to} aborted; retrying on your fallback chain`
-						: `Server fallback ${event.from} -> ${event.to} aborted; no chain configured (set one with /fallback)`,
-				);
+				this.showNoticeBox({
+					title: `⚠ Server fallback aborted · ${event.from} → ${event.to}`,
+					tone: "warning",
+					why: event.chainConfigured
+						? "Retrying on your configured fallback chain."
+						: "No fallback chain configured — set one with /fallback.",
+				});
 				break;
 
 			case "auto_retry_start": {
@@ -4913,6 +4932,21 @@ export class InteractiveMode {
 	showError(errorMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${sanitizeTuiErrorMessage(errorMessage)}`), 1, 0));
+		this.ui.requestRender();
+	}
+
+	showNoticeBox(spec: NoticeSpec): void {
+		const sanitized: NoticeSpec = {
+			...spec,
+			title: sanitizeTuiErrorMessage(spec.title),
+			why: sanitizeTuiErrorMessage(spec.why),
+			...(spec.extra === undefined
+				? {}
+				: { extra: spec.extra.map((line) => ({ ...line, text: sanitizeTuiErrorMessage(line.text) })) }),
+			...(spec.expandedLine === undefined ? {} : { expandedLine: sanitizeTuiErrorMessage(spec.expandedLine) }),
+		};
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(buildNoticeBox(sanitized, { expanded: this.toolOutputExpanded }, theme));
 		this.ui.requestRender();
 	}
 

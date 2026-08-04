@@ -120,6 +120,7 @@ async function driveTurn({
 	modelOverrides,
 	mockModels,
 	retry,
+	followUpPrompts = [],
 }) {
 	const p = API_PRESETS[apiName];
 	const box = makeSandbox(`mock-loop-${apiName}`);
@@ -140,6 +141,22 @@ async function driveTurn({
 		prompt,
 	];
 	const result = await runCli(args, { env: hermeticEnv(box.env), cwd: box.cwd, timeoutMs });
+	if (followUpPrompts.length > 0) {
+		let combined = result;
+		for (const followUp of followUpPrompts) {
+			const followArgs = args.slice(0, -1);
+			followArgs.splice(followArgs.length - 1, 0, "--continue");
+			followArgs.push(followUp);
+			const next = await runCli(followArgs, { env: hermeticEnv(box.env), cwd: box.cwd, timeoutMs });
+			combined = {
+				code: next.code,
+				stdout: `${combined.stdout}\n${next.stdout}`,
+				stderr: `${combined.stderr}\n${next.stderr}`,
+				timedOut: combined.timedOut || next.timedOut,
+			};
+		}
+		return { box, server, result: combined, preset: p, prepared };
+	}
 	return { box, server, result, preset: p, prepared };
 }
 
@@ -610,7 +627,7 @@ if (argv[0] === "--self-test") {
 			"  node mock-loop.mjs --with-text-tool-leak --api <anthropic-messages|openai-completions>",
 			"  node mock-loop.mjs --with-truncated-text-tool-leak --api <anthropic-messages|openai-completions>",
 			"  node mock-loop.mjs --with-mcp-tool <tool> [--tool-args JSON]",
-			"  node mock-loop.mjs --scenario <transient-recover|budget-exhaust|server-error-fallback|long-retry-after|billing-swap|anthropic-policy-refusal-fallback|kimi-xtml-thinking-recover|ttsr-collapse|ttsr-leak> [--api <name>]",
+			"  node mock-loop.mjs --scenario <transient-recover|budget-exhaust|server-error-fallback|long-retry-after|billing-swap|anthropic-policy-refusal-fallback|kimi-xtml-thinking-recover|ttsr-collapse|ttsr-leak|ttsr-repetitive-turns> [--api <name>]",
 			"  node mock-loop.mjs --scenario <hinted-429-in-turn|no-hint-429-fast-fallback|hinted-429-probe-back>",
 			"  node mock-loop.mjs --run <prompt> [--api <name>]",
 			`  APIs: ${ALL_APIS.join(", ")}`,

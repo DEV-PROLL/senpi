@@ -140,4 +140,5 @@ export type ApplyPatchToolDefinition = ToolDefinition<
 
 export type ApplyPatchExtensionAPI = Pick<ExtensionAPI, "on" | "getActiveTools" | "getAllTools" | "setActiveTools"> & {
 	registerTool: (tool: ApplyPatchToolDefinition) => void;
+	registerLazyToolActivator?: ExtensionAPI["registerLazyToolActivator"];
 };

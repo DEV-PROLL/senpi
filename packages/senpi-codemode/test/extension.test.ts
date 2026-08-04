@@ -215,7 +215,13 @@ describe("senpi-codemode extension factory", () => {
 			expect(tool.description).not.toContain('`"rb"`');
 			expect(tool.description).not.toContain('`"jl"`');
 			await expect(
-				tool.execute("disabled-ruby", { language: "rb", code: "1" }, undefined, undefined, ctx),
+				tool.execute(
+					"disabled-ruby",
+					{ language: "rb", code: "1", summary: "disabled probe" },
+					undefined,
+					undefined,
+					ctx,
+				),
 			).rejects.toThrow('Unsupported eval language "rb". Enabled languages: js');
 		} finally {
 			await emit(pi, "session_shutdown", {}, ctx);
@@ -412,7 +418,13 @@ describe("senpi-codemode extension factory", () => {
 		const tool = pi.registeredTool;
 		if (!tool) throw new Error("eval tool was not registered");
 		await expect(
-			tool.execute("after-shutdown", { language: "js", code: "1" }, undefined, undefined, ctx),
+			tool.execute(
+				"after-shutdown",
+				{ language: "js", code: "1", summary: "post shutdown" },
+				undefined,
+				undefined,
+				ctx,
+			),
 		).rejects.toThrow("session has not started");
 		expect(manager.getKernelCount).toBe(0);
 	});
@@ -429,13 +441,25 @@ describe("senpi-codemode extension lifecycle", () => {
 		await emit(pi, "session_start", { reason: "startup" }, ctx);
 		const tool = pi.registeredTool;
 		expect(tool).toBeDefined();
-		const run = tool?.execute("cell-running", { language: "js", code: "await pending()" }, undefined, undefined, ctx);
+		const run = tool?.execute(
+			"cell-running",
+			{ language: "js", code: "await pending()", summary: "mid run cell" },
+			undefined,
+			undefined,
+			ctx,
+		);
 		await manager.runStarted.promise;
 		await emit(pi, "session_shutdown", {}, ctx);
 
 		await expect(run).resolves.toMatchObject({ details: expect.objectContaining({ isError: true }) });
 		await expect(
-			tool?.execute("after-shutdown", { language: "js", code: "1" }, undefined, undefined, ctx),
+			tool?.execute(
+				"after-shutdown",
+				{ language: "js", code: "1", summary: "post shutdown" },
+				undefined,
+				undefined,
+				ctx,
+			),
 		).rejects.toMatchObject({ name: "CodemodeSessionDisposedError" });
 		expect([manager.disposeCount, manager.getKernelCount]).toEqual([1, 1]);
 		expect(manager.runControllers[0]?.signal.aborted).toBe(true);
@@ -453,7 +477,7 @@ describe("senpi-codemode extension lifecycle", () => {
 		const notification = pi.nextMessage();
 		const run = tool.execute(
 			"notified-detached",
-			{ language: "js", code: "await pending()", timeout: 1, on_timeout: "detach" },
+			{ language: "js", code: "await pending()", timeout: 1, on_timeout: "detach", summary: "notified detached" },
 			undefined,
 			undefined,
 			ctx,
@@ -481,7 +505,13 @@ describe("senpi-codemode extension lifecycle", () => {
 		await emit(pi, "session_start", { reason: "startup" }, ctx);
 		const tool = pi.registeredTool;
 		if (!tool) throw new Error("eval tool was not registered");
-		const run = tool.execute("tracked-cell", { language: "js", code: "await pending()" }, undefined, undefined, ctx);
+		const run = tool.execute(
+			"tracked-cell",
+			{ language: "js", code: "await pending()", summary: "tracked cell" },
+			undefined,
+			undefined,
+			ctx,
+		);
 		await manager.runStarted.promise;
 
 		// When
@@ -497,7 +527,13 @@ describe("senpi-codemode extension lifecycle", () => {
 		expect(settled.details).toMatchObject({ isError: true, cells: [{ status: "error" }] });
 		expect(manager.events).toEqual(["interrupt", "dispose"]);
 		await expect(
-			tool.execute("after-shutdown", { language: "js", code: "1" }, undefined, undefined, ctx),
+			tool.execute(
+				"after-shutdown",
+				{ language: "js", code: "1", summary: "post shutdown" },
+				undefined,
+				undefined,
+				ctx,
+			),
 		).rejects.toMatchObject({ name: "CodemodeSessionDisposedError" });
 	});
 });

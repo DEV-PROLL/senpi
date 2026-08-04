@@ -38,7 +38,13 @@ async function run(
 	language: "js" | "py",
 	code: string,
 ): Promise<AgentToolResult<unknown>> {
-	return await tool.execute(cellId, { language, code }, undefined, undefined, interactiveContext());
+	return await tool.execute(
+		cellId,
+		{ language, code, summary: "reuse probe" },
+		undefined,
+		undefined,
+		interactiveContext(),
+	);
 }
 
 async function detach(
@@ -50,7 +56,7 @@ async function detach(
 	const started = kernel.deferNextRun();
 	const execution = tool.execute(
 		cellId,
-		{ language, code: "await forever", on_timeout: "detach" },
+		{ language, code: "await forever", on_timeout: "detach", summary: "detach probe" },
 		undefined,
 		undefined,
 		interactiveContext(),

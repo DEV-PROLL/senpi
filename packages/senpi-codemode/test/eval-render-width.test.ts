@@ -18,12 +18,12 @@ function longWord(label: string): string {
 }
 
 describe.each(WIDTHS)("eval renderer width %i", (width) => {
-	it("Given wide output title emoji ANSI and long words when rendered then every line fits", () => {
+	it("Given wide output summary emoji ANSI and long words when rendered then every line fits", () => {
 		// Given
 		const givenCall = renderEvalCall(
 			{
 				language: "py",
-				title: "analysis🙂",
+				summary: "analysis🙂",
 				code: [
 					"print('hello🙂')",
 					longWord("call"),
@@ -38,7 +38,7 @@ describe.each(WIDTHS)("eval renderer width %i", (width) => {
 		const givenResult = evalResult(
 			{
 				language: "py",
-				title: "analysis🙂",
+				summary: "analysis🙂",
 				durationMs: 12,
 				toolCalls: [{ name: "searchTool", ok: true }],
 				truncated: false,
@@ -156,7 +156,7 @@ describe("eval renderer rerender width behavior", () => {
 		// Given
 		const component = renderEvalResult(
 			evalResult(
-				{ language: "rb", title: "resize🙂", durationMs: 4, toolCalls: [], truncated: false },
+				{ language: "rb", summary: "resize🙂", durationMs: 4, toolCalls: [], truncated: false },
 				[longWord("wide"), "second line", "third line🙂"].join("\n"),
 			),
 			{ expanded: false, isPartial: false },
@@ -176,7 +176,9 @@ describe("eval renderer rerender width behavior", () => {
 	it("Given collapsed component when rerendered expanded then hidden preview content returns and fits", () => {
 		// Given
 		const codeLines = Array.from({ length: 7 }, (_, index) => `code-${index + 1}-${longWord("cell")}`);
-		const args = { language: "js", code: codeLines.join("\n") } satisfies Parameters<typeof renderEvalCall>[0];
+		const args = { language: "js", code: codeLines.join("\n"), summary: "wide preview" } satisfies Parameters<
+			typeof renderEvalCall
+		>[0];
 		const collapsed = renderEvalCall(args, undefined, callContext());
 
 		// When
@@ -207,7 +209,7 @@ describe("eval renderer cell detail width", () => {
 				cells: [
 					{
 						index: 0,
-						title: "failed cell",
+						summary: "failed cell",
 						code: "print('korean-output-test')",
 						language: "py",
 						output: "korean-output-test and this very long error description must wrap to fit the width",
@@ -246,7 +248,8 @@ describe("eval renderer cell detail width", () => {
 
 		// Then
 		expectLinesWithinWidth(lines, width, "narrow detail render");
-		expect.soft(text).toContain("eval py failed cell error");
+		expect.soft(text).toContain("eval py error");
+		expect.soft(text).toContain("failed cell");
 		expect.soft(text).toContain("read 12 chars");
 		expect.soft(text).toContain("worker-cell done");
 		expect.soft(text).toContain("display[1]");

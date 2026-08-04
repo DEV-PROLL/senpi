@@ -204,7 +204,7 @@ export type AgentSessionEvent =
 			steering: readonly string[];
 			followUp: readonly string[];
 	  }
-	| { type: "compaction_start"; reason: CompactionReason }
+	| { type: "compaction_start"; reason: CompactionReason; requestId?: string }
 	| { type: "compaction_progress"; reason: CompactionReason; delta?: string; text?: string }
 	| { type: "entry_appended"; entry: SessionEntry }
 	| { type: "session_info_changed"; name: string | undefined }
@@ -320,6 +320,7 @@ interface CompactionExecutionRequest {
 	controller: AbortController;
 	owner: "auto" | "compaction";
 	reason: CompactionReason;
+	requestId?: string;
 	customInstructions?: string;
 	willRetry: boolean;
 	skipAbortedCheck?: boolean;
@@ -589,6 +590,10 @@ export class AgentSession {
 	private _queuedInputOrder: QueuedInput[] = [];
 	private _nextQueuedInputOrder = 0;
 	private _sessionLogger: SessionLogger;
+	private _activeCompactionLogAttempt:
+		| { id: string; reason: CompactionReason; tokensBefore: number | undefined }
+		| undefined;
+	private readonly _supersededCompactionLogAttemptIds = new Set<string>();
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
 	// Queues held while the first post-compaction response is classified. Agent
@@ -605,6 +610,10 @@ export class AgentSession {
 	private readonly _sessionWorkBarrier = new SessionWorkBarrier();
 	private _overflowRecoveryAttempted = false;
 	private _requiredCompactionAdmissionError: RequiredCompactionError | undefined;
+	// Preserve provenance across agent-core's conversion of our admission error
+	// into an assistant error message. Matching provider text alone is not proof
+	// that AgentSession initiated required-compaction recovery.
+	private _requiredCompactionTurnError: RequiredCompactionError | undefined;
 	// A retry continuation immediately follows an accepted compaction. Its first
 	// response must not retrigger threshold compaction from stale provider usage.
 	private _skipNextPostRetryCompactionCheck = false;
@@ -693,7 +702,6 @@ export class AgentSession {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
-		this.agent.abortServerSideFallback = this.settingsManager.getAbortServerSideFallback();
 		const noModelFallback =
 			config.resourceLoader.getExtensions().runtime.flagValues.get("no-model-fallback") === true ||
 			process.env.SENPI_NO_FALLBACK === "1";
@@ -718,8 +726,11 @@ export class AgentSession {
 			this.settingsManager.getRawFallbackChains(),
 			this._modelRegistry,
 		);
+		// `source` names the scope that supplied the chains so a single log line
+		// points at the file to open; "default" means no scope configured any.
+		const fallbackChainsSource = this.settingsManager.getFallbackChainsScope() ?? "default";
 		for (const warning of this._fallbackValidationWarnings) {
-			fallbackLogger.warn("validation_warning", { warning });
+			fallbackLogger.warn("validation_warning", { warning, source: fallbackChainsSource });
 		}
 		this._selectorCooldowns = new SelectorCooldowns(config.fallbackNow ?? (() => Date.now()));
 		this._fallbackNow = config.fallbackNow ?? (() => Date.now());
@@ -993,8 +1004,11 @@ export class AgentSession {
 				try {
 					return await this._enforceCompactionBeforeProvider(turn.message, true, "threshold");
 				} catch (error) {
-					if (error instanceof RequiredCompactionError && this.agent.hasQueuedMessages()) {
-						this._requiredCompactionAdmissionError = error;
+					if (error instanceof RequiredCompactionError) {
+						this._requiredCompactionTurnError = error;
+						if (this.agent.hasQueuedMessages()) {
+							this._requiredCompactionAdmissionError = error;
+						}
 					}
 					throw error;
 				}
@@ -1066,18 +1080,75 @@ export class AgentSession {
 	/** Mirror stuck-prone lifecycle transitions into logs/session.log (content-free). */
 	private _logSessionEvent(event: AgentSessionEvent): void {
 		if (event.type === "compaction_start") {
-			this._sessionLogger.info("compaction_start", { reason: event.reason });
+			const previousAttempt = this._activeCompactionLogAttempt;
+			if (previousAttempt) {
+				const tokensAfter = this._estimateCompactionLogTokens("persisted");
+				this._sessionLogger.info("compaction_decision", {
+					attemptId: previousAttempt.id,
+					reason: previousAttempt.reason,
+					mode: previousAttempt.reason === "manual" ? "manual" : "auto",
+					action: "compact",
+					disposition: "superseded",
+					accepted: false,
+					skipped: true,
+					aborted: true,
+					willRetry: false,
+					tokensBefore: previousAttempt.tokensBefore,
+					tokensAfter,
+				});
+				this._supersededCompactionLogAttemptIds.add(previousAttempt.id);
+			}
+			const attempt = {
+				id: event.requestId ?? randomUUID(),
+				reason: event.reason,
+				tokensBefore: this._estimateCompactionLogTokens("persisted"),
+			};
+			this._activeCompactionLogAttempt = attempt;
+			this._sessionLogger.info("compaction_start", {
+				attemptId: attempt.id,
+				reason: event.reason,
+				mode: event.reason === "manual" ? "manual" : "auto",
+				action: "compact",
+				tokensBefore: attempt.tokensBefore,
+			});
 			return;
 		}
 		if (event.type === "compaction_end") {
+			if (event.requestId && this._supersededCompactionLogAttemptIds.delete(event.requestId)) return;
+			const activeAttempt = this._activeCompactionLogAttempt;
+			const attempt =
+				event.requestId !== undefined && activeAttempt?.id === event.requestId ? activeAttempt : undefined;
+			const accepted = event.accepted ?? event.result !== undefined;
+			const rejected = event.rejectionCause !== undefined;
+			const skipped = !accepted && (attempt === undefined || (!rejected && !event.aborted && !event.errorMessage));
+			const disposition = accepted
+				? "committed"
+				: attempt === undefined
+					? "skipped"
+					: rejected
+						? "rejected"
+						: event.aborted
+							? "aborted"
+							: event.errorMessage
+								? "failed"
+								: "skipped";
+			const tokensAfter = this._estimateCompactionLogTokens(accepted ? "active" : "persisted");
 			this._sessionLogger.info("compaction_decision", {
+				attemptId: attempt?.id ?? event.requestId,
 				reason: event.reason,
-				accepted: event.accepted ?? event.result !== undefined,
+				mode: event.reason === "manual" ? "manual" : "auto",
+				action: accepted || attempt ? "compact" : "none",
+				disposition,
+				accepted,
+				skipped,
 				aborted: event.aborted,
 				willRetry: event.willRetry,
 				rejectionCause: event.rejectionCause,
 				error: event.errorMessage,
+				tokensBefore: attempt?.tokensBefore ?? tokensAfter,
+				tokensAfter,
 			});
+			if (attempt) this._activeCompactionLogAttempt = undefined;
 			return;
 		}
 		if (event.type === "message_end" && event.message.role === "assistant") {
@@ -1089,6 +1160,16 @@ export class AgentSession {
 					? "timeout"
 					: "error";
 			this._sessionLogger.warn("provider_error", { kind, error: message.errorMessage });
+		}
+	}
+
+	private _estimateCompactionLogTokens(source: "active" | "persisted"): number | undefined {
+		try {
+			const messages =
+				source === "active" ? this.agent.state.messages : this.sessionManager.buildSessionContext().messages;
+			return estimateMessagesTokens(filterContextExcludedMessages(messages));
+		} catch {
+			return undefined;
 		}
 	}
 
@@ -1178,6 +1259,8 @@ export class AgentSession {
 	private async _promptAgent(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
 		this._requiredCompactionAdmissionError = undefined;
+		this.agent.abortServerSideFallback =
+			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
 		try {
 			await this.agent.prompt(messages);
 			// AgentSession's subscriber intentionally queues event work instead of
@@ -1378,16 +1461,17 @@ export class AgentSession {
 			const messages = filterContextExcludedMessages(this.agent.state.messages);
 			const estimate = estimateContextTokens(messages);
 			if (estimate.lastUsageIndex === null) {
-				return undefined;
-			}
-			const compactionEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
-			const usageMessage = messages[estimate.lastUsageIndex];
-			if (
-				compactionEntry &&
-				usageMessage?.role === "assistant" &&
-				this._isAssistantFromBeforeLatestCompaction(usageMessage)
-			) {
-				return undefined;
+				if (!this._isRequiredCompactionError(message)) return undefined;
+			} else {
+				const compactionEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
+				const usageMessage = messages[estimate.lastUsageIndex];
+				if (
+					compactionEntry &&
+					usageMessage?.role === "assistant" &&
+					this._isAssistantFromBeforeLatestCompaction(usageMessage)
+				) {
+					return undefined;
+				}
 			}
 			contextTokens = estimate.tokens;
 		}
@@ -1455,13 +1539,19 @@ export class AgentSession {
 	}
 
 	private _willRetryAfterAgentEnd(messages: AgentMessage[]): boolean {
-		const settings = this.settingsManager.getRetrySettings();
-		if (!settings.enabled) {
-			return false;
-		}
-
 		const lastAssistant = this._lastAssistantMessage ?? this._findLastAssistantInMessages(messages);
 		if (!lastAssistant) {
+			return false;
+		}
+		if (
+			this._isRequiredCompactionError(lastAssistant) &&
+			this._getRequiredAutoCompactionReason(lastAssistant) !== undefined
+		) {
+			return true;
+		}
+
+		const settings = this.settingsManager.getRetrySettings();
+		if (!settings.enabled) {
 			return false;
 		}
 
@@ -1494,7 +1584,18 @@ export class AgentSession {
 		return this._retryFallback.canTryFallback();
 	}
 
+	private _isRequiredCompactionError(message: AssistantMessage): boolean {
+		return (
+			this._requiredCompactionTurnError !== undefined &&
+			message.stopReason === "error" &&
+			message.errorMessage === this._requiredCompactionTurnError.message
+		);
+	}
+
 	private async _processAgentEvent(event: AgentEvent, signal: AbortSignal): Promise<void> {
+		if (event.type === "agent_start") {
+			this._requiredCompactionTurnError = undefined;
+		}
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
@@ -1611,6 +1712,8 @@ export class AgentSession {
 			this._lastAssistantMessage = undefined;
 			this._skipNextPostRetryCompactionCheck = false;
 			const requiredAutoCompaction = this._getRequiredAutoCompactionReason(msg);
+			const retryAfterRequiredCompaction =
+				requiredAutoCompaction !== undefined && this._isRequiredCompactionError(msg);
 
 			// Retry transient failures normally and eligible hard errors only through a fallback.
 			const retryableError = this._isRetryableError(msg);
@@ -1642,10 +1745,19 @@ export class AgentSession {
 			retryContinuationBlocked ||= retryOutcome === "blocked";
 			if (!retryContinuationBlocked) {
 				if (compactedBeforeRetry && this.agent.hasQueuedMessages()) {
+					// Accepted recovery supersedes the stored admission rejection: the
+					// queued continuation is about to run, so the originating prompt must
+					// not observe the stale RequiredCompactionError.
+					this._requiredCompactionAdmissionError = undefined;
 					this._scheduleContinuationAfterCurrentEvent();
 					launchedContinuation = true;
 				} else {
-					launchedContinuation = await this._checkCompaction(msg);
+					launchedContinuation = await this._checkCompaction(msg, true, undefined, retryAfterRequiredCompaction);
+					if (launchedContinuation && this.agent.hasQueuedMessages()) {
+						// Same supersession on the post-check path: an accepted recovery
+						// compaction owns the continuation now.
+						this._requiredCompactionAdmissionError = undefined;
+					}
 					allowsPostCompactionUsageExemptContinuation = this._postCompactionUsageExemptAssistants.has(msg);
 					if (allowsPostCompactionUsageExemptContinuation) {
 						this._flushPostCompactionDeferredMessages();
@@ -1673,6 +1785,9 @@ export class AgentSession {
 				(allowsQueuedContinuation || allowsPostCompactionUsageExemptContinuation) &&
 				this.agent.hasQueuedMessages()
 			) {
+				// A scheduled continuation owns the queue now; the stored admission
+				// rejection from a superseded required compaction must not surface.
+				this._requiredCompactionAdmissionError = undefined;
 				this._scheduleContinuationAfterCurrentEvent();
 				launchedContinuation = true;
 			}
@@ -3401,6 +3516,8 @@ export class AgentSession {
 		}
 		const thinkingLevel = this._getThinkingLevelForModelSwitch(opts.ephemeralThinkingLevel);
 		this.agent.state.model = model;
+		this.agent.abortServerSideFallback =
+			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
 		if (opts.appendSessionEntry) {
 			this.sessionManager.appendModelChange(
 				model.provider,
@@ -3767,6 +3884,7 @@ export class AgentSession {
 	async compact(customInstructions?: string): Promise<CompactionResult> {
 		const admission = this._claimPendingCompactionAdmission();
 		const controller = admission.controller;
+		const requestId = randomUUID();
 		let outcome: "completed" | "failed" | "aborted" = "failed";
 		let disconnected = false;
 
@@ -3777,11 +3895,12 @@ export class AgentSession {
 			await this._abortActiveAgentAndRetry("system");
 			this._disconnectFromAgent();
 			disconnected = true;
-			this._emit({ type: "compaction_start", reason: "manual" });
+			this._emit({ type: "compaction_start", reason: "manual", requestId });
 			const execution = await this._executeCompaction({
 				controller,
 				owner: "compaction",
 				reason: "manual",
+				requestId,
 				customInstructions,
 				willRetry: false,
 			});
@@ -3806,6 +3925,7 @@ export class AgentSession {
 				result: undefined,
 				aborted,
 				willRetry: false,
+				requestId,
 				errorMessage: aborted ? undefined : `Compaction failed: ${message}`,
 			});
 			throw error;
@@ -3831,9 +3951,14 @@ export class AgentSession {
 		}
 
 		const ownsController = this._compactionAbortController === undefined;
+		const lifecycleState = this._compactionLifecycle.state;
+		const requestId =
+			!ownsController && lifecycleState.status === "running" && lifecycleState.stage === "feedback"
+				? lifecycleState.operationId
+				: randomUUID();
 		if (ownsController) {
 			this._claimCompactionController(new AbortController(), "compaction");
-			this._emit({ type: "compaction_start", reason: options.reason });
+			this._emit({ type: "compaction_start", reason: options.reason, requestId });
 		}
 		const controller = this._compactionAbortController;
 		if (!controller) return { applied: false, reason: "rejected" };
@@ -3844,6 +3969,7 @@ export class AgentSession {
 				controller,
 				owner: "compaction",
 				reason: options.reason,
+				requestId,
 				willRetry: false,
 				precomputed,
 			});
@@ -3864,6 +3990,7 @@ export class AgentSession {
 				result: undefined,
 				aborted,
 				willRetry: false,
+				requestId,
 				errorMessage: aborted ? undefined : `Compaction failed: ${message}`,
 			});
 			return { applied: false, reason: "rejected" };
@@ -3878,9 +4005,10 @@ export class AgentSession {
 		const controller = new AbortController();
 		this._claimCompactionController(controller, "compaction");
 		const model = this.model;
+		const requestId = randomUUID();
 		this._compactionLifecycle.begin(
 			{
-				operationId: randomUUID(),
+				operationId: requestId,
 				stage: "feedback",
 				reason,
 				model: model ? { provider: model.provider, id: model.id } : undefined,
@@ -3888,7 +4016,7 @@ export class AgentSession {
 			},
 			controller,
 		);
-		this._emit({ type: "compaction_start", reason });
+		this._emit({ type: "compaction_start", reason, requestId });
 		return controller.signal;
 	}
 
@@ -3935,7 +4063,8 @@ export class AgentSession {
 			result: undefined,
 			aborted,
 			willRetry: false,
-			errorMessage: aborted ? undefined : options.errorMessage,
+			requestId: operation.operationId,
+			errorMessage: aborted ? undefined : (options.errorMessage ?? "Compaction did not apply"),
 		});
 		this._releaseCompactionController(options.signal);
 	}
@@ -3950,7 +4079,7 @@ export class AgentSession {
 		if (!this._ownsCompactionController(controller, request.owner)) {
 			throw new CompactionExecutionError(new CompactionCancelledError(), false, true);
 		}
-		const requestId = randomUUID();
+		const requestId = request.requestId ?? randomUUID();
 		const operationId = this._compactionLifecycle.begin(
 			{
 				operationId: requestId,
@@ -4290,6 +4419,11 @@ export class AgentSession {
 	 * Cancel in-progress compaction (manual or auto).
 	 */
 	abortCompaction(): void {
+		const lifecycleState = this._compactionLifecycle.state;
+		const activeFeedbackRequestId =
+			lifecycleState.status === "running" && lifecycleState.stage === "feedback"
+				? lifecycleState.operationId
+				: undefined;
 		const feedbackOperation = this._compactionLifecycle.abort(this._messageRevision);
 		this._compactionAbortController?.abort();
 		this._autoCompactionAbortController?.abort();
@@ -4301,6 +4435,7 @@ export class AgentSession {
 				result: undefined,
 				aborted: true,
 				willRetry: false,
+				requestId: activeFeedbackRequestId,
 			});
 		}
 	}
@@ -4547,17 +4682,20 @@ export class AgentSession {
 			} else {
 				const messages = filterContextExcludedMessages(this.agent.state.messages);
 				const estimate = estimateContextTokens(messages);
-				if (estimate.lastUsageIndex === null) return false; // No usage data at all
-				// Verify the usage source is post-compaction. Kept pre-compaction messages
-				// have stale usage reflecting the old (larger) context and would falsely
-				// trigger compaction right after one just finished.
-				const usageMsg = messages[estimate.lastUsageIndex];
-				if (
-					compactionEntry &&
-					usageMsg.role === "assistant" &&
-					this._isAssistantFromBeforeLatestCompaction(usageMsg)
-				) {
-					return false;
+				if (estimate.lastUsageIndex === null) {
+					if (!this._isRequiredCompactionError(assistantMessage)) return false;
+				} else {
+					// Verify the usage source is post-compaction. Kept pre-compaction messages
+					// have stale usage reflecting the old (larger) context and would falsely
+					// trigger compaction right after one just finished.
+					const usageMsg = messages[estimate.lastUsageIndex];
+					if (
+						compactionEntry &&
+						usageMsg.role === "assistant" &&
+						this._isAssistantFromBeforeLatestCompaction(usageMsg)
+					) {
+						return false;
+					}
 				}
 				contextTokens = estimate.tokens;
 			}
@@ -4571,7 +4709,7 @@ export class AgentSession {
 					retryAfterCompaction,
 				);
 			} else {
-				const compacted = await this._runAutoCompaction("threshold", false);
+				const compacted = await this._runAutoCompaction("threshold", retryAfterCompaction);
 				if (
 					!compacted &&
 					this._compactionLifecycle.state.status === "failed" &&
@@ -4601,14 +4739,16 @@ export class AgentSession {
 		allowSummaryOnly = false,
 	): Promise<boolean> {
 		const controller = new AbortController();
+		const requestId = randomUUID();
 		this._claimCompactionController(controller, "compaction");
-		this._emit({ type: "compaction_start", reason });
+		this._emit({ type: "compaction_start", reason, requestId });
 
 		try {
 			const execution = await this._executeCompaction({
 				controller,
 				owner: "compaction",
 				reason,
+				requestId,
 				willRetry,
 				lastAssistantMessage,
 				skipAbortedCheck,
@@ -4637,6 +4777,7 @@ export class AgentSession {
 				result: undefined,
 				aborted,
 				willRetry: false,
+				requestId,
 				errorMessage: aborted ? undefined : `Pre-prompt compaction failed: ${errorMessage}`,
 			});
 			return false;
@@ -4756,9 +4897,10 @@ export class AgentSession {
 		const finishCompactionWork = this._sessionWorkBarrier.begin();
 		const agentMessagesAtStart = this.agent.state.messages.slice();
 		const autoCompactionController = new AbortController();
+		const requestId = randomUUID();
 		this._claimCompactionController(autoCompactionController, "auto");
 		const endBeforeExecution = (): false => {
-			this._emit({ type: "compaction_start", reason });
+			this._emit({ type: "compaction_start", reason, requestId });
 			if (reason === "overflow" && this._autoCompactionAbortController === autoCompactionController) {
 				this._overflowRecoveryAttempted = false;
 			}
@@ -4774,6 +4916,7 @@ export class AgentSession {
 				result: undefined,
 				aborted: autoCompactionController.signal.aborted,
 				willRetry: false,
+				requestId,
 			});
 			return false;
 		};
@@ -4804,12 +4947,13 @@ export class AgentSession {
 				return endBeforeExecution();
 			}
 			if (!this._ownsCompactionController(autoCompactionController, "auto")) return false;
-			this._emit({ type: "compaction_start", reason });
+			this._emit({ type: "compaction_start", reason, requestId });
 
 			const execution = await this._executeCompaction({
 				controller: autoCompactionController,
 				owner: "auto",
 				reason,
+				requestId,
 				willRetry,
 				agentMessagesAtStart,
 			});
@@ -4853,6 +4997,7 @@ export class AgentSession {
 				result: undefined,
 				aborted,
 				willRetry: false,
+				requestId,
 				errorMessage: aborted
 					? undefined
 					: reason === "overflow"
@@ -5158,6 +5303,7 @@ export class AgentSession {
 				compact: (options) => {
 					const admission = this._claimPendingCompactionAdmission();
 					const controller = admission.controller;
+					const requestId = randomUUID();
 					void (async () => {
 						let outcome: "completed" | "failed" | "aborted" = "failed";
 						let compactionCompleted = false;
@@ -5167,11 +5313,12 @@ export class AgentSession {
 							await this._abortActiveAgentAndRetry("system");
 							this._disconnectFromAgent();
 							disconnected = true;
-							this._emit({ type: "compaction_start", reason: "extension" });
+							this._emit({ type: "compaction_start", reason: "extension", requestId });
 							const execution = await this._executeCompaction({
 								controller,
 								owner: "compaction",
 								reason: "extension",
+								requestId,
 								customInstructions: options?.customInstructions,
 								willRetry: false,
 							});
@@ -5196,6 +5343,7 @@ export class AgentSession {
 								result: undefined,
 								aborted,
 								willRetry: false,
+								requestId,
 								errorMessage: aborted ? undefined : `Compaction failed: ${message}`,
 							});
 							const err = error instanceof Error ? error : new Error(String(error));

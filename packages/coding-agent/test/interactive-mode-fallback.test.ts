@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
+import type { NoticeSpec } from "../src/core/extensions/notice/index.ts";
 import { InteractiveMode, shouldShowRetryIndicator } from "../src/modes/interactive/interactive-mode.ts";
 
 type FallbackLifecycleFixture = {
@@ -11,6 +12,7 @@ type FallbackLifecycleFixture = {
 	showWarning: (message: string) => void;
 	showStatus: (message: string) => void;
 	showError: (message: string) => void;
+	showNoticeBox: (spec: NoticeSpec) => void;
 	showStatusIndicator: (indicator: { kind: string }) => void;
 	clearStatusIndicator: (kind: string) => void;
 	setExtensionStatus: (key: string, text: string | undefined) => void;
@@ -30,6 +32,7 @@ function createFixture(): FallbackLifecycleFixture {
 		showWarning: vi.fn(),
 		showStatus: vi.fn(),
 		showError: vi.fn(),
+		showNoticeBox: vi.fn(),
 		showStatusIndicator(indicator): void {
 			this.activeStatusIndicatorKind = indicator.kind;
 		},
@@ -51,8 +54,8 @@ describe("InteractiveMode fallback lifecycle", () => {
 			to: "claude-opus-4-8",
 			chainConfigured: true,
 		});
-		expect(withChain.showWarning).toHaveBeenCalledWith(
-			"Server fallback claude-fable-5 -> claude-opus-4-8 aborted; retrying on your fallback chain",
+		expect(withChain.showNoticeBox).toHaveBeenCalledWith(
+			expect.objectContaining({ tone: "warning", title: expect.stringContaining("claude-fable-5") }),
 		);
 
 		const withoutChain = createFixture();
@@ -62,8 +65,8 @@ describe("InteractiveMode fallback lifecycle", () => {
 			to: "claude-opus-4-6",
 			chainConfigured: false,
 		});
-		expect(withoutChain.showWarning).toHaveBeenCalledWith(
-			"Server fallback claude-opus-5 -> claude-opus-4-6 aborted; no chain configured (set one with /fallback)",
+		expect(withoutChain.showNoticeBox).toHaveBeenCalledWith(
+			expect.objectContaining({ tone: "warning", why: expect.stringContaining("/fallback") }),
 		);
 	});
 
@@ -119,11 +122,25 @@ describe("InteractiveMode fallback lifecycle", () => {
 			lastError: "all models unavailable",
 		});
 
-		expect(fixture.showWarning).toHaveBeenCalledWith("Model fallback: faux/faux-1 -> faux/faux-2 (transient)");
-		expect(fixture.showStatus).toHaveBeenNthCalledWith(1, "Fallback model faux/faux-2 responded");
-		expect(fixture.showStatus).toHaveBeenNthCalledWith(2, "Reverted to faux/faux-1");
-		expect(fixture.showError).toHaveBeenCalledWith(
-			"Fallback chain exhausted for faux/faux-1: all models unavailable",
+		expect(fixture.showNoticeBox).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({
+				tone: "warning",
+				title: expect.stringContaining("faux/faux-2"),
+				why: expect.stringContaining("transient"),
+			}),
+		);
+		expect(fixture.showNoticeBox).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({ tone: "success", title: expect.stringContaining("faux/faux-2") }),
+		);
+		expect(fixture.showNoticeBox).toHaveBeenNthCalledWith(
+			3,
+			expect.objectContaining({ tone: "accent", title: expect.stringContaining("faux/faux-1") }),
+		);
+		expect(fixture.showNoticeBox).toHaveBeenNthCalledWith(
+			4,
+			expect.objectContaining({ tone: "error", why: "all models unavailable" }),
 		);
 		expect(fixture.setExtensionStatus).toHaveBeenNthCalledWith(1, "fallback", "fallback: faux/faux-2");
 		expect(fixture.setExtensionStatus).toHaveBeenNthCalledWith(2, "fallback", undefined);

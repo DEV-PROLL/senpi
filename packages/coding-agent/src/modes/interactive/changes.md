@@ -1,5 +1,45 @@
 # changes
 
+## Fallback transitions render as shared notice boxes (2026-08-04)
+
+### What changed
+
+- `retry_fallback_applied`/`succeeded`/`reverted`/`exhausted` and `server_fallback_aborted` now render through `InteractiveMode.showNoticeBox` (shared `buildNoticeBox` from `src/core/extensions/notice/`) as titled notice boxes with per-event tones, replacing the one-line `showWarning`/`showStatus`/`showError` texts. The `FALLBACK_STATUS_KEY` footer indicator is unchanged.
+- `showNoticeBox` sanitizes every rendered line with `sanitizeTuiErrorMessage`, preserving the OSC/control-strip invariant previously carried by the `showError` exhausted path; `interactive-mode-fallback-error-sanitization.test.ts` re-pins that property against the box.
+
+### Why
+
+- Fallback transitions join loop-guard detections, ttsr injections, and goal cache-warm entries on one notice widget, so transient one-liners no longer scroll away unnoticed.
+
+### Expected merge conflict zones
+
+- LOW: five `case` bodies in `handleEvent` and one additive method beside `showError` in `interactive-mode.ts`.
+
+## Bun console diagnostics stay behind the interactive terminal guard (2026-08-03)
+
+### What changed
+
+- While the TUI owns the terminal, the interactive stderr guard now routes `console.info`, `console.warn`, and
+  `console.error` through its hidden, redacted debug-log sink and restores the exact console methods whenever the
+  terminal is released.
+- Coverage models Bun's native console behavior, which bypasses a replaced `process.stderr.write`, and pins
+  terminal silence, debug-log redaction, and restoration.
+
+### Why
+
+- omo-senpi emits ulw-loop and start-work diagnostics through `console.*`. Node routes those calls through the
+  patched stderr writer, but Bun writes them through its native console implementation, so the diagnostics could
+  corrupt the interactive footer even though direct `process.stderr.write` coverage was green.
+
+### Why this cannot be expressed externally
+
+- Extensions cannot protect the host TUI from runtime-specific console output before it reaches the terminal.
+  The host must own console interception for exactly the interval in which it owns the terminal.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-stderr-guard.ts` and its focused regression test.
+
 ## Backfill: exit alias and footer provider priority (2026-08-01)
 
 ### What changed

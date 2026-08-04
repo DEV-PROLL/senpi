@@ -157,7 +157,9 @@ describe("eval renderer theme hierarchy", () => {
 
 		// When
 		const lines = [
-			...renderEvalCall({ language: "js", code }, TEST_THEME, callContext()).render(80),
+			...renderEvalCall({ language: "js", code, summary: "collapse previews" }, TEST_THEME, callContext()).render(
+				80,
+			),
 			...renderEvalResult(result, { expanded: false, isPartial: false }, TEST_THEME, resultContext()).render(80),
 		];
 
@@ -191,7 +193,7 @@ describe("eval renderer theme hierarchy", () => {
 	it("Given a themed JavaScript call when rendered then the framed code uses syntax highlighting", () => {
 		// Given
 		const component = renderEvalCall(
-			{ language: "js", code: "const answer = 42;", title: "compute" },
+			{ language: "js", code: "const answer = 42;", summary: "compute" },
 			TEST_THEME,
 			callContext(),
 		);
@@ -201,7 +203,8 @@ describe("eval renderer theme hierarchy", () => {
 		const codeLine = requiredLine(lines, "answer");
 
 		// Then
-		expect.soft(stripAnsi(lines[0] ?? "")).toContain("eval js compute pending");
+		expect.soft(stripAnsi(lines[0] ?? "")).toContain("eval js pending");
+		expect.soft(stripAnsi(lines.join("\n"))).toContain("compute");
 		expect.soft(stripAnsi(codeLine)).toContain("const answer = 42;");
 		expect.soft(codeLine.startsWith(TEST_THEME.getFgAnsi("mdCodeBlock"))).toBe(false);
 	});

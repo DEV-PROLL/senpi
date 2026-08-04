@@ -12,6 +12,46 @@
 
 ### Removed
 
+## [2026.8.4] - 2026-08-04
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.3-3] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Filtered `skill:` slash commands out of the bare `/` palette so they surface only on a matching prefix or the explicit `skill:` namespace, with a `skill:` browse hint offered while the typed prefix is still a prefix of `skill:` ([#606](https://github.com/code-yeongyu/senpi/pull/606) by [@daniduro89](https://github.com/daniduro89)).
+
+### Fixed
+
+- Fixed visible-cursor flicker and duplicated IME composition by keeping cursor restoration and visibility bytes inside each synchronized render frame, suppressing the editor's inverse-video fake cursor while the hardware cursor is visible, and stripping colocated fake cursors terminated by either inverse-off (`CSI 27 m`) or full reset (`CSI 0 m`) ([#571](https://github.com/code-yeongyu/senpi/pull/571) by [@stevenahhh](https://github.com/stevenahhh)).
+
+### Removed
+
+## [2026.8.3-2] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [2026.8.3] - 2026-08-03
 
 ### Breaking Changes

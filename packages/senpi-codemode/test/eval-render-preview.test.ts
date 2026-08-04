@@ -9,6 +9,7 @@ describe("eval renderer preview", () => {
 		const givenArgs = {
 			language: "js",
 			code: codeLines.join("\n"),
+			summary: "six line preview",
 		} satisfies Parameters<typeof renderEvalCall>[0];
 
 		// When
@@ -143,6 +144,7 @@ describe("eval renderer preview", () => {
 		const givenArgs = {
 			language: "js",
 			code: codeLines.join("\n"),
+			summary: "show everything",
 		} satisfies Parameters<typeof renderEvalCall>[0];
 		const givenResult = evalResult(
 			{ language: "js", durationMs: 1, toolCalls, truncated: false },
@@ -187,14 +189,16 @@ describe("eval renderer preview", () => {
 		const givenArgs = {
 			language: "js",
 			code: codeLines.join("\n"),
+			summary: "large listing",
 		} satisfies Parameters<typeof renderEvalCall>[0];
 
 		// When
 		const lines = renderEvalCall(givenArgs, undefined, callContext({ expanded: true })).render(80);
 
 		// Then
-		expect.soft(lines).toHaveLength(codeLines.length + 1);
-		expect.soft(lines[1]).toBe(codeLines[0]);
+		expect.soft(lines).toHaveLength(codeLines.length + 2);
+		expect.soft(lines[1]).toBe("large listing");
+		expect.soft(lines[2]).toBe(codeLines[0]);
 		expect.soft(lines.at(-1)).toBe(codeLines.at(-1));
 	});
 

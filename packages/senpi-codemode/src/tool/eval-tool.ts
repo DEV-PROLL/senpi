@@ -8,10 +8,16 @@ import { abortError, CellExecution, defaultTimeoutFactory } from "./cell-executi
 import { CellHandler, type CellState } from "./cell-handler.ts";
 import { EvalDetachedCellManager } from "./detached-cell-manager.ts";
 import { detachedKernelBusyError, executeEvalControl, resultAfterDetach } from "./detached-eval-result.ts";
-import { evalTimeoutBehavior, isEvalControlRequest, parseEvalRequest } from "./eval-request.ts";
+import { clampEvalSummary, evalTimeoutBehavior, isEvalControlRequest, parseEvalRequest } from "./eval-request.ts";
 import type { CreateEvalToolOptions, EvalCellInvocation } from "./eval-tool-options.ts";
 import { describeTimeoutState } from "./interrupt-note.ts";
-import { createEvalInputSchema, type EvalInputSchema, type EvalToolDetails, enabledLanguageList } from "./types.ts";
+import {
+	createEvalInputSchema,
+	type EvalInputSchema,
+	type EvalToolDetails,
+	type EvalToolRequest,
+	enabledLanguageList,
+} from "./types.ts";
 
 export type { EvalTimeoutFactory } from "./cell-execution.ts";
 export type { CreateEvalToolOptions } from "./eval-tool-options.ts";
@@ -35,6 +41,15 @@ export function createEvalTool(options: CreateEvalToolOptions): ToolDefinition<E
 		promptGuidelines: [...prompt.promptGuidelines],
 		parameters,
 		executionMode: "sequential",
+		prepareArguments: (args) => {
+			if (typeof args !== "object" || args === null) return args as EvalToolRequest;
+			const record = args as Record<string, unknown>;
+			if (record.action === "peek" || record.action === "stop") return args as EvalToolRequest;
+			const summary = clampEvalSummary(record.summary);
+			if (summary === undefined) delete record.summary;
+			else record.summary = summary;
+			return args as EvalToolRequest;
+		},
 		...(options.renderers?.renderCall === undefined ? {} : { renderCall: options.renderers.renderCall }),
 		...(options.renderers?.renderResult === undefined ? {} : { renderResult: options.renderers.renderResult }),
 		async execute(toolCallId, params, signal, onUpdate, ctx) {

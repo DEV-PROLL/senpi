@@ -255,8 +255,7 @@ function renderPrefixed(text: string, environment: RenderEnvironment, prefixStyl
 
 function cellHeader(cell: EvalCellResult, environment: RenderEnvironment, badges: CellBadges): string {
 	const presentation = cellPresentation(cell.status, environment.spinnerFrame);
-	const title = cell.title === undefined ? "" : ` ${cell.title}`;
-	let header = `eval ${cell.language}${title} ${presentation.label} ${presentation.icon}`;
+	let header = `eval ${cell.language} ${presentation.label} ${presentation.icon}`;
 	if (cell.durationMs !== undefined) header += ` · ${formatDuration(cell.durationMs)}`;
 	if (badges.reset) header += " · reset";
 	if (badges.timeout !== undefined) header += ` · timeout ${badges.timeout}s`;
@@ -511,6 +510,16 @@ function renderCell(cell: EvalCellResult, environment: RenderEnvironment, badges
 		continuation: "│  ",
 		color: "borderAccent",
 	});
+	if (cell.summary !== undefined) {
+		appendLines(
+			lines,
+			renderPrefixed(style(environment.theme, "muted", cell.summary), environment, {
+				prefix: "│ ",
+				continuation: "│ ",
+				color: "muted",
+			}),
+		);
+	}
 	const innerWidth = Math.max(1, environment.width - 2);
 	const codePreview = previewText(
 		highlightedCode(cell.code, cell.language, environment.theme),
@@ -726,7 +735,6 @@ function resultHeader(
 	status: "running" | "done" | "error",
 	theme: Theme | undefined,
 ): string {
-	const title = details?.title === undefined ? "" : ` ${details.title}`;
 	let color: ThemeColor;
 	switch (status) {
 		case "running":
@@ -739,7 +747,7 @@ function resultHeader(
 			color = "error";
 			break;
 	}
-	return style(theme, color, `eval ${details?.language ?? "?"}${title} ${status}`);
+	return style(theme, color, `eval ${details?.language ?? "?"} ${status}`);
 }
 
 function resultMetadata(
@@ -771,11 +779,11 @@ export function renderEvalCall(
 		return component;
 	}
 	if (theme === undefined && context.spinnerFrame === undefined) {
-		const title = args.title === undefined ? "" : ` ${args.title}`;
 		const reset = args.reset === true ? " reset" : "";
 		const timeout = args.timeout === undefined ? "" : ` timeout ${args.timeout}s`;
 		component.setBlocks([
-			{ kind: "text", text: style(theme, "toolTitle", `eval ${args.language}${title}${reset}${timeout}`) },
+			{ kind: "text", text: style(theme, "toolTitle", `eval ${args.language}${reset}${timeout}`) },
+			...(args.summary === undefined ? [] : [{ kind: "text" as const, text: style(theme, "muted", args.summary) }]),
 			{
 				kind: "text",
 				text: style(theme, "mdCodeBlock", args.code.trim().length > 0 ? args.code : "..."),
@@ -799,7 +807,7 @@ export function renderEvalCall(
 				};
 				const cell: EvalCellResult = {
 					index: 0,
-					...(args.title === undefined ? {} : { title: args.title }),
+					...(args.summary === undefined ? {} : { summary: args.summary }),
 					code: args.code,
 					language: args.language,
 					output: "",
@@ -850,6 +858,9 @@ export function renderEvalResult(
 	const status = resultStatus(details, options, context.isError);
 	const blocks: RenderBlock[] = [
 		{ kind: "text", text: resultHeader(details, status, theme) },
+		...(details?.summary === undefined
+			? []
+			: [{ kind: "text" as const, text: style(theme, "muted", details.summary) }]),
 		...resultMetadata(details, options, theme),
 		{ kind: "blank" },
 	];

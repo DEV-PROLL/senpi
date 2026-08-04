@@ -8,6 +8,7 @@ Pi supports subscription-based providers via OAuth and API key providers via env
 - [API Keys](#api-keys)
 - [Auth File](#auth-file)
 - [Cloud Providers](#cloud-providers)
+- [Ollama Cloud](#ollama-cloud)
 - [llama.cpp](#llamacpp)
 - [Custom Providers](#custom-providers)
 - [Resolution Order](#resolution-order)
@@ -111,6 +112,23 @@ If your Claude Pro/Max subscription usage through `claude-sdk-oauth` feels unexp
 
 Radius is a dynamic `pi-messages` gateway. `/login radius` stores OAuth tokens in `auth.json`; the gateway catalog is refreshed independently and cached in `models-store.json`. Custom Radius gateways can be declared in `models.json` with `"oauth": "radius"` and a gateway `baseUrl`.
 
+## Ollama Cloud
+
+Set `OLLAMA_API_KEY` or store an API key under the `ollama` auth key, then refresh the dynamic catalog:
+
+```bash
+export OLLAMA_API_KEY=...
+senpi update --models
+senpi --provider ollama --model qwen3.5:397b
+```
+
+Senpi lists tool-capable models from `https://ollama.com/api/tags`, enriches their context, thinking, and
+vision capabilities through `/api/show`, and caches the result in `models-store.json` for offline startup.
+The provider streams through Ollama's OpenAI-compatible `/v1/chat/completions` endpoint.
+
+Existing local Ollama configurations remain supported. When an `ollama` provider in `models.json` includes
+an explicit `models` catalog, that catalog takes precedence and Senpi does not run Ollama Cloud discovery.
+
 ## API Keys
 
 ### Environment Variables or Auth File
@@ -128,6 +146,7 @@ pi
 | Ant Ling | `ANT_LING_API_KEY` | `ant-ling` |
 | Azure OpenAI Responses | `AZURE_OPENAI_API_KEY` | `azure-openai-responses` |
 | OpenAI | `OPENAI_API_KEY` | `openai` |
+| Ollama Cloud | `OLLAMA_API_KEY` | `ollama` |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek` |
 | NVIDIA NIM | `NVIDIA_API_KEY` | `nvidia` |
 | Google Gemini | `GEMINI_API_KEY` | `google` |

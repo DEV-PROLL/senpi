@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stagePublishManifest } from "./prepare-senpi-publish-manifest.mjs";
+import { rewriteOwnedRegistryAliases, stagePublishManifest } from "./prepare-senpi-publish-manifest.mjs";
+import { pinSenpiPeerDependency } from "./publish-manifest.mjs";
 export {
 	bundlablePublishPackageNames,
 	isPlatformConstrainedPackage,
@@ -55,7 +56,23 @@ const bundledWorkspaces = [
 		requiredFiles: ["package.json", "src/index.ts", "src/kernels/py/prelude.py"],
 	},
 ];
-const internalPackageNames = new Set(bundledWorkspaces.map((workspace) => workspace.packageName));
+const vendoredTypeWorkspaces = [
+	{
+		source: "packages/client/dist",
+		packageName: "@earendil-works/pi-client",
+		target: "pi-client",
+		resolverParts: ["@earendil-works", "pi-client"],
+		requiredFiles: ["index.js", "index.d.ts"],
+	},
+	{
+		source: "packages/protocol/dist",
+		packageName: "@earendil-works/pi-protocol",
+		target: "pi-protocol",
+		resolverParts: ["@earendil-works", "pi-protocol"],
+		requiredFiles: ["index.js", "index.d.ts"],
+	},
+];
+const internalPackageNames = new Set([...bundledWorkspaces, ...vendoredTypeWorkspaces].map((workspace) => workspace.packageName));
 function requiredFilesForWorkspace(workspace, nativeTargets) {
 	const requiredFiles = [...(workspace.requiredFiles ?? ["package.json", "dist/index.js"])];
 	if (workspace.nativePrebuild) {
@@ -68,6 +85,14 @@ export function bundledWorkspacePackageChecks(nativeTargets = [nativePrebuildTar
 	return bundledWorkspaces.map((workspace) => ({
 		packageName: workspace.packageName,
 		requiredFiles: requiredFilesForWorkspace(workspace, nativeTargets),
+	}));
+}
+
+function vendoredWorkspacePackageChecks() {
+	return vendoredTypeWorkspaces.map((workspace) => ({
+		packageName: workspace.packageName,
+		target: workspace.target,
+		requiredFiles: workspace.requiredFiles,
 	}));
 }
 
@@ -85,6 +110,128 @@ function shouldCopyWorkspaceFile(sourceRoot, sourcePath, sourceOnly = false) {
 		path.startsWith(`native/`) ||
 		(sourceOnly && (path === "src" || path.startsWith("src/")))
 	);
+}
+
+function listFilesRecursive(rootDir) {
+	const files = [];
+	const pending = [rootDir];
+	while (pending.length > 0) {
+		const current = pending.pop();
+		for (const entry of readdirSync(current, { withFileTypes: true })) {
+			const path = join(current, entry.name);
+			if (entry.isDirectory()) {
+				pending.push(path);
+			} else {
+				files.push(path);
+			}
+		}
+	}
+	return files;
+}
+
+function relativeModuleSpecifier(fromFile, toFile) {
+	const path = relative(dirname(fromFile), toFile).replaceAll("\\", "/");
+	return path.startsWith(".") ? path : `./${path}`;
+}
+
+function rewritePackageSpecifier(rootDir, packageName, targetFile) {
+	if (!existsSync(rootDir)) return;
+	for (const path of listFilesRecursive(rootDir)) {
+		if (!path.endsWith(".js") && !path.endsWith(".d.ts")) continue;
+		const source = readFileSync(path, "utf8");
+		const specifier = relativeModuleSpecifier(path, targetFile);
+		const rewritten = source
+			.replaceAll(`"${packageName}"`, `"${specifier}"`)
+			.replaceAll(`'${packageName}'`, `'${specifier}'`);
+		if (rewritten !== source) {
+			writeFileSync(path, rewritten);
+		}
+	}
+}
+
+function assertNoVendoredPackageSpecifiers(rootDirs) {
+	for (const rootDir of rootDirs) {
+		if (!existsSync(rootDir)) continue;
+		for (const path of listFilesRecursive(rootDir)) {
+			if (!path.endsWith(".js") && !path.endsWith(".d.ts")) continue;
+			const source = readFileSync(path, "utf8");
+			for (const workspace of vendoredTypeWorkspaces) {
+				if (source.includes(workspace.packageName)) {
+					throw new Error(
+						`Vendored output ${path} still references resolver-visible package ${workspace.packageName}`,
+					);
+				}
+			}
+		}
+	}
+}
+
+function rewriteBundledWorkspaceManifest(targetRoot) {
+	const manifestPath = join(targetRoot, "package.json");
+	const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+	rewriteOwnedRegistryAliases(manifest);
+	pinSenpiPeerDependency(manifest);
+	writeFileSync(manifestPath, `${JSON.stringify(manifest, undefined, "\t")}\n`);
+}
+
+function assertVendoredRuntimeDependencies(repoRoot) {
+	const codingAgentManifest = JSON.parse(
+		readFileSync(join(repoRoot, "packages/coding-agent/package.json"), "utf8"),
+	);
+	const codingAgentRuntimeDependencies = {
+		...(codingAgentManifest.dependencies ?? {}),
+		...(codingAgentManifest.optionalDependencies ?? {}),
+	};
+	const vendoredPackageNames = new Set(vendoredTypeWorkspaces.map((workspace) => workspace.packageName));
+	for (const workspace of vendoredTypeWorkspaces) {
+		const manifest = JSON.parse(readFileSync(join(repoRoot, dirname(workspace.source), "package.json"), "utf8"));
+		for (const dependencyName of Object.keys(manifest.dependencies ?? {})) {
+			if (vendoredPackageNames.has(dependencyName)) continue;
+			if (codingAgentRuntimeDependencies[dependencyName] === undefined) {
+				throw new Error(
+					`Vendored workspace ${workspace.packageName} requires ${dependencyName}, which is absent from @code-yeongyu/senpi runtime dependencies`,
+				);
+			}
+		}
+	}
+}
+
+function copyVendoredTypeWorkspaces(repoRoot) {
+	const codingAgentDir = join(repoRoot, "packages/coding-agent");
+	const codingAgentNodeModules = join(codingAgentDir, "node_modules");
+	const vendorRoot = join(codingAgentDir, "vendor");
+	rmSync(vendorRoot, { recursive: true, force: true });
+	assertVendoredRuntimeDependencies(repoRoot);
+
+	for (const workspace of vendoredTypeWorkspaces) {
+		rmSync(join(codingAgentNodeModules, ...workspace.resolverParts), { recursive: true, force: true });
+		const sourceRoot = join(repoRoot, workspace.source);
+		for (const requiredFile of workspace.requiredFiles) {
+			const requiredPath = join(sourceRoot, requiredFile);
+			if (!existsSync(requiredPath)) {
+				throw new Error(`Missing ${requiredPath}. Run npm run build before preparing vendored workspaces.`);
+			}
+		}
+
+		const targetRoot = join(vendorRoot, workspace.target);
+		mkdirSync(dirname(targetRoot), { recursive: true });
+		cpSync(sourceRoot, targetRoot, { recursive: true });
+	}
+
+	const clientRoot = join(vendorRoot, "pi-client");
+	const protocolRoot = join(vendorRoot, "pi-protocol");
+	rewritePackageSpecifier(clientRoot, "@earendil-works/pi-protocol", join(protocolRoot, "index.js"));
+	rewritePackageSpecifier(
+		join(codingAgentDir, "dist"),
+		"@earendil-works/pi-client",
+		join(clientRoot, "index.js"),
+	);
+	rewritePackageSpecifier(
+		join(codingAgentDir, "dist"),
+		"@earendil-works/pi-protocol",
+		join(protocolRoot, "index.js"),
+	);
+	assertNoVendoredPackageSpecifiers([join(codingAgentDir, "dist"), vendorRoot]);
 }
 
 export function directNodeModulesPackageName(lockPath) {
@@ -133,6 +280,16 @@ export function assertSenpiPackedWorkspaceFiles(packed, options = {}) {
 	const nativeTargets = options.nativePrebuildTargets ?? [nativePrebuildTarget()];
 	const prebuildFiles = new Set(nativeTargets.map(nativePrebuildFile));
 	const filePaths = new Set((packed.files ?? []).map((file) => file.path));
+	const resolverVisibleVendor = [...filePaths].find(
+		(path) =>
+			path.includes("node_modules/@earendil-works/pi-client/") ||
+			path.includes("node_modules/@earendil-works/pi-protocol/"),
+	);
+	if (resolverVisibleVendor) {
+		throw new Error(
+			`senpi package tarball must keep client/protocol outside package-manager node_modules (found ${resolverVisibleVendor})`,
+		);
+	}
 
 	// Every dependency selected by the staged bundle manifest must be vendored in the
 	// tarball. Platform-specific optional dependencies intentionally stay outside this
@@ -177,6 +334,17 @@ export function assertSenpiPackedWorkspaceFiles(packed, options = {}) {
 				continue;
 			}
 			missing.push(`${path} or ${dryRunPath}`);
+		}
+	}
+	for (const { target, requiredFiles } of vendoredWorkspacePackageChecks()) {
+		const packageRoot = `package/vendor/${target}`;
+		const dryRunPackageRoot = `vendor/${target}`;
+		for (const requiredFile of requiredFiles) {
+			const path = `${packageRoot}/${requiredFile}`;
+			const dryRunPath = `${dryRunPackageRoot}/${requiredFile}`;
+			if (!filePaths.has(path) && !filePaths.has(dryRunPath)) {
+				missing.push(`${path} or ${dryRunPath}`);
+			}
 		}
 	}
 
@@ -225,13 +393,17 @@ export function prepareSenpiBundledWorkspaces(repoRoot = root) {
 			recursive: true,
 			filter: (sourcePath) => shouldCopyWorkspaceFile(sourceRoot, sourcePath, workspace.sourceOnly),
 		});
+		rewriteBundledWorkspaceManifest(targetRoot);
 	}
+
+	copyVendoredTypeWorkspaces(repoRoot);
 
 	// Rewrite the publish manifest LAST: bundleDependencies must mirror the staged
 	// node_modules exactly (all registry runtime deps + the 5 workspace packages), so
-	// npm pack vendors the complete runtime closure into the tarball. This dirties
-	// packages/coding-agent/package.json in the working tree; restore it with
-	// `git checkout -- packages/coding-agent/package.json` after packing/publishing.
+	// npm pack vendors the complete runtime closure into the tarball. Publish staging
+	// dirties packages/coding-agent/package.json and rewrites emitted dist imports;
+	// release checkouts are disposable, while local validation must restore the checked
+	// manifest and rebuild coding-agent before returning to development.
 	const stagedPackageNames = stagePublishManifest(repoRoot);
 	console.log(`Staged ${stagedPackageNames.length} bundled packages for @code-yeongyu/senpi publish.`);
 }

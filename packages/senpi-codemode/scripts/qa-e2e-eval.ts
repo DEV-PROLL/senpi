@@ -90,6 +90,7 @@ async function runDefaultScenario(
 	const result = await session.executeTool<EvalToolDetails>("eval", {
 		language: "js",
 		code: "for(let i=0;i<3000;i++)console.log('L'+i)",
+		summary: "Print 3000 lines to verify output truncation and spill artifact",
 	});
 	const artifactPath = result.details.meta?.artifactId;
 	const spillExists = artifactPath !== undefined && existsSync(artifactPath);
@@ -97,7 +98,7 @@ async function runDefaultScenario(
 	console.log(`SPILL_EXISTS: ${spillExists}`);
 	let rubyRejected = false;
 	try {
-		await session.executeTool("eval", { language: "rb", code: "puts 1" });
+		await session.executeTool("eval", { language: "rb", code: "puts 1", summary: "Run Ruby to confirm disabled languages are rejected" });
 	} catch (error) {
 		if (error instanceof Error) rubyRejected = true;
 		else throw error;
@@ -112,14 +113,14 @@ async function runDefaultScenario(
 async function runAbortScenario(
 	session: Awaited<ReturnType<typeof createAgentSession>>["session"],
 ): Promise<void> {
-	await session.executeTool<EvalToolDetails>("eval", { language: "py", code: "x=42" });
+	await session.executeTool<EvalToolDetails>("eval", { language: "py", code: "x=42", summary: "Set Python variable x=42 before abort test" });
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(new DOMException("QA abort", "AbortError")), 500);
 	let interrupted: AgentToolResult<EvalToolDetails>;
 	try {
 		interrupted = await session.executeTool<EvalToolDetails>(
 			"eval",
-			{ language: "py", code: "while True: pass" },
+			{ language: "py", code: "while True: pass", summary: "Run infinite loop to test cooperative abort and state preservation" },
 			{ signal: controller.signal },
 		);
 	} finally {
@@ -130,7 +131,7 @@ async function runAbortScenario(
 		interrupted.details.isError === true ||
 		interruptedText.includes("QA abort") ||
 		interruptedText.toLowerCase().includes("interrupt");
-	const resumed = await session.executeTool<EvalToolDetails>("eval", { language: "py", code: "print(x)" });
+	const resumed = await session.executeTool<EvalToolDetails>("eval", { language: "py", code: "print(x)", summary: "Print x after abort to verify Python state survived" });
 	const resumedText = textOf(resumed);
 	console.log(`CANCELLED: ${cancelled}`);
 	console.log(`STATE: ${resumedText.trim()}`);

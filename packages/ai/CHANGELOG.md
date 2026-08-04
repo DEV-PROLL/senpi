@@ -12,6 +12,44 @@
 
 ### Removed
 
+## [2026.8.4] - 2026-08-04
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.3-3] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+- Added the official Ollama Cloud provider as an OpenAI-compatible builtin using `OLLAMA_API_KEY` and `https://ollama.com/v1`, discovering tool-capable models through `/api/tags` and `/api/show` with bounded-concurrency inspection, derived thinking/vision/context metadata, and last-known-catalog retention when a refresh fails or returns no usable models ([#525](https://github.com/code-yeongyu/senpi/pull/525) by [@thisisjun786](https://github.com/thisisjun786)).
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.3-2] - 2026-08-03
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [2026.8.3] - 2026-08-03
 
 ### Breaking Changes

@@ -46,7 +46,7 @@ export interface DetectorContext {
 }
 
 export interface DetectorMatch {
-	readonly rule: "collapse-repetition" | "control-token-leak";
+	readonly rule: "collapse-repetition" | "control-token-leak" | "repetitive-turns";
 	readonly reason: string;
 	readonly anomalyStartOffset: number;
 	readonly garbageStartOffset: number;

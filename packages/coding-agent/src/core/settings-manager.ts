@@ -1010,6 +1010,18 @@ export class SettingsManager {
 		return this.settings.retry?.fallbackChains;
 	}
 
+	/**
+	 * Which scope supplied `retry.fallbackChains`, so a validation warning can name
+	 * the file to open. Project scope wins because it replaces the global chain map
+	 * wholesale. Returns undefined when no scope configured chains and the resolved
+	 * map is therefore the shipped defaults.
+	 */
+	getFallbackChainsScope(): SettingsScope | undefined {
+		if (this.projectSettings.retry?.fallbackChains !== undefined) return "project";
+		if (this.globalSettings.retry?.fallbackChains !== undefined) return "global";
+		return undefined;
+	}
+
 	getRetryFallbackSettings(): ResolvedRetryFallbackSettings {
 		return resolveRetryFallbackSettings(this.settings.retry);
 	}

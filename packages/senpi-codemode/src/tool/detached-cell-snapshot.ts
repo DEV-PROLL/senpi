@@ -52,14 +52,14 @@ function fallbackResult(input: EvalToolInput): AgentToolResult<EvalToolDetails> 
 		details: {
 			language: input.language,
 			languages: [input.language],
-			...(input.title === undefined ? {} : { title: input.title }),
+			...(input.summary === undefined ? {} : { summary: input.summary }),
 			durationMs: 0,
 			toolCalls: [],
 			truncated: false,
 			cells: [
 				{
 					index: 0,
-					...(input.title === undefined ? {} : { title: input.title }),
+					...(input.summary === undefined ? {} : { summary: input.summary }),
 					code: input.code,
 					language: input.language,
 					output: "",

@@ -20,6 +20,7 @@ const OWNED_REGISTRY_ALIASES = [
 	"@code-yeongyu/senpi-codemode",
 	"@code-yeongyu/senpi",
 ];
+const BUNDLED_ONLY_WORKSPACES = ["@code-yeongyu/senpi-client", "@code-yeongyu/senpi-protocol"];
 
 function readJson(path) {
 	return JSON.parse(readFileSync(path, "utf8"));
@@ -37,6 +38,9 @@ describe("npm publish dependency graph", () => {
 		}
 		for (const packageName of OWNED_REGISTRY_ALIASES) {
 			assert.match(publishScript, new RegExp(`name: "${packageName}"`));
+		}
+		for (const packageName of BUNDLED_ONLY_WORKSPACES) {
+			assert.doesNotMatch(publishScript, new RegExp(`name: "${packageName}"`));
 		}
 	});
 });

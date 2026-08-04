@@ -216,7 +216,7 @@ async function runQa(options: QaOptions): Promise<void> {
 			try {
 				const result = await tool.execute(
 					`qa-cell-${index + 1}`,
-					{ language: "js", code, timeout: options.timeoutSeconds },
+					{ language: "js", code, timeout: options.timeoutSeconds, summary: `Execute JS cell #${index + 1} from QA --code args` },
 					undefined,
 					undefined,
 					qaContext,

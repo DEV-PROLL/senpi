@@ -1,5 +1,90 @@
 # goal Extension Changes
 
+## Cache-warm entry renderer delegates to the shared notice kit (2026-08-04)
+
+### What changed
+
+- `cache-warm-renderer.ts` now renders through `noticeEntryRenderer` from `src/core/extensions/notice/`. The exported `renderGoalCacheWarmupEntry` symbol, registration, title/why/warm/expanded text, accent and success tones, and expand behavior are unchanged; `goal-cache-warm-renderer.test.ts` passes unmodified.
+
+### Expected merge conflict zones
+
+- LOW in `cache-warm-renderer.ts`; NONE in cache-warm metrics, continuation, or persistence.
+
+## A terminal provider error is a prompt-recoverable block (2026-08-04)
+
+### What changed
+
+- `continuation-recovery.ts` exports `PROVIDER_ERROR_BLOCKED_REASON` and adds it to
+  `MECHANICAL_CONTINUATION_BLOCKS`, so `isMechanicalContinuationBlock` classifies a
+  retries-exhausted provider error alongside the cap, repetition, and length guards.
+- `index.ts` writes that shared constant instead of repeating the literal reason and
+  appends `continuationCapRecoveryHint(...)` to the blocked notice, so the TUI warning
+  now ends with `Send any message to resume.` instead of only naming the failure.
+- `GoalDirectInputLifecycle.onDisposition` needed no change: reactivating a mechanically
+  blocked goal on accepted direct input already existed, and the provider-error reason
+  now flows through it.
+
+### Why
+
+- A terminal provider error is infrastructure, not a decision. The user's next message is
+  exactly the retry signal, so leaving the goal blocked stranded a live run behind a state
+  only `/goal resume` could clear, while the notice never said so.
+- Intentional blocks stay non-recoverable: `user interrupted the turn` and model-declared
+  `update_goal` blocks are still excluded, because those encode a decision to stop.
+- This is the in-session counterpart to the restart resume prompt below: that entry recovers
+  a stopped goal when a new session loads it, this one recovers it mid-session without a
+  restart or a prompt.
+
+### Why an extension couldn't do it
+
+- Both the block-reason writer and the mechanical-block classifier live inside this builtin;
+  the policy has no public extension hook.
+
+### Expected merge-conflict zones
+
+- `continuation-recovery.ts` `MECHANICAL_CONTINUATION_BLOCKS` and its exported reason constants.
+- `index.ts` `agent_end` terminal-provider-error branch and its import block.
+
+## Restart resume prompt covers every stopped-but-unfinished goal (2026-08-04)
+
+### What changed
+
+- `lifecycle-helpers.ts` renames `isResumeOfPausedGoal` to `isResumeOfStoppedGoal`
+  and admits the whole stopped-but-unfinished set (`paused` and `blocked`) instead
+  of `paused` alone. The idle / has-UI / no-pending-messages guards and the
+  `"resume"` session-start reason are unchanged.
+- `index.ts` renames `maybePromptResumePausedGoal` to
+  `maybePromptResumeStoppedGoal`, renames the `LEAVE_GOAL_PAUSED_CHOICE` constant
+  to `LEAVE_GOAL_STOPPED_CHOICE` (`"Leave stopped"`), and interpolates the goal's
+  real status into the prompt title (`Resume blocked goal?` / `Resume paused
+  goal?`) so the dialog names the state the user is actually resuming from.
+- Accepting the prompt is unchanged: the goal flips to `active` via a `"user"`
+  mutation, accounting restarts, the footer refreshes, and a continuation is
+  queued through the same admission path.
+
+### Why
+
+- Ports the upstream codex rule in
+  `codex-rs/tui/src/app/thread_goal_actions.rs`
+  (`maybe_prompt_resume_paused_goal_after_resume`), which prompts on resume for
+  `Paused | Blocked | UsageLimited` — every status that stopped the goal without
+  finishing it. senpi previously ported only the `paused` arm.
+- A `blocked` goal was unrecoverable on restart: no prompt fired, and the
+  session-start auto-continuation denied it with `not-eligible` because the
+  status is not `active`. The goal stayed blocked with no user-visible
+  affordance, even though `blocked` is reached by ordinary events — a user
+  interrupt, a terminal provider error, or a tripped continuation guard.
+- senpi stays budget-free, so codex's `UsageLimited` arm has no counterpart and
+  no budget status is introduced. The senpi stopped set is exactly
+  `paused | blocked`; `complete` and `active` are untouched.
+
+### Expected merge conflict zones on the next sync
+
+- LOW in `lifecycle-helpers.ts` around the renamed predicate and its status set;
+  standalone `pi-goal` has no restart resume prompt.
+- LOW in `index.ts` around the `session_start` handler's resume-prompt call and
+  the choice constants.
+
 ## Legacy `pi-goal` state is imported once at session start (2026-07-31)
 
 ### What changed
@@ -109,6 +194,57 @@
   `lifecycle-helpers.ts` around continuation delivery ordering.
 - LOW in monitor continuation tests that observe delayed persistence.
 - NONE in the goal store schema, public extension API, or status transitions.
+
+## Visible continuation-wait countdown (2026-08-03)
+
+### What changed
+
+- `wait-progress.ts` exports the clamped 12-cell progress bar and the user-grace / monitor
+  wait-label formatter, reusing `formatWakeDuration` so countdowns match existing cache-warm
+  notices.
+- New `wait-ticker.ts` follows the existing `GoalElapsedTicker` / `MonitorStatusTicker` pattern:
+  it renders a dedicated `goal-wait` footer status immediately, refreshes once per second on an
+  unref'd interval, skips unchanged labels, and clears the status when its timer ends or is
+  cancelled.
+- `monitor-continuation.ts` now drives that ticker from the real delayed-continuation lifecycle.
+  It restores the 60-second `userGrace` continuation after a clean accepted user turn, keeps the
+  existing four-minute monitor delay, freezes both timers while direct-input admission is
+  unresolved, resumes rejected/handled holds with their remaining time, and clears the footer on
+  delivery, accepted replacement input, goal state changes, monitor settlement, reload, and
+  shutdown.
+- The countdown is footer-only and transient. It does not append a durable entry: a transcript
+  line per user-grace window would be permanent noise for a state whose value changes every
+  second. The existing durable `goal-cache-warmup` story remains unchanged for monitor waits.
+- Coverage keeps the nine pure rendering tests and adds lifecycle wiring assertions that observe
+  the real user-grace status before triggering the turn, advance it with fake time, then await
+  exact delivery/clear signals; cancellation is likewise observed before accepted input and
+  proves no later delivery or status tick leaks.
+
+### Why
+
+The original 60-second grace path left an active Goal silent and visually indistinguishable from
+an idle or hung session. PR #553 later removed that timer while improving correlated direct-input
+admission. This change intentionally restores the grace continuation requested here without
+removing those safeguards: accepted input still cancels an already-armed wait synchronously, and
+only the clean end of that accepted user turn starts a fresh visible grace window.
+
+A dedicated footer ticker matches the TUI's established live-status mechanism and keeps the
+countdown independent from cumulative `Pursuing goal (…)` elapsed time. Durable timeline entries
+cannot represent per-second state without transcript spam, so they are the wrong rendering
+surface for this wait.
+
+### Why the extension system could not handle this differently
+
+The scheduler and footer status are already private implementation details of the builtin Goal
+extension. The wiring stays entirely inside that builtin and uses the public `ctx.ui.setStatus`
+surface; no core extension API change is required.
+
+### Expected merge conflict zones on the next sync
+
+- MEDIUM in `monitor-continuation.ts` around delayed timer ownership and direct-input holds.
+- LOW in `continuation.ts` for the restored `userGrace` path and in `index.ts` for ticker wiring.
+- LOW in the focused Goal monitor lifecycle tests and harness status signal.
+- NONE in the Goal store schema, public extension API, or durable cache-warm entry contract.
 
 ## Observable progress resets the persisted continuation cap streak (2026-07-30)
 
@@ -679,4 +815,3 @@ codex-aligned tool naming, and budget-driven behavior removed. An optional
 - LOW in `types.ts` around the `SessionEvent` union and `on()` overloads (additive).
 - LOW in `agent-session.ts` around `abort()` and the `AgentSessionEvent` union (additive).
 - LOW in `goal/index.ts` around the session_start handler and the new session_abort handler.
-

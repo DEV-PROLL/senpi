@@ -36,7 +36,7 @@ export function callContext(options?: RenderContextOptions): CallContext;
 export function callContext(input?: EvalComponent | RenderContextOptions): CallContext {
 	const options = resolveContextOptions(input, false);
 	return {
-		args: options.args ?? { language: "js", code: "" },
+		args: options.args ?? { language: "js", code: "", summary: "render fixture" },
 		toolCallId: "eval-render-call",
 		invalidate: () => {},
 		lastComponent: options.lastComponent,
@@ -59,7 +59,7 @@ export function resultContext(options?: RenderContextOptions): ResultContext;
 export function resultContext(input?: EvalComponent | RenderContextOptions, showImages = false): ResultContext {
 	const options = resolveContextOptions(input, showImages);
 	return {
-		args: options.args ?? { language: "js", code: "" },
+		args: options.args ?? { language: "js", code: "", summary: "render fixture" },
 		toolCallId: "eval-render-result",
 		invalidate: () => {},
 		lastComponent: options.lastComponent,

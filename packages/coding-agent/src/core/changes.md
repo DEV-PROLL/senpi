@@ -1,5 +1,129 @@
 # changes
 
+## Default fallback chains survive user chain configuration (2026-08-04)
+
+### What changed
+
+- `retry-fallback/settings.ts` now layers user `retry.fallbackChains` over
+  `DEFAULT_FALLBACK_CHAINS` per key instead of replacing the whole map. A user
+  key of the same name still replaces that default outright (never a union), and
+  an explicit empty array removes a default the user does not want.
+- `retry-fallback/validate.ts` no longer warns that an empty chain "must contain
+  at least one entry", because an empty array is now the documented opt-out.
+- The malformed-map warning names the offending value
+  (`"...but got null."` / `"...but got an array."`) instead of being anonymous.
+- `SettingsManager.getFallbackChainsScope()` reports which scope supplied
+  `retry.fallbackChains` (project wins, since it replaces the map wholesale), and
+  every `validation_warning` log record now carries that scope as `source`, so a
+  single log line names the file to open. `source` is `"default"` when no scope
+  configured chains and the resolved map is the shipped defaults.
+
+### Why
+
+- Configuring an unrelated model silently deleted every shipped default chain.
+  A user who added only `apitopia/kimi-k3-*` chains lost the default
+  `anthropic/claude-fable-5` chain without any warning.
+- That loss then propagated into policy: with no chain for the active model,
+  `hasConfiguredChain()` returned false, the 2026-08-03 server-fallback policy
+  correctly disabled `abortServerSideFallback`, and Anthropic's server-side
+  substitution replaced the user's intended client fallback. The policy behaved
+  as designed; its input was wrong.
+- The anonymous "must be a plain object" warning fired repeatedly in real logs
+  with no way to identify which value produced it.
+
+### Why this cannot be expressed externally
+
+- Defaults-vs-user resolution happens inside settings resolution, before any
+  extension observes a session. An extension can add chains through
+  `setFallbackChain`, but cannot restore a default the resolver already dropped.
+
+### Expected merge conflict zones
+
+- LOW: `retry-fallback/settings.ts` `resolveFallbackChains()`.
+- LOW: `retry-fallback/validate.ts` empty-entry branch and the malformed-map string.
+- LOW: fallback settings/validate test expectations.
+
+## Durable compaction telemetry correlation (2026-08-03)
+
+### What changed
+
+- `agent-session.ts` retains superseded compaction attempt IDs until their stale terminal event arrives, rather than evicting the oldest ID after 64 supersessions.
+- A `compaction_end` event without a request ID is now logged as an uncorrelated skipped/no-attempt decision and cannot consume an active same-reason attempt. Request-bearing terminals still require an exact attempt-ID match.
+- `test/session-log-routes.test.ts` covers an early stale accepted terminal after more than 64 supersessions and no-ID retry exhaustion while another overflow attempt remains active.
+
+### Why
+
+- FIFO tombstone eviction allowed a late accepted terminal from an old attempt to reappear as a committed compaction after enough supersessions.
+- Reason-only fallback correlation let retry exhaustion, which starts no compaction and carries no request ID, falsely mark an unrelated active overflow attempt as failed/compact.
+
+### Why this cannot be expressed externally
+
+- Attempt ownership and session-log emission meet inside `AgentSession._logSessionEvent()` before external telemetry consumers receive the content-free lifecycle record.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` compaction start/end logging correlation and `test/session-log-routes.test.ts` lifecycle telemetry coverage.
+
+## Required-compaction continuation recovery (2026-08-03)
+
+### What changed
+
+- `AgentSession` marks only provenance-confirmed required-compaction admission errors as retrying.
+- Accepted post-turn threshold compaction resumes the exact interrupted continuation, including queued
+  steering input, without fabricating a user `continue`.
+- A locally proven required-compaction error can use the persisted byte estimate when every provider
+  usage sample is missing or zero.
+- Rejected recovery stays terminal, provider errors with the same text do not gain retry provenance,
+  and one recovery sequence persists one threshold error.
+
+### Why
+
+- Required admission previously surfaced as a terminal provider failure before the recovery compaction
+  finished, leaving active work idle even after a successful compaction.
+
+### Why this cannot be expressed externally
+
+- Only the session runtime owns the interrupted continuation, compaction lifecycle, provider-admission
+  ordering, and queued-input precedence.
+
+### Expected merge conflict zones
+
+- `agent-session.ts` required-compaction provenance, `_runAutoCompaction()`, and upstream request-ID telemetry.
+
+## Prefer configured client fallback chains over server substitutions (2026-08-03)
+
+### What changed
+
+- `agent-session.ts` now enables Anthropic's server-fallback abort only when the
+  current model has a configured client fallback chain.
+- The policy refreshes before each prompt and after every active-model switch,
+  so `/fallback` edits, manual model changes, retry fallbacks, and primary
+  restoration cannot carry stale precedence into the next provider request.
+- An explicit `retry.abortServerSideFallback: false` still opts out even when a
+  client chain exists.
+
+### Why
+
+- The previous session bootstrap enabled the abort unconditionally by default.
+  When Anthropic substituted `claude-opus-4-8` for `claude-opus-5` and no client
+  chain existed, Senpi discarded the valid substitute response and surfaced an
+  error plus a warning telling the user to configure `/fallback`.
+- Server fallback should be the default recovery when the user has not selected
+  a client policy; an explicit client chain should remain authoritative when it
+  exists.
+
+### Why this cannot be expressed externally
+
+- The decision must be forwarded in request-local provider options before the
+  Anthropic stream parses a fallback receipt. Extensions can configure chains
+  and observe events, but cannot change the agent loop's provider option after
+  model selection and before each internal retry continuation.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` around `_promptAgent()` and `_switchActiveModel()`.
+- LOW: server-fallback option/routing tests.
+
 ## Resume queued messages after non-auto compaction; retain admission-rejected custom messages (2026-08-03)
 
 ### What changed
