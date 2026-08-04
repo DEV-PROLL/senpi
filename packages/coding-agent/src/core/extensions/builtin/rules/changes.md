@@ -2,6 +2,24 @@
 
 Vendored from [`code-yeongyu/pi-rules`](https://github.com/code-yeongyu/pi-rules) (see `external-versions.json`).
 
+## 2026-08-04 - Live-context dedup for dynamic rules
+
+### What changed and why
+
+- Dynamic rule matching and target fingerprints remain per tool target, but delivery dedup now uses one `live-context` scope for the active extension session.
+- Reading a second target that matches an unchanged rule therefore does not append the same instruction body or another `Project rules` activation while that body remains in model context.
+- Rejected compaction keeps the dedup state warm. Accepted compaction still calls `engine.resetSession(...)`, so a later matching tool result restores the rule after context loss.
+- The existing rule-content hash remains part of the engine's dedup key, so editing a rule makes the updated body eligible for immediate re-injection without waiting for compaction.
+
+### Why this cannot be supplied by another extension
+
+- Dynamic injection filtering and `markDynamicInjected(...)` calls happen inside this builtin's private `tool_result` handler. A second extension cannot remove an already-appended instruction block or activation entry without duplicating and replacing the rules engine.
+
+### Coverage and expected conflict zones
+
+- Coverage: `test/rules-dynamic-cross-target-dedup.test.ts` verifies distinct-target suppression, rejected/accepted compaction boundaries, activation counts, and changed-content re-injection.
+- Expected conflicts: `index.ts` around the dynamic `tool_result` filter and mark loop. Preserve the shared `DYNAMIC_CONTEXT_SCOPE` argument while keeping `fingerprintDynamicTargets(...)` target-specific.
+
 ## 2026-08-04 - Shared activation notices for dynamic rules
 
 ### What changed and why
@@ -33,4 +51,4 @@ Vendored from [`code-yeongyu/pi-rules`](https://github.com/code-yeongyu/pi-rules
 
 ## Conflict zones
 
-Re-vendoring overwrites these files; this is a MANUAL_PACKAGES entry in `scripts/sync-builtin-extensions.mjs` (metadata only, no auto file-sync). Re-apply the parameter-property patches after re-running the transform, then re-check `npm run check`. The same applies to the environment resolver (`config.ts`, `index.ts`, `rules/types.ts`), the complete-result budget plus `<project_rules>` envelope (`rules/constants.ts`, `rules/formatter.ts`), and the static-selection filter in `index.ts`. Dropping the resolver makes the documented `PI_RULES_*` values inert; dropping complete-result budgeting makes Senpi's wrapper exceed the configured limit; dropping the envelope or static-selection adaptation silently removes project rules on the `claude-agent-sdk` lane or subsequent prompts. Re-run `test/rules-env-config.test.ts`, `test/rules-before-agent-start.test.ts`, and `test/claude-agent-sdk-project-instructions.test.ts` after every re-vendor.
+Re-vendoring overwrites these files; this is a MANUAL_PACKAGES entry in `scripts/sync-builtin-extensions.mjs` (metadata only, no auto file-sync). Re-apply the parameter-property patches after re-running the transform, then re-check `npm run check`. The same applies to the environment resolver (`config.ts`, `index.ts`, `rules/types.ts`), the complete-result budget plus `<project_rules>` envelope (`rules/constants.ts`, `rules/formatter.ts`), the static-selection filter, and the dynamic `DYNAMIC_CONTEXT_SCOPE` in `index.ts`. Dropping the resolver makes the documented `PI_RULES_*` values inert; dropping complete-result budgeting makes Senpi's wrapper exceed the configured limit; dropping the envelope or static-selection adaptation silently removes project rules on the `claude-agent-sdk` lane or subsequent prompts; dropping the live-context scope reintroduces repeated dynamic instructions for each distinct matching target. Re-run `test/rules-env-config.test.ts`, `test/rules-before-agent-start.test.ts`, `test/rules-dynamic-cross-target-dedup.test.ts`, and `test/claude-agent-sdk-project-instructions.test.ts` after every re-vendor.

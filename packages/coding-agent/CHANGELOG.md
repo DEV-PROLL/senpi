@@ -15,6 +15,7 @@
 ### Fixed
 
 - Collapsed repeated `<ultrawork-mode>` directive blocks to the single most recent copy when the Claude SDK OAuth lane flattens a conversation, cutting the re-sent prompt on a representative transcript from 85,890 to 18,094 bytes ([#705](https://github.com/code-yeongyu/senpi/pull/705))
+- Fixed dynamic project rules being re-injected for every distinct matching tool target: unchanged rule content now stays deduplicated while it remains in the live agent context, then becomes eligible again after accepted compaction or a rule-content change ([#712](https://github.com/code-yeongyu/senpi/pull/712)).
 - Fixed MCP prompt slash commands going missing after startup-raced server connections: the MCP service now emits a catalog-registration signal after publishing each snapshot, and prompt command registration waits for the server's prompt metadata instead of inferring readiness from tool registration ([#706](https://github.com/code-yeongyu/senpi/pull/706)).
 
 ### Removed
