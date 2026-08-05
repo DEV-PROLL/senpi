@@ -12,6 +12,9 @@
 
 ### Fixed
 
+- Fixed interactive shutdown crashing with `setRawMode failed with errno: 5` when an SSH or PTY peer disappears before
+  terminal raw-mode restoration. Senpi now completes the requested exit for dead terminals without hiding unexpected
+  restoration failures ([#726](https://github.com/code-yeongyu/senpi/pull/726)).
 - Fixed `apply_patch` binary-file previews so delete and move operations render a concise marker instead of decoded byte garbage, with move-only patches preserving the original bytes.
 - Fixed client-policy server fallback aborts rendering both a refusal-shaped assistant `Error:` row and the dedicated
   fallback notice box. Diagnosed aborts now leave the notice box as the single visible explanation while preserving
