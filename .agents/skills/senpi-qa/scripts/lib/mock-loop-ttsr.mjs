@@ -46,6 +46,9 @@ export default function(pi) {
 	pi.on("agent_end", (event) => {
 		record({ type: "agent_end", aborted: event.aborted, abortSource: event.abortSource });
 	});
+	pi.on("tool_result", (event) => {
+		if (event.toolName === "create_goal") record({ type: "goal_created" });
+	});
 	pi.events?.on("goal_continuation_scheduled", (data) => {
 		record({ type: "goal_continuation_scheduled", data });
 	});
@@ -77,15 +80,14 @@ async function runRepetitiveTurnsScenario({ apiName, driveTurn, evidenceSlug, ch
 	const { box, server, result, prepared } = await driveTurn({
 		apiName,
 		turns: [
-			{ toolCalls: [{ name: "create_goal", args: { objective: "Keep the live monitor wait active" } }] },
 			{ text: REPEATED_STATUS_TURNS[0] },
+			{ toolCalls: [{ name: "create_goal", args: { objective: "Keep the live monitor wait active" } }] },
 			{ text: REPEATED_STATUS_TURNS[1] },
-			{ text: REPEATED_STATUS_TURNS[2] },
 			{ text: finalMarker },
 		],
-		prompt: `Create a Goal, report status repeatedly, and finish with ${finalMarker}.`,
+		prompt: `Report status repeatedly and finish with ${finalMarker}.`,
 		extraArgs: ["--approve"],
-		followUpPrompts: ["continue", "continue"],
+		followUpPrompts: ["Create a Goal and continue monitoring"],
 		prepareSandbox: writeGoalMonitorFixture,
 		timeoutMs: 180000,
 	});
@@ -95,6 +97,7 @@ async function runRepetitiveTurnsScenario({ apiName, driveTurn, evidenceSlug, ch
 		const allBodies = JSON.stringify(server.requests.map((r) => r.body ?? r.raw ?? ""));
 		const goalState = readGoalState(box);
 		const fixtureEvents = readFixtureEvents(prepared.eventLogPath);
+		const goalCreatedIndex = fixtureEvents.findIndex((event) => event.type === "goal_created");
 		const systemAbortIndex = fixtureEvents.findIndex(
 			(event) => event.type === "agent_end" && event.aborted === true && event.abortSource === "system",
 		);
@@ -103,12 +106,14 @@ async function runRepetitiveTurnsScenario({ apiName, driveTurn, evidenceSlug, ch
 		);
 		const monitorScheduleIndex = fixtureEvents.findIndex(
 			(event, index) =>
-				index > recoveryIndex && event.type === "goal_continuation_scheduled" && event.data?.activeMonitorCount === 1,
+				index > goalCreatedIndex &&
+				event.type === "goal_continuation_scheduled" &&
+				event.data?.activeMonitorCount === 1,
 		);
 		checks.ok(`${scenarioName}: CLI exits zero`, result.code === 0 && !result.timedOut, `code=${result.code}`);
 		checks.ok(
 			`${scenarioName}: cross-turn repetition triggered an extra bounded turn`,
-			server.requests.length === 6,
+			server.requests.length === 4,
 			`requests=${server.requests.length}`,
 		);
 		checks.ok(
@@ -117,20 +122,28 @@ async function runRepetitiveTurnsScenario({ apiName, driveTurn, evidenceSlug, ch
 			`interruptPresent=${allBodies.includes("repetitive-turns")}`,
 		);
 		checks.ok(`${scenarioName}: recovery answer returned`, output.includes(finalMarker), `marker=${finalMarker}`);
+		const hiddenRuntimeError = /Agent is already processing|Extension error \([^)]*\): This extension ctx is stale/.test(output);
+		checks.ok(
+			`${scenarioName}: no hidden runtime or stale-context errors`,
+			!hiddenRuntimeError,
+			`hiddenRuntimeError=${hiddenRuntimeError}`,
+		);
 		checks.ok(
 			`${scenarioName}: final persisted Goal remains active`,
 			goalState?.goal?.status === "active",
 			`status=${goalState?.goal?.status ?? "missing"}`,
 		);
 		checks.ok(
-			`${scenarioName}: TTSR system abort is followed by a recovery agent end`,
-			systemAbortIndex >= 0 && recoveryIndex > systemAbortIndex,
-			`systemAbortIndex=${systemAbortIndex} recoveryIndex=${recoveryIndex}`,
+			`${scenarioName}: active Goal exists before the TTSR system abort`,
+			goalCreatedIndex >= 0 && systemAbortIndex > goalCreatedIndex,
+			`goalCreatedIndex=${goalCreatedIndex} systemAbortIndex=${systemAbortIndex}`,
 		);
 		checks.ok(
-			`${scenarioName}: live monitor continuation remains scheduled after recovery`,
-			monitorScheduleIndex > recoveryIndex,
-			`recoveryIndex=${recoveryIndex} monitorScheduleIndex=${monitorScheduleIndex}`,
+			`${scenarioName}: TTSR system abort is followed by recovery with monitor wait live`,
+			recoveryIndex > systemAbortIndex &&
+				monitorScheduleIndex > goalCreatedIndex &&
+				monitorScheduleIndex < recoveryIndex,
+			`systemAbortIndex=${systemAbortIndex} recoveryIndex=${recoveryIndex} monitorScheduleIndex=${monitorScheduleIndex}`,
 		);
 		guard.assertUnchanged();
 		if (evidenceSlug) {
