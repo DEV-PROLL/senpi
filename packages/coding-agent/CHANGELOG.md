@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- Fixed system-owned TTSR interruptions being recorded as user interruptions, which could block an active Goal even
+  while a background child or monitor could still resume the run. Stream-rule and Goal cache-warm status now render
+  through one durable notice owner instead of duplicate transient and persisted UI messages
+  ([#733](https://github.com/code-yeongyu/senpi/pull/733)).
 - Fixed required compaction fatally ending a turn once the per-turn soft cap (3 accepted or ineffective
   compactions) was reached. Compaction admission is now bounded only by the absolute session cap (10) and the
   failure circuit breaker, so long turns that legitimately need more than three compactions keep running
