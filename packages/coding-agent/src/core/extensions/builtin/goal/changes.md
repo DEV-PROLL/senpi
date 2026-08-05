@@ -12,6 +12,11 @@
   avoids arming user grace, and lets the recovery end arm the live monitor wait.
   If no automatic retry remains, an active monitor wait is armed immediately so
   the Goal still has a live resumption channel.
+- If a system-owned provider error has neither an automatic retry nor an active
+  monitor, Goal queues its own hidden `systemRecovery` continuation instead of
+  leaving an active Goal idle. This path bypasses only idle/terminal-stop
+  eligibility and retains the persisted cap, repetition, pending-message, and
+  single-flight guards.
 - Provenance-free terminal aborted responses still block as provider failures,
   while explicit user aborts retain the dedicated `user interrupted the turn`
   block.
@@ -33,7 +38,8 @@
 
 ### Expected merge conflict zones
 
-- `index.ts` around `didTerminalProviderErrorEndTurn` and system-abort tests.
+- `agent-end-continuation.ts`, `continuation.ts`, and
+  `monitor-continuation.ts` around system-abort continuation routing.
 
 ## Cache-warm waits are widget-owned (2026-08-05)
 
@@ -483,7 +489,7 @@ surface; no core extension API change is required.
 ### What changed
 
 - `monitor-continuation.ts` counts consecutive monitor-wait continuations per goal
-  (`GOAL_MONITOR_STALL_THRESHOLD = 3`). From the third consecutive delayed continuation
+  (`GOAL_STALL_TOOLLESS_THRESHOLD = 3`). From the third consecutive delayed continuation
   fired while monitors stayed active, the hidden continuation prompt is prefixed with a
   `<goal_monitor_stall_check>` block (`buildMonitorStallNotice` in `prompt.ts`) telling
   the agent the repeated wait looks abnormal and to actively inspect the monitored state

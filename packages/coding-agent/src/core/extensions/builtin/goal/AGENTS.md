@@ -53,12 +53,16 @@ recovery bullets otherwise. Accepted direct input disarms a pending continuation
 and a clean accepted user turn arms a visible 10-second grace countdown before the Goal
 resumes; mechanically blocked Goals are reactivated on accepted input, including admitted
 steering. A `length` stop gets exactly one minimal truncation recovery before the goal
-blocks on repetition, terminal provider errors block the goal only when `AgentEndEvent.willRetry`
-is false and count as mechanical (a new user message resumes the goal, and the blocked notice
-says so), while intentional blocks — a user interrupt or a model-declared `update_goal` block —
-stay non-recoverable. Resumed sessions with 8+ trailing historical continuation entries suppress
-session-start auto-resume. `tokenBudget` remains inert compatibility metadata only; this
-policy is budget-free by design.
+blocks on repetition. Terminal provider errors block the goal only when
+`AgentEndEvent.willRetry` is false and the abort is not explicitly system-owned; those
+blocks count as mechanical, so a new user message resumes the goal and the blocked notice
+says so. A terminal system error instead preserves the active Goal: it schedules the live
+monitor wait when one exists, or queues a guarded hidden `systemRecovery` continuation
+when no monitor or retry can resume the run. Intentional blocks — a user interrupt or a
+model-declared `update_goal` block — stay non-recoverable. Resumed sessions with 8+
+trailing historical continuation entries suppress session-start auto-resume.
+`tokenBudget` remains inert compatibility metadata only; this policy is budget-free by
+design.
 
 ## RESTART RESUME PROMPT
 

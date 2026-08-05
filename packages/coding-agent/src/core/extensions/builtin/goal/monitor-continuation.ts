@@ -10,7 +10,6 @@ import {
 import {
 	continuationTurnUsedTools,
 	evaluateGoalContinuation,
-	GOAL_STALL_TOOLLESS_THRESHOLD,
 	GOAL_USER_GRACE_DELAY_MS,
 	type GoalContinuationInput,
 	type GoalContinuationPath,
@@ -41,8 +40,6 @@ import type { GoalWaitTicker } from "./wait-ticker.ts";
 export const GOAL_MONITOR_CONTINUATION_DELAY_MS = 240_000;
 export const GOAL_CONTINUATION_SCHEDULED_EVENT = "goal_continuation_scheduled";
 export const GOAL_CONTINUATION_RESUMED_EVENT = "goal_continuation_resumed";
-export const GOAL_MONITOR_CONTINUATION_NOTICE = "Goal continuation scheduled in 4 minutes while a monitor is active.";
-export const GOAL_MONITOR_STALL_THRESHOLD = GOAL_STALL_TOOLLESS_THRESHOLD;
 export const GOAL_MONITOR_STALL_EVENT = "goal_monitor_continuation_stall";
 
 export class MonitorAwareGoalContinuation {
@@ -162,14 +159,16 @@ export class MonitorAwareGoalContinuation {
 		return goal;
 	}
 
-	afterSystemAbort(options: SystemAbortOptions): Goal | null {
+	async afterSystemAbort(options: SystemAbortOptions): Promise<Goal | null> {
 		this.noteContinuationStarted();
 		this.#ctx = options.ctx;
 		this.#goal = options.goal;
 		this.#lastAgentEndMessages = options.messages;
 		this.#lastTurnUsage = collectAssistantUsage([...options.messages]);
-		if (!options.willRetry && options.goal?.status === "active" && this.#activeMonitorCount > 0) {
-			this.#schedule(options.goal, "monitor");
+		if (options.willRetry || options.goal?.status !== "active") return options.goal;
+		if (this.#activeMonitorCount > 0) this.#schedule(options.goal, "monitor");
+		else if (lastAssistantMessage(options.messages)?.stopReason === "error") {
+			return (await this.#admitAndQueue(options.ctx, options.goal, "systemRecovery", options.messages)).goal;
 		}
 		return options.goal;
 	}
