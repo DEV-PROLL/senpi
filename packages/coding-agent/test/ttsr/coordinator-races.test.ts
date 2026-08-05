@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { RULE_ACTIVATION_ENTRY_TYPE } from "../../src/core/extensions/builtin/rule-activation/types.ts";
 import {
 	claimAbort,
 	createGenerationState,
@@ -62,7 +61,7 @@ function readSessionEntries(harness: Harness): PersistedEntry[] {
 }
 
 function activationRecords(entries: PersistedEntry[]): PersistedEntry[] {
-	return entries.filter((entry) => entry.type === "custom" && entry.customType === RULE_ACTIVATION_ENTRY_TYPE);
+	return entries.filter((entry) => entry.type === "custom" && entry.customType === "rule-activation");
 }
 
 function nudgeMessages(entries: PersistedEntry[]): PersistedEntry[] {
