@@ -1,6 +1,7 @@
 import { GOAL_CONTINUATION_MESSAGE_TYPE } from "../../../messages.ts";
 import type { SessionEntry } from "../../../session-manager.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
+import { continueGoalAfterAgentEnd } from "./agent-end-continuation.ts";
 import { GOAL_CACHE_WARMUP_ENTRY_TYPE } from "./cache-warm.ts";
 import { renderGoalCacheWarmupEntry } from "./cache-warm-renderer.ts";
 import { registerGoalCommand } from "./command-registration.ts";
@@ -212,13 +213,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			clearAgentGoalAccounting();
 		}
 		refreshGoalUiBestEffort(ctx, goal);
-		let continuationGoal = goal;
-		if (event.aborted === true && event.abortSource === "system") {
-			monitorContinuation.noteContinuationStarted();
-			monitorContinuation.syncGoal(goal);
-		} else {
-			continuationGoal = await monitorContinuation.afterAgentEnd({ ctx, goal, messages: event.messages });
-		}
+		const continuationGoal = await continueGoalAfterAgentEnd(monitorContinuation, { ctx, event, goal });
 		if (continuationGoal !== goal) {
 			goal = continuationGoal;
 			if (goal?.status === "active") {

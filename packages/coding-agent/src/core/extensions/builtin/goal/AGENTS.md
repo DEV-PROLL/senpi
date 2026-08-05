@@ -12,10 +12,13 @@ hidden continuation prompts.
 ```
 goal/
 ├── index.ts          # Extension entry — tools + /goal command + session/agent lifecycle + usage accounting
+├── agent-end-continuation.ts # Agent-end routing into Goal continuation ownership
 ├── store.ts          # File persistence: read/write/create/update/clear/accountGoalUsage
 ├── types.ts          # Goal (+ inert tokenBudget compatibility metadata), GoalStatus, GoalFile, refs, snapshots
 ├── validation.ts     # validateObjective (trim + max length)
 ├── continuation.ts   # shouldQueueGoalContinuation* gating predicates
+├── monitor-continuation-types.ts # Monitor scheduler lifecycle contracts
+├── last-assistant-message.ts # Shared last-assistant lookup for terminal classification
 ├── prompt.ts         # buildContinuationPrompt (untrusted-objective + completion audit)
 ├── format.ts         # Tool/UI formatting + goalToolResponse snapshot
 ├── command.ts        # parseGoalCommand (show|pause|resume|clear|setObjective)

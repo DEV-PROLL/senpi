@@ -5,10 +5,13 @@
 ### What changed
 
 - Explicit `abortSource: "system"` terminal abort events no longer enter Goal's
-  retries-exhausted provider-error blocking branch.
+  retries-exhausted provider-error blocking branch, including TTSR's
+  provider-error shell with `stopReason: "error"`.
 - A system-owned aborted `agent_end` is treated as the start of extension-owned
   recovery rather than as a clean user turn: it preserves any existing timer,
   avoids arming user grace, and lets the recovery end arm the live monitor wait.
+  If no automatic retry remains, an active monitor wait is armed immediately so
+  the Goal still has a live resumption channel.
 - Provenance-free terminal aborted responses still block as provider failures,
   while explicit user aborts retain the dedicated `user interrupted the turn`
   block.
