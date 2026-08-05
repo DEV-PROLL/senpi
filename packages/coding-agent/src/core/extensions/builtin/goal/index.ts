@@ -216,20 +216,17 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		const continuationGoal = await continueGoalAfterAgentEnd(monitorContinuation, { ctx, event, goal });
 		if (continuationGoal !== goal) {
 			goal = continuationGoal;
-			if (goal?.status === "active") {
-				beginAgentGoalAccounting(goal);
-			} else {
-				clearAgentGoalAccounting();
-			}
-			refreshGoalUiBestEffort(ctx, goal);
+			syncContinuationGoal(ctx, goal);
 		}
 	});
 
-	pi.on("agent_settled", async () => {
-		await monitorContinuation.afterAgentSettled();
+	pi.on("agent_settled", async (_event, ctx) => {
+		const goal = await monitorContinuation.afterAgentSettled();
+		if (goal !== undefined) syncContinuationGoal(ctx, goal);
 	});
 
 	pi.on("session_abort", async (_event, ctx) => {
+		continuationPending = false;
 		const goal = await readGoal(goalStoreRef(ctx));
 		if (goal?.status !== "active") return;
 		const accounted = await accountCurrentAgentTurn(ctx, "active");
@@ -327,6 +324,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		agentGoalAccounting = null;
 		blockedThisTurnGoalId = null;
 		completedThisTurnGoalId = null;
+	}
+
+	function syncContinuationGoal(ctx: ExtensionContext, goal: Goal | null): void {
+		if (goal?.status === "active") beginAgentGoalAccounting(goal);
+		else clearAgentGoalAccounting();
+		refreshGoalUiBestEffort(ctx, goal);
 	}
 
 	function refreshGoalUi(ctx: ExtensionContext, goal: Goal | null): void {

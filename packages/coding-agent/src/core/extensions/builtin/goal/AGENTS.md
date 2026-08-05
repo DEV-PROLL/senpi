@@ -59,7 +59,9 @@ blocks count as mechanical, so a new user message resumes the goal and the block
 says so. A terminal system error instead preserves the active Goal: it schedules the live
 monitor wait when one exists, or queues a guarded hidden `systemRecovery` continuation
 after `agent_settled` when no monitor or retry can resume the run. Staging recovery until
-settlement makes an error-compatible idle turn while preserving late user cancellation.
+settlement makes an error-compatible idle turn while preserving late user cancellation;
+canceling the staged delivery also releases the single-flight latch so `/goal resume`
+can start fresh recovery.
 Intentional blocks — a user interrupt or a model-declared `update_goal` block — stay
 non-recoverable. Resumed sessions with 8+
 trailing historical continuation entries suppress session-start auto-resume.

@@ -103,6 +103,41 @@ describe("user abort racing settlement-owned recovery", () => {
 			"Continue working toward the active thread goal.",
 		);
 	});
+
+	it("resumes Goal recovery after a canceled settlement delivery", async () => {
+		let abort: Promise<void> | undefined;
+		const harness = await createHarness({
+			persistSession: true,
+			settings: { retry: { enabled: false, maxRetries: 0, baseDelayMs: 1 } },
+			extensionFactories: [goalExtension, ttsrExtension],
+		});
+		harnesses.push(harness);
+		await harness.session.bindExtensions({});
+		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
+		await createGoal(ref, "Resume canceled Goal recovery");
+		harness.session.subscribe((event) => {
+			if (event.type === "agent_end" && abort === undefined) abort = harness.session.abort();
+		});
+		harness.setResponses([
+			controlTokenLeakResponse(),
+			fauxAssistantMessage([fauxToolCall("update_goal", { status: "complete" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("resumed recovery completed")]),
+		]);
+
+		await harness.session.prompt("continue monitoring");
+		await abort;
+		expect(await readGoal(ref)).toMatchObject({ status: "blocked" });
+
+		const recoverySettled = waitForAgentSettled(harness.session);
+		await harness.session.prompt("/goal resume");
+		await recoverySettled;
+
+		expect(harness.faux.getCallLog().length).toBeGreaterThanOrEqual(2);
+		expect(JSON.stringify(harness.faux.getCallLog()[1]?.context.messages)).toContain(
+			"Continue working toward the active thread goal.",
+		);
+		expect(await readGoal(ref)).toMatchObject({ status: "complete" });
+	});
 });
 
 interface SettlementGate {
@@ -139,4 +174,19 @@ function unavailableToolResponse() {
 function controlTokenLeakResponse() {
 	const leaked = ["<", "|", "sep", "|", ">"].join("");
 	return fauxAssistantMessage([fauxThinking(`Thinking... ${leaked} ${leaked} ${leaked} trailing ${"x".repeat(400)}`)]);
+}
+
+function waitForAgentSettled(session: Harness["session"]): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			unsubscribe();
+			reject(new Error("Timed out waiting for resumed Goal recovery to settle"));
+		}, 5_000);
+		const unsubscribe = session.subscribe((event) => {
+			if (event.type !== "agent_settled") return;
+			clearTimeout(timeout);
+			unsubscribe();
+			resolve();
+		});
+	});
 }

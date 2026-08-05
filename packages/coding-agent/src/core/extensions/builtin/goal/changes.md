@@ -16,9 +16,15 @@
   monitor, Goal stages its hidden `systemRecovery` continuation until
   `agent_settled`. This launches recovery from the idle-compatible path instead
   of leaving a native follow-up stranded behind the error stop, while a user
-  abort during `agent_end` or settlement cancels the staged delivery. The path
-  bypasses only idle/terminal-stop eligibility and retains the persisted cap,
-  repetition, pending-message, and single-flight guards.
+  abort during `agent_end` or settlement cancels the staged delivery and clears
+  its single-flight latch, so an explicit `/goal resume` can admit a fresh
+  continuation. The path bypasses only idle/terminal-stop eligibility and
+  retains the persisted cap, repetition, pending-message, and single-flight
+  guards.
+- If one of those guards blocks recovery during `agent_settled`, the returned
+  Goal status now flows through the same accounting and TUI refresh path as an
+  `agent_end` continuation decision; the footer no longer remains
+  `Pursuing goal` after persistence has changed the Goal to blocked.
 - Provenance-free terminal aborted responses still block as provider failures,
   while explicit user aborts retain the dedicated `user interrupted the turn`
   block.

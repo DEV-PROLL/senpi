@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
+import { readGoal, recordContinuationDelivered } from "../../src/core/extensions/builtin/goal/store.ts";
 import { goalStoreRef } from "../../src/core/extensions/builtin/goal/store-ref.ts";
 import {
 	cleanAssistantStop,
 	cleanupGoalMonitorTempDirs,
 	createGoalHarness,
+	createGoalStatusHarness,
 	makeGoalContext,
 	runGoalHandlers,
 } from "./goal-monitor-test-harness.ts";
@@ -79,5 +80,36 @@ describe("goal state after a system-owned abort", () => {
 		await runGoalHandlers(handlers, "agent_settled", { type: "agent_settled" }, ctx);
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
+	});
+
+	it("refreshes blocked Goal status when settlement recovery hits the cap", async () => {
+		const notices: string[] = [];
+		const status = createGoalStatusHarness();
+		const { tools, handlers } = createGoalHarness();
+		const ctx = await makeGoalContext(notices, "thread-system-error-cap", { pendingMessages: false, status });
+		await tools
+			.get("create_goal")
+			?.execute("create", { objective: "Stop at the continuation cap" }, undefined, undefined, ctx);
+		const ref = goalStoreRef(ctx.sessionManager, ctx.cwd);
+		for (let attempt = 0; attempt < 8; attempt++) {
+			await recordContinuationDelivered(ref, `signature-${attempt}`);
+		}
+		await runGoalHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		await runGoalHandlers(
+			handlers,
+			"agent_end",
+			{
+				type: "agent_end",
+				aborted: true,
+				abortSource: "system",
+				willRetry: false,
+				messages: [{ ...cleanAssistantStop(), stopReason: "error" as const }],
+			},
+			ctx,
+		);
+		await runGoalHandlers(handlers, "agent_settled", { type: "agent_settled" }, ctx);
+
+		expect(await readGoal(ref)).toMatchObject({ status: "blocked" });
+		expect(status.updates.at(-1)?.text).toContain("Goal blocked");
 	});
 });
