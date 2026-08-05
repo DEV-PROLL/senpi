@@ -15,6 +15,7 @@ export async function continueGoalAfterAgentEnd(
 	if (options.event.aborted === true && options.event.abortSource === "system") {
 		return monitor.afterSystemAbort({
 			ctx: options.ctx,
+			event: options.event,
 			goal: options.goal,
 			messages: options.event.messages,
 			willRetry: options.event.willRetry === true,

@@ -58,8 +58,10 @@ blocks on repetition. Terminal provider errors block the goal only when
 blocks count as mechanical, so a new user message resumes the goal and the blocked notice
 says so. A terminal system error instead preserves the active Goal: it schedules the live
 monitor wait when one exists, or queues a guarded hidden `systemRecovery` continuation
-when no monitor or retry can resume the run. Intentional blocks — a user interrupt or a
-model-declared `update_goal` block — stay non-recoverable. Resumed sessions with 8+
+after `agent_settled` when no monitor or retry can resume the run. Staging recovery until
+settlement makes an error-compatible idle turn while preserving late user cancellation.
+Intentional blocks — a user interrupt or a model-declared `update_goal` block — stay
+non-recoverable. Resumed sessions with 8+
 trailing historical continuation entries suppress session-start auto-resume.
 `tokenBudget` remains inert compatibility metadata only; this policy is budget-free by
 design.

@@ -17,6 +17,11 @@
 - The same cancellation boundary remains open through the public `agent_end`
   notification, covering Escape handlers that run after extension dispatch but
   before retry and settlement processing.
+- The boundary now remains mutable through `agent_settled` dispatch as well.
+  Extension messages requested from that event are held by
+  `agent-settled-delivery.ts` until every handler and public listener completes;
+  a user abort drops the held actions before one can become a corrective
+  provider turn, without disturbing user-owned steering or follow-up queues.
 - System-owned aborts no longer set the user-only queued-continuation suppression
   latch; a user join still sets it before awaiting the shared abort.
 
@@ -33,8 +38,9 @@
 
 ### Expected merge conflict zones
 
-- `core/agent-abort-provenance.ts` and `core/agent-session.ts` around
-  `_emitExtensionEvent`, `abort`, and `_abortActiveAgentAndRetry`.
+- `core/agent-abort-provenance.ts`, `core/agent-settled-delivery.ts`, and
+  `core/agent-session.ts` around `_emitExtensionEvent`, `_emitAgentSettled`,
+  `abort`, and `_abortActiveAgentAndRetry`.
 
 ## Required-recovery admission supersession and bounded fallback sizing (2026-08-03)
 

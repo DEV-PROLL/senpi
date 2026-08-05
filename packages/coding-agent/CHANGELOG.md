@@ -15,8 +15,9 @@
 - Fixed system-owned TTSR interruptions being recorded as user interruptions, which could block an active Goal even
   while a background child or monitor could still resume the run. System-owned provider-error shells and consecutive
   remediation generations now retain system provenance, while a late Escape cancels corrective and provider-retry
-  work before agent settlement even when it arrives after TTSR or extension dispatch. A terminal system error with
-  no retry or monitor now queues a guarded Goal-owned recovery instead of leaving an active Goal idle. Stream-rule
+  work through `agent_settled` even when it arrives after TTSR or extension dispatch. Settlement-triggered messages
+  are held until every handler completes and discarded on cancellation. A terminal system error with no retry or
+  monitor now launches a guarded Goal-owned recovery after settlement instead of leaving an active Goal idle. Stream-rule
   and Goal cache-warm status now render through one durable notice owner instead of duplicate transient and persisted UI messages
   ([#733](https://github.com/code-yeongyu/senpi/pull/733)).
 - Fixed required compaction fatally ending a turn once the per-turn soft cap (3 accepted or ineffective

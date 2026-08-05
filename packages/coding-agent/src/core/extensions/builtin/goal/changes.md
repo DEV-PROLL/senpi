@@ -13,10 +13,12 @@
   If no automatic retry remains, an active monitor wait is armed immediately so
   the Goal still has a live resumption channel.
 - If a system-owned provider error has neither an automatic retry nor an active
-  monitor, Goal queues its own hidden `systemRecovery` continuation instead of
-  leaving an active Goal idle. This path bypasses only idle/terminal-stop
-  eligibility and retains the persisted cap, repetition, pending-message, and
-  single-flight guards.
+  monitor, Goal stages its hidden `systemRecovery` continuation until
+  `agent_settled`. This launches recovery from the idle-compatible path instead
+  of leaving a native follow-up stranded behind the error stop, while a user
+  abort during `agent_end` or settlement cancels the staged delivery. The path
+  bypasses only idle/terminal-stop eligibility and retains the persisted cap,
+  repetition, pending-message, and single-flight guards.
 - Provenance-free terminal aborted responses still block as provider failures,
   while explicit user aborts retain the dedicated `user interrupted the turn`
   block.
@@ -39,7 +41,7 @@
 ### Expected merge conflict zones
 
 - `agent-end-continuation.ts`, `continuation.ts`, and
-  `monitor-continuation.ts` around system-abort continuation routing.
+  `monitor-continuation.ts` around system-abort staging and settlement routing.
 
 ## Cache-warm waits are widget-owned (2026-08-05)
 

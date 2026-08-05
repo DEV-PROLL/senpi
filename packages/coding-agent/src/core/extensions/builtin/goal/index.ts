@@ -225,6 +225,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 	});
 
+	pi.on("agent_settled", async () => {
+		await monitorContinuation.afterAgentSettled();
+	});
+
 	pi.on("session_abort", async (_event, ctx) => {
 		const goal = await readGoal(goalStoreRef(ctx));
 		if (goal?.status !== "active") return;

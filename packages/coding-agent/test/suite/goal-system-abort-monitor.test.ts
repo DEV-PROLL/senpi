@@ -75,6 +75,8 @@ describe("goal state after a system-owned abort", () => {
 		);
 
 		expect(await readGoal(goalStoreRef(ctx.sessionManager, ctx.cwd))).toMatchObject({ status: "active" });
+		expect(sent).toHaveLength(0);
+		await runGoalHandlers(handlers, "agent_settled", { type: "agent_settled" }, ctx);
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
 	});

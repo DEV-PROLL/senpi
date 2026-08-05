@@ -65,6 +65,7 @@ export class MonitorAwareGoalContinuation {
 	#scheduledCache: GoalCacheWarmMetrics | undefined;
 	#heldTimer: { kind: DelayedContinuationKind; remainingMs: number } | undefined;
 	#directInputHolds = new Set<string>();
+	#pendingSystemRecovery: SystemAbortOptions | undefined;
 
 	constructor(
 		pi: ExtensionAPI,
@@ -161,6 +162,7 @@ export class MonitorAwareGoalContinuation {
 
 	async afterSystemAbort(options: SystemAbortOptions): Promise<Goal | null> {
 		this.noteContinuationStarted();
+		this.#pendingSystemRecovery = undefined;
 		this.#ctx = options.ctx;
 		this.#goal = options.goal;
 		this.#lastAgentEndMessages = options.messages;
@@ -168,9 +170,16 @@ export class MonitorAwareGoalContinuation {
 		if (options.willRetry || options.goal?.status !== "active") return options.goal;
 		if (this.#activeMonitorCount > 0) this.#schedule(options.goal, "monitor");
 		else if (lastAssistantMessage(options.messages)?.stopReason === "error") {
-			return (await this.#admitAndQueue(options.ctx, options.goal, "systemRecovery", options.messages)).goal;
+			this.#pendingSystemRecovery = options;
 		}
 		return options.goal;
+	}
+
+	async afterAgentSettled(): Promise<Goal | null | undefined> {
+		const pending = this.#pendingSystemRecovery;
+		this.#pendingSystemRecovery = undefined;
+		if (pending === undefined || pending.goal === null || pending.event.abortSource === "user") return undefined;
+		return (await this.#admitAndQueue(pending.ctx, pending.goal, "systemRecovery", pending.messages)).goal;
 	}
 
 	syncGoal(goal: Goal | null): void {
@@ -433,6 +442,7 @@ export class MonitorAwareGoalContinuation {
 	}
 
 	#resetContinuationState(): void {
+		this.#pendingSystemRecovery = undefined;
 		this.#consecutiveLengthRecoveries.clear();
 		this.#recentNormalizedOutputHashes = [];
 		this.#resetToollessContinuationStreak();

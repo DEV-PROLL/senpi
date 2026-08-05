@@ -11,12 +11,18 @@ export type JoinedAbort = {
 export class AgentAbortProvenance {
 	#source: AbortSource | undefined;
 	#agentEndEvent: AgentEndEvent | undefined;
+	#settlingAgentEndEvent: AgentEndEvent | undefined;
 	#agentEndBoundaryOpen = false;
 	#lateUserJoin = false;
 	#lateUserJoinDelivered = false;
 
+	get hasOpenAgentEndBoundary(): boolean {
+		return this.#agentEndBoundaryOpen || this.#agentEndEvent !== undefined;
+	}
+
 	begin(source: AbortSource): boolean {
 		this.#source = source;
+		this.#settlingAgentEndEvent = undefined;
 		this.#agentEndBoundaryOpen = false;
 		this.#lateUserJoin = false;
 		this.#lateUserJoinDelivered = false;
@@ -27,9 +33,10 @@ export class AgentAbortProvenance {
 		if (source === "user" && (this.#agentEndEvent !== undefined || this.#agentEndBoundaryOpen)) {
 			this.#source = "user";
 			if (!this.#lateUserJoinDelivered) this.#lateUserJoin = true;
-			if (this.#agentEndEvent !== undefined) {
-				this.#agentEndEvent.aborted = true;
-				this.#agentEndEvent.abortSource = "user";
+			const event = this.#agentEndEvent ?? this.#settlingAgentEndEvent;
+			if (event !== undefined) {
+				event.aborted = true;
+				event.abortSource = "user";
 			}
 			return { abortCurrentAgent: false, userOwned: true };
 		}
@@ -54,6 +61,7 @@ export class AgentAbortProvenance {
 			...(this.#source === undefined ? {} : { abortSource: this.#source }),
 		};
 		this.#agentEndEvent = event;
+		this.#settlingAgentEndEvent = undefined;
 		this.#agentEndBoundaryOpen = false;
 		this.#lateUserJoin = false;
 		this.#lateUserJoinDelivered = false;
@@ -63,6 +71,7 @@ export class AgentAbortProvenance {
 	endAgentEnd(event: AgentEndEvent): void {
 		if (this.#agentEndEvent === event) {
 			this.#agentEndEvent = undefined;
+			this.#settlingAgentEndEvent = event;
 			this.#agentEndBoundaryOpen = true;
 		}
 		this.#source = undefined;
@@ -77,5 +86,11 @@ export class AgentAbortProvenance {
 
 	closeAgentEndBoundary(): void {
 		this.#agentEndBoundaryOpen = false;
+		this.#settlingAgentEndEvent = undefined;
+	}
+
+	joinOpenBoundary(source: AbortSource): JoinedAbort | undefined {
+		if (!this.#agentEndBoundaryOpen && this.#agentEndEvent === undefined) return undefined;
+		return this.join(source, false);
 	}
 }

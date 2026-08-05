@@ -62,6 +62,7 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { AgentAbortProvenance } from "./agent-abort-provenance.ts";
+import { AgentSettledDelivery, type DeferredAgentSettledAction } from "./agent-settled-delivery.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import {
@@ -646,7 +647,9 @@ export class AgentSession {
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _userAbortPromise: Promise<void> | undefined = undefined;
 	private readonly _abortProvenance = new AgentAbortProvenance();
+	private readonly _agentSettledDelivery = new AgentSettledDelivery();
 	private _suppressQueuedContinuationAfterUserAbort = false;
+	private _userAbortGeneration = 0;
 	/** Set when clearQueue({ abortWillFollow: true }) drains queues immediately before abort(). */
 	private _hadClearedQueuedMessages = false;
 	private _extensionEventSignal: AbortSignal | undefined = undefined;
@@ -1248,16 +1251,24 @@ export class AgentSession {
 			await this.agent.waitForIdle();
 		}
 		if (!this._isAgentRunActive) {
+			this._abortProvenance.closeAgentEndBoundary();
 			this._resolveIdleWaitIfIdle();
 			return;
 		}
 		this._isAgentRunActive = false;
+		let deferredActions: DeferredAgentSettledAction[] = [];
+		this._agentSettledDelivery.begin(this._userAbortGeneration);
 		try {
 			await this._extensionRunner.emit({ type: "agent_settled" });
 			this._emit({ type: "agent_settled" });
+			if (this._abortProvenance.takeLateUserJoin()) await this._emitSessionAbort();
+			deferredActions = this._agentSettledDelivery.finish(this._userAbortGeneration);
 		} finally {
+			this._agentSettledDelivery.cancel();
+			this._abortProvenance.closeAgentEndBoundary();
 			this._resolveIdleWaitIfIdle();
 		}
+		for (const action of deferredActions) action();
 	}
 
 	private async _promptAgent(messages: AgentMessage | AgentMessage[]): Promise<void> {
@@ -1641,7 +1652,6 @@ export class AgentSession {
 		this._emit(event.type === "agent_end" ? { ...event, willRetry: agentEndWillRetry } : event);
 		if (event.type === "agent_end") {
 			if (this._abortProvenance.takeLateUserJoin()) await this._emitSessionAbort();
-			this._abortProvenance.closeAgentEndBoundary();
 		}
 
 		// Handle session persistence
@@ -1750,7 +1760,10 @@ export class AgentSession {
 					retryOutcome = await this._handleRetryableError(msg, { hardErrorFallback: true });
 				}
 			}
-			if (retryOutcome === "continued") return;
+			if (retryOutcome === "continued") {
+				this._abortProvenance.closeAgentEndBoundary();
+				return;
+			}
 
 			this._resolveRetry();
 			retryContinuationBlocked ||= retryOutcome === "blocked";
@@ -1804,6 +1817,8 @@ export class AgentSession {
 			}
 			if (!launchedContinuation) {
 				await this._emitAgentSettled();
+			} else {
+				this._abortProvenance.closeAgentEndBoundary();
 			}
 		}
 	}
@@ -3148,6 +3163,7 @@ export class AgentSession {
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 	): Promise<void> {
+		const userAbortGeneration = this._userAbortGeneration;
 		const appMessage = {
 			role: "custom" as const,
 			customType: message.customType,
@@ -3169,6 +3185,7 @@ export class AgentSession {
 		try {
 			if (waitForExistingSessionWork) {
 				await this._waitForSettledSessionWork();
+				if (userAbortGeneration !== this._userAbortGeneration) return;
 				finishSessionWork = this._sessionWorkBarrier.begin();
 			}
 
@@ -3381,8 +3398,10 @@ export class AgentSession {
 		const hadRetryBackoff = this._retryAbortController !== undefined;
 		const hadCompactionOrPending = !this.isStreaming && (this.isCompacting || this.pendingMessageCount > 0);
 		const hadClearedQueues = this._hadClearedQueuedMessages;
+		const joinedAgentEndBoundary = this._abortProvenance.hasOpenAgentEndBoundary;
 		this._hadClearedQueuedMessages = false;
-		const shouldEmitAbort = !wasMidRun && (hadRetryBackoff || hadCompactionOrPending || hadClearedQueues);
+		const shouldEmitAbort =
+			!joinedAgentEndBoundary && !wasMidRun && (hadRetryBackoff || hadCompactionOrPending || hadClearedQueues);
 		this.abortCompaction();
 		await this._abortActiveAgentAndRetry("user");
 		if (!shouldEmitAbort) return;
@@ -3849,17 +3868,29 @@ export class AgentSession {
 		admission.finishSessionWork();
 	}
 
+	private _recordUserAbort(): void {
+		this._suppressQueuedContinuationAfterUserAbort = true;
+		this._userAbortGeneration += 1;
+	}
+
 	private async _abortActiveAgentAndRetry(source: "user" | "system"): Promise<void> {
 		this.abortRetry();
 		this.abortBranchSummary();
+		if (this._userAbortPromise === undefined) {
+			const boundaryJoin = this._abortProvenance.joinOpenBoundary(source);
+			if (boundaryJoin !== undefined) {
+				if (boundaryJoin.userOwned) this._recordUserAbort();
+				return;
+			}
+		}
 		if (this._userAbortPromise) {
 			const joined = this._abortProvenance.join(source, this.isStreaming);
-			if (joined.userOwned) this._suppressQueuedContinuationAfterUserAbort = true;
+			if (joined.userOwned) this._recordUserAbort();
 			if (joined.abortCurrentAgent) this.agent.abort();
 			await this._userAbortPromise;
 			return;
 		}
-		if (this.isStreaming) this._suppressQueuedContinuationAfterUserAbort = this._abortProvenance.begin(source);
+		if (this.isStreaming && this._abortProvenance.begin(source)) this._recordUserAbort();
 
 		const abortPromise = (async () => {
 			this.agent.abort();
@@ -5182,13 +5213,16 @@ export class AgentSession {
 		runner.bindCore(
 			{
 				sendMessage: (message, options) => {
-					this.sendCustomMessage(message, options).catch((err) => {
-						runner.emitError({
-							extensionPath: RUNTIME_EXTENSION_PATH,
-							event: "send_message",
-							error: err instanceof Error ? err.message : String(err),
+					const send = () =>
+						this.sendCustomMessage(message, options).catch((err) => {
+							runner.emitError({
+								extensionPath: RUNTIME_EXTENSION_PATH,
+								event: "send_message",
+								error: err instanceof Error ? err.message : String(err),
+							});
 						});
-					});
+					if (this._agentSettledDelivery.defer(send)) return;
+					send();
 				},
 				sendUserMessage: (content, options) => {
 					this.sendUserMessage(content, options).catch((err) => {

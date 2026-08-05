@@ -1,6 +1,6 @@
 import { getKeybindings } from "@earendil-works/pi-tui";
 
-import type { ExtensionAPI, ExtensionContext, MessageUpdateEvent } from "../../types.ts";
+import type { AgentEndEvent, ExtensionAPI, ExtensionContext, MessageUpdateEvent } from "../../types.ts";
 import { appendRuleActivation, registerRuleActivationRenderer } from "../rule-activation/index.ts";
 import { parseRuleActivationDetails, RULE_ACTIVATION_ENTRY_TYPE } from "../rule-activation/types.ts";
 import { BUILTIN_TTSR_RULES } from "./builtin-rules.ts";
@@ -71,6 +71,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 	let pendingRemediation: PendingRemediation | null = null;
 	let pendingRuleNudge: PendingRuleNudge | null = null;
 	let pendingNudge: TtsrNudgeMessage | null = null;
+	let settlingAgentEnd: AgentEndEvent | null = null;
 	let disabled = false;
 	const repetitiveTurns = new RepetitiveTurnsLane();
 
@@ -165,6 +166,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_end", (event) => {
+		settlingAgentEnd = event;
 		if (event.abortSource === "user") {
 			cancelRemediation();
 			return;
@@ -259,8 +261,9 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_settled", () => {
-		if (pendingNudge === null || genState.userCancelled) {
+		if (pendingNudge === null || genState.userCancelled || settlingAgentEnd?.abortSource === "user") {
 			pendingNudge = null;
+			settlingAgentEnd = null;
 			return;
 		}
 		const nudge = pendingNudge;

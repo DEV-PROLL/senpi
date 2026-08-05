@@ -38,8 +38,10 @@
 - Explicit user interrupts still use the default user source and keep the
   existing intentional Goal block.
 - If a user interrupt joins an in-flight TTSR system abort, the resulting
-  user-owned `agent_end` cancels pending remediation before `agent_settled`, so
-  no corrective hidden turn runs after Escape.
+  user-owned settlement mutates the retained `agent_end` through the end of
+  `agent_settled`. TTSR checks that shared event before requesting its nudge,
+  while the host defers earlier settlement requests until every handler
+  completes, so neither handler order can run a corrective turn after Escape.
 - An automatic provider retry starts a fresh TTSR detection generation even
   though agent-core does not emit a new `turn_start`, so consecutive leaking
   generations each receive their own system abort and provenance.
@@ -52,6 +54,9 @@
 - `test/suite/goal-ttsr-user-abort-race.test.ts` pins the joined-abort ordering,
   one underlying abort, user provenance, durable Goal block, and no corrective
   follow-up turn.
+- `test/suite/goal-ttsr-settlement-race.test.ts` pins both `agent_settled`
+  handler orders, Goal recovery launch after a terminal system error, and stale
+  recovery removal on public-boundary cancellation.
 - `test/suite/goal-system-abort-monitor.test.ts` pins the Goal-side system-abort
   policy independently of the detector.
 - LOW in `index.ts` at the three `ctx.abort("system")` call sites.
