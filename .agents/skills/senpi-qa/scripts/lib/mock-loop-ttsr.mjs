@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createChecks, evidenceDir, guardRealAuth, installCleanupHooks } from "./common.mjs";
 
@@ -15,10 +15,13 @@ function check(name, pass, detail) {
 	return { name, pass, detail };
 }
 
-function writeTtsrEvidence(slug, scenarioName, result, server) {
+function writeTtsrEvidence(slug, scenarioName, result, server, state) {
 	const dir = evidenceDir(slug);
 	writeFileSync(join(dir, `${scenarioName}-stdout.txt`), `${result.stdout}\n${result.stderr}`);
 	writeFileSync(join(dir, `${scenarioName}-requests.json`), JSON.stringify(server.requests, null, 2));
+	if (state !== undefined) {
+		writeFileSync(join(dir, `${scenarioName}-state.json`), JSON.stringify(state, null, 2));
+	}
 	process.stderr.write(`evidence: ${dir}\n`);
 }
 
@@ -28,28 +31,86 @@ const REPEATED_STATUS_TURNS = [
 	"I read this as continue supervising the portable matrix; it has started cleanly with 3 checks green and 6 gates pending.",
 ];
 
+function writeGoalMonitorFixture(box) {
+	const eventLogPath = join(box.dir, "goal-monitor-events.jsonl");
+	const extensionPath = join(box.dir, "goal-monitor-extension.mjs");
+	const source = `
+import { appendFileSync } from "node:fs";
+
+const eventLogPath = ${JSON.stringify(eventLogPath)};
+const record = (event) => appendFileSync(eventLogPath, JSON.stringify(event) + "\\n");
+
+export default function(pi) {
+	pi.on("session_start", () => {
+		pi.events?.emit("terminal_monitor_state", { activeCount: 1 });
+		record({ type: "monitor_state", activeCount: 1 });
+	});
+	pi.on("agent_end", (event) => {
+		record({ type: "agent_end", aborted: event.aborted, abortSource: event.abortSource });
+	});
+	pi.events?.on("goal_continuation_scheduled", (data) => {
+		record({ type: "goal_continuation_scheduled", data });
+	});
+}
+`;
+	writeFileSync(extensionPath, source);
+	return { extraArgs: ["--extension", extensionPath], eventLogPath };
+}
+
+function readGoalState(box) {
+	const goalDir = join(box.sessionDir, "extensions", "goal");
+	if (!existsSync(goalDir)) return undefined;
+	const goalFile = readdirSync(goalDir)
+		.filter((name) => name.endsWith(".json"))
+		.map((name) => join(goalDir, name))
+		.at(0);
+	return goalFile === undefined ? undefined : JSON.parse(readFileSync(goalFile, "utf8"));
+}
+
+function readFixtureEvents(path) {
+	if (!existsSync(path)) return [];
+	return readFileSync(path, "utf8")
+		.split(/\r?\n/)
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+}
+
 async function runRepetitiveTurnsScenario({ apiName, driveTurn, evidenceSlug, checks, guard, finalMarker, scenarioName }) {
-	const { box, server, result } = await driveTurn({
+	const { box, server, result, prepared } = await driveTurn({
 		apiName,
 		turns: [
+			{ toolCalls: [{ name: "create_goal", args: { objective: "Keep the live monitor wait active" } }] },
 			{ text: REPEATED_STATUS_TURNS[0] },
 			{ text: REPEATED_STATUS_TURNS[1] },
 			{ text: REPEATED_STATUS_TURNS[2] },
 			{ text: finalMarker },
 		],
-		prompt: `Report status repeatedly and finish with ${finalMarker}.`,
+		prompt: `Create a Goal, report status repeatedly, and finish with ${finalMarker}.`,
 		extraArgs: ["--approve"],
 		followUpPrompts: ["continue", "continue"],
+		prepareSandbox: writeGoalMonitorFixture,
 		timeoutMs: 180000,
 	});
 
 	try {
 		const output = `${result.stdout}\n${result.stderr}`;
 		const allBodies = JSON.stringify(server.requests.map((r) => r.body ?? r.raw ?? ""));
+		const goalState = readGoalState(box);
+		const fixtureEvents = readFixtureEvents(prepared.eventLogPath);
+		const systemAbortIndex = fixtureEvents.findIndex(
+			(event) => event.type === "agent_end" && event.aborted === true && event.abortSource === "system",
+		);
+		const recoveryIndex = fixtureEvents.findIndex(
+			(event, index) => index > systemAbortIndex && event.type === "agent_end" && event.abortSource === undefined,
+		);
+		const monitorScheduleIndex = fixtureEvents.findIndex(
+			(event, index) =>
+				index > recoveryIndex && event.type === "goal_continuation_scheduled" && event.data?.activeMonitorCount === 1,
+		);
 		checks.ok(`${scenarioName}: CLI exits zero`, result.code === 0 && !result.timedOut, `code=${result.code}`);
 		checks.ok(
 			`${scenarioName}: cross-turn repetition triggered an extra bounded turn`,
-			server.requests.length > 2,
+			server.requests.length === 6,
 			`requests=${server.requests.length}`,
 		);
 		checks.ok(
@@ -58,8 +119,25 @@ async function runRepetitiveTurnsScenario({ apiName, driveTurn, evidenceSlug, ch
 			`interruptPresent=${allBodies.includes("repetitive-turns")}`,
 		);
 		checks.ok(`${scenarioName}: recovery answer returned`, output.includes(finalMarker), `marker=${finalMarker}`);
+		checks.ok(
+			`${scenarioName}: final persisted Goal remains active`,
+			goalState?.goal?.status === "active",
+			`status=${goalState?.goal?.status ?? "missing"}`,
+		);
+		checks.ok(
+			`${scenarioName}: TTSR system abort is followed by a recovery agent end`,
+			systemAbortIndex >= 0 && recoveryIndex > systemAbortIndex,
+			`systemAbortIndex=${systemAbortIndex} recoveryIndex=${recoveryIndex}`,
+		);
+		checks.ok(
+			`${scenarioName}: live monitor continuation remains scheduled after recovery`,
+			monitorScheduleIndex > recoveryIndex,
+			`recoveryIndex=${recoveryIndex} monitorScheduleIndex=${monitorScheduleIndex}`,
+		);
 		guard.assertUnchanged();
-		if (evidenceSlug) writeTtsrEvidence(evidenceSlug, scenarioName, result, server);
+		if (evidenceSlug) {
+			writeTtsrEvidence(evidenceSlug, scenarioName, result, server, { goalState, fixtureEvents });
+		}
 	} finally {
 		await server.stop();
 		box.cleanup();
