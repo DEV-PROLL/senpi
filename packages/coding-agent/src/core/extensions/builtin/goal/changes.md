@@ -6,6 +6,7 @@
 
 - Monitor-delayed Goal continuations no longer emit transient scheduled/resumed
   `ctx.ui.notify` messages.
+- The now-dead notice builders and their prose-only tests were removed.
 - The durable `goal-cache-warmup` entry remains the single notice box for the
   cache-warm story, while the `goal-wait` status ticker remains the live
   countdown surface.
