@@ -10,9 +10,19 @@
 
 ### Fixed
 
-- Kept tool parameter schemas rooted in an object type. A root `anyOf`/`oneOf`/`allOf` previously had its `type` hoisted into the branches and deleted, so OpenAI-compatible gateways rejected the request with `tools.function.parameters.type is required and must be "object"`, and the Moonshot root-union merge dropped the root's own properties entirely ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
-- Sent the real parameters of root-union tool schemas to Anthropic. `convertTools` read top-level `properties` only, so plugin and MCP tools defined as a root union reached the model with no parameters at all ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
-- Stopped retrying provider request-shape rejections. Gateways wrap these deterministic failures in 5xx envelopes, so they were classified transient and the identical invalid payload was replayed on the same model before fallback inherited it ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
+- Fixed OpenAI-compatible Chat Completions tool schemas whose object-shaped root used `anyOf`, `oneOf`, or `allOf`:
+  root object typing is no longer hoisted away, and object-shaped root `anyOf`/`oneOf` schemas now retain root
+  properties and required names while merging branch properties. The same object-root normalization is used for
+  Moonshot, while scalar and mixed root unions are left unchanged rather than being mislabeled as objects
+  ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
+- Fixed Anthropic tool conversion advertising object-shaped root `anyOf`/`oneOf` schemas as parameterless tools.
+  The adapter now resolves those schemas into top-level properties and required names before constructing
+  `input_schema`, while leaving ordinary object schemas unchanged
+  ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
+- Stopped same-model retries for recognized malformed `tools.`/`functions.` schema errors, including
+  gateway-wrapped 5xx responses and `invalid tool schema` messages. These matches are classified non-retryable before
+  generic server-error rules; unrelated transient 5xx failures remain retryable
+  ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
 
 ### Removed
 

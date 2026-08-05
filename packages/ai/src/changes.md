@@ -4,32 +4,30 @@
 
 ### What changed and why
 
-- `utils/tool-schema-compat.ts` no longer hoists a ROOT schema's `type` into its combiner
-  branches. A tool's root `parameters` must stay an object schema: OpenAI-compatible gateways
-  reject a typeless root with `tools.function.parameters.type is required and must be "object"`,
-  which is exactly how an Apitopia/Kimi turn died on 2026-08-04. `normalizeNode` now takes an
-  `isRoot` flag so branch-level hoisting (still correct below the root) is unchanged, and
-  `ensureRootObjectSchema` guarantees the emitted root is always `{"type":"object", ...}`.
-- `mergeRootObjectUnion` now merges the root's OWN `properties`/`required` with the branches'
-  instead of replacing them. It previously returned `{"properties":{},"type":"object"}` for a root
-  union that declared its properties at the root — silently sending a tool with zero parameters.
-  Untyped constraint-only branches (`{ required: [...] }` over root properties) are accepted, and
-  `required` keeps root entries plus only the names every branch shares.
-- Both flavors share one root guarantee: `normalizeToolParametersForMoonshot` is now the OpenAI
-  normalization plus annotation stripping, rather than a second, divergent root-merge path.
-- `api/anthropic-messages.ts` resolves a tool's root parameters through the shared
-  `resolveRootObjectSchema` before building `input_schema`. `convertTools` reads top-level
-  `properties`/`required` only, so a tool whose parameters are a root union arrived as
-  `{"properties":{},"required":[]}` — Claude was told the tool takes no arguments. senpi's own
-  `monitorSchema` was flattened in July to dodge this, but plugin and MCP tools ship root unions
-  and cannot be flattened by us, so the conversion itself has to handle them.
-- `utils/retry.ts` classifies provider request-shape rejections as NON-retryable, and
-  `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` is renamed `NON_RETRYABLE_PROVIDER_ERROR_PATTERN`
-  because it no longer covers only limits. Gateways wrap these deterministic rejections in 5xx
-  envelopes (`500 server_error: Invalid request: tools.function.parameters...`), so matching on
-  status text alone classified a permanent failure as transient: the identical payload was replayed
-  on the identical model until the turn died. The patterns are anchored on the
-  `tools.`/`functions.` request path so unrelated prose mentioning tools stays retryable.
+- `utils/tool-schema-compat.ts` no longer hoists a ROOT schema's `type` into its combiner branches.
+  OpenAI-compatible gateways reject a covered object-shaped root when normalization removes its required
+  `type: "object"`, which is exactly how an Apitopia/Kimi turn died on 2026-08-04. `normalizeNode` now takes an
+  `isRoot` flag so branch-level hoisting (still correct below the root) is unchanged. Plain and object-shaped roots
+  receive or retain object typing, while scalar and mixed root unions remain unchanged instead of being mislabeled.
+  Root `allOf` is protected from root type hoisting but is not flattened into a synthetic object.
+- `mergeRootObjectUnion` merges object-shaped root `anyOf`/`oneOf` schemas without replacing the root's own
+  `properties`/`required`. It previously returned `{"properties":{},"type":"object"}` for a root union that declared
+  its properties at the root — silently sending a tool with zero parameters. Untyped constraint-only branches
+  (`{ required: [...] }` over root properties) are accepted, and `required` keeps root entries plus only the names
+  every branch shares.
+- `normalizeToolParametersForMoonshot` now reuses the same object-root normalization before annotation stripping,
+  rather than maintaining a second, divergent root-merge path.
+- `api/anthropic-messages.ts` resolves object-shaped root `anyOf`/`oneOf` parameters through the shared
+  `resolveRootObjectSchema` before building `input_schema`. `convertTools` reads top-level `properties`/`required`
+  only, so covered root unions previously arrived as `{"properties":{},"required":[]}`. The conversion now merges
+  their properties and required names while leaving ordinary object schemas unchanged; non-object unions and root
+  `allOf` remain outside this resolver's flattening boundary.
+- `utils/retry.ts` classifies five recognized malformed tool/function schema message forms as NON-retryable, and
+  `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` is renamed `NON_RETRYABLE_PROVIDER_ERROR_PATTERN` because it no
+  longer covers only limits. Gateways can wrap these deterministic rejections in retryable-looking 5xx envelopes,
+  so generic status matching replayed an equivalent invalid request on the same model. Four matchers target
+  `tools.`/`functions.` request paths; `invalid tool schema` is intentionally broader. Eligible configured
+  fallbacks rebuild their own provider-specific request rather than inheriting guaranteed identical bytes.
 
 ### Why this cannot be expressed externally
 
