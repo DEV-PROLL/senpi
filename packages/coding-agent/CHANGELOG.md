@@ -12,10 +12,26 @@
 
 ### Fixed
 
+- Brought GitHub binary installs up to parity with npm for paused terminal monitors: after the wake budget suppresses
+  noisy line updates, the same monitor's terminal completion, timeout, or kill summary now clears the notifier pause
+  and prior rate limit, resets the monitor-only wake streak, and wakes the session automatically without
+  `monitor({ action: "rearm" })` or another wake-budget charge. Intermediate events remain suppressed until rearm,
+  and the pause notice now makes that distinction explicit ([#717](https://github.com/code-yeongyu/senpi/pull/717)).
 - Fixed provider transport-timeout retries remaining indefinitely Working when both
   ordinary stream guards were disabled; retry continuations now abort only their
   captured Agent run at the configured retry cap, settle the session, and leave
   later prompts/takeovers untouched ([#719](https://github.com/code-yeongyu/senpi/pull/719)).
+- Fixed OpenAI-compatible tool calls failing when an object-shaped root combiner lost its required
+  `type: "object"`, and fixed Moonshot normalization dropping root-declared properties while merging
+  object-shaped root `anyOf`/`oneOf` schemas. Scalar and mixed root unions remain unchanged instead of being
+  mislabeled as objects ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
+- Fixed Anthropic receiving object-shaped root `anyOf`/`oneOf` tools with an empty parameter map. Senpi now merges
+  their properties and computes top-level required names before constructing Anthropic `input_schema`, while
+  preserving ordinary object schemas ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
+- Stopped retrying recognized malformed tool/function schema errors on the same model when gateways wrap them in
+  retryable-looking 5xx responses. With auto-retry enabled and a configured candidate, eligible error-only turns
+  switch immediately to that fallback; without a candidate they settle after the first call, while generic
+  transient server errors remain retryable ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
 
 ### Removed
 
