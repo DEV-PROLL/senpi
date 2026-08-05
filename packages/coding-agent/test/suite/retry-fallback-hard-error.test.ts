@@ -6,6 +6,8 @@ import { createHarness, type Harness } from "./harness.ts";
 const primary = "faux/faux-1";
 const fallback = "faux/faux-2";
 const insufficientQuota = "billing error: insufficient_quota";
+const toolSchemaRejection =
+	'500 server_error: Invalid request: tools.function.parameters.type is required and must be "object"';
 
 type RetryFallbackInternals = {
 	_retryFallback?: { deps?: { cooldowns?: SelectorCooldowns } };
@@ -87,6 +89,52 @@ describe("retry fallback hard errors", () => {
 		expect(harness.faux.state.callCount).toBe(1);
 		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
 		expect(harness.eventsOfType("retry_fallback_applied")).toEqual([]);
+	});
+
+	it("does not replay a gateway-wrapped tool-schema rejection on the same model", async () => {
+		// Apitopia wrapped Kimi's deterministic request-shape rejection in a 500
+		// server_error envelope, so it read as transient and every retry resent the
+		// identical invalid payload to the identical model until the turn died
+		// (observed 2026-08-04). The payload is what is wrong, so replaying it can
+		// never succeed.
+		const harness = await createHarness({
+			settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } },
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: toolSchemaRejection })]);
+
+		await harness.session.prompt("hello");
+
+		expect(harness.faux.state.callCount).toBe(1);
+		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
+		expect(harness.session.state.messages.at(-1)).toMatchObject({ errorMessage: toolSchemaRejection });
+	});
+
+	it("switches models immediately on a tool-schema rejection instead of retrying in place", async () => {
+		// With a chain configured the rejection must take the hard-error path: one
+		// call on the failing model, an immediate switch, and no same-model retry
+		// backoff in between. The observed session instead reported
+		// "Retrying (2/3)" against the model that had already rejected the payload.
+		const harness = await createHarness({
+			models: [{ id: "faux-1" }, { id: "faux-2" }],
+			settings: {
+				retry: { enabled: true, maxRetries: 3, baseDelayMs: 60_000, fallbackChains: { [primary]: [fallback] } },
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: toolSchemaRejection }),
+			fauxAssistantMessage("fallback answer"),
+		]);
+
+		await harness.session.prompt("hello");
+
+		expect(harness.faux.getCallLog().map((call) => call.modelId)).toEqual(["faux-1", "faux-2"]);
+		expect(
+			harness.events
+				.filter((event) => event.type === "retry_fallback_applied")
+				.map((event) => (event.type === "retry_fallback_applied" ? event.reason : "")),
+		).toEqual(["hard-error"]);
 	});
 
 	it("does not treat context overflow as a hard-error fallback", async () => {

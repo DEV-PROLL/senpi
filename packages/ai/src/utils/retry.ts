@@ -4,7 +4,7 @@ function buildProviderErrorPattern(patterns: readonly string[]): RegExp {
 	return new RegExp(patterns.join("|"), "i");
 }
 
-const NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN = buildProviderErrorPattern([
+const NON_RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	// OpenCode Go/free-tier limits returned as 429 JSON error types by OpenCode's
 	// Zen API. These are subscription/account limits, not transient throttles.
 	"GoUsageLimitError",
@@ -28,6 +28,20 @@ const NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN = buildProviderErrorPattern([
 	// spend limit, so same-model retries can never recover it.
 	"credits_required",
 	"credits are required",
+
+	// Request-shape rejections: the provider refused the payload we built, not the
+	// work it describes. Gateways wrap these in whatever status they like — the
+	// observed Apitopia/Kimi case arrives as `500 server_error: Invalid request:
+	// tools.function.parameters.type is required and must be "object"` — so the
+	// status text alone would classify a permanent failure as transient. The same
+	// bytes are rejected on every attempt and on every fallback model, so retrying
+	// can only burn the turn. Anchored on the `tools[...]`/`functions[...]` request
+	// path so unrelated prose mentioning tools stays retryable.
+	"invalid request: tools\\.",
+	"invalid request: functions\\.",
+	"tools\\.[^ ]*function\\.parameters",
+	"tools\\.\\d+\\.function\\.parameters",
+	"invalid tool schema",
 ]);
 
 const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
@@ -285,6 +299,6 @@ export function isProviderTimeoutError(message: AssistantMessage): boolean {
  */
 export function isRetryableErrorMessage(errorMessage: string): boolean {
 	if (!errorMessage) return false;
-	if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage)) return false;
+	if (NON_RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage)) return false;
 	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
 }

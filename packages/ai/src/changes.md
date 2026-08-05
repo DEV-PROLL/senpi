@@ -1,5 +1,49 @@
 # AI Source Changes
 
+## 2026-08-05 - Root-object tool schemas and request-shape error classification
+
+### What changed and why
+
+- `utils/tool-schema-compat.ts` no longer hoists a ROOT schema's `type` into its combiner
+  branches. A tool's root `parameters` must stay an object schema: OpenAI-compatible gateways
+  reject a typeless root with `tools.function.parameters.type is required and must be "object"`,
+  which is exactly how an Apitopia/Kimi turn died on 2026-08-04. `normalizeNode` now takes an
+  `isRoot` flag so branch-level hoisting (still correct below the root) is unchanged, and
+  `ensureRootObjectSchema` guarantees the emitted root is always `{"type":"object", ...}`.
+- `mergeRootObjectUnion` now merges the root's OWN `properties`/`required` with the branches'
+  instead of replacing them. It previously returned `{"properties":{},"type":"object"}` for a root
+  union that declared its properties at the root — silently sending a tool with zero parameters.
+  Untyped constraint-only branches (`{ required: [...] }` over root properties) are accepted, and
+  `required` keeps root entries plus only the names every branch shares.
+- Both flavors share one root guarantee: `normalizeToolParametersForMoonshot` is now the OpenAI
+  normalization plus annotation stripping, rather than a second, divergent root-merge path.
+- `api/anthropic-messages.ts` resolves a tool's root parameters through the shared
+  `resolveRootObjectSchema` before building `input_schema`. `convertTools` reads top-level
+  `properties`/`required` only, so a tool whose parameters are a root union arrived as
+  `{"properties":{},"required":[]}` — Claude was told the tool takes no arguments. senpi's own
+  `monitorSchema` was flattened in July to dodge this, but plugin and MCP tools ship root unions
+  and cannot be flattened by us, so the conversion itself has to handle them.
+- `utils/retry.ts` classifies provider request-shape rejections as NON-retryable, and
+  `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` is renamed `NON_RETRYABLE_PROVIDER_ERROR_PATTERN`
+  because it no longer covers only limits. Gateways wrap these deterministic rejections in 5xx
+  envelopes (`500 server_error: Invalid request: tools.function.parameters...`), so matching on
+  status text alone classified a permanent failure as transient: the identical payload was replayed
+  on the identical model until the turn died. The patterns are anchored on the
+  `tools.`/`functions.` request path so unrelated prose mentioning tools stays retryable.
+
+### Why this cannot be expressed externally
+
+- Wire-payload schema normalization runs inside the provider adapter, after extension payload
+  hooks, so no extension can repair the emitted tool schema. Retry classification is consumed by
+  the agent session's hard-error routing, which lives below any extension seam.
+
+### Expected merge conflict zones
+
+- MEDIUM: `utils/tool-schema-compat.ts` around root handling and `mergeRootObjectUnion`.
+- MEDIUM: `utils/retry.ts` in the non-retryable pattern list and its renamed constant.
+- LOW: `test/openai-completions-tool-schema-compat.test.ts`, `test/retry.test.ts`.
+
+
 ## 2026-08-03 - Hint-aware 429 retry-after propagation
 
 ### What changed and why
