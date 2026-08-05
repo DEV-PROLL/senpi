@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Fixed `apply_patch` binary-file previews so delete and move operations render a concise marker instead of decoded byte garbage, with move-only patches preserving the original bytes.
+
 ### Removed
 
 ## [2026.8.5-2] - 2026-08-05
