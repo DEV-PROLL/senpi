@@ -3856,14 +3856,13 @@ export class AgentSession {
 		this.abortRetry();
 		this.abortBranchSummary();
 		if (this._userAbortPromise) {
-			this.agent.abort();
+			if (source === "user" && this._agentAbortSource !== undefined)
+				[this._agentAbortSource, this._suppressQueuedContinuationAfterUserAbort] = ["user", true];
 			await this._userAbortPromise;
 			return;
 		}
-		if (this.isStreaming) {
-			this._suppressQueuedContinuationAfterUserAbort = true;
-			this._agentAbortSource = source;
-		}
+		if (this.isStreaming)
+			[this._suppressQueuedContinuationAfterUserAbort, this._agentAbortSource] = [source === "user", source];
 
 		const abortPromise = (async () => {
 			this.agent.abort();

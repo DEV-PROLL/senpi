@@ -37,12 +37,18 @@
   nudge and any live monitor/background completion channel resume the run.
 - Explicit user interrupts still use the default user source and keep the
   existing intentional Goal block.
+- If a user interrupt joins an in-flight TTSR system abort, the resulting
+  user-owned `agent_end` cancels pending remediation before `agent_settled`, so
+  no corrective hidden turn runs after Escape.
 
 ### Coverage and expected conflict zones
 
 - `test/suite/goal-abort-extension.test.ts` combines Goal + TTSR + an active
   monitor and pins system attribution, active Goal state, and user-abort
   regression behavior.
+- `test/suite/goal-ttsr-user-abort-race.test.ts` pins the joined-abort ordering,
+  one underlying abort, user provenance, durable Goal block, and no corrective
+  follow-up turn.
 - `test/suite/goal-system-abort-monitor.test.ts` pins the Goal-side system-abort
   policy independently of the detector.
 - LOW in `index.ts` at the three `ctx.abort("system")` call sites.

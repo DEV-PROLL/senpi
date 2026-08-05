@@ -1,3 +1,29 @@
+## Joined user aborts override system provenance (2026-08-05)
+
+### What changed
+
+- `AgentSession` now promotes an in-flight system-owned abort to user-owned when
+  an explicit user abort joins the same operation.
+- Joining an existing abort awaits the shared promise without issuing a second
+  `agent.abort()` call, and a later system abort cannot downgrade user provenance.
+- System-owned aborts no longer set the user-only queued-continuation suppression
+  latch; a user join still sets it before awaiting the shared abort.
+
+### Why
+
+- TTSR can begin a corrective system abort immediately before the user presses
+  Escape. The old early-return path kept `"system"` provenance and invoked the
+  underlying abort twice, so Goal could ignore the user's durable stop intent.
+
+### Why this cannot be expressed externally
+
+- Abort provenance, shared-promise ownership, and queued-continuation suppression
+  are private `AgentSession` lifecycle state.
+
+### Expected merge conflict zones
+
+- `core/agent-session.ts` around `_abortActiveAgentAndRetry`.
+
 ## Required-recovery admission supersession and bounded fallback sizing (2026-08-03)
 
 ### What changed

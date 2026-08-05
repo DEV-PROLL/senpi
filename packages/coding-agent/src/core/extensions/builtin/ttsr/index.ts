@@ -155,6 +155,10 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		cancelRemediation();
 	});
 
+	pi.on("agent_end", (event) => {
+		if (event.abortSource === "user") cancelRemediation();
+	});
+
 	pi.on("turn_start", (_event, ctx) => {
 		ensureInitialized(ctx);
 		generation += 1;
