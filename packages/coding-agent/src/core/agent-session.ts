@@ -1635,9 +1635,14 @@ export class AgentSession {
 		} finally {
 			this._extensionEventSignal = undefined;
 		}
+		if (event.type === "agent_end" && this._abortProvenance.takeLateUserJoin()) await this._emitSessionAbort();
 
 		// Notify all listeners
 		this._emit(event.type === "agent_end" ? { ...event, willRetry: agentEndWillRetry } : event);
+		if (event.type === "agent_end") {
+			if (this._abortProvenance.takeLateUserJoin()) await this._emitSessionAbort();
+			this._abortProvenance.closeAgentEndBoundary();
+		}
 
 		// Handle session persistence
 		if (event.type === "message_end") {
@@ -1723,7 +1728,9 @@ export class AgentSession {
 			const retryableError = this._isRetryableError(msg);
 			const hardErrorFallbackEligible = this._isHardErrorFallbackEligible(msg);
 			const retryCanAdmitProvider =
-				this.settingsManager.getRetrySettings().enabled && (retryableError || hardErrorFallbackEligible);
+				!userAbortSuppressedQueuedContinuation &&
+				this.settingsManager.getRetrySettings().enabled &&
+				(retryableError || hardErrorFallbackEligible);
 			let compactedBeforeRetry = false;
 			if (
 				retryCanAdmitProvider &&
@@ -1736,7 +1743,7 @@ export class AgentSession {
 			}
 
 			let retryOutcome: "continued" | "blocked" | "not-handled" = "not-handled";
-			if (!retryContinuationBlocked) {
+			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
 				if (retryableError) {
 					retryOutcome = await this._handleRetryableError(msg);
 				} else if (hardErrorFallbackEligible) {
@@ -1747,7 +1754,7 @@ export class AgentSession {
 
 			this._resolveRetry();
 			retryContinuationBlocked ||= retryOutcome === "blocked";
-			if (!retryContinuationBlocked) {
+			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
 				if (compactedBeforeRetry && this.agent.hasQueuedMessages()) {
 					// Accepted recovery supersedes the stored admission rejection: the
 					// queued continuation is about to run, so the originating prompt must
@@ -1814,6 +1821,11 @@ export class AgentSession {
 		this._probePhase = "idle";
 		this._hintDeadlineMs = undefined;
 		this._cumulativeHintedWaitMs = 0;
+	}
+
+	private async _emitSessionAbort(): Promise<void> {
+		await this._extensionRunner.emit({ type: "session_abort" });
+		this._emit({ type: "session_abort" });
 	}
 
 	/**
@@ -3364,32 +3376,18 @@ export class AgentSession {
 	 * Abort current operation and wait for agent to become idle.
 	 */
 	async abort(): Promise<void> {
-		// Capture gap-state BEFORE _abortActiveAgentAndRetry resets retry/compaction state.
-		// A mid-run abort (actively streaming with no pending retry) is delivered via
-		// agent_end (abortSource "user") — no session_abort needed. The gap case is when
-		// no agent_end will fire to carry the abort signal:
-		//   - retry backoff (_retryAbortController defined — the error agent_end already
-		//     fired, agent.abort() during backoff is a no-op, no new agent_end)
-		//   - compaction (!isStreaming && isCompacting)
-		//   - queued continuation that was already cleared by the caller (TUI clears queues
-		//     before calling abort, so pendingMessageCount is 0 but _hadClearedQueuedMessages
-		//     records that messages were present)
-		// Purely-idle defensive aborts (e.g. RPC session close on an idle session) must not
-		// fire session_abort.
+		// Streaming aborts are carried by agent_end provenance; only gaps need session_abort.
 		const wasMidRun = this.isStreaming && this._retryAbortController === undefined;
 		const hadRetryBackoff = this._retryAbortController !== undefined;
 		const hadCompactionOrPending = !this.isStreaming && (this.isCompacting || this.pendingMessageCount > 0);
 		const hadClearedQueues = this._hadClearedQueuedMessages;
-		const joinedAgentEndDispatch = this._abortProvenance.isAgentEndDispatching;
 		this._hadClearedQueuedMessages = false;
-		const shouldEmitAbort =
-			joinedAgentEndDispatch || (!wasMidRun && (hadRetryBackoff || hadCompactionOrPending || hadClearedQueues));
+		const shouldEmitAbort = !wasMidRun && (hadRetryBackoff || hadCompactionOrPending || hadClearedQueues);
 		this.abortCompaction();
 		await this._abortActiveAgentAndRetry("user");
 		if (!shouldEmitAbort) return;
 		try {
-			await this._extensionRunner.emit({ type: "session_abort" });
-			this._emit({ type: "session_abort" });
+			await this._emitSessionAbort();
 		} catch {
 			// Extension runner may be torn down during RPC close — best-effort.
 		}

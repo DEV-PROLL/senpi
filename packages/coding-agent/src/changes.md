@@ -10,8 +10,13 @@
   `agent.abort()` and records a fresh source instead of incorrectly joining the
   prior generation's completed abort.
 - User intent that arrives while `agent_end` handlers are dispatching promotes
-  the shared event in place and emits the idempotent `session_abort` fallback, so
-  early and late handlers both observe the stop.
+  the shared event in place. A late join that occurs after an earlier handler
+  already observed system provenance emits one `session_abort` before
+  `agent_settled`, so TTSR corrective follow-ups and provider retries admitted
+  before dispatch cannot outrun the user cancellation.
+- The same cancellation boundary remains open through the public `agent_end`
+  notification, covering Escape handlers that run after extension dispatch but
+  before retry and settlement processing.
 - System-owned aborts no longer set the user-only queued-continuation suppression
   latch; a user join still sets it before awaiting the shared abort.
 

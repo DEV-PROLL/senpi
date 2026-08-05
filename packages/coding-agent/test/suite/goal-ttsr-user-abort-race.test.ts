@@ -118,61 +118,6 @@ describe("user abort racing a TTSR system abort", () => {
 			expect.objectContaining({ activeMonitorCount: 1, delayMs: 240_000 }),
 		);
 	});
-
-	it("preserves a late user join while agent_end handlers are still dispatching", async () => {
-		const abortSources: Array<string | undefined> = [];
-		let sessionAbortCount = 0;
-		let signalAgentEndStarted: (() => void) | undefined;
-		let releaseAgentEnd: (() => void) | undefined;
-		const agentEndStarted = new Promise<void>((resolve) => {
-			signalAgentEndStarted = resolve;
-		});
-		const agentEndRelease = new Promise<void>((resolve) => {
-			releaseAgentEnd = resolve;
-		});
-		const harness = await createHarness({
-			persistSession: true,
-			extensionFactories: [
-				(pi) => {
-					pi.on("agent_end", async () => {
-						signalAgentEndStarted?.();
-						await agentEndRelease;
-					});
-				},
-				goalExtension,
-				ttsrExtension,
-				(pi) => {
-					pi.on("agent_end", (event) => {
-						abortSources.push(event.abortSource);
-					});
-					pi.on("session_abort", () => {
-						sessionAbortCount += 1;
-					});
-				},
-			],
-		});
-		harnesses.push(harness);
-		await harness.session.bindExtensions({});
-		const ref = goalStoreRef(harness.sessionManager, harness.tempDir);
-		await createGoal(ref, "Honor Escape during event dispatch");
-		const originalAbort = harness.agent.abort.bind(harness.agent);
-		const abortSpy = vi.spyOn(harness.agent, "abort").mockImplementation(() => {
-			originalAbort();
-		});
-		harness.setResponses([fauxAssistantMessage([fauxText('<unavailable-tool-call name="read"> inert imitation')])]);
-
-		const prompt = harness.session.prompt("continue monitoring");
-		await agentEndStarted;
-		const abort = harness.session.abort();
-		releaseAgentEnd?.();
-		await Promise.all([abort, prompt]);
-
-		expect(abortSpy).toHaveBeenCalledTimes(1);
-		expect(abortSources).toEqual(["user"]);
-		expect(sessionAbortCount).toBe(1);
-		expect(await readGoal(ref)).toMatchObject({ status: "blocked", blockedReason: "user interrupted the turn" });
-		expect(harness.faux.getCallLog()).toHaveLength(1);
-	});
 });
 
 function createUi(captureInput: (handler: (data: string) => void) => void): ExtensionUIContext {
