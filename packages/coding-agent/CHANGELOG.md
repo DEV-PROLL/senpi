@@ -12,6 +12,11 @@
 
 ### Fixed
 
+- Fixed standalone GitHub release binaries failing during normal startup with a jsdom synchronous-XHR worker path
+  captured from the build runner. Binary builds now select an embedded worker path only inside standalone Bun,
+  compile the worker as an explicit entrypoint on every target, and smoke-test relocated archives with both `--help`
+  and `--version`.
+
 ### Removed
 
 ## [2026.8.5] - 2026-08-05

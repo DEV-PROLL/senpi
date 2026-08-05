@@ -26,6 +26,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+REPO_ROOT=$PWD
 
 SKIP_INSTALL=false
 SKIP_DEPS=false
@@ -146,13 +147,11 @@ fi
 
 for platform in "${PLATFORMS[@]}"; do
     echo "Building for $platform..."
-    # Bun compiled executables only embed worker scripts when they are passed as
-    # explicit build entrypoints. The runtime can still use new URL(...), but the
-    # worker must be present in the compiled executable.
+    # Bun embeds worker scripts only when they are explicit build entrypoints.
     if [[ "$platform" == windows-* ]]; then
-        bun build --compile --no-compile-autoload-dotenv --minify --keep-names --target=bun-$platform ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/pi.exe"
+        bun build --compile --no-compile-autoload-dotenv --minify --keep-names --target=bun-$platform ./dist/bun/cli.js ./src/utils/image-resize-worker.ts ../../node_modules/jsdom/lib/jsdom/living/xhr/xhr-sync-worker.js --outfile "$OUTPUT_DIR/$platform/pi.exe"
     else
-        bun build --compile --no-compile-autoload-dotenv --minify --keep-names --target=bun-$platform ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/pi"
+        bun build --compile --no-compile-autoload-dotenv --minify --keep-names --target=bun-$platform ./dist/bun/cli.js ./src/utils/image-resize-worker.ts ../../node_modules/jsdom/lib/jsdom/living/xhr/xhr-sync-worker.js --outfile "$OUTPUT_DIR/$platform/pi"
         if [[ "$platform" == darwin-* ]] && command -v codesign >/dev/null 2>&1; then
             codesign --remove-signature "$OUTPUT_DIR/$platform/pi" 2>/dev/null || true
             codesign --force --sign - "$OUTPUT_DIR/$platform/pi"
@@ -300,14 +299,9 @@ if [[ -n "$host_target" ]]; then
             echo "ERROR: host binary missing: $host_binary" >&2
             exit 1
         fi
-        set +e
-        smoke_output=$("$host_binary" --help)
-        smoke_exit=$?
-        set -e
-        if [[ $smoke_exit -ne 0 ]] || [[ -z "$smoke_output" ]]; then
-            echo "ERROR: binary smoke failed for $host_target" >&2
-            exit 1
-        fi
+        node "$REPO_ROOT/scripts/smoke-standalone-binary.mjs" \
+            "$host_binary" \
+            "$REPO_ROOT/node_modules/jsdom/lib/jsdom/living/xhr/xhr-sync-worker.js"
         echo "binary smoke OK"
     else
         echo "binary smoke skipped (host $host_target not built)"

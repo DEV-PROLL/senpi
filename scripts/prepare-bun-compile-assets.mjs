@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const repoRoot = process.cwd();
+const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(process.env.PI_BUN_COMPILE_REPO_ROOT ?? join(scriptDirectory, ".."));
 const cssTreeRoots = [
 	join(repoRoot, "node_modules", "css-tree"),
 	join(repoRoot, "packages", "coding-agent", "node_modules", "css-tree"),
@@ -14,6 +16,8 @@ const jsdomRoots = [
 ];
 const jsdomDefaultStylesheetRead =
 	/const defaultStyleSheet = fs\.readFileSync\(\s*path\.resolve\(\s*__dirname,\s*["']\.\.\/\.\.\/\.\.\/browser\/default-stylesheet\.css["']\s*\),\s*(?:\{\s*encoding:\s*["']utf-8["']\s*\}|["']utf8["'])\s*\);/;
+const jsdomSyncWorkerResolve =
+	/const syncWorkerFile = require\.resolve\(\s*["']\.\/xhr-sync-worker\.js["']\s*\);/;
 
 let preparedCssTreeCount = 0;
 let preparedJsdomCount = 0;
@@ -93,23 +97,46 @@ for (const cssTreeRoot of cssTreeRoots) {
 for (const jsdomRoot of jsdomRoots) {
 	const stylesheetPath = join(jsdomRoot, "lib", "jsdom", "browser", "default-stylesheet.css");
 	const computedStylePath = join(jsdomRoot, "lib", "jsdom", "living", "css", "helpers", "computed-style.js");
-	if (!existsSync(stylesheetPath) || !existsSync(computedStylePath)) {
-		continue;
-	}
+	const xhrRoot = join(jsdomRoot, "lib", "jsdom", "living", "xhr");
+	const xhrImplementationPath = join(xhrRoot, "XMLHttpRequest-impl.js");
+	const xhrSyncWorkerPath = join(xhrRoot, "xhr-sync-worker.js");
+	let preparedJsdom = false;
 
-	const stylesheet = readFileSync(stylesheetPath, "utf8");
-	const computedStyleSource = readFileSync(computedStylePath, "utf8");
-	const inlinedStylesheet = `const defaultStyleSheet = ${JSON.stringify(stylesheet)};`;
-	const preparedComputedStyleSource = computedStyleSource.replace(jsdomDefaultStylesheetRead, inlinedStylesheet);
-	if (preparedComputedStyleSource === computedStyleSource) {
-		if (!computedStyleSource.includes(inlinedStylesheet)) {
-			throw new Error(`Unable to inline jsdom default stylesheet in ${computedStylePath}`);
+	if (existsSync(stylesheetPath) && existsSync(computedStylePath)) {
+		const stylesheet = readFileSync(stylesheetPath, "utf8");
+		const computedStyleSource = readFileSync(computedStylePath, "utf8");
+		const inlinedStylesheet = `const defaultStyleSheet = ${JSON.stringify(stylesheet)};`;
+		const preparedComputedStyleSource = computedStyleSource.replace(jsdomDefaultStylesheetRead, inlinedStylesheet);
+		if (preparedComputedStyleSource === computedStyleSource) {
+			if (!computedStyleSource.includes(inlinedStylesheet)) {
+				throw new Error(`Unable to inline jsdom default stylesheet in ${computedStylePath}`);
+			}
+		} else {
+			writeFileSync(computedStylePath, preparedComputedStyleSource);
 		}
-	} else {
-		writeFileSync(computedStylePath, preparedComputedStyleSource);
+		preparedJsdom = true;
 	}
 
-	preparedJsdomCount += 1;
+	if (existsSync(xhrImplementationPath) && existsSync(xhrSyncWorkerPath)) {
+		const xhrImplementationSource = readFileSync(xhrImplementationPath, "utf8");
+		const workerLookup = `const syncWorkerFile =
+  typeof Bun !== "undefined"
+    ? "../../node_modules/jsdom/lib/jsdom/living/xhr/xhr-sync-worker.js"
+    : require.resolve(require("node:path").join(__dirname, "xhr-sync-worker.js"));`;
+		const preparedXhrImplementationSource = xhrImplementationSource.replace(jsdomSyncWorkerResolve, workerLookup);
+		if (preparedXhrImplementationSource === xhrImplementationSource) {
+			if (!xhrImplementationSource.includes(workerLookup)) {
+				throw new Error(`Unable to rewrite jsdom sync worker lookup in ${xhrImplementationPath}`);
+			}
+		} else {
+			writeFileSync(xhrImplementationPath, preparedXhrImplementationSource);
+		}
+		preparedJsdom = true;
+	}
+
+	if (preparedJsdom) {
+		preparedJsdomCount += 1;
+	}
 }
 
 if (preparedCssTreeCount === 0 && preparedJsdomCount === 0) {
