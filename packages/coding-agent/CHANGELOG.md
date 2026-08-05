@@ -12,6 +12,11 @@
 
 ### Fixed
 
+- Fixed provider transport-timeout retries remaining indefinitely Working when both
+  ordinary stream guards were disabled; retry continuations now abort only their
+  captured Agent run at the configured retry cap, settle the session, and leave
+  later prompts/takeovers untouched ([#719](https://github.com/code-yeongyu/senpi/pull/719)).
+
 ### Removed
 
 ## [2026.8.4-2] - 2026-08-04

@@ -127,6 +127,7 @@ import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScop
 import type { ModelRuntime } from "./model-runtime.ts";
 import { PROMPT_CACHE_SAFE_WAIT_ENV, resolvePromptCacheSafeWaitSeconds } from "./prompt-cache-budget.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
+import { createProviderTimeoutRetryPlan, runBoundedRetryContinuation } from "./provider-timeout-retry.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { isBillingErrorMessage } from "./retry-fallback/billing.ts";
 import { formatSelector } from "./retry-fallback/chains.ts";
@@ -4812,6 +4813,7 @@ export class AgentSession {
 
 	private async _continueAgentAfterCurrentRun(
 		options: AgentContinuationOptions = {},
+		retryTimeoutMs?: number,
 	): Promise<"continued" | "taken-over"> {
 		await this.agent.waitForIdle();
 		try {
@@ -4820,19 +4822,26 @@ export class AgentSession {
 			await this._revalidateScheduledContinuationAdmission();
 			if (this.agent.state.isStreaming) return "taken-over";
 
-			if (this._scheduledContinuationRecompacted) {
-				const tail = this.agent.state.messages.at(-1);
-				if (tail?.role === "assistant" && (tail.stopReason === "error" || tail.stopReason === "aborted")) {
-					this._retireFailedRetryAssistant(tail);
-					if (this.agent.state.messages.at(-1) === tail) {
-						this.agent.state.messages = this.agent.state.messages.slice(0, -1);
-						this._incrementMessageRevision();
+			await runBoundedRetryContinuation({
+				continueRun: async () => {
+					if (this._scheduledContinuationRecompacted) {
+						const tail = this.agent.state.messages.at(-1);
+						if (tail?.role === "assistant" && (tail.stopReason === "error" || tail.stopReason === "aborted")) {
+							this._retireFailedRetryAssistant(tail);
+							if (this.agent.state.messages.at(-1) === tail) {
+								this.agent.state.messages = this.agent.state.messages.slice(0, -1);
+								this._incrementMessageRevision();
+							}
+						}
+						await this.agent.continueWithQueuedMessages(options);
+					} else {
+						await this.agent.continue(options);
 					}
-				}
-				await this.agent.continueWithQueuedMessages(options);
-			} else {
-				await this.agent.continue(options);
-			}
+				},
+				getActiveSignal: () => this.agent.signal,
+				abortActive: () => this.agent.abort(),
+				timeoutMs: retryTimeoutMs,
+			});
 			return "continued";
 		} catch (error) {
 			if (
@@ -4864,13 +4873,14 @@ export class AgentSession {
 	private _scheduleContinuationAfterCurrentEvent(
 		options: AgentContinuationOptions = {},
 		retryContinuation = false,
+		retryTimeoutMs?: number,
 	): void {
 		// Tool hooks wait for queued message persistence, so continue() cannot run inside this event promise.
 		const currentEventQueue = this._agentEventQueue;
 		const finishContinuationWork = this._sessionWorkBarrier.begin();
 		const continueAfterEvent = async (): Promise<void> => {
 			try {
-				await this._continueAgentAfterCurrentRun(options);
+				await this._continueAgentAfterCurrentRun(options, retryTimeoutMs);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				this._emit({
@@ -5687,23 +5697,6 @@ export class AgentSession {
 		return hintMs;
 	}
 
-	private _getProviderTimeoutRetryOptions(message: AssistantMessage): AgentContinuationOptions {
-		if (!isProviderTimeoutError(message)) return {};
-
-		const capMs = this.settingsManager.getProviderStreamRetryTimeoutMs();
-		const capEnabledBound = (configuredMs: number | undefined): number | undefined => {
-			if (capMs === undefined || configuredMs === undefined) return undefined;
-			return Math.min(configuredMs, capMs);
-		};
-		const timeoutMs = capEnabledBound(this.agent.timeoutMs);
-		const streamStartTimeoutMs = capEnabledBound(this.agent.streamStartTimeoutMs);
-		return {
-			deferQueuedMessages: true,
-			...(timeoutMs === undefined ? {} : { timeoutMs }),
-			...(streamStartTimeoutMs === undefined ? {} : { streamStartTimeoutMs }),
-		};
-	}
-
 	/**
 	 * Retry policy + callbacks shared by compaction and branch-summary summarization calls.
 	 * Uses the same `settings.retry` budget/backoff as agent-turn retries so a single transient
@@ -6135,9 +6128,14 @@ export class AgentSession {
 		// the first queue poll so user input stays deferred until that request proves
 		// responsive. A concurrent low-level Agent prompt is a benign takeover, not
 		// a terminal continuation failure.
-		const continuationOptions = this._getProviderTimeoutRetryOptions(message);
+		const continuation = createProviderTimeoutRetryPlan({
+			message,
+			streamRetryTimeoutMs: this.settingsManager.getProviderStreamRetryTimeoutMs(),
+			timeoutMs: this.agent.timeoutMs,
+			streamStartTimeoutMs: this.agent.streamStartTimeoutMs,
+		});
 		this.agent.suppressQueuedMessageDrain();
-		this._scheduleContinuationAfterCurrentEvent(continuationOptions, true);
+		this._scheduleContinuationAfterCurrentEvent(continuation.options, true, continuation.watchdogTimeoutMs);
 
 		return "continued";
 	}
