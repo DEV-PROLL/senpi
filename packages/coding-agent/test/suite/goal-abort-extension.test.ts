@@ -114,11 +114,14 @@ describe("goal abort lifecycle through the agent session", () => {
 		await harness.session.prompt("run normally");
 
 		expect(observed).toEqual([{ aborted: undefined, abortSource: undefined }]);
-		expect(observed).toEqual([{ aborted: undefined, abortSource: undefined }]);
 	});
 
 	it("keeps an active monitored Goal live across a TTSR system abort", async () => {
 		const abortSources: Array<string | undefined> = [];
+		let resolveScheduledContinuation: ((data: unknown) => void) | undefined;
+		const scheduledContinuation = new Promise<unknown>((resolve) => {
+			resolveScheduledContinuation = resolve;
+		});
 		const harness = await createHarness({
 			persistSession: true,
 			extensionFactories: [
@@ -128,11 +131,9 @@ describe("goal abort lifecycle through the agent session", () => {
 					pi.on("session_start", () => {
 						pi.events?.emit("terminal_monitor_state", { activeCount: 1 });
 					});
+					pi.events?.on("goal_continuation_scheduled", (data) => resolveScheduledContinuation?.(data));
 					pi.on("agent_end", (event) => {
 						abortSources.push(event.abortSource);
-						if (event.abortSource === undefined) {
-							pi.events?.emit("terminal_monitor_state", { activeCount: 0 });
-						}
 					});
 				},
 			],
@@ -150,7 +151,10 @@ describe("goal abort lifecycle through the agent session", () => {
 
 		expect(abortSources).toContain("system");
 		expect(abortSources).not.toContain("user");
+		expect(abortSources).toContain(undefined);
+		expect(harness.faux.getCallLog()).toHaveLength(2);
 		expect(await readGoal(ref)).toMatchObject({ status: "active" });
+		expect(await scheduledContinuation).toEqual(expect.objectContaining({ delayMs: 240_000 }));
 	});
 
 	it("keeps a model-authored block blocked on ordinary direct input", async () => {

@@ -221,7 +221,7 @@ export class MonitorAwareGoalContinuation {
 		this.#resetContinuationState();
 	}
 
-	/** A queued hidden continuation has started, so the next end is not user-initiated. */
+	/** A hidden continuation or system recovery has started, so the next end is not user-initiated. */
 	noteContinuationStarted(): void {
 		this.#endedTurnWasUserInitiated = false;
 	}

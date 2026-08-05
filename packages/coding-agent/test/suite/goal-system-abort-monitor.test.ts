@@ -34,6 +34,7 @@ describe("goal state after a system-owned abort", () => {
 				type: "agent_end",
 				aborted: true,
 				abortSource: "system",
+				willRetry: false,
 				messages: [{ ...cleanAssistantStop(), stopReason: "aborted" as const }],
 			},
 			ctx,

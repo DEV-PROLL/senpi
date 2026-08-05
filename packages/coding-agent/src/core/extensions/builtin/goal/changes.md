@@ -1,5 +1,37 @@
 # goal Extension Changes
 
+## System-owned aborts stay active through Goal recovery (2026-08-05)
+
+### What changed
+
+- Explicit `abortSource: "system"` terminal abort events no longer enter Goal's
+  retries-exhausted provider-error blocking branch.
+- A system-owned aborted `agent_end` is treated as the start of extension-owned
+  recovery rather than as a clean user turn: it preserves any existing timer,
+  avoids arming user grace, and lets the recovery end arm the live monitor wait.
+- Provenance-free terminal aborted responses still block as provider failures,
+  while explicit user aborts retain the dedicated `user interrupted the turn`
+  block.
+- Production-shaped coverage includes `willRetry: false`, an aborted assistant
+  message, active monitor state, and the combined TTSR recovery continuation.
+
+### Why
+
+- TTSR owns a corrective recovery turn after its system abort. Treating that
+  abort as a provider failure transiently blocked the Goal, disarmed monitor
+  continuation ownership, and contradicted the internal-interruption contract.
+- Restricting the exemption to explicit system provenance preserves existing
+  protection for provider-originated terminal aborts with no source.
+
+### Why an extension couldn't do it
+
+- The classification and resulting Goal status transition are private to this
+  builtin's `agent_end` handler.
+
+### Expected merge conflict zones
+
+- `index.ts` around `didTerminalProviderErrorEndTurn` and system-abort tests.
+
 ## Cache-warm waits are widget-owned (2026-08-05)
 
 ### What changed
