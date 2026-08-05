@@ -238,6 +238,17 @@ export function normalizeToolParametersForMoonshot(schema: Record<string, unknow
 	return stripMoonshotAnnotations(normalizeToolParametersForOpenAICompat(schema));
 }
 
+/**
+ * Resolve a tool's root parameters into a single object schema, without the
+ * OpenAI-specific rewrites. Wire formats that read a tool's parameters from
+ * top-level `properties`/`required` need this: a root union carries neither, so
+ * they would otherwise describe the tool to the model as taking no arguments.
+ * Schemas that are already plain objects are returned untouched.
+ */
+export function resolveRootObjectSchema(schema: Record<string, unknown>): Record<string, unknown> {
+	return mergeRootObjectUnion(structuredClone(schema)) ?? schema;
+}
+
 function stripMoonshotAnnotations(node: unknown): Record<string, unknown> {
 	if (Array.isArray(node)) {
 		return node.map((child) => stripMoonshotAnnotations(child)) as unknown as Record<string, unknown>;

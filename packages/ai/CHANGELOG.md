@@ -11,6 +11,7 @@
 ### Fixed
 
 - Kept tool parameter schemas rooted in an object type. A root `anyOf`/`oneOf`/`allOf` previously had its `type` hoisted into the branches and deleted, so OpenAI-compatible gateways rejected the request with `tools.function.parameters.type is required and must be "object"`, and the Moonshot root-union merge dropped the root's own properties entirely ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
+- Sent the real parameters of root-union tool schemas to Anthropic. `convertTools` read top-level `properties` only, so plugin and MCP tools defined as a root union reached the model with no parameters at all ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
 - Stopped retrying provider request-shape rejections. Gateways wrap these deterministic failures in 5xx envelopes, so they were classified transient and the identical invalid payload was replayed on the same model before fallback inherited it ([#718](https://github.com/code-yeongyu/senpi/pull/718)).
 
 ### Removed

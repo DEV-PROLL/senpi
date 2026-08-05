@@ -17,6 +17,12 @@
   `required` keeps root entries plus only the names every branch shares.
 - Both flavors share one root guarantee: `normalizeToolParametersForMoonshot` is now the OpenAI
   normalization plus annotation stripping, rather than a second, divergent root-merge path.
+- `api/anthropic-messages.ts` resolves a tool's root parameters through the shared
+  `resolveRootObjectSchema` before building `input_schema`. `convertTools` reads top-level
+  `properties`/`required` only, so a tool whose parameters are a root union arrived as
+  `{"properties":{},"required":[]}` — Claude was told the tool takes no arguments. senpi's own
+  `monitorSchema` was flattened in July to dodge this, but plugin and MCP tools ship root unions
+  and cannot be flattened by us, so the conversion itself has to handle them.
 - `utils/retry.ts` classifies provider request-shape rejections as NON-retryable, and
   `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` is renamed `NON_RETRYABLE_PROVIDER_ERROR_PATTERN`
   because it no longer covers only limits. Gateways wrap these deterministic rejections in 5xx

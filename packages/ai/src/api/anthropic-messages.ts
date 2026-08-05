@@ -49,6 +49,7 @@ import {
 } from "../utils/server-fallback-receipt.ts";
 import { normalizeToolCallId } from "../utils/tool-call-id.ts";
 import { isForcedToolChoiceUnsupportedError, omitToolChoiceParam } from "../utils/tool-choice-fallback.ts";
+import { resolveRootObjectSchema } from "../utils/tool-schema-compat.ts";
 import { demotedToolCallText, demotedToolResultText } from "../utils/unavailable-tool-text.ts";
 import { sanitizeAnthropicToolPairs } from "./anthropic-tool-pairs.ts";
 import { resolveCloudflareBaseUrl } from "./cloudflare.ts";
@@ -2330,7 +2331,12 @@ function convertTools(
 
 	return tools.map((tool, index) => {
 		const strict = resolveJsonSchemaStrictSampling(tool, supportsStrictTools);
-		const schema = tool.parameters as { properties?: unknown; required?: string[] };
+		// A root union carries no top-level properties, so reading them directly
+		// would advertise the tool to the model as taking no arguments at all.
+		const schema = resolveRootObjectSchema(tool.parameters as Record<string, unknown>) as {
+			properties?: unknown;
+			required?: string[];
+		};
 		const legacyInputSchema = {
 			type: "object" as const,
 			properties: schema.properties ?? {},
