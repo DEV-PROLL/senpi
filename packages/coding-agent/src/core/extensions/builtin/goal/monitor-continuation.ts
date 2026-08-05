@@ -2,8 +2,6 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isTerminalMonitorStateEvent, TERMINAL_MONITOR_STATE_EVENT } from "../monitor-state-event.ts";
 import {
-	buildCacheWarmResumedNotice,
-	buildCacheWarmScheduledNotice,
 	estimateCacheWarmMetrics,
 	GOAL_CACHE_WARMUP_ENTRY_TYPE,
 	type GoalCacheWarmMetrics,
@@ -247,9 +245,6 @@ export class MonitorAwareGoalContinuation {
 			const cache = estimateCacheWarmMetrics(this.#ctx?.model, process.env, this.#lastTurnUsage);
 			this.#scheduledCache = cache;
 			this.#scheduledAtMs = Date.now();
-			if (this.#ctx?.hasUI) {
-				this.#ctx.ui.notify(buildCacheWarmScheduledNotice(delayMs, this.#activeMonitorCount, cache), "info");
-			}
 			this.#pi.events?.emit(GOAL_CONTINUATION_SCHEDULED_EVENT, {
 				goalId: goal.id,
 				delayMs,
@@ -332,9 +327,6 @@ export class MonitorAwareGoalContinuation {
 			activeMonitorCount: this.#activeMonitorCount,
 			...(cache !== undefined ? { cache } : {}),
 		});
-		if (ctx.hasUI) {
-			ctx.ui.notify(buildCacheWarmResumedNotice(waitedMs, this.#activeMonitorCount, cache), "info");
-		}
 	}
 
 	async #admitAndQueue(

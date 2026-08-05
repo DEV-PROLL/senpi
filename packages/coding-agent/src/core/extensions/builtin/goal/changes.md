@@ -1,5 +1,26 @@
 # goal Extension Changes
 
+## Cache-warm waits are widget-owned (2026-08-05)
+
+### What changed
+
+- Monitor-delayed Goal continuations no longer emit transient scheduled/resumed
+  `ctx.ui.notify` messages.
+- The durable `goal-cache-warmup` entry remains the single notice box for the
+  cache-warm story, while the `goal-wait` status ticker remains the live
+  countdown surface.
+
+### Why
+
+- The transient notifications repeated the same scheduled/resumed event already
+  rendered by the durable entry. One event now has one display owner without
+  changing the continuation timer, prompt-cache metrics, wake event, or hidden
+  Goal continuation message.
+
+### Expected merge conflict zones
+
+- LOW in `monitor-continuation.ts` around monitor schedule and resume reporting.
+
 ## Cache-warm entry renderer delegates to the shared notice kit (2026-08-04)
 
 ### What changed
