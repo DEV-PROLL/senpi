@@ -191,7 +191,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		if (outcome.resolution !== null && claimAbort(genState, outcome.resolution)) {
 			pendingRemediation = { resolution: outcome.resolution, streamKind: source };
 			notify(ctx, outcome.resolution.owner);
-			ctx.abort();
+			ctx.abort("system");
 			return;
 		}
 		if (source === "text") {
@@ -201,7 +201,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 				genState.abortOwner = "collapse-repetition";
 				genState.selfAbortAt = Date.now();
 				notify(ctx, REPETITIVE_TURNS_RULE_NAME);
-				ctx.abort();
+				ctx.abort("system");
 				return;
 			}
 		}
@@ -213,7 +213,7 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 			genState.selfAbortAt = Date.now();
 			pendingRuleNudge = { rule };
 			notify(ctx, rule.name);
-			ctx.abort();
+			ctx.abort("system");
 		}
 	});
 

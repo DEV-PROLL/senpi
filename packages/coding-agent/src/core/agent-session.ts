@@ -5254,11 +5254,9 @@ export class AgentSession {
 				getAgentDir: () => this._agentDir,
 				isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
 				getSignal: () => this._extensionEventSignal ?? this.agent.signal,
-				abort: () => {
-					if (this._extensionAbortHandler) {
-						this._extensionAbortHandler();
-						return;
-					}
+				abort: (source = "user") => {
+					if (source === "system") return void this._abortActiveAgentAndRetry("system");
+					if (this._extensionAbortHandler) return this._extensionAbortHandler();
 					void this.abort();
 				},
 				hasPendingMessages: () => this.pendingMessageCount > 0,

@@ -1,5 +1,25 @@
 # TTSR Fork Tracker
 
+## 2026-08-05 - System-owned remediation aborts
+
+### What changed and why
+
+- All TTSR remediation aborts now call `ctx.abort("system")`.
+- The host reports those turns as `agent_end.abortSource === "system"` instead
+  of `"user"`, so an active Goal remains active while the hidden corrective
+  nudge and any live monitor/background completion channel resume the run.
+- Explicit user interrupts still use the default user source and keep the
+  existing intentional Goal block.
+
+### Coverage and expected conflict zones
+
+- `test/suite/goal-abort-extension.test.ts` combines Goal + TTSR + an active
+  monitor and pins system attribution, active Goal state, and user-abort
+  regression behavior.
+- `test/suite/goal-system-abort-monitor.test.ts` pins the Goal-side system-abort
+  policy independently of the detector.
+- LOW in `index.ts` at the three `ctx.abort("system")` call sites.
+
 ## 2026-08-04 - Cross-turn repetitive-turns detection
 
 ### What changed and why
