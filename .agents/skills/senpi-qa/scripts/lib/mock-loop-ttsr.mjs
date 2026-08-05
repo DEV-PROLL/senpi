@@ -15,14 +15,12 @@ function check(name, pass, detail) {
 	return { name, pass, detail };
 }
 
-function writeTtsrEvidence(slug, scenarioName, result, server, state) {
+function writeTtsrEvidence(slug, scenarioName, result, server) {
 	const dir = evidenceDir(slug);
 	writeFileSync(join(dir, `${scenarioName}-stdout.txt`), `${result.stdout}\n${result.stderr}`);
 	writeFileSync(join(dir, `${scenarioName}-requests.json`), JSON.stringify(server.requests, null, 2));
-	if (state !== undefined) {
-		writeFileSync(join(dir, `${scenarioName}-state.json`), JSON.stringify(state, null, 2));
-	}
 	process.stderr.write(`evidence: ${dir}\n`);
+	return dir;
 }
 
 const REPEATED_STATUS_TURNS = [
@@ -136,7 +134,8 @@ async function runRepetitiveTurnsScenario({ apiName, driveTurn, evidenceSlug, ch
 		);
 		guard.assertUnchanged();
 		if (evidenceSlug) {
-			writeTtsrEvidence(evidenceSlug, scenarioName, result, server, { goalState, fixtureEvents });
+			const dir = writeTtsrEvidence(evidenceSlug, scenarioName, result, server);
+			writeFileSync(join(dir, `${scenarioName}-state.json`), JSON.stringify({ goalState, fixtureEvents }, null, 2));
 		}
 	} finally {
 		await server.stop();
