@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2026.8.5-2] - 2026-08-05
 
 ### New Features
 
