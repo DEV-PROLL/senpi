@@ -1,5 +1,32 @@
 # TTSR Fork Tracker
 
+## 2026-08-05 - One activation, one visible record
+
+### What changed and why
+
+- TTSR now persists only the shared `rule-activation` entry for each remediation.
+- The old private `ttsr-injection` custom entry is no longer written, and the
+  transient `ctx.ui.notify("Stream rule triggered…")` warning is removed.
+- The hidden `ttsr-injection` custom message remains because it is the
+  model-facing corrective nudge, not a user-facing duplicate.
+- Session rehydration reads typed TTSR `rule-activation` entries while retaining
+  read compatibility with legacy private entries already stored in old sessions.
+
+### Ownership contract
+
+- One logical stream-rule activation has one persisted display owner:
+  `rule-activation`.
+- The renderer owns the single TUI notice box. Presentation must not also flow
+  through a transient notify or a second display-only custom entry.
+
+### Coverage and expected conflict zones
+
+- `test/ttsr/extension-wiring.test.ts` pins one activation entry, zero private
+  entries, zero transient notices, and a preserved hidden nudge.
+- Persistence, coordinator-race, and cross-turn tests now assert against the
+  shared activation record while retaining legacy rehydration coverage.
+- MEDIUM in `index.ts` around `recordInjection` and session rehydration.
+
 ## 2026-08-05 - System-owned remediation aborts
 
 ### What changed and why
