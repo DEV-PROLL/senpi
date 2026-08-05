@@ -6,6 +6,12 @@
   an explicit user abort joins the same operation.
 - Joining an existing abort awaits the shared promise without issuing a second
   `agent.abort()` call, and a later system abort cannot downgrade user provenance.
+- A later recovery generation with no active provenance issues its own
+  `agent.abort()` and records a fresh source instead of incorrectly joining the
+  prior generation's completed abort.
+- User intent that arrives while `agent_end` handlers are dispatching promotes
+  the shared event in place and emits the idempotent `session_abort` fallback, so
+  early and late handlers both observe the stop.
 - System-owned aborts no longer set the user-only queued-continuation suppression
   latch; a user join still sets it before awaiting the shared abort.
 
@@ -22,7 +28,8 @@
 
 ### Expected merge conflict zones
 
-- `core/agent-session.ts` around `_abortActiveAgentAndRetry`.
+- `core/agent-abort-provenance.ts` and `core/agent-session.ts` around
+  `_emitExtensionEvent`, `abort`, and `_abortActiveAgentAndRetry`.
 
 ## Required-recovery admission supersession and bounded fallback sizing (2026-08-03)
 

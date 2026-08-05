@@ -61,6 +61,7 @@ import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
+import { AgentAbortProvenance } from "./agent-abort-provenance.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import {
@@ -644,7 +645,7 @@ export class AgentSession {
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _userAbortPromise: Promise<void> | undefined = undefined;
-	private _agentAbortSource: "user" | "system" | undefined = undefined;
+	private readonly _abortProvenance = new AgentAbortProvenance();
 	private _suppressQueuedContinuationAfterUserAbort = false;
 	/** Set when clearQueue({ abortWillFollow: true }) drains queues immediately before abort(). */
 	private _hadClearedQueuedMessages = false;
@@ -1959,19 +1960,15 @@ export class AgentSession {
 			this._turnIndex = 0;
 			await this._extensionRunner.emit({ type: "agent_start" });
 		} else if (event.type === "agent_end") {
-			const abortSource = this._agentAbortSource;
-			const aborted =
-				abortSource !== undefined || this._findLastAssistantInMessages(event.messages)?.stopReason === "aborted";
+			const extensionEvent = this._abortProvenance.beginAgentEnd(
+				event.messages,
+				agentEndWillRetry,
+				this._findLastAssistantInMessages(event.messages)?.stopReason === "aborted",
+			);
 			try {
-				await this._extensionRunner.emit({
-					type: "agent_end",
-					messages: event.messages,
-					willRetry: agentEndWillRetry,
-					...(aborted ? { aborted: true } : {}),
-					...(abortSource === undefined ? {} : { abortSource }),
-				});
+				await this._extensionRunner.emit(extensionEvent);
 			} finally {
-				this._agentAbortSource = undefined;
+				this._abortProvenance.endAgentEnd(extensionEvent);
 			}
 		} else if (event.type === "turn_start") {
 			const extensionEvent: TurnStartEvent = {
@@ -3383,8 +3380,10 @@ export class AgentSession {
 		const hadRetryBackoff = this._retryAbortController !== undefined;
 		const hadCompactionOrPending = !this.isStreaming && (this.isCompacting || this.pendingMessageCount > 0);
 		const hadClearedQueues = this._hadClearedQueuedMessages;
+		const joinedAgentEndDispatch = this._abortProvenance.isAgentEndDispatching;
 		this._hadClearedQueuedMessages = false;
-		const shouldEmitAbort = !wasMidRun && (hadRetryBackoff || hadCompactionOrPending || hadClearedQueues);
+		const shouldEmitAbort =
+			joinedAgentEndDispatch || (!wasMidRun && (hadRetryBackoff || hadCompactionOrPending || hadClearedQueues));
 		this.abortCompaction();
 		await this._abortActiveAgentAndRetry("user");
 		if (!shouldEmitAbort) return;
@@ -3856,13 +3855,13 @@ export class AgentSession {
 		this.abortRetry();
 		this.abortBranchSummary();
 		if (this._userAbortPromise) {
-			if (source === "user" && this._agentAbortSource !== undefined)
-				[this._agentAbortSource, this._suppressQueuedContinuationAfterUserAbort] = ["user", true];
+			const joined = this._abortProvenance.join(source, this.isStreaming);
+			if (joined.userOwned) this._suppressQueuedContinuationAfterUserAbort = true;
+			if (joined.abortCurrentAgent) this.agent.abort();
 			await this._userAbortPromise;
 			return;
 		}
-		if (this.isStreaming)
-			[this._suppressQueuedContinuationAfterUserAbort, this._agentAbortSource] = [source === "user", source];
+		if (this.isStreaming) this._suppressQueuedContinuationAfterUserAbort = this._abortProvenance.begin(source);
 
 		const abortPromise = (async () => {
 			this.agent.abort();

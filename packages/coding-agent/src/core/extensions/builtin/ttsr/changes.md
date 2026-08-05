@@ -40,6 +40,9 @@
 - If a user interrupt joins an in-flight TTSR system abort, the resulting
   user-owned `agent_end` cancels pending remediation before `agent_settled`, so
   no corrective hidden turn runs after Escape.
+- An automatic provider retry starts a fresh TTSR detection generation even
+  though agent-core does not emit a new `turn_start`, so consecutive leaking
+  generations each receive their own system abort and provenance.
 
 ### Coverage and expected conflict zones
 

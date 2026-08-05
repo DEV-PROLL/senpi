@@ -84,6 +84,15 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 		}
 	}
 
+	function resetGenerationState(): void {
+		generation += 1;
+		genState = createGenerationState();
+		pendingRemediation = null;
+		pendingRuleNudge = null;
+		repetitiveTurns.resetTurn();
+		watcher?.reset();
+	}
+
 	function recordInjection(owner: string, observed: readonly string[], retryMode: "nudge" | "provider-error"): void {
 		appendRuleActivation(pi, {
 			kind: "ttsr",
@@ -156,17 +165,16 @@ export default function ttsrExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_end", (event) => {
-		if (event.abortSource === "user") cancelRemediation();
+		if (event.abortSource === "user") {
+			cancelRemediation();
+			return;
+		}
+		if (event.willRetry === true) resetGenerationState();
 	});
 
 	pi.on("turn_start", (_event, ctx) => {
 		ensureInitialized(ctx);
-		generation += 1;
-		genState = createGenerationState();
-		pendingRemediation = null;
-		pendingRuleNudge = null;
-		repetitiveTurns.resetTurn();
-		watcher?.reset();
+		resetGenerationState();
 	});
 
 	pi.on("turn_end", () => {
