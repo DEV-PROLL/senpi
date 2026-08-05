@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const workflow = readFileSync(new URL("../.github/workflows/build-binaries.yml", import.meta.url), "utf8");
+const buildScriptUrl = new URL("./build-binaries.sh", import.meta.url);
+const buildScript = readFileSync(buildScriptUrl, "utf8");
+const codingAgentPackage = JSON.parse(
+	readFileSync(new URL("../packages/coding-agent/package.json", import.meta.url), "utf8"),
+);
 
 describe("binary release workflow", () => {
 	it("pins a stable Bun release with downloadable cross-compile executables", () => {
@@ -19,5 +24,18 @@ describe("binary release workflow", () => {
 			workflow,
 			/SOURCE_REF:\s*\$\{\{ github\.event\.inputs\.source_ref \|\| github\.event\.inputs\.tag \|\| github\.ref_name \}\}/,
 		);
+	});
+
+	it("embeds jsdom's sync worker in release binaries", () => {
+		assert.notEqual(statSync(buildScriptUrl).mode & 0o111, 0);
+		assert.match(buildScript, /node scripts\/prepare-bun-compile-assets\.mjs/);
+		assert.match(buildScript, /node_modules\/jsdom\/lib\/jsdom\/living\/xhr\/xhr-sync-worker\.js/);
+		assert.match(buildScript, /for smoke_arg in --help --version/);
+	});
+
+	it("keeps the package binary build aligned with release packaging", () => {
+		const binaryBuild = codingAgentPackage.scripts["build:binary"];
+		assert.match(binaryBuild, /node \.\.\/\.\.\/scripts\/prepare-bun-compile-assets\.mjs/);
+		assert.match(binaryBuild, /node_modules\/jsdom\/lib\/jsdom\/living\/xhr\/xhr-sync-worker\.js/);
 	});
 });

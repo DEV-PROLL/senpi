@@ -32,6 +32,17 @@ function writeJsdomFixture(root, stylesheet) {
 	return join(jsdomRoot, "lib", "jsdom", "living", "css", "helpers", "computed-style.js");
 }
 
+function writeJsdomXhrFixture(root) {
+	const xhrRoot = join(root, "node_modules", "jsdom", "lib", "jsdom", "living", "xhr");
+	writeFixture(join(xhrRoot, "xhr-sync-worker.js"), `"use strict";\n`);
+	const xhrImplementationPath = join(xhrRoot, "XMLHttpRequest-impl.js");
+	writeFixture(
+		xhrImplementationPath,
+		`"use strict";\n\nconst syncWorkerFile = require.resolve("./xhr-sync-worker.js");\n`,
+	);
+	return xhrImplementationPath;
+}
+
 describe("prepare-bun-compile-assets", () => {
 	it("inlines jsdom's default stylesheet for Bun-compiled binaries", () => {
 		// Given: jsdom loads this stylesheet through an absolute filesystem path at runtime.
@@ -58,5 +69,34 @@ describe("prepare-bun-compile-assets", () => {
 		});
 		assert.equal(repeatedResult.status, 0, repeatedResult.stderr);
 		assert.equal(readFileSync(computedStylePath, "utf8"), preparedSource);
+	});
+
+	it("rewrites jsdom's sync worker lookup for Bun standalone binaries", () => {
+		// Given: jsdom eagerly resolves the worker to the build machine's absolute checkout path.
+		tempDir = mkdtempSync(join(tmpdir(), "senpi-bun-compile-assets-"));
+		writeJsdomFixture(tempDir, "html { color: red; }\n");
+		const xhrImplementationPath = writeJsdomXhrFixture(tempDir);
+
+		// When
+		const result = spawnSync(process.execPath, [prepareAssetsScript], {
+			cwd: tempDir,
+			encoding: "utf8",
+		});
+
+		// Then: Bun can map the relative worker URL to its separately embedded entrypoint.
+		assert.equal(result.status, 0, result.stderr);
+		const preparedSource = readFileSync(xhrImplementationPath, "utf8");
+		assert.match(
+			preparedSource,
+			/const syncWorkerFile = new URL\("\.\/xhr-sync-worker\.js", import\.meta\.url\);/,
+		);
+		assert.doesNotMatch(preparedSource, /require\.resolve\("\.\/xhr-sync-worker\.js"\)/);
+
+		const repeatedResult = spawnSync(process.execPath, [prepareAssetsScript], {
+			cwd: tempDir,
+			encoding: "utf8",
+		});
+		assert.equal(repeatedResult.status, 0, repeatedResult.stderr);
+		assert.equal(readFileSync(xhrImplementationPath, "utf8"), preparedSource);
 	});
 });
