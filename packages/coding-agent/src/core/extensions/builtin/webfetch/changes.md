@@ -9,7 +9,7 @@ Vendored from [`code-yeongyu/pi-webfetch`](https://github.com/code-yeongyu/pi-we
 - Runtime deps `@mozilla/readability`, `jsdom`, and `turndown` (+ `@types/jsdom`, `@types/turndown`) added to `package.json`.
 - HTML markdown/text responses now pass through Readability before conversion so reader-style article content is returned without nav/header/footer/aside/script page chrome. Registers the `webfetch` tool, gated by `PI_WEBFETCH` (default on).
 - Tistory-style article containers are preferred over surrounding blog chrome, noisy related-post/sidebar blocks are stripped from the cloned article, and text conversion uses a DOM pass to preserve readable line breaks.
-- Standalone Bun builds rewrite jsdom 29's eager `require.resolve("./xhr-sync-worker.js")` to an import-meta-relative worker URL and compile that worker as an explicit entrypoint. Without both steps, the executable captures the CI checkout path and fails during startup on machines where that path does not exist. This must be handled in the host build because an extension cannot change third-party module resolution inside an already-compiled executable.
+- Standalone Bun builds rewrite jsdom 29's eager worker lookup to select the compiled worker entry only in standalone executables while retaining jsdom's normal `require.resolve()` behavior under Node, then compile that worker as an explicit entrypoint. Without both steps, the executable captures the CI checkout path and fails during startup on machines where that path does not exist. This must be handled in the host build because an extension cannot change third-party module resolution inside an already-compiled executable.
 
 ## Conflict zones
 

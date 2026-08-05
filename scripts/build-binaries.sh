@@ -26,6 +26,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+REPO_ROOT=$PWD
 
 SKIP_INSTALL=false
 SKIP_DEPS=false
@@ -298,16 +299,9 @@ if [[ -n "$host_target" ]]; then
             echo "ERROR: host binary missing: $host_binary" >&2
             exit 1
         fi
-        for smoke_arg in --help --version; do
-            set +e
-            smoke_output=$("$host_binary" "$smoke_arg")
-            smoke_exit=$?
-            set -e
-            if [[ $smoke_exit -ne 0 ]] || [[ -z "$smoke_output" ]]; then
-                echo "ERROR: binary smoke failed for $host_target ($smoke_arg)" >&2
-                exit 1
-            fi
-        done
+        node "$REPO_ROOT/scripts/smoke-standalone-binary.mjs" \
+            "$host_binary" \
+            "$REPO_ROOT/node_modules/jsdom/lib/jsdom/living/xhr/xhr-sync-worker.js"
         echo "binary smoke OK"
     else
         echo "binary smoke skipped (host $host_target not built)"

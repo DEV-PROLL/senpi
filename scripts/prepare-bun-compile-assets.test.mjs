@@ -43,6 +43,14 @@ function writeJsdomXhrFixture(root) {
 	return xhrImplementationPath;
 }
 
+function runPreparation(root, cwd = root, script = prepareAssetsScript) {
+	return spawnSync(process.execPath, [script], {
+		cwd,
+		encoding: "utf8",
+		env: { ...process.env, PI_BUN_COMPILE_REPO_ROOT: root },
+	});
+}
+
 describe("prepare-bun-compile-assets", () => {
 	it("inlines jsdom's default stylesheet for Bun-compiled binaries", () => {
 		// Given: jsdom loads this stylesheet through an absolute filesystem path at runtime.
@@ -51,10 +59,7 @@ describe("prepare-bun-compile-assets", () => {
 		const computedStylePath = writeJsdomFixture(tempDir, stylesheet);
 
 		// When
-		const result = spawnSync(process.execPath, [prepareAssetsScript], {
-			cwd: tempDir,
-			encoding: "utf8",
-		});
+		const result = runPreparation(tempDir);
 
 		// Then: the compiled module no longer requires the filesystem-only CSS asset.
 		assert.equal(result.status, 0, result.stderr);
@@ -63,10 +68,7 @@ describe("prepare-bun-compile-assets", () => {
 		assert.doesNotMatch(preparedSource, /default-stylesheet\.css/);
 
 		// And: rebuilds invoke this preparation step again without restoring node_modules.
-		const repeatedResult = spawnSync(process.execPath, [prepareAssetsScript], {
-			cwd: tempDir,
-			encoding: "utf8",
-		});
+		const repeatedResult = runPreparation(tempDir);
 		assert.equal(repeatedResult.status, 0, repeatedResult.stderr);
 		assert.equal(readFileSync(computedStylePath, "utf8"), preparedSource);
 	});
@@ -78,25 +80,45 @@ describe("prepare-bun-compile-assets", () => {
 		const xhrImplementationPath = writeJsdomXhrFixture(tempDir);
 
 		// When
-		const result = spawnSync(process.execPath, [prepareAssetsScript], {
-			cwd: tempDir,
-			encoding: "utf8",
-		});
+		const result = runPreparation(tempDir);
 
-		// Then: Bun can map the relative worker URL to its separately embedded entrypoint.
+		// Then: standalone Bun uses the embedded worker while Node keeps jsdom's original lookup.
 		assert.equal(result.status, 0, result.stderr);
 		const preparedSource = readFileSync(xhrImplementationPath, "utf8");
 		assert.match(
 			preparedSource,
-			/const syncWorkerFile = new URL\("\.\/xhr-sync-worker\.js", import\.meta\.url\);/,
+			/typeof Bun !== "undefined"[\s\S]*\.\.\/\.\.\/node_modules\/jsdom\/lib\/jsdom\/living\/xhr\/xhr-sync-worker\.js[\s\S]*require\.resolve\(require\("node:path"\)\.join\(__dirname, "xhr-sync-worker\.js"\)\)/,
 		);
-		assert.doesNotMatch(preparedSource, /require\.resolve\("\.\/xhr-sync-worker\.js"\)/);
+		assert.doesNotMatch(preparedSource, /import\.meta/);
 
-		const repeatedResult = spawnSync(process.execPath, [prepareAssetsScript], {
-			cwd: tempDir,
+		const nodeResult = spawnSync(process.execPath, ["-e", `require(${JSON.stringify(xhrImplementationPath)})`], {
 			encoding: "utf8",
 		});
+		assert.equal(nodeResult.status, 0, nodeResult.stderr);
+
+		const repeatedResult = runPreparation(tempDir);
 		assert.equal(repeatedResult.status, 0, repeatedResult.stderr);
 		assert.equal(readFileSync(xhrImplementationPath, "utf8"), preparedSource);
+	});
+
+	it("resolves the repository root independently of the caller's working directory", () => {
+		tempDir = mkdtempSync(join(tmpdir(), "senpi-bun-compile-assets-"));
+		writeJsdomFixture(tempDir, "html { color: red; }\n");
+		const xhrImplementationPath = writeJsdomXhrFixture(tempDir);
+		const copiedScript = join(tempDir, "scripts", "prepare-bun-compile-assets.mjs");
+		writeFixture(copiedScript, readFileSync(prepareAssetsScript, "utf8"));
+		const packageCwd = join(tempDir, "packages", "coding-agent");
+		mkdirSync(packageCwd, { recursive: true });
+
+		const result = spawnSync(process.execPath, [copiedScript], {
+			cwd: packageCwd,
+			encoding: "utf8",
+		});
+
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(
+			readFileSync(xhrImplementationPath, "utf8"),
+			/typeof Bun !== "undefined"/,
+		);
 	});
 });

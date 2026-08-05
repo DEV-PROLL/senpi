@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const repoRoot = process.cwd();
+const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(process.env.PI_BUN_COMPILE_REPO_ROOT ?? join(scriptDirectory, ".."));
 const cssTreeRoots = [
 	join(repoRoot, "node_modules", "css-tree"),
 	join(repoRoot, "packages", "coding-agent", "node_modules", "css-tree"),
@@ -117,10 +119,13 @@ for (const jsdomRoot of jsdomRoots) {
 
 	if (existsSync(xhrImplementationPath) && existsSync(xhrSyncWorkerPath)) {
 		const xhrImplementationSource = readFileSync(xhrImplementationPath, "utf8");
-		const workerUrl = `const syncWorkerFile = new URL("./xhr-sync-worker.js", import.meta.url);`;
-		const preparedXhrImplementationSource = xhrImplementationSource.replace(jsdomSyncWorkerResolve, workerUrl);
+		const workerLookup = `const syncWorkerFile =
+  typeof Bun !== "undefined"
+    ? "../../node_modules/jsdom/lib/jsdom/living/xhr/xhr-sync-worker.js"
+    : require.resolve(require("node:path").join(__dirname, "xhr-sync-worker.js"));`;
+		const preparedXhrImplementationSource = xhrImplementationSource.replace(jsdomSyncWorkerResolve, workerLookup);
 		if (preparedXhrImplementationSource === xhrImplementationSource) {
-			if (!xhrImplementationSource.includes(workerUrl)) {
+			if (!xhrImplementationSource.includes(workerLookup)) {
 				throw new Error(`Unable to rewrite jsdom sync worker lookup in ${xhrImplementationPath}`);
 			}
 		} else {

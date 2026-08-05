@@ -27,10 +27,12 @@ describe("binary release workflow", () => {
 	});
 
 	it("embeds jsdom's sync worker in release binaries", () => {
-		assert.notEqual(statSync(buildScriptUrl).mode & 0o111, 0);
+		if (process.platform !== "win32") {
+			assert.notEqual(statSync(buildScriptUrl).mode & 0o111, 0);
+		}
 		assert.match(buildScript, /node scripts\/prepare-bun-compile-assets\.mjs/);
 		assert.match(buildScript, /node_modules\/jsdom\/lib\/jsdom\/living\/xhr\/xhr-sync-worker\.js/);
-		assert.match(buildScript, /for smoke_arg in --help --version/);
+		assert.match(buildScript, /smoke-standalone-binary\.mjs/);
 	});
 
 	it("keeps the package binary build aligned with release packaging", () => {
