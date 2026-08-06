@@ -1,5 +1,37 @@
 # changes
 
+## Degrade fallback-unavailable 429s to in-turn retry (2026-08-06)
+
+### What changed
+
+- A 429-class failure whose hint tier routes to fallback (`no-hint-fast-fallback`, tier2, tier3) no
+  longer fails the turn with `auto_retry_end { attempt: 0 }` when no fallback candidate is usable
+  (no chain for the model, chain exhausted, candidates cooling, or unauthenticated).
+- No-hint failures degrade to same-model in-turn retries on the ordinary `settings.retry`
+  exponential schedule; tier2 hinted waits retry in-turn with the wait clamped to
+  `hintedWaitCapMs`; tier3 (>= `probeBackMaxMs`) waits stay terminal but the final error now names
+  the provider-requested wait in seconds.
+- The pure policy is `degradeWithoutFallback` in `retry-fallback/hint-policy.ts`;
+  `agent-session.ts` routes both former instant-death branches through
+  `_degradeRateLimitedWithoutFallback`, which also reports the TRUE attempt count on budget
+  exhaustion.
+
+### Why
+
+- Providers that send hint-less 429s (e.g. wafer `server_overloaded` bodies that literally say
+  "Please retry shortly") killed the turn on the FIRST 429 for any model without a usable fallback
+  chain, surfacing "Retry failed after 0 attempts". sst/opencode retries such failures in-turn
+  with a visible countdown and openai/codex replays the turn within its stream budget; failing
+  with zero attempts was strictly worse than both.
+
+### Why this cannot be expressed externally
+
+- Retry admission, the retry promise, `_retryAttempt` accounting, and the hint tier router live in
+  `AgentSession._handleRetryableError`; an extension cannot re-enter the continuation path after
+  the fallback controller declines a candidate.
+- Expected merge-conflict zone: `agent-session.ts` `_handleRetryableError` 429 tier routing and the
+  `retry-fallback/hint-policy.ts` tail.
+
 ## Absolute-cap compaction rejection message (2026-08-05)
 
 - `describeCompactionRejection()` for `"per-turn-cap"` now reads "absolute compaction cap reached for
