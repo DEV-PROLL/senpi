@@ -10,7 +10,10 @@
 
 ### Changed
 
-- Changed the turn-completion TPS notice to show the turn's cache-hit percentage instead of raw token counters
+- Changed the turn-completion TPS notice from a dense list of raw input, output, cache-read, cache-write, and total-token
+  counters to `TPS <rate> tok/s. Cache hit <rate>%, <seconds>s`. The cache-hit percentage is aggregated across every
+  assistant message in the completed turn as `cacheRead / (input + cacheRead + cacheWrite)`, reports `0.0%` when the
+  turn has no cache reads, and keeps tool and permission waits out of the elapsed-time calculation
   ([#742](https://github.com/code-yeongyu/senpi/pull/742)).
 
 ### Fixed

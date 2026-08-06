@@ -10,7 +10,10 @@
 
 ### Fixed
 
-- Formatted completed eval durations with compact human-readable units instead of raw millisecond counts in transcript metadata ([#743](https://github.com/code-yeongyu/senpi/pull/743)).
+- Formatted completed eval durations in the simple-result transcript branch with the same compact human-readable units
+  used by detailed cell headers and nested tool widgets, so sub-second, seconds, minutes, and hours values render as
+  labels such as `<1s`, `12s`, `3m 5s`, or `1h 2m` instead of raw millisecond counts. Live footer, working-status, and
+  thinking-duration policies are unchanged ([#743](https://github.com/code-yeongyu/senpi/pull/743)).
 
 ### Removed
 
