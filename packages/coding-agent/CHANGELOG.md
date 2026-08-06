@@ -25,11 +25,14 @@
 - Fixed required compaction fatally ending a turn once the per-turn soft cap (3 accepted or ineffective
   compactions) was reached. Compaction admission is now bounded only by the absolute session cap (10) and the
   failure circuit breaker, so long turns that legitimately need more than three compactions keep running
-  (supersedes [#728](https://github.com/code-yeongyu/senpi/pull/728)).
+  ([#731](https://github.com/code-yeongyu/senpi/pull/731), superseding
+  [#728](https://github.com/code-yeongyu/senpi/pull/728)).
 - Fixed interactive shutdown crashing with `setRawMode failed with errno: 5` when an SSH or PTY peer disappears before
   terminal raw-mode restoration. Senpi now completes the requested exit for dead terminals without hiding unexpected
   restoration failures ([#726](https://github.com/code-yeongyu/senpi/pull/726)).
-- Fixed `apply_patch` binary-file previews so delete and move operations render a concise marker instead of decoded byte garbage, with move-only patches preserving the original bytes.
+- Fixed `apply_patch` binary-file previews so delete and move operations render a concise marker instead of
+  decoded byte garbage, with move-only patches preserving the original bytes
+  ([#725](https://github.com/code-yeongyu/senpi/pull/725)).
 - Fixed client-policy server fallback aborts rendering both a refusal-shaped assistant `Error:` row and the dedicated
   fallback notice box. Diagnosed aborts now leave the notice box as the single visible explanation while preserving
   the original message diagnostics and incremental render-cache updates
