@@ -15,6 +15,12 @@
 
 ### Fixed
 
+- Fixed a 429/rate-limit failure without a retry-after hint killing the turn with "Retry failed after 0 attempts"
+  when no fallback chain was usable for the active model. Such failures now degrade to same-model in-turn retries on
+  the ordinary exponential schedule, hinted waits below the probe-back ceiling retry in-turn clamped to
+  `retry.hintedWaitCapMs`, hour-plus hinted waits name the provider-requested wait in the final error, and retry
+  exhaustion reports the true attempt count ([#744](https://github.com/code-yeongyu/senpi/pull/744)).
+
 ### Removed
 
 ## [2026.8.6] - 2026-08-06
