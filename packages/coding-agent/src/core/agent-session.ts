@@ -137,6 +137,8 @@ import { RetryFallbackController } from "./retry-fallback/controller.ts";
 import { SelectorCooldowns } from "./retry-fallback/cooldown.ts";
 import {
 	classifyRateLimitedWait,
+	degradeWithoutFallback,
+	type HintTier,
 	nextInTurnDelayMs,
 	type ProbePhase,
 	probeBackSchedule,
@@ -5759,6 +5761,56 @@ export class AgentSession {
 	}
 
 	/**
+	 * A 429-class failure with no usable fallback candidate must not fail the
+	 * turn with zero attempts: a provider answering 429 is asking for a retry.
+	 * No-hint and tier2 waits degrade to same-model in-turn retries under the
+	 * normal retry budget (tier2 clamps the hinted wait to the in-turn cap);
+	 * only tier3 hour-plus waits stay terminal, with the requested wait named
+	 * in the final error. Returns the in-turn retry delay, or undefined after
+	 * emitting the terminal auto_retry_end.
+	 */
+	private _degradeRateLimitedWithoutFallback(
+		tier: HintTier,
+		hintMs: number | undefined,
+		message: AssistantMessage,
+		errorMessage: string,
+	): number | undefined {
+		const settings = this.settingsManager.getRetrySettings();
+		const hintSettings = this.settingsManager.getHintPolicySettings();
+		const finishTurn = (attempt: number, finalError: string | undefined) => {
+			const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+			if (exhaustedChainKey) {
+				this._emit({ type: "retry_fallback_exhausted", chainKey: exhaustedChainKey, lastError: errorMessage });
+			}
+			this._emit({ type: "auto_retry_end", success: false, attempt, finalError });
+			this._retryAttempt = 0;
+			this._resetHintTierState();
+			this._resolveRetry();
+		};
+		const degraded = degradeWithoutFallback(
+			tier,
+			hintMs,
+			this._retryAttempt + 1,
+			settings.baseDelayMs,
+			hintSettings.hintedWaitCapMs,
+		);
+		if (degraded.kind === "fail") {
+			const waitSeconds = Math.ceil(degraded.hintMs / 1000);
+			finishTurn(
+				this._retryAttempt,
+				`Provider requested a ${waitSeconds}s wait before retrying and no usable fallback model is available. ${message.errorMessage ?? ""}`,
+			);
+			return undefined;
+		}
+		this._retryAttempt++;
+		if (this._retryAttempt > settings.maxRetries) {
+			finishTurn(this._retryAttempt - 1, message.errorMessage);
+			return undefined;
+		}
+		return degraded.delayMs;
+	}
+
+	/**
 	 * Handle retryable errors with exponential backoff.
 	 * @returns whether retry continuation started, was blocked by compaction, or was not handled
 	 */
@@ -5861,29 +5913,15 @@ export class AgentSession {
 				const tier = classifyRateLimitedWait(hintMs, hintSettings);
 				is429TierRouted = true;
 				if (tier === "no-hint-fast-fallback") {
-					// Skip same-model retries entirely; fall back immediately.
+					// Fall back immediately when a candidate exists; otherwise degrade
+					// to same-model in-turn retries instead of failing the turn.
 					switchedFallback = await this._retryFallback.tryFallback("transient", { errorMessage });
 					if (switchedFallback) {
 						this._retryAttempt = 1;
 					} else {
-						const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
-						if (exhaustedChainKey) {
-							this._emit({
-								type: "retry_fallback_exhausted",
-								chainKey: exhaustedChainKey,
-								lastError: errorMessage,
-							});
-						}
-						this._emit({
-							type: "auto_retry_end",
-							success: false,
-							attempt: 0,
-							finalError: message.errorMessage,
-						});
-						this._retryAttempt = 0;
-						this._resetHintTierState();
-						this._resolveRetry();
-						return "not-handled";
+						const degradedDelayMs = this._degradeRateLimitedWithoutFallback(tier, hintMs, message, errorMessage);
+						if (degradedDelayMs === undefined) return "not-handled";
+						hintTierDelayMs = degradedDelayMs;
 					}
 				} else if (tier === "tier1-in-turn") {
 					this._retryAttempt++;
@@ -5978,24 +6016,9 @@ export class AgentSession {
 							this._armProbeBackForDemotedSelector(selector, remainingHintMs);
 						}
 					} else {
-						const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
-						if (exhaustedChainKey) {
-							this._emit({
-								type: "retry_fallback_exhausted",
-								chainKey: exhaustedChainKey,
-								lastError: errorMessage,
-							});
-						}
-						this._emit({
-							type: "auto_retry_end",
-							success: false,
-							attempt: 0,
-							finalError: message.errorMessage,
-						});
-						this._retryAttempt = 0;
-						this._resetHintTierState();
-						this._resolveRetry();
-						return "not-handled";
+						const degradedDelayMs = this._degradeRateLimitedWithoutFallback(tier, hintMs, message, errorMessage);
+						if (degradedDelayMs === undefined) return "not-handled";
+						hintTierDelayMs = degradedDelayMs;
 					}
 				}
 			}
