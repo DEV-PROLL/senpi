@@ -10,6 +10,9 @@
 
 ### Changed
 
+- Changed the turn-completion TPS notice to show the turn's cache-hit percentage instead of raw token counters
+  ([#742](https://github.com/code-yeongyu/senpi/pull/742)).
+
 ### Fixed
 
 ### Removed
