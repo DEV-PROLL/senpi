@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Formatted completed eval durations with compact human-readable units instead of raw millisecond counts in transcript metadata ([#743](https://github.com/code-yeongyu/senpi/pull/743)).
+
 ### Removed
 
 ## [2026.8.6] - 2026-08-06
