@@ -1,5 +1,24 @@
 # Builtin extensions changes
 
+## tps: concise turn cache-hit notice (2026-08-06)
+
+- The turn-completion TPS notification now renders
+  `TPS <rate> tok/s. Cache hit <rate>%, <seconds>s` instead of repeating raw
+  output, input, cache-read/write, and total-token counters.
+- Cache hit is aggregated across every assistant message completed in the
+  agent turn, using the same denominator as the lower footer:
+  `cacheRead / (input + cacheRead + cacheWrite)`. A turn notice should describe
+  the whole turn, rather than only the last assistant message within it.
+- Why an extension change: `tps.ts` already owns the transient notification,
+  receives the complete turn's messages through `agent_end`, and can compute
+  the metric without widening the public extension context or changing the
+  persistent footer.
+- Coverage: `test/suite/tps-extension.test.ts` pins a multi-message 70.0% hit
+  rate, a zero-read 0.0% edge, monotonic elapsed time, and exclusion of
+  tool/permission waits.
+- Expected merge conflict zones: LOW in `tps.ts` around the usage aggregation
+  and notification string; LOW in `tps-extension.test.ts`.
+
 ## notice: shared transcript notice kit (2026-08-04)
 
 - New internal module `src/core/extensions/notice/` (`spec.ts`, `box.ts`, `adapters.ts`) owns the loop-guard visual family as a shared widget: a `NoticeSpec` contract (title/tone/why/extra/expandedLine), `buildNoticeBox`, and `noticeMessageRenderer`/`noticeEntryRenderer` adapters.
