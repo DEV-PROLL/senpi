@@ -1,5 +1,27 @@
 # senpi-codemode fork changes
 
+## Compact elapsed labels for simple eval results (2026-08-06)
+
+### What changed
+
+- `src/tool/render.ts`: final eval results without detailed cell records now route `durationMs` through the same compact formatter already used by cell headers, agent progress, and nested tool-call widgets.
+- `test/eval-result-duration.test.ts`: focused coverage pins sub-second, seconds, minutes, and hours output plus the surrounding status/summary/phase/output frame.
+- Existing renderer-state expectations now preserve the compact `<1s` label for very short completed and failed evaluations.
+
+### Why
+
+- The simple-result branch was the only eval duration surface that interpolated raw milliseconds, producing labels such as `took 3720000ms` while the detailed branch rendered the same duration as `1h 2m`.
+- Consistent compact labels make completed tool-call timing readable without changing live footer, working-status, or thinking-duration policies.
+
+### Why this cannot be expressed externally
+
+- The inconsistency lives inside the eval tool's result renderer and must be corrected at the branch that builds transcript metadata.
+
+### Expected merge conflict zones
+
+- LOW: `src/tool/render.ts` around `resultMetadata()`.
+- LOW: `test/eval-render-state.test.ts` and `test/eval-result-duration.test.ts`.
+
 ## Eval `summary` replaces `title` (2026-08-04)
 
 ### What changed
