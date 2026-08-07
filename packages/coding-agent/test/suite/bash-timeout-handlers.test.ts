@@ -5,7 +5,11 @@ import bashTimeoutExtension, {
 	type BashToolInputLike,
 } from "../../src/core/extensions/builtin/bash-timeout/index.ts";
 
-type Handler = (event: unknown) => Promise<unknown> | unknown;
+type Handler = (event: unknown, ctx?: unknown) => Promise<unknown> | unknown;
+
+function ctxWithApi(api: string): { model: { api: string } } {
+	return { model: { api } };
+}
 
 interface ApiMock {
 	api: { on(event: string, handler: Handler): void };
@@ -120,10 +124,10 @@ describe("bashTimeoutExtension factory wiring", () => {
 			const { api, handlers } = makeApiMock();
 			bashTimeoutExtension(api as never);
 
-			const result = (await handlers.before_agent_start[0]({
-				systemPrompt: "BASE",
-				// biome-ignore lint/suspicious/noExplicitAny: minimal ctx stub for the handler
-			} as any, { model: { api: "anthropic-messages" } } as any)) as { systemPrompt: string };
+			const result = (await handlers.before_agent_start[0](
+				{ systemPrompt: "BASE" },
+				ctxWithApi("anthropic-messages"),
+			)) as { systemPrompt: string };
 
 			expect(result.systemPrompt).toContain("Bash Tool Timeout Policy");
 			expect(result.systemPrompt).not.toContain("auto-detaches");
@@ -139,10 +143,10 @@ describe("bashTimeoutExtension factory wiring", () => {
 			const { api, handlers } = makeApiMock();
 			bashTimeoutExtension(api as never);
 
-			const result = (await handlers.before_agent_start[0]({
-				systemPrompt: "BASE",
-				// biome-ignore lint/suspicious/noExplicitAny: minimal ctx stub for the handler
-			} as any, { model: { api: "openai-completions" } } as any)) as { systemPrompt: string };
+			const result = (await handlers.before_agent_start[0](
+				{ systemPrompt: "BASE" },
+				ctxWithApi("openai-completions"),
+			)) as { systemPrompt: string };
 
 			expect(result.systemPrompt).toContain("auto-detaches");
 		} finally {

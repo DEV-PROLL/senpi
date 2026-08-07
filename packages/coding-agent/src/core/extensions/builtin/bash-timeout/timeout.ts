@@ -46,10 +46,7 @@ export function applyBashTimeout<TInput extends BashToolInputLike>(
  * policy must not promise it — a prompt that describes impossible behavior is
  * worse than a silent one.
  */
-export function buildBashTimeoutPrompt(
-	defaults: BashTimeoutDefaults,
-	foregroundWindowSeconds?: number,
-): string {
+export function buildBashTimeoutPrompt(defaults: BashTimeoutDefaults, foregroundWindowSeconds?: number): string {
 	const minutes = (seconds: number): string => (seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds}s`);
 	const detachRules =
 		foregroundWindowSeconds === undefined
