@@ -10,6 +10,14 @@
 
 ### Changed
 
+- Changed the `bash` tool so a long-running foreground command is handed to a live background session instead of
+  blocking the turn or being killed. Foreground blocking now stops at a fixed window (`PI_BASH_FOREGROUND_SECONDS`,
+  default 60s) rather than tracking the prompt-cache budget, and `timeout` becomes the process kill deadline
+  (default 1800s) enforced after the hand-off. Commands whose purpose is waiting — a bare `sleep 30`,
+  `sleep 45; gh pr view ...`, or a `while`/`for` poll loop — detach after 5s and report back with guidance to end the
+  turn and wait for the completion notification, or to use `monitor({ command, filter })` for output-pattern waits;
+  short settle sleeps such as `pkill; sleep 1` still run in the foreground. Sessions started with
+  `run_in_background: true` are unchanged ([#747](https://github.com/code-yeongyu/senpi/pull/747)).
 - Changed the turn-completion TPS notice from a dense list of raw input, output, cache-read, cache-write, and total-token
   counters to `TPS <rate> tok/s. Cache hit <rate>%, <seconds>s`. The cache-hit percentage is aggregated across every
   assistant message in the completed turn as `cacheRead / (input + cacheRead + cacheWrite)`, reports `0.0%` when the
