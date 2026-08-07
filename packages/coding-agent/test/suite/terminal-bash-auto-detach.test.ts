@@ -346,4 +346,20 @@ describe("terminal bash foreground window auto-detach", () => {
 		expect(firstText(result)).toBe("gone");
 		expect(result.details).toEqual({ status: "completed" });
 	});
+
+	it("never hands a process deadline to an explicit background session", async () => {
+		const { bash } = setup();
+
+		const execution = bash.execute("bg-unlimited", {
+			command: "tail -f /var/log/system.log",
+			run_in_background: true,
+			timeout: 1800,
+		});
+		await vi.advanceTimersByTimeAsync(500);
+		const started = await execution;
+
+		expect(firstText(started)).toContain("Command running in background with ID: bash_1");
+		expect(spawned.request).toMatchObject({ command: "tail -f /var/log/system.log" });
+		expect((spawned.request as { timeoutMs?: number }).timeoutMs).toBeUndefined();
+	});
 });
