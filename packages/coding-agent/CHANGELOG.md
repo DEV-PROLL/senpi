@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- Fixed multi-session RPC `open_session` failures returning only a bare `open_failed` code. Responses now preserve the
+  stable prefix and include the underlying workspace or runtime cause as `open_failed: <reason>`, while all other
+  transport error codes remain exact strings ([#750](https://github.com/code-yeongyu/senpi/pull/750)).
+
 ### Removed
 
 ## [2026.8.7] - 2026-08-07
