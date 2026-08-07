@@ -272,7 +272,11 @@ async function resolveSessionPath(sessionArg: string, cwd: string, sessionDir?: 
 	return { type: "not_found", arg: sessionArg };
 }
 
-/** Prompt user for yes/no confirmation */
+/**
+ * Prompt user for yes/no confirmation.
+ * Resolves false on stdin EOF (Ctrl+D, closed pipe): without the close handler a
+ * readline question never settles once the input stream ends, hanging the process.
+ */
 async function promptConfirm(message: string): Promise<boolean> {
 	return new Promise((resolve) => {
 		const rl = createInterface({
@@ -283,6 +287,7 @@ async function promptConfirm(message: string): Promise<boolean> {
 			rl.close();
 			resolve(answer.toLowerCase() === "y" || answer.toLowerCase() === "yes");
 		});
+		rl.on("close", () => resolve(false));
 	});
 }
 
@@ -387,6 +392,18 @@ async function createSessionManager(
 				return openSessionOrExit(resolved.path, sessionDir);
 
 			case "global": {
+				if (!process.stdin.isTTY) {
+					// The fork confirmation below blocks on readline, which never resolves
+					// without an interactive stdin (piped, detached, or closed), hanging
+					// the process indefinitely. Fail fast with an actionable message.
+					console.error(chalk.red(`Session found in different project: ${resolved.cwd}`));
+					console.error(
+						chalk.red(
+							`Cannot confirm forking without an interactive terminal. Use --fork '${parsed.session}' to fork it into the current directory, or re-run from ${resolved.cwd}.`,
+						),
+					);
+					process.exit(1);
+				}
 				console.log(chalk.yellow(`Session found in different project: ${resolved.cwd}`));
 				const shouldFork = await promptConfirm("Fork this session into current directory?");
 				if (!shouldFork) {

@@ -1,3 +1,15 @@
+## `--session` cross-project resume fails fast instead of hanging on non-interactive stdin (2026-08-07)
+
+### What changed
+
+- `src/main.ts`: when `--session <id>` resolves to a session owned by a different project, the CLI previously always asked `Fork this session into current directory?` via readline. With piped, detached, or closed stdin (scripts, `-p` one-shots, app-server spawns) the question never settles — readline does not answer on EOF — so the process hung forever with no output. The CLI now checks `process.stdin.isTTY` first and exits 1 with an actionable message (`--fork '<id>'` or re-run from the owning project) when no interactive terminal is available.
+- `promptConfirm()` additionally resolves `false` on readline `close` (Ctrl+D / stdin EOF) so interactive sessions can no longer wedge on an ended input stream.
+- Coverage: `test/session-cross-project-resume.test.ts` spawns the real CLI with ignored stdin against a cross-project session fixture and asserts the fast, guided failure.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: additive branch and close-handler only, both inside fork-owned `main.ts` session wiring.
+
 ## Joined user aborts override system provenance (2026-08-05)
 
 ### What changed
