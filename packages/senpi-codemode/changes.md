@@ -1,5 +1,43 @@
 # senpi-codemode fork changes
 
+## Detached eval cell resumption-channel liveness (2026-08-08)
+
+### What changed
+
+- New `src/extension/resumption-channel.ts` duplicates the cross-package `resumption_channel_state` event literal and
+  payload type locally; senpi-codemode is a separate package and must not import from packages/coding-agent, so a
+  sentinel test pins the literal to catch drift.
+- `src/tool/detached-cell-manager.ts`: new optional `onChannelState` callback fires a full per-source snapshot
+  (`{ source: "eval-detached", activeCount, channels: [{ id, description, startedAtMs }] }`) on the same transitions as
+  the existing `#emitStatus` footer seam (detach / settle / stop / dispose). `description` mirrors the footer label
+  fallback (`summary` else cell id). A public `publishChannelState()` re-publishes the current snapshot.
+- `src/index.ts`: the local `CodemodeExtensionAPI` widens with an optional `events?: { emit(name, data) }`; emission
+  goes through `pi.events?.emit(...)` so hosts without an event bus are a harmless no-op. Both cell-manager
+  constructions wire the callback, and the `session_start` handler re-publishes the snapshot because the consuming
+  goal builtin clears its per-session counts there.
+- `test/eval-resumption-channel.test.ts`: pins the single-cell snapshot, the two-cells-settling count sequence, the
+  bus-less host no-op, the `session_start` re-emit plus bus transport, and the event-name sentinel.
+
+### Why
+
+- The goal builtin delays its hidden "keep going" continuation while a live resumption channel is on duty, but it only
+  ever learned about terminal monitors. Detached eval cells are a real live channel that reported nothing, so the goal
+  nagged itself immediately at turn end while a cell was still computing. This change makes codemode EMIT its liveness;
+  a sibling lane owns the consuming side in the goal builtin.
+- The legacy `terminal_monitor_state` event keeps its single-owner full-snapshot semantics; emitting it from a second
+  source would clobber the terminal's count, so only the new source-keyed event is used.
+
+### Why this cannot be expressed externally
+
+- The liveness transitions live inside the detached-cell manager and the extension entry; an external extension cannot
+  observe detach/settle/dispose without reimplementing the cell lifecycle.
+
+### Expected merge conflict zones
+
+- LOW: `src/index.ts` around the cell-manager constructions and the `session_start` handler.
+- LOW: `src/tool/detached-cell-manager.ts` around `#emitStatus`.
+- MEDIUM: `CHANGELOG.md` `[Unreleased]` when sibling lanes land entries; keep both bullets.
+
 ## Compact elapsed labels for simple eval results (2026-08-06)
 
 ### What changed
