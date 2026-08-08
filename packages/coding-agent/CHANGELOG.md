@@ -12,6 +12,9 @@
 
 ### Fixed
 
+- Fixed terminal resumption liveness reporting so monitor snapshots are dual-published through the legacy event and
+  the shared source-keyed channel contract, while live background bash sessions now publish spawn, exit, kill, and
+  session-start snapshots even when terminal completion notifications are disabled.
 - Fixed active Goals resuming immediately while background tasks, detached evals, or background bash sessions were
   still live. Goal continuation now aggregates source-keyed resumption-channel snapshots, preserves the four-minute
   cache-warm check-in, and reports a per-source wait summary while retaining terminal-monitor telemetry compatibility.
