@@ -170,17 +170,14 @@
 - Expected merge conflict zones: MEDIUM in `service-tier.ts` around the command
   and `before_provider_request` handler.
 
-## terminal + goal: monitor liveness event contract (2026-07-28)
+## resumption channels + goal: source-keyed liveness contract (2026-08-08, supersedes 2026-07-28)
 
-- New `monitor-state-event.ts` defines the internal `terminal_monitor_state` pi-event
-  payload (`activeCount`).
-- The terminal extension publishes the live registry count on every existing
-  `MonitorRegistry.onChange` transition (register, pause/rearm snapshot change,
-  settle, dispose) while preserving the monitor footer update.
-- The goal builtin consumes this internal event to select immediate versus delayed
-  continuation policy; no public `ExtensionContext` or RPC protocol type changed.
-- Expected merge conflict zones: LOW in `terminal/extension.ts` around the monitor
-  registry `onChange` callback; NONE in `extensions/types.ts`.
+- New `resumption-channel-event.ts` defines the internal `resumption_channel_state` pi-event as a full snapshot for one open-set `source`: `{source, activeCount, channels?}`. Sources are strings rather than an enum so terminal monitors, background bash, detached evals, senpi tasks, and future producers can share the contract without central registration.
+- Goal stores one count per source and writes each incoming snapshot to that key. Legacy `terminal_monitor_state` and generalized `resumption_channel_state` emissions both write `"terminal-monitor"`, making dual emission idempotent: a count of two remains two and is never summed to four.
+- Immediate-versus-delayed continuation, system-abort recovery, timer eligibility, wait labels, and stall context use the total across source keys. Timer cancellation and toolless-streak reset occur only when that total transitions from positive to zero; one source draining while another remains live has no zero-transition side effect.
+- Goal subscribes at extension factory/construction scope rather than inside `session_start`, and keeps both subscriptions until disposal. `start()` clears prior-session counts. Every emitter must therefore publish transitions while live and re-emit its full current snapshot on `session_start` after Goal has reset, so the new session cannot inherit stale counts or miss live channels.
+- Scheduled/resumed pi-events and `goal-cache-warmup` entries retain backward-compatible `activeMonitorCount` (terminal monitors only) and add `channelCounts` for the source-keyed snapshot. No public `ExtensionContext` or RPC protocol type changed.
+- Expected merge conflict zones: emitters in sibling-owned terminal/task/eval modules; LOW in Goal continuation telemetry and wait presentation; NONE in `extensions/types.ts`.
 
 ## bash-timeout: beyond-max routing to run_in_background + monitor (2026-07-28)
 
