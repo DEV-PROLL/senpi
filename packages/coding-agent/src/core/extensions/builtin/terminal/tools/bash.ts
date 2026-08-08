@@ -306,6 +306,7 @@ async function runForeground(
 
 	if (outcome === "detached") {
 		scheduleDetachedSweep(ctx, id, runtime, timeoutMs, startedAt);
+		ctx.onBackgroundStart?.(id, input.description ?? input.command, startedAt);
 		if (ctx.onBackgroundExit) runtime.session.onExit(() => ctx.onBackgroundExit?.(id, runtime));
 		const delta = runtime.readDelta();
 		const partialOutput = formatTerminalToolOutput(delta.text).text || "(no output yet)";
@@ -377,6 +378,7 @@ async function runBackground(
 		cwd,
 		envOverrides: sessionEnvOverrides(ctx, execCtx),
 	});
+	ctx.onBackgroundStart?.(id, input.description ?? input.command, Date.now());
 	if (ctx.onBackgroundExit) runtime.session.onExit(() => ctx.onBackgroundExit?.(id, runtime));
 
 	// Capture any output the command emits within a short grace window (or its exit).
