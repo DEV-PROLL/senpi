@@ -12,6 +12,9 @@
 
 ### Fixed
 
+- Fixed active Goals resuming immediately while background tasks, detached evals, or background bash sessions were
+  still live. Goal continuation now aggregates source-keyed resumption-channel snapshots, preserves the four-minute
+  cache-warm check-in, and reports a per-source wait summary while retaining terminal-monitor telemetry compatibility.
 - Fixed multi-session RPC `open_session` failures returning only a bare `open_failed` code. Responses now preserve the
   stable prefix and include the underlying workspace or runtime cause as `open_failed: <reason>`, while all other
   transport error codes remain exact strings ([#750](https://github.com/code-yeongyu/senpi/pull/750)).

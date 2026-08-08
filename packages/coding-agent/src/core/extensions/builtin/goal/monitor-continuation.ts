@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isTerminalMonitorStateEvent, TERMINAL_MONITOR_STATE_EVENT } from "../monitor-state-event.ts";
+import { isResumptionChannelStateEvent, RESUMPTION_CHANNEL_STATE_EVENT } from "../resumption-channel-event.ts";
 import {
 	estimateCacheWarmMetrics,
 	GOAL_CACHE_WARMUP_ENTRY_TYPE,
@@ -28,6 +29,7 @@ import type {
 	ContinuingGoalContinuationVerdict,
 	DelayedContinuationKind,
 	GoalContinuationAdmission,
+	ResumptionChannelCounts,
 	SystemAbortOptions,
 } from "./monitor-continuation-types.ts";
 import { buildContinuationPrompt, buildGoalStallNotice, buildTruncationRecoveryPrompt } from "./prompt.ts";
@@ -47,12 +49,12 @@ export class MonitorAwareGoalContinuation {
 	readonly #isContinuationPending: () => boolean;
 	readonly #markContinuationPending: () => void;
 	readonly #waitTicker: GoalWaitTicker | undefined;
-	#activeMonitorCount = 0;
+	#channelCounts = new Map<string, number>();
 	#ctx: ExtensionContext | undefined;
 	#goal: Goal | null = null;
 	#timer: ReturnType<typeof setTimeout> | undefined;
 	#scheduledContinuationKind: DelayedContinuationKind | undefined;
-	#unsubscribeMonitorState: (() => void) | undefined;
+	#channelStateUnsubscribers: Array<() => void> = [];
 	#lastAgentEndMessages: readonly AgentMessage[] = [];
 	#consecutiveLengthRecoveries = new Map<string, number>();
 	#recentNormalizedOutputHashes: string[] = [];
@@ -77,31 +79,17 @@ export class MonitorAwareGoalContinuation {
 		this.#isContinuationPending = isContinuationPending;
 		this.#markContinuationPending = markContinuationPending;
 		this.#waitTicker = waitTicker;
+		this.#subscribeToChannelState();
 	}
 
 	start(ctx: ExtensionContext): void {
 		this.#cancelTimer();
-		this.#unsubscribeMonitorState?.();
 		this.#ctx = ctx;
-		this.#activeMonitorCount = 0;
+		this.#channelCounts.clear();
 		this.#goal = null;
 		this.#lastAgentEndMessages = [];
 		this.#directInputHolds.clear();
 		this.#resetContinuationState();
-		const events = this.#pi.events;
-		if (events === undefined) return;
-		this.#unsubscribeMonitorState = events.on(TERMINAL_MONITOR_STATE_EVENT, (data) => {
-			if (!isTerminalMonitorStateEvent(data)) return;
-			this.#activeMonitorCount = data.activeCount;
-			if (data.activeCount === 0) {
-				if (this.#scheduledContinuationKind === "monitor") this.#cancelTimer();
-				this.#resetToollessContinuationStreak();
-				return;
-			}
-			if (this.#scheduledContinuationKind === "monitor") {
-				this.#waitTicker?.setActiveMonitorCount(data.activeCount);
-			}
-		});
 	}
 
 	async afterAgentEnd(options: AgentEndOptions): Promise<Goal | null> {
@@ -151,7 +139,7 @@ export class MonitorAwareGoalContinuation {
 		}
 		if (immediateVerdict.kind === "deny" && immediateVerdict.reason === "not-eligible") return goal;
 
-		if (this.#activeMonitorCount === 0) {
+		if (this.#activeChannelCount() === 0) {
 			this.#cancelTimer();
 			const admission = await this.#admitAndQueue(options.ctx, goal, "immediate", options.messages);
 			return admission.goal;
@@ -168,7 +156,7 @@ export class MonitorAwareGoalContinuation {
 		this.#lastAgentEndMessages = options.messages;
 		this.#lastTurnUsage = collectAssistantUsage([...options.messages]);
 		if (options.willRetry || options.goal?.status !== "active") return options.goal;
-		if (this.#activeMonitorCount > 0) this.#schedule(options.goal, "monitor");
+		if (this.#activeChannelCount() > 0) this.#schedule(options.goal, "monitor");
 		else if (lastAssistantMessage(options.messages)?.stopReason === "error") {
 			this.#pendingSystemRecovery = options;
 		}
@@ -240,11 +228,11 @@ export class MonitorAwareGoalContinuation {
 
 	dispose(): void {
 		this.#cancelTimer();
-		this.#unsubscribeMonitorState?.();
-		this.#unsubscribeMonitorState = undefined;
+		for (const unsubscribe of this.#channelStateUnsubscribers) unsubscribe();
+		this.#channelStateUnsubscribers = [];
 		this.#ctx = undefined;
 		this.#goal = null;
-		this.#activeMonitorCount = 0;
+		this.#channelCounts.clear();
 		this.#lastAgentEndMessages = [];
 		this.#directInputHolds.clear();
 		this.#resetContinuationState();
@@ -255,19 +243,22 @@ export class MonitorAwareGoalContinuation {
 		const delayMs = kind === "monitor" ? GOAL_MONITOR_CONTINUATION_DELAY_MS : GOAL_USER_GRACE_DELAY_MS;
 		if (kind === "monitor") {
 			const cache = estimateCacheWarmMetrics(this.#ctx?.model, process.env, this.#lastTurnUsage);
+			const channelCounts = this.#channelCountSnapshot();
 			this.#scheduledCache = cache;
 			this.#scheduledAtMs = Date.now();
 			this.#pi.events?.emit(GOAL_CONTINUATION_SCHEDULED_EVENT, {
 				goalId: goal.id,
 				delayMs,
-				activeMonitorCount: this.#activeMonitorCount,
+				activeMonitorCount: this.#activeTerminalMonitorCount(),
+				channelCounts,
 				cache,
 			});
 			this.#appendWarmupEntry({
 				phase: "scheduled",
 				goalId: goal.id,
 				delayMs,
-				activeMonitorCount: this.#activeMonitorCount,
+				activeMonitorCount: this.#activeTerminalMonitorCount(),
+				channelCounts,
 				...(cache !== undefined ? { cache } : {}),
 			});
 		} else {
@@ -290,7 +281,7 @@ export class MonitorAwareGoalContinuation {
 				kind,
 				remainingMs: delayMs,
 				totalMs: kind === "monitor" ? GOAL_MONITOR_CONTINUATION_DELAY_MS : GOAL_USER_GRACE_DELAY_MS,
-				activeMonitorCount: this.#activeMonitorCount,
+				channelCounts: this.#channelCountSnapshot(),
 			});
 		}
 		this.#timer = setTimeout(() => {
@@ -316,7 +307,7 @@ export class MonitorAwareGoalContinuation {
 		const ctx = this.#ctx;
 		const goal = this.#goal;
 		if (ctx === undefined || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
-		if (kind === "monitor" && this.#activeMonitorCount === 0) return;
+		if (kind === "monitor" && this.#activeChannelCount() === 0) return;
 		const admission = await this.#admitAndQueue(
 			ctx,
 			goal,
@@ -324,11 +315,13 @@ export class MonitorAwareGoalContinuation {
 			this.#lastAgentEndMessages,
 		);
 		if (kind !== "monitor" || !admission.admitted) return;
+		const channelCounts = this.#channelCountSnapshot();
 		this.#pi.events?.emit(GOAL_CONTINUATION_RESUMED_EVENT, {
 			goalId: goal.id,
 			delayMs,
 			waitedMs,
-			activeMonitorCount: this.#activeMonitorCount,
+			activeMonitorCount: this.#activeTerminalMonitorCount(),
+			channelCounts,
 			cache,
 		});
 		this.#appendWarmupEntry({
@@ -336,7 +329,8 @@ export class MonitorAwareGoalContinuation {
 			goalId: goal.id,
 			delayMs,
 			waitedMs,
-			activeMonitorCount: this.#activeMonitorCount,
+			activeMonitorCount: this.#activeTerminalMonitorCount(),
+			channelCounts,
 			...(cache !== undefined ? { cache } : {}),
 		});
 	}
@@ -395,20 +389,21 @@ export class MonitorAwareGoalContinuation {
 		let content = verdict.prompt === "minimal" ? buildTruncationRecoveryPrompt() : buildContinuationPrompt(goal);
 		if (!verdict.stallNotice) return content;
 
-		const monitorsActive = this.#activeMonitorCount > 0;
+		const liveSources = this.#liveChannelSources();
 		this.#pi.events?.emit(GOAL_MONITOR_STALL_EVENT, {
 			goalId: goal.id,
 			consecutiveContinuations: this.#toollessContinuationStreak,
 			toolless: true,
 		});
 		if (ctx.hasUI) {
-			const context = monitorsActive ? "while monitors stayed active" : "without tool use";
+			const context =
+				liveSources.length > 0 ? `while ${liveSources.join(", ")} channels stayed active` : "without tool use";
 			ctx.ui.notify(
 				`Goal continuation repeated ${this.#toollessContinuationStreak} toolless turns ${context} - injected a stall check.`,
 				"info",
 			);
 		}
-		content = `${buildGoalStallNotice(this.#toollessContinuationStreak, { monitorsActive })}\n\n${content}`;
+		content = `${buildGoalStallNotice(this.#toollessContinuationStreak, { liveSources })}\n\n${content}`;
 		return content;
 	}
 
@@ -439,6 +434,58 @@ export class MonitorAwareGoalContinuation {
 	#resetLengthRecoveryAfterCleanStop(goal: Goal | null, messages: readonly AgentMessage[]): void {
 		if (goal === null || lastAssistantMessage(messages)?.stopReason !== "stop") return;
 		this.#consecutiveLengthRecoveries.delete(goal.id);
+	}
+
+	#subscribeToChannelState(): void {
+		const events = this.#pi.events;
+		if (events === undefined) return;
+		this.#channelStateUnsubscribers.push(
+			events.on(TERMINAL_MONITOR_STATE_EVENT, (data) => {
+				if (!isTerminalMonitorStateEvent(data)) return;
+				this.#setChannelCount("terminal-monitor", data.activeCount);
+			}),
+			events.on(RESUMPTION_CHANNEL_STATE_EVENT, (data) => {
+				if (!isResumptionChannelStateEvent(data)) return;
+				this.#setChannelCount(data.source, data.activeCount);
+			}),
+		);
+	}
+
+	#setChannelCount(source: string, activeCount: number): void {
+		const previousTotal = this.#activeChannelCount();
+		this.#channelCounts.set(source, activeCount);
+		const nextTotal = this.#activeChannelCount();
+		if (previousTotal > 0 && nextTotal === 0) {
+			if (this.#scheduledContinuationKind === "monitor") this.#cancelTimer();
+			this.#resetToollessContinuationStreak();
+			return;
+		}
+		if (this.#scheduledContinuationKind === "monitor") {
+			this.#waitTicker?.setChannelCounts(this.#channelCountSnapshot());
+		}
+	}
+
+	#activeChannelCount(): number {
+		let total = 0;
+		for (const count of this.#channelCounts.values()) total += count;
+		return total;
+	}
+
+	#activeTerminalMonitorCount(): number {
+		return this.#channelCounts.get("terminal-monitor") ?? 0;
+	}
+
+	#channelCountSnapshot(): ResumptionChannelCounts {
+		return Object.fromEntries(
+			[...this.#channelCounts.entries()].sort(([left], [right]) => left.localeCompare(right)),
+		);
+	}
+
+	#liveChannelSources(): string[] {
+		return [...this.#channelCounts.entries()]
+			.filter(([, count]) => count > 0)
+			.map(([source]) => source)
+			.sort();
 	}
 
 	#resetContinuationState(): void {

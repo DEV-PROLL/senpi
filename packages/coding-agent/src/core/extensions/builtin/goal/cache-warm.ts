@@ -30,6 +30,8 @@ export interface GoalCacheWarmupEntryData {
 	/** Actual wait in milliseconds; present on the `resumed` phase only. */
 	readonly waitedMs?: number;
 	readonly activeMonitorCount: number;
+	/** Full source-keyed snapshot; absent on entries written before resumption channels were generalized. */
+	readonly channelCounts?: Readonly<Record<string, number>>;
 	readonly cache?: GoalCacheWarmMetrics;
 }
 
