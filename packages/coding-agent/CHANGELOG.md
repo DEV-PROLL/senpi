@@ -18,6 +18,7 @@
   dead. Native waits are now settled from a dedicated reaper thread, keeping the libuv pool free; synchronous wait errors,
   exit payloads, and process-tree kill behavior are unchanged. Added native regression coverage for threadpool exhaustion
   and Worker teardown ([#768](https://github.com/code-yeongyu/senpi/pull/768)).
+- Fixed threshold-triggered compaction giving up with "Compaction did not apply" when an idle-warmed summary became stale after a message-revision change. The blocking route now discards the stale warm result and regenerates a fresh summary against the current session instead of allowing context to keep growing.
 
 ### Removed
 
