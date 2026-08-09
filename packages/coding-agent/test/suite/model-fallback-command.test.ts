@@ -20,7 +20,9 @@ const dirs: string[] = [];
 let previousAgentDir: string | undefined;
 const primary = model("anthropic", "claude-fable-5", true);
 const fallback = model("ccapi", "kimi-k3", true);
-const kimiK3 = model("apitopia", "kimi-k3-unlocked", true);
+const kimiK3 = model("kimi-coding", "k3", true);
+const sdkFable = model("claude-sdk-oauth", "claude-fable-5", true);
+const sdkOpus5 = model("claude-sdk-oauth", "claude-opus-5", true);
 const opus5 = model("anthropic", "claude-opus-5", true);
 const opus48 = model("anthropic", "claude-opus-4-8", true);
 
@@ -191,9 +193,11 @@ describe("model fallback builtin command", () => {
 		const sessionSideSettings = SettingsManager.create(dir);
 		await command?.handler("anthropic/claude-fable-5 ccapi/kimi-k3:max", await context(dir, notices));
 		await sessionSideSettings.reload();
-		expect(sessionSideSettings.getRetryFallbackSettings().chains).toEqual({
-			"anthropic/claude-fable-5": ["ccapi/kimi-k3:max"],
-		});
+		// The user's canonical key wins for that provider; the bare shipped default
+		// stays in the raw map so other providers serving the family keep a chain.
+		expect(sessionSideSettings.getRetryFallbackSettings().chains["anthropic/claude-fable-5"]).toEqual([
+			"ccapi/kimi-k3:max",
+		]);
 		expect(notices).toContain("Fallback chain saved for anthropic/claude-fable-5.");
 	});
 
@@ -217,7 +221,12 @@ describe("model fallback builtin command", () => {
 			name: "all default models are available",
 			models: [primary, kimiK3, opus5, opus48],
 			expected:
-				"anthropic/claude-fable-5 -> apitopia/kimi-k3-unlocked:max, anthropic/claude-opus-5:xhigh, anthropic/claude-opus-4-8:xhigh",
+				"anthropic/claude-fable-5 -> kimi-coding/k3:max, anthropic/claude-opus-5:xhigh, anthropic/claude-opus-4-8:xhigh",
+		},
+		{
+			name: "Fable 5 is attached through the Claude SDK OAuth provider instead of anthropic",
+			models: [sdkFable, kimiK3, sdkOpus5],
+			expected: "claude-sdk-oauth/claude-fable-5 -> kimi-coding/k3:max, claude-sdk-oauth/claude-opus-5:xhigh",
 		},
 		{
 			name: "Kimi K3 is unavailable",
