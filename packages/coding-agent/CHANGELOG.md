@@ -12,6 +12,9 @@
 
 ### Fixed
 
+- Fixed config reloads discarding live terminal monitor and background-bash snapshots before Goal continuation
+  scheduling. Fresh Goal instances now retain Terminal's pre-start replay, while later same-instance session starts
+  still clear stale channel state.
 - Fixed terminal resumption liveness reporting so monitor snapshots are dual-published through the legacy event and
   the shared source-keyed channel contract, while live background bash sessions now publish spawn, exit, kill, and
   session-start snapshots even when terminal completion notifications are disabled.
