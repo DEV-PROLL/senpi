@@ -20,8 +20,17 @@
   OAuth-credential providers first, then a fixed precedence order, and never to OpenRouter; explicit
   `provider/model` chains keep exact behavior, and `retry.fallbackChains` accepts a bare model id as a
   family-wide key with `[]` still opting out ([#761](https://github.com/code-yeongyu/senpi/pull/761)).
+- Changed `/model` search ranking to a model-aware scorer that matches query tokens against the model id, name,
+  provider, and `provider/id` independently instead of one concatenated string. Exact, whole-token, and
+  word-boundary matches now beat scattered subsequence matches, so `opus 5` ranks `claude-opus-5` first and an exact
+  `provider/id` query still outranks proxy providers that merely reuse the id. Favorite models are ranked above
+  non-favorites in `/model` search results, with relevance preserved inside each group.
 
 ### Fixed
+
+- Fixed the model rows jumping while toggling favorites. `/model` and `/favorite-models` now freeze their row order
+  when the screen opens: toggling a favorite only updates the `*` marker, and the order is recomputed the next time
+  the screen is opened. Explicit reorder keys still move rows immediately.
 
 - Fixed config reloads discarding live terminal monitor and background-bash snapshots before Goal continuation
   scheduling. Fresh Goal instances now retain Terminal's pre-start replay, while later same-instance session starts
