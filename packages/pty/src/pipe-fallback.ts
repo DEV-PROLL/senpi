@@ -51,6 +51,25 @@ export function shouldUsePipeFallback(
 	return isPipeFallbackForced(env) || nativeLoadResult.native === null;
 }
 
+/**
+ * Signal the child's whole process group on POSIX. The detached child is its
+ * own group leader, and grandchildren inherit the stdio pipes — leaving them
+ * alive after a kill keeps 'close' from ever firing (the POSIX twin of the
+ * Windows taskkill /T branch below). Returns false when the group signal was
+ * not delivered so callers can fall back to a direct kill.
+ */
+function signalDetachedTree(child: ChildProcessHandle, signal: NodeJS.Signals): boolean {
+	const pid = child.pid;
+	if (pid === undefined || process.platform === "win32") return false;
+	try {
+		process.kill(-pid, signal);
+		return true;
+	} catch {
+		// Group already gone — let the caller fall back to a direct kill.
+		return false;
+	}
+}
+
 function normalizeSpawnError(command: string, error: Error): PipeFallbackSessionError {
 	return {
 		code: "spawn_error",
@@ -104,6 +123,13 @@ export class PipeFallbackSession {
 				cwd: this.options.cwd,
 				env: this.options.env ? { ...process.env, ...this.options.env } : process.env,
 				stdio: ["pipe", "pipe", "pipe"],
+				// Detach on POSIX so the child leads its own session with no
+				// controlling terminal. Without this, a tty-reading program (e.g. a
+				// sudo password prompt) opens /dev/tty — the user's real terminal —
+				// and races the TUI's raw-mode stdin reader byte-by-byte, splitting
+				// keystrokes and Kitty escape sequences between the two readers.
+				// Detached, the /dev/tty open fails with a clear error instead.
+				detached: process.platform !== "win32",
 				windowsHide: true,
 			});
 			this.child = child;
@@ -124,7 +150,7 @@ export class PipeFallbackSession {
 			if (this.options.timeoutMs !== undefined) {
 				this.timeoutHandle = setTimeout(() => {
 					this.timedOut = true;
-					child.kill("SIGTERM");
+					signalDetachedTree(child, "SIGTERM");
 				}, this.options.timeoutMs);
 			}
 		} catch (error) {
@@ -216,6 +242,9 @@ export class PipeFallbackSession {
 			} catch {
 				// Fall through to the direct kill if taskkill is unavailable.
 			}
+		}
+		if (signalDetachedTree(this.child, signal)) {
+			return { ok: true, note: `Sent ${signal} to child_process pipe fallback process group (pgid ${pid}).` };
 		}
 		this.child.kill(signal);
 		return { ok: true, note: `Sent ${signal} to child_process pipe fallback session.` };
