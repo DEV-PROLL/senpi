@@ -675,8 +675,12 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Open
 	const isDeepSeek = provider === "deepseek" || baseUrl.includes("deepseek.com");
 	const isOpenRouterDeveloperRoleModel =
 		isOpenRouter && (model.id.startsWith("anthropic/") || model.id.startsWith("openai/"));
-	const cacheControlFormat =
-		provider === "openrouter" && /^~?anthropic\//.test(model.id) ? "anthropic" : undefined;
+	const openRouterCacheControlPrefixes = ["anthropic/", "qwen/", "google/"];
+	const cacheControlModelId = model.id.startsWith("~") ? model.id.slice(1) : model.id;
+	const supportsOpenRouterCacheControl = openRouterCacheControlPrefixes.some((prefix) =>
+		cacheControlModelId.startsWith(prefix),
+	);
+	const cacheControlFormat = provider === "openrouter" && supportsOpenRouterCacheControl ? "anthropic" : undefined;
 
 	return {
 		supportsStore: !isNonStandard,

@@ -139,9 +139,14 @@ describe("Anthropic Messages TTL", () => {
 });
 
 describe("OpenAI Completions TTL", () => {
-	it("uses resolved OpenRouter compat for anthropic-prefixed models", () => {
+	it.each([
+		"anthropic/claude-sonnet-4",
+		"~anthropic/claude-opus-latest",
+		"qwen/qwen3-235b-a22b",
+		"google/gemini-2.5-pro",
+	])("uses resolved OpenRouter cache control compat for %s", (modelId) => {
 		const openRouterModel = createModel("openai-completions", {
-			id: "anthropic/claude-sonnet-4",
+			id: modelId,
 			provider: "openrouter",
 			baseUrl: "https://openrouter.ai/api/v1",
 			cacheRetention: "long",
@@ -150,6 +155,16 @@ describe("OpenAI Completions TTL", () => {
 		expect(getOpenAICompletionsCompat(openRouterModel).cacheControlFormat).toBe("anthropic");
 		expect(getOpenAICompletionsCompat(openRouterModel).sendSessionAffinityHeaders).toBe(true);
 		expect(resolvePromptCacheTtlSeconds(openRouterModel)).toBe(3600);
+	});
+
+	it("does not enable cache control for other OpenRouter model prefixes", () => {
+		const openRouterModel = createModel("openai-completions", {
+			id: "meta-llama/llama-3.3-70b-instruct",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+		});
+
+		expect(getOpenAICompletionsCompat(openRouterModel).cacheControlFormat).toBeUndefined();
 	});
 
 	it("selects Moonshot tool schema normalization and prompt cache keys automatically", () => {
