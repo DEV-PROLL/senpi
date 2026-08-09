@@ -93,10 +93,13 @@ function createUi(notices: string[], choices: string[]): ExtensionUIContext {
 	};
 }
 
-function createModelRegistry(registeredModels: Model<Api>[] = [primary, fallback]): ModelRegistry {
+function createModelRegistry(
+	registeredModels: Model<Api>[] = [primary, fallback],
+	availableModels: Model<Api>[] = registeredModels,
+): ModelRegistry {
 	const modelRegistry = ModelRegistry.inMemory(AuthStorage.inMemory());
 	modelRegistry.getAll = () => registeredModels;
-	modelRegistry.getAvailable = () => registeredModels;
+	modelRegistry.getAvailable = () => availableModels;
 	modelRegistry.find = (provider: string, id: string) =>
 		registeredModels.find((registeredModel) => registeredModel.provider === provider && registeredModel.id === id);
 	return modelRegistry;
@@ -107,9 +110,10 @@ async function context(
 	notices: string[],
 	choices: string[] = [],
 	registeredModels?: Model<Api>[],
+	availableModels?: Model<Api>[],
 ): Promise<ExtensionCommandContext> {
 	const settings = SettingsManager.create(dir);
-	const modelRegistry = createModelRegistry(registeredModels);
+	const modelRegistry = createModelRegistry(registeredModels, availableModels ?? registeredModels);
 	return {
 		ui: createUi(notices, choices),
 		mode: choices.length > 0 ? "tui" : "print",
@@ -183,6 +187,28 @@ describe("model fallback builtin command", () => {
 		const command = (await harness()).get("fallback");
 		expect(command?.argumentHint).toBe("[target [fallback1 fallback2 ...]]");
 		expect(command?.description).toContain("fallback");
+	});
+
+	it("lists a default chain only for models the user can actually select", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "senpi-fallback-command-"));
+		dirs.push(dir);
+		const notices: string[] = [];
+		const catalogOnly = model("github-copilot", "claude-fable-5", true);
+		// The builtin catalog publishes Fable 5 under many providers; only the SDK
+		// OAuth one is actually usable here, so only its chain belongs on screen.
+		const ctx = await context(
+			dir,
+			notices,
+			["Show chains & live state"],
+			[sdkFable, sdkOpus5, kimiK3, catalogOnly],
+			[sdkFable, sdkOpus5, kimiK3],
+		);
+
+		await (await harness()).get("fallback")?.handler("", ctx);
+
+		const rendered = notices.join("\n");
+		expect(rendered).toContain("claude-sdk-oauth/claude-fable-5 -> kimi-coding/k3:max");
+		expect(rendered).not.toContain("github-copilot/claude-fable-5 ->");
 	});
 
 	it("quick-set validates and persists a chain visible after a session-side reload", async () => {

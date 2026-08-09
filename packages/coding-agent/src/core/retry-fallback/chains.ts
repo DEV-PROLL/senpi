@@ -2,7 +2,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { isValidThinkingLevel } from "../../cli/args.ts";
 import { findExactModelReferenceMatch, parseModelPattern } from "../model-resolver.ts";
-import { type FallbackAuthLookup, parseBareSelector, rankFamilyModels } from "./expansion.ts";
+import { type FallbackAuthTiers, MAX_PROVIDERS_PER_FAMILY, parseBareSelector, rankFamilyModels } from "./expansion.ts";
 
 export interface FallbackSelector {
 	raw: string;
@@ -15,7 +15,11 @@ export type FallbackChains = Readonly<Record<string, readonly string[]>>;
 
 export type FallbackModelLookup =
 	| readonly Model<Api>[]
-	| { getAll(): Model<Api>[]; isUsingOAuth?(model: Model<Api>): boolean };
+	| {
+			getAll(): Model<Api>[];
+			isUsingOAuth?(model: Model<Api>): boolean;
+			hasConfiguredAuth?(model: Model<Api>): boolean;
+	  };
 
 function availableModels(lookup: FallbackModelLookup): Model<Api>[] {
 	return "getAll" in lookup ? lookup.getAll() : [...lookup];
@@ -25,12 +29,19 @@ function availableModels(lookup: FallbackModelLookup): Model<Api>[] {
  * Auth tier is optional so array lookups and older callers keep working; without
  * it every provider lands in the non-OAuth tier and the precedence table decides.
  */
-function authLookup(lookup: FallbackModelLookup): FallbackAuthLookup {
-	if (Array.isArray(lookup)) return () => false;
-	const registry = lookup as { isUsingOAuth?(model: Model<Api>): boolean };
-	return typeof registry.isUsingOAuth === "function"
-		? (model) => registry.isUsingOAuth?.(model) === true
-		: () => false;
+function authTiers(lookup: FallbackModelLookup): FallbackAuthTiers {
+	if (Array.isArray(lookup)) return { isUsingOAuth: () => false };
+	const registry = lookup as {
+		isUsingOAuth?(model: Model<Api>): boolean;
+		hasConfiguredAuth?(model: Model<Api>): boolean;
+	};
+	return {
+		isUsingOAuth: (model) => registry.isUsingOAuth?.(model) === true,
+		hasConfiguredAuth:
+			typeof registry.hasConfiguredAuth === "function"
+				? (model) => registry.hasConfiguredAuth?.(model) === true
+				: undefined,
+	};
 }
 
 /** An empty entry list is the documented opt-out; it survives as a tombstone. */
@@ -112,7 +123,7 @@ export function baseSelector(selector: Pick<FallbackSelector, "provider" | "id">
  */
 export function canonicalizeFallbackChains(chains: FallbackChains, lookup: FallbackModelLookup): FallbackChains {
 	const models = availableModels(lookup);
-	const isUsingOAuth = authLookup(lookup);
+	const tiers = authTiers(lookup);
 	const canonical: Record<string, readonly string[]> = {};
 	const explicitKeys = new Set<string>();
 	const tombstones = new Set<string>();
@@ -121,7 +132,7 @@ export function canonicalizeFallbackChains(chains: FallbackChains, lookup: Fallb
 		entries.flatMap((entry) => {
 			const bare = parseBareSelector(entry);
 			if (bare) {
-				return rankFamilyModels(models, bare.family, isUsingOAuth)
+				return rankFamilyModels(models, bare.family, tiers, { limit: MAX_PROVIDERS_PER_FAMILY })
 					.map((model) =>
 						bare.thinkingLevel ? `${formatSelector(model)}:${bare.thinkingLevel}` : formatSelector(model),
 					)
@@ -136,12 +147,12 @@ export function canonicalizeFallbackChains(chains: FallbackChains, lookup: Fallb
 		const bareKey = parseBareSelector(key);
 		if (!bareKey || !Array.isArray(entries)) continue;
 		if (isChainTombstone(entries)) {
-			for (const model of rankFamilyModels(models, bareKey.family, isUsingOAuth)) {
+			for (const model of rankFamilyModels(models, bareKey.family, tiers)) {
 				tombstones.add(formatSelector(model).toLowerCase());
 			}
 			continue;
 		}
-		for (const model of rankFamilyModels(models, bareKey.family, isUsingOAuth)) {
+		for (const model of rankFamilyModels(models, bareKey.family, tiers)) {
 			const keySelector = bareKey.thinkingLevel
 				? `${formatSelector(model)}:${bareKey.thinkingLevel}`
 				: formatSelector(model);

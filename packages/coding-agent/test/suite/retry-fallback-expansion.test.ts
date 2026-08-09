@@ -24,10 +24,15 @@ const OPUS5 = "claude-opus-5";
 const OPUS48 = "claude-opus-4-8";
 
 /** Registry stand-in: `oauthProviders` marks which providers hold an OAuth credential. */
-function lookup(models: Model<Api>[], oauthProviders: string[] = []) {
+function lookup(models: Model<Api>[], oauthProviders: string[] = [], unauthenticated: string[] = []) {
 	return {
 		getAll: () => models,
 		isUsingOAuth: (candidate: Model<Api>) => oauthProviders.includes(candidate.provider),
+		hasConfiguredAuth: (candidate: Model<Api>) => !unauthenticated.includes(candidate.provider),
+	} as {
+		getAll(): Model<Api>[];
+		isUsingOAuth(model: Model<Api>): boolean;
+		hasConfiguredAuth(model: Model<Api>): boolean;
 	};
 }
 
@@ -169,5 +174,58 @@ describe("bare-key opt-out tombstones", () => {
 
 		expect(chains[`anthropic/${FABLE}`]).toEqual([`anthropic/${OPUS48}:max`]);
 		expect(chains[`claude-sdk-oauth/${FABLE}`]?.[0]).toBe("kimi-coding/k3:max");
+	});
+});
+
+describe("expansion stays scoped to models the user can actually use", () => {
+	const catalog = [
+		model("claude-sdk-oauth", FABLE),
+		model("claude-sdk-oauth", OPUS5),
+		model("anthropic", FABLE),
+		model("anthropic", OPUS5),
+		model("github-copilot", FABLE),
+		model("github-copilot", OPUS5),
+		model("opencode", FABLE),
+		model("opencode", OPUS5),
+		model("cloudflare-ai-gateway", FABLE),
+		model("cloudflare-ai-gateway", OPUS5),
+		model("kimi-coding", "k3"),
+	];
+
+	it("prefers authenticated providers over unauthenticated ones for bare candidates", () => {
+		const unauthenticated = ["github-copilot", "opencode", "cloudflare-ai-gateway"];
+		const chains = canonicalizeFallbackChains(DEFAULT_FALLBACK_CHAINS, lookup(catalog, [], unauthenticated));
+
+		// Ranking, never filtering: an unauthenticated provider must not outrank a
+		// configured one, but the chain still exists when availability is unknown.
+		for (const entries of Object.values(chains)) {
+			for (const provider of unauthenticated) {
+				expect(entries.some((entry) => entry.startsWith(`${provider}/`))).toBe(false);
+			}
+		}
+	});
+
+	it("still expands when no provider reports configured auth yet", () => {
+		const chains = canonicalizeFallbackChains(
+			DEFAULT_FALLBACK_CHAINS,
+			lookup(
+				catalog,
+				[],
+				catalog.map((m) => m.provider),
+			),
+		);
+
+		expect(Object.keys(chains).length).toBeGreaterThan(0);
+	});
+
+	it("caps how many providers one bare candidate fans out to", () => {
+		const chains = canonicalizeFallbackChains(DEFAULT_FALLBACK_CHAINS, lookup(catalog));
+		const entries = chains[`anthropic/${FABLE}`] ?? [];
+		const opus5Providers = entries.filter((entry) => entry.includes(OPUS5));
+
+		// A shipped default must stay a short, readable chain rather than every
+		// provider in the builtin catalog that happens to publish the model.
+		expect(opus5Providers.length).toBeLessThanOrEqual(2);
+		expect(entries.length).toBeLessThanOrEqual(5);
 	});
 });

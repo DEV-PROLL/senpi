@@ -24,6 +24,34 @@ export interface BareSelectorParts {
 /** Auth-tier probe. Providers holding an OAuth credential outrank API-key ones. */
 export type FallbackAuthLookup = (model: Model<Api>) => boolean;
 
+/**
+ * Auth tiers for bare expansion. OAuth first (a logged-in subscription is the
+ * account the user actually wants used), then any configured credential, then
+ * everything else. This ranks rather than filters: the runtime already skips
+ * unauthenticated candidates, and dropping them here would erase the chain
+ * whenever availability is not yet known.
+ */
+export interface FallbackAuthTiers {
+	isUsingOAuth: FallbackAuthLookup;
+	hasConfiguredAuth?: FallbackAuthLookup;
+}
+
+function authTier(model: Model<Api>, tiers: FallbackAuthTiers): number {
+	if (tiers.isUsingOAuth(model)) return 0;
+	if (tiers.hasConfiguredAuth?.(model) === true) return 1;
+	return 2;
+}
+
+/**
+ * How many providers one bare selector may fan out to. A shipped default must
+ * stay a short, readable chain: senpi's builtin catalog publishes popular models
+ * under a dozen providers, and expanding to all of them turned `/fallback` into
+ * an unreadable wall and the policy into "try every gateway that resells this".
+ * Two keeps the useful property - a second account for the same model - without
+ * the noise.
+ */
+const MAX_PROVIDERS_PER_FAMILY = 2;
+
 /** A selector is bare when it carries no provider prefix and no wildcard. */
 export function parseBareSelector(raw: string): BareSelectorParts | undefined {
 	const trimmed = raw.trim();
@@ -83,7 +111,8 @@ function precedenceIndex(provider: string): number {
 export function rankFamilyModels(
 	models: readonly Model<Api>[],
 	family: string,
-	isUsingOAuth: FallbackAuthLookup,
+	tiers: FallbackAuthTiers,
+	options: { limit?: number } = {},
 ): Model<Api>[] {
 	const byProvider = new Map<string, Model<Api>[]>();
 	for (const model of models) {
@@ -99,11 +128,16 @@ export function rankFamilyModels(
 		return variant ? [variant] : [];
 	});
 
-	return picked.sort((left, right) => {
-		const oauth = Number(isUsingOAuth(right)) - Number(isUsingOAuth(left));
-		if (oauth !== 0) return oauth;
+	const ranked = picked.sort((left, right) => {
+		const tier = authTier(left, tiers) - authTier(right, tiers);
+		if (tier !== 0) return tier;
 		const precedence = precedenceIndex(left.provider) - precedenceIndex(right.provider);
 		if (precedence !== 0) return precedence;
 		return left.provider.localeCompare(right.provider);
 	});
+
+	const limit = options.limit ?? ranked.length;
+	return ranked.slice(0, limit);
 }
+
+export { MAX_PROVIDERS_PER_FAMILY };

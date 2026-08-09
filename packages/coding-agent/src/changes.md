@@ -455,6 +455,13 @@
   candidate selection ranks the same way the `/fallback` display does.
 - `core/retry-fallback/validate.ts`: a bare key naming a registered family is valid configuration; a bare key
   matching nothing keeps the original "roles are unsupported" guidance.
+- Bare candidates fan out to at most `MAX_PROVIDERS_PER_FAMILY` (2) providers, ranked by auth tier
+  (OAuth credential, then any configured credential, then the rest). Auth ranks candidates and never filters
+  them: the runtime already skips unauthenticated candidates, and filtering during canonicalization erased the
+  chain whenever an availability snapshot was not populated yet.
+- `core/extensions/builtin/model-fallback/settings.ts`: `/fallback` renders chains canonicalized against
+  `modelRegistry.getAvailable()` so the menu lists only models the user can select, while the runtime keeps
+  resolving against the full registry.
 
 ### Why
 
@@ -469,6 +476,14 @@
   is used instead of exhausting the chain inside one account.
 - `apitopia/kimi-k3-unlocked` is a personal gateway id that should never have shipped as a product default.
 
+### QA
+
+- Real-CLI QA (senpi-qa Channel 2, TUI in a pty, isolated sandbox, `PI_OFFLINE=1`): with Fable 5 served only by
+  `claude-sdk-oauth` and no `retry.fallbackChains` configured, `/fallback` renders
+  `claude-sdk-oauth/claude-fable-5 -> kimi-coding/k3:max, claude-sdk-oauth/claude-opus-5:xhigh,
+  claude-sdk-oauth/claude-opus-4-8:xhigh` where the previous default produced no chain at all. That QA run is
+  what surfaced both the fan-out cap and the display scoping above; neither was visible to unit fixtures.
+
 ### Expected merge conflict zones on next upstream sync
 
 - LOW: `core/retry-fallback/expansion.ts` is additive and fork-local with no upstream counterpart.
@@ -476,6 +491,7 @@
 - MEDIUM: `canonicalizeFallbackChains` in `core/retry-fallback/chains.ts` was restructured (two passes plus
   tombstones) rather than edited in place.
 - LOW: the optional `isUsingOAuth` member on the controller registry dep.
+- LOW: the display-scoping helper in `core/extensions/builtin/model-fallback/settings.ts`.
 
 ## Anthropic credits_required 429 pins the billing fallback (2026-07-29)
 
