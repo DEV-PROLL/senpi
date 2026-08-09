@@ -23,6 +23,10 @@
   exit payloads, and process-tree kill behavior are unchanged. Added native regression coverage for threadpool exhaustion
   and Worker teardown ([#768](https://github.com/code-yeongyu/senpi/pull/768)).
 
+- Recovered malformed Claude tool-call text that starts with an angle-less
+  `antml:invoke` and ends with a stray `</function_results>`, so Senpi executes
+  the validated call once without printing internal protocol markup.
+
 ### Removed
 
 ## [2026.8.9] - 2026-08-09
