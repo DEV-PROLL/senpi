@@ -151,13 +151,24 @@ describe("OpenAI Completions TTL", () => {
 		expect(resolvePromptCacheTtlSeconds(openRouterModel)).toBe(3600);
 	});
 
-	it("selects Moonshot tool schema normalization automatically", () => {
+	it("selects Moonshot tool schema normalization and prompt cache keys automatically", () => {
 		const moonshotModel = createModel("openai-completions", {
 			provider: "moonshotai",
 			baseUrl: "https://api.moonshot.ai/v1",
 		});
 
 		expect(getOpenAICompletionsCompat(moonshotModel).toolSchemaFlavor).toBe("moonshot-mfjs");
+		expect(getOpenAICompletionsCompat(moonshotModel).supportsPromptCacheKey).toBe(true);
+	});
+
+	it("preserves an explicit Moonshot prompt cache key override", () => {
+		const moonshotModel = createModel("openai-completions", {
+			provider: "moonshotai",
+			baseUrl: "https://api.moonshot.ai/v1",
+			compat: { supportsPromptCacheKey: false },
+		});
+
+		expect(getOpenAICompletionsCompat(moonshotModel).supportsPromptCacheKey).toBe(false);
 	});
 
 	it("preserves an explicit tool schema normalization override", () => {

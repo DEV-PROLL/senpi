@@ -138,6 +138,29 @@ describe("openai-completions prompt caching", () => {
 		expect(message.usage.input).toBe(600);
 	});
 
+	it("sets a clamped prompt_cache_key for Moonshot requests with short retention", async () => {
+		const sessionId = "moonshot-session-".repeat(5);
+		const model = createModel({
+			provider: "moonshotai",
+			baseUrl: "https://api.moonshot.ai/v1",
+		});
+
+		const { payload } = await captureRequest({ cacheRetention: "short", sessionId }, model);
+
+		expect(payload?.prompt_cache_key).toBe(sessionId.slice(0, 64));
+	});
+
+	it("does not set prompt_cache_key for unknown OpenAI-compatible providers", async () => {
+		const model = createModel({
+			provider: "custom",
+			baseUrl: "https://proxy.example.com/v1",
+		});
+
+		const { payload } = await captureRequest({ cacheRetention: "short", sessionId: "custom-session" }, model);
+
+		expect(payload?.prompt_cache_key).toBeUndefined();
+	});
+
 	it("sets prompt_cache_key for direct OpenAI requests when caching is enabled", async () => {
 		const { payload } = await captureRequest({ sessionId: "session-123" });
 

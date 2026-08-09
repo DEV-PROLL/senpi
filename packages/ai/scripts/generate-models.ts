@@ -617,6 +617,7 @@ const OPENAI_COMPLETIONS_DEFAULT_COMPAT = {
 	supportsStrictMode: true,
 	supportsOpenAIGrammarTools: false,
 	sendSessionAffinityHeaders: false,
+	supportsPromptCacheKey: false,
 	supportsLongCacheRetention: true,
 } satisfies Required<Omit<OpenAICompletionsCompat, "cacheControlFormat" | "deferredToolsMode">> & {
 	cacheControlFormat?: OpenAICompletionsCompat["cacheControlFormat"];
@@ -708,6 +709,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Open
 		supportsOpenAIGrammarTools: false,
 		...(cacheControlFormat ? { cacheControlFormat } : {}),
 		sendSessionAffinityHeaders: false,
+		supportsPromptCacheKey: isMoonshot || baseUrl.includes("api.openai.com"),
 		supportsLongCacheRetention: !(
 			isTogether ||
 			isCloudflareWorkersAI ||
