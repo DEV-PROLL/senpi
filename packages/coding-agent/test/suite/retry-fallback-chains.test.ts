@@ -123,10 +123,10 @@ describe("resolveRetryFallbackSettings chain defaults", () => {
 
 	it("keeps a shipped default chain when the user configures an unrelated model", () => {
 		const resolved = resolveRetryFallbackSettings({
-			fallbackChains: { "apitopia/kimi-k3-unlocked": ["apitopia/kimi-k3-ultrafast-unlocked:max"] },
+			fallbackChains: { "example-gateway/unrelated-model": ["example-gateway/unrelated-fallback:max"] },
 		});
 
-		expect(resolved.chains["apitopia/kimi-k3-unlocked"]).toEqual(["apitopia/kimi-k3-ultrafast-unlocked:max"]);
+		expect(resolved.chains["example-gateway/unrelated-model"]).toEqual(["example-gateway/unrelated-fallback:max"]);
 		expect(resolved.chains[fableKey]).toEqual(DEFAULT_FALLBACK_CHAINS[fableKey]);
 		expect(DEFAULT_FALLBACK_CHAINS[fableKey]).toHaveLength(3);
 		// The shipped default is provider-agnostic: bare ids only, expanded at canonicalization.

@@ -130,7 +130,7 @@ describe("SettingsManager retry fallback settings", () => {
 			JSON.stringify({
 				retry: {
 					fallbackChains: {
-						"apitopia/kimi-k3-unlocked": ["apitopia/kimi-k3-ultrafast-unlocked:max"],
+						"example-gateway/unrelated-model": ["example-gateway/unrelated-fallback:max"],
 					},
 				},
 			}),
@@ -138,7 +138,7 @@ describe("SettingsManager retry fallback settings", () => {
 
 		const chains = SettingsManager.create(projectDir, agentDir).getRetryFallbackSettings().chains;
 
-		expect(chains["apitopia/kimi-k3-unlocked"]).toEqual(["apitopia/kimi-k3-ultrafast-unlocked:max"]);
+		expect(chains["example-gateway/unrelated-model"]).toEqual(["example-gateway/unrelated-fallback:max"]);
 		expect(chains["claude-fable-5"]).toEqual(defaultChains["claude-fable-5"]);
 	});
 
