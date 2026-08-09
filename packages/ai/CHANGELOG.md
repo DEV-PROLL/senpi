@@ -6,6 +6,7 @@
 
 ### Added
 
+- Added a native Anthropic `warmPromptCache` primitive for zero-output prompt-cache pre-warming with normalized cache usage accounting.
 - Added `prompt_cache_key` support for Moonshot/Kimi Chat Completions and first-request OpenRouter affinity through
   both `x-session-id` and the request body's `session_id`.
 

@@ -1,5 +1,29 @@
 # AI Source Changes
 
+## 2026-08-09 - Native Anthropic prompt-cache warming primitive
+
+### What changed and why
+
+- `api/warm-prompt-cache.ts` adds the non-streaming `warmPromptCache()` request primitive for direct Anthropic
+  Messages models. It sends the normal converted system, tools, and conversation cache breakpoints with
+  `max_tokens: 0`, strips streaming, thinking, and forced tool choice, disables SDK retries, and returns normalized
+  input/output/cache-read/cache-write usage alongside the raw provider usage.
+- `api/anthropic-messages.ts` exposes a focused warm-request builder so pre-warming and the normal stream share the
+  same message, tool, cache-control, and tool-pair conversion instead of maintaining a second wire transform.
+- The root package exports the primitive and its exact supported/unsupported result contract. Non-Anthropic APIs and
+  Anthropic-compatible gateways return unsupported before authentication or network work begins.
+
+### Why this cannot be expressed externally
+
+- Correct cache breakpoints depend on adapter-internal Anthropic message and tool conversion. Reconstructing the
+  request outside the package would drift from the normal provider path and could mutate history or send incompatible
+  streaming/thinking options.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/anthropic-messages.ts` near request construction and cache-control conversion.
+- LOW: additive `api/warm-prompt-cache.ts` and root `index.ts` export.
+
 ## 2026-08-09 - Prompt-cache correctness across OpenAI-compatible and Bedrock lanes
 
 ### What changed and why
