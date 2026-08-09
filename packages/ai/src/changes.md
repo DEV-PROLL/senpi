@@ -1,5 +1,40 @@
 # AI Source Changes
 
+## 2026-08-09 - Prompt-cache correctness across OpenAI-compatible and Bedrock lanes
+
+### What changed and why
+
+- `api/openai-completions.ts` `parseChunkUsage()` now reads Kimi's flat `usage.cached_tokens` only after the
+  existing nested OpenAI and `prompt_cache_hit_tokens` forms, preserving precedence while reporting cache reads and
+  uncached input correctly.
+- `types.ts` adds `OpenAICompletionsCompat.supportsPromptCacheKey`; `utils/prompt-cache-ttl.ts`
+  `detectOpenAICompletionsCompat()` enables it for Moonshot and direct OpenAI endpoints, and
+  `getOpenAICompletionsCompat()` preserves explicit overrides. `buildParams()` uses the resolved flag to emit a
+  clamped stable key without adding provider URL checks at the request boundary.
+- OpenRouter compatibility detection now defaults session affinity on, and `buildParams()` sends the same session ID
+  in both `x-session-id` and the body `session_id` from the first cache-enabled request.
+- Runtime and `scripts/generate-models.ts` detection share the literal `anthropic/`, `qwen/`, `google/` cache-control
+  prefix allowlist and strip one optional leading `~`. Hydrated Moonshot and OpenRouter catalogs bake the resolved
+  compatibility metadata.
+- `utils/prompt-cache-ttl.ts` `supportsOneHourCacheTtl()` is the single Bedrock Claude 4.5 allowlist used by both
+  `api/bedrock-converse-stream.ts` cache-point sites and `resolvePromptCacheTtlSeconds()`, preventing a one-hour
+  resolver estimate when the wire request can only use five minutes.
+- `resolvePromptCacheTtlSeconds()` reports 300 seconds for the actual `claude-sdk-oauth` model shape because the SDK
+  owns that lane's default ephemeral prompt caching.
+
+### Why this cannot be expressed externally
+
+- Usage parsing, provider request fields, cache-point TTLs, and cache lifetime estimates are adapter-internal wire
+  contracts resolved before an extension can observe a normalized assistant message or safely rewrite every request
+  path. Generated compatibility metadata must also stay aligned with runtime detection.
+
+### Expected merge conflict zones
+
+- HIGH: `utils/prompt-cache-ttl.ts` OpenAI-compatible detection/merge and cache TTL resolver switches.
+- HIGH: `api/openai-completions.ts` request construction and streamed usage parsing.
+- MEDIUM: `api/bedrock-converse-stream.ts` system and conversation cache-point construction.
+- MEDIUM: `scripts/generate-models.ts` compatibility detection and generated Moonshot/OpenRouter data.
+
 ## 2026-08-09 - Shared visible assistant-content classification
 
 ### What changed and why

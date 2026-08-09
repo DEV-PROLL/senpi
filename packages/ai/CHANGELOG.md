@@ -6,9 +6,20 @@
 
 ### Added
 
+- Added `prompt_cache_key` support for Moonshot/Kimi Chat Completions and first-request OpenRouter affinity through
+  both `x-session-id` and the request body's `session_id`.
+
 ### Changed
 
+- Expanded explicit OpenRouter prompt-cache markers to Anthropic, Qwen, and Google model prefixes, including
+  catalog model IDs with one leading `~`.
+
 ### Fixed
+
+- Fixed Kimi cache-read accounting for flat `usage.cached_tokens` responses.
+- Restricted Bedrock one-hour prompt-cache TTLs to Claude Opus 4.5, Sonnet 4.5, and Haiku 4.5; other cacheable
+  Bedrock Claude models now consistently use the five-minute wire and resolver TTL.
+- Reported the Claude SDK OAuth lane's SDK-managed prompt-cache TTL as five minutes.
 
 ### Removed
 
