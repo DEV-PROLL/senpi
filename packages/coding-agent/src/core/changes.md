@@ -1,5 +1,23 @@
 # changes
 
+## Prompt-cache keep-alive and goal backstop settings (2026-08-09)
+
+### What changed
+
+- `settings-manager.ts` gained `promptCache.goalBackstopMaxSeconds` (default 3570) capping the
+  cache-derived goal continuation backstop, and `promptCache.keepAlive`
+  (`enabled` default false, `maxRequestsPerSession` 3, `maxCostUsdPerSession` 0.05,
+  `marginSeconds` 60) governing the opt-in `cache-keepalive` builtin extension.
+
+### Why not an extension
+
+- Both live on `Settings`, which is core-owned; extensions read them through
+  `ExtensionContext`, they cannot declare new persisted settings keys themselves.
+
+### Merge-conflict zones
+
+- `PromptCacheSettings` interface and the corresponding getters in `settings-manager.ts`.
+
 ## Dispatch extension commands before settled session work (2026-08-09)
 
 ### What changed
