@@ -10,6 +10,14 @@
 
 ### Changed
 
+- Slash commands provided by extensions (`/todo`, `/goal`, `/help`, `/mcp`, and every
+  other registered command) now run the moment you press Enter, even while the agent
+  is mid-turn or compacting. Previously they were held until the turn finished
+  whenever a queued continuation (such as an active goal chain) owned the session,
+  so `/todo` appeared to do nothing until the agent stopped working.
+- `/ir` now refuses to switch sessions while the agent is working or compacting,
+  reporting that it is unavailable instead of aborting the in-flight run.
+
 - Changed the shipped default model-fallback chain from a provider-pinned literal
   (`anthropic/claude-fable-5` -> `apitopia/kimi-k3-unlocked:max`, `anthropic/claude-opus-5:xhigh`,
   `anthropic/claude-opus-4-8:xhigh`) to provider-agnostic model families
