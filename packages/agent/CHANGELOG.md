@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- Retry one assistant `stop` response with no visible text or tool call for Claude, Kimi, and configured text-tool
+  protocols instead of only Kimi. Unicode format-only output such as zero-width spaces stays buffered with the
+  discarded attempt, and a second invisible response remains a bounded explicit error.
+
 ### Removed
 
 ## [2026.8.7] - 2026-08-07
