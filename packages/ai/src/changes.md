@@ -1,5 +1,26 @@
 # AI Source Changes
 
+## 2026-08-09 - Shared visible assistant-content classification
+
+### What changed and why
+
+- `utils/visible-text.ts` defines the shared visibility boundary for assistant text: Unicode format characters
+  (`\p{Cf}`) are removed before whitespace trimming, so zero-width spaces, joiners, word joiners, byte-order marks,
+  and directional formatting marks cannot make an otherwise empty response appear user-visible.
+- `hasVisibleAssistantContent` treats a tool call or text containing a visible scalar as assistant output. Emoji ZWJ
+  sequences remain visible because removing the joiner leaves visible emoji scalars.
+- The browser-safe root exports both predicates so agent-core and other consumers use one classification instead of
+  duplicating JavaScript `trim()` checks that miss U+200B.
+
+### Why this cannot be expressed externally
+
+- Assistant response visibility is a shared message-level contract consumed before coding-agent extensions receive a
+  committed turn; external hooks cannot reliably repair divergent classifiers in each core consumer.
+
+### Expected merge conflict zones
+
+- LOW: additive `utils/visible-text.ts` module and root export in `index.ts`.
+
 ## 2026-08-05 - Root-object tool schemas and request-shape error classification
 
 ### What changed and why

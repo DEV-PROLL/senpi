@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- Added shared assistant-content visibility classification that ignores Unicode format characters before checking
+  text, preventing zero-width-only output from being treated as a visible response while preserving emoji ZWJ
+  sequences and tool calls.
+
 ### Removed
 
 ## [2026.8.7] - 2026-08-07
