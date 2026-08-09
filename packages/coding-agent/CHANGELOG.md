@@ -8,6 +8,8 @@
 
 ### Added
 
+- Added `pi.registerFilesystemPolicy()` for extensions. Policies receive a canonicalized path plus operation (`read`, `enumerate`, or `write`) and tool name, compose deny-wins below permission hooks, and are enforced by the built-in `read`, `write`, `edit`, `ls`, `find`, and `grep` tools. Denials surface as ordinary tool errors carrying the policy reason, and hosts without any registered policy behave exactly as before. The runner also exposes aggregated denied-root metadata for future sandbox backends.
+
 ### Changed
 
 ### Fixed

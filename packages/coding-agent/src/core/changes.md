@@ -1,5 +1,22 @@
 # changes
 
+## Extension filesystem policy binding (2026-08-09)
+
+### What changed
+
+- `AgentSession._buildRuntime()` composes factory-registered filesystem policies once and injects the resulting optional
+  checker into Senpi's six built-in file tools.
+- Policy absence produces `undefined`, preserving the previous runtime path without per-call extension dispatch.
+
+### Why this cannot be expressed externally
+
+- Only the session runtime constructs the canonical built-in tool definitions and can install a checker below
+  permission/approval hooks while keeping extension-overridden custom tools separate.
+
+### Expected merge conflict zones
+
+- LOW: `_buildRuntime()` around extension result loading and `createAllToolDefinitions()` options.
+
 ## Prompt-cache keep-alive and goal backstop settings (2026-08-09)
 
 ### What changed
