@@ -12,6 +12,13 @@
 
 ### Fixed
 
+- Fixed a full session freeze when four or more long-lived background terminal sessions were active. Each native terminal
+  `waitExit()` previously parked one of the four default libuv workers on a blocking thread join for the child's lifetime,
+  starving all later fs/DNS work so provider requests died as `Request timed out.` and the turn pipeline wedged with input
+  dead. Native waits are now settled from a dedicated reaper thread, keeping the libuv pool free; synchronous wait errors,
+  exit payloads, and process-tree kill behavior are unchanged. Added native regression coverage for threadpool exhaustion
+  and Worker teardown ([#768](https://github.com/code-yeongyu/senpi/pull/768)).
+
 ### Removed
 
 ## [2026.8.9] - 2026-08-09

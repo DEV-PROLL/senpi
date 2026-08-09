@@ -1,5 +1,36 @@
 # terminal builtin extension — fork surface
 
+## Native PTY waits no longer exhaust the libuv threadpool (2026-08-09)
+
+### What changed
+
+- `crates/senpi-pty/src/lib.rs`: `waitExit()` and `wait()` now obtain the existing waiter
+  synchronously, create a N-API deferred promise, and join the waiter on a named private Rust
+  reaper thread. The reaper resolves or rejects the deferred only after the waiter has completed
+  its existing child wait and reader-drain sequence.
+- Native lifecycle regressions start six pending waits with `UV_THREADPOOL_SIZE=1` and prove DNS,
+  filesystem, and PBKDF2 work still completes; a companion tears down a Worker environment while
+  its native wait is pending and proves the process exits naturally after the PTY child is killed.
+
+### Why
+
+The prior N-API `AsyncTask` ran `JoinHandle::join()` on a libuv worker for the PTY child's entire
+lifetime. Enough long-lived terminal sessions exhausted the shared pool and indefinitely queued
+unrelated DNS and filesystem work, which could leave provider requests and the terminal UI stuck.
+
+### Why this cannot be expressed externally
+
+The blocked worker was owned by the Rust-to-N-API promise implementation below the TypeScript PTY
+facade. An extension cannot move native wait completion off libuv or safely settle a promise after
+native reader teardown.
+
+### Expected merge conflict zones
+
+- `crates/senpi-pty/src/lib.rs` around `NativePtySession::waitExit` / `wait` and native promise
+  settlement.
+- `packages/pty/test/native-wait-threadpool.test.ts` and its native subprocess fixtures.
+
+
 ## Terminal monitor and background-bash resumption channels (2026-08-08)
 
 ### What changed
