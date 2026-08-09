@@ -86,7 +86,7 @@ describe("retention precedence stays pinned to the API adapters", () => {
 
 		expect(resolvePromptCacheTtlSeconds(anthropicModel, env)).toBe(3600);
 		expect(resolvePromptCacheTtlSeconds(anthropicCompletionsModel, env)).toBe(3600);
-		expect(resolvePromptCacheTtlSeconds(cacheableBedrockModel, env)).toBe(3600);
+		expect(resolvePromptCacheTtlSeconds(cacheableBedrockModel, env)).toBe(300);
 		expect(resolvePromptCacheTtlSeconds(openAIResponsesModel, env)).toBe(300);
 	});
 
@@ -202,8 +202,8 @@ describe("Bedrock Converse TTL", () => {
 		);
 	});
 
-	it("returns one hour for a cacheable Claude model with long retention", () => {
-		expect(resolvePromptCacheTtlSeconds({ ...cacheableBedrockModel, cacheRetention: "long" })).toBe(3600);
+	it("returns five minutes for a cacheable Claude 3.7 model with long retention", () => {
+		expect(resolvePromptCacheTtlSeconds({ ...cacheableBedrockModel, cacheRetention: "long" })).toBe(300);
 	});
 
 	it("returns undefined for a model without explicit prompt caching support", () => {
@@ -226,7 +226,7 @@ describe("Bedrock Converse TTL", () => {
 		const env = { AWS_BEDROCK_FORCE_CACHE: "1" };
 
 		expect(supportsPromptCaching(model, env)).toBe(true);
-		expect(resolvePromptCacheTtlSeconds(model, env)).toBe(3600);
+		expect(resolvePromptCacheTtlSeconds(model, env)).toBe(300);
 	});
 });
 

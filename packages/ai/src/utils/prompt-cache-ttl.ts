@@ -227,6 +227,13 @@ export function getBedrockModelMatchCandidates(modelId: string, modelName?: stri
 	});
 }
 
+export function supportsOneHourCacheTtl(model: Model<"bedrock-converse-stream">): boolean {
+	const candidates = getBedrockModelMatchCandidates(model.id, model.name);
+	return candidates.some((candidate) =>
+		["opus-4-5", "sonnet-4-5", "haiku-4-5"].some((modelVersion) => candidate.includes(modelVersion)),
+	);
+}
+
 /**
  * Check if the model supports prompt caching.
  * Supported: Claude 3.5 Haiku, Claude 3.7 Sonnet, Claude 4.x models, Claude 5 models
@@ -323,7 +330,9 @@ export function resolvePromptCacheTtlSeconds(model: Model<Api>, env?: ProviderEn
 			const bedrockModel = model as Model<"bedrock-converse-stream">;
 			const retention = resolveBedrockCacheRetention(bedrockModel.cacheRetention, env);
 			if (retention === "none" || !supportsPromptCaching(bedrockModel, env)) return undefined;
-			return retention === "long" ? PROMPT_CACHE_TTL_LONG_SECONDS : PROMPT_CACHE_TTL_SHORT_SECONDS;
+			return retention === "long" && supportsOneHourCacheTtl(bedrockModel)
+				? PROMPT_CACHE_TTL_LONG_SECONDS
+				: PROMPT_CACHE_TTL_SHORT_SECONDS;
 		}
 		case "openai-completions": {
 			const completionsModel = model as Model<"openai-completions">;
