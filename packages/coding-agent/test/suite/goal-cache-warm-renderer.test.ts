@@ -38,7 +38,7 @@ describe("goal cache-warm entry renderer", () => {
 			cache: { ttlSeconds: 300, cachedTokens: 120_000, estimatedSavedUsd: 0.324 },
 		});
 		expect(text).toContain("Cache-warm wait · iteration 2");
-		expect(text).toContain("1 monitor on duty");
+		expect(text).toContain("1 wake source on duty");
 		expect(text).toContain("5m prompt-cache TTL");
 		expect(text).toContain("~120K tokens kept warm");
 		expect(text).toContain("$0.324 saved");
@@ -56,7 +56,7 @@ describe("goal cache-warm entry renderer", () => {
 		});
 		expect(text).toContain("Cache-warm wake · iteration 3");
 		expect(text).toContain("waited 4m 30s");
-		expect(text).toContain("2 monitors on duty");
+		expect(text).toContain("2 wake sources on duty");
 		expect(text).toContain("~120K tokens stayed warm");
 		expect(text).toContain("$0.324 saved");
 	});
@@ -95,7 +95,7 @@ describe("goal cache-warm entry renderer", () => {
 			activeMonitorCount: 1,
 		});
 		expect(text).toContain("Cache-warm wait");
-		expect(text).toContain("1 monitor on duty");
+		expect(text).toContain("1 wake source on duty");
 		expect(text).not.toContain("tokens");
 	});
 

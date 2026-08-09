@@ -52,10 +52,10 @@ describe("goal wait label", () => {
 			kind: "monitor",
 			remainingMs: 216_000,
 			totalMs: 270_000,
-			channelCounts: { "terminal-monitor": 2 },
+			channelCounts: { "terminal-monitors": 2 },
 		});
 
-		expect(label).toBe("▰▰▱▱▱▱▱▱▱▱▱▱ goal continues in 3m 36s · 2 monitors on duty");
+		expect(label).toBe("▰▰▱▱▱▱▱▱▱▱▱▱ goal continues in 3m 36s · 2 wake sources on duty");
 	});
 
 	it("uses a stable singular and plural breakdown for mixed live sources", () => {
@@ -64,14 +64,14 @@ describe("goal wait label", () => {
 			remainingMs: 60_000,
 			totalMs: 240_000,
 			channelCounts: {
-				"terminal-bash": 1,
+				"terminal-background-sessions": 1,
 				"senpi-task": 2,
-				"terminal-monitor": 1,
-				"eval-detached": 2,
+				"terminal-monitors": 1,
+				"senpi-codemode": 2,
 			},
 		});
 
-		expect(label).toContain("1 monitor · 2 tasks · 2 evals · 1 bash on duty");
+		expect(label).toContain("1 wake source · 2 tasks · 2 evals · 1 bash on duty");
 	});
 
 	it("never renders a negative remaining time", () => {
@@ -91,7 +91,7 @@ describe("goal wait label", () => {
 			kind: "userGrace",
 			remainingMs: 30_000,
 			totalMs: 60_000,
-			channelCounts: { "terminal-monitor": 3 },
+			channelCounts: { "terminal-monitors": 3 },
 		});
 
 		expect(label).not.toContain("monitor");

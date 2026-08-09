@@ -1,5 +1,24 @@
 # terminal builtin extension — fork surface
 
+## Terminal wake-source snapshots (2026-08-09)
+
+### What changed
+
+- Monitor snapshots now publish `wake_source_state` under `terminal-monitors` while permanently retaining the legacy `terminal_monitor_state` emission.
+- The bundle-owned active background-session set publishes `terminal-background-sessions` on explicit background launch, foreground detach, exit, kill, teardown, and session rebind.
+
+### Why
+
+Goal continuation must count every terminal activity that can wake or unblock the session, not only monitor watches, using the same source-keyed contract as other packages.
+
+### Why this cannot be expressed externally
+
+The authoritative monitor registry and background-session lifecycle are private to the terminal builtin and its reload-surviving session bundle.
+
+### Expected merge conflict zones
+
+- MEDIUM in `extension.ts` and `session-bundle.ts` around snapshot sinks and reload replay.
+
 ## Native PTY waits no longer exhaust the libuv threadpool (2026-08-09)
 
 ### What changed

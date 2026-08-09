@@ -1,7 +1,11 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
-import { isTerminalMonitorStateEvent, TERMINAL_MONITOR_STATE_EVENT } from "../monitor-state-event.ts";
-import { isResumptionChannelStateEvent, RESUMPTION_CHANNEL_STATE_EVENT } from "../resumption-channel-event.ts";
+import {
+	isTerminalMonitorStateEvent,
+	isWakeSourceStateEvent,
+	TERMINAL_MONITOR_STATE_EVENT,
+	WAKE_SOURCE_STATE_EVENT,
+} from "../monitor-state-event.ts";
 import {
 	estimateCacheWarmMetrics,
 	GOAL_CACHE_WARMUP_ENTRY_TYPE,
@@ -54,7 +58,7 @@ export class MonitorAwareGoalContinuation {
 	readonly #isContinuationPending: () => boolean;
 	readonly #markContinuationPending: () => void;
 	readonly #waitTicker: GoalWaitTicker | undefined;
-	#channelCounts = new Map<string, number>();
+	#wakeSources = new Map<string, number>();
 	#hasStarted = false;
 	#ctx: ExtensionContext | undefined;
 	#goal: Goal | null = null;
@@ -74,7 +78,9 @@ export class MonitorAwareGoalContinuation {
 	#scheduledDelayMs: number | undefined;
 	#cacheWarmIteration = 0;
 	#scheduledCacheWarmIteration: number | undefined;
-	#heldTimer: { kind: DelayedContinuationKind; remainingMs: number; heldAtMs: number; totalMs: number } | undefined;
+	#heldTimer:
+		| { kind: DelayedContinuationKind; remainingMs: number; heldAtMs: number; totalMs: number; drainFire: boolean }
+		| undefined;
 	#directInputHolds = new Set<string>();
 	#pendingSystemRecovery: SystemAbortOptions | undefined;
 
@@ -94,7 +100,7 @@ export class MonitorAwareGoalContinuation {
 	start(ctx: ExtensionContext): void {
 		this.#cancelTimer();
 		this.#ctx = ctx;
-		if (this.#hasStarted) this.#channelCounts.clear();
+		if (this.#hasStarted) this.#wakeSources.clear();
 		else this.#hasStarted = true;
 		this.#goal = null;
 		this.#lastAgentEndMessages = [];
@@ -150,7 +156,7 @@ export class MonitorAwareGoalContinuation {
 		}
 		if (immediateVerdict.kind === "deny" && immediateVerdict.reason === "not-eligible") return goal;
 
-		if (this.#activeChannelCount() === 0) {
+		if (this.#activeWakeSourceCount() === 0) {
 			this.#cancelTimer();
 			const admission = await this.#admitAndQueue(options.ctx, goal, "immediate", options.messages);
 			return admission.goal;
@@ -172,7 +178,7 @@ export class MonitorAwareGoalContinuation {
 			return options.goal;
 		}
 		if (options.willRetry) return options.goal;
-		if (this.#activeChannelCount() > 0) this.#schedule(options.goal, "monitor");
+		if (this.#activeWakeSourceCount() > 0) this.#schedule(options.goal, "monitor");
 		else if (lastAssistantMessage(options.messages)?.stopReason === "error") {
 			this.#pendingSystemRecovery = options;
 		}
@@ -212,6 +218,7 @@ export class MonitorAwareGoalContinuation {
 			remainingMs: Math.max(0, (this.#scheduledDueAtMs ?? heldAtMs) - heldAtMs),
 			heldAtMs,
 			totalMs: this.#scheduledDelayMs ?? GOAL_USER_GRACE_DELAY_MS,
+			drainFire: false,
 		};
 		clearTimeout(this.#timer);
 		this.#timer = undefined;
@@ -231,7 +238,7 @@ export class MonitorAwareGoalContinuation {
 		const held = this.#heldTimer;
 		this.#heldTimer = undefined;
 		const elapsedWhileHeldMs = Math.max(0, Date.now() - held.heldAtMs);
-		this.#armTimer(held.kind, Math.max(0, held.remainingMs - elapsedWhileHeldMs), held.totalMs);
+		this.#armTimer(held.kind, Math.max(0, held.remainingMs - elapsedWhileHeldMs), held.totalMs, held.drainFire);
 	}
 
 	/** An accepted real user prompt starts a grace-governed user turn. */
@@ -252,7 +259,7 @@ export class MonitorAwareGoalContinuation {
 		this.#channelStateUnsubscribers = [];
 		this.#ctx = undefined;
 		this.#goal = null;
-		this.#channelCounts.clear();
+		this.#wakeSources.clear();
 		this.#lastAgentEndMessages = [];
 		this.#directInputHolds.clear();
 		this.#resetContinuationState();
@@ -273,15 +280,15 @@ export class MonitorAwareGoalContinuation {
 			this.#scheduledCacheWarmIteration = this.#cacheWarmIteration;
 			const iteration = this.#scheduledCacheWarmIteration;
 			const cache = estimateCacheWarmMetrics(this.#ctx?.model, process.env, this.#lastTurnUsage);
-			const channelCounts = this.#channelCountSnapshot();
+			const wakeSources = this.#wakeSourceSnapshot();
 			this.#scheduledCache = cache;
 			this.#scheduledAtMs = Date.now();
 			this.#pi.events?.emit(GOAL_CONTINUATION_SCHEDULED_EVENT, {
 				goalId: goal.id,
 				delayMs,
 				iteration,
-				activeMonitorCount: this.#activeTerminalMonitorCount(),
-				channelCounts,
+				activeMonitorCount: this.#activeWakeSourceCount(),
+				wakeSources,
 				cache,
 			});
 			this.#appendWarmupEntry({
@@ -289,8 +296,8 @@ export class MonitorAwareGoalContinuation {
 				goalId: goal.id,
 				delayMs,
 				iteration,
-				activeMonitorCount: this.#activeTerminalMonitorCount(),
-				channelCounts,
+				activeMonitorCount: this.#activeWakeSourceCount(),
+				wakeSources,
 				...(cache !== undefined ? { cache } : {}),
 			});
 		} else {
@@ -300,13 +307,13 @@ export class MonitorAwareGoalContinuation {
 		}
 		this.#scheduledContinuationKind = kind;
 		if (this.#directInputHolds.size > 0) {
-			this.#heldTimer = { kind, remainingMs: delayMs, heldAtMs: Date.now(), totalMs: delayMs };
+			this.#heldTimer = { kind, remainingMs: delayMs, heldAtMs: Date.now(), totalMs: delayMs, drainFire: false };
 			return;
 		}
 		this.#armTimer(kind, delayMs, delayMs);
 	}
 
-	#armTimer(kind: DelayedContinuationKind, delayMs: number, totalMs: number): void {
+	#armTimer(kind: DelayedContinuationKind, delayMs: number, totalMs: number, drainFire = false): void {
 		this.#scheduledDueAtMs = Date.now() + delayMs;
 		const ctx = this.#ctx;
 		if (ctx?.hasUI) {
@@ -314,11 +321,11 @@ export class MonitorAwareGoalContinuation {
 				kind,
 				remainingMs: delayMs,
 				totalMs,
-				channelCounts: this.#channelCountSnapshot(),
+				channelCounts: this.#wakeSourceSnapshot(),
 			});
 		}
 		this.#timer = setTimeout(() => {
-			void this.#continueIfEligible(kind).catch((error: unknown) => {
+			void this.#continueIfEligible(kind, drainFire).catch((error: unknown) => {
 				if (this.#ctx?.hasUI) {
 					const message = error instanceof Error ? error.message : String(error);
 					this.#ctx.ui.notify(`Goal continuation delivery failed: ${message}`, "error");
@@ -327,7 +334,7 @@ export class MonitorAwareGoalContinuation {
 		}, delayMs);
 	}
 
-	async #continueIfEligible(kind: DelayedContinuationKind): Promise<void> {
+	async #continueIfEligible(kind: DelayedContinuationKind, drainFire = false): Promise<void> {
 		this.#timer = undefined;
 		this.#scheduledDueAtMs = undefined;
 		this.#scheduledContinuationKind = undefined;
@@ -345,7 +352,7 @@ export class MonitorAwareGoalContinuation {
 		const ctx = this.#ctx;
 		const goal = this.#goal;
 		if (ctx === undefined || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
-		if (kind === "monitor" && this.#activeChannelCount() === 0) return;
+		if (kind === "monitor" && this.#activeWakeSourceCount() === 0 && !drainFire) return;
 		const admission = await this.#admitAndQueue(
 			ctx,
 			goal,
@@ -353,14 +360,14 @@ export class MonitorAwareGoalContinuation {
 			this.#lastAgentEndMessages,
 		);
 		if (kind !== "monitor" || !admission.admitted || iteration === undefined) return;
-		const channelCounts = this.#channelCountSnapshot();
+		const wakeSources = this.#wakeSourceSnapshot();
 		this.#pi.events?.emit(GOAL_CONTINUATION_RESUMED_EVENT, {
 			goalId: goal.id,
 			delayMs,
 			waitedMs,
 			iteration,
-			activeMonitorCount: this.#activeTerminalMonitorCount(),
-			channelCounts,
+			activeMonitorCount: this.#activeWakeSourceCount(),
+			wakeSources,
 			cache,
 		});
 		this.#appendWarmupEntry({
@@ -369,11 +376,11 @@ export class MonitorAwareGoalContinuation {
 			delayMs,
 			waitedMs,
 			iteration,
-			activeMonitorCount: this.#activeTerminalMonitorCount(),
-			channelCounts,
+			activeMonitorCount: this.#activeWakeSourceCount(),
+			wakeSources,
 			...(cache !== undefined ? { cache } : {}),
 		});
-		if (admission.goal.status !== "active") this.#resetCacheWarmIteration();
+		if (drainFire || admission.goal.status !== "active") this.#resetCacheWarmIteration();
 	}
 
 	async #admitAndQueue(
@@ -430,7 +437,7 @@ export class MonitorAwareGoalContinuation {
 		let content = verdict.prompt === "minimal" ? buildTruncationRecoveryPrompt() : buildContinuationPrompt(goal);
 		if (!verdict.stallNotice) return content;
 
-		const liveSources = this.#liveChannelSources();
+		const liveSources = this.#liveWakeSources();
 		this.#pi.events?.emit(GOAL_MONITOR_STALL_EVENT, {
 			goalId: goal.id,
 			consecutiveContinuations: this.#toollessContinuationStreak,
@@ -483,48 +490,60 @@ export class MonitorAwareGoalContinuation {
 		this.#channelStateUnsubscribers.push(
 			events.on(TERMINAL_MONITOR_STATE_EVENT, (data) => {
 				if (!isTerminalMonitorStateEvent(data)) return;
-				this.#setChannelCount("terminal-monitor", data.activeCount);
+				this.#setWakeSourceCount("terminal-monitors", data.activeCount);
 			}),
-			events.on(RESUMPTION_CHANNEL_STATE_EVENT, (data) => {
-				if (!isResumptionChannelStateEvent(data)) return;
-				this.#setChannelCount(data.source, data.activeCount);
+			events.on(WAKE_SOURCE_STATE_EVENT, (data) => {
+				if (!isWakeSourceStateEvent(data)) return;
+				this.#setWakeSourceCount(data.source, data.activeCount);
 			}),
 		);
 	}
 
-	#setChannelCount(source: string, activeCount: number): void {
-		const previousTotal = this.#activeChannelCount();
-		this.#channelCounts.set(source, activeCount);
-		const nextTotal = this.#activeChannelCount();
+	#setWakeSourceCount(source: string, activeCount: number): void {
+		const previousTotal = this.#activeWakeSourceCount();
+		this.#wakeSources.set(source, activeCount);
+		const nextTotal = this.#activeWakeSourceCount();
 		if (previousTotal > 0 && nextTotal === 0) {
-			if (this.#scheduledContinuationKind === "monitor") this.#cancelTimer();
+			if (this.#scheduledContinuationKind === "monitor") this.#armDrainFire();
+			else this.#resetCacheWarmIteration();
 			this.#resetToollessContinuationStreak();
-			this.#resetCacheWarmIteration();
 			return;
 		}
 		if (this.#scheduledContinuationKind === "monitor") {
-			this.#waitTicker?.setChannelCounts(this.#channelCountSnapshot());
+			this.#waitTicker?.setChannelCounts(this.#wakeSourceSnapshot());
 		}
 	}
 
-	#activeChannelCount(): number {
+	#armDrainFire(): void {
+		if (this.#directInputHolds.size > 0) {
+			this.#heldTimer = {
+				kind: "monitor",
+				remainingMs: 1_000,
+				heldAtMs: Date.now(),
+				totalMs: 1_000,
+				drainFire: true,
+			};
+			return;
+		}
+		if (this.#timer !== undefined) clearTimeout(this.#timer);
+		this.#timer = undefined;
+		this.#scheduledDueAtMs = undefined;
+		this.#waitTicker?.stop();
+		this.#armTimer("monitor", 1_000, 1_000, true);
+	}
+
+	#activeWakeSourceCount(): number {
 		let total = 0;
-		for (const count of this.#channelCounts.values()) total += count;
+		for (const count of this.#wakeSources.values()) total += count;
 		return total;
 	}
 
-	#activeTerminalMonitorCount(): number {
-		return this.#channelCounts.get("terminal-monitor") ?? 0;
+	#wakeSourceSnapshot(): ResumptionChannelCounts {
+		return Object.fromEntries([...this.#wakeSources.entries()].sort(([left], [right]) => left.localeCompare(right)));
 	}
 
-	#channelCountSnapshot(): ResumptionChannelCounts {
-		return Object.fromEntries(
-			[...this.#channelCounts.entries()].sort(([left], [right]) => left.localeCompare(right)),
-		);
-	}
-
-	#liveChannelSources(): string[] {
-		return [...this.#channelCounts.entries()]
+	#liveWakeSources(): string[] {
+		return [...this.#wakeSources.entries()]
 			.filter(([, count]) => count > 0)
 			.map(([source]) => source)
 			.sort();

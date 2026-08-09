@@ -178,9 +178,9 @@ describe("goal + terminal resumption state across reload", () => {
 		expect(second.sentMessages).toHaveLength(0);
 		expect(scheduledEvents(second)).toContainEqual(
 			expect.objectContaining({
-				channelCounts: expect.objectContaining({
-					"terminal-monitor": 1,
-					"terminal-bash": 1,
+				wakeSources: expect.objectContaining({
+					"terminal-monitors": 1,
+					"terminal-background-sessions": 1,
 				}),
 			}),
 		);

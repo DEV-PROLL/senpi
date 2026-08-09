@@ -2,8 +2,7 @@ import { getShellEnv } from "../../../../utils/shell.ts";
 import { SettingsManager } from "../../../settings-manager.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isAnthropicBashEnabled } from "../anthropic-bash/index.ts";
-import { TERMINAL_MONITOR_STATE_EVENT } from "../monitor-state-event.ts";
-import { RESUMPTION_CHANNEL_STATE_EVENT } from "../resumption-channel-event.ts";
+import { TERMINAL_MONITOR_STATE_EVENT, WAKE_SOURCE_STATE_EVENT } from "../monitor-state-event.ts";
 import { MonitorNotifier } from "./monitor-notify.ts";
 import { MONITOR_STATUS_KEY } from "./monitor-status.ts";
 import { MonitorStatusTicker } from "./monitor-status-ticker.ts";
@@ -66,10 +65,10 @@ function bundleSinks(pi: ExtensionAPI, state: TerminalExtensionState): TerminalE
 					startedAtMs: entry.startedAtMs,
 				})),
 			});
-			pi.events?.emit(RESUMPTION_CHANNEL_STATE_EVENT, {
-				source: "terminal-monitor",
+			pi.events?.emit(WAKE_SOURCE_STATE_EVENT, {
+				source: "terminal-monitors",
 				activeCount: snapshot.length,
-				channels: snapshot.map((entry) => ({
+				monitors: snapshot.map((entry) => ({
 					id: entry.id,
 					description: entry.description,
 					startedAtMs: entry.startedAtMs,
@@ -77,10 +76,10 @@ function bundleSinks(pi: ExtensionAPI, state: TerminalExtensionState): TerminalE
 			});
 		},
 		onBackgroundState: (snapshot) => {
-			pi.events?.emit(RESUMPTION_CHANNEL_STATE_EVENT, {
-				source: "terminal-bash",
+			pi.events?.emit(WAKE_SOURCE_STATE_EVENT, {
+				source: "terminal-background-sessions",
 				activeCount: snapshot.length,
-				channels: snapshot,
+				items: snapshot,
 			});
 		},
 		onBackgroundExit: (id, runtime) => state.notifier?.notifyCompletion(id, runtime),

@@ -64,7 +64,7 @@ describe("goal monitor continuation lifecycle", () => {
 		expect(harness.sent).toHaveLength(1);
 	});
 
-	it("cancels the delayed continuation when the final monitor settles", async () => {
+	it("fires the micro-grace continuation when the final monitor settles", async () => {
 		vi.useFakeTimers();
 		const { harness, ctx } = await createActiveMonitorHarness("thread-monitor-settles");
 		await endCleanTurn(harness, ctx);
@@ -74,8 +74,10 @@ describe("goal monitor continuation lifecycle", () => {
 		await harness.events.flush();
 
 		expect(harness.sent).toHaveLength(0);
-		await vi.advanceTimersByTimeAsync(270_000);
-		expect(harness.sent).toHaveLength(0);
+		const delivered = waitForSentCount(harness, 1);
+		await vi.advanceTimersByTimeAsync(1_000);
+		await delivered;
+		expect(harness.sent).toHaveLength(1);
 	});
 
 	it("suppresses the delayed continuation when the goal stops or messages become pending", async () => {

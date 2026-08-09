@@ -1,4 +1,4 @@
-import type { ResumptionChannelEntry } from "../resumption-channel-event.ts";
+import type { WakeSourceStateItem } from "../monitor-state-event.ts";
 import { TerminalManager, type TerminalManagerOptions } from "./manager.ts";
 import { type MonitorEvent, MonitorRegistry, type MonitorSnapshotEntry } from "./monitor-registry.ts";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
@@ -6,7 +6,7 @@ import type { TerminalRuntimeSession } from "./runtime-session.ts";
 export interface TerminalEventSinks {
 	readonly onMonitorEvent: (event: MonitorEvent) => void;
 	readonly onMonitorState: (snapshot: readonly MonitorSnapshotEntry[]) => void;
-	readonly onBackgroundState: (snapshot: readonly ResumptionChannelEntry[]) => void;
+	readonly onBackgroundState: (snapshot: readonly WakeSourceStateItem[]) => void;
 	readonly onBackgroundExit: (id: string, runtime: TerminalRuntimeSession) => void;
 }
 
@@ -26,7 +26,7 @@ export class TerminalSessionBundle {
 	#sinks: TerminalEventSinks | null = null;
 	#parkedMonitorEvents: MonitorEvent[] = [];
 	#parkedExits = new Map<string, TerminalRuntimeSession>();
-	#backgrounds = new Map<string, ResumptionChannelEntry>();
+	#backgrounds = new Map<string, WakeSourceStateItem>();
 	#torndown = false;
 
 	constructor(options: TerminalManagerOptions) {
@@ -54,7 +54,7 @@ export class TerminalSessionBundle {
 		this.#sinks = null;
 	}
 
-	backgroundSnapshot(): readonly ResumptionChannelEntry[] {
+	backgroundSnapshot(): readonly WakeSourceStateItem[] {
 		return [...this.#backgrounds.values()];
 	}
 

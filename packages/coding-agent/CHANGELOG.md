@@ -8,6 +8,8 @@
 
 ### Added
 
+- Goal continuation now aggregates terminal monitors, background terminal sessions, detached eval cells, and other producers through the shared `wake_source_state` contract. Scheduled/resumed telemetry keeps `activeMonitorCount` as the aggregate compatibility field and adds a per-source `wakeSources` snapshot.
+
 - Goal cache-warm wait and wake entries now show an in-memory iteration number for each accepted monitor cycle, resetting when the Goal or wake epoch changes while remaining compatible with legacy persisted entries.
 
 ### Changed
@@ -15,6 +17,8 @@
 - Goal monitor continuation backstops now derive from the active model's prompt-cache safe-wait budget instead of a fixed four-minute delay, capped by `promptCache.goalBackstopMaxSeconds` (default 3570 seconds). Held direct-input admission now consumes wall-clock time, and cache-warm notices no longer claim warmth or savings after the cache TTL may have elapsed.
 
 ### Fixed
+
+- Fixed active goals becoming stranded when the final wake source drained: an armed monitor wait now fires after a one-second micro-grace even at zero active sources. Activating a goal through app-server `thread/goal/set` also queues work for an otherwise idle session.
 
 - Fixed a full session freeze when four or more long-lived background terminal sessions were active. Each native terminal
   `waitExit()` previously parked one of the four default libuv workers on a blocking thread join for the child's lifetime,

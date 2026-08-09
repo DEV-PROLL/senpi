@@ -10,9 +10,9 @@ import { writeGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { Goal } from "../../src/core/extensions/builtin/goal/types.ts";
 import { GoalWaitTicker } from "../../src/core/extensions/builtin/goal/wait-ticker.ts";
 import {
-	isResumptionChannelStateEvent,
-	RESUMPTION_CHANNEL_STATE_EVENT,
-} from "../../src/core/extensions/builtin/resumption-channel-event.ts";
+	isWakeSourceStateEvent,
+	WAKE_SOURCE_STATE_EVENT,
+} from "../../src/core/extensions/builtin/monitor-state-event.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import {
 	cleanAssistantStop,
@@ -82,19 +82,20 @@ function channelEvents(events: TestEventBus, channel: string): Record<string, un
 		.map((event) => event.data as Record<string, unknown>);
 }
 
-describe("resumption channel state contract", () => {
-	it("accepts open source names and rejects malformed snapshots", () => {
-		expect(isResumptionChannelStateEvent({ source: "custom-worker", activeCount: 0 })).toBe(true);
+describe("wake source state contract", () => {
+	it("accepts open source names and extra fields while rejecting malformed snapshots", () => {
+		expect(isWakeSourceStateEvent({ source: "custom-worker", activeCount: 0 })).toBe(true);
 		expect(
-			isResumptionChannelStateEvent({
+			isWakeSourceStateEvent({
 				source: "senpi-task",
 				activeCount: 1,
 				channels: [{ id: "task-1", description: "child", startedAtMs: 123 }],
 			}),
 		).toBe(true);
-		expect(isResumptionChannelStateEvent({ source: "", activeCount: 1 })).toBe(false);
-		expect(isResumptionChannelStateEvent({ source: "senpi-task", activeCount: 0.5 })).toBe(false);
-		expect(isResumptionChannelStateEvent(null)).toBe(false);
+		expect(isWakeSourceStateEvent({ source: "", activeCount: 1 })).toBe(false);
+		expect(isWakeSourceStateEvent({ source: "senpi-task", activeCount: 0.5 })).toBe(true);
+		expect(isWakeSourceStateEvent({ source: "senpi-task", activeCount: Number.NaN })).toBe(false);
+		expect(isWakeSourceStateEvent(null)).toBe(false);
 	});
 });
 
@@ -112,7 +113,7 @@ describe("goal continuation resumption channels", () => {
 		const goal = activeGoal("goal-task-channel");
 		await persistGoal(ctx, goal);
 		monitor.start(ctx);
-		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "senpi-task", activeCount: 1 });
+		events.emit(WAKE_SOURCE_STATE_EVENT, { source: "senpi-task", activeCount: 1 });
 		await events.flush();
 
 		await endTurn(monitor, ctx, goal);
@@ -130,8 +131,8 @@ describe("goal continuation resumption channels", () => {
 		const goal = activeGoal("goal-total-zero");
 		await persistGoal(ctx, goal);
 		monitor.start(ctx);
-		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "senpi-task", activeCount: 1 });
-		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "terminal-bash", activeCount: 1 });
+		events.emit(WAKE_SOURCE_STATE_EVENT, { source: "senpi-task", activeCount: 1 });
+		events.emit(WAKE_SOURCE_STATE_EVENT, { source: "terminal-background-sessions", activeCount: 1 });
 		await events.flush();
 
 		for (let turn = 1; turn <= 2; turn++) {
@@ -142,7 +143,7 @@ describe("goal continuation resumption channels", () => {
 		}
 
 		await endTurn(monitor, ctx, goal);
-		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "senpi-task", activeCount: 0 });
+		events.emit(WAKE_SOURCE_STATE_EVENT, { source: "senpi-task", activeCount: 0 });
 		await events.flush();
 		const thirdDelivery = waitForSentCount(harness, 3);
 		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS);
@@ -150,10 +151,12 @@ describe("goal continuation resumption channels", () => {
 		expect(sent[2]?.message.content).toContain("<goal_stall_check>");
 
 		await endTurn(monitor, ctx, goal);
-		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "terminal-bash", activeCount: 0 });
+		events.emit(WAKE_SOURCE_STATE_EVENT, { source: "terminal-background-sessions", activeCount: 0 });
 		await events.flush();
-		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS);
-		expect(sent).toHaveLength(3);
+		const drainDelivery = waitForSentCount(harness, 4);
+		await vi.advanceTimersByTimeAsync(1_000);
+		await drainDelivery;
+		expect(sent).toHaveLength(4);
 	});
 
 	it("treats legacy and generalized terminal-monitor snapshots as idempotent writes", async () => {
@@ -166,16 +169,16 @@ describe("goal continuation resumption channels", () => {
 		await persistGoal(ctx, goal);
 		monitor.start(ctx);
 		events.emit("terminal_monitor_state", { activeCount: 2 });
-		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "terminal-monitor", activeCount: 2 });
+		events.emit(WAKE_SOURCE_STATE_EVENT, { source: "terminal-monitors", activeCount: 2 });
 		await events.flush();
 
 		await endTurn(monitor, ctx, goal);
 
-		expect(status.updates.at(-1)?.text).toContain("2 monitors on duty");
-		expect(status.updates.at(-1)?.text).not.toContain("4 monitors");
+		expect(status.updates.at(-1)?.text).toContain("2 wake sources on duty");
+		expect(status.updates.at(-1)?.text).not.toContain("4 wake sources");
 		expect(channelEvents(events, GOAL_CONTINUATION_SCHEDULED_EVENT)[0]).toMatchObject({
 			activeMonitorCount: 2,
-			channelCounts: { "terminal-monitor": 2 },
+			wakeSources: { "terminal-monitors": 2 },
 		});
 	});
 
@@ -185,7 +188,7 @@ describe("goal continuation resumption channels", () => {
 		const ctx = await makeGoalContext(notices, "thread-pre-start");
 		const harness = createHarness();
 		const { monitor, events, sent } = harness;
-		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "eval-detached", activeCount: 1 });
+		events.emit(WAKE_SOURCE_STATE_EVENT, { source: "senpi-codemode", activeCount: 1 });
 		await events.flush();
 
 		monitor.start(ctx);
@@ -212,13 +215,13 @@ describe("goal continuation resumption channels", () => {
 		await persistGoal(ctx, goal);
 		monitor.start(ctx);
 		events.emit("terminal_monitor_state", { activeCount: 2 });
-		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "senpi-task", activeCount: 1 });
+		events.emit(WAKE_SOURCE_STATE_EVENT, { source: "senpi-task", activeCount: 1 });
 		await events.flush();
 
 		await endTurn(monitor, ctx, goal);
 		const expected = {
-			activeMonitorCount: 2,
-			channelCounts: { "senpi-task": 1, "terminal-monitor": 2 },
+			activeMonitorCount: 3,
+			wakeSources: { "senpi-task": 1, "terminal-monitors": 2 },
 		};
 		expect(channelEvents(events, GOAL_CONTINUATION_SCHEDULED_EVENT)[0]).toMatchObject(expected);
 		expect(entries[0]?.data).toMatchObject(expected);

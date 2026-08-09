@@ -14,7 +14,7 @@ export const GOAL_WAIT_BAR_CELLS = 12;
 
 const FILLED_CELL = "\u25b0";
 const EMPTY_CELL = "\u25b1";
-const SOURCE_ORDER = ["terminal-monitor", "senpi-task", "eval-detached", "terminal-bash"] as const;
+const SOURCE_ORDER = ["terminal-monitors", "senpi-task", "senpi-codemode", "terminal-background-sessions"] as const;
 
 function clampRatio(value: number): number {
 	if (!Number.isFinite(value)) return 0;
@@ -38,13 +38,13 @@ function sourceSortIndex(source: string): number {
 
 function formatSourceCount(source: string, count: number): string {
 	switch (source) {
-		case "terminal-monitor":
-			return count === 1 ? "1 monitor" : `${count} monitors`;
+		case "terminal-monitors":
+			return count === 1 ? "1 wake source" : `${count} wake sources`;
 		case "senpi-task":
 			return count === 1 ? "1 task" : `${count} tasks`;
-		case "eval-detached":
+		case "senpi-codemode":
 			return count === 1 ? "1 eval" : `${count} evals`;
-		case "terminal-bash":
+		case "terminal-background-sessions":
 			return count === 1 ? "1 bash" : `${count} bash sessions`;
 		default: {
 			const label = source.replaceAll("-", " ");

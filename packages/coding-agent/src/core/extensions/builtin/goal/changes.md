@@ -1,5 +1,27 @@
 # goal Extension Changes
 
+## Unified wake-source continuation gating (2026-08-09)
+
+### What changed
+
+- Goal dual-subscribes to `wake_source_state` and the permanent `terminal_monitor_state` alias, storing last-write-wins counts by source and gating on their sum.
+- Scheduled/resumed events and cache-warm entries retain `activeMonitorCount` as the aggregate compatibility field and add the complete `wakeSources` snapshot.
+- Draining the aggregate count to zero while a monitor wait is armed replaces the long backstop with a one-second drain fire that bypasses the zero-count guard; its resumed record keeps the pre-reset warm iteration.
+- App-server `thread/goal/set` publishes `goal_store_changed`, allowing the builtin to queue an active goal on an idle session.
+
+### Why
+
+Background work could remain live outside terminal monitors, and a final source drain previously cancelled the only continuation timer without delivering work. RPC-created goals also had no lifecycle edge to wake an idle agent.
+
+### Why an extension couldn't do it
+
+The continuation gate, iteration reset order, goal store, and app-server session event bus are fork-owned builtin/core surfaces.
+
+### Expected merge conflict zones
+
+- HIGH in `monitor-continuation.ts` around source snapshots, timer firing, and iteration reset order.
+- MEDIUM in `index.ts` and app-server goal handlers around the internal store-change event.
+
 ## Cache-safe backstops and warm-iteration ordinals (2026-08-09)
 
 ### What changed

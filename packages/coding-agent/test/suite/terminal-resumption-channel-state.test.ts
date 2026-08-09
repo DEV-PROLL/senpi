@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	RESUMPTION_CHANNEL_STATE_EVENT,
-	type ResumptionChannelStateEvent,
-} from "../../src/core/extensions/builtin/resumption-channel-event.ts";
+	WAKE_SOURCE_STATE_EVENT,
+	type WakeSourceStateEvent,
+} from "../../src/core/extensions/builtin/monitor-state-event.ts";
 import { registerTerminalExtension } from "../../src/core/extensions/builtin/terminal/extension.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
 import { initTheme, theme } from "../../src/modes/interactive/theme/theme.ts";
@@ -31,13 +31,13 @@ interface LegacyMonitorStateEvent {
 interface FakeRunner {
 	readonly pi: ExtensionAPI;
 	readonly tools: Map<string, ToolLike>;
-	readonly channelStates: ResumptionChannelStateEvent[];
+	readonly channelStates: WakeSourceStateEvent[];
 	readonly legacyMonitorStates: LegacyMonitorStateEvent[];
 	emitLifecycle(eventType: string, payload: Record<string, unknown>, ctx: ExtensionContext): Promise<void>;
-	waitForChannel(source: string, activeCount: number): Promise<ResumptionChannelStateEvent>;
+	waitForChannel(source: string, activeCount: number): Promise<WakeSourceStateEvent>;
 }
 
-function isChannelState(data: unknown): data is ResumptionChannelStateEvent {
+function isChannelState(data: unknown): data is WakeSourceStateEvent {
 	return (
 		typeof data === "object" &&
 		data !== null &&
@@ -52,7 +52,7 @@ function createRunner(): FakeRunner {
 	const handlers = new Map<string, Handler[]>();
 	const tools = new Map<string, ToolLike>();
 	const eventListeners = new Map<string, Set<EventListener>>();
-	const channelStates: ResumptionChannelStateEvent[] = [];
+	const channelStates: WakeSourceStateEvent[] = [];
 	const legacyMonitorStates: LegacyMonitorStateEvent[] = [];
 	let activeTools: string[] = [];
 
@@ -64,7 +64,7 @@ function createRunner(): FakeRunner {
 			return () => listeners.delete(listener);
 		},
 		emit(eventType: string, data: unknown) {
-			if (eventType === RESUMPTION_CHANNEL_STATE_EVENT && isChannelState(data)) channelStates.push(data);
+			if (eventType === WAKE_SOURCE_STATE_EVENT && isChannelState(data)) channelStates.push(data);
 			if (
 				eventType === "terminal_monitor_state" &&
 				typeof data === "object" &&
@@ -105,12 +105,12 @@ function createRunner(): FakeRunner {
 			for (const handler of handlers.get(eventType) ?? []) await handler(payload, ctx);
 		},
 		waitForChannel(source, activeCount) {
-			return new Promise<ResumptionChannelStateEvent>((resolve, reject) => {
+			return new Promise<WakeSourceStateEvent>((resolve, reject) => {
 				const timeout = setTimeout(() => {
 					unsubscribe();
 					reject(new Error(`Timed out waiting for ${source} activeCount=${activeCount}`));
 				}, 5000);
-				const unsubscribe = events.on(RESUMPTION_CHANNEL_STATE_EVENT, (data) => {
+				const unsubscribe = events.on(WAKE_SOURCE_STATE_EVENT, (data) => {
 					if (!isChannelState(data) || data.source !== source || data.activeCount !== activeCount) return;
 					clearTimeout(timeout);
 					unsubscribe();
@@ -141,7 +141,7 @@ function makeContext(cwd: string, sessionId: string): ExtensionContext {
 	} as unknown as ExtensionContext;
 }
 
-describe("terminal resumption channel state", () => {
+describe("terminal wake source state", () => {
 	const savedForcePipe = process.env.SENPI_PTY_FORCE_PIPE;
 	const savedAgentDir = process.env.SENPI_CODING_AGENT_DIR;
 	let tmp: string;
@@ -184,7 +184,7 @@ describe("terminal resumption channel state", () => {
 		return { runner, ctx };
 	}
 
-	it("emits matching legacy and resumption snapshots for monitor transitions", async () => {
+	it("emits matching legacy and wake-source snapshots for monitor transitions", async () => {
 		const { runner } = await start();
 		const monitor = runner.tools.get("monitor");
 		const started = await monitor?.execute("monitor", {
@@ -195,16 +195,16 @@ describe("terminal resumption channel state", () => {
 		const bashId = extractBashId(started);
 
 		const legacy = runner.legacyMonitorStates.at(-1);
-		const channel = runner.channelStates.filter((state) => state.source === "terminal-monitor").at(-1);
+		const channel = runner.channelStates.filter((state) => state.source === "terminal-monitors").at(-1);
 		expect(legacy?.activeCount).toBe(1);
 		expect(channel).toEqual({
-			source: "terminal-monitor",
+			source: "terminal-monitors",
 			activeCount: legacy?.activeCount,
-			channels: [{ id: bashId, description: "dual emit monitor", startedAtMs: expect.any(Number) }],
+			monitors: [{ id: bashId, description: "dual emit monitor", startedAtMs: expect.any(Number) }],
 		});
 	});
 
-	it("emits terminal-bash snapshots on spawn, exit, and kill", async () => {
+	it("emits terminal-background-sessions snapshots on spawn, exit, and kill", async () => {
 		const { runner } = await start();
 		const bash = runner.tools.get("bash");
 		const exited = await bash?.execute("quick", {
@@ -214,11 +214,13 @@ describe("terminal resumption channel state", () => {
 		});
 		const exitedId = extractBashId(exited);
 		expect(runner.channelStates).toContainEqual({
-			source: "terminal-bash",
+			source: "terminal-background-sessions",
 			activeCount: 1,
-			channels: [{ id: exitedId, description: "quick background", startedAtMs: expect.any(Number) }],
+			items: [{ id: exitedId, description: "quick background", startedAtMs: expect.any(Number) }],
 		});
-		expect(runner.channelStates.filter((state) => state.source === "terminal-bash").at(-1)?.activeCount).toBe(0);
+		expect(
+			runner.channelStates.filter((state) => state.source === "terminal-background-sessions").at(-1)?.activeCount,
+		).toBe(0);
 
 		const started = await bash?.execute("long", {
 			command: "cat",
@@ -226,10 +228,12 @@ describe("terminal resumption channel state", () => {
 			run_in_background: true,
 		});
 		const bashId = extractBashId(started);
-		expect(runner.channelStates.filter((state) => state.source === "terminal-bash").at(-1)?.activeCount).toBe(1);
-		const killedState = runner.waitForChannel("terminal-bash", 0);
+		expect(
+			runner.channelStates.filter((state) => state.source === "terminal-background-sessions").at(-1)?.activeCount,
+		).toBe(1);
+		const killedState = runner.waitForChannel("terminal-background-sessions", 0);
 		await runner.tools.get("kill_bash")?.execute("kill", { bash_id: bashId });
-		expect(await killedState).toMatchObject({ source: "terminal-bash", activeCount: 0, channels: [] });
+		expect(await killedState).toMatchObject({ source: "terminal-background-sessions", activeCount: 0, items: [] });
 	});
 
 	it("tracks two concurrent backgrounds and decrements when one exits", async () => {
@@ -241,14 +245,16 @@ describe("terminal resumption channel state", () => {
 		const second = extractBashId(
 			await bash?.execute("second", { command: "cat", description: "second", run_in_background: true }),
 		);
-		expect(runner.channelStates.filter((state) => state.source === "terminal-bash").at(-1)?.activeCount).toBe(2);
+		expect(
+			runner.channelStates.filter((state) => state.source === "terminal-background-sessions").at(-1)?.activeCount,
+		).toBe(2);
 
-		const decremented = runner.waitForChannel("terminal-bash", 1);
+		const decremented = runner.waitForChannel("terminal-background-sessions", 1);
 		await runner.tools.get("bash_input")?.execute("exit-first", { bash_id: first, input: "\n" });
 		expect(await decremented).toMatchObject({
-			source: "terminal-bash",
+			source: "terminal-background-sessions",
 			activeCount: 1,
-			channels: [{ id: second, description: "second", startedAtMs: expect.any(Number) }],
+			items: [{ id: second, description: "second", startedAtMs: expect.any(Number) }],
 		});
 	});
 
@@ -260,10 +266,10 @@ describe("terminal resumption channel state", () => {
 			run_in_background: true,
 		});
 		const bashId = extractBashId(started);
-		expect(runner.channelStates.filter((state) => state.source === "terminal-bash").at(-1)).toEqual({
-			source: "terminal-bash",
+		expect(runner.channelStates.filter((state) => state.source === "terminal-background-sessions").at(-1)).toEqual({
+			source: "terminal-background-sessions",
 			activeCount: 1,
-			channels: [{ id: bashId, description: "muted background", startedAtMs: expect.any(Number) }],
+			items: [{ id: bashId, description: "muted background", startedAtMs: expect.any(Number) }],
 		});
 	});
 
@@ -286,8 +292,8 @@ describe("terminal resumption channel state", () => {
 		const second = await start("reload", "wake", sessionId);
 		expect(second.runner.channelStates).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ source: "terminal-monitor", activeCount: 1 }),
-				expect.objectContaining({ source: "terminal-bash", activeCount: 1 }),
+				expect.objectContaining({ source: "terminal-monitors", activeCount: 1 }),
+				expect.objectContaining({ source: "terminal-background-sessions", activeCount: 1 }),
 			]),
 		);
 	});
