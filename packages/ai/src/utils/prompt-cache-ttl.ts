@@ -167,7 +167,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Reso
 		toolCallFormat: undefined,
 		supportsOpenAIGrammarTools: false,
 		cacheControlFormat,
-		sendSessionAffinityHeaders: false,
+		sendSessionAffinityHeaders: isOpenRouter,
 		deferredToolsMode: undefined,
 		sessionAffinityFormat: isOpenRouter ? "openrouter" : "openai",
 		supportsPromptCacheKey: isMoonshot || baseUrl.includes("api.openai.com"),

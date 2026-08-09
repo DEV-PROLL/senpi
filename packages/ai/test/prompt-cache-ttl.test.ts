@@ -148,6 +148,7 @@ describe("OpenAI Completions TTL", () => {
 		});
 
 		expect(getOpenAICompletionsCompat(openRouterModel).cacheControlFormat).toBe("anthropic");
+		expect(getOpenAICompletionsCompat(openRouterModel).sendSessionAffinityHeaders).toBe(true);
 		expect(resolvePromptCacheTtlSeconds(openRouterModel)).toBe(3600);
 	});
 

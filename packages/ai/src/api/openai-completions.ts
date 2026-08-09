@@ -90,6 +90,7 @@ type OpenAICompletionsRequestParams = Omit<
 	reasoning_effort?: string;
 	provider?: OpenAICompletionsCompat["openRouterRouting"];
 	providerOptions?: { gateway: Record<string, string[]> };
+	session_id?: string;
 };
 
 type ReasoningEffort = NonNullable<OpenAICompletionsOptions["reasoningEffort"]>;
@@ -948,6 +949,10 @@ function buildParams(
 				? clampOpenAIPromptCacheKey(options?.sessionId)
 				: undefined,
 		prompt_cache_retention: cacheRetention === "long" && compat.supportsLongCacheRetention ? "24h" : undefined,
+		session_id:
+			compat.sendSessionAffinityHeaders && compat.sessionAffinityFormat === "openrouter" && cacheRetention !== "none"
+				? options?.sessionId
+				: undefined,
 	};
 
 	if (compat.supportsUsageInStreaming !== false) {

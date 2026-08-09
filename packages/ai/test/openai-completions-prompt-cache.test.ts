@@ -234,14 +234,14 @@ describe("openai-completions prompt caching", () => {
 		expect(headers["x-session-id"]).toBeUndefined();
 	});
 
-	it("uses OpenRouter session-affinity header when configured", async () => {
+	it("uses OpenRouter session-affinity header and body field when configured", async () => {
 		const model = createModel({
 			baseUrl: "https://proxy.example.com/v1",
 			compat: { sendSessionAffinityHeaders: true, sessionAffinityFormat: "openrouter" },
 		});
 		const { payload, headers } = await captureRequest({ sessionId: "session-proxy" }, model);
 
-		expect(payload?.session_id).toBeUndefined();
+		expect(payload?.session_id).toBe("session-proxy");
 		expect(payload?.prompt_cache_key).toBeUndefined();
 		expect(headers["x-session-id"]).toBe("session-proxy");
 		expect(headers.session_id).toBeUndefined();
@@ -249,15 +249,14 @@ describe("openai-completions prompt caching", () => {
 		expect(headers["x-session-affinity"]).toBeUndefined();
 	});
 
-	it("auto-detects OpenRouter session-affinity header for OpenRouter endpoints", async () => {
+	it("auto-detects OpenRouter session-affinity header and body field for OpenRouter endpoints", async () => {
 		const model = createModel({
 			provider: "openrouter",
 			baseUrl: "https://openrouter.ai/api/v1",
-			compat: { sendSessionAffinityHeaders: true },
 		});
 		const { payload, headers } = await captureRequest({ sessionId: "session-openrouter" }, model);
 
-		expect(payload?.session_id).toBeUndefined();
+		expect(payload?.session_id).toBe("session-openrouter");
 		expect(payload?.prompt_cache_key).toBeUndefined();
 		expect(headers["x-session-id"]).toBe("session-openrouter");
 		expect(headers.session_id).toBeUndefined();
@@ -265,10 +264,11 @@ describe("openai-completions prompt caching", () => {
 		expect(headers["x-session-affinity"]).toBeUndefined();
 	});
 
-	it("omits OpenRouter session-affinity data when disabled", async () => {
+	it("omits OpenRouter session-affinity data when explicitly disabled", async () => {
 		const model = createModel({
 			provider: "openrouter",
 			baseUrl: "https://openrouter.ai/api/v1",
+			compat: { sendSessionAffinityHeaders: false },
 		});
 		const { payload, headers } = await captureRequest({ sessionId: "session-openrouter" }, model);
 
