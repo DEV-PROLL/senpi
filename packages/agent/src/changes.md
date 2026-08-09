@@ -1,5 +1,32 @@
 # Changes
 
+## 2026-08-09 - Recover invisible text-protocol assistant stops
+
+### What changed and why
+
+- Empty-assistant recovery now covers every model selected for text-tool-call recovery or configured with a text tool
+  format, expanding the previous Kimi-only gate to Claude, ANTML, Hermes, morph-XML, YAML-XML, Gemma delimiters, and
+  other configured text protocols. A `stop` turn with no visible text and no tool call is discarded and retried once;
+  a second invisible stop retains the existing explicit `Model returned an empty response twice` failure.
+- Both the completed-message gate and the first-visible-event gate use pi-ai's shared Unicode visibility predicates.
+  Unicode format-only deltas such as the U+200B block emitted by the Apitopia Kimi-K3 gateway remain buffered, so
+  malformed thinking/tool-marker events from the discarded attempt never reach subscribers.
+- The approved universal gate was narrowed after the full-suite audit: buffering all model streams suppressed ordinary
+  thinking updates, changed provider stream-start/idle-timeout semantics, and prevented coding-agent TTSR from
+  observing and aborting malformed reasoning streams. Plain native-protocol models therefore keep direct streaming,
+  while every model exposed to the text-protocol failure mode receives bounded recovery.
+- Healthy visible text, tool calls, and non-`stop` terminal states retain their existing pass-through behavior.
+
+### Why the extension system could not handle this
+
+- Provider stream buffering and retry happen inside agent-core before message-update events are forwarded or an
+  assistant turn is committed; extensions cannot retract leaked attempt-one events or replace the committed turn.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `empty-assistant-recovery.ts` visibility checks and stream wrapper gate.
+- LOW: `agent-loop.ts` at the recovery wrapper call site.
+
 ## 2026-07-30 - Bound empty Kimi assistant responses
 
 ### What changed and why

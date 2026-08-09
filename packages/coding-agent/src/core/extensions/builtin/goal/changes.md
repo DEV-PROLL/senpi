@@ -1,5 +1,31 @@
 # goal Extension Changes
 
+## Reload snapshots survive first session start (2026-08-09)
+
+### What changed
+
+- `MonitorAwareGoalContinuation` preserves source-keyed channel snapshots received
+  before its first `start()`, while a subsequent `start()` on the same instance
+  still clears counts from the replaced session.
+- Integration coverage runs Terminal before Goal on one event bus, parks live
+  monitor and background-bash state across a real reload lifecycle, and verifies
+  both replayed snapshots delay Goal continuation after the new runner starts.
+
+### Why
+
+- Builtin order is load-bearing: Terminal's reload `session_start` claims and binds
+  its parked bundle before Goal's handler runs. `bind()` immediately replays both
+  terminal snapshots to the newly constructed Goal instance, so clearing counts on
+  that instance's first `start()` discarded current-session liveness with no later
+  transition available to restore it.
+- Pre-first-start snapshots belong to the fresh runner generation. Only a later
+  same-instance `start()` represents a genuine session replacement whose old
+  snapshots must be discarded.
+
+### Expected merge conflict zones
+
+- LOW in `monitor-continuation.ts` around `start()` lifecycle reset behavior.
+
 ## System-owned aborts stay active through Goal recovery (2026-08-05)
 
 ### What changed

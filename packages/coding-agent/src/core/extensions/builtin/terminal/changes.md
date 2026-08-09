@@ -30,6 +30,31 @@ native reader teardown.
   settlement.
 - `packages/pty/test/native-wait-threadpool.test.ts` and its native subprocess fixtures.
 
+
+## Terminal monitor and background-bash resumption channels (2026-08-08)
+
+### What changed
+
+- Monitor registry transitions still emit the byte-compatible `terminal_monitor_state` payload and
+  now also emit the shared `resumption_channel_state` snapshot under source
+  `"terminal-monitor"`, with matching counts and channel identity metadata.
+- `TerminalSessionBundle` now owns the live background-session snapshot. Explicit background bash
+  launches and foreground auto-detaches register a channel, while exit, `kill_bash`, and bundle
+  teardown remove it. Every transition emits the complete source snapshot under
+  `"terminal-bash"`.
+- Bundle binding re-publishes both monitor and background snapshots during `session_start`, including
+  after reload, so a goal consumer that clears session-scoped counts sees channels that remained
+  alive across the boundary.
+
+### Notification tradeoff
+
+Background sessions count as live resumption channels unconditionally, including non-interactive
+sessions and terminal `notify: "off"`. The notify setting controls whether completion injects a wake
+notification; it does not change whether work is still alive. A muted session can therefore delay a
+goal continuation even though its completion will not wake the agent, but the existing four-minute
+continuation backstop bounds that delay. Keeping liveness independent from notification policy avoids
+the measured 53ms premature continuation seen with `notify: "off"` (52ms with notifications enabled).
+
 ## Fixed foreground window replaces cache budget; sleep-wait commands detach early (2026-08-07)
 
 ### What changed
