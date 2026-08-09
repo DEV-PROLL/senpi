@@ -1,5 +1,14 @@
 # changes
 
+## model selector search ranking and frozen ordering
+
+- Added `src/modes/interactive/model-search-rank.ts` so model search ranks each query token against the independent fields `id`, `name`, `provider`, and `provider/id` through a tier ladder (exact, whole token, boundary substring, substring, then `fuzzyMatch` as a last resort), with a canonical provider-path check and a favorites-first partition ahead of the relevance costs in the composite sort key.
+- Changed `src/modes/interactive/components/model-selector.ts` so `/model` search ranks through `rankModelSearchItems` with favorites-first partitioning in the all-models scope, and so both the base sort and the search partition read a favorite-ids snapshot taken when the selector opens; a `Ctrl+F` toggle updates only the favorite marker and no longer re-sorts rows mid-session.
+- Changed `src/modes/interactive/components/favorite-models-selector.ts` so `/favorite-models` row order is frozen at screen open (a `displayIds` snapshot), favoriting or unfavoriting flips only the marker, explicit reorder keys mirror-swap the snapshot so rows still visibly move, and search ranks through the same module without a favorites partition.
+- Why: user-reported UX bugs. Unfavoriting a row made the whole list jump under the cursor, and the query `opus` ranked `claude-sonnet-4-5` above `claude-opus-5` because the old concatenated-string `fuzzyFilter` let a greedy subsequence match scattered letters across "anthropic…claude…sonnet" and score better than the literal word in the opus id.
+- This was changed in core UI because the selector components and their ranking are internal `InteractiveMode` behavior; no extension hook can replace selector search ranking or row ordering without reimplementing the built-in selectors.
+- Expected merge-conflict zone on upstream sync: `src/modes/interactive/components/model-selector.ts` and `favorite-models-selector.ts` (extending the zone already declared by the favorite model cycling entry), plus `src/modes/interactive/model-search.ts` and the new `src/modes/interactive/model-search-rank.ts`.
+
 ## Server fallback abort uses one TUI notice (2026-08-05)
 
 ### What changed
