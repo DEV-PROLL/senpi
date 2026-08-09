@@ -355,6 +355,7 @@ async function createSessionManager(
 	cwd: string,
 	sessionDir: string | undefined,
 	settingsManager: SettingsManager,
+	appMode: AppMode,
 ): Promise<SessionManager> {
 	if (parsed.noSession || parsed.help || parsed.listModels !== undefined || parsed.listTips) {
 		return SessionManager.inMemory(cwd, parsed.sessionId !== undefined ? { id: parsed.sessionId } : undefined);
@@ -392,14 +393,16 @@ async function createSessionManager(
 				return openSessionOrExit(resolved.path, sessionDir);
 
 			case "global": {
-				if (!process.stdin.isTTY) {
-					// The fork confirmation below blocks on readline, which never resolves
-					// without an interactive stdin (piped, detached, or closed), hanging
-					// the process indefinitely. Fail fast with an actionable message.
+				if (appMode !== "interactive") {
+					// The fork confirmation below blocks on readline, which only an
+					// interactive session can answer. Print, JSON, RPC, and app-server runs
+					// reach here with a TTY attached too (`-p` from a terminal), where the
+					// question hangs the process or resolves as "no" on stdin EOF. Fail fast
+					// with an actionable message instead.
 					console.error(chalk.red(`Session found in different project: ${resolved.cwd}`));
 					console.error(
 						chalk.red(
-							`Cannot confirm forking without an interactive terminal. Use --fork '${parsed.session}' to fork it into the current directory, or re-run from ${resolved.cwd}.`,
+							`Cannot confirm forking without an interactive session. Use --fork '${parsed.session}' to fork it into the current directory, or re-run interactively from ${resolved.cwd}.`,
 						),
 					);
 					process.exit(1);
@@ -752,7 +755,7 @@ export async function main(args: string[], options?: MainOptions) {
 		(parsed.sessionDir ? normalizePath(parsed.sessionDir) : undefined) ??
 		(envSessionDir ? expandTildePath(envSessionDir) : undefined) ??
 		startupSettingsManager.getSessionDir();
-	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager);
+	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager, appMode);
 	const missingSessionCwdIssue = getMissingSessionCwdIssue(sessionManager, cwd);
 	if (missingSessionCwdIssue) {
 		if (appMode === "interactive") {
