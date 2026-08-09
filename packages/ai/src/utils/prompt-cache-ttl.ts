@@ -316,6 +316,9 @@ function resolveOpenAIResponsesCacheRetention(cacheRetention?: CacheRetention, e
 
 export function resolvePromptCacheTtlSeconds(model: Model<Api>, env?: ProviderEnv): number | undefined {
 	switch (model.api) {
+		case "claude-sdk-oauth":
+			// The Claude SDK owns prompt caching for this lane and uses Anthropic's default 5m TTL.
+			return PROMPT_CACHE_TTL_SHORT_SECONDS;
 		case "anthropic-messages": {
 			const anthropicModel = model as Model<"anthropic-messages">;
 			const retention = resolveAnthropicCacheRetention(anthropicModel.cacheRetention, env, "long");
