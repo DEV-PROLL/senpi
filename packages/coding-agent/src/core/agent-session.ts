@@ -5313,6 +5313,7 @@ export class AgentSession {
 				getContextUsage: () => this.getContextUsage(),
 				getCompactionSettings: () => this.settingsManager.getCompactionSettings(),
 				getPromptCacheSafeWaitSeconds: () => this.resolvePromptCacheSafeWaitSeconds(),
+				getPromptCacheGoalBackstopMaxSeconds: () => this.settingsManager.getPromptCacheGoalBackstopMaxSeconds(),
 				getLookAtSettings: () => {
 					const global = this.settingsManager.getGlobalSettings().lookAt;
 					const project = this.settingsManager.getProjectSettings().lookAt;

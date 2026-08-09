@@ -1,5 +1,30 @@
 # goal Extension Changes
 
+## Cache-safe backstops and warm-iteration ordinals (2026-08-09)
+
+### What changed
+
+- Monitor continuation delays snapshot the active extension context's prompt-cache safe-wait budget and apply the configured `promptCache.goalBackstopMaxSeconds` ceiling, with the former four-minute value retained only as the unknown-budget fallback.
+- Direct-input holds now consume elapsed wall-clock time instead of restarting the held remainder, and wait progress keeps the originally scheduled total.
+- Cache-warm rendering stops claiming that tokens remained warm or produced savings when the planned or actual wait reaches the displayed cache TTL.
+- Cache-warm scheduled/resumed events and durable entries carry an optional per-epoch iteration ordinal; legacy entries omit the iteration wording.
+
+### Why
+
+- Provider lanes expose materially different cache-safe budgets. A fixed four-minute backstop wakes long-TTL lanes too often and ignores the existing provider-aware budget resolver.
+- Input admission time is still real cache age, so pausing the timer during admission could overrun the captured budget.
+- Iteration ordinals make repeated warm cycles understandable without persisting session-global state or mislabeling old entries.
+
+### Why an extension couldn't do it
+
+- The resolved prompt-cache budget and merged settings are owned by the session core and must cross the typed extension-context boundary.
+- Goal's monitor timer, durable entry payload, and renderer are private builtin implementation surfaces.
+
+### Expected merge conflict zones
+
+- MEDIUM in `monitor-continuation.ts`, `cache-warm.ts`, and `cache-warm-renderer.ts` around scheduling and entry payloads.
+- LOW in `settings-manager.ts`, extension context plumbing, and goal-monitor test harnesses.
+
 ## Reload snapshots survive first session start (2026-08-09)
 
 ### What changed

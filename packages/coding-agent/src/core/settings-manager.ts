@@ -68,6 +68,7 @@ export interface TerminalSettings {
 export interface PromptCacheSettings {
 	cacheAwareTimeouts?: boolean; // default: true (size foreground tool waits by the model's prompt-cache TTL)
 	safetyBufferSeconds?: number; // default: 30 (headroom subtracted from the cache TTL)
+	goalBackstopMaxSeconds?: number; // default: 3570 (maximum Goal monitor continuation backstop)
 }
 
 export interface ImageSettings {
@@ -597,6 +598,14 @@ export class SettingsManager {
 
 	getProjectSettings(): Settings {
 		return structuredClone(this.projectSettings);
+	}
+
+	getPromptCacheGoalBackstopMaxSeconds(): number {
+		return (
+			this.projectSettings.promptCache?.goalBackstopMaxSeconds ??
+			this.globalSettings.promptCache?.goalBackstopMaxSeconds ??
+			3570
+		);
 	}
 
 	isProjectTrusted(): boolean {

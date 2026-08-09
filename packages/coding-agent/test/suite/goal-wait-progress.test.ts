@@ -47,15 +47,15 @@ describe("goal wait label", () => {
 		expect(label).toContain(EMPTY);
 	});
 
-	it("keeps the monitors-only rendering byte-identical", () => {
+	it("renders a cache-budget-derived monitor wait", () => {
 		const label = formatGoalWaitLabel({
 			kind: "monitor",
-			remainingMs: 192_000,
-			totalMs: 240_000,
+			remainingMs: 216_000,
+			totalMs: 270_000,
 			channelCounts: { "terminal-monitor": 2 },
 		});
 
-		expect(label).toBe("▰▰▱▱▱▱▱▱▱▱▱▱ goal continues in 3m 12s · 2 monitors on duty");
+		expect(label).toBe("▰▰▱▱▱▱▱▱▱▱▱▱ goal continues in 3m 36s · 2 monitors on duty");
 	});
 
 	it("uses a stable singular and plural breakdown for mixed live sources", () => {
