@@ -21,6 +21,13 @@
 - Fixed active Goals resuming immediately while background tasks, detached evals, or background bash sessions were
   still live. Goal continuation now aggregates source-keyed resumption-channel snapshots, preserves the four-minute
   cache-warm check-in, and reports a per-source wait summary while retaining terminal-monitor telemetry compatibility.
+- Fixed the pipe-fallback terminal backend letting shell children take over the user's terminal. When no native PTY
+  prebuild is available, `bash` children ran inside senpi's own session, so a tty-reading program (such as a `sudo`
+  password prompt) opened `/dev/tty` and raced the TUI's raw-mode stdin reader - the password swallowed stolen escape
+  bytes and the editor then showed Kitty key-release fragments like `[49;1:3u` as literal text (reported on Ubuntu +
+  kitty). Pipe-fallback children are now detached on POSIX with no controlling terminal, and `kill()` signals the whole
+  process group so backgrounded grandchildren can no longer hold the output pipe open
+  ([#758](https://github.com/code-yeongyu/senpi/pull/758)).
 - Fixed multi-session RPC `open_session` failures returning only a bare `open_failed` code. Responses now preserve the
   stable prefix and include the underlying workspace or runtime cause as `open_failed: <reason>`, while all other
   transport error codes remain exact strings ([#750](https://github.com/code-yeongyu/senpi/pull/750)).
