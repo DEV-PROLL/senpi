@@ -24,10 +24,12 @@
   (`claude-fable-5` -> `k3:max`, `claude-opus-5:xhigh`, `claude-opus-4-8:xhigh`) that expand against the live
   model registry. Fable 5 now keeps a working fallback chain no matter which provider serves it - the builtin
   Anthropic provider, the Claude SDK OAuth extension, a gateway, or Bedrock - instead of silently losing the
-  chain and leaving provider-side fallback aborted with nothing to fall back to. Bare selectors expand to
-  OAuth-credential providers first, then a fixed precedence order, and never to OpenRouter; explicit
-  `provider/model` chains keep exact behavior, and `retry.fallbackChains` accepts a bare model id as a
-  family-wide key with `[]` still opting out ([#761](https://github.com/code-yeongyu/senpi/pull/761)).
+  chain and leaving provider-side fallback aborted with nothing to fall back to. Bare selectors expand to at most two
+  providers, preferring OAuth credentials, then API keys, then a fixed provider precedence, and never OpenRouter.
+  Candidates now resolve only through usable models, and `/fallback` hides family expansions that are unavailable or
+  excluded by the active selectable-model filter instead of advertising dead routes. Explicit `provider/model` chains
+  keep exact behavior, and `retry.fallbackChains` accepts a bare model id as a family-wide key with `[]` still opting
+  out ([#761](https://github.com/code-yeongyu/senpi/pull/761)).
 - Changed `/model` search ranking to a model-aware scorer that matches query tokens against the model id, name,
   provider, and `provider/id` independently instead of one concatenated string. Exact, whole-token, and
   word-boundary matches now beat scattered subsequence matches, so `opus 5` ranks `claude-opus-5` first and an exact
