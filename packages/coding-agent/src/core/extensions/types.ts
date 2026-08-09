@@ -430,6 +430,13 @@ export interface ExtensionContext {
 	getPromptCacheSafeWaitSeconds?(): number | undefined;
 	/** Maximum Goal monitor continuation backstop configured for prompt-cache waits. */
 	getPromptCacheGoalBackstopMaxSeconds?(): number;
+	/** Resolved opt-in prompt-cache keep-alive policy. */
+	getPromptCacheKeepAliveSettings?(): {
+		enabled: boolean;
+		maxRequestsPerSession: number;
+		maxCostUsdPerSession: number;
+		marginSeconds: number;
+	};
 	/** Get resolved look-at settings from global/project/user overrides. */
 	getLookAtSettings(): { enabled: boolean; models: string[] | undefined };
 	/** Get resolved image settings from global/project/user overrides. */
@@ -2064,6 +2071,12 @@ export interface ExtensionContextActions {
 	getCompactionSettings: () => CompactionPreparation["settings"];
 	getPromptCacheSafeWaitSeconds?: () => number | undefined;
 	getPromptCacheGoalBackstopMaxSeconds?: () => number;
+	getPromptCacheKeepAliveSettings?: () => {
+		enabled: boolean;
+		maxRequestsPerSession: number;
+		maxCostUsdPerSession: number;
+		marginSeconds: number;
+	};
 	getLookAtSettings: () => { enabled: boolean; models: string[] | undefined };
 	getImageSettings: () => { autoResize: boolean; blockImages: boolean };
 	sessionSettings: ExtensionSessionSettings;

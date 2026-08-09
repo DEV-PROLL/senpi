@@ -392,6 +392,8 @@ export class ExtensionRunner {
 	});
 	private getPromptCacheSafeWaitSecondsFn: () => number | undefined = () => undefined;
 	private getPromptCacheGoalBackstopMaxSecondsFn: () => number = () => 3570;
+	private getPromptCacheKeepAliveSettingsFn: NonNullable<ExtensionContextActions["getPromptCacheKeepAliveSettings"]> =
+		() => ({ enabled: false, maxRequestsPerSession: 3, maxCostUsdPerSession: 0.05, marginSeconds: 60 });
 	private getLookAtSettingsFn: ExtensionContextActions["getLookAtSettings"] = () => ({
 		enabled: true,
 		models: undefined,
@@ -500,6 +502,8 @@ export class ExtensionRunner {
 			this.getPromptCacheSafeWaitSecondsFn = contextActions.getPromptCacheSafeWaitSeconds;
 		if (contextActions.getPromptCacheGoalBackstopMaxSeconds)
 			this.getPromptCacheGoalBackstopMaxSecondsFn = contextActions.getPromptCacheGoalBackstopMaxSeconds;
+		if (contextActions.getPromptCacheKeepAliveSettings)
+			this.getPromptCacheKeepAliveSettingsFn = contextActions.getPromptCacheKeepAliveSettings;
 		this.getLookAtSettingsFn = contextActions.getLookAtSettings;
 		this.getImageSettingsFn = contextActions.getImageSettings;
 		this.sessionSettingsFn = contextActions.sessionSettings;
@@ -1057,6 +1061,10 @@ export class ExtensionRunner {
 			getPromptCacheGoalBackstopMaxSeconds: () => {
 				runner.assertActive();
 				return runner.getPromptCacheGoalBackstopMaxSecondsFn();
+			},
+			getPromptCacheKeepAliveSettings: () => {
+				runner.assertActive();
+				return runner.getPromptCacheKeepAliveSettingsFn();
 			},
 			getLookAtSettings: () => {
 				runner.assertActive();

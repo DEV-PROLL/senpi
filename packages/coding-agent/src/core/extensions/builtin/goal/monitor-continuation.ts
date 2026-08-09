@@ -51,6 +51,7 @@ import type { GoalWaitTicker } from "./wait-ticker.ts";
 
 export const GOAL_CONTINUATION_SCHEDULED_EVENT = "goal_continuation_scheduled";
 export const GOAL_CONTINUATION_RESUMED_EVENT = "goal_continuation_resumed";
+export const GOAL_CONTINUATION_TIMER_STATE_EVENT = "goal_continuation_timer_state";
 export const GOAL_MONITOR_STALL_EVENT = "goal_monitor_continuation_stall";
 
 export class MonitorAwareGoalContinuation {
@@ -306,6 +307,7 @@ export class MonitorAwareGoalContinuation {
 			this.#scheduledCacheWarmIteration = undefined;
 		}
 		this.#scheduledContinuationKind = kind;
+		this.#pi.events?.emit(GOAL_CONTINUATION_TIMER_STATE_EVENT, { armed: true, kind });
 		if (this.#directInputHolds.size > 0) {
 			this.#heldTimer = { kind, remainingMs: delayMs, heldAtMs: Date.now(), totalMs: delayMs, drainFire: false };
 			return;
@@ -338,6 +340,7 @@ export class MonitorAwareGoalContinuation {
 		this.#timer = undefined;
 		this.#scheduledDueAtMs = undefined;
 		this.#scheduledContinuationKind = undefined;
+		this.#pi.events?.emit(GOAL_CONTINUATION_TIMER_STATE_EVENT, { armed: false, kind });
 		this.#waitTicker?.stop();
 		const delayMs =
 			this.#scheduledDelayMs ??
@@ -568,6 +571,7 @@ export class MonitorAwareGoalContinuation {
 	}
 
 	#cancelTimer(): void {
+		const kind = this.#scheduledContinuationKind;
 		this.#scheduledAtMs = undefined;
 		this.#scheduledDueAtMs = undefined;
 		this.#scheduledCache = undefined;
@@ -577,6 +581,7 @@ export class MonitorAwareGoalContinuation {
 		if (this.#timer !== undefined) clearTimeout(this.#timer);
 		this.#timer = undefined;
 		this.#scheduledContinuationKind = undefined;
+		if (kind !== undefined) this.#pi.events?.emit(GOAL_CONTINUATION_TIMER_STATE_EVENT, { armed: false, kind });
 		this.#waitTicker?.stop();
 	}
 }

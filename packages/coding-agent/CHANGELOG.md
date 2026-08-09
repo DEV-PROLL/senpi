@@ -8,6 +8,8 @@
 
 ### Added
 
+- Added opt-in native Anthropic prompt-cache keep-alive pings, disabled by default and bounded per session by request and estimated-cost caps. Idle pings stay dormant while any Goal continuation wait is armed and render as `⚡ Warm ping #N` transcript entries.
+
 - Goal continuation now aggregates terminal monitors, background terminal sessions, detached eval cells, and other producers through the shared `wake_source_state` contract. Scheduled/resumed telemetry keeps `activeMonitorCount` as the aggregate compatibility field and adds a per-source `wakeSources` snapshot.
 
 - Goal cache-warm wait and wake entries now show an in-memory iteration number for each accepted monitor cycle, resetting when the Goal or wake epoch changes while remaining compatible with legacy persisted entries.
