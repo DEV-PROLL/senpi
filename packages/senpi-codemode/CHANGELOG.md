@@ -6,6 +6,13 @@
 
 ### Added
 
+- Detached eval cells now publish their liveness as a `resumption_channel_state` event (source `eval-detached`) on the
+  host event bus: a full per-source snapshot with `activeCount` and per-cell `id`/`description`/`startedAtMs` entries is
+  emitted whenever a cell detaches, settles, is stopped, or is disposed, and once on `session_start`. The goal builtin
+  consumes this to hold its hidden continuation while detached cells are still computing instead of nagging immediately
+  at turn end. Hosts without an event bus are unaffected (emission is a no-op), and the footer/status rendering is
+  unchanged.
+
 ### Changed
 
 ### Fixed
