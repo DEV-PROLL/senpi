@@ -13,9 +13,10 @@
 ### Fixed
 
 - Fixed `senpi --session <id>` hanging indefinitely with no output when the session belongs to a different project and
-  stdin is not interactive (piped, detached, or `-p` one-shots). The cross-project fork confirmation now fails fast
-  with actionable guidance (`--fork '<id>'` or re-run from the owning project) when no interactive terminal is
-  available, and the confirmation prompt resolves as "no" on stdin EOF instead of wedging the process
+  the run is not interactive (piped, detached, app-server spawns, and `-p` one-shots started from a terminal). The
+  cross-project fork confirmation is now gated on the resolved application mode instead of stdin alone and fails fast
+  with actionable guidance (`--fork '<id>'` or re-run interactively from the owning project), and the confirmation
+  prompt resolves as "no" on stdin EOF instead of wedging the process
   ([#756](https://github.com/code-yeongyu/senpi/pull/756)).
 - Fixed terminal resumption liveness reporting so monitor snapshots are dual-published through the legacy event and
   the shared source-keyed channel contract, while live background bash sessions now publish spawn, exit, kill, and
