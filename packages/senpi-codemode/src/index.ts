@@ -7,7 +7,6 @@ import { defaultCodemodeSettings } from "./config/settings.ts";
 import { EvalNotifier } from "./extension/eval-notifier.ts";
 import { EVAL_CELLS_STATUS_KEY } from "./extension/eval-status.ts";
 import { EvalStatusTicker } from "./extension/eval-status-ticker.ts";
-import { RESUMPTION_CHANNEL_STATE_EVENT, type ResumptionChannelState } from "./extension/resumption-channel.ts";
 import {
 	createExecuteTool,
 	createRuntime,
@@ -16,6 +15,7 @@ import {
 } from "./extension/runtime-factory.ts";
 import type { CodemodeSessionManager, CreateCodemodeSessionManagerOptions } from "./extension/session-manager.ts";
 import { SessionManagerProxy } from "./extension/session-manager-proxy.ts";
+import { WAKE_SOURCE_STATE_EVENT, type WakeSourceState } from "./extension/wake-source-state.ts";
 import { EvalDetachedCellManager, type EvalDetachedCellStatusEntry } from "./tool/detached-cell-manager.ts";
 import { createEvalTool } from "./tool/eval-tool.ts";
 import { renderEvalCall, renderEvalResult } from "./tool/render.ts";
@@ -39,7 +39,7 @@ export interface CodemodeExtensionAPI {
 	getActiveTools(): string[];
 	getAllTools(): readonly EvalSchemaToolInfo[];
 	sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
-	/** Optional host event bus; a host without one turns resumption-channel emission into a harmless no-op. */
+	/** Optional host event bus; a host without one turns wake-source emission into a harmless no-op. */
 	events?: { emit(name: string, data: unknown): void };
 }
 
@@ -82,8 +82,8 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 	const showDetachedCells = (entries: readonly EvalDetachedCellStatusEntry[]): void => {
 		statusTicker.sync(entries);
 	};
-	const emitChannelState = (state: ResumptionChannelState): void => {
-		pi.events?.emit(RESUMPTION_CHANNEL_STATE_EVENT, state);
+	const emitWakeSourceState = (state: WakeSourceState): void => {
+		pi.events?.emit(WAKE_SOURCE_STATE_EVENT, state);
 	};
 	const registerEvalForRuntime = (
 		runtime: SessionRuntime,
@@ -132,7 +132,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			cellManager: new EvalDetachedCellManager({
 				notifier,
 				onStatusChange: showDetachedCells,
-				onChannelState: emitChannelState,
+				onWakeSourceState: emitWakeSourceState,
 				...(options.now === undefined ? {} : { now: options.now }),
 			}),
 			executionTracker: manager,
@@ -163,12 +163,12 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			artifactsDir: runtime.artifactsDir,
 			notifier,
 			onStatusChange: showDetachedCells,
-			onChannelState: emitChannelState,
+			onWakeSourceState: emitWakeSourceState,
 			...(options.now === undefined ? {} : { now: options.now }),
 		});
 		activeCells = cellManager;
 		// The goal builtin clears its per-session counts at session_start; re-publish our snapshot.
-		cellManager.publishChannelState();
+		cellManager.publishWakeSourceState();
 		activeRuntime = runtime;
 		activeModelId = ctx.model?.id;
 		registerEvalForRuntime(runtime, activeModelId, cellManager);

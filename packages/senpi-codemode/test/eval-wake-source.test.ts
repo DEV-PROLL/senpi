@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@code-yeongyu/senpi";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RESUMPTION_CHANNEL_STATE_EVENT, type ResumptionChannelState } from "../src/extension/resumption-channel.ts";
 import type { CodemodeSessionManager } from "../src/extension/session-manager.ts";
+import { WAKE_SOURCE_STATE_EVENT, type WakeSourceState } from "../src/extension/wake-source-state.ts";
 import senpiCodemode, { type CodemodeExtensionAPI } from "../src/index.ts";
 import { EvalDetachedCellManager } from "../src/tool/detached-cell-manager.ts";
 import { createEvalTool } from "../src/tool/eval-tool.ts";
@@ -18,12 +18,12 @@ afterEach(async () => {
 	await Promise.all(directories.splice(0).map(async (path) => await rm(path, { recursive: true, force: true })));
 });
 
-function channelRecorder(): {
-	readonly emissions: ResumptionChannelState[];
-	readonly onChannelState: (state: ResumptionChannelState) => void;
+function wakeSourceRecorder(): {
+	readonly emissions: WakeSourceState[];
+	readonly onWakeSourceState: (state: WakeSourceState) => void;
 } {
-	const emissions: ResumptionChannelState[] = [];
-	return { emissions, onChannelState: (state) => emissions.push(state) };
+	const emissions: WakeSourceState[] = [];
+	return { emissions, onWakeSourceState: (state) => emissions.push(state) };
 }
 
 function interactiveContext() {
@@ -60,11 +60,11 @@ async function detach(
 	await execution;
 }
 
-describe("eval detached cell resumption channel liveness", () => {
+describe("eval detached cell wake source liveness", () => {
 	it("emits a full snapshot with the channel entry when one cell detaches", async () => {
 		vi.useFakeTimers();
-		const channel = channelRecorder();
-		const manager = new EvalDetachedCellManager({ onChannelState: channel.onChannelState });
+		const channel = wakeSourceRecorder();
+		const manager = new EvalDetachedCellManager({ onWakeSourceState: channel.onWakeSourceState });
 		const kernel = new FakeKernel([]);
 		const tool = createTool(manager, [["js", kernel]]);
 
@@ -72,9 +72,9 @@ describe("eval detached cell resumption channel liveness", () => {
 
 		expect(channel.emissions).toEqual([
 			{
-				source: "eval-detached",
+				source: "senpi-codemode",
 				activeCount: 1,
-				channels: [{ id: "channel-cell", description: "numpy feather rerun", startedAtMs: expect.any(Number) }],
+				items: [{ id: "channel-cell", description: "numpy feather rerun", startedAtMs: expect.any(Number) }],
 			},
 		]);
 		await manager.stop("channel-cell");
@@ -83,8 +83,8 @@ describe("eval detached cell resumption channel liveness", () => {
 
 	it("tracks activeCount as two live cells settle one by one", async () => {
 		vi.useFakeTimers();
-		const channel = channelRecorder();
-		const manager = new EvalDetachedCellManager({ onChannelState: channel.onChannelState });
+		const channel = wakeSourceRecorder();
+		const manager = new EvalDetachedCellManager({ onWakeSourceState: channel.onWakeSourceState });
 		const js = new FakeKernel([]);
 		const py = new FakeKernel([]);
 		const tool = createTool(manager, [
@@ -96,9 +96,9 @@ describe("eval detached cell resumption channel liveness", () => {
 		await detach(tool, py, "py-cell", "strip repairs", "py");
 
 		expect(channel.emissions.at(-1)).toEqual({
-			source: "eval-detached",
+			source: "senpi-codemode",
 			activeCount: 2,
-			channels: [
+			items: [
 				{ id: "js-cell", description: "bundle build", startedAtMs: expect.any(Number) },
 				{ id: "py-cell", description: "strip repairs", startedAtMs: expect.any(Number) },
 			],
@@ -107,14 +107,14 @@ describe("eval detached cell resumption channel liveness", () => {
 		await manager.stop("js-cell");
 
 		expect(channel.emissions.at(-1)).toEqual({
-			source: "eval-detached",
+			source: "senpi-codemode",
 			activeCount: 1,
-			channels: [{ id: "py-cell", description: "strip repairs", startedAtMs: expect.any(Number) }],
+			items: [{ id: "py-cell", description: "strip repairs", startedAtMs: expect.any(Number) }],
 		});
 
 		await manager.stop("py-cell");
 
-		expect(channel.emissions.at(-1)).toEqual({ source: "eval-detached", activeCount: 0, channels: [] });
+		expect(channel.emissions.at(-1)).toEqual({ source: "senpi-codemode", activeCount: 0, items: [] });
 		await manager.flushNotifications();
 	});
 });
@@ -234,7 +234,7 @@ async function detachOne(
 	await execution;
 }
 
-describe("resumption channel liveness wiring", () => {
+describe("wake source liveness wiring", () => {
 	it("re-emits the current snapshot on session_start and publishes detach transitions on the host bus", async () => {
 		const cwd = await sessionCwd();
 		const pi = new WiringPi();
@@ -249,8 +249,8 @@ describe("resumption channel liveness wiring", () => {
 
 		expect(busEmissions).toEqual([
 			{
-				name: "resumption_channel_state",
-				data: { source: "eval-detached", activeCount: 0, channels: [] },
+				name: "wake_source_state",
+				data: { source: "senpi-codemode", activeCount: 0, items: [] },
 			},
 		]);
 
@@ -258,19 +258,19 @@ describe("resumption channel liveness wiring", () => {
 		await detachOne(pi, kernel, ctx, "wire-cell", "wire probe");
 
 		expect(busEmissions.at(-1)).toEqual({
-			name: "resumption_channel_state",
+			name: "wake_source_state",
 			data: {
-				source: "eval-detached",
+				source: "senpi-codemode",
 				activeCount: 1,
-				channels: [{ id: "wire-cell", description: "wire probe", startedAtMs: expect.any(Number) }],
+				items: [{ id: "wire-cell", description: "wire probe", startedAtMs: expect.any(Number) }],
 			},
 		});
 
 		kernel.completeDeferredRun(result("wire-cell", "42"));
 		await vi.waitFor(() =>
 			expect(busEmissions.at(-1)).toEqual({
-				name: "resumption_channel_state",
-				data: { source: "eval-detached", activeCount: 0, channels: [] },
+				name: "wake_source_state",
+				data: { source: "senpi-codemode", activeCount: 0, items: [] },
 			}),
 		);
 
@@ -298,8 +298,8 @@ describe("resumption channel liveness wiring", () => {
 	});
 });
 
-describe("resumption channel event contract", () => {
+describe("wake source event contract", () => {
 	it("pins the duplicated event literal to the exact cross-package contract", () => {
-		expect(RESUMPTION_CHANNEL_STATE_EVENT).toBe("resumption_channel_state");
+		expect(WAKE_SOURCE_STATE_EVENT).toBe("wake_source_state");
 	});
 });
