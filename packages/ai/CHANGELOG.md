@@ -21,6 +21,9 @@
 - Restricted Bedrock one-hour prompt-cache TTLs to Claude Opus 4.5, Sonnet 4.5, and Haiku 4.5; other cacheable
   Bedrock Claude models now consistently use the five-minute wire and resolver TTL.
 - Reported the Claude SDK OAuth lane's SDK-managed prompt-cache TTL as five minutes.
+- Fixed `warmPromptCache` eagerly loading the Anthropic SDK and message implementation for models that cannot use
+  Anthropic prompt-cache warming. Capability checks now run first, so unsupported provider lanes avoid the optional
+  Anthropic dependency entirely while supported models preserve the same pre-warm request and usage accounting.
 
 - Recovered Claude tool calls that omit the opening `<` before a lowercase
   `antml:invoke` and append a stray `</function_results>` trailer, dispatching
