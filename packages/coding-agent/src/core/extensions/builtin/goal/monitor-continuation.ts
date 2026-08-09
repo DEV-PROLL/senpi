@@ -50,6 +50,7 @@ export class MonitorAwareGoalContinuation {
 	readonly #markContinuationPending: () => void;
 	readonly #waitTicker: GoalWaitTicker | undefined;
 	#channelCounts = new Map<string, number>();
+	#hasStarted = false;
 	#ctx: ExtensionContext | undefined;
 	#goal: Goal | null = null;
 	#timer: ReturnType<typeof setTimeout> | undefined;
@@ -85,7 +86,8 @@ export class MonitorAwareGoalContinuation {
 	start(ctx: ExtensionContext): void {
 		this.#cancelTimer();
 		this.#ctx = ctx;
-		this.#channelCounts.clear();
+		if (this.#hasStarted) this.#channelCounts.clear();
+		else this.#hasStarted = true;
 		this.#goal = null;
 		this.#lastAgentEndMessages = [];
 		this.#directInputHolds.clear();

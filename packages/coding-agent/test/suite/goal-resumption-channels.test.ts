@@ -179,25 +179,26 @@ describe("goal continuation resumption channels", () => {
 		});
 	});
 
-	it("subscribes before start and clears prior-session snapshots when start resets the session", async () => {
+	it("preserves first-start snapshots but clears them on a same-instance session replacement", async () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
 		const ctx = await makeGoalContext(notices, "thread-pre-start");
 		const harness = createHarness();
 		const { monitor, events, sent } = harness;
-		const beforeStartGoal = activeGoal("goal-before-start");
-		await persistGoal(ctx, beforeStartGoal);
 		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "eval-detached", activeCount: 1 });
 		await events.flush();
 
-		await endTurn(monitor, ctx, beforeStartGoal);
+		monitor.start(ctx);
+		const firstSessionGoal = activeGoal("goal-first-session");
+		await persistGoal(ctx, firstSessionGoal);
+		await endTurn(monitor, ctx, firstSessionGoal);
 		expect(channelEvents(events, GOAL_CONTINUATION_SCHEDULED_EVENT)).toHaveLength(1);
 		expect(sent).toHaveLength(0);
 
 		monitor.start(ctx);
-		const afterStartGoal = activeGoal("goal-after-start");
-		await persistGoal(ctx, afterStartGoal);
-		await endTurn(monitor, ctx, afterStartGoal);
+		const replacementSessionGoal = activeGoal("goal-replacement-session");
+		await persistGoal(ctx, replacementSessionGoal);
+		await endTurn(monitor, ctx, replacementSessionGoal);
 		expect(sent).toHaveLength(1);
 	});
 

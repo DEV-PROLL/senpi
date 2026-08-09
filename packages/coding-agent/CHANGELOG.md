@@ -12,6 +12,9 @@
 
 ### Fixed
 
+- Fixed config reloads discarding live terminal monitor and background-bash snapshots before Goal continuation
+  scheduling. Fresh Goal instances now retain Terminal's pre-start replay, while later same-instance session starts
+  still clear stale channel state.
 - Fixed `senpi --session <id>` hanging indefinitely with no output when the session belongs to a different project and
   the run is not interactive (piped, detached, app-server spawns, and `-p` one-shots started from a terminal). The
   cross-project fork confirmation is now gated on the resolved application mode instead of stdin alone and fails fast
