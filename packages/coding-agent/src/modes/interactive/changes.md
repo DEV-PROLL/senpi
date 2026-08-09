@@ -1,5 +1,26 @@
 # changes
 
+## Correct extension-command immediate-dispatch comments (2026-08-09)
+
+### What changed
+
+- Updated the comments in the `onSubmit` handler and in `handleFollowUp` inside `src/modes/interactive/interactive-mode.ts` so they describe the post-fix dispatch flow accurately: extension commands short-circuit at the `isExtensionCommand` branch (the Enter path returns there) and dispatch immediately inside `AgentSession.prompt()` — including during compaction and barrier-held continuation runs — because `prompt()` now hoists the extension-command branch above the settled-work gate.
+- The `onSubmit` compaction branch comment now states that only non-command text reaches it (queued for post-compaction delivery) and notes that its `isExtensionCommand` re-check is already unreachable today (the earlier `isExtensionCommand` branch returns first) and stays harmless after the fix.
+- `handleFollowUp` is bound directly to `app.message.followUp` (Alt+Enter) and does NOT pass through `onSubmit`, so its `isExtensionCommand` check IS reachable and is the live dispatch point on that path; its comments say so explicitly instead of claiming an `onSubmit` short-circuit.
+- The streaming branch comment now clarifies that the steer/followUp behavior applies only to ordinary text, prompt template expansion, and queueing — extension commands are already dispatched immediately by `prompt()`.
+
+### Why
+
+- The previous comments claimed "extension commands execute immediately" in the compaction and streaming paths, which was false for the barrier-held and compaction cases until the parallel `AgentSession.prompt()` hoist landed. The corrected comments align the code's narrative with the actual post-fix control flow.
+
+### Why extension system couldn't handle this
+
+- The gate that serialized extension commands lives inside `AgentSession.prompt()` (core), not in the interactive mode. The TUI comments merely needed to stop asserting a behavior the TUI does not control.
+
+### Expected merge conflict zones
+
+- `src/modes/interactive/interactive-mode.ts`: the `onSubmit` dispatch block (compaction branch comment ~line 3591, streaming branch comment ~line 3608) and the `handleFollowUp` comments (~line 4785, ~line 4808).
+
 ## model selector search ranking and frozen ordering
 
 - Added `src/modes/interactive/model-search-rank.ts` so model search ranks each query token against the independent fields `id`, `name`, `provider`, and `provider/id` through a tier ladder (exact, whole token, boundary substring, substring, then `fuzzyMatch` as a last resort), with a canonical provider-path check and a favorites-first partition ahead of the relevance costs in the composite sort key.

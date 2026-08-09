@@ -1,5 +1,13 @@
 # Builtin extensions changes
 
+## import-repro: guard /ir against mid-run and mid-compaction dispatch (2026-08-09)
+
+- Extension commands now dispatch immediately inside `AgentSession.prompt()` (immediate-extension-commands plan), including while a run is streaming and while compaction is active. `/ir` replaces the live session through `ctx.switchSession()`, which aborts the in-flight turn without confirmation and — during compaction — fire-and-forget aborts the compaction task and disposes the session while that task is still unwinding (`agent-session-runtime.ts` `teardownCurrent` -> `abort()` -> `dispose()`).
+- The `/ir` handler now refuses with a warning notification (`/ir is unavailable while the agent is working`) when `ctx.isIdle()` is false or `ctx.isCompacting?.()` is true; idle behavior is unchanged, and the guard sits above argument validation so no fetch/write/switch work starts.
+- Why a per-handler guard instead of a core gate: the mid-turn audit of all builtin commands found only session-replacing `/ir` unsafe under immediate dispatch; the rest are read-only/UI, append-only (`appendCustomEntry` does not bump the message revision and survives compaction as a branch ancestor), host-guarded (`ctx.reload()` vetoes streaming and compaction), or defended by core design (model and tool-set changes invalidate/abort compaction deliberately). Verdict table: `.omo/evidence/task-3-immediate-extension-commands.md`.
+- Coverage: `test/suite/import-repro-builtin-extension.test.ts` asserts the notify+return path while streaming and while compacting, plus an idle passthrough control.
+- Expected merge conflict zones: LOW in `import-repro.ts` at the top of the `/ir` handler; LOW in `import-repro-builtin-extension.test.ts` around the new probe helpers.
+
 ## tps: concise turn cache-hit notice (2026-08-06)
 
 - The turn-completion TPS notification now renders

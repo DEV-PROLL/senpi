@@ -2552,6 +2552,32 @@ export class AgentSession {
 			await userAbortPromise;
 			throwIfCancelled();
 		}
+
+		// Extension commands are UI actions, not prompts: dispatch them before the
+		// settled-session-work gate below. That gate makes a bare prompt() wait for
+		// _sessionWorkBarrier, which a scheduled continuation (goal chain, queued
+		// follow-up) holds for an entire run, so a command typed mid-turn used to run
+		// only after the turn ended. The registry lookup stays synchronous so ordinary
+		// text beginning with "/" gains no await before the prompt-start bookkeeping.
+		try {
+			if ((options?.expandPromptTemplates ?? true) && text.startsWith("/")) {
+				const spaceIndex = text.indexOf(" ");
+				const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+				if (this._extensionRunner.getCommand(commandName)) {
+					const handled = await this._tryExecuteExtensionCommand(text);
+					throwIfCancelled();
+					if (handled) {
+						options?.promptDisposition?.("handled");
+						options?.preflightResult?.(true);
+						return;
+					}
+				}
+			}
+		} catch (error) {
+			options?.preflightResult?.(false);
+			throw error;
+		}
+
 		const ownsPromptStart =
 			!this.isStreaming && !this._promptStartPending && options?.streamingBehavior === undefined;
 		if (ownsPromptStart) this._promptStartPending = true;
@@ -2612,19 +2638,6 @@ export class AgentSession {
 		};
 
 		try {
-			// Handle extension commands first (execute immediately, even during streaming)
-			// Extension commands manage their own LLM interaction via pi.sendMessage()
-			if (expandPromptTemplates && text.startsWith("/")) {
-				const handled = await this._tryExecuteExtensionCommand(text);
-				throwIfCancelled();
-				if (handled) {
-					// Extension command executed, no prompt to send
-					promptDisposition?.("handled");
-					preflightResult?.(true);
-					return;
-				}
-			}
-
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
 			let currentImages = options?.images;
