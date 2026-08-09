@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GOAL_CONTINUATION_RESUMED_EVENT,
 	GOAL_CONTINUATION_SCHEDULED_EVENT,
-	GOAL_MONITOR_CONTINUATION_DELAY_MS,
+	GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS,
 	MonitorAwareGoalContinuation,
 } from "../../src/core/extensions/builtin/goal/monitor-continuation.ts";
 import { writeGoal } from "../../src/core/extensions/builtin/goal/store.ts";
@@ -137,7 +137,7 @@ describe("goal continuation resumption channels", () => {
 		for (let turn = 1; turn <= 2; turn++) {
 			await endTurn(monitor, ctx, goal);
 			const delivered = waitForSentCount(harness, turn);
-			await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
+			await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS);
 			await delivered;
 		}
 
@@ -145,14 +145,14 @@ describe("goal continuation resumption channels", () => {
 		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "senpi-task", activeCount: 0 });
 		await events.flush();
 		const thirdDelivery = waitForSentCount(harness, 3);
-		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
+		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS);
 		await thirdDelivery;
 		expect(sent[2]?.message.content).toContain("<goal_stall_check>");
 
 		await endTurn(monitor, ctx, goal);
 		events.emit(RESUMPTION_CHANNEL_STATE_EVENT, { source: "terminal-bash", activeCount: 0 });
 		await events.flush();
-		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
+		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS);
 		expect(sent).toHaveLength(3);
 	});
 
@@ -225,7 +225,7 @@ describe("goal continuation resumption channels", () => {
 
 		const delivered = waitForSentCount(harness, 1);
 		const resumed = waitForEventCount(events, GOAL_CONTINUATION_RESUMED_EVENT, 1);
-		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_DELAY_MS);
+		await vi.advanceTimersByTimeAsync(GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS);
 		await Promise.all([delivered, resumed]);
 		expect(channelEvents(events, GOAL_CONTINUATION_RESUMED_EVENT)[0]).toMatchObject(expected);
 		expect(entries[1]?.data).toMatchObject(expected);

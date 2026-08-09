@@ -5,6 +5,31 @@ import type { TokenUsageSnapshot } from "./types.ts";
 /** Custom session-entry type carrying the cache-warm continuation story. */
 export const GOAL_CACHE_WARMUP_ENTRY_TYPE = "goal-cache-warmup";
 
+export const GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS = 240_000;
+const GOAL_MONITOR_CONTINUATION_MIN_DELAY_MS = 1_000;
+const GOAL_MONITOR_CONTINUATION_HARD_CEILING_MS = 3_600_000;
+
+export function resolveGoalMonitorContinuationDelayMs(
+	cacheSafeWaitSeconds: number | undefined,
+	goalBackstopMaxSeconds?: number,
+): number {
+	if (
+		typeof cacheSafeWaitSeconds !== "number" ||
+		!Number.isFinite(cacheSafeWaitSeconds) ||
+		cacheSafeWaitSeconds <= 0
+	) {
+		return GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS;
+	}
+	const configuredCeilingMs =
+		typeof goalBackstopMaxSeconds === "number" && Number.isFinite(goalBackstopMaxSeconds) && goalBackstopMaxSeconds > 0
+			? Math.min(goalBackstopMaxSeconds * 1000, GOAL_MONITOR_CONTINUATION_HARD_CEILING_MS)
+			: GOAL_MONITOR_CONTINUATION_HARD_CEILING_MS;
+	return Math.max(
+		GOAL_MONITOR_CONTINUATION_MIN_DELAY_MS,
+		Math.min(cacheSafeWaitSeconds * 1000, configuredCeilingMs),
+	);
+}
+
 /** Cache context captured when a monitor-wait continuation is scheduled. */
 export interface GoalCacheWarmMetrics {
 	/** Prompt-cache TTL of the active model in seconds, when known. */

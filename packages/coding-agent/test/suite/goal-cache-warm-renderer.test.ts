@@ -32,7 +32,7 @@ describe("goal cache-warm entry renderer", () => {
 		const text = renderToText({
 			phase: "scheduled",
 			goalId: "goal-1",
-			delayMs: 240_000,
+			delayMs: 270_000,
 			activeMonitorCount: 1,
 			cache: { ttlSeconds: 300, cachedTokens: 120_000, estimatedSavedUsd: 0.324 },
 		});
@@ -47,16 +47,42 @@ describe("goal cache-warm entry renderer", () => {
 		const text = renderToText({
 			phase: "resumed",
 			goalId: "goal-1",
-			delayMs: 240_000,
-			waitedMs: 240_000,
+			delayMs: 270_000,
+			waitedMs: 270_000,
 			activeMonitorCount: 2,
 			cache: { ttlSeconds: 300, cachedTokens: 120_000, estimatedSavedUsd: 0.324 },
 		});
 		expect(text).toContain("Cache-warm wake");
-		expect(text).toContain("waited 4m");
+		expect(text).toContain("waited 4m 30s");
 		expect(text).toContain("2 monitors on duty");
 		expect(text).toContain("~120K tokens stayed warm");
 		expect(text).toContain("$0.324 saved");
+	});
+
+	it("does not claim warmth or savings when the cache TTL may have elapsed", () => {
+		const scheduled = renderToText({
+			phase: "scheduled",
+			goalId: "goal-expired-scheduled",
+			delayMs: 300_000,
+			activeMonitorCount: 1,
+			cache: { ttlSeconds: 300, cachedTokens: 120_000, estimatedSavedUsd: 0.324 },
+		});
+		expect(scheduled).toContain("TTL may elapse");
+		expect(scheduled).not.toContain("stays inside");
+		expect(scheduled).not.toContain("kept warm");
+		expect(scheduled).not.toContain("saved");
+
+		const resumed = renderToText({
+			phase: "resumed",
+			goalId: "goal-expired-resumed",
+			delayMs: 270_000,
+			waitedMs: 300_000,
+			activeMonitorCount: 1,
+			cache: { ttlSeconds: 300, cachedTokens: 120_000, estimatedSavedUsd: 0.324 },
+		});
+		expect(resumed).toContain("TTL may have elapsed");
+		expect(resumed).not.toContain("stayed warm");
+		expect(resumed).not.toContain("saved");
 	});
 
 	it("stays readable without cache metrics", () => {

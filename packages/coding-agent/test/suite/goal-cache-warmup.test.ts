@@ -35,7 +35,11 @@ async function setupWarmHarness(
 ): Promise<{ harness: GoalHarness; notices: string[]; ctx: Awaited<ReturnType<typeof makeGoalContext>> }> {
 	const notices: string[] = [];
 	const harness = createGoalHarness();
-	const ctx = await makeGoalContext(notices, threadId, { pendingMessages: false, model: cacheModel() });
+	const ctx = await makeGoalContext(notices, threadId, {
+		pendingMessages: false,
+		model: cacheModel(),
+		cacheSafeWaitSeconds: 270,
+	});
 	await harness.tools.get("create_goal")?.execute("create", { objective: "Keep watching" }, undefined, undefined, ctx);
 	await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
 	harness.events.emit("terminal_monitor_state", { activeCount: 1 });
@@ -75,7 +79,7 @@ describe("goal cache-warm continuation story", () => {
 		expect(channelEvents(harness, "goal_continuation_scheduled")).toEqual([
 			expect.objectContaining({
 				goalId: expect.any(String),
-				delayMs: 240_000,
+				delayMs: 270_000,
 				activeMonitorCount: 1,
 				cache: expect.objectContaining({ cachedTokens: 120_000, ttlSeconds: 300 }),
 			}),
@@ -87,7 +91,7 @@ describe("goal cache-warm continuation story", () => {
 			expect.objectContaining({
 				phase: "scheduled",
 				goalId: expect.any(String),
-				delayMs: 240_000,
+				delayMs: 270_000,
 				activeMonitorCount: 1,
 				cache: expect.objectContaining({ cachedTokens: 120_000, ttlSeconds: 300 }),
 			}),
@@ -100,7 +104,7 @@ describe("goal cache-warm continuation story", () => {
 
 		const delayedDeliveryRecorded = waitForSentCount(harness, 1);
 		const resumedEventRecorded = waitForEventCount(harness.events, "goal_continuation_resumed", 1);
-		await vi.advanceTimersByTimeAsync(240_000);
+		await vi.advanceTimersByTimeAsync(270_000);
 		await Promise.all([delayedDeliveryRecorded, resumedEventRecorded]);
 
 		expect(harness.sent).toHaveLength(1);
@@ -109,8 +113,8 @@ describe("goal cache-warm continuation story", () => {
 		expect(channelEvents(harness, "goal_continuation_resumed")).toEqual([
 			expect.objectContaining({
 				goalId: expect.any(String),
-				delayMs: 240_000,
-				waitedMs: 240_000,
+				delayMs: 270_000,
+				waitedMs: 270_000,
 				activeMonitorCount: 1,
 				cache: expect.objectContaining({
 					cachedTokens: 120_000,
@@ -125,7 +129,7 @@ describe("goal cache-warm continuation story", () => {
 		expect(resumed[0]).toEqual(
 			expect.objectContaining({
 				phase: "resumed",
-				waitedMs: 240_000,
+				waitedMs: 270_000,
 				activeMonitorCount: 1,
 				cache: expect.objectContaining({ cachedTokens: 120_000 }),
 			}),

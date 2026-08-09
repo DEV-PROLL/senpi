@@ -8,7 +8,11 @@
 
 ### Added
 
+- Goal cache-warm wait and wake entries now show an in-memory iteration number for each accepted monitor cycle, resetting when the Goal or wake epoch changes while remaining compatible with legacy persisted entries.
+
 ### Changed
+
+- Goal monitor continuation backstops now derive from the active model's prompt-cache safe-wait budget instead of a fixed four-minute delay, capped by `promptCache.goalBackstopMaxSeconds` (default 3570 seconds). Held direct-input admission now consumes wall-clock time, and cache-warm notices no longer claim warmth or savings after the cache TTL may have elapsed.
 
 ### Fixed
 
