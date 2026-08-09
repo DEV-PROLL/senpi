@@ -52,22 +52,29 @@ export function shouldUsePipeFallback(
 }
 
 /**
- * Signal the child's whole process group on POSIX. The detached child is its
- * own group leader, and grandchildren inherit the stdio pipes — leaving them
- * alive after a kill keeps 'close' from ever firing (the POSIX twin of the
- * Windows taskkill /T branch below). Returns false when the group signal was
- * not delivered so callers can fall back to a direct kill.
+ * Terminate the child, preferring its whole process group on POSIX. The
+ * detached child is its own group leader and grandchildren inherit the stdio
+ * pipes, so leaving them alive keeps 'close' from ever firing (the POSIX twin
+ * of the Windows taskkill /T branch below). Every path that stops a child must
+ * go through here: when the group signal is unavailable (Windows, no pid) or
+ * the group is already gone, it still falls back to a direct kill, so the
+ * child is never left running.
  */
-function signalDetachedTree(child: ChildProcessHandle, signal: NodeJS.Signals): boolean {
+export function terminateChildTree(
+	child: Pick<ChildProcessHandle, "pid" | "kill">,
+	signal: NodeJS.Signals,
+): "group" | "direct" {
 	const pid = child.pid;
-	if (pid === undefined || process.platform === "win32") return false;
-	try {
-		process.kill(-pid, signal);
-		return true;
-	} catch {
-		// Group already gone — let the caller fall back to a direct kill.
-		return false;
+	if (pid !== undefined && process.platform !== "win32") {
+		try {
+			process.kill(-pid, signal);
+			return "group";
+		} catch {
+			// Group already gone — fall through to the direct kill.
+		}
 	}
+	child.kill(signal);
+	return "direct";
 }
 
 function normalizeSpawnError(command: string, error: Error): PipeFallbackSessionError {
@@ -150,7 +157,7 @@ export class PipeFallbackSession {
 			if (this.options.timeoutMs !== undefined) {
 				this.timeoutHandle = setTimeout(() => {
 					this.timedOut = true;
-					signalDetachedTree(child, "SIGTERM");
+					terminateChildTree(child, "SIGTERM");
 				}, this.options.timeoutMs);
 			}
 		} catch (error) {
@@ -243,10 +250,9 @@ export class PipeFallbackSession {
 				// Fall through to the direct kill if taskkill is unavailable.
 			}
 		}
-		if (signalDetachedTree(this.child, signal)) {
+		if (terminateChildTree(this.child, signal) === "group") {
 			return { ok: true, note: `Sent ${signal} to child_process pipe fallback process group (pgid ${pid}).` };
 		}
-		this.child.kill(signal);
 		return { ok: true, note: `Sent ${signal} to child_process pipe fallback session.` };
 	}
 

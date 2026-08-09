@@ -6,6 +6,7 @@ import {
 	isPipeFallbackForced,
 	PipeFallbackSession,
 	shouldUsePipeFallback,
+	terminateChildTree,
 } from "../src/pipe-fallback.ts";
 
 function nodeSession(script: string, options: { timeoutMs?: number } = {}): PipeFallbackSession {
@@ -195,4 +196,25 @@ describe("PipeFallbackSession terminal detachment", () => {
 		},
 		5000,
 	);
+});
+
+describe("terminateChildTree", () => {
+	it("falls back to a direct kill when no process-group signal is available", () => {
+		// The branch Windows always takes (and POSIX takes once the group is
+		// gone). Every stop path routes through here, so losing the fallback
+		// would leave timed-out children running forever.
+		const signals: NodeJS.Signals[] = [];
+		const child = {
+			pid: undefined,
+			kill: (signal?: NodeJS.Signals) => {
+				signals.push(signal ?? "SIGTERM");
+				return true;
+			},
+		};
+
+		const route = terminateChildTree(child, "SIGTERM");
+
+		expect(route).toBe("direct");
+		expect(signals).toEqual(["SIGTERM"]);
+	});
 });
