@@ -1,5 +1,39 @@
 # changes
 
+## Dispatch extension commands before settled session work (2026-08-09)
+
+### What changed
+
+- Registered extension slash commands now dispatch at the head of `AgentSession.prompt()`, after any
+  in-flight user-abort wait but before prompt-start ownership and the settled-session-work gate.
+- A synchronous command lookup avoids adding an await or widening prompt-start admission for unknown
+  leading-slash text. Handled commands preserve the existing `promptDisposition("handled")` and
+  `preflightResult(true)` callbacks; post-handler cancellation reports `preflightResult(false)` and
+  rethrows.
+
+### Why
+
+- Extension commands are UI actions, not prompts. Serializing them behind compaction or the
+  session-work barrier delayed command output until an active continuation run ended, even though
+  the same commands were intended to execute immediately.
+
+### Accepted behavior deltas
+
+- Idle extension commands now skip `_maybeRestoreFallbackPrimary()`. `/fast` and `/fallback` may
+  observe a fallback model whose cooldown has expired; the primary is still restored by the next
+  real prompt.
+- In print mode, a slash command in a scripted `-m` message list executes immediately rather than
+  after pending continuations.
+- App-server handled-command turn lifecycle behavior is unchanged, but command handling can now
+  complete earlier relative to its pre-existing started/user-message events.
+
+### Why this cannot be expressed externally
+
+- The settled-work admission gate and prompt-start bookkeeping live inside `AgentSession.prompt()`;
+  an extension command handler cannot run until core dispatch reaches it.
+- Expected merge-conflict zone: `agent-session.ts` at the head of `prompt()` around user-abort,
+  extension-command dispatch, prompt-start ownership, and settled-work admission.
+
 ## Degrade fallback-unavailable 429s to in-turn retry (2026-08-06)
 
 ### What changed
