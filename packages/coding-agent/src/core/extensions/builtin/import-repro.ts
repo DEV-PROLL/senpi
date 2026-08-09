@@ -295,8 +295,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Import a CI issue-analysis session from a gist ID, share URL, or issue URL and switch to it",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			// Session replacement aborts and disposes the live session; never start
-			// that while a run or compaction is active (immediate-dispatch audit,
-			// .omo/plans/immediate-extension-commands.md todo 3).
+			// that while a run or compaction is active. Commands dispatch immediately
+			// now (see extensions/builtin/changes.md), so this handler can be entered
+			// mid-turn. isCompacting is checked separately because isIdle() is true
+			// during compaction without streaming.
 			if (!ctx.isIdle() || ctx.isCompacting?.() === true) {
 				ctx.ui.notify("/ir is unavailable while the agent is working", "warning");
 				return;
