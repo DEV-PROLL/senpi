@@ -8,6 +8,8 @@
 
 ### Changed
 
+- Detached eval cells now emit the shared `wake_source_state` event under source `senpi-codemode` when they detach, complete, stop, or are disposed. The optional host event passthrough remains guarded, synchronous cells emit no lifecycle transition, and per-cell snapshot metadata is preserved.
+
 ### Fixed
 
 ### Removed

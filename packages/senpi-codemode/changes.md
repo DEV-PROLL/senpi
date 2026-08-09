@@ -1,5 +1,26 @@
 # senpi-codemode fork changes
 
+## Detached eval cell wake-source contract (2026-08-09)
+
+### What changed
+
+- The duplicated cross-package event literal is now `wake_source_state`, with source `senpi-codemode` and optional per-cell `items` metadata.
+- Detached-cell detach, completion, stop, and session-dispose transitions publish the current active count through the optional host `events` passthrough; synchronous cells do not emit a lifecycle transition.
+- The focused wiring suite pins event-bus delivery, completion-to-zero, bus-less compatibility, and the exact duplicated literal.
+
+### Why
+
+Goal continuation now aggregates every producer under one wake-source contract, so codemode must use the same event and a stable package-owned source key rather than the retired resumption-channel name.
+
+### Why this cannot be expressed externally
+
+Detach and settlement ownership lives inside `EvalDetachedCellManager`, and only the extension entry has access to the host event bus.
+
+### Expected merge conflict zones
+
+- MEDIUM in `src/index.ts` and `src/tool/detached-cell-manager.ts` around lifecycle snapshot wiring.
+- LOW in the duplicated event contract and focused tests.
+
 ## Detached eval cell resumption-channel liveness (2026-08-08)
 
 ### What changed

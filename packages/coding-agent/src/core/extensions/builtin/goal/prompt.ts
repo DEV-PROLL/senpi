@@ -57,7 +57,7 @@ export function buildGoalStallNotice(
 	if (options.liveSources.length > 0) {
 		const sources = new Set(options.liveSources);
 		const advice: string[] = [];
-		if (sources.has("terminal-monitor") || sources.has("terminal-bash")) {
+		if (sources.has("terminal-monitors") || sources.has("terminal-background-sessions")) {
 			advice.push(
 				"- Inspect the terminal sessions' output now (bash_output), verify the watched condition can still occur, and stop obsolete or hung sessions (kill_bash).",
 			);
@@ -67,13 +67,14 @@ export function buildGoalStallNotice(
 				"- Inspect each child task now (task_output); if it needs correction or cancellation, send it a concrete instruction (task_send).",
 			);
 		}
-		if (sources.has("eval-detached")) {
+		if (sources.has("senpi-codemode")) {
 			advice.push(
 				"- Inspect detached eval cells now (eval peek); stop cells that are stalled, obsolete, or waiting on impossible conditions (eval stop).",
 			);
 		}
 		for (const source of sources) {
-			if (["terminal-monitor", "terminal-bash", "senpi-task", "eval-detached"].includes(source)) continue;
+			if (["terminal-monitors", "terminal-background-sessions", "senpi-task", "senpi-codemode"].includes(source))
+				continue;
 			advice.push(
 				`- Inspect the live ${source} channel now and stop or replace it if it can no longer make progress.`,
 			);
@@ -101,7 +102,7 @@ export function buildGoalStallNotice(
 }
 
 export function buildMonitorStallNotice(consecutiveContinuations: number): string {
-	return buildGoalStallNotice(consecutiveContinuations, { liveSources: ["terminal-monitor"] });
+	return buildGoalStallNotice(consecutiveContinuations, { liveSources: ["terminal-monitors"] });
 }
 
 function escapeXmlText(value: string): string {

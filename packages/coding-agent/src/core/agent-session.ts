@@ -2403,6 +2403,16 @@ export class AgentSession {
 		return this.sessionManager.getSessionId();
 	}
 
+	/** Subscribe to the internal event bus shared by this session's extensions. */
+	onExtensionEvent(channel: string, handler: (data: unknown) => void): () => void {
+		return this._resourceLoader.onExtensionEvent?.(channel, handler) ?? (() => {});
+	}
+
+	/** Publish on the internal event bus shared by this session's extensions. */
+	emitExtensionEvent(channel: string, data: unknown): void {
+		this._resourceLoader.emitExtensionEvent?.(channel, data);
+	}
+
 	/** Current session display name, if set */
 	get sessionName(): string | undefined {
 		return this.sessionManager.getSessionName();

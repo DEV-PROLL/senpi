@@ -273,7 +273,7 @@ describe("goal stall notice", () => {
 
 	it("matches investigation advice to every live channel kind", () => {
 		const notice = buildGoalStallNotice(4, {
-			liveSources: ["terminal-monitor", "senpi-task", "eval-detached", "terminal-bash"],
+			liveSources: ["terminal-monitors", "senpi-task", "senpi-codemode", "terminal-background-sessions"],
 		});
 		expect(notice).toContain("<goal_stall_check>");
 		expect(notice).toContain("bash_output");
@@ -289,7 +289,7 @@ describe("goal stall notice", () => {
 	it("keeps buildMonitorStallNotice as a legacy wrapper over the generalized notice", () => {
 		const legacy = buildMonitorStallNotice(5);
 		expect(legacy).toContain("<goal_stall_check>");
-		expect(legacy).toBe(buildGoalStallNotice(5, { liveSources: ["terminal-monitor"] }));
+		expect(legacy).toBe(buildGoalStallNotice(5, { liveSources: ["terminal-monitors"] }));
 	});
 });
 

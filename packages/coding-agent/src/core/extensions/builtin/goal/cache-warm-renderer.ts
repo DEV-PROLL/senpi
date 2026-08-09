@@ -21,14 +21,15 @@ export const renderGoalCacheWarmupEntry: EntryRenderer<GoalCacheWarmupEntryData>
 });
 
 function titleLine(data: GoalCacheWarmupEntryData): string {
-	const monitors = data.activeMonitorCount === 1 ? "1 monitor on duty" : `${data.activeMonitorCount} monitors on duty`;
+	const wakeSources =
+		data.activeMonitorCount === 1 ? "1 wake source on duty" : `${data.activeMonitorCount} wake sources on duty`;
 	const iteration = validIteration(data.iteration);
 	const iterationText = iteration === undefined ? "" : ` · iteration ${iteration}`;
 	switch (data.phase) {
 		case "scheduled":
-			return `⚡ Cache-warm wait${iterationText} · ${monitors}`;
+			return `⚡ Cache-warm wait${iterationText} · ${wakeSources}`;
 		case "resumed":
-			return `⚡ Cache-warm wake${iterationText} · waited ${formatWakeDuration(data.waitedMs ?? data.delayMs)} · ${monitors}`;
+			return `⚡ Cache-warm wake${iterationText} · waited ${formatWakeDuration(data.waitedMs ?? data.delayMs)} · ${wakeSources}`;
 	}
 }
 
