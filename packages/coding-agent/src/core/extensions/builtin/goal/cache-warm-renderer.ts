@@ -22,12 +22,18 @@ export const renderGoalCacheWarmupEntry: EntryRenderer<GoalCacheWarmupEntryData>
 
 function titleLine(data: GoalCacheWarmupEntryData): string {
 	const monitors = data.activeMonitorCount === 1 ? "1 monitor on duty" : `${data.activeMonitorCount} monitors on duty`;
+	const iteration = validIteration(data.iteration);
+	const iterationText = iteration === undefined ? "" : ` · iteration ${iteration}`;
 	switch (data.phase) {
 		case "scheduled":
-			return `⚡ Cache-warm wait · ${monitors}`;
+			return `⚡ Cache-warm wait${iterationText} · ${monitors}`;
 		case "resumed":
-			return `⚡ Cache-warm wake · waited ${formatWakeDuration(data.waitedMs ?? data.delayMs)} · ${monitors}`;
+			return `⚡ Cache-warm wake${iterationText} · waited ${formatWakeDuration(data.waitedMs ?? data.delayMs)} · ${monitors}`;
 	}
+}
+
+function validIteration(value: number | undefined): number | undefined {
+	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function whyLine(data: GoalCacheWarmupEntryData): string {

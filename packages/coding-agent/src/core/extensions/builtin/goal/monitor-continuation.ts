@@ -8,9 +8,12 @@ import {
 	GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS,
 	type GoalCacheWarmMetrics,
 	type GoalCacheWarmupEntryData,
+	type LiveGoalCacheWarmupEntryData,
 	resolveGoalMonitorContinuationDelayMs,
 } from "./cache-warm.ts";
+
 export { GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS } from "./cache-warm.ts";
+
 import {
 	continuationTurnUsedTools,
 	evaluateGoalContinuation,
@@ -69,9 +72,9 @@ export class MonitorAwareGoalContinuation {
 	#scheduledDueAtMs: number | undefined;
 	#scheduledCache: GoalCacheWarmMetrics | undefined;
 	#scheduledDelayMs: number | undefined;
-	#heldTimer:
-		| { kind: DelayedContinuationKind; remainingMs: number; heldAtMs: number; totalMs: number }
-		| undefined;
+	#cacheWarmIteration = 0;
+	#scheduledCacheWarmIteration: number | undefined;
+	#heldTimer: { kind: DelayedContinuationKind; remainingMs: number; heldAtMs: number; totalMs: number } | undefined;
 	#directInputHolds = new Set<string>();
 	#pendingSystemRecovery: SystemAbortOptions | undefined;
 
@@ -100,7 +103,7 @@ export class MonitorAwareGoalContinuation {
 	}
 
 	async afterAgentEnd(options: AgentEndOptions): Promise<Goal | null> {
-		if (options.goal?.id !== this.#goal?.id) this.#resetToollessContinuationStreak();
+		if (options.goal?.id !== this.#goal?.id) this.#resetContinuationState();
 		this.#ctx = options.ctx;
 		this.#goal = options.goal;
 		this.#lastAgentEndMessages = options.messages;
@@ -110,6 +113,7 @@ export class MonitorAwareGoalContinuation {
 		this.#recordAssistantOutput(options.messages, turnUsedTools);
 		if (options.goal?.status !== "active") {
 			this.#cancelTimer();
+			this.#resetContinuationState();
 			return options.goal;
 		}
 		this.#recordToollessContinuationTurn(options.goal, turnUsedTools);
@@ -157,12 +161,17 @@ export class MonitorAwareGoalContinuation {
 
 	async afterSystemAbort(options: SystemAbortOptions): Promise<Goal | null> {
 		this.noteContinuationStarted();
+		if (options.goal?.id !== this.#goal?.id) this.#resetContinuationState();
 		this.#pendingSystemRecovery = undefined;
 		this.#ctx = options.ctx;
 		this.#goal = options.goal;
 		this.#lastAgentEndMessages = options.messages;
 		this.#lastTurnUsage = collectAssistantUsage([...options.messages]);
-		if (options.willRetry || options.goal?.status !== "active") return options.goal;
+		if (options.goal?.status !== "active") {
+			this.#resetContinuationState();
+			return options.goal;
+		}
+		if (options.willRetry) return options.goal;
 		if (this.#activeChannelCount() > 0) this.#schedule(options.goal, "monitor");
 		else if (lastAssistantMessage(options.messages)?.stopReason === "error") {
 			this.#pendingSystemRecovery = options;
@@ -260,6 +269,9 @@ export class MonitorAwareGoalContinuation {
 				: GOAL_USER_GRACE_DELAY_MS;
 		this.#scheduledDelayMs = delayMs;
 		if (kind === "monitor") {
+			this.#cacheWarmIteration += 1;
+			this.#scheduledCacheWarmIteration = this.#cacheWarmIteration;
+			const iteration = this.#scheduledCacheWarmIteration;
 			const cache = estimateCacheWarmMetrics(this.#ctx?.model, process.env, this.#lastTurnUsage);
 			const channelCounts = this.#channelCountSnapshot();
 			this.#scheduledCache = cache;
@@ -267,6 +279,7 @@ export class MonitorAwareGoalContinuation {
 			this.#pi.events?.emit(GOAL_CONTINUATION_SCHEDULED_EVENT, {
 				goalId: goal.id,
 				delayMs,
+				iteration,
 				activeMonitorCount: this.#activeTerminalMonitorCount(),
 				channelCounts,
 				cache,
@@ -275,6 +288,7 @@ export class MonitorAwareGoalContinuation {
 				phase: "scheduled",
 				goalId: goal.id,
 				delayMs,
+				iteration,
 				activeMonitorCount: this.#activeTerminalMonitorCount(),
 				channelCounts,
 				...(cache !== undefined ? { cache } : {}),
@@ -282,6 +296,7 @@ export class MonitorAwareGoalContinuation {
 		} else {
 			this.#scheduledAtMs = undefined;
 			this.#scheduledCache = undefined;
+			this.#scheduledCacheWarmIteration = undefined;
 		}
 		this.#scheduledContinuationKind = kind;
 		if (this.#directInputHolds.size > 0) {
@@ -317,13 +332,16 @@ export class MonitorAwareGoalContinuation {
 		this.#scheduledDueAtMs = undefined;
 		this.#scheduledContinuationKind = undefined;
 		this.#waitTicker?.stop();
-		const delayMs = this.#scheduledDelayMs ??
+		const delayMs =
+			this.#scheduledDelayMs ??
 			(kind === "monitor" ? GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS : GOAL_USER_GRACE_DELAY_MS);
 		const waitedMs = this.#scheduledAtMs === undefined ? delayMs : Math.max(0, Date.now() - this.#scheduledAtMs);
 		const cache = this.#scheduledCache;
+		const iteration = this.#scheduledCacheWarmIteration;
 		this.#scheduledAtMs = undefined;
 		this.#scheduledCache = undefined;
 		this.#scheduledDelayMs = undefined;
+		this.#scheduledCacheWarmIteration = undefined;
 		const ctx = this.#ctx;
 		const goal = this.#goal;
 		if (ctx === undefined || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
@@ -334,12 +352,13 @@ export class MonitorAwareGoalContinuation {
 			kind === "monitor" ? "monitorDelayed" : "userGrace",
 			this.#lastAgentEndMessages,
 		);
-		if (kind !== "monitor" || !admission.admitted) return;
+		if (kind !== "monitor" || !admission.admitted || iteration === undefined) return;
 		const channelCounts = this.#channelCountSnapshot();
 		this.#pi.events?.emit(GOAL_CONTINUATION_RESUMED_EVENT, {
 			goalId: goal.id,
 			delayMs,
 			waitedMs,
+			iteration,
 			activeMonitorCount: this.#activeTerminalMonitorCount(),
 			channelCounts,
 			cache,
@@ -349,10 +368,12 @@ export class MonitorAwareGoalContinuation {
 			goalId: goal.id,
 			delayMs,
 			waitedMs,
+			iteration,
 			activeMonitorCount: this.#activeTerminalMonitorCount(),
 			channelCounts,
 			...(cache !== undefined ? { cache } : {}),
 		});
+		if (admission.goal.status !== "active") this.#resetCacheWarmIteration();
 	}
 
 	async #admitAndQueue(
@@ -379,7 +400,7 @@ export class MonitorAwareGoalContinuation {
 		return { goal: admittedGoal, admitted: verdict.kind === "continue" };
 	}
 
-	#appendWarmupEntry(data: GoalCacheWarmupEntryData): void {
+	#appendWarmupEntry(data: LiveGoalCacheWarmupEntryData): void {
 		this.#pi.appendEntry?.<GoalCacheWarmupEntryData>(GOAL_CACHE_WARMUP_ENTRY_TYPE, data);
 	}
 
@@ -478,6 +499,7 @@ export class MonitorAwareGoalContinuation {
 		if (previousTotal > 0 && nextTotal === 0) {
 			if (this.#scheduledContinuationKind === "monitor") this.#cancelTimer();
 			this.#resetToollessContinuationStreak();
+			this.#resetCacheWarmIteration();
 			return;
 		}
 		if (this.#scheduledContinuationKind === "monitor") {
@@ -513,6 +535,12 @@ export class MonitorAwareGoalContinuation {
 		this.#consecutiveLengthRecoveries.clear();
 		this.#recentNormalizedOutputHashes = [];
 		this.#resetToollessContinuationStreak();
+		this.#resetCacheWarmIteration();
+	}
+
+	#resetCacheWarmIteration(): void {
+		this.#cacheWarmIteration = 0;
+		this.#scheduledCacheWarmIteration = undefined;
 	}
 
 	#resetToollessContinuationStreak(): void {
@@ -525,6 +553,7 @@ export class MonitorAwareGoalContinuation {
 		this.#scheduledDueAtMs = undefined;
 		this.#scheduledCache = undefined;
 		this.#scheduledDelayMs = undefined;
+		this.#scheduledCacheWarmIteration = undefined;
 		this.#heldTimer = undefined;
 		if (this.#timer !== undefined) clearTimeout(this.#timer);
 		this.#timer = undefined;

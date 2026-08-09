@@ -21,13 +21,12 @@ export function resolveGoalMonitorContinuationDelayMs(
 		return GOAL_MONITOR_CONTINUATION_FALLBACK_DELAY_MS;
 	}
 	const configuredCeilingMs =
-		typeof goalBackstopMaxSeconds === "number" && Number.isFinite(goalBackstopMaxSeconds) && goalBackstopMaxSeconds > 0
+		typeof goalBackstopMaxSeconds === "number" &&
+		Number.isFinite(goalBackstopMaxSeconds) &&
+		goalBackstopMaxSeconds > 0
 			? Math.min(goalBackstopMaxSeconds * 1000, GOAL_MONITOR_CONTINUATION_HARD_CEILING_MS)
 			: GOAL_MONITOR_CONTINUATION_HARD_CEILING_MS;
-	return Math.max(
-		GOAL_MONITOR_CONTINUATION_MIN_DELAY_MS,
-		Math.min(cacheSafeWaitSeconds * 1000, configuredCeilingMs),
-	);
+	return Math.max(GOAL_MONITOR_CONTINUATION_MIN_DELAY_MS, Math.min(cacheSafeWaitSeconds * 1000, configuredCeilingMs));
 }
 
 /** Cache context captured when a monitor-wait continuation is scheduled. */
@@ -50,6 +49,8 @@ export type GoalCacheWarmupPhase = "scheduled" | "resumed";
 export interface GoalCacheWarmupEntryData {
 	readonly phase: GoalCacheWarmupPhase;
 	readonly goalId: string;
+	/** Display ordinal within the current in-memory Goal/wake epoch; absent on legacy persisted entries. */
+	readonly iteration?: number;
 	/** Planned continuation delay in milliseconds. */
 	readonly delayMs: number;
 	/** Actual wait in milliseconds; present on the `resumed` phase only. */
@@ -59,6 +60,9 @@ export interface GoalCacheWarmupEntryData {
 	readonly channelCounts?: Readonly<Record<string, number>>;
 	readonly cache?: GoalCacheWarmMetrics;
 }
+
+/** Live entries always carry an iteration; the ordinal is intentionally not persisted into Goal state. */
+export type LiveGoalCacheWarmupEntryData = GoalCacheWarmupEntryData & { readonly iteration: number };
 
 const TOKENS_PER_PRICE_UNIT = 1_000_000;
 
