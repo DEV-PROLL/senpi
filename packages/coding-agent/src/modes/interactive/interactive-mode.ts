@@ -3588,7 +3588,15 @@ export class InteractiveMode {
 				}
 			}
 
-			// Queue input during compaction (extension commands execute immediately)
+			// Queue non-command input during compaction.
+			// Extension commands short-circuit at the isExtensionCommand branch above and
+			// dispatch immediately inside AgentSession.prompt(), so the only text that
+			// reaches this compaction branch is non-command user input, which is queued
+			// for delivery after compaction settles.
+			//
+			// Note: the isExtensionCommand re-check below is already unreachable today
+			// (the branch above returns first) and stays harmless after the
+			// immediate-dispatch hoist in prompt().
 			if (this.session.isCompacting) {
 				if (this.isExtensionCommand(text)) {
 					this.editor.addToHistory?.(text);
@@ -3600,8 +3608,11 @@ export class InteractiveMode {
 				return;
 			}
 
-			// If streaming, use prompt() with steer behavior
-			// This handles extension commands (execute immediately), prompt template expansion, and queueing
+			// If streaming, use prompt() with steer behavior.
+			// Extension commands are dispatched immediately by AgentSession.prompt()
+			// (short-circuited at the isExtensionCommand branch above); the steer
+			// behavior here applies only to ordinary text, prompt template expansion,
+			// and queueing.
 			if (this.session.isStreaming) {
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
@@ -4771,7 +4782,12 @@ export class InteractiveMode {
 		const text = this.getExpandedEditorText().trim();
 		if (!text) return;
 
-		// Queue input during compaction (extension commands execute immediately)
+		// Queue non-command input during compaction; dispatch extension commands.
+		// This is the Alt+Enter path (bound directly to app.message.followUp), which
+		// does NOT pass through onSubmit, so the isExtensionCommand check below is the
+		// live dispatch point here: commands go straight to AgentSession.prompt(),
+		// which runs them immediately even while compaction is active, while ordinary
+		// text is queued for delivery after compaction settles.
 		if (this.session.isCompacting) {
 			if (this.isExtensionCommand(text)) {
 				this.editor.addToHistory?.(text);
@@ -4783,8 +4799,11 @@ export class InteractiveMode {
 			return;
 		}
 
-		// Alt+Enter queues a follow-up message (waits until agent finishes)
-		// This handles extension commands (execute immediately), prompt template expansion, and queueing
+		// Alt+Enter queues a follow-up message (waits until agent finishes).
+		// Extension commands never reach this branch: the compaction branch above
+		// dispatches them while compacting, and otherwise prompt() runs them
+		// immediately. The followUp behavior here applies only to ordinary text,
+		// prompt template expansion, and queueing.
 		if (this.session.isStreaming) {
 			this.editor.addToHistory?.(text);
 			this.editor.setText("");
