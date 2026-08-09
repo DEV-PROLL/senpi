@@ -19,6 +19,16 @@ interface CapturedCompletionsPayload {
 const mockState = vi.hoisted(() => ({
 	lastParams: undefined as CapturedCompletionsPayload | undefined,
 	lastClientOptions: undefined as FakeOpenAIClientOptions | undefined,
+	usage: undefined as
+		| {
+				prompt_tokens: number;
+				completion_tokens: number;
+				total_tokens?: number;
+				cached_tokens?: number;
+				prompt_tokens_details?: { cached_tokens?: number };
+				completion_tokens_details?: { reasoning_tokens?: number };
+		  }
+		| undefined,
 }));
 
 vi.mock("openai", () => {
@@ -31,7 +41,7 @@ vi.mock("openai", () => {
 						async *[Symbol.asyncIterator]() {
 							yield {
 								choices: [{ delta: {}, finish_reason: "stop" }],
-								usage: {
+								usage: mockState.usage ?? {
 									prompt_tokens: 1,
 									completion_tokens: 1,
 									prompt_tokens_details: { cached_tokens: 0 },
@@ -69,6 +79,7 @@ describe("openai-completions prompt caching", () => {
 	beforeEach(() => {
 		mockState.lastParams = undefined;
 		mockState.lastClientOptions = undefined;
+		mockState.usage = undefined;
 		delete process.env.PI_CACHE_RETENTION;
 	});
 
@@ -97,7 +108,7 @@ describe("openai-completions prompt caching", () => {
 		},
 		model: Model<"openai-completions"> = createModel(),
 	) {
-		await streamOpenAICompletions(
+		const message = await streamOpenAICompletions(
 			model,
 			{
 				systemPrompt: "sys",
@@ -109,8 +120,23 @@ describe("openai-completions prompt caching", () => {
 		return {
 			payload: mockState.lastParams,
 			headers: mockState.lastClientOptions?.defaultHeaders ?? {},
+			message,
 		};
 	}
+
+	it("parses flat cached_tokens from Kimi usage as cache-read tokens", async () => {
+		mockState.usage = {
+			prompt_tokens: 1000,
+			completion_tokens: 10,
+			total_tokens: 1010,
+			cached_tokens: 400,
+		};
+
+		const { message } = await captureRequest();
+
+		expect(message.usage.cacheRead).toBe(400);
+		expect(message.usage.input).toBe(600);
+	});
 
 	it("sets prompt_cache_key for direct OpenAI requests when caching is enabled", async () => {
 		const { payload } = await captureRequest({ sessionId: "session-123" });
