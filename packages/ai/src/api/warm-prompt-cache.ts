@@ -1,8 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { Context, Model, ProviderHeaders, StreamOptions } from "../types.ts";
 import { providerHeadersToRecord } from "../utils/headers.ts";
-import { getAnthropicCompat, isAnthropicApiBaseUrl } from "../utils/prompt-cache-ttl.ts";
-import { type AnthropicOptions, buildAnthropicWarmPromptCacheParams } from "./anthropic-messages.ts";
+import { isAnthropicApiBaseUrl } from "../utils/prompt-cache-ttl.ts";
+import type { AnthropicOptions } from "./anthropic-messages.ts";
 
 export interface WarmPromptCacheUsage {
 	readonly input: number;
@@ -30,7 +29,12 @@ export async function warmPromptCache(
 	}
 
 	const anthropicModel = model as Model<"anthropic-messages">;
-	getAnthropicCompat(anthropicModel);
+	// Loaded lazily: a static import would pull the Anthropic SDK into the root
+	// barrel and break the lazy provider-loading contract (lazy-module-load.test.ts).
+	const [{ default: Anthropic }, { buildAnthropicWarmPromptCacheParams }] = await Promise.all([
+		import("@anthropic-ai/sdk"),
+		import("./anthropic-messages.ts"),
+	]);
 	const headers = providerHeadersToRecord(options.headers);
 	const client = new Anthropic({
 		apiKey: options.apiKey ?? null,
