@@ -24,6 +24,10 @@
   and Worker teardown ([#768](https://github.com/code-yeongyu/senpi/pull/768)).
 - Fixed threshold-triggered compaction giving up with "Compaction did not apply" when an idle-warmed summary became stale after a message-revision change. The blocking route now discards the stale warm result and regenerates a fresh summary against the current session instead of allowing context to keep growing.
 
+- Recovered malformed Claude tool-call text that starts with an angle-less
+  `antml:invoke` and ends with a stray `</function_results>`, so Senpi executes
+  the validated call once without printing internal protocol markup.
+
 ### Removed
 
 ## [2026.8.9] - 2026-08-09

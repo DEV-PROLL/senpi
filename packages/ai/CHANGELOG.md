@@ -21,6 +21,10 @@
   Bedrock Claude models now consistently use the five-minute wire and resolver TTL.
 - Reported the Claude SDK OAuth lane's SDK-managed prompt-cache TTL as five minutes.
 
+- Recovered Claude tool calls that omit the opening `<` before a lowercase
+  `antml:invoke` and append a stray `</function_results>` trailer, dispatching
+  the validated tool call instead of exposing internal protocol markup.
+
 ### Removed
 
 ## [2026.8.9] - 2026-08-09
