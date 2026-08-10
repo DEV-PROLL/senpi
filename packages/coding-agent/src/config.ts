@@ -540,10 +540,23 @@ export function getShareViewerUrl(gistId: string): string {
 // User Config Paths (~/.senpi/agent/*)
 // =============================================================================
 
-/** Resolve the agent config directory from an explicit environment. */
+/** Marker file that identifies a flat-layout config directory. */
+export const FLAT_LAYOUT_SENTINEL = "settings.json";
+
+/**
+ * Resolve the agent config directory from an explicit environment.
+ *
+ * A flat-layout brand keeps its state directly under the config directory, so it looks for
+ * the settings file as proof rather than for an `agent` subdirectory - the config directory
+ * name may also be used by unrelated project tooling.
+ */
 export function resolveAgentDir(cwd: string, homeDir: string, envDir?: string): string {
 	if (envDir) {
 		return normalizePath(envDir, { homeDir });
+	}
+	if (CONFIG_FLAT_LAYOUT) {
+		const flatProjectDir = findNearestParentConfigDir(cwd, homeDir, CONFIG_DIR_NAME, undefined, FLAT_LAYOUT_SENTINEL);
+		return flatProjectDir ?? join(homeDir, CONFIG_DIR_NAME);
 	}
 	const projectConfigDir = findNearestParentConfigDir(cwd, homeDir, CONFIG_DIR_NAME, "agent");
 	return projectConfigDir ? join(projectConfigDir, "agent") : join(homeDir, CONFIG_DIR_NAME, "agent");
