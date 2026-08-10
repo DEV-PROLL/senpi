@@ -6,6 +6,8 @@ import { theme } from "../theme/theme.ts";
 import { type FooterSegment, planFooterLayout } from "./footer-layout.ts";
 
 const FAST_MODE_INDICATOR = "\u26a1 ";
+/** Bottom-left marker identifying a session running the omo native distribution. */
+const OMO_NATIVE_BADGE = "(😺 OmO Native)";
 
 /**
  * Sanitize text for display in a single-line status.
@@ -145,7 +147,7 @@ export class FooterComponent implements Component {
 		const sessionName = this.session.sessionManager.getSessionName();
 
 		const omoNativeBadge: FooterSegment | undefined = this.footerData.isOmoNative()
-			? { plain: "(🏴‍☠️ OmO Native)", colored: theme.fg("success", "(🏴‍☠️ OmO Native)") }
+			? { plain: OMO_NATIVE_BADGE, colored: theme.fg("success", OMO_NATIVE_BADGE) }
 			: undefined;
 
 		const anchor: [FooterSegment, ...FooterSegment[]] = [{ plain: pwdRaw, colored: theme.fg("accent", pwdRaw) }];
