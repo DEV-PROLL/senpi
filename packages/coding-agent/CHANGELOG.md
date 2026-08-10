@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- Route Anthropic provider-native refusal fallbacks through the configured Senpi chain after an active-turn model
+  change, instead of persisting the server-selected substitute because the run retained the previous model's policy
+  ([#796](https://github.com/code-yeongyu/senpi/pull/796)).
+
 ### Removed
 
 ## [2026.8.11-2] - 2026-08-10
