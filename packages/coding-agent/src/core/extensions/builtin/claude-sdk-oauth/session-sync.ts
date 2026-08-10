@@ -42,9 +42,23 @@ export function sessionSyncDigest(value: unknown): string {
 	return digest(value);
 }
 
+/**
+ * A user message with no content blocks carries nothing to transmit and is
+ * transient: it is present for a single provider call and gone by the next.
+ * Hashing one shifts every later index, so the following turn reports
+ * `sent_stream_diverged` and re-sends the whole history even though the
+ * conversation never changed. Tool results are never filtered - an empty tool
+ * result is a real observation, and its id and name stay hash-significant.
+ */
+function isContentlessUserMessage(message: SentMessage): boolean {
+	if (message.role !== "user") return false;
+	return message.content.length === 0;
+}
+
 export function sentMessages(context: Context): SentMessage[] {
 	const messages = context.messages.filter(
-		(message): message is SentMessage => message.role === "user" || message.role === "toolResult",
+		(message): message is SentMessage =>
+			(message.role === "user" || message.role === "toolResult") && !isContentlessUserMessage(message),
 	);
 	return messages;
 }

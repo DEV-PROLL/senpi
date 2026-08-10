@@ -149,6 +149,24 @@ The stored-OAuth branch in `ModelsImpl.checkProviderAuth` is a structural short-
 
 LOW in `oauth-login.ts` (added `check` to the returned shape + optional `readSettings` dep); LOW in `index.ts` (one added `readSettings` line); LOW in `provider-composer.ts` (`ExtensionOAuthConfig.check` + `adaptOAuth` forwarding, both additive).
 
+||||||| parent of 5baf13f11 (fix(claude-sdk-oauth): ignore content-less user messages in continuity hashes)
+
+## 2026-08-10 - Ignore content-less user messages in sent-stream continuity
+
+- `sentMessages()` now drops user messages whose `content` array is empty. Such a message carries nothing to transmit
+  and is transient: it is present for a single provider call and gone by the next. Hashing one shifted every later
+  index, so the following turn reported `sent_stream_diverged` and re-sent the entire history even though the
+  conversation had not changed.
+- Observed live on `2026.8.9-2`: consecutive prefix snapshots of one session held 203 messages both times, with the
+  only difference an empty user message at index 201 that vanished on the next call, forcing a 203-message flatten.
+- Tool results are never filtered. An empty tool result is a real observation, and its `toolCallId` and `toolName`
+  stay hash-significant, so genuine rewrites of already-sent history still resolve to `sent_stream_diverged`.
+- This cannot be implemented by an external extension: the transmitted set is computed inside the builtin provider
+  before session-registry continuity is decided, and no extension hook can replace it.
+- Added `test/suite/regressions/790-claude-sdk-oauth-empty-user-continuity.test.ts` covering the transient empty
+  message, a plain append, a genuine rewrite, and the filter itself.
+- Expected merge conflict zones: LOW in `session-sync.ts` (`sentMessages`); LOW in the new regression test.
+
 ## 2026-08-07 - Ignore volatile thinking timing in continuity hashes
 
 - Removed `startedAt` and `endedAt` from thinking blocks before hashing the provider-final and committed assistant
