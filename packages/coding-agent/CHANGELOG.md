@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A launch from a deleted working directory (for example a removed worktree) no longer crashes during
+  startup with `uv_cwd`; the CLI recovers into the home directory before any dependency evaluates
+  `process.cwd()`.
+
 ### New Features
 
 ### Breaking Changes
