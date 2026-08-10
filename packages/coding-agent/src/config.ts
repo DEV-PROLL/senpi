@@ -567,6 +567,14 @@ export function getAgentDir(): string {
 	return resolveAgentDir(process.cwd(), homedir(), envValue("CODING_AGENT_DIR"));
 }
 
+/**
+ * Short, display-only spelling of the agent directory for help text and tips, e.g.
+ * `~/.omo` for a flat brand or `~/.senpi/agent` for the engine layout.
+ */
+export function agentDirLabel(): string {
+	return CONFIG_FLAT_LAYOUT ? `~/${CONFIG_DIR_NAME}` : `~/${CONFIG_DIR_NAME}/agent`;
+}
+
 /** Get path to user's custom themes directory */
 export function getCustomThemesDir(): string {
 	return join(getAgentDir(), "themes");
