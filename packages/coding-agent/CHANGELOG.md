@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Distributions repackaging senpi can set their own product identity through a `SENPI_BRAND` profile: name, display version, config directory (optionally flat), environment prefix, wire identity and update channel. The profile is consumed and scrubbed at startup, so nested senpi processes keep the engine identity. A standalone install is unchanged.
+- Product settings are read across the brand prefix and the legacy `SENPI_`/`PI_` prefixes, so existing environments keep working after a rebrand.
+- A branded install checks its own release channel for updates, and the update notice, changelog link and self-update paths point at the distribution's own command instead of `senpi update`.
+
 ### New Features
 
 ### Breaking Changes
