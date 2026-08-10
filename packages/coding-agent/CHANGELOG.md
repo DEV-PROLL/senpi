@@ -22,6 +22,9 @@
 
 ### Fixed
 
+- Windows pipe-fallback shutdown no longer crashes with an uncaught `spawn taskkill ENOENT` when the helper cannot
+  resolve. Senpi now invokes `taskkill.exe` explicitly and falls back to direct child termination if helper startup
+  fails.
 - A brand profile carrying an unsafe `configDir` (a path separator, `.` or `..`) is rejected instead of redirecting
   agent state and its migration outside the intended directory
   ([#787](https://github.com/code-yeongyu/senpi/pull/787)).
