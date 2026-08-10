@@ -6,7 +6,6 @@ import { theme } from "../theme/theme.ts";
 import { type FooterSegment, planFooterLayout } from "./footer-layout.ts";
 
 const FAST_MODE_INDICATOR = "\u26a1 ";
-/** Bottom-left marker identifying a session running the omo native distribution. */
 
 /**
  * Sanitize text for display in a single-line status.
