@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { APP_NAME } from "./config.ts";
+import { setWireIdentity } from "@earendil-works/pi-ai";
+import { APP_NAME, BRAND } from "./config.ts";
 import { configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import { installEarlyInspectorVmImportRecovery } from "./inspector-policy.ts";
 import { main } from "./main.ts";
@@ -9,6 +10,8 @@ import { main } from "./main.ts";
 installEarlyInspectorVmImportRecovery();
 
 process.title = APP_NAME;
+// Outgoing requests must carry the running product's identity, not the engine's.
+setWireIdentity(BRAND?.userAgent ?? APP_NAME);
 process.env.PI_CODING_AGENT = "true";
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 

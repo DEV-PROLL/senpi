@@ -1,10 +1,11 @@
 import { chmodSync, closeSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { APP_NAME } from "../config.ts";
 import { envValue } from "./brand.ts";
 
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 const MAX_STRING_LENGTH = 200;
-const DEBUG_PREFIX = "[senpi-session]";
+const DEBUG_PREFIX = `[${APP_NAME}-session]`;
 const BLOCKED_KEY =
 	/^(?:__proto__|constructor|prototype|headers?|env(?:ironment)?|authorization|credential(?:s)?|password|secret|token|api_?key|client_?secret)$/i;
 const ALLOWED_DATA_KEY =
