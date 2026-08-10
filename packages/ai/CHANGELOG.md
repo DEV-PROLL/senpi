@@ -6,6 +6,10 @@
 
 ### Added
 
+- Added `getWireIdentity()` and `setWireIdentity()` for configuring the product token used on outgoing requests, so
+  distributions repackaging the engine can supply their own wire identity
+  ([#783](https://github.com/code-yeongyu/senpi/pull/783)).
+
 ### Changed
 
 ### Fixed
