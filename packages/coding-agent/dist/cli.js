@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./valid-cwd.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
