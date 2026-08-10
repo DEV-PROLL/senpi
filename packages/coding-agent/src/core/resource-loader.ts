@@ -64,6 +64,8 @@ export interface ResourceLoaderReloadOptions {
 
 export interface ResourceLoader {
 	getExtensions(): LoadExtensionsResult;
+	emitExtensionEvent?(channel: string, data: unknown): void;
+	onExtensionEvent?(channel: string, handler: (data: unknown) => void): () => void;
 	getSkills(): { skills: Skill[]; diagnostics: ResourceDiagnostic[] };
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
@@ -457,6 +459,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	getExtensions(): LoadExtensionsResult {
 		return this.extensionsResult;
+	}
+
+	emitExtensionEvent(channel: string, data: unknown): void {
+		this.eventBus.emit(channel, data);
+	}
+
+	onExtensionEvent(channel: string, handler: (data: unknown) => void): () => void {
+		return this.eventBus.on(channel, handler);
 	}
 
 	getSkills(): { skills: Skill[]; diagnostics: ResourceDiagnostic[] } {

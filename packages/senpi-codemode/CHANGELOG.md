@@ -12,6 +12,51 @@
 
 ### Removed
 
+## [2026.8.10] - 2026-08-10
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.9-2] - 2026-08-09
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Detached eval cells now emit the shared `wake_source_state` event under source `senpi-codemode` when they detach, complete, stop, or are disposed. The optional host event passthrough remains guarded, synchronous cells emit no lifecycle transition, and per-cell snapshot metadata is preserved.
+
+### Fixed
+
+### Removed
+
+## [2026.8.9] - 2026-08-09
+
+### Breaking Changes
+
+### Added
+
+- Detached eval cells now publish their liveness as a `resumption_channel_state` event (source `eval-detached`) on the
+  host event bus: a full per-source snapshot with `activeCount` and per-cell `id`/`description`/`startedAtMs` entries is
+  emitted whenever a cell detaches, settles, is stopped, or is disposed, and once on `session_start`. The goal builtin
+  consumes this to hold its hidden continuation while detached cells are still computing instead of nagging immediately
+  at turn end. Hosts without an event bus are unaffected (emission is a no-op), and the footer/status rendering is
+  unchanged.
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [2026.8.7] - 2026-08-07
 
 ### Breaking Changes

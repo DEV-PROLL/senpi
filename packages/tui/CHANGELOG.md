@@ -12,6 +12,42 @@
 
 ### Removed
 
+## [2026.8.10] - 2026-08-10
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.9-2] - 2026-08-09
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.9] - 2026-08-09
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [2026.8.7] - 2026-08-07
 
 ### Breaking Changes

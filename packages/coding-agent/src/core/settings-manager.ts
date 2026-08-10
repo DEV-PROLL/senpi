@@ -65,9 +65,18 @@ export interface TerminalSettings {
 	monitorWakeBudget?: number; // default: 5 (consecutive monitor-only wake limit)
 }
 
+export interface PromptCacheKeepAliveSettings {
+	enabled?: boolean; // default: false
+	maxRequestsPerSession?: number; // default: 3
+	maxCostUsdPerSession?: number; // default: 0.05
+	marginSeconds?: number; // default: 60
+}
+
 export interface PromptCacheSettings {
 	cacheAwareTimeouts?: boolean; // default: true (size foreground tool waits by the model's prompt-cache TTL)
 	safetyBufferSeconds?: number; // default: 30 (headroom subtracted from the cache TTL)
+	goalBackstopMaxSeconds?: number; // default: 3570 (maximum Goal monitor continuation backstop)
+	keepAlive?: PromptCacheKeepAliveSettings;
 }
 
 export interface ImageSettings {
@@ -597,6 +606,24 @@ export class SettingsManager {
 
 	getProjectSettings(): Settings {
 		return structuredClone(this.projectSettings);
+	}
+
+	getPromptCacheGoalBackstopMaxSeconds(): number {
+		return (
+			this.projectSettings.promptCache?.goalBackstopMaxSeconds ??
+			this.globalSettings.promptCache?.goalBackstopMaxSeconds ??
+			3570
+		);
+	}
+
+	getPromptCacheKeepAliveSettings(): Required<PromptCacheKeepAliveSettings> {
+		const configured = this.settings.promptCache?.keepAlive;
+		return {
+			enabled: configured?.enabled ?? false,
+			maxRequestsPerSession: configured?.maxRequestsPerSession ?? 3,
+			maxCostUsdPerSession: configured?.maxCostUsdPerSession ?? 0.05,
+			marginSeconds: configured?.marginSeconds ?? 60,
+		};
 	}
 
 	isProjectTrusted(): boolean {

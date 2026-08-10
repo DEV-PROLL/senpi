@@ -16,6 +16,142 @@
   timing annotations changed, preserving resident-session and prompt-cache continuity for reasoning-heavy turns
   ([#751](https://github.com/code-yeongyu/senpi/pull/751)).
 
+### Removed
+
+- Removed the OmO-specific footer badge, its detection module, and the `isOmoNative` provider surface. Downstream packages contribute footer content through the supported `ctx.ui.setStatus` extension API instead, so no product-specific markers live in the coding agent.
+
+## [2026.8.10] - 2026-08-10
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+- Added `pi.registerFilesystemPolicy()` for extensions. Policies receive a canonicalized path plus operation (`read`, `enumerate`, or `write`) and tool name, compose deny-wins below permission hooks, and are enforced by the built-in `read`, `write`, `edit`, `ls`, `find`, and `grep` tools. Denials surface as ordinary tool errors carrying the policy reason, and hosts without any registered policy behave exactly as before. The runner also exposes aggregated denied-root metadata for future sandbox backends.
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.9-2] - 2026-08-09
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+- Added opt-in native Anthropic prompt-cache keep-alive pings, disabled by default and bounded per session by request and estimated-cost caps. Idle pings stay dormant while any Goal continuation wait is armed and render as `⚡ Warm ping #N` transcript entries.
+
+- Added provider-native prompt-cache identity and first-request affinity for the interactive agent: Moonshot/Kimi Chat
+  Completions now send `prompt_cache_key`, while OpenRouter sends both `x-session-id` and the request body's `session_id`
+  so repeated turns consistently target the same upstream cache lane.
+
+- Goal continuation now aggregates terminal monitors, background terminal sessions, detached eval cells, and other producers through the shared `wake_source_state` contract. Scheduled/resumed telemetry keeps `activeMonitorCount` as the aggregate compatibility field and adds a per-source `wakeSources` snapshot.
+
+- Goal cache-warm wait and wake entries now show an in-memory iteration number for each accepted monitor cycle, resetting when the Goal or wake epoch changes while remaining compatible with legacy persisted entries.
+
+### Changed
+
+- Goal monitor continuation backstops now derive from the active model's prompt-cache safe-wait budget instead of a fixed four-minute delay, capped by `promptCache.goalBackstopMaxSeconds` (default 3570 seconds). Held direct-input admission now consumes wall-clock time, and cache-warm notices no longer claim warmth or savings after the cache TTL may have elapsed.
+
+- Expanded explicit OpenRouter prompt-cache markers beyond Anthropic model names to Qwen and Google prefixes, including
+  catalog IDs with one leading `~`, so those provider families reuse the intended cache boundary instead of sending
+  otherwise equivalent prompts without cache-control markers.
+
+### Fixed
+
+- Fixed active goals becoming stranded when the final wake source drained: an armed monitor wait now fires after a one-second micro-grace even at zero active sources. Activating a goal through app-server `thread/goal/set` also queues work for an otherwise idle session.
+
+- Fixed provider cache accounting and TTL reporting used by Senpi's status, cost, and cache-warm decisions: flat Kimi
+  `usage.cached_tokens` now counts as cache-read tokens; Bedrock requests one-hour retention only for Claude Opus 4.5,
+  Sonnet 4.5, and Haiku 4.5 while other cacheable Claude models stay at five minutes; and the Claude SDK OAuth lane now
+  reports its SDK-managed cache lifetime as 300 seconds.
+- Fixed Anthropic prompt-cache pre-warming importing the Anthropic SDK before Senpi knew whether the selected model
+  supported warming. Unsupported providers now remain dependency-lazy, while supported Anthropic models preserve the
+  same zero-output warm request and normalized cache-usage accounting.
+
+- Fixed a full session freeze when four or more long-lived background terminal sessions were active. Each native terminal
+  `waitExit()` previously parked one of the four default libuv workers on a blocking thread join for the child's lifetime,
+  starving all later fs/DNS work so provider requests died as `Request timed out.` and the turn pipeline wedged with input
+  dead. Native waits are now settled from a dedicated reaper thread, keeping the libuv pool free; synchronous wait errors,
+  exit payloads, and process-tree kill behavior are unchanged. Added native regression coverage for threadpool exhaustion
+  and Worker teardown ([#768](https://github.com/code-yeongyu/senpi/pull/768)).
+- Fixed threshold-triggered compaction giving up with "Compaction did not apply" when an idle-warmed summary became stale after a message-revision change. The blocking route now discards the stale warm result and regenerates a fresh summary against the current session instead of allowing context to keep growing.
+
+- Recovered malformed Claude tool-call text that starts with an angle-less
+  `antml:invoke` and ends with a stray `</function_results>`, so Senpi executes
+  the validated call once without printing internal protocol markup.
+
+### Removed
+
+## [2026.8.9] - 2026-08-09
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Slash commands provided by extensions (`/todo`, `/goal`, `/help`, `/mcp`, and every
+  other registered command) now run the moment you press Enter, even while the agent
+  is mid-turn or compacting. Previously they were held until the turn finished
+  whenever a queued continuation (such as an active goal chain) owned the session,
+  so `/todo` appeared to do nothing until the agent stopped working.
+- `/ir` now refuses to switch sessions while the agent is working or compacting,
+  reporting that it is unavailable instead of aborting the in-flight run.
+
+- Changed the shipped default model-fallback chain from a provider-pinned literal
+  (`anthropic/claude-fable-5` -> `apitopia/kimi-k3-unlocked:max`, `anthropic/claude-opus-5:xhigh`,
+  `anthropic/claude-opus-4-8:xhigh`) to provider-agnostic model families
+  (`claude-fable-5` -> `k3:max`, `claude-opus-5:xhigh`, `claude-opus-4-8:xhigh`) that expand against the live
+  model registry. Fable 5 now keeps a working fallback chain no matter which provider serves it - the builtin
+  Anthropic provider, the Claude SDK OAuth extension, a gateway, or Bedrock - instead of silently losing the
+  chain and leaving provider-side fallback aborted with nothing to fall back to. Bare selectors expand to at most two
+  providers, preferring OAuth credentials, then API keys, then a fixed provider precedence, and never OpenRouter.
+  Candidates now resolve only through usable models, and `/fallback` hides family expansions that are unavailable or
+  excluded by the active selectable-model filter instead of advertising dead routes. Explicit `provider/model` chains
+  keep exact behavior, and `retry.fallbackChains` accepts a bare model id as a family-wide key with `[]` still opting
+  out ([#761](https://github.com/code-yeongyu/senpi/pull/761)).
+- Changed `/model` search ranking to a model-aware scorer that matches query tokens against the model id, name,
+  provider, and `provider/id` independently instead of one concatenated string. Exact, whole-token, and
+  word-boundary matches now beat scattered subsequence matches, so `opus 5` ranks `claude-opus-5` first and an exact
+  `provider/id` query still outranks proxy providers that merely reuse the id. Favorite models are ranked above
+  non-favorites in `/model` search results, with relevance preserved inside each group.
+
+### Fixed
+
+- Fixed the model rows jumping while toggling favorites. `/model` and `/favorite-models` now freeze their row order
+  when the screen opens: toggling a favorite only updates the `*` marker, and the order is recomputed the next time
+  the screen is opened. Explicit reorder keys still move rows immediately.
+
+- Fixed config reloads discarding live terminal monitor and background-bash snapshots before Goal continuation
+  scheduling. Fresh Goal instances now retain Terminal's pre-start replay, while later same-instance session starts
+  still clear stale channel state.
+- Fixed `senpi --session <id>` hanging indefinitely with no output when the session belongs to a different project and
+  the run is not interactive (piped, detached, app-server spawns, and `-p` one-shots started from a terminal). The
+  cross-project fork confirmation is now gated on the resolved application mode instead of stdin alone and fails fast
+  with actionable guidance (`--fork '<id>'` or re-run interactively from the owning project), and the confirmation
+  prompt resolves as "no" on stdin EOF instead of wedging the process
+  ([#756](https://github.com/code-yeongyu/senpi/pull/756)).
+- Fixed terminal resumption liveness reporting so monitor snapshots are dual-published through the legacy event and
+  the shared source-keyed channel contract, while live background bash sessions now publish spawn, exit, kill, and
+  session-start snapshots even when terminal completion notifications are disabled.
+- Fixed active Goals resuming immediately while background tasks, detached evals, or background bash sessions were
+  still live. Goal continuation now aggregates source-keyed resumption-channel snapshots, preserves the four-minute
+  cache-warm check-in, and reports a per-source wait summary while retaining terminal-monitor telemetry compatibility.
+- Fixed the pipe-fallback terminal backend letting shell children take over the user's terminal. When no native PTY
+  prebuild is available, `bash` children ran inside senpi's own session, so a tty-reading program (such as a `sudo`
+  password prompt) opened `/dev/tty` and raced the TUI's raw-mode stdin reader - the password swallowed stolen escape
+  bytes and the editor then showed Kitty key-release fragments like `[49;1:3u` as literal text (reported on Ubuntu +
+  kitty). Pipe-fallback children are now detached on POSIX with no controlling terminal, and `kill()` signals the whole
+  process group so backgrounded grandchildren can no longer hold the output pipe open
+  ([#758](https://github.com/code-yeongyu/senpi/pull/758)).
 - Fixed multi-session RPC `open_session` failures returning only a bare `open_failed` code. Responses now preserve the
   stable prefix and include the underlying workspace or runtime cause as `open_failed: <reason>`, while all other
   transport error codes remain exact strings ([#750](https://github.com/code-yeongyu/senpi/pull/750)).

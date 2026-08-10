@@ -1,5 +1,79 @@
 # terminal builtin extension — fork surface
 
+## Terminal wake-source snapshots (2026-08-09)
+
+### What changed
+
+- Monitor snapshots now publish `wake_source_state` under `terminal-monitors` while permanently retaining the legacy `terminal_monitor_state` emission.
+- The bundle-owned active background-session set publishes `terminal-background-sessions` on explicit background launch, foreground detach, exit, kill, teardown, and session rebind.
+
+### Why
+
+Goal continuation must count every terminal activity that can wake or unblock the session, not only monitor watches, using the same source-keyed contract as other packages.
+
+### Why this cannot be expressed externally
+
+The authoritative monitor registry and background-session lifecycle are private to the terminal builtin and its reload-surviving session bundle.
+
+### Expected merge conflict zones
+
+- MEDIUM in `extension.ts` and `session-bundle.ts` around snapshot sinks and reload replay.
+
+## Native PTY waits no longer exhaust the libuv threadpool (2026-08-09)
+
+### What changed
+
+- `crates/senpi-pty/src/lib.rs`: `waitExit()` and `wait()` now obtain the existing waiter
+  synchronously, create a N-API deferred promise, and join the waiter on a named private Rust
+  reaper thread. The reaper resolves or rejects the deferred only after the waiter has completed
+  its existing child wait and reader-drain sequence.
+- Native lifecycle regressions start six pending waits with `UV_THREADPOOL_SIZE=1` and prove DNS,
+  filesystem, and PBKDF2 work still completes; a companion tears down a Worker environment while
+  its native wait is pending and proves the process exits naturally after the PTY child is killed.
+
+### Why
+
+The prior N-API `AsyncTask` ran `JoinHandle::join()` on a libuv worker for the PTY child's entire
+lifetime. Enough long-lived terminal sessions exhausted the shared pool and indefinitely queued
+unrelated DNS and filesystem work, which could leave provider requests and the terminal UI stuck.
+
+### Why this cannot be expressed externally
+
+The blocked worker was owned by the Rust-to-N-API promise implementation below the TypeScript PTY
+facade. An extension cannot move native wait completion off libuv or safely settle a promise after
+native reader teardown.
+
+### Expected merge conflict zones
+
+- `crates/senpi-pty/src/lib.rs` around `NativePtySession::waitExit` / `wait` and native promise
+  settlement.
+- `packages/pty/test/native-wait-threadpool.test.ts` and its native subprocess fixtures.
+
+
+## Terminal monitor and background-bash resumption channels (2026-08-08)
+
+### What changed
+
+- Monitor registry transitions still emit the byte-compatible `terminal_monitor_state` payload and
+  now also emit the shared `resumption_channel_state` snapshot under source
+  `"terminal-monitor"`, with matching counts and channel identity metadata.
+- `TerminalSessionBundle` now owns the live background-session snapshot. Explicit background bash
+  launches and foreground auto-detaches register a channel, while exit, `kill_bash`, and bundle
+  teardown remove it. Every transition emits the complete source snapshot under
+  `"terminal-bash"`.
+- Bundle binding re-publishes both monitor and background snapshots during `session_start`, including
+  after reload, so a goal consumer that clears session-scoped counts sees channels that remained
+  alive across the boundary.
+
+### Notification tradeoff
+
+Background sessions count as live resumption channels unconditionally, including non-interactive
+sessions and terminal `notify: "off"`. The notify setting controls whether completion injects a wake
+notification; it does not change whether work is still alive. A muted session can therefore delay a
+goal continuation even though its completion will not wake the agent, but the existing four-minute
+continuation backstop bounds that delay. Keeping liveness independent from notification policy avoids
+the measured 53ms premature continuation seen with `notify: "off"` (52ms with notifications enabled).
+
 ## Fixed foreground window replaces cache budget; sleep-wait commands detach early (2026-08-07)
 
 ### What changed

@@ -162,6 +162,7 @@ import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinking-levels.ts";
 import { resetTimings, time } from "./timings.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
+import { composeFilesystemPolicies } from "./tools/filesystem-policy.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
@@ -2403,6 +2404,16 @@ export class AgentSession {
 		return this.sessionManager.getSessionId();
 	}
 
+	/** Subscribe to the internal event bus shared by this session's extensions. */
+	onExtensionEvent(channel: string, handler: (data: unknown) => void): () => void {
+		return this._resourceLoader.onExtensionEvent?.(channel, handler) ?? (() => {});
+	}
+
+	/** Publish on the internal event bus shared by this session's extensions. */
+	emitExtensionEvent(channel: string, data: unknown): void {
+		this._resourceLoader.emitExtensionEvent?.(channel, data);
+	}
+
 	/** Current session display name, if set */
 	get sessionName(): string | undefined {
 		return this.sessionManager.getSessionName();
@@ -2552,6 +2563,32 @@ export class AgentSession {
 			await userAbortPromise;
 			throwIfCancelled();
 		}
+
+		// Extension commands are UI actions, not prompts: dispatch them before the
+		// settled-session-work gate below. That gate makes a bare prompt() wait for
+		// _sessionWorkBarrier, which a scheduled continuation (goal chain, queued
+		// follow-up) holds for an entire run, so a command typed mid-turn used to run
+		// only after the turn ended. The registry lookup stays synchronous so ordinary
+		// text beginning with "/" gains no await before the prompt-start bookkeeping.
+		try {
+			if ((options?.expandPromptTemplates ?? true) && text.startsWith("/")) {
+				const spaceIndex = text.indexOf(" ");
+				const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+				if (this._extensionRunner.getCommand(commandName)) {
+					const handled = await this._tryExecuteExtensionCommand(text);
+					throwIfCancelled();
+					if (handled) {
+						options?.promptDisposition?.("handled");
+						options?.preflightResult?.(true);
+						return;
+					}
+				}
+			}
+		} catch (error) {
+			options?.preflightResult?.(false);
+			throw error;
+		}
+
 		const ownsPromptStart =
 			!this.isStreaming && !this._promptStartPending && options?.streamingBehavior === undefined;
 		if (ownsPromptStart) this._promptStartPending = true;
@@ -2612,19 +2649,6 @@ export class AgentSession {
 		};
 
 		try {
-			// Handle extension commands first (execute immediately, even during streaming)
-			// Extension commands manage their own LLM interaction via pi.sendMessage()
-			if (expandPromptTemplates && text.startsWith("/")) {
-				const handled = await this._tryExecuteExtensionCommand(text);
-				throwIfCancelled();
-				if (handled) {
-					// Extension command executed, no prompt to send
-					promptDisposition?.("handled");
-					preflightResult?.(true);
-					return;
-				}
-			}
-
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
 			let currentImages = options?.images;
@@ -5300,6 +5324,8 @@ export class AgentSession {
 				getContextUsage: () => this.getContextUsage(),
 				getCompactionSettings: () => this.settingsManager.getCompactionSettings(),
 				getPromptCacheSafeWaitSeconds: () => this.resolvePromptCacheSafeWaitSeconds(),
+				getPromptCacheGoalBackstopMaxSeconds: () => this.settingsManager.getPromptCacheGoalBackstopMaxSeconds(),
+				getPromptCacheKeepAliveSettings: () => this.settingsManager.getPromptCacheKeepAliveSettings(),
 				getLookAtSettings: () => {
 					const global = this.settingsManager.getGlobalSettings().lookAt;
 					const project = this.settingsManager.getProjectSettings().lookAt;
@@ -5547,6 +5573,10 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
+		const extensionsResult = this._resourceLoader.getExtensions();
+		const filesystemPolicy = composeFilesystemPolicies(
+			extensionsResult.extensions.flatMap((extension) => extension.filesystemPolicies ?? []),
+		);
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -5555,15 +5585,18 @@ export class AgentSession {
 					]),
 				)
 			: createAllToolDefinitions(this._cwd, {
-					read: { autoResizeImages },
+					read: { autoResizeImages, filesystemPolicy },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
+					write: { filesystemPolicy },
+					edit: { filesystemPolicy },
+					grep: { filesystemPolicy },
+					find: { filesystemPolicy },
+					ls: { filesystemPolicy },
 				});
 
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
-
-		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {
 			for (const [name, value] of options.flagValues) {
 				extensionsResult.runtime.flagValues.set(name, value);
