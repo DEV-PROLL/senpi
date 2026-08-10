@@ -33,7 +33,17 @@ function readPackageName(packageJsonPath: string): string | undefined {
 	}
 }
 
-export function detectOmoNativeInstall(packages: PackageSource[] | undefined, agentDir: string): boolean {
+export function detectOmoNativeInstall(
+	packages: PackageSource[] | undefined,
+	agentDir: string,
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	// The omo launcher marks every senpi spawn it owns; omo-ai global installs load the plugin via
+	// --extension, so no settings.packages entry ever exists for them and the env marker is the only
+	// signal available at footer-render time.
+	if (env.OMO_NATIVE === "1") {
+		return true;
+	}
 	if (!packages) {
 		return false;
 	}
