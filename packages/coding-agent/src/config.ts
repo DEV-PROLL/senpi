@@ -3,6 +3,7 @@ import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
 import { fileURLToPath } from "url";
 import { createBunLauncherRepairCommand } from "./bun-global-launcher.ts";
+import { type BrandProfile, consumeBrandProfile } from "./core/brand.ts";
 import { findNearestParentConfigDir } from "./nearest-parent-config.ts";
 import { spawnProcessSync } from "./utils/child-process.ts";
 import { normalizePath } from "./utils/paths.ts";
@@ -499,11 +500,23 @@ try {
 }
 
 const piConfigName: string | undefined = pkg.piConfig?.name;
+
+/**
+ * A distribution repackaging this engine injects its brand once. The profile is consumed
+ * here - which also scrubs the variable - so every process spawned later inherits a clean
+ * environment and keeps the engine's own identity.
+ */
+export const BRAND: BrandProfile | undefined = consumeBrandProfile();
+
 export const PACKAGE_NAME: string = pkg.name || "@earendil-works/pi-coding-agent";
-export const APP_NAME: string = piConfigName || "pi";
-export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
-export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
+export const APP_NAME: string = BRAND?.name || piConfigName || "pi";
+export const APP_TITLE: string = BRAND?.name || (piConfigName ? APP_NAME : "π");
+export const CONFIG_DIR_NAME: string = BRAND?.configDir || pkg.piConfig?.configDir || ".pi";
+/** True when the brand stores agent state directly under the config dir, with no `agent` segment. */
+export const CONFIG_FLAT_LAYOUT: boolean = BRAND?.flatLayout === true;
 export const VERSION: string = pkg.version || "0.0.0";
+/** Version shown to users; VERSION stays the engine version used for update comparisons. */
+export const DISPLAY_VERSION: string = BRAND?.displayVersion || VERSION;
 
 // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
