@@ -110,13 +110,23 @@ export function parseBrandProfile(raw: string | undefined): BrandProfile | undef
 }
 
 /**
- * Parses the brand profile from an environment and removes the variable from it, so every
- * child process spawned later starts from a clean environment.
+ * Parses the brand profile without touching the environment.
+ *
+ * The CLI entrypoint re-spawns the real agent as a child process and hands it `process.env`,
+ * so the variable has to survive that hop. Scrubbing therefore happens explicitly in the
+ * process that actually runs the agent - see `scrubBrandFromEnvironment`.
  */
 export function consumeBrandProfile(env: NodeJS.ProcessEnv = process.env): BrandProfile | undefined {
-	const profile = parseBrandProfile(env[BRAND_ENV_VAR]);
+	return parseBrandProfile(env[BRAND_ENV_VAR]);
+}
+
+/**
+ * Removes the brand variable so tools spawning the engine again inherit a clean environment
+ * and keep the engine's own identity. Called once the profile has been resolved by the
+ * process that runs the agent loop.
+ */
+export function scrubBrandFromEnvironment(env: NodeJS.ProcessEnv = process.env): void {
 	delete env[BRAND_ENV_VAR];
-	return profile;
 }
 
 /**

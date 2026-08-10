@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	BRAND_ENV_VAR,
@@ -6,6 +7,7 @@ import {
 	envValue,
 	parseBrandProfile,
 	resetBrandProfileForTests,
+	scrubBrandFromEnvironment,
 } from "../src/core/brand.ts";
 
 const OMO_PROFILE = JSON.stringify({
@@ -76,24 +78,42 @@ describe("parseBrandProfile", () => {
 });
 
 describe("consumeBrandProfile", () => {
-	test("removes the variable so child processes inherit a clean environment", () => {
+	test("reads the profile without disturbing the environment", () => {
 		const env: NodeJS.ProcessEnv = { [BRAND_ENV_VAR]: OMO_PROFILE, PATH: "/usr/bin" };
 
 		const profile = consumeBrandProfile(env);
 
 		expect(profile?.name).toBe("omo");
+		expect(env.PATH).toBe("/usr/bin");
+	});
+
+	test("keeps the variable readable for the process the entrypoint re-spawns", () => {
+		// The CLI entrypoint resolves the brand and then hands process.env to a child that runs
+		// the agent; scrubbing here would leave that child unbranded.
+		const env: NodeJS.ProcessEnv = { [BRAND_ENV_VAR]: OMO_PROFILE };
+
+		consumeBrandProfile(env);
+
+		expect(env[BRAND_ENV_VAR]).toBe(OMO_PROFILE);
+	});
+});
+
+describe("scrubBrandFromEnvironment", () => {
+	test("removes the variable so a nested engine run keeps the engine identity", () => {
+		const env: NodeJS.ProcessEnv = { [BRAND_ENV_VAR]: OMO_PROFILE, PATH: "/usr/bin" };
+
+		scrubBrandFromEnvironment(env);
+
 		expect(BRAND_ENV_VAR in env).toBe(false);
 		expect(env.PATH).toBe("/usr/bin");
 	});
 
-	test("still scrubs the variable when the payload is unusable", () => {
-		const env: NodeJS.ProcessEnv = { [BRAND_ENV_VAR]: "{broken" };
-		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+	test("the entrypoints that run the agent scrub after resolving the brand", () => {
+		for (const entry of ["cli-main.ts", "rpc-entry.ts"]) {
+			const source = readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf-8");
 
-		expect(consumeBrandProfile(env)).toBeUndefined();
-		expect(BRAND_ENV_VAR in env).toBe(false);
-
-		stderr.mockRestore();
+			expect(source).toContain("scrubBrandFromEnvironment()");
+		}
 	});
 });
 
@@ -119,7 +139,7 @@ describe("config module brand integration", () => {
 		expect(config.ENV_AGENT_DIR).toBe("SENPI_CODING_AGENT_DIR");
 	});
 
-	test("branded install renames the product and scrubs the variable", async () => {
+	test("branded install renames the product", async () => {
 		process.env[BRAND_ENV_VAR] = OMO_PROFILE;
 		vi.resetModules();
 
@@ -131,7 +151,8 @@ describe("config module brand integration", () => {
 		expect(config.CONFIG_FLAT_LAYOUT).toBe(true);
 		expect(config.DISPLAY_VERSION).toBe("9.9.9");
 		expect(config.ENV_AGENT_DIR).toBe("OMO_CODING_AGENT_DIR");
-		expect(process.env[BRAND_ENV_VAR]).toBeUndefined();
+		// Resolution alone must not scrub: the entrypoint re-spawns the agent with this env.
+		expect(process.env[BRAND_ENV_VAR]).toBe(OMO_PROFILE);
 	});
 });
 
