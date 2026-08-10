@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- Prevented Claude Agent SDK OAuth sessions from scheduling `assistant_rewritten` forks when only host-side thinking
+  timing annotations changed, preserving resident-session and prompt-cache continuity for reasoning-heavy turns
+  ([#751](https://github.com/code-yeongyu/senpi/pull/751)).
+
 ### Removed
 
 ## [2026.8.11] - 2026-08-10
