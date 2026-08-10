@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- Prevented Claude Agent SDK OAuth sessions from scheduling `assistant_rewritten` forks when only host-side thinking
+  timing annotations changed, preserving resident-session and prompt-cache continuity for reasoning-heavy turns
+  ([#751](https://github.com/code-yeongyu/senpi/pull/751)).
+
 - Fixed multi-session RPC `open_session` failures returning only a bare `open_failed` code. Responses now preserve the
   stable prefix and include the underlying workspace or runtime cause as `open_failed: <reason>`, while all other
   transport error codes remain exact strings ([#750](https://github.com/code-yeongyu/senpi/pull/750)).
