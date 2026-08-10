@@ -85,7 +85,13 @@ export async function getLatestPiRelease(
 ): Promise<LatestPiRelease | undefined> {
 	if (envValue("OFFLINE")) return undefined;
 
-	const channel = brandProfile()?.update;
+	const brand = brandProfile();
+	const channel = brand?.update;
+	if (brand && !channel) {
+		// The engine's own releases are not installable from inside a branded distribution, so
+		// advertising them would send the user after an update they cannot apply.
+		return undefined;
+	}
 	const response = await fetch(latestVersionUrl(channel), {
 		headers: {
 			"User-Agent": getPiUserAgent(currentVersion),
