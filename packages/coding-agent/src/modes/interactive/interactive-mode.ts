@@ -50,7 +50,9 @@ import { spawn, spawnSync } from "child_process";
 import {
 	APP_NAME,
 	APP_TITLE,
+	BRAND,
 	CONFIG_DIR_NAME,
+	DISPLAY_VERSION,
 	expandTildePath,
 	getAgentDir,
 	getAuthPath,
@@ -658,7 +660,7 @@ export class InteractiveMode {
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
-		this.version = VERSION;
+		this.version = DISPLAY_VERSION;
 		this.ui = createInteractiveTui({
 			uiMode,
 			showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
@@ -4978,7 +4980,7 @@ export class InteractiveMode {
 	}
 
 	showNewVersionNotification(newVersion: string): void {
-		const action = theme.fg("accent", `${APP_NAME} update`);
+		const action = theme.fg("accent", BRAND?.update?.command ?? `${APP_NAME} update`);
 		const updateInstruction = theme.fg("muted", `New version ${newVersion} is available. Run `) + action;
 		const changelogUrl = getReleaseChangelogUrl(newVersion);
 		const changelogLink = getCapabilities().hyperlinks
