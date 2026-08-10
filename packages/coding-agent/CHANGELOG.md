@@ -14,6 +14,8 @@
 
 ### Removed
 
+- Removed the OmO-specific footer badge, its detection module, and the `isOmoNative` provider surface. Downstream packages contribute footer content through the supported `ctx.ui.setStatus` extension API instead, so no product-specific markers live in the coding agent.
+
 ## [2026.8.10] - 2026-08-10
 
 ### New Features
