@@ -2,14 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Windows pipe-fallback shutdown no longer crashes with an uncaught `spawn taskkill ENOENT` when the helper cannot
-  resolve. Senpi now invokes `taskkill.exe` explicitly and falls back to direct child termination if helper startup
-  fails.
-- A brand profile carrying an unsafe `configDir` (a path separator, `.` or `..`) is rejected instead of redirecting agent state and its migration outside the intended directory.
-- A branded install without an update channel no longer falls back to checking the engine's own releases, which it cannot install.
-
 ### New Features
 
 ### Breaking Changes
@@ -30,8 +22,16 @@
 
 ### Fixed
 
+- Windows pipe-fallback shutdown no longer crashes with an uncaught `spawn taskkill ENOENT` when the helper cannot
+  resolve. Senpi now invokes `taskkill.exe` explicitly and falls back to direct child termination if helper startup
+  fails.
+- A brand profile carrying an unsafe `configDir` (a path separator, `.` or `..`) is rejected instead of redirecting
+  agent state and its migration outside the intended directory
+  ([#787](https://github.com/code-yeongyu/senpi/pull/787)).
+- A branded install without an update channel no longer falls back to checking the engine's own releases, which it
+  cannot install ([#787](https://github.com/code-yeongyu/senpi/pull/787)).
 - Prevented an asynchronous goal continuation from restoring a goal after `thread/goal/clear` or recording delivery
-  against a replacement goal.
+  against a replacement goal ([#788](https://github.com/code-yeongyu/senpi/pull/788)).
 - Prevented Claude Agent SDK OAuth sessions from scheduling `assistant_rewritten` forks when only host-side thinking
   timing annotations changed, preserving resident-session and prompt-cache continuity for reasoning-heavy turns
   ([#751](https://github.com/code-yeongyu/senpi/pull/751) by [@goldtg](https://github.com/goldtg)).
