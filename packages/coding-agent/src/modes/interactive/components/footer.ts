@@ -144,7 +144,6 @@ export class FooterComponent implements Component {
 		const branch = this.footerData.getGitBranch();
 		const sessionName = this.session.sessionManager.getSessionName();
 
-
 		const anchor: [FooterSegment, ...FooterSegment[]] = [{ plain: pwdRaw, colored: theme.fg("accent", pwdRaw) }];
 		if (branch) anchor.push({ plain: branch, colored: theme.fg("warning", branch) });
 		const pwdIndex = 0;

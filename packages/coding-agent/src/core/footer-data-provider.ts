@@ -166,7 +166,6 @@ export class FooterDataProvider {
 		this.availableProviderCount = count;
 	}
 
-
 	setCwd(cwd: string): void {
 		if (this.cwd === cwd) {
 			return;
