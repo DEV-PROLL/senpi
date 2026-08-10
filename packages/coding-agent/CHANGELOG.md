@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A brand profile carrying an unsafe `configDir` (a path separator, `.` or `..`) is rejected instead of redirecting agent state and its migration outside the intended directory.
+- A branded install without an update channel no longer falls back to checking the engine's own releases, which it cannot install.
+
 ### New Features
 
 ### Breaking Changes

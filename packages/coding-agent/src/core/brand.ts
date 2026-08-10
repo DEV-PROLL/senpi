@@ -64,6 +64,15 @@ function readUpdateChannel(source: Record<string, unknown>): BrandUpdateChannel 
 	};
 }
 
+/**
+ * A config directory names ONE entry inside the home directory. Anything carrying a separator or
+ * a parent reference would move agent state - and the migration that copies into it - somewhere
+ * the user never agreed to, so such a profile is rejected rather than sanitised.
+ */
+function isSafeConfigDirName(value: string): boolean {
+	return value !== "." && value !== ".." && !/[\\/]/.test(value);
+}
+
 function readString(source: Record<string, unknown>, key: string): string | undefined {
 	const value = source[key];
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -97,10 +106,16 @@ export function parseBrandProfile(raw: string | undefined): BrandProfile | undef
 		return undefined;
 	}
 
+	const configDir = readString(source, "configDir") || `.${name}`;
+	if (!isSafeConfigDirName(configDir)) {
+		process.stderr.write(`warning: ignoring ${BRAND_ENV_VAR} with an unsafe "configDir"\n`);
+		return undefined;
+	}
+
 	return {
 		name,
 		displayVersion: readString(source, "displayVersion"),
-		configDir: readString(source, "configDir") || `.${name}`,
+		configDir,
 		flatLayout: source.flatLayout === true,
 		envPrefix: (readString(source, "envPrefix") || name).toUpperCase(),
 		userAgent: readString(source, "userAgent") || name,
