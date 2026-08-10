@@ -129,7 +129,7 @@ describe("FooterComponent width handling", () => {
 		for (const line of lines) {
 			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 		}
-		expect(plain).toContain("(🏴‍☠️ OmO Native)");
+		expect(plain).toContain("(😺 OmO Native)");
 		expect(plain).toContain("coding-agent");
 		expect(plain).not.toContain("/workspace/client");
 		expect(plain).toContain("CH25.0%");
