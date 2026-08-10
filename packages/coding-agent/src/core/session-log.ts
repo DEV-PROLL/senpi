@@ -1,5 +1,6 @@
 import { chmodSync, closeSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { envValue } from "./brand.ts";
 
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 const MAX_STRING_LENGTH = 200;
@@ -36,7 +37,7 @@ export function createSessionLogger(agentDir: string | undefined, options: Sessi
 			const line = formatLine(level, event, data);
 			options.sink?.(line);
 			writeLine(filePath, line, maxBytes);
-			if (options.mirrorToStderr ?? process.env.SENPI_SESSION_DEBUG === "1") {
+			if (options.mirrorToStderr ?? envValue("SESSION_DEBUG") === "1") {
 				console.error(DEBUG_PREFIX, line);
 			}
 		} catch (error) {

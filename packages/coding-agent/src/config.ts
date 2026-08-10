@@ -3,7 +3,7 @@ import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
 import { fileURLToPath } from "url";
 import { createBunLauncherRepairCommand } from "./bun-global-launcher.ts";
-import { type BrandProfile, consumeBrandProfile } from "./core/brand.ts";
+import { type BrandProfile, brandProfile, envValue } from "./core/brand.ts";
 import { findNearestParentConfigDir } from "./nearest-parent-config.ts";
 import { spawnProcessSync } from "./utils/child-process.ts";
 import { normalizePath } from "./utils/paths.ts";
@@ -381,7 +381,7 @@ export function getUpdateInstruction(packageName: string): string {
  */
 export function getPackageDir(): string {
 	// Allow override via environment variable (useful for Nix/Guix where store paths tokenize poorly)
-	const envDir = process.env.PI_PACKAGE_DIR;
+	const envDir = envValue("PACKAGE_DIR");
 	if (envDir) {
 		return normalizePath(envDir);
 	}
@@ -506,7 +506,7 @@ const piConfigName: string | undefined = pkg.piConfig?.name;
  * here - which also scrubs the variable - so every process spawned later inherits a clean
  * environment and keeps the engine's own identity.
  */
-export const BRAND: BrandProfile | undefined = consumeBrandProfile();
+export const BRAND: BrandProfile | undefined = brandProfile();
 
 export const PACKAGE_NAME: string = pkg.name || "@earendil-works/pi-coding-agent";
 export const APP_NAME: string = BRAND?.name || piConfigName || "pi";
@@ -519,8 +519,10 @@ export const VERSION: string = pkg.version || "0.0.0";
 export const DISPLAY_VERSION: string = BRAND?.displayVersion || VERSION;
 
 // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
-export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
-export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;
+/** Primary environment prefix for this product; legacy prefixes stay readable. */
+export const ENV_PREFIX: string = BRAND?.envPrefix || APP_NAME.toUpperCase();
+export const ENV_AGENT_DIR = `${ENV_PREFIX}_CODING_AGENT_DIR`;
+export const ENV_SESSION_DIR = `${ENV_PREFIX}_CODING_AGENT_SESSION_DIR`;
 
 export function expandTildePath(path: string): string {
 	return normalizePath(path);
@@ -530,7 +532,7 @@ const DEFAULT_SHARE_VIEWER_URL = "https://pi.dev/session/";
 
 /** Get the share viewer URL for a gist ID */
 export function getShareViewerUrl(gistId: string): string {
-	const baseUrl = process.env.PI_SHARE_VIEWER_URL || DEFAULT_SHARE_VIEWER_URL;
+	const baseUrl = envValue("SHARE_VIEWER_URL") || DEFAULT_SHARE_VIEWER_URL;
 	return `${baseUrl}#${gistId}`;
 }
 
@@ -549,7 +551,7 @@ export function resolveAgentDir(cwd: string, homeDir: string, envDir?: string): 
 
 /** Get the agent config directory (e.g., ~/.senpi/agent/) */
 export function getAgentDir(): string {
-	return resolveAgentDir(process.cwd(), homedir(), process.env[ENV_AGENT_DIR]);
+	return resolveAgentDir(process.cwd(), homedir(), envValue("CODING_AGENT_DIR"));
 }
 
 /** Get path to user's custom themes directory */

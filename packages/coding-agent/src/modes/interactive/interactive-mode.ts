@@ -62,6 +62,7 @@ import {
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import { isApiKeyLoginProvider } from "../../core/auth-providers.ts";
+import { envValue } from "../../core/brand.ts";
 import {
 	CACHE_TTL_MS,
 	type CacheMiss,
@@ -1149,7 +1150,7 @@ export class InteractiveMode {
 	async run(): Promise<void> {
 		await this.init();
 
-		if (!process.env.PI_OFFLINE) {
+		if (!envValue("OFFLINE")) {
 			void this.session.modelRuntime
 				.refresh()
 				.then(() => {
@@ -1342,7 +1343,7 @@ export class InteractiveMode {
 	}
 
 	private reportInstallTelemetry(version: string): void {
-		if (process.env.PI_OFFLINE) {
+		if (envValue("OFFLINE")) {
 			return;
 		}
 

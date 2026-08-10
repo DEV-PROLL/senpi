@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { BRAND_ENV_VAR, consumeBrandProfile, parseBrandProfile } from "../src/core/brand.ts";
+import {
+	BRAND_ENV_VAR,
+	brandEnvNames,
+	consumeBrandProfile,
+	envValue,
+	parseBrandProfile,
+	resetBrandProfileForTests,
+} from "../src/core/brand.ts";
 
 const OMO_PROFILE = JSON.stringify({
 	name: "omo",
@@ -125,5 +132,45 @@ describe("config module brand integration", () => {
 		expect(config.DISPLAY_VERSION).toBe("9.9.9");
 		expect(config.ENV_AGENT_DIR).toBe("OMO_CODING_AGENT_DIR");
 		expect(process.env[BRAND_ENV_VAR]).toBeUndefined();
+	});
+});
+
+describe("envValue", () => {
+	afterEach(() => {
+		resetBrandProfileForTests();
+		delete process.env[BRAND_ENV_VAR];
+	});
+
+	test("prefers the brand prefix, then the legacy prefixes, in order", () => {
+		process.env[BRAND_ENV_VAR] = OMO_PROFILE;
+		resetBrandProfileForTests();
+
+		const env = { OMO_OFFLINE: "brand", SENPI_OFFLINE: "engine", PI_OFFLINE: "legacy" };
+
+		expect(envValue("OFFLINE", env)).toBe("brand");
+		expect(envValue("OFFLINE", { SENPI_OFFLINE: "engine", PI_OFFLINE: "legacy" })).toBe("engine");
+		expect(envValue("OFFLINE", { PI_OFFLINE: "legacy" })).toBe("legacy");
+		expect(envValue("OFFLINE", {})).toBeUndefined();
+	});
+
+	test("returns an explicitly empty value, so `set but empty` keeps its meaning", () => {
+		expect(envValue("OFFLINE", { PI_OFFLINE: "" })).toBe("");
+	});
+
+	test("a standalone install reads only the engine and legacy names", () => {
+		resetBrandProfileForTests();
+
+		expect(brandEnvNames("CODING_AGENT_DIR")).toEqual(["SENPI_CODING_AGENT_DIR", "PI_CODING_AGENT_DIR"]);
+	});
+
+	test("a branded install reads its own name first and never duplicates a prefix", () => {
+		process.env[BRAND_ENV_VAR] = OMO_PROFILE;
+		resetBrandProfileForTests();
+
+		expect(brandEnvNames("CODING_AGENT_DIR")).toEqual([
+			"OMO_CODING_AGENT_DIR",
+			"SENPI_CODING_AGENT_DIR",
+			"PI_CODING_AGENT_DIR",
+		]);
 	});
 });
