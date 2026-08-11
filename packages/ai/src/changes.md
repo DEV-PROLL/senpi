@@ -1,5 +1,15 @@
 # AI Source Changes
 
+## 2026-08-11 - Optional availability `check` on `OAuthAuth`
+
+### What changed and why
+
+Added an optional `check?(input)` to `OAuthAuth` (`auth/types.ts`) and taught `checkProviderAuth` (`models.ts`) to consult it in the stored-OAuth-credential branch. Previously that branch was a pure structural short-circuit — `provider.auth.oauth ? {configured} : undefined` — so any stored OAuth credential, including an empty sentinel envelope with zero accounts, reported the provider as configured. The fallback engine reads configured-ness through `hasConfiguredAuth`, so such a provider was never skipped as `unauthenticated`. `ApiKeyAuth` already exposes an equivalent `check`; this makes the OAuth path symmetric. When `check` is absent, behavior is byte-identical to before, so every existing OAuth provider is unaffected. This cannot be extension-local: the short-circuit lives in `ModelsImpl.checkProviderAuth`, which no extension hook reaches, and `OAuthAuth` had no `check` to supply.
+
+### Expected merge-conflict zones
+
+LOW in `auth/types.ts` (additive optional field on `OAuthAuth`); LOW in `models.ts` `checkProviderAuth` (one stored-OAuth branch expanded, existing behavior preserved when `check` is undefined).
+
 ## 2026-08-09 - Native Anthropic prompt-cache warming primitive
 
 ### What changed and why
