@@ -12,6 +12,8 @@
 
 ### Changed
 
+- Changed direct Anthropic API prompt caching to use the provider's 5-minute default unless long retention is explicitly selected.
+
 ### Removed
 
 ## [2026.8.11-4] - 2026-08-11

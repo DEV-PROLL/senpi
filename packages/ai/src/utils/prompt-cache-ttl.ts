@@ -329,7 +329,7 @@ export function resolvePromptCacheTtlSeconds(model: Model<Api>, env?: ProviderEn
 			return PROMPT_CACHE_TTL_SHORT_SECONDS;
 		case "anthropic-messages": {
 			const anthropicModel = model as Model<"anthropic-messages">;
-			const retention = resolveAnthropicCacheRetention(anthropicModel.cacheRetention, env, "long");
+			const retention = resolveAnthropicCacheRetention(anthropicModel.cacheRetention, env, "short");
 			if (retention === "none") return undefined;
 			return retention === "long" &&
 				isAnthropicApiBaseUrl(anthropicModel.baseUrl) &&

@@ -1,5 +1,29 @@
 # AI Source Changes
 
+## 2026-08-12 - Default direct Anthropic prompt caching to five minutes
+
+### What changed and why
+
+- Native `anthropic-messages` requests now use Anthropic's default five-minute prompt-cache retention when neither
+  `cacheRetention` nor `PI_CACHE_RETENTION=long` explicitly selects long retention. The adapter emits bare
+  `{ type: "ephemeral" }` cache-control markers instead of adding `ttl: "1h"`.
+- The browser-safe `resolvePromptCacheTtlSeconds()` mirror now reports 300 seconds for the same omitted-retention
+  path, keeping cache-aware tool waits and goal-monitor timing aligned with the wire request.
+- Explicit `cacheRetention: "long"`, model-level long retention, and `PI_CACHE_RETENTION=long` still request and
+  report one hour on supported canonical Anthropic endpoints. Anthropic-compatible proxies remain five minutes.
+
+### Why this cannot be expressed externally
+
+- Prompt-cache retention is selected while the Anthropic provider serializes system, tool, and conversation cache
+  breakpoints. Extensions only observe higher-level requests and cannot safely rewrite every provider-owned
+  `cache_control` block or the browser-safe TTL estimate consumed by cache-aware runtime scheduling.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/anthropic-messages.ts` around `resolveCacheRetention()` and the cache-session-id setup.
+- MEDIUM: `utils/prompt-cache-ttl.ts` in the native Anthropic branch of `resolvePromptCacheTtlSeconds()`.
+- LOW: focused cache-retention and TTL tests that pin provider-default precedence.
+
 ## 2026-08-11 - Native Responses image-generation item reconciliation
 
 ### What changed and why
