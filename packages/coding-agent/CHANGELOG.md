@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Gateway/provider failures reported as `The model request was rejected. Check the request and try again.` now retry
+  the current model according to `settings.retry` before the configured fallback chain is used
+  ([#806](https://github.com/code-yeongyu/senpi/pull/806)).
 - `/goal resume` can explicitly reactivate a completed goal and queue its continuation, while completed goals remain excluded from automatic restart-resume prompts.
 - A launch from a deleted working directory (for example a removed worktree) no longer crashes during
   startup with `uv_cwd`; the CLI recovers into the home directory before any dependency evaluates
