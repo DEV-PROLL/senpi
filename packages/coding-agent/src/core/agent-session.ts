@@ -1689,6 +1689,7 @@ export class AgentSession {
 
 				const assistantMsg = event.message as AssistantMessage;
 				const succeeded =
+					!assistantMsg.errorMessage &&
 					assistantMsg.stopReason !== "error" &&
 					assistantMsg.stopReason !== "aborted" &&
 					!isClassifierRefusal(assistantMsg);
