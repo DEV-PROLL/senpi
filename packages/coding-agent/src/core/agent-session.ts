@@ -122,7 +122,7 @@ import type {
 	LazyToolActivator,
 	ModelSelectSource,
 } from "./extensions/types.ts";
-import { RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
+import { normalizeToolExposure, RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
 import { shouldWarnHighReasoning } from "./high-reasoning-warning.ts";
 import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
@@ -2226,15 +2226,17 @@ export class AgentSession {
 	}
 
 	/**
-	 * Get all configured tools with name, description, parameter schema, prompt guidelines, and source metadata.
+	 * Get all configured tools with normalized exposure metadata and source metadata.
 	 */
 	getAllTools(): ToolInfo[] {
 		return Array.from(this._toolDefinitions.values()).map(({ definition, sourceInfo }) => ({
 			name: definition.name,
+			label: definition.label,
 			description: definition.description,
 			parameters: definition.parameters,
 			promptGuidelines: definition.promptGuidelines,
 			sourceInfo,
+			...normalizeToolExposure(definition),
 		}));
 	}
 

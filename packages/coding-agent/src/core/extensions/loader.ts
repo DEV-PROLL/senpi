@@ -354,6 +354,9 @@ function createExtensionAPI(
 
 		registerTool(tool: ToolDefinition): void {
 			runtime.assertActive();
+			if (tool.name === "tool_search" && extension.sourceInfo.source !== "builtin") {
+				throw new Error('Tool name "tool_search" is reserved for the builtin tool-search extension.');
+			}
 			extension.tools.set(tool.name, {
 				definition: tool,
 				sourceInfo: extension.sourceInfo,

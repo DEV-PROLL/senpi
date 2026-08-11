@@ -1,5 +1,31 @@
 # Core Extensions Changes
 
+## 2026-08-11 - Declarative tool search-exposure metadata
+
+### What changed
+
+- `ToolDefinition` now declares an initial `direct` or `search` exposure policy plus supplemental search text,
+  keywords, grouping, and lazy-activation control.
+- `getAllTools()` projects the human-readable label and normalized effective metadata, preserving `direct`, an empty
+  keyword list, and lazy activation as the defaults for existing definitions.
+- Non-builtin extensions cannot register the reserved `tool_search` name.
+
+### Why
+
+- A shared searchable catalog needs complete, normalized metadata without a second extension lookup, while existing
+  extensions must retain their current direct-exposure behavior when they omit the new fields.
+- Reserving the catalog tool name prevents extension registration order from shadowing the builtin search surface.
+
+### Why this cannot be expressed externally
+
+- Default exposure, registry projection, and registration-name ownership are core extension-runtime concerns shared by
+  every host and extension source.
+
+### Expected merge conflict zones
+
+- MEDIUM: `types.ts` around `ToolDefinition` and `ToolInfo` as the shared search catalog lands.
+- LOW: `loader.ts` registration validation and `agent-session.ts` `getAllTools()` projection.
+
 ## 2026-08-09 - Extension-registered filesystem access policies
 
 ### What changed

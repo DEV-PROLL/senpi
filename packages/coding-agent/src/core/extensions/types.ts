@@ -614,6 +614,8 @@ export interface ToolRenderContext<TState = any, TArgs = any> {
 	spinnerFrame?: number;
 }
 
+export type ToolExposure = "direct" | "search";
+
 /**
  * Tool definition for registerTool().
  */
@@ -624,9 +626,35 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	label: string;
 	/** Description for LLM */
 	description: string;
-	/** Optional one-line snippet for the Available tools section in the default system prompt. Custom tools are omitted from that section when this is not provided. */
+	/**
+	 * Initial model-exposure policy. Defaults to `"direct"`.
+	 *
+	 * This is not a permission boundary: explicit `setActiveTools()` calls or host configuration may still activate
+	 * a search-exposed tool.
+	 */
+	exposure?: ToolExposure;
+	/** Supplemental capability text indexed by `tool_search`; never sent to the model and ignored unless exposure is `"search"`. */
+	searchText?: string;
+	/** Synonyms and domain terms indexed by `tool_search` with the same weight as tool names; never sent to the model. */
+	searchKeywords?: readonly string[];
+	/** Organizational filter group for `tool_search`; defaults to a host-derived extension label. */
+	searchGroup?: string;
+	/**
+	 * Whether `tool_search` and inactive-tool execution may lazily activate this tool. Defaults to true.
+	 * When false, lazy activators must not run, but explicit `setActiveTools()` calls may still activate the tool.
+	 */
+	allowLazyActivation?: boolean;
+	/**
+	 * Optional one-line snippet for the Available tools section in the default system prompt. Custom tools are omitted
+	 * from that section when this is not provided. Promoting a search-exposed tool carrying prompt text rebuilds the
+	 * system prompt and may invalidate the provider prompt-cache prefix.
+	 */
 	promptSnippet?: string;
-	/** Optional guideline bullets appended to the default system prompt Guidelines section when this tool is active. */
+	/**
+	 * Optional guideline bullets appended to the default system prompt Guidelines section when this tool is active.
+	 * Promoting a search-exposed tool carrying prompt text rebuilds the system prompt and may invalidate the provider
+	 * prompt-cache prefix.
+	 */
 	promptGuidelines?: string[];
 	/** Parameter schema (TypeBox) */
 	parameters: TParams;
@@ -668,6 +696,29 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 		theme: Theme,
 		context: ToolRenderContext<TState, Static<TParams>>,
 	) => Component;
+}
+
+/** Resolve the effective search-exposure metadata for a tool definition. */
+export function normalizeToolExposure(
+	definition: Pick<
+		ToolDefinition,
+		"exposure" | "searchText" | "searchKeywords" | "searchGroup" | "allowLazyActivation"
+	>,
+): {
+	exposure: ToolExposure;
+	searchText?: string;
+	searchKeywords: readonly string[];
+	searchGroup?: string;
+	allowLazyActivation: boolean;
+} {
+	const exposure: ToolExposure = definition.exposure === "search" ? "search" : "direct";
+	return {
+		exposure,
+		searchText: exposure === "search" ? definition.searchText : undefined,
+		searchKeywords: definition.searchKeywords ?? [],
+		searchGroup: definition.searchGroup,
+		allowLazyActivation: definition.allowLazyActivation !== false,
+	};
 }
 
 type AnyToolDefinition = ToolDefinition<any, any, any>;
@@ -1978,9 +2029,14 @@ export type RegisterLazyToolActivatorHandler = (activator: LazyToolActivator) =>
 
 export type GetActiveToolsHandler = () => string[];
 
-/** Tool info with name, description, parameter schema, prompt guidelines, and source metadata. */
-export type ToolInfo = Pick<ToolDefinition, "name" | "description" | "parameters" | "promptGuidelines"> & {
+/** Tool info with normalized exposure metadata and source metadata. */
+export type ToolInfo = Pick<ToolDefinition, "name" | "label" | "description" | "parameters" | "promptGuidelines"> & {
 	sourceInfo: SourceInfo;
+	exposure: ToolExposure;
+	searchText?: string;
+	searchKeywords: readonly string[];
+	searchGroup?: string;
+	allowLazyActivation: boolean;
 };
 
 export type GetAllToolsHandler = () => ToolInfo[];
