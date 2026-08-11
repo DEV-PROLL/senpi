@@ -52,6 +52,39 @@ function mcpToolsPayload(count: number): { tools: Record<string, unknown>[] } {
 }
 
 describe("todo 9 generalized catalog injection", () => {
+	it("wires non-MCP extension catalog membership into native deferral", async () => {
+		const searchableExtension: ExtensionFactory = (pi: ExtensionAPI) => {
+			pi.registerTool({
+				name: "weather_forecast",
+				label: "Weather Forecast",
+				description: "Forecast weather",
+				exposure: "search",
+				parameters: Type.Object({ city: Type.String() }),
+				execute: async () => ({ content: [{ type: "text", text: "sunny" }], details: {} }),
+			});
+		};
+		const harness = await createHarness({
+			api: "anthropic-messages",
+			extensionFactories: [
+				{ factory: toolSearchExtension, path: "<builtin:tool-search>" },
+				{ factory: searchableExtension, path: "/workspace/extensions/weather.ts" },
+			],
+		});
+		try {
+			const output = await harness.getExtensionRunner().emitBeforeProviderRequest({
+				tools: [{ name: "tool_search", description: "Search", input_schema: {} }],
+			});
+
+			expect(named(toolsOf(output), "weather_forecast")).toMatchObject({
+				name: "weather_forecast",
+				description: "Forecast weather",
+				defer_loading: true,
+			});
+		} finally {
+			harness.cleanup();
+		}
+	});
+
 	it("injects an inactive searchable extension tool schema with defer_loading", () => {
 		const parameters = { type: "object", properties: { city: { type: "string" } }, required: ["city"] };
 		const payload = { tools: [{ name: "tool_search", description: "search", input_schema: {} }] };
