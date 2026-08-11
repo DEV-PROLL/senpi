@@ -14,6 +14,7 @@ import gptApplyPatchExtension from "./gpt-apply-patch/index.ts";
 import helpExtension from "./help/index.ts";
 import historySearchExtension from "./history-search/index.ts";
 import hooksExtension from "./hooks/index.ts";
+import imageGenExtension from "./imagegen/index.ts";
 import importReproExtension from "./import-repro.ts";
 import lookAtExtension from "./look-at/index.ts";
 import loopGuardExtension from "./loop-guard/index.ts";
@@ -56,6 +57,7 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "hooks", factory: hooksExtension },
 	{ id: "permission-system", factory: permissionSystemExtension },
 	{ id: "gpt-apply-patch", factory: gptApplyPatchExtension },
+	{ id: "imagegen", factory: imageGenExtension },
 	{ id: "prompt-preset", factory: promptPresetExtension },
 	{ id: "todowrite", factory: todowriteExtension },
 	{ id: "redraws", factory: redrawsExtension },

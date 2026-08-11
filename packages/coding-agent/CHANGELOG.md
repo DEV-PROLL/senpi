@@ -33,6 +33,12 @@
 
 ### Added
 
+- Added a credential-gated `generate_image` tool: when an OpenAI-compatible credential exists (a stored OpenAI
+  key, `OPENAI_API_KEY`, or a configured OpenAI-compatible gateway provider), the agent can generate images with
+  `gpt-image-2` saved as files (never overwriting existing ones); without credentials the tool returns structured
+  setup guidance instead of failing ([#813](https://github.com/code-yeongyu/senpi/pull/813)).
+- Added a conditionally contributed `gpt-image-gen` skill with a detailed prompt-crafting guide that is listed
+  only while image-generation credentials exist ([#813](https://github.com/code-yeongyu/senpi/pull/813)).
 - **Extension Tool Search**: Extension tools can opt into a shared searchable catalog by setting `exposure: "search"` on `pi.registerTool()`. Searchable tools stay inactive and cost zero prompt tokens until the model finds them with the shared `tool_search` tool, which promotes matches into the active set for the next model request.
 
 ### Changed
