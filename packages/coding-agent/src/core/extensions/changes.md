@@ -1,5 +1,26 @@
 # Core Extensions Changes
 
+## 2026-08-12 - Extension-owned RPC request handlers
+
+### What changed
+
+- `pi.rpc.handle(name, handler)` registers structured client-to-extension request handlers on the
+  loaded extension generation.
+- `ExtensionRunner.requestRpc()` requires exactly one active handler and rejects unknown,
+  duplicate, empty, and stale-generation requests without invoking the model.
+- `pi.rpc.emit()` now also checks generation liveness before publishing.
+
+### Why
+
+- RPC clients need a direct, typed control path for extension-owned runtime state; encoding controls
+  as slash-command prompts would involve the model and lose request/response semantics.
+- Per-generation ownership prevents captured handlers from surviving extension replacement or
+  reload.
+
+### Expected merge conflict zones
+
+- LOW: `types.ts`, `loader.ts`, and `runner.ts` RPC extension surfaces.
+
 ## 2026-08-11 - Native-deferred catalog tools activate at call time
 
 ### What changed

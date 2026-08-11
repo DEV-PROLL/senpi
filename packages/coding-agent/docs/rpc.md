@@ -948,6 +948,43 @@ Extension rows come directly from the session's loaded resource inventory, not f
 
 In multi-session mode this is a session-scoped command and requires the routing `sessionId`.
 
+### extension_request
+
+Invoke a request handler registered by an extension through `pi.rpc.handle(name, handler)`:
+
+```json
+{
+  "id": "req-42",
+  "type": "extension_request",
+  "name": "acme.job.cancel",
+  "data": {
+    "jobId": "job-42"
+  }
+}
+```
+
+Success returns the extension-owned structured value:
+
+```json
+{
+  "id": "req-42",
+  "type": "response",
+  "command": "extension_request",
+  "success": true,
+  "data": {
+    "cancelled": true
+  }
+}
+```
+
+The request `name` must resolve to exactly one handler in the active extension generation.
+Unknown names, duplicate names, stale generations, handler failures, and empty names return the
+normal `{ type: "response", success: false, error }` envelope. Senpi treats request and response
+data as opaque; the owning extension and client must validate their payloads.
+
+In multi-session mode this command requires the owning routing `sessionId`. The response receives
+the same `sessionId`, and another session's extension handlers are never consulted.
+
 ## Events
 
 Events are streamed to stdout as JSON lines during agent operation. Events do not generally include an `id` field; `bash_execution_update` includes the `id` of its originating `bash` command when one was provided.

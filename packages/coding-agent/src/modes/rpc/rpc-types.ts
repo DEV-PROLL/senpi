@@ -79,6 +79,7 @@ type RpcSessionCommand =
 	// Commands and loaded runtime surfaces
 	| { id?: string; type: "get_commands" }
 	| { id?: string; type: "get_loaded_surfaces" }
+	| { id?: string; type: "extension_request"; name: string; data?: unknown }
 
 	// Auth (task 13) is additive. get_auth_providers, login_api_key and logout
 	// answer synchronously. login_start responds immediately (flow-started) and
@@ -389,6 +390,13 @@ export type RpcResponse =
 			command: "get_loaded_surfaces";
 			success: true;
 			data: { extensions: RpcLoadedExtension[]; mcpServers: RpcLoadedMcpServer[] };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "extension_request";
+			success: true;
+			data: unknown;
 	  }
 
 	// Auth (task 13)

@@ -258,11 +258,7 @@ export function createRpcConnectionHandler(
 		await sink.waitForBackpressure();
 	};
 
-	const success = <T extends RpcCommand["type"]>(
-		id: string | undefined,
-		command: T,
-		data?: object | null,
-	): RpcResponse => {
+	const success = <T extends RpcCommand["type"]>(id: string | undefined, command: T, data?: unknown): RpcResponse => {
 		if (data === undefined) {
 			return { id, type: "response", command, success: true } as RpcResponse;
 		}
@@ -1016,6 +1012,15 @@ export function createRpcConnectionHandler(
 				await requestMcpWireStatus();
 				const inventory = recordLoadedSurfaces(true);
 				return success(id, "get_loaded_surfaces", inventory.data);
+			}
+
+			case "extension_request": {
+				const name = command.name.trim();
+				if (name.length === 0) {
+					return error(id, "extension_request", "Extension RPC request name cannot be empty");
+				}
+				const data = await session.extensionRunner.requestRpc(name, command.data);
+				return success(id, "extension_request", data);
 			}
 
 			// =================================================================
