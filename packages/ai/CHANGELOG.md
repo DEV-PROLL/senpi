@@ -6,6 +6,12 @@
 
 ### Added
 
+- Added an `openai-images` Images API adapter for text-only OpenAI image generations, with canonical `/v1`
+  endpoint normalization, shared credential-header auth, provider-owned retries, usage/cost mapping, and lazy
+  builtin registration.
+- Added a built-in `openai` images provider serving generated `gpt-image-2` and `gpt-image-1.5` catalog entries,
+  authenticated through `OPENAI_API_KEY`.
+
 ### Changed
 
 ### Fixed
