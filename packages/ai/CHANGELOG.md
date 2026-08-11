@@ -10,6 +10,9 @@
 
 ### Fixed
 
+- Provider-specific OAuth availability checks can now reject empty sentinel credentials and recognize usable ambient
+  auth without refreshing or exposing tokens ([#803](https://github.com/code-yeongyu/senpi/pull/803)).
+
 ### Removed
 
 ## [2026.8.11-2] - 2026-08-10

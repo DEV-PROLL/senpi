@@ -365,24 +365,39 @@ class ModelsImpl implements MutableModels {
 		provider: Provider,
 		credential: Credential | undefined,
 	): Promise<AuthCheck | undefined> {
+		const oauth = provider.auth.oauth;
 		if (credential?.type === "oauth") {
-			return provider.auth.oauth ? { source: "OAuth", type: "oauth" } : undefined;
-		}
-		const apiKey = provider.auth.apiKey;
-		if (!apiKey) return undefined;
-		if (apiKey.check) {
+			if (!oauth) return undefined;
+			if (!oauth.check) return { source: "OAuth", type: "oauth" };
 			try {
-				return await apiKey.check({
-					ctx: this.authContext,
-					credential: credential?.type === "api_key" ? credential : undefined,
-				});
+				return await oauth.check({ ctx: this.authContext, credential });
 			} catch (error) {
-				throw new ModelsError("auth", `API key auth check failed for provider ${provider.id}`, { cause: error });
+				throw new ModelsError("auth", `OAuth auth check failed for provider ${provider.id}`, { cause: error });
 			}
 		}
-
-		const resolution = await resolveProviderAuth(provider, this.credentials, this.authContext);
-		return resolution ? { source: resolution.source, type: "api_key" } : undefined;
+		const apiKey = provider.auth.apiKey;
+		if (apiKey) {
+			if (apiKey.check) {
+				try {
+					const result = await apiKey.check({
+						ctx: this.authContext,
+						credential: credential?.type === "api_key" ? credential : undefined,
+					});
+					if (result) return result;
+				} catch (error) {
+					throw new ModelsError("auth", `API key auth check failed for provider ${provider.id}`, { cause: error });
+				}
+			} else {
+				const resolution = await resolveProviderAuth(provider, this.credentials, this.authContext);
+				if (resolution) return { source: resolution.source, type: "api_key" };
+			}
+		}
+		if (!oauth?.check) return undefined;
+		try {
+			return await oauth.check({ ctx: this.authContext });
+		} catch (error) {
+			throw new ModelsError("auth", `OAuth auth check failed for provider ${provider.id}`, { cause: error });
+		}
 	}
 
 	async checkAuth(providerId: string): Promise<AuthCheck | undefined> {

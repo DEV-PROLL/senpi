@@ -429,6 +429,40 @@ describe("Models runtime", () => {
 		expect((await models.getAvailable("ambient")).map((model) => model.provider)).toEqual(["ambient"]);
 	});
 
+	it("uses an OAuth availability check for stored and ambient auth", async () => {
+		const credentials = new InMemoryCredentialStore();
+		const check = vi.fn(async ({ credential }: { credential?: { access: string } }) =>
+			credential?.access === "usable" ? { source: "checked", type: "oauth" as const } : undefined,
+		);
+		const models = createModels({ credentials });
+		models.setProvider(
+			testProvider({
+				id: "oauth",
+				auth: { oauth: testOAuth({ check } as unknown as Partial<OAuthAuth>) },
+			}),
+		);
+
+		expect(await models.checkAuth("oauth")).toBeUndefined();
+		expect(check).toHaveBeenCalledTimes(1);
+		expect(check.mock.calls[0]?.[0].credential).toBeUndefined();
+
+		await credentials.modify("oauth", async () => ({
+			type: "oauth",
+			access: "empty",
+			refresh: "refresh",
+			expires: 0,
+		}));
+		expect(await models.checkAuth("oauth")).toBeUndefined();
+
+		await credentials.modify("oauth", async () => ({
+			type: "oauth",
+			access: "usable",
+			refresh: "refresh",
+			expires: 0,
+		}));
+		expect(await models.checkAuth("oauth")).toEqual({ source: "checked", type: "oauth" });
+	});
+
 	it("runs provider login and logout through the credential store", async () => {
 		const credentials = new InMemoryCredentialStore();
 		const apiKey = envKeyAuth(undefined);

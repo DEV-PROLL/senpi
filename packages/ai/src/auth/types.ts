@@ -193,6 +193,13 @@ export interface OAuthAuth {
 	/** Selector label for the subscription login option, e.g. "Sign in with SuperGrok or X Premium". */
 	loginLabel?: string;
 
+	/**
+	 * Side-effect-free availability check. Providers with ambient OAuth or
+	 * sentinel credential envelopes can use this to decide whether they are
+	 * currently usable without refreshing or exposing credentials.
+	 */
+	check?(input: { ctx: AuthContext; credential?: OAuthCredential }): Promise<AuthCheck | undefined>;
+
 	login(interaction: AuthInteraction): Promise<OAuthCredential>;
 
 	/**

@@ -1,5 +1,25 @@
 # AI Source Changes
 
+## 2026-08-11 - Provider-specific OAuth availability checks
+
+### What changed and why
+
+- `OAuthAuth` now supports an optional side-effect-free `check()` hook, symmetric with `ApiKeyAuth.check()`.
+- `Models.checkAuth()` invokes that hook for stored OAuth credentials and ambient no-credential providers. Providers
+  without a hook retain the previous behavior where any matching stored OAuth credential is configured.
+- This lets providers reject sentinel credential envelopes or confirm ambient OAuth without refreshing, resolving, or
+  exposing token material.
+
+### Why this cannot be expressed externally
+
+- Provider availability and model filtering happen inside `Models` before host registries and fallback controllers see
+  the provider, so an extension-only post-filter would leave `checkAuth()` and `getAvailable()` inconsistent.
+
+### Expected merge conflict zones
+
+- LOW: the additive `OAuthAuth.check` contract in `auth/types.ts`.
+- MEDIUM: the auth precedence branches in `models.ts`.
+
 ## 2026-08-09 - Native Anthropic prompt-cache warming primitive
 
 ### What changed and why
