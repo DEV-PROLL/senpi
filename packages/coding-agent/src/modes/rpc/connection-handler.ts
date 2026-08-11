@@ -16,7 +16,9 @@
  */
 
 import * as crypto from "node:crypto";
+import { basename, dirname, extname } from "node:path";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
+import type { AgentSession } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
 import {
@@ -29,6 +31,13 @@ import {
 	pinProviderAccount,
 	removeProviderAccount,
 } from "../../core/extensions/builtin/claude-sdk-oauth/account-management.ts";
+import {
+	isMcpControlInventoryChanged,
+	MCP_CONTROL_INVENTORY_CHANGED_EVENT,
+	MCP_CONTROL_INVENTORY_REQUEST_EVENT,
+	type McpControlInventoryRequest,
+} from "../../core/extensions/builtin/mcp/control-inventory.ts";
+import type { McpWireStatusServer, McpWireStatusSnapshot } from "../../core/extensions/builtin/mcp/service-types.ts";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -44,6 +53,9 @@ import type {
 	RpcCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
+	RpcLoadedExtension,
+	RpcLoadedMcpServer,
+	RpcMcpServerStatus,
 	RpcResponse,
 	RpcSessionState,
 	RpcSlashCommand,
@@ -89,6 +101,58 @@ export interface RpcConnectionHandler {
 	dispose(): Promise<void>;
 }
 
+function loadedExtensionName(path: string): string {
+	const synthetic = /^<(?:builtin|inline):([^>]+)>$/.exec(path);
+	if (synthetic) return synthetic[1];
+	const withoutExtension = basename(path, extname(path));
+	if (withoutExtension !== "index") return withoutExtension;
+	const parent = dirname(path);
+	const parentName = basename(parent);
+	return parentName === "src" || parentName === "dist" ? basename(dirname(parent)) : parentName;
+}
+
+function loadedExtensions(session: AgentSession): RpcLoadedExtension[] {
+	return session.resourceLoader.getExtensions().extensions.map((extension) => ({
+		name: loadedExtensionName(extension.path),
+		path: extension.path,
+		sourceInfo: extension.sourceInfo,
+		enabled: true,
+	}));
+}
+
+function loadedMcpStatus(server: McpWireStatusServer): RpcMcpServerStatus {
+	if (server.status !== undefined) return server.status;
+	if (server.serverInfo !== null) return "connected";
+	if (server.authStatus === "notLoggedIn") return "needs_auth";
+	return "enabled";
+}
+
+function loadedMcpServers(snapshot: McpWireStatusSnapshot): RpcLoadedMcpServer[] {
+	return snapshot.servers.map((server) => ({
+		name: server.name,
+		toolCount: server.tools.length,
+		status: loadedMcpStatus(server),
+		authStatus: server.authStatus,
+	}));
+}
+
+function loadedSurfacesFingerprint(
+	session: AgentSession,
+	extensions: readonly RpcLoadedExtension[],
+	mcpServers: readonly RpcLoadedMcpServer[],
+): string {
+	return JSON.stringify({
+		skills: session.resourceLoader.getSkills().skills.map((skill) => ({
+			name: skill.name,
+			path: skill.filePath,
+			sourceInfo: skill.sourceInfo,
+			enabled: !skill.disableModelInvocation,
+		})),
+		extensions,
+		mcpServers,
+	});
+}
+
 /**
  * Create a per-connection RPC handler bound to one runtime host and one sink.
  *
@@ -106,6 +170,10 @@ export function createRpcConnectionHandler(
 	let session = runtimeHost.session;
 	let unsubscribe: (() => void) | undefined;
 	let unsubscribeBackpressure: (() => void) | undefined;
+	let unsubscribeLoadedSurfaces: (() => void) | undefined;
+	let mcpWireStatus: McpWireStatusSnapshot = { servers: [] };
+	let loadedSurfacesDigest: string | undefined;
+	let suppressLoadedSurfaceEvents = false;
 	const eventOutput = createRpcEventOutputBuffer(sink.writeRaw);
 
 	const tagSessionRecord = <T extends object>(value: T): T | (T & { sessionId: string }) =>
@@ -118,6 +186,53 @@ export function createRpcConnectionHandler(
 	const outputEvent = (event: object) => {
 		eventOutput.enqueueEvent(tagSessionRecord(event));
 	};
+
+	const currentLoadedSurfaces = (): {
+		data: { extensions: RpcLoadedExtension[]; mcpServers: RpcLoadedMcpServer[] };
+		digest: string;
+	} => {
+		const extensions = loadedExtensions(session);
+		const mcpServers = loadedMcpServers(mcpWireStatus);
+		return {
+			data: { extensions, mcpServers },
+			digest: loadedSurfacesFingerprint(session, extensions, mcpServers),
+		};
+	};
+
+	const recordLoadedSurfaces = (emitChange: boolean): ReturnType<typeof currentLoadedSurfaces> => {
+		const current = currentLoadedSurfaces();
+		const changed = loadedSurfacesDigest !== undefined && loadedSurfacesDigest !== current.digest;
+		loadedSurfacesDigest = current.digest;
+		if (emitChange && changed && !suppressLoadedSurfaceEvents) {
+			outputEvent({ type: "loaded_surfaces_changed" });
+		}
+		return current;
+	};
+
+	const requestMcpWireStatus = async (): Promise<void> => {
+		let response: Promise<McpWireStatusSnapshot> | undefined;
+		const request: McpControlInventoryRequest = {
+			sessionId: session.sessionId,
+			respond(snapshot) {
+				response ??= snapshot;
+			},
+		};
+		session.resourceLoader.emitExtensionEvent?.(MCP_CONTROL_INVENTORY_REQUEST_EVENT, request);
+		mcpWireStatus = response === undefined ? { servers: [] } : await response;
+	};
+
+	const subscribeLoadedSurfaceEvents = (): void => {
+		unsubscribeLoadedSurfaces?.();
+		unsubscribeLoadedSurfaces = session.resourceLoader.onExtensionEvent?.(
+			MCP_CONTROL_INVENTORY_CHANGED_EVENT,
+			(data) => {
+				if (!isMcpControlInventoryChanged(data) || data.sessionId !== session.sessionId) return;
+				mcpWireStatus = data.snapshot;
+				if (!suppressLoadedSurfaceEvents) recordLoadedSurfaces(true);
+			},
+		);
+	};
+
 	const unsubscribeProviderAccountEvents = subscribeProviderAccountEvents((event) => {
 		if (event.type === "accounts_changed") {
 			outputEvent({ type: "auth_accounts_changed", provider: event.provider });
@@ -396,49 +511,79 @@ export function createRpcConnectionHandler(
 		},
 	});
 
+	const refreshLoadedSurfacesAfter = async (operation: () => Promise<void>, resetMcp: boolean): Promise<void> => {
+		const previousDigest = loadedSurfacesDigest;
+		const wasSuppressed = suppressLoadedSurfaceEvents;
+		suppressLoadedSurfaceEvents = true;
+		if (resetMcp) mcpWireStatus = { servers: [] };
+		try {
+			await operation();
+			await requestMcpWireStatus();
+			loadedSurfacesDigest = currentLoadedSurfaces().digest;
+		} finally {
+			suppressLoadedSurfaceEvents = wasSuppressed;
+		}
+		if (!wasSuppressed && previousDigest !== undefined && previousDigest !== loadedSurfacesDigest) {
+			outputEvent({ type: "loaded_surfaces_changed" });
+		}
+	};
+
 	runtimeHost.setRebindSession(async () => {
 		await rebindSession();
 	});
 
 	const rebindSession = async (): Promise<void> => {
+		unsubscribeLoadedSurfaces?.();
 		session = runtimeHost.session;
-		await session.bindExtensions({
-			uiContext: createExtensionUIContext(),
-			mode: "rpc",
-			commandContextActions: {
-				waitForIdle: () => session.agent.waitForIdle(),
-				newSession: async (options) => runtimeHost.newSession(options),
-				fork: async (entryId, forkOptions) => {
-					const result = await runtimeHost.fork(entryId, forkOptions);
-					return { cancelled: result.cancelled };
-				},
-				navigateTree: async (targetId, options) => {
-					const result = await session.navigateTree(targetId, {
-						summarize: options?.summarize,
-						customInstructions: options?.customInstructions,
-						replaceInstructions: options?.replaceInstructions,
-						label: options?.label,
-					});
-					return { cancelled: result.cancelled };
-				},
-				switchSession: async (sessionPath, options) => {
-					return runtimeHost.switchSession(sessionPath, options);
-				},
-				reload: async () => {
-					await session.reload();
-				},
-			},
-			shutdownHandler: () => {
-				if (options.shutdownHandler) {
-					options.shutdownHandler();
-				} else {
-					shutdownRequested = true;
-				}
-			},
-			onError: (err) => {
-				output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
-			},
-		});
+		subscribeLoadedSurfaceEvents();
+		await refreshLoadedSurfacesAfter(
+			() =>
+				session.bindExtensions({
+					uiContext: createExtensionUIContext(),
+					mode: "rpc",
+					commandContextActions: {
+						waitForIdle: () => session.agent.waitForIdle(),
+						newSession: async (options) => runtimeHost.newSession(options),
+						fork: async (entryId, forkOptions) => {
+							const result = await runtimeHost.fork(entryId, forkOptions);
+							return { cancelled: result.cancelled };
+						},
+						navigateTree: async (targetId, options) => {
+							const result = await session.navigateTree(targetId, {
+								summarize: options?.summarize,
+								customInstructions: options?.customInstructions,
+								replaceInstructions: options?.replaceInstructions,
+								label: options?.label,
+							});
+							return { cancelled: result.cancelled };
+						},
+						switchSession: async (sessionPath, options) => {
+							return runtimeHost.switchSession(sessionPath, options);
+						},
+						reload: async () => {
+							await refreshLoadedSurfacesAfter(async () => {
+								await session.reload();
+							}, false);
+						},
+					},
+					shutdownHandler: () => {
+						if (options.shutdownHandler) {
+							options.shutdownHandler();
+						} else {
+							shutdownRequested = true;
+						}
+					},
+					onError: (err) => {
+						output({
+							type: "extension_error",
+							extensionPath: err.extensionPath,
+							event: err.event,
+							error: err.error,
+						});
+					},
+				}),
+			true,
+		);
 
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
@@ -856,6 +1001,12 @@ export function createRpcConnectionHandler(
 				return success(id, "get_commands", { commands });
 			}
 
+			case "get_loaded_surfaces": {
+				await requestMcpWireStatus();
+				const inventory = recordLoadedSurfaces(true);
+				return success(id, "get_loaded_surfaces", inventory.data);
+			}
+
 			// =================================================================
 			// Auth (task 13)
 			// =================================================================
@@ -978,8 +1129,10 @@ export function createRpcConnectionHandler(
 		unsubscribeProviderAccountEvents();
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
+		unsubscribeLoadedSurfaces?.();
 		unsubscribe = undefined;
 		unsubscribeBackpressure = undefined;
+		unsubscribeLoadedSurfaces = undefined;
 		if (options.disposeRuntime !== false) {
 			await runtimeHost.dispose();
 		}

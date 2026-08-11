@@ -19,6 +19,10 @@
 
 ### New Features
 
+- Multi-session RPC clients can read loaded extensions and live MCP server inventory with
+  `get_loaded_surfaces`, and receive `loaded_surfaces_changed` invalidations when skills, extensions, or MCP
+  inventory changes ([#805](https://github.com/code-yeongyu/senpi/pull/805)).
+
 ### Breaking Changes
 
 ### Added
