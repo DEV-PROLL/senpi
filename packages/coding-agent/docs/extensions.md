@@ -1416,6 +1416,29 @@ Use this for extension-to-client state such as progress snapshots. It is separat
 extension-local event-bus communication and must not carry secrets, prompts, transcripts, or other
 data the client did not explicitly opt into receiving.
 
+### pi.rpc.handle(name, handler)
+
+Register one structured request handler that an RPC client can invoke without turning the request
+into a model prompt:
+
+```typescript
+pi.rpc.handle("acme.job.cancel", async (data) => {
+  const input = CancelJobInput.parse(data);
+  await cancelJob(input.jobId);
+  return { cancelled: true };
+});
+```
+
+`name` must be non-empty and unique across the loaded extension generation. The handler receives
+opaque `unknown` data and may return any JSON-serializable value synchronously or asynchronously.
+Extensions own validation for their request names; Senpi owns request correlation, multi-session
+routing, stale-generation rejection, and bounded unknown/duplicate-name errors.
+
+Use this for trusted RPC-client controls over extension-owned state. Do not use slash-command
+prompts as a control transport: `pi.rpc.handle` executes directly without invoking the model. An
+older Senpi host that does not expose `handle` can be supported by feature-detecting the method
+before registration.
+
 ### pi.registerTool(definition)
 
 Register a custom tool callable by the LLM. See [Custom Tools](#custom-tools) for full details.

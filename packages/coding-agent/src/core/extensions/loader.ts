@@ -566,12 +566,24 @@ function createExtensionAPI(
 
 		rpc: {
 			emit(name, data) {
+				runtime.assertActive();
 				const normalizedName = name.trim();
 				if (normalizedName.length === 0) throw new Error("RPC extension event name must not be empty");
 				eventBus.emit(EXTENSION_RPC_EVENT_CHANNEL, {
 					name: normalizedName,
 					data,
 				} satisfies ExtensionRpcEvent);
+			},
+			handle(name, handler) {
+				runtime.assertActive();
+				const normalizedName = name.trim();
+				if (normalizedName.length === 0) throw new Error("RPC extension request name must not be empty");
+				const handlers = extension.rpcHandlers ?? new Map();
+				if (handlers.has(normalizedName)) {
+					throw new Error(`RPC extension request handler already registered: ${normalizedName}`);
+				}
+				handlers.set(normalizedName, handler);
+				extension.rpcHandlers = handlers;
 			},
 		},
 		events: eventBus,
@@ -644,6 +656,7 @@ function createExtension(extensionPath: string, resolvedPath: string, registrati
 		messageRenderers: new Map(),
 		entryRenderers: undefined,
 		commands: new Map(),
+		rpcHandlers: new Map(),
 		flags: new Map(),
 		shortcuts: new Map(),
 		mcpServers: new Map(),

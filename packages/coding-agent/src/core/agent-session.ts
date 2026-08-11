@@ -5740,8 +5740,12 @@ export class AgentSession {
 			const removed = oldExtensionIdentities.filter(
 				(extension) => !newExtensionResolvedPaths.has(extension.resolvedPath),
 			);
-			if (removed.length > 0) {
-				await oldExtensionRunner.emit({ type: "session_extensions_removed", reason: "reload", removed });
+			try {
+				if (removed.length > 0) {
+					await oldExtensionRunner.emit({ type: "session_extensions_removed", reason: "reload", removed });
+				}
+			} finally {
+				oldExtensionRunner.invalidate("stale extension generation after reload");
 			}
 			time("runtime", "reload");
 		}

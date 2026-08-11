@@ -1,5 +1,28 @@
 # changes
 
+## Extension request RPC command (2026-08-12)
+
+### What changed
+
+- Added the session-scoped `extension_request` command and structured success/error response.
+- `RpcClient.requestExtension()` exposes the command through the public client.
+- Existing multi-session routing tags the response with the owning `sessionId`.
+
+### Why
+
+- Capability-gated `extension_event` records cover extension-to-client state, but interactive
+  extension controls also need a direct client-to-extension request path that does not become a
+  model prompt.
+
+### Why extension system couldn't handle this
+
+- Request ids, multi-session routing, JSONL response serialization, and public client correlation
+  are owned by the built-in RPC transport.
+
+### Expected merge conflict zones
+
+- MEDIUM: `rpc-types.ts`, `connection-handler.ts`, and `rpc-client.ts`.
+
 ## Multi-session open failure details (2026-08-07)
 
 ### What changed

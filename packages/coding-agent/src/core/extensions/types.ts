@@ -1846,14 +1846,22 @@ export interface ExtensionAPI {
 	 */
 	unregisterProvider(name: string): void;
 
-	/** Emit structured extension data to RPC clients that explicitly opt in. */
+	/**
+	 * Exchange structured extension-owned data with RPC clients.
+	 *
+	 * `emit` is fire-and-forget server -> client delivery. `handle` registers a
+	 * client -> extension request handler owned by this extension generation.
+	 */
 	rpc: {
 		emit(name: string, data: unknown): void;
+		handle(name: string, handler: ExtensionRpcRequestHandler): void;
 	};
 
 	/** Shared event bus for extension communication. */
 	events: EventBus;
 }
+
+export type ExtensionRpcRequestHandler = (data: unknown) => unknown | Promise<unknown>;
 
 // ============================================================================
 // Provider Registration Types
@@ -2254,6 +2262,8 @@ export interface Extension {
 	markdownTransformer?: MarkdownTransformer;
 	entryRenderers?: Map<string, EntryRenderer>;
 	commands: Map<string, RegisteredCommand>;
+	/** Optional for compatibility with extension records created before RPC requests. */
+	rpcHandlers?: Map<string, ExtensionRpcRequestHandler>;
 	flags: Map<string, ExtensionFlag>;
 	shortcuts: Map<KeyId, ExtensionShortcut>;
 	mcpServers: Map<string, RegisteredMcpServerDeclaration>;

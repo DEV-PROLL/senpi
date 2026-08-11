@@ -958,6 +958,27 @@ export class ExtensionRunner {
 		return this.resolveRegisteredCommands().find((command) => command.invocationName === name);
 	}
 
+	async requestRpc(name: string, data: unknown): Promise<unknown> {
+		this.assertActive();
+		const normalizedName = name.trim();
+		if (normalizedName.length === 0) {
+			throw new Error("Extension RPC request name must not be empty");
+		}
+		const matches = this.extensions.flatMap((extension) => {
+			const handler = extension.rpcHandlers?.get(normalizedName);
+			return handler === undefined ? [] : [handler];
+		});
+		if (matches.length === 0) {
+			throw new Error(`Unknown extension RPC request: ${normalizedName}`);
+		}
+		if (matches.length > 1) {
+			throw new Error(`Multiple extension RPC request handlers registered: ${normalizedName}`);
+		}
+		const result = await matches[0]?.(data);
+		this.assertActive();
+		return result;
+	}
+
 	/**
 	 * Request a graceful shutdown. Called by extension tools and event handlers.
 	 * The actual shutdown behavior is provided by the mode via bindExtensions().

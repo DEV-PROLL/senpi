@@ -460,6 +460,16 @@ export class RpcClient {
 		return this.getData<{ commands: RpcSlashCommand[] }>(response).commands;
 	}
 
+	/** Invoke one extension-owned RPC request handler and return its structured result. */
+	async requestExtension<T = unknown>(name: string, data?: unknown): Promise<T> {
+		const response = await this.send({
+			type: "extension_request",
+			name,
+			...(data === undefined ? {} : { data }),
+		});
+		return this.getData<T>(response);
+	}
+
 	/** List safe metadata for the named provider's configured account slots. */
 	async getProviderAccounts(provider: string): Promise<RpcProviderAccount[]> {
 		const response = await this.send({ type: "get_provider_accounts", provider });
