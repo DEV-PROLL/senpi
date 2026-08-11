@@ -1,5 +1,26 @@
 # goal Extension Changes
 
+## Explicit resume revives completed goals (2026-08-11)
+
+### What changed
+
+- User-originated status mutations may transition a completed goal back to `active`, so `/goal resume` and app-server `thread/goal/set {status:"active"}` revive the existing goal and queue the normal continuation path.
+- Resuming clears `completedAt`, stamps `lastStartedAt`, and resets persisted continuation streak state through the existing status-transition behavior.
+- Model-originated transitions remain unchanged, `complete -> paused` remains illegal, and restart-resume prompting still excludes completed goals.
+
+### Why
+
+Codex permits an explicit user action to reactivate a completed thread goal. Senpi parsed `/goal resume` and wired continuation delivery correctly, but its user transition guard rejected `complete -> active` before that path could run.
+
+### Why this is not extension-only
+
+The transition guard is private to the builtin goal store and controls both the command and app-server wire paths. An external extension cannot authorize a new persisted status edge.
+
+### Merge-conflict zones
+
+- LOW in `transitions.ts` around the user transition set.
+- LOW in goal store and command-path tests covering completed-goal resume.
+
 ## Serialized goal mutations and stale-continuation cancellation (2026-08-10)
 
 ### What changed
