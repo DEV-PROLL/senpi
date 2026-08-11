@@ -30,6 +30,7 @@ const apitopiaToolSchemaRejectionMessage =
 	'500 data: {"error":{"message":"500 server_error: Invalid request: tools.function.parameters.type is required and must be \\"object\\"","type":"server_error","code":500,"status":500,"statusCode":500,"isRetryable":true}}\n\ndata:[DONE]\n\n';
 const moonshotToolSchemaRejectionMessage =
 	"500 server_error: Invalid request: tools.0.function.parameters: invalid tool schema";
+const gatewayModelRequestRejectedMessage = "Error: The model request was rejected. Check the request and try again.";
 
 describe("provider retry classification", () => {
 	it("matches explicit provider retry guidance", () => {
@@ -273,6 +274,19 @@ describe("provider retry classification", () => {
 		).toBe(true);
 	});
 
+	it("matches gateway-side model-request rejections as transient", () => {
+		// Gateways/proxies answer with "The model request was rejected. Check the
+		// request and try again." when the upstream lane is momentarily unable to
+		// serve the request (observed in a live session, 2026-08-11). The wording
+		// carries no request-shape or quota semantics, so the bounded retry
+		// policy is exactly what should absorb it instead of killing the turn.
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: gatewayModelRequestRejectedMessage }),
+			),
+		).toBe(true);
+	});
+
 	it("keeps provider limit errors non-retryable", () => {
 		expect(
 			isRetryableAssistantError(
@@ -362,6 +376,21 @@ describe("retryAssistantCall", () => {
 		expect(res.content).toEqual([{ type: "text", text: "recovered" }]);
 		expect(produce).toHaveBeenCalledTimes(3);
 		expect(onRetryFinished).toHaveBeenCalledWith(true, 2);
+	});
+
+	it("retries a model-request rejection once then returns the recovered response", async () => {
+		let n = 0;
+		const produce = vi.fn(async () => {
+			n++;
+			return n < 2
+				? fauxAssistantMessage("", { stopReason: "error", errorMessage: gatewayModelRequestRejectedMessage })
+				: fauxAssistantMessage("recovered");
+		});
+		const onRetryScheduled = vi.fn();
+		const res = await retryAssistantCall(produce, enabled, undefined, { onRetryScheduled });
+		expect(res.content).toEqual([{ type: "text", text: "recovered" }]);
+		expect(produce).toHaveBeenCalledTimes(2);
+		expect(onRetryScheduled).toHaveBeenCalledTimes(1);
 	});
 
 	it("reports an aborted retried call as unsuccessful", async () => {

@@ -109,6 +109,15 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"try your request again",
 	"please retry your request",
 
+	// Gateway/proxy-side rejection of the whole model request, e.g. "Error: The
+	// model request was rejected. Check the request and try again." (observed in a
+	// live session, 2026-08-11). The upstream lane is momentarily unable to serve
+	// the request; the wording carries no request-shape or quota semantics, so the
+	// bounded retry policy absorbs it instead of killing the turn. Anchored on
+	// "model request" so unrelated rejections (permission denials, request-shape
+	// errors) stay terminal.
+	"model request was rejected",
+
 	// Anthropic server-tool pairing rejections, e.g. "`web_search` tool use with id
 	// `srvtoolu_...` was found without a corresponding `web_search_tool_result`
 	// block". A turn closed before its deferred server tool could answer leaves
