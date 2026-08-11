@@ -1,5 +1,21 @@
 # imagegen builtin — changes
 
+## Cross-layer arbitration regression suite (2026-08-11)
+
+### What changed
+
+- Added `test/suite/regressions/imagegen-arbitration.test.ts`: a 23-row truth-table regression covering the full matrix of (credentials: none | gateway | native) × (model: official-responses | proxied-responses | official+compat-off | proxied+compat-on | azure | completions) × (enable-env: on | off). Each row asserts all three consumers — native injector (payload tools), client tool (execute behavior), and skill contribution (resources_discover + before_agent_start section) — agree on the active image-generation surface.
+- Includes four summary invariant checks (bypass ⟺ native injection ⟺ native section; skill ⟺ creds; no-creds-no-native → missing_config; creds-no-native → live) and a gate-function discrimination test.
+- Mutation proof: flipping `supportsNativeOpenAiImageGeneration` to constant true causes 12 of 28 tests to fail (captured to `w3/t12-mutation-red.txt`); reverting restores all 28 green.
+
+### Why
+
+- The three consumers are wired by separate builtins (imagegen and openai-image-gen) that share state through a narrow seam (`setNativeBypass` + `resolveImageGenAuth`). A regression in one builtin's gate could silently desynchronize them. This truth table locks the invariant so any mutation is caught.
+
+### Merge-conflict zones
+
+- NONE: test file only; no production code changed.
+
 ## Native bypass wiring goes live (2026-08-11)
 
 ### What changed
