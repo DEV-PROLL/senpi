@@ -6,6 +6,8 @@
   `retry_fallback_succeeded` and `auto_retry_end { success: true }`.
 - A fallback provider response such as `Not logged in · Please run /login` can no longer produce the green
   `Fallback model responded` notice merely because its stop reason was not normalized to `error`.
+- A terminal errored fallback response also closes the active retry attempt with `auto_retry_end { success: false }`,
+  so a later successful user turn cannot emit a delayed success notice for the earlier failed fallback.
 
 ### Why this cannot be expressed externally
 

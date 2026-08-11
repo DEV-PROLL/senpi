@@ -1772,6 +1772,12 @@ export class AgentSession {
 				return;
 			}
 
+			if (retryOutcome === "not-handled" && this._retryAttempt > 0 && msg.errorMessage) {
+				const attempt = this._retryAttempt;
+				this._retryAttempt = 0;
+				this._resetHintTierState();
+				this._emit({ type: "auto_retry_end", success: false, attempt, finalError: msg.errorMessage });
+			}
 			this._resolveRetry();
 			retryContinuationBlocked ||= retryOutcome === "blocked";
 			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
