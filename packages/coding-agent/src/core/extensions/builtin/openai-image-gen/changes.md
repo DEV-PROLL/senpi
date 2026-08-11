@@ -1,5 +1,32 @@
 # openai-image-gen builtin — changes
 
+## message_end externalization of native image results (2026-08-11)
+
+### What changed
+
+- Added `externalize.ts` and a `message_end` handler in `index.ts`. Every completed `image_generation_call` provider-native block is decoded, written under `<cwd>/generated-images/`, and REPLACED by a normal text block `Generated image: <relative path>` (plus `Revised prompt: <value>` only when the provider sent one). The handler runs for every assistant message regardless of arbitration state, because whichever path produced the bytes they must not reach history.
+- The base64 block is removed whether or not the write succeeds: a decode or disk failure yields a short `Generated image could not be saved: <reason>.` text instead. Every per-block failure is caught, so no handler exception can ever leave the payload in the message.
+- Filenames: the provider item id when present, else `<responseId>-<outputIndex>`, both run through `sanitizeImageStem`. The extension comes from the decoded magic bytes (png/jpg/webp, default png) because the Responses API does not contractually pin the result encoding.
+- Never overwrites: a taken filename gains a `-2`, `-3`, ... suffix, so a replayed or duplicated item id cannot discard a valid earlier image.
+- `imagegen/paths.ts` now exports `sanitizeImageStem` and `GENERATED_IMAGE_DIRECTORY`; the tool's `sanitizeToolCallId` delegates to the shared helper so the sanitize rule has one owner. `displayPath` is reused for the relative path in the replacement text.
+- Added a specialized `image_generation_call` case to `modes/provider-native-rendering.ts` rendering status, decoded byte count, and revised prompt ONLY.
+
+### Why
+
+- `AssistantMessage` has no image content variant, so a native result can only survive as base64 inside a providerNative block. Session history is persisted from the finalized message, so without this pass a 24 MiB payload would be written to the session file and replayed into every later context.
+- `message_end` is the correct seam: replacements preserve the role and are applied in place before `sessionManager.appendMessage(event.message)` runs, so agent state, listeners, and persistence all observe the externalized message.
+- The renderer is defense in depth. It shows a byte count rather than the payload and deliberately shows NO path: it only ever receives the pre-replacement block, and the file does not exist until `message_end` runs.
+
+### Why not core
+
+- Disk IO for a provider-specific item type is builtin policy; `packages/ai` stays browser-safe and owns no filesystem access.
+
+### Merge-conflict zones
+
+- LOW: `externalize.ts` is new and owned by this change.
+- MEDIUM: `modes/provider-native-rendering.ts` is shared across renderers; preserve sibling subtype cases when resolving conflicts.
+- MEDIUM: `imagegen/paths.ts` is imported cross-builtin; keep `sanitizeImageStem`, `GENERATED_IMAGE_DIRECTORY`, and `displayPath` signature-stable.
+
 ## Native image_generation injection with arbitration (2026-08-11)
 
 ### What changed

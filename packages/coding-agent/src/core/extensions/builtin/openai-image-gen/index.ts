@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { resolveImageGenAuth } from "../imagegen/auth.ts";
 import { imageGenRegistryOverride, setNativeBypass } from "../imagegen/state.ts";
+import { externalizeNativeImages } from "./externalize.ts";
 import {
 	isOpenAiImageGenEnabled,
 	type NativeImageGenTarget,
@@ -85,6 +86,14 @@ export default function openaiImageGenExtension(pi: ExtensionAPI): void {
 		await ensureFresh(ctx.model, ctx);
 		if (state.kind !== "native") return undefined;
 		return { systemPrompt: `${event.systemPrompt}\n${OPENAI_IMAGE_GEN_SECTION}` };
+	});
+
+	// Runs for every assistant message regardless of arbitration state: whichever
+	// path produced the bytes, they must never reach session history.
+	pi.on("message_end", async (event, ctx) => {
+		if (event.message.role !== "assistant") return undefined;
+		const message = await externalizeNativeImages(event.message, ctx.cwd);
+		return message === undefined ? undefined : { message };
 	});
 
 	pi.on("session_shutdown", async () => {
