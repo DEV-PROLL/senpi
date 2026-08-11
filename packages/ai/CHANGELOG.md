@@ -10,6 +10,9 @@
 
 ### Fixed
 
+- Gateway/provider failures reported as `The model request was rejected. Check the request and try again.` now go
+  through the configured bounded retry policy instead of failing immediately or burning the fallback chain
+  ([#806](https://github.com/code-yeongyu/senpi/pull/806)).
 - `OAuthAuth` accepts an optional availability `check` that `checkProviderAuth` consults in the stored-OAuth
   branch, so a provider whose stored credential does not by itself imply usability (for example a zero-account
   sentinel) is no longer reported as configured. When `check` is absent, behavior is unchanged
