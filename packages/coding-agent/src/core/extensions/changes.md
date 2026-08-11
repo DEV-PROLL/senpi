@@ -1,5 +1,26 @@
 # Core Extensions Changes
 
+## 2026-08-11 - Lazy activation honors per-tool hard stops
+
+### What changed
+
+- `executeTool(..., { activateInactiveTool: true })` now checks the winning definition before invoking lazy activators.
+- Definitions with `allowLazyActivation: false` return the existing `inactive_tool` error without calling any activator.
+- Default-enabled lazy activation and explicit `setActiveTools()` activation retain their existing behavior.
+
+### Why
+
+- The declarative hard stop must apply before extension or shared-search activators can produce side effects.
+- Already-active tools remain executable because the flag governs lazy promotion, not active-set permissions.
+
+### Why this cannot be expressed externally
+
+- Core owns winning-definition resolution and the ordered lazy-activator dispatch used by every execution caller.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` `_activateLazyTool` as shared tool-search activation wiring lands.
+
 ## 2026-08-11 - Reload continuity follows tool ownership
 
 ### What changed

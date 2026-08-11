@@ -2335,8 +2335,16 @@ export class AgentSession {
 		};
 	}
 
-	/** Lets a registering extension activate its own inactive tool on demand; it owns eligibility. */
+	/**
+	 * Lazily activate a registered inactive tool.
+	 *
+	 * Resolution order is deliberate: resolve the winning definition and enforce its
+	 * `allowLazyActivation` hard stop, then invoke activators in registration order.
+	 * The caller re-resolves the tool from the active registry before execution.
+	 */
 	private _activateLazyTool(toolName: string): boolean {
+		const definition = this._toolDefinitions.get(toolName)?.definition;
+		if (!definition || !normalizeToolExposure(definition).allowLazyActivation) return false;
 		return this._lazyToolActivators.some((activate) => activate(toolName));
 	}
 
