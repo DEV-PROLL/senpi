@@ -23,6 +23,31 @@ The lane decision lives inside the builtin provider's own `queryWithAuthLane`/`m
 
 LOW in `auth-lane.ts` (new `resolveEffectiveLane` + `managedPool` lane resolution); LOW in `oauth-login.ts` (`readSettings` dep + lane-aware `check`); LOW in `index.ts` (one new import + `readSettings` wiring); LOW in `options.ts` (one fallback literal). LOW in `test/claude-sdk-oauth-auth-status.test.ts` and `test/suite/regressions/6784-claude-sdk-oauth-default-lane.test.ts`.
 
+## 2026-08-12 - Restore request auth for the ambient lane
+
+- Regression from 2acbb6e0c ("Require a real OAuth login for runtime availability"), which removed the
+  `apiKey: "claude-sdk-oauth-managed"` registration placeholder. That placeholder was the provider's only route to
+  api-key auth, and `resolveProviderAuth()` reads ambient credentials exclusively through `apiKey.resolve()`.
+  Removing it left the provider registering `oauth` alone, so with no stored account every request failed
+  `Provider is not configured: claude-sdk-oauth` — including the automatic `session_title_generation` call, which
+  surfaced the error on session start before the user typed anything.
+- The availability check kept accepting an environment token or a logged-in Claude CLI, so those users still had
+  `claude-sdk-oauth` models offered and selected. Availability and resolution disagreed, and no configuration could
+  fix it: only a stored credential was ever consulted, while `queryWithAuthLane` has always supported an `ambient`
+  lane that `managedPool` selects by default.
+- `createOAuthConfig` now exposes `resolveAmbient()`, returning the sentinel access field when the provider is
+  usable without a stored credential. `check()` and `resolveAmbient()` share one `configuredFor()` predicate — the
+  lane resolution introduced by the entry above, factored out — so availability and resolution cannot drift apart
+  again. This does not restore the false availability 2acbb6e0c fixed: resolution applies the same lane rules and
+  the same real probe as `check()`, where the removed literal reported configured unconditionally.
+- `availability.ts` memoises the ambient probe (30s TTL, shared in-flight read, rejections uncached). The probe
+  spawns the Claude binary at roughly 200-650ms and now sits on the per-request auth path rather than only on
+  catalog refresh.
+- This cannot be implemented by an external extension: the composer discards a provider's ambient credentials
+  before `Models.getAuth()` runs, so the resolution path must exist in provider composition.
+- Expected merge conflict zones: LOW in `oauth-login.ts` and `availability.ts`; LOW in the focused ambient
+  resolution and probe-cache tests.
+
 ## 2026-08-11 - Require a real OAuth login for runtime availability
 
 - Removed the literal `apiKey: "claude-sdk-oauth-managed"` registration placeholder. Provider composition treated

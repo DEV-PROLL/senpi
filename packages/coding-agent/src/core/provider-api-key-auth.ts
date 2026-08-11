@@ -35,7 +35,15 @@ export function composeApiKeyAuth(
 	const oauth = extension?.oauth ?? base?.auth.oauth;
 	const rawHeaders = configuredHeaders(config, extension);
 	const headerSource = headerAuthResolutionSource(config?.headers, extension?.headers);
-	if (!inherited && rawKey === undefined && !headerSource && oauth) return undefined;
+	if (!inherited && rawKey === undefined && !headerSource && oauth) {
+		// An OAuth provider with no key, no headers and no base normally gets no
+		// api-key auth at all. That is right for providers whose only credential
+		// is the stored one, but `resolveProviderAuth` reads ambient credentials
+		// exclusively through `apiKey.resolve()`: denying it here strands
+		// providers whose credentials live outside auth.json, which pass
+		// `check()` and then fail every request as "Provider is not configured".
+		return ambientOnlyAuth(oauth);
+	}
 	const authHeader = extension?.authHeader ?? config?.authHeader ?? false;
 	return {
 		name: inherited?.name ?? "API key",
@@ -81,6 +89,34 @@ export function composeApiKeyAuth(
 				source: result?.source ?? headerSource,
 			};
 		},
+	};
+}
+
+type AmbientResolver = (input: { ctx: AuthContext }) => Promise<AuthResult | undefined>;
+
+function ambientResolverOf(oauth: unknown): AmbientResolver | undefined {
+	const candidate = (oauth as { resolveAmbient?: unknown } | undefined)?.resolveAmbient;
+	return typeof candidate === "function" ? (candidate as AmbientResolver) : undefined;
+}
+
+/**
+ * Api-key auth for an OAuth provider that also accepts ambient credentials.
+ * Login stays on the OAuth flow, so this deliberately omits `login` — it exists
+ * only so ambient credentials have a resolution path. A stored credential wins:
+ * `resolveProviderAuth` never reaches the ambient branch once one exists, and
+ * the guard here keeps that true if some other caller passes one in.
+ */
+function ambientOnlyAuth(oauth: unknown): ApiKeyAuth | undefined {
+	const resolveAmbient = ambientResolverOf(oauth);
+	if (!resolveAmbient) return undefined;
+	return {
+		name: (oauth as { name?: string }).name ?? "Ambient credentials",
+		check: async ({ ctx, credential }) => {
+			if (credential) return undefined;
+			const resolved = await resolveAmbient({ ctx });
+			return resolved ? { type: "oauth", source: resolved.source } : undefined;
+		},
+		resolve: async ({ ctx, credential }) => (credential ? undefined : resolveAmbient({ ctx })),
 	};
 }
 

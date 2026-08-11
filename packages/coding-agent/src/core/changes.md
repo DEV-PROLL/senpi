@@ -19,6 +19,34 @@
 
 - LOW: `provider-display-names.ts` display-name map.
 
+## Compose ambient api-key auth for OAuth providers (2026-08-12)
+
+### What changed
+
+- `ExtensionOAuthConfig` (`provider-composer.ts`) gained an additive optional `resolveAmbient()` hook for providers
+  whose credentials live outside `auth.json` — an environment token, or a CLI the provider shells out to.
+- `composeApiKeyAuth` (`provider-api-key-auth.ts`) previously returned `undefined` for a provider with no inherited
+  auth, no configured key and no configured headers whenever `oauth` was present. It now returns ambient-only
+  api-key auth built from `resolveAmbient()` when the OAuth config supplies one, and still returns `undefined`
+  otherwise. The composed auth deliberately omits `login`, so the OAuth flow keeps ownership of login, and it
+  declines whenever a credential is passed, so a stored credential always wins.
+
+### Why this cannot be expressed externally
+
+- `resolveProviderAuth()` in `pi-ai` reads ambient credentials exclusively through `provider.auth.apiKey.resolve()`.
+  A provider that registers only `oauth` is therefore unresolvable with an empty `auth.json`, no matter what the
+  extension does: the composer discards its ambient credentials before `Models.getAuth()` runs. Availability and
+  resolution then disagree, because `Models.checkProviderAuth()` falls back to `oauth.check()` with no credential —
+  the provider advertises models it cannot authenticate, and every request fails
+  `Provider is not configured: <id>`.
+- This restores the resolution path that `apiKey: "claude-sdk-oauth-managed"` provided before 2acbb6e0c, without
+  restoring its false availability: the synthesized auth resolves only when the provider's own ambient probe says so,
+  where the literal sentinel reported configured unconditionally.
+
+### Expected merge conflict zones
+
+- LOW: the additive `ExtensionOAuthConfig.resolveAmbient` field in `provider-composer.ts`.
+- LOW: the early-return branch at the top of `composeApiKeyAuth` in `provider-api-key-auth.ts`.
 
 ## Retire extension generations after reload notifications (2026-08-12)
 
