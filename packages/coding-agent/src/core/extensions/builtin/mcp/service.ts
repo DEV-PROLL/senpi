@@ -73,6 +73,8 @@ export class McpService {
 	readonly #interactiveAuthServers = new Set<string>();
 	readonly #promptCommandNames = new Set<string>();
 	readonly #registrationListeners = new Set<() => void>();
+	readonly #wireStatusListeners = new Set<(sessionId: string | undefined, snapshot: McpWireStatusSnapshot) => void>();
+	#wireStatusRefreshQueue: Promise<void> = Promise.resolve();
 	#refreshActiveSetWhenNoTools = false;
 	#tierBRegistration: McpSessionRegistration | undefined;
 	#historyScanned = false;
@@ -117,7 +119,7 @@ export class McpService {
 			// one turn late. Doing it here puts restored tools on the very first
 			// wire payload after a --continue/resume.
 			if (_pi !== undefined) this.#rehydrateFromSessionHistory(ctx);
-			if (shouldCaptureWireStatus(ctx)) await this.#captureWireStatus(ctx.sessionManager?.getSessionId?.());
+			if (shouldCaptureWireStatus(ctx)) await this.refreshWireStatusSnapshot(ctx.sessionManager?.getSessionId?.());
 		});
 		this.#attachQueue = attach.then(
 			() => undefined,
@@ -160,7 +162,7 @@ export class McpService {
 			await this.#syncFromConfig(config, this.#sessionOptions, false, pi, toolRefreshGeneration);
 			await this.#registerDirectTools(pi);
 			if (this.#sessionContext !== null && shouldCaptureWireStatus(this.#sessionContext)) {
-				await this.#captureWireStatus(this.#sessionContext.sessionManager?.getSessionId?.());
+				await this.refreshWireStatusSnapshot(this.#sessionContext.sessionManager?.getSessionId?.());
 			}
 		}
 		return warnings;
@@ -188,6 +190,23 @@ export class McpService {
 	onMcpRegistrationChanged(listener: () => void): () => void {
 		this.#registrationListeners.add(listener);
 		return () => this.#registrationListeners.delete(listener);
+	}
+
+	/** Subscribe to live MCP inventory transitions for session-scoped hosts. */
+	onWireStatusChanged(listener: (sessionId: string | undefined, snapshot: McpWireStatusSnapshot) => void): () => void {
+		this.#wireStatusListeners.add(listener);
+		return () => this.#wireStatusListeners.delete(listener);
+	}
+
+	/** Refresh and return the current session-owned MCP wire inventory. */
+	async refreshWireStatusSnapshot(sessionId?: string): Promise<McpWireStatusSnapshot> {
+		const refresh = this.#wireStatusRefreshQueue.then(() => this.#captureWireStatus(sessionId));
+		this.#wireStatusRefreshQueue = refresh.then(
+			() => undefined,
+			() => undefined,
+		);
+		await refresh;
+		return this.getWireStatusSnapshot(sessionId);
 	}
 
 	/** Reveal skill-owned tools (todo 37): activation is effective the next
@@ -219,6 +238,7 @@ export class McpService {
 		this.#interactiveAuthServers.clear();
 		this.#promptCommandNames.clear();
 		this.#registrationListeners.clear();
+		this.#wireStatusListeners.clear();
 		this.#wireStatusBySession.clear();
 		this.#latestWireStatus = { servers: [] };
 		const entries = [...this.#connections.values()];
@@ -422,10 +442,18 @@ export class McpService {
 			sink,
 		});
 		const unsubscribe = entry.connection.onToolsChanged(() => coalescer.notify());
+		const unsubscribeState = entry.connection.onStateChange(() => {
+			const ctx = this.#sessionContext;
+			if (ctx?.mode !== "rpc") return;
+			void this.refreshWireStatusSnapshot(ctx.sessionManager?.getSessionId?.()).catch((error: unknown) => {
+				entry.logger.error("Failed to refresh MCP control inventory", error);
+			});
+		});
 		entry.disposeListChanged = () => {
 			unsubscribe();
 			coalescer.dispose();
 		};
+		entry.disposeWireStatus = unsubscribeState;
 	}
 
 	// Re-list a server on a coalesced list_changed and re-register: added tools
@@ -459,6 +487,10 @@ export class McpService {
 		this.#tierBRegistration = await registerMcpServiceDirectTools(pi, config, this.#connections.values(), {
 			refreshActiveSetWhenEmpty: this.#refreshActiveSetWhenNoTools,
 		});
+		const ctx = this.#sessionContext;
+		if (ctx?.mode === "rpc") {
+			await this.refreshWireStatusSnapshot(ctx.sessionManager?.getSessionId?.());
+		}
 		for (const listener of this.#registrationListeners) listener();
 		// A (re-)registration recomputes the active set from config alone, so any
 		// promotions recorded in history are worth replaying on the next scan.
@@ -501,8 +533,11 @@ export class McpService {
 				.map((name) => this.#captureWireStatusServer(name, config.servers[name])),
 		);
 		const snapshot: McpWireStatusSnapshot = { servers };
+		const previous = this.getWireStatusSnapshot(sessionId);
 		this.#latestWireStatus = snapshot;
 		if (sessionId !== undefined) this.#wireStatusBySession.set(sessionId, snapshot);
+		if (JSON.stringify(previous) === JSON.stringify(snapshot)) return;
+		for (const listener of this.#wireStatusListeners) listener(sessionId, snapshot);
 	}
 
 	async #captureWireStatusServer(name: string, server: ResolvedMcpServer | undefined): Promise<McpWireStatusServer> {
@@ -519,27 +554,23 @@ export class McpService {
 			const client = connection.client;
 			const version = client.getServerVersion();
 			if (version !== undefined) serverInfo = mapWireServerInfo(version);
-			if (cached === undefined) {
-				try {
-					tools = (
-						await collectAllPages<ListedTool>((cursor) =>
-							client.listTools(cursor === undefined ? {} : { cursor }),
-						)
-					).items;
-				} catch (error: unknown) {
-					if (!(error instanceof Error)) throw error;
-					tools = [];
-				}
-				try {
-					resources = (
-						await collectAllPages<ListedResource>((cursor) =>
-							client.listResources(cursor === undefined ? {} : { cursor }),
-						)
-					).items;
-				} catch (error: unknown) {
-					if (!(error instanceof Error)) throw error;
-					resources = [];
-				}
+			try {
+				tools = (
+					await collectAllPages<ListedTool>((cursor) => client.listTools(cursor === undefined ? {} : { cursor }))
+				).items;
+			} catch (error: unknown) {
+				if (!(error instanceof Error)) throw error;
+				tools = cached?.tools ?? [];
+			}
+			try {
+				resources = (
+					await collectAllPages<ListedResource>((cursor) =>
+						client.listResources(cursor === undefined ? {} : { cursor }),
+					)
+				).items;
+			} catch (error: unknown) {
+				if (!(error instanceof Error)) throw error;
+				resources = cached?.resources ?? [];
 			}
 			try {
 				resourceTemplates = (
@@ -560,6 +591,9 @@ export class McpService {
 			resources: resources.map(mapWireResource),
 			resourceTemplates: resourceTemplates.map(mapWireResourceTemplate),
 			authStatus: wireAuthStatus(entry, server),
+			...(connection?.state === undefined && server?.state === undefined
+				? {}
+				: { status: connection?.state ?? server?.state }),
 		};
 	}
 
@@ -650,7 +684,7 @@ function wireAuthStatus(
 }
 
 function shouldCaptureWireStatus(ctx: McpSessionContext): boolean {
-	return ctx.mode === "app-server";
+	return ctx.mode === "app-server" || ctx.mode === "rpc";
 }
 
 function mapWireServerInfo(info: NonNullable<ReturnType<Client["getServerVersion"]>>): McpWireServerInfo {
@@ -740,6 +774,7 @@ export function shouldDisposeMcpService(reason: SessionShutdownEvent["reason"]):
 
 async function disposeEntryConnection(entry: McpConnectionEntry): Promise<void> {
 	entry.disposeListChanged?.();
+	entry.disposeWireStatus?.();
 	disposeMcpReconnect(entry.connection);
 	disposeMcpConnectionLifecycle(entry.connection);
 	await entry.connection.dispose();

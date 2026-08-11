@@ -889,6 +889,51 @@ Each command has:
 
 **Note**: Built-in TUI commands (`/settings`, `/hotkeys`, etc.) are not included. They are handled only in interactive mode and would not execute if sent via `prompt`.
 
+#### get_loaded_surfaces
+
+Get the extensions and MCP servers loaded by the active runtime. Skills remain available through `get_commands`, where each loaded skill is represented by one `source: "skill"` row.
+
+```json
+{"type": "get_loaded_surfaces"}
+```
+
+Response:
+
+```json
+{
+  "type": "response",
+  "command": "get_loaded_surfaces",
+  "success": true,
+  "data": {
+    "extensions": [
+      {
+        "name": "my-extension",
+        "path": "/home/user/.senpi/agent/extensions/my-extension.ts",
+        "sourceInfo": {
+          "path": "/home/user/.senpi/agent/extensions/my-extension.ts",
+          "source": "auto",
+          "scope": "user",
+          "origin": "top-level"
+        },
+        "enabled": true
+      }
+    ],
+    "mcpServers": [
+      {
+        "name": "filesystem",
+        "toolCount": 12,
+        "status": "connected",
+        "authStatus": "unsupported"
+      }
+    ]
+  }
+}
+```
+
+Extension rows come directly from the session's loaded resource inventory, not from registered slash commands. A commandless extension therefore appears once, and an extension registering several commands is not duplicated. MCP rows come from the live session-owned MCP service and expose its current server state, listed tool count, and non-secret auth status.
+
+In multi-session mode this is a session-scoped command and requires the routing `sessionId`.
+
 ## Events
 
 Events are streamed to stdout as JSON lines during agent operation. Events do not generally include an `id` field; `bash_execution_update` includes the `id` of its originating `bash` command when one was provided.
@@ -918,6 +963,7 @@ Events are streamed to stdout as JSON lines during agent operation. Events do no
 | `summarization_retry_attempt_start` | Retried summarization request starts |
 | `summarization_retry_finished` | Summarization retry loop completes |
 | `extension_error` | Extension threw an error |
+| `loaded_surfaces_changed` | Loaded skills, extensions, or MCP inventory changed; re-read `get_commands` and `get_loaded_surfaces` |
 
 ### agent_start
 
@@ -1185,6 +1231,14 @@ For branch summaries, `source` is `"branchSummary"` and no `reason` is present.
 {
   "type": "summarization_retry_finished"
 }
+```
+
+### loaded_surfaces_changed
+
+Emitted without a request id when the loaded skill, extension, or MCP inventory changes. The event carries no inventory payload; clients re-read `get_commands` for skills and `get_loaded_surfaces` for extensions/MCP, mirroring the app-server `skills/changed` invalidation model.
+
+```json
+{"type": "loaded_surfaces_changed"}
 ```
 
 ### extension_error

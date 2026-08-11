@@ -1,3 +1,27 @@
+## Control protocol exposes loaded extensions and MCP inventory (2026-08-11)
+
+### What changed
+
+- RPC gained the session-scoped `get_loaded_surfaces` request. Extension rows come from
+  `resourceLoader.getExtensions().extensions`, so commandless extensions remain visible and multi-command extensions
+  appear once; skills remain one-row-per-skill through `get_commands`.
+- MCP rows come from the live session-owned MCP service and report server name, tool count, connection/config status,
+  and non-secret auth status. A session-local event-bus bridge preserves multi-session isolation instead of consulting
+  the classic process singleton.
+- RPC emits `loaded_surfaces_changed` when the loaded skill, extension, or MCP snapshot changes. The event is an
+  invalidation notice with no payload, matching the app-server `skills/changed` read-after-notify model.
+
+### Why this cannot be expressed externally
+
+- The control host owns session routing and response/event ordering, while the loaded extension inventory and scoped
+  MCP service are private runtime state. An extension cannot add a correlated control request or safely address another
+  session's service.
+
+### Expected merge conflict zones
+
+- MEDIUM: additive request/event handling in `modes/rpc/rpc-types.ts` and `connection-handler.ts`.
+- LOW: the MCP control-inventory bridge and wire-status refresh hooks under `core/extensions/builtin/mcp/`.
+
 ## Fallback responses with errors no longer emit success (2026-08-11)
 
 ### What changed

@@ -1,5 +1,29 @@
 # mcp Extension Changes
 
+## Session-scoped control inventory bridge (2026-08-11)
+
+### What changed
+- The MCP service now captures wire inventory for RPC sessions as well as app-server threads and serializes explicit
+  refreshes so concurrent connection/catalog transitions cannot overwrite a newer snapshot.
+- Live snapshots include the server's connection/config state and notify session-local listeners only after the
+  machine-readable inventory changes.
+- The builtin registers a private resource-event-bus bridge for the control host to request and subscribe to its own
+  session's snapshot. Lifecycle teardown removes both request and change listeners on reload, replacement, and quit.
+
+### Why
+- Multi-session RPC creates one MCP service inside each provider scope, so the process-global classic getter cannot
+  identify the service belonging to a routing handle. The bridge keeps MCP status/tool inventory attached to the same
+  session that loaded it and prevents cross-session leakage.
+
+### Why extension system couldn't handle this alone
+- The MCP builtin can expose its private service through the extension event bus, but only the RPC host can correlate
+  that inventory with control requests and emit routed invalidation events.
+
+### Expected merge conflict zones
+- LOW: `index.ts` session lifecycle wiring.
+- MEDIUM: `service.ts` wire-status refresh and notification paths.
+- LOW: additive `control-inventory.ts` and status metadata in `service-types.ts`.
+
 ## Strip invalid null-valued MCP schema types (2026-08-04)
 
 ### What changed
