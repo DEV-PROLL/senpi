@@ -1,5 +1,27 @@
 # Core Extensions Changes
 
+## 2026-08-11 - Shared tool-search registration and MCP catalog activation
+
+### What changed
+
+- The tool-search builtin now registers the single reserved `tool_search` definition and keeps it active only while the shared catalog contains searchable documents.
+- The session-scoped service accepts MCP documents and activation hooks, lazily activates either catalog source, and rehydrates v2 plus legacy MCP markers once per catalog generation.
+- Generic searches no longer default to the MCP source; only the legacy `server` argument maps to `source: "mcp"` plus the equivalent group filter.
+
+### Why
+
+- Atomic registration and feeder activation avoid duplicate builtin precedence while preserving model-visible MCP behavior and enabling extension tools through the same search surface.
+- Catalog lifecycle ownership keeps the registered definition resident but removes all prompt cost when no searchable documents exist.
+
+### Why this cannot be expressed externally
+
+- The service coordinates inactive registered tools, active-set replacement, session history, and MCP-owned stub swapping across builtin boundaries.
+
+### Expected merge conflict zones
+
+- HIGH: tool-search `index.ts`/`service.ts` registration and MCP feeder integration.
+- MEDIUM: shared search tool tests and MCP lifecycle fixtures.
+
 ## 2026-08-11 - Lazy activation honors per-tool hard stops
 
 ### What changed

@@ -146,13 +146,13 @@ describe("ToolSearchService", () => {
 		]);
 
 		expect(service.maybeRehydrateFromHistory([{ content: marker }])).toEqual(["weather_forecast"]);
-		expect(state.active).toEqual(["weather_forecast"]);
+		expect(state.active).toEqual(["tool_search", "weather_forecast"]);
 		expect(service.maybeRehydrateFromHistory([{ content: marker }])).toEqual([]);
-		expect(state.setActiveTools).toHaveBeenCalledOnce();
+		expect(state.setActiveTools).toHaveBeenCalledTimes(2);
 
 		tools.push(toolInfo("weather_alerts"));
 		expect(service.maybeRehydrateFromHistory([{ content: marker }])).toEqual(["weather_forecast"]);
-		expect(state.setActiveTools).toHaveBeenCalledTimes(2);
+		expect(state.setActiveTools).toHaveBeenCalledTimes(3);
 	});
 
 	it("authors legacy server argument mapping without registering tool_search", async () => {
@@ -182,7 +182,7 @@ describe("ToolSearchService", () => {
 		expect(state.setActiveTools).not.toHaveBeenCalled();
 	});
 
-	it("loads dormant wiring, catalogs extension tools, lazily promotes, and rehydrates session history", async () => {
+	it("registers shared wiring, catalogs extension tools, lazily promotes, and rehydrates session history", async () => {
 		const tools = [toolInfo("weather_forecast")];
 		const state = runtime(tools);
 		const service = new ToolSearchService(state.runtime);
@@ -214,7 +214,8 @@ describe("ToolSearchService", () => {
 		for (const handler of handlers.get("session_start") ?? []) {
 			handler({ type: "session_start", reason: "resume" } satisfies SessionStartEvent, ctx);
 		}
-		expect(pi.registerTool).not.toHaveBeenCalled();
+		expect(pi.registerTool).toHaveBeenCalledOnce();
+		expect(pi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: "tool_search" }));
 		expect(service.getCatalog()).toEqual([
 			expect.objectContaining({ name: "weather_forecast", source: "extension" }),
 		]);

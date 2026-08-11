@@ -1,5 +1,24 @@
 # mcp Extension Changes
 
+## Shared tool-search catalog feeder (2026-08-11)
+
+### What changed
+- Tier-B MCP registration now feeds MCP tool documents and a stub-aware activation hook into the shared tool-search service instead of registering a separate MCP-owned `tool_search` definition.
+- MCP promotion, eval lazy activation, skill reveal, and ownership-aware/legacy rehydration all route through the same feeder hook.
+- Active-set ordering now identifies sortable tools by shared catalog membership while preserving base-tool reference order; legacy stale MCP registrations are still removed during catalog replacement.
+- The superseded MCP-local search tool, BM25 engine, and lazy-activator modules were removed. Proxy mode now uses the shared BM25 engine without changing its gateway contract.
+
+### Why
+- A single registered search tool must cover both MCP and extension catalogs without duplicate builtin-name precedence or split activation history.
+- Routing every matched name through the MCP hook preserves stub-to-full replacement even when a stub is already active.
+
+### Why extension system couldn't handle this alone
+- MCP retains ownership of exposure policy, naming, proxy mode, stub swapping, skill-carried server reveal, and catalog refresh generations; only the builtin can translate those semantics into the shared catalog contract.
+
+### Expected merge conflict zones
+- HIGH: `expose/tier-b.ts`, `expose/session.ts`, `service.ts`, and `index.ts` around catalog registration and lifecycle wiring.
+- MEDIUM: MCP search, rehydration, and eval test suites now target the shared service.
+
 ## Strip invalid null-valued MCP schema types (2026-08-04)
 
 ### What changed

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-	buildBm25Index as buildMcpBm25Index,
-	type Bm25Doc as McpBm25Doc,
-} from "../../src/core/extensions/builtin/mcp/expose/bm25.ts";
-import {
 	buildBm25Index,
 	normalizeToolName,
 	tokenizeToolText,
@@ -27,23 +23,18 @@ function toolDoc(name: string, overrides: Partial<Omit<ToolSearchDocument, "name
 	};
 }
 
-function mcpDoc(name: string, description: string, server = "docs"): McpBm25Doc {
+function mcpDoc(name: string, description: string, server = "docs"): ToolSearchDocument {
 	const toolName = name.replace(/^mcp_[^_]+_/, "");
-	return { name, toolName, description, server };
-}
-
-function generalizedMcpDoc(doc: McpBm25Doc): ToolSearchDocument {
 	return {
-		name: doc.name,
-		label: doc.toolName,
-		aliases: [],
-		description: doc.description,
+		name,
+		label: toolName,
+		aliases: [toolName],
+		description,
 		keywords: [],
 		source: "mcp",
-		group: doc.server,
-		// Empty ownerLabel preserves the old engine's single server-field contribution.
-		ownerLabel: "",
-		registrationId: `mcp:${doc.server}:${doc.toolName}`,
+		group: server,
+		ownerLabel: server,
+		registrationId: `mcp:${server}:${toolName}`,
 	};
 }
 
@@ -65,7 +56,7 @@ describe("tool-search bm25 tokenizer", () => {
 	});
 });
 
-describe("tool-search bm25 MCP parity", () => {
+describe("tool-search bm25 MCP-shaped documents", () => {
 	const servers = ["docs", "github", "fs", "db", "web"];
 	const pairs = [
 		"get-library",
@@ -79,53 +70,44 @@ describe("tool-search bm25 MCP parity", () => {
 		"fetch-table",
 		"resolve-session",
 	];
-	const corpus: McpBm25Doc[] = [];
-	for (const server of servers) {
-		for (const pair of pairs) {
-			corpus.push({
-				name: `mcp_${server}_${pair}`,
-				toolName: pair,
-				description: `${pair.replace("-", " a ")} on the ${server} server`,
-				server,
-			});
-		}
-	}
-	const mcpIndex = buildMcpBm25Index(corpus);
-	const toolIndex = buildBm25Index(corpus.map(generalizedMcpDoc));
+	const corpus = servers.flatMap((server) =>
+		pairs.map((pair) =>
+			mcpDoc(`mcp_${server}_${pair}`, `${pair.replace("-", " a ")} on the ${server} server`, server),
+		),
+	);
+	const toolIndex = buildBm25Index(corpus);
 
-	for (const query of [
-		"docs search file",
-		"github create record",
-		"fs delete page",
-		"db list issue",
-		"web fetch table",
+	for (const { query, expected } of [
+		{ query: "docs search file", expected: "mcp_docs_search-file" },
+		{ query: "github create record", expected: "mcp_github_create-record" },
+		{ query: "fs delete page", expected: "mcp_fs_delete-page" },
+		{ query: "db list issue", expected: "mcp_db_list-issue" },
+		{ query: "web fetch table", expected: "mcp_web_fetch-table" },
 	]) {
-		it(`preserves MCP ranking order for '${query}'`, () => {
-			expect(resultNames(toolIndex.search(query, 25))).toEqual(resultNames(mcpIndex.search(query, 25)));
+		it(`ranks '${expected}' in the top three for '${query}'`, () => {
+			expect(resultNames(toolIndex.search(query, 3))).toContain(expected);
 		});
 	}
 
-	it("preserves MCP filter ranking order with group replacing server", () => {
-		expect(resultNames(toolIndex.search("get", 20, { group: "github" }))).toEqual(
-			resultNames(mcpIndex.search("get", 20, { server: "github" })),
-		);
+	it("uses group as the MCP server filter", () => {
+		const results = toolIndex.search("get", 20, { group: "github" });
+		expect(results.length).toBeGreaterThan(0);
+		expect(results.every((result) => result.doc.group === "github")).toBe(true);
 	});
 
 	it("preserves the exact-name short-circuit before BM25", () => {
 		const filler = new Array(40).fill("alpha beta gamma delta epsilon zeta eta theta").join(" ");
-		const exactCorpus = [
+		const index = buildBm25Index([
 			mcpDoc("mcp_docs_get-library-docs", `get library docs ${filler}`),
 			mcpDoc("mcp_docs_get_library_docs_helper", "get library docs"),
 			mcpDoc("mcp_docs_get_library_docs_alt", "get library docs"),
-		];
-		const index = buildBm25Index(exactCorpus.map(generalizedMcpDoc));
+		]);
 
 		expect(index.search("get library docs", 10, { exactMatch: false })[0]?.name).not.toBe(
 			"mcp_docs_get-library-docs",
 		);
 		for (const query of ["get-library-docs", "get_library_docs", "GET-LIBRARY-DOCS", "mcp_docs_get-library-docs"]) {
-			expect(index.search(query)[0]?.name).toBe("mcp_docs_get-library-docs");
-			expect(resultNames(index.search(query))).toEqual(resultNames(buildMcpBm25Index(exactCorpus).search(query)));
+			expect(index.search(query)[0]).toMatchObject({ exact: true, name: "mcp_docs_get-library-docs" });
 		}
 	});
 });

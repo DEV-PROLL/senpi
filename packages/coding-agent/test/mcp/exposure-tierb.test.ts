@@ -10,7 +10,9 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { orderActiveSet } from "../../src/core/extensions/builtin/mcp/expose/tier-b.ts";
 import { getMcpService, resetMcpServiceForTests } from "../../src/core/extensions/builtin/mcp/service.ts";
+import { TOOL_SEARCH_ACTIVATION_MARKER_V2 } from "../../src/core/extensions/builtin/tool-search/engine/marker.ts";
 import { createHarness, type Harness } from "../suite/harness.ts";
 import {
 	attachHarnessSession,
@@ -207,5 +209,22 @@ describe("todo32 tier-B: stubSwap keeps the tools array byte-stable", () => {
 
 		// Flapping (re-search tool_5) is a byte-identical no-op: cache preserved.
 		expect(turn3).toEqual(turn2);
+
+		const searchResults = harness.sessionManager
+			.getEntries()
+			.filter((entry) => entry.type === "message" && entry.message.role === "toolResult")
+			.map((entry) => JSON.stringify(entry.message));
+		expect(searchResults.some((result) => result.includes(TOOL_SEARCH_ACTIVATION_MARKER_V2))).toBe(true);
+
+		// Catalog membership, not an mcp_ prefix, controls the sorted suffix.
+		const catalogNames = new Set(["weather_forecast", "calendar_create"]);
+		const firstPromotion = orderActiveSet(
+			["base_second", "weather_forecast", "base_first"],
+			["base_first", "base_second"],
+			catalogNames,
+		);
+		const secondPromotion = orderActiveSet([...firstPromotion, "calendar_create"], firstPromotion, catalogNames);
+		expect(secondPromotion.filter((name) => new Set(firstPromotion).has(name))).toEqual(firstPromotion);
+		if (process.env.TOOL_SEARCH_QA === "1") console.log(JSON.stringify({ firstPromotion, secondPromotion }));
 	});
 });

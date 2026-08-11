@@ -28,7 +28,7 @@ export interface ToolSearchDetails {
 
 type ToolSearchTool = ToolDefinition<typeof ParamsSchema, ToolSearchDetails, unknown>;
 
-/** Author the shared tool definition. Registration is intentionally deferred to todo 8. */
+/** Author the single shared tool-search definition registered by this builtin. */
 export function createToolSearchTool(service: ToolSearchService): ToolSearchTool {
 	return {
 		name: TOOL_SEARCH_TOOL_NAME,
@@ -77,8 +77,8 @@ function prepareToolSearchArguments(args: unknown): Params {
 	const { server, ...rest } = args;
 	return {
 		...rest,
-		source: rest.source ?? "mcp",
-		group: rest.group ?? server,
+		...(rest.source === undefined && server === undefined ? {} : { source: rest.source ?? "mcp" }),
+		...(rest.group === undefined && server === undefined ? {} : { group: rest.group ?? server }),
 	} as Params;
 }
 

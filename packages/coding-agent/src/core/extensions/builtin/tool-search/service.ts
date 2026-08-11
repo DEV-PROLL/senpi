@@ -4,6 +4,7 @@ import type { ExtensionAPI, ToolInfo } from "../../types.ts";
 import { type Bm25Result, type Bm25SearchOptions, buildBm25Index } from "./engine/bm25.ts";
 import type { ToolSearchDocument, ToolSearchSource } from "./engine/document.ts";
 import { deriveExtensionRegistrationId, rehydrate } from "./engine/marker.ts";
+import { TOOL_SEARCH_TOOL_NAME } from "./tool.ts";
 
 export interface ToolSearchFeederHooks {
 	/** Activate every named match, including names already active as stubs. */
@@ -42,7 +43,10 @@ export class ToolSearchService {
 
 	bindRuntime(runtime: RuntimeApi): void {
 		this.#runtime = runtime;
-		this.#refreshExtensionDocs();
+	}
+
+	bindActivationRuntime(runtime: Pick<RuntimeApi, "getActiveTools" | "setActiveTools">): void {
+		this.#runtime = { ...this.#runtime, ...runtime };
 	}
 
 	beginSession(): void {
@@ -50,6 +54,7 @@ export class ToolSearchService {
 		this.#registryGeneration += 1;
 		this.#historyScannedGeneration = -1;
 		this.#refreshExtensionDocs();
+		this.#syncToolSearchLifecycle();
 	}
 
 	/** Replace one source's catalog generation and activation hook. */
@@ -57,6 +62,7 @@ export class ToolSearchService {
 		const validDocs = docs.filter((doc) => isValidDocument(doc, source));
 		this.#feeds.set(source, { docs: validDocs, hooks });
 		this.#registryGeneration += 1;
+		this.#syncToolSearchLifecycle();
 	}
 
 	getCatalog(): ToolSearchDocument[] {
@@ -83,20 +89,20 @@ export class ToolSearchService {
 		return matches.map(({ name }) => name).filter((name) => active.has(name));
 	}
 
-	activateExtensionTool(name: string): boolean {
-		const doc = this.getCatalog().find((candidate) => candidate.source === "extension" && candidate.name === name);
+	activateTool(name: string): boolean {
+		const doc = this.getCatalog().find((candidate) => candidate.name === name);
 		if (doc === undefined) return false;
-		this.#feeds.get("extension")?.hooks.activate([name]);
+		this.#feeds.get(doc.source)?.hooks.activate([name]);
 		return this.#runtime.getActiveTools().includes(name);
 	}
 
-	/** Replay extension-owned v2 history once for the current catalog generation. */
+	/** Replay ownership-aware and legacy MCP history once per catalog generation. */
 	maybeRehydrateFromHistory(messages: readonly unknown[]): string[] {
-		this.#refreshExtensionDocs();
+		const catalog = this.getCatalog();
 		if (this.#historyScannedGeneration === this.#registryGeneration) return [];
 		this.#historyScannedGeneration = this.#registryGeneration;
-		const extensionDocs = new Map(
-			this.#extensionDocs.map((doc) => [
+		const docsByName = new Map(
+			catalog.map((doc) => [
 				doc.name,
 				{
 					name: doc.name,
@@ -106,8 +112,8 @@ export class ToolSearchService {
 				},
 			]),
 		);
-		const restored = rehydrate(messages, extensionDocs);
-		if (restored.length > 0) this.#feeds.get("extension")?.hooks.activate(restored);
+		const restored = rehydrate(messages, docsByName);
+		if (restored.length > 0) this.#activateNames(restored, catalog);
 		return restored;
 	}
 
@@ -127,6 +133,30 @@ export class ToolSearchService {
 			hooks: { activate: (names) => this.#promoteExtensionTools(names) },
 		});
 		this.#registryGeneration += 1;
+		this.#syncToolSearchLifecycle();
+	}
+
+	#activateNames(names: readonly string[], catalog = this.getCatalog()): void {
+		const sourceByName = new Map(catalog.map((doc) => [doc.name, doc.source] as const));
+		const namesBySource = new Map<ToolSearchSource, string[]>();
+		for (const name of names) {
+			const source = sourceByName.get(name);
+			if (source === undefined) continue;
+			const sourceNames = namesBySource.get(source) ?? [];
+			sourceNames.push(name);
+			namesBySource.set(source, sourceNames);
+		}
+		for (const [source, sourceNames] of namesBySource) this.#feeds.get(source)?.hooks.activate(sourceNames);
+	}
+
+	#syncToolSearchLifecycle(): void {
+		const current = this.#runtime.getActiveTools();
+		const hasDocuments = this.#extensionDocs.length > 0 || (this.#feeds.get("mcp")?.docs.length ?? 0) > 0;
+		const isActive = current.includes(TOOL_SEARCH_TOOL_NAME);
+		if (hasDocuments === isActive) return;
+		this.#runtime.setActiveTools(
+			hasDocuments ? [...current, TOOL_SEARCH_TOOL_NAME] : current.filter((name) => name !== TOOL_SEARCH_TOOL_NAME),
+		);
 	}
 
 	#promoteExtensionTools(names: readonly string[]): void {

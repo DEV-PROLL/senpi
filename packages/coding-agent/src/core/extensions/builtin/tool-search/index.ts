@@ -1,6 +1,7 @@
 import { bindToProviderScope } from "@earendil-works/pi-ai/node/provider-scope";
 import type { ExtensionAPI, ExtensionFactory } from "../../types.ts";
 import { getToolSearchService, installScopedToolSearchService, ToolSearchService } from "./service.ts";
+import { createToolSearchTool } from "./tool.ts";
 
 export function createToolSearchExtension(service: ToolSearchService): ExtensionFactory {
 	return (pi: ExtensionAPI): void => {
@@ -13,10 +14,8 @@ export function createToolSearchExtension(service: ToolSearchService): Extension
 		pi.on("context", (event) => {
 			service.maybeRehydrateFromHistory(event.messages);
 		});
-		pi.registerLazyToolActivator((toolName) => service.activateExtensionTool(toolName));
-
-		// Deliberately do not register createToolSearchTool(service) here. MCP still
-		// owns the active tool_search registration until todo 8 performs the atomic swap.
+		pi.registerLazyToolActivator((toolName) => service.activateTool(toolName));
+		pi.registerTool(createToolSearchTool(service));
 	};
 }
 
