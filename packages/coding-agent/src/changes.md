@@ -1,3 +1,24 @@
+## Fallback responses with errors no longer emit success (2026-08-11)
+
+### What changed
+
+- `core/agent-session.ts` now requires an assistant response to have no `errorMessage` before it emits
+  `retry_fallback_succeeded` and `auto_retry_end { success: true }`.
+- A fallback provider response such as `Not logged in · Please run /login` can no longer produce the green
+  `Fallback model responded` notice merely because its stop reason was not normalized to `error`.
+- A terminal errored fallback response also closes the active retry attempt with `auto_retry_end { success: false }`,
+  so a later successful user turn cannot emit a delayed success notice for the earlier failed fallback.
+
+### Why this cannot be expressed externally
+
+- Retry-attempt settlement and `retry_fallback_succeeded` emission occur inside private `AgentSession` lifecycle
+  state before extensions or interactive renderers can correct the classification.
+
+### Expected merge conflict zones
+
+- LOW: the assistant `message_end` success gate in `core/agent-session.ts`.
+- LOW: the focused hard-error fallback cases in `test/suite/retry-fallback-hard-error.test.ts`.
+
 ## Public filesystem policy exports (2026-08-09)
 
 ### What changed

@@ -1,137 +1,80 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createModels, InMemoryCredentialStore } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
-import {
-	type ClaudeSdkOauthCredential,
-	emptyCredential,
-} from "../src/core/extensions/builtin/claude-sdk-oauth/accounts.ts";
+import type { AuthCheck, AuthContext, OAuthCredential } from "@earendil-works/pi-ai";
+import { describe, expect, it, vi } from "vitest";
+import { emptyCredential } from "../src/core/extensions/builtin/claude-sdk-oauth/accounts.ts";
 import { createOAuthConfig } from "../src/core/extensions/builtin/claude-sdk-oauth/oauth-login.ts";
-import { ModelConfig } from "../src/core/model-config.ts";
-import { composeModelProvider } from "../src/core/provider-composer.ts";
 
-const PROVIDER = "claude-sdk-oauth";
-const SENTINEL_API_KEY = "claude-sdk-oauth-managed";
-const MODELS = [
-	{
-		id: "claude-opus-5",
-		name: "Opus",
-		reasoning: true,
-		input: ["text"] as "text"[],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 200_000,
-		maxTokens: 8_192,
-	},
-];
-const temporaryDirectories: string[] = [];
+type OAuthAvailabilityCheck = (input: {
+	ctx: AuthContext;
+	credential?: OAuthCredential;
+}) => Promise<AuthCheck | undefined>;
 
-function makeConfig(): ModelConfig {
-	const directory = mkdtempSync(join(tmpdir(), "senpi-claude-sdk-oauth-auth-status-"));
-	temporaryDirectories.push(directory);
-	const modelsPath = join(directory, "models.json");
-	writeFileSync(modelsPath, JSON.stringify({ providers: {} }), "utf8");
-	return ModelConfig.loadSync(modelsPath);
-}
-
-function oneAccount(): ClaudeSdkOauthCredential {
+function authContext(environment: Record<string, string> = {}): AuthContext {
 	return {
-		...emptyCredential(),
-		accounts: [{ name: "default", access: "a", refresh: "r", expires: Date.now() + 60_000, source: "login" }],
+		env: async (name) => environment[name],
+		fileExists: async () => false,
 	};
 }
 
-type Lane = "ambient" | "oauth-slots";
-
-function extension(lane: Lane) {
-	return {
-		baseUrl: PROVIDER,
-		api: PROVIDER,
-		apiKey: SENTINEL_API_KEY,
-		models: MODELS,
-		streamSimple: () => {
-			throw new Error("unused in auth-status tests");
-		},
-		oauth: createOAuthConfig({
-			readCurrent: async () => undefined,
-			readSettings: () => ({ tokenInjection: lane }),
-		}),
-	};
+function availabilityCheck(readAmbientAuthStatus: () => Promise<boolean>): OAuthAvailabilityCheck {
+	const config = createOAuthConfig({
+		readCurrent: async () => undefined,
+		readAmbientAuthStatus,
+	} as Parameters<typeof createOAuthConfig>[0] & {
+		readAmbientAuthStatus: () => Promise<boolean>;
+	}) as ReturnType<typeof createOAuthConfig> & { check?: OAuthAvailabilityCheck };
+	expect(config.check).toBeTypeOf("function");
+	return config.check as OAuthAvailabilityCheck;
 }
 
-async function checkAuth(lane: Lane, credential: ClaudeSdkOauthCredential | undefined) {
-	const provider = composeModelProvider(PROVIDER, undefined, makeConfig(), extension(lane));
-	const store = new InMemoryCredentialStore();
-	if (credential) await store.modify(PROVIDER, async () => credential);
-	const models = createModels({ credentials: store });
-	models.setProvider(provider);
-	return models.checkAuth(PROVIDER);
-}
+describe("claude-sdk-oauth availability", () => {
+	it("accepts a stored managed account without probing ambient auth", async () => {
+		const readAmbientAuthStatus = vi.fn(async () => false);
+		const check = availabilityCheck(readAmbientAuthStatus);
+		const credential = {
+			...emptyCredential(),
+			accounts: [
+				{
+					name: "managed",
+					refresh: "refresh",
+					access: "access",
+					expires: Date.now() + 60_000,
+					source: "login" as const,
+				},
+			],
+		};
 
-afterEach(() => {
-	while (temporaryDirectories.length > 0) {
-		const directory = temporaryDirectories.pop();
-		if (directory) rmSync(directory, { recursive: true, force: true });
-	}
-});
+		expect(await check({ ctx: authContext(), credential })).toEqual({
+			type: "oauth",
+			source: "Claude SDK OAuth",
+		});
+		expect(readAmbientAuthStatus).not.toHaveBeenCalled();
+	});
 
-describe("claude-sdk-oauth fallback auth status", () => {
-	describe("#given a managed lane and an empty sentinel credential", () => {
-		describe("#when the fallback runtime checks auth", () => {
-			it("#then the provider is unconfigured so the candidate is skipped", async () => {
-				// given the zero-account sentinel envelope
-				const credential = emptyCredential();
+	it("rejects a persisted empty managed credential when ambient auth is logged out", async () => {
+		const check = availabilityCheck(async () => false);
+		expect(await check({ ctx: authContext(), credential: emptyCredential() })).toBeUndefined();
+	});
 
-				// when
-				const result = await checkAuth("oauth-slots", credential);
+	it("accepts an environment OAuth token without probing ambient auth", async () => {
+		const readAmbientAuthStatus = vi.fn(async () => false);
+		const check = availabilityCheck(readAmbientAuthStatus);
+		expect(await check({ ctx: authContext({ CLAUDE_CODE_OAUTH_TOKEN: "env-token" }) })).toEqual({
+			type: "oauth",
+			source: "Claude SDK OAuth",
+		});
+		expect(readAmbientAuthStatus).not.toHaveBeenCalled();
+	});
 
-				// then
-				expect(result).toBeUndefined();
-			});
+	it("accepts an authenticated ambient Claude CLI", async () => {
+		const check = availabilityCheck(async () => true);
+		expect(await check({ ctx: authContext() })).toEqual({
+			type: "oauth",
+			source: "Claude SDK OAuth",
 		});
 	});
 
-	describe("#given a managed lane and one stored login account", () => {
-		describe("#when the fallback runtime checks auth", () => {
-			it("#then the provider stays configured", async () => {
-				// given
-				const credential = oneAccount();
-
-				// when
-				const result = await checkAuth("oauth-slots", credential);
-
-				// then
-				expect(result).toEqual({ source: "OAuth", type: "oauth" });
-			});
-		});
-	});
-
-	describe("#given the ambient lane and an empty sentinel credential", () => {
-		describe("#when the fallback runtime checks auth", () => {
-			it("#then the provider stays configured because the spawned engine may hold its own login", async () => {
-				// given
-				const credential = emptyCredential();
-
-				// when
-				const result = await checkAuth("ambient", credential);
-
-				// then
-				expect(result).toEqual({ source: "OAuth", type: "oauth" });
-			});
-		});
-	});
-
-	describe("#given the ambient lane and no stored credential", () => {
-		describe("#when the fallback runtime checks auth", () => {
-			it("#then the provider stays configured via the sentinel api key", async () => {
-				// given no stored credential
-
-				// when
-				const result = await checkAuth("ambient", undefined);
-
-				// then
-				expect(result).toEqual({ type: "api_key", source: "configured API key" });
-			});
-		});
+	it("rejects a logged-out ambient Claude CLI", async () => {
+		const check = availabilityCheck(async () => false);
+		expect(await check({ ctx: authContext() })).toBeUndefined();
 	});
 });

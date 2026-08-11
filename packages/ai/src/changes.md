@@ -10,6 +10,25 @@ Added an optional `check?(input)` to `OAuthAuth` (`auth/types.ts`) and taught `c
 
 LOW in `auth/types.ts` (additive optional field on `OAuthAuth`); LOW in `models.ts` `checkProviderAuth` (one stored-OAuth branch expanded, existing behavior preserved when `check` is undefined).
 
+## 2026-08-11 - OAuth availability `check` for ambient and no-credential providers
+
+### What changed and why
+
+- Follow-up to the optional `OAuthAuth.check` hook: `Models.checkAuth()` now also invokes the hook for ambient
+  no-credential providers, not only for stored OAuth credentials. Providers without a hook retain the previous
+  behavior where any matching stored OAuth credential is configured.
+- This lets providers confirm usable ambient OAuth without refreshing, resolving, or exposing token material. Hook
+  failures are wrapped in `ModelsError` on both the stored-credential and ambient paths.
+
+### Why this cannot be expressed externally
+
+- Provider availability and model filtering happen inside `Models` before host registries and fallback controllers see
+  the provider, so an extension-only post-filter would leave `checkAuth()` and `getAvailable()` inconsistent.
+
+### Expected merge conflict zones
+
+- MEDIUM: the auth precedence branches in `models.ts`.
+
 ## 2026-08-09 - Native Anthropic prompt-cache warming primitive
 
 ### What changed and why

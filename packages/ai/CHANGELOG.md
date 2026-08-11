@@ -14,6 +14,8 @@
   branch, so a provider whose stored credential does not by itself imply usability (for example a zero-account
   sentinel) is no longer reported as configured. When `check` is absent, behavior is unchanged
   ([#804](https://github.com/code-yeongyu/senpi/pull/804)).
+- Provider-specific OAuth availability checks can now reject empty sentinel credentials and recognize usable ambient
+  auth without refreshing or exposing tokens ([#803](https://github.com/code-yeongyu/senpi/pull/803)).
 
 ### Removed
 

@@ -1689,6 +1689,7 @@ export class AgentSession {
 
 				const assistantMsg = event.message as AssistantMessage;
 				const succeeded =
+					!assistantMsg.errorMessage &&
 					assistantMsg.stopReason !== "error" &&
 					assistantMsg.stopReason !== "aborted" &&
 					!isClassifierRefusal(assistantMsg);
@@ -1771,6 +1772,12 @@ export class AgentSession {
 				return;
 			}
 
+			if (retryOutcome === "not-handled" && this._retryAttempt > 0 && msg.errorMessage) {
+				const attempt = this._retryAttempt;
+				this._retryAttempt = 0;
+				this._resetHintTierState();
+				this._emit({ type: "auto_retry_end", success: false, attempt, finalError: msg.errorMessage });
+			}
 			this._resolveRetry();
 			retryContinuationBlocked ||= retryOutcome === "blocked";
 			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
