@@ -1,10 +1,10 @@
 import { type Api, type Context, createAssistantMessageEventStream, type Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
+import { emptyCredential } from "../../src/core/extensions/builtin/claude-sdk-oauth/accounts.ts";
 import claudeSdkOauthExtension, {
 	CLAUDE_SDK_OAUTH_PROVIDER_ID,
 } from "../../src/core/extensions/builtin/claude-sdk-oauth/index.ts";
-import { emptyCredential } from "../../src/core/extensions/builtin/claude-sdk-oauth/accounts.ts";
 import { builtinExtensions } from "../../src/core/extensions/builtin/index.ts";
 import type { ExtensionAPI } from "../../src/core/extensions/types.ts";
 import { ModelRuntime } from "../../src/core/model-runtime.ts";
