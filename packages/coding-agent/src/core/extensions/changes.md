@@ -1,5 +1,26 @@
 # Core Extensions Changes
 
+## 2026-08-11 - Reload continuity follows tool ownership
+
+### What changed
+
+- Session reload now preserves active membership only when a tool name still belongs to the same registration identity.
+- A search-exposed same-name replacement from a different extension is treated as a fresh inactive registration.
+- Tools no longer registered by a still-loaded extension continue to fall out through the rebuilt registry filter.
+
+### Why
+
+- Name-only continuity could transfer a prior promotion to an unrelated extension that took over the same tool name.
+- Binding continuity to the host-derived source path keeps remembered activation scoped to the owning registration.
+
+### Why this cannot be expressed externally
+
+- Reload replaces the extension runner and registry atomically, so only core can compare the previous and winning owners.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` reload and `_refreshToolRegistry` option threading.
+
 ## 2026-08-11 - Search-exposed tools start inactive
 
 ### What changed

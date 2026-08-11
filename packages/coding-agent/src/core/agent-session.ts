@@ -113,6 +113,7 @@ import {
 	type TurnStartEvent,
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
+import { deriveExtensionRegistrationId } from "./extensions/builtin/tool-search/engine/marker.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type {
 	ApplyCompactionOptions,
@@ -5477,7 +5478,11 @@ export class AgentSession {
 		return this._fallbackValidationWarnings;
 	}
 
-	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
+	private _refreshToolRegistry(options?: {
+		activeToolNames?: string[];
+		includeAllExtensionTools?: boolean;
+		previousActiveToolRegistrationIds?: ReadonlyMap<string, string>;
+	}): void {
 		const previousRegistryNames = new Set(this._toolRegistry.keys());
 		const previousActiveToolNames = this.getActiveToolNames();
 		const allowedToolNames = this._allowedToolNames;
@@ -5551,7 +5556,16 @@ export class AgentSession {
 
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
-		).filter((name) => isAllowedTool(name));
+		).filter((name) => {
+			if (!isAllowedTool(name)) return false;
+			const previousRegistrationIds = options?.previousActiveToolRegistrationIds;
+			if (!previousRegistrationIds) return true;
+			const current = this._toolDefinitions.get(name);
+			return (
+				current !== undefined &&
+				previousRegistrationIds.get(name) === deriveExtensionRegistrationId(current.sourceInfo, name)
+			);
+		});
 
 		if (allowedToolNames) {
 			for (const toolName of this._toolRegistry.keys()) {
@@ -5578,6 +5592,7 @@ export class AgentSession {
 		activeToolNames?: string[];
 		flagValues?: Map<string, boolean | string>;
 		includeAllExtensionTools?: boolean;
+		previousActiveToolRegistrationIds?: ReadonlyMap<string, string>;
 	}): void {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
@@ -5632,6 +5647,7 @@ export class AgentSession {
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,
+			previousActiveToolRegistrationIds: options.previousActiveToolRegistrationIds,
 		});
 	}
 
@@ -5647,6 +5663,11 @@ export class AgentSession {
 		const oldExtensionRunner = this._extensionRunner;
 		const oldExtensionIdentities = oldExtensionRunner.getExtensionIdentities();
 		const previousFlagValues = oldExtensionRunner.getFlagValues();
+		const previousActiveToolRegistrationIds = new Map<string, string>();
+		for (const name of this.getActiveToolNames()) {
+			const entry = this._toolDefinitions.get(name);
+			if (entry) previousActiveToolRegistrationIds.set(name, deriveExtensionRegistrationId(entry.sourceInfo, name));
+		}
 		await emitSessionShutdownEvent(oldExtensionRunner, { type: "session_shutdown", reason: "reload" });
 		time("shutdown", "reload");
 		await this.settingsManager.reload();
@@ -5678,6 +5699,7 @@ export class AgentSession {
 				activeToolNames: this.getActiveToolNames(),
 				flagValues: previousFlagValues,
 				includeAllExtensionTools: true,
+				previousActiveToolRegistrationIds,
 			});
 		} finally {
 			// An extension removed by this reload must be told even if the rebuild throws
