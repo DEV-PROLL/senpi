@@ -1,5 +1,20 @@
 # imagegen builtin — changes
 
+## Native bypass wiring goes live (2026-08-11)
+
+### What changed
+
+- The `setNativeBypass` seam in `state.ts` is now driven by the sibling `openai-image-gen` builtin: it recomputes the arbitration state on `session_start` and `model_select` (both flip directions) and clears the bypass on `session_shutdown`. While the current model will receive the native `image_generation` server tool, `generate_image` execute returns the `provider_native_bypass` deferral; otherwise it runs normally.
+- No imagegen module code changed; only the previously inert seam gained its live caller.
+
+### Why
+
+- The bypass must track the injector's real decision per model, not a startup snapshot, so mid-session model switches re-arm or defer the client tool correctly.
+
+### Merge-conflict zones
+
+- LOW: this `changes.md` entry only; the live wiring lives entirely in `openai-image-gen`.
+
 ## Conditional skill contribution and packaging (2026-08-11)
 
 ### What changed
