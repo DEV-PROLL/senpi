@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Terminal monitor wake budgets now treat widely spaced progress as separate bursts instead of eventually pausing,
+  while a true budget pause immediately steers the main session even when ordinary notifications wait for the next
+  turn ([#815](https://github.com/code-yeongyu/senpi/pull/815)).
 - Model switches no longer fail before generation when persisted tool-call IDs contain provider-specific characters
   such as the colon in Kimi's `eval:18`; replay now preserves call/result pairing while satisfying strict
   Anthropic-backed gateway constraints ([#810](https://github.com/code-yeongyu/senpi/pull/810)).
