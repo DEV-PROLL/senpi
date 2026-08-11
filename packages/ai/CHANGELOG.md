@@ -10,7 +10,7 @@
   native image results occupy a single provider-native slot (added then replaced in place on done),
   partial-image events are ignored, oversized payloads are rejected before persistence, and a
   `supportsImageGeneration` compat flag gates server-tool injection per endpoint
-  ([#NNN](https://github.com/code-yeongyu/senpi/pull/NNN)).
+  ([#814](https://github.com/code-yeongyu/senpi/pull/814)).
 
 ### Changed
 

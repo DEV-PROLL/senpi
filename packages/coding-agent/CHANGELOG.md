@@ -19,11 +19,11 @@
   `generate_image` function tool so exactly one image surface is offered per request. Mid-session model
   switches re-evaluate the gate. Azure Responses endpoints default to the client tool unless
   `compat.supportsImageGeneration` opts in
-  ([#NNN](https://github.com/code-yeongyu/senpi/pull/NNN)).
+  ([#814](https://github.com/code-yeongyu/senpi/pull/814)).
 - Native image results are externalized before persistence: a `message_end` handler decodes each
   completed `image_generation_call` block, writes the image to `generated-images/`, and replaces the
   provider-native block with a text path reference. Base64 payloads never reach the session file
-  ([#NNN](https://github.com/code-yeongyu/senpi/pull/NNN)).
+  ([#814](https://github.com/code-yeongyu/senpi/pull/814)).
 
 ### Changed
 
