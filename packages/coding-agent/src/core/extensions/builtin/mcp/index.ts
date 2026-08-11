@@ -20,7 +20,7 @@ import {
 	type SkillMcpDeclarations,
 	skillActivationTargets,
 } from "./skills.ts";
-import { reportMcpAsyncError, wrapAsync } from "./wrap.ts";
+import { reportMcpAsyncError, safeEventBusOn, wrapAsync } from "./wrap.ts";
 
 const MCP_BUILTIN_EXTENSION_PATH = "<builtin:mcp>";
 
@@ -29,10 +29,14 @@ export function createMcpExtension(service: McpService, sessionOwned = true): Ex
 		let attachPromise: Promise<void> | undefined;
 		let attachedSessionId: string | undefined;
 		let controlInventoryDisposed = false;
-		const unsubscribeControlInventoryRequest = pi.events.on(MCP_CONTROL_INVENTORY_REQUEST_EVENT, (data) => {
-			if (!isMcpControlInventoryRequest(data) || data.sessionId !== attachedSessionId) return;
-			data.respond(service.refreshWireStatusSnapshot(data.sessionId));
-		});
+		const unsubscribeControlInventoryRequest = safeEventBusOn(
+			pi.events,
+			MCP_CONTROL_INVENTORY_REQUEST_EVENT,
+			(data) => {
+				if (!isMcpControlInventoryRequest(data) || data.sessionId !== attachedSessionId) return;
+				data.respond(service.refreshWireStatusSnapshot(data.sessionId));
+			},
+		);
 		const unsubscribeWireStatus = service.onWireStatusChanged((sessionId, snapshot) => {
 			if (sessionId === undefined || sessionId !== attachedSessionId) return;
 			pi.events.emit(MCP_CONTROL_INVENTORY_CHANGED_EVENT, { sessionId, snapshot });
@@ -142,7 +146,7 @@ export function createMcpExtension(service: McpService, sessionOwned = true): Ex
 		// the first turn's payload deterministically carries the MCP tool set.
 		// session_start always starts a fresh attach (reloads must re-sync config).
 		const attach = (event: SessionStartEvent, ctx: ExtensionContext): Promise<void> => {
-			attachedSessionId = ctx.sessionManager.getSessionId();
+			attachedSessionId = ctx.sessionManager?.getSessionId?.();
 			attachPromise = (async () => {
 				await service.attachSession(event, ctx, pi);
 				refreshMcpInstructionsForSession(service);
@@ -186,8 +190,8 @@ export function createMcpExtension(service: McpService, sessionOwned = true): Ex
 			wrapAsync(
 				"mcp.session_shutdown",
 				async (event) => {
-					disposeControlInventory();
 					if (event.reason === "reload" && !sessionOwned) return;
+					disposeControlInventory();
 					await service.handleSessionShutdown(event);
 				},
 				sink,
@@ -199,6 +203,7 @@ export function createMcpExtension(service: McpService, sessionOwned = true): Ex
 				"mcp.session_extensions_removed",
 				async (event) => {
 					if (event.removed.some((extension) => extension.path === MCP_BUILTIN_EXTENSION_PATH)) {
+						disposeControlInventory();
 						await service.dispose("reload");
 					}
 				},
