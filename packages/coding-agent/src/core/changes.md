@@ -1,5 +1,32 @@
 # changes
 
+## Standalone binary codemode sidecar resolution (2026-08-11)
+
+### What changed
+
+- `resource-loader.ts` now loads codemode through a statically imported
+  extension factory in compiled Bun binaries, while retaining an explicit
+  `node_modules/@code-yeongyu/senpi-codemode/package.json` sidecar lookup for
+  source/runtime assets and non-compiled package resolution.
+- Source and npm installations retain their existing workspace/package
+  resolution paths and builtin ordering.
+- Standalone relocation smoke now initializes classic RPC and requires one
+  enabled `codemode` extension at `<builtin:codemode>` in
+  `get_loaded_surfaces`.
+
+### Why this cannot be expressed externally
+
+- Bun's compiled `$bunfs` `createRequire()` cannot resolve an external package
+  beside the executable, and Jiti-loaded sidecar source cannot resolve its
+  package dependencies back into the compiled host. The trusted
+  builtin-adjacent loader must embed the factory while the distribution keeps
+  worker and prelude assets beside the executable.
+
+### Expected merge conflict zones
+
+- HIGH: `resource-loader.ts` around bundled builtin package resolution.
+- LOW: standalone binary relocation smoke coverage.
+
 ## Preserve extension OAuth availability checks (2026-08-11)
 
 ### What changed
