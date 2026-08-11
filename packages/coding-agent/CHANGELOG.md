@@ -13,10 +13,11 @@
 - Gateway/provider failures reported as `The model request was rejected. Check the request and try again.` now retry
   the current model according to `settings.retry` before the configured fallback chain is used
   ([#806](https://github.com/code-yeongyu/senpi/pull/806)).
-- `/goal resume` can explicitly reactivate a completed goal and queue its continuation, while completed goals remain excluded from automatic restart-resume prompts.
+- `/goal resume` can explicitly reactivate a completed goal and queue its continuation, while completed goals remain
+  excluded from automatic restart-resume prompts ([#802](https://github.com/code-yeongyu/senpi/pull/802)).
 - A launch from a deleted working directory (for example a removed worktree) no longer crashes during
   startup with `uv_cwd`; the CLI recovers into the home directory before any dependency evaluates
-  `process.cwd()`.
+  `process.cwd()` ([#799](https://github.com/code-yeongyu/senpi/pull/799)).
 - `claude-sdk-oauth` is now skipped as an unauthenticated fallback candidate on a managed lane
   (`oauth-slots`/`config-dir`) when no account is logged in, instead of always counting as configured because its
   stored credential is a zero-account sentinel. The ambient lane is unchanged and still defers to the spawned
@@ -25,6 +26,9 @@
   authenticated ambient Claude CLI is usable. Empty sentinel credentials and logged-out local CLIs are skipped, and
   fallback responses carrying errors such as `Not logged in` cannot emit an immediate or delayed green
   `Fallback model responded` notice ([#803](https://github.com/code-yeongyu/senpi/pull/803)).
+- Route Anthropic provider-native refusal fallbacks through the configured Senpi chain after an active-turn model
+  change, instead of persisting the server-selected substitute because the run retained the previous model's policy
+  ([#796](https://github.com/code-yeongyu/senpi/pull/796)).
 
 ### New Features
 
@@ -52,15 +56,12 @@
   setup guidance instead of failing ([#813](https://github.com/code-yeongyu/senpi/pull/813)).
 - Added a conditionally contributed `gpt-image-gen` skill with a detailed prompt-crafting guide that is listed
   only while image-generation credentials exist ([#813](https://github.com/code-yeongyu/senpi/pull/813)).
-- **Extension Tool Search**: Extension tools can opt into a shared searchable catalog by setting `exposure: "search"` on `pi.registerTool()`. Searchable tools stay inactive and cost zero prompt tokens until the model finds them with the shared `tool_search` tool, which promotes matches into the active set for the next model request.
+- **Extension Tool Search**: Extension tools can opt into a shared searchable catalog by setting
+  `exposure: "search"` on `pi.registerTool()`. Searchable tools stay inactive and cost zero prompt tokens until the
+  model finds them with the shared `tool_search` tool, which promotes matches into the active set for the next model
+  request ([#811](https://github.com/code-yeongyu/senpi/pull/811)).
 
 ### Changed
-
-### Fixed
-
-- Route Anthropic provider-native refusal fallbacks through the configured Senpi chain after an active-turn model
-  change, instead of persisting the server-selected substitute because the run retained the previous model's policy
-  ([#796](https://github.com/code-yeongyu/senpi/pull/796)).
 
 ### Removed
 
