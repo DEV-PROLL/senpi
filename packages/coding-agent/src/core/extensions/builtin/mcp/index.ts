@@ -1,14 +1,12 @@
 import { bindToProviderScope } from "@earendil-works/pi-ai/node/provider-scope";
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory, SessionStartEvent } from "../../types.ts";
+import { installMcpNativeToolSearchGate } from "../tool-search/native-search.ts";
 import { registerMcpCommands } from "./commands.ts";
 import {
 	isMcpControlInventoryRequest,
 	MCP_CONTROL_INVENTORY_CHANGED_EVENT,
 	MCP_CONTROL_INVENTORY_REQUEST_EVENT,
 } from "./control-inventory.ts";
-import { createLazyToolActivator } from "./expose/lazy-activate.ts";
-import { AnthropicNativeToolSearchAdapter } from "./expose/native-search.ts";
-import { TOOL_SEARCH_TOOL_NAME } from "./expose/tool-search.ts";
 import { injectMcpInstructions, refreshMcpInstructionsForSession } from "./instructions.ts";
 import { createMcpLogger } from "./log.ts";
 import { registerMcpPromptCommands } from "./prompts.ts";
@@ -57,43 +55,10 @@ export function createMcpExtension(service: McpService, sessionOwned = true): Ex
 
 		registerMcpCommands(pi, service);
 
-		// Native provider tool-search adapter (todo 33 — Anthropic, spike = GO).
-		// Runs on every request but is a no-op unless settings.nativeToolSearch is
-		// auto|true and the model is anthropic-messages; a 400 disables it for the
-		// session and falls back to the always-registered local tool_search.
-		const nativeAdapter = new AnthropicNativeToolSearchAdapter({
-			enabled: () => {
-				const setting = service.getNativeToolSearchSetting();
-				return setting === true || setting === "auto";
-			},
-			isDeferrable: (name) => name.startsWith("mcp_") && name !== TOOL_SEARCH_TOOL_NAME,
-			onFallback: (reason) => createMcpLogger("service").warn(reason),
-			searchToolName: TOOL_SEARCH_TOOL_NAME,
+		installMcpNativeToolSearchGate(() => {
+			const setting = service.getNativeToolSearchSetting();
+			return setting === true || setting === "auto";
 		});
-		pi.on("before_provider_request", (event, ctx) => nativeAdapter.applyBeforeRequest(ctx.model?.api, event.payload));
-		pi.on("after_provider_response", (event) => nativeAdapter.noteResponseStatus(event.status));
-		// Resumed/compacted sessions carry tool_search activation markers in their
-		// history but re-enter search mode with only directTools active. The context
-		// event (fired before each LLM call, with the full message history) replays
-		// the markers as a safety net; the primary replay happens at attach time so
-		// the FIRST turn's payload already carries previously promoted tools. Scans
-		// once per registration (see McpService.maybeRehydrateFromHistory).
-		pi.on("context", (event) => {
-			service.maybeRehydrateFromHistory(event.messages);
-		});
-
-		// A code-mode (eval) cell may name a search-mode tool that tool_search would
-		// promote but that is not active yet. Activating it here keeps the catalog the
-		// only eligible set, so permission-denied, tombstoned, and capability-gated
-		// tools stay inactive, and routes through tier-B activate() for stub swapping.
-		pi.registerLazyToolActivator(
-			createLazyToolActivator({
-				getSearchable: () => service.getTierBSearchable(),
-				getActiveTools: () => pi.getActiveTools(),
-				activate: (names) => service.activateSkillMcpTools(names),
-			}),
-		);
-
 		// skills-carry-MCP (todo 37): skills declaring MCP servers (mcp.json
 		// sidecar or SKILL.md frontmatter) register lazily with tools hidden;
 		// loading a skill — /skill:<name> input or the model reading its SKILL.md —

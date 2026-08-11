@@ -1,5 +1,10 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { ExtensionAPI, ExtensionUIContext, SessionShutdownEvent, SessionStartEvent } from "../../types.ts";
+import {
+	getToolSearchService,
+	resetToolSearchServiceForTests,
+	type ToolSearchService,
+} from "../tool-search/service.ts";
 import { detectLiteralBearerWarnings, resolveAuthMode, resolveServerAuth } from "./auth/context.ts";
 import { collectToolCatalog } from "./catalog.ts";
 import { getValidCachedServer, readMcpCatalogCache } from "./catalog-cache.ts";
@@ -77,7 +82,7 @@ export class McpService {
 	#wireStatusRefreshQueue: Promise<void> = Promise.resolve();
 	#refreshActiveSetWhenNoTools = false;
 	#tierBRegistration: McpSessionRegistration | undefined;
-	#historyScanned = false;
+	#toolSearchService: ToolSearchService | undefined;
 	#sessionOptions: McpSessionOptions = {};
 	#pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools" | "registerTool"> | undefined;
 	#attachQueue: Promise<void> = Promise.resolve();
@@ -106,6 +111,18 @@ export class McpService {
 			mergeExtensionMcpServers(config, ctx.getRegisteredMcpServers?.() ?? []);
 			this.#config = config;
 			this.#pi = _pi;
+			if (_pi !== undefined) {
+				const activationRuntime = {
+					getActiveTools: () => _pi.getActiveTools(),
+					setActiveTools: (names: readonly string[]) => _pi.setActiveTools([...names]),
+				};
+				try {
+					this.#toolSearchService = getToolSearchService();
+					this.#toolSearchService.bindActivationRuntime(activationRuntime);
+				} catch {
+					this.#toolSearchService = getToolSearchService({ getAllTools: () => [], ...activationRuntime });
+				}
+			}
 			this.#authAgentDir = options.agentDir;
 			this.#authEnv = options.env;
 			this.#sessionOptions = options;
@@ -484,38 +501,32 @@ export class McpService {
 	): Promise<void> {
 		const config = this.#config;
 		if (config === null) return;
-		this.#tierBRegistration = await registerMcpServiceDirectTools(pi, config, this.#connections.values(), {
-			refreshActiveSetWhenEmpty: this.#refreshActiveSetWhenNoTools,
-		});
+		const toolSearchService = this.#toolSearchService;
+		if (toolSearchService === undefined) return;
+		this.#tierBRegistration = await registerMcpServiceDirectTools(
+			pi,
+			config,
+			this.#connections.values(),
+			toolSearchService,
+			{
+				refreshActiveSetWhenEmpty: this.#refreshActiveSetWhenNoTools,
+			},
+		);
 		const ctx = this.#sessionContext;
 		if (ctx?.mode === "rpc") {
 			await this.refreshWireStatusSnapshot(ctx.sessionManager?.getSessionId?.());
 		}
 		for (const listener of this.#registrationListeners) listener();
-		// A (re-)registration recomputes the active set from config alone, so any
-		// promotions recorded in history are worth replaying on the next scan.
-		this.#historyScanned = false;
 	}
 
-	/**
-	 * Replay tool_search activation markers from session history through the
-	 * live tier-B activation path (see tool-search.ts). Returns newly activated
-	 * names; safe to call repeatedly (already-active names are skipped).
-	 */
+	/** Route compatibility callers through the shared ownership-aware scanner. */
 	rehydrateActiveToolsFromHistory(messages: readonly unknown[]): string[] {
-		this.#historyScanned = true;
-		return this.#tierBRegistration?.rehydrateFromHistory(messages) ?? [];
+		return this.#toolSearchService?.maybeRehydrateFromHistory(messages) ?? [];
 	}
 
-	/**
-	 * Once-per-registration variant for per-turn context events: scanning the
-	 * full history each turn would cost O(history) JSON serialization, and a
-	 * live session's active set only drifts from history when a (re-)registration
-	 * rebuilt it — so scan once after each registration and skip otherwise.
-	 */
+	/** Shared service memoization keeps this scan once-per-catalog-generation. */
 	maybeRehydrateFromHistory(messages: readonly unknown[]): string[] {
-		if (this.#historyScanned) return [];
-		return this.rehydrateActiveToolsFromHistory(messages);
+		return this.#toolSearchService?.maybeRehydrateFromHistory(messages) ?? [];
 	}
 
 	#serverSnapshot(name: string): McpServerSnapshot {
@@ -782,4 +793,5 @@ async function disposeEntryConnection(entry: McpConnectionEntry): Promise<void> 
 
 export function resetMcpServiceForTests(): void {
 	service = null;
+	resetToolSearchServiceForTests();
 }

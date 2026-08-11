@@ -33,6 +33,8 @@
 
 ### Added
 
+- **Extension Tool Search**: Extension tools can opt into a shared searchable catalog by setting `exposure: "search"` on `pi.registerTool()`. Searchable tools stay inactive and cost zero prompt tokens until the model finds them with the shared `tool_search` tool, which promotes matches into the active set for the next model request.
+
 ### Changed
 
 ### Fixed

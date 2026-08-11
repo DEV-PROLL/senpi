@@ -2159,6 +2159,11 @@ pi.registerTool({
   name: "my_tool",
   label: "My Tool",
   description: "What this tool does (shown to LLM)",
+  exposure: "search",
+  searchText: "Look up items in the project todo list",
+  searchKeywords: ["todo", "task", "planning"],
+  searchGroup: "my_extension",
+  allowLazyActivation: true,
   promptSnippet: "List or add items in the project todo list",
   promptGuidelines: [
     "Use my_tool for todo planning instead of direct file edits when the user asks for a task list."
@@ -2559,19 +2564,43 @@ If a slot renderer is not defined or throws:
 
 ### Dynamic Tool Loading
 
-Extensions can register many tools while keeping only a small initial set active. A tool can then add more tools with `pi.setActiveTools()` during execution. Pi detects purely additive changes, records the newly available tool names on that tool result, and applies the updated active set before the next model request.
+Extensions can ship large tool catalogs without bloating the model's context window by opting into declarative search exposure. A tool declared with `exposure: "search"` is indexed in the shared `tool_search` catalog and remains inactive (costing zero prompt tokens) until the model searches for it.
 
-This works with every model. Models with native deferred-loading support preserve the stable prompt prefix and load the new definitions at the tool-result position. Other models use the fallback described below.
+The declarative API handles the entire lifecycle:
+1. Register tools with `exposure: "search"`. The tools stay out of the initial active set.
+2. The shared `tool_search` builtin (always active) indexes their `name`, `label`, `description`, `searchText`, and `searchKeywords`.
+3. When the model needs a capability, it calls `tool_search`.
+4. Pi automatically promotes matching tools to the active set for the next model request.
+5. On supported models (Anthropic, OpenAI), this promotion uses native deferred loading protocols to preserve prompt cache stability.
 
-The lifecycle is:
+Tools promoted via search are tied to your extension's identity. If your extension is reloaded, they stay active; if your extension is removed, they are cleaned up.
 
-1. Register every tool with `pi.registerTool()` so it appears in `pi.getAllTools()`.
-2. Keep loader tools, such as `search_tools`, active and leave searchable tools inactive.
-3. During loader execution, call `pi.setActiveTools([...currentTools, ...matchingTools])`. The change must be additive: do not remove currently active tools in the same call.
-4. Pi records which tools were added on the loader's tool result.
-5. Before the next model response, Pi exposes the added definitions using native deferred loading when supported, or the normal active tool list otherwise.
+#### Declarative Fields
 
-You do not need to return provider-specific tool references or mark the loader as a special search tool. The active-tool change is the signal. Names passed to `pi.setActiveTools()` must already be registered; unknown names are ignored.
+Add these fields to `pi.registerTool(...)`:
+
+- **`exposure`**: `"direct" | "search"`. Default is `"direct"` (tool is auto-activated immediately). Use `"search"` for large catalogs.
+- **`searchText`**: Supplemental text indexed by `tool_search`. Never sent to the model. Useful for domain terms that don't belong in the tool description.
+- **`searchKeywords`**: Synonyms or domain terms, indexed with the same weight as the tool name. Never sent to the model.
+- **`searchGroup`**: Organizational filter group. Defaults to your extension's label.
+- **`allowLazyActivation`**: Default `true`. If `false`, the tool is hidden from `tool_search` completely and cannot be lazily activated during code mode execution. Explicit activation via `pi.setActiveTools()` is still allowed.
+
+**Important:** You cannot register a tool named `tool_search` yourself; it is a reserved name.
+
+#### Prompt Cache Warning
+
+Activating a tool that includes `promptSnippet` or `promptGuidelines` rebuilds the system prompt. Even when the provider supports deferred schemas, changing the system prompt may invalidate the cached prefix. Lazily loaded tools should usually rely on their `description` and omit active-only prompt metadata to get the best cache performance.
+
+#### Advanced: DIY Dynamic Loading
+
+For advanced use cases like project-specific routing or custom remote catalogs, extensions can skip `exposure: "search"` and manage the active set imperatively. A tool can add more tools with `pi.setActiveTools()` during execution. Pi detects purely additive changes, records the newly available tool names on that tool result, and applies the updated active set before the next model request.
+
+The DIY lifecycle is:
+
+1. Register every tool with `exposure: "direct"` (or omit it) but explicitly remove them from the active set during `session_start` using `pi.setActiveTools()`.
+2. Keep your custom loader tool active.
+3. During loader execution, call `pi.setActiveTools([...currentTools, ...matchingTools])`. The change must be additive.
+4. Pi exposes the added definitions before the next model response.
 
 #### Models with native deferred loading
 
@@ -2590,11 +2619,9 @@ For all other models and providers, dynamic activation still works: Pi sends the
 
 Pi also uses this safe fallback when the active set is not purely additive, such as replacing one group of tools with another. Tool removals therefore work, but they do not use deferred loading.
 
-For the best cache behavior, keep the loader tool active for the whole session and add tools instead of replacing the active set. Also note that activating a tool with `promptSnippet` or `promptGuidelines` rebuilds the system prompt; that system-prompt change can invalidate the prefix even when the provider supports deferred schemas. Lazily loaded tools should usually rely on their tool `description` and omit active-only prompt metadata.
+#### DIY Custom Search Tool Example
 
-#### Search tool example
-
-The following extension registers two searchable tools, removes them from the initial active set, and keeps only `search_tools` as their loader. The example uses simple keyword matching, but the search implementation could use BM25, embeddings, a remote catalog, or project-specific routing.
+The following extension registers two tools, removes them from the initial active set, and keeps only a custom `search_tools` as their loader. The example uses simple keyword matching, but the search implementation could use embeddings or a remote catalog.
 
 ```typescript
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

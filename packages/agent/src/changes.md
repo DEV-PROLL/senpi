@@ -1,5 +1,23 @@
 # Changes
 
+## 2026-08-11 - Resolve eligible inactive tools at model call time
+
+### What changed and why
+
+- `AgentLoopConfig.resolveUnknownToolCall` is consulted before the existing unknown-tool result is emitted.
+- A host may return a newly activated tool, which then follows the normal argument validation, hooks, execution, and result lifecycle.
+- Returning `undefined` preserves the existing `Tool <name> not found` behavior byte-for-byte.
+
+### Why the extension system could not handle this
+
+- Unknown tool names were rejected inside the low-level agent loop before coding-agent tool hooks or extension callbacks ran.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `types.ts` next to tool-loop callback configuration.
+- LOW: `agent-loop.ts` unknown-tool preparation branch.
+- LOW: `agent.ts` loop-config forwarding.
+
 ## 2026-08-10 - Refresh server-fallback policy between tool turns
 
 ### What changed and why
