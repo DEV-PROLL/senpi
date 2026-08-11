@@ -34,7 +34,10 @@ Utility modules with no lazy wrapper: `cloudflare.ts`, `github-copilot-headers.t
 
 - `simple-options.ts` `applyExtraBody()`: merges caller-supplied `extraBody` into a provider request, skipping keys in the provider's `reservedKeys` set. Never overwrite `model`, `messages`, `stream`, tool-call fields, or reasoning fields. Each provider declares its own `RESERVED_BODY_KEYS` set (e.g., `OPENAI_COMPLETIONS_RESERVED_BODY_KEYS`).
 - `transform-messages.ts`: cross-provider message coercion (image downgrade, tool-result flattening). Returns new structures; never mutates shared message arrays. Cross-model transforms drop incompatible opaque state (provider-native content that can't round-trip). Same-model provider-native state (Anthropic signed thinking, redacted thinking blocks, encrypted web-search state) is byte-sensitive and must be preserved exactly.
-- `openai-responses-shared.ts`: shared logic for both `openai-responses.ts` and `openai-codex-responses.ts`.
+- `openai-responses-shared.ts`: shared logic for both `openai-responses.ts` and `openai-codex-responses.ts`. Native
+  `image_generation_call` items are structurally reconciled here (not from the installed SDK type): partial-image
+  events are ignored, terminal output can backfill a missing done frame, and final base64 is aggregate-capped before
+  provider-native content leaves the parser.
 - `google-shared.ts`: shared logic for both `google-generative-ai.ts` and `google-vertex.ts`.
 
 ## PROVIDERSTREAMS CONTRACT

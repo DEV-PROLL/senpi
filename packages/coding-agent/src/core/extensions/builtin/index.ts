@@ -21,6 +21,7 @@ import loopGuardExtension from "./loop-guard/index.ts";
 import mcpExtension from "./mcp/index.ts";
 import modelFallbackExtension from "./model-fallback/index.ts";
 import nestedAgentsMdExtension from "./nested-agents-md/index.ts";
+import openaiImageGenExtension from "./openai-image-gen/index.ts";
 import openaiWebSearchExtension from "./openai-web-search/index.ts";
 import permissionSystemExtension from "./permission-system/index.ts";
 import promptPresetExtension from "./prompt-preset/index.ts";
@@ -58,6 +59,8 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "permission-system", factory: permissionSystemExtension },
 	{ id: "gpt-apply-patch", factory: gptApplyPatchExtension },
 	{ id: "imagegen", factory: imageGenExtension },
+	// Follows imagegen so the native injector's bypass wiring observes the registered client tool.
+	{ id: "openai-image-gen", factory: openaiImageGenExtension },
 	{ id: "prompt-preset", factory: promptPresetExtension },
 	{ id: "todowrite", factory: todowriteExtension },
 	{ id: "redraws", factory: redrawsExtension },

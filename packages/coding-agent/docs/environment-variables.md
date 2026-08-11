@@ -86,4 +86,11 @@ These variables are read by Pi itself:
 | `VISUAL`, `EDITOR` | External editor fallback when `externalEditor` is unset |
 | `HTTP_PROXY`, `HTTPS_PROXY` | Proxy outbound HTTP requests |
 
+### Image Generation
+
+| Variable | Description |
+|----------|-------------|
+| `PI_OPENAI_IMAGE_GEN` | Enable or disable native `image_generation` server-tool injection on OpenAI Responses models. Accepts `1`/`true`/`yes` (default) or `0`/`false`/`no`. When disabled, the client-side `generate_image` tool is used instead |
+| `PI_IMAGE_GEN_PROVIDER` | Pin a specific configured gateway provider for image generation (for example `quotio-openai`). The provider must have a resolvable API key and base URL in `models.json`. When unset, the credential resolver picks the best available source automatically |
+
 Provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and cloud-provider configuration are listed in [Providers](providers.md#environment-variables-or-auth-file).

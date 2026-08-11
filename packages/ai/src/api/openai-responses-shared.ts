@@ -578,6 +578,60 @@ type ResponsesOutputSlot =
 
 type ToolCallOutputSlot = Extract<ResponsesOutputSlot, { type: "toolCall" }>;
 
+type NativeImageGenerationCall = {
+	type: "image_generation_call";
+	id?: string;
+	status: string;
+	result?: string | null;
+	revised_prompt?: string;
+};
+
+const MAX_NATIVE_IMAGE_BASE64_CHARS = 24 * 1024 * 1024;
+
+function readNativeImageGenerationCall(value: unknown): NativeImageGenerationCall | undefined {
+	if (typeof value !== "object" || value === null || !("type" in value) || !("status" in value)) return undefined;
+	if (value.type !== "image_generation_call" || typeof value.status !== "string") return undefined;
+	return {
+		type: "image_generation_call",
+		...("id" in value && typeof value.id === "string" ? { id: value.id } : {}),
+		status: value.status,
+		...("result" in value && (typeof value.result === "string" || value.result === null)
+			? { result: value.result }
+			: {}),
+		...("revised_prompt" in value && typeof value.revised_prompt === "string"
+			? { revised_prompt: value.revised_prompt }
+			: {}),
+	};
+}
+
+function isValidBase64(value: string): boolean {
+	return value.length > 0 && value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value);
+}
+
+function reconcileNativeImageGenerationCall(item: NativeImageGenerationCall): NativeImageGenerationCall {
+	if (item.status !== "completed") {
+		return {
+			type: "image_generation_call",
+			...(item.id !== undefined ? { id: item.id } : {}),
+			status: item.status,
+		};
+	}
+	if (typeof item.result !== "string" || !isValidBase64(item.result)) {
+		return {
+			type: "image_generation_call",
+			...(item.id !== undefined ? { id: item.id } : {}),
+			status: "malformed",
+		};
+	}
+	return {
+		type: "image_generation_call",
+		...(item.id !== undefined ? { id: item.id } : {}),
+		status: "completed",
+		result: item.result,
+		...(item.revised_prompt?.trim() ? { revised_prompt: item.revised_prompt } : {}),
+	};
+}
+
 export async function processResponsesStream<TApi extends Api>(
 	openaiStream: AsyncIterable<ResponseStreamEvent>,
 	output: AssistantMessage,
@@ -586,8 +640,11 @@ export async function processResponsesStream<TApi extends Api>(
 	options?: OpenAIResponsesStreamOptions,
 ): Promise<void> {
 	let sawTerminalResponseEvent = false;
+	let nativeImageBase64Chars = 0;
 	const outputSlots = new Map<number, ResponsesOutputSlot>();
 	const reasoningBlocksById = new Map<string, ThinkingContent>();
+	const nativeImageCharsByOutputIndex = new Map<number, number>();
+	const finalizedNativeImageOutputIndexes = new Set<number>();
 	const applyMessagePhaseStopReason = (item: ResponseOutputItem): void => {
 		if (item.type === "message" && item.phase === "final_answer") {
 			output.stopReason = "stop";
@@ -675,13 +732,19 @@ export async function processResponsesStream<TApi extends Api>(
 			stream.push({ type: "toolcall_start", contentIndex: slot.contentIndex, partial: output });
 			return slot;
 		}
-		const block = { type: "providerNative", subtype: item.type, raw: item } satisfies ProviderNativeContent;
-		output.content.push(block);
+		const imageItem = readNativeImageGenerationCall(item);
+		const block = {
+			type: "providerNative",
+			subtype: item.type,
+			raw: imageItem ? reconcileNativeImageGenerationCall(imageItem) : item,
+		} satisfies ProviderNativeContent;
 		const slot = {
 			type: "providerNative",
 			block,
-			contentIndex: output.content.length - 1,
+			contentIndex: output.content.length,
 		} satisfies ResponsesOutputSlot;
+		if (imageItem) reconcileNativeImageSlot(outputIndex, slot, imageItem);
+		output.content.push(block);
 		outputSlots.set(outputIndex, slot);
 		return slot;
 	};
@@ -690,6 +753,50 @@ export async function processResponsesStream<TApi extends Api>(
 		item: ResponseOutputItem | ResponseCustomToolCallItem,
 	): ResponsesOutputSlot | undefined => {
 		return outputSlots.get(outputIndex) ?? createSlot(outputIndex, item);
+	};
+	function scrubNativeImageResults(): void {
+		for (const block of output.content) {
+			if (block.type !== "providerNative" || block.subtype !== "image_generation_call") continue;
+			const item = readNativeImageGenerationCall(block.raw);
+			if (typeof item?.result !== "string") continue;
+			block.raw = {
+				type: "image_generation_call",
+				...(item.id !== undefined ? { id: item.id } : {}),
+				status: "malformed",
+			};
+		}
+		nativeImageBase64Chars = 0;
+		nativeImageCharsByOutputIndex.clear();
+	}
+	function reconcileNativeImageSlot(
+		outputIndex: number,
+		slot: Extract<ResponsesOutputSlot, { type: "providerNative" }>,
+		item: NativeImageGenerationCall,
+	): void {
+		const reconciled = reconcileNativeImageGenerationCall(item);
+		const previousChars = nativeImageCharsByOutputIndex.get(outputIndex) ?? 0;
+		const nextChars = typeof reconciled.result === "string" ? reconciled.result.length : 0;
+		const nextTotal = nativeImageBase64Chars - previousChars + nextChars;
+		if (nextTotal > MAX_NATIVE_IMAGE_BASE64_CHARS) {
+			scrubNativeImageResults();
+			throw new Error("Native image generation results exceed the 24 MiB base64 limit");
+		}
+		nativeImageBase64Chars = nextTotal;
+		if (nextChars > 0) nativeImageCharsByOutputIndex.set(outputIndex, nextChars);
+		else nativeImageCharsByOutputIndex.delete(outputIndex);
+		slot.block.subtype = "image_generation_call";
+		slot.block.raw = reconciled;
+	}
+	const backfillNativeImageGenerationCalls = (responseOutput: readonly ResponseOutputItem[]): void => {
+		for (const [outputIndex, outputItem] of responseOutput.entries()) {
+			if (finalizedNativeImageOutputIndexes.has(outputIndex)) continue;
+			const imageItem = readNativeImageGenerationCall(outputItem);
+			if (!imageItem) continue;
+			const existingSlot = getSlot(outputIndex, "providerNative");
+			if (existingSlot) reconcileNativeImageSlot(outputIndex, existingSlot, imageItem);
+			else createSlot(outputIndex, outputItem);
+			outputSlots.delete(outputIndex);
+		}
 	};
 	// Azure OpenAI can omit reasoning.encrypted_content from response.output_item.done
 	// and provide it only in response.completed.response.output. Backfill the
@@ -714,6 +821,7 @@ export async function processResponsesStream<TApi extends Api>(
 	) => {
 		sawTerminalResponseEvent = true;
 		backfillReasoningSignatures(response.output ?? []);
+		backfillNativeImageGenerationCalls(response.output ?? []);
 		if (response?.id) {
 			output.responseId = response.id;
 		}
@@ -837,8 +945,13 @@ export async function processResponsesStream<TApi extends Api>(
 			const item = event.item;
 			applyMessagePhaseStopReason(item);
 			const slot = getOrCreateSlot(event.output_index, item);
+			const imageItem = readNativeImageGenerationCall(item);
 
-			if (item.type === "reasoning" && slot?.type === "thinking") {
+			if (imageItem && slot?.type === "providerNative") {
+				reconcileNativeImageSlot(event.output_index, slot, imageItem);
+				finalizedNativeImageOutputIndexes.add(event.output_index);
+				outputSlots.delete(event.output_index);
+			} else if (item.type === "reasoning" && slot?.type === "thinking") {
 				const summaryText = item.summary?.map((s) => s.text).join("\n\n") || "";
 				const contentText = item.content?.map((c) => c.text).join("\n\n") || "";
 				slot.block.thinking = summaryText || contentText || slot.block.thinking;

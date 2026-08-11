@@ -6,6 +6,11 @@
 
 ### Added
 
+- Added `image_generation_call` reconciliation to the OpenAI Responses shared stream processor: completed
+  native image results occupy a single provider-native slot (added then replaced in place on done),
+  partial-image events are ignored, oversized payloads are rejected before persistence, and a
+  `supportsImageGeneration` compat flag gates server-tool injection per endpoint
+  ([#814](https://github.com/code-yeongyu/senpi/pull/814)).
 - Added an `openai-images` Images API adapter for text-only OpenAI image generations, with canonical `/v1`
   endpoint normalization, shared credential-header auth, provider-owned retries, usage/cost mapping, and lazy
   builtin registration ([#813](https://github.com/code-yeongyu/senpi/pull/813)).

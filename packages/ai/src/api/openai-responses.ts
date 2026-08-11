@@ -90,6 +90,7 @@ function getCompat(model: Model<"openai-responses">, env?: ProviderEnv): Require
 		supportsWebSocket: model.compat?.supportsWebSocket ?? isNativeEndpoint,
 		supportsRemoteCompactionV2: model.compat?.supportsRemoteCompactionV2 ?? isNativeEndpoint,
 		supportsWebSearchPreview: model.compat?.supportsWebSearchPreview ?? isNativeEndpoint,
+		supportsImageGeneration: model.compat?.supportsImageGeneration ?? isNativeEndpoint,
 		supportsStrictMode: model.compat?.supportsStrictMode ?? false,
 		supportsOpenAIGrammarTools: model.compat?.supportsOpenAIGrammarTools ?? false,
 		supportsToolSearch: model.compat?.supportsToolSearch ?? false,
