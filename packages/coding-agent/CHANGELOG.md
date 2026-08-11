@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `/goal resume` can explicitly reactivate a completed goal and queue its continuation, while completed goals remain excluded from automatic restart-resume prompts.
 - A launch from a deleted working directory (for example a removed worktree) no longer crashes during
   startup with `uv_cwd`; the CLI recovers into the home directory before any dependency evaluates
   `process.cwd()`.
