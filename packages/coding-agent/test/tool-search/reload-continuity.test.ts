@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
-import type { ExtensionFactory, LoadExtensionsResult, ToolDefinition } from "../../src/index.ts";
 import type { ResourceLoader } from "../../src/core/resource-loader.ts";
+import type { ExtensionFactory, LoadExtensionsResult, ToolDefinition } from "../../src/index.ts";
 import { createHarness } from "../suite/harness.ts";
 import { createTestExtensionsResult, createTestResourceLoader } from "../utilities.ts";
 
@@ -20,7 +20,10 @@ async function extensionResult(path: string, register: (pi: Parameters<Extension
 	return createTestExtensionsResult([{ path, factory: register }]);
 }
 
-function mutableResourceLoader(initial: LoadExtensionsResult, reloadTo: () => Promise<LoadExtensionsResult>): ResourceLoader {
+function mutableResourceLoader(
+	initial: LoadExtensionsResult,
+	reloadTo: () => Promise<LoadExtensionsResult>,
+): ResourceLoader {
 	let current = initial;
 	return {
 		...createTestResourceLoader(),
@@ -31,7 +34,10 @@ function mutableResourceLoader(initial: LoadExtensionsResult, reloadTo: () => Pr
 	};
 }
 
-function promote(session: { getActiveToolNames(): string[]; setActiveToolsByName(names: string[]): void }, name: string) {
+function promote(
+	session: { getActiveToolNames(): string[]; setActiveToolsByName(names: string[]): void },
+	name: string,
+) {
 	session.setActiveToolsByName([...session.getActiveToolNames(), name]);
 }
 
