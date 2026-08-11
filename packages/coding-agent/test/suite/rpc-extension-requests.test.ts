@@ -226,4 +226,49 @@ describe("extension RPC requests", () => {
 
 		await expect(runner.requestRpc("fixture.stale", null)).rejects.toThrow("stale extension generation");
 	});
+
+	it("invalidates the previous extension generation after a real reload", async () => {
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					const rpc = (pi as ExtensionRequestApi).rpc;
+					if (typeof rpc.handle !== "function") return;
+					rpc.handle("fixture.reload", () => ({ generation: "old" }));
+				},
+			],
+		});
+		harnesses.push(harness);
+		const oldRunner = harness.session.extensionRunner;
+
+		await harness.session.reload();
+
+		expect(harness.session.extensionRunner).not.toBe(oldRunner);
+		await expect(oldRunner.requestRpc("fixture.reload", null)).rejects.toThrow("stale extension generation");
+	});
+
+	it("rejects an in-flight result when its generation becomes stale", async () => {
+		const started = Promise.withResolvers<void>();
+		const result = Promise.withResolvers<{ generation: string }>();
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					const rpc = (pi as ExtensionRequestApi).rpc;
+					if (typeof rpc.handle !== "function") return;
+					rpc.handle("fixture.in-flight", async () => {
+						started.resolve();
+						return result.promise;
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		const runner = harness.session.extensionRunner;
+		const pending = runner.requestRpc("fixture.in-flight", null);
+		await started.promise;
+
+		runner.invalidate("stale extension generation");
+		result.resolve({ generation: "old" });
+
+		await expect(pending).rejects.toThrow("stale extension generation");
+	});
 });

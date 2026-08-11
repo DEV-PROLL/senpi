@@ -974,7 +974,9 @@ export class ExtensionRunner {
 		if (matches.length > 1) {
 			throw new Error(`Multiple extension RPC request handlers registered: ${normalizedName}`);
 		}
-		return matches[0]?.(data);
+		const result = await matches[0]?.(data);
+		this.assertActive();
+		return result;
 	}
 
 	/**

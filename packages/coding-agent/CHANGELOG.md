@@ -10,6 +10,11 @@
 
 ### Added
 
+- RPC clients can invoke generation-owned extension request handlers directly through
+  `pi.rpc.handle()` and `RpcClient.requestExtension()` without turning controls into
+  model prompts; request routing rejects unknown, duplicate, cross-session, stale,
+  and stale-in-flight generations ([#822](https://github.com/code-yeongyu/senpi/pull/822)).
+
 ### Changed
 
 ### Removed

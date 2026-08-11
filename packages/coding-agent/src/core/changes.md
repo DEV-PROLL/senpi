@@ -1,5 +1,22 @@
 # changes
 
+## Retire extension generations after reload notifications (2026-08-12)
+
+### What changed
+
+- Session reload invalidates the previous `ExtensionRunner` after removed-extension notifications
+  have been delivered, including when notification delivery throws.
+
+### Why
+
+- Reload replaced the active runner but left captured references to the previous generation callable.
+  Invalidating after the final old-generation lifecycle event preserves notification behavior while
+  closing later request registration, emission, and dispatch.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` reload lifecycle ordering.
+
 ## Standalone binary codemode sidecar resolution (2026-08-11)
 
 ### What changed

@@ -1,5 +1,22 @@
 # Core Extensions Changes
 
+## 2026-08-12 - Reject stale in-flight RPC request results
+
+### What changed
+
+- `ExtensionRunner.requestRpc()` re-checks generation liveness after an asynchronous handler
+  completes, so a result cannot escape after reload or replacement invalidates its owner.
+- Focused tests cover both explicit mid-flight invalidation and a real session reload.
+
+### Why
+
+- Entry-time liveness alone allowed a slow handler from generation N to return successfully after
+  generation N+1 became active.
+
+### Expected merge conflict zones
+
+- LOW: `runner.ts` request dispatch and its RPC request suite.
+
 ## 2026-08-12 - Extension-owned RPC request handlers
 
 ### What changed
