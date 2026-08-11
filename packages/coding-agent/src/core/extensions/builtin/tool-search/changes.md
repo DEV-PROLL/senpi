@@ -1,5 +1,23 @@
 # Tool Search Builtin Changes
 
+## 2026-08-11 - Defer local tool registration until the catalog is searchable
+
+### What changed
+
+- Deferred `tool_search` registration until the shared catalog contains at least one searchable MCP or extension document.
+- Kept the existing catalog lifecycle responsible for activating `tool_search` when documents appear and removing it from the active set when the catalog becomes empty.
+- Added coverage for the empty-to-searchable-to-empty lifecycle and retained `noTools: "all"` as a hard empty registry and active set.
+
+### Why
+
+- Registering `tool_search` unconditionally made it appear in no-builtin tool listings even when there was nothing it could search.
+- Catalog-gated registration preserves legitimate search-mode behavior while giving sessions that never gain a searchable catalog zero resident and registry cost.
+
+### Expected merge conflict zones
+
+- MEDIUM: `index.ts` owns builtin registration timing.
+- LOW: `service.ts` owns catalog-driven registration and activation lifecycle.
+
 ## 2026-08-11 - Anthropic native deferral for searchable extension tools
 
 ### What changed

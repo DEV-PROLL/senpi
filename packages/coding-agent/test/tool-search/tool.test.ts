@@ -71,7 +71,8 @@ describe("registered shared tool_search", () => {
 		expect(providerTools[1]).not.toContain("calendar_create");
 		const result = harness.sessionManager
 			.getEntries()
-			.filter((entry) => entry.type === "message" && entry.message.role === "toolResult")
+			.filter((entry) => entry.type === "message")
+			.filter((entry) => entry.message.role === "toolResult")
 			.map((entry) => JSON.stringify(entry.message));
 		expect(result.some((text) => text.includes("weather_forecast-ran"))).toBe(true);
 	});

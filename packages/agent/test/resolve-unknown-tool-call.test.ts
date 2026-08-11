@@ -10,11 +10,18 @@ import { describe, expect, it, vi } from "vitest";
 import { agentLoop } from "../src/agent-loop.ts";
 import type { AgentContext, AgentLoopConfig, AgentTool } from "../src/types.ts";
 
+type SuccessfulAssistantMessage = AssistantMessage & {
+	stopReason: Extract<AssistantMessage["stopReason"], "stop" | "length" | "toolUse">;
+};
+
 class AssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
-	constructor(message: AssistantMessage) {
+	constructor(message: SuccessfulAssistantMessage) {
 		super(
 			(event) => event.type === "done",
-			(event) => event.message,
+			(event) => {
+				if (event.type !== "done") throw new Error("Unexpected non-terminal assistant event");
+				return event.message;
+			},
 		);
 		queueMicrotask(() => this.push({ type: "done", reason: message.stopReason, message }));
 	}
@@ -35,7 +42,10 @@ function model(): Model<"openai-responses"> {
 	};
 }
 
-function assistant(content: AssistantMessage["content"], stopReason: AssistantMessage["stopReason"]): AssistantMessage {
+function assistant(
+	content: AssistantMessage["content"],
+	stopReason: SuccessfulAssistantMessage["stopReason"],
+): SuccessfulAssistantMessage {
 	return {
 		role: "assistant",
 		content,
@@ -87,12 +97,14 @@ async function run(resolveUnknownToolCall: AgentLoopConfig["resolveUnknownToolCa
 	return await stream.result();
 }
 
-function tool(execute = vi.fn()): AgentTool {
+const ToolParameters = Type.Object({ city: Type.String() });
+
+function tool(execute = vi.fn()): AgentTool<typeof ToolParameters> {
 	return {
 		name: "lazy_weather",
 		label: "Lazy weather",
 		description: "Weather",
-		parameters: Type.Object({ city: Type.String() }),
+		parameters: ToolParameters,
 		execute: async (_id, params) => {
 			execute(params);
 			return { content: [{ type: "text", text: `weather:${params.city}` }], details: {} };

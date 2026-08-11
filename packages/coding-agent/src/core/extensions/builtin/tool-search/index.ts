@@ -16,7 +16,12 @@ export function createToolSearchExtension(service: ToolSearchService): Extension
 			service.maybeRehydrateFromHistory(event.messages);
 		});
 		pi.registerLazyToolActivator((toolName) => service.activateTool(toolName));
-		pi.registerTool(createToolSearchTool(service));
+		let toolRegistered = false;
+		service.bindToolRegistrar(() => {
+			if (toolRegistered) return;
+			toolRegistered = true;
+			pi.registerTool(createToolSearchTool(service));
+		});
 
 		const nativeAdapter = new AnthropicNativeToolSearchAdapter({
 			enabled: () => {

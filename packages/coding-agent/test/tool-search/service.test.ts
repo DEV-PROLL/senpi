@@ -70,6 +70,24 @@ function runtime(
 }
 
 describe("ToolSearchService", () => {
+	it("registers tool_search only after the catalog gains a searchable document", () => {
+		const state = runtime([], ["read"]);
+		const service = new ToolSearchService(state.runtime);
+		const register = vi.fn();
+
+		service.bindToolRegistrar(register);
+		expect(register).not.toHaveBeenCalled();
+		expect(state.active).toEqual(["read"]);
+
+		service.feed("mcp", [document("mcp_calendar_create")], { activate: vi.fn() });
+		expect(register).toHaveBeenCalledOnce();
+		expect(state.active).toEqual(["read", "tool_search"]);
+
+		service.feed("mcp", [], { activate: vi.fn() });
+		expect(register).toHaveBeenCalledOnce();
+		expect(state.active).toEqual(["read"]);
+	});
+
 	it("ranks fed documents and invokes the owning hook for every match, including an active stub", () => {
 		const state = runtime([], ["mcp_calendar_stub"]);
 		const service = new ToolSearchService(state.runtime);
@@ -226,7 +244,10 @@ describe("ToolSearchService", () => {
 		expect(state.active).toEqual(["weather_forecast"]);
 		const callsBeforeContext = state.setActiveTools.mock.calls.length;
 		for (const handler of handlers.get("context") ?? []) {
-			handler({ type: "context", messages: [{ content: marker }] } satisfies ContextEvent, ctx);
+			handler(
+				{ type: "context", messages: [{ role: "user", content: marker, timestamp: 0 }] } satisfies ContextEvent,
+				ctx,
+			);
 		}
 		// The context event is in the same catalog generation as session_start,
 		// so stale history is not applied a second time.

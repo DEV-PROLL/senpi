@@ -32,6 +32,7 @@ export class ToolSearchService {
 	#extensionFingerprint = "";
 	#registryGeneration = 0;
 	#historyScannedGeneration = -1;
+	#registerToolSearch: (() => void) | undefined;
 
 	constructor(runtime: ToolSearchRuntime) {
 		this.#runtime = runtime;
@@ -47,6 +48,11 @@ export class ToolSearchService {
 
 	bindActivationRuntime(runtime: Pick<RuntimeApi, "getActiveTools" | "setActiveTools">): void {
 		this.#runtime = { ...this.#runtime, ...runtime };
+	}
+
+	/** Register the resident search tool only after a searchable catalog exists. */
+	bindToolRegistrar(register: () => void): void {
+		this.#registerToolSearch = register;
 	}
 
 	beginSession(): void {
@@ -150,8 +156,9 @@ export class ToolSearchService {
 	}
 
 	#syncToolSearchLifecycle(): void {
-		const current = this.#runtime.getActiveTools();
 		const hasDocuments = this.#extensionDocs.length > 0 || (this.#feeds.get("mcp")?.docs.length ?? 0) > 0;
+		if (hasDocuments) this.#registerToolSearch?.();
+		const current = this.#runtime.getActiveTools();
 		const isActive = current.includes(TOOL_SEARCH_TOOL_NAME);
 		if (hasDocuments === isActive) return;
 		this.#runtime.setActiveTools(

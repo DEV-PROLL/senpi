@@ -215,7 +215,8 @@ describe("todo32 tier-B: stubSwap keeps the tools array byte-stable", () => {
 
 		const searchResults = harness.sessionManager
 			.getEntries()
-			.filter((entry) => entry.type === "message" && entry.message.role === "toolResult")
+			.filter((entry) => entry.type === "message")
+			.filter((entry) => entry.message.role === "toolResult")
 			.map((entry) => JSON.stringify(entry.message));
 		expect(searchResults.some((result) => result.includes(TOOL_SEARCH_ACTIVATION_MARKER_V2))).toBe(true);
 
