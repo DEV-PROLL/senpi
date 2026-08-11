@@ -4,14 +4,14 @@
 
 ### What changed
 
-- Deferred `tool_search` registration until the shared catalog contains at least one searchable MCP or extension document.
-- Kept the existing catalog lifecycle responsible for activating `tool_search` when documents appear and removing it from the active set when the catalog becomes empty.
+- Deferred the first `tool_search` registration until the shared catalog contains at least one searchable MCP or extension document; sessions whose catalog stays empty never register or activate it.
+- Kept the catalog lifecycle responsible for activating `tool_search` while documents exist and removing it from the active set when the catalog becomes empty. A definition registered earlier in the session remains registered but inactive because the extension API has no unregister operation.
 - Added coverage for the empty-to-searchable-to-empty lifecycle and retained `noTools: "all"` as a hard empty registry and active set.
 
 ### Why
 
 - Registering `tool_search` unconditionally made it appear in no-builtin tool listings even when there was nothing it could search.
-- Catalog-gated registration preserves legitimate search-mode behavior while giving sessions that never gain a searchable catalog zero resident and registry cost.
+- Deferred first registration preserves legitimate search-mode behavior while giving sessions that never gain a searchable catalog zero resident, registry, and prompt cost; active-set removal preserves zero prompt cost after a populated catalog empties.
 
 ### Expected merge conflict zones
 
@@ -56,3 +56,38 @@
 
 - MEDIUM: `index.ts` will register the authored tool when MCP drops its legacy registration.
 - MEDIUM: `service.ts` feeder and rehydration paths will gain MCP ownership in the same swap.
+
+## 2026-08-11 - Ownership-aware activation-marker foundation
+
+### What changed
+
+- Added v2 `[tool_search:activated:v2]` markers carrying each promoted tool's name and host-derived registration identity.
+- Added parsing for both v2 markers and legacy MCP name-only markers, with rehydration restoring v2 entries only when ownership still matches and limiting legacy restoration to MCP documents.
+- Excluded missing, owner-changed, and lazy-activation-gated documents while returning deduplicated, stable-sorted names.
+
+### Why
+
+- Extension tool names are not sufficient ownership proof across reloads, so persisted promotion must bind a name to the registration that originally supplied it.
+- Legacy MCP history remains compatible without allowing name-only markers to activate an unrelated extension tool.
+
+### Expected merge conflict zones
+
+- LOW: `engine/marker.ts` marker parsing, registration identity derivation, and rehydration rules.
+
+## 2026-08-11 - Generalized tool-search document and BM25 foundation
+
+### What changed
+
+- Added the shared `ToolSearchDocument` model for MCP and extension sources, including group, aliases, keywords, owner label, and registration identity.
+- Generalized the MCP BM25 engine to rank shared documents with weighted names, labels, aliases, keywords, groups, descriptions, and supplemental search text.
+- Added source/group filtering, normalized exact-match handling, and deterministic canonical-name tie breaking.
+
+### Why
+
+- MCP and extension tools need one source-neutral search representation and ranking engine before they can feed a shared catalog.
+- Keeping source as a filter rather than a ranking signal preserves deterministic relevance across catalog owners.
+
+### Expected merge conflict zones
+
+- LOW: `engine/document.ts` shared document fields.
+- LOW: `engine/bm25.ts` field weighting, exact-match handling, filtering, and ordering.

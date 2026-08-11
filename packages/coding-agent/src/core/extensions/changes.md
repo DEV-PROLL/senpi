@@ -22,18 +22,19 @@
 - MEDIUM: `agent-session.ts` agent tool-hook installation.
 - MEDIUM: tool-search provider-request wiring.
 
-## 2026-08-11 - Shared tool-search registration and MCP catalog activation
+## 2026-08-11 - Deferred tool-search registration and MCP catalog activation
 
 ### What changed
 
-- The tool-search builtin now registers the single reserved `tool_search` definition and keeps it active only while the shared catalog contains searchable documents.
+- The tool-search builtin owns the single reserved `tool_search` definition but defers registering it until the shared catalog first contains a searchable document; sessions whose catalog stays empty never register or activate it.
+- Once registered, `tool_search` is active only while searchable documents exist. If the catalog later empties, the definition remains registered because the extension API has no unregister operation, but it is removed from the active set.
 - The session-scoped service accepts MCP documents and activation hooks, lazily activates either catalog source, and rehydrates v2 plus legacy MCP markers once per catalog generation.
 - Generic searches no longer default to the MCP source; only the legacy `server` argument maps to `source: "mcp"` plus the equivalent group filter.
 
 ### Why
 
-- Atomic registration and feeder activation avoid duplicate builtin precedence while preserving model-visible MCP behavior and enabling extension tools through the same search surface.
-- Catalog lifecycle ownership keeps the registered definition resident but removes all prompt cost when no searchable documents exist.
+- Atomic ownership and feeder activation avoid duplicate builtin precedence while preserving model-visible MCP behavior and enabling extension tools through the same search surface.
+- Deferred first registration gives sessions that never gain a searchable catalog zero registry and prompt cost, including `noTools: "all"` sessions, while active-set removal preserves zero prompt cost if a populated catalog later empties.
 
 ### Why this cannot be expressed externally
 
