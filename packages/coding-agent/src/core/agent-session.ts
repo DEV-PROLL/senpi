@@ -5544,6 +5544,10 @@ export class AgentSession {
 			toolRegistry.set(tool.name, tool);
 		}
 		this._toolRegistry = toolRegistry;
+		const isDirectlyExposed = (name: string): boolean => {
+			const entry = this._toolDefinitions.get(name);
+			return entry !== undefined && normalizeToolExposure(entry.definition).exposure === "direct";
+		};
 
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
@@ -5557,11 +5561,11 @@ export class AgentSession {
 			}
 		} else if (options?.includeAllExtensionTools) {
 			for (const tool of wrappedExtensionTools) {
-				nextActiveToolNames.push(tool.name);
+				if (isDirectlyExposed(tool.name)) nextActiveToolNames.push(tool.name);
 			}
 		} else if (!options?.activeToolNames) {
 			for (const toolName of this._toolRegistry.keys()) {
-				if (!previousRegistryNames.has(toolName)) {
+				if (!previousRegistryNames.has(toolName) && isDirectlyExposed(toolName)) {
 					nextActiveToolNames.push(toolName);
 				}
 			}

@@ -1,5 +1,26 @@
 # Core Extensions Changes
 
+## 2026-08-11 - Search-exposed tools start inactive
+
+### What changed
+
+- Factory-loaded and post-bind extension tools now auto-activate only when their effective exposure is `direct`.
+- Explicit initial active names and host allowlists remain authoritative, including for search-exposed tools.
+- Re-registering an existing tool preserves its current active or inactive membership instead of reapplying exposure defaults.
+
+### Why
+
+- Search-exposed tools must remain registered and discoverable without adding their schemas to every model request.
+- Exposure is an initial-state policy, not a permission boundary or a reason to demote an already-promoted tool.
+
+### Why this cannot be expressed externally
+
+- Initial activation is computed while the core session rebuilds its winning definition and executable registries.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` active-set computation in `_refreshToolRegistry` as shared tool search lands.
+
 ## 2026-08-11 - Declarative tool search-exposure metadata
 
 ### What changed
