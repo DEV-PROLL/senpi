@@ -28,10 +28,10 @@
 
 ### What changed
 
-- `shell.ts`: the Windows branch of `killProcessTree` moved into `killWindowsProcessTree`, which resolves
-  `%SystemRoot%\System32\taskkill.exe` through the new `resolveWindowsTaskkillPath` export, runs the killer with
-  `spawnSync` under a 5s timeout, and falls back to `process.kill(pid)` when the launcher never started or the
-  timeout fired. Both new functions are exported for direct regression coverage.
+- `shell.ts`: the Windows branch of `killProcessTree` moved into `killWindowsProcessTree`, which walks the ordered
+  launcher list from the new `windowsTaskkillCandidates` export (every existing absolute `System32` / `Sysnative`
+  `taskkill.exe`, then the bare PATH-resolved name), runs each with `spawnSync` under a 5s timeout, and only degrades
+  to `process.kill(pid)` when no launcher starts at all. Both new functions are exported for regression coverage.
 
 ### Why
 
@@ -44,6 +44,9 @@
   `process.exit(129)` in the same tick. An asynchronous killer — or a fallback wired to the child's `error` event —
   never runs on that path, so the tracked child would survive. `spawnSync` reports a failed lookup on its returned
   `error` field instead of emitting it, so ENOENT can no longer become an uncaught exception either.
+- The candidate list exists because the reported failure was PATH resolution, not a missing binary: a broken PATH must
+  not downgrade a tree kill to a direct kill. `process.kill` maps to `TerminateProcess` and leaves descendants
+  orphaned, the same limitation `packages/pty/src/pipe-fallback.ts` documents, so it stays a last resort.
 
 ### Why extension system couldn't handle this
 

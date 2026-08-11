@@ -7,9 +7,11 @@
 - The ambient Claude auth availability probe now passes `windowsHide: true` when spawning `claude auth status`, so the background check no longer opens a console window on Windows ([#870](https://github.com/code-yeongyu/senpi/issues/870)).
 - `senpi --help` now lists the `PI_RULES_DISABLED`, `PI_RULES_MAX_RULE_CHARS`, and `PI_RULES_MAX_RESULT_CHARS` environment settings that the built-in rules extension reads, so the two environment-only character limits are discoverable from the CLI ([#678](https://github.com/code-yeongyu/senpi/issues/678)).
 - Windows shutdown no longer dies with an uncaught `Error: spawn taskkill ENOENT` when `%SystemRoot%\System32` is
-  missing from PATH. The tracked-detached-child kill now runs the absolute `System32\taskkill.exe` synchronously, so a
-  shutdown that exits in the same tick still terminates the tree, and falls back to killing the direct child when the
-  launcher cannot start ([#807](https://github.com/code-yeongyu/senpi/pull/807)).
+  missing from PATH. The tracked-detached-child kill now tries every absolute `System32` / `Sysnative` `taskkill.exe`
+  before the PATH-resolved name, runs synchronously so a shutdown that exits in the same tick still terminates the
+  tree, and degrades to killing the direct child only when no launcher starts at all
+  ([#812](https://github.com/code-yeongyu/senpi/issues/812),
+  [#807](https://github.com/code-yeongyu/senpi/pull/807)).
 
 
 ### New Features

@@ -261,20 +261,30 @@ export function killTrackedDetachedChildren(): void {
 }
 
 /**
- * Resolve the Windows `taskkill` executable.
+ * Ordered `taskkill` launchers to try, most reliable first.
  *
  * `spawn("taskkill", ...)` relies on a PATH lookup, so any session whose PATH lost
  * `%SystemRoot%\System32` (a POSIX-style PATH inherited from a Git Bash/MSYS launcher,
- * a truncated user PATH, a locked-down service account) fails to resolve it. Prefer the
- * absolute System32 path and keep the bare executable name as the last resort.
+ * a truncated user PATH, a locked-down service account) fails to resolve it. A broken PATH
+ * must not cost us the process-tree kill, so every absolute System32 location that actually
+ * exists is tried before the bare PATH-resolved name.
  */
-export function resolveWindowsTaskkillPath(env: NodeJS.ProcessEnv = process.env): string {
-	const systemRoot = env.SystemRoot ?? env.SYSTEMROOT ?? env.windir;
-	if (systemRoot) {
-		const absolute = join(systemRoot, "System32", "taskkill.exe");
-		if (existsSync(absolute)) return absolute;
+export function windowsTaskkillCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
+	// A bare `SystemDrive` is drive-relative ("C:"), so anchor it before joining.
+	const systemDrive = env.SystemDrive ? `${env.SystemDrive}\\` : undefined;
+	const roots = [env.SystemRoot, env.SYSTEMROOT, env.windir, systemDrive && join(systemDrive, "Windows")];
+	const candidates: string[] = [];
+	for (const root of roots) {
+		if (!root) continue;
+		// Sysnative reaches the real 64-bit System32 from a 32-bit process, where System32
+		// is redirected to SysWOW64.
+		for (const systemDir of ["System32", "Sysnative"]) {
+			const absolute = join(root, systemDir, "taskkill.exe");
+			if (!candidates.includes(absolute) && existsSync(absolute)) candidates.push(absolute);
+		}
 	}
-	return "taskkill.exe";
+	candidates.push("taskkill.exe");
+	return candidates;
 }
 
 function killProcessDirectly(pid: number): void {
@@ -312,9 +322,17 @@ function taskkillHandledTree(pid: number, taskkillPath: string): boolean {
  * the tracked child would survive. `spawnSync` also reports a failed executable lookup on
  * its returned `error` field instead of emitting it, so a PATH without
  * `%SystemRoot%\System32` can no longer surface as an uncaught `spawn taskkill ENOENT`.
+ *
+ * The direct `process.kill` at the end is a degraded last resort reached only when no
+ * `taskkill.exe` can be launched at all. It maps to `TerminateProcess`, which does not
+ * touch descendants — the same limitation `packages/pty/src/pipe-fallback.ts` documents.
+ * Nothing in-process can walk a Windows process tree without an external tool, so this
+ * still beats leaving the whole tree running.
  */
-export function killWindowsProcessTree(pid: number, taskkillPath = resolveWindowsTaskkillPath()): void {
-	if (taskkillHandledTree(pid, taskkillPath)) return;
+export function killWindowsProcessTree(pid: number, taskkillPaths = windowsTaskkillCandidates()): void {
+	for (const taskkillPath of taskkillPaths) {
+		if (taskkillHandledTree(pid, taskkillPath)) return;
+	}
 	killProcessDirectly(pid);
 }
 

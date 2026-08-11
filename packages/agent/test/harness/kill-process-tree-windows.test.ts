@@ -4,10 +4,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { killWindowsProcessTree, resolveWindowsTaskkillPath } from "../../src/harness/env/nodejs.ts";
+import { killWindowsProcessTree, windowsTaskkillCandidates } from "../../src/harness/env/nodejs.ts";
 
-/** A name that can never resolve on PATH, so spawn() fails with ENOENT on every platform. */
-const UNRESOLVABLE_TASKKILL = "senpi-nonexistent-taskkill-binary.exe";
+/** Names that can never resolve on PATH, so spawn() fails with ENOENT on every platform. */
+const UNRESOLVABLE_TASKKILL = ["senpi-nonexistent-taskkill-binary.exe"];
 
 const tempRoots: string[] = [];
 
@@ -28,16 +28,19 @@ afterEach(() => {
 	}
 });
 
-describe("resolveWindowsTaskkillPath", () => {
-	it("prefers the absolute System32 executable over a bare PATH lookup", () => {
+describe("windowsTaskkillCandidates", () => {
+	it("puts the absolute System32 executable ahead of the bare PATH lookup", () => {
 		const root = createFakeSystemRoot(true);
-		expect(resolveWindowsTaskkillPath({ SystemRoot: root })).toBe(join(root, "System32", "taskkill.exe"));
+		expect(windowsTaskkillCandidates({ SystemRoot: root })).toEqual([
+			join(root, "System32", "taskkill.exe"),
+			"taskkill.exe",
+		]);
 	});
 
-	it("falls back to the bare executable name when System32 has no taskkill", () => {
+	it("falls back to the bare executable name when no absolute candidate exists", () => {
 		const root = createFakeSystemRoot(false);
-		expect(resolveWindowsTaskkillPath({ SystemRoot: root })).toBe("taskkill.exe");
-		expect(resolveWindowsTaskkillPath({})).toBe("taskkill.exe");
+		expect(windowsTaskkillCandidates({ SystemRoot: root })).toEqual(["taskkill.exe"]);
+		expect(windowsTaskkillCandidates({})).toEqual(["taskkill.exe"]);
 	});
 });
 

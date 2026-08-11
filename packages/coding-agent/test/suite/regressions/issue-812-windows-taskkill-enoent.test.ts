@@ -4,10 +4,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { killWindowsProcessTree, resolveWindowsTaskkillPath } from "../src/utils/shell.ts";
+import { killWindowsProcessTree, windowsTaskkillCandidates } from "../../../src/utils/shell.ts";
 
-/** A name that can never resolve on PATH, so spawn() fails with ENOENT on every platform. */
-const UNRESOLVABLE_TASKKILL = "senpi-nonexistent-taskkill-binary.exe";
+/** Names that can never resolve on PATH, so spawn() fails with ENOENT on every platform. */
+const UNRESOLVABLE_TASKKILL = ["senpi-nonexistent-taskkill-binary.exe"];
 
 const tempRoots: string[] = [];
 
@@ -28,23 +28,46 @@ afterEach(() => {
 	}
 });
 
-describe("resolveWindowsTaskkillPath", () => {
-	it("prefers the absolute System32 executable over a bare PATH lookup", () => {
+describe("windowsTaskkillCandidates", () => {
+	it("puts every existing absolute System32 executable ahead of the bare PATH lookup", () => {
 		const root = createFakeSystemRoot(true);
-		expect(resolveWindowsTaskkillPath({ SystemRoot: root })).toBe(join(root, "System32", "taskkill.exe"));
+		expect(windowsTaskkillCandidates({ SystemRoot: root })).toEqual([
+			join(root, "System32", "taskkill.exe"),
+			"taskkill.exe",
+		]);
 	});
 
-	it("accepts the uppercase SYSTEMROOT and windir spellings", () => {
+	it("accepts the uppercase SYSTEMROOT, windir, and SystemDrive spellings", () => {
 		const upper = createFakeSystemRoot(true);
 		const windir = createFakeSystemRoot(true);
-		expect(resolveWindowsTaskkillPath({ SYSTEMROOT: upper })).toBe(join(upper, "System32", "taskkill.exe"));
-		expect(resolveWindowsTaskkillPath({ windir })).toBe(join(windir, "System32", "taskkill.exe"));
+		expect(windowsTaskkillCandidates({ SYSTEMROOT: upper })[0]).toBe(join(upper, "System32", "taskkill.exe"));
+		expect(windowsTaskkillCandidates({ windir })[0]).toBe(join(windir, "System32", "taskkill.exe"));
 	});
 
-	it("falls back to the bare executable name when System32 has no taskkill", () => {
+	it("collects Sysnative and deduplicates repeated roots", () => {
+		const root = mkdtempSync(join(tmpdir(), "senpi-systemroot-"));
+		tempRoots.push(root);
+		for (const systemDir of ["System32", "Sysnative"]) {
+			mkdirSync(join(root, systemDir), { recursive: true });
+			writeFileSync(join(root, systemDir, "taskkill.exe"), "");
+		}
+		expect(windowsTaskkillCandidates({ SystemRoot: root, SYSTEMROOT: root, windir: root })).toEqual([
+			join(root, "System32", "taskkill.exe"),
+			join(root, "Sysnative", "taskkill.exe"),
+			"taskkill.exe",
+		]);
+	});
+
+	it("falls back to the bare executable name when no absolute candidate exists", () => {
 		const root = createFakeSystemRoot(false);
-		expect(resolveWindowsTaskkillPath({ SystemRoot: root })).toBe("taskkill.exe");
-		expect(resolveWindowsTaskkillPath({})).toBe("taskkill.exe");
+		expect(windowsTaskkillCandidates({ SystemRoot: root })).toEqual(["taskkill.exe"]);
+		expect(windowsTaskkillCandidates({})).toEqual(["taskkill.exe"]);
+	});
+
+	it("ignores an empty SystemDrive instead of probing a drive-relative path", () => {
+		// `join("\\", "Windows", ...)` resolves against the current drive, which would silently
+		// reintroduce a candidate the environment does not actually declare.
+		expect(windowsTaskkillCandidates({ SystemDrive: "" })).toEqual(["taskkill.exe"]);
 	});
 });
 
@@ -89,6 +112,26 @@ describe("killWindowsProcessTree", () => {
 		}
 
 		expect(calls).toEqual([[4242, undefined]]);
+	});
+
+	it("tries every candidate before degrading to the direct kill", () => {
+		const attempted: string[] = [];
+		const realKill = process.kill.bind(process);
+		const candidates = ["senpi-missing-a.exe", "senpi-missing-b.exe", process.execPath];
+		process.kill = (() => {
+			attempted.push("direct");
+			return true;
+		}) as typeof process.kill;
+
+		try {
+			// process.execPath launches successfully, so the tree kill is considered handled
+			// and the direct fallback must not run.
+			killWindowsProcessTree(4242, candidates);
+		} finally {
+			process.kill = realKill;
+		}
+
+		expect(attempted).toEqual([]);
 	});
 
 	it("tolerates a pid that is already gone", async () => {
