@@ -21,6 +21,27 @@
 
 - LOW: `agent-session.ts` `_activateLazyTool` as shared tool-search activation wiring lands.
 
+## 2026-08-11 - Dormant shared tool-search builtin wiring
+
+### What changed
+
+- The builtin list now loads a shared tool-search service before MCP while keeping MCP last.
+- The service catalogs search-exposed extension tools, promotes them additively through lazy activation, and replays ownership-aware activation history once per catalog generation.
+- The generalized `tool_search` definition is authored but intentionally not registered in this increment.
+
+### Why
+
+- Shared extension catalog behavior must be available before MCP becomes a feeder, but registering a second builtin with the same tool name before removing MCP's registration would violate atomic winner precedence.
+
+### Why this cannot be expressed externally
+
+- Live registry metadata, inactive-tool activation, and session-history lifecycle hooks are core extension-runtime surfaces.
+
+### Expected merge conflict zones
+
+- LOW: builtin ordering immediately before the MCP-last sentinel.
+- MEDIUM: tool-search registration and MCP feeder wiring in the planned atomic follow-up.
+
 ## 2026-08-11 - Reload continuity follows tool ownership
 
 ### What changed
