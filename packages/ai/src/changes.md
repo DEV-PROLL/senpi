@@ -1,5 +1,28 @@
 # AI Source Changes
 
+## 2026-08-11 - Normalize replayed tool IDs for strict OpenAI-compatible gateways
+
+### What changed and why
+
+- `api/openai-completions.ts` now sanitizes every replayed non-Responses tool-call ID to the OpenAI-compatible
+  alphanumeric/underscore/dash shape, preserves already-valid bounded IDs, and uses a deterministic hash suffix when
+  sanitization or the 40-character bound changes the ID.
+- `api/transform-messages.ts` lets strict target adapters opt into applying their supplied tool-call ID normalizer to
+  same-model history as well as cross-model history. OpenAI completions enables that opt-in and remaps the paired
+  tool result through the existing ID map; Responses retains its provider-native IDs.
+- A persisted `apitopia/kimi-k3-unlocked` session stored tool-call IDs such as `eval:18`. After switching to
+  `opengateway/anthropic/claude-fable-5`, the gateway rejected the request before generation with
+  `messages.36.content.1.tool_use.id: String should match pattern '^[a-zA-Z0-9_-]+$'`.
+- This cannot be extension-local: tool-call IDs and their paired results are transformed inside provider request
+  serialization before an extension can safely rewrite the complete outbound history. Rewriting persisted session
+  files would also leave other histories and future provider handoffs exposed.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/openai-completions.ts` near the local `normalizeToolCallId` function in `convertMessages`.
+- LOW: `api/transform-messages.ts` in the assistant `toolCall` transformation branch.
+- LOW: `../test/model-switch-replay-characterization.test.ts` near the non-Responses replay cases.
+
 ## 2026-08-11 - Retry gateway model-request rejections
 
 ### What changed and why

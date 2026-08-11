@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Model switches no longer fail before generation when persisted tool-call IDs contain provider-specific characters
+  such as the colon in Kimi's `eval:18`; replay now preserves call/result pairing while satisfying strict
+  Anthropic-backed gateway constraints ([#810](https://github.com/code-yeongyu/senpi/pull/810)).
 - Gateway/provider failures reported as `The model request was rejected. Check the request and try again.` now retry
   the current model according to `settings.retry` before the configured fallback chain is used
   ([#806](https://github.com/code-yeongyu/senpi/pull/806)).

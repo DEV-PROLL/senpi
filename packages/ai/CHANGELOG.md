@@ -10,6 +10,9 @@
 
 ### Fixed
 
+- Replayed tool-call IDs are normalized to the strict OpenAI-compatible character and length constraints while
+  preserving paired tool results, so Kimi histories containing IDs such as `eval:18` no longer fail when a
+  conversation switches to an Anthropic-backed gateway ([#810](https://github.com/code-yeongyu/senpi/pull/810)).
 - Gateway/provider failures reported as `The model request was rejected. Check the request and try again.` now go
   through the configured bounded retry policy instead of failing immediately or burning the fallback chain
   ([#806](https://github.com/code-yeongyu/senpi/pull/806)).
