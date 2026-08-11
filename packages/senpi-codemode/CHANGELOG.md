@@ -10,6 +10,11 @@
 
 ### Fixed
 
+- Ruby and Julia `eval` kernels launched from standalone Bun binaries now
+  resolve their external runner files from the shipped codemode sidecar when
+  the embedded `$bunfs` module path has no physical asset
+  ([#818](https://github.com/code-yeongyu/senpi/pull/818)).
+
 ### Removed
 
 ## [2026.8.11-3] - 2026-08-11

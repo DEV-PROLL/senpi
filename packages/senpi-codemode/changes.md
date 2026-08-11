@@ -1,5 +1,31 @@
 # senpi-codemode fork changes
 
+## Compiled binary runner sidecar resolution (2026-08-11)
+
+### What changed
+
+- Ruby and Julia kernels now preserve their normal module-relative runner path
+  in source/npm execution but fall back to the standalone executable's
+  `node_modules/@code-yeongyu/senpi-codemode/src/kernels/...` sidecar when the
+  embedded `$bunfs` path does not exist.
+- Focused tests pin Ruby, Julia, and non-compiled local-path behavior.
+
+### Why
+
+- The compiled coding-agent embeds the codemode factory and JavaScript
+  dependency graph, but Ruby and Julia execute external runner files that Bun
+  does not expose at the embedded module's `import.meta.dirname`.
+
+### Why this cannot be expressed externally
+
+- Runner paths are selected inside kernel construction before user code or an
+  extension wrapper can replace the subprocess arguments.
+
+### Expected merge conflict zones
+
+- `src/kernels/rb/kernel.ts` and `src/kernels/jl/kernel.ts` runner arguments.
+- `src/kernels/shared/runtime-asset.ts` compiled sidecar layout.
+
 ## Detached eval cell wake-source contract (2026-08-09)
 
 ### What changed

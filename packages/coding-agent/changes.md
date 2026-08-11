@@ -1,5 +1,40 @@
 # Local fork changes
 
+## 2026-08-11 — Ship codemode with standalone binaries
+
+### What changed
+
+- Added one manifest-driven copier for the source-only codemode runtime payload.
+- Both `npm run build:binary` and the six-platform release archive build now
+  stage codemode under the executable's adjacent
+  `node_modules/@code-yeongyu/senpi-codemode` path.
+- A clean package-level `build:binary` now builds the PTY workspace before
+  coding-agent so its declarations are present without relying on stale root
+  build output.
+- Package-level binary compilation now embeds `css-tree`, matching the
+  six-platform release build instead of externalizing a dependency that Bun's
+  `$bunfs` resolver cannot load from an adjacent `node_modules`.
+- The copier replaces stale output and excludes package tests, development
+  dependencies, and repository-only files.
+
+### Why this lives in the fork
+
+- Codemode is a fork-owned default-on extension distributed with Senpi.
+  npm's `bundleDependencies` controls npm tarballs but does not embed or copy
+  dynamically resolved source packages into Bun standalone archives.
+
+### Why this cannot be expressed externally
+
+- The archive layout and Bun sidecars are constructed before user extensions
+  load, so an extension cannot add its own missing package to the executable
+  distribution.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/package.json` around `copy-binary-assets`.
+- `scripts/build-binaries.sh` around shared platform sidecars.
+- `scripts/copy-codemode-sidecar.mjs` and its contract test.
+
 ## 2026-08-09 — General extension filesystem policy API
 
 ### What changed

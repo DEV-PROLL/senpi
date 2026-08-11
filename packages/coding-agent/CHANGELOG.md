@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- Standalone Bun release archives now embed the default-on `senpi-codemode`
+  factory and ship its worker/prelude package assets beside the executable, so
+  launches outside the repository no longer depend on `$bunfs` package lookup,
+  warn that `<builtin:codemode>` is unavailable, or silently lose `eval`.
+  The relocation smoke now verifies codemode through RPC instead of checking
+  only `--help` and `--version`; clean package-level binary builds also compile
+  the PTY workspace before coding-agent instead of depending on stale
+  declarations, and embed `css-tree` so relocated binaries do not fail while
+  resolving that package from `$bunfs`
+  ([#818](https://github.com/code-yeongyu/senpi/pull/818)).
+
 ### New Features
 
 ### Breaking Changes
