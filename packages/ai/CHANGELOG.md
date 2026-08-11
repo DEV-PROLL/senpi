@@ -10,6 +10,11 @@
 
 ### Fixed
 
+- `OAuthAuth` accepts an optional availability `check` that `checkProviderAuth` consults in the stored-OAuth
+  branch, so a provider whose stored credential does not by itself imply usability (for example a zero-account
+  sentinel) is no longer reported as configured. When `check` is absent, behavior is unchanged
+  ([#804](https://github.com/code-yeongyu/senpi/pull/804)).
+
 ### Removed
 
 ## [2026.8.11-2] - 2026-08-10
