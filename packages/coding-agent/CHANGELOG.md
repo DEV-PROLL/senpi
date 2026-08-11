@@ -8,6 +8,9 @@
 - A launch from a deleted working directory (for example a removed worktree) no longer crashes during
   startup with `uv_cwd`; the CLI recovers into the home directory before any dependency evaluates
   `process.cwd()`.
+- Claude SDK OAuth models are no longer selected as fallback candidates until a real local OAuth account exists,
+  and fallback responses carrying errors such as `Not logged in` no longer emit the green
+  `Fallback model responded` notice ([#803](https://github.com/code-yeongyu/senpi/pull/803)).
 
 ### New Features
 
