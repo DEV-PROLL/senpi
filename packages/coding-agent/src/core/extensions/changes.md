@@ -1,5 +1,27 @@
 # Core Extensions Changes
 
+## 2026-08-11 - Native-deferred catalog tools activate at call time
+
+### What changed
+
+- The shared tool-search builtin injects inactive searchable extension schemas into Anthropic Messages payloads with native `defer_loading` metadata.
+- AgentSession resolves a model call for an inactive catalog member through the existing shared lazy-promotion path, then returns the newly active tool to agent-core for normal execution.
+- Non-catalog names and lazy-activation-gated definitions retain the existing unknown-tool result.
+
+### Why
+
+- Native provider search may return a tool call for a schema that was intentionally absent from the agent context snapshot; activation must happen between tool-name lookup and argument preparation.
+- Reusing catalog promotion keeps call-time activation aligned with local `tool_search` and eval/code-mode behavior.
+
+### Why this cannot be expressed externally
+
+- The model call reaches agent-core before extension tool hooks run, while registry activation and winning-definition resolution are session-owned operations.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` agent tool-hook installation.
+- MEDIUM: tool-search provider-request wiring.
+
 ## 2026-08-11 - Shared tool-search registration and MCP catalog activation
 
 ### What changed

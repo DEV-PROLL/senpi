@@ -969,7 +969,10 @@ async function prepareToolCall(
 		};
 	}
 
-	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
+	let tool = currentContext.tools?.find((candidate) => candidate.name === toolCall.name);
+	if (!tool && config.resolveUnknownToolCall) {
+		tool = await config.resolveUnknownToolCall(toolCall.name, currentContext);
+	}
 	if (!tool) {
 		const hint = config.removedToolHints?.[toolCall.name];
 		return {

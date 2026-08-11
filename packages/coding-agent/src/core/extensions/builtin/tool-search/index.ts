@@ -1,7 +1,8 @@
 import { bindToProviderScope } from "@earendil-works/pi-ai/node/provider-scope";
 import type { ExtensionAPI, ExtensionFactory } from "../../types.ts";
+import { AnthropicNativeToolSearchAdapter, isMcpNativeToolSearchEnabled } from "./native-search.ts";
 import { getToolSearchService, installScopedToolSearchService, ToolSearchService } from "./service.ts";
-import { createToolSearchTool } from "./tool.ts";
+import { createToolSearchTool, TOOL_SEARCH_TOOL_NAME } from "./tool.ts";
 
 export function createToolSearchExtension(service: ToolSearchService): ExtensionFactory {
 	return (pi: ExtensionAPI): void => {
@@ -16,6 +17,32 @@ export function createToolSearchExtension(service: ToolSearchService): Extension
 		});
 		pi.registerLazyToolActivator((toolName) => service.activateTool(toolName));
 		pi.registerTool(createToolSearchTool(service));
+
+		const nativeAdapter = new AnthropicNativeToolSearchAdapter({
+			enabled: () => {
+				const active = new Set(pi.getActiveTools());
+				return service
+					.getCatalog()
+					.some(
+						(doc) =>
+							(doc.source === "extension" && !active.has(doc.name)) ||
+							(doc.source === "mcp" && isMcpNativeToolSearchEnabled()),
+					);
+			},
+			getCatalog: () => service.getCatalog(),
+			getToolDefinition: (name) => {
+				const tool = pi.getAllTools().find((candidate) => candidate.name === name);
+				return tool === undefined ? undefined : { description: tool.description, parameters: tool.parameters };
+			},
+			isDeferrable: (name) => {
+				const doc = service.getCatalog().find((candidate) => candidate.name === name);
+				if (doc?.source === "mcp") return isMcpNativeToolSearchEnabled();
+				return doc?.source === "extension" && !pi.getActiveTools().includes(name);
+			},
+			searchToolName: TOOL_SEARCH_TOOL_NAME,
+		});
+		pi.on("before_provider_request", (event, ctx) => nativeAdapter.applyBeforeRequest(ctx.model?.api, event.payload));
+		pi.on("after_provider_response", (event) => nativeAdapter.noteResponseStatus(event.status));
 	};
 }
 

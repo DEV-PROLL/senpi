@@ -1,7 +1,7 @@
 import { bindToProviderScope } from "@earendil-works/pi-ai/node/provider-scope";
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory, SessionStartEvent } from "../../types.ts";
+import { installMcpNativeToolSearchGate } from "../tool-search/native-search.ts";
 import { registerMcpCommands } from "./commands.ts";
-import { AnthropicNativeToolSearchAdapter } from "./expose/native-search.ts";
 import { injectMcpInstructions, refreshMcpInstructionsForSession } from "./instructions.ts";
 import { createMcpLogger } from "./log.ts";
 import { registerMcpPromptCommands } from "./prompts.ts";
@@ -30,21 +30,10 @@ export function createMcpExtension(service: McpService, sessionOwned = true): Ex
 
 		registerMcpCommands(pi, service);
 
-		// Native provider tool-search adapter (todo 33 — Anthropic, spike = GO).
-		// Runs on every request but is a no-op unless settings.nativeToolSearch is
-		// auto|true and the model is anthropic-messages; a 400 disables it for the
-		// session and falls back to the always-registered local tool_search.
-		const nativeAdapter = new AnthropicNativeToolSearchAdapter({
-			enabled: () => {
-				const setting = service.getNativeToolSearchSetting();
-				return setting === true || setting === "auto";
-			},
-			isDeferrable: (name) => name.startsWith("mcp_") && name !== "tool_search",
-			onFallback: (reason) => createMcpLogger("service").warn(reason),
-			searchToolName: "tool_search",
+		installMcpNativeToolSearchGate(() => {
+			const setting = service.getNativeToolSearchSetting();
+			return setting === true || setting === "auto";
 		});
-		pi.on("before_provider_request", (event, ctx) => nativeAdapter.applyBeforeRequest(ctx.model?.api, event.payload));
-		pi.on("after_provider_response", (event) => nativeAdapter.noteResponseStatus(event.status));
 		// skills-carry-MCP (todo 37): skills declaring MCP servers (mcp.json
 		// sidecar or SKILL.md frontmatter) register lazily with tools hidden;
 		// loading a skill — /skill:<name> input or the model reading its SKILL.md —

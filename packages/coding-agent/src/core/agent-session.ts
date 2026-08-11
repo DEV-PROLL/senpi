@@ -83,6 +83,8 @@ import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import type { ServiceTier } from "./extensions/builtin/service-tier.ts";
+import { deriveExtensionRegistrationId } from "./extensions/builtin/tool-search/engine/marker.ts";
+import { getToolSearchService } from "./extensions/builtin/tool-search/service.ts";
 import {
 	type ContextUsage,
 	ExecuteToolError,
@@ -113,7 +115,6 @@ import {
 	type TurnStartEvent,
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
-import { deriveExtensionRegistrationId } from "./extensions/builtin/tool-search/engine/marker.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type {
 	ApplyCompactionOptions,
@@ -905,6 +906,18 @@ export class AgentSession {
 	}
 
 	private _installAgentToolHooks(): void {
+		this.agent.resolveUnknownToolCall = (toolName) => {
+			let service: ReturnType<typeof getToolSearchService>;
+			try {
+				service = getToolSearchService();
+			} catch {
+				return undefined;
+			}
+			const catalogTool = service.getCatalog().some((doc) => doc.name === toolName);
+			if (!catalogTool || !this._activateLazyTool(toolName)) return undefined;
+			return this.agent.state.tools.find((tool) => tool.name === toolName);
+		};
+
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
 			this._toolExecutionDepth++;
 			try {
