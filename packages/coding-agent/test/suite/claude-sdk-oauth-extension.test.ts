@@ -1,9 +1,10 @@
 import { type Api, type Context, createAssistantMessageEventStream, type Model } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { emptyCredential } from "../../src/core/extensions/builtin/claude-sdk-oauth/accounts.ts";
-import claudeSdkOauthExtension, {
+import {
 	CLAUDE_SDK_OAUTH_PROVIDER_ID,
+	registerClaudeSdkOauthExtension,
 } from "../../src/core/extensions/builtin/claude-sdk-oauth/index.ts";
 import { builtinExtensions } from "../../src/core/extensions/builtin/index.ts";
 import type { ExtensionAPI } from "../../src/core/extensions/types.ts";
@@ -12,7 +13,9 @@ import type { ProviderConfigInput } from "../../src/core/provider-composer.ts";
 
 type Registration = { name: string; config: ProviderConfigInput };
 
-function captureRegistration(): { registration: Registration } {
+function captureRegistration(readAmbientAuthStatus: () => Promise<boolean> = async () => false): {
+	registration: Registration;
+} {
 	let captured: Registration | undefined;
 	const pi = {
 		registerProvider: (name: string, config: ProviderConfigInput) => {
@@ -23,7 +26,7 @@ function captureRegistration(): { registration: Registration } {
 		getFlag: () => undefined,
 		on: (..._args: unknown[]) => {},
 	} as unknown as ExtensionAPI;
-	claudeSdkOauthExtension(pi);
+	registerClaudeSdkOauthExtension(pi, { readAmbientAuthStatus });
 	if (!captured) throw new Error("extension did not register a provider");
 	return { registration: captured };
 }
@@ -61,6 +64,10 @@ function authenticatedStorage(): AuthStorage {
 }
 
 describe("claude-sdk-oauth builtin provider", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
 	it("registers the provider with OAuth, catalog models and a stream fn", () => {
 		const { registration } = captureRegistration();
 		const builtinIds = builtinExtensions.map((extension) => extension.id);
@@ -82,11 +89,34 @@ describe("claude-sdk-oauth builtin provider", () => {
 		expect(await runtime.getAvailable(CLAUDE_SDK_OAUTH_PROVIDER_ID)).toEqual([]);
 	});
 
+	it("keeps claude-sdk-oauth unavailable with a persisted empty credential", async () => {
+		const { registration } = captureRegistration();
+		const storage = AuthStorage.inMemory({ [CLAUDE_SDK_OAUTH_PROVIDER_ID]: emptyCredential() });
+		const runtime = await createRuntimeWithProvider(registration.config, storage);
+		expect(runtime.hasConfiguredAuth(CLAUDE_SDK_OAUTH_PROVIDER_ID)).toBe(false);
+		expect(await runtime.getAvailable(CLAUDE_SDK_OAUTH_PROVIDER_ID)).toEqual([]);
+	});
+
 	it("keeps claude-sdk-oauth available with a stored login", async () => {
 		const { registration } = captureRegistration();
 		const runtime = await createRuntimeWithProvider(registration.config, authenticatedStorage());
 		expect(runtime.hasConfiguredAuth(CLAUDE_SDK_OAUTH_PROVIDER_ID)).toBe(true);
 		expect(runtime.isUsingOAuth(CLAUDE_SDK_OAUTH_PROVIDER_ID)).toBe(true);
+		expect(await runtime.getAvailable(CLAUDE_SDK_OAUTH_PROVIDER_ID)).not.toEqual([]);
+	});
+
+	it("keeps claude-sdk-oauth available with an environment token", async () => {
+		vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "env-token");
+		const { registration } = captureRegistration();
+		const runtime = await createRuntimeWithProvider(registration.config);
+		expect(runtime.hasConfiguredAuth(CLAUDE_SDK_OAUTH_PROVIDER_ID)).toBe(true);
+		expect(await runtime.getAvailable(CLAUDE_SDK_OAUTH_PROVIDER_ID)).not.toEqual([]);
+	});
+
+	it("keeps claude-sdk-oauth available with an authenticated ambient CLI", async () => {
+		const { registration } = captureRegistration(async () => true);
+		const runtime = await createRuntimeWithProvider(registration.config);
+		expect(runtime.hasConfiguredAuth(CLAUDE_SDK_OAUTH_PROVIDER_ID)).toBe(true);
 		expect(await runtime.getAvailable(CLAUDE_SDK_OAUTH_PROVIDER_ID)).not.toEqual([]);
 	});
 

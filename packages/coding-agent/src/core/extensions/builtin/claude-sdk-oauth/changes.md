@@ -5,12 +5,15 @@
 - Removed the literal `apiKey: "claude-sdk-oauth-managed"` registration placeholder. Provider composition treated
   that sentinel as configured API-key authentication, so a machine with no Claude SDK OAuth account still admitted
   `claude-sdk-oauth` models into retry fallback selection before the subprocess returned `Not logged in`.
-- Kept OAuth registration, catalog discovery, login selection, and the SDK stream unchanged. A stored OAuth account
-  still makes the provider available; an empty credential store now leaves it registered but unavailable.
+- Added a provider OAuth availability check that accepts a stored account, any `CLAUDE_CODE_OAUTH_TOKEN` slot, or a
+  successful `claude auth status` exit code. Empty and persisted `accounts: []` credentials remain unavailable.
+- The ambient probe resolves the same bundled/overridden Claude executable used by requests, discards its output, and
+  decides only from the documented exit status, so account identity and credentials never enter logs.
+- Kept OAuth registration, catalog discovery, login selection, and SDK streaming unchanged for every usable auth lane.
 - This cannot be implemented by an external extension: the false availability was created by this builtin provider's
-  own `registerProvider` authentication metadata before retry fallback evaluates candidates.
-- Expected merge conflict zones: LOW in `index.ts` provider registration and LOW in
-  `test/suite/claude-sdk-oauth-extension.test.ts`.
+  own auth metadata and must be resolved before retry fallback evaluates candidates.
+- Expected merge conflict zones: LOW in `index.ts`, `oauth-login.ts`, and `availability.ts`; LOW in the focused auth
+  status and extension registration tests.
 
 ## 2026-08-07 - Ignore volatile thinking timing in continuity hashes
 
