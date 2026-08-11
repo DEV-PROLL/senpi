@@ -202,6 +202,51 @@ describe("tool-search bm25 generalized fields and filters", () => {
 		expect(results[0]?.score).toBe(results[1]?.score);
 		expect(resultNames(results)).toEqual(["a_extension", "b_mcp"]);
 	});
+
+	it("keeps source filter-only when it is the sole query match", () => {
+		const shared = {
+			group: "utilities",
+			ownerLabel: "Core",
+			description: "catalog lookup",
+			searchText: "package records",
+		} as const;
+		const index = buildBm25Index([
+			toolDoc("alpha_tool", { ...shared, label: "Alpha Tool", source: "extension" }),
+			toolDoc("beta_tool", { ...shared, label: "Beta Tool", source: "mcp" }),
+		]);
+
+		expect(index.search("extension", 10, { exactMatch: false })).toEqual([]);
+		expect(index.search("mcp", 10, { exactMatch: false })).toEqual([]);
+	});
+
+	it("weights group and owner-label hits above description-only hits", () => {
+		const index = buildBm25Index([
+			toolDoc("description_candidate", {
+				label: "plain",
+				group: "plain",
+				ownerLabel: "plain",
+				description: "routing",
+			}),
+			toolDoc("group_candidate", {
+				label: "plain",
+				group: "routing",
+				ownerLabel: "plain",
+				description: "plain",
+			}),
+			toolDoc("owner_candidate", {
+				label: "plain",
+				group: "plain",
+				ownerLabel: "routing",
+				description: "plain",
+			}),
+		]);
+
+		expect(resultNames(index.search("routing", 10, { exactMatch: false }))).toEqual([
+			"group_candidate",
+			"owner_candidate",
+			"description_candidate",
+		]);
+	});
 });
 
 describe("tool-search bm25 malformed input and determinism", () => {
