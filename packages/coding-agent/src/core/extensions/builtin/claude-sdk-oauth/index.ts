@@ -43,7 +43,6 @@ export default function claudeSdkOauthExtension(pi: ExtensionAPI): void {
 	pi.registerProvider(CLAUDE_SDK_OAUTH_PROVIDER_ID, {
 		baseUrl: CLAUDE_SDK_OAUTH_PROVIDER_ID,
 		api: CLAUDE_SDK_OAUTH_PROVIDER_ID,
-		apiKey: "claude-sdk-oauth-managed",
 		models: MODELS,
 		streamSimple: streamClaudeSdkOauth,
 		oauth: createOAuthConfig({

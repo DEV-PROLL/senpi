@@ -1,5 +1,17 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-11 - Require a real OAuth login for runtime availability
+
+- Removed the literal `apiKey: "claude-sdk-oauth-managed"` registration placeholder. Provider composition treated
+  that sentinel as configured API-key authentication, so a machine with no Claude SDK OAuth account still admitted
+  `claude-sdk-oauth` models into retry fallback selection before the subprocess returned `Not logged in`.
+- Kept OAuth registration, catalog discovery, login selection, and the SDK stream unchanged. A stored OAuth account
+  still makes the provider available; an empty credential store now leaves it registered but unavailable.
+- This cannot be implemented by an external extension: the false availability was created by this builtin provider's
+  own `registerProvider` authentication metadata before retry fallback evaluates candidates.
+- Expected merge conflict zones: LOW in `index.ts` provider registration and LOW in
+  `test/suite/claude-sdk-oauth-extension.test.ts`.
+
 ## 2026-08-07 - Ignore volatile thinking timing in continuity hashes
 
 - Removed `startedAt` and `endedAt` from thinking blocks before hashing the provider-final and committed assistant
