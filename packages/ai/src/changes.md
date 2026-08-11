@@ -1,5 +1,28 @@
 # AI Source Changes
 
+## 2026-08-11 - Lazy builtin registration for openai-images provider
+
+### What changed and why
+
+- `providers/images/register-builtins.ts` registers the `openai-images` ImagesApi as a lazy builtin alongside the
+  existing `openrouter-images` registration. The lazy wrapper defers the dynamic import of `api/openai-images.ts`
+  until first invocation, and catches any module-load failure into a normalized `AssistantImages` error envelope
+  (stopReason "error", never a thrown rejection).
+- The shared `createLazyLoadErrorImages` helper is generalized over `ImagesApi` so both providers reuse the same
+  error-envelope construction.
+
+### Why this cannot be expressed externally
+
+- Builtin provider registration runs at module load time inside `packages/ai`; external extensions register through
+  the public registry surface but cannot supply the lazy module-promise boundary that keeps the openai-images SDK
+  out of the initial bundle.
+
+### Expected merge conflict zones
+
+- LOW: additive registration entry inside `registerBuiltInImagesApiProviders()` and the new lazy wrapper export in
+  `providers/images/register-builtins.ts`.
+- LOW: additive test file `test/images-registry-builtins.test.ts`.
+
 ## 2026-08-11 - OpenAI Images API adapter
 
 ### What changed and why
