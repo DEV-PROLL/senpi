@@ -8,6 +8,10 @@
 - A launch from a deleted working directory (for example a removed worktree) no longer crashes during
   startup with `uv_cwd`; the CLI recovers into the home directory before any dependency evaluates
   `process.cwd()`.
+- `claude-sdk-oauth` is now skipped as an unauthenticated fallback candidate on a managed lane
+  (`oauth-slots`/`config-dir`) when no account is logged in, instead of always counting as configured because its
+  stored credential is a zero-account sentinel. The ambient lane is unchanged and still defers to the spawned
+  Claude Code engine ([#804](https://github.com/code-yeongyu/senpi/pull/804)).
 - Claude SDK OAuth models are selected as fallback candidates only when a stored account, environment token, or
   authenticated ambient Claude CLI is usable. Empty sentinel credentials and logged-out local CLIs are skipped, and
   fallback responses carrying errors such as `Not logged in` cannot emit an immediate or delayed green

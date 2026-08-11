@@ -35,6 +35,8 @@ import {
 
 export interface ExtensionOAuthConfig {
 	name: string;
+	/** Optional availability check forwarded to `OAuthAuth.check`; absent means any stored OAuth credential counts as configured. */
+	check?(input: { ctx: AuthContext; credential?: OAuthCredentials }): Promise<AuthCheck | undefined>;
 	/** @deprecated Retained for extension source compatibility; ignored by canonical auth flows. */
 	usesCallbackServer?: boolean;
 	check?(input: { ctx: AuthContext; credential?: OAuthCredential }): Promise<AuthCheck | undefined>;
@@ -285,6 +287,14 @@ function adaptOAuth(config: ExtensionOAuthConfig): OAuthAuth {
 		},
 		refresh: async (credential) => ({ ...(await config.refreshToken(credential)), type: "oauth" }),
 		toAuth: async (credential) => ({ apiKey: config.getApiKey(credential) }),
+		...(config.check
+			? {
+					check: (input: { ctx: AuthContext; credential?: OAuthCredentials }) => {
+						const check = config.check;
+						return check ? check(input) : Promise.resolve(undefined);
+					},
+				}
+			: {}),
 	};
 }
 

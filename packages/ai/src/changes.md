@@ -1,14 +1,24 @@
 # AI Source Changes
 
-## 2026-08-11 - Provider-specific OAuth availability checks
+## 2026-08-11 - Optional availability `check` on `OAuthAuth`
 
 ### What changed and why
 
-- `OAuthAuth` now supports an optional side-effect-free `check()` hook, symmetric with `ApiKeyAuth.check()`.
-- `Models.checkAuth()` invokes that hook for stored OAuth credentials and ambient no-credential providers. Providers
-  without a hook retain the previous behavior where any matching stored OAuth credential is configured.
-- This lets providers reject sentinel credential envelopes or confirm ambient OAuth without refreshing, resolving, or
-  exposing token material.
+Added an optional `check?(input)` to `OAuthAuth` (`auth/types.ts`) and taught `checkProviderAuth` (`models.ts`) to consult it in the stored-OAuth-credential branch. Previously that branch was a pure structural short-circuit — `provider.auth.oauth ? {configured} : undefined` — so any stored OAuth credential, including an empty sentinel envelope with zero accounts, reported the provider as configured. The fallback engine reads configured-ness through `hasConfiguredAuth`, so such a provider was never skipped as `unauthenticated`. `ApiKeyAuth` already exposes an equivalent `check`; this makes the OAuth path symmetric. When `check` is absent, behavior is byte-identical to before, so every existing OAuth provider is unaffected. This cannot be extension-local: the short-circuit lives in `ModelsImpl.checkProviderAuth`, which no extension hook reaches, and `OAuthAuth` had no `check` to supply.
+
+### Expected merge-conflict zones
+
+LOW in `auth/types.ts` (additive optional field on `OAuthAuth`); LOW in `models.ts` `checkProviderAuth` (one stored-OAuth branch expanded, existing behavior preserved when `check` is undefined).
+
+## 2026-08-11 - OAuth availability `check` for ambient and no-credential providers
+
+### What changed and why
+
+- Follow-up to the optional `OAuthAuth.check` hook: `Models.checkAuth()` now also invokes the hook for ambient
+  no-credential providers, not only for stored OAuth credentials. Providers without a hook retain the previous
+  behavior where any matching stored OAuth credential is configured.
+- This lets providers confirm usable ambient OAuth without refreshing, resolving, or exposing token material. Hook
+  failures are wrapped in `ModelsError` on both the stored-credential and ambient paths.
 
 ### Why this cannot be expressed externally
 
@@ -17,7 +27,6 @@
 
 ### Expected merge conflict zones
 
-- LOW: the additive `OAuthAuth.check` contract in `auth/types.ts`.
 - MEDIUM: the auth precedence branches in `models.ts`.
 
 ## 2026-08-09 - Native Anthropic prompt-cache warming primitive

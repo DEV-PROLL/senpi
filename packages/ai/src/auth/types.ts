@@ -193,13 +193,6 @@ export interface OAuthAuth {
 	/** Selector label for the subscription login option, e.g. "Sign in with SuperGrok or X Premium". */
 	loginLabel?: string;
 
-	/**
-	 * Side-effect-free availability check. Providers with ambient OAuth or
-	 * sentinel credential envelopes can use this to decide whether they are
-	 * currently usable without refreshing or exposing credentials.
-	 */
-	check?(input: { ctx: AuthContext; credential?: OAuthCredential }): Promise<AuthCheck | undefined>;
-
 	login(interaction: AuthInteraction): Promise<OAuthCredential>;
 
 	/**
@@ -207,6 +200,14 @@ export interface OAuthAuth {
 	 * (invalid_grant etc.). `Models` runs this under the store lock.
 	 */
 	refresh(credential: OAuthCredential, signal?: AbortSignal): Promise<OAuthCredential>;
+
+	/**
+	 * Optional side-effect-free availability check, mirroring `ApiKeyAuth.check`.
+	 * Supply this when a stored OAuth credential does not by itself imply the
+	 * provider is usable — for example a sentinel envelope that carries zero
+	 * accounts. When absent, any stored OAuth credential counts as configured.
+	 */
+	check?(input: { ctx: AuthContext; credential?: OAuthCredential }): Promise<AuthCheck | undefined>;
 
 	/**
 	 * Side-effect-free derivation of request auth from a valid credential.
