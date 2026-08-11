@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { constants, createReadStream } from "node:fs";
+import { constants, createReadStream, existsSync } from "node:fs";
 import {
 	access,
 	appendFile,
@@ -250,17 +250,61 @@ function getShellEnv(
 	};
 }
 
+/**
+ * Resolve the Windows `taskkill` executable.
+ *
+ * `spawn("taskkill", ...)` relies on a PATH lookup, so any session whose PATH lost
+ * `%SystemRoot%\System32` (a POSIX-style PATH inherited from a Git Bash/MSYS launcher,
+ * a truncated user PATH, a locked-down service account) fails to resolve it. Prefer the
+ * absolute System32 path and keep the bare executable name as the last resort.
+ */
+export function resolveWindowsTaskkillPath(env: NodeJS.ProcessEnv = process.env): string {
+	const systemRoot = env.SystemRoot ?? env.SYSTEMROOT ?? env.windir;
+	if (systemRoot) {
+		const absolute = join(systemRoot, "System32", "taskkill.exe");
+		if (existsSync(absolute)) return absolute;
+	}
+	return "taskkill.exe";
+}
+
+function killProcessDirectly(pid: number): void {
+	try {
+		process.kill(pid);
+	} catch {
+		// Process already dead.
+	}
+}
+
+/**
+ * Kill a process and all its children on Windows via `taskkill /T`.
+ *
+ * `spawn()` reports a failed executable lookup asynchronously through the child's
+ * `error` event, never by throwing — so a surrounding `try`/`catch` cannot see it.
+ * Without an `error` listener Node re-emits ENOENT as an uncaught exception that
+ * takes down the host process. Handle the event and fall back to the direct child.
+ */
+export function killWindowsProcessTree(pid: number, taskkillPath = resolveWindowsTaskkillPath()): void {
+	let killer: ChildProcess;
+	try {
+		killer = spawn(taskkillPath, ["/F", "/T", "/PID", String(pid)], {
+			stdio: "ignore",
+			detached: true,
+			windowsHide: true,
+		});
+	} catch {
+		killProcessDirectly(pid);
+		return;
+	}
+	killer.once("error", () => {
+		killProcessDirectly(pid);
+	});
+	// Fire-and-forget: a detached killer must not hold the event loop open during exit.
+	killer.unref();
+}
+
 function killProcessTree(pid: number): void {
 	if (process.platform === "win32") {
-		try {
-			spawn("taskkill", ["/F", "/T", "/PID", String(pid)], {
-				stdio: "ignore",
-				detached: true,
-				windowsHide: true,
-			});
-		} catch {
-			// Ignore errors.
-		}
+		killWindowsProcessTree(pid);
 		return;
 	}
 

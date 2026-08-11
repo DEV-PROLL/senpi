@@ -165,6 +165,9 @@
 - Refresh `abortServerSideFallback` from the host's next-turn snapshot so an active agent run cannot carry a prior
   model's server-fallback policy into the next provider request
   ([#796](https://github.com/code-yeongyu/senpi/pull/796)).
+- The Node harness Windows process-tree kill no longer raises an uncaught `spawn taskkill ENOENT`. It launches the
+  absolute `System32\taskkill.exe`, handles the asynchronous spawn `error` event, and falls back to killing the direct
+  child so the target still dies.
 
 ### Removed
 

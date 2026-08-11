@@ -24,6 +24,32 @@
 - LOW: `tools-manager.ts`, at the offline environment gate and `downloadFile`
   response-body handling.
 
+## Windows process-tree kill survives an unresolvable taskkill (2026-08-11)
+
+### What changed
+
+- `shell.ts`: the Windows branch of `killProcessTree` moved into `killWindowsProcessTree`, which resolves
+  `%SystemRoot%\System32\taskkill.exe` through the new `resolveWindowsTaskkillPath` export, registers an `error`
+  listener on the spawned killer, falls back to `process.kill(pid)` when the launcher never starts, and `unref()`s
+  the detached child. Both new functions are exported for direct regression coverage.
+
+### Why
+
+- `spawn("taskkill", ...)` resolves the executable through PATH and reports a failed lookup asynchronously on the
+  child's `error` event, so the surrounding `try`/`catch` never saw it. On a session whose PATH had lost
+  `%SystemRoot%\System32`, `killTrackedDetachedChildren()` during shutdown raised
+  `Error: spawn taskkill ENOENT` as an uncaught exception and took the CLI down instead of exiting, and no tracked
+  child was killed. This mirrors the already-correct launcher handling in `open-browser.ts`.
+
+### Why extension system couldn't handle this
+
+- Detached-child bookkeeping and the shutdown signal handlers live in core modes; no extension hook runs inside the
+  signal path that kills tracked children.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: the Windows branch of `killProcessTree` and the `node:path` / `child_process` import lines in `shell.ts`.
+
 ## Config-reload recursive watch option (2026-07-21)
 
 ### What changed
