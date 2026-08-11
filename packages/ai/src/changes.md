@@ -23,6 +23,28 @@
 - LOW: `api/transform-messages.ts` in the assistant `toolCall` transformation branch.
 - LOW: `../test/model-switch-replay-characterization.test.ts` near the non-Responses replay cases.
 
+## 2026-08-11 - Retry gateway model-request rejections
+
+### What changed and why
+
+- `utils/retry.ts` classifies `"model request was rejected"` as retryable so a gateway/proxy-side "The model
+  request was rejected. Check the request and try again." response is absorbed by the bounded same-model retry
+  policy (`settings.retry`) instead of failing the turn or immediately burning the fallback chain. Observed in a
+  live session on 2026-08-11. The classifier couples the rejection sentence to its explicit "Check the request and
+  try again." instruction so permission denials, content refusals, and request-shape errors remain terminal, and
+  the non-retryable list still wins on overlap.
+
+### Why this cannot be expressed externally
+
+- The transient-vs-terminal message classifier is package-internal; callers and extensions consume its verdict
+  through `retryAssistantCall`/`isRetryableAssistantError` and cannot add a message class without forking the
+  retry loop.
+
+### Expected merge conflict zones
+
+- LOW: additive pattern in `utils/retry.ts`, additive cases in `test/retry.test.ts`, additive mock-loop scenario
+  and optional scripted-error `type` under `.agents/skills/senpi-qa/scripts/`.
+
 ## 2026-08-11 - Optional availability `check` on `OAuthAuth`
 
 ### What changed and why
