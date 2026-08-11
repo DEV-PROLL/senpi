@@ -10,6 +10,7 @@ import { getAgentDir } from "../../config.ts";
 import { type Theme, theme } from "../../modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../utils/ansi.ts";
 import type { ResourceDiagnostic } from "../diagnostics.ts";
+import { createEventBus, type EventBus, EXTENSION_RPC_EVENT_CHANNEL, type ExtensionRpcEvent } from "../event-bus.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
@@ -372,6 +373,7 @@ export class ExtensionRunner {
 	private cwd: string;
 	private sessionManager: SessionManager;
 	private modelRegistry: ModelRegistry;
+	private eventBus: EventBus;
 	private errorListeners: Set<ExtensionErrorListener> = new Set();
 	private getModel: () => Model<any> | undefined = () => undefined;
 	private getServiceTier: () => ServiceTier | undefined = () => undefined;
@@ -444,6 +446,7 @@ export class ExtensionRunner {
 		cwd: string,
 		sessionManager: SessionManager,
 		modelRegistry: ModelRegistry,
+		eventBus: EventBus = createEventBus(),
 	) {
 		this.extensions = extensions;
 		this.runtime = runtime;
@@ -451,6 +454,7 @@ export class ExtensionRunner {
 		this.cwd = cwd;
 		this.sessionManager = sessionManager;
 		this.modelRegistry = modelRegistry;
+		this.eventBus = eventBus;
 	}
 
 	bindCore(
@@ -654,6 +658,12 @@ export class ExtensionRunner {
 		return this.extensions.flatMap((extension) =>
 			(extension.filesystemPolicies ?? []).flatMap((policy) => policy.deniedRoots ?? []),
 		);
+	}
+
+	onRpcEvent(handler: (event: ExtensionRpcEvent) => void): () => void {
+		return this.eventBus.on(EXTENSION_RPC_EVENT_CHANNEL, (data) => {
+			handler(data as ExtensionRpcEvent);
+		});
 	}
 
 	/** Get extension-declared MCP servers (first declaration per name wins). */

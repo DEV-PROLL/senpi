@@ -1396,6 +1396,26 @@ export default function (pi: ExtensionAPI) {
 
 Subscribe to events. See [Events](#events) for event types and return values.
 
+### pi.rpc.emit(name, data)
+
+Publish an extension-owned event to RPC clients:
+
+```typescript
+pi.rpc.emit("acme.job.updated", {
+  jobId: "job-42",
+  status: "running",
+});
+```
+
+`name` must be non-empty and `data` must be JSON-serializable. Delivery is additive and
+fire-and-forget: RPC clients receive the event only when they advertise the `extension_events`
+capability. In multi-session mode the host adds the owning routing `sessionId` to the wire record.
+Unflagged clients and non-RPC modes do not receive a transport record.
+
+Use this for extension-to-client state such as progress snapshots. It is separate from
+extension-local event-bus communication and must not carry secrets, prompts, transcripts, or other
+data the client did not explicitly opt into receiving.
+
 ### pi.registerTool(definition)
 
 Register a custom tool callable by the LLM. See [Custom Tools](#custom-tools) for full details.

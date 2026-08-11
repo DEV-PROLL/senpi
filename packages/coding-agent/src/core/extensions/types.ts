@@ -1846,6 +1846,11 @@ export interface ExtensionAPI {
 	 */
 	unregisterProvider(name: string): void;
 
+	/** Emit structured extension data to RPC clients that explicitly opt in. */
+	rpc: {
+		emit(name: string, data: unknown): void;
+	};
+
 	/** Shared event bus for extension communication. */
 	events: EventBus;
 }
@@ -2261,6 +2266,8 @@ export interface LoadExtensionsResult {
 	errors: Array<{ path: string; error: string }>;
 	/** Shared runtime - actions are throwing stubs until runner.initialize() */
 	runtime: ExtensionRuntime;
+	/** Event bus shared by every API created for this extension generation. */
+	eventBus?: EventBus;
 }
 
 // ============================================================================

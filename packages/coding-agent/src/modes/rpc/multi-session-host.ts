@@ -1,4 +1,5 @@
 import type { CreateAgentSessionRuntimeFactory } from "../../core/agent-session-runtime.ts";
+import { envValue } from "../../core/brand.ts";
 import {
 	flushRawStdout,
 	takeOverStdout,
@@ -7,6 +8,7 @@ import {
 } from "../../core/output-guard.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import type { RpcConnectionSink } from "./connection-handler.ts";
+import { parseClientCapabilities } from "./custom-capability.ts";
 import { attachJsonlLineReader } from "./jsonl.ts";
 import type { RpcCommand, RpcResponse } from "./rpc-types.ts";
 import { SessionCommandRouter } from "./session-command-router.ts";
@@ -27,10 +29,13 @@ export async function runMultiSessionHost(options: MultiSessionHostOptions): Pro
 	takeOverStdout();
 	const sink: RpcConnectionSink = { writeRaw: writeRawStdout, waitForBackpressure: waitForRawStdoutBackpressure };
 	const writer = new SessionEventWriter(sink.writeRaw);
+	const capabilities = parseClientCapabilities(envValue("RPC_CLIENT_CAPABILITIES"));
 	const router = new SessionCommandRouter(
 		new RpcSessionRegistry({ agentDir: options.agentDir, createRuntime: options.createRuntime }),
 		writer,
 		options,
+		undefined,
+		{ capabilities },
 	);
 	let shuttingDown = false;
 	const output = async (response: RpcResponse) => {

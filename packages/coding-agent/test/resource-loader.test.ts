@@ -289,6 +289,7 @@ export default function(pi) {
 			});
 
 			const extensionsResult = loader.getExtensions();
+			expect(extensionsResult.eventBus).toBeDefined();
 			expect(nonBuiltinExtensions(extensionsResult.extensions).map((extension) => extension.path)).toEqual([
 				join(cwd, ".pi", "extensions", "project.ts"),
 				join(userExtDir, "user.ts"),

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
 	RPC_ERROR_MISSING_SESSION_ID,
 	RPC_ERROR_MULTI_SESSION_DISABLED,
@@ -43,6 +43,49 @@ describe("multi-session RPC routing", () => {
 			command: "get_protocol_info",
 			success: true,
 			data: { protocolVersion: 1, capabilities: ["multi_session"], mode: "multi" },
+		});
+	});
+
+	test("forwards client capabilities into each opened session binding", async () => {
+		const entry = {
+			runtime: {
+				session: {
+					model: undefined,
+					thinkingLevel: "off",
+					isStreaming: false,
+					isCompacting: false,
+					steeringMode: "one-at-a-time",
+					followUpMode: "one-at-a-time",
+					sessionFile: undefined,
+					sessionId: "durable-session-beta",
+					sessionName: undefined,
+				},
+			},
+		};
+		const registry = {
+			openSession: async () => ({ sessionId: "rpc-session-beta" }),
+			getForCommand: () => entry,
+			list: () => [],
+			beginClose: () => entry,
+			closeMarked: async () => {},
+		} as never;
+		const createBinding = vi.fn(async () => ({
+			handle: async () => {},
+			dispose: async () => {},
+		}));
+		const writer = new SessionEventWriter(() => {});
+		const router = Reflect.construct(SessionCommandRouter, [
+			registry,
+			writer,
+			{ cwd: "/tmp" },
+			createBinding,
+			{ capabilities: ["extension_events"] },
+		]) as SessionCommandRouter;
+
+		await router.handle({ id: "open", type: "open_session", cwd: "/tmp" });
+
+		expect(createBinding).toHaveBeenCalledWith("rpc-session-beta", entry, writer, expect.any(Function), {
+			capabilities: ["extension_events"],
 		});
 	});
 

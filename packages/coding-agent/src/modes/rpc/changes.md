@@ -231,3 +231,23 @@ fork change here is a merge-conflict surface on upstream syncs.
 
 - MEDIUM: `connection-handler.ts` command dispatch and `rpc-types.ts` response unions.
 - LOW: `rpc-client.ts` model metadata and `docs/rpc.md` protocol reference.
+
+## Capability-gated extension events reach classic and multi-session clients (2026-08-11)
+
+RPC clients advertising `extension_events` now receive additive
+`extension_event { name, data }` records. Unflagged clients remain byte-identical. Multi-session mode
+parses `SENPI_RPC_CLIENT_CAPABILITIES`, threads capabilities through `SessionCommandRouter` and
+`createRpcSessionBinding`, and preserves the owning routing `sessionId` on emitted records.
+
+## Session-start extension events are subscribed before binding (2026-08-11)
+
+Capability-gated extension RPC listeners now attach before `bindExtensions()` dispatches
+`session_start`. This preserves initial atomic extension snapshots such as native task state while
+keeping rebind cleanup generation-safe; subscribing after binding deterministically dropped those
+events.
+## Public RPC client exposes extension events (2026-08-11)
+
+`RpcClientEvent`, `RpcEventListener`, the modes barrel, and the package root now include
+`RpcExtensionEvent`, so capability-enabled SDK consumers can narrow and validate generic extension
+records. The extension and RPC guides document `pi.rpc.emit`, capability environment variables, the
+wire shape, multi-session tagging, and payload validation responsibilities.

@@ -27,7 +27,7 @@ import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.ts";
 // avoiding a circular dependency. Extensions can import from @code-yeongyu/senpi.
 import * as _bundledPiCodingAgent from "../../index.ts";
 import { resolvePath } from "../../utils/paths.ts";
-import { createEventBus, type EventBus } from "../event-bus.ts";
+import { createEventBus, type EventBus, EXTENSION_RPC_EVENT_CHANNEL, type ExtensionRpcEvent } from "../event-bus.ts";
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
 import { readPiManifest } from "../pi-manifest.ts";
@@ -564,6 +564,16 @@ function createExtensionAPI(
 			runtime.unregisterProvider(name, extension.path);
 		},
 
+		rpc: {
+			emit(name, data) {
+				const normalizedName = name.trim();
+				if (normalizedName.length === 0) throw new Error("RPC extension event name must not be empty");
+				eventBus.emit(EXTENSION_RPC_EVENT_CHANNEL, {
+					name: normalizedName,
+					data,
+				} satisfies ExtensionRpcEvent);
+			},
+		},
 		events: eventBus,
 	} as ExtensionAPI;
 
@@ -739,6 +749,7 @@ async function loadExtensionsInternal(
 		extensions,
 		errors,
 		runtime: resolvedRuntime,
+		eventBus: resolvedEventBus,
 	};
 }
 

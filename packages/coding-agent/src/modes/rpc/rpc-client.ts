@@ -16,6 +16,7 @@ import type {
 	RpcAccountFailoverEvent,
 	RpcAuthAccountsChangedEvent,
 	RpcCommand,
+	RpcExtensionEvent,
 	RpcProviderAccount,
 	RpcResponse,
 	RpcSessionState,
@@ -56,9 +57,10 @@ export interface ModelInfo {
 }
 
 export type RpcProviderAccountEvent = RpcAuthAccountsChangedEvent | RpcAccountFailoverEvent;
-export type RpcEventListener = (event: AgentSessionEvent | RpcProviderAccountEvent) => void;
+export type RpcClientEvent = AgentSessionEvent | RpcProviderAccountEvent | RpcExtensionEvent;
+export type RpcEventListener = (event: RpcClientEvent) => void;
 
-function isProviderAccountEvent(event: AgentSessionEvent | RpcProviderAccountEvent): event is RpcProviderAccountEvent {
+function isProviderAccountEvent(event: RpcClientEvent): event is RpcProviderAccountEvent {
 	return event.type === "auth_accounts_changed" || event.type === "account_failover";
 }
 
@@ -511,7 +513,7 @@ export class RpcClient {
 			}, timeout);
 
 			const unsubscribe = this.onEvent((event) => {
-				if (isProviderAccountEvent(event)) return;
+				if (isProviderAccountEvent(event) || event.type === "extension_event") return;
 				events.push(event);
 				if (event.type === "agent_settled") {
 					clearTimeout(timer);
@@ -549,7 +551,7 @@ export class RpcClient {
 
 			// Otherwise it's an event
 			for (const listener of this.eventListeners) {
-				listener(data as AgentSessionEvent);
+				listener(data as RpcClientEvent);
 			}
 		} catch {
 			// Ignore non-JSON lines

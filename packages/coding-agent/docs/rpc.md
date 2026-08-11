@@ -17,6 +17,20 @@ Common options:
 - `--no-session`: Disable session persistence
 - `--session-dir <path>`: Custom session storage directory
 
+### Client capabilities
+
+Optional additive records are enabled through the comma-separated
+`SENPI_RPC_CLIENT_CAPABILITIES` environment variable:
+
+```bash
+SENPI_RPC_CLIENT_CAPABILITIES=extension_events senpi --mode rpc
+```
+
+Rebranded distributions read the equivalent variable under their configured environment prefix
+(for example `OMO_RPC_CLIENT_CAPABILITIES`). Unknown capability names are ignored. Advertising
+`extension_events` opts the client into generic extension-owned event records; clients that omit it
+retain the previous wire stream unchanged.
+
 ## Multi-session mode (D1 wire protocol)
 
 Multi-session mode lets one `senpi --mode rpc` process serve several independent conversations concurrently over the same stdio JSONL stream. Classic single-session mode is byte-identical to today; the only additive classic-mode behavior is that `get_protocol_info` is answered.
@@ -963,7 +977,28 @@ Events are streamed to stdout as JSON lines during agent operation. Events do no
 | `summarization_retry_attempt_start` | Retried summarization request starts |
 | `summarization_retry_finished` | Summarization retry loop completes |
 | `extension_error` | Extension threw an error |
+| `extension_event` | Capability-gated extension-owned event (`extension_events` clients only) |
 | `loaded_surfaces_changed` | Loaded skills, extensions, or MCP inventory changed; re-read `get_commands` and `get_loaded_surfaces` |
+
+### extension_event
+
+Emitted when an extension calls `pi.rpc.emit(name, data)` and the client advertised
+`extension_events`:
+
+```json
+{
+  "type": "extension_event",
+  "name": "acme.job.updated",
+  "data": {
+    "jobId": "job-42",
+    "status": "running"
+  }
+}
+```
+
+`name` is extension-owned and `data` is opaque to Senpi. Consumers should validate the payload for
+the specific event name before applying it. In multi-session mode the record also includes the
+routing `sessionId`; delivery preserves the owning session and per-session event order.
 
 ### agent_start
 

@@ -205,6 +205,7 @@ export async function createTestExtensionsResult(
 		extensions,
 		errors: [],
 		runtime,
+		eventBus,
 	};
 }
 

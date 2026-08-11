@@ -1569,3 +1569,9 @@ If upstream modifies compaction event definitions in `types.ts`, preserve the ad
 
 - `types.ts` around `ToolDefinition`
 - `builtin/index.ts` builtin registration ordering
+
+## Extensions can emit capability-gated RPC events (2026-08-11)
+
+Extension APIs now expose `pi.rpc.emit(name, data)`. It validates a non-empty name and publishes an
+opaque payload on the generation-owned extension bus; it does not write to a transport directly.
+Keep ordinary `pi.events` extension-local, and keep RPC delivery opt-in at the connection boundary.

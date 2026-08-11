@@ -46,11 +46,16 @@ import type {
 } from "../../core/extensions/index.ts";
 import { getSupportedThinkingLevels } from "../../core/thinking-levels.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
-import { buildCustomUnsupportedRequest, DEFAULT_CUSTOM_EXTENSION_LABEL } from "./custom-capability.ts";
+import {
+	buildCustomUnsupportedRequest,
+	DEFAULT_CUSTOM_EXTENSION_LABEL,
+	EXTENSION_EVENTS_CAPABILITY,
+} from "./custom-capability.ts";
 import { createRpcEventOutputBuffer } from "./event-output-buffer.ts";
 import type {
 	RpcAuthProvider,
 	RpcCommand,
+	RpcExtensionEvent,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
 	RpcLoadedExtension,
@@ -171,6 +176,7 @@ export function createRpcConnectionHandler(
 	let unsubscribe: (() => void) | undefined;
 	let unsubscribeBackpressure: (() => void) | undefined;
 	let unsubscribeLoadedSurfaces: (() => void) | undefined;
+	let unsubscribeExtensionEvents: (() => void) | undefined;
 	let mcpWireStatus: McpWireStatusSnapshot = { servers: [] };
 	let loadedSurfacesDigest: string | undefined;
 	let suppressLoadedSurfaceEvents = false;
@@ -534,7 +540,13 @@ export function createRpcConnectionHandler(
 
 	const rebindSession = async (): Promise<void> => {
 		unsubscribeLoadedSurfaces?.();
+		unsubscribeExtensionEvents?.();
 		session = runtimeHost.session;
+		unsubscribeExtensionEvents = clientCapabilities?.includes(EXTENSION_EVENTS_CAPABILITY)
+			? session.extensionRunner.onRpcEvent(({ name, data }) => {
+					outputEvent({ type: "extension_event", name, data } satisfies RpcExtensionEvent);
+				})
+			: undefined;
 		subscribeLoadedSurfaceEvents();
 		await refreshLoadedSurfacesAfter(
 			() =>
@@ -584,7 +596,6 @@ export function createRpcConnectionHandler(
 				}),
 			true,
 		);
-
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
 		unsubscribe = session.subscribe((event) => {
@@ -1130,9 +1141,11 @@ export function createRpcConnectionHandler(
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
 		unsubscribeLoadedSurfaces?.();
+		unsubscribeExtensionEvents?.();
 		unsubscribe = undefined;
 		unsubscribeBackpressure = undefined;
 		unsubscribeLoadedSurfaces = undefined;
+		unsubscribeExtensionEvents = undefined;
 		if (options.disposeRuntime !== false) {
 			await runtimeHost.dispose();
 		}

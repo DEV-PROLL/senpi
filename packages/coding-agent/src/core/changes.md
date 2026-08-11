@@ -1732,3 +1732,15 @@ If upstream modifies any compaction route (manual, threshold, overflow, pre-prom
 ### Expected merge conflict zones
 
 - HIGH: `agent-session.ts` prompt serialization and fallback model-switch logic.
+
+## Extension event bus follows the loaded generation into runtime (2026-08-11)
+
+`LoadExtensionsResult` now retains the event bus used to construct extension APIs, and
+`AgentSession` passes that exact bus into `ExtensionRunner`. RPC subscriptions must bind to this
+generation-owned bus rather than an unrelated runtime or resource-loader instance, especially after
+extension reloads. Test extension results preserve the same ownership contract.
+## Preserve extension event bus after project trust resolution (2026-08-11)
+
+The trusted/untrusted extension result composition now carries forward the shared event bus used by
+both pre-trust and remaining extensions. Dropping it caused `ExtensionRunner` to allocate an
+unrelated fallback bus, silently disconnecting `pi.rpc.emit` on trust-requiring projects.

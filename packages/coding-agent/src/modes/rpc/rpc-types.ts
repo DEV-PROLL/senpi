@@ -465,6 +465,12 @@ export type RpcExtensionUIRequest =
 	// returns undefined. Default clients never see it (byte-identical behavior).
 	| { type: "extension_ui_request"; id: string; method: "custom_unsupported"; extensionName: string };
 
+export type RpcExtensionEvent = {
+	type: "extension_event";
+	name: string;
+	data: unknown;
+};
+
 // ============================================================================
 // Extension UI Commands (stdin)
 // ============================================================================
