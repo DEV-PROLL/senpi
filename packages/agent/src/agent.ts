@@ -121,6 +121,7 @@ export interface AgentOptions {
 	maxRetryDelayMs?: number;
 	toolExecution?: ToolExecutionMode;
 	removedToolHints?: Record<string, string>;
+	resolveUnknownToolCall?: AgentLoopConfig["resolveUnknownToolCall"];
 	abortServerSideFallback?: boolean;
 }
 
@@ -235,6 +236,8 @@ export class Agent {
 	public toolExecution: ToolExecutionMode;
 	/** Migration guidance returned when a removed tool name is called. */
 	public removedToolHints: Record<string, string>;
+	/** Optional call-time resolver for tools absent from the request context. */
+	public resolveUnknownToolCall?: AgentLoopConfig["resolveUnknownToolCall"];
 	/** Forwarded to the stream function; providers without server-side fallback ignore it. */
 	public abortServerSideFallback?: boolean;
 
@@ -262,6 +265,7 @@ export class Agent {
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
 		this.removedToolHints = runtimeOptions.removedToolHints ?? {};
+		this.resolveUnknownToolCall = runtimeOptions.resolveUnknownToolCall;
 		this.abortServerSideFallback = runtimeOptions.abortServerSideFallback;
 	}
 
@@ -560,6 +564,7 @@ export class Agent {
 			abortServerSideFallback: this.abortServerSideFallback,
 			toolExecution: this.toolExecution,
 			removedToolHints: this.removedToolHints,
+			resolveUnknownToolCall: this.resolveUnknownToolCall,
 			beforeToolCall: this.beforeToolCall,
 			afterToolCall: this.afterToolCall,
 			prepareNextTurn:

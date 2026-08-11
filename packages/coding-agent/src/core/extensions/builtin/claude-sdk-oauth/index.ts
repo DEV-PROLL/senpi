@@ -11,6 +11,9 @@ import { registerSessionRegistry } from "./session-registry-wiring.ts";
 import { streamClaudeSdkOauth } from "./stream.ts";
 
 export { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
+export type ClaudeSdkOauthExtensionDeps = {
+	readAmbientAuthStatus?: () => Promise<boolean>;
+};
 
 const MODELS = getModels("anthropic").map((model) => ({
 	id: model.id,
@@ -37,17 +40,17 @@ function readStoredCredential(providerId: string): ClaudeSdkOauthCredential | un
 	}
 }
 
-export default function claudeSdkOauthExtension(pi: ExtensionAPI): void {
+export function registerClaudeSdkOauthExtension(pi: ExtensionAPI, deps: ClaudeSdkOauthExtensionDeps = {}): void {
 	registerClaudeAccountCommand(pi);
 	registerSessionRegistry(pi);
 	pi.registerProvider(CLAUDE_SDK_OAUTH_PROVIDER_ID, {
 		baseUrl: CLAUDE_SDK_OAUTH_PROVIDER_ID,
 		api: CLAUDE_SDK_OAUTH_PROVIDER_ID,
-		apiKey: "claude-sdk-oauth-managed",
 		models: MODELS,
 		streamSimple: streamClaudeSdkOauth,
 		oauth: createOAuthConfig({
 			readCurrent: async () => readStoredCredential(CLAUDE_SDK_OAUTH_PROVIDER_ID),
+			readAmbientAuthStatus: deps.readAmbientAuthStatus,
 			readAnthropicCredential: async () => {
 				const credential = readStoredCredential("anthropic");
 				return credential && typeof credential.access === "string"
@@ -56,4 +59,8 @@ export default function claudeSdkOauthExtension(pi: ExtensionAPI): void {
 			},
 		}),
 	});
+}
+
+export default function claudeSdkOauthExtension(pi: ExtensionAPI): void {
+	registerClaudeSdkOauthExtension(pi);
 }

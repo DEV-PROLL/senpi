@@ -1,5 +1,22 @@
 # changes
 
+## Preserve extension OAuth availability checks (2026-08-11)
+
+### What changed
+
+- Extension provider OAuth configs can expose the additive `check()` availability hook from `pi-ai`.
+- `provider-composer.ts` carries that hook through `adaptOAuth()` so the canonical model runtime can classify stored
+  sentinel credentials and ambient OAuth sources without provider-specific core branches.
+
+### Why this cannot be expressed externally
+
+- Extension registration is normalized into canonical provider auth inside the core composer; without this adapter
+  field, the provider's hook is discarded before `Models.checkAuth()` runs.
+
+### Expected merge conflict zones
+
+- LOW: the additive `ExtensionOAuthConfig.check` field and `adaptOAuth()` spread in `provider-composer.ts`.
+
 ## Refresh server-fallback policy for active-turn model changes (2026-08-10)
 
 ### What changed
