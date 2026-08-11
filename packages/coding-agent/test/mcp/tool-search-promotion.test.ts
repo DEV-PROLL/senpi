@@ -77,7 +77,9 @@ afterEach(() => {
 });
 
 async function makeHarness(): Promise<Harness> {
-	const harness = await createHarness({ extensionFactories: [toolSearchExtension()] });
+	const harness = await createHarness({
+		extensionFactories: [{ factory: toolSearchExtension(), path: "<builtin:mcp>" }],
+	});
 	harnesses.push(harness);
 	return harness;
 }

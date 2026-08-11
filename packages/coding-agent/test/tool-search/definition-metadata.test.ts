@@ -107,6 +107,44 @@ describe("tool search definition metadata", () => {
 		}
 	});
 
+	it("ignores searchText when projecting a direct-exposure tool", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "senpi-tool-direct-search-text-"));
+		tempDirs.push(cwd);
+		const agentDir = join(cwd, "agent");
+		const settingsManager = SettingsManager.create(cwd, agentDir);
+		const resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir,
+			settingsManager,
+			extensionFactories: [
+				(pi) => {
+					pi.registerTool(
+						tool("direct_tool", {
+							exposure: "direct",
+							searchText: "must not be projected for direct tools",
+						}),
+					);
+				},
+			],
+		});
+		await resourceLoader.reload();
+
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager: SessionManager.inMemory(),
+			resourceLoader,
+		});
+
+		try {
+			expect(session.getAllTools().find(({ name }) => name === "direct_tool")?.searchText).toBeUndefined();
+		} finally {
+			session.dispose();
+		}
+	});
+
 	it("rejects the reserved tool_search name from non-builtin extensions", async () => {
 		await expect(
 			loadExtensionFromFactory(

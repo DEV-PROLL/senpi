@@ -63,7 +63,9 @@ function names(shapes: ToolShape[]): string[] {
 }
 
 async function harnessFor(root: TestRoot): Promise<Harness> {
-	const harness = await createHarness({ extensionFactories: [mcpExtensionFor(root.agentDir)] });
+	const harness = await createHarness({
+		extensionFactories: [{ factory: mcpExtensionFor(root.agentDir), path: "<builtin:mcp>" }],
+	});
 	harnesses.push(harness);
 	// The harness never emits session_start on its own; attach + await the
 	// raced registration so the first prompt's tool snapshot is deterministic.

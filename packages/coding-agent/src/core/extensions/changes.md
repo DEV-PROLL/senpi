@@ -9,12 +9,17 @@
 - `getAllTools()` projects the human-readable label and normalized effective metadata, preserving `direct`, an empty
   keyword list, and lazy activation as the defaults for existing definitions.
 - Non-builtin extensions cannot register the reserved `tool_search` name.
+- MCP harness factories that stand in for the production builtin now use host-assigned `<builtin:...>` paths, so the
+  reserved-name guard exercises the same source identity in tests without exempting inline or end-user extensions.
+- Definition metadata coverage now pins that `searchText` is omitted from the normalized projection for direct tools.
 
 ### Why
 
 - A shared searchable catalog needs complete, normalized metadata without a second extension lookup, while existing
   extensions must retain their current direct-exposure behavior when they omit the new fields.
 - Reserving the catalog tool name prevents extension registration order from shadowing the builtin search surface.
+- Keeping the guard strict and correcting builtin test identity avoids a harness-only regression without opening a
+  registration path that a real end-user extension could use.
 
 ### Why this cannot be expressed externally
 
