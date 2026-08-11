@@ -28,6 +28,7 @@ import { nvidiaProvider } from "./nvidia.ts";
 import { ollamaProvider } from "./ollama.ts";
 import { openaiProvider } from "./openai.ts";
 import { openaiCodexProvider } from "./openai-codex.ts";
+import { openaiImagesProvider } from "./openai-images.ts";
 import { opencodeProvider } from "./opencode.ts";
 import { opencodeGoProvider } from "./opencode-go.ts";
 import { openrouterProvider } from "./openrouter.ts";
@@ -181,7 +182,7 @@ export function builtinModels(options?: CreateModelsOptions): MutableModels {
 
 /** All built-in image-generation providers, freshly constructed. */
 export function builtinImagesProviders(): ImagesProvider[] {
-	return [openrouterImagesProvider()];
+	return [openrouterImagesProvider(), openaiImagesProvider()];
 }
 
 /** An `ImagesModels` collection with every built-in image-generation provider registered. */

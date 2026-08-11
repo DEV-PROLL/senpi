@@ -1,5 +1,29 @@
 # AI Source Changes
 
+## 2026-08-11 - OpenAI images provider with generated gpt-image models
+
+### What changed and why
+
+- `scripts/generate-image-models.ts` now also emits `IMAGE_MODELS.openai` with static, hand-authored entries for
+  `gpt-image-2` and `gpt-image-1.5` (api `openai-images`, provider `openai`, baseUrl `https://api.openai.com/v1`,
+  input `["text"]` only - the v1 generations endpoint is text-only). Costs quote models.dev as of 2026-08-11
+  (gpt-image-2: $5 input / $30 output / $1.25 cache-read per 1M tokens; gpt-image-1.5 has no models.dev cost entry
+  as of that date and is zero-filled until pricing is published). The OpenRouter live fetch is unchanged.
+- `providers/openai-images.ts` adds `openaiImagesProvider()` mirroring the OpenRouter images provider, authing via
+  `OPENAI_API_KEY` and serving `Object.values(IMAGE_MODELS.openai)` through the lazy `openaiImagesApi()` accessor.
+- `providers/all.ts` appends the provider to `builtinImagesProviders()`, so `builtinImagesModels()` exposes the
+  `openai` provider and its catalog.
+
+### Why this cannot be expressed externally
+
+- The built-in image model catalog is generated inside `packages/ai`; external providers can register through the
+  images registry but cannot extend the generated `IMAGE_MODELS` catalog or the builtin provider list.
+
+### Expected merge conflict zones
+
+- LOW: additive static model table and provider grouping in `scripts/generate-image-models.ts`.
+- LOW: one-line append in `builtinImagesProviders()` and the import block in `providers/all.ts`.
+
 ## 2026-08-11 - Lazy builtin registration for openai-images provider
 
 ### What changed and why

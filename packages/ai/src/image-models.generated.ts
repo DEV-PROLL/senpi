@@ -4,6 +4,38 @@
 import type { ImagesApi, ImagesModel } from "./types.ts";
 
 export const IMAGE_MODELS = {
+	openai: {
+		"gpt-image-2": {
+			id: "gpt-image-2",
+			name: "GPT Image 2",
+			api: "openai-images",
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+			input: ["text"],
+			output: ["image"],
+			cost: {
+				input: 5,
+				output: 30,
+				cacheRead: 1.25,
+				cacheWrite: 0,
+			},
+		} satisfies ImagesModel<"openai-images">,
+		"gpt-image-1.5": {
+			id: "gpt-image-1.5",
+			name: "GPT Image 1.5",
+			api: "openai-images",
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+			input: ["text"],
+			output: ["image"],
+			cost: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+			},
+		} satisfies ImagesModel<"openai-images">,
+	},
 	openrouter: {
 		"black-forest-labs/flux.2-flex": {
 			id: "black-forest-labs/flux.2-flex",
