@@ -1,5 +1,25 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-11 - Require a real OAuth login for runtime availability
+
+- Removed the literal `apiKey: "claude-sdk-oauth-managed"` registration placeholder. Provider composition treated
+  that sentinel as configured API-key authentication, so a machine with no Claude SDK OAuth account still admitted
+  `claude-sdk-oauth` models into retry fallback selection before the subprocess returned `Not logged in`.
+- Added a provider OAuth availability check that accepts a stored account, any `CLAUDE_CODE_OAUTH_TOKEN` slot, or a
+  successful `claude auth status` exit code. Empty and persisted `accounts: []` credentials remain unavailable.
+- The ambient probe resolves the same bundled/overridden Claude executable used by requests, discards its output, and
+  decides only from the documented exit status, so account identity and credentials never enter logs.
+- Errored fallback responses (e.g. `Not logged in`) are rejected as fallback successes both within the active turn
+  and on the next turn's retry state, so a green `Fallback model responded` notice cannot surface from a provider
+  that was never actually usable ([#803](https://github.com/code-yeongyu/senpi/pull/803)).
+- Kept OAuth registration, catalog discovery, login selection, and SDK streaming unchanged for every usable auth lane.
+- This cannot be implemented by an external extension: the false availability was created by this builtin provider's
+  own auth metadata and must be resolved before retry fallback evaluates candidates.
+- Supersedes [#804](https://github.com/code-yeongyu/senpi/pull/804), which introduced the initial account-aware
+  availability check for managed lanes.
+- Expected merge conflict zones: LOW in `index.ts`, `oauth-login.ts`, and `availability.ts`; LOW in the focused auth
+  status and extension registration tests.
+
 ## 2026-08-11 - Account-aware auth availability for fallback
 
 ### What changed

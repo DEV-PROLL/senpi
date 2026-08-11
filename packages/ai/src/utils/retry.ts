@@ -109,6 +109,14 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"try your request again",
 	"please retry your request",
 
+	// Gateway/proxy-side rejection of the whole model request, e.g. "Error: The
+	// model request was rejected. Check the request and try again." (observed in a
+	// live session, 2026-08-11). Coupling the rejection sentence to its explicit
+	// retry instruction keeps unrelated permission, request-shape, and content-
+	// policy rejections terminal while the bounded retry policy absorbs this
+	// transient wrapper wording.
+	"the model request was rejected\\.\\s*check the request and try again\\.?",
+
 	// Anthropic server-tool pairing rejections, e.g. "`web_search` tool use with id
 	// `srvtoolu_...` was found without a corresponding `web_search_tool_result`
 	// block". A turn closed before its deferred server tool could answer leaves

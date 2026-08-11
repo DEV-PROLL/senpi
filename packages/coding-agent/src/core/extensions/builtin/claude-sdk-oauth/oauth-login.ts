@@ -1,4 +1,11 @@
-import type { AuthContext, AuthInteraction, OAuthAuth, OAuthCredentials } from "@earendil-works/pi-ai";
+import type {
+	AuthCheck,
+	AuthContext,
+	AuthInteraction,
+	OAuthAuth,
+	OAuthCredential,
+	OAuthCredentials,
+} from "@earendil-works/pi-ai";
 import { loadAnthropicOAuth } from "@earendil-works/pi-ai/oauth";
 import {
 	type AccountSlot,
@@ -8,6 +15,7 @@ import {
 	listAccounts,
 	SENTINEL_OAUTH_FIELDS,
 } from "./accounts.ts";
+import { readAmbientClaudeAuthStatus } from "./availability.ts";
 
 export type OAuthLoginCallbacks = {
 	signal?: AbortSignal;
@@ -21,18 +29,18 @@ export type CurrentCredentialReader = () => Promise<ClaudeSdkOauthCredential | u
 
 export type OAuthConfigShape = {
 	name: string;
+	check(input: { ctx: AuthContext; credential?: OAuthCredential }): Promise<AuthCheck | undefined>;
 	login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
 	refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials>;
 	getApiKey(credentials: OAuthCredentials): string;
-	check(input: {
-		ctx: AuthContext;
-		credential?: OAuthCredentials;
-	}): Promise<{ source: string; type: "oauth" } | undefined>;
 };
 
 export const CLAUDE_SDK_OAUTH_NAME = "Claude SDK OAuth (Claude Pro/Max)";
-
-const OAUTH_CONFIGURED: { source: string; type: "oauth" } = { source: "OAuth", type: "oauth" };
+const ENV_TOKEN_NAMES = [
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	...Array.from({ length: 15 }, (_, index) => `CLAUDE_CODE_OAUTH_TOKEN_${index + 2}`),
+] as const;
+const AUTH_CHECK = { source: "Claude SDK OAuth", type: "oauth" } as const;
 
 function toSlot(
 	credential: { access: string; refresh: string; expires: number },
@@ -57,19 +65,20 @@ async function promptAccountName(callbacks: OAuthLoginCallbacks, existing: Accou
 export function createOAuthConfig(deps: {
 	readCurrent: CurrentCredentialReader;
 	readAnthropicCredential?: () => Promise<{ access: string; refresh: string; expires: number } | undefined>;
+	readAmbientAuthStatus?: () => Promise<boolean>;
 	loginFlow?: OAuthAuth;
-	readSettings?: () => { tokenInjection?: "ambient" | "oauth-slots" | "config-dir" } | undefined;
 }): OAuthConfigShape {
 	return {
 		name: CLAUDE_SDK_OAUTH_NAME,
 
-		async check({ credential }) {
+		async check({ ctx, credential }) {
 			const stored = credential as ClaudeSdkOauthCredential | undefined;
-			const env = (name: string) => process.env[name];
-			const accounts = listAccounts(stored ?? emptyCredential(), env);
-			if (accounts.length > 0) return OAUTH_CONFIGURED;
-			const lane = deps.readSettings?.()?.tokenInjection ?? "ambient";
-			return lane === "ambient" ? OAUTH_CONFIGURED : undefined;
+			if (stored?.type === "oauth" && Array.isArray(stored.accounts) && stored.accounts.length > 0) {
+				return AUTH_CHECK;
+			}
+			const envTokens = await Promise.all(ENV_TOKEN_NAMES.map((name) => ctx.env(name)));
+			if (envTokens.some((token) => token !== undefined && token.length > 0)) return AUTH_CHECK;
+			return (await (deps.readAmbientAuthStatus ?? readAmbientClaudeAuthStatus)()) ? AUTH_CHECK : undefined;
 		},
 
 		async login(callbacks) {

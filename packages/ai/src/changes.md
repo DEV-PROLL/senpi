@@ -1,5 +1,50 @@
 # AI Source Changes
 
+## 2026-08-11 - Normalize replayed tool IDs for strict OpenAI-compatible gateways
+
+### What changed and why
+
+- `api/openai-completions.ts` now sanitizes every replayed non-Responses tool-call ID to the OpenAI-compatible
+  alphanumeric/underscore/dash shape, preserves already-valid bounded IDs, and uses a deterministic hash suffix when
+  sanitization or the 40-character bound changes the ID.
+- `api/transform-messages.ts` lets strict target adapters opt into applying their supplied tool-call ID normalizer to
+  same-model history as well as cross-model history. OpenAI completions enables that opt-in and remaps the paired
+  tool result through the existing ID map; Responses retains its provider-native IDs.
+- A persisted `apitopia/kimi-k3-unlocked` session stored tool-call IDs such as `eval:18`. After switching to
+  `opengateway/anthropic/claude-fable-5`, the gateway rejected the request before generation with
+  `messages.36.content.1.tool_use.id: String should match pattern '^[a-zA-Z0-9_-]+$'`.
+- This cannot be extension-local: tool-call IDs and their paired results are transformed inside provider request
+  serialization before an extension can safely rewrite the complete outbound history. Rewriting persisted session
+  files would also leave other histories and future provider handoffs exposed.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/openai-completions.ts` near the local `normalizeToolCallId` function in `convertMessages`.
+- LOW: `api/transform-messages.ts` in the assistant `toolCall` transformation branch.
+- LOW: `../test/model-switch-replay-characterization.test.ts` near the non-Responses replay cases.
+
+## 2026-08-11 - Retry gateway model-request rejections
+
+### What changed and why
+
+- `utils/retry.ts` classifies `"model request was rejected"` as retryable so a gateway/proxy-side "The model
+  request was rejected. Check the request and try again." response is absorbed by the bounded same-model retry
+  policy (`settings.retry`) instead of failing the turn or immediately burning the fallback chain. Observed in a
+  live session on 2026-08-11. The classifier couples the rejection sentence to its explicit "Check the request and
+  try again." instruction so permission denials, content refusals, and request-shape errors remain terminal, and
+  the non-retryable list still wins on overlap.
+
+### Why this cannot be expressed externally
+
+- The transient-vs-terminal message classifier is package-internal; callers and extensions consume its verdict
+  through `retryAssistantCall`/`isRetryableAssistantError` and cannot add a message class without forking the
+  retry loop.
+
+### Expected merge conflict zones
+
+- LOW: additive pattern in `utils/retry.ts`, additive cases in `test/retry.test.ts`, additive mock-loop scenario
+  and optional scripted-error `type` under `.agents/skills/senpi-qa/scripts/`.
+
 ## 2026-08-11 - Optional availability `check` on `OAuthAuth`
 
 ### What changed and why
@@ -9,6 +54,25 @@ Added an optional `check?(input)` to `OAuthAuth` (`auth/types.ts`) and taught `c
 ### Expected merge-conflict zones
 
 LOW in `auth/types.ts` (additive optional field on `OAuthAuth`); LOW in `models.ts` `checkProviderAuth` (one stored-OAuth branch expanded, existing behavior preserved when `check` is undefined).
+
+## 2026-08-11 - OAuth availability `check` for ambient and no-credential providers
+
+### What changed and why
+
+- Follow-up to the optional `OAuthAuth.check` hook: `Models.checkAuth()` now also invokes the hook for ambient
+  no-credential providers, not only for stored OAuth credentials. Providers without a hook retain the previous
+  behavior where any matching stored OAuth credential is configured.
+- This lets providers confirm usable ambient OAuth without refreshing, resolving, or exposing token material. Hook
+  failures are wrapped in `ModelsError` on both the stored-credential and ambient paths.
+
+### Why this cannot be expressed externally
+
+- Provider availability and model filtering happen inside `Models` before host registries and fallback controllers see
+  the provider, so an extension-only post-filter would leave `checkAuth()` and `getAvailable()` inconsistent.
+
+### Expected merge conflict zones
+
+- MEDIUM: the auth precedence branches in `models.ts`.
 
 ## 2026-08-09 - Native Anthropic prompt-cache warming primitive
 

@@ -1295,12 +1295,17 @@ export function convertMessages(
 			return `${prefix}_${hash}`;
 		}
 
-		if (model.provider === "openai") return id.length > 40 ? id.slice(0, 40) : id;
-		return id;
+		const sanitizedId = id.replace(/[^a-zA-Z0-9_-]/g, "_") || "tool_call";
+		if (sanitizedId === id && sanitizedId.length <= 40) return id;
+
+		const hash = shortHash(id).slice(0, 8);
+		const prefix = sanitizedId.slice(0, Math.max(1, 40 - hash.length - 1));
+		return `${prefix}_${hash}`;
 	};
 
 	const transformedMessages = transformMessages(context.messages, model, (id) => normalizeToolCallId(id), {
 		preserveThinking: options.preserveThinking,
+		normalizeSameModelToolCallIds: true,
 	});
 
 	if (context.systemPrompt) {

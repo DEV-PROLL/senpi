@@ -627,7 +627,7 @@ if (argv[0] === "--self-test") {
 			"  node mock-loop.mjs --with-text-tool-leak --api <anthropic-messages|openai-completions>",
 			"  node mock-loop.mjs --with-truncated-text-tool-leak --api <anthropic-messages|openai-completions>",
 			"  node mock-loop.mjs --with-mcp-tool <tool> [--tool-args JSON]",
-			"  node mock-loop.mjs --scenario <transient-recover|budget-exhaust|server-error-fallback|long-retry-after|billing-swap|anthropic-policy-refusal-fallback|kimi-xtml-thinking-recover|ttsr-collapse|ttsr-leak|ttsr-repetitive-turns> [--api <name>]",
+			"  node mock-loop.mjs --scenario <transient-recover|budget-exhaust|server-error-fallback|long-retry-after|billing-swap|anthropic-policy-refusal-fallback|kimi-xtml-thinking-recover|model-request-rejected-recover|ttsr-collapse|ttsr-leak|ttsr-repetitive-turns> [--api <name>]",
 			"  node mock-loop.mjs --scenario <hinted-429-in-turn|no-hint-429-fast-fallback|hinted-429-probe-back|no-hint-429-no-chain>",
 			"  node mock-loop.mjs --run <prompt> [--api <name>]",
 			`  APIs: ${ALL_APIS.join(", ")}`,

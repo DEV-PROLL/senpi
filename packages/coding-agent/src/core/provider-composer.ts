@@ -11,6 +11,7 @@ import {
 	lazyStream,
 	type Model,
 	type OAuthAuth,
+	type OAuthCredential,
 	type OAuthCredentials,
 	type OAuthLoginCallbacks,
 	type Provider,
@@ -38,6 +39,7 @@ export interface ExtensionOAuthConfig {
 	check?(input: { ctx: AuthContext; credential?: OAuthCredentials }): Promise<AuthCheck | undefined>;
 	/** @deprecated Retained for extension source compatibility; ignored by canonical auth flows. */
 	usesCallbackServer?: boolean;
+	check?(input: { ctx: AuthContext; credential?: OAuthCredential }): Promise<AuthCheck | undefined>;
 	login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
 	refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials>;
 	getApiKey(credentials: OAuthCredentials): string;
@@ -270,6 +272,7 @@ function applyExtension(
 function adaptOAuth(config: ExtensionOAuthConfig): OAuthAuth {
 	return {
 		name: config.name,
+		...(config.check ? { check: config.check } : {}),
 		login: async (callbacks) => {
 			const credential = await config.login({
 				onAuth: (info) => callbacks.notify({ type: "auth_url", ...info }),

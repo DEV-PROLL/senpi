@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Model switches no longer fail before generation when persisted tool-call IDs contain provider-specific characters
+  such as the colon in Kimi's `eval:18`; replay now preserves call/result pairing while satisfying strict
+  Anthropic-backed gateway constraints ([#810](https://github.com/code-yeongyu/senpi/pull/810)).
+- Gateway/provider failures reported as `The model request was rejected. Check the request and try again.` now retry
+  the current model according to `settings.retry` before the configured fallback chain is used
+  ([#806](https://github.com/code-yeongyu/senpi/pull/806)).
 - `/goal resume` can explicitly reactivate a completed goal and queue its continuation, while completed goals remain excluded from automatic restart-resume prompts.
 - A launch from a deleted working directory (for example a removed worktree) no longer crashes during
   startup with `uv_cwd`; the CLI recovers into the home directory before any dependency evaluates
@@ -12,8 +18,16 @@
   (`oauth-slots`/`config-dir`) when no account is logged in, instead of always counting as configured because its
   stored credential is a zero-account sentinel. The ambient lane is unchanged and still defers to the spawned
   Claude Code engine ([#804](https://github.com/code-yeongyu/senpi/pull/804)).
+- Claude SDK OAuth models are selected as fallback candidates only when a stored account, environment token, or
+  authenticated ambient Claude CLI is usable. Empty sentinel credentials and logged-out local CLIs are skipped, and
+  fallback responses carrying errors such as `Not logged in` cannot emit an immediate or delayed green
+  `Fallback model responded` notice ([#803](https://github.com/code-yeongyu/senpi/pull/803)).
 
 ### New Features
+
+- Multi-session RPC clients can read loaded extensions and live MCP server inventory with
+  `get_loaded_surfaces`, and receive `loaded_surfaces_changed` invalidations when skills, extensions, or MCP
+  inventory changes ([#805](https://github.com/code-yeongyu/senpi/pull/805)).
 
 ### Breaking Changes
 
