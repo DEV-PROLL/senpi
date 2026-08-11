@@ -1,5 +1,28 @@
 # imagegen builtin — changes
 
+## Conditional skill contribution and packaging (2026-08-11)
+
+### What changed
+
+- Added the imagegen extension entry. It registers `generate_image` once, contributes the bundled `gpt-image-gen` skill only while `resolveImageGenAuth` finds credentials, and appends a short conditional-safe image-generation section before an agent turn while that same gate is active.
+- Skill discovery resolves `skill/SKILL.md` beside the extension module and checks the file before returning it. A missing packaged asset emits one debug message and contributes no dangling path, so skill loading remains nonfatal.
+- Registered the imagegen factory in the builtin catalog so the real CLI loads the tool and resource handlers.
+- Extended source-build asset copying, binary-distribution asset copying, and Bun compile preparation so `builtin/imagegen/skill/SKILL.md` is present under the built extension directory.
+
+### Why
+
+- Tool registration, skill visibility, and prompt guidance must share one credential predicate: no credentials means no skill or image-generation section, while native OpenAI and compatible gateway credentials enable both.
+- Markdown is not emitted by TypeScript compilation, so every packaging route must carry the skill explicitly rather than relying on its presence in `src`.
+
+### Test seam note
+
+- `registerImageGenExtension` accepts an alternate base directory so the missing-file guard can be exercised through the real `resources_discover` runner surface without renaming the checked-in skill.
+
+### Merge-conflict zones
+
+- LOW: `index.ts` is the isolated imagegen extension entry owned by this change.
+- MEDIUM: builtin registration and package build scripts are shared catalogs; preserve sibling registrations and asset clauses when resolving conflicts.
+
 ## generate_image tool (2026-08-11)
 
 ### What changed
