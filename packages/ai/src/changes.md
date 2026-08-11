@@ -1,5 +1,32 @@
 # AI Source Changes
 
+## 2026-08-11 - Native Responses image-generation item reconciliation
+
+### What changed and why
+
+- The shared OpenAI Responses stream loop now structurally recognizes `image_generation_call` output items across
+  SSE, WebSocket, Azure, and Codex adapters. Added and done frames reconcile into one provider-native slot, while a
+  terminal response backfills the final item when providers omit `response.output_item.done`.
+- Completed items retain only validated base64 plus an optional nonempty `revised_prompt`. Missing, empty, or invalid
+  results become short malformed status blocks; failed and provider-specific statuses remain message-local metadata
+  instead of escalating into transport errors. Partial-image events remain intentionally ignored.
+- Native image results have a 24 MiB aggregate base64-character cap. Exceeding it scrubs already collected image bytes
+  before the adapter returns a normalized provider error, so oversized data cannot enter the final assistant content.
+- `OpenAIResponsesCompat.supportsImageGeneration` exposes an explicit native-tool compatibility override, with direct
+  OpenAI Responses endpoints as the default-compatible route.
+
+### Why this cannot be expressed externally
+
+- Output-item slot reconciliation and terminal-response backfill happen inside the shared provider event loop before
+  extensions receive a completed assistant message. External hooks cannot reliably deduplicate frames or prevent
+  oversized native payloads from entering normalized content across all three adapters.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/openai-responses-shared.ts` output-slot lifecycle and terminal response finalization.
+- LOW: `openai-responses-compat.ts` additive compatibility flag.
+- LOW: `api/openai-responses.ts` resolved compatibility defaults.
+
 ## 2026-08-09 - Native Anthropic prompt-cache warming primitive
 
 ### What changed and why
