@@ -33,6 +33,16 @@
 
 ### Added
 
+- Added the `openai-image-gen` native builtin: when the active model uses the OpenAI Responses API on
+  `api.openai.com`, senpi injects the `image_generation` server tool and strips the client-side
+  `generate_image` function tool so exactly one image surface is offered per request. Mid-session model
+  switches re-evaluate the gate. Azure Responses endpoints default to the client tool unless
+  `compat.supportsImageGeneration` opts in
+  ([#814](https://github.com/code-yeongyu/senpi/pull/814)).
+- Native image results are externalized before persistence: a `message_end` handler decodes each
+  completed `image_generation_call` block, writes the image to `generated-images/`, and replaces the
+  provider-native block with a text path reference. Base64 payloads never reach the session file
+  ([#814](https://github.com/code-yeongyu/senpi/pull/814)).
 - Added a credential-gated `generate_image` tool: when an OpenAI-compatible credential exists (a stored OpenAI
   key, `OPENAI_API_KEY`, or a configured OpenAI-compatible gateway provider), the agent can generate images with
   `gpt-image-2` saved as files (never overwriting existing ones); without credentials the tool returns structured
