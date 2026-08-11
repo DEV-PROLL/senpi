@@ -92,7 +92,7 @@ function getCacheControl(
 	cacheRetention?: CacheRetention,
 	env?: ProviderEnv,
 ): { retention: CacheRetention; cacheControl?: CacheControlEphemeral } {
-	const retention = resolveCacheRetention(cacheRetention, env, "long");
+	const retention = resolveCacheRetention(cacheRetention, env, "short");
 	if (retention === "none") {
 		return { retention };
 	}
@@ -1235,7 +1235,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				const cacheRetention = resolveCacheRetention(
 					options?.cacheRetention ?? model.cacheRetention,
 					options?.env,
-					"long",
+					"short",
 				);
 				const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
 

@@ -12,6 +12,8 @@
 
 ### Changed
 
+- Changed direct Anthropic API prompt caching to use the provider's 5-minute default unless long retention is explicitly selected ([#820](https://github.com/code-yeongyu/senpi/pull/820)).
+
 ### Removed
 
 ## [2026.8.11-4] - 2026-08-11
