@@ -89,7 +89,7 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "loop-guard", factory: loopGuardExtension },
 	// Config reload follows settings-dependent builtins so reloads rebuild their resolved settings before catalog feeders observe them.
 	{ id: "config-reload", factory: configReloadExtension },
-	// Shared catalog wiring loads before MCP, which remains the final builtin and will feed it in the atomic todo-8 swap.
+	// Shared catalog wiring loads before MCP, which feeds its tools into the shared catalog as the final builtin.
 	{ id: "tool-search", factory: toolSearchExtension },
 	// Keep MCP last so its eventual provider-payload tap observes all co-resident builtin mutations.
 	{ id: "mcp", factory: mcpExtension },

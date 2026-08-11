@@ -76,7 +76,7 @@ Shared non-factory modules in this directory:
 - `permission-system/storage.ts` writes JSONL approval logs; don't change the line shape without a migration.
 - `compaction/restoration-tracker.ts` powers the post-compact context restoration feature — see `compaction/changes.md`.
 - `goal/elapsed-ticker.ts` drives the live 'Pursuing goal...' footer refresh on a one-second cadence.
-- MCP search exposure tool is `tool_search` (mcp/expose/tool-search.ts). Do not reintroduce `mcp_search` references anywhere.
+- MCP search exposure tool is `tool_search` (builtin/tool-search/tool.ts). Do not reintroduce `mcp_search` references anywhere.
 - Prompt presets routinely append the shared `file-operations.ts` tuning block. Mirror this when adding GPT-5.x presets — see `prompt-preset/changes.md` 2026-05-07.
 
 ---
