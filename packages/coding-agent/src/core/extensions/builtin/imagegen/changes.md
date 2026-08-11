@@ -58,3 +58,19 @@
 - LOW: `auth.ts` is a new isolated module.
 - MEDIUM: this `changes.md` will receive entries from the tool, skill-gating, and native-injector lanes; preserve all dated sections when resolving concurrent additions.
 - NONE: this change does not edit `imagegen/skill/`, builtin registration, or packages/ai files.
+
+## Credential-gate resolver tightening (2026-08-11)
+
+### What changed
+
+- `credentialParts` now requires a non-empty `apiKey`; headers alone no longer qualify a provider as an image-gen credential source.
+- Headers are still threaded through when a key exists.
+
+### Why
+
+- Providers like `github-copilot` resolve `ok:true` with static headers and no apiKey. Those headers authenticate only their own endpoint; calling `/images/generations` there would fail confusingly. The gateway scan and `PI_IMAGE_GEN_PROVIDER` pin must require a real apiKey.
+
+### Merge-conflict zones
+
+- LOW: one-line guard change in `auth.ts`.
+- NONE: no other modules touched.

@@ -163,13 +163,40 @@ describe("imagegen credential resolution", () => {
 		if (result.kind !== "none") expect(result.headers?.Authorization).toBeUndefined();
 	});
 
-	it("accepts independently resolved header-only gateway auth", async () => {
+	it("rejects headers-only gateway auth without an apiKey", async () => {
 		const result = await resolve({
 			models: [model("header-only-openai")],
 			modelAuth: { "header-only-openai": { ok: true, headers: { "X-API-Key": "header-secret" } } },
 		});
 
-		expect(result).toMatchObject({ kind: "gateway", apiKey: undefined, headers: { "X-API-Key": "header-secret" } });
+		expect(result.kind).toBe("none");
+	});
+
+	it("falls through a headers-only provider to a later keyed gateway", async () => {
+		const result = await resolve({
+			models: [model("headers-first"), model("keyed-second")],
+			modelAuth: {
+				"headers-first": { ok: true, headers: { "X-API-Key": "header-secret" } },
+				"keyed-second": { ok: true, apiKey: "second-key" },
+			},
+		});
+
+		expect(result).toMatchObject({ kind: "gateway", providerId: "keyed-second", apiKey: "second-key" });
+	});
+
+	it("treats a pinned headers-only provider as unavailable and falls through", async () => {
+		const result = await resolve(
+			{
+				models: [model("pinned-headers"), model("keyed-fallback")],
+				modelAuth: {
+					"pinned-headers": { ok: true, headers: { "X-API-Key": "header-secret" } },
+					"keyed-fallback": { ok: true, apiKey: "fallback-key" },
+				},
+			},
+			{ PI_IMAGE_GEN_PROVIDER: "pinned-headers" },
+		);
+
+		expect(result).toMatchObject({ kind: "gateway", providerId: "keyed-fallback", apiKey: "fallback-key" });
 	});
 
 	it("rejects empty inline keys", async () => {

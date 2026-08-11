@@ -68,8 +68,8 @@ function credentialParts(
 	auth: { apiKey?: string; headers?: Record<string, string | null> } | undefined,
 ): CredentialParts | undefined {
 	const apiKey = nonEmpty(auth?.apiKey);
+	if (!apiKey) return undefined;
 	const headers = resolvedHeaders(auth?.headers);
-	if (!apiKey && !headers) return undefined;
 	return { apiKey, ...(headers ? { headers } : {}) };
 }
 
