@@ -113,6 +113,9 @@ function validateScriptedTurns(turns) {
 		if (typeof error.message !== "string" || !error.message.trim()) {
 			throw new Error(`${label}: error.message must be a non-empty string`);
 		}
+		if (error.type !== undefined && (typeof error.type !== "string" || !error.type.trim())) {
+			throw new Error(`${label}: error.type must be a non-empty string when given`);
+		}
 		const successField = ["reasoning", "text", "chunks", "chunkDelayMs", "toolCalls"].find((field) => Object.hasOwn(turn, field));
 		if (successField) {
 			throw new Error(`${label}: error turns cannot also define ${successField}`);
@@ -129,7 +132,7 @@ function sendProviderError(res, error) {
 	sendJson(res, error.status, {
 		error: {
 			message: error.message,
-			type: error.status === 429 ? "rate_limit_error" : "server_error",
+			type: error.type ?? (error.status === 429 ? "rate_limit_error" : "server_error"),
 		},
 	});
 }
