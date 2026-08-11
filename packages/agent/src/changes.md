@@ -60,11 +60,13 @@
 
 - `harness/env/nodejs.ts`: the Windows branch of the harness `killProcessTree` moved into the exported
   `killWindowsProcessTree`, which resolves `%SystemRoot%\System32\taskkill.exe` through the new
-  `resolveWindowsTaskkillPath`, registers an `error` listener on the spawned killer, falls back to
-  `process.kill(pid)` when the launcher never starts, and `unref()`s the detached child.
+  `resolveWindowsTaskkillPath`, runs the killer with `spawnSync` under a 5s timeout, and falls back to
+  `process.kill(pid)` when the launcher never started or the timeout fired.
 - `spawn("taskkill", ...)` resolves through PATH and reports a failed lookup asynchronously on the child's `error`
   event, so the surrounding `try`/`catch` never observed it. Without a listener Node re-emits ENOENT as an uncaught
   exception, killing the host process instead of the target tree whenever PATH had lost `%SystemRoot%\System32`.
+- The kill is synchronous so a caller that tears down and exits in the same tick still terminates its children;
+  `spawnSync` also reports a failed lookup on its returned `error` field instead of emitting it.
 - The same fix lands in `packages/coding-agent/src/utils/shell.ts`; the two harnesses keep independent copies of this
   helper as they already do for `getShellEnv` and bash resolution.
 
@@ -74,7 +76,8 @@
 
 ### Expected merge conflict zones on next upstream sync
 
-- LOW: the Windows branch of `killProcessTree` and the `node:fs` import line in `harness/env/nodejs.ts`.
+- LOW: the Windows branch of `killProcessTree` and the `node:child_process` / `node:fs` import lines in
+  `harness/env/nodejs.ts`.
 
 ## 2026-08-10 - Refresh server-fallback policy between tool turns
 

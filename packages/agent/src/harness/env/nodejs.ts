@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants, createReadStream, existsSync } from "node:fs";
 import {
@@ -275,31 +275,36 @@ function killProcessDirectly(pid: number): void {
 	}
 }
 
+/** Upper bound on how long a teardown may block waiting for `taskkill` to finish. */
+const TASKKILL_TIMEOUT_MS = 5_000;
+
+function taskkillHandledTree(pid: number, taskkillPath: string): boolean {
+	try {
+		const result = spawnSync(taskkillPath, ["/F", "/T", "/PID", String(pid)], {
+			stdio: "ignore",
+			windowsHide: true,
+			timeout: TASKKILL_TIMEOUT_MS,
+		});
+		// `error` means the launcher never started (ENOENT, EACCES); a null status means
+		// the timeout killed it. Any real taskkill exit code counts as handled.
+		return result.error === undefined && result.status !== null;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Kill a process and all its children on Windows via `taskkill /T`.
  *
- * `spawn()` reports a failed executable lookup asynchronously through the child's
- * `error` event, never by throwing — so a surrounding `try`/`catch` cannot see it.
- * Without an `error` listener Node re-emits ENOENT as an uncaught exception that
- * takes down the host process. Handle the event and fall back to the direct child.
+ * Synchronous on purpose. A caller that tears down and exits in the same tick would never
+ * observe an asynchronous killer's `error` event, leaving the target alive. `spawnSync`
+ * also reports a failed executable lookup on its returned `error` field instead of
+ * emitting it, so a PATH without `%SystemRoot%\System32` can no longer surface as an
+ * uncaught `spawn taskkill ENOENT`.
  */
 export function killWindowsProcessTree(pid: number, taskkillPath = resolveWindowsTaskkillPath()): void {
-	let killer: ChildProcess;
-	try {
-		killer = spawn(taskkillPath, ["/F", "/T", "/PID", String(pid)], {
-			stdio: "ignore",
-			detached: true,
-			windowsHide: true,
-		});
-	} catch {
-		killProcessDirectly(pid);
-		return;
-	}
-	killer.once("error", () => {
-		killProcessDirectly(pid);
-	});
-	// Fire-and-forget: a detached killer must not hold the event loop open during exit.
-	killer.unref();
+	if (taskkillHandledTree(pid, taskkillPath)) return;
+	killProcessDirectly(pid);
 }
 
 function killProcessTree(pid: number): void {

@@ -29,9 +29,9 @@
 ### What changed
 
 - `shell.ts`: the Windows branch of `killProcessTree` moved into `killWindowsProcessTree`, which resolves
-  `%SystemRoot%\System32\taskkill.exe` through the new `resolveWindowsTaskkillPath` export, registers an `error`
-  listener on the spawned killer, falls back to `process.kill(pid)` when the launcher never starts, and `unref()`s
-  the detached child. Both new functions are exported for direct regression coverage.
+  `%SystemRoot%\System32\taskkill.exe` through the new `resolveWindowsTaskkillPath` export, runs the killer with
+  `spawnSync` under a 5s timeout, and falls back to `process.kill(pid)` when the launcher never started or the
+  timeout fired. Both new functions are exported for direct regression coverage.
 
 ### Why
 
@@ -39,7 +39,11 @@
   child's `error` event, so the surrounding `try`/`catch` never saw it. On a session whose PATH had lost
   `%SystemRoot%\System32`, `killTrackedDetachedChildren()` during shutdown raised
   `Error: spawn taskkill ENOENT` as an uncaught exception and took the CLI down instead of exiting, and no tracked
-  child was killed. This mirrors the already-correct launcher handling in `open-browser.ts`.
+  child was killed.
+- The kill is synchronous because `emergencyTerminalExit()` calls `killTrackedDetachedChildren()` and then
+  `process.exit(129)` in the same tick. An asynchronous killer — or a fallback wired to the child's `error` event —
+  never runs on that path, so the tracked child would survive. `spawnSync` reports a failed lookup on its returned
+  `error` field instead of emitting it, so ENOENT can no longer become an uncaught exception either.
 
 ### Why extension system couldn't handle this
 

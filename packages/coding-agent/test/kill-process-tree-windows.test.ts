@@ -60,7 +60,7 @@ describe("killWindowsProcessTree", () => {
 		process.on("uncaughtException", onUncaught);
 
 		try {
-			// spawn() surfaces ENOENT asynchronously through the child's 'error' event.
+			// An asynchronous spawn() surfaces ENOENT through the child's 'error' event.
 			// Before the fix this became an uncaughtException that killed the whole CLI.
 			killWindowsProcessTree(pid as number, UNRESOLVABLE_TASKKILL);
 			await once(child, "exit");
@@ -69,6 +69,26 @@ describe("killWindowsProcessTree", () => {
 			process.off("uncaughtException", onUncaught);
 			if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 		}
+	});
+
+	it("issues the fallback kill synchronously, before the caller can exit", () => {
+		// emergencyTerminalExit() runs killTrackedDetachedChildren() and then process.exit(129)
+		// in the same tick, so a fallback deferred to a later event-loop turn never runs and the
+		// tracked child survives. The kill must therefore be issued before this call returns.
+		const calls: Array<[number, NodeJS.Signals | number | undefined]> = [];
+		const realKill = process.kill.bind(process);
+		process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+			calls.push([pid, signal]);
+			return true;
+		}) as typeof process.kill;
+
+		try {
+			killWindowsProcessTree(4242, UNRESOLVABLE_TASKKILL);
+		} finally {
+			process.kill = realKill;
+		}
+
+		expect(calls).toEqual([[4242, undefined]]);
 	});
 
 	it("tolerates a pid that is already gone", async () => {
