@@ -1,42 +1,22 @@
-// Zero-dependency BM25 tool-search engine (todo 30).
-//
-// Ranks MCP tools by relevance of a free-text query against tokenised
-// name + description, with a server-name field boost. A normalised exact-name
-// match short-circuits BEFORE BM25 (hyphen/underscore/case-insensitive) so a
-// query equal to a tool's own name always wins rank-1 even when raw BM25
-// term-frequency would float noisier tools above it (codex #21503 regression
-// class). Constants k1=0.9, b=0.4 are SPEC-verified.
-//
-// Ranking is deterministic: equal scores tie-break by ascending full name.
+import type { ToolSearchDocument, ToolSearchSource } from "./document.ts";
 
 const BM25_K1 = 0.9;
 const BM25_B = 0.4;
 
-// Field weights applied to term frequency. Name tokens matter most; the server
-// name gets a modest boost; description is the baseline signal.
 const NAME_FIELD_WEIGHT = 3;
-const SERVER_FIELD_WEIGHT = 2;
+const GROUP_FIELD_WEIGHT = 2;
 const DESCRIPTION_FIELD_WEIGHT = 1;
-
-export interface Bm25Doc {
-	/** Full senpi tool name, e.g. `mcp_docs_get-library-docs`. Returned in results. */
-	readonly name: string;
-	/** Bare MCP tool name, e.g. `get-library-docs`. Used for exact-name matching. */
-	readonly toolName: string;
-	readonly description?: string;
-	readonly server: string;
-}
 
 export interface Bm25Result {
 	readonly name: string;
 	readonly score: number;
 	readonly exact: boolean;
-	readonly doc: Bm25Doc;
+	readonly doc: ToolSearchDocument;
 }
 
 export interface Bm25SearchOptions {
-	/** Restrict results to a single server (by server name). */
-	readonly server?: string;
+	readonly source?: ToolSearchSource;
+	readonly group?: string;
 	/** Disable the exact-name short-circuit (used to prove BM25-alone behaviour). */
 	readonly exactMatch?: boolean;
 }
@@ -46,17 +26,16 @@ export interface Bm25Index {
 }
 
 interface IndexedDoc {
-	readonly doc: Bm25Doc;
+	readonly doc: ToolSearchDocument;
 	readonly termFreq: ReadonlyMap<string, number>;
 	readonly length: number;
-	readonly normName: string;
-	readonly normToolName: string;
+	readonly exactNames: ReadonlySet<string>;
 }
 
 const DEFAULT_LIMIT = 25;
 
-export function buildBm25Index(docs: readonly Bm25Doc[]): Bm25Index {
-	const indexed: IndexedDoc[] = docs.map(indexDoc);
+export function buildBm25Index(docs: readonly ToolSearchDocument[]): Bm25Index {
+	const indexed = docs.map(indexDoc);
 	const docFreq = new Map<string, number>();
 	for (const entry of indexed) {
 		for (const term of entry.termFreq.keys()) {
@@ -69,8 +48,11 @@ export function buildBm25Index(docs: readonly Bm25Doc[]): Bm25Index {
 
 	return {
 		search(query, limit = DEFAULT_LIMIT, options = {}): Bm25Result[] {
-			const pool =
-				options.server === undefined ? indexed : indexed.filter((entry) => entry.doc.server === options.server);
+			const pool = indexed.filter(
+				(entry) =>
+					(options.source === undefined || entry.doc.source === options.source) &&
+					(options.group === undefined || entry.doc.group === options.group),
+			);
 			const queryTerms = tokenizeToolText(query);
 			if (queryTerms.length === 0) return [];
 
@@ -78,7 +60,7 @@ export function buildBm25Index(docs: readonly Bm25Doc[]): Bm25Index {
 			const normQuery = normalizeToolName(query);
 			const results: Bm25Result[] = [];
 			for (const entry of pool) {
-				const exact = useExact && normQuery.length > 0 && isExactNameMatch(entry, normQuery);
+				const exact = useExact && normQuery.length > 0 && entry.exactNames.has(normQuery);
 				const score = bm25Score(entry, queryTerms, docFreq, avgLength, docCount);
 				if (!exact && score <= 0) continue;
 				results.push({ doc: entry.doc, exact, name: entry.doc.name, score });
@@ -89,19 +71,23 @@ export function buildBm25Index(docs: readonly Bm25Doc[]): Bm25Index {
 	};
 }
 
-function indexDoc(doc: Bm25Doc): IndexedDoc {
+function indexDoc(doc: ToolSearchDocument): IndexedDoc {
 	const termFreq = new Map<string, number>();
 	addField(termFreq, tokenizeToolText(doc.name), NAME_FIELD_WEIGHT);
-	addField(termFreq, tokenizeToolText(doc.toolName), NAME_FIELD_WEIGHT);
-	addField(termFreq, tokenizeToolText(doc.server), SERVER_FIELD_WEIGHT);
+	addField(termFreq, tokenizeToolText(doc.label), NAME_FIELD_WEIGHT);
+	for (const alias of doc.aliases) addField(termFreq, tokenizeToolText(alias), NAME_FIELD_WEIGHT);
+	for (const keyword of doc.keywords) addField(termFreq, tokenizeToolText(keyword), NAME_FIELD_WEIGHT);
+	addField(termFreq, tokenizeToolText(doc.group), GROUP_FIELD_WEIGHT);
+	addField(termFreq, tokenizeToolText(doc.ownerLabel), GROUP_FIELD_WEIGHT);
 	addField(termFreq, tokenizeToolText(doc.description ?? ""), DESCRIPTION_FIELD_WEIGHT);
+	addField(termFreq, tokenizeToolText(doc.searchText ?? ""), DESCRIPTION_FIELD_WEIGHT);
+
 	let length = 0;
 	for (const count of termFreq.values()) length += count;
 	return {
 		doc,
+		exactNames: new Set([doc.name, doc.label, ...doc.aliases, ...doc.keywords].map(normalizeToolName)),
 		length,
-		normName: normalizeToolName(doc.name),
-		normToolName: normalizeToolName(doc.toolName),
 		termFreq,
 	};
 }
@@ -134,14 +120,8 @@ function bm25Score(
 }
 
 function inverseDocFreq(termDocFreq: number, docCount: number): number {
-	// BM25 idf with the standard +1 smoothing; clamped to be non-negative so a
-	// term present in every doc never contributes a negative score.
 	const value = Math.log(1 + (docCount - termDocFreq + 0.5) / (termDocFreq + 0.5));
 	return value < 0 ? 0 : value;
-}
-
-function isExactNameMatch(entry: IndexedDoc, normQuery: string): boolean {
-	return normQuery === entry.normName || normQuery === entry.normToolName;
 }
 
 function compareResults(left: Bm25Result, right: Bm25Result): number {
@@ -150,14 +130,10 @@ function compareResults(left: Bm25Result, right: Bm25Result): number {
 	return left.name.localeCompare(right.name);
 }
 
-/** Tokenise a tool identifier or description into lowercase word tokens,
- * splitting snake_case, kebab-case and camelCase / PascalCase boundaries. */
+/** Tokenise searchable text into lowercase word tokens, splitting identifiers. */
 export function tokenizeToolText(text: string): string[] {
 	if (text.length === 0) return [];
-	const withBoundaries = text
-		// camelCase / PascalCase: insert a space at lower->Upper and Upper->UpperLower boundaries.
-		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-		.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
+	const withBoundaries = text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
 	const tokens: string[] = [];
 	for (const raw of withBoundaries.split(/[^a-zA-Z0-9]+/)) {
 		if (raw.length === 0) continue;
@@ -166,7 +142,7 @@ export function tokenizeToolText(text: string): string[] {
 	return tokens;
 }
 
-/** Normalise a tool name for exact matching: lowercase, strip separators. */
+/** Normalize a searchable name for separator- and case-insensitive exact matching. */
 export function normalizeToolName(name: string): string {
 	return name.toLowerCase().replace(/[-_\s]+/g, "");
 }

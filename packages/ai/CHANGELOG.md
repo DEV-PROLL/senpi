@@ -11,10 +11,28 @@
   partial-image events are ignored, oversized payloads are rejected before persistence, and a
   `supportsImageGeneration` compat flag gates server-tool injection per endpoint
   ([#814](https://github.com/code-yeongyu/senpi/pull/814)).
+- Added an `openai-images` Images API adapter for text-only OpenAI image generations, with canonical `/v1`
+  endpoint normalization, shared credential-header auth, provider-owned retries, usage/cost mapping, and lazy
+  builtin registration ([#813](https://github.com/code-yeongyu/senpi/pull/813)).
+- Added a built-in `openai` images provider serving generated `gpt-image-2` and `gpt-image-1.5` catalog entries,
+  authenticated through `OPENAI_API_KEY` ([#813](https://github.com/code-yeongyu/senpi/pull/813)).
 
 ### Changed
 
 ### Fixed
+
+- Replayed tool-call IDs are normalized to the strict OpenAI-compatible character and length constraints while
+  preserving paired tool results, so Kimi histories containing IDs such as `eval:18` no longer fail when a
+  conversation switches to an Anthropic-backed gateway ([#810](https://github.com/code-yeongyu/senpi/pull/810)).
+- Gateway/provider failures reported as `The model request was rejected. Check the request and try again.` now go
+  through the configured bounded retry policy instead of failing immediately or burning the fallback chain
+  ([#806](https://github.com/code-yeongyu/senpi/pull/806)).
+- `OAuthAuth` accepts an optional availability `check` that `checkProviderAuth` consults in the stored-OAuth
+  branch, so a provider whose stored credential does not by itself imply usability (for example a zero-account
+  sentinel) is no longer reported as configured. When `check` is absent, behavior is unchanged
+  ([#804](https://github.com/code-yeongyu/senpi/pull/804)).
+- Provider-specific OAuth availability checks can now reject empty sentinel credentials and recognize usable ambient
+  auth without refreshing or exposing tokens ([#803](https://github.com/code-yeongyu/senpi/pull/803)).
 
 ### Removed
 

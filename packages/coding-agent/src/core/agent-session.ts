@@ -83,6 +83,8 @@ import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import type { ServiceTier } from "./extensions/builtin/service-tier.ts";
+import { deriveExtensionRegistrationId } from "./extensions/builtin/tool-search/engine/marker.ts";
+import { getToolSearchService } from "./extensions/builtin/tool-search/service.ts";
 import {
 	type ContextUsage,
 	ExecuteToolError,
@@ -122,7 +124,7 @@ import type {
 	LazyToolActivator,
 	ModelSelectSource,
 } from "./extensions/types.ts";
-import { RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
+import { normalizeToolExposure, RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
 import { shouldWarnHighReasoning } from "./high-reasoning-warning.ts";
 import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
@@ -904,6 +906,18 @@ export class AgentSession {
 	}
 
 	private _installAgentToolHooks(): void {
+		this.agent.resolveUnknownToolCall = (toolName) => {
+			let service: ReturnType<typeof getToolSearchService>;
+			try {
+				service = getToolSearchService();
+			} catch {
+				return undefined;
+			}
+			const catalogTool = service.getCatalog().some((doc) => doc.name === toolName);
+			if (!catalogTool || !this._activateLazyTool(toolName)) return undefined;
+			return this.agent.state.tools.find((tool) => tool.name === toolName);
+		};
+
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
 			this._toolExecutionDepth++;
 			try {
@@ -1689,6 +1703,7 @@ export class AgentSession {
 
 				const assistantMsg = event.message as AssistantMessage;
 				const succeeded =
+					!assistantMsg.errorMessage &&
 					assistantMsg.stopReason !== "error" &&
 					assistantMsg.stopReason !== "aborted" &&
 					!isClassifierRefusal(assistantMsg);
@@ -1771,6 +1786,12 @@ export class AgentSession {
 				return;
 			}
 
+			if (retryOutcome === "not-handled" && this._retryAttempt > 0 && msg.errorMessage) {
+				const attempt = this._retryAttempt;
+				this._retryAttempt = 0;
+				this._resetHintTierState();
+				this._emit({ type: "auto_retry_end", success: false, attempt, finalError: msg.errorMessage });
+			}
 			this._resolveRetry();
 			retryContinuationBlocked ||= retryOutcome === "blocked";
 			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
@@ -2226,15 +2247,17 @@ export class AgentSession {
 	}
 
 	/**
-	 * Get all configured tools with name, description, parameter schema, prompt guidelines, and source metadata.
+	 * Get all configured tools with normalized exposure metadata and source metadata.
 	 */
 	getAllTools(): ToolInfo[] {
 		return Array.from(this._toolDefinitions.values()).map(({ definition, sourceInfo }) => ({
 			name: definition.name,
+			label: definition.label,
 			description: definition.description,
 			parameters: definition.parameters,
 			promptGuidelines: definition.promptGuidelines,
 			sourceInfo,
+			...normalizeToolExposure(definition),
 		}));
 	}
 
@@ -2332,8 +2355,16 @@ export class AgentSession {
 		};
 	}
 
-	/** Lets a registering extension activate its own inactive tool on demand; it owns eligibility. */
+	/**
+	 * Lazily activate a registered inactive tool.
+	 *
+	 * Resolution order is deliberate: resolve the winning definition and enforce its
+	 * `allowLazyActivation` hard stop, then invoke activators in registration order.
+	 * The caller re-resolves the tool from the active registry before execution.
+	 */
 	private _activateLazyTool(toolName: string): boolean {
+		const definition = this._toolDefinitions.get(toolName)?.definition;
+		if (!definition || !normalizeToolExposure(definition).allowLazyActivation) return false;
 		return this._lazyToolActivators.some((activate) => activate(toolName));
 	}
 
@@ -5475,7 +5506,11 @@ export class AgentSession {
 		return this._fallbackValidationWarnings;
 	}
 
-	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
+	private _refreshToolRegistry(options?: {
+		activeToolNames?: string[];
+		includeAllExtensionTools?: boolean;
+		previousActiveToolRegistrationIds?: ReadonlyMap<string, string>;
+	}): void {
 		const previousRegistryNames = new Set(this._toolRegistry.keys());
 		const previousActiveToolNames = this.getActiveToolNames();
 		const allowedToolNames = this._allowedToolNames;
@@ -5542,10 +5577,23 @@ export class AgentSession {
 			toolRegistry.set(tool.name, tool);
 		}
 		this._toolRegistry = toolRegistry;
+		const isDirectlyExposed = (name: string): boolean => {
+			const entry = this._toolDefinitions.get(name);
+			return entry !== undefined && normalizeToolExposure(entry.definition).exposure === "direct";
+		};
 
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
-		).filter((name) => isAllowedTool(name));
+		).filter((name) => {
+			if (!isAllowedTool(name)) return false;
+			const previousRegistrationIds = options?.previousActiveToolRegistrationIds;
+			if (!previousRegistrationIds) return true;
+			const current = this._toolDefinitions.get(name);
+			return (
+				current !== undefined &&
+				previousRegistrationIds.get(name) === deriveExtensionRegistrationId(current.sourceInfo, name)
+			);
+		});
 
 		if (allowedToolNames) {
 			for (const toolName of this._toolRegistry.keys()) {
@@ -5555,11 +5603,11 @@ export class AgentSession {
 			}
 		} else if (options?.includeAllExtensionTools) {
 			for (const tool of wrappedExtensionTools) {
-				nextActiveToolNames.push(tool.name);
+				if (isDirectlyExposed(tool.name)) nextActiveToolNames.push(tool.name);
 			}
 		} else if (!options?.activeToolNames) {
 			for (const toolName of this._toolRegistry.keys()) {
-				if (!previousRegistryNames.has(toolName)) {
+				if (!previousRegistryNames.has(toolName) && isDirectlyExposed(toolName)) {
 					nextActiveToolNames.push(toolName);
 				}
 			}
@@ -5572,6 +5620,7 @@ export class AgentSession {
 		activeToolNames?: string[];
 		flagValues?: Map<string, boolean | string>;
 		includeAllExtensionTools?: boolean;
+		previousActiveToolRegistrationIds?: ReadonlyMap<string, string>;
 	}): void {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
@@ -5626,6 +5675,7 @@ export class AgentSession {
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,
+			previousActiveToolRegistrationIds: options.previousActiveToolRegistrationIds,
 		});
 	}
 
@@ -5641,6 +5691,11 @@ export class AgentSession {
 		const oldExtensionRunner = this._extensionRunner;
 		const oldExtensionIdentities = oldExtensionRunner.getExtensionIdentities();
 		const previousFlagValues = oldExtensionRunner.getFlagValues();
+		const previousActiveToolRegistrationIds = new Map<string, string>();
+		for (const name of this.getActiveToolNames()) {
+			const entry = this._toolDefinitions.get(name);
+			if (entry) previousActiveToolRegistrationIds.set(name, deriveExtensionRegistrationId(entry.sourceInfo, name));
+		}
 		await emitSessionShutdownEvent(oldExtensionRunner, { type: "session_shutdown", reason: "reload" });
 		time("shutdown", "reload");
 		await this.settingsManager.reload();
@@ -5672,6 +5727,7 @@ export class AgentSession {
 				activeToolNames: this.getActiveToolNames(),
 				flagValues: previousFlagValues,
 				includeAllExtensionTools: true,
+				previousActiveToolRegistrationIds,
 			});
 		} finally {
 			// An extension removed by this reload must be told even if the rebuild throws

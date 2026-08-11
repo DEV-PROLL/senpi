@@ -33,6 +33,7 @@ import serviceTierExtension from "./service-tier.ts";
 import terminalExtension from "./terminal/index.ts";
 import todowriteExtension from "./todotools/index.ts";
 import toolPairGuardExtension from "./tool-pair-guard/index.ts";
+import toolSearchExtension from "./tool-search/index.ts";
 import tpsExtension from "./tps.ts";
 import ttsrExtension from "./ttsr/index.ts";
 import videoInExtension from "./video-in/index.ts";
@@ -91,8 +92,10 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "claude-sdk-oauth", factory: claudeSdkOauthExtension },
 	// Loop guard is a pure observer of tool_execution_start; it never mutates payloads, so it slots before config-reload and leaves MCP last.
 	{ id: "loop-guard", factory: loopGuardExtension },
-	// Config reload follows settings-dependent builtins so reloads rebuild their resolved settings before MCP observes them.
+	// Config reload follows settings-dependent builtins so reloads rebuild their resolved settings before catalog feeders observe them.
 	{ id: "config-reload", factory: configReloadExtension },
+	// Shared catalog wiring loads before MCP, which feeds its tools into the shared catalog as the final builtin.
+	{ id: "tool-search", factory: toolSearchExtension },
 	// Keep MCP last so its eventual provider-payload tap observes all co-resident builtin mutations.
 	{ id: "mcp", factory: mcpExtension },
 ];

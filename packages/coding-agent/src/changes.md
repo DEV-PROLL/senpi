@@ -1,3 +1,48 @@
+## Control protocol exposes loaded extensions and MCP inventory (2026-08-11)
+
+### What changed
+
+- RPC gained the session-scoped `get_loaded_surfaces` request. Extension rows come from
+  `resourceLoader.getExtensions().extensions`, so commandless extensions remain visible and multi-command extensions
+  appear once; skills remain one-row-per-skill through `get_commands`.
+- MCP rows come from the live session-owned MCP service and report server name, tool count, connection/config status,
+  and non-secret auth status. A session-local event-bus bridge preserves multi-session isolation instead of consulting
+  the classic process singleton.
+- RPC emits `loaded_surfaces_changed` when the loaded skill, extension, or MCP snapshot changes. The event is an
+  invalidation notice with no payload, matching the app-server `skills/changed` read-after-notify model.
+
+### Why this cannot be expressed externally
+
+- The control host owns session routing and response/event ordering, while the loaded extension inventory and scoped
+  MCP service are private runtime state. An extension cannot add a correlated control request or safely address another
+  session's service.
+
+### Expected merge conflict zones
+
+- MEDIUM: additive request/event handling in `modes/rpc/rpc-types.ts` and `connection-handler.ts`.
+- LOW: the MCP control-inventory bridge and wire-status refresh hooks under `core/extensions/builtin/mcp/`.
+
+## Fallback responses with errors no longer emit success (2026-08-11)
+
+### What changed
+
+- `core/agent-session.ts` now requires an assistant response to have no `errorMessage` before it emits
+  `retry_fallback_succeeded` and `auto_retry_end { success: true }`.
+- A fallback provider response such as `Not logged in · Please run /login` can no longer produce the green
+  `Fallback model responded` notice merely because its stop reason was not normalized to `error`.
+- A terminal errored fallback response also closes the active retry attempt with `auto_retry_end { success: false }`,
+  so a later successful user turn cannot emit a delayed success notice for the earlier failed fallback.
+
+### Why this cannot be expressed externally
+
+- Retry-attempt settlement and `retry_fallback_succeeded` emission occur inside private `AgentSession` lifecycle
+  state before extensions or interactive renderers can correct the classification.
+
+### Expected merge conflict zones
+
+- LOW: the assistant `message_end` success gate in `core/agent-session.ts`.
+- LOW: the focused hard-error fallback cases in `test/suite/retry-fallback-hard-error.test.ts`.
+
 ## Public filesystem policy exports (2026-08-09)
 
 ### What changed

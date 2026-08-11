@@ -1,5 +1,61 @@
 # mcp Extension Changes
 
+## Anthropic native deferral delegated to shared tool search (2026-08-11)
+
+### What changed
+- Removed MCP's provider-request/response native-search handlers and bound only the session's resolved `nativeToolSearch` setting into the shared tool-search adapter.
+- Kept the former MCP module path as a compatibility re-export for existing internal imports; implementation ownership now lives under the shared builtin.
+
+### Why
+- One session-scoped adapter must inject inactive schemas from both MCP and extension catalog sources, enforce one 400 fallback state, and avoid duplicate provider hooks.
+
+### Expected merge conflict zones
+- LOW: `index.ts` beside command and session lifecycle registration.
+- LOW: `expose/native-search.ts` compatibility re-export.
+
+## Shared tool-search catalog feeder (2026-08-11)
+
+### What changed
+- Tier-B MCP registration now feeds MCP tool documents and a stub-aware activation hook into the shared tool-search service instead of registering a separate MCP-owned `tool_search` definition.
+- MCP promotion, eval lazy activation, skill reveal, and ownership-aware/legacy rehydration all route through the same feeder hook.
+- Active-set ordering now identifies sortable tools by shared catalog membership while preserving base-tool reference order; legacy stale MCP registrations are still removed during catalog replacement.
+- The superseded MCP-local search tool, BM25 engine, and lazy-activator modules were removed. Proxy mode now uses the shared BM25 engine without changing its gateway contract.
+
+### Why
+- A single registered search tool must cover both MCP and extension catalogs without duplicate builtin-name precedence or split activation history.
+- Routing every matched name through the MCP hook preserves stub-to-full replacement even when a stub is already active.
+
+### Why extension system couldn't handle this alone
+- MCP retains ownership of exposure policy, naming, proxy mode, stub swapping, skill-carried server reveal, and catalog refresh generations; only the builtin can translate those semantics into the shared catalog contract.
+
+### Expected merge conflict zones
+- HIGH: `expose/tier-b.ts`, `expose/session.ts`, `service.ts`, and `index.ts` around catalog registration and lifecycle wiring.
+- MEDIUM: MCP search, rehydration, and eval test suites now target the shared service.
+
+## Session-scoped control inventory bridge (2026-08-11)
+
+### What changed
+- The MCP service now captures wire inventory for RPC sessions as well as app-server threads and serializes explicit
+  refreshes so concurrent connection/catalog transitions cannot overwrite a newer snapshot.
+- Live snapshots include the server's connection/config state and notify session-local listeners only after the
+  machine-readable inventory changes.
+- The builtin registers a private resource-event-bus bridge for the control host to request and subscribe to its own
+  session's snapshot. Lifecycle teardown removes both request and change listeners on reload, replacement, and quit.
+
+### Why
+- Multi-session RPC creates one MCP service inside each provider scope, so the process-global classic getter cannot
+  identify the service belonging to a routing handle. The bridge keeps MCP status/tool inventory attached to the same
+  session that loaded it and prevents cross-session leakage.
+
+### Why extension system couldn't handle this alone
+- The MCP builtin can expose its private service through the extension event bus, but only the RPC host can correlate
+  that inventory with control requests and emit routed invalidation events.
+
+### Expected merge conflict zones
+- LOW: `index.ts` session lifecycle wiring.
+- MEDIUM: `service.ts` wire-status refresh and notification paths.
+- LOW: additive `control-inventory.ts` and status metadata in `service-types.ts`.
+
 ## Strip invalid null-valued MCP schema types (2026-08-04)
 
 ### What changed

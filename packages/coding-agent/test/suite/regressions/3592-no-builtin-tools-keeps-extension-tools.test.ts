@@ -93,6 +93,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			"dynamic_tool",
 			"edit",
 			"find",
+			"generate_image",
 			"get_goal",
 			"grep",
 			"look_at",
@@ -106,6 +107,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			"write",
 		]);
 		expect(session.getActiveToolNames()).toEqual([
+			"generate_image",
 			"todo",
 			"web_search",
 			"webfetch",
@@ -147,6 +149,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 
 		expect(session.getActiveToolNames()).toEqual([
 			"apply_patch",
+			"generate_image",
 			"todo",
 			"web_search",
 			"webfetch",

@@ -296,6 +296,17 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	removedToolHints?: Record<string, string>;
 
 	/**
+	 * Called when a model names a tool absent from the current context snapshot.
+	 * Return a newly available tool to continue normal validation and execution, or
+	 * undefined to emit the existing unknown-tool result. Hosts may use this to
+	 * activate a registered lazy tool at call time.
+	 */
+	resolveUnknownToolCall?: (
+		toolName: string,
+		context: AgentContext,
+	) => AgentTool | undefined | Promise<AgentTool | undefined>;
+
+	/**
 	 * Called before a tool is executed, after arguments have been validated.
 	 *
 	 * Return `{ block: true }` to prevent execution. The loop emits an error tool result instead.

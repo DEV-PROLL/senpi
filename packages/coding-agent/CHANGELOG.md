@@ -4,11 +4,30 @@
 
 ### Fixed
 
+- Model switches no longer fail before generation when persisted tool-call IDs contain provider-specific characters
+  such as the colon in Kimi's `eval:18`; replay now preserves call/result pairing while satisfying strict
+  Anthropic-backed gateway constraints ([#810](https://github.com/code-yeongyu/senpi/pull/810)).
+- Gateway/provider failures reported as `The model request was rejected. Check the request and try again.` now retry
+  the current model according to `settings.retry` before the configured fallback chain is used
+  ([#806](https://github.com/code-yeongyu/senpi/pull/806)).
+- `/goal resume` can explicitly reactivate a completed goal and queue its continuation, while completed goals remain excluded from automatic restart-resume prompts.
 - A launch from a deleted working directory (for example a removed worktree) no longer crashes during
   startup with `uv_cwd`; the CLI recovers into the home directory before any dependency evaluates
   `process.cwd()`.
+- `claude-sdk-oauth` is now skipped as an unauthenticated fallback candidate on a managed lane
+  (`oauth-slots`/`config-dir`) when no account is logged in, instead of always counting as configured because its
+  stored credential is a zero-account sentinel. The ambient lane is unchanged and still defers to the spawned
+  Claude Code engine ([#804](https://github.com/code-yeongyu/senpi/pull/804)).
+- Claude SDK OAuth models are selected as fallback candidates only when a stored account, environment token, or
+  authenticated ambient Claude CLI is usable. Empty sentinel credentials and logged-out local CLIs are skipped, and
+  fallback responses carrying errors such as `Not logged in` cannot emit an immediate or delayed green
+  `Fallback model responded` notice ([#803](https://github.com/code-yeongyu/senpi/pull/803)).
 
 ### New Features
+
+- Multi-session RPC clients can read loaded extensions and live MCP server inventory with
+  `get_loaded_surfaces`, and receive `loaded_surfaces_changed` invalidations when skills, extensions, or MCP
+  inventory changes ([#805](https://github.com/code-yeongyu/senpi/pull/805)).
 
 ### Breaking Changes
 
@@ -24,6 +43,13 @@
   completed `image_generation_call` block, writes the image to `generated-images/`, and replaces the
   provider-native block with a text path reference. Base64 payloads never reach the session file
   ([#814](https://github.com/code-yeongyu/senpi/pull/814)).
+- Added a credential-gated `generate_image` tool: when an OpenAI-compatible credential exists (a stored OpenAI
+  key, `OPENAI_API_KEY`, or a configured OpenAI-compatible gateway provider), the agent can generate images with
+  `gpt-image-2` saved as files (never overwriting existing ones); without credentials the tool returns structured
+  setup guidance instead of failing ([#813](https://github.com/code-yeongyu/senpi/pull/813)).
+- Added a conditionally contributed `gpt-image-gen` skill with a detailed prompt-crafting guide that is listed
+  only while image-generation credentials exist ([#813](https://github.com/code-yeongyu/senpi/pull/813)).
+- **Extension Tool Search**: Extension tools can opt into a shared searchable catalog by setting `exposure: "search"` on `pi.registerTool()`. Searchable tools stay inactive and cost zero prompt tokens until the model finds them with the shared `tool_search` tool, which promotes matches into the active set for the next model request.
 
 ### Changed
 
