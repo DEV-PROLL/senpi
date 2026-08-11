@@ -6,6 +6,12 @@
 
 ### Added
 
+- Added `image_generation_call` reconciliation to the OpenAI Responses shared stream processor: completed
+  native image results occupy a single provider-native slot (added then replaced in place on done),
+  partial-image events are ignored, oversized payloads are rejected before persistence, and a
+  `supportsImageGeneration` compat flag gates server-tool injection per endpoint
+  ([#NNN](https://github.com/code-yeongyu/senpi/pull/NNN)).
+
 ### Changed
 
 ### Fixed

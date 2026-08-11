@@ -135,6 +135,16 @@ Run `/fallback` without arguments in the TUI for a menu that can:
 
 Use quick-set in non-TUI modes; the no-argument menu requires interactive UI. Pass `--no-model-fallback` or set `SENPI_NO_FALLBACK=1` to disable fallback for that process without modifying saved settings.
 
+## Built-in Native Capabilities
+
+Senpi ships built-in extensions that inject provider-native server tools when the active model supports them. These run as ordinary extensions internally but are always loaded and require no user configuration beyond having valid credentials.
+
+**openai-image-gen** injects the OpenAI Responses `image_generation` server tool when the model uses `openai-responses` on `api.openai.com`. It arbitrates against the client-side `generate_image` function tool so exactly one image surface is offered per request. A `message_end` handler decodes completed image results, writes them to `generated-images/`, and replaces the provider-native block with a text path reference before session persistence, so base64 payloads never reach the session file. Set `PI_OPENAI_IMAGE_GEN=false` to force the client tool path. Azure Responses endpoints default to the client tool unless `compat.supportsImageGeneration` opts in.
+
+**openai-web-search** injects the OpenAI Responses `web_search_preview` server tool following the same pattern: credential-gated, stripped on unsupported endpoints, arbitrated against its client-side counterpart.
+
+Both builtins use `before_provider_request` to mutate the outgoing payload and re-evaluate their gate on every `model_select`, so mid-session model switches flip between native and client tools without a restart.
+
 ## Extension Locations
 
 > **Security:** Extensions run with your full system permissions and can execute arbitrary code. Only install from sources you trust.
