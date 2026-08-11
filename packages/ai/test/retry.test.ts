@@ -31,6 +31,11 @@ const apitopiaToolSchemaRejectionMessage =
 const moonshotToolSchemaRejectionMessage =
 	"500 server_error: Invalid request: tools.0.function.parameters: invalid tool schema";
 const gatewayModelRequestRejectedMessage = "Error: The model request was rejected. Check the request and try again.";
+const nonCanonicalModelRequestRejectionMessages = [
+	"Error: The model request was rejected because this API key does not have permission to use it.",
+	"Error: The model request was rejected because max_tokens must be greater than or equal to 1.",
+	"Error: The model request was rejected by the safety classifier.",
+] as const;
 
 describe("provider retry classification", () => {
 	it("matches explicit provider retry guidance", () => {
@@ -274,17 +279,57 @@ describe("provider retry classification", () => {
 		).toBe(true);
 	});
 
-	it("matches gateway-side model-request rejections as transient", () => {
+	it("matches the canonical gateway model-request rejection as transient", () => {
 		// Gateways/proxies answer with "The model request was rejected. Check the
 		// request and try again." when the upstream lane is momentarily unable to
-		// serve the request (observed in a live session, 2026-08-11). The wording
-		// carries no request-shape or quota semantics, so the bounded retry
-		// policy is exactly what should absorb it instead of killing the turn.
+		// serve the request. Coupling both sentences keeps unrelated permission,
+		// request-shape, and content-policy rejections terminal.
 		expect(
 			isRetryableAssistantError(
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: gatewayModelRequestRejectedMessage }),
 			),
 		).toBe(true);
+	});
+
+	it.each(nonCanonicalModelRequestRejectionMessages)(
+		"keeps non-canonical model-request rejections terminal: %s",
+		(errorMessage) => {
+			expect(isRetryableAssistantError(fauxAssistantMessage("", { stopReason: "error", errorMessage }))).toBe(false);
+		},
+	);
+
+	it.each(["refusal", "sensitive"] as const)(
+		"keeps typed %s messages terminal even with the canonical retry wording",
+		(type) => {
+			expect(
+				isRetryableAssistantError(
+					fauxAssistantMessage("", {
+						stopReason: "error",
+						errorMessage: gatewayModelRequestRejectedMessage,
+						stopDetails: { type },
+					}),
+				),
+			).toBe(false);
+		},
+	);
+
+	it("keeps non-retryable overlap precedence over the canonical retry wording", () => {
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: `${gatewayModelRequestRejectedMessage} quota exceeded`,
+				}),
+			),
+		).toBe(false);
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: `${gatewayModelRequestRejectedMessage} Invalid request: tools.0.function.parameters.type is required`,
+				}),
+			),
+		).toBe(false);
 	});
 
 	it("keeps provider limit errors non-retryable", () => {

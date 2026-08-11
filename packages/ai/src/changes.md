@@ -7,8 +7,9 @@
 - `utils/retry.ts` classifies `"model request was rejected"` as retryable so a gateway/proxy-side "The model
   request was rejected. Check the request and try again." response is absorbed by the bounded same-model retry
   policy (`settings.retry`) instead of failing the turn or immediately burning the fallback chain. Observed in a
-  live session on 2026-08-11. The anchor stays on "model request" so permission denials, content refusals, and
-  request-shape errors remain terminal, and the non-retryable list still wins on overlap.
+  live session on 2026-08-11. The classifier couples the rejection sentence to its explicit "Check the request and
+  try again." instruction so permission denials, content refusals, and request-shape errors remain terminal, and
+  the non-retryable list still wins on overlap.
 
 ### Why this cannot be expressed externally
 
