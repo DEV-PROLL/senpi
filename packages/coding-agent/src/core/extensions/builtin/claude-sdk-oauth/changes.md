@@ -1,5 +1,23 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-11 - Account-aware auth availability for fallback
+
+### What changed
+
+`createOAuthConfig` (`oauth-login.ts`) now supplies an OAuth `check`, and `index.ts` passes a `readSettings` dep so that check can read the configured `tokenInjection` lane. `ExtensionOAuthConfig` (`provider-composer.ts`) gained an optional `check` that `adaptOAuth` forwards to the composed `OAuthAuth`. The provider still registers the `claude-sdk-oauth-managed` api-key sentinel, which keeps the ambient default configured (see below); only the stored-OAuth-credential path becomes account-aware.
+
+### Why
+
+The fallback engine never skipped this provider as `unauthenticated`. A stored `emptyCredential()` is `{ type: "oauth", ...SENTINEL_OAUTH_FIELDS, accounts: [] }`, and the upstream stored-OAuth branch in `ModelsImpl.checkProviderAuth` reported configured for any OAuth credential without inspecting `accounts`, so a zero-account sentinel still counted as logged in. The new `check` returns configured only when `listAccounts` finds at least one account (stored login/import or a `CLAUDE_CODE_OAUTH_TOKEN` env slot); on a managed lane (`oauth-slots`/`config-dir`) with zero accounts it returns unconfigured so the candidate is skipped. The ambient lane stays configured with zero accounts because the spawned Claude Code engine may hold its own login that senpi cannot see — that deferral is intentional (`auth-lane.ts`, `docs/providers.md`).
+
+### Why an extension could not handle it
+
+The stored-OAuth branch in `ModelsImpl.checkProviderAuth` is a structural short-circuit with no extension hook, and `OAuthAuth` had no `check` field (unlike `ApiKeyAuth`). `Provider.filterModels` filters the catalog in `getAvailable()` but cannot influence `configuredProviders` / `hasConfiguredAuth`, which the fallback controller reads. So the availability decision required the upstream `OAuthAuth.check` added in the companion `packages/ai` change; this extension only supplies the account-aware implementation.
+
+### Expected merge-conflict zones
+
+LOW in `oauth-login.ts` (added `check` to the returned shape + optional `readSettings` dep); LOW in `index.ts` (one added `readSettings` line); LOW in `provider-composer.ts` (`ExtensionOAuthConfig.check` + `adaptOAuth` forwarding, both additive).
+
 ## 2026-08-07 - Ignore volatile thinking timing in continuity hashes
 
 - Removed `startedAt` and `endedAt` from thinking blocks before hashing the provider-final and committed assistant
