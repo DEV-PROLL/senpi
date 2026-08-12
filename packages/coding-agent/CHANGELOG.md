@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- Claude SDK OAuth accounts saved by senpi's own login are now injected into the
+  spawned Claude Code subprocess by default. The default `tokenInjection` lane
+  was `ambient` (a review-time hold from `606aa052b`), so stored accounts were
+  ignored unless explicitly configured, causing every query to fail with
+  "Failed to authenticate: OAuth session expired and could not be refreshed"
+  on machines where `claude auth status` is logged out
+  ([#828](https://github.com/code-yeongyu/senpi/pull/828),
+  oh-my-openagent#6784).
+
 - External-editor tests now recover from transient process-launch pressure
   while preserving the distinction between an editor that failed to launch
   and one that launched and exited unsuccessfully

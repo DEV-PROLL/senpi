@@ -8,6 +8,7 @@ import { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
 import type { ClaudeSdkOauthCredential } from "./accounts.ts";
 import { createOAuthConfig } from "./oauth-login.ts";
 import { registerSessionRegistry } from "./session-registry-wiring.ts";
+import { loadClaudeSdkOauthProviderSettingsFromDisk } from "./settings.ts";
 import { streamClaudeSdkOauth } from "./stream.ts";
 
 export { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
@@ -51,6 +52,13 @@ export function registerClaudeSdkOauthExtension(pi: ExtensionAPI, deps: ClaudeSd
 		oauth: createOAuthConfig({
 			readCurrent: async () => readStoredCredential(CLAUDE_SDK_OAUTH_PROVIDER_ID),
 			readAmbientAuthStatus: deps.readAmbientAuthStatus,
+			readSettings: () => {
+				try {
+					return { tokenInjection: loadClaudeSdkOauthProviderSettingsFromDisk(process.cwd()).tokenInjection };
+				} catch {
+					return undefined;
+				}
+			},
 			readAnthropicCredential: async () => {
 				const credential = readStoredCredential("anthropic");
 				return credential && typeof credential.access === "string"

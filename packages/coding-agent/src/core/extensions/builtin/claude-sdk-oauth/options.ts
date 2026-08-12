@@ -230,7 +230,7 @@ export function buildClaudeSdkOauthQueryOptions(input: ClaudeSdkOauthQueryOption
 		});
 		if (deprecation !== undefined) input.onGuidance(deprecation);
 	}
-	const authLane = input.authLane ?? providerSettings.tokenInjection ?? "oauth-slots";
+	const authLane = input.authLane ?? providerSettings.tokenInjection ?? "ambient";
 	const append =
 		mode === "preset-append"
 			? [
