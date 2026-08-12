@@ -284,6 +284,14 @@ describe("Token Statistics on Abort", () => {
 		});
 	});
 
+	describe.skipIf(!process.env.OPENGATEWAY_API_KEY)("OpenGateway Provider", () => {
+		const llm = getModel("opengateway", "moonshotai/kimi-k3");
+
+		it("should include token stats when aborted mid-stream", { retry: 3, timeout: 30000 }, async () => {
+			await testTokensOnAbort(llm);
+		});
+	});
+
 	describe.skipIf(!process.env.QWEN_TOKEN_PLAN_API_KEY)("Qwen Token Plan Provider", () => {
 		const llm = getModel("qwen-token-plan", "qwen3.7-max");
 

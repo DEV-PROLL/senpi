@@ -711,6 +711,14 @@ describe("AI Providers Unicode Surrogate Pair Tests", () => {
 		});
 	});
 
+	describe.skipIf(!process.env.OPENGATEWAY_API_KEY)("OpenGateway Provider Unicode Handling", () => {
+		const llm = getModel("opengateway", "moonshotai/kimi-k3");
+
+		it("should handle emoji in tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testEmojiInToolResults(llm);
+		});
+	});
+
 	describe.skipIf(!process.env.QWEN_TOKEN_PLAN_API_KEY)("Qwen Token Plan Provider Unicode Handling", () => {
 		const llm = getModel("qwen-token-plan", "qwen3.7-max");
 

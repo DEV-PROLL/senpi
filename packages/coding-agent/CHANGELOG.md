@@ -9,11 +9,21 @@
   limit.`) recovers the way the core `compact()` route already does. Speculative warm-ups keep their own idle retry,
   and failures with a deterministic zero-LLM recovery still skip retrying ([#834](https://github.com/code-yeongyu/senpi/pull/834)).
 
+- Favorite models are no longer erased from settings when a favorite's provider is
+  momentarily unauthenticated or unreachable. Both selectors list only models that
+  resolve against the current availability snapshot, and persisting that view
+  overwrote the stored patterns, permanently dropping every favorite that did not
+  resolve at that moment (and removing the `favoriteModels` key entirely when nothing
+  resolved). Stored patterns that resolve to no model are now preserved on persist.
+  ([#833](https://github.com/code-yeongyu/senpi/pull/833))
+
 ### New Features
 
 ### Breaking Changes
 
 ### Added
+
+- OpenGateway now appears as an API-key provider in `/login` (display name "OpenGateway") with `moonshotai/kimi-k3` as its default model; `docs/providers.md` covers key issuance at https://opengateway.ai/api-keys. [#832](https://github.com/code-yeongyu/senpi/pull/832)
 
 ### Changed
 
@@ -971,6 +981,7 @@
   [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg), an unbounded expansion-length
   denial-of-service reachable transitively through `glob` and `minimatch`. This is dependency-only: glob matching,
   extension discovery, configuration formats, and command behavior are unchanged.
+
 ### Fixed
 
 - Compare Senpi CalVer releases by the repository's `YYYY.M.D-N` contract instead of npm prerelease ordering when
@@ -1067,6 +1078,7 @@
 ### Fixed
 
 - Strip publish-runner-native optional packages before packing the universal Senpi tarball while preserving npm's consumer-platform sidecar selection contract ([#446](https://github.com/code-yeongyu/senpi/issues/446)).
+
 ### Removed
 
 ## [2026.7.29-4] - 2026-07-29
@@ -3411,6 +3423,7 @@ How to disable it:
 - Updated `antigravity-image-gen.ts` example extension to use User-Agent version `1.21.9` ([#2901](https://github.com/badlogic/pi-mono/pull/2901) by [@aadishv](https://github.com/aadishv))
 - Fixed `--list-models` silently swallowing `models.json` load errors; errors are now printed to stderr ([#3072](https://github.com/badlogic/pi-mono/issues/3072))
 - Fixed custom models for built-in providers (e.g. `openrouter`) being silently dropped from `--list-models` by inheriting `api`/`baseUrl` from built-in model definitions and no longer requiring `apiKey` for providers with existing auth ([#2921](https://github.com/badlogic/pi-mono/issues/2921) and [#3072](https://github.com/badlogic/pi-mono/issues/3072))
+
 ### Added
 
 - Added full `openRouterRouting` field support in `models.json`, including fallbacks, parameter requirements, data collection, ZDR, ignore lists, quantizations, provider sorting, max price, and preferred throughput and latency constraints ([#2904](https://github.com/badlogic/pi-mono/pull/2904) by [@zmberber](https://github.com/zmberber))

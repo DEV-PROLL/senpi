@@ -1,5 +1,25 @@
 # changes
 
+## OpenGateway display name for /login (2026-08-12)
+
+### What changed
+
+- `BUILT_IN_PROVIDER_DISPLAY_NAMES` maps `opengateway` to `OpenGateway`, which makes the new
+  built-in provider API-key eligible in the `/login` and `/logout` selectors on both the TUI and
+  RPC provider lists.
+- `defaultModelPerProvider` gains the required `opengateway` entry (`moonshotai/kimi-k3`) so the
+  exhaustive `Record<KnownProvider, string>` map stays total.
+
+### Why
+
+- `isApiKeyLoginProvider()` treats a built-in model provider without a display name as ineligible
+  for API-key login; the display-name entry is the single switch that exposes the provider.
+
+### Expected merge conflict zones
+
+- LOW: `provider-display-names.ts` display-name map.
+
+
 ## Retire extension generations after reload notifications (2026-08-12)
 
 ### What changed

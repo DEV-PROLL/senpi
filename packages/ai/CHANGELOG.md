@@ -9,6 +9,8 @@
 - Added `retryTransientCall()`, a throw-based sibling of `retryAssistantCall()` that shares the same bounded
   exponential backoff, abort, and retry-callback contract for producers that signal failure by throwing ([#834](https://github.com/code-yeongyu/senpi/pull/834)).
 
+- Added the OpenGateway built-in provider for the OpenAI-compatible gateway at `https://apis.opengateway.ai`: a generated 62-model catalog hydrated from the live `/v1/models` endpoint (chat-capable, non-retired models enriched with models.dev pricing/context/reasoning metadata), `OPENGATEWAY_API_KEY` env detection, and `supportsDeveloperRole: false` compat because the gateway rejects the OpenAI `developer` role. [#832](https://github.com/code-yeongyu/senpi/pull/832)
+
 ### Changed
 
 ### Fixed
@@ -826,6 +828,7 @@
 - Fixed GitHub Copilot long-context pricing tiers in generated model metadata ([#6668](https://github.com/earendil-works/pi/issues/6668)).
 - Fixed Kimi Coding subscription models to report API-equivalent implied costs when models.dev reports zero pricing.
 - Fixed OpenAI Responses early stream endings to be classified as retryable provider errors ([#6727](https://github.com/earendil-works/pi/issues/6727)).
+
 ### Removed
 
 ## [2026.7.17-5] - 2026-07-17

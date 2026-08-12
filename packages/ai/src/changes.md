@@ -26,6 +26,32 @@
   inserted.
 - LOW: `test/retry-transient-call.test.ts` is a new focused file for the added surface.
 
+## 2026-08-12 - OpenGateway built-in provider
+
+### What changed and why
+
+- Added `opengateway` as a built-in provider for the OpenGateway data plane (`https://apis.opengateway.ai`),
+  an OpenAI-compatible multi-provider gateway serving `owner/model` ids (OpenAI, Anthropic, Google, xAI,
+  Moonshot, DeepSeek, ZAI, MiniMax, Qwen) through a single `OPENGATEWAY_API_KEY` Bearer credential.
+- The generated catalog is hydrated from the gateway's live `/v1/models` at generation time by
+  `scripts/generate-models-opengateway.ts`: chat-completions-capable, non-retired models are kept and
+  enriched with pricing/context/reasoning metadata from models.dev, preferring the owning provider's
+  catalog over the OpenRouter id space. Six models models.dev cannot enrich carry explicit overrides.
+- Env detection maps `OPENGATEWAY_API_KEY`; the provider factory uses the shared `openai-completions`
+  API with standard OpenAI compat auto-detection.
+
+### Why this cannot be expressed externally
+
+- A user-level `models.json` custom provider can point at the gateway, but it cannot ship a generated,
+  validated catalog in `src/providers/data/`, participate in `KnownProvider` typing, or register the
+  built-in display name that makes the provider a first-class `/login` target.
+
+### Expected merge conflict zones
+
+- MEDIUM: `scripts/generate-models.ts` main fetch/assembly flow (new source call + spread).
+- LOW: `src/types.ts` `KnownProvider` union, `src/env-api-keys.ts` env map, `src/providers/all.ts`
+  registration list.
+- LOW: generated artifacts (`models.generated.ts`, `providers/data/`) — resolve by regenerating.
 ## 2026-08-12 - Default direct Anthropic prompt caching to five minutes
 
 ### What changed and why

@@ -96,6 +96,7 @@ import {
 	defaultModelPerProvider,
 	findExactModelReferenceMatch,
 	resolveModelScope,
+	resolveModelScopeWithDiagnostics,
 	type ScopedModel,
 } from "../../core/model-resolver.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
@@ -150,7 +151,11 @@ import { FavoriteModelsSelectorComponent } from "./components/favorite-models-se
 import { FooterComponent, formatTokens } from "./components/footer.ts";
 import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.ts";
 import { LoginDialogComponent } from "./components/login-dialog.ts";
-import { type FavoriteModelIds, getModelFullId } from "./components/model-favorites.ts";
+import {
+	type FavoriteModelIds,
+	getModelFullId,
+	mergeFavoritePatternsForPersist,
+} from "./components/model-favorites.ts";
 import { ModelSelectorComponent } from "./components/model-selector.ts";
 import {
 	type AuthSelectorProvider,
@@ -5654,6 +5659,25 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private async persistFavoritePatterns(
+		favoriteIds: FavoriteModelIds,
+		candidateModels: readonly Model<any>[],
+	): Promise<void> {
+		const storedPatterns = this.settingsManager.getFavoriteModels() ?? [];
+		const { diagnostics } = await resolveModelScopeWithDiagnostics(storedPatterns, this.session.modelRuntime);
+		const unresolvedPatterns = diagnostics
+			.filter((diagnostic) => diagnostic.code === "no-match")
+			.map((diagnostic) => diagnostic.pattern);
+		this.settingsManager.setFavoriteModels(
+			mergeFavoritePatternsForPersist({
+				storedPatterns,
+				unresolvedPatterns,
+				selectedIds: favoriteIds,
+				candidateIds: candidateModels.map(getModelFullId),
+			}),
+		);
+	}
+
 	/** Update the footer's available provider count from the current snapshot without refreshing catalogs. */
 	private updateAvailableProviderCount(): void {
 		const models =
@@ -5766,8 +5790,7 @@ export class InteractiveMode {
 					favoriteModelIds,
 					onFavoriteChange: async (favoriteIds, allModels) => {
 						await this.updateSessionFavoritesFromIds(favoriteIds, allModels);
-						const newPatterns = favoriteIds === null ? allModels.map(getModelFullId) : favoriteIds;
-						this.settingsManager.setFavoriteModels(newPatterns.length > 0 ? [...newPatterns] : undefined);
+						await this.persistFavoritePatterns(favoriteIds, allModels);
 					},
 				},
 			);
@@ -5797,9 +5820,9 @@ export class InteractiveMode {
 						await this.updateSessionFavoritesFromIds(favoriteIds, allModels);
 					},
 					onPersist: (favoriteIds) => {
-						const newPatterns = favoriteIds === null ? allModels.map(getModelFullId) : favoriteIds;
-						this.settingsManager.setFavoriteModels(newPatterns.length > 0 ? [...newPatterns] : undefined);
-						this.showStatus("Favorite models saved to settings");
+						void this.persistFavoritePatterns(favoriteIds, allModels).then(() => {
+							this.showStatus("Favorite models saved to settings");
+						});
 					},
 					onSelect: (model) => {
 						void this.selectModelFromUi(model, done);
