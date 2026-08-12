@@ -6,6 +6,10 @@ import {
 	createBlockingContext,
 	createCompactionHandlers,
 } from "../helpers/blocking-compaction-harness.ts";
+import { MAX_SUMMARIZATION_ATTEMPT_RETRIES } from "../../src/core/extensions/builtin/compaction/summarization-retry.ts";
+/** One summarization now costs its initial attempt plus the shared retry budget. */
+const SUMMARIZATION_ATTEMPTS = 1 + MAX_SUMMARIZATION_ATTEMPT_RETRIES;
+
 
 const registrations: Array<{ unregister: () => void }> = [];
 
@@ -23,7 +27,9 @@ describe("blocking compaction network-failure degradation", () => {
 			const { beforeAgentStart } = createCompactionHandlers();
 			const harness = createBlockingContext({ usageTokens: 9_950 });
 			registrations.push(harness.registration);
-			harness.registration.setResponses([connectionErrorResponse()]);
+			harness.registration.setResponses(
+				Array.from({ length: SUMMARIZATION_ATTEMPTS }, () => connectionErrorResponse()),
+			);
 
 			// When / Then: the handler resolves (no extension-error stack surface)…
 			await expect(beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx)).resolves.toBeUndefined();
@@ -42,11 +48,9 @@ describe("blocking compaction network-failure degradation", () => {
 			const { beforeAgentStart } = createCompactionHandlers();
 			const harness = createBlockingContext({ usageTokens: 6_000 });
 			registrations.push(harness.registration);
-			harness.registration.setResponses([
-				connectionErrorResponse(),
-				connectionErrorResponse(),
-				connectionErrorResponse(),
-			]);
+			harness.registration.setResponses(
+				Array.from({ length: 3 * SUMMARIZATION_ATTEMPTS }, () => connectionErrorResponse()),
+			);
 
 			// When: three consecutive prompts fail on connection errors.
 			for (let attempt = 0; attempt < 3; attempt++) {
@@ -57,7 +61,7 @@ describe("blocking compaction network-failure degradation", () => {
 
 			// Then: the tripped breaker stops the fourth prompt from paying for
 			// another doomed summarization request.
-			expect(callsAfterTrip).toBe(3);
+			expect(callsAfterTrip).toBe(3 * SUMMARIZATION_ATTEMPTS);
 			expect(harness.registration.state.callCount).toBe(callsAfterTrip);
 		});
 	});

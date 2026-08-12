@@ -12,6 +12,10 @@ import {
 	createBlockingContext,
 	createCompactionHandlers,
 } from "../helpers/blocking-compaction-harness.ts";
+import { MAX_SUMMARIZATION_ATTEMPT_RETRIES } from "../../src/core/extensions/builtin/compaction/summarization-retry.ts";
+/** One summarization now costs its initial attempt plus the shared retry budget. */
+const SUMMARIZATION_ATTEMPTS = 1 + MAX_SUMMARIZATION_ATTEMPT_RETRIES;
+
 
 const registrations: Array<{ unregister: () => void }> = [];
 
@@ -72,11 +76,9 @@ describe("blocking compaction review hardening", () => {
 			const handlers = createCompactionHandlers();
 			const harness = createBlockingContext({ usageTokens: 6_000 });
 			registrations.push(harness.registration);
-			harness.registration.setResponses([
-				connectionErrorResponse(),
-				connectionErrorResponse(),
-				connectionErrorResponse(),
-			]);
+			harness.registration.setResponses(
+				Array.from({ length: 3 * SUMMARIZATION_ATTEMPTS }, () => connectionErrorResponse()),
+			);
 			for (let attempt = 0; attempt < 3; attempt++) {
 				await expect(
 					handlers.beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx),
