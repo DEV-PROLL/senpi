@@ -7,7 +7,7 @@
 // (authoritative for limits and pricing), then the OpenRouter id space as fallback
 // for models the owner catalog does not list.
 
-import type { Api, Model, ModelCost } from "../src/types.ts";
+import type { Model, ModelCost } from "../src/types.ts";
 import type { ModelsDevReasoningOption } from "./models-dev-reasoning-options.ts";
 
 const OPENGATEWAY_MODELS_URL = "https://apis.opengateway.ai/v1/models";
@@ -24,10 +24,49 @@ interface OpenGatewayCatalogModel {
 /** Subset of the models.dev model entry used for OpenGateway enrichment. */
 interface OpenGatewayEnrichmentSource {
 	name?: string;
+	tool_call?: boolean;
 	reasoning?: boolean;
 	reasoning_options?: ModelsDevReasoningOption[];
 	limit?: { context?: number; output?: number };
-	cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
+	cost?: {
+		input?: number;
+		output?: number;
+		cache_read?: number;
+		cache_write?: number;
+		tiers?: {
+			input?: number;
+			output?: number;
+			cache_read?: number;
+			cache_write?: number;
+			tier?: { type?: string; size?: number };
+		}[];
+	};
+}
+
+function toModelCost(
+	source: OpenGatewayEnrichmentSource | undefined,
+	override: OpenGatewayModelOverride | undefined,
+): ModelCost {
+	const tiers = source?.cost?.tiers?.flatMap((tier) => {
+		const context = tier.tier;
+		if (context?.type !== "context" || context.size === undefined) return [];
+		return [
+			{
+				inputTokensAbove: context.size,
+				input: tier.input || 0,
+				output: tier.output || 0,
+				cacheRead: tier.cache_read || 0,
+				cacheWrite: tier.cache_write || 0,
+			},
+		];
+	});
+	return {
+		input: source?.cost?.input || override?.cost.input || 0,
+		output: source?.cost?.output || override?.cost.output || 0,
+		cacheRead: source?.cost?.cache_read || override?.cost.cacheRead || 0,
+		cacheWrite: source?.cost?.cache_write || override?.cost.cacheWrite || 0,
+		...(tiers && tiers.length > 0 ? { tiers } : {}),
+	};
 }
 
 type ModelsDevProviderCatalogs = Record<string, { models?: Record<string, OpenGatewayEnrichmentSource> } | undefined>;
@@ -138,6 +177,10 @@ export async function fetchOpenGatewayModels(
 				console.warn(`OpenGateway model ${item.id} has no models.dev metadata; skipping`);
 				continue;
 			}
+			// Built-in catalogs are tool-capable only (same positive requirement as the
+			// models.dev sections' tool_call !== true filter). Override-only entries
+			// assert tool capability by design.
+			if (source && source.tool_call !== true) continue;
 			if (source) recordReasoning(item.id, source);
 
 			const input: ("text" | "image")[] = ["text"];
@@ -156,12 +199,7 @@ export async function fetchOpenGatewayModels(
 				},
 				reasoning: override?.reasoning ?? (source?.reasoning === true),
 				input,
-				cost: {
-					input: source?.cost?.input || override?.cost.input || 0,
-					output: source?.cost?.output || override?.cost.output || 0,
-					cacheRead: source?.cost?.cache_read || override?.cost.cacheRead || 0,
-					cacheWrite: source?.cost?.cache_write || override?.cost.cacheWrite || 0,
-				},
+				cost: toModelCost(source, override),
 				contextWindow: source?.limit?.context || override?.contextWindow || 4096,
 				maxTokens: source?.limit?.output || override?.maxTokens || 4096,
 			});
