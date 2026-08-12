@@ -1212,6 +1212,9 @@
 
 ### What changed
 
+- `/btw` side queries now use model-aware prompt budgeting before provider dispatch. Large captured sessions are reduced,
+  structurally repaired, and pruned oldest-first while preserving the final question and newest usable context, avoiding
+  provider context-window rejection without changing normal small-session behavior.
 - New builtin extension `core/extensions/builtin/btw/` adds `/btw <question>`: a read-only side LLM query against a synchronously captured snapshot of the current conversation, running in parallel with any in-flight main turn without writing to session history. Details in `core/extensions/builtin/btw/changes.md`.
 - TUI: the answer streams into a dismissable widget above the editor; Escape dismisses the side panel without touching main-turn Escape behavior. Non-TUI modes deliver the answer via `ctx.ui.notify`.
 - `core/extensions/builtin/index.ts` registers the extension between `goal` and `mcp`.
