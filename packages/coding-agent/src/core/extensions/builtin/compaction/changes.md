@@ -1,5 +1,45 @@
 # Builtin compaction extension changes
 
+## Retry transient blocking summarization failures (2026-08-12)
+
+### What changed
+
+- `speculative.ts` now runs the summarization request inside `retryTransientCall` from `@earendil-works/pi-ai`, with
+  the budget in the new `summarization-retry.ts` (3 retries, 1s base delay, 60s total wall-clock bound).
+- The provider `error` stop is raised INSIDE the retried producer, so a transient failure spends the retry budget.
+  Overflow shrinking and abort handling stay in the surrounding loop and are never answered by replaying a request.
+- Retry is limited to `core-route` and `blocking` snapshot origins. The speculative warm-up keeps `idle-retry.ts`,
+  whose idle/breaker/threshold guards are re-evaluated between attempts against live session state, and a failed warm
+  job stays inheritable so the next blocking route degrades on it instead of paying for a second request.
+- `isRetryableSummaryAttempt()` refuses every class that has a deterministic zero-LLM recovery: watchdog timeouts,
+  `upstream-stream-truncated`, and overflow exhaustion are rebuilt for free by the required-compaction fallback. Those
+  classes are mirrored from `classifyRequiredCompactionFallbackFailure` rather than imported, because
+  `deterministic-fallback.ts` imports this module.
+- Exhaustion is unchanged externally: one `compaction_end` carrying the verbatim upstream message and exactly one
+  circuit-breaker failure, not one per attempt.
+
+### Why
+
+- The core `compact()` route already retries summarization through `completeSummarization` with
+  `SettingsManager.getRetrySettings()`, but the extension route had no retry at all. A real session on 2026-08-12 hit
+  an upstream Cloudflare Worker OOM (`500 Worker exceeded memory limit.`, 28ms round trip, 471,441 tokens) and the
+  route reported `willRetry:false` on attempt one, even though `isTransientSummarizationFailure` already classified
+  that message as transient.
+- The wall-clock bound exists because one attempt may hold the session for
+  `DEFAULT_SUMMARIZATION_MAX_DURATION_MS` (120s); replaying a slow failure would stack deadlines, which is the freeze
+  the budget and the speculative-handoff degrade path exist to prevent.
+
+### Why an extension could not do this
+
+- This is the builtin extension's private summarization request path. `ExtensionContext` exposes no retry-policy
+  accessor, and no external extension can wrap another extension's in-flight summary generation.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `speculative.ts` inside `runExtensionCompaction`'s request loop and its import block.
+- LOW: `summarization-retry.ts` is new and fork-owned.
+- LOW: blocking-route tests that express attempts against `MAX_SUMMARIZATION_ATTEMPT_RETRIES`.
+
 ## Regenerate after a warm summary goes stale (2026-08-09)
 
 ### What changed

@@ -1,5 +1,31 @@
 # AI Source Changes
 
+## 2026-08-12 - Throw-based sibling for the bounded assistant retry loop
+
+### What changed and why
+
+- `utils/retry.ts` adds `retryTransientCall(produce, isRetryable, policy, signal, callbacks)`. It reuses the exact
+  sleep, exponential backoff (`baseDelayMs * 2^(attempt-1)`), abort, and `RetryCallbacks` contract that
+  `retryAssistantCall` already implements, for producers that report failure by THROWING rather than by resolving an
+  `AssistantMessage` with `stopReason: "error"`.
+- The classifier is an explicit `isRetryable(error)` parameter, so each caller keeps ownership of what counts as
+  transient instead of inheriting assistant-message semantics that do not apply to it.
+- `retryAssistantCall` is untouched and stays value-based; its full existing suite passes unchanged. The two loops
+  share the private `sleep`/`RetrySleepAbortError` primitives so backoff and cancellation have one implementation.
+- First consumer is senpi's builtin compaction extension, whose summarization request throws and therefore could not
+  reuse the bounded retry without first reshaping failures into assistant messages.
+
+### Why this cannot be expressed externally
+
+- The delay, abort-during-backoff normalization, and retry callback ordering are private to this module. A caller
+  reimplementing them outside `utils/retry.ts` is exactly the duplicated policy this addition removes.
+
+### Expected merge conflict zones
+
+- MEDIUM: `utils/retry.ts` between `RetryCallbacks`/`sleep` and `retryAssistantCall`, where the new function is
+  inserted.
+- LOW: `test/retry-transient-call.test.ts` is a new focused file for the added surface.
+
 ## 2026-08-12 - Default direct Anthropic prompt caching to five minutes
 
 ### What changed and why
