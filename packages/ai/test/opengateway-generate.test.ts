@@ -39,10 +39,19 @@ describe("fetchOpenGatewayModels", () => {
 			gatewayResponse([{ id: "moonshotai/kimi-k3" }]),
 			modelsDevResponse({
 				moonshotai: {
-					"kimi-k3": { name: "Kimi K3", tool_call: true, reasoning: true, limit: { context: 1048576, output: 131072 } },
+					"kimi-k3": {
+						name: "Kimi K3",
+						tool_call: true,
+						reasoning: true,
+						limit: { context: 1048576, output: 131072 },
+					},
 				},
 				openrouter: {
-					"moonshotai/kimi-k3": { name: "K3 via OR", tool_call: true, limit: { context: 1048576, output: 1048576 } },
+					"moonshotai/kimi-k3": {
+						name: "K3 via OR",
+						tool_call: true,
+						limit: { context: 1048576, output: 1048576 },
+					},
 				},
 			}),
 		);
