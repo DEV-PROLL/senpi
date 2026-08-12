@@ -13,6 +13,11 @@
   ([#828](https://github.com/code-yeongyu/senpi/pull/828),
   oh-my-openagent#6784).
 
+- Bun global installs no longer let a sibling `signal-exit@4` shadow the
+  callable `signal-exit@3` required by `proper-lockfile`, preventing
+  `TypeError: onExit is not a function` during Senpi and `omo` startup
+  ([#829](https://github.com/code-yeongyu/senpi/pull/829)).
+
 ### New Features
 
 ### Breaking Changes
