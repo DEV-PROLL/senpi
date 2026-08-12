@@ -8,6 +8,9 @@
   while preserving the distinction between an editor that failed to launch
   and one that launched and exited unsuccessfully.
 
+- `/btw` side queries now budget captured session context against the selected model's window instead of replaying the
+  full snapshot, so large sessions no longer fail with a context-window overflow ([#826](https://github.com/code-yeongyu/senpi/pull/826)).
+
 ### New Features
 
 ### Breaking Changes

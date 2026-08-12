@@ -91,7 +91,7 @@ function estimatePendingPromptTokens(event: { prompt?: string; images?: readonly
 	return approxTokens(event.prompt ?? "") + (event.images?.length ?? 0) * IMAGE_PROMPT_TOKEN_ESTIMATE;
 }
 
-function getPromptContextWindow(contextWindow: number, maxTokens: number | undefined): number {
+export function getPromptContextWindow(contextWindow: number, maxTokens: number | undefined): number {
 	if (typeof maxTokens !== "number" || !Number.isFinite(maxTokens) || maxTokens <= 0 || contextWindow <= 0) {
 		return contextWindow;
 	}
