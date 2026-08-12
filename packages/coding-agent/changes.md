@@ -283,6 +283,19 @@
 - Merge-conflict risk: low. `scripts/publish.mjs` temporary manifest staging
   and `stagePublishManifest()` alias rewriting are the expected conflict zones.
 
+## 2026-08-12 — app-server extension RPC coverage and documentation
+
+- Changed: added focused app-server suites for extension event audience/one-frame delivery and request round-trips with
+  unknown and duplicate handler errors; documented the additive method and notification wire shapes.
+- Why: app-server had no executable contract for the existing extension-owned RPC channel, even though classic RPC did.
+- What changed: `test/suite/app-server-extension-events.test.ts`,
+  `test/suite/app-server-extension-requests.test.ts`, and `docs/app-server.md` now cover the real runtime surface with
+  isolated temporary extension directories and no network or credentials.
+- Why the extension system could not handle this: tests and public protocol documentation describe the host connection
+  boundary; an extension cannot install or verify those repository-level contracts.
+- Merge-conflict risk: low. The focused test files are new; the supported-method and notification sections in
+  `docs/app-server.md` are the only shared conflict zones.
+
 ## 2026-07-22 — app-server runtime import test without npm subprocess
 
 - Changed: `test/suite/app-server-protocol.test.ts` now executes its runtime `.js` import probe with

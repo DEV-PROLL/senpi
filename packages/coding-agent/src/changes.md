@@ -226,6 +226,36 @@
 
 - LOW: `core/extensions/builtin/gpt-apply-patch/apply.ts` and `tool.ts` completed-result construction.
 
+## App-server extension RPC delivery (2026-08-12)
+
+### What changed
+
+- `modes/app-server/runtime.ts` subscribes to each bound session's opt-in extension RPC events before extension binding,
+  preserves binding-time events until the thread is registered, and routes live events only to that thread's subscribers.
+- `modes/app-server/rpc/registry.ts` registers `extension_request` and dispatches `{threadId,name,data}` to the loaded
+  session's `extensionRunner.requestRpc`, preserving its exactly-one-handler semantics as JSON-RPC errors.
+- `modes/app-server/threads/registry.ts` seeds a new thread's notification queue with binding-time extension records so
+  the connection that started, resumed, or forked the thread receives them after subscription.
+
+### Why
+
+- App-server mode binds and owns separate sessions, so classic RPC's connection-bound extension delivery never reaches
+  app-server clients in either direction.
+- App-server initialize capabilities have no `extension_events` field. Event delivery is therefore unconditional for
+  initialized subscribers, while thread subscriptions provide the required audience boundary.
+
+### Why this cannot be expressed externally
+
+- Both directions cross the app-server's internal thread/session registry and notification router. An extension can opt
+  into delivery with `pi.rpc`, but cannot register an app-server JSON-RPC method or address the owning thread's clients.
+- Ordinary `pi.events` channels remain extension-local; this change forwards only explicit `pi.rpc.emit` records at the
+  connection boundary.
+
+### Expected merge conflict zones
+
+- MEDIUM: `modes/app-server/runtime.ts` session binding and registry wiring.
+- LOW: `modes/app-server/rpc/registry.ts` method registration and `threads/registry.ts` initial notification storage.
+
 ## Backfill: injected app-server turns (2026-08-01)
 
 ### What changed
