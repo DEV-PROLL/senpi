@@ -8,7 +8,7 @@ describe("OpenGateway provider", () => {
 		const provider = opengatewayProvider();
 		expect(provider.id).toBe("opengateway");
 		expect(provider.name).toBe("OpenGateway");
-		expect(provider.baseUrl).toBe("https://apis.opengateway.ai");
+		expect(provider.baseUrl).toBe("https://apis.opengateway.ai/v1");
 		expect(provider.auth.apiKey).toBeDefined();
 	});
 
@@ -17,7 +17,7 @@ describe("OpenGateway provider", () => {
 		expect(model).toBeDefined();
 		expect(model.api).toBe("openai-completions");
 		expect(model.provider).toBe("opengateway");
-		expect(model.baseUrl).toBe("https://apis.opengateway.ai");
+		expect(model.baseUrl).toBe("https://apis.opengateway.ai/v1");
 		expect(model.input).toEqual(["text", "image"]);
 	});
 

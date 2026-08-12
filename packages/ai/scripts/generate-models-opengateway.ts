@@ -11,7 +11,7 @@ import type { Api, Model, ModelCost } from "../src/types.ts";
 import type { ModelsDevReasoningOption } from "./models-dev-reasoning-options.ts";
 
 const OPENGATEWAY_MODELS_URL = "https://apis.opengateway.ai/v1/models";
-const OPENGATEWAY_BASE_URL = "https://apis.opengateway.ai";
+const OPENGATEWAY_BASE_URL = "https://apis.opengateway.ai/v1";
 const MODELS_DEV_URL = "https://models.dev/api.json";
 
 interface OpenGatewayCatalogModel {

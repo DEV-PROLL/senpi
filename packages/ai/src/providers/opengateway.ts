@@ -7,7 +7,7 @@ export function opengatewayProvider(): Provider<"openai-completions"> {
 	return createProvider({
 		id: "opengateway",
 		name: "OpenGateway",
-		baseUrl: "https://apis.opengateway.ai",
+		baseUrl: "https://apis.opengateway.ai/v1",
 		auth: { apiKey: envApiKeyAuth("OpenGateway API key", ["OPENGATEWAY_API_KEY"]) },
 		models: Object.values(OPENGATEWAY_MODELS),
 		api: openAICompletionsApi(),
