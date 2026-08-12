@@ -1,5 +1,22 @@
 # changes
 
+## `OPENGATEWAY_API_KEY` in `--help` environment list (2026-08-12)
+
+### What changed
+
+- `args.ts`: the `Environment Variables:` help block lists `OPENGATEWAY_API_KEY` (with the
+  https://opengateway.ai/api-keys issuance URL) next to the other provider keys.
+
+### Why
+
+- The new `opengateway` built-in provider authenticates with this variable; the help block is the
+  in-CLI discovery surface and stays exhaustive per provider-add convention.
+
+### Expected merge conflict zones
+
+- LOW: `args.ts` environment-variable help rows.
+
+
 ## `senpi --list-tips` prints the tip catalog as JSON (2026-07-29)
 
 ### What changed

@@ -407,6 +407,7 @@ ${chalk.bold("Environment Variables:")}
   TOGETHER_API_KEY                 - Together AI API key
   OPENROUTER_API_KEY               - OpenRouter API key
   AI_GATEWAY_API_KEY               - Vercel AI Gateway API key
+  OPENGATEWAY_API_KEY              - OpenGateway API key (https://opengateway.ai/api-keys)
   ZAI_API_KEY                      - ZAI Coding Plan API key (Global)
   ZAI_CODING_CN_API_KEY            - ZAI Coding Plan API key (China)
   MISTRAL_API_KEY                  - Mistral API key
