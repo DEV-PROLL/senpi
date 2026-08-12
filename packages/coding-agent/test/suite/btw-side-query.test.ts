@@ -123,6 +123,19 @@ describe("buildSideQueryContext", () => {
 		).toBe(true);
 	});
 
+	it("counts a large system prompt against the side-query budget", () => {
+		const promptContextWindow = 14_000;
+		const context = buildSideQueryContext({
+			systemPrompt: `BASE-${"s".repeat(10_000)}`,
+			history: [{ role: "user", content: `old-${"o".repeat(6_000)}`, timestamp: 1 }],
+			question: "keep the newest question",
+			promptContextWindow,
+		});
+
+		expect(estimatePromptTokens(context)).toBeLessThanOrEqual(promptContextWindow);
+		expect(getMessageText(context.messages.at(-1))).toBe("keep the newest question");
+	});
+
 	it("reserves at most half the context window for side-query output", () => {
 		expect(getSideQueryPromptContextWindow({ contextWindow: 2_000, maxTokens: 256 })).toBe(1_744);
 		expect(getSideQueryPromptContextWindow({ contextWindow: 2_000, maxTokens: 4_000 })).toBe(1_000);
