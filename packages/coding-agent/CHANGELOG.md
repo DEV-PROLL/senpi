@@ -10,6 +10,10 @@
 
 ### Added
 
+- App-server clients can now receive extension-owned `extension_event` notifications and call loaded-thread
+  `extension_request` handlers, bringing both directions of the opt-in `pi.rpc` channel to app/editor integrations
+  ([#838](https://github.com/code-yeongyu/senpi/pull/838)).
+
 ### Changed
 
 ### Removed
