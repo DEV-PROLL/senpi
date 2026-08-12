@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- External-editor tests now recover from transient process-launch pressure
+  while preserving the distinction between an editor that failed to launch
+  and one that launched and exited unsuccessfully.
+
 ### New Features
 
 ### Breaking Changes

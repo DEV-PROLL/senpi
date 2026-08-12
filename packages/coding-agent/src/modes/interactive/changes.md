@@ -1,5 +1,38 @@
 # changes
 
+## External-editor launch failures remain distinct (2026-08-12)
+
+### What changed
+
+- `editInExternalEditor()` now resolves a discriminated child-process outcome:
+  the `error` event returns `launch-failed`, while `close` after a real launch
+  returns `failed` for nonzero or signal exits and `complete` only for exit 0.
+- The composer still replaces its text only for `complete`, so launch failures
+  and editor failures both preserve the current prompt without widening the
+  UI control flow.
+- Deterministic coverage uses a real Node process under `RLIMIT_NPROC` to force
+  `EAGAIN`, rather than mocking `spawn`, sleeping, increasing timeouts, or
+  relying on an overloaded full suite to reproduce by chance.
+
+### Why
+
+- The old path resolved `error` as `null` and then treated it as an editor
+  nonzero exit. Under full-suite process pressure, the editor could fail to
+  launch while callers and tests received the status that means it did launch.
+- The sibling file-editor path already preserves this distinction because only
+  a launched editor may have modified caller-owned files.
+
+### Why this cannot be expressed externally
+
+- The built-in interactive mode owns the process spawn, temporary prompt
+  directory, editor result type, and composer replacement decision before any
+  extension hook can intervene.
+
+### Expected merge conflict zones
+
+- LOW: `external-editor.ts` around `ExternalEditorResult` and the prompt-editor
+  `spawn` event handlers.
+
 ## Correct extension-command immediate-dispatch comments (2026-08-09)
 
 ### What changed

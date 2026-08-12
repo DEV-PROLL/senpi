@@ -1,5 +1,40 @@
 # Local fork changes
 
+## 2026-08-12 — Distinguish external-editor launch failures
+
+### What changed
+
+- Prompt editing now reports `launch-failed` when the configured external
+  editor process never starts, instead of returning the same `failed` status
+  used when an editor actually launches and exits nonzero or by signal.
+- Added a deterministic regression that invokes the real prompt-editor code
+  under a constrained process limit and proves the operating system's `EAGAIN`
+  launch path remains distinct from an editor exit.
+- Added a bounded stress harness that runs the prompt/file external-editor
+  suites 25 times sequentially and four times concurrently, while asserting
+  every child exit and exact before/after temporary-directory residue.
+
+### Why this lives in the fork
+
+- Senpi's interactive composer owns the external-editor handoff and its
+  temporary prompt file. The return status determines whether callers may
+  assume the editor ran and could have produced side effects.
+- Full-suite subprocess pressure can make `spawn()` fail before launch. Folding
+  that condition into a normal editor failure made tests and callers reason
+  from side effects that never happened.
+
+### Why this cannot be expressed externally
+
+- Extensions receive control after the built-in composer and process lifecycle
+  contract have already been selected. They cannot distinguish a swallowed
+  host `spawn` error from a real editor exit.
+
+### Expected merge conflict zones
+
+- `src/modes/interactive/external-editor.ts` around prompt-editor child-process
+  outcome handling.
+- `test/external-editor.test.ts` around real-child lifecycle coverage.
+
 ## 2026-08-11 — Ship codemode with standalone binaries
 
 ### What changed
