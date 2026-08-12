@@ -149,6 +149,11 @@ export async function fetchOpenGatewayModels(
 				api: "openai-completions",
 				provider: "opengateway",
 				baseUrl: OPENGATEWAY_BASE_URL,
+				compat: {
+					// The gateway rejects the OpenAI "developer" role with a 400
+					// (verified 2026-08-12); always send "system" instead.
+					supportsDeveloperRole: false,
+				},
 				reasoning: override?.reasoning ?? (source?.reasoning === true),
 				input,
 				cost: {
