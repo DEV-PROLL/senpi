@@ -1,5 +1,28 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-12 - Account-aware default auth lane (issue #6784)
+
+### What changed
+
+- `auth-lane.ts` `managedPool` no longer defaults `tokenInjection` to `ambient`. A new exported `resolveEffectiveLane(settings, accounts)` resolves the lane as `settings.tokenInjection ?? (accounts.length > 0 ? "oauth-slots" : "ambient")`.
+- `oauth-login.ts` `createOAuthConfig` gains an optional `readSettings` dep so the OAuth `check` resolves the same effective lane. On a managed lane it reports configured only when accounts exist; on ambient it defers to the ambient Claude CLI probe.
+- `index.ts` wires `readSettings` to `loadClaudeSdkOauthProviderSettingsFromDisk(process.cwd())`.
+- `options.ts` `buildClaudeSdkOauthQueryOptions` aligns its `authLane` fallback to `ambient` so both lane-resolution sites agree (the previous `?? "oauth-slots"` was a dead default contradicted by `managedPool`).
+
+### Why
+
+Commit `606aa052b` (2026-07-27) flipped `managedPool`'s default from `oauth-slots` to `ambient` as a review-time safety hold ("until the live spike proves a managed lane"). The managed lanes matured across the 2026-08-01 and 2026-08-11 waves, but the default was never restored, so OAuth accounts saved by senpi's own login into `~/.omo/auth.json` were NEVER injected into the spawned Claude Code subprocess unless the user explicitly set `claudeSdkOauthProvider.tokenInjection`. On a machine where `claude auth status` is logged out, every query (main turn and `session_title_generation`) failed with "Failed to authenticate: OAuth session expired and could not be refreshed" (oh-my-openagent#6784).
+
+The ambient lane remains the default ONLY when no accounts exist, preserving the zero-config Claude Code CLI-login path documented in the 2026-08-11 entry. An explicit `tokenInjection` setting always wins.
+
+### Why an extension could not handle it
+
+The lane decision lives inside the builtin provider's own `queryWithAuthLane`/`managedPool` and the OAuth availability `check`, both of which no external extension hook can replace.
+
+### Expected merge-conflict zones
+
+LOW in `auth-lane.ts` (new `resolveEffectiveLane` + `managedPool` lane resolution); LOW in `oauth-login.ts` (`readSettings` dep + lane-aware `check`); LOW in `index.ts` (one new import + `readSettings` wiring); LOW in `options.ts` (one fallback literal). LOW in `test/claude-sdk-oauth-auth-status.test.ts` and `test/suite/regressions/6784-claude-sdk-oauth-default-lane.test.ts`.
+
 ## 2026-08-11 - Require a real OAuth login for runtime availability
 
 - Removed the literal `apiKey: "claude-sdk-oauth-managed"` registration placeholder. Provider composition treated

@@ -66,6 +66,7 @@ export function createOAuthConfig(deps: {
 	readCurrent: CurrentCredentialReader;
 	readAnthropicCredential?: () => Promise<{ access: string; refresh: string; expires: number } | undefined>;
 	readAmbientAuthStatus?: () => Promise<boolean>;
+	readSettings?: () => { tokenInjection?: "oauth-slots" | "config-dir" | "ambient" } | undefined;
 	loginFlow?: OAuthAuth;
 }): OAuthConfigShape {
 	return {
@@ -73,12 +74,15 @@ export function createOAuthConfig(deps: {
 
 		async check({ ctx, credential }) {
 			const stored = credential as ClaudeSdkOauthCredential | undefined;
-			if (stored?.type === "oauth" && Array.isArray(stored.accounts) && stored.accounts.length > 0) {
-				return AUTH_CHECK;
-			}
+			const storedAccounts = stored?.type === "oauth" && Array.isArray(stored.accounts) ? stored.accounts : [];
 			const envTokens = await Promise.all(ENV_TOKEN_NAMES.map((name) => ctx.env(name)));
-			if (envTokens.some((token) => token !== undefined && token.length > 0)) return AUTH_CHECK;
-			return (await (deps.readAmbientAuthStatus ?? readAmbientClaudeAuthStatus)()) ? AUTH_CHECK : undefined;
+			const envAccountCount = envTokens.filter((token) => token !== undefined && token.length > 0).length;
+			const accountCount = storedAccounts.length + envAccountCount;
+			const lane = deps.readSettings?.()?.tokenInjection ?? (accountCount > 0 ? "oauth-slots" : "ambient");
+			if (lane === "ambient") {
+				return (await (deps.readAmbientAuthStatus ?? readAmbientClaudeAuthStatus)()) ? AUTH_CHECK : undefined;
+			}
+			return accountCount > 0 ? AUTH_CHECK : undefined;
 		},
 
 		async login(callbacks) {

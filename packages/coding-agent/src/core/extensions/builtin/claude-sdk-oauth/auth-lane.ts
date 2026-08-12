@@ -131,9 +131,14 @@ function writeConfigCredentials(directory: string, slot: AccountSlot, access: st
 	);
 }
 
+export function resolveEffectiveLane(
+	settings: ClaudeSdkOauthProviderSettings,
+	accounts: readonly AccountSlot[],
+): ClaudeSdkOauthTokenInjection {
+	return settings.tokenInjection ?? (accounts.length > 0 ? "oauth-slots" : "ambient");
+}
+
 async function managedPool(settings: ClaudeSdkOauthProviderSettings): Promise<ManagedPool | undefined> {
-	const lane = settings.tokenInjection ?? "ambient";
-	if (lane === "ambient") return undefined;
 	const store = activeBoundary.createStore();
 	let credential = await store.read(CLAUDE_SDK_OAUTH_PROVIDER_ID);
 	const environment = activeBoundary.env();
@@ -148,7 +153,8 @@ async function managedPool(settings: ClaudeSdkOauthProviderSettings): Promise<Ma
 			(name) => environment[name],
 		);
 	}
-	if (accounts.length === 0) return undefined;
+	const lane = resolveEffectiveLane(settings, accounts);
+	if (lane === "ambient" || accounts.length === 0) return undefined;
 	const stored = credential?.type === "oauth" ? (credential as ClaudeSdkOauthCredential) : undefined;
 	return { accounts, lane, pinnedAccount: settings.pinnedAccount ?? stored?.pinned, store };
 }
