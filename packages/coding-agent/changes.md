@@ -289,8 +289,8 @@
   unknown and duplicate handler errors; documented the additive method and notification wire shapes.
 - Why: app-server had no executable contract for the existing extension-owned RPC channel, even though classic RPC did.
 - What changed: `test/suite/app-server-extension-events.test.ts`,
-  `test/suite/app-server-extension-requests.test.ts`, and `docs/app-server.md` now cover the real runtime surface with
-  isolated temporary extension directories and no network or credentials.
+  `test/suite/app-server-extension-requests.test.ts`, `docs/app-server.md`, and the package `CHANGELOG.md` now cover the
+  real runtime surface and release note with isolated temporary extension directories and no network or credentials.
 - Why the extension system could not handle this: tests and public protocol documentation describe the host connection
   boundary; an extension cannot install or verify those repository-level contracts.
 - Merge-conflict risk: low. The focused test files are new; the supported-method and notification sections in
