@@ -8,8 +8,8 @@
   editor process never starts, instead of returning the same `failed` status
   used when an editor actually launches and exits nonzero or by signal.
 - Added a deterministic regression that invokes the real prompt-editor code
-  under a constrained process limit and proves the operating system's `EAGAIN`
-  launch path remains distinct from an editor exit.
+  with a guaranteed-missing executable and proves the operating system's
+  process-launch failure remains distinct from an editor exit.
 - Added a bounded stress harness that runs the prompt/file external-editor
   suites 25 times sequentially and four times concurrently, while asserting
   every child exit and exact before/after temporary-directory residue.

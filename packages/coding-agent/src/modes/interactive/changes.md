@@ -10,9 +10,10 @@
 - The composer still replaces its text only for `complete`, so launch failures
   and editor failures both preserve the current prompt without widening the
   UI control flow.
-- Deterministic coverage uses a real Node process under `RLIMIT_NPROC` to force
-  `EAGAIN`, rather than mocking `spawn`, sleeping, increasing timeouts, or
-  relying on an overloaded full suite to reproduce by chance.
+- Deterministic coverage uses a guaranteed-missing executable to force a real
+  operating-system launch failure, rather than mocking `spawn`, sleeping,
+  increasing timeouts, or relying on an overloaded full suite to reproduce by
+  chance.
 
 ### Why
 

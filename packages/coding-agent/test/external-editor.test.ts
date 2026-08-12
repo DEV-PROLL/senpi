@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -7,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import { type ExternalEditorResult, editInExternalEditor } from "../src/modes/interactive/external-editor.ts";
 
 const editorFixturePath = fileURLToPath(new URL("./fixtures/fake-external-editor.mjs", import.meta.url));
-const externalEditorModulePath = fileURLToPath(new URL("../src/modes/interactive/external-editor.ts", import.meta.url));
 
 interface EditorCapture {
 	filePath: string;
@@ -46,53 +44,6 @@ async function runExternalEditor(fixtureFlag?: "--fail" | "--empty"): Promise<{
 	}
 }
 
-async function runExternalEditorWithoutProcessSlot(): Promise<ExternalEditorResult> {
-	const source = [
-		'import { writeSync } from "node:fs";',
-		`import { editInExternalEditor } from ${JSON.stringify(externalEditorModulePath)};`,
-		'const result = await editInExternalEditor({ command: process.execPath + " -e process.exit(0)", content: "original" });',
-		'writeSync(1, JSON.stringify(result) + "\\n");',
-	].join(" ");
-	const command =
-		process.platform === "win32"
-			? [process.execPath, "--experimental-strip-types", "-e", source]
-			: [
-					"/bin/sh",
-					"-c",
-					`ulimit -u 1; exec ${process.execPath} --experimental-strip-types -e ${JSON.stringify(source)}`,
-				];
-	const output = await new Promise<string>((resolve, reject) => {
-		const child = spawn(command[0], command.slice(1), {
-			stdio: ["ignore", "pipe", "pipe"],
-			...(process.platform === "win32"
-				? { env: { ...process.env, ComSpec: "Z:\\senpi-missing-command-shell.exe" } }
-				: {}),
-		});
-		let stdout = "";
-		let stderr = "";
-		child.stdout.on("data", (data: Buffer) => {
-			stdout += data.toString();
-		});
-		child.stderr.on("data", (data: Buffer) => {
-			stderr += data.toString();
-		});
-		child.on("error", reject);
-		child.on("close", (code) => {
-			if (code === 0) {
-				resolve(stdout);
-				return;
-			}
-			reject(new Error(`RLIMIT_NPROC helper exited ${code}: ${stderr}`));
-		});
-	});
-	const line = output
-		.trim()
-		.split("\n")
-		.findLast((entry) => entry.startsWith("{"));
-	if (!line) throw new Error(`RLIMIT_NPROC helper returned no JSON result: ${output}`);
-	return JSON.parse(line) as ExternalEditorResult;
-}
-
 describe("editInExternalEditor", () => {
 	it("edits a prompt inside a private temporary directory", async () => {
 		const { result, capture } = await runExternalEditor();
@@ -123,7 +74,23 @@ describe("editInExternalEditor", () => {
 	});
 
 	it("reports when the editor cannot launch", async () => {
-		const result = await runExternalEditorWithoutProcessSlot();
+		const previousComSpec = process.env.ComSpec;
+		if (process.platform === "win32") {
+			process.env.ComSpec = "Z:\\senpi-missing-command-shell.exe";
+		}
+		let result: ExternalEditorResult;
+		try {
+			result = await editInExternalEditor({
+				command: join(tmpdir(), "senpi-missing-external-editor"),
+				content: "original",
+			});
+		} finally {
+			if (previousComSpec === undefined) {
+				delete process.env.ComSpec;
+			} else {
+				process.env.ComSpec = previousComSpec;
+			}
+		}
 
 		expect(result).toEqual({ status: "launch-failed" });
 	});
