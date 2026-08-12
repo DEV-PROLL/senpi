@@ -1,3 +1,29 @@
+## Model-aware `/btw` side-query context budgeting (2026-08-12)
+
+### What changed
+
+- `/btw` side queries now budget the complete ephemeral prompt against the selected model's context window. Oversized
+  snapshots reuse the deterministic context reducer, repair orphaned tool results, and prune oldest context while
+  preserving the final question and newest usable messages.
+- Mandatory prompt content that still cannot fit now fails locally with an actionable `/compact` suggestion instead of
+  sending a provider request that is guaranteed to be rejected.
+
+### Why
+
+- The builtin `/btw` path bypassed the main-turn context pipeline and replayed the captured session snapshot directly to
+  the provider. Large sessions could therefore fail with a context-window overflow even while the main turn continued.
+
+### Why an extension could not do this
+
+- The oversized payload is assembled inside the builtin command's private snapshot-to-provider path. An external
+  extension cannot intercept and structurally budget that ephemeral request without replacing the builtin.
+
+### Expected merge conflict zones on next upstream sync
+
+- `core/extensions/builtin/btw/index.ts` around snapshot construction and side-query dispatch.
+- `core/extensions/builtin/btw/side-query.ts` around context assembly and model runtime options.
+- `test/suite/btw-side-query.test.ts` around context-builder and command regression coverage.
+
 ## Control protocol exposes loaded extensions and MCP inventory (2026-08-11)
 
 ### What changed

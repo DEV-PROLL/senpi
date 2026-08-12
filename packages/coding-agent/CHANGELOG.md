@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- `/btw` side queries now budget captured session context against the selected model's window instead of replaying the
+  full snapshot, so large sessions no longer fail with a context-window overflow ([#826](https://github.com/code-yeongyu/senpi/pull/826)).
+
 ### New Features
 
 ### Breaking Changes
