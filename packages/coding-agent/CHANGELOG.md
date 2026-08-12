@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Transient summarization failures on the blocking compaction route now spend a bounded retry budget instead of
+  ending the compaction on the first attempt, so an upstream `500` (observed: `Compaction failed: 500 Worker exceeded memory
+  limit.`) recovers the way the core `compact()` route already does. Speculative warm-ups keep their own idle retry,
+  and failures with a deterministic zero-LLM recovery still skip retrying ([#834](https://github.com/code-yeongyu/senpi/pull/834)).
+
 ### New Features
 
 ### Breaking Changes

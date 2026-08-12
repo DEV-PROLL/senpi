@@ -6,6 +6,9 @@
 
 ### Added
 
+- Added `retryTransientCall()`, a throw-based sibling of `retryAssistantCall()` that shares the same bounded
+  exponential backoff, abort, and retry-callback contract for producers that signal failure by throwing ([#834](https://github.com/code-yeongyu/senpi/pull/834)).
+
 ### Changed
 
 ### Fixed
