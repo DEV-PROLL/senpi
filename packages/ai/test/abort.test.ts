@@ -261,6 +261,18 @@ describe("AI Providers Abort Tests", () => {
 		});
 	});
 
+	describe.skipIf(!process.env.OPENGATEWAY_API_KEY)("OpenGateway Provider Abort", () => {
+		const llm = getModel("opengateway", "moonshotai/kimi-k3");
+
+		it("should abort mid-stream", { retry: 3 }, async () => {
+			await testAbortSignal(llm);
+		});
+
+		it("should handle immediate abort", { retry: 3 }, async () => {
+			await testImmediateAbort(llm);
+		});
+	});
+
 	describe.skipIf(!process.env.QWEN_TOKEN_PLAN_API_KEY)("Qwen Token Plan Provider Abort", () => {
 		const llm = getModel("qwen-token-plan", "qwen3.7-max");
 

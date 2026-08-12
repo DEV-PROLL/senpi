@@ -262,6 +262,14 @@ describe("Tool Call Without Result Tests", () => {
 		});
 	});
 
+	describe.skipIf(!process.env.OPENGATEWAY_API_KEY)("OpenGateway Provider", () => {
+		const model = getModel("opengateway", "moonshotai/kimi-k3");
+
+		it("should filter out tool calls without corresponding tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testToolCallWithoutResult(model);
+		});
+	});
+
 	describe.skipIf(!process.env.QWEN_TOKEN_PLAN_API_KEY)("Qwen Token Plan Provider", () => {
 		const model = getModel("qwen-token-plan", "qwen3.7-max");
 

@@ -576,6 +576,25 @@ describe("totalTokens field", () => {
 	// Qwen Token Plan
 	// =========================================================================
 
+	describe.skipIf(!process.env.OPENGATEWAY_API_KEY)("OpenGateway", () => {
+		it("moonshotai/kimi-k3 - should return totalTokens equal to sum of components", {
+			retry: 3,
+			timeout: 60000,
+		}, async () => {
+			const llm = getModel("opengateway", "moonshotai/kimi-k3");
+
+			console.log(`\nOpenGateway / ${llm.id}:`);
+			const { first, second } = await testTotalTokensWithCache(llm, {
+				apiKey: process.env.OPENGATEWAY_API_KEY,
+			});
+
+			logUsage("First request", first);
+			logUsage("Second request", second);
+
+			assertTotalTokensEqualsComponents(first);
+		});
+	});
+
 	describe.skipIf(!process.env.QWEN_TOKEN_PLAN_API_KEY)("Qwen Token Plan", () => {
 		it("qwen3.7-max - should return totalTokens equal to sum of components", {
 			retry: 3,
