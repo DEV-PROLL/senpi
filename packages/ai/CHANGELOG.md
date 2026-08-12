@@ -6,6 +6,8 @@
 
 ### Added
 
+- Added the OpenGateway built-in provider for the OpenAI-compatible gateway at `https://apis.opengateway.ai`: a generated 62-model catalog hydrated from the live `/v1/models` endpoint (chat-capable, non-retired models enriched with models.dev pricing/context/reasoning metadata), `OPENGATEWAY_API_KEY` env detection, and `supportsDeveloperRole: false` compat because the gateway rejects the OpenAI `developer` role. [#832](https://github.com/code-yeongyu/senpi/pull/832)
+
 ### Changed
 
 ### Fixed

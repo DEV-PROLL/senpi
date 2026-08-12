@@ -10,6 +10,8 @@
 
 ### Added
 
+- OpenGateway now appears as an API-key provider in `/login` (display name "OpenGateway") with `moonshotai/kimi-k3` as its default model; `docs/providers.md` covers key issuance at https://opengateway.ai/api-keys. [#832](https://github.com/code-yeongyu/senpi/pull/832)
+
 ### Changed
 
 ### Removed
