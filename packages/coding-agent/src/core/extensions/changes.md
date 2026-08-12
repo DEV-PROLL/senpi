@@ -1,5 +1,22 @@
 # Core Extensions Changes
 
+## 2026-08-12 - Expose session cwd during extension registration
+
+### What changed
+
+- `ExtensionAPI.cwd` exposes the absolute cwd of the session that loaded the extension instance.
+
+### Why
+
+- Extension factories may need to initialize per-project state at registration time, before any event
+  supplies an `ExtensionContext`.
+- In multi-session hosts, `process.cwd()` is the shared process launch directory rather than the
+  project root for each extension instance.
+
+### Expected merge conflict zones
+
+- LOW: `types.ts` ExtensionAPI interface, `loader.ts` createExtensionAPI return literal.
+
 ## 2026-08-12 - Reject stale in-flight RPC request results
 
 ### What changed

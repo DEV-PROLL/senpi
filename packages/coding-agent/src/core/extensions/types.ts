@@ -1554,6 +1554,13 @@ export type ExtensionHandler<E, R = undefined> = (event: E, ctx: ExtensionContex
  */
 export interface ExtensionAPI {
 	// =========================================================================
+	// Session Context
+	// =========================================================================
+
+	/** Absolute cwd of the session this extension instance was loaded for. */
+	readonly cwd: string;
+
+	// =========================================================================
 	// Event Subscription
 	// =========================================================================
 
