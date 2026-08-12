@@ -10,6 +10,7 @@ import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { estimateTokens } from "../../../compaction/index.ts";
 import { convertToLlm } from "../../../messages.ts";
 import { BUILTIN_CONTEXT_REDUCTION_OPTIONS, reduceContextMessages } from "../compaction/context-reduction.ts";
+import { getPromptContextWindow } from "../compaction/index.ts";
 import { pruneOldMessagesToBudget } from "../compaction/overflow-retry.ts";
 import { repairOrphanedToolResults } from "../compaction/repair-tool-pairs.ts";
 
@@ -20,7 +21,6 @@ export const SIDE_QUERY_INSTRUCTION = [
 ].join(" ");
 
 export const DEFAULT_ESTABLISHMENT_TIMEOUT_MS = 30_000;
-const MAX_OUTPUT_RESERVE_RATIO = 0.5;
 
 export interface SideQueryContextInput {
 	systemPrompt: string;
@@ -64,12 +64,7 @@ function boundSideQueryMessages(
 }
 
 export function getSideQueryPromptContextWindow(model: Pick<Model<string>, "contextWindow" | "maxTokens">): number {
-	const { contextWindow, maxTokens } = model;
-	if (typeof maxTokens !== "number" || !Number.isFinite(maxTokens) || maxTokens <= 0 || contextWindow <= 0) {
-		return contextWindow;
-	}
-	const outputReserve = Math.min(maxTokens, Math.floor(contextWindow * MAX_OUTPUT_RESERVE_RATIO));
-	return contextWindow - outputReserve;
+	return getPromptContextWindow(model.contextWindow, model.maxTokens);
 }
 
 export function buildSideQueryContext(input: SideQueryContextInput): Context {
