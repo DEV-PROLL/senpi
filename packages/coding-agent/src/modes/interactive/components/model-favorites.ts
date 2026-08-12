@@ -56,6 +56,22 @@ export function moveFavoriteModel(favoriteIds: FavoriteModelIds, id: string, del
 	return result;
 }
 
+export function mergeFavoritePatternsForPersist(options: {
+	storedPatterns: readonly string[];
+	unresolvedPatterns: readonly string[];
+	selectedIds: FavoriteModelIds;
+	candidateIds: readonly string[];
+}): string[] | undefined {
+	const { storedPatterns, unresolvedPatterns, selectedIds, candidateIds } = options;
+	const unresolved = new Set(unresolvedPatterns);
+	const merged = storedPatterns.filter((pattern) => unresolved.has(pattern));
+	const selected = selectedIds === null ? candidateIds : selectedIds;
+	for (const id of selected) {
+		if (!merged.includes(id)) merged.push(id);
+	}
+	return merged.length > 0 ? merged : undefined;
+}
+
 export function getSortedFavoriteModelIds(favoriteIds: FavoriteModelIds, allIds: string[]): string[] {
 	if (favoriteIds === null) return allIds;
 	const favoriteSet = new Set(favoriteIds);

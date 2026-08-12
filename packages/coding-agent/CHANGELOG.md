@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Favorite models are no longer erased from settings when a favorite's provider is
+  momentarily unauthenticated or unreachable. Both selectors list only models that
+  resolve against the current availability snapshot, and persisting that view
+  overwrote the stored patterns, permanently dropping every favorite that did not
+  resolve at that moment (and removing the `favoriteModels` key entirely when nothing
+  resolved). Stored patterns that resolve to no model are now preserved on persist.
+  ([#833](https://github.com/code-yeongyu/senpi/pull/833))
+
 ### New Features
 
 ### Breaking Changes

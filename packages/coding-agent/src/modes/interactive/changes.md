@@ -1,5 +1,35 @@
 # changes
 
+## Favorite patterns survive a persist while providers are unavailable (2026-08-12)
+
+### What changed
+
+- `mergeFavoritePatternsForPersist()` in `components/model-favorites.ts` merges the
+  selector's visible selection with stored favorite patterns that currently resolve to
+  no model. `interactive-mode.ts` persists through it from both the model selector's
+  `onFavoriteChange` and the favorites selector's `onPersist`.
+- The persisted list keeps unresolvable patterns in their stored order and appends the
+  user's selection without duplicating entries. `undefined` is still written only when
+  the merged result is genuinely empty.
+
+### Why
+
+- Both selectors derive their favorite ids from `session.favoriteModels`, which is
+  `resolveModelScope()` filtered against the current availability snapshot. Persisting
+  that view verbatim erased every stored favorite whose provider was momentarily
+  unauthenticated or unreachable, and an empty result removed the `favoriteModels` key
+  from `settings.json` entirely.
+
+### Why this cannot be expressed externally
+
+- Interactive mode owns the selector callbacks and the settings write, so no extension
+  hook can intervene between the filtered view and the persist.
+
+### Expected merge conflict zones
+
+- LOW: `components/model-favorites.ts` around the merge helper and `interactive-mode.ts`
+  around the two selector persist callbacks.
+
 ## External-editor launch failures remain distinct (2026-08-12)
 
 ### What changed
