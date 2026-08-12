@@ -1,15 +1,15 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import { MAX_SUMMARIZATION_ATTEMPT_RETRIES } from "../../src/core/extensions/builtin/compaction/summarization-retry.ts";
 import {
 	connectionErrorResponse,
 	createBeforeAgentStartEvent,
 	createBlockingContext,
 	createCompactionHandlers,
 } from "../helpers/blocking-compaction-harness.ts";
-import { MAX_SUMMARIZATION_ATTEMPT_RETRIES } from "../../src/core/extensions/builtin/compaction/summarization-retry.ts";
+
 /** One summarization now costs its initial attempt plus the shared retry budget. */
 const SUMMARIZATION_ATTEMPTS = 1 + MAX_SUMMARIZATION_ATTEMPT_RETRIES;
-
 
 const registrations: Array<{ unregister: () => void }> = [];
 

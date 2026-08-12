@@ -3,16 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FAILURE_TRIP_THRESHOLD } from "../../src/core/extensions/builtin/compaction/circuit-breaker.ts";
 import compactionExtension from "../../src/core/extensions/builtin/compaction/index.ts";
 import { hardCap } from "../../src/core/extensions/builtin/compaction/per-turn-cap.ts";
+import { MAX_SUMMARIZATION_ATTEMPT_RETRIES } from "../../src/core/extensions/builtin/compaction/summarization-retry.ts";
 import type { ExtensionHandler } from "../../src/core/extensions/index.ts";
 import {
 	connectionErrorResponse,
 	createBeforeAgentStartEvent,
 	createBlockingContext,
 } from "../helpers/blocking-compaction-harness.ts";
-import { MAX_SUMMARIZATION_ATTEMPT_RETRIES } from "../../src/core/extensions/builtin/compaction/summarization-retry.ts";
+
 /** One summarization now costs its initial attempt plus the shared retry budget. */
 const SUMMARIZATION_ATTEMPTS = 1 + MAX_SUMMARIZATION_ATTEMPT_RETRIES;
-
 
 const FORMER_SOFT_CAP = 3;
 

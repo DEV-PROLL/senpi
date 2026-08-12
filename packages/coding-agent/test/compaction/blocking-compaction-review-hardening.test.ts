@@ -5,6 +5,7 @@ import {
 	handleMessageEnd,
 	RECOVERY_INSTRUCTIONS,
 } from "../../src/core/extensions/builtin/compaction/degradation-monitor.ts";
+import { MAX_SUMMARIZATION_ATTEMPT_RETRIES } from "../../src/core/extensions/builtin/compaction/summarization-retry.ts";
 import type { ModelSelectEvent } from "../../src/core/extensions/index.ts";
 import {
 	connectionErrorResponse,
@@ -12,10 +13,9 @@ import {
 	createBlockingContext,
 	createCompactionHandlers,
 } from "../helpers/blocking-compaction-harness.ts";
-import { MAX_SUMMARIZATION_ATTEMPT_RETRIES } from "../../src/core/extensions/builtin/compaction/summarization-retry.ts";
+
 /** One summarization now costs its initial attempt plus the shared retry budget. */
 const SUMMARIZATION_ATTEMPTS = 1 + MAX_SUMMARIZATION_ATTEMPT_RETRIES;
-
 
 const registrations: Array<{ unregister: () => void }> = [];
 

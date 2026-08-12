@@ -44,9 +44,9 @@ import {
 	shrinkSummarizationInputForOverflowRetry,
 } from "./overflow-retry.ts";
 import { computeEffectiveKeepRecentTokens, computeEffectiveThreshold } from "./policy.ts";
-import { allowSummarizationRetry, DEFAULT_SUMMARIZATION_RETRY_POLICY } from "./summarization-retry.ts";
 import { buildPrompt, type MergedCompactionPromptVariant } from "./prompts.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
+import { allowSummarizationRetry, DEFAULT_SUMMARIZATION_RETRY_POLICY } from "./summarization-retry.ts";
 import { extractTaskIntent, resolveInheritedTaskIntent } from "./task-intent.ts";
 import * as truncation from "./tool-truncation.ts";
 import { computeStructuralYield } from "./yield.ts";

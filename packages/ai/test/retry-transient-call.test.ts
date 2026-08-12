@@ -15,9 +15,9 @@ describe("retryTransientCall", () => {
 	it("returns the value immediately when the producer succeeds", async () => {
 		const produce = vi.fn(async () => "ok");
 		const onRetryScheduled = vi.fn();
-		await expect(retryTransientCall(produce, alwaysRetryable, enabled, undefined, { onRetryScheduled })).resolves.toBe(
-			"ok",
-		);
+		await expect(
+			retryTransientCall(produce, alwaysRetryable, enabled, undefined, { onRetryScheduled }),
+		).resolves.toBe("ok");
 		expect(produce).toHaveBeenCalledTimes(1);
 		expect(onRetryScheduled).not.toHaveBeenCalled();
 	});
