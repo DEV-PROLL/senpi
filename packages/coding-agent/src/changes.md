@@ -1,3 +1,17 @@
+## Historical image transport limits (2026-08-12)
+
+### What changed
+
+- Added `images.maxHistoricalImages` to limit how many images from completed turns are replayed to providers.
+- Images in the current turn remain intact, while older images are replaced only in the request payload with the
+  existing recoverable image-elision marker. Persisted session history is not modified.
+
+### Why
+
+- Long coding sessions could resend tens of megabytes of already-processed screenshots on every request. The repeated
+  upload and vision prefill caused high Kimi time-to-first-token latency even when the current turn contained no image.
+- The setting is opt-in; remove it to restore the previous transport behavior immediately.
+
 ## Model-aware `/btw` side-query context budgeting (2026-08-12)
 
 ### What changed

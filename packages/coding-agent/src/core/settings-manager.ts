@@ -83,6 +83,7 @@ export interface PromptCacheSettings {
 export interface ImageSettings {
 	autoResize?: boolean; // default: true (resize images to 2000x2000 max for better model compatibility)
 	blockImages?: boolean; // default: false - when true, prevents all images from being sent to LLM providers
+	maxHistoricalImages?: number; // default: undefined (preserve existing transport behavior)
 }
 
 export interface LookAtSettings {
@@ -1562,6 +1563,11 @@ export class SettingsManager {
 
 	getBlockImages(): boolean {
 		return this.settings.images?.blockImages ?? false;
+	}
+
+	getMaxHistoricalImages(): number | undefined {
+		const value = this.settings.images?.maxHistoricalImages;
+		return Number.isInteger(value) && value !== undefined && value >= 0 ? value : undefined;
 	}
 
 	setBlockImages(blocked: boolean): void {

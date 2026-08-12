@@ -453,6 +453,24 @@ describe("SettingsManager", () => {
 
 			expect(manager.getDefaultProjectTrust()).toBe("ask");
 		});
+
+		it("should read a non-negative historical image limit", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ images: { maxHistoricalImages: 2 } }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getMaxHistoricalImages()).toBe(2);
+		});
+
+		it("should ignore invalid historical image limits", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ images: { maxHistoricalImages: -1 } }));
+			const negative = SettingsManager.create(projectDir, agentDir);
+			expect(negative.getMaxHistoricalImages()).toBeUndefined();
+
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ images: { maxHistoricalImages: 1.5 } }));
+			const fractional = SettingsManager.create(projectDir, agentDir);
+			expect(fractional.getMaxHistoricalImages()).toBeUndefined();
+		});
 	});
 
 	describe("project settings directory creation", () => {
