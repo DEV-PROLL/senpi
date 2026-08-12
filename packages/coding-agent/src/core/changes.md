@@ -7,6 +7,8 @@
 - `BUILT_IN_PROVIDER_DISPLAY_NAMES` maps `opengateway` to `OpenGateway`, which makes the new
   built-in provider API-key eligible in the `/login` and `/logout` selectors on both the TUI and
   RPC provider lists.
+- `defaultModelPerProvider` gains the required `opengateway` entry (`moonshotai/kimi-k3`) so the
+  exhaustive `Record<KnownProvider, string>` map stays total.
 
 ### Why
 
