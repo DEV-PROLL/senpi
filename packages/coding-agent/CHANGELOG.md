@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- External-editor tests now recover from transient process-launch pressure
+  while preserving the distinction between an editor that failed to launch
+  and one that launched and exited unsuccessfully
+  ([#827](https://github.com/code-yeongyu/senpi/pull/827)).
+
 - `/btw` side queries now budget captured session context against the selected model's window instead of replaying the
   full snapshot, so large sessions no longer fail with a context-window overflow ([#826](https://github.com/code-yeongyu/senpi/pull/826)).
 
