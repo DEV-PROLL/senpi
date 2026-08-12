@@ -13,6 +13,20 @@
   ([#828](https://github.com/code-yeongyu/senpi/pull/828),
   oh-my-openagent#6784).
 
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Removed
+
+## [2026.8.12] - 2026-08-12
+
+### Fixed
+
 - External-editor tests now recover from transient process-launch pressure
   while preserving the distinction between an editor that failed to launch
   and one that launched and exited unsuccessfully
