@@ -514,12 +514,17 @@ export default function compactionExtension(
 
 	pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx) => {
 		const claimedWarmJob = claimWarmSummaryForCoreRoute(event, ctx);
+		// A claim detaches the job without aborting it, so every path that leaves
+		// without consuming the result must still stop the request it is paying for.
+		const releaseUnusedWarmJob = () => claimedWarmJob?.controller.abort();
 		invalidateSpeculativeCompaction(ctx);
 		if (lanePolicy.disablesSenpiCompaction(ctx)) {
+			releaseUnusedWarmJob();
 			return { cancel: true, reason: SDK_NATIVE_LANE_REJECTION_REASON };
 		}
 		if (cap.shouldRejectByCap(state).cancel) {
 			getLogger(ctx).debug("skip_cap", { reason: event.reason, count: state.acceptedAbsolute });
+			releaseUnusedWarmJob();
 			return {
 				cancel: true,
 				rejectionCause: "per-turn-cap",
@@ -530,6 +535,7 @@ export default function compactionExtension(
 		if (breaker.isTripped(state, now) && !breaker.shouldBypass(state, { reason: event.reason })) {
 			const remainingMs = state.trippedAt !== null ? Math.max(0, state.trippedAt + breaker.COOLDOWN_MS - now) : 0;
 			getLogger(ctx).debug("skip_breaker", { reason: event.reason, remainingSec: Math.ceil(remainingMs / 1000) });
+			releaseUnusedWarmJob();
 			return {
 				cancel: true,
 				rejectionCause: "circuit-breaker",
@@ -540,7 +546,10 @@ export default function compactionExtension(
 		capturePendingMetadata(event.requestId, ctx);
 
 		const model = ctx.model;
-		if (!model) return undefined;
+		if (!model) {
+			releaseUnusedWarmJob();
+			return undefined;
+		}
 		const remoteCompaction = await runOpenAiRemoteCompaction(
 			ctx,
 			event,
@@ -549,6 +558,7 @@ export default function compactionExtension(
 		);
 		if (remoteCompaction) {
 			getLogger(ctx).debug("core_route_generated", { route: "core-route", requestId: event.requestId });
+			releaseUnusedWarmJob();
 			return { compaction: remoteCompaction };
 		}
 
