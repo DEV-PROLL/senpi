@@ -196,3 +196,32 @@
 - MEDIUM: `local-release.mjs`, around package order and private package policy.
 - HIGH: `build-binaries.sh`, around native dependency installation, Bun compile
   flags, embedded assets, target selection, and Darwin codesigning.
+# Claude Agent SDK native platform lock coverage
+
+## What changed
+
+- Added `generate-claude-agent-sdk-platform-lock.mjs` to materialize every native optional package declared by
+  the locked `@anthropic-ai/claude-agent-sdk` version into the root `package-lock.json`.
+- Added a platform-matrix regression that derives the required package names and exact versions from the SDK's
+  own lock entry instead of maintaining a second hard-coded list.
+- Wired the generator's offline `--check` mode into the root static-validation command.
+
+## Why
+
+- CI installs dependencies on each runner platform with lifecycle scripts disabled. The root lock contained only
+  the locally generated Darwin ARM64 SDK package, so Linux and Windows runners omitted the SDK's native Claude
+  executable and six OAuth suites bypassed their injected query boundary with `Native CLI binary ... not found`.
+- Keeping every SDK-declared optional in the lock lets npm select the matching binary on each runner without
+  enabling arbitrary dependency lifecycle scripts.
+
+## Why not an extension
+
+- Dependency resolution happens before Senpi or any extension can start. Only the repository lock generator and
+  CI validation can guarantee that npm has the platform package available during installation.
+
+## Expected conflict zones
+
+- `package-lock.json` entries for `@anthropic-ai/claude-agent-sdk-*`.
+- Root `package.json` static-check scripts.
+- Release/dependency lock tests under `scripts/`.
+
