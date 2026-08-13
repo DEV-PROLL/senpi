@@ -3,7 +3,7 @@ import type { ExtensionContext } from "@code-yeongyu/senpi";
 import type { AgentExecuteTool } from "./bridges/agent-bridge.ts";
 import type { EvalSchemaToolInfo } from "./bridges/schema-bridge.ts";
 import { type CompletionRequest, type CompletionResult, createCompletionHandler } from "./completion/handler.ts";
-import { defaultCodemodeSettings } from "./config/settings.ts";
+import { defaultCodemodeSettings, resolveHardLimitSeconds } from "./config/settings.ts";
 import { EvalNotifier } from "./extension/eval-notifier.ts";
 import { EVAL_CELLS_STATUS_KEY } from "./extension/eval-status.ts";
 import { EvalStatusTicker } from "./extension/eval-status-ticker.ts";
@@ -131,6 +131,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			settings: defaultCodemodeSettings,
 			cellManager: new EvalDetachedCellManager({
 				notifier,
+				hardLimitSeconds: resolveHardLimitSeconds(defaultCodemodeSettings),
 				onStatusChange: showDetachedCells,
 				onWakeSourceState: emitWakeSourceState,
 				...(options.now === undefined ? {} : { now: options.now }),
@@ -162,6 +163,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 		const cellManager = new EvalDetachedCellManager({
 			artifactsDir: runtime.artifactsDir,
 			notifier,
+			hardLimitSeconds: resolveHardLimitSeconds(runtime.settings),
 			onStatusChange: showDetachedCells,
 			onWakeSourceState: emitWakeSourceState,
 			...(options.now === undefined ? {} : { now: options.now }),
