@@ -1,5 +1,32 @@
 # changes
 
+## Merge concurrent main updates before release push (2026-08-13)
+
+### What changed
+
+- Release preparation now fetches `origin/main` after creating the verified
+  release tag and next-cycle commit.
+- If remote main advanced during the long release test transaction, the release
+  branch creates a normal merge commit before pushing `main`.
+- Added focused tests for advanced, already-contained, and dry-run paths.
+
+### Why
+
+- The release workflow can run for several minutes while other verified PRs
+  merge. A non-fast-forward main push previously failed after all release build
+  and test work had completed.
+- The release tag remains anchored to the already verified release commit;
+  only the post-release next-cycle branch absorbs concurrent main history.
+
+### Why an extension could not handle it
+
+- Git synchronization and tag/branch publication happen before any Senpi
+  runtime or extension is loaded.
+
+### Expected merge conflict zones
+
+- MEDIUM: the final tag/next-cycle/push sequence in `release.mjs`.
+
 ## Lock every Rolldown platform binding (2026-08-13)
 
 ### What changed
