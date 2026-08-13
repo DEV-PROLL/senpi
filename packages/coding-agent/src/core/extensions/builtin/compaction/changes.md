@@ -1,5 +1,36 @@
 # Builtin compaction extension changes
 
+## 2026-08-13 - Let the core route claim the idle warm summary
+
+### What changed
+
+- `session_before_compact` now attempts `claimWarmSummaryForCoreRoute()` BEFORE invalidating, and
+  returns the warm result as its `compaction` when the claim holds. The claim detaches the job
+  synchronously (before any `await`) so exactly one route can own it, and deliberately does NOT abort
+  its controller - aborting is what threw the already-paid summarization away.
+- A claim requires: no custom instructions (manual compaction keeps its own wording), a speculative
+  origin, the same model identity, a valid `WarmAnchorSnapshot` against the event branch, and a
+  boundary equal to the core preparation's `firstKeptEntryId`. Anything else falls through to the
+  existing fresh generation, unchanged.
+- The claimed job's generation is logged as `warm_consumed` with `route: "core-route"`.
+
+### Why
+
+On a new prompt the ordering is deterministic, not a race: `_enforceCompactionBeforeProvider` runs
+before `emitBeforeAgentStart`, so the CORE route always reaches compaction first. Its handler called
+`invalidateSpeculativeCompaction()` as its first statement, so the idle warm-up - whose entire purpose
+is to keep summarization off the user's critical path - was destroyed and re-billed exactly when it
+was needed. PR #853 fixed the extension route only; this closes the other half.
+
+### Why an extension could not do it
+
+The warm job lives in this extension, but the route that discarded it is the core-driven
+`session_before_compact` emission; the fix has to happen inside that handler.
+
+### Expected merge-conflict zones
+
+- `index.ts` `session_before_compact` handler head and the block preceding core-route snapshot creation.
+
 ## 2026-08-13 - Anchor warm summaries to the summarized prefix
 
 ### What changed

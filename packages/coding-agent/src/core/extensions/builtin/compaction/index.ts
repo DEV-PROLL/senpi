@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
+import { createWarmAnchorSnapshot, isWarmSummaryAnchorValid } from "../../../compaction/warm-anchor.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type {
 	ContextUsage,
@@ -265,6 +266,47 @@ export default function compactionExtension(
 		});
 	}
 
+	function isSameModelIdentity(
+		left: SpeculativeCompactionSnapshot["model"],
+		right: ExtensionContext["model"],
+	): boolean {
+		return (
+			right !== undefined &&
+			left.api === right.api &&
+			left.provider === right.provider &&
+			left.id === right.id &&
+			left.baseUrl === right.baseUrl &&
+			left.contextWindow === right.contextWindow
+		);
+	}
+
+	/**
+	 * Detach the warm job for the core route before any `await`, so exactly one
+	 * claimant can own it. The controller is deliberately NOT aborted: the whole
+	 * point is to keep the already-paid summarization alive and hand its result to
+	 * core, and clearing the reference is what stands the idle-retry watcher down.
+	 */
+	function claimWarmSummaryForCoreRoute(
+		event: SessionBeforeCompactEvent,
+		ctx: ExtensionContext,
+	): typeof speculativeJob {
+		const job = speculativeJob;
+		if (!job) return undefined;
+		if (event.customInstructions !== undefined) return undefined;
+		if (job.snapshot.origin !== "speculative") return undefined;
+		if (job.snapshot.preparation.firstKeptEntryId !== event.preparation.firstKeptEntryId) return undefined;
+		if (!isSameModelIdentity(job.snapshot.model, ctx.model)) return undefined;
+		const anchor = createWarmAnchorSnapshot(
+			job.snapshot.preparation.firstKeptEntryId,
+			job.snapshot.branchEntries ?? [],
+		);
+		if (!anchor || !isWarmSummaryAnchorValid(anchor, event.branchEntries ?? ctx.sessionManager.getBranch())) {
+			return undefined;
+		}
+		speculativeJob = undefined;
+		return job;
+	}
+
 	function invalidateSpeculativeCompaction(ctx: ExtensionContext): void {
 		const previousGeneration = speculativeGeneration;
 		speculativeGeneration++;
@@ -471,6 +513,7 @@ export default function compactionExtension(
 	}
 
 	pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx) => {
+		const claimedWarmJob = claimWarmSummaryForCoreRoute(event, ctx);
 		invalidateSpeculativeCompaction(ctx);
 		if (lanePolicy.disablesSenpiCompaction(ctx)) {
 			return { cancel: true, reason: SDK_NATIVE_LANE_REJECTION_REASON };
@@ -507,6 +550,22 @@ export default function compactionExtension(
 		if (remoteCompaction) {
 			getLogger(ctx).debug("core_route_generated", { route: "core-route", requestId: event.requestId });
 			return { compaction: remoteCompaction };
+		}
+
+		if (claimedWarmJob) {
+			const unlinkAbort = linkAbortSignal(event.signal, claimedWarmJob.controller);
+			let warmCompaction: CompactionResult | undefined;
+			let warmFailure: Error | undefined;
+			try {
+				warmCompaction = await claimedWarmJob.promise;
+				warmFailure = await claimedWarmJob.failure;
+			} finally {
+				unlinkAbort();
+			}
+			if (warmFailure === undefined && warmCompaction && !event.signal.aborted) {
+				getLogger(ctx).debug("warm_consumed", { generation: claimedWarmJob.generation, route: "core-route" });
+				return { compaction: warmCompaction };
+			}
 		}
 
 		const snapshot = {
