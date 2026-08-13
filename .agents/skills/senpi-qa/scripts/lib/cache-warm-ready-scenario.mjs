@@ -24,6 +24,7 @@ const TURNS = [
 	{ text: "Continuation check-in: still watching." },
 ];
 const PROMPT = "Create a goal and keep watching the monitor.";
+const PROVIDER_ENV_CANARY_KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 
 export async function runCacheWarmReadyScenario() {
 	installCleanupHooks();
@@ -32,6 +33,7 @@ export async function runCacheWarmReadyScenario() {
 	const evidence = sharedEvidenceDir(root);
 	const cleanup = createCleanupState();
 	const startedAt = new Date().toISOString();
+	const restoreProviderCanaries = installProviderEnvCanaries();
 	try {
 		const rpc = await runRpcSurface({ cleanup, evidence });
 		const tui = await runTuiSurface({ cleanup, evidence, root });
@@ -43,6 +45,8 @@ export async function runCacheWarmReadyScenario() {
 		);
 		process.stdout.write(`PASS cache-warm-ready-rpc-tui (evidence: ${evidence})\n`);
 	} finally {
+		restoreProviderCanaries();
+		cleanup.providerCanariesRestored = true;
 		writeFileSync(join(evidence, "cleanup.json"), `${JSON.stringify(cleanup, null, 2)}\n`);
 		if (Object.values(cleanup).some((done) => !done)) {
 			process.stderr.write(`CLEANUP_INCOMPLETE: ${JSON.stringify(cleanup)}\n`);
@@ -60,6 +64,20 @@ function createCleanupState() {
 		rpcSandboxRemoved: false,
 		tuiSandboxRemoved: false,
 		authUnchanged: false,
+		providerCanariesRestored: false,
+	};
+}
+
+function installProviderEnvCanaries() {
+	const previous = new Map(PROVIDER_ENV_CANARY_KEYS.map((key) => [key, process.env[key]]));
+	for (const key of PROVIDER_ENV_CANARY_KEYS) {
+		process.env[key] = "senpi-qa-provider-env-canary";
+	}
+	return () => {
+		for (const [key, value] of previous) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
 	};
 }
 
