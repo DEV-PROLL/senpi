@@ -6,6 +6,8 @@
 
 ### Added
 
+- Gave every eval cell a wall-clock hard limit (`hardLimitSeconds`, default 1800s, overridable with `SENPI_CODEMODE_HARD_LIMIT_SECONDS`) so a detached or tool-call-heavy cell can no longer run unbounded: the deadline survives `detach()` and is never paused by bridge tool calls, and a cell it kills reports itself to the agent as killed at the hard limit ([#857](https://github.com/code-yeongyu/senpi/pull/857)).
+
 ### Changed
 
 ### Fixed
