@@ -11,7 +11,8 @@ npm warn Unknown user config "auto-install-peers". This will stop working in the
     "id": "@code-yeongyu/senpi-telemetry@2026.8.13",
     "filename": "code-yeongyu-senpi-telemetry-2026.8.13.tgz"
   }
-]`;
+]
+npm warn Unknown project config "legacy-peer-deps". This will stop working in the next major version of npm.`;
 
 		assert.deepEqual(parseNpmPackJson(output), [
 			{
