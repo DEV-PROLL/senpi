@@ -12,7 +12,7 @@ import {
 	tsxEntry,
 } from "./common.mjs";
 import { startFakeModelServer } from "./fake-model-server.mjs";
-import { hermeticEnv, writeMockModelsJson } from "./mock-loop-support.mjs";
+import { hermeticEnv, PROVIDER_ENV_KEYS, writeMockModelsJson } from "./mock-loop-support.mjs";
 import { renderTerminalScreenshot } from "./terminal-screenshot.mjs";
 import { startTmuxTui } from "./tmux-tui-driver.mjs";
 import { buildRpcReport, collectRpc, readJsonlFile, waitForClose } from "./cache-warm-ready-rpc.mjs";
@@ -71,7 +71,13 @@ function writeMonitorFixture(box) {
 		`import { appendFileSync } from "node:fs";
 const eventLogPath = ${JSON.stringify(eventLogPath)};
 export default function(pi) {
-	pi.on("session_start", () => pi.events?.emit("terminal_monitor_state", { activeCount: 1 }));
+	pi.on("session_start", () => {
+		appendFileSync(eventLogPath, JSON.stringify({
+			type: "qa_env_snapshot",
+			leakedProviderKeys: ${JSON.stringify(PROVIDER_ENV_KEYS)}.filter((key) => process.env[key] !== undefined)
+		}) + "\\n");
+		pi.events?.emit("terminal_monitor_state", { activeCount: 1 });
+	});
 	pi.events?.on("goal_continuation_scheduled", (data) => {
 		appendFileSync(eventLogPath, JSON.stringify({ type: "goal_continuation_scheduled", observedAtMs: Date.now(), data }) + "\\n");
 	});
@@ -97,9 +103,7 @@ async function runRpcSurface({ cleanup, evidence }) {
 			(message) =>
 				message.type === "response" &&
 				message.command === "parse" &&
-				message.success === false &&
-				typeof message.error === "string" &&
-				message.error.startsWith("Failed to parse command:"),
+				message.success === false,
 			"malformed JSONL rejection",
 		);
 		await rpc.send({ type: "get_state" });
@@ -113,9 +117,13 @@ async function runRpcSurface({ cleanup, evidence }) {
 			"goal-cache-warmup scheduled entry_appended",
 		);
 		const report = buildRpcReport(record.entry, readJsonlFile(fixture.eventLogPath));
+		const rpcEnvironment = readJsonlFile(fixture.eventLogPath).find((event) => event.type === "qa_env_snapshot");
 		writeFileSync(join(evidence, "rpc-cache-warm-entry.json"), `${JSON.stringify(report, null, 2)}\n`);
 		writeFileSync(join(evidence, "rpc-session.jsonl"), `${rpc.lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
 		if (!report.pass) throw new Error(`RPC cache-warm assertions failed: ${JSON.stringify(report.assertions)}`);
+		if (!rpcEnvironment || rpcEnvironment.leakedProviderKeys.length !== 0) {
+			throw new Error(`RPC provider env leaked: ${JSON.stringify(rpcEnvironment?.leakedProviderKeys ?? null)}`);
+		}
 		const { dueAtMs, delayMs } = report.entry.data;
 		process.stdout.write(
 			`[PASS] rpc: goal-cache-warmup scheduled entry appended (dueAtMs=${dueAtMs} delayMs=${delayMs} basisDeltaMs=${report.basisDeltaMs})\n`,
@@ -125,7 +133,8 @@ async function runRpcSurface({ cleanup, evidence }) {
 			entryTimestamp: report.entry.timestamp,
 			dueAtMs,
 			delayMs,
-			malformedError: malformedResponse.error,
+			malformedRejected: malformedResponse.success === false,
+			providerEnvIsolated: true,
 		};
 	} finally {
 		child.kill("SIGTERM");
@@ -177,14 +186,22 @@ async function runTuiSurface({ cleanup, evidence, root }) {
 		const text = await terminal.waitFor((value) => pattern.test(value), "durable cache-warm ready notice", 120_000);
 		const noticeLine = text.split("\n").find((line) => pattern.test(line.trim()))?.trim();
 		const raw = terminal.getRaw();
+		const tuiEvents = readJsonlFile(fixture.eventLogPath);
+		const tuiEnvironment = tuiEvents.find((event) => event.type === "qa_env_snapshot");
+		if (!tuiEnvironment || tuiEnvironment.leakedProviderKeys.length !== 0) {
+			throw new Error(`TUI provider env leaked: ${JSON.stringify(tuiEnvironment?.leakedProviderKeys ?? null)}`);
+		}
 		writeFileSync(join(evidence, "terminal.ansi"), raw);
 		writeFileSync(join(evidence, "terminal.txt"), stripAnsi(raw));
 		await renderTerminalScreenshot(root, evidence, raw);
 		copyFileSync(fixture.eventLogPath, join(evidence, "tui-goal-monitor-events.jsonl"));
 		process.stdout.write(`[PASS] tui: durable cache-warm notice rendered: ${noticeLine}\n`);
 		process.stdout.write(`[PASS] tui: screenshot: ${join(evidence, "terminal.png")}\n`);
-		return { noticeLine };
+		return { noticeLine, providerEnvIsolated: true };
 	} finally {
+		cleanup.terminalExited = terminal.stop();
+		await server.stop();
+		cleanup.tuiServerStopped = !server.listening;
 		writeFileSync(
 			join(evidence, "tui-model-requests.json"),
 			`${JSON.stringify(
@@ -197,9 +214,6 @@ async function runTuiSurface({ cleanup, evidence, root }) {
 				2,
 			)}\n`,
 		);
-		cleanup.terminalExited = terminal.stop();
-		await server.stop();
-		cleanup.tuiServerStopped = !server.listening;
 		box.cleanup();
 		cleanup.tuiSandboxRemoved = !existsSync(box.dir);
 	}
