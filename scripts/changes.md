@@ -1,5 +1,29 @@
 # changes
 
+## Build telemetry before its consumers (2026-08-13)
+
+### What changed
+
+- Moved AI into the build phase after telemetry, and agent into the following
+  phase after AI.
+- Strengthened the build-order regression so direct workspace dependencies must
+  be in strictly later phases instead of merely the same phase.
+
+### Why
+
+- Release preparation runs `npm run clean` before its second workspace build.
+  With telemetry and AI in the same parallel phase, AI could resolve telemetry
+  before `dist/index.d.ts` existed and fail deterministically on a clean runner.
+
+### Why an extension could not handle it
+
+- Workspace compilation order is release/build tooling that runs before the
+  Senpi runtime or extension loader exists.
+
+### Expected merge conflict zones
+
+- LOW: `BUILD_PHASES` and its dependency-order assertions.
+
 ## Install the compiler used by workspace builds (2026-08-13)
 
 ### What changed
