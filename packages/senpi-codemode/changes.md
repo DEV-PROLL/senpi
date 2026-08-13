@@ -1,5 +1,34 @@
 # senpi-codemode fork changes
 
+## Eval cell hard limit (2026-08-13)
+
+### What changed
+
+- A cell now carries a wall-clock kill deadline resolved from the new `hardLimitSeconds` setting
+  (default 1800s, `SENPI_CODEMODE_HARD_LIMIT_SECONDS` override), raised per call by an explicit
+  larger `timeout`.
+- `EvalDetachedCellManager` arms that deadline when the cell is created and clears it only on
+  settlement, so it survives `detach()` and is never paused by bridge tool calls. On expiry the cell
+  is interrupted, settles as cancelled, and the detached-cell notification tells the main agent it
+  was killed at the hard limit.
+
+### Why
+
+- `cellTimeoutSeconds` only feeds the idle watchdog: `CellExecution.detach()` disposes that watchdog
+  and `withBridgeTimeoutPause` pauses it for the whole duration of every host tool call, so a
+  detached or tool-call-heavy cell had no upper bound at all — one observed cell ran 1h13m. The bash
+  tool has enforced a kill deadline since `bash-timeout/timeout.ts`; eval now matches it.
+
+### Why this cannot be expressed externally
+
+- Cell lifetime, kernel interruption, and the detached-cell notification queue all live inside the
+  package; an extension cannot observe a detached cell, let alone kill it.
+
+### Expected merge conflict zones
+
+- MEDIUM in `src/tool/detached-cell-manager.ts` around cell creation and settlement.
+- LOW in `src/config/settings.ts` schema/defaults and the prompt timeout wording.
+
 ## Compiled binary runner sidecar resolution (2026-08-11)
 
 ### What changed

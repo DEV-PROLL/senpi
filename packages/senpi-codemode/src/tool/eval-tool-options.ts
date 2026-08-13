@@ -19,6 +19,8 @@ export interface CreateEvalToolOptions {
 	readonly enabledLanguages: EnabledEvalLanguages;
 	readonly kernelManager: EvalKernelManager;
 	readonly cellTimeoutSeconds: number;
+	/** Wall-clock kill deadline applied to every cell; only used when this factory creates its own manager. */
+	readonly hardLimitSeconds?: number;
 	readonly executeTool: ExecuteTool;
 	readonly listTools?: () => readonly EvalSchemaToolInfo[];
 	readonly complete?: (request: CompletionRequest, ctx: ExtensionContext) => Promise<CompletionResult>;
