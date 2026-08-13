@@ -5,11 +5,17 @@
 ### What changed
 
 - `applyGeneratedCompaction` no longer discards a warm summary on message-revision
-  inequality alone. When the revision moved, it validates the snapshot's
-  `preparation.firstKeptEntryId` against the current branch (`warm-anchor.ts`) and applies
-  the warm result while the summarized prefix is unchanged.
-- That path passes `expectedFirstKeptEntryId` instead of `expectedRevision`, so the core
-  compare-and-apply gate re-validates the same anchor before mutating the transcript.
+  inequality alone. When the revision moved, it builds a warm-anchor snapshot from
+  `preparation.firstKeptEntryId` (`core/compaction/warm-anchor.ts`) and applies the warm
+  result while the summarized prefix is unchanged.
+- That path passes `expectedWarmAnchor` instead of `expectedRevision`, and the core
+  compare-and-apply gate re-validates it with the SAME shared validator before mutating the
+  transcript, so the two gates cannot drift apart.
+- The compaction boundary is compared by entry ID, never by array position. Compaction records
+  are appended after the entries they summarize, so a valid next-generation anchor routinely
+  precedes the boundary it updates, and sibling branches can hold different boundaries at the
+  same index. A positional rule silently rejected every warm summary in an already-compacted
+  session while still admitting a cross-branch boundary.
 
 ### Why
 

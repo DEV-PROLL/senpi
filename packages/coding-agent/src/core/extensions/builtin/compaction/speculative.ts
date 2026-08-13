@@ -31,6 +31,11 @@ import {
 	StreamDurationBudgetError,
 	StreamIdleTimeoutError,
 } from "../../../compaction/stream-watchdog.ts";
+import {
+	createWarmAnchorSnapshot,
+	isWarmSummaryAnchorValid,
+	type WarmAnchorSnapshot,
+} from "../../../compaction/warm-anchor.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type { ModelRegistry } from "../../../model-registry.ts";
 import type { ReadonlySessionManager } from "../../../session-manager.ts";
@@ -50,7 +55,6 @@ import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
 import { allowSummarizationRetry, DEFAULT_SUMMARIZATION_RETRY_POLICY } from "./summarization-retry.ts";
 import { extractTaskIntent, resolveInheritedTaskIntent } from "./task-intent.ts";
 import * as truncation from "./tool-truncation.ts";
-import { isWarmSummaryAnchorValid } from "./warm-anchor.ts";
 import { computeStructuralYield } from "./yield.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
@@ -80,7 +84,7 @@ export interface SpeculativeCompactionContext {
 		options: {
 			reason: "extension";
 			expectedRevision?: number;
-			expectedFirstKeptEntryId?: string;
+			expectedWarmAnchor?: WarmAnchorSnapshot;
 			signal?: AbortSignal;
 		},
 	): Promise<ApplyCompactionResult>;
@@ -636,21 +640,19 @@ export async function applyGeneratedCompaction(
 	}
 
 	const revisionUnchanged = snapshot.expectedRevision === context.getMessageRevision();
+	const warmAnchor = createWarmAnchorSnapshot(snapshot.preparation.firstKeptEntryId, snapshot.branchEntries ?? []);
 	if (
 		!revisionUnchanged &&
-		!isWarmSummaryAnchorValid(
-			{ firstKeptEntryId: snapshot.preparation.firstKeptEntryId, branchEntries: snapshot.branchEntries },
-			context.sessionManager.getBranch(),
-		)
+		(!warmAnchor || !isWarmSummaryAnchorValid(warmAnchor, context.sessionManager.getBranch()))
 	) {
 		return { applied: false, reason: "stale" };
 	}
 
 	return await context.applyCompaction(compaction, {
 		reason: "extension",
-		...(revisionUnchanged
+		...(revisionUnchanged || !warmAnchor
 			? { expectedRevision: snapshot.expectedRevision }
-			: { expectedFirstKeptEntryId: snapshot.preparation.firstKeptEntryId }),
+			: { expectedWarmAnchor: warmAnchor }),
 		signal,
 	});
 }

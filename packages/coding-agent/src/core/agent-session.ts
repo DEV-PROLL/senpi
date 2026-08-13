@@ -80,6 +80,7 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { CompactionLifecycleCoordinator, type CompactionLifecycleState } from "./compaction/lifecycle.ts";
+import { isWarmSummaryAnchorValid } from "./compaction/warm-anchor.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "./dynamic-prompt/index.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
@@ -4059,15 +4060,11 @@ export class AgentSession {
 		if (options.expectedRevision !== undefined && options.expectedRevision !== this._messageRevision) {
 			return { applied: false, reason: "stale" };
 		}
-		if (options.expectedFirstKeptEntryId !== undefined) {
-			const branchEntries = this.sessionManager.getBranch();
-			const anchorIndex = branchEntries.findIndex((entry) => entry.id === options.expectedFirstKeptEntryId);
-			const latestCompaction = getLatestCompactionEntry(branchEntries);
-			const latestCompactionIndex =
-				latestCompaction === null ? -1 : branchEntries.findIndex((entry) => entry.id === latestCompaction.id);
-			if (anchorIndex === -1 || latestCompactionIndex > anchorIndex) {
-				return { applied: false, reason: "stale" };
-			}
+		if (
+			options.expectedWarmAnchor !== undefined &&
+			!isWarmSummaryAnchorValid(options.expectedWarmAnchor, this.sessionManager.getBranch())
+		) {
+			return { applied: false, reason: "stale" };
 		}
 
 		const ownsController = this._compactionAbortController === undefined;

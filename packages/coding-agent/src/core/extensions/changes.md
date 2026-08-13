@@ -4,8 +4,10 @@
 
 ### What changed
 
-- `ApplyCompactionOptions` gains optional `expectedFirstKeptEntryId`, a content anchor the host
-  accepts as an alternative to `expectedRevision` when admitting a precomputed compaction.
+- `ApplyCompactionOptions` gains optional `expectedWarmAnchor` (`WarmAnchorSnapshot` from
+  `core/compaction/warm-anchor.ts`): the anchor entry id, the prefix entry ids it covers, and the
+  latest compaction entry id observed when the summary was generated. The host accepts it as an
+  alternative to `expectedRevision` when admitting a precomputed compaction.
 
 ### Why
 
