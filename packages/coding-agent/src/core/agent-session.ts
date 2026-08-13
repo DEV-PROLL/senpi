@@ -80,6 +80,7 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { CompactionLifecycleCoordinator, type CompactionLifecycleState } from "./compaction/lifecycle.ts";
+import { isWarmSummaryAnchorValid } from "./compaction/warm-anchor.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "./dynamic-prompt/index.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
@@ -4056,6 +4057,12 @@ export class AgentSession {
 			return { applied: false, reason: "stale" };
 		}
 		if (options.expectedRevision !== undefined && options.expectedRevision !== this._messageRevision) {
+			return { applied: false, reason: "stale" };
+		}
+		if (
+			options.expectedWarmAnchor !== undefined &&
+			!isWarmSummaryAnchorValid(options.expectedWarmAnchor, this.sessionManager.getBranch())
+		) {
 			return { applied: false, reason: "stale" };
 		}
 

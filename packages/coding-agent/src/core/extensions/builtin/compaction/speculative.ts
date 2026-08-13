@@ -31,6 +31,11 @@ import {
 	StreamDurationBudgetError,
 	StreamIdleTimeoutError,
 } from "../../../compaction/stream-watchdog.ts";
+import {
+	createWarmAnchorSnapshot,
+	isWarmSummaryAnchorValid,
+	type WarmAnchorSnapshot,
+} from "../../../compaction/warm-anchor.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type { ModelRegistry } from "../../../model-registry.ts";
 import type { ReadonlySessionManager } from "../../../session-manager.ts";
@@ -76,7 +81,12 @@ export interface SpeculativeCompactionContext {
 	prepareProviderRequest?(messages: AgentMessage[]): Promise<ProviderRequestPreparation>;
 	applyCompaction(
 		precomputed: CompactionResult,
-		options: { reason: "extension"; expectedRevision: number; signal?: AbortSignal },
+		options: {
+			reason: "extension";
+			expectedRevision?: number;
+			expectedWarmAnchor?: WarmAnchorSnapshot;
+			signal?: AbortSignal;
+		},
 	): Promise<ApplyCompactionResult>;
 }
 
@@ -625,13 +635,24 @@ export async function applyGeneratedCompaction(
 ): Promise<SpeculativeCompactionResult> {
 	if (!snapshot || !compaction) return { applied: false, reason: "unavailable" };
 
-	if (snapshot.generation !== getCurrentGeneration() || snapshot.expectedRevision !== context.getMessageRevision()) {
+	if (snapshot.generation !== getCurrentGeneration()) {
+		return { applied: false, reason: "stale" };
+	}
+
+	const revisionUnchanged = snapshot.expectedRevision === context.getMessageRevision();
+	const warmAnchor = createWarmAnchorSnapshot(snapshot.preparation.firstKeptEntryId, snapshot.branchEntries ?? []);
+	if (
+		!revisionUnchanged &&
+		(!warmAnchor || !isWarmSummaryAnchorValid(warmAnchor, context.sessionManager.getBranch()))
+	) {
 		return { applied: false, reason: "stale" };
 	}
 
 	return await context.applyCompaction(compaction, {
 		reason: "extension",
-		expectedRevision: snapshot.expectedRevision,
+		...(revisionUnchanged || !warmAnchor
+			? { expectedRevision: snapshot.expectedRevision }
+			: { expectedWarmAnchor: warmAnchor }),
 		signal,
 	});
 }
