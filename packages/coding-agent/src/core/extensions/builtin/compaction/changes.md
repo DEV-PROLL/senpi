@@ -1,5 +1,48 @@
 # Builtin compaction extension changes
 
+## Stand the idle warm-up watcher down on a retired generation (2026-08-13)
+
+### What changed
+
+- `index.ts` gained `isContextRetired(ctx)`, and `armIdleWarmupRetry` now consults it in BOTH continuations that
+  outlive the runner generation that armed them: the `job.failure` continuation and the armed retry `setTimeout`.
+- `index.ts` registers a `session_shutdown` handler that cancels the pending warm-up timer, resets the attempt
+  counter, and aborts the in-flight speculative job.
+
+### Why
+
+- `AgentSession.reload()` retires the old extension generation (`oldExtensionRunner.invalidate("stale extension
+  generation after reload")`), after which every `ExtensionContext` getter throws. The warm-up watcher outlived that
+  invalidation and read the retired context anyway, and neither call site had a caller left to receive the throw:
+  the failure continuation is spawned with `void` (an unhandled rejection) and the timer callback throws straight
+  into the timer queue. Interactive mode promotes that to `uncaughtCrash`, so a reload landing inside the warm-up
+  retry window killed the CLI with:
+
+  ```
+  pi exiting due to uncaughtException:
+  Error: stale extension generation after reload
+      at ExtensionRunner.assertActive (core/extensions/runner.js)
+      at Object.getContextUsage (core/extensions/runner.js)
+      at core/extensions/builtin/compaction/index.js
+  ```
+
+- `session_shutdown` fires on the reload path BEFORE the invalidation, so tearing the watcher down there is the
+  deterministic fix; `isContextRetired` remains the backstop for any path that retires a generation without
+  emitting the event.
+- The probe reads a getter inside `try`/`catch` because `ExtensionContext` deliberately exposes no liveness flag.
+  Adding one is a public-API change that this crash does not justify.
+
+### Why an extension could not do this
+
+- This is the builtin extension's own private warm-up watcher. No external extension can observe, cancel, or guard
+  another extension's armed timer or in-flight summarization continuation.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `index.ts` `armIdleWarmupRetry` (both guard sites) — upstream has no such watcher, so a sync that
+  rewrites this function will drop the guards.
+- LOW: the trailing `session_shutdown` handler at the end of the extension factory.
+
 ## 2026-08-13 - Let the core route claim the idle warm summary
 
 ### What changed

@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- A session reload no longer crashes the CLI while a compaction idle warm-up retry is pending. The warm-up watcher
+  armed after a transient summarization failure kept reading its `ExtensionContext` after `reload()` retired that
+  extension generation, and the resulting `stale extension generation after reload` escaped as an unhandled
+  rejection from the failure continuation and as an `uncaughtException` from the armed retry timer, killing the
+  process. The watcher now stands down on `session_shutdown` and re-checks that its generation is still live before
+  either continuation touches the context
+  ([#865](https://github.com/code-yeongyu/senpi/pull/865)).
+
 - Every registry package source is now private, and every scripted release-publication entrypoint fails
   closed outside the trusted GitHub Actions path, preventing direct or scripted npm publication without
   provenance attestations.
