@@ -4,11 +4,31 @@
 
 ### Breaking Changes
 
+- Replaced the legacy harness session model with the lane-based `Session`, `SessionStorage`, and `SessionRepo`
+  APIs, including durable operation records, global facts, shared sequence numbers, and tree-scoped lane views.
+- Promoted `AgentHarness` v2 and the new session API to the default export, removed the experimental subpaths,
+  and removed the legacy JSONL and in-memory repository APIs.
+- Required harness file-system implementations to provide atomic same-filesystem `renameFile()` semantics.
+
 ### Added
+
+- Added typed AI-request and harness telemetry schemas, reusable callbacks, and a generated schema reference.
+- Added bounded branch-entry queries, indexed open-operation recovery, a compile-complete `AgentHarness` v2
+  scaffold, and the append-only v4 `JsonlSessionRepo`.
+- Added `AgentOptions.shouldStopAfterTurn`, arbitrary OpenAI-compatible `samplingParams` proxy forwarding, and
+  blocked-tool `terminate` handling for all-terminating batches.
 
 ### Changed
 
+- Backfilled the durable `AgentHarness` design docs (`docs/harness.md`, `docs/harness-v2.md`) from upstream
+  v0.83.0; upstream v0.82.1 and v0.83.0 shipped no other agent-package changes.
+
 ### Fixed
+
+- Fixed `Agent.reset()` mutating transcript and runtime state during active runs; reset now rejects until idle.
+- Fixed Windows path handling for execution-environment basenames, recursive skill loading, and prompt templates.
+- Fixed JSONL session IDs being treated as globally unique across working directories.
+- Fixed JSONL forks and torn-tail repairs publishing non-atomically after interrupted writes.
 
 ### Removed
 

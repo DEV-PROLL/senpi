@@ -1,5 +1,29 @@
 # changes
 
+## Brand-aware offline package management (2026-08-13)
+
+### What changed
+
+- Kept the package manager's offline gate routed through
+  `envValue("OFFLINE")` instead of reading `PI_OFFLINE` directly.
+- Kept `downloadFile` typed against Node's readable-stream interface rather
+  than an untyped response body.
+
+### Why
+
+- Senpi supports branded environment prefixes while retaining upstream
+  compatibility, and package downloads need a concrete stream contract.
+
+### Why an extension could not handle it
+
+- Package installation and self-update execute before extension loading and own
+  the process environment and download pipeline.
+
+### Expected merge conflict zones
+
+- LOW: `tools-manager.ts`, at the offline environment gate and `downloadFile`
+  response-body handling.
+
 ## Config-reload recursive watch option (2026-07-21)
 
 ### What changed

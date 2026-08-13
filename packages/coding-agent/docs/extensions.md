@@ -1,10 +1,10 @@
-> pi can create extensions. Ask it to build one for your use case.
+> senpi can create extensions. Ask it to build one for your use case.
 
 # Extensions
 
-Extensions are TypeScript modules that extend pi's behavior. They can subscribe to lifecycle events, register custom tools callable by the LLM, add commands, and more.
+Extensions are TypeScript modules that extend senpi's behavior. They can subscribe to lifecycle events, register custom tools callable by the LLM, add commands, and more.
 
-> **Placement for /reload:** Put extensions in `~/.pi/agent/extensions/` (global) or `.pi/extensions/` (project-local) for auto-discovery. Use `pi -e ./path.ts` only for quick tests. Extensions in auto-discovered locations can be hot-reloaded with `/reload`.
+> **Placement for /reload:** Put extensions in `~/.senpi/agent/extensions/` (global) or `.senpi/extensions/` (project-local) for auto-discovery. Use `senpi -e ./path.ts` only for quick tests. Extensions in auto-discovered locations can be hot-reloaded with `/reload`.
 
 **Key capabilities:**
 - **Custom tools** - Register tools the LLM can call via `pi.registerTool()`
@@ -58,7 +58,7 @@ See [examples/extensions/](../examples/extensions/) for working implementations.
 
 ## Quick Start
 
-Create `~/.pi/agent/extensions/my-extension.ts`:
+Create `~/.senpi/agent/extensions/my-extension.ts`:
 
 ```typescript
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -106,7 +106,7 @@ export default function (pi: ExtensionAPI) {
 Test with `--extension` (or `-e`) flag:
 
 ```bash
-pi -e ./my-extension.ts
+senpi -e ./my-extension.ts
 ```
 
 ## Bundled /fallback Command
@@ -149,14 +149,14 @@ Both builtins use `before_provider_request` to mutate the outgoing payload and r
 
 > **Security:** Extensions run with your full system permissions and can execute arbitrary code. Only install from sources you trust.
 
-Extensions are auto-discovered from trusted locations. Project-local `.pi/extensions` entries load only after the project is trusted.
+Extensions are auto-discovered from trusted locations. Project-local `.senpi/extensions` entries load only after the project is trusted.
 
 | Location | Scope |
 |----------|-------|
-| `~/.pi/agent/extensions/*.ts` | Global (all projects) |
-| `~/.pi/agent/extensions/*/index.ts` | Global (subdirectory) |
-| `.pi/extensions/*.ts` | Project-local |
-| `.pi/extensions/*/index.ts` | Project-local (subdirectory) |
+| `~/.senpi/agent/extensions/*.ts` | Global (all projects) |
+| `~/.senpi/agent/extensions/*/index.ts` | Global (subdirectory) |
+| `.senpi/extensions/*.ts` | Project-local |
+| `.senpi/extensions/*/index.ts` | Project-local (subdirectory) |
 
 Additional paths via `settings.json`:
 
@@ -173,7 +173,7 @@ Additional paths via `settings.json`:
 }
 ```
 
-To share extensions via npm or git as pi packages, see [packages.md](packages.md).
+To share extensions via npm or git as senpi packages, see [packages.md](packages.md).
 
 ## Available Imports
 
@@ -186,7 +186,7 @@ To share extensions via npm or git as pi packages, see [packages.md](packages.md
 
 npm dependencies work too. Add a `package.json` next to your extension (or in a parent directory), run `npm install`, and imports from `node_modules/` are resolved automatically.
 
-For distributed pi packages installed with `pi install` (npm or git), runtime deps must be in `dependencies`. Package installation uses production installs (`npm install --omit=dev`) by default, so `devDependencies` are not available at runtime; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers.
+For distributed senpi packages installed with `senpi install` (npm or git), runtime deps must be in `dependencies`. Package installation uses production installs (`npm install --omit=dev`) by default, so `devDependencies` are not available at runtime; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers.
 
 Node.js built-ins (`node:fs`, `node:path`, etc.) are also available.
 
@@ -217,7 +217,7 @@ export default function (pi: ExtensionAPI) {
 
 Extensions are loaded via [jiti](https://github.com/unjs/jiti), so TypeScript works without compilation.
 
-If the factory returns a `Promise`, pi awaits it before continuing startup. That means async initialization completes before `session_start`, before `resources_discover`, and before provider registrations queued via `pi.registerProvider()` are flushed.
+If the factory returns a `Promise`, senpi awaits it before continuing startup. That means async initialization completes before `session_start`, before `resources_discover`, and before provider registrations queued via `pi.registerProvider()` are flushed.
 
 ### Async factory functions
 
@@ -254,7 +254,7 @@ export default async function (pi: ExtensionAPI) {
 }
 ```
 
-This pattern makes the fetched models available during normal startup and to `pi --list-models`.
+This pattern makes the fetched models available during normal startup and to `senpi --list-models`.
 
 ### Long-lived resources and shutdown
 
@@ -267,14 +267,14 @@ Defer background resource startup until `session_start` or the command/tool/even
 **Single file** - simplest, for small extensions:
 
 ```
-~/.pi/agent/extensions/
+~/.senpi/agent/extensions/
 └── my-extension.ts
 ```
 
 **Directory with index.ts** - for multi-file extensions:
 
 ```
-~/.pi/agent/extensions/
+~/.senpi/agent/extensions/
 └── my-extension/
     ├── index.ts        # Entry point (exports default function)
     ├── tools.ts        # Helper module
@@ -284,7 +284,7 @@ Defer background resource startup until `session_start` or the command/tool/even
 **Package with dependencies** - for extensions that need npm packages:
 
 ```
-~/.pi/agent/extensions/
+~/.senpi/agent/extensions/
 └── my-extension/
     ├── package.json    # Declares dependencies and entry points
     ├── package-lock.json
@@ -314,7 +314,7 @@ Run `npm install` in the extension directory, then imports from `node_modules/` 
 ### Lifecycle Overview
 
 ```
-pi starts
+senpi starts
   │
   ├─► project_trust (user/global and CLI extensions only, before project resources load)
   ├─► session_start { reason: "startup" }
@@ -396,7 +396,7 @@ exit (Ctrl+C, Ctrl+D, SIGHUP, SIGTERM)
 
 #### project_trust
 
-Fired before pi decides whether to trust a project with dynamic configs (`.pi` or `.agents/skills`). It runs during startup and when session replacement (for example `/resume`) enters a cwd whose trust has not been resolved in the current process. Only user/global extensions and CLI `-e` extensions participate; project-local extensions are not loaded until after trust is resolved.
+Fired before senpi decides whether to trust a project with dynamic configs (`.senpi` or `.agents/skills`). It runs during startup and when session replacement (for example `/resume`) enters a cwd whose trust has not been resolved in the current process. Only user/global extensions and CLI `-e` extensions participate; project-local extensions are not loaded until after trust is resolved.
 
 ```typescript
 pi.on("project_trust", async (event, ctx) => {
@@ -409,7 +409,7 @@ pi.on("project_trust", async (event, ctx) => {
 });
 ```
 
-A `project_trust` handler must return `{ trusted: "yes" | "no" | "undecided" }`. A user/global or CLI extension that returns `"yes"` or `"no"` owns the decision; the first yes/no decision wins and suppresses the built-in trust prompt. Use `remember: true` to persist a yes/no decision; otherwise it applies only to the current process. Return `"undecided"` to let later handlers or the built-in trust flow decide. Check `ctx.hasUI` before prompting. If no handler returns yes/no, normal trust resolution continues: saved `trust.json` decisions apply first, then `defaultProjectTrust` controls whether pi asks, trusts, or declines by default.
+A `project_trust` handler must return `{ trusted: "yes" | "no" | "undecided" }`. A user/global or CLI extension that returns `"yes"` or `"no"` owns the decision; the first yes/no decision wins and suppresses the built-in trust prompt. Use `remember: true` to persist a yes/no decision; otherwise it applies only to the current process. Return `"undecided"` to let later handlers or the built-in trust flow decide. Check `ctx.hasUI` before prompting. If no handler returns yes/no, normal trust resolution continues: saved `trust.json` decisions apply first, then `defaultProjectTrust` controls whether senpi asks, trusts, or declines by default.
 
 ### Resource Events
 
@@ -473,7 +473,7 @@ pi.on("session_before_switch", async (event, ctx) => {
 });
 ```
 
-After a successful switch or new-session action, pi emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "new" | "resume"` and `previousSessionFile`.
+After a successful switch or new-session action, senpi emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "new" | "resume"` and `previousSessionFile`.
 Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `session_start`.
 
 #### session_before_fork
@@ -490,7 +490,7 @@ pi.on("session_before_fork", async (event, ctx) => {
 });
 ```
 
-After a successful fork or clone, pi emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "fork"` and `previousSessionFile`.
+After a successful fork or clone, senpi emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "fork"` and `previousSessionFile`.
 Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `session_start`.
 
 #### session_before_reload
@@ -613,13 +613,13 @@ pi.on("before_agent_start", async (event, ctx) => {
 });
 ```
 
-The `systemPromptOptions` field gives extensions access to the same structured data Pi uses to build the system prompt. This lets you inspect what Pi has loaded — custom prompts, guidelines, tool snippets, context files, skills — without re-discovering resources or re-parsing flags. Use it when your extension needs to make deep, informed changes to the system prompt while respecting user-provided configuration.
+The `systemPromptOptions` field gives extensions access to the same structured data senpi uses to build the system prompt. This lets you inspect what senpi has loaded — custom prompts, guidelines, tool snippets, context files, skills — without re-discovering resources or re-parsing flags. Use it when your extension needs to make deep, informed changes to the system prompt while respecting user-provided configuration.
 
 Inside `before_agent_start`, `event.systemPrompt` and `ctx.getSystemPrompt()` both reflect the chained system prompt as of the current handler. Later `before_agent_start` handlers can still modify it again.
 
 #### agent_start / agent_end / agent_settled
 
-`agent_start` fires when a low-level agent run begins. `agent_end` fires when that run ends, but Pi may still auto-retry, auto-compact and retry, or continue with queued follow-up messages. Use `agent_settled` for status integrations that need to know Pi will not continue running automatically.
+`agent_start` fires when a low-level agent run begins. `agent_end` fires when that run ends, but senpi may still auto-retry, auto-compact and retry, or continue with queued follow-up messages. Use `agent_settled` for status integrations that need to know senpi will not continue running automatically.
 
 ```typescript
 pi.on("agent_start", async (_event, ctx) => {});
@@ -730,7 +730,7 @@ pi.on("before_provider_headers", (event, ctx) => {
   // Add or override — e.g. a session id for gateway tracing/attribution
   event.headers["x-session-id"] = ctx.sessionManager.getSessionId();
 
-  // Drop a tracking header pi adds for this call
+  // Drop a tracking header senpi adds for this call
   event.headers["X-OpenRouter-Title"] = null;
 });
 ```
@@ -741,7 +741,7 @@ Runs once per provider request; retries reuse the same headers rather than re-fi
 
 Fired after the provider-specific payload is built, right before the request is sent. Handlers run in extension load order. Returning `undefined` keeps the payload unchanged. Returning any other value replaces the payload for later handlers and for the actual request.
 
-This hook can rewrite provider-level system instructions or remove them entirely. Those payload-level changes are not reflected by `ctx.getSystemPrompt()`, which reports Pi's system prompt string rather than the final serialized provider payload.
+This hook can rewrite provider-level system instructions or remove them entirely. Those payload-level changes are not reflected by `ctx.getSystemPrompt()`, which reports senpi's system prompt string rather than the final serialized provider payload.
 
 ```typescript
 pi.on("before_provider_request", (event, ctx) => {
@@ -814,7 +814,7 @@ Use this to update extension UI when `pi.setThinkingLevel()`, model changes, or 
 
 Fired after `tool_execution_start`, before the tool executes. **Can block.** Use `isToolCallEventType` to narrow and get typed inputs.
 
-Before `tool_call` runs, pi waits for previously emitted Agent events to finish draining through `AgentSession`. This means `ctx.sessionManager` is up to date through the current assistant tool-calling message.
+Before `tool_call` runs, senpi waits for previously emitted Agent events to finish draining through `AgentSession`. This means `ctx.sessionManager` is up to date through the current assistant tool-calling message.
 
 In the default parallel tool execution mode, sibling tool calls from the same assistant message are preflighted sequentially, then executed concurrently. `tool_call` is not guaranteed to see sibling tool results from that same assistant message in `ctx.sessionManager`.
 
@@ -824,7 +824,8 @@ Behavior guarantees:
 - Mutations to `event.input` affect the actual tool execution
 - Later `tool_call` handlers see mutations made by earlier handlers
 - No re-validation is performed after your mutation
-- Return values from `tool_call` only control blocking via `{ block: true, reason?: string }`
+- Return values from `tool_call` control blocking via `{ block: true, reason?: string, terminate?: boolean }`
+- `terminate` only applies to a blocked call; the agent stops early only when every finalized result in the batch is terminating
 
 ```typescript
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
@@ -840,7 +841,7 @@ pi.on("tool_call", async (event, ctx) => {
     event.input.command = `source ~/.profile\n${event.input.command}`;
 
     if (event.input.command.includes("rm -rf")) {
-      return { block: true, reason: "Dangerous command" };
+      return { block: true, reason: "Dangerous command", terminate: true };
     }
   }
 
@@ -925,7 +926,7 @@ pi.on("user_bash", (event, ctx) => {
   // Option 1: Provide custom operations (e.g., SSH)
   return { operations: remoteBashOps };
 
-  // Option 2: Wrap pi's built-in local bash backend
+  // Option 2: Wrap senpi's built-in local bash backend
   const local = createLocalBashOperations();
   return {
     operations: {
@@ -1060,7 +1061,7 @@ Use this for abort-aware nested work started by extension handlers, for example:
 - file or process helpers that accept `AbortSignal`
 
 `ctx.signal` is typically defined during active turn events such as `tool_call`, `tool_result`, `message_update`, and `turn_end`.
-It is usually `undefined` in idle or non-turn contexts such as session events, extension commands, and shortcuts fired while pi is idle.
+It is usually `undefined` in idle or non-turn contexts such as session events, extension commands, and shortcuts fired while senpi is idle.
 
 ```typescript
 pi.on("tool_result", async (event, ctx) => {
@@ -1077,11 +1078,11 @@ pi.on("tool_result", async (event, ctx) => {
 
 ### ctx.isIdle() / ctx.abort() / ctx.hasPendingMessages()
 
-Control flow helpers. `ctx.isIdle()` is false while Pi is processing an agent run, automatic retry, auto-compaction retry, or queued continuation.
+Control flow helpers. `ctx.isIdle()` is false while senpi is processing an agent run, automatic retry, auto-compaction retry, or queued continuation.
 
 ### ctx.shutdown()
 
-Request a graceful shutdown of pi.
+Request a graceful shutdown of senpi.
 
 - **Interactive mode:** Deferred until the agent becomes idle (after processing all queued steering and follow-up messages).
 - **RPC mode:** Deferred until the next idle state (after completing the current command response, when waiting for the next command).
@@ -1126,7 +1127,7 @@ ctx.compact({
 
 ### ctx.getSystemPrompt()
 
-Returns Pi's current system prompt string.
+Returns senpi's current system prompt string.
 
 - During `before_agent_start`, this reflects chained system-prompt changes made so far for the current turn.
 - It does not include later `context` message mutations.
@@ -1146,7 +1147,7 @@ Command handlers receive `ExtensionCommandContext`, which extends `ExtensionCont
 
 ### ctx.getSystemPromptOptions()
 
-Returns the base inputs Pi currently uses to build the system prompt.
+Returns the base inputs senpi currently uses to build the system prompt.
 
 ```typescript
 const options = ctx.getSystemPromptOptions();
@@ -1721,7 +1722,7 @@ Labels persist in the session and survive restarts. Use them to mark important p
 
 Register a command.
 
-If multiple extensions register the same command name, pi keeps them all and assigns numeric invocation suffixes in load order, for example `/review:1` and `/review:2`.
+If multiple extensions register the same command name, senpi keeps them all and assigns numeric invocation suffixes in load order, for example `/review:1` and `/review:2`.
 
 ```typescript
 pi.registerCommand("stats", {
@@ -1791,7 +1792,7 @@ Register a custom TUI renderer for custom messages with your `customType`. Custo
 
 ### pi.registerMarkdownTransformer(transformer)
 
-Register a transformer for the Markdown in normal user text, assistant text, and thinking blocks. Transformers run in extension load order, and each transformer receives the Markdown returned by the previous transformer. After the chain finishes, Pi renders the transformed content with its built-in renderer.
+Register a transformer for the Markdown in normal user text, assistant text, and thinking blocks. Transformers run in extension load order, and each transformer receives the Markdown returned by the previous transformer. After the chain finishes, senpi renders the transformed content with its built-in renderer.
 
 The transformer receives the Markdown string and a context with:
 
@@ -1808,7 +1809,7 @@ pi.registerMarkdownTransformer((markdown, { messageType, isStreaming }) => {
 });
 ```
 
-If a transformer throws, Pi keeps the Markdown produced so far and continues with the next transformer. The hook is display-only: the original message remains unchanged in the session and model context. It runs for new user messages, assistant streaming updates, restored session messages, and terminal width changes, so transformers should remain synchronous and inexpensive.
+If a transformer throws, senpi keeps the Markdown produced so far and continues with the next transformer. The hook is display-only: the original message remains unchanged in the session and model context. It runs for new user messages, assistant streaming updates, restored session messages, and terminal width changes, so transformers should remain synchronous and inexpensive.
 
 ### pi.registerEntryRenderer(customType, renderer)
 
@@ -1993,7 +1994,9 @@ Register or override a model provider dynamically. Useful for proxies, custom en
 
 Calls made during the extension factory function are queued and applied once the runner initialises. Calls made after that — for example from a command handler following a user setup flow — take effect immediately without requiring a `/reload`.
 
-Dynamic providers can implement `refreshModels`. Pi calls it during model refresh, publishes the returned list synchronously through the provider, and passes the canonical credential/store/network/signal context. The extension decides whether to persist the catalog through `context.store`; live servers such as llama.cpp can ignore it.
+Dynamic providers can implement `refreshModels`. Senpi calls it during model refresh, publishes the returned list synchronously through the provider, and passes the canonical credential/stored-catalog/network/signal context. The extension decides whether to persist catalog metadata through generation-checked `context.publish({ persist: entry })`; live servers such as llama.cpp can return models without persisting them.
+
+`context.signal` is always a concrete signal and provider callbacks must pass it to blocking I/O. Public `ModelRuntime.refresh()` and `ModelRegistry.refresh()` calls accept an optional signal and are unbounded when it is omitted; extensions and applications choose their own deadlines. Cancellation stops the caller waiting even if a provider ignores the signal, but cooperation is still required to stop the underlying work.
 
 Extensions that need native provider auth, filtering, refresh, or stream behavior can register a complete `Provider` from `@earendil-works/pi-ai`. The provider becomes the composition base and `models.json` overrides still apply above it.
 
@@ -2083,7 +2086,8 @@ pi.registerProvider("corporate-ai", {
       const code = await callbacks.onPrompt({ message: "Enter code:" });
       return { refresh: code, access: code, expires: Date.now() + 3600000 };
     },
-    async refreshToken(credentials) {
+    async refreshToken(credentials, signal) {
+      signal.throwIfAborted();
       // Refresh logic
       return credentials;
     },
@@ -2104,7 +2108,7 @@ The object form accepts a complete pi-ai `Provider`, including native `auth`, `g
 - `headers` - Custom headers to include in requests.
 - `authHeader` - If true, adds `Authorization: Bearer` header automatically.
 - `models` - Array of model definitions. If provided, replaces all existing models for this provider. Model definitions can set `baseUrl` to override the provider endpoint for that model.
-- `refreshModels` - Async dynamic discovery callback. Its returned models replace extension-provided models. Use the scoped `context.store` only when results should persist.
+- `refreshModels` - Async dynamic discovery callback. Its returned models replace extension-provided models. `context.stored` contains the persisted provider snapshot; use generation-checked `context.publish({ persist: entry })` only when updated catalog data should persist. Use `persist: null` to delete that snapshot.
 - `oauth` - OAuth provider config for `/login` support. When provided, the provider appears in the login menu.
 - `streamSimple` - Custom streaming implementation for non-standard APIs.
 
@@ -2266,7 +2270,7 @@ pi.registerTool({
 });
 ```
 
-**Usage accounting:** If a tool makes nested LLM calls, return their combined `Usage` as `usage`. Pi persists it on the tool result and includes it in footer, `/session`, and RPC session totals. `tool_result` handlers can inspect or replace this value.
+**Usage accounting:** If a tool makes nested LLM calls, return their combined `Usage` as `usage`. Senpi persists it on the tool result and includes it in footer, `/session`, and RPC session totals. `tool_result` handlers can inspect or replace this value.
 
 **Signaling errors:** To mark a tool execution as failed (sets `isError: true` on the result and reports it to the LLM), throw an error from `execute`. Returning a value never sets the error flag regardless of what properties you include in the return object.
 
@@ -2284,7 +2288,7 @@ async execute(toolCallId, params) {
 
 **Important:** Use `StringEnum` from `@earendil-works/pi-ai` for string enums. `Type.Union`/`Type.Literal` doesn't work with Google's API.
 
-**Argument preparation:** `prepareArguments(args)` is optional. If defined, it runs before schema validation and before `execute()`. Use it to mimic an older accepted input shape when pi resumes an older session whose stored tool call arguments no longer match the current schema. Return the object you want validated against `parameters`. Keep the public schema strict. Do not add deprecated compatibility fields to `parameters` just to keep old resumed sessions working.
+**Argument preparation:** `prepareArguments(args)` is optional. If defined, it runs before schema validation and before `execute()`. Use it to mimic an older accepted input shape when senpi resumes an older session whose stored tool call arguments no longer match the current schema. Return the object you want validated against `parameters`. Keep the public schema strict. Do not add deprecated compatibility fields to `parameters` just to keep old resumed sessions working.
 
 Example: an older session may contain an `edit` tool call with top-level `oldText` and `newText`, while the current schema only accepts `edits: [{ oldText, newText }]`.
 
@@ -2623,7 +2627,7 @@ The declarative API handles the entire lifecycle:
 1. Register tools with `exposure: "search"`. The tools stay out of the initial active set.
 2. The shared `tool_search` builtin (always active) indexes their `name`, `label`, `description`, `searchText`, and `searchKeywords`.
 3. When the model needs a capability, it calls `tool_search`.
-4. Pi automatically promotes matching tools to the active set for the next model request.
+4. Senpi automatically promotes matching tools to the active set for the next model request.
 5. On supported models (Anthropic, OpenAI), this promotion uses native deferred loading protocols to preserve prompt cache stability.
 
 Tools promoted via search are tied to your extension's identity. If your extension is reloaded, they stay active; if your extension is removed, they are cleaned up.
@@ -2646,14 +2650,14 @@ Activating a tool that includes `promptSnippet` or `promptGuidelines` rebuilds t
 
 #### Advanced: DIY Dynamic Loading
 
-For advanced use cases like project-specific routing or custom remote catalogs, extensions can skip `exposure: "search"` and manage the active set imperatively. A tool can add more tools with `pi.setActiveTools()` during execution. Pi detects purely additive changes, records the newly available tool names on that tool result, and applies the updated active set before the next model request.
+For advanced use cases like project-specific routing or custom remote catalogs, extensions can skip `exposure: "search"` and manage the active set imperatively. A tool can add more tools with `pi.setActiveTools()` during execution. Senpi detects purely additive changes, records the newly available tool names on that tool result, and applies the updated active set before the next model request.
 
 The DIY lifecycle is:
 
 1. Register every tool with `exposure: "direct"` (or omit it) but explicitly remove them from the active set during `session_start` using `pi.setActiveTools()`.
 2. Keep your custom loader tool active.
 3. During loader execution, call `pi.setActiveTools([...currentTools, ...matchingTools])`. The change must be additive.
-4. Pi exposes the added definitions before the next model response.
+4. Senpi exposes the added definitions before the next model response.
 
 #### Models with native deferred loading
 
@@ -2662,15 +2666,15 @@ The DIY lifecycle is:
   - **Native representation:** Deferred definitions use `defer_loading`; the load point uses `tool_reference` content.
 - **OpenAI**
   - **Models:** `gpt-5.4` and newer family
-  - **Native representation:** Pi adds completed client `tool_search_call` and `tool_search_output` items at the load point.
+  - **Native representation:** Senpi adds completed client `tool_search_call` and `tool_search_output` items at the load point.
 
 For a verified custom model or proxy, native handling can be enabled with `compat.supportsToolReferences: true` for `anthropic-messages`, or `compat.supportsToolSearch: true` for `openai-responses` and `openai-codex-responses`. Leave these disabled unless the endpoint and model accept the corresponding native protocol.
 
 #### Fallback behavior
 
-For all other models and providers, dynamic activation still works: Pi sends the complete current active tool list normally on the next request. The model can call the newly activated tools, but adding their definitions may invalidate the provider's cached prompt prefix.
+For all other models and providers, dynamic activation still works: senpi sends the complete current active tool list normally on the next request. The model can call the newly activated tools, but adding their definitions may invalidate the provider's cached prompt prefix.
 
-Pi also uses this safe fallback when the active set is not purely additive, such as replacing one group of tools with another. Tool removals therefore work, but they do not use deferred loading.
+Senpi also uses this safe fallback when the active set is not purely additive, such as replacing one group of tools with another. Tool removals therefore work, but they do not use deferred loading.
 
 #### DIY Custom Search Tool Example
 

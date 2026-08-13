@@ -70,13 +70,21 @@ export function getAnthropicCompat(
 
 export type ResolvedOpenAICompletionsCompat = Omit<
 	Required<OpenAICompletionsCompat>,
-	"cacheControlFormat" | "toolCallFormat" | "deferredToolsMode" | "toolSchemaFlavor" | "supportsPromptCacheKey"
+	| "cacheControlFormat"
+	| "toolCallFormat"
+	| "deferredToolsMode"
+	| "toolSchemaFlavor"
+	| "supportsPromptCacheKey"
+	| "chatTemplateArgs"
+	| "supportsThinkingTokenBudget"
 > & {
 	cacheControlFormat?: OpenAICompletionsCompat["cacheControlFormat"];
 	supportsPromptCacheKey?: OpenAICompletionsCompat["supportsPromptCacheKey"];
 	toolCallFormat?: OpenAICompletionsCompat["toolCallFormat"];
 	deferredToolsMode?: OpenAICompletionsCompat["deferredToolsMode"];
 	toolSchemaFlavor?: OpenAICompletionsCompat["toolSchemaFlavor"];
+	chatTemplateArgs?: OpenAICompletionsCompat["chatTemplateArgs"];
+	supportsThinkingTokenBudget?: OpenAICompletionsCompat["supportsThinkingTokenBudget"];
 };
 
 /**

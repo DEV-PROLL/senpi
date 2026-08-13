@@ -1,5 +1,32 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-13 - Preserve request cancellation through OAuth refresh
+
+### What changed
+
+- Managed account refresh now receives the active turn's `AbortSignal` through both non-resident and resident
+  query paths, instead of constructing a detached signal inside the Anthropic OAuth adapter.
+- Direct provider login uses the shared `ProviderAuthInteraction` contract and supplies either the caller's
+  signal or a concrete never-aborted fallback.
+- Focused account, auth-lane, and login tests assert the exact signal identity reaching the refresh and login
+  boundaries.
+
+### Why
+
+- Upstream made provider OAuth refresh and login cancellation mandatory. The merge initially satisfied the new
+  type with locally constructed signals, which made an aborted turn unable to cancel credential refresh and
+  could delay shutdown or failover behind unrelated network work.
+
+### Why an extension could not handle it
+
+- Credential refresh runs inside this builtin provider before the SDK subprocess is spawned. No external hook
+  can replace that private auth-lane boundary or retroactively attach the turn's cancellation signal.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `accounts.ts` and `auth-lane.ts` around `SlotRefresher`, `refreshSlot`, and `prepareSlot`.
+- LOW: `stream.ts`, `session-stream.ts`, and `oauth-login.ts` at request-to-auth signal plumbing.
+
 ## 2026-08-12 - Account-aware default auth lane (issue #6784)
 
 ### What changed

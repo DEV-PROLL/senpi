@@ -13,7 +13,13 @@ import { StringEnum } from "../src/utils/typebox-helpers.ts";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.ts";
 import { hasBedrockCredentials } from "./bedrock-utils.ts";
 import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.ts";
-import { getLiveEnvApiKey, isOllamaLiveTestAvailable, OPENROUTER_LIVE_TEST_FLAG } from "./live-api-gates.ts";
+import {
+	BASETEN_LIVE_TEST_FLAG,
+	getLiveEnvApiKey,
+	isOllamaLiveTestAvailable,
+	OPENROUTER_LIVE_TEST_FLAG,
+	QWEN_TOKEN_PLAN_LIVE_TEST_FLAG,
+} from "./live-api-gates.ts";
 import { resolveApiKey } from "./oauth.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,6 +33,9 @@ const oauthTokens = await Promise.all([
 ]);
 const [anthropicOAuthToken, githubCopilotToken, openaiCodexToken] = oauthTokens;
 const openRouterApiKey = getLiveEnvApiKey("OPENROUTER_API_KEY", OPENROUTER_LIVE_TEST_FLAG);
+const basetenApiKey = getLiveEnvApiKey("BASETEN_API_KEY", BASETEN_LIVE_TEST_FLAG);
+const qwenTokenPlanApiKey = getLiveEnvApiKey("QWEN_TOKEN_PLAN_API_KEY", QWEN_TOKEN_PLAN_LIVE_TEST_FLAG);
+const qwenTokenPlanCnApiKey = getLiveEnvApiKey("QWEN_TOKEN_PLAN_CN_API_KEY", QWEN_TOKEN_PLAN_LIVE_TEST_FLAG);
 
 // Calculator tool definition (same as examples)
 // Note: Using StringEnum helper because Google's API doesn't support anyOf/const patterns
@@ -788,6 +797,31 @@ describe("Generate E2E Tests", () => {
 		});
 	});
 
+	describe.skipIf(!basetenApiKey)("Baseten Provider (GLM 5.2 via OpenAI Completions)", () => {
+		const llm = getModel("baseten", "zai-org/GLM-5.2");
+		const options = { reasoningEffort: "high" } satisfies StreamOptionsWithExtras;
+
+		it("should complete basic text generation", { retry: 3 }, async () => {
+			await basicTextGeneration(llm, options);
+		});
+
+		it("should handle tool calling", { retry: 3 }, async () => {
+			await handleToolCall(llm, options);
+		});
+
+		it("should handle streaming", { retry: 3 }, async () => {
+			await handleStreaming(llm, options);
+		});
+
+		it("should handle thinking mode", { retry: 3 }, async () => {
+			await handleThinking(llm, options);
+		});
+
+		it("should handle multi-turn with thinking and tools", { retry: 3 }, async () => {
+			await multiTurn(llm, options);
+		});
+	});
+
 	describe.skipIf(!process.env.NVIDIA_API_KEY)("NVIDIA NIM Provider (Nemotron 3 Super via OpenAI Completions)", () => {
 		const llm = getModel("nvidia", "nvidia/nemotron-3-super-120b-a12b");
 
@@ -1229,38 +1263,63 @@ describe("Generate E2E Tests", () => {
 		});
 	});
 
-	describe.skipIf(!process.env.QWEN_TOKEN_PLAN_API_KEY)(
-		"Qwen Token Plan Provider (Qwen3.7-Max, international)",
-		() => {
-			const llm = getModel("qwen-token-plan", "qwen3.7-max");
-			const thinkingOptions = {
-				thinkingEnabled: true,
-				reasoningEffort: "high",
-			} satisfies StreamOptionsWithExtras;
+	describe.skipIf(!qwenTokenPlanApiKey)("Qwen Token Plan Provider (Qwen3.7-Max, international)", () => {
+		const llm = getModel("qwen-token-plan", "qwen3.7-max");
+		const thinkingOptions = {
+			thinkingEnabled: true,
+			reasoningEffort: "high",
+		} satisfies StreamOptionsWithExtras;
 
-			it("should complete basic text generation", { retry: 3 }, async () => {
-				await basicTextGeneration(llm);
-			});
+		it("should complete basic text generation", { retry: 3 }, async () => {
+			await basicTextGeneration(llm);
+		});
 
-			it("should handle tool calling", { retry: 3 }, async () => {
-				await handleToolCall(llm);
-			});
+		it("should handle tool calling", { retry: 3 }, async () => {
+			await handleToolCall(llm);
+		});
 
-			it("should handle streaming", { retry: 3 }, async () => {
-				await handleStreaming(llm);
-			});
+		it("should handle streaming", { retry: 3 }, async () => {
+			await handleStreaming(llm);
+		});
 
-			it("should handle thinking mode", { retry: 3 }, async () => {
-				await handleThinking(llm, thinkingOptions);
-			});
+		it("should handle thinking mode", { retry: 3 }, async () => {
+			await handleThinking(llm, thinkingOptions);
+		});
 
-			it("should handle multi-turn with thinking and tools", { retry: 3 }, async () => {
-				await multiTurn(llm, thinkingOptions);
-			});
-		},
-	);
+		it("should handle multi-turn with thinking and tools", { retry: 3 }, async () => {
+			await multiTurn(llm, thinkingOptions);
+		});
+	});
 
-	describe.skipIf(!process.env.QWEN_TOKEN_PLAN_CN_API_KEY)("Qwen Token Plan Provider (Qwen3.7-Max, CN region)", () => {
+	describe.skipIf(!qwenTokenPlanApiKey)("Qwen Token Plan Individual Provider (Qwen3.8-Max, international)", () => {
+		const llm = getModel("qwen-token-plan-individual", "qwen3.8-max");
+		const thinkingOptions = {
+			thinkingEnabled: true,
+			reasoningEffort: "high",
+		} satisfies StreamOptionsWithExtras;
+
+		it("should complete basic text generation", { retry: 3 }, async () => {
+			await basicTextGeneration(llm);
+		});
+
+		it("should handle tool calling", { retry: 3 }, async () => {
+			await handleToolCall(llm);
+		});
+
+		it("should handle streaming", { retry: 3 }, async () => {
+			await handleStreaming(llm);
+		});
+
+		it("should handle thinking mode", { retry: 3 }, async () => {
+			await handleThinking(llm, thinkingOptions);
+		});
+
+		it("should handle multi-turn with thinking and tools", { retry: 3 }, async () => {
+			await multiTurn(llm, thinkingOptions);
+		});
+	});
+
+	describe.skipIf(!qwenTokenPlanCnApiKey)("Qwen Token Plan Provider (Qwen3.7-Max, CN region)", () => {
 		const llm = getModel("qwen-token-plan-cn", "qwen3.7-max");
 		const thinkingOptions = {
 			thinkingEnabled: true,

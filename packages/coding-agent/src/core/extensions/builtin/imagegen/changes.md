@@ -1,5 +1,26 @@
 # imagegen builtin — changes
 
+## 2026-08-13 - Materialize nullable headers only at image requests
+
+### What changed
+
+- Image credential resolution accepts registry `ProviderHeaders`; `null` entries are filtered only when the
+  generated-image fetch request needs concrete string headers.
+
+### Why
+
+- Upstream header composition uses `null` as an explicit deletion marker. Narrowing the registry result earlier
+  broke the merged type contract and risked retaining an inherited header.
+
+### Why an extension could not handle it
+
+- The imagegen builtin owns the credential-to-request conversion; no outside hook can repair a marker discarded
+  before its fetch boundary.
+
+### Expected merge-conflict zones
+
+- LOW: `auth.ts` registry result and resolved auth types; LOW: `tool.ts` final header materialization.
+
 ## Cross-layer arbitration regression suite (2026-08-11)
 
 ### What changed

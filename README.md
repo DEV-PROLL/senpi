@@ -21,6 +21,14 @@ senpi was born from two influences:
 
 Core source modifications are minimised and tracked in [`changes.md`](#fork-strategy) files alongside every modified subdirectory so upstream rebases stay clean.
 
+| Package | Description |
+|---------|-------------|
+| **[@earendil-works/pi-telemetry](packages/telemetry)** | Vendor-neutral telemetry contracts, reference adapter, conformance tests, and typed schemas |
+| **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
+| **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
+| **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
+| **[@earendil-works/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
+
 ## Coming from OMO? Recommended extension setup
 
 If you're migrating from [OMO (oh-my-openagent)](https://github.com/code-yeongyu/oh-my-openagent), here is the practical map from "what I used in OMO" to "what to install in senpi". A lot of OMO's signature work is **already wired into senpi as a builtin** (nothing to install); the rest lives in the [`code-yeongyu/pi-*`](https://github.com/code-yeongyu?tab=repositories&q=pi-) GitHub repos and is one `senpi install` away.

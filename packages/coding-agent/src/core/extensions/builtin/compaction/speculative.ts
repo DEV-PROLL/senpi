@@ -9,6 +9,7 @@ import {
 	isRetryableErrorMessage,
 	type Message,
 	type Model,
+	type ProviderHeaders,
 	retryTransientCall,
 	type StreamOptions,
 	sanitizeAnthropicToolPairs as sanitizeAnthropicPayload,
@@ -247,7 +248,7 @@ async function generateSummaryMessage(options: {
 	snapshot: SpeculativeCompactionSnapshot;
 	auth: {
 		apiKey?: string;
-		headers?: Record<string, string>;
+		headers?: ProviderHeaders;
 		extraBody?: Record<string, unknown>;
 	};
 }): Promise<Message | undefined> {

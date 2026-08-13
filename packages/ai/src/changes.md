@@ -1,5 +1,22 @@
 # AI Source Changes
 
+## 2026-08-13 - Upstream option and live-test cleanup
+
+### What changed and why
+
+- Removed an obsolete reasoning-budget local and a Baseten live-test key lookup no test consumes after the
+  upstream option/catalog merge.
+- Runtime behavior and live-test gating are unchanged; this keeps warnings fatal without weakening the checks.
+
+### Why this cannot be expressed externally
+
+- Both warnings arise in the provider-neutral option compiler and AI test module before coding-agent extensions
+  exist.
+
+### Expected merge conflict zones
+
+- LOW: `api/simple-options.ts` reasoning-budget setup and `test/context-overflow.test.ts` live-key declarations.
+
 ## 2026-08-12 - Throw-based sibling for the bounded assistant retry loop
 
 ### What changed and why
@@ -1528,11 +1545,11 @@ provider request builders in `packages/ai`, below any extension-visible surface.
 
 ### What changed and why
 - `providers/openai-codex-responses.ts` `buildBaseCodexHeaders()`: changed the hardcoded `originator: "pi"` and the `User-Agent: "pi (…)"` string to `"senpi"`. Upstream chose `"pi"` as the Codex CLI identity; this fork's identity is `senpi`.
-- `utils/oauth/openai-codex.ts` `createAuthorizationFlow()`: changed the default `originator` parameter from `"pi"` to `"senpi"` and updated the JSDoc on `loginOpenAICodex` accordingly. Callers can still pass their own originator.
+- `auth/oauth/openai-codex.ts` `createAuthorizationFlow()`: changed the default `originator` parameter from `"pi"` to `"senpi"` and updated the JSDoc on `loginOpenAICodex` accordingly. Callers can still pass their own originator.
 
 ### Files modified
 - `providers/openai-codex-responses.ts`
-- `utils/oauth/openai-codex.ts`
+- `auth/oauth/openai-codex.ts`
 
 ### Why the higher-level extension system couldn't handle this alone
 - The originator + User-Agent headers are built inside `pi-ai`'s Codex header constructor before the request leaves the library. Coding-agent extensions cannot intercept the header construction step.

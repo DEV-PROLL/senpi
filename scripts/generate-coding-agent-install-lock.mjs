@@ -14,6 +14,7 @@ import {
 	sortedPackageEntry,
 } from "./install-lock-utils.mjs";
 import { validateGeneratedFiles } from "./install-lock-validation.mjs";
+import { resolveOptionalRegistryPackage } from "./publish-lock-optional-registry.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -84,8 +85,17 @@ function addInternalWorkspace(installLockPackages, addedPaths, queue, name, work
 	}
 }
 
-function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, item) {
-	const lockPath = resolveExternalDependency(lockPackages, item.name, item.resolveFrom, item.spec);
+async function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, item) {
+	let lockPath;
+	try {
+		lockPath = resolveExternalDependency(lockPackages, item.name, item.resolveFrom, item.spec);
+	} catch (error) {
+		if (!(error instanceof Error) || !error.message.includes("No matching lockfile entry found")) {
+			throw error;
+		}
+		lockPath = `node_modules/${item.name}`;
+		lockPackages[lockPath] = await resolveOptionalRegistryPackage(item.name, item.spec);
+	}
 	const outputPath = rebaseResolvedLockPath(lockPath, item.sourceBase, item.outputBase);
 	if (addedPaths.has(outputPath)) {
 		return;
@@ -138,7 +148,7 @@ function createRootLockEntry(installerPackageJson) {
 	return sortedPackageEntry(entry);
 }
 
-function generateInstallLock() {
+async function generateInstallLock() {
 	const rootLock = readJson(rootLockfilePath);
 	if (rootLock.lockfileVersion !== 3 || !rootLock.packages) {
 		throw new Error("package-lock.json must be lockfileVersion 3 and contain a packages map");
@@ -178,7 +188,7 @@ function generateInstallLock() {
 			continue;
 		}
 
-			addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, item);
+		await addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, item);
 	}
 
 	const installLock = {
@@ -200,7 +210,7 @@ function generateInstallLock() {
 }
 
 try {
-	const { installerPackageJson, installLock } = generateInstallLock();
+	const { installerPackageJson, installLock } = await generateInstallLock();
 	const packageJsonContent = `${JSON.stringify(installerPackageJson, null, "\t")}\n`;
 	const lockfileContent = `${JSON.stringify(installLock, null, "\t")}\n`;
 

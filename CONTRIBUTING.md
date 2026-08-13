@@ -62,7 +62,7 @@ npm run release -- --dry-run   # preview without committing
 ```
 
 The release script (`scripts/release.mjs`) imports `scripts/calver.mjs` to compute the next version, then:
-1. Bumps all 5 workspace `package.json` files in lockstep.
+1. Bumps all 9 release-managed workspace `package.json` files in lockstep.
 2. Updates each package's `CHANGELOG.md`: `## [Unreleased]` → `## [<version>] - YYYY-MM-DD`.
 3. Commits `release: v<version>`, tags `v<version>`, publishes to npm with `--tag latest`.
 4. Pushes `main` and the tag to `origin`.
@@ -72,7 +72,7 @@ The release script (`scripts/release.mjs`) imports `scripts/calver.mjs` to compu
 
 - First release of the day: `YYYY.M.D` (e.g. `2026.5.13`).
 - Same-day re-release: `YYYY.M.D-N` where N ≥ 2 (e.g. `2026.5.13-2`).
-- All 5 workspaces always share the version.
+- All 9 release-managed workspaces always share the version.
 - Tags are `v<version>` — `build-binaries.yml` triggers on these.
 
 ### Upstream sync

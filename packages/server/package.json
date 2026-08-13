@@ -18,14 +18,7 @@
 		"./unix": {
 			"types": "./dist/transports/unix/index.d.ts",
 			"import": "./dist/transports/unix/index.js"
-		},
-		"./legacy": {
-			"types": "./dist/legacy/index.d.ts",
-			"import": "./dist/legacy/index.js"
 		}
-	},
-	"bin": {
-		"server": "./dist/legacy/cli.js"
 	},
 	"files": [
 		"dist",
@@ -35,7 +28,7 @@
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
-		"build": "tsc -p tsconfig.build.json && shx chmod +x dist/legacy/cli.js",
+		"build": "tsc -p tsconfig.build.json",
 		"test": "vitest --run",
 		"typecheck": "tsc -p tsconfig.test.json",
 		"prepublishOnly": "npm run clean && npm run build"
@@ -56,8 +49,7 @@
 	},
 	"dependencies": {
 		"@earendil-works/pi-ai": "^2026.8.12-4",
-		"@earendil-works/pi-protocol": "^2026.8.12-4",
-		"@code-yeongyu/senpi": "2026.8.12-4"
+		"@earendil-works/pi-protocol": "^2026.8.12-4"
 	},
 	"devDependencies": {
 		"shx": "0.4.0",

@@ -8,7 +8,9 @@ Outputs all session events as JSON lines to stdout. Useful for integrating senpi
 
 ## Event Types
 
-Events are defined in [`AgentSessionEvent`](../src/core/agent-session.ts):
+Wire events use `JsonAgentSessionEvent`. It matches
+[`AgentSessionEvent`](../src/core/agent-session.ts)
+except that streaming message updates omit cumulative snapshots:
 
 ```typescript
 type AgentSessionEvent =
@@ -30,9 +32,23 @@ type AgentSessionEvent =
   | { type: "summarization_retry_finished" };
 ```
 
+The wire format strips cumulative snapshots from streaming updates:
+
+```typescript
+type WithoutPartial<T> = T extends { partial: unknown } ? Omit<T, "partial"> : T;
+
+type JsonAgentSessionEvent =
+  | Exclude<AgentSessionEvent, { type: "message_update" }>
+  | {
+      type: "message_update";
+      assistantMessageEvent: WithoutPartial<AssistantMessageEvent>;
+    };
+```
+
 `queue_update` emits the full pending steering and follow-up queues whenever they change. `compaction_start`, `compaction_progress`, and `compaction_end` cover both manual and automatic compaction. `session_info_changed` fires when the session display name changes, `thinking_level_changed` when the thinking level changes, `system_prompt_change` (see `SystemPromptChangeEvent` in [`extensions/types.ts`](../src/core/extensions/types.ts)) when a model switch changes the active system prompt, and `tool_hook_status` (see `ExtensionToolHookLifecycleEvent` in [`extensions/runner.ts`](../src/core/extensions/runner.ts)) for extension tool hook start/end phases.
 
-Base events from [`AgentEvent`](../../agent/src/types.ts):
+Other base events come from
+[`AgentEvent`](../../agent/src/types.ts):
 
 ```typescript
 type AgentEvent =
@@ -79,11 +95,16 @@ Followed by events as they occur:
 {"type":"agent_start"}
 {"type":"turn_start"}
 {"type":"message_start","message":{"role":"assistant","content":[],...}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_delta","delta":"Hello",...}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello"}}
 {"type":"message_end","message":{...}}
 {"type":"turn_end","message":{...},"toolResults":[]}
 {"type":"agent_end","messages":[...]}
 ```
+
+`message_update` records are delta-only. They omit both the cumulative `message` field and
+`assistantMessageEvent.partial` to keep stream size linear. Use `contentIndex` and `delta`
+to assemble live text, thinking, or tool-call arguments if needed. `message_end` contains
+the final authoritative message.
 
 ## Example
 

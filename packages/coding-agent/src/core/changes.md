@@ -1,5 +1,58 @@
 # changes
 
+## Historical image transport limits (2026-08-12)
+
+### What changed
+
+- Added `images.maxHistoricalImages` to limit how many images from completed
+  turns are replayed to providers.
+- Images in the active turn remain intact. Older images are replaced only in
+  the provider request payload with the existing recoverable elision marker;
+  persisted session history is unchanged.
+
+### Why
+
+- Long coding sessions could resend tens of megabytes of already-processed
+  screenshots on every request, increasing upload cost and vision prefill even
+  when the active turn contained no image.
+- The setting is opt-in and removing it restores the previous replay behavior.
+
+### Why an extension could not handle it
+
+- Elision runs inside the core-owned transport conversion before provider
+  dispatch and below extension payload hooks.
+- The `images.*` setting and the request conversion are both core `Settings`
+  and SDK responsibilities.
+
+### Expected merge conflict zones
+
+- MEDIUM: `messages.ts`, in the historical-image counting and elision loop.
+- LOW: `settings-manager.ts`, in the `images.*` schema and getter.
+- MEDIUM: `sdk.ts`, where `convertToLlmForTransport()` forwards the limit into
+  the upstream-owned block-image conversion path.
+
+## Extension OAuth runtime credential overlay (2026-08-13)
+
+### What changed
+
+- Preserved `asExtensionOAuthRegistry`, which overlays extension-registered
+  OAuth providers onto the core runtime credential registry.
+
+### Why
+
+- Builtin and third-party OAuth extensions need to participate in model
+  credential resolution without replacing the core credential store.
+
+### Why an extension could not handle it
+
+- The overlay is the core boundary that turns extension registrations into the
+  credential interface consumed by model runtime and auth preflight.
+
+### Expected merge conflict zones
+
+- LOW: `runtime-credentials.ts`, around the registry wrapper and provider
+  lookup delegation.
+
 ## OpenGateway display name for /login (2026-08-12)
 
 ### What changed

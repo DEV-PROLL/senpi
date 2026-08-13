@@ -4,11 +4,55 @@
 
 ### Breaking Changes
 
+- Renamed the exported `ModelsStreamTransforms` interface to `ModelsRequestTransforms` because its header transformation now applies to all authenticated provider requests.
+- Required dynamic model providers to accept a concrete `RefreshModelsContext.signal`; `Models.refresh()` remains unbounded when callers omit its optional signal.
+- Required provider login, API-key check/resolution, and OAuth refresh implementations to accept a concrete abort signal; public auth and credential operations remain unbounded when callers omit their optional signal.
+- Replaced raw `RefreshModelsContext.store` access with the read-only `context.stored` snapshot and generation-checked `context.publish()` transaction. `createProvider({ fetchModels })` needs no catalog-publication migration; handwritten `Provider.refreshModels()` implementations must publish restored and refreshed catalogs through `context.publish()`, passing `persist` to write (`ModelsStoreEntry`) or delete (`null`) storage and `update` for the in-memory publication.
+
 ### Added
+
+- Added Qwen Token Plan Individual as a built-in provider with its documented subscription model catalog and the shared international `QWEN_TOKEN_PLAN_API_KEY` ([#7659](https://github.com/earendil-works/pi/pull/7659) by [@arasovic](https://github.com/arasovic)).
+- Added Baseten as a built-in OpenAI-compatible provider with models.dev catalog generation and native `chat_template_args` reasoning controls.
+- Added optional `OAuthAuth.isSubscription` metadata for distinguishing subscription-backed authentication from generic OAuth sign-in.
+- Added explicit `TelemetryContext` propagation across stream, deferred, and image request options using the vendor-neutral `@earendil-works/pi-telemetry` contract.
+- Added deferred provider request contracts, durable response handles, authenticated fetch/cancel dispatch, and faux-provider support for pending, ready, failed, and cancelled responses ([#7339](https://github.com/earendil-works/pi/pull/7339) by [@davidbrai](https://github.com/davidbrai)).
+- Added arbitrary OpenAI-compatible sampling parameters through `Model.samplingParams` and `StreamOptions.samplingParams`, including per-request overrides ([#7568](https://github.com/earendil-works/pi/pull/7568) by [@mrexodia](https://github.com/mrexodia)).
+- Added opt-in vLLM `thinking_token_budget` support for OpenAI-compatible models, reserving output tokens for the final answer ([#7638](https://github.com/earendil-works/pi/pull/7638) by [@bnsd55](https://github.com/bnsd55)).
+- Added `OpenAICompletionsCompat.supportsFinishReason` for providers that omit streamed `finish_reason` values, inferring normal and tool-use stops when the stream ends.
+- Added structured Amazon Bedrock failure diagnostics with HTTP status, modeled error code, and AWS request id when available ([#7286](https://github.com/earendil-works/pi/pull/7286) by [@brianstanley](https://github.com/brianstanley)).
+- Added `ModelsStoreEntry.etag` so persisted provider catalogs can carry the remote ETag validator for conditional refreshes.
+- Added `ANTHROPIC_AUTH_TOKEN` bearer authentication for Anthropic-compatible gateways ([#5871](https://github.com/earendil-works/pi/issues/5871)).
+- Added Claude Opus 5 support for Anthropic and Amazon Bedrock with adaptive thinking, inference profiles, prompt caching, and preserved AWS validation messages ([#7081](https://github.com/earendil-works/pi/pull/7081) by [@unexge](https://github.com/unexge), [#7083](https://github.com/earendil-works/pi/pull/7083) by [@davidbrai](https://github.com/davidbrai)).
+- Added manual redirect URL and authorization-code entry to OpenRouter OAuth login for remote and headless environments ([#7114](https://github.com/earendil-works/pi/pull/7114) by [@rgarcia](https://github.com/rgarcia)).
 
 ### Changed
 
+- Added optional cancellation to `ModelsStore` reads, writes, and deletions; catalog orchestration binds these waits to the provider refresh signal.
+- Changed Radius OAuth device authorization, token exchange, and refresh requests to use the configured gateway directly.
+- Changed `ModelsError` messages to append the underlying cause, so auth failures such as `OAuth refresh failed for openai-codex` report the provider response instead of a bare wrapper message.
+
 ### Fixed
+
+- Fixed GitHub Copilot Grok 4.5 requests to use the supported Responses API ([#7560](https://github.com/earendil-works/pi/issues/7560)).
+- Bounded OAuth token refreshes so stalled requests release the credential-store lock ([#7508](https://github.com/earendil-works/pi/issues/7508)).
+- Fixed tool argument validation to preserve values that already match an `anyOf`/`oneOf` union arm before attempting coercion, avoiding nullable unions converting `null` to another primitive value ([#7328](https://github.com/earendil-works/pi/issues/7328)).
+- Fixed cancellation of model catalog refreshes so callers stop waiting even when a custom provider ignores its abort signal ([#7027](https://github.com/earendil-works/pi/issues/7027)).
+- Fixed auth resolution, availability checks, OAuth refreshes, provider login, and in-memory credential queue waits to honor caller cancellation.
+- Fixed newer provider refreshes being blocked by or overwritten by an older stalled generation, including persisted catalog publication.
+- Fixed Fireworks GLM 5.2 models sending the unsupported `prompt_cache_retention` field when long cache retention is enabled, and enabled session affinity for automatic prompt caching ([#7676](https://github.com/earendil-works/pi/issues/7676)).
+- Fixed the OpenCode Go provider display name.
+- Fixed provider error normalization treating arrays and class instances as structured response bodies instead of preserving their original errors ([#7205](https://github.com/earendil-works/pi/pull/7205) by [@erikogenvik](https://github.com/erikogenvik)).
+- Fixed Anthropic streams dropping text or thinking included in the initial content-block event ([#7358](https://github.com/earendil-works/pi/pull/7358) by [@davidbrai](https://github.com/davidbrai)).
+- Fixed Google history conversion dropping signed empty text and thinking blocks required for replay ([#7362](https://github.com/earendil-works/pi/pull/7362) by [@jingtao-wisdomgraph](https://github.com/jingtao-wisdomgraph)).
+- Fixed OpenAI Codex cached WebSocket sessions being shared across different account credentials ([#7364](https://github.com/earendil-works/pi/pull/7364)).
+- Fixed transient Google Generative AI and Vertex AI provider errors bypassing automatic retries ([#7471](https://github.com/earendil-works/pi/pull/7471) by [@vish-pr](https://github.com/vish-pr)).
+- Fixed Gemini 3 tool call ids being discarded during history conversion, breaking signed multi-turn replay ([#7494](https://github.com/earendil-works/pi/pull/7494) by [@muyiyr](https://github.com/muyiyr)).
+- Fixed OpenAI Responses incomplete reasons so only `max_output_tokens` is treated as a length stop, and exposed bounded recovery detection for responses truncated below their intended output limit ([#7540](https://github.com/earendil-works/pi/pull/7540) by [@davidbrai](https://github.com/davidbrai)).
+- Restored GitHub Copilot models returned through account-specific policy responses ([#7672](https://github.com/earendil-works/pi/pull/7672) by [@muyiyr](https://github.com/muyiyr)).
+- Replaced the retired Qwen Token Plan `qwen3.8-max-preview` model with `qwen3.8-max` ([#7670](https://github.com/earendil-works/pi/pull/7670) by [@QuintinShaw](https://github.com/QuintinShaw)).
+- Fixed Z.AI providers and compatible custom endpoints to send output limits through `max_tokens`, which those endpoints honor ([#7174](https://github.com/earendil-works/pi/pull/7174) by [@HyeokjaeLee](https://github.com/HyeokjaeLee)).
+- Fixed explicitly configured Amazon Bedrock profiles being overridden by ambient AWS access keys ([#7176](https://github.com/earendil-works/pi/pull/7176) by [@christianbasch](https://github.com/christianbasch)).
+- Fixed malformed OpenAI-compatible tool-call deltas with both a valid `function` payload and an empty `custom` object discarding the function arguments ([#7288](https://github.com/earendil-works/pi/pull/7288) by [@sunnyyoung](https://github.com/sunnyyoung)).
 
 ### Removed
 

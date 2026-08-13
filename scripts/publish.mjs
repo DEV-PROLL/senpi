@@ -17,7 +17,7 @@ import { rewritePublishManifest } from "./publish-manifest.mjs";
 // client/protocol imports keep their original @earendil-works keys in the Senpi tarball.
 //
 // @code-yeongyu/senpi-server remains excluded because it is `private: true`, and
-// @earendil-works/pi-storage-sqlite-node keeps upstream's independent semver line.
+// The sqlite session backend keeps upstream's independent semver line.
 const packages = [
 	{ directory: "packages/ai", name: "@code-yeongyu/senpi-ai", rewriteManifest: true },
 	{ directory: "packages/agent", name: "@code-yeongyu/senpi-agent-core", rewriteManifest: true },

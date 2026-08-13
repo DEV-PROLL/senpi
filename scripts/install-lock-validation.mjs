@@ -2,6 +2,7 @@ import {
 	isExactVersionSpec,
 	packageDependencies,
 	packageNameFromLockPath,
+	registryMetadataError,
 	resolveExternalDependency,
 } from "./install-lock-utils.mjs";
 
@@ -41,6 +42,10 @@ export function validateGeneratedFiles(options) {
 		}
 		if (entry.dev || entry.devOptional || entry.extraneous) {
 			errors.push(`${lockPath || "root"} contains dev/extraneous metadata`);
+		}
+		const metadataError = registryMetadataError(lockPath, entry);
+		if (metadataError && !internalPackagePrefixes.some((prefix) => packageName?.startsWith(prefix))) {
+			errors.push(metadataError);
 		}
 		if (
 			internalPackagePrefixes.some((prefix) => packageName?.startsWith(prefix)) &&

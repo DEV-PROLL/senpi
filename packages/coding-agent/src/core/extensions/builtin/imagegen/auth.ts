@@ -6,7 +6,7 @@ export interface ImageGenAuthModel {
 }
 
 export type ImageGenRegistryAuthResult =
-	| { ok: true; apiKey?: string; headers?: Record<string, string> }
+	| { ok: true; apiKey?: string; headers?: Record<string, string | null> }
 	| { ok: false; error: string };
 
 export interface ImageGenProviderAuthResult {

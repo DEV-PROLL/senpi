@@ -3,6 +3,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveOptionalRegistryPackage } from "./publish-lock-optional-registry.mjs";
+import { registryMetadataError } from "./install-lock-utils.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -41,6 +43,16 @@ function packageDependencies(entry) {
 		...(entry.dependencies ?? {}),
 		...(entry.optionalDependencies ?? {}),
 	};
+}
+
+function packageDependencyEntries(entry) {
+	const dependencies = new Map(
+		Object.entries(entry.dependencies ?? {}).map(([name, version]) => [name, { name, version, optional: false }]),
+	);
+	for (const [name, version] of Object.entries(entry.optionalDependencies ?? {})) {
+		dependencies.set(name, { name, version, optional: true });
+	}
+	return [...dependencies.values()];
 }
 
 function sortedObject(object) {
@@ -209,23 +221,33 @@ function addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, name, works
 	shrinkwrapPackages[outputPath] = sortedPackageEntry(entry);
 	addedPaths.add(outputPath);
 
-	for (const dependencyName of Object.keys(packageDependencies(packageJson))) {
-		queue.push({ name: dependencyName, from: outputPath });
+	for (const dependency of packageDependencyEntries(packageJson)) {
+		queue.push({ ...dependency, from: outputPath });
 	}
 }
 
-function addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, queue, name, from) {
-	const lockPath = resolveExternalDependency(lockPackages, name, from);
+async function addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, queue, item) {
+	let lockPath;
+	let entry;
+	try {
+		lockPath = resolveExternalDependency(lockPackages, item.name, item.from);
+		entry = lockPackages[lockPath];
+	} catch (error) {
+		if (!item.optional) {
+			throw error;
+		}
+		lockPath = `node_modules/${item.name}`;
+		entry = await resolveOptionalRegistryPackage(item.name, item.version);
+	}
 	if (addedPaths.has(lockPath)) {
 		return;
 	}
 
-	const entry = lockPackages[lockPath];
 	shrinkwrapPackages[lockPath] = copyLockEntry(entry);
 	addedPaths.add(lockPath);
 
-	for (const dependencyName of Object.keys(packageDependencies(entry))) {
-		queue.push({ name: dependencyName, from: lockPath });
+	for (const dependency of packageDependencyEntries(entry)) {
+		queue.push({ ...dependency, from: lockPath });
 	}
 }
 
@@ -245,6 +267,10 @@ function validateShrinkwrap(shrinkwrap, internalNames) {
 		}
 		if (typeof entry.resolved === "string" && /^(file:|link:|workspace:|\.\.?\/|\/)/.test(entry.resolved)) {
 			errors.push(`${lockPath} has a local resolved value: ${entry.resolved}`);
+		}
+		const metadataError = registryMetadataError(lockPath, entry);
+		if (metadataError) {
+			errors.push(metadataError);
 		}
 		if (entry.hasInstallScript) {
 			if (!packageName || !entry.version) {
@@ -295,7 +321,7 @@ function validateShrinkwrap(shrinkwrap, internalNames) {
 	}
 }
 
-function generateShrinkwrap() {
+async function generateShrinkwrap() {
 	const rootLock = readJson(rootLockfilePath);
 	if (rootLock.lockfileVersion !== 3 || !rootLock.packages) {
 		throw new Error("package-lock.json must be lockfileVersion 3 and contain a packages map");
@@ -309,7 +335,7 @@ function generateShrinkwrap() {
 	};
 	const addedPaths = new Set([""]);
 	const internalNames = new Set();
-	const queue = Object.keys(packageDependencies(codingAgentPackage)).map((name) => ({ name, from: "" }));
+	const queue = packageDependencyEntries(codingAgentPackage).map((dependency) => ({ ...dependency, from: "" }));
 
 	while (queue.length > 0) {
 		const item = queue.shift();
@@ -327,7 +353,7 @@ function generateShrinkwrap() {
 			continue;
 		}
 
-		addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, queue, item.name, item.from);
+		await addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, queue, item);
 	}
 
 	const shrinkwrap = {
@@ -343,7 +369,7 @@ function generateShrinkwrap() {
 }
 
 try {
-	const shrinkwrap = generateShrinkwrap();
+	const shrinkwrap = await generateShrinkwrap();
 	const content = `${JSON.stringify(shrinkwrap, null, "\t")}\n`;
 
 	if (checkOnly) {

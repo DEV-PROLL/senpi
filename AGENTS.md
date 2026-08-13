@@ -40,7 +40,7 @@ Senpi is an extension-first coding-agent monorepo. Keep changes scoped, preserve
 | `packages/agent/` | Browser-safe agent loop plus optional Node harness |
 | `packages/coding-agent/` | `senpi` CLI, sessions, extensions, RPC, interactive mode |
 | `packages/tui/` | Differential terminal renderer and editor primitives |
-| `packages/server/` | Composable protocol server; legacy daemon/IPC under `src/legacy/` |
+| `packages/server/` | Composable, transport-neutral protocol server |
 | `packages/protocol/` | Transport-neutral CBOR protocol for remote pi sessions |
 | `packages/client/` | Transport-neutral client for remote pi sessions (framed CBOR) |
 | `packages/storage/` | Storage backends; `sqlite-node/` Node sqlite session store |
@@ -119,6 +119,8 @@ Persistent terminals -> packages/pty -> crates/senpi-pty
 - The lockfile hook allows workspace-metadata-only refreshes; other lockfile changes require explicit `PI_ALLOW_LOCKFILE_CHANGE=1` approval.
 - Keep shared environment surfaces synchronized: dependency, Node, provider/env, QA-channel, build-command, and forwarded-port changes must update `scripts/devenv-setup.mjs`, `.devcontainer/devcontainer.json`, and related references together.
 - Regenerate `packages/coding-agent/publish-deps.lock.json` with `node scripts/generate-coding-agent-shrinkwrap.mjs`; never replace it with `npm-shrinkwrap.json`.
+- External registry entries in root, publish, and installer locks must preserve both npm tarball `resolved` URLs
+  and `integrity` hashes; incomplete merge results are invalid even when dependency topology still resolves.
 - Dependencies with lifecycle scripts require package/version review and an explicit justified generator allowlist entry; never add one silently to pass the gate.
 
 ## GIT AND DELIVERY
