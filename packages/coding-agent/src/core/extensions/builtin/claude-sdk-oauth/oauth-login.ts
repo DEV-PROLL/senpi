@@ -1,10 +1,10 @@
 import type {
 	AuthCheck,
 	AuthContext,
-	AuthInteraction,
 	OAuthAuth,
 	OAuthCredential,
 	OAuthCredentials,
+	ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
 import { loadAnthropicOAuth } from "@earendil-works/pi-ai/oauth";
 import {
@@ -103,8 +103,8 @@ export function createOAuthConfig(deps: {
 					}
 				}
 			}
-			const interaction: AuthInteraction = {
-				signal: callbacks.signal,
+			const interaction: ProviderAuthInteraction = {
+				signal: callbacks.signal ?? new AbortController().signal,
 				prompt: async (prompt) => {
 					if (prompt.type === "select") return "";
 					return callbacks.onPrompt ? callbacks.onPrompt({ message: prompt.message }) : "";

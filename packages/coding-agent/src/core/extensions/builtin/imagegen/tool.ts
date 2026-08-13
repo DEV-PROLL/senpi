@@ -4,8 +4,8 @@ import { dirname } from "node:path";
 import type { AssistantImages, ImagesModel } from "@earendil-works/pi-ai/compat";
 import { generateImages } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
-import { defineTool } from "../../types.ts";
-import { type ImageGenAuthRegistry, type ImageGenAuthResolution, resolveImageGenAuth } from "./auth.ts";
+import { defineTool, type ExtensionContext } from "../../types.ts";
+import { type ImageGenAuthResolution, resolveImageGenAuth } from "./auth.ts";
 import { displayPath, resolveTargets } from "./paths.ts";
 import { imageGenRegistryOverride, isNativeBypass, NATIVE_BYPASS_MESSAGE } from "./state.ts";
 
@@ -61,11 +61,6 @@ export interface GenerateImageDetails {
  * Only the registry surface the credential resolver needs. The session passes its
  * full ModelRegistry, which satisfies this structurally.
  */
-export interface GenerateImageToolContext {
-	cwd: string;
-	modelRegistry: ImageGenAuthRegistry;
-}
-
 function failure(
 	message: string,
 	reason: NonNullable<GenerateImageDetails["reason"]>,
@@ -150,7 +145,7 @@ export const generateImageTool = defineTool<typeof Params, GenerateImageDetails>
 		"Generate an image from a text prompt with gpt-image-2 and save it as a PNG file. Returns the saved file paths.",
 	promptSnippet: "Generate images from text prompts and save them as PNG files.",
 	parameters: Params,
-	async execute(toolCallId, params, signal, _onUpdate, ctx: GenerateImageToolContext) {
+	async execute(toolCallId, params, signal, _onUpdate, ctx: ExtensionContext) {
 		const size = params.size ?? "auto";
 		const quality = params.quality ?? "auto";
 		const requested = params.n ?? 1;

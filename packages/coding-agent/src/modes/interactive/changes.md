@@ -1,5 +1,25 @@
 # changes
 
+## Deferred assistant messages are not errors (2026-08-13)
+
+### What changed
+
+- The assistant renderer treats upstream's new `deferred` stop reason as a successful non-error terminal state.
+- Focused component coverage proves it does not synthesize an `Error:` row.
+
+### Why
+
+- The exhaustive switch predated the new stop reason, causing both a build failure and the risk of falsely
+  presenting intentionally deferred work as a provider error.
+
+### Why this cannot be expressed externally
+
+- The built-in assistant component owns terminal-state rendering before extension UI contributions are composed.
+
+### Expected merge conflict zones
+
+- LOW: `components/assistant-render-descriptors.ts` stop-reason switch.
+
 ## Favorite patterns survive a persist while providers are unavailable (2026-08-12)
 
 ### What changed

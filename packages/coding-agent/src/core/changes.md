@@ -1,5 +1,145 @@
 # changes
 
+## Catalog listing and atomic fallback-chain overrides (2026-08-13)
+
+### What changed
+
+- `--list-models` reads the registered model snapshot without filtering out
+  models whose credentials are not configured.
+- Project `retry.fallbackChains` replaces the global map atomically while
+  sibling retry settings continue to merge recursively.
+- Native provider replacement synchronizes its composed OAuth adapter into the
+  credential store, preserving auth-derived request metadata such as Copilot
+  enterprise base URLs.
+- Core summarization resolves stored provider auth before invoking SDK-style or
+  custom stream wrappers, so account-specific request metadata is not replaced
+  by a legacy catalog key.
+
+### Why
+
+- Model listing is a discovery fast path used before login.
+- Fallback chains are ordered policy maps; retaining unrelated global keys
+  changes project-specific retry behavior.
+
+### Why an extension could not handle it
+
+- CLI fast-path model discovery and settings precedence run before extensions.
+- OAuth adapter composition belongs to the core model runtime and credential
+  store boundary.
+- Summarization auth is assembled inside `AgentSession` before extensions or
+  stream wrappers receive the request.
+
+### Expected merge conflict zones
+
+- LOW: `cli/list-models.ts`, around catalog selection.
+- MEDIUM: `settings-manager.ts`, around global/project deep merge behavior.
+- MEDIUM: `model-runtime.ts`, around native provider registration and OAuth
+  adapter replacement.
+- MEDIUM: `agent-session.ts`, around summarization request auth.
+
+## Compaction terminal-state and retry recovery parity (2026-08-13)
+
+### What changed
+
+- Successful manual compaction now clears its controller before publishing
+  `compaction_end`, so listeners observe a terminal state and may queue prompts.
+- Prompt admission failures during manual compaction report
+  `preflightResult(false)`.
+- Recoverable length-stopped assistants are removed before the post-compaction
+  continuation, matching error-stopped recovery.
+- Summarization reuses an active request API key for ordinary key-auth providers
+  while preserving stored OAuth resolution and its account-specific base URL.
+
+### Why
+
+- The merged lifecycle emitted completion while `isCompacting` was still true,
+  omitted the preflight rejection callback, and retained truncated assistants
+  that prevented the scheduled retry from reaching the provider.
+
+### Why an extension could not handle it
+
+- Prompt admission, lifecycle publication, and continuation message ownership
+  are private `AgentSession` state transitions.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts`, around `isCompacting`, `prompt()`, successful
+  `_executeCompaction()` completion, and `_runAutoCompaction()` continuation.
+
+## Node built-in auth-storage timer import (2026-08-13)
+
+### What changed
+
+- Normalized the auth-storage retry delay import to `node:timers/promises`.
+
+### Why
+
+- Vitest's module runner can resolve bare `timers/promises` relative to an
+  aliased package root, breaking codemode suites that import the coding-agent
+  source graph.
+
+### Why an extension could not handle it
+
+- Auth storage is loaded as core module code before extensions can intercept
+  module resolution.
+
+### Expected merge conflict zones
+
+- LOW: `auth-storage.ts`, in the Node timer import used by bounded retries.
+
+## Historical image transport limits (2026-08-12)
+
+### What changed
+
+- Added `images.maxHistoricalImages` to limit how many images from completed
+  turns are replayed to providers.
+- Images in the active turn remain intact. Older images are replaced only in
+  the provider request payload with the existing recoverable elision marker;
+  persisted session history is unchanged.
+
+### Why
+
+- Long coding sessions could resend tens of megabytes of already-processed
+  screenshots on every request, increasing upload cost and vision prefill even
+  when the active turn contained no image.
+- The setting is opt-in and removing it restores the previous replay behavior.
+
+### Why an extension could not handle it
+
+- Elision runs inside the core-owned transport conversion before provider
+  dispatch and below extension payload hooks.
+- The `images.*` setting and the request conversion are both core `Settings`
+  and SDK responsibilities.
+
+### Expected merge conflict zones
+
+- MEDIUM: `messages.ts`, in the historical-image counting and elision loop.
+- LOW: `settings-manager.ts`, in the `images.*` schema and getter.
+- MEDIUM: `sdk.ts`, where `convertToLlmForTransport()` forwards the limit into
+  the upstream-owned block-image conversion path.
+
+## Extension OAuth runtime credential overlay (2026-08-13)
+
+### What changed
+
+- Preserved `asExtensionOAuthRegistry`, which overlays extension-registered
+  OAuth providers onto the core runtime credential registry.
+
+### Why
+
+- Builtin and third-party OAuth extensions need to participate in model
+  credential resolution without replacing the core credential store.
+
+### Why an extension could not handle it
+
+- The overlay is the core boundary that turns extension registrations into the
+  credential interface consumed by model runtime and auth preflight.
+
+### Expected merge conflict zones
+
+- LOW: `runtime-credentials.ts`, around the registry wrapper and provider
+  lookup delegation.
+
 ## OpenGateway display name for /login (2026-08-12)
 
 ### What changed

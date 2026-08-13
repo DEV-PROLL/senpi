@@ -1,5 +1,20 @@
 # core/tools changes
 
+## Node 26 path-type compatibility (2026-08-13)
+
+### What changed
+
+- `find.ts` types its injected path implementation as `typeof path.posix`, which remains compatible with the
+  module, POSIX, and Win32 path implementations after `node:path.PlatformPath` was removed.
+
+### Why extension hooks alone could not handle this
+
+- The dependency-injection type is part of the built-in find tool's compile-time test seam.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `find.ts` injected dependency shape.
+
 ## extension filesystem policy enforcement (2026-08-09)
 
 ### What changed

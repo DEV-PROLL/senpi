@@ -13,7 +13,9 @@ const GENERATED_PACKAGE_SUFFIXES = [join("coding-agent", "install-lock")];
 // Fork-specific: `@earendil-works/pi-storage-sqlite-node` follows upstream's independent
 // semver line (see scripts/publish.mjs), so it stays out of this fork's CalVer lockstep
 // validation and its dependency pins are left alone.
-const INDEPENDENT_VERSION_PACKAGE_NAMES = new Set(["@earendil-works/pi-storage-sqlite-node"]);
+const INDEPENDENT_VERSION_PACKAGE_NAMES = new Set([
+	"@earendil-works/pi-storage-sqlite-node",
+]);
 
 function nextWorkspaceVersion(currentVersion, nextVersion) {
 	return currentVersion.startsWith("^") ? `^${nextVersion}` : nextVersion;

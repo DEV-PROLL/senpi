@@ -9,6 +9,7 @@ import { releaseInheritedInspectorForChild } from "./inspector-policy.js";
 import { handleBootstrapSelfUpdate } from "./self-update-bootstrap.js";
 process.title = APP_NAME;
 process.env.PI_CODING_AGENT = "true";
+process.env.AI_AGENT = APP_NAME;
 process.emitWarning = (() => { });
 const args = process.argv.slice(2);
 const PACKAGE_COMMANDS = new Set(["install", "remove", "uninstall", "update", "list", "config"]);

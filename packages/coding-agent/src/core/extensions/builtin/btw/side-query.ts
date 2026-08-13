@@ -2,6 +2,7 @@ import type {
 	Context,
 	Message,
 	Model,
+	ProviderHeaders,
 	SimpleStreamOptions,
 	StreamFunction,
 	ThinkingLevel,
@@ -83,7 +84,7 @@ export function buildSideQueryContext(input: SideQueryContextInput): Context {
 
 export interface SideQueryAuth {
 	apiKey?: string;
-	headers?: Record<string, string>;
+	headers?: ProviderHeaders;
 	extraBody?: Record<string, unknown>;
 }
 

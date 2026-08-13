@@ -1,5 +1,5 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FAILURE_TRIP_THRESHOLD } from "../../src/core/extensions/builtin/compaction/circuit-breaker.ts";
 import compactionExtension from "../../src/core/extensions/builtin/compaction/index.ts";
 import { hardCap } from "../../src/core/extensions/builtin/compaction/per-turn-cap.ts";
@@ -18,9 +18,19 @@ const FORMER_SOFT_CAP = 3;
 
 const registrations: Array<{ unregister: () => void }> = [];
 
+beforeEach(() => {
+	vi.useFakeTimers();
+});
+
 afterEach(() => {
+	vi.useRealTimers();
 	for (const registration of registrations.splice(0)) registration.unregister();
 });
+
+async function settleRetryBackoff<T>(operation: T | PromiseLike<T>): Promise<T> {
+	await vi.runAllTimersAsync();
+	return await operation;
+}
 
 function captureHandlers(): Map<string, ExtensionHandler<never, unknown>> {
 	const handlers = new Map<string, ExtensionHandler<never, unknown>>();
@@ -66,7 +76,8 @@ describe("blocking compaction route guards (issue #527)", () => {
 		);
 
 		for (let attempt = 0; attempt < 8; attempt++) {
-			await beforeAgentStart?.(createBeforeAgentStartEvent() as never, harness.ctx);
+			const compaction = beforeAgentStart?.(createBeforeAgentStartEvent() as never, harness.ctx);
+			if (compaction) await settleRetryBackoff(compaction);
 		}
 
 		expect(harness.registration.state.callCount).toBe(FAILURE_TRIP_THRESHOLD * SUMMARIZATION_ATTEMPTS);
