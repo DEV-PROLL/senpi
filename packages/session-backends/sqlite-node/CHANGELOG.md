@@ -18,3 +18,5 @@
   inventory reads avoid writer claims while including current names.
 - Adopted optional-chain narrowing for invalid fork targets so the new SQLite session backend passes the
   repository warning-as-error gate without changing its validation behavior.
+- Kept the backend private and independently versioned while linking AI and agent as local test-only workspaces,
+  preventing the root lock from downloading upstream runtime packages that Senpi does not ship through this backend.
