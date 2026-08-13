@@ -3,6 +3,33 @@
 The historical-image transport entry moved to `core/changes.md`, beside the
 other provider-bound image transport behavior that owns the same payload path.
 
+## Shipped Fable fallback chain reaches Kimi K3 served as `kimi-k3` (2026-08-13)
+
+### What changed
+
+- `core/retry-fallback/settings.ts`: `DEFAULT_FALLBACK_CHAINS["claude-fable-5"]` gains a bare `kimi-k3:max` entry after
+  `k3:max`, so providers that expose Kimi K3 under the vendor-prefixed id `kimi-k3` (OpenCode Go) join the shipped
+  Fable -> K3 fallback route. `matchesFamily` is untouched: the conservative exact/dash-suffix matcher still cannot
+  capture `kimi-k3` via `k3`, which is why the alias is an explicit entry rather than a matcher change (issue #793).
+- Coverage: `test/suite/retry-fallback-expansion.test.ts` (new alias expansion case + shipped-default pin),
+  `test/settings-manager-retry-fallback.test.ts` and `test/suite/retry-fallback-chains.test.ts` (shipped-default pins),
+  and the real-CLI scenario `.agents/skills/senpi-qa/scripts/scenarios/fallback-chains-kimi-k3-qa.mjs`.
+
+### Why
+
+- On registries serving `opencode-go/kimi-k3`, `/fallback` expanded the shipped Fable chain to Claude entries only:
+  `k3` matches `k3`/`k3-*` but never `kimi-k3`, so OpenCode Go users lost the intended Fable -> K3 route.
+
+### Why an extension could not do this
+
+- The shipped defaults are core policy consumed by `canonicalizeFallbackChains`; an extension can replace a chain per
+  key but cannot amend the shipped default's entries without owning the whole key.
+
+### Expected merge conflict zones on next upstream sync
+
+- `core/retry-fallback/settings.ts` (`DEFAULT_FALLBACK_CHAINS` literal).
+- The three test files pinning the shipped chain contents/length.
+
 ## Provider stream stalls share the bounded retry policy (2026-08-13)
 
 ### What changed
