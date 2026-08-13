@@ -1,5 +1,42 @@
 # changes
 
+## Parse npm pack JSON after warning output (2026-08-13)
+
+### What changed
+
+- Added a parser that scans `npm pack --json` output for the final valid JSON
+  array instead of parsing the entire stdout stream directly.
+- Added regression coverage using the workspace/config warnings emitted during
+  the failed first Senpi telemetry publication.
+- Publish staging now materializes any missing optional runtime package directly
+  from the exact tarball URL and integrity recorded in the root lock before
+  preparing the bundled Senpi package.
+- Final tarball validation now requires the publish manifest's actual
+  `bundleDependencies`, excluding platform-constrained optional packages that
+  intentionally remain registry-resolved on the installing machine.
+- Portable hoisted transitive packages are promoted to exact temporary
+  dependencies in the staged publish manifest so npm includes every declared
+  bundle member in the final Senpi tarball.
+
+### Why
+
+- npm can print warnings before its JSON payload. The publish workflow prepared
+  the package successfully but failed before `npm publish` because the warning
+  prefix made raw `JSON.parse` reject the output.
+- Cross-platform native packages are intentionally present in the lock but npm
+  installs only the current host variant. Senpi bundles those platform binaries,
+  so publish staging must reify the missing locked variants without changing
+  manifests or lockfiles.
+
+### Why an extension could not handle it
+
+- Package packing and npm publication run in release tooling before any Senpi
+  runtime or extension is loaded.
+
+### Expected merge conflict zones
+
+- LOW: `prepareAndPackPackage` in `publish.mjs`.
+
 ## Merge concurrent main updates before release push (2026-08-13)
 
 ### What changed
