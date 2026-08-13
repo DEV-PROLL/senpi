@@ -12,7 +12,7 @@ import {
 	tsxEntry,
 } from "./common.mjs";
 import { startFakeModelServer } from "./fake-model-server.mjs";
-import { hermeticEnv, writeMockModelsJson } from "./mock-loop-support.mjs";
+import { hermeticEnv, PROVIDER_ENV_KEYS, writeMockModelsJson } from "./mock-loop-support.mjs";
 import { renderTerminalScreenshot } from "./terminal-screenshot.mjs";
 import { startTmuxTui } from "./tmux-tui-driver.mjs";
 import { buildRpcReport, collectRpc, readJsonlFile, waitForClose } from "./cache-warm-ready-rpc.mjs";
@@ -24,6 +24,7 @@ const TURNS = [
 	{ text: "Continuation check-in: still watching." },
 ];
 const PROMPT = "Create a goal and keep watching the monitor.";
+const PROVIDER_ENV_CANARY_KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 
 export async function runCacheWarmReadyScenario() {
 	installCleanupHooks();
@@ -32,6 +33,7 @@ export async function runCacheWarmReadyScenario() {
 	const evidence = sharedEvidenceDir(root);
 	const cleanup = createCleanupState();
 	const startedAt = new Date().toISOString();
+	const restoreProviderCanaries = installProviderEnvCanaries();
 	try {
 		const rpc = await runRpcSurface({ cleanup, evidence });
 		const tui = await runTuiSurface({ cleanup, evidence, root });
@@ -43,6 +45,8 @@ export async function runCacheWarmReadyScenario() {
 		);
 		process.stdout.write(`PASS cache-warm-ready-rpc-tui (evidence: ${evidence})\n`);
 	} finally {
+		restoreProviderCanaries();
+		cleanup.providerCanariesRestored = true;
 		writeFileSync(join(evidence, "cleanup.json"), `${JSON.stringify(cleanup, null, 2)}\n`);
 		if (Object.values(cleanup).some((done) => !done)) {
 			process.stderr.write(`CLEANUP_INCOMPLETE: ${JSON.stringify(cleanup)}\n`);
@@ -60,6 +64,20 @@ function createCleanupState() {
 		rpcSandboxRemoved: false,
 		tuiSandboxRemoved: false,
 		authUnchanged: false,
+		providerCanariesRestored: false,
+	};
+}
+
+function installProviderEnvCanaries() {
+	const previous = new Map(PROVIDER_ENV_CANARY_KEYS.map((key) => [key, process.env[key]]));
+	for (const key of PROVIDER_ENV_CANARY_KEYS) {
+		process.env[key] = "senpi-qa-provider-env-canary";
+	}
+	return () => {
+		for (const [key, value] of previous) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
 	};
 }
 
@@ -71,7 +89,13 @@ function writeMonitorFixture(box) {
 		`import { appendFileSync } from "node:fs";
 const eventLogPath = ${JSON.stringify(eventLogPath)};
 export default function(pi) {
-	pi.on("session_start", () => pi.events?.emit("terminal_monitor_state", { activeCount: 1 }));
+	pi.on("session_start", () => {
+		appendFileSync(eventLogPath, JSON.stringify({
+			type: "qa_env_snapshot",
+			leakedProviderKeys: ${JSON.stringify(PROVIDER_ENV_KEYS)}.filter((key) => process.env[key] !== undefined)
+		}) + "\\n");
+		pi.events?.emit("terminal_monitor_state", { activeCount: 1 });
+	});
 	pi.events?.on("goal_continuation_scheduled", (data) => {
 		appendFileSync(eventLogPath, JSON.stringify({ type: "goal_continuation_scheduled", observedAtMs: Date.now(), data }) + "\\n");
 	});
@@ -92,6 +116,14 @@ async function runRpcSurface({ cleanup, evidence }) {
 	);
 	const rpc = collectRpc(child);
 	try {
+		child.stdin.write("{not-json\n");
+		const malformedResponse = await rpc.waitFor(
+			(message) =>
+				message.type === "response" &&
+				message.command === "parse" &&
+				message.success === false,
+			"malformed JSONL rejection",
+		);
 		await rpc.send({ type: "get_state" });
 		await rpc.send({ type: "set_model", provider: "mock", modelId: "mock-model" });
 		await rpc.send({ type: "prompt", message: PROMPT });
@@ -103,14 +135,25 @@ async function runRpcSurface({ cleanup, evidence }) {
 			"goal-cache-warmup scheduled entry_appended",
 		);
 		const report = buildRpcReport(record.entry, readJsonlFile(fixture.eventLogPath));
+		const rpcEnvironment = readJsonlFile(fixture.eventLogPath).find((event) => event.type === "qa_env_snapshot");
 		writeFileSync(join(evidence, "rpc-cache-warm-entry.json"), `${JSON.stringify(report, null, 2)}\n`);
 		writeFileSync(join(evidence, "rpc-session.jsonl"), `${rpc.lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
 		if (!report.pass) throw new Error(`RPC cache-warm assertions failed: ${JSON.stringify(report.assertions)}`);
+		if (!rpcEnvironment || rpcEnvironment.leakedProviderKeys.length !== 0) {
+			throw new Error(`RPC provider env leaked: ${JSON.stringify(rpcEnvironment?.leakedProviderKeys ?? null)}`);
+		}
 		const { dueAtMs, delayMs } = report.entry.data;
 		process.stdout.write(
 			`[PASS] rpc: goal-cache-warmup scheduled entry appended (dueAtMs=${dueAtMs} delayMs=${delayMs} basisDeltaMs=${report.basisDeltaMs})\n`,
 		);
-		return { entryTimestamp: report.entry.timestamp, dueAtMs, delayMs };
+		process.stdout.write(`[PASS] rpc: malformed JSONL rejected without terminating the process\n`);
+		return {
+			entryTimestamp: report.entry.timestamp,
+			dueAtMs,
+			delayMs,
+			malformedRejected: malformedResponse.success === false,
+			providerEnvIsolated: true,
+		};
 	} finally {
 		child.kill("SIGTERM");
 		await waitForClose(child);
@@ -152,23 +195,43 @@ async function runTuiSurface({ cleanup, evidence, root }) {
 		rows: 36,
 	});
 	try {
-		await terminal.waitFor((text) => text.includes("mock-model"), "initial TUI model render");
+		await terminal.waitFor(
+			(text) => text.includes("mock-model") && text.includes("esc interrupt"),
+			"interactive TUI ready",
+		);
 		terminal.submit(PROMPT);
 		const pattern = /ready \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \(\d+[smh][^)]*\)/;
 		const text = await terminal.waitFor((value) => pattern.test(value), "durable cache-warm ready notice", 120_000);
 		const noticeLine = text.split("\n").find((line) => pattern.test(line.trim()))?.trim();
 		const raw = terminal.getRaw();
+		const tuiEvents = readJsonlFile(fixture.eventLogPath);
+		const tuiEnvironment = tuiEvents.find((event) => event.type === "qa_env_snapshot");
+		if (!tuiEnvironment || tuiEnvironment.leakedProviderKeys.length !== 0) {
+			throw new Error(`TUI provider env leaked: ${JSON.stringify(tuiEnvironment?.leakedProviderKeys ?? null)}`);
+		}
 		writeFileSync(join(evidence, "terminal.ansi"), raw);
 		writeFileSync(join(evidence, "terminal.txt"), stripAnsi(raw));
 		await renderTerminalScreenshot(root, evidence, raw);
 		copyFileSync(fixture.eventLogPath, join(evidence, "tui-goal-monitor-events.jsonl"));
 		process.stdout.write(`[PASS] tui: durable cache-warm notice rendered: ${noticeLine}\n`);
 		process.stdout.write(`[PASS] tui: screenshot: ${join(evidence, "terminal.png")}\n`);
-		return { noticeLine };
+		return { noticeLine, providerEnvIsolated: true };
 	} finally {
 		cleanup.terminalExited = terminal.stop();
 		await server.stop();
 		cleanup.tuiServerStopped = !server.listening;
+		writeFileSync(
+			join(evidence, "tui-model-requests.json"),
+			`${JSON.stringify(
+				server.requests.map((request) => ({
+					...request,
+					authorization: request.authorization ? "<mock-redacted>" : null,
+					apiKeyHeader: request.apiKeyHeader ? "<mock-redacted>" : null,
+				})),
+				null,
+				2,
+			)}\n`,
+		);
 		box.cleanup();
 		cleanup.tuiSandboxRemoved = !existsSync(box.dir);
 	}
