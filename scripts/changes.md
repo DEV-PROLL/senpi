@@ -1,5 +1,28 @@
 # changes
 
+## Lock every Rolldown platform binding (2026-08-13)
+
+### What changed
+
+- Added a root-lock regression that requires every native optional declared by
+  Rolldown to carry its exact version, registry URL, integrity hash, and
+  `optional` marker.
+- Recorded the cross-platform lock restoration merged in PR #849.
+
+### Why
+
+- The upstream sync left only the host Darwin ARM64 binding in
+  `package-lock.json`. Linux and Windows Vitest processes failed at startup
+  before executing tests because their Rolldown native package was absent.
+
+### Why an extension could not handle it
+
+- Vitest loads Rolldown before tests or the Senpi runtime can start.
+
+### Expected merge conflict zones
+
+- MEDIUM: root `package-lock.json` optional dependency entries.
+
 ## Reconcile native optionals after release lock refresh (2026-08-13)
 
 ### What changed
