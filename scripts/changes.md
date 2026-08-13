@@ -1,5 +1,32 @@
 # changes
 
+## Reconcile native optionals after release lock refresh (2026-08-13)
+
+### What changed
+
+- Release preparation now runs a no-script install immediately after the
+  package-lock-only refresh.
+- Added a release-artifact regression covering both executed and dry-run command
+  sequences.
+
+### Why
+
+- npm refreshes optional dependencies for the current host in the lock, but a
+  package-lock-only operation does not update `node_modules`. Linux release
+  tests could therefore retain the old dependency tree and miss Rolldown's
+  `@rolldown/binding-linux-x64-gnu` native package.
+- Reconciliation is no-script and network-auditing disabled; it only makes the
+  installed tree match the freshly generated host lock before clean/build/test.
+
+### Why an extension could not handle it
+
+- Native package installation and release lock refresh happen before the Senpi
+  runtime or extension loader exists.
+
+### Expected merge conflict zones
+
+- LOW: `runPackageLockRefresh` in `release-artifacts.mjs`.
+
 ## Build telemetry before its consumers (2026-08-13)
 
 ### What changed
