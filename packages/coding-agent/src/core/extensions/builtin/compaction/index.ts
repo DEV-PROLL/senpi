@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { CompactionResult } from "../../../compaction/index.ts";
+import { createWarmAnchorSnapshot, isWarmSummaryAnchorValid } from "../../../compaction/warm-anchor.ts";
 import { convertToLlm } from "../../../messages.ts";
 import type {
 	ContextUsage,
@@ -265,6 +266,47 @@ export default function compactionExtension(
 		});
 	}
 
+	function isSameModelIdentity(
+		left: SpeculativeCompactionSnapshot["model"],
+		right: ExtensionContext["model"],
+	): boolean {
+		return (
+			right !== undefined &&
+			left.api === right.api &&
+			left.provider === right.provider &&
+			left.id === right.id &&
+			left.baseUrl === right.baseUrl &&
+			left.contextWindow === right.contextWindow
+		);
+	}
+
+	/**
+	 * Detach the warm job for the core route before any `await`, so exactly one
+	 * claimant can own it. The controller is deliberately NOT aborted: the whole
+	 * point is to keep the already-paid summarization alive and hand its result to
+	 * core, and clearing the reference is what stands the idle-retry watcher down.
+	 */
+	function claimWarmSummaryForCoreRoute(
+		event: SessionBeforeCompactEvent,
+		ctx: ExtensionContext,
+	): typeof speculativeJob {
+		const job = speculativeJob;
+		if (!job) return undefined;
+		if (event.customInstructions !== undefined) return undefined;
+		if (job.snapshot.origin !== "speculative") return undefined;
+		if (job.snapshot.preparation.firstKeptEntryId !== event.preparation.firstKeptEntryId) return undefined;
+		if (!isSameModelIdentity(job.snapshot.model, ctx.model)) return undefined;
+		const anchor = createWarmAnchorSnapshot(
+			job.snapshot.preparation.firstKeptEntryId,
+			job.snapshot.branchEntries ?? [],
+		);
+		if (!anchor || !isWarmSummaryAnchorValid(anchor, event.branchEntries ?? ctx.sessionManager.getBranch())) {
+			return undefined;
+		}
+		speculativeJob = undefined;
+		return job;
+	}
+
 	function invalidateSpeculativeCompaction(ctx: ExtensionContext): void {
 		const previousGeneration = speculativeGeneration;
 		speculativeGeneration++;
@@ -471,97 +513,129 @@ export default function compactionExtension(
 	}
 
 	pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx) => {
+		const claimedWarmJob = claimWarmSummaryForCoreRoute(event, ctx);
+		// The claim detaches the job without aborting it, so ownership must survive every
+		// exit from this handler - including a throw - or the request it already paid for
+		// keeps streaming for a result nobody will read.
+		let warmJobConsumed = false;
 		invalidateSpeculativeCompaction(ctx);
-		if (lanePolicy.disablesSenpiCompaction(ctx)) {
-			return { cancel: true, reason: SDK_NATIVE_LANE_REJECTION_REASON };
-		}
-		if (cap.shouldRejectByCap(state).cancel) {
-			getLogger(ctx).debug("skip_cap", { reason: event.reason, count: state.acceptedAbsolute });
-			return {
-				cancel: true,
-				rejectionCause: "per-turn-cap",
-				reason: "absolute compaction cap reached for this session",
-			};
-		}
-		const now = Date.now();
-		if (breaker.isTripped(state, now) && !breaker.shouldBypass(state, { reason: event.reason })) {
-			const remainingMs = state.trippedAt !== null ? Math.max(0, state.trippedAt + breaker.COOLDOWN_MS - now) : 0;
-			getLogger(ctx).debug("skip_breaker", { reason: event.reason, remainingSec: Math.ceil(remainingMs / 1000) });
-			return {
-				cancel: true,
-				rejectionCause: "circuit-breaker",
-				reason: `compaction circuit breaker cooling down (${Math.ceil(remainingMs / 1000)}s left)`,
-			};
-		}
-
-		capturePendingMetadata(event.requestId, ctx);
-
-		const model = ctx.model;
-		if (!model) return undefined;
-		const remoteCompaction = await runOpenAiRemoteCompaction(
-			ctx,
-			event,
-			(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
-			remoteCompactionDependencies,
-		);
-		if (remoteCompaction) {
-			getLogger(ctx).debug("core_route_generated", { route: "core-route", requestId: event.requestId });
-			return { compaction: remoteCompaction };
-		}
-
-		const snapshot = {
-			generation: ++speculativeGeneration,
-			expectedRevision: ctx.getMessageRevision(),
-			model,
-			contextWindow: ctx.getContextUsage()?.contextWindow ?? model.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-			preparation: event.preparation,
-			branchEntries: event.branchEntries,
-			promptVariant: getPromptVariant(event),
-			origin: "core-route" as const,
-			customInstructions: event.customInstructions,
-			systemPrompt: ctx.getSystemPrompt(),
-			tools: getSummarizationTools(),
-		};
-		let compaction: CompactionResult | undefined;
 		try {
-			compaction = await runExtensionCompaction(ctx, snapshot, event.signal, (delta) =>
-				ctx.updateCompaction?.({ reason: event.reason, signal: event.signal, delta }),
-			);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			const failureKind = classifyRequiredCompactionFallbackFailure(error);
-			if (isRequiredCompactionFallbackReason(event.reason) && failureKind !== undefined && !event.signal.aborted) {
-				const fallback = createRequiredCompactionFallback(
-					snapshot.preparation,
-					snapshot.contextWindow,
-					failureKind,
-					{ taskIntent: resolveInheritedTaskIntent(event.branchEntries) },
-					event.branchEntries,
-				);
-				if (fallback) return { compaction: fallback };
-				pendingMetadata.delete(event.requestId);
+			if (lanePolicy.disablesSenpiCompaction(ctx)) {
+				return { cancel: true, reason: SDK_NATIVE_LANE_REJECTION_REASON };
+			}
+			if (cap.shouldRejectByCap(state).cancel) {
+				getLogger(ctx).debug("skip_cap", { reason: event.reason, count: state.acceptedAbsolute });
 				return {
 					cancel: true,
-					reason: "deterministic compaction fallback cannot retain the prepared suffix",
+					rejectionCause: "per-turn-cap",
+					reason: "absolute compaction cap reached for this session",
 				};
 			}
-			pendingMetadata.delete(event.requestId);
-			if (error instanceof SummaryGenerationError) {
-				return { cancel: true, reason: error.message };
+			const now = Date.now();
+			if (breaker.isTripped(state, now) && !breaker.shouldBypass(state, { reason: event.reason })) {
+				const remainingMs = state.trippedAt !== null ? Math.max(0, state.trippedAt + breaker.COOLDOWN_MS - now) : 0;
+				getLogger(ctx).debug("skip_breaker", { reason: event.reason, remainingSec: Math.ceil(remainingMs / 1000) });
+				return {
+					cancel: true,
+					rejectionCause: "circuit-breaker",
+					reason: `compaction circuit breaker cooling down (${Math.ceil(remainingMs / 1000)}s left)`,
+				};
 			}
-			return { cancel: true, reason: `compaction generator failed: ${message}` };
-		}
-		if (!compaction) {
-			pendingMetadata.delete(event.requestId);
-			if (event.signal.aborted) {
-				return { cancel: true };
-			}
-			return { cancel: true, reason: "compaction generator returned no summary" };
-		}
 
-		return {
-			compaction,
-		};
+			capturePendingMetadata(event.requestId, ctx);
+
+			const model = ctx.model;
+			if (!model) {
+				return undefined;
+			}
+			const remoteCompaction = await runOpenAiRemoteCompaction(
+				ctx,
+				event,
+				(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
+				remoteCompactionDependencies,
+			);
+			if (remoteCompaction) {
+				getLogger(ctx).debug("core_route_generated", { route: "core-route", requestId: event.requestId });
+				return { compaction: remoteCompaction };
+			}
+
+			if (claimedWarmJob) {
+				const unlinkAbort = linkAbortSignal(event.signal, claimedWarmJob.controller);
+				let warmCompaction: CompactionResult | undefined;
+				let warmFailure: Error | undefined;
+				try {
+					warmCompaction = await claimedWarmJob.promise;
+					warmFailure = await claimedWarmJob.failure;
+				} finally {
+					unlinkAbort();
+				}
+				if (warmFailure === undefined && warmCompaction && !event.signal.aborted) {
+					getLogger(ctx).debug("warm_consumed", { generation: claimedWarmJob.generation, route: "core-route" });
+					warmJobConsumed = true;
+					return { compaction: warmCompaction };
+				}
+			}
+
+			const snapshot = {
+				generation: ++speculativeGeneration,
+				expectedRevision: ctx.getMessageRevision(),
+				model,
+				contextWindow: ctx.getContextUsage()?.contextWindow ?? model.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+				preparation: event.preparation,
+				branchEntries: event.branchEntries,
+				promptVariant: getPromptVariant(event),
+				origin: "core-route" as const,
+				customInstructions: event.customInstructions,
+				systemPrompt: ctx.getSystemPrompt(),
+				tools: getSummarizationTools(),
+			};
+			let compaction: CompactionResult | undefined;
+			try {
+				compaction = await runExtensionCompaction(ctx, snapshot, event.signal, (delta) =>
+					ctx.updateCompaction?.({ reason: event.reason, signal: event.signal, delta }),
+				);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				const failureKind = classifyRequiredCompactionFallbackFailure(error);
+				if (
+					isRequiredCompactionFallbackReason(event.reason) &&
+					failureKind !== undefined &&
+					!event.signal.aborted
+				) {
+					const fallback = createRequiredCompactionFallback(
+						snapshot.preparation,
+						snapshot.contextWindow,
+						failureKind,
+						{ taskIntent: resolveInheritedTaskIntent(event.branchEntries) },
+						event.branchEntries,
+					);
+					if (fallback) return { compaction: fallback };
+					pendingMetadata.delete(event.requestId);
+					return {
+						cancel: true,
+						reason: "deterministic compaction fallback cannot retain the prepared suffix",
+					};
+				}
+				pendingMetadata.delete(event.requestId);
+				if (error instanceof SummaryGenerationError) {
+					return { cancel: true, reason: error.message };
+				}
+				return { cancel: true, reason: `compaction generator failed: ${message}` };
+			}
+			if (!compaction) {
+				pendingMetadata.delete(event.requestId);
+				if (event.signal.aborted) {
+					return { cancel: true };
+				}
+				return { cancel: true, reason: "compaction generator returned no summary" };
+			}
+
+			return {
+				compaction,
+			};
+		} finally {
+			if (!warmJobConsumed) claimedWarmJob?.controller.abort();
+		}
 	});
 
 	pi.on("model_select", (event, ctx) => {
