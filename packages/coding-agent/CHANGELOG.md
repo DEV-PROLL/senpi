@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- The shipped `claude-fable-5` fallback chain now reaches Kimi K3 on providers that expose the
+  model as `kimi-k3` (for example OpenCode Go), via an explicit `kimi-k3:max` entry. The
+  conservative family matcher is unchanged, so `k3` still cannot capture arbitrary ids
+  ([#793](https://github.com/code-yeongyu/senpi/issues/793)).
+
 - Every registry package source is now private, and every scripted release-publication entrypoint fails
   closed outside the trusted GitHub Actions path, preventing direct or scripted npm publication without
   provenance attestations.
