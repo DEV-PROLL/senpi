@@ -33,15 +33,15 @@ describe("build-all", () => {
 			"packages/tui",
 			"packages/pty",
 			"packages/telemetry",
-			"packages/ai",
 			"packages/protocol",
-			"packages/agent",
+			"packages/ai",
 			"packages/client",
+			"packages/agent",
 			"packages/session-backends/sqlite-node",
 			"packages/coding-agent",
 			"packages/server",
 		]);
-		assert.ok(index("packages/ai") >= index("packages/telemetry"));
+		assert.ok(index("packages/ai") > index("packages/telemetry"));
 		assert.ok(index("packages/agent") > index("packages/ai"));
 		assert.ok(index("packages/client") > index("packages/protocol"));
 		assert.ok(index("packages/session-backends/sqlite-node") > index("packages/agent"));
@@ -58,13 +58,7 @@ describe("build-all", () => {
 
 		// Then
 		assert.equal(packageJson.name, "@earendil-works/pi-pty");
-		assert.deepEqual(phaseOne, [
-			"packages/tui",
-			"packages/pty",
-			"packages/telemetry",
-			"packages/ai",
-			"packages/protocol",
-		]);
+		assert.deepEqual(phaseOne, ["packages/tui", "packages/pty", "packages/telemetry", "packages/protocol"]);
 	});
 
 	it("wires the pty package export surface for workspace imports", () => {

@@ -1,5 +1,55 @@
 # changes
 
+## Build telemetry before its consumers (2026-08-13)
+
+### What changed
+
+- Moved AI into the build phase after telemetry, and agent into the following
+  phase after AI.
+- Strengthened the build-order regression so direct workspace dependencies must
+  be in strictly later phases instead of merely the same phase.
+- Kept the flattened phase-order expectation synchronized with the executable
+  phase list so the serial release test gate verifies the new order.
+
+### Why
+
+- Release preparation runs `npm run clean` before its second workspace build.
+  With telemetry and AI in the same parallel phase, AI could resolve telemetry
+  before `dist/index.d.ts` existed and fail deterministically on a clean runner.
+
+### Why an extension could not handle it
+
+- Workspace compilation order is release/build tooling that runs before the
+  Senpi runtime or extension loader exists.
+
+### Expected merge conflict zones
+
+- LOW: `BUILD_PHASES` and its dependency-order assertions.
+
+## Install the compiler used by workspace builds (2026-08-13)
+
+### What changed
+
+- Pointed the root `@typescript/native` alias at
+  `@typescript/native-preview`, the package that actually provides the `tsgo`
+  binary invoked by workspace build scripts.
+- Added a dependency-contract test covering the manifest alias, lockfile
+  package identity, pinned native compiler version, and installed `tsgo` bin.
+
+### Why
+
+- Clean release runners do not have a globally installed `tsgo`; telemetry must
+  build before coding-agent can consume its generated declarations.
+
+### Why an extension could not handle it
+
+- Compiler installation and workspace build ordering happen before any Senpi
+  runtime or extension is loaded.
+
+### Expected merge conflict zones
+
+- LOW: root development dependencies in `package.json` and `package-lock.json`.
+
 ## Registry-complete locks and owned telemetry publishing (2026-08-13)
 
 ### What changed
