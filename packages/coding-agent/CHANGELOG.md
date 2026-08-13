@@ -7,7 +7,16 @@
 - Idle compaction warm-ups are no longer wasted. A summary prepared while the session was idle is
   now applied when the history it summarized is unchanged, instead of being discarded because
   unrelated messages arrived during the wait. Sessions parked in a cache-warm wait no longer pay a
-  second full compaction the moment you send your next message.
+  second full compaction the moment you send your next message
+  ([#853](https://github.com/code-yeongyu/senpi/pull/853)).
+
+- Provider stream stalls (`Provider stream start timed out after <n>ms` and `Idle timeout waiting for
+  provider stream after <n>ms`) now use the same bounded retry budget as every other transient provider
+  error instead of giving up after a single same-model attempt, so a turn no longer ends with
+  `Retry failed after 1 attempts` while `retry.maxRetries` is 3. Retries also keep the configured provider
+  timeouts rather than shrinking them to `retry.provider.streamRetryTimeoutMs`, which had turned a configured
+  90s stream-start budget into 30s on the retry; that setting still bounds the retry continuation itself
+  ([#845](https://github.com/code-yeongyu/senpi/pull/845)).
 
 - Historical image replay can now be capped with `images.maxHistoricalImages`, preserving every
   image in the active turn while replacing only older request-payload images with the existing

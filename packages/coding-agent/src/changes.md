@@ -3,6 +3,42 @@
 The historical-image transport entry moved to `core/changes.md`, beside the
 other provider-bound image transport behavior that owns the same payload path.
 
+## Provider stream stalls share the bounded retry policy (2026-08-13)
+
+### What changed
+
+- `core/agent-session.ts`: provider-stream stalls (`isProviderStreamStallError`, covering both the idle-timeout and
+  stream-start-timeout watchdog wordings) are no longer special-cased. They consume the same bounded same-model retry
+  budget (`settings.retry.maxRetries`) as every other transient class and escalate to the fallback chain only when that
+  budget is exhausted. The `_consecutiveProviderStreamStalls` streak counter and its escalation branch are removed.
+- `core/provider-timeout-retry.ts`: the retry request keeps the configured `timeoutMs`/`streamStartTimeoutMs` instead of
+  clamping both to `retry.provider.streamRetryTimeoutMs`. That setting still bounds the retry *continuation*
+  (`runBoundedRetryContinuation`), so a wedged retry is still cancelled without shortening the provider's own guards.
+  Disabled guards are still never re-enabled.
+- Coverage: `test/suite/retry-fallback-stall-shared-budget.test.ts` (replaces
+  `test/suite/retry-fallback-stall-escalation.test.ts`), `test/provider-timeout-retry.test.ts`, and updated
+  `test/suite/regressions/provider-idle-{recovery,steering}.test.ts`.
+
+### Why
+
+- This reverses the 2026-07-29 stall-escalation and retry-cap entries below. In practice the two combined to end turns
+  early: the second consecutive stall skipped the remaining same-model budget, so a session with no configured fallback
+  chain surfaced `Retry failed after 1 attempts: Provider stream start timed out after 30000ms` while `maxRetries` was 3.
+- The cap also shrank a configured 90s stream-start guard to 30s on the retry, so the retry was judged dead on a deadline
+  the operator never configured - visible as a 90000ms stall immediately followed by a 30000ms one. A slow-but-alive
+  provider now gets the budget it was configured with, and the transient class it already belongs to
+  (`isRetryableErrorMessage` matches both wordings) decides the number of attempts.
+
+### Why an extension could not do this
+
+- Retry classification, the same-model budget, and the fallback-chain handoff all live in the private auto-retry branch of
+  `AgentSession`. No extension hook observes or replaces that decision.
+
+### Expected merge conflict zones on next upstream sync
+
+- `core/agent-session.ts` in the transient retry branch (`_autoRetry`) around the budget/fallback gate.
+- `core/provider-timeout-retry.ts` in `createProviderTimeoutRetryPlan`.
+
 ## Model-aware `/btw` side-query context budgeting (2026-08-12)
 
 ### What changed

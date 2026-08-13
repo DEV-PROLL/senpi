@@ -648,7 +648,6 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
-	private _consecutiveProviderStreamStalls = 0;
 	private _probePhase: ProbePhase = "idle";
 	private _hintDeadlineMs: number | undefined = undefined;
 	private _cumulativeHintedWaitMs = 0;
@@ -6027,19 +6026,12 @@ export class AgentSession {
 			}
 			this._retryAttempt++;
 		} else {
-			if (this._retryAttempt === 0) {
-				this._consecutiveProviderStreamStalls = 0;
-			}
-			// A provider-stream stall means the request was accepted but delivered
-			// zero events for the whole idle budget. Replaying the identical payload
-			// against a hung provider burns that full budget again per attempt
-			// ((1 + maxRetries) * httpIdleTimeoutMs of opaque dead air), so a second
-			// consecutive stall escalates to the fallback chain immediately. Fast
-			// non-stall failures in between reset the streak and keep the normal
-			// same-model recovery semantics.
+			// A provider-stream stall is an ordinary transient failure: it consumes
+			// the same bounded same-model budget (`settings.maxRetries`) as every
+			// other retryable class and escalates to the fallback chain only when
+			// that budget is exhausted. It is excluded from 429-class tier routing
+			// because a stall carries no rate-limit markers or retry-after hint.
 			const stallError = isProviderStreamStallError(message);
-			const escalateAfterRepeatedStall = stallError && this._consecutiveProviderStreamStalls > 0;
-			this._consecutiveProviderStreamStalls = stallError ? this._consecutiveProviderStreamStalls + 1 : 0;
 			// 429-class detection: retryable AND message carries rate-limit markers.
 			const is429Class =
 				!stallError &&
@@ -6164,7 +6156,7 @@ export class AgentSession {
 			if (!is429TierRouted) {
 				this._retryAttempt++;
 			}
-			if (!is429TierRouted && (this._retryAttempt > settings.maxRetries || escalateAfterRepeatedStall)) {
+			if (!is429TierRouted && this._retryAttempt > settings.maxRetries) {
 				switchedFallback = await this._retryFallback.tryFallback("transient", {
 					errorMessage,
 					retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
@@ -6193,10 +6185,6 @@ export class AgentSession {
 					return "not-handled";
 				}
 			}
-		}
-
-		if (switchedFallback) {
-			this._consecutiveProviderStreamStalls = 0;
 		}
 
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
