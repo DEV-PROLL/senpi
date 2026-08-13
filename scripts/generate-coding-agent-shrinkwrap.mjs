@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveOptionalRegistryPackage } from "./publish-lock-optional-registry.mjs";
-import { registryMetadataError } from "./install-lock-utils.mjs";
+import { rebaseResolvedLockPath, registryMetadataError } from "./install-lock-utils.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -20,7 +20,7 @@ const manifestRelPath = "packages/coding-agent/publish-deps.lock.json";
 const shrinkwrapPath = join(repoRoot, manifestRelPath);
 const internalPackagePrefixes = ["@earendil-works/pi-", "@code-yeongyu/senpi-codemode"];
 const allowedInstallScriptPackages = new Map([
-	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
+	["@google/genai@2.13.0", "preinstall is a no-op in the published package"],
 	["protobufjs@7.6.5", "postinstall only warns about protobufjs version scheme mismatches"],
 ]);
 
@@ -222,7 +222,12 @@ function addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, name, works
 	addedPaths.add(outputPath);
 
 	for (const dependency of packageDependencyEntries(packageJson)) {
-		queue.push({ ...dependency, from: outputPath });
+		queue.push({
+			...dependency,
+			resolveFrom: workspace.lockPath,
+			sourceBase: workspace.lockPath,
+			outputBase: outputPath,
+		});
 	}
 }
 
@@ -230,7 +235,7 @@ async function addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, 
 	let lockPath;
 	let entry;
 	try {
-		lockPath = resolveExternalDependency(lockPackages, item.name, item.from);
+		lockPath = resolveExternalDependency(lockPackages, item.name, item.resolveFrom);
 		entry = lockPackages[lockPath];
 	} catch (error) {
 		if (!item.optional) {
@@ -239,15 +244,21 @@ async function addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, 
 		lockPath = `node_modules/${item.name}`;
 		entry = await resolveOptionalRegistryPackage(item.name, item.version);
 	}
-	if (addedPaths.has(lockPath)) {
+	const outputPath = rebaseResolvedLockPath(lockPath, item.sourceBase, item.outputBase);
+	if (addedPaths.has(outputPath)) {
 		return;
 	}
 
-	shrinkwrapPackages[lockPath] = copyLockEntry(entry);
-	addedPaths.add(lockPath);
+	shrinkwrapPackages[outputPath] = copyLockEntry(entry);
+	addedPaths.add(outputPath);
 
 	for (const dependency of packageDependencyEntries(entry)) {
-		queue.push({ ...dependency, from: lockPath });
+		queue.push({
+			...dependency,
+			resolveFrom: lockPath,
+			sourceBase: item.sourceBase,
+			outputBase: item.outputBase,
+		});
 	}
 }
 
@@ -335,7 +346,12 @@ async function generateShrinkwrap() {
 	};
 	const addedPaths = new Set([""]);
 	const internalNames = new Set();
-	const queue = packageDependencyEntries(codingAgentPackage).map((dependency) => ({ ...dependency, from: "" }));
+	const queue = packageDependencyEntries(codingAgentPackage).map((dependency) => ({
+		...dependency,
+		resolveFrom: "packages/coding-agent",
+		sourceBase: "packages/coding-agent",
+		outputBase: "",
+	}));
 
 	while (queue.length > 0) {
 		const item = queue.shift();

@@ -6,6 +6,9 @@
 
 - Preserved CalVer release orchestration, nine-package lockstep versioning, and
   fork-scoped publish manifest rewriting.
+- Installer-lock generation derives bundled internal workspaces from the
+  release-managed package list, so telemetry follows the fork's CalVer alias
+  policy while independently versioned sqlite remains registry-backed.
 - Combined upstream native dependency isolation, baseline binary targets, and
   Bun bunfig-autoload protection with Senpi's binary assets and codesigning.
 - Preserved local-release and publish behavior for fork package identities while

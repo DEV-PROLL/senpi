@@ -15,6 +15,7 @@ import {
 } from "./install-lock-utils.mjs";
 import { validateGeneratedFiles } from "./install-lock-validation.mjs";
 import { resolveOptionalRegistryPackage } from "./publish-lock-optional-registry.mjs";
+import { WORKSPACE_PACKAGES } from "./release-packages.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -23,7 +24,6 @@ const outputDir = join(codingAgentDir, "install-lock");
 const rootLockfilePath = join(repoRoot, "package-lock.json");
 const outputPackageJsonPath = join(outputDir, "package.json");
 const outputLockfilePath = join(outputDir, "package-lock.json");
-const internalPackagePrefixes = ["@earendil-works/pi-", "@code-yeongyu/senpi"];
 const installPackageName = "@code-yeongyu/senpi-install";
 const allowedInstallScriptPackages = new Map([
 	["@google/genai@2.13.0", "preinstall is a no-op in the published package"],
@@ -44,14 +44,14 @@ function readJson(path) {
 	return JSON.parse(readFileSync(path, "utf8"));
 }
 
-function getInternalWorkspaces(lockPackages) {
+function getInternalWorkspaces(lockPackages, lockstepInternalNames) {
 	const workspaces = new Map();
 
 	for (const [lockPath, entry] of Object.entries(lockPackages)) {
 		if (!lockPath.startsWith("packages/") || lockPath.includes("/node_modules/") || !entry.name || !entry.version) {
 			continue;
 		}
-		if (!internalPackagePrefixes.some((prefix) => entry.name.startsWith(prefix))) {
+		if (!lockstepInternalNames.has(entry.name)) {
 			continue;
 		}
 
@@ -157,7 +157,10 @@ async function generateInstallLock() {
 	const lockPackages = rootLock.packages;
 	const codingAgentPackage = readJson(join(codingAgentDir, "package.json"));
 	const installerPackageJson = createInstallerPackageJson(codingAgentPackage);
-	const internalWorkspaces = getInternalWorkspaces(lockPackages);
+	const lockstepInternalNames = new Set(
+		WORKSPACE_PACKAGES.map((packagePath) => readJson(join(repoRoot, packagePath)).name),
+	);
+	const internalWorkspaces = getInternalWorkspaces(lockPackages, lockstepInternalNames);
 	const installLockPackages = {
 		"": createRootLockEntry(installerPackageJson),
 	};
@@ -203,7 +206,7 @@ async function generateInstallLock() {
 		installerPackageJson,
 		installLock,
 		internalNames,
-		internalPackagePrefixes,
+		lockstepInternalNames,
 		allowedInstallScriptPackages,
 	});
 	return { installerPackageJson, installLock };

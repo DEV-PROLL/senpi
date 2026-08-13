@@ -121,6 +121,9 @@ Persistent terminals -> packages/pty -> crates/senpi-pty
 - Regenerate `packages/coding-agent/publish-deps.lock.json` with `node scripts/generate-coding-agent-shrinkwrap.mjs`; never replace it with `npm-shrinkwrap.json`.
 - External registry entries in root, publish, and installer locks must preserve both npm tarball `resolved` URLs
   and `integrity` hashes; incomplete merge results are invalid even when dependency topology still resolves.
+- `@earendil-works/pi-telemetry` is a runtime dependency and must stay in Senpi's owned CalVer alias, publish,
+  and bundle sets. `@earendil-works/pi-storage-sqlite-node` remains private and independently versioned because
+  it is not reachable from the shipped coding-agent runtime.
 - Dependencies with lifecycle scripts require package/version review and an explicit justified generator allowlist entry; never add one silently to pass the gate.
 
 ## GIT AND DELIVERY
@@ -135,6 +138,6 @@ Persistent terminals -> packages/pty -> crates/senpi-pty
 
 ## RELEASE NOTES
 
-- Releases use CalVer and lockstep-version nine packages listed in `scripts/release-packages.mjs`.
+- Releases use CalVer and lockstep-version the packages listed in `scripts/release-packages.mjs`.
 - Release only from clean `main` after changelog audit and local release smoke tests. `scripts/release.mjs` owns versioning, generated artifacts, checks, commits, tag, and push.
 - Never rerun the release script after its tag is pushed; failed publishing is retried from the existing tag workflow.

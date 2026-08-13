@@ -23,6 +23,7 @@ const packages = [
 	{ directory: "packages/agent", name: "@code-yeongyu/senpi-agent-core", rewriteManifest: true },
 	{ directory: "packages/tui", name: "@code-yeongyu/senpi-tui", rewriteManifest: true },
 	{ directory: "packages/pty", name: "@code-yeongyu/senpi-pty", rewriteManifest: true },
+	{ directory: "packages/telemetry", name: "@code-yeongyu/senpi-telemetry", rewriteManifest: true },
 	{ directory: "packages/senpi-codemode", name: "@code-yeongyu/senpi-codemode", rewriteManifest: true },
 	{ directory: "packages/coding-agent", name: "@code-yeongyu/senpi" },
 ];

@@ -7,8 +7,13 @@ import {
 } from "./install-lock-utils.mjs";
 
 export function validateGeneratedFiles(options) {
-	const { installerPackageJson, installLock, internalNames, internalPackagePrefixes, allowedInstallScriptPackages } =
-		options;
+	const {
+		installerPackageJson,
+		installLock,
+		internalNames,
+		lockstepInternalNames,
+		allowedInstallScriptPackages,
+	} = options;
 	const errors = [];
 	const rootEntry = installLock.packages[""];
 	const includedPackageNames = new Set();
@@ -44,13 +49,10 @@ export function validateGeneratedFiles(options) {
 			errors.push(`${lockPath || "root"} contains dev/extraneous metadata`);
 		}
 		const metadataError = registryMetadataError(lockPath, entry);
-		if (metadataError && !internalPackagePrefixes.some((prefix) => packageName?.startsWith(prefix))) {
+		if (metadataError && !lockstepInternalNames.has(packageName)) {
 			errors.push(metadataError);
 		}
-		if (
-			internalPackagePrefixes.some((prefix) => packageName?.startsWith(prefix)) &&
-			entry.version !== installerPackageJson.version
-		) {
+		if (packageName && lockstepInternalNames.has(packageName) && entry.version !== installerPackageJson.version) {
 			errors.push(`${lockPath} internal package version ${entry.version} does not match ${installerPackageJson.version}`);
 		}
 		if (entry.hasInstallScript) {
