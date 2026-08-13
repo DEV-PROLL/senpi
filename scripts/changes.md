@@ -1,5 +1,29 @@
 # changes
 
+## Install the compiler used by workspace builds (2026-08-13)
+
+### What changed
+
+- Pointed the root `@typescript/native` alias at
+  `@typescript/native-preview`, the package that actually provides the `tsgo`
+  binary invoked by workspace build scripts.
+- Added a dependency-contract test covering the manifest alias, lockfile
+  package identity, pinned native compiler version, and installed `tsgo` bin.
+
+### Why
+
+- Clean release runners do not have a globally installed `tsgo`; telemetry must
+  build before coding-agent can consume its generated declarations.
+
+### Why an extension could not handle it
+
+- Compiler installation and workspace build ordering happen before any Senpi
+  runtime or extension is loaded.
+
+### Expected merge conflict zones
+
+- LOW: root development dependencies in `package.json` and `package-lock.json`.
+
 ## Registry-complete locks and owned telemetry publishing (2026-08-13)
 
 ### What changed
