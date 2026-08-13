@@ -1,5 +1,25 @@
 # changes
 
+## Registry-owned thread teardown (2026-08-13)
+
+### What changed
+
+- `ThreadRegistry.dispose()` now drains each loaded thread's queued work,
+  disposes its session, clears MCP wire state, and removes the loaded entries.
+
+### Why
+
+- Test and server teardown must not remove session directories while queued goal
+  persistence or replacement work is still writing beneath them.
+
+### Why an extension could not handle it
+
+- The task queues and loaded-session map are private registry state.
+
+### Expected merge conflict zones
+
+- LOW: `threads/registry.ts`, beside `unloadThread()` and task queue ownership.
+
 ## App-server extension RPC bridge (2026-08-12)
 
 ### What changed

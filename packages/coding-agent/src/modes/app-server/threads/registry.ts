@@ -264,6 +264,16 @@ export class ThreadRegistry {
 		return this.entries.delete(threadId);
 	}
 
+	async dispose(): Promise<void> {
+		const entries = [...this.entries.values()];
+		await Promise.all(entries.map((entry) => entry.taskQueue));
+		for (const entry of entries) {
+			entry.session.dispose();
+			this.mcpWireStatuses.removeThread(entry.id);
+		}
+		this.entries.clear();
+	}
+
 	buildThread(entry: ThreadEntry): WireThread {
 		return this.buildLoadedThread(entry);
 	}
