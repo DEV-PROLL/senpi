@@ -4,6 +4,26 @@
 
 ### Fixed
 
+=======
+- The shipped `claude-fable-5` fallback chain now reaches Kimi K3 on providers that expose the
+  model as `kimi-k3` (for example OpenCode Go), via an explicit `kimi-k3:max` entry. The
+  conservative family matcher is unchanged, so `k3` still cannot capture arbitrary ids
+  ([#793](https://github.com/code-yeongyu/senpi/issues/793)).
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Removed
+
+## [2026.8.13-2] - 2026-08-13
+
+### Fixed
+
 - A session reload no longer crashes the CLI while a compaction idle warm-up retry is pending. The warm-up watcher
   armed after a transient summarization failure kept reading its `ExtensionContext` after `reload()` retired that
   extension generation, and the resulting `stale extension generation after reload` escaped as an unhandled
@@ -11,6 +31,8 @@
   process. The watcher now stands down on `session_shutdown` and re-checks that its generation is still live before
   either continuation touches the context
   ([#866](https://github.com/code-yeongyu/senpi/pull/866)).
+
+
 
 - The shipped `claude-fable-5` fallback chain now reaches Kimi K3 on providers that expose the
   model as `kimi-k3` (for example OpenCode Go), via an explicit `kimi-k3:max` entry. The
