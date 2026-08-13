@@ -92,6 +92,16 @@ async function runRpcSurface({ cleanup, evidence }) {
 	);
 	const rpc = collectRpc(child);
 	try {
+		child.stdin.write("{not-json\n");
+		const malformedResponse = await rpc.waitFor(
+			(message) =>
+				message.type === "response" &&
+				message.command === "parse" &&
+				message.success === false &&
+				typeof message.error === "string" &&
+				message.error.startsWith("Failed to parse command:"),
+			"malformed JSONL rejection",
+		);
 		await rpc.send({ type: "get_state" });
 		await rpc.send({ type: "set_model", provider: "mock", modelId: "mock-model" });
 		await rpc.send({ type: "prompt", message: PROMPT });
@@ -110,7 +120,13 @@ async function runRpcSurface({ cleanup, evidence }) {
 		process.stdout.write(
 			`[PASS] rpc: goal-cache-warmup scheduled entry appended (dueAtMs=${dueAtMs} delayMs=${delayMs} basisDeltaMs=${report.basisDeltaMs})\n`,
 		);
-		return { entryTimestamp: report.entry.timestamp, dueAtMs, delayMs };
+		process.stdout.write(`[PASS] rpc: malformed JSONL rejected without terminating the process\n`);
+		return {
+			entryTimestamp: report.entry.timestamp,
+			dueAtMs,
+			delayMs,
+			malformedError: malformedResponse.error,
+		};
 	} finally {
 		child.kill("SIGTERM");
 		await waitForClose(child);
@@ -152,7 +168,10 @@ async function runTuiSurface({ cleanup, evidence, root }) {
 		rows: 36,
 	});
 	try {
-		await terminal.waitFor((text) => text.includes("mock-model"), "initial TUI model render");
+		await terminal.waitFor(
+			(text) => text.includes("mock-model") && text.includes("esc interrupt"),
+			"interactive TUI ready",
+		);
 		terminal.submit(PROMPT);
 		const pattern = /ready \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \(\d+[smh][^)]*\)/;
 		const text = await terminal.waitFor((value) => pattern.test(value), "durable cache-warm ready notice", 120_000);
@@ -166,6 +185,18 @@ async function runTuiSurface({ cleanup, evidence, root }) {
 		process.stdout.write(`[PASS] tui: screenshot: ${join(evidence, "terminal.png")}\n`);
 		return { noticeLine };
 	} finally {
+		writeFileSync(
+			join(evidence, "tui-model-requests.json"),
+			`${JSON.stringify(
+				server.requests.map((request) => ({
+					...request,
+					authorization: request.authorization ? "<mock-redacted>" : null,
+					apiKeyHeader: request.apiKeyHeader ? "<mock-redacted>" : null,
+				})),
+				null,
+				2,
+			)}\n`,
+		);
 		cleanup.terminalExited = terminal.stop();
 		await server.stop();
 		cleanup.tuiServerStopped = !server.listening;

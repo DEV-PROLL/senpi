@@ -3,29 +3,31 @@ import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import xtermHeadless from "@xterm/headless";
 import { withTimeout } from "./with-timeout.mjs";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const { Terminal } = xtermHeadless;
 
 export async function renderTerminalScreenshot(root, evidence, raw) {
 	if (!existsSync(CHROME)) throw new Error(`Chrome not found at ${CHROME}`);
-	const xtermRoot = join(root, ".agents", "skills", "senpi-qa", "node_modules", "@xterm", "xterm");
-	const js = pathToFileURL(join(xtermRoot, "lib", "xterm.js")).href;
-	const css = pathToFileURL(join(xtermRoot, "css", "xterm.css")).href;
 	const htmlPath = join(evidence, "terminal.html");
 	const pngPath = join(evidence, "terminal.png");
 	const profileDir = mkdtempSync(join(tmpdir(), "senpi-qa-chrome-"));
-	const encoded = Buffer.from(raw, "utf8").toString("base64");
+	const terminal = new Terminal({ cols: 120, rows: 36, convertEol: true, allowProposedApi: true });
+	await new Promise((resolve) => terminal.write(raw, resolve));
+	const viewport = terminal.buffer.active;
+	const lines = Array.from({ length: terminal.rows }, (_, row) =>
+		viewport.getLine(viewport.viewportY + row)?.translateToString(true) ?? "",
+	);
+	terminal.dispose();
+	const text = escapeHtml(lines.join("\n"));
 	writeFileSync(
 		htmlPath,
-		`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="${css}">` +
-			`<style>html,body,#terminal{margin:0;width:100%;height:100%;background:#0b0d10}</style>` +
-			`<div id="terminal"></div><script src="${js}"></script><script>` +
-			`const t=new Terminal({cols:120,rows:36,convertEol:true,fontSize:16,theme:{background:"#0b0d10"}});` +
-			`t.open(document.getElementById("terminal"));` +
-			`t.write(new TextDecoder().decode(Uint8Array.from(atob("${encoded}"),c=>c.charCodeAt(0))),` +
-			`()=>{document.body.dataset.ready="true"});` +
-			`</script>`,
+		`<!doctype html><html><head><meta charset="utf-8"><style>` +
+			`html,body{margin:0;width:100%;height:100%;background:#0b0d10;color:#e6edf3}` +
+			`pre{box-sizing:border-box;margin:0;padding:16px;font:16px/1.2 Menlo,Monaco,monospace;white-space:pre}` +
+			`</style></head><body data-ready="true"><pre>${text}</pre></body></html>`,
 	);
 	const chrome = spawn(
 		CHROME,
@@ -58,15 +60,11 @@ export async function renderTerminalScreenshot(root, evidence, raw) {
 		try {
 			await cdp.send("Runtime.enable");
 			await cdp.send("Page.enable");
-			await cdp.send("Runtime.evaluate", {
-				expression:
-					`new Promise((resolve)=>{` +
-					`if(document.body?.dataset.ready==="true")return resolve(true);` +
-					`const observer=new MutationObserver(()=>{if(document.body?.dataset.ready==="true"){observer.disconnect();resolve(true)}});` +
-					`observer.observe(document.documentElement,{attributes:true,subtree:true})})`,
-				awaitPromise: true,
+			const ready = await cdp.send("Runtime.evaluate", {
+				expression: `document.body?.dataset.ready === "true"`,
 				returnByValue: true,
 			});
+			if (ready.result?.value !== true) throw new Error("Chrome did not load terminal.html");
 			const screenshot = await cdp.send("Page.captureScreenshot", {
 				format: "png",
 				fromSurface: true,
@@ -83,6 +81,10 @@ export async function renderTerminalScreenshot(root, evidence, raw) {
 	if (!existsSync(pngPath) || statSync(pngPath).size === 0) {
 		throw new Error("Chrome did not produce terminal.png");
 	}
+}
+
+function escapeHtml(value) {
+	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 function devToolsPort(chrome) {
