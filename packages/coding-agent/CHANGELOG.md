@@ -10,7 +10,7 @@
   rejection from the failure continuation and as an `uncaughtException` from the armed retry timer, killing the
   process. The watcher now stands down on `session_shutdown` and re-checks that its generation is still live before
   either continuation touches the context
-  ([#865](https://github.com/code-yeongyu/senpi/pull/865)).
+  ([#866](https://github.com/code-yeongyu/senpi/pull/866)).
 
 - Every registry package source is now private, and every scripted release-publication entrypoint fails
   closed outside the trusted GitHub Actions path, preventing direct or scripted npm publication without
