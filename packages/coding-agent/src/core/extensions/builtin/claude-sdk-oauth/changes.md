@@ -50,6 +50,35 @@ The lane decision lives inside the builtin provider's own `queryWithAuthLane`/`m
 
 LOW in `auth-lane.ts` (new `resolveEffectiveLane` + `managedPool` lane resolution); LOW in `oauth-login.ts` (`readSettings` dep + lane-aware `check`); LOW in `index.ts` (one new import + `readSettings` wiring); LOW in `options.ts` (one fallback literal). LOW in `test/claude-sdk-oauth-auth-status.test.ts` and `test/suite/regressions/6784-claude-sdk-oauth-default-lane.test.ts`.
 
+## 2026-08-13 - Bound the ambient probe and let an abandoned request stop waiting
+
+### What changed
+
+- `probeAmbientClaudeAuthStatus` runs under a 10s deadline, killing the status child and reporting unavailable
+  when it expires. The probe accepts an injected spawn so the deadline is covered without a real subprocess.
+- The reader returned by `createAmbientAuthStatusReader` takes an optional `AbortSignal` and rejects for THAT
+  caller once its request is abandoned. The shared probe keeps running for the callers still waiting on it.
+- `check()` and `resolveAmbient()` thread the signal supplied by `ApiKeyAuth`, so both paths through
+  `configuredFor()` are bounded.
+
+### Why
+
+- `claude auth status` validates credentials and can stall. The probe sits on the auth path of every request and
+  its result is shared, so one stall parked every caller that joined it, with no deadline and no way for an
+  aborted turn to walk away. Model calls waited behind auth resolution that could never settle.
+- Cancelling the shared probe on one caller's abort would be the wrong repair: it would cancel work another live
+  request is waiting on. Only the individual wait is abandoned.
+
+### Why an extension could not handle it
+
+- The probe and its cache live inside this builtin provider, behind `Models.getAuth()`. No external hook observes
+  that boundary or the per-request signal reaching it.
+
+### Expected merge-conflict zones
+
+- LOW: `availability.ts` around the reader and probe signatures.
+- LOW: `oauth-login.ts` at `configuredFor`, `check`, and `resolveAmbient` parameter lists.
+
 ## 2026-08-12 - Restore request auth for the ambient lane
 
 - Regression from 2acbb6e0c ("Require a real OAuth login for runtime availability"), which removed the

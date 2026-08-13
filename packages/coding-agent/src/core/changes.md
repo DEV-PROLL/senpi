@@ -159,6 +159,24 @@
 
 - LOW: `provider-display-names.ts` display-name map.
 
+## Ambient auth resolution honours the request signal (2026-08-13)
+
+### What changed
+
+- `ExtensionOAuthConfig.resolveAmbient()` (`provider-composer.ts`) accepts an optional `signal` alongside `ctx`.
+- The ambient-only api-key auth in `provider-api-key-auth.ts` forwards the `AbortSignal` that `ApiKeyAuth.check`
+  and `ApiKeyAuth.resolve` already receive, so an abandoned request stops waiting on ambient resolution.
+
+### Why
+
+- Ambient resolution can shell out to a provider CLI, which runs on the auth path of every request. Without the
+  signal an aborted turn still waited for that work to settle.
+
+### Expected merge conflict zones
+
+- LOW: the `resolveAmbient` signature in `provider-composer.ts` and the ambient auth callsites in
+  `provider-api-key-auth.ts`.
+
 ## Compose ambient api-key auth for OAuth providers (2026-08-12)
 
 ### What changed

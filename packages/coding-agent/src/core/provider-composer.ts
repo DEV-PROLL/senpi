@@ -48,7 +48,7 @@ export interface ExtensionOAuthConfig {
 	 * `oauth`, so ambient users resolve instead of hitting
 	 * "Provider is not configured". Never consulted once a credential is stored.
 	 */
-	resolveAmbient?(input: { ctx: AuthContext }): Promise<AuthResult | undefined>;
+	resolveAmbient?(input: { ctx: AuthContext; signal?: AbortSignal }): Promise<AuthResult | undefined>;
 	login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
 	refreshToken(credentials: OAuthCredentials, signal: AbortSignal): Promise<OAuthCredentials>;
 	getApiKey(credentials: OAuthCredentials): string;

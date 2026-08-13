@@ -92,7 +92,7 @@ export function composeApiKeyAuth(
 	};
 }
 
-type AmbientResolver = (input: { ctx: AuthContext }) => Promise<AuthResult | undefined>;
+type AmbientResolver = (input: { ctx: AuthContext; signal?: AbortSignal }) => Promise<AuthResult | undefined>;
 
 function ambientResolverOf(oauth: unknown): AmbientResolver | undefined {
 	const candidate = (oauth as { resolveAmbient?: unknown } | undefined)?.resolveAmbient;
@@ -111,12 +111,12 @@ function ambientOnlyAuth(oauth: unknown): ApiKeyAuth | undefined {
 	if (!resolveAmbient) return undefined;
 	return {
 		name: (oauth as { name?: string }).name ?? "Ambient credentials",
-		check: async ({ ctx, credential }) => {
+		check: async ({ ctx, credential, signal }) => {
 			if (credential) return undefined;
-			const resolved = await resolveAmbient({ ctx });
+			const resolved = await resolveAmbient({ ctx, signal });
 			return resolved ? { type: "oauth", source: resolved.source } : undefined;
 		},
-		resolve: async ({ ctx, credential }) => (credential ? undefined : resolveAmbient({ ctx })),
+		resolve: async ({ ctx, credential, signal }) => (credential ? undefined : resolveAmbient({ ctx, signal })),
 	};
 }
 

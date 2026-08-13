@@ -38,6 +38,30 @@ describe("ambient Claude auth status cache", () => {
 		expect(probe).toHaveBeenCalledTimes(1);
 	});
 
+	it("stops waiting when the caller aborts, leaving the shared probe for the others", async () => {
+		let release: ((value: boolean) => void) | undefined;
+		const probe = vi.fn(() => new Promise<boolean>((resolve) => (release = resolve)));
+		const read = createAmbientAuthStatusReader(probe, () => 1_000, 30_000);
+		const abandoned = new AbortController();
+
+		const abandonedRead = read(abandoned.signal);
+		const stillWaiting = read();
+		abandoned.abort(new Error("turn aborted"));
+
+		await expect(abandonedRead).rejects.toThrow("turn aborted");
+		release?.(true);
+		expect(await stillWaiting).toBe(true);
+		expect(probe).toHaveBeenCalledTimes(1);
+	});
+
+	it("rejects immediately when the caller is already aborted", async () => {
+		const probe = vi.fn(async () => true);
+		const read = createAmbientAuthStatusReader(probe, () => 1_000, 30_000);
+		await read();
+
+		await expect(read(AbortSignal.abort(new Error("already gone")))).rejects.toThrow("already gone");
+	});
+
 	it("does not cache a rejected probe", async () => {
 		const probe = vi.fn().mockRejectedValueOnce(new Error("spawn failed")).mockResolvedValueOnce(true);
 		const read = createAmbientAuthStatusReader(probe, () => 1_000, 30_000);
