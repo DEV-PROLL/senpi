@@ -8,6 +8,8 @@
   phase after AI.
 - Strengthened the build-order regression so direct workspace dependencies must
   be in strictly later phases instead of merely the same phase.
+- Kept the flattened phase-order expectation synchronized with the executable
+  phase list so the serial release test gate verifies the new order.
 
 ### Why
 
