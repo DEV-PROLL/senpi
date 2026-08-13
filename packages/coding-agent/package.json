@@ -1,6 +1,7 @@
 {
 	"name": "@code-yeongyu/senpi",
 	"version": "2026.8.13",
+	"private": true,
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"piConfig": {

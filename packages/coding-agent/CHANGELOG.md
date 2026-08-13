@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Every registry package source is now private, and every scripted release-publication entrypoint fails
+  closed outside the trusted GitHub Actions path, preventing direct or scripted npm publication without
+  provenance attestations.
+
 - The compaction prepared while your session sat idle is now reused no matter which internal path runs
   the compaction. Previously the path that runs first on a new prompt threw that finished summary away
   and summarized again while you waited, so the idle head start was wasted in exactly the case it was

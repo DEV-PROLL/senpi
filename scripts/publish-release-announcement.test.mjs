@@ -1,6 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getPublicWorkspacePackages } from "./release-packages.mjs";
 import { advanceLatestRelease, compareReleaseVersions } from "./publish-release-announcement.mjs";
+
+test("announces every fork-owned registry package from private sources", () => {
+	assert.deepEqual(
+		getPublicWorkspacePackages().map(({ name }) => name),
+		[
+			"@code-yeongyu/senpi-agent-core",
+			"@code-yeongyu/senpi-ai",
+			"@code-yeongyu/senpi",
+			"@code-yeongyu/senpi-pty",
+			"@code-yeongyu/senpi-codemode",
+			"@code-yeongyu/senpi-telemetry",
+			"@code-yeongyu/senpi-tui",
+		],
+	);
+});
 
 test("compares stable release versions numerically", () => {
 	assert.ok(compareReleaseVersions("0.85.0", "0.84.9") > 0);

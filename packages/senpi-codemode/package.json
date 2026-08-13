@@ -1,6 +1,7 @@
 {
 	"name": "@code-yeongyu/senpi-codemode",
 	"version": "2026.8.13",
+	"private": true,
 	"description": "Source-only senpi extension package for codemode evaluation tools",
 	"type": "module",
 	"main": "./src/index.ts",

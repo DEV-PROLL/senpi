@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { findPackageDirectories } from "./package-workspaces.mjs";
+import { ownedRegistryAliases } from "./prepare-senpi-publish-manifest.mjs";
 
 export const WORKSPACE_PACKAGES = [
 	"packages/ai/package.json",
@@ -49,11 +50,20 @@ export function runSyncVersions(dryRun, runCommand, log, dryRunLog) {
 }
 
 export function getPublicWorkspacePackages() {
+	const publishedPackageNames = new Map([
+		...ownedRegistryAliases.entries(),
+		["@code-yeongyu/senpi-codemode", "@code-yeongyu/senpi-codemode"],
+		["@code-yeongyu/senpi", "@code-yeongyu/senpi"],
+	]);
 	return findPackageDirectories()
 		.map((directory) => ({
 			directory,
 			...JSON.parse(readFileSync(join(directory, "package.json"), "utf8")),
 		}))
-		.filter((pkg) => pkg.private !== true)
-		.map(({ directory, name, version }) => ({ directory, name, version }));
+		.filter((pkg) => publishedPackageNames.has(pkg.name))
+		.map(({ directory, name, version }) => ({
+			directory,
+			name: publishedPackageNames.get(name),
+			version,
+		}));
 }
