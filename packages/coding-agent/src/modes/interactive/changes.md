@@ -1,5 +1,33 @@
 # changes
 
+## Extension selector windows long option lists (2026-08-13)
+
+### What changed
+
+- `components/extension-selector.ts` renders only a window of options around the selection (sized like
+  `TreeList`: half the terminal rows, minimum 5, defaulting to 10 without a TUI handle) with muted
+  `… N more above/below` markers when clipped. Previously `updateList()` rebuilt every option on every
+  keypress; on large model registries the overflowing list pushed past the viewport and the moved highlight
+  was never painted, so arrows and j/k looked dead in `/fallback` even though the selection moved (issue #795).
+- Coverage: `test/suite/regressions/795-extension-selector-windowing.test.ts` and the real-CLI scenario
+  `.agents/skills/senpi-qa/scripts/scenarios/fallback-selector-nav-repro.mjs` (60-model registry,
+  kitty-encoded and legacy input).
+
+### Why
+
+- Every `/fallback` chain edit on a large registry hit a selector whose visible highlight never updated:
+  the selection index advanced synchronously, but the full-list repaint was lost past the viewport, so the
+  flow looked frozen while Esc (a single cheap repaint of the restored editor) still responded.
+
+### Why this cannot be expressed externally
+
+- The component is the shared extension-dialog selector owned by interactive mode; no extension hook
+  intercepts its per-keypress render.
+
+### Expected merge conflict zones
+
+- LOW: `components/extension-selector.ts` `updateList()` and constructor option handling.
+
 ## Deferred assistant messages are not errors (2026-08-13)
 
 ### What changed
