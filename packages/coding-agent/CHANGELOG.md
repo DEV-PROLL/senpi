@@ -4,11 +4,23 @@
 
 ### Fixed
 
+<<<<<<< HEAD
 - The shipped `claude-fable-5` fallback chain now reaches Kimi K3 on providers that expose the
   model as `kimi-k3` (for example OpenCode Go), via an explicit `kimi-k3:max` entry. The
   conservative family matcher is unchanged, so `k3` still cannot capture arbitrary ids
   ([#793](https://github.com/code-yeongyu/senpi/issues/793)).
 
+||||||| feb0f4780
+=======
+- A session reload no longer crashes the CLI while a compaction idle warm-up retry is pending. The warm-up watcher
+  armed after a transient summarization failure kept reading its `ExtensionContext` after `reload()` retired that
+  extension generation, and the resulting `stale extension generation after reload` escaped as an unhandled
+  rejection from the failure continuation and as an `uncaughtException` from the armed retry timer, killing the
+  process. The watcher now stands down on `session_shutdown` and re-checks that its generation is still live before
+  either continuation touches the context
+  ([#866](https://github.com/code-yeongyu/senpi/pull/866)).
+
+>>>>>>> origin/main
 - Every registry package source is now private, and every scripted release-publication entrypoint fails
   closed outside the trusted GitHub Actions path, preventing direct or scripted npm publication without
   provenance attestations.
