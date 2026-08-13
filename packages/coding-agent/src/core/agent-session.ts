@@ -4059,6 +4059,16 @@ export class AgentSession {
 		if (options.expectedRevision !== undefined && options.expectedRevision !== this._messageRevision) {
 			return { applied: false, reason: "stale" };
 		}
+		if (options.expectedFirstKeptEntryId !== undefined) {
+			const branchEntries = this.sessionManager.getBranch();
+			const anchorIndex = branchEntries.findIndex((entry) => entry.id === options.expectedFirstKeptEntryId);
+			const latestCompaction = getLatestCompactionEntry(branchEntries);
+			const latestCompactionIndex =
+				latestCompaction === null ? -1 : branchEntries.findIndex((entry) => entry.id === latestCompaction.id);
+			if (anchorIndex === -1 || latestCompactionIndex > anchorIndex) {
+				return { applied: false, reason: "stale" };
+			}
+		}
 
 		const ownsController = this._compactionAbortController === undefined;
 		const lifecycleState = this._compactionLifecycle.state;

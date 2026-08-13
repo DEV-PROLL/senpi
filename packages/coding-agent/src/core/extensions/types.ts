@@ -339,6 +339,12 @@ export interface CompactOptions {
 export interface ApplyCompactionOptions {
 	reason: CompactionReason;
 	expectedRevision?: number;
+	/**
+	 * Content anchor for a warm summary: the compaction applies while this entry
+	 * still bounds an unrewritten summarized prefix, so idle-time appends after
+	 * the cut no longer discard the summary the way `expectedRevision` does.
+	 */
+	expectedFirstKeptEntryId?: string;
 	/** The feedback operation that owns this apply, when one was begun. */
 	signal?: AbortSignal;
 }

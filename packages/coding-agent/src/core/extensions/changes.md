@@ -1,5 +1,23 @@
 # Core Extensions Changes
 
+## 2026-08-13 - Content-anchored compaction admission
+
+### What changed
+
+- `ApplyCompactionOptions` gains optional `expectedFirstKeptEntryId`, a content anchor the host
+  accepts as an alternative to `expectedRevision` when admitting a precomputed compaction.
+
+### Why
+
+`expectedRevision` conflates appended messages with rewritten history, so every warm
+speculative summary went stale after any idle-time append. The anchor lets the host admit a
+warm summary whose summarized prefix is still intact, while still rejecting one whose history
+was rewritten.
+
+### Expected merge-conflict zones
+
+- `types.ts` `ApplyCompactionOptions`.
+
 ## 2026-08-12 - Expose session cwd during extension registration
 
 ### What changed

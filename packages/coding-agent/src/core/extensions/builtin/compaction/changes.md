@@ -1,5 +1,36 @@
 # Builtin compaction extension changes
 
+## 2026-08-13 - Anchor warm summaries to the summarized prefix
+
+### What changed
+
+- `applyGeneratedCompaction` no longer discards a warm summary on message-revision
+  inequality alone. When the revision moved, it validates the snapshot's
+  `preparation.firstKeptEntryId` against the current branch (`warm-anchor.ts`) and applies
+  the warm result while the summarized prefix is unchanged.
+- That path passes `expectedFirstKeptEntryId` instead of `expectedRevision`, so the core
+  compare-and-apply gate re-validates the same anchor before mutating the transcript.
+
+### Why
+
+The idle warm-up exists to move summarization off the user's critical path, but
+`_messageRevision` increments on every appended message. A session parked in a cache-warm
+wait appends wait notices, monitor state, and finally the user's own prompt, so the warm
+summary was guaranteed stale exactly when the blocking route needed it. Field logs showed
+415 warm-ups started, 36 consumed and only 10 applied; the rest paid a second full
+summarization for work already done. A summary describes the entries before its cut, so
+appends after the anchor cannot invalidate it - only a rewrite of the summarized prefix can.
+
+### Why an extension could not do it
+
+The compare-and-apply admission gate lives in `core/agent-session.ts`; admitting a warm
+summary under a content anchor requires that core option and its revalidation.
+
+### Expected merge-conflict zones
+
+- `speculative.ts` `applyGeneratedCompaction` and the `applyCompaction` context signature.
+- `core/agent-session.ts` `applyCompaction` guard block.
+
 ## 2026-08-13 - Preserve auth-resolved local compaction endpoints
 
 ### What changed

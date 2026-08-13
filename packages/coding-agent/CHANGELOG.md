@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Idle compaction warm-ups are no longer wasted. A summary prepared while the session was idle is
+  now applied when the history it summarized is unchanged, instead of being discarded because
+  unrelated messages arrived during the wait. Sessions parked in a cache-warm wait no longer pay a
+  second full compaction the moment you send your next message.
+
 - Historical image replay can now be capped with `images.maxHistoricalImages`, preserving every
   image in the active turn while replacing only older request-payload images with the existing
   recoverable elision marker. Persisted session history is unchanged, and removing the setting

@@ -50,6 +50,7 @@ import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
 import { allowSummarizationRetry, DEFAULT_SUMMARIZATION_RETRY_POLICY } from "./summarization-retry.ts";
 import { extractTaskIntent, resolveInheritedTaskIntent } from "./task-intent.ts";
 import * as truncation from "./tool-truncation.ts";
+import { isWarmSummaryAnchorValid } from "./warm-anchor.ts";
 import { computeStructuralYield } from "./yield.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
@@ -76,7 +77,12 @@ export interface SpeculativeCompactionContext {
 	prepareProviderRequest?(messages: AgentMessage[]): Promise<ProviderRequestPreparation>;
 	applyCompaction(
 		precomputed: CompactionResult,
-		options: { reason: "extension"; expectedRevision: number; signal?: AbortSignal },
+		options: {
+			reason: "extension";
+			expectedRevision?: number;
+			expectedFirstKeptEntryId?: string;
+			signal?: AbortSignal;
+		},
 	): Promise<ApplyCompactionResult>;
 }
 
@@ -625,13 +631,26 @@ export async function applyGeneratedCompaction(
 ): Promise<SpeculativeCompactionResult> {
 	if (!snapshot || !compaction) return { applied: false, reason: "unavailable" };
 
-	if (snapshot.generation !== getCurrentGeneration() || snapshot.expectedRevision !== context.getMessageRevision()) {
+	if (snapshot.generation !== getCurrentGeneration()) {
+		return { applied: false, reason: "stale" };
+	}
+
+	const revisionUnchanged = snapshot.expectedRevision === context.getMessageRevision();
+	if (
+		!revisionUnchanged &&
+		!isWarmSummaryAnchorValid(
+			{ firstKeptEntryId: snapshot.preparation.firstKeptEntryId, branchEntries: snapshot.branchEntries },
+			context.sessionManager.getBranch(),
+		)
+	) {
 		return { applied: false, reason: "stale" };
 	}
 
 	return await context.applyCompaction(compaction, {
 		reason: "extension",
-		expectedRevision: snapshot.expectedRevision,
+		...(revisionUnchanged
+			? { expectedRevision: snapshot.expectedRevision }
+			: { expectedFirstKeptEntryId: snapshot.preparation.firstKeptEntryId }),
 		signal,
 	});
 }
