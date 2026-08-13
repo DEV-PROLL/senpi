@@ -1,5 +1,34 @@
 # changes
 
+## Require provenance-backed npm release publication (2026-08-13)
+
+### What changed
+
+- Release publication now refuses to build an npm publish command outside
+  GitHub Actions.
+- The trusted workflow continues to publish every package with
+  `--provenance`; dry-run validation remains available locally because it
+  exits before publication.
+- Added regression coverage for both the rejected local release path and the
+  attested GitHub Actions path.
+
+### Why
+
+- The first telemetry package creation required a one-time local recovery, and
+  the remaining release packages were then published without npm provenance
+  because the local command silently omitted `--provenance`.
+- npm package versions are immutable, so the safe invariant is to reject future
+  local release publication and require the trusted OIDC workflow.
+
+### Why an extension could not handle it
+
+- npm publication runs in repository release tooling before the Senpi runtime
+  or extension loader exists.
+
+### Expected merge conflict zones
+
+- LOW: `buildPublishArgs` in `publish-command.mjs` and its focused tests.
+
 ## Parse npm pack JSON after warning output (2026-08-13)
 
 ### What changed

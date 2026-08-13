@@ -5,15 +5,14 @@ import { describe, it } from "node:test";
 import { buildPublishArgs } from "./publish-command.mjs";
 
 describe("npm publish command", () => {
-	it("uses provenance only inside GitHub Actions", () => {
-		assert.deepEqual(buildPublishArgs({ githubActions: false }), [
-			"publish",
-			"--access",
-			"public",
-			"--tag",
-			"latest",
-			"--ignore-scripts",
-		]);
+	it("rejects release publication outside GitHub Actions", () => {
+		assert.throws(
+			() => buildPublishArgs({ githubActions: false }),
+			/GitHub Actions is required for provenance-backed npm publication/,
+		);
+	});
+
+	it("uses provenance inside GitHub Actions", () => {
 		assert.deepEqual(buildPublishArgs({ githubActions: true }), [
 			"publish",
 			"--access",

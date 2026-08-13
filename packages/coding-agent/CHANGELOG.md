@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Release publication now fails closed outside the trusted GitHub Actions path instead of silently
+  publishing npm packages without provenance attestations.
+
 ### New Features
 
 ### Breaking Changes
