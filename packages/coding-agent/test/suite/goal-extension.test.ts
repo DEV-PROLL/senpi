@@ -8,7 +8,6 @@ import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
 import { goalFilePath, readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "../../src/core/extensions/types.ts";
 import type { SessionEntry } from "../../src/core/session-manager.ts";
-import { waitForGoalContinuationCount } from "./goal-monitor-test-harness.ts";
 
 type AnyTool = ToolDefinition<any, any, any>;
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
@@ -768,7 +767,7 @@ describe("goal extension session_start migration-lite admission", () => {
 
 	it("resumes normally on the next clean turn after a real user prompt follows a suppressed load", async () => {
 		vi.useFakeTimers();
-		const { tools, handlers, sent } = createGoalHarness();
+		const { tools, handlers, sent, continuationQueued } = createGoalHarness();
 		const notices: string[] = [];
 		const ctx = await makeNotifyingCtx(notices, "thread-suppressed-then-prompt", [
 			userMessageEntry(),
@@ -798,12 +797,14 @@ describe("goal extension session_start migration-lite admission", () => {
 			ctx,
 		);
 		expect(sent).toHaveLength(0);
-		const graceDeliveryRecorded = waitForGoalContinuationCount(ctx, 1);
 		await vi.advanceTimersByTimeAsync(GOAL_USER_GRACE_DELAY_MS);
-		await graceDeliveryRecorded;
+		await continuationQueued;
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.message.customType).toBe("goal-continuation");
-		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("active");
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({
+			status: "active",
+			consecutiveContinuations: 1,
+		});
 		vi.useRealTimers();
 	});
 
