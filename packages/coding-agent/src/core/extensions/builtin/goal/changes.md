@@ -572,6 +572,30 @@ surface; no core extension API change is required.
 
 ## Cache-warm continuation story: enriched events + durable entry + TUI renderer (2026-07-29)
 
+### Follow-up: expected-ready timestamps in cache-warm status (2026-08-13)
+
+- Scheduled cache-warm pi-events and durable `goal-cache-warmup` entries now carry an optional
+  additive `dueAtMs` epoch timestamp derived from the producer's scheduling clock and `delayMs`.
+  RPC consumers no longer need to approximate the completion point from receipt time.
+- The TUI renderer names that expected UTC completion point and keeps the planned or actual
+  elapsed duration in parentheses. Legacy entries and invalid timestamps retain the existing
+  elapsed-only `waited ...` wording.
+- The schedule payload builder lives in `cache-warm.ts` so the already oversized monitor
+  orchestrator does not absorb another formatting/contract responsibility.
+- Coverage: `goal-cache-warmup.test.ts`, `goal-monitor-rpc-notice.test.ts`, and
+  `goal-cache-warm-renderer.test.ts`.
+
+#### Why this lives in the fork
+
+- Cache-warm continuation entries, monitor-aware scheduling, and their TUI renderer are
+  fork-owned builtin Goal behavior. A consumer extension cannot amend an already-emitted
+  durable entry with the producer's authoritative due timestamp.
+
+#### Expected merge conflict zones on the next sync
+
+- LOW in `cache-warm.ts` and `cache-warm-renderer.ts`, both fork-owned cache-warm surfaces.
+- LOW in `monitor-continuation.ts` around the scheduled payload construction.
+
 ### What changed
 
 - New `cache-warm.ts`: `estimateCacheWarmMetrics(model, env, lastTurnUsage)` derives

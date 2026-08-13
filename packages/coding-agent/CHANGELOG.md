@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Cache-warm Goal wait and wake entries now show the expected UTC completion time while retaining
+  the planned or actual elapsed duration in parentheses; RPC entry consumers receive the same
+  authoritative `dueAtMs` timestamp.
+
 ### New Features
 
 ### Breaking Changes
