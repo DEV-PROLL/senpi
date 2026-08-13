@@ -11,6 +11,8 @@ import {
 } from "./prepare-senpi-bundled-workspaces.mjs";
 import { buildPublishArgs } from "./publish-command.mjs";
 import { rewritePublishManifest } from "./publish-manifest.mjs";
+import { materializeMissingPublishRuntime } from "./materialize-publish-runtime.mjs";
+import { parseNpmPackJson } from "./npm-pack-json.mjs";
 
 // Source packages retain their upstream names and private guard. Registry-backed
 // packages are published from temporary manifests under our scope, while bundled-only
@@ -98,7 +100,7 @@ function assertBuildOutputExists(directory) {
 
 function validatePack(directory) {
 	const result = run("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], { capture: true, cwd: directory });
-	const packed = JSON.parse(result.stdout)[0];
+	const packed = parseNpmPackJson(result.stdout)[0];
 	const packageJson = readPackageJson(directory);
 	if (directory === "packages/coding-agent") {
 		assertSenpiPackedWorkspaceFiles(packed, {
@@ -157,6 +159,7 @@ if (versions.length !== 1) {
 
 console.log(`Publishing senpi packages at ${versions[0]}${dryRun ? " (dry run)" : ""}\n`);
 
+await materializeMissingPublishRuntime();
 prepareSenpiBundledWorkspaces();
 
 const packageStates = packages.map((pkg) => ({
