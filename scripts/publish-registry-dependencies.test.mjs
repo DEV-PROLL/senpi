@@ -46,7 +46,7 @@ describe("npm publish dependency graph", () => {
 		}
 		for (const workspace of INDEPENDENT_UPSTREAM_WORKSPACES) {
 			const manifest = readJson(join(repoRoot, workspace.packageJsonPath));
-			assert.notEqual(manifest.private, true, `${workspace.packageName} must remain independently publishable`);
+			assert.equal(manifest.private, true, `${workspace.packageName} must remain excluded from fork publishing`);
 			assert.doesNotMatch(publishScript, new RegExp(`name: "${workspace.packageName}"`));
 		}
 		for (const packageName of OWNED_REGISTRY_ALIASES) {

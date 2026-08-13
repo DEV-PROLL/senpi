@@ -259,6 +259,7 @@ describe("prepareSenpiBundledWorkspaces", () => {
 			"@earendil-works/pi-agent-core": "npm:@code-yeongyu/senpi-agent-core@2026.7.22",
 			"@earendil-works/pi-ai": "npm:@code-yeongyu/senpi-ai@2026.7.22",
 			"@earendil-works/pi-pty": "npm:@code-yeongyu/senpi-pty@2026.7.22",
+			"@earendil-works/pi-telemetry": "npm:@code-yeongyu/senpi-telemetry@2026.7.22",
 			"@earendil-works/pi-tui": "npm:@code-yeongyu/senpi-tui@2026.7.22",
 		});
 		const stagedAgentManifest = JSON.parse(
