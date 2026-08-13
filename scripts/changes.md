@@ -9,6 +9,9 @@
 - All seven registry package source manifests are private; the canonical
   publisher creates temporary public manifests only inside its validated
   release flow.
+- Lockstep validation and release-announcement enumeration now use one explicit
+  source-to-registry package map instead of inferring publication from
+  `private`.
 - Root `publish` and `publish:dry` scripts now route through the guarded
   publisher instead of calling npm workspaces directly.
 - The trusted workflow continues to publish every package with

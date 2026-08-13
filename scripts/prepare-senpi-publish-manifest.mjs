@@ -1,13 +1,10 @@
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { registryPackageNames } from "./registry-packages.mjs";
 
-export const ownedRegistryAliases = new Map([
-	["@earendil-works/pi-ai", "@code-yeongyu/senpi-ai"],
-	["@earendil-works/pi-agent-core", "@code-yeongyu/senpi-agent-core"],
-	["@earendil-works/pi-tui", "@code-yeongyu/senpi-tui"],
-	["@earendil-works/pi-pty", "@code-yeongyu/senpi-pty"],
-	["@earendil-works/pi-telemetry", "@code-yeongyu/senpi-telemetry"],
-]);
+export const ownedRegistryAliases = new Map(
+	[...registryPackageNames].filter(([sourceName, registryName]) => sourceName !== registryName),
+);
 const ownedRegistryPackageNames = new Set([...ownedRegistryAliases.values(), "@code-yeongyu/senpi-codemode"]);
 const vendoredOnlyPackageNames = ["@earendil-works/pi-client", "@earendil-works/pi-protocol"];
 
