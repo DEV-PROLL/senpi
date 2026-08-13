@@ -294,14 +294,78 @@ const JSON_SCHEMA_META_DECLARATIONS = new Set([
  * Strip meta-declarations from a schema obj
  */
 function sanitizeForOpenApi(schema: unknown): unknown {
-	if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+	if (typeof schema !== "object" || schema === null) {
 		return schema;
+	}
+
+	if (Array.isArray(schema)) {
+		return schema.map(sanitizeForOpenApi);
 	}
 
 	const result: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(schema)) {
 		if (JSON_SCHEMA_META_DECLARATIONS.has(key)) continue;
 		result[key] = sanitizeForOpenApi(value);
+	}
+	return result;
+}
+
+/**
+ * Keywords whose values hold instance data, not subschemas. These must be
+ * passed through untouched so that e.g. `const: { optional: true }` is
+ * preserved as legitimate data.
+ */
+const SCHEMA_VALUE_KEYWORDS = new Set(["const", "default", "examples", "enum"]);
+
+/**
+ * Keywords whose values are maps of name → subschema (e.g. `properties`).
+ * The map keys are instance property / definition names and must be
+ * preserved even if one happens to be named `optional`.
+ */
+const SCHEMA_MAP_KEYS_STRIP = new Set(["properties", "patternProperties", "$defs", "definitions"]);
+
+/**
+ * Strip the non-standard 'optional' keyword from a JSON schema object.
+ *
+ * Position-aware: only strips `optional` when it appears as a schema keyword
+ * (a sibling of `type`, `properties`, etc.). Preserves `optional` when it is
+ * a property name inside `properties`/`patternProperties`/`$defs`/`definitions`,
+ * and does not traverse value keywords (`const`/`default`/`examples`/`enum`)
+ * whose contents are instance data, not subschemas.
+ */
+function stripOptional(schema: unknown): unknown {
+	if (typeof schema !== "object" || schema === null) {
+		return schema;
+	}
+
+	if (Array.isArray(schema)) {
+		return schema.map(stripOptional);
+	}
+
+	const result: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(schema)) {
+		// Strip the non-standard 'optional' keyword from schema keyword position.
+		if (key === "optional") continue;
+
+		// Value keywords hold instance data, not schemas — pass through untouched.
+		if (SCHEMA_VALUE_KEYWORDS.has(key)) {
+			result[key] = value;
+			continue;
+		}
+
+		// Map keys hold instance property names / definition names as keys.
+		// Preserve each key but recurse into the subschema value.
+		if (SCHEMA_MAP_KEYS_STRIP.has(key) && typeof value === "object" && value !== null && !Array.isArray(value)) {
+			const map: Record<string, unknown> = {};
+			for (const [name, subschema] of Object.entries(value as Record<string, unknown>)) {
+				map[name] = stripOptional(subschema);
+			}
+			result[key] = map;
+			continue;
+		}
+
+		// All other keywords hold schemas (or schema arrays) — recurse.
+		result[key] = stripOptional(value);
 	}
 	return result;
 }
@@ -325,8 +389,8 @@ export function convertTools(
 				name: tool.name,
 				description: tool.description,
 				...(useParameters
-					? { parameters: sanitizeForOpenApi(tool.parameters) }
-					: { parametersJsonSchema: tool.parameters }),
+					? { parameters: stripOptional(sanitizeForOpenApi(tool.parameters)) }
+					: { parametersJsonSchema: stripOptional(tool.parameters) }),
 			})),
 		},
 	];

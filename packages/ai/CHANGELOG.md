@@ -10,6 +10,13 @@
 
 ### Fixed
 
+- Made `optional` keyword stripping in `google-shared.ts` schema-position-aware:
+  `stripOptional()` now preserves legitimate properties named `optional` under
+  `properties`/`patternProperties`/`$defs`/`definitions` and passes through value
+  keywords (`const`/`default`/`examples`/`enum`) without traversing them.
+  `sanitizeForOpenApi()` now recurses into array branches so `optional` inside
+  `anyOf`/`oneOf`/`allOf` is stripped on the legacy Gemini `parameters` path.
+
 ### Removed
 
 ## [2026.8.12-4] - 2026-08-12
