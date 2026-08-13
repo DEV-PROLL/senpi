@@ -11,6 +11,12 @@
 - Publish staging now materializes any missing optional runtime package directly
   from the exact tarball URL and integrity recorded in the root lock before
   preparing the bundled Senpi package.
+- Final tarball validation now requires the publish manifest's actual
+  `bundleDependencies`, excluding platform-constrained optional packages that
+  intentionally remain registry-resolved on the installing machine.
+- Portable hoisted transitive packages are promoted to exact temporary
+  dependencies in the staged publish manifest so npm includes every declared
+  bundle member in the final Senpi tarball.
 
 ### Why
 

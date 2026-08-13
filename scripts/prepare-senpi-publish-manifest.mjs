@@ -180,6 +180,17 @@ export function stagePublishManifest(repoRoot) {
 		...promotePlatformOptionalDependencyFamilies(codingAgentNodeModules, stagedPackageNames),
 		...(manifest.optionalDependencies ?? {}),
 	};
+	manifest.dependencies ??= {};
+	for (const packageName of bundlablePackageNames) {
+		if (manifest.dependencies[packageName] !== undefined || manifest.optionalDependencies[packageName] !== undefined) {
+			continue;
+		}
+		const packageManifest = readPackageManifest(join(codingAgentNodeModules, packageName));
+		if (typeof packageManifest?.version !== "string") {
+			throw new Error(`Bundled runtime package ${packageName} must declare an exact version`);
+		}
+		manifest.dependencies[packageName] = packageManifest.version;
+	}
 	const bundlableSet = new Set(bundlablePackageNames);
 	for (const packageName of stagedPackageNames) {
 		if (!bundlableSet.has(packageName)) {
