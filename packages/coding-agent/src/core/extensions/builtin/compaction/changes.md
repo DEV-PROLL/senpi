@@ -1,5 +1,74 @@
 # Builtin compaction extension changes
 
+## 2026-08-13 - Preserve auth-resolved local compaction endpoints
+
+### What changed
+
+- Local speculative and blocking compaction overlay the snapshot model with the
+  base URL returned by `ModelRegistry.getApiKeyAndHeaders()` before dispatching
+  summarization.
+
+### Why
+
+- OAuth providers such as GitHub Copilot derive account-specific enterprise
+  endpoints from credentials; using the catalog model silently fell back to the
+  individual endpoint.
+
+### Why an extension could not handle it
+
+- The builtin compaction extension owns this alternate summarization path.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `speculative.ts`, around auth resolution and summary request snapshot
+  construction.
+
+## 2026-08-13 - Make retry-policy tests deterministic
+
+### What changed
+
+- Blocking compaction retry tests now advance fake time through the production
+  1s/2s/4s backoff instead of waiting on wall-clock timers.
+
+### Why
+
+- The full retry budget is seven seconds, longer than Vitest's five-second test
+  timeout. Real-time waits made the merged tests fail deterministically despite
+  correct retry behavior.
+
+### Why an extension could not handle it
+
+- This is test-harness coverage for the builtin extension's retry policy; no
+  shipped runtime behavior changed.
+
+### Expected merge-conflict zones
+
+- LOW: blocking compaction retry-policy tests.
+
+## 2026-08-13 - Preserve nullable provider-header overrides
+
+### What changed
+
+- Speculative and OpenAI remote compaction auth contracts now accept `ProviderHeaders`, preserving `null`
+  deletion markers through registry and provider-request transforms.
+- Concrete compact-endpoint and WebSocket request construction remains the boundary that materializes final
+  wire headers.
+
+### Why
+
+- Upstream widened provider headers so a later layer can explicitly remove an inherited header. String-only
+  structural types introduced during merge resolution either failed compilation or silently discarded those
+  deletion markers before the canonical request boundary.
+
+### Why an extension could not handle it
+
+- These types bridge the builtin compaction route directly to the model registry and stream runtime. An external
+  extension cannot recover a deleted marker after this private structural boundary has narrowed it away.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `speculative.ts`, `openai-remote.ts`, and `openai-remote-responses-v2.ts` auth option shapes.
+
 ## Retry transient blocking summarization failures (2026-08-12)
 
 ### What changed

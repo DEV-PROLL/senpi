@@ -8,8 +8,8 @@ Commit: `4f26b8282` (2026-08-07)
 
 ```text
 src/tui.ts                  TuiBase, Container, CURSOR_MARKER, ViewportTUI contract
-src/TuiMainScreen.ts        Main-screen/scrollback TUI (thin TuiBase subclass)
-src/TuiAltScreen.ts         Alt-screen TUI: layout frames, scroll routing, flash
+src/tui-main-screen.ts      Main-screen/scrollback TUI (thin TuiBase subclass)
+src/tui-alt-screen.ts       Alt-screen TUI: layout frames, scroll routing, flash
 src/layout.ts               Layout frame rendering, rects, clipping, scrollbar geometry
 src/layout-node.ts          Per-component layout node attachment
 src/terminal.ts             Terminal capabilities and lifecycle
@@ -47,7 +47,7 @@ Public exports include `VStack`, `HStack`, `ScrollView`, `Spacer`, `TuiAltScreen
 | Task | File |
 |---|---|
 | Flicker, cursor, viewport | `src/tui.ts` |
-| Alt-screen rendering, scroll wheel/keys routing | `src/TuiAltScreen.ts` |
+| Alt-screen rendering, scroll wheel/keys routing | `src/tui-alt-screen.ts` |
 | Layout rects, clipping, scrollbar geometry | `src/layout.ts`, `src/layout-node.ts` |
 | Stack sizing, scrollable regions | `src/components/stack.ts`, `src/components/scroll-view.ts` |
 | Viewport contract checks | `src/tui.ts` (`isViewportTUI`, `VIEWPORT_TUI`) |

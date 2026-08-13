@@ -313,6 +313,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			blockImages: settingsManager.getBlockImages(),
 			budgetBytes: TRANSPORT_IMAGE_BUDGET_BYTES,
 			alwaysKeepNewest: 1,
+			maxHistoricalImages: settingsManager.getMaxHistoricalImages(),
 		});
 
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};

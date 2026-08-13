@@ -1,5 +1,26 @@
 # changes — btw
 
+## 2026-08-13 - Preserve provider-header deletion markers
+
+### What changed
+
+- `/btw` passes model-registry `ProviderHeaders` directly into the runtime stream options, including `null`
+  values that delete inherited provider headers.
+
+### Why
+
+- The upstream auth contract widened during this merge. Materializing headers early would make a side query
+  retain a header that the active provider configuration explicitly removed.
+
+### Why an extension could not handle it
+
+- This is the builtin command's private registry-to-stream boundary; an external hook cannot restore a deletion
+  marker after it has been dropped.
+
+### Expected merge-conflict zones
+
+- LOW: `index.ts` auth forwarding and `side-query.ts` `SideQueryAuth`.
+
 ## Model-aware side-query context budgeting (2026-08-12)
 
 ### What changed

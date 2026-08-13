@@ -421,6 +421,7 @@ describe("deferred tools", () => {
 			openRouterRouting: {},
 			vercelGatewayRouting: {},
 			chatTemplateKwargs: {},
+			chatTemplateArgs: {},
 			zaiToolStream: false,
 			supportsStrictMode: false,
 			supportsDisabledThinking: false,

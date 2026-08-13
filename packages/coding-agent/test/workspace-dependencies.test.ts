@@ -10,6 +10,10 @@ const WORKSPACE_DEPENDENCIES = [
 	{ name: "@earendil-works/pi-ai", packageJsonPath: "packages/ai/package.json" },
 	{ name: "@earendil-works/pi-tui", packageJsonPath: "packages/tui/package.json" },
 ] as const;
+const BUNDLED_WORKSPACE_NAMES = new Set([
+	...WORKSPACE_DEPENDENCIES.map((dependency) => dependency.name),
+	"@earendil-works/pi-telemetry",
+]);
 
 const GLOBAL_INSTALL_EXCLUDED_DEPENDENCIES = new Set(["@google/genai"]);
 
@@ -105,14 +109,25 @@ describe("coding-agent workspace dependencies", () => {
 
 	test("does not install nested registry pi packages under coding-agent", () => {
 		// Given
-		const lockfile = readFileSync(join(WORKSPACE_ROOT, "package-lock.json"), "utf8");
+		const lockfile = readJsonObject(join(WORKSPACE_ROOT, "package-lock.json"));
+		if (!isRecord(lockfile.packages)) {
+			throw new Error("package-lock.json packages must be a JSON object");
+		}
 
 		// When
-		const nestedRegistryPackagePattern =
-			/"packages\/coding-agent\/node_modules\/@earendil-works\/pi-(?:agent-core|ai|tui)"/;
+		const nestedPiEntries = Object.entries(lockfile.packages).filter(([path]) =>
+			/^packages\/coding-agent\/node_modules\/@earendil-works\/pi-(?:agent-core|ai|tui|pty|telemetry|storage-sqlite-node)$/.test(
+				path,
+			),
+		);
 
 		// Then
-		expect(lockfile).not.toMatch(nestedRegistryPackagePattern);
+		for (const [path, value] of nestedPiEntries) {
+			expect(isRecord(value), path).toBe(true);
+			if (!isRecord(value)) continue;
+			expect(value.link, path).toBe(true);
+			expect(value.resolved, path).toMatch(/^packages\//);
+		}
 	});
 
 	test("bundles local pi packages for npm publish", () => {
@@ -150,14 +165,12 @@ describe("coding-agent workspace dependencies", () => {
 	test("declares external dependencies required by bundled workspaces", () => {
 		// Given
 		const codingAgentPackage = readPackageJson("packages/coding-agent/package.json");
-		const bundledWorkspaceNames = new Set<string>(WORKSPACE_DEPENDENCIES.map((dependency) => dependency.name));
-
 		// When
 		const missingExternalDependencies: string[] = [];
 		for (const dependency of WORKSPACE_DEPENDENCIES) {
 			const localPackage = readPackageJson(dependency.packageJsonPath);
 			for (const [name, version] of Object.entries(localPackage.dependencies)) {
-				if (bundledWorkspaceNames.has(name) || GLOBAL_INSTALL_EXCLUDED_DEPENDENCIES.has(name)) {
+				if (BUNDLED_WORKSPACE_NAMES.has(name) || GLOBAL_INSTALL_EXCLUDED_DEPENDENCIES.has(name)) {
 					continue;
 				}
 				const declaredVersion =

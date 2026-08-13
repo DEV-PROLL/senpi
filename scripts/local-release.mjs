@@ -10,6 +10,7 @@ import { prepareSenpiBundledWorkspaces } from "./prepare-senpi-bundled-workspace
 export { run } from "./local-release-runner.mjs";
 
 const packages = [
+	{ directory: "packages/telemetry", name: "@earendil-works/pi-telemetry" },
 	{ directory: "packages/ai", name: "@earendil-works/pi-ai" },
 	{ directory: "packages/pty", name: "@earendil-works/pi-pty" },
 	{ directory: "packages/tui", name: "@earendil-works/pi-tui" },

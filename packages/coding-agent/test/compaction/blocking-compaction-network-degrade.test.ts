@@ -1,5 +1,5 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_SUMMARIZATION_ATTEMPT_RETRIES } from "../../src/core/extensions/builtin/compaction/summarization-retry.ts";
 import {
 	connectionErrorResponse,
@@ -13,11 +13,21 @@ const SUMMARIZATION_ATTEMPTS = 1 + MAX_SUMMARIZATION_ATTEMPT_RETRIES;
 
 const registrations: Array<{ unregister: () => void }> = [];
 
+beforeEach(() => {
+	vi.useFakeTimers();
+});
+
 afterEach(() => {
+	vi.useRealTimers();
 	for (const registration of registrations.splice(0)) {
 		registration.unregister();
 	}
 });
+
+async function settleRetryBackoff<T>(operation: T | PromiseLike<T>): Promise<T> {
+	await vi.runAllTimersAsync();
+	return await operation;
+}
 
 describe("blocking compaction network-failure degradation", () => {
 	describe("Given the provider connection drops during emergency blocking compaction", () => {
@@ -32,7 +42,8 @@ describe("blocking compaction network-failure degradation", () => {
 			);
 
 			// When / Then: the handler resolves (no extension-error stack surface)…
-			await expect(beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx)).resolves.toBeUndefined();
+			const compaction = beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx);
+			await expect(settleRetryBackoff(compaction)).resolves.toBeUndefined();
 
 			// …and the single clean surface is compaction_end's errorMessage.
 			expect(harness.endCompaction).toHaveBeenCalledWith(
@@ -54,7 +65,8 @@ describe("blocking compaction network-failure degradation", () => {
 
 			// When: three consecutive prompts fail on connection errors.
 			for (let attempt = 0; attempt < 3; attempt++) {
-				await expect(beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx)).resolves.toBeUndefined();
+				const compaction = beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx);
+				await expect(settleRetryBackoff(compaction)).resolves.toBeUndefined();
 			}
 			const callsAfterTrip = harness.registration.state.callCount;
 			await expect(beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx)).resolves.toBeUndefined();

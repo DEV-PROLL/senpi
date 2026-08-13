@@ -4,13 +4,68 @@
 
 ### Fixed
 
+- Provider stream stalls (`Provider stream start timed out after <n>ms` and `Idle timeout waiting for
+  provider stream after <n>ms`) now use the same bounded retry budget as every other transient provider
+  error instead of giving up after a single same-model attempt, so a turn no longer ends with
+  `Retry failed after 1 attempts` while `retry.maxRetries` is 3. Retries also keep the configured provider
+  timeouts rather than shrinking them to `retry.provider.streamRetryTimeoutMs`, which had turned a configured
+  90s stream-start budget into 30s on the retry; that setting still bounds the retry continuation itself
+  ([#845](https://github.com/code-yeongyu/senpi/pull/845)).
+
+- Historical image replay can now be capped with `images.maxHistoricalImages`, preserving every
+  image in the active turn while replacing only older request-payload images with the existing
+  recoverable elision marker. Persisted session history is unchanged, and removing the setting
+  restores the previous replay behavior.
+
+- Upstream fixes picked up in the v0.84.1 sync:
+  - LaTeX blocks in markdown render without corrupting surrounding text, and Kitty terminal
+    detection/key handling no longer misfires on non-Kitty terminals.
+  - Windows terminal input handles bracketed paste and modifier keys correctly, and truecolor
+    output is detected reliably instead of falling back to 256 colors.
+  - `Agent.reset` now rejects while a run is active instead of silently clobbering in-flight
+    state, so callers get a clear error instead of a corrupted session.
+  - When a blocked tool call is denied, the run terminates cleanly rather than leaving the
+    agent waiting on a tool result that will never arrive.
+
+- Cache-warm Goal wait and wake entries now show the expected UTC completion time while retaining
+  the planned or actual elapsed duration in parentheses; RPC entry consumers receive the same
+  authoritative `dueAtMs` timestamp.
+
 ### New Features
 
 ### Breaking Changes
 
 ### Added
 
+- App-server clients can now receive extension-owned `extension_event` notifications and call loaded-thread
+  `extension_request` handlers, bringing both directions of the opt-in `pi.rpc` channel to app/editor integrations
+  ([#838](https://github.com/code-yeongyu/senpi/pull/838)).
+
 ### Changed
+
+- Synced the coding-agent, AI, TUI, session, storage, and supporting workspace packages through
+  upstream `pi-mono` v0.84.1. The merge adopts configurable default tools, streaming-usage
+  preservation, session-backend consolidation, OAuth/provider updates, model-catalog refreshes,
+  TUI/input fixes, and release tooling improvements while retaining Senpi extension APIs,
+  app-server RPC events, multi-session routing, fork-specific retry/compaction behavior, and the
+  OmO integration boundary. User-facing changes from the sync:
+  - The default tool set is now configurable, so setups can trim or extend which built-in tools
+    an agent starts with instead of always getting the fixed list.
+  - Session persistence is consolidated onto a single session backend; the separate legacy
+    storage paths are gone and existing sessions keep working through the unified backend.
+  - Auth checks and provider OAuth flows were reworked: credential validity is verified up
+    front, and provider OAuth logins refresh and store tokens more predictably.
+  - Sampling requests to deferred providers now resolve the provider lazily at call time, so
+    models from providers that finish auth or registration late are still usable in the same
+    session.
+  - The TUI can run fullscreen, text selection works inside it, and the terminal is restored
+    correctly on exit.
+  - The TUI can be switched at runtime, and a linear JSON output mode is available for
+    non-interactive consumers that want a flat event stream.
+  - Telemetry hooks landed upstream; the fork keeps its existing opt-in posture, and no data
+    leaves the machine without explicit configuration.
+  - Baseten joins the provider catalog and the Qwen model entries were refreshed to the current
+    lineup.
 
 ### Removed
 

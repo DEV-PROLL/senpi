@@ -49,6 +49,7 @@ import {
 	isContextOverflow,
 	isProviderStreamStallError,
 	isProviderTimeoutError,
+	isRecoverableLength,
 	isRetryableAssistantError,
 	modelsAreEqual,
 	type RetryCallbacks,
@@ -61,6 +62,7 @@ import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
+import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { AgentAbortProvenance } from "./agent-abort-provenance.ts";
 import { AgentSettledDelivery, type DeferredAgentSettledAction } from "./agent-settled-delivery.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
@@ -645,7 +647,6 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
-	private _consecutiveProviderStreamStalls = 0;
 	private _probePhase: ProbePhase = "idle";
 	private _hintDeadlineMs: number | undefined = undefined;
 	private _cumulativeHintedWaitMs = 0;
@@ -803,6 +804,7 @@ export class AgentSession {
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
+		model: Model<any>;
 		apiKey?: string;
 		headers?: Record<string, string>;
 		extraBody?: Record<string, unknown>;
@@ -819,7 +821,9 @@ export class AgentSession {
 			throw error;
 		}
 		if (result && (result.auth.apiKey || result.auth.headers)) {
+			const requestModel = result.auth.baseUrl ? { ...model, baseUrl: result.auth.baseUrl } : model;
 			return {
+				model: requestModel,
 				apiKey: result.auth.apiKey,
 				headers: withoutDeletedHeaders(result.auth.headers),
 				extraBody: this._modelRuntime.getCompatibilityRequestConfig(model).extraBody,
@@ -843,6 +847,7 @@ export class AgentSession {
 	 * functions may provide ambient credentials, unlike streamSimple.
 	 */
 	private async _getSummarizationRequestAuth(model: Model<any>): Promise<{
+		model: Model<any>;
 		apiKey?: string;
 		headers?: Record<string, string>;
 		env?: Record<string, string>;
@@ -852,21 +857,27 @@ export class AgentSession {
 		}
 
 		try {
-			const apiKey = await this.agent.getApiKey?.(model.provider);
-			const result = await this._modelRuntime.getAuth(model, { apiKey });
-			return result
-				? {
-						apiKey: apiKey ?? result.auth.apiKey,
-						headers: withoutDeletedHeaders(result.auth.headers),
-						env: result.env,
-					}
-				: {};
+			const storedResult = await this._modelRuntime.getAuth(model);
+			const activeApiKey = await this.agent.getApiKey?.(model.provider);
+			const result =
+				activeApiKey !== undefined && storedResult?.source !== "OAuth"
+					? await this._modelRuntime.getAuth(model, { apiKey: activeApiKey })
+					: storedResult;
+			if (!result) return { model };
+			const requestModel = result.auth.baseUrl ? { ...model, baseUrl: result.auth.baseUrl } : model;
+			return {
+				model: requestModel,
+				apiKey: result.auth.apiKey,
+				headers: withoutDeletedHeaders(result.auth.headers),
+				env: result.env,
+			};
 		} catch {
-			return {};
+			return { model };
 		}
 	}
 
 	private async _getCompactionRequestAuth(model: Model<any>): Promise<{
+		model: Model<any>;
 		apiKey?: string;
 		headers?: Record<string, string>;
 		extraBody?: Record<string, unknown>;
@@ -977,30 +988,32 @@ export class AgentSession {
 		isError: boolean,
 	) {
 		const runner = this._extensionRunner;
-		if (!runner.hasHandlers("tool_result")) {
-			return undefined;
-		}
-
-		const hookResult = await runner.emitToolResult({
-			type: "tool_result",
-			toolName: toolCall.name,
-			toolCallId: toolCall.id,
-			input: args as Record<string, unknown>,
-			content: result.content,
-			details: result.details,
-			isError,
-			usage: result.usage,
+		const hookResult = runner.hasHandlers("tool_result")
+			? await runner.emitToolResult({
+					type: "tool_result",
+					toolName: toolCall.name,
+					toolCallId: toolCall.id,
+					input: args as Record<string, unknown>,
+					content: result.content,
+					details: result.details,
+					isError,
+					usage: result.usage,
+				})
+			: undefined;
+		const content = hookResult?.content ?? result.content ?? [];
+		const normalizedContent = await normalizeToolResultImages(content, {
+			autoResizeImages: this.settingsManager.getImageAutoResize(),
 		});
 
-		if (!hookResult) {
+		if (!hookResult && normalizedContent === content) {
 			return undefined;
 		}
 
 		return {
-			content: hookResult.content,
-			details: hookResult.details,
-			isError: hookResult.isError ?? isError,
-			usage: hookResult.usage,
+			content: normalizedContent,
+			details: hookResult?.details,
+			isError: hookResult?.isError ?? isError,
+			usage: hookResult?.usage,
 		};
 	}
 
@@ -1707,7 +1720,7 @@ export class AgentSession {
 					assistantMsg.stopReason !== "error" &&
 					assistantMsg.stopReason !== "aborted" &&
 					!isClassifierRefusal(assistantMsg);
-				if (succeeded) {
+				if (succeeded && assistantMsg.stopReason !== "length") {
 					this._overflowRecoveryAttempted = false;
 				}
 
@@ -2401,7 +2414,6 @@ export class AgentSession {
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return (
-			this._pendingCompactionAdmission !== undefined ||
 			this._compactionLifecycle.state.status === "running" ||
 			this._autoCompactionAbortController !== undefined ||
 			this._compactionAbortController !== undefined ||
@@ -2621,6 +2633,13 @@ export class AgentSession {
 		} catch (error) {
 			options?.preflightResult?.(false);
 			throw error;
+		}
+
+		if (options?.source !== "extension" && this._compactionAbortController !== undefined) {
+			options?.preflightResult?.(false);
+			throw new Error(
+				"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.",
+			);
 		}
 
 		const ownsPromptStart =
@@ -4253,10 +4272,16 @@ export class AgentSession {
 				}
 
 				if (!compactionResult) {
-					const { apiKey, headers, extraBody, env } = await this._getCompactionRequestAuth(model);
+					const {
+						model: requestModel,
+						apiKey,
+						headers,
+						extraBody,
+						env,
+					} = await this._getCompactionRequestAuth(model);
 					compactionResult = await compact(
 						preparation,
-						model,
+						requestModel,
 						apiKey,
 						headers,
 						request.customInstructions,
@@ -4359,6 +4384,9 @@ export class AgentSession {
 				})
 			) {
 				throw new CompactionCancelledError();
+			}
+			if (request.owner === "compaction" && this._compactionAbortController === request.controller) {
+				this._compactionAbortController = undefined;
 			}
 
 			this._emit({
@@ -4684,8 +4712,10 @@ export class AgentSession {
 			contextUsage !== undefined &&
 			contextUsage.tokens !== null &&
 			shouldCompact(contextUsage.tokens, contextUsage.contextWindow, settings);
+		const recoverableLength = sameModel && isRecoverableLength(assistantMessage, this.model?.maxTokens ?? 0);
 		const isOverflow =
-			isContextOverflow(assistantMessage, contextWindow) && (sameModel || currentContextNeedsCompaction);
+			(isContextOverflow(assistantMessage, contextWindow) && (sameModel || currentContextNeedsCompaction)) ||
+			recoverableLength;
 		if (
 			isOverflow &&
 			assistantMessage.stopReason === "stop" &&
@@ -5067,7 +5097,11 @@ export class AgentSession {
 			if (willRetry) {
 				const messages = this.agent.state.messages;
 				const lastMsg = messages[messages.length - 1];
-				if (lastMsg?.role === "assistant" && (lastMsg as AssistantMessage).stopReason === "error") {
+				if (
+					lastMsg?.role === "assistant" &&
+					((lastMsg as AssistantMessage).stopReason === "error" ||
+						(lastMsg as AssistantMessage).stopReason === "length")
+				) {
 					this.agent.state.messages = messages.slice(0, -1);
 					this._incrementMessageRevision();
 				}
@@ -5985,19 +6019,12 @@ export class AgentSession {
 			}
 			this._retryAttempt++;
 		} else {
-			if (this._retryAttempt === 0) {
-				this._consecutiveProviderStreamStalls = 0;
-			}
-			// A provider-stream stall means the request was accepted but delivered
-			// zero events for the whole idle budget. Replaying the identical payload
-			// against a hung provider burns that full budget again per attempt
-			// ((1 + maxRetries) * httpIdleTimeoutMs of opaque dead air), so a second
-			// consecutive stall escalates to the fallback chain immediately. Fast
-			// non-stall failures in between reset the streak and keep the normal
-			// same-model recovery semantics.
+			// A provider-stream stall is an ordinary transient failure: it consumes
+			// the same bounded same-model budget (`settings.maxRetries`) as every
+			// other retryable class and escalates to the fallback chain only when
+			// that budget is exhausted. It is excluded from 429-class tier routing
+			// because a stall carries no rate-limit markers or retry-after hint.
 			const stallError = isProviderStreamStallError(message);
-			const escalateAfterRepeatedStall = stallError && this._consecutiveProviderStreamStalls > 0;
-			this._consecutiveProviderStreamStalls = stallError ? this._consecutiveProviderStreamStalls + 1 : 0;
 			// 429-class detection: retryable AND message carries rate-limit markers.
 			const is429Class =
 				!stallError &&
@@ -6122,7 +6149,7 @@ export class AgentSession {
 			if (!is429TierRouted) {
 				this._retryAttempt++;
 			}
-			if (!is429TierRouted && (this._retryAttempt > settings.maxRetries || escalateAfterRepeatedStall)) {
+			if (!is429TierRouted && this._retryAttempt > settings.maxRetries) {
 				switchedFallback = await this._retryFallback.tryFallback("transient", {
 					errorMessage,
 					retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
@@ -6151,10 +6178,6 @@ export class AgentSession {
 					return "not-handled";
 				}
 			}
-		}
-
-		if (switchedFallback) {
-			this._consecutiveProviderStreamStalls = 0;
 		}
 
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
@@ -6564,10 +6587,16 @@ export class AgentSession {
 			let summaryUsage: Usage | undefined;
 			if (options.summarize && entriesToSummarize.length > 0 && !extensionSummary) {
 				const model = this.model!;
-				const { apiKey, headers, extraBody, env } = await this._getCompactionRequestAuth(model);
+				const {
+					model: requestModel,
+					apiKey,
+					headers,
+					extraBody,
+					env,
+				} = await this._getCompactionRequestAuth(model);
 				const branchSummarySettings = this.settingsManager.getBranchSummarySettings();
 				const result = await generateBranchSummary(entriesToSummarize, {
-					model,
+					model: requestModel,
 					apiKey,
 					headers,
 					extraBody,

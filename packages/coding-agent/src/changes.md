@@ -1,3 +1,44 @@
+# changes
+
+The historical-image transport entry moved to `core/changes.md`, beside the
+other provider-bound image transport behavior that owns the same payload path.
+
+## Provider stream stalls share the bounded retry policy (2026-08-13)
+
+### What changed
+
+- `core/agent-session.ts`: provider-stream stalls (`isProviderStreamStallError`, covering both the idle-timeout and
+  stream-start-timeout watchdog wordings) are no longer special-cased. They consume the same bounded same-model retry
+  budget (`settings.retry.maxRetries`) as every other transient class and escalate to the fallback chain only when that
+  budget is exhausted. The `_consecutiveProviderStreamStalls` streak counter and its escalation branch are removed.
+- `core/provider-timeout-retry.ts`: the retry request keeps the configured `timeoutMs`/`streamStartTimeoutMs` instead of
+  clamping both to `retry.provider.streamRetryTimeoutMs`. That setting still bounds the retry *continuation*
+  (`runBoundedRetryContinuation`), so a wedged retry is still cancelled without shortening the provider's own guards.
+  Disabled guards are still never re-enabled.
+- Coverage: `test/suite/retry-fallback-stall-shared-budget.test.ts` (replaces
+  `test/suite/retry-fallback-stall-escalation.test.ts`), `test/provider-timeout-retry.test.ts`, and updated
+  `test/suite/regressions/provider-idle-{recovery,steering}.test.ts`.
+
+### Why
+
+- This reverses the 2026-07-29 stall-escalation and retry-cap entries below. In practice the two combined to end turns
+  early: the second consecutive stall skipped the remaining same-model budget, so a session with no configured fallback
+  chain surfaced `Retry failed after 1 attempts: Provider stream start timed out after 30000ms` while `maxRetries` was 3.
+- The cap also shrank a configured 90s stream-start guard to 30s on the retry, so the retry was judged dead on a deadline
+  the operator never configured - visible as a 90000ms stall immediately followed by a 30000ms one. A slow-but-alive
+  provider now gets the budget it was configured with, and the transient class it already belongs to
+  (`isRetryableErrorMessage` matches both wordings) decides the number of attempts.
+
+### Why an extension could not do this
+
+- Retry classification, the same-model budget, and the fallback-chain handoff all live in the private auto-retry branch of
+  `AgentSession`. No extension hook observes or replaces that decision.
+
+### Expected merge conflict zones on next upstream sync
+
+- `core/agent-session.ts` in the transient retry branch (`_autoRetry`) around the budget/fallback gate.
+- `core/provider-timeout-retry.ts` in `createProviderTimeoutRetryPlan`.
+
 ## Model-aware `/btw` side-query context budgeting (2026-08-12)
 
 ### What changed
@@ -225,6 +266,36 @@
 ### Expected merge conflict zones
 
 - LOW: `core/extensions/builtin/gpt-apply-patch/apply.ts` and `tool.ts` completed-result construction.
+
+## App-server extension RPC delivery (2026-08-12)
+
+### What changed
+
+- `modes/app-server/runtime.ts` subscribes to each bound session's opt-in extension RPC events before extension binding,
+  preserves binding-time events until the thread is registered, and routes live events only to that thread's subscribers.
+- `modes/app-server/rpc/registry.ts` registers `extension_request` and dispatches `{threadId,name,data}` to the loaded
+  session's `extensionRunner.requestRpc`, preserving its exactly-one-handler semantics as JSON-RPC errors.
+- `modes/app-server/threads/registry.ts` seeds a new thread's notification queue with binding-time extension records so
+  the connection that started, resumed, or forked the thread receives them after subscription.
+
+### Why
+
+- App-server mode binds and owns separate sessions, so classic RPC's connection-bound extension delivery never reaches
+  app-server clients in either direction.
+- App-server initialize capabilities have no `extension_events` field. Event delivery is therefore unconditional for
+  initialized subscribers, while thread subscriptions provide the required audience boundary.
+
+### Why this cannot be expressed externally
+
+- Both directions cross the app-server's internal thread/session registry and notification router. An extension can opt
+  into delivery with `pi.rpc`, but cannot register an app-server JSON-RPC method or address the owning thread's clients.
+- Ordinary `pi.events` channels remain extension-local; this change forwards only explicit `pi.rpc.emit` records at the
+  connection boundary.
+
+### Expected merge conflict zones
+
+- MEDIUM: `modes/app-server/runtime.ts` session binding and registry wiring.
+- LOW: `modes/app-server/rpc/registry.ts` method registration and `threads/registry.ts` initial notification storage.
 
 ## Backfill: injected app-server turns (2026-08-01)
 
@@ -989,8 +1060,6 @@
 - Regression: `test/suite/compaction-race.test.ts` covers compaction during a live provider stream and asserts the
   aborted `agent_end` precedes compaction startup without deadlocking future prompts.
 
-# changes
-
 ## Removed the legacy `--neo` Go TUI surface (2026-07-26)
 
 ### What changed
@@ -1333,21 +1402,6 @@
 ### Expected merge conflict zones on next upstream sync
 
 - LOW: `model-runtime.ts` `prepareRequest()` body; `agent-session.ts` service-tier assignment sites.
-
-## Accepted compaction resumes the waiting prompt (2026-07-20)
-
-### What changed
-
-- `agent-session.ts`: the pre-prompt fail-closed check now recognizes an assistant response retained behind the latest accepted compaction boundary as historical usage. A prompt waiting on compaction therefore dispatches with compacted history, while cancelled or would-overflow compaction remains blocked before any provider request.
-- `agent-session-compaction.test.ts`: added a provider-dispatch regression for irreducibly oversized pre-prompt compaction results.
-
-### Why extension system couldn't handle this
-
-- `AgentSession` owns the compaction boundary, stale usage classification, prompt settlement barrier, and the provider-dispatch decision. Extensions can propose or reject summaries but cannot serialize this state transition.
-
-### Expected merge conflict zones on next upstream sync
-
-- MEDIUM: `agent-session.ts` around `prompt()`, `_checkCompaction()`, and compaction-boundary stale-message checks.
 
 ## Paced streaming tool argument previews (2026-07-20)
 

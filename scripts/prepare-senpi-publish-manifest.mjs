@@ -6,6 +6,7 @@ export const ownedRegistryAliases = new Map([
 	["@earendil-works/pi-agent-core", "@code-yeongyu/senpi-agent-core"],
 	["@earendil-works/pi-tui", "@code-yeongyu/senpi-tui"],
 	["@earendil-works/pi-pty", "@code-yeongyu/senpi-pty"],
+	["@earendil-works/pi-telemetry", "@code-yeongyu/senpi-telemetry"],
 ]);
 const ownedRegistryPackageNames = new Set([...ownedRegistryAliases.values(), "@code-yeongyu/senpi-codemode"]);
 const vendoredOnlyPackageNames = ["@earendil-works/pi-client", "@earendil-works/pi-protocol"];

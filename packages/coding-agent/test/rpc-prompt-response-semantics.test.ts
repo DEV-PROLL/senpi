@@ -91,11 +91,7 @@ function getPromptResponses(outputLines: string[], id: string): ParsedOutputLine
 	);
 }
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): Promise<{
+async function createRuntimeHost(options: { withAuth: boolean; holdResponse?: boolean; model?: Model<any> }): Promise<{
 	runtimeHost: AgentSessionRuntime;
 	cleanup: () => Promise<void>;
 }> {
@@ -118,9 +114,9 @@ async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: 
 			const stream = new MockAssistantStream();
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: createAssistantMessage("") });
-				setTimeout(() => {
+				if (!options.holdResponse) {
 					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("done") });
-				}, options.responseDelayMs);
+				}
 			});
 			return stream;
 		},
@@ -169,7 +165,7 @@ async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: 
 	};
 }
 
-async function startRpcMode(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): Promise<{
+async function startRpcMode(options: { withAuth: boolean; holdResponse?: boolean; model?: Model<any> }): Promise<{
 	lineHandler: (line: string) => void;
 	cleanup: () => Promise<void>;
 }> {
@@ -192,7 +188,6 @@ describe("RPC prompt response semantics", () => {
 	it("emits one failure response when prompt preflight rejects", async () => {
 		const { lineHandler, cleanup } = await startRpcMode({
 			withAuth: false,
-			responseDelayMs: 0,
 			model: {
 				id: "fake-model",
 				name: "Fake Model",
@@ -229,7 +224,7 @@ describe("RPC prompt response semantics", () => {
 	});
 
 	it("emits one success response when prompt preflight succeeds", async () => {
-		const { lineHandler, cleanup } = await startRpcMode({ withAuth: true, responseDelayMs: 0 });
+		const { lineHandler, cleanup } = await startRpcMode({ withAuth: true });
 
 		try {
 			lineHandler(JSON.stringify({ id: "b2", type: "prompt", message: "Hello" }));
@@ -250,7 +245,7 @@ describe("RPC prompt response semantics", () => {
 	});
 
 	it("emits one success response when prompt is queued during streaming", async () => {
-		const { lineHandler, cleanup } = await startRpcMode({ withAuth: true, responseDelayMs: 100 });
+		const { lineHandler, cleanup } = await startRpcMode({ withAuth: true, holdResponse: true });
 
 		try {
 			lineHandler(JSON.stringify({ id: "b3-start", type: "prompt", message: "Start" }));
@@ -278,8 +273,6 @@ describe("RPC prompt response semantics", () => {
 					success: true,
 				});
 			});
-
-			await sleep(150);
 		} finally {
 			await cleanup();
 		}

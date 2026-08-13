@@ -1,4 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { findPackageDirectories } from "./package-workspaces.mjs";
 
 export const WORKSPACE_PACKAGES = [
 	"packages/ai/package.json",
@@ -8,6 +10,7 @@ export const WORKSPACE_PACKAGES = [
 	"packages/protocol/package.json",
 	"packages/server/package.json",
 	"packages/pty/package.json",
+	"packages/telemetry/package.json",
 	"packages/senpi-codemode/package.json",
 	"packages/tui/package.json",
 ];
@@ -43,4 +46,14 @@ export function runSyncVersions(dryRun, runCommand, log, dryRunLog) {
 	}
 	log("running scripts/sync-versions.js");
 	runCommand("node", ["scripts/sync-versions.js"]);
+}
+
+export function getPublicWorkspacePackages() {
+	return findPackageDirectories()
+		.map((directory) => ({
+			directory,
+			...JSON.parse(readFileSync(join(directory, "package.json"), "utf8")),
+		}))
+		.filter((pkg) => pkg.private !== true)
+		.map(({ directory, name, version }) => ({ directory, name, version }));
 }

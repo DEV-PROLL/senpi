@@ -4,9 +4,17 @@
 
 ### Breaking Changes
 
+- Changed tool-result protocol conversion to require and verify the original tool call.
+- Replaced runtime session summaries with durable `SessionMetadata` in server inventory responses.
+
 ### Changed
 
 ### Fixed
+
+- Hardened protocol adapters against contradictory lifecycle states, invalid identifiers and timestamps, sparse
+  execution arrays, and additive AI-contract drift.
+- Sanitized service and runtime failures into stable `not_implemented` and `internal_error` responses without
+  exposing private error details.
 
 ## [2026.8.12-4] - 2026-08-12
 

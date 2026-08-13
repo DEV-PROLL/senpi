@@ -1,5 +1,41 @@
 # Changes
 
+## 2026-08-13 - Summary-safe branch compaction text
+
+### What changed and why
+
+- Branch summarization and compaction use `contentTextForSummary()` instead of
+  the portable-only AI `contentText()` helper.
+- Provider-native replay blocks must be filtered while preserving the text that
+  belongs in a durable branch summary.
+
+### Why the extension system could not handle this
+
+- Harness compaction constructs the summary request before any coding-agent
+  extension can inspect or rewrite the session entry payload.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `harness/compaction/branch-summarization.ts`, in
+  `generateBranchSummary()` content extraction.
+- LOW: `harness/compaction/utils.ts`, where the summary-safe helper is defined.
+
+## 2026-08-13 - Upstream harness type cleanup
+
+### What changed and why
+
+- Removed an unused compaction image type import and adopted optional-chain narrowing in reducer and session-state
+  guards introduced by the upstream harness v2 merge.
+- Runtime behavior is unchanged; the edits make the merged harness pass the repository's warning-as-error gate.
+
+### Why the extension system could not handle this
+
+- These are internal harness compiler and lint boundaries, evaluated before any coding-agent extension loads.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: harness compaction imports, reducer assistant-entry guards, and session fork-target validation.
+
 ## 2026-08-11 - Resolve eligible inactive tools at model call time
 
 ### What changed and why
