@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Provider stream stalls (`Provider stream start timed out after <n>ms` and `Idle timeout waiting for
+  provider stream after <n>ms`) now use the same bounded retry budget as every other transient provider
+  error instead of giving up after a single same-model attempt, so a turn no longer ends with
+  `Retry failed after 1 attempts` while `retry.maxRetries` is 3. Retries also keep the configured provider
+  timeouts rather than shrinking them to `retry.provider.streamRetryTimeoutMs`, which had turned a configured
+  90s stream-start budget into 30s on the retry; that setting still bounds the retry continuation itself
+  ([#845](https://github.com/code-yeongyu/senpi/pull/845)).
+
 - Historical image replay can now be capped with `images.maxHistoricalImages`, preserving every
   image in the active turn while replacing only older request-payload images with the existing
   recoverable elision marker. Persisted session history is unchanged, and removing the setting
