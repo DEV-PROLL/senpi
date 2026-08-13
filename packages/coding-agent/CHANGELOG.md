@@ -19,6 +19,10 @@
   - When a blocked tool call is denied, the run terminates cleanly rather than leaving the
     agent waiting on a tool result that will never arrive.
 
+- Cache-warm Goal wait and wake entries now show the expected UTC completion time while retaining
+  the planned or actual elapsed duration in parentheses; RPC entry consumers receive the same
+  authoritative `dueAtMs` timestamp.
+
 ### New Features
 
 ### Breaking Changes

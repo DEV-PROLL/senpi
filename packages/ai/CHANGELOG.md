@@ -54,6 +54,13 @@
 - Fixed explicitly configured Amazon Bedrock profiles being overridden by ambient AWS access keys ([#7176](https://github.com/earendil-works/pi/pull/7176) by [@christianbasch](https://github.com/christianbasch)).
 - Fixed malformed OpenAI-compatible tool-call deltas with both a valid `function` payload and an empty `custom` object discarding the function arguments ([#7288](https://github.com/earendil-works/pi/pull/7288) by [@sunnyyoung](https://github.com/sunnyyoung)).
 
+- Made `optional` keyword stripping in `google-shared.ts` schema-position-aware:
+  `stripOptional()` now preserves legitimate properties named `optional` under
+  `properties`/`patternProperties`/`$defs`/`definitions` and passes through value
+  keywords (`const`/`default`/`examples`/`enum`) without traversing them.
+  `sanitizeForOpenApi()` now recurses into array branches so `optional` inside
+  `anyOf`/`oneOf`/`allOf` is stripped on the legacy Gemini `parameters` path.
+
 ### Removed
 
 ## [2026.8.12-4] - 2026-08-12
