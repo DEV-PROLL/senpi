@@ -1,5 +1,50 @@
 # Builtin compaction extension changes
 
+## 2026-08-13 - Preserve auth-resolved local compaction endpoints
+
+### What changed
+
+- Local speculative and blocking compaction overlay the snapshot model with the
+  base URL returned by `ModelRegistry.getApiKeyAndHeaders()` before dispatching
+  summarization.
+
+### Why
+
+- OAuth providers such as GitHub Copilot derive account-specific enterprise
+  endpoints from credentials; using the catalog model silently fell back to the
+  individual endpoint.
+
+### Why an extension could not handle it
+
+- The builtin compaction extension owns this alternate summarization path.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `speculative.ts`, around auth resolution and summary request snapshot
+  construction.
+
+## 2026-08-13 - Keep runtime-owned OAuth resolution during remote compaction
+
+### What changed
+
+- Remote and fallback compaction dispatch already-authenticated requests through ModelRuntime's internal
+  resolved-request stream seams, preserving provider transport and model-recovery wrapping without resolving
+  credentials twice.
+- Direct and injected stream runners still receive the resolved key because they do not own credential resolution.
+
+### Why
+
+- Explicit API-key overrides intentionally outrank stored OAuth credentials. Reusing the token as that override
+  made GitHub Copilot enterprise compaction fall back to the individual API-key base URL.
+
+### Why an extension could not handle it
+
+- This is the builtin compaction route's private handoff into the shared model runtime.
+
+### Expected merge-conflict zones
+
+- LOW: `openai-remote.ts` in `resolveRemoteStreamRunner`.
+
 ## 2026-08-13 - Preserve nullable provider-header overrides
 
 ### What changed

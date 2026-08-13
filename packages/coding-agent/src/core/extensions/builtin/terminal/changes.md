@@ -1,5 +1,26 @@
 # terminal builtin extension — fork surface
 
+## Align terminal bash environment guidance (2026-08-13)
+
+### What changed
+
+- Matched the terminal extension's bash prompt guideline to the core tool:
+  `You can inspect PI_* environment variables for current model and session
+  details.`
+
+### Why
+
+- The default terminal extension replaces the core bash tool, so stale wording
+  otherwise overrides the canonical SDK prompt contract.
+
+### Why an extension could not handle it
+
+- This is the builtin extension's own registered tool description.
+
+### Expected merge conflict zones
+
+- LOW: `tools/bash.ts`, in `promptGuidelines`.
+
 ## Burst-aware monitor pauses force a wake (2026-08-11)
 
 ### What changed

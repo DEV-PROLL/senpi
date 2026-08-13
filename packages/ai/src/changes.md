@@ -1,5 +1,22 @@
 # AI Source Changes
 
+## 2026-08-13 - Preserve explicit request compatibility fields
+
+### What changed and why
+
+- OpenAI-completions compatibility resolution now preserves explicit Baseten `chatTemplateArgs` and vLLM
+  `supportsThinkingTokenBudget` settings when it combines detected defaults with model overrides.
+- Focused Baseten and thinking-budget tests prove those fields reach the final request payload.
+
+### Why this cannot be expressed externally
+
+- The compatibility resolver is the provider-neutral normalization boundary used before any request transform or
+  coding-agent extension can observe the payload.
+
+### Expected merge conflict zones
+
+- MEDIUM: `utils/prompt-cache-ttl.ts` at the explicit compatibility override return object.
+
 ## 2026-08-13 - Upstream option and live-test cleanup
 
 ### What changed and why

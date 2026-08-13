@@ -1569,7 +1569,7 @@ describe("ExtensionRunner", () => {
 			expect(modelRegistry.getRegisteredNativeProvider("mixed-provider")).toBeUndefined();
 			expect(modelRegistry.find("mixed-provider", "instant-model")).toBeDefined();
 			expect(modelRegistry.find("mixed-provider", "native-model")).toBeUndefined();
-			await expect(modelRegistry.refresh()).resolves.toBeUndefined();
+			await expect(modelRegistry.refresh()).resolves.toMatchObject({ aborted: false });
 		});
 
 		it("lets a later native registration replace an earlier legacy registration for the same provider", async () => {
@@ -1583,7 +1583,7 @@ describe("ExtensionRunner", () => {
 			expect(modelRegistry.getRegisteredNativeProvider("mixed-provider")).toBeDefined();
 			expect(modelRegistry.find("mixed-provider", "native-model")).toBeDefined();
 			expect(modelRegistry.find("mixed-provider", "instant-model")).toBeUndefined();
-			await expect(modelRegistry.refresh()).resolves.toBeUndefined();
+			await expect(modelRegistry.refresh()).resolves.toMatchObject({ aborted: false });
 		});
 	});
 

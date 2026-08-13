@@ -222,7 +222,14 @@ function deepMergeObjects(base: Record<string, unknown>, overrides: Record<strin
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
 function deepMergeSettings(base: Settings, overrides: Settings): Settings {
-	return deepMergeObjects(base as Record<string, unknown>, overrides as Record<string, unknown>) as Settings;
+	const result = deepMergeObjects(base as Record<string, unknown>, overrides as Record<string, unknown>) as Settings;
+	if (overrides.retry?.fallbackChains !== undefined) {
+		result.retry = {
+			...result.retry,
+			fallbackChains: structuredClone(overrides.retry.fallbackChains),
+		};
+	}
+	return result;
 }
 
 function parseTimeoutSetting(value: unknown, settingName: string): number | undefined {

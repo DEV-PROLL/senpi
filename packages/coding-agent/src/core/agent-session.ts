@@ -858,13 +858,12 @@ export class AgentSession {
 		}
 
 		try {
-			const apiKey = await this.agent.getApiKey?.(model.provider);
-			const result = await this._modelRuntime.getAuth(model, { apiKey });
+			const result = await this._modelRuntime.getAuth(model);
 			if (!result) return { model };
 			const requestModel = result.auth.baseUrl ? { ...model, baseUrl: result.auth.baseUrl } : model;
 			return {
 				model: requestModel,
-				apiKey: apiKey ?? result.auth.apiKey,
+				apiKey: result.auth.apiKey,
 				headers: withoutDeletedHeaders(result.auth.headers),
 				env: result.env,
 			};
@@ -2411,7 +2410,6 @@ export class AgentSession {
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return (
-			this._pendingCompactionAdmission !== undefined ||
 			this._compactionLifecycle.state.status === "running" ||
 			this._autoCompactionAbortController !== undefined ||
 			this._compactionAbortController !== undefined ||
@@ -2634,6 +2632,7 @@ export class AgentSession {
 		}
 
 		if (options?.source !== "extension" && this._compactionAbortController !== undefined) {
+			options?.preflightResult?.(false);
 			throw new Error(
 				"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.",
 			);
@@ -4382,6 +4381,9 @@ export class AgentSession {
 			) {
 				throw new CompactionCancelledError();
 			}
+			if (request.owner === "compaction" && this._compactionAbortController === request.controller) {
+				this._compactionAbortController = undefined;
+			}
 
 			this._emit({
 				type: "compaction_end",
@@ -5091,7 +5093,11 @@ export class AgentSession {
 			if (willRetry) {
 				const messages = this.agent.state.messages;
 				const lastMsg = messages[messages.length - 1];
-				if (lastMsg?.role === "assistant" && (lastMsg as AssistantMessage).stopReason === "error") {
+				if (
+					lastMsg?.role === "assistant" &&
+					((lastMsg as AssistantMessage).stopReason === "error" ||
+						(lastMsg as AssistantMessage).stopReason === "length")
+				) {
 					this.agent.state.messages = messages.slice(0, -1);
 					this._incrementMessageRevision();
 				}

@@ -959,8 +959,8 @@ describe("config reload builtin extension", () => {
 
 		const compaction = harness.session.compact();
 		await compactEvent.promise;
-		expect(harness.session.isCompacting).toBe(true);
-		expect(reload).not.toHaveBeenCalled();
+		expect(harness.session.isCompacting).toBe(false);
+		expect(reload).toHaveBeenCalledTimes(1);
 		await compaction;
 		expect(harness.session.isCompacting).toBe(false);
 

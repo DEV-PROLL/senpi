@@ -703,7 +703,6 @@ export class ModelRuntime implements Models {
 			return wrapStreamWithModelRecovery(inner, model, context.tools ?? []);
 		});
 	}
-
 	complete<TApi extends Api>(
 		model: Model<TApi>,
 		context: Context,
@@ -834,6 +833,9 @@ export class ModelRuntime implements Models {
 		this.extensionProviders.delete(provider.id);
 		this.nativeExtensionProviders.set(provider.id, provider);
 		this.recomposeProvider(provider.id);
+		const composedOAuth = this.models.getProvider(provider.id)?.auth.oauth;
+		if (composedOAuth) this.credentials.registerOAuthProvider(provider.id, composedOAuth);
+		else this.credentials.unregisterOAuthProvider(provider.id);
 		this.updateModelSnapshot();
 		return this.refreshAfterRegistration();
 	}

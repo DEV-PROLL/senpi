@@ -465,21 +465,24 @@ export async function runExtensionCompaction(
 			auth && !auth.ok ? auth.error : `no credentials resolved for provider "${snapshot.model.provider}"`;
 		throw new SummaryGenerationError("auth", `summarization credentials unavailable: ${detail}`);
 	}
+	const requestSnapshot = auth.baseUrl
+		? { ...snapshot, model: { ...snapshot.model, baseUrl: auth.baseUrl } }
+		: snapshot;
 
 	const prompt = buildPrompt({
-		variant: snapshot.promptVariant,
-		previousSummary: snapshot.preparation.previousSummary,
-		taskIntent: resolveInheritedTaskIntent(snapshot.branchEntries ?? []),
-		customInstructions: snapshot.customInstructions,
+		variant: requestSnapshot.promptVariant,
+		previousSummary: requestSnapshot.preparation.previousSummary,
+		taskIntent: resolveInheritedTaskIntent(requestSnapshot.branchEntries ?? []),
+		customInstructions: requestSnapshot.customInstructions,
 	});
 	const promptTokens = approxTokens(prompt.user);
 	let messages = boundSummarizationInput(
 		pruneToolResults(
-			[...snapshot.preparation.messagesToSummarize, ...snapshot.preparation.turnPrefixMessages],
-			snapshot.contextWindow,
+			[...requestSnapshot.preparation.messagesToSummarize, ...requestSnapshot.preparation.turnPrefixMessages],
+			requestSnapshot.contextWindow,
 			SUMMARIZATION_INPUT_BUDGET_RATIO,
 		),
-		snapshot.contextWindow,
+		requestSnapshot.contextWindow,
 		promptTokens,
 	);
 	const overflowRetryStartMs = Date.now();
@@ -509,7 +512,7 @@ export async function runExtensionCompaction(
 						onProgress,
 						prompt,
 						signal,
-						snapshot,
+						snapshot: requestSnapshot,
 						auth: {
 							apiKey: auth.apiKey,
 							headers: auth.headers,

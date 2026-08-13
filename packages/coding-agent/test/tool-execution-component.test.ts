@@ -80,6 +80,7 @@ function captureTodoTool(): ToolDefinition<typeof TODO_PARAMS_SCHEMA> {
 type InteractiveModeStopThis = {
 	streamingReveal: { stop(): void };
 	toolResultReveal: { stop(): void };
+	disposeActiveSelector(): void;
 	settingsManager: { getShowTerminalProgress(): boolean };
 	ui: { terminal: { setProgress(value: boolean): void }; stop(): void };
 	clearStatusIndicator(): void;
@@ -910,6 +911,7 @@ describe("ToolExecutionComponent parity", () => {
 		const fakeThis: InteractiveModeStopThis = {
 			streamingReveal: { stop: vi.fn() },
 			toolResultReveal: { stop: vi.fn() },
+			disposeActiveSelector: vi.fn(),
 			settingsManager: { getShowTerminalProgress: () => false },
 			ui: { terminal: { setProgress: vi.fn() }, stop: vi.fn() },
 			clearStatusIndicator: vi.fn(),

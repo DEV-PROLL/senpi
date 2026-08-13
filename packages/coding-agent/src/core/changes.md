@@ -1,5 +1,84 @@
 # changes
 
+## Catalog listing and atomic fallback-chain overrides (2026-08-13)
+
+### What changed
+
+- `--list-models` reads the registered model snapshot without filtering out
+  models whose credentials are not configured.
+- Project `retry.fallbackChains` replaces the global map atomically while
+  sibling retry settings continue to merge recursively.
+- Native provider replacement synchronizes its composed OAuth adapter into the
+  credential store, preserving auth-derived request metadata such as Copilot
+  enterprise base URLs.
+
+### Why
+
+- Model listing is a discovery fast path used before login.
+- Fallback chains are ordered policy maps; retaining unrelated global keys
+  changes project-specific retry behavior.
+
+### Why an extension could not handle it
+
+- CLI fast-path model discovery and settings precedence run before extensions.
+- OAuth adapter composition belongs to the core model runtime and credential
+  store boundary.
+
+### Expected merge conflict zones
+
+- LOW: `cli/list-models.ts`, around catalog selection.
+- MEDIUM: `settings-manager.ts`, around global/project deep merge behavior.
+- MEDIUM: `model-runtime.ts`, around native provider registration and OAuth
+  adapter replacement.
+
+## Compaction terminal-state and retry recovery parity (2026-08-13)
+
+### What changed
+
+- Successful manual compaction now clears its controller before publishing
+  `compaction_end`, so listeners observe a terminal state and may queue prompts.
+- Prompt admission failures during manual compaction report
+  `preflightResult(false)`.
+- Recoverable length-stopped assistants are removed before the post-compaction
+  continuation, matching error-stopped recovery.
+
+### Why
+
+- The merged lifecycle emitted completion while `isCompacting` was still true,
+  omitted the preflight rejection callback, and retained truncated assistants
+  that prevented the scheduled retry from reaching the provider.
+
+### Why an extension could not handle it
+
+- Prompt admission, lifecycle publication, and continuation message ownership
+  are private `AgentSession` state transitions.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts`, around `isCompacting`, `prompt()`, successful
+  `_executeCompaction()` completion, and `_runAutoCompaction()` continuation.
+
+## Node built-in auth-storage timer import (2026-08-13)
+
+### What changed
+
+- Normalized the auth-storage retry delay import to `node:timers/promises`.
+
+### Why
+
+- Vitest's module runner can resolve bare `timers/promises` relative to an
+  aliased package root, breaking codemode suites that import the coding-agent
+  source graph.
+
+### Why an extension could not handle it
+
+- Auth storage is loaded as core module code before extensions can intercept
+  module resolution.
+
+### Expected merge conflict zones
+
+- LOW: `auth-storage.ts`, in the Node timer import used by bounded retries.
+
 ## Historical image transport limits (2026-08-12)
 
 ### What changed

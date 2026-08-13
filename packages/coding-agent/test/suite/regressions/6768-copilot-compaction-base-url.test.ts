@@ -52,9 +52,9 @@ describe("issue #6768 Copilot compaction base URL", () => {
 		const catalogModel = { ...harness.getModel(), baseUrl: INDIVIDUAL_BASE_URL };
 		harness.session.agent.state.model = catalogModel;
 
-		let requestBaseUrl: string | undefined;
+		const requestBaseUrls: string[] = [];
 		const respond = (requestModel: Model<string>) => {
-			requestBaseUrl = requestModel.baseUrl;
+			requestBaseUrls.push(requestModel.baseUrl);
 			const stream = createAssistantMessageEventStream();
 			stream.push({
 				type: "done",
@@ -104,11 +104,18 @@ describe("issue #6768 Copilot compaction base URL", () => {
 		const modelRuntime = harness.session.modelRuntime;
 		modelRuntime.registerNativeProvider(provider);
 		await modelRuntime.refresh({ allowNetwork: false, providers: [catalogModel.provider] });
+		await expect(modelRuntime.getAuth(catalogModel)).resolves.toMatchObject({
+			auth: { baseUrl: ENTERPRISE_BASE_URL },
+		});
+		await expect(harness.session.modelRegistry.getApiKeyAndHeaders(catalogModel)).resolves.toMatchObject({
+			ok: true,
+			baseUrl: ENTERPRISE_BASE_URL,
+		});
 		harness.session.agent.streamFunction = (model, context, options) =>
 			modelRuntime.streamSimple(model, context, options);
 
 		await harness.session.compact();
 
-		expect(requestBaseUrl).toBe(ENTERPRISE_BASE_URL);
+		expect(requestBaseUrls).toEqual([ENTERPRISE_BASE_URL]);
 	});
 });
