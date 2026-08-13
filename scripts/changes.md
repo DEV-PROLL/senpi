@@ -6,6 +6,9 @@
 
 - Release publication now refuses to build an npm publish command outside
   GitHub Actions.
+- All seven registry package source manifests are private; the canonical
+  publisher creates temporary public manifests only inside its validated
+  release flow.
 - Root `publish` and `publish:dry` scripts now route through the guarded
   publisher instead of calling npm workspaces directly.
 - The trusted workflow continues to publish every package with
@@ -21,6 +24,9 @@
   because the local command silently omitted `--provenance`.
 - The root workspace publish command was a second bypass because forwarded npm
   arguments could override its literal provenance flag.
+- The coding-agent and codemode source packages were also directly publishable
+  through native npm workspace/package commands, bypassing both the provenance
+  guard and canonical bundle validation.
 - npm package versions are immutable, so the safe invariant is to reject future
   local release publication and require the trusted OIDC workflow.
 
@@ -31,8 +37,8 @@
 
 ### Expected merge conflict zones
 
-- LOW: root publish scripts, `buildPublishArgs` in `publish-command.mjs`, and
-  their focused tests.
+- LOW: source package privacy, registry alias enumeration, root publish scripts,
+  `buildPublishArgs` in `publish-command.mjs`, and their focused tests.
 
 ## Parse npm pack JSON after warning output (2026-08-13)
 

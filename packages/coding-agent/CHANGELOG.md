@@ -4,8 +4,9 @@
 
 ### Fixed
 
-- Every repository release-publication entrypoint now fails closed outside the trusted GitHub Actions
-  path instead of silently publishing npm packages without provenance attestations.
+- Every registry package source is now private, and every scripted release-publication entrypoint fails
+  closed outside the trusted GitHub Actions path, preventing direct or scripted npm publication without
+  provenance attestations.
 
 - The compaction prepared while your session sat idle is now reused no matter which internal path runs
   the compaction. Previously the path that runs first on a new prompt threw that finished summary away
