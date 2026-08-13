@@ -6,6 +6,8 @@
 
 - Release publication now refuses to build an npm publish command outside
   GitHub Actions.
+- Root `publish` and `publish:dry` scripts now route through the guarded
+  publisher instead of calling npm workspaces directly.
 - The trusted workflow continues to publish every package with
   `--provenance`; dry-run validation remains available locally because it
   exits before publication.
@@ -17,6 +19,8 @@
 - The first telemetry package creation required a one-time local recovery, and
   the remaining release packages were then published without npm provenance
   because the local command silently omitted `--provenance`.
+- The root workspace publish command was a second bypass because forwarded npm
+  arguments could override its literal provenance flag.
 - npm package versions are immutable, so the safe invariant is to reject future
   local release publication and require the trusted OIDC workflow.
 
@@ -27,7 +31,8 @@
 
 ### Expected merge conflict zones
 
-- LOW: `buildPublishArgs` in `publish-command.mjs` and its focused tests.
+- LOW: root publish scripts, `buildPublishArgs` in `publish-command.mjs`, and
+  their focused tests.
 
 ## Parse npm pack JSON after warning output (2026-08-13)
 
