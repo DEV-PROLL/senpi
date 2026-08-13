@@ -5,7 +5,8 @@
 ### What changed
 
 - Added a parser that scans `npm pack --json` output for the final valid JSON
-  array instead of parsing the entire stdout stream directly.
+  array instead of parsing the entire stdout stream directly, including when npm
+  emits warnings after the JSON payload.
 - Added regression coverage using the workspace/config warnings emitted during
   the failed first Senpi telemetry publication.
 - Publish staging now materializes any missing optional runtime package directly
