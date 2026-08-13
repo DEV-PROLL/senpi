@@ -220,8 +220,28 @@ export default function compactionExtension(
 		idleWarmupTimer = undefined;
 	}
 
-	// Fenced on the observed job: a prompt, invalidation, or newer warm-up
-	// stands this watcher down before it can start a duplicate summarization.
+	// A session reload retires this extension generation while the warm-up
+	// watcher below is still armed: `AgentSession.reload()` invalidates the old
+	// runner, after which every `ExtensionContext` getter throws
+	// "stale extension generation after reload". The watcher outlives that
+	// invalidation in two places — the `job.failure` continuation and the armed
+	// retry timer — and neither had a caller left to receive the throw: the
+	// continuation is spawned with `void` (unhandled rejection) and the timer
+	// callback throws straight into the timer queue, which terminates the
+	// process. The context carries no liveness flag, so a retired generation is
+	// only observable by reading a getter and catching the assertion.
+	function isContextRetired(ctx: ExtensionContext): boolean {
+		try {
+			ctx.isIdle();
+			return false;
+		} catch {
+			return true;
+		}
+	}
+
+	// Fenced on the observed job: a prompt, invalidation, a reload, or a newer
+	// warm-up stands this watcher down before it can start a duplicate
+	// summarization.
 	function armIdleWarmupRetry(ctx: ExtensionContext): void {
 		const job = speculativeJob;
 		if (!job) return;
@@ -231,6 +251,11 @@ export default function compactionExtension(
 				return;
 			}
 			if (speculativeJob !== job) return;
+			// A reload between arming and this continuation retires the context.
+			if (isContextRetired(ctx)) {
+				cancelIdleWarmupRetry();
+				return;
+			}
 			const usage = ctx.getContextUsage();
 			const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 			const retryDecision: idleRetry.IdleWarmupRetryDecision = {
@@ -252,6 +277,9 @@ export default function compactionExtension(
 			idleWarmupTimer = setTimeout(() => {
 				idleWarmupTimer = undefined;
 				if (speculativeJob !== job) return;
+				// The reload may land after the timer was armed; a throw here would
+				// escape into the timer queue as an uncaughtException.
+				if (isContextRetired(ctx)) return;
 				if (!ctx.isIdle()) return;
 				idleWarmupAttempt += 1;
 				getLogger(ctx).debug("idle_trigger", {
@@ -897,5 +925,16 @@ export default function compactionExtension(
 
 	pi.on("tool_call", (event) => {
 		restoration.trackToolCall(restorationState, event);
+	});
+
+	// The reload path retires this extension generation right after this event
+	// (`AgentSession.reload()` invalidates the old runner), so stand the idle
+	// warm-up watcher down here rather than leaving a timer armed against a
+	// context that is about to start throwing on every read.
+	pi.on("session_shutdown", () => {
+		cancelIdleWarmupRetry();
+		idleWarmupAttempt = 0;
+		speculativeJob?.controller.abort();
+		speculativeJob = undefined;
 	});
 }
