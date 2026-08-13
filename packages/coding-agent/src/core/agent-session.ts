@@ -858,7 +858,12 @@ export class AgentSession {
 		}
 
 		try {
-			const result = await this._modelRuntime.getAuth(model);
+			const storedResult = await this._modelRuntime.getAuth(model);
+			const activeApiKey = await this.agent.getApiKey?.(model.provider);
+			const result =
+				activeApiKey !== undefined && storedResult?.source !== "OAuth"
+					? await this._modelRuntime.getAuth(model, { apiKey: activeApiKey })
+					: storedResult;
 			if (!result) return { model };
 			const requestModel = result.auth.baseUrl ? { ...model, baseUrl: result.auth.baseUrl } : model;
 			return {

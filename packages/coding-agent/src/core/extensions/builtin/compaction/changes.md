@@ -23,27 +23,27 @@
 - MEDIUM: `speculative.ts`, around auth resolution and summary request snapshot
   construction.
 
-## 2026-08-13 - Keep runtime-owned OAuth resolution during remote compaction
+## 2026-08-13 - Make retry-policy tests deterministic
 
 ### What changed
 
-- Remote and fallback compaction dispatch already-authenticated requests through ModelRuntime's internal
-  resolved-request stream seams, preserving provider transport and model-recovery wrapping without resolving
-  credentials twice.
-- Direct and injected stream runners still receive the resolved key because they do not own credential resolution.
+- Blocking compaction retry tests now advance fake time through the production
+  1s/2s/4s backoff instead of waiting on wall-clock timers.
 
 ### Why
 
-- Explicit API-key overrides intentionally outrank stored OAuth credentials. Reusing the token as that override
-  made GitHub Copilot enterprise compaction fall back to the individual API-key base URL.
+- The full retry budget is seven seconds, longer than Vitest's five-second test
+  timeout. Real-time waits made the merged tests fail deterministically despite
+  correct retry behavior.
 
 ### Why an extension could not handle it
 
-- This is the builtin compaction route's private handoff into the shared model runtime.
+- This is test-harness coverage for the builtin extension's retry policy; no
+  shipped runtime behavior changed.
 
 ### Expected merge-conflict zones
 
-- LOW: `openai-remote.ts` in `resolveRemoteStreamRunner`.
+- LOW: blocking compaction retry-policy tests.
 
 ## 2026-08-13 - Preserve nullable provider-header overrides
 

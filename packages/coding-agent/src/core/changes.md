@@ -11,6 +11,9 @@
 - Native provider replacement synchronizes its composed OAuth adapter into the
   credential store, preserving auth-derived request metadata such as Copilot
   enterprise base URLs.
+- Core summarization resolves stored provider auth before invoking SDK-style or
+  custom stream wrappers, so account-specific request metadata is not replaced
+  by a legacy catalog key.
 
 ### Why
 
@@ -23,6 +26,8 @@
 - CLI fast-path model discovery and settings precedence run before extensions.
 - OAuth adapter composition belongs to the core model runtime and credential
   store boundary.
+- Summarization auth is assembled inside `AgentSession` before extensions or
+  stream wrappers receive the request.
 
 ### Expected merge conflict zones
 
@@ -30,6 +35,7 @@
 - MEDIUM: `settings-manager.ts`, around global/project deep merge behavior.
 - MEDIUM: `model-runtime.ts`, around native provider registration and OAuth
   adapter replacement.
+- MEDIUM: `agent-session.ts`, around summarization request auth.
 
 ## Compaction terminal-state and retry recovery parity (2026-08-13)
 
@@ -41,6 +47,8 @@
   `preflightResult(false)`.
 - Recoverable length-stopped assistants are removed before the post-compaction
   continuation, matching error-stopped recovery.
+- Summarization reuses an active request API key for ordinary key-auth providers
+  while preserving stored OAuth resolution and its account-specific base URL.
 
 ### Why
 
