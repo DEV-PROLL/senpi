@@ -1,5 +1,37 @@
 # changes
 
+## Admit provider-owned compaction lanes (2026-08-14)
+
+### What changed
+
+- `CompactionRejectionCause` now includes `external-owner`, with an exhaustive fallback description for rejection
+  events that do not carry an extension reason.
+- `AgentSession` treats a failed `external-owner` compaction as delegated only while the lifecycle's recorded model
+  provider matches the active provider. Delegated failures neither throw `RequiredCompactionError`, block final or
+  retry admission, nor arm `_blockedPostCompactionAssistant`.
+- Circuit-breaker cooldown semantics remain unchanged: its final-admission bypass still requires the post-attempt
+  estimate to fall below the threshold, while delegated lanes may proceed despite Senpi's unreliable oversize
+  estimate.
+
+### Why
+
+- SDK-native provider lanes compact inside the admitted query. Rejecting the core compaction route is an ownership
+  handoff, not a failed prerequisite, so stopping before provider dispatch prevents the component that owns
+  compaction from doing its work.
+- Failed lifecycle state survives model selection. Matching the recorded provider prevents a delegated rejection
+  from one provider from suppressing required-compaction errors after switching to another provider.
+
+### Why an extension could not handle it
+
+- Required-compaction admission, retry gating, lifecycle model identity, and blocked-assistant recovery are private
+  `AgentSession` state. An extension can report ownership but cannot alter these core gates.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts`, around required-compaction admission, final provider admission, post-compaction blocking,
+  scheduled continuation revalidation, and retry admission.
+- LOW: `extensions/types.ts`, in the shared compaction rejection-cause union.
+
 ## Catalog listing and atomic fallback-chain overrides (2026-08-13)
 
 ### What changed

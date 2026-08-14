@@ -97,6 +97,7 @@ export type ServiceTier = "auto" | "flex" | "priority";
 export type CompactionReason = "manual" | "threshold" | "overflow" | "pre_prompt" | "branch" | "extension";
 export type CompactionRejectionCause =
 	| "cancelled-by-extension"
+	| "external-owner"
 	| "would-overflow"
 	| "circuit-breaker"
 	| "per-turn-cap"

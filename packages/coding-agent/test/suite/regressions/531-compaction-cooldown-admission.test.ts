@@ -32,6 +32,22 @@ function genericallyCancelledCompaction(): InlineExtension {
 	}) as InlineExtension;
 }
 
+function externallyOwnedCompaction(): InlineExtension {
+	return ((pi: ExtensionAPI) => {
+		pi.on("session_before_compact", () => ({
+			cancel: true,
+			rejectionCause: "external-owner",
+			reason: "provider lane owns compaction",
+		}));
+	}) as InlineExtension;
+}
+
+function privateSessionMethod(session: Harness["session"], name: string): (...args: unknown[]) => unknown {
+	const method: unknown = Reflect.get(session, name);
+	if (typeof method !== "function") throw new Error(`Expected AgentSession.${name}`);
+	return method.bind(session);
+}
+
 async function createOverThresholdHarness(extension: InlineExtension): Promise<Harness> {
 	const harness = await createHarness({
 		models: [{ id: "faux-large", contextWindow: 20_000, maxTokens: 4_096 }],
@@ -78,6 +94,20 @@ describe("issue #531: compaction cooldown must not brick prompt admission", () =
 		expect(texts.some((text) => text.includes("continued fine"))).toBe(true);
 	});
 
+	it("lets the provider-owned lane proceed when delegated compaction leaves context over threshold", async () => {
+		const harness = await createOverThresholdHarness(externallyOwnedCompaction());
+		harness.setResponses([fauxAssistantMessage("provider compacted and continued")]);
+
+		await harness.session.prompt("next provider-owned todo item");
+
+		expect(harness.faux.state.callCount).toBe(1);
+		expect(harness.session.compactionState).toMatchObject({
+			status: "failed",
+			rejectionCause: "external-owner",
+			model: { provider: harness.session.model?.provider },
+		});
+	});
+
 	it("keeps failing closed when compaction is cancelled for a non-breaker reason", async () => {
 		// Given: the same over-threshold context, but the cancel is a plain
 		// extension refusal, not a breaker cooldown.
@@ -88,5 +118,67 @@ describe("issue #531: compaction cooldown must not brick prompt admission", () =
 		await expect(harness.session.prompt("next todo item")).rejects.toThrow(
 			"Context remains above the compaction threshold because compaction did not complete",
 		);
+	});
+
+	it("does not reuse delegated admission after switching providers", async () => {
+		const harness = await createOverThresholdHarness(externallyOwnedCompaction());
+		const lastAssistant = harness.session.agent.state.messages.findLast((message) => message.role === "assistant");
+		if (lastAssistant?.role !== "assistant") throw new Error("Expected seeded assistant");
+		const runPrePromptCompaction = privateSessionMethod(harness.session, "_runPrePromptCompaction");
+		await runPrePromptCompaction(lastAssistant, false, "pre_prompt");
+		expect(harness.session.compactionState).toMatchObject({
+			status: "failed",
+			rejectionCause: "external-owner",
+			model: { provider: harness.session.model?.provider },
+		});
+
+		const currentModel = harness.getModel();
+		const otherProvider = "other-faux-provider";
+		await harness.authStorage.modify(otherProvider, async () => ({ type: "api_key", key: "faux-key" }));
+		harness.modelRegistry.registerProvider(otherProvider, {
+			baseUrl: currentModel.baseUrl,
+			apiKey: "faux-key",
+			api: harness.faux.api,
+			models: [{ ...currentModel, provider: undefined }],
+		});
+		await harness.session.setSessionModel({ ...currentModel, provider: otherProvider });
+
+		const isCompactionDelegated = privateSessionMethod(harness.session, "_isCompactionDelegated");
+		expect(isCompactionDelegated()).toBe(false);
+		const enforceBeforeProvider = privateSessionMethod(harness.session, "_enforceCompactionBeforeProvider");
+		await expect(enforceBeforeProvider(undefined, false, "pre_prompt")).rejects.toThrow(
+			"Context remains above the compaction threshold because compaction did not complete",
+		);
+	});
+
+	it("does not arm blocked post-compaction admission for an external owner", async () => {
+		const harness = await createOverThresholdHarness(externallyOwnedCompaction());
+		const branch = harness.sessionManager.getBranch();
+		const firstMessage = branch.find((entry) => entry.type === "message");
+		if (!firstMessage) throw new Error("Expected seeded message entry");
+		harness.sessionManager.appendCompaction("prior summary", firstMessage.id, 19_500);
+		const timestamp = Date.now();
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "post-compaction work" }],
+			timestamp: timestamp - 1,
+		});
+		const assistant = {
+			...fauxAssistantMessage("post-compaction oversized response", { timestamp }),
+			usage: {
+				input: 19_500,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 19_500,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		};
+		harness.sessionManager.appendMessage(assistant);
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+
+		const checkCompaction = privateSessionMethod(harness.session, "_checkCompaction");
+		expect(await checkCompaction(assistant, true)).toBe(false);
+		expect(Reflect.get(harness.session, "_blockedPostCompactionAssistant")).toBeUndefined();
 	});
 });
