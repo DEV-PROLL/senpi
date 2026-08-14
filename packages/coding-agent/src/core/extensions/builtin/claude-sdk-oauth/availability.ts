@@ -60,7 +60,8 @@ export type AmbientProbeOptions = {
 
 export async function probeAmbientClaudeAuthStatus(options: AmbientProbeOptions = {}): Promise<boolean> {
 	const timeoutMs = options.timeoutMs ?? AMBIENT_PROBE_TIMEOUT_MS;
-	const spawnProbe = options.spawnProbe ?? ((command, args) => spawn(command, [...args], { stdio: "ignore" }));
+	const spawnProbe =
+		options.spawnProbe ?? ((command, args) => spawn(command, [...args], { stdio: "ignore", windowsHide: true }));
 	let executable: string;
 	try {
 		executable = resolveClaudeCodeExecutable(defaultExecutableDeps());

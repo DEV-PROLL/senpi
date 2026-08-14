@@ -1,5 +1,113 @@
 # changes
 
+## Require provenance-backed npm release publication (2026-08-13)
+
+### What changed
+
+- Release publication now refuses to build an npm publish command outside
+  GitHub Actions.
+- All seven registry package source manifests are private; the canonical
+  publisher creates temporary public manifests only inside its validated
+  release flow.
+- Lockstep validation and release-announcement enumeration now use one explicit
+  source-to-registry package map instead of inferring publication from
+  `private`.
+- Root `publish` and `publish:dry` scripts now route through the guarded
+  publisher instead of calling npm workspaces directly.
+- The trusted workflow continues to publish every package with
+  `--provenance`; dry-run validation remains available locally because it
+  exits before publication.
+- Added regression coverage for both the rejected local release path and the
+  attested GitHub Actions path.
+
+### Why
+
+- The first telemetry package creation required a one-time local recovery, and
+  the remaining release packages were then published without npm provenance
+  because the local command silently omitted `--provenance`.
+- The root workspace publish command was a second bypass because forwarded npm
+  arguments could override its literal provenance flag.
+- The coding-agent and codemode source packages were also directly publishable
+  through native npm workspace/package commands, bypassing both the provenance
+  guard and canonical bundle validation.
+- npm package versions are immutable, so the safe invariant is to reject future
+  local release publication and require the trusted OIDC workflow.
+
+### Why an extension could not handle it
+
+- npm publication runs in repository release tooling before the Senpi runtime
+  or extension loader exists.
+
+### Expected merge conflict zones
+
+- LOW: source package privacy, registry alias enumeration, root publish scripts,
+  `buildPublishArgs` in `publish-command.mjs`, and their focused tests.
+
+## Parse npm pack JSON after warning output (2026-08-13)
+
+### What changed
+
+- Added a parser that scans `npm pack --json` output for the final valid JSON
+  array instead of parsing the entire stdout stream directly, including when npm
+  emits warnings after the JSON payload.
+- Added regression coverage using the workspace/config warnings emitted during
+  the failed first Senpi telemetry publication.
+- Publish staging now materializes any missing optional runtime package directly
+  from the exact tarball URL and integrity recorded in the root lock before
+  preparing the bundled Senpi package.
+- Final tarball validation now requires the publish manifest's actual
+  `bundleDependencies`, excluding platform-constrained optional packages that
+  intentionally remain registry-resolved on the installing machine.
+- Portable hoisted transitive packages are promoted to exact temporary
+  dependencies in the staged publish manifest so npm includes every declared
+  bundle member in the final Senpi tarball.
+
+### Why
+
+- npm can print warnings before its JSON payload. The publish workflow prepared
+  the package successfully but failed before `npm publish` because the warning
+  prefix made raw `JSON.parse` reject the output.
+- Cross-platform native packages are intentionally present in the lock but npm
+  installs only the current host variant. Senpi bundles those platform binaries,
+  so publish staging must reify the missing locked variants without changing
+  manifests or lockfiles.
+
+### Why an extension could not handle it
+
+- Package packing and npm publication run in release tooling before any Senpi
+  runtime or extension is loaded.
+
+### Expected merge conflict zones
+
+- LOW: `prepareAndPackPackage` in `publish.mjs`.
+
+## Merge concurrent main updates before release push (2026-08-13)
+
+### What changed
+
+- Release preparation now fetches `origin/main` after creating the verified
+  release tag and next-cycle commit.
+- If remote main advanced during the long release test transaction, the release
+  branch creates a normal merge commit before pushing `main`.
+- Added focused tests for advanced, already-contained, and dry-run paths.
+
+### Why
+
+- The release workflow can run for several minutes while other verified PRs
+  merge. A non-fast-forward main push previously failed after all release build
+  and test work had completed.
+- The release tag remains anchored to the already verified release commit;
+  only the post-release next-cycle branch absorbs concurrent main history.
+
+### Why an extension could not handle it
+
+- Git synchronization and tag/branch publication happen before any Senpi
+  runtime or extension is loaded.
+
+### Expected merge conflict zones
+
+- MEDIUM: the final tag/next-cycle/push sequence in `release.mjs`.
+
 ## Lock every Rolldown platform binding (2026-08-13)
 
 ### What changed
@@ -196,3 +304,32 @@
 - MEDIUM: `local-release.mjs`, around package order and private package policy.
 - HIGH: `build-binaries.sh`, around native dependency installation, Bun compile
   flags, embedded assets, target selection, and Darwin codesigning.
+# Claude Agent SDK native platform lock coverage
+
+## What changed
+
+- Added `generate-claude-agent-sdk-platform-lock.mjs` to materialize every native optional package declared by
+  the locked `@anthropic-ai/claude-agent-sdk` version into the root `package-lock.json`.
+- Added a platform-matrix regression that derives the required package names and exact versions from the SDK's
+  own lock entry instead of maintaining a second hard-coded list.
+- Wired the generator's offline `--check` mode into the root static-validation command.
+
+## Why
+
+- CI installs dependencies on each runner platform with lifecycle scripts disabled. The root lock contained only
+  the locally generated Darwin ARM64 SDK package, so Linux and Windows runners omitted the SDK's native Claude
+  executable and six OAuth suites bypassed their injected query boundary with `Native CLI binary ... not found`.
+- Keeping every SDK-declared optional in the lock lets npm select the matching binary on each runner without
+  enabling arbitrary dependency lifecycle scripts.
+
+## Why not an extension
+
+- Dependency resolution happens before Senpi or any extension can start. Only the repository lock generator and
+  CI validation can guarantee that npm has the platform package available during installation.
+
+## Expected conflict zones
+
+- `package-lock.json` entries for `@anthropic-ai/claude-agent-sdk-*`.
+- Root `package.json` static-check scripts.
+- Release/dependency lock tests under `scripts/`.
+

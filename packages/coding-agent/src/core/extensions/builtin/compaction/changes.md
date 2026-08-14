@@ -1,5 +1,141 @@
 # Builtin compaction extension changes
 
+## Report provider-owned compaction as delegated (2026-08-14)
+
+### What changed
+
+- The SDK-native lane's `session_before_compact` cancellation now carries the structured `external-owner` rejection
+  cause while preserving its existing human-readable reason.
+- The lane-policy documentation now describes the structured ownership signal instead of the former generic
+  extension cancellation.
+
+### Why
+
+- Core admission must distinguish a provider lane that will compact inside the admitted query from an ordinary
+  extension refusal. Treating both as `cancelled-by-extension` made over-threshold SDK-native sessions fail with
+  `RequiredCompactionError` before the provider could run.
+
+### Why an extension could not do this
+
+- The builtin compaction extension owns the lane cancellation verdict and is the only layer that can identify this
+  cancellation as provider ownership before core records the lifecycle failure.
+
+### Expected merge-conflict zones
+
+- LOW: `index.ts`, in the SDK-native lane branch of `session_before_compact`.
+- LOW: `lane-policy.ts`, around `SDK_NATIVE_LANE_REJECTION_REASON` documentation.
+
+## Stand the idle warm-up watcher down on a retired generation (2026-08-13)
+
+### What changed
+
+- `index.ts` gained `isContextRetired(ctx)`, and `armIdleWarmupRetry` now consults it in BOTH continuations that
+  outlive the runner generation that armed them: the `job.failure` continuation and the armed retry `setTimeout`.
+- `index.ts` registers a `session_shutdown` handler that cancels the pending warm-up timer, resets the attempt
+  counter, and aborts the in-flight speculative job.
+
+### Why
+
+- `AgentSession.reload()` retires the old extension generation (`oldExtensionRunner.invalidate("stale extension
+  generation after reload")`), after which every `ExtensionContext` getter throws. The warm-up watcher outlived that
+  invalidation and read the retired context anyway, and neither call site had a caller left to receive the throw:
+  the failure continuation is spawned with `void` (an unhandled rejection) and the timer callback throws straight
+  into the timer queue. Interactive mode promotes that to `uncaughtCrash`, so a reload landing inside the warm-up
+  retry window killed the CLI with:
+
+  ```
+  pi exiting due to uncaughtException:
+  Error: stale extension generation after reload
+      at ExtensionRunner.assertActive (core/extensions/runner.js)
+      at Object.getContextUsage (core/extensions/runner.js)
+      at core/extensions/builtin/compaction/index.js
+  ```
+
+- `session_shutdown` fires on the reload path BEFORE the invalidation, so tearing the watcher down there is the
+  deterministic fix; `isContextRetired` remains the backstop for any path that retires a generation without
+  emitting the event.
+- The probe reads a getter inside `try`/`catch` because `ExtensionContext` deliberately exposes no liveness flag.
+  Adding one is a public-API change that this crash does not justify.
+
+### Why an extension could not do this
+
+- This is the builtin extension's own private warm-up watcher. No external extension can observe, cancel, or guard
+  another extension's armed timer or in-flight summarization continuation.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `index.ts` `armIdleWarmupRetry` (both guard sites) — upstream has no such watcher, so a sync that
+  rewrites this function will drop the guards.
+- LOW: the trailing `session_shutdown` handler at the end of the extension factory.
+
+## 2026-08-13 - Let the core route claim the idle warm summary
+
+### What changed
+
+- `session_before_compact` now attempts `claimWarmSummaryForCoreRoute()` BEFORE invalidating, and
+  returns the warm result as its `compaction` when the claim holds. The claim detaches the job
+  synchronously (before any `await`) so exactly one route can own it, and deliberately does NOT abort
+  its controller - aborting is what threw the already-paid summarization away.
+- A claim requires: no custom instructions (manual compaction keeps its own wording), a speculative
+  origin, the same model identity, a valid `WarmAnchorSnapshot` against the event branch, and a
+  boundary equal to the core preparation's `firstKeptEntryId`. Anything else falls through to the
+  existing fresh generation, unchanged.
+- The claimed job's generation is logged as `warm_consumed` with `route: "core-route"`.
+
+### Why
+
+On a new prompt the ordering is deterministic, not a race: `_enforceCompactionBeforeProvider` runs
+before `emitBeforeAgentStart`, so the CORE route always reaches compaction first. Its handler called
+`invalidateSpeculativeCompaction()` as its first statement, so the idle warm-up - whose entire purpose
+is to keep summarization off the user's critical path - was destroyed and re-billed exactly when it
+was needed. PR #853 fixed the extension route only; this closes the other half.
+
+### Why an extension could not do it
+
+The warm job lives in this extension, but the route that discarded it is the core-driven
+`session_before_compact` emission; the fix has to happen inside that handler.
+
+### Expected merge-conflict zones
+
+- `index.ts` `session_before_compact` handler head and the block preceding core-route snapshot creation.
+
+## 2026-08-13 - Anchor warm summaries to the summarized prefix
+
+### What changed
+
+- `applyGeneratedCompaction` no longer discards a warm summary on message-revision
+  inequality alone. When the revision moved, it builds a warm-anchor snapshot from
+  `preparation.firstKeptEntryId` (`core/compaction/warm-anchor.ts`) and applies the warm
+  result while the summarized prefix is unchanged.
+- That path passes `expectedWarmAnchor` instead of `expectedRevision`, and the core
+  compare-and-apply gate re-validates it with the SAME shared validator before mutating the
+  transcript, so the two gates cannot drift apart.
+- The compaction boundary is compared by entry ID, never by array position. Compaction records
+  are appended after the entries they summarize, so a valid next-generation anchor routinely
+  precedes the boundary it updates, and sibling branches can hold different boundaries at the
+  same index. A positional rule silently rejected every warm summary in an already-compacted
+  session while still admitting a cross-branch boundary.
+
+### Why
+
+The idle warm-up exists to move summarization off the user's critical path, but
+`_messageRevision` increments on every appended message. A session parked in a cache-warm
+wait appends wait notices, monitor state, and finally the user's own prompt, so the warm
+summary was guaranteed stale exactly when the blocking route needed it. Field logs showed
+415 warm-ups started, 36 consumed and only 10 applied; the rest paid a second full
+summarization for work already done. A summary describes the entries before its cut, so
+appends after the anchor cannot invalidate it - only a rewrite of the summarized prefix can.
+
+### Why an extension could not do it
+
+The compare-and-apply admission gate lives in `core/agent-session.ts`; admitting a warm
+summary under a content anchor requires that core option and its revalidation.
+
+### Expected merge-conflict zones
+
+- `speculative.ts` `applyGeneratedCompaction` and the `applyCompaction` context signature.
+- `core/agent-session.ts` `applyCompaction` guard block.
+
 ## 2026-08-13 - Preserve auth-resolved local compaction endpoints
 
 ### What changed

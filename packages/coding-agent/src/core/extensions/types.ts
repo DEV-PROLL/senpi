@@ -50,6 +50,7 @@ import type { Static, TSchema } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { BashResult } from "../bash-executor.ts";
 import type { CompactionPreparation, CompactionResult } from "../compaction/index.ts";
+import type { WarmAnchorSnapshot } from "../compaction/warm-anchor.ts";
 import type { EventBus } from "../event-bus.ts";
 import type { ExecOptions, ExecResult } from "../exec.ts";
 import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
@@ -96,6 +97,7 @@ export type ServiceTier = "auto" | "flex" | "priority";
 export type CompactionReason = "manual" | "threshold" | "overflow" | "pre_prompt" | "branch" | "extension";
 export type CompactionRejectionCause =
 	| "cancelled-by-extension"
+	| "external-owner"
 	| "would-overflow"
 	| "circuit-breaker"
 	| "per-turn-cap"
@@ -339,6 +341,12 @@ export interface CompactOptions {
 export interface ApplyCompactionOptions {
 	reason: CompactionReason;
 	expectedRevision?: number;
+	/**
+	 * Content anchor for a warm summary: the compaction applies while this snapshot
+	 * still describes an unrewritten summarized prefix, so idle-time appends after
+	 * the cut no longer discard the summary the way the revision counter does.
+	 */
+	expectedWarmAnchor?: WarmAnchorSnapshot;
 	/** The feedback operation that owns this apply, when one was begun. */
 	signal?: AbortSignal;
 }

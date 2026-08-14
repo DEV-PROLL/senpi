@@ -4,6 +4,30 @@
 
 ### Breaking Changes
 
+### Changed
+
+### Fixed
+
+## [2026.8.14] - 2026-08-14
+
+### Breaking Changes
+
+### Changed
+
+### Fixed
+
+## [2026.8.13-2] - 2026-08-13
+
+### Breaking Changes
+
+### Changed
+
+### Fixed
+
+## [2026.8.13] - 2026-08-13
+
+### Breaking Changes
+
 - Changed tool-result protocol conversion to require and verify the original tool call.
 - Replaced runtime session summaries with durable `SessionMetadata` in server inventory responses.
 

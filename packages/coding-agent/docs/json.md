@@ -19,7 +19,7 @@ type AgentSessionEvent =
   | { type: "queue_update"; steering: readonly string[]; followUp: readonly string[] }
   | { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
   | { type: "compaction_progress"; reason: "manual" | "threshold" | "overflow"; delta?: string; text?: string }
-  | { type: "compaction_end"; reason: "manual" | "threshold" | "overflow"; result: CompactionResult | undefined; aborted: boolean; willRetry: boolean; requestId?: string; accepted?: boolean; rejectionCause?: "cancelled-by-extension" | "would-overflow" | "circuit-breaker" | "per-turn-cap"; errorMessage?: string }
+  | { type: "compaction_end"; reason: "manual" | "threshold" | "overflow"; result: CompactionResult | undefined; aborted: boolean; willRetry: boolean; requestId?: string; accepted?: boolean; rejectionCause?: "cancelled-by-extension" | "external-owner" | "would-overflow" | "circuit-breaker" | "per-turn-cap"; errorMessage?: string }
   | { type: "session_info_changed"; name: string | undefined }
   | { type: "thinking_level_changed"; level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" }
   | SystemPromptChangeEvent           // type: "system_prompt_change"
@@ -31,6 +31,8 @@ type AgentSessionEvent =
   | { type: "summarization_retry_attempt_start"; source: "compaction"; reason: "manual" | "threshold" | "overflow" }
   | { type: "summarization_retry_finished" };
 ```
+
+`external-owner` means senpi declined the compaction because the active provider owns compaction for the session.
 
 The wire format strips cumulative snapshots from streaming updates:
 

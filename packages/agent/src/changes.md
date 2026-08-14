@@ -54,6 +54,32 @@
 - LOW: `agent-loop.ts` unknown-tool preparation branch.
 - LOW: `agent.ts` loop-config forwarding.
 
+## 2026-08-11 - Windows process-tree kill survives an unresolvable taskkill
+
+### What changed and why
+
+- `harness/env/nodejs.ts`: the Windows branch of the harness `killProcessTree` moved into the exported
+  `killWindowsProcessTree`, which walks the ordered launcher list from the new `windowsTaskkillCandidates` export
+  (every existing absolute `System32` / `Sysnative` `taskkill.exe`, then the bare PATH-resolved name), runs each with
+  `spawnSync` under a 5s timeout, and only degrades to `process.kill(pid)` when no launcher starts at all.
+- `spawn("taskkill", ...)` resolves through PATH and reports a failed lookup asynchronously on the child's `error`
+  event, so the surrounding `try`/`catch` never observed it. Without a listener Node re-emits ENOENT as an uncaught
+  exception, killing the host process instead of the target tree whenever PATH had lost `%SystemRoot%\System32`.
+- The kill is synchronous so a caller that tears down and exits in the same tick still terminates its children;
+  `spawnSync` also reports a failed lookup on its returned `error` field instead of emitting it. The direct
+  `process.kill` stays a last resort because `TerminateProcess` leaves descendants orphaned.
+- The same fix lands in `packages/coding-agent/src/utils/shell.ts`; the two harnesses keep independent copies of this
+  helper as they already do for `getShellEnv` and bash resolution.
+
+### Why the extension system could not handle this
+
+- The kill runs inside the Node harness's own process supervision, below every extension hook.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: the Windows branch of `killProcessTree` and the `node:child_process` / `node:fs` import lines in
+  `harness/env/nodejs.ts`.
+
 ## 2026-08-10 - Refresh server-fallback policy between tool turns
 
 ### What changed and why

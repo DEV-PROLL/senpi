@@ -4,6 +4,103 @@
 
 ### Fixed
 
+- The ambient Claude auth availability probe now passes `windowsHide: true` when spawning `claude auth status`, so the background check no longer opens a console window on Windows ([#870](https://github.com/code-yeongyu/senpi/issues/870)).
+- `senpi --help` now lists the `PI_RULES_DISABLED`, `PI_RULES_MAX_RULE_CHARS`, and `PI_RULES_MAX_RESULT_CHARS` environment settings that the built-in rules extension reads, so the two environment-only character limits are discoverable from the CLI ([#678](https://github.com/code-yeongyu/senpi/issues/678)).
+- Windows shutdown no longer dies with an uncaught `Error: spawn taskkill ENOENT` when `%SystemRoot%\System32` is
+  missing from PATH. The tracked-detached-child kill now tries every absolute `System32` / `Sysnative` `taskkill.exe`
+  before the PATH-resolved name, runs synchronously so a shutdown that exits in the same tick still terminates the
+  tree, and degrades to killing the direct child only when no launcher starts at all
+  ([#812](https://github.com/code-yeongyu/senpi/issues/812),
+  [#807](https://github.com/code-yeongyu/senpi/pull/807)).
+
+
+- MCP shutdown no longer risks terminating unrelated processes on macOS when Homebrew `proctools` provides `pgrep`: process-tree collection now passes an explicit match-all pattern, and the kill path skips PID 1 and non-positive PIDs as defense in depth ([#823](https://github.com/code-yeongyu/senpi/issues/823)).
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Removed
+
+## [2026.8.14] - 2026-08-14
+
+### Fixed
+
+- Extension selectors (including the `/fallback` model picker) now window long option lists around the
+  highlighted row instead of rendering every entry. On large model registries the full list overflowed the
+  viewport and the moved highlight was never painted, so arrow keys and j/k appeared to do nothing even
+  though the selection moved ([#795](https://github.com/code-yeongyu/senpi/issues/795)).
+
+- The shipped `claude-fable-5` fallback chain now reaches Kimi K3 on providers that expose the
+  model as `kimi-k3` (for example OpenCode Go), via an explicit `kimi-k3:max` entry. The
+  conservative family matcher is unchanged, so `k3` still cannot capture arbitrary ids
+  ([#793](https://github.com/code-yeongyu/senpi/issues/793)).
+
+- Sessions on the `claude-sdk-oauth` lane no longer fail with `Context remains above the compaction
+  threshold because compaction did not complete` or fatal print-mode exits when the SDK owns
+  compaction. Senpi now recognizes the lane's external-owner rejection and lets the admitted query
+  compact natively; rejected compactions no longer force a cache-losing resident-session restart,
+  and the lane now pins the SDK's native auto-compaction on
+  ([#874](https://github.com/code-yeongyu/senpi/pull/874)).
+  **Note:** `compaction_end` / `session_compact` events may now carry
+  `rejectionCause: "external-owner"`. This is additive for well-formed consumers, but consumers
+  exhaustively matching the rejection-cause union should add the new case.
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Removed
+
+## [2026.8.13-2] - 2026-08-13
+
+### Fixed
+
+- A session reload no longer crashes the CLI while a compaction idle warm-up retry is pending. The warm-up watcher
+  armed after a transient summarization failure kept reading its `ExtensionContext` after `reload()` retired that
+  extension generation, and the resulting `stale extension generation after reload` escaped as an unhandled
+  rejection from the failure continuation and as an `uncaughtException` from the armed retry timer, killing the
+  process. The watcher now stands down on `session_shutdown` and re-checks that its generation is still live before
+  either continuation touches the context
+  ([#866](https://github.com/code-yeongyu/senpi/pull/866)).
+
+- Every registry package source is now private, and every scripted release-publication entrypoint fails
+  closed outside the trusted GitHub Actions path, preventing direct or scripted npm publication without
+  provenance attestations.
+
+- The compaction prepared while your session sat idle is now reused no matter which internal path runs
+  the compaction. Previously the path that runs first on a new prompt threw that finished summary away
+  and summarized again while you waited, so the idle head start was wasted in exactly the case it was
+  built for.
+
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Removed
+
+## [2026.8.13] - 2026-08-13
+
+### Fixed
+
+- Idle compaction warm-ups are no longer wasted. A summary prepared while the session was idle is
+  now applied when the history it summarized is unchanged, instead of being discarded because
+  unrelated messages arrived during the wait. Sessions parked in a cache-warm wait no longer pay a
+  second full compaction the moment you send your next message
+  ([#853](https://github.com/code-yeongyu/senpi/pull/853)).
+
 - Provider stream stalls (`Provider stream start timed out after <n>ms` and `Idle timeout waiting for
   provider stream after <n>ms`) now use the same bounded retry budget as every other transient provider
   error instead of giving up after a single same-model attempt, so a turn no longer ends with

@@ -32,7 +32,12 @@ export function createEvalTool(options: CreateEvalToolOptions): ToolDefinition<E
 		...(options.hostLine === undefined ? {} : { hostLine: options.hostLine }),
 	});
 	const languages = enabledLanguageList(options.enabledLanguages);
-	const cellManager = options.cellManager ?? new EvalDetachedCellManager({ artifactsDir: options.artifactsDir });
+	const cellManager =
+		options.cellManager ??
+		new EvalDetachedCellManager({
+			...(options.artifactsDir === undefined ? {} : { artifactsDir: options.artifactsDir }),
+			...(options.hardLimitSeconds === undefined ? {} : { hardLimitSeconds: options.hardLimitSeconds }),
+		});
 	return {
 		name: "eval",
 		label: "Eval",
@@ -194,7 +199,12 @@ async function executeCell(
 			...(options.imageResizer === undefined ? {} : { imageResizer: options.imageResizer }),
 		});
 		handler = activeHandler;
-		cellManager.markRunning(cell, kernel, () => activeHandler.liveResult());
+		cellManager.markRunning(
+			cell,
+			kernel,
+			() => activeHandler.liveResult(),
+			(error) => execution.cancel(error),
+		);
 		if ("setContext" in options.kernelManager && typeof options.kernelManager.setContext === "function") {
 			options.kernelManager.setContext(bridgeContext);
 		}

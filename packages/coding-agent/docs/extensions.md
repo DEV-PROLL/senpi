@@ -536,12 +536,20 @@ pi.on("session_before_compact", async (event, ctx) => {
 });
 
 pi.on("session_compact", async (event, ctx) => {
-  // event.compactionEntry - the saved compaction
+  // Consumers must check event.accepted before reading event.compactionEntry.
+  if (!event.accepted) {
+    // event.rejectionCause - why compaction was rejected
+    return;
+  }
+
+  // event.compactionEntry - the saved compaction (accepted events only)
   // event.fromExtension - whether extension provided it
   // event.reason - "manual" (/compact), "threshold", or "overflow"
   // event.willRetry - whether the aborted turn is retried after compaction (overflow recovery)
 });
 ```
+
+This accepted/rejected contract has been emitted since [#248](https://github.com/code-yeongyu/senpi/pull/248): accepted events carry `compactionEntry`, while rejected events carry `accepted: false` and `rejectionCause` with no compaction entry. Built-in handlers are required to guard on `event.accepted`; for example, the `claude-sdk-oauth` session registry now does so before recording a compaction fork.
 
 #### session_before_tree / session_tree
 

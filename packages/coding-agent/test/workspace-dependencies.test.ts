@@ -20,6 +20,7 @@ const GLOBAL_INSTALL_EXCLUDED_DEPENDENCIES = new Set(["@google/genai"]);
 type PackageJson = {
 	readonly name: string;
 	readonly version: string;
+	readonly private: boolean;
 	readonly dependencies: Readonly<Record<string, string>>;
 	readonly optionalDependencies: Readonly<Record<string, string>>;
 	readonly bundledDependencies: readonly string[];
@@ -43,6 +44,9 @@ function readPackageJson(packageJsonPath: string): PackageJson {
 	const json = readJsonObject(filePath);
 	if (typeof json.name !== "string" || typeof json.version !== "string") {
 		throw new Error(`${packageJsonPath} must include string name and version fields`);
+	}
+	if (json.private !== undefined && typeof json.private !== "boolean") {
+		throw new Error(`${packageJsonPath} private must be a boolean`);
 	}
 
 	const dependencies: Record<string, string> = {};
@@ -87,7 +91,15 @@ function readPackageJson(packageJsonPath: string): PackageJson {
 		}
 	}
 
-	return { name: json.name, version: json.version, dependencies, optionalDependencies, bundledDependencies, scripts };
+	return {
+		name: json.name,
+		version: json.version,
+		private: json.private ?? false,
+		dependencies,
+		optionalDependencies,
+		bundledDependencies,
+		scripts,
+	};
 }
 
 describe("coding-agent workspace dependencies", () => {
@@ -143,7 +155,7 @@ describe("coding-agent workspace dependencies", () => {
 		}
 	});
 
-	test("prepares bundled workspace packages before npm publish", () => {
+	test("routes root publication through the guarded bundle publisher", () => {
 		// Given
 		const rootPackage = readJsonObject(join(WORKSPACE_ROOT, "package.json"));
 		if (!isRecord(rootPackage.scripts)) {
@@ -158,8 +170,10 @@ describe("coding-agent workspace dependencies", () => {
 		}
 
 		// Then
-		expect(publishScript).toContain("scripts/prepare-senpi-bundled-workspaces.mjs");
-		expect(dryRunScript).toContain("scripts/prepare-senpi-bundled-workspaces.mjs");
+		expect(publishScript).toContain("scripts/publish.mjs");
+		expect(dryRunScript).toContain("scripts/publish.mjs --dry-run");
+		expect(readPackageJson("packages/coding-agent/package.json").private).toBe(true);
+		expect(readPackageJson("packages/senpi-codemode/package.json").private).toBe(true);
 	});
 
 	test("declares external dependencies required by bundled workspaces", () => {

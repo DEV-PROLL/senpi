@@ -80,6 +80,7 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { CompactionLifecycleCoordinator, type CompactionLifecycleState } from "./compaction/lifecycle.ts";
+import { isWarmSummaryAnchorValid } from "./compaction/warm-anchor.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "./dynamic-prompt/index.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
@@ -381,6 +382,8 @@ function describeCompactionRejection(cause: CompactionRejectionCause): string {
 			return "Compaction rejected: the produced summary would still overflow the model context window. Reduce context (e.g. /new, drop attachments) or switch to a larger-context model.";
 		case "cancelled-by-extension":
 			return "Compaction rejected: cancelled by an extension.";
+		case "external-owner":
+			return "Compaction rejected: the active provider owns compaction for this session.";
 		case "circuit-breaker":
 			return "Compaction rejected: the compaction circuit breaker is open after repeated failures. Wait for the cooldown and retry.";
 		case "per-turn-cap":
@@ -1783,7 +1786,7 @@ export class AgentSession {
 			) {
 				this._retireFailedRetryAssistant(msg);
 				compactedBeforeRetry = await this._runPrePromptCompaction(msg, true, "threshold", true);
-				retryContinuationBlocked = !compactedBeforeRetry;
+				retryContinuationBlocked = !compactedBeforeRetry && !this._isCompactionDelegated();
 			}
 
 			let retryOutcome: "continued" | "blocked" | "not-handled" = "not-handled";
@@ -4058,6 +4061,12 @@ export class AgentSession {
 		if (options.expectedRevision !== undefined && options.expectedRevision !== this._messageRevision) {
 			return { applied: false, reason: "stale" };
 		}
+		if (
+			options.expectedWarmAnchor !== undefined &&
+			!isWarmSummaryAnchorValid(options.expectedWarmAnchor, this.sessionManager.getBranch())
+		) {
+			return { applied: false, reason: "stale" };
+		}
 
 		const ownsController = this._compactionAbortController === undefined;
 		const lifecycleState = this._compactionLifecycle.state;
@@ -4623,7 +4632,7 @@ export class AgentSession {
 			const compacted = await this._runPrePromptCompaction(assistantMessage, skipAbortedCheck, inlineReason);
 			if (compacted) return true;
 		}
-		if (this._isCompactionOnCooldown()) return false;
+		if (this._isCompactionOnCooldown() || this._isCompactionDelegated()) return false;
 		throw new RequiredCompactionError();
 	}
 
@@ -4665,6 +4674,7 @@ export class AgentSession {
 		}
 
 		const compacted = await this._runPrePromptCompaction(lastAssistantMessage, false, "pre_prompt");
+		if (!compacted && this._isCompactionDelegated()) return;
 		if (!compacted && !isOversized() && this._isCompactionOnCooldown()) return;
 		if (!compacted || isOversized()) {
 			throw new RequiredCompactionError();
@@ -4732,6 +4742,7 @@ export class AgentSession {
 				if (
 					!compacted &&
 					this._compactionLifecycle.state.status === "failed" &&
+					this._compactionLifecycle.state.rejectionCause !== "external-owner" &&
 					getLatestCompactionEntry(this.sessionManager.getBranch()) !== null
 				) {
 					this._blockedPostCompactionAssistant = {
@@ -4776,7 +4787,7 @@ export class AgentSession {
 				this._restoreAgentMessagesFromSession();
 				this._incrementMessageRevision();
 			}
-			if (!compacted && inlineReason) {
+			if (!compacted && inlineReason && !this._isCompactionDelegated()) {
 				throw new RequiredCompactionError();
 			}
 			return compacted;
@@ -4833,6 +4844,7 @@ export class AgentSession {
 				if (
 					!compacted &&
 					this._compactionLifecycle.state.status === "failed" &&
+					this._compactionLifecycle.state.rejectionCause !== "external-owner" &&
 					getLatestCompactionEntry(this.sessionManager.getBranch()) !== null
 				) {
 					this._blockedPostCompactionAssistant = {
@@ -4849,6 +4861,18 @@ export class AgentSession {
 	private _isCompactionOnCooldown(): boolean {
 		const state = this._compactionLifecycle.state;
 		return state.status === "failed" && state.rejectionCause === "circuit-breaker";
+	}
+
+	private _isCompactionDelegated(): boolean {
+		const state = this._compactionLifecycle.state;
+		const model = this.model;
+		return (
+			state.status === "failed" &&
+			state.rejectionCause === "external-owner" &&
+			state.model !== undefined &&
+			model !== undefined &&
+			state.model.provider === model.provider
+		);
 	}
 
 	private async _runPrePromptCompaction(
@@ -4924,7 +4948,7 @@ export class AgentSession {
 
 		const compacted = await this._runPrePromptCompaction(this._findLastAssistantMessage(), true, "pre_prompt");
 		if (!compacted) {
-			if (this._isCompactionOnCooldown()) return;
+			if (this._isCompactionOnCooldown() || this._isCompactionDelegated()) return;
 			throw new RequiredCompactionError();
 		}
 		this._scheduledContinuationRecompacted = true;
@@ -6279,7 +6303,7 @@ export class AgentSession {
 			shouldCompact(contextTokens, model.contextWindow, compactionSettings)
 		) {
 			const preRetryCompaction = await this._runPrePromptCompaction(message, true, "threshold", true, true);
-			if (!preRetryCompaction && !this._isCompactionOnCooldown()) {
+			if (!preRetryCompaction && !this._isCompactionOnCooldown() && !this._isCompactionDelegated()) {
 				const attempt = this._retryAttempt;
 				this._retryAttempt = 0;
 				this._resetHintTierState();

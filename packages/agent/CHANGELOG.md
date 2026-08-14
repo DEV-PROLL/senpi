@@ -4,6 +4,42 @@
 
 ### Breaking Changes
 
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.14] - 2026-08-14
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.13-2] - 2026-08-13
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.13] - 2026-08-13
+
+### Breaking Changes
+
 - Replaced the legacy harness session model with the lane-based `Session`, `SessionStorage`, and `SessionRepo`
   APIs, including durable operation records, global facts, shared sequence numbers, and tree-scoped lane views.
 - Promoted `AgentHarness` v2 and the new session API to the default export, removed the experimental subpaths,
@@ -129,6 +165,11 @@
 - Refresh `abortServerSideFallback` from the host's next-turn snapshot so an active agent run cannot carry a prior
   model's server-fallback policy into the next provider request
   ([#796](https://github.com/code-yeongyu/senpi/pull/796)).
+- The Node harness Windows process-tree kill no longer raises an uncaught `spawn taskkill ENOENT`. It tries every
+  absolute `System32` / `Sysnative` `taskkill.exe` before the PATH-resolved name, runs synchronously so a teardown
+  that exits in the same tick still terminates its children, and degrades to killing the direct child only when no
+  launcher starts at all ([#812](https://github.com/code-yeongyu/senpi/issues/812),
+  [#807](https://github.com/code-yeongyu/senpi/pull/807)).
 
 ### Removed
 

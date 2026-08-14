@@ -64,9 +64,16 @@ npm run release -- --dry-run   # preview without committing
 The release script (`scripts/release.mjs`) imports `scripts/calver.mjs` to compute the next version, then:
 1. Bumps every workspace listed in `scripts/release-packages.mjs` in lockstep.
 2. Updates each package's `CHANGELOG.md`: `## [Unreleased]` → `## [<version>] - YYYY-MM-DD`.
-3. Commits `release: v<version>`, tags `v<version>`, publishes to npm with `--tag latest`.
+3. Commits `release: v<version>`, tags it, and creates the fresh next-cycle
+   `## [Unreleased]` commit.
 4. Pushes `main` and the tag to `origin`.
-5. Re-inserts a fresh `## [Unreleased]` section to each changelog.
+5. The tag-triggered binary workflow builds and stages public artifacts.
+6. The trusted `publish-npm.yml` workflow publishes all registry packages through GitHub OIDC with npm provenance.
+7. After npm succeeds, the binary workflow makes the staged GitHub Release public.
+
+Source workspace manifests are intentionally private. Real npm publication is
+only supported through the trusted workflow; use `npm run publish:dry` for local
+package validation.
 
 ### CalVer rules
 
