@@ -24,6 +24,39 @@
 - LOW: `tools-manager.ts`, at the offline environment gate and `downloadFile`
   response-body handling.
 
+## Windows process-tree kill survives an unresolvable taskkill (2026-08-11)
+
+### What changed
+
+- `shell.ts`: the Windows branch of `killProcessTree` moved into `killWindowsProcessTree`, which walks the ordered
+  launcher list from the new `windowsTaskkillCandidates` export (every existing absolute `System32` / `Sysnative`
+  `taskkill.exe`, then the bare PATH-resolved name), runs each with `spawnSync` under a 5s timeout, and only degrades
+  to `process.kill(pid)` when no launcher starts at all. Both new functions are exported for regression coverage.
+
+### Why
+
+- `spawn("taskkill", ...)` resolves the executable through PATH and reports a failed lookup asynchronously on the
+  child's `error` event, so the surrounding `try`/`catch` never saw it. On a session whose PATH had lost
+  `%SystemRoot%\System32`, `killTrackedDetachedChildren()` during shutdown raised
+  `Error: spawn taskkill ENOENT` as an uncaught exception and took the CLI down instead of exiting, and no tracked
+  child was killed.
+- The kill is synchronous because `emergencyTerminalExit()` calls `killTrackedDetachedChildren()` and then
+  `process.exit(129)` in the same tick. An asynchronous killer — or a fallback wired to the child's `error` event —
+  never runs on that path, so the tracked child would survive. `spawnSync` reports a failed lookup on its returned
+  `error` field instead of emitting it, so ENOENT can no longer become an uncaught exception either.
+- The candidate list exists because the reported failure was PATH resolution, not a missing binary: a broken PATH must
+  not downgrade a tree kill to a direct kill. `process.kill` maps to `TerminateProcess` and leaves descendants
+  orphaned, the same limitation `packages/pty/src/pipe-fallback.ts` documents, so it stays a last resort.
+
+### Why extension system couldn't handle this
+
+- Detached-child bookkeeping and the shutdown signal handlers live in core modes; no extension hook runs inside the
+  signal path that kills tracked children.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: the Windows branch of `killProcessTree` and the `node:path` / `child_process` import lines in `shell.ts`.
+
 ## Config-reload recursive watch option (2026-07-21)
 
 ### What changed
