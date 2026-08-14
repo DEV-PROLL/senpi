@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- Multi-session RPC no longer amplifies a streaming answer into hundreds of megabytes of stdout, which made
+  clients freeze and then render walls of text at once. Each `message_update` carried a full cumulative snapshot,
+  so a single 96-second answer measured 140 MB on the wire (median line 72 KB, peak 95 KB) for 12 KB of assistant
+  content. Superseded snapshots pending in a session queue are now demoted to `message: null` /
+  `assistantMessageEvent.partial: null` and adjacent same-index text/thinking/toolcall deltas merge, while
+  `tool_execution_update` keeps only the latest record per `toolCallId`; every boundary, delta-only, error,
+  lifecycle, UI-request and response record stays untouched, so no assistant transition is lost. The event writer
+  also drains single-flight - one complete record in flight at a time, round-robin fairness preserved, host control
+  responses routed through their own non-coalescing lane, and shutdown flushing the writer before stdout. Classic
+  single-session RPC is unchanged and now pinned by regression tests, including its per-event backpressure.
 - The ambient Claude auth availability probe now passes `windowsHide: true` when spawning `claude auth status`, so the background check no longer opens a console window on Windows ([#870](https://github.com/code-yeongyu/senpi/issues/870)).
 - `senpi --help` now lists the `PI_RULES_DISABLED`, `PI_RULES_MAX_RULE_CHARS`, and `PI_RULES_MAX_RESULT_CHARS` environment settings that the built-in rules extension reads, so the two environment-only character limits are discoverable from the CLI ([#678](https://github.com/code-yeongyu/senpi/issues/678)).
 - Windows shutdown no longer dies with an uncaught `Error: spawn taskkill ENOENT` when `%SystemRoot%\System32` is
