@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Expanding several tool results at once (Ctrl+O) no longer renders mismatched or truncated content: when a frame grows above the viewport and a visible row also changes, the renderer now replays the canonical transcript instead of repainting only the visible rows, so every expanded result reaches scrollback under its own header ([#701](https://github.com/code-yeongyu/senpi/issues/701)).
+
 ### Removed
 
 ## [2026.8.14] - 2026-08-14

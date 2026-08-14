@@ -28,7 +28,7 @@ export interface MultiSessionHostOptions {
 export async function runMultiSessionHost(options: MultiSessionHostOptions): Promise<never> {
 	takeOverStdout();
 	const sink: RpcConnectionSink = { writeRaw: writeRawStdout, waitForBackpressure: waitForRawStdoutBackpressure };
-	const writer = new SessionEventWriter(sink.writeRaw);
+	const writer = new SessionEventWriter(sink.writeRaw, sink.waitForBackpressure);
 	const capabilities = parseClientCapabilities(envValue("RPC_CLIENT_CAPABILITIES"));
 	const router = new SessionCommandRouter(
 		new RpcSessionRegistry({ agentDir: options.agentDir, createRuntime: options.createRuntime }),
@@ -39,8 +39,7 @@ export async function runMultiSessionHost(options: MultiSessionHostOptions): Pro
 	);
 	let shuttingDown = false;
 	const output = async (response: RpcResponse) => {
-		sink.writeRaw(`${JSON.stringify(response)}\n`);
-		await sink.waitForBackpressure();
+		await writer.enqueueControl(response);
 	};
 	const handle = async (line: string) => {
 		let command: RpcCommand;
@@ -63,6 +62,7 @@ export async function runMultiSessionHost(options: MultiSessionHostOptions): Pro
 		shuttingDown = true;
 		detach();
 		await router.dispose();
+		await writer.flush();
 		await flushRawStdout();
 		process.exit(exitCode);
 	};

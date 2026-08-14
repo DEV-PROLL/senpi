@@ -1,5 +1,72 @@
 # changes
 
+## Pin classic RPC delta batching and immediate barriers (2026-08-14)
+
+### What changed
+
+- Characterization coverage now proves 1000 classic delta-only `message_update` records remain complete while sharing one same-tick raw write.
+- Event, extension-UI request, event, and response ordering is pinned across consecutive immediate-write barriers.
+- Classic connection-handler backpressure remains deliberately attached to every agent-loop event.
+
+### Why
+
+- Classic RPC projects cumulative assistant updates into delta-only public wire records. Those deltas cannot be compacted safely, so per-event backpressure is its flow control and must not be removed as part of the multi-session writer redesign.
+- `RpcClient` consumers depend on the documented delta sequence and on immediate UI/response records never overtaking pending events.
+
+### Why extension system couldn't handle this
+
+- Classic JSONL projection, batching, and agent-loop backpressure are built-in RPC transport contracts below extension hooks.
+
+### Expected merge conflict zones
+
+- LOW: characterization-only additions in `rpc-event-coalescing.test.ts`.
+- NONE: classic runtime code remains unchanged.
+
+## Single-flight multi-session RPC drain and control lane (2026-08-14)
+
+### What changed
+
+- The multi-session writer now hands exactly one complete record to stdout, awaits backpressure, and then selects the next ready session in round-robin order.
+- Untagged host responses use a dedicated non-coalescing control lane, and shutdown waits for all retained and in-flight records before flushing raw stdout.
+- Deterministic buffered-record/byte counters include the in-flight record, control enqueues resolve after their own backpressure boundary, and permanent stdout failures reject the active drain and pending control completions.
+
+### Why
+
+- Direct host response writes could bypass session ordering, while synchronous queue draining still fed an unbounded downstream promise chain during stdout stalls.
+- Keeping the backlog in typed lanes lets per-session compaction remain effective and prevents one busy session from monopolizing the raw writer.
+
+### Why extension system couldn't handle this
+
+- Process-wide stdout ownership, host control responses, session fairness, and shutdown flushing are built-in RPC transport responsibilities.
+
+### Expected merge conflict zones
+
+- HIGH: `session-event-writer.ts` drain lifecycle and constructor contract.
+- MEDIUM: `multi-session-host.ts` output and shutdown wiring.
+- LOW: deterministic multi-session drain tests.
+
+## Compact cumulative multi-session RPC events per session (2026-08-14)
+
+### What changed
+
+- Multi-session RPC queues now retain structured records until drain time and compact cumulative assistant snapshots within each session and ordering segment.
+- Superseded full snapshots keep their delta while replacing cumulative `message` and `partial` fields with present `null` values; adjacent compatible deltas merge, and the newest update remains the sole full snapshot.
+- Tool progress is latest-wins per tool-call id, with retained updates appended in occurrence order. Protocol, lifecycle, error, delta-only, and unknown records remain barriers and are never coalesced.
+
+### Why
+
+- Long cumulative assistant snapshots produced quadratic queued bytes when a desktop RPC reader stalled, causing visible freezes followed by large output bursts.
+- Delta content and transition boundaries must remain lossless, while repeated cumulative snapshots and accumulated tool progress are redundant before they reach stdout.
+
+### Why extension system couldn't handle this
+
+- Session tagging, JSONL framing, and pending stdout scheduling are owned by the built-in multi-session RPC transport below extension hooks.
+
+### Expected merge conflict zones
+
+- MEDIUM: `session-event-writer.ts` queue representation, compaction keys, and drain serialization.
+- LOW: focused multi-session event-writer tests.
+
 ## Extension request RPC command (2026-08-12)
 
 ### What changed

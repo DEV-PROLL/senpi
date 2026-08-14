@@ -5,6 +5,16 @@
 ### Fixed
 
 - Ambient Claude SDK OAuth authentication now preserves request-scoped token overrides through SDK subprocess creation, remains valid when auxiliary calls replay resolved auth, rejects logged-out empty account envelopes, and applies configured headers consistently with stored OAuth ([#836](https://github.com/code-yeongyu/senpi/pull/836)).
+- Multi-session RPC no longer amplifies a streaming answer into hundreds of megabytes of stdout, which made
+  clients freeze and then render walls of text at once. Each `message_update` carried a full cumulative snapshot,
+  so a single 96-second answer measured 140 MB on the wire (median line 72 KB, peak 95 KB) for 12 KB of assistant
+  content. Superseded snapshots pending in a session queue are now demoted to `message: null` /
+  `assistantMessageEvent.partial: null` and adjacent same-index text/thinking/toolcall deltas merge, while
+  `tool_execution_update` keeps only the latest record per `toolCallId`; every boundary, delta-only, error,
+  lifecycle, UI-request and response record stays untouched, so no assistant transition is lost. The event writer
+  also drains single-flight - one complete record in flight at a time, round-robin fairness preserved, host control
+  responses routed through their own non-coalescing lane, and shutdown flushing the writer before stdout. Classic
+  single-session RPC is unchanged and now pinned by regression tests, including its per-event backpressure.
 - The ambient Claude auth availability probe now passes `windowsHide: true` when spawning `claude auth status`, so the background check no longer opens a console window on Windows ([#870](https://github.com/code-yeongyu/senpi/issues/870)).
 - `senpi --help` now lists the `PI_RULES_DISABLED`, `PI_RULES_MAX_RULE_CHARS`, and `PI_RULES_MAX_RESULT_CHARS` environment settings that the built-in rules extension reads, so the two environment-only character limits are discoverable from the CLI ([#678](https://github.com/code-yeongyu/senpi/issues/678)).
 - Windows shutdown no longer dies with an uncaught `Error: spawn taskkill ENOENT` when `%SystemRoot%\System32` is
@@ -16,6 +26,13 @@
 
 
 - MCP shutdown no longer risks terminating unrelated processes on macOS when Homebrew `proctools` provides `pgrep`: process-tree collection now passes an explicit match-all pattern, and the kill path skips PID 1 and non-positive PIDs as defense in depth ([#823](https://github.com/code-yeongyu/senpi/issues/823)).
+- `claude-sdk-oauth` sessions no longer re-send the full conversation after a transient content-less user message disappears. Such messages are now excluded from the sent-stream continuity hash, so an unchanged conversation stays a `delta` instead of forking with `sent_stream_diverged` ([#790](https://github.com/code-yeongyu/senpi/issues/790)).
+- `config-reload` now accepts an extension watch rooted at the agent directory when every `filterGlob` is root-anchored and non-protected, so extensions can live-watch safe root config files such as `omo.jsonc`. Unfiltered targets, unanchored filters, and protected paths (`auth.json`, `sessions/`, `logs/`) remain rejected ([#819](https://github.com/code-yeongyu/senpi/issues/819)).
+
+- An active Goal no longer auto-continues in a loop when the `claude-sdk-oauth` account-rotating proxy reports that every account is exhausted. The zero-token `stop` response is now classified as a terminal provider error, so the Goal blocks and resumes on the next user message instead of queueing repeated failed requests ([#748](https://github.com/code-yeongyu/senpi/issues/748)).
+
+- A failed compaction now reports the concrete reason — for example `Compaction did not apply: remote-compaction-timeout; local fallback unavailable` — instead of the generic `Compaction did not apply`, so the cause is diagnosable in the TUI and decision log ([#765](https://github.com/code-yeongyu/senpi/issues/765)).
+
 
 ### New Features
 
