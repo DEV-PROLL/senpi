@@ -887,6 +887,32 @@ function registrationFingerprint(registration: ConfigWatchRegistration): string 
 	});
 }
 
+function isProtectedAgentPath(candidate: string, agentDir: string): boolean {
+	const authPath = resolve(agentDir, "auth.json");
+	const sessionsPath = resolve(agentDir, "sessions");
+	const logsPath = resolve(agentDir, "logs");
+	return isWithin(candidate, authPath) || isWithin(candidate, sessionsPath) || isWithin(candidate, logsPath);
+}
+
+// A watch rooted exactly at the agent directory is safe when every filter is
+// root-anchored (a leading `/` matches only an immediate child of the watch root,
+// never a nested path) and none of those anchored names resolves into a protected
+// path. Unfiltered targets, unanchored filters, and any protected filter stay
+// fail-closed.
+function isSafeFilteredAgentDirTarget(
+	target: ConfigWatchTarget,
+	resolvedPath: string,
+	agentDir: string,
+): boolean {
+	if (target.kind !== "dir" || resolvedPath !== resolve(agentDir)) return false;
+	const filterGlobs = target.filterGlobs;
+	if (!filterGlobs || filterGlobs.length === 0) return false;
+	return filterGlobs.every((glob) => {
+		if (!glob.startsWith("/")) return false;
+		return !isProtectedAgentPath(resolve(resolvedPath, glob.slice(1)), agentDir);
+	});
+}
+
 function registrationHasRestrictedTarget(
 	registration: ConfigWatchRegistration,
 	cwd: string,
@@ -897,6 +923,7 @@ function registrationHasRestrictedTarget(
 	const logsPath = resolve(agentDir, "logs");
 	return registration.targets.some((target) => {
 		const path = resolvePath(target.path, cwd, { trim: true });
+		if (isSafeFilteredAgentDirTarget(target, path, agentDir)) return false;
 		return (
 			isWithin(path, authPath) ||
 			isWithin(authPath, path) ||
