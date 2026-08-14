@@ -1,5 +1,30 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-14 - Pin native auto-compaction on the SDK lane
+
+### What changed
+
+- Every Claude SDK OAuth query now supplies session-scoped inline settings with `autoCompactEnabled: true`.
+- The lane deliberately leaves `autoCompactWindow` unset and keeps the SDK's supported window behavior.
+- Focused options coverage pins the setting even when the provider configuration has no compaction preference.
+
+### Why
+
+- The ambient lane can load the user's Claude Code settings, including `autoCompactEnabled: false`. Senpi stands down its
+  own compaction while a resident SDK query owns the conversation, so inheriting that preference could leave no
+  compaction owner at all.
+- The SDK's inline `settings` option is loaded into the highest-priority user-controlled flag-settings layer, making the
+  lane contract override filesystem preferences for this query without changing the user's global configuration.
+
+### Why an extension could not handle it
+
+- Query options are assembled inside this builtin provider before the Claude Code subprocess starts. External extensions
+  cannot inject SDK flag settings at that private spawn boundary.
+
+### Expected merge-conflict zones
+
+- LOW: `options.ts` at the query-options literal and its focused options test; LOW in the provider documentation.
+
 ## 2026-08-14 - Ignore rejected compaction events for resident continuity
 
 ### What changed

@@ -255,6 +255,7 @@ export function buildClaudeSdkOauthQueryOptions(input: ClaudeSdkOauthQueryOption
 		canUseTool,
 		hooks: HOST_TOOL_DENIAL_HOOKS,
 		systemPrompt,
+		settings: { autoCompactEnabled: true },
 		settingSources: resolveSettingSources(providerSettings, mode, authLane),
 	};
 	if (input.pathToClaudeCodeExecutable) queryOptions.pathToClaudeCodeExecutable = input.pathToClaudeCodeExecutable;
