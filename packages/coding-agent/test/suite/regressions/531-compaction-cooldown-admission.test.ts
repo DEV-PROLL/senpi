@@ -139,7 +139,19 @@ describe("issue #531: compaction cooldown must not brick prompt admission", () =
 			baseUrl: currentModel.baseUrl,
 			apiKey: "faux-key",
 			api: harness.faux.api,
-			models: [{ ...currentModel, provider: undefined }],
+			models: [
+				{
+					id: currentModel.id,
+					name: currentModel.name,
+					api: currentModel.api,
+					reasoning: currentModel.reasoning,
+					input: currentModel.input,
+					cost: currentModel.cost,
+					contextWindow: currentModel.contextWindow,
+					maxTokens: currentModel.maxTokens,
+					baseUrl: currentModel.baseUrl,
+				},
+			],
 		});
 		await harness.session.setSessionModel({ ...currentModel, provider: otherProvider });
 
