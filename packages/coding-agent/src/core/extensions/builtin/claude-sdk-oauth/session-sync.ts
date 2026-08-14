@@ -52,7 +52,10 @@ export function sessionSyncDigest(value: unknown): string {
  */
 function isContentlessUserMessage(message: SentMessage): boolean {
 	if (message.role !== "user") return false;
-	return message.content.length === 0;
+	// Only a literal zero-block array is content-less. Whitespace-only text and
+	// explicit empty-text blocks still emit transport blocks, so they must stay
+	// hash-significant to keep divergence detection fail-closed.
+	return Array.isArray(message.content) && message.content.length === 0;
 }
 
 export function sentMessages(context: Context): SentMessage[] {

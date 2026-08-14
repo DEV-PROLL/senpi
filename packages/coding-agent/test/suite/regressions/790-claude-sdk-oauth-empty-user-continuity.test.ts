@@ -109,4 +109,29 @@ describe("claude-sdk-oauth: content-less user messages must not break sent-strea
 			reason: "sent_stream_diverged",
 		});
 	});
+
+	// The predicate must stay narrow: only a literal zero-block array is excluded.
+	// Whitespace-only text and explicit empty-text blocks still produce transport
+	// blocks, so dropping them would weaken fail-closed divergence detection.
+	it("keeps whitespace-only and empty-text-block user messages hashed (fail-closed)", () => {
+		const whitespaceOnly = { role: "user", content: [{ type: "text", text: "   " }], timestamp: 1 };
+		const emptyTextBlock = { role: "user", content: [{ type: "text", text: "" }], timestamp: 1 };
+		const realTurn = userMessage("real turn");
+
+		const messages = [realTurn, whitespaceOnly, emptyTextBlock, toolResultMessage("call-1", "output")];
+
+		// Only a literal content: [] message is dropped; these three stay.
+		expect(sentMessages(contextOf(messages))).toHaveLength(4);
+	});
+
+	it("treats the disappearance of a whitespace-only user message as divergence", () => {
+		const whitespaceOnly = { role: "user", content: [{ type: "text", text: "   " }], timestamp: 1 };
+		const turnOne = [toolResultMessage("call-0", "out"), whitespaceOnly, userMessage("next")];
+		const turnTwo = [toolResultMessage("call-0", "out"), userMessage("next"), toolResultMessage("call-1", "new")];
+
+		// A whitespace-only message WAS transmitted, so its removal is a real rewrite.
+		expect(decide(hashesFor(turnOne), hashesFor(turnTwo))).toMatchObject({
+			reason: "sent_stream_diverged",
+		});
+	});
 });
