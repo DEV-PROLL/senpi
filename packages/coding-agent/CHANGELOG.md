@@ -17,6 +17,8 @@
 - MCP shutdown no longer risks terminating unrelated processes on macOS when Homebrew `proctools` provides `pgrep`: process-tree collection now passes an explicit match-all pattern, and the kill path skips PID 1 and non-positive PIDs as defense in depth ([#823](https://github.com/code-yeongyu/senpi/issues/823)).
 - `claude-sdk-oauth` sessions no longer re-send the full conversation after a transient content-less user message disappears. Such messages are now excluded from the sent-stream continuity hash, so an unchanged conversation stays a `delta` instead of forking with `sent_stream_diverged` ([#790](https://github.com/code-yeongyu/senpi/issues/790)).
 
+- An active Goal no longer auto-continues in a loop when the `claude-sdk-oauth` account-rotating proxy reports that every account is exhausted. The zero-token `stop` response is now classified as a terminal provider error, so the Goal blocks and resumes on the next user message instead of queueing repeated failed requests ([#748](https://github.com/code-yeongyu/senpi/issues/748)).
+
 
 ### New Features
 
