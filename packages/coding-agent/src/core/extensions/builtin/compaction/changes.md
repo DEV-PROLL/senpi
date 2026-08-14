@@ -1,5 +1,24 @@
 # Builtin compaction extension changes
 
+## Surface the concrete reason a compaction did not apply (2026-08-14)
+
+### What changed
+
+- `endCompactionFeedback` now threads the remote stage's fallback reason (captured from the `remote_fallback` event) and the terminal local reason (`unavailable` / `stale`) into `ctx.endCompaction`'s `errorMessage`, so the decision log and TUI show e.g. `Compaction did not apply: remote-compaction-timeout; local fallback unavailable` instead of the bare generic string.
+- An aborted compaction still renders `Compaction cancelled` downstream and carries no failure message.
+
+### Why
+
+- Both the remote-timeout path and the `unavailable`/`stale` fallback collapsed into the generic `Compaction did not apply`, so the actual cause was not diagnosable after the fact. The remote reason was previously emitted only on an event bus with no subscriber.
+
+### Why an extension could not handle it
+
+- The reason is produced inside this builtin's blocking route; an external extension cannot observe the remote stage's fallback event or the feedback call site.
+
+### Expected merge conflict zones
+
+- LOW: `index.ts` `endCompactionFeedback` and the remote-capture emit in `applyBlockingCompaction`; LOW in the compaction tests that pinned silent degradation.
+
 ## Report provider-owned compaction as delegated (2026-08-14)
 
 ### What changed
