@@ -1786,7 +1786,7 @@ export class AgentSession {
 			) {
 				this._retireFailedRetryAssistant(msg);
 				compactedBeforeRetry = await this._runPrePromptCompaction(msg, true, "threshold", true);
-				retryContinuationBlocked = !compactedBeforeRetry;
+				retryContinuationBlocked = !compactedBeforeRetry && !this._isCompactionDelegated();
 			}
 
 			let retryOutcome: "continued" | "blocked" | "not-handled" = "not-handled";

@@ -108,6 +108,20 @@ describe("issue #531: compaction cooldown must not brick prompt admission", () =
 		});
 	});
 
+	it("retries a provider error when threshold compaction is delegated", async () => {
+		const harness = await createOverThresholdHarness(externallyOwnedCompaction());
+		harness.settingsManager.applyOverrides({ retry: { enabled: true, maxRetries: 1, baseDelayMs: 0 } });
+		harness.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			fauxAssistantMessage("provider retry recovered"),
+		]);
+
+		await harness.session.prompt("retry through provider-owned compaction");
+
+		expect(harness.faux.state.callCount).toBe(2);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.attempt)).toEqual([1]);
+	});
+
 	it("keeps failing closed when compaction is cancelled for a non-breaker reason", async () => {
 		// Given: the same over-threshold context, but the cancel is a plain
 		// extension refusal, not a breaker cooldown.
@@ -163,34 +177,43 @@ describe("issue #531: compaction cooldown must not brick prompt admission", () =
 		);
 	});
 
-	it("does not arm blocked post-compaction admission for an external owner", async () => {
-		const harness = await createOverThresholdHarness(externallyOwnedCompaction());
-		const branch = harness.sessionManager.getBranch();
-		const firstMessage = branch.find((entry) => entry.type === "message");
-		if (!firstMessage) throw new Error("Expected seeded message entry");
-		harness.sessionManager.appendCompaction("prior summary", firstMessage.id, 19_500);
-		const timestamp = Date.now();
-		harness.sessionManager.appendMessage({
-			role: "user",
-			content: [{ type: "text", text: "post-compaction work" }],
-			timestamp: timestamp - 1,
-		});
-		const assistant = {
-			...fauxAssistantMessage("post-compaction oversized response", { timestamp }),
-			usage: {
-				input: 19_500,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 19_500,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-		};
-		harness.sessionManager.appendMessage(assistant);
-		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+	it.each([
+		["overflow", 20_001],
+		["threshold", 19_500],
+	] as const)(
+		"does not arm blocked post-compaction admission for an external owner on the %s path",
+		async (reason, input) => {
+			const harness = await createOverThresholdHarness(externallyOwnedCompaction());
+			const branch = harness.sessionManager.getBranch();
+			const firstMessage = branch.find((entry) => entry.type === "message");
+			if (!firstMessage) throw new Error("Expected seeded message entry");
+			harness.sessionManager.appendCompaction("prior summary", firstMessage.id, 19_500);
+			const timestamp = Date.now();
+			harness.sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "post-compaction work" }],
+				timestamp: timestamp - 1,
+			});
+			const assistant = {
+				...fauxAssistantMessage("post-compaction oversized response", { timestamp }),
+				usage: {
+					input,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: input,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			};
+			harness.sessionManager.appendMessage(assistant);
+			harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
 
-		const checkCompaction = privateSessionMethod(harness.session, "_checkCompaction");
-		expect(await checkCompaction(assistant, true)).toBe(false);
-		expect(Reflect.get(harness.session, "_blockedPostCompactionAssistant")).toBeUndefined();
-	});
+			const checkCompaction = privateSessionMethod(harness.session, "_checkCompaction");
+			expect(await checkCompaction(assistant, true)).toBe(false);
+			expect(harness.eventsOfType("compaction_end")).toContainEqual(
+				expect.objectContaining({ reason, accepted: false, rejectionCause: "external-owner" }),
+			);
+			expect(Reflect.get(harness.session, "_blockedPostCompactionAssistant")).toBeUndefined();
+		},
+	);
 });
