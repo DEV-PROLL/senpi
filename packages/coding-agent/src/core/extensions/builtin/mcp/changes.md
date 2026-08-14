@@ -4,7 +4,8 @@
 
 ### What changed
 - `process-tree.ts` now passes `.` as the positional match-all pattern to `pgrep -P`.
-- `test/suite/regressions/issue-823-mcp-pgrep-pattern.test.ts` places a deterministic fake `pgrep` first on PATH and proves unrelated PIDs are excluded.
+- `killPids` now skips any non-positive or PID-1 entry before signaling, as defense in depth against a broken or substituted discovery executable returning a catastrophic target.
+- `test/suite/regressions/issue-823-mcp-pgrep-pattern.test.ts` places a deterministic fake `pgrep` first on PATH and proves unrelated PIDs are excluded, and that PID 1 is never signaled even when discovery returns it.
 - `test/mcp/transport.test.ts` uses the same explicit pattern in its child-PID helper.
 
 ### Why
