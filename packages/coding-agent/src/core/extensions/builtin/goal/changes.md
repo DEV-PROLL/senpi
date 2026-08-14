@@ -1,5 +1,24 @@
 # goal Extension Changes
 
+## Claude SDK OAuth account exhaustion blocks the goal (2026-08-14)
+
+### What changed
+
+- `didTerminalProviderErrorEndTurn` now also classifies the claude-sdk-oauth account-rotating proxy's total-exhaustion response as a terminal provider error. The proxy returns it as an assistant message with `stopReason: "stop"` and zero usage, so it previously slipped past the stopReason checks and the goal kept auto-continuing.
+- The match requires `api: "claude-sdk-oauth"`, `stopReason: "stop"`, and both stable phrases (`API Error: Server is temporarily limiting requests` and `accounts exhausted`); the account count and the `Retry in NNNs` suffix vary and are not matched.
+
+### Why
+
+- An active goal treated the exhaustion response as a clean turn end and queued another hidden continuation, looping failed zero-token requests until the continuation cap fired. The goal now blocks mechanically and resumes on the next accepted user message.
+
+### Why an extension could not handle it
+
+- Terminal provider-error classification lives in this builtin's `terminal-provider-error.ts`; an external extension cannot intercept the goal's block decision.
+
+### Expected merge conflict zones
+
+- LOW: `terminal-provider-error.ts` classification; LOW in `goal-extension.test.ts`.
+
 ## Explicit resume revives completed goals (2026-08-11)
 
 ### What changed
