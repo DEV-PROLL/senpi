@@ -1,5 +1,37 @@
 # Local fork changes
 
+## 2026-08-14 — RPC stream regression suites for multi-session compaction
+
+### What changed
+
+- `test/rpc-multi-session-events.test.ts` gained the coverage for the multi-session
+  event writer's per-session compaction and single-flight drain: a 1000-update
+  stalled-writer load case that asserts no assistant transition is lost and the
+  retained bytes stay far below the sum of the cumulative records, latest-wins
+  coalescing keyed by `toolCallId` in occurrence order, barrier isolation, and
+  the seal/late-enqueue contract.
+- `test/rpc-event-coalescing.test.ts` gained two characterization pins for the
+  CLASSIC single-session path: every delta survives same-tick batching into one
+  raw write, and immediate barriers keep event/UI-request/response ordering.
+  Both were proven to bite under their own targeted mutation.
+- The behavior these suites cover is described in `src/modes/rpc/changes.md`
+  (2026-08-14 entry); this entry exists so the package-level log records the
+  test surface that guards it.
+
+### Why this lives in the fork
+
+The compaction and single-flight drain are fork-specific: upstream writes every
+record straight through, so these suites have no upstream counterpart and would
+be dropped by a naive merge resolution.
+
+### Expected merge-conflict zones
+
+`test/rpc-multi-session-events.test.ts` and `test/rpc-event-coalescing.test.ts`
+resolve to `ours`. If upstream adds cases to either file, port them INTO these
+suites rather than replacing them - deleting the compaction or classic-pin cases
+silently removes the only guard against reintroducing the O(n^2) wire
+amplification or dropping classic per-event backpressure.
+
 ## 2026-08-12 — Distinguish external-editor launch failures
 
 ### What changed
