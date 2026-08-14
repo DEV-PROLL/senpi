@@ -1,5 +1,22 @@
 # mcp Extension Changes
 
+## Explicit pgrep match-all pattern for process-tree collection (2026-08-12)
+
+### What changed
+- `process-tree.ts` now passes `.` as the positional match-all pattern to `pgrep -P`.
+- `killPids` now skips any non-positive or PID-1 entry before signaling, as defense in depth against a broken or substituted discovery executable returning a catastrophic target.
+- `test/suite/regressions/issue-823-mcp-pgrep-pattern.test.ts` places a deterministic fake `pgrep` first on PATH and proves unrelated PIDs are excluded, and that PID 1 is never signaled even when discovery returns it.
+- `test/mcp/transport.test.ts` uses the same explicit pattern in its child-PID helper.
+
+### Why
+- Some `pgrep` implementations interpret `pgrep -P <parent>` without a positional pattern as a broad process query. The explicit `.` keeps collection limited to the requested parent on macOS and Linux.
+
+### Why extension system couldn't handle this alone
+- MCP stdio shutdown owns the private descendant-collection helper; an external extension cannot change the process tree selected before shutdown.
+
+### Expected merge conflict zones
+- LOW: `process-tree.ts` `childPids`; `test/mcp/transport.test.ts` test-only child discovery helper.
+
 ## Anthropic native deferral delegated to shared tool search (2026-08-11)
 
 ### What changed

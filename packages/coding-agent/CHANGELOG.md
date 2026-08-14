@@ -7,6 +7,8 @@
 - The ambient Claude auth availability probe now passes `windowsHide: true` when spawning `claude auth status`, so the background check no longer opens a console window on Windows ([#870](https://github.com/code-yeongyu/senpi/issues/870)).
 - `senpi --help` now lists the `PI_RULES_DISABLED`, `PI_RULES_MAX_RULE_CHARS`, and `PI_RULES_MAX_RESULT_CHARS` environment settings that the built-in rules extension reads, so the two environment-only character limits are discoverable from the CLI ([#678](https://github.com/code-yeongyu/senpi/issues/678)).
 
+- MCP shutdown no longer risks terminating unrelated processes on macOS when Homebrew `proctools` provides `pgrep`: process-tree collection now passes an explicit match-all pattern, and the kill path skips PID 1 and non-positive PIDs as defense in depth ([#823](https://github.com/code-yeongyu/senpi/issues/823)).
+
 ### New Features
 
 ### Breaking Changes
