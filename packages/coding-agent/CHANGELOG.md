@@ -19,6 +19,8 @@
 
 - An active Goal no longer auto-continues in a loop when the `claude-sdk-oauth` account-rotating proxy reports that every account is exhausted. The zero-token `stop` response is now classified as a terminal provider error, so the Goal blocks and resumes on the next user message instead of queueing repeated failed requests ([#748](https://github.com/code-yeongyu/senpi/issues/748)).
 
+- A failed compaction now reports the concrete reason — for example `Compaction did not apply: remote-compaction-timeout; local fallback unavailable` — instead of the generic `Compaction did not apply`, so the cause is diagnosable in the TUI and decision log ([#765](https://github.com/code-yeongyu/senpi/issues/765)).
+
 
 ### New Features
 
