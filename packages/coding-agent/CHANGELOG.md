@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- The ambient Claude auth availability probe now passes `windowsHide: true` when spawning `claude auth status`, so the background check no longer opens a console window on Windows ([#870](https://github.com/code-yeongyu/senpi/issues/870)).
+
 ### New Features
 
 ### Breaking Changes
