@@ -16,7 +16,10 @@ export async function readAmbientClaudeAuthStatus(): Promise<boolean> {
 			settled = true;
 			resolve(available);
 		};
-		const child = spawn(executable, ["auth", "status"], { stdio: "ignore" });
+		const child = spawn(executable, ["auth", "status"], {
+			stdio: "ignore",
+			windowsHide: true,
+		});
 		child.once("error", () => finish(false));
 		child.once("close", (code) => finish(code === 0));
 	});

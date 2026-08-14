@@ -47,6 +47,20 @@
 
 - LOW: `session-registry-wiring.ts` at the `session_compact` handler and its focused wiring test.
 
+||||||| parent of 2c6a09919 (fix(coding-agent): hide Claude auth probe window)
+
+## 2026-08-14 - Hide ambient auth probes on Windows
+
+### What changed
+
+- `readAmbientClaudeAuthStatus()` now passes `windowsHide: true` when spawning
+  `claude auth status`, preventing the availability check from opening a console
+  window on Windows.
+
+### Expected merge-conflict zones
+
+- LOW: `availability.ts` spawn options.
+
 ## 2026-08-13 - Preserve request cancellation through OAuth refresh
 
 ### What changed
