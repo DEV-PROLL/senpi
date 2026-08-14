@@ -17,6 +17,7 @@ import {
 	CONFIG_WATCH_RELOADED,
 	CONFIG_WATCH_UNREGISTER,
 	type ConfigWatchRegistration,
+	type ConfigWatchTarget,
 	isConfigWatchRegistration,
 	isConfigWatchUnregistration,
 	isConfigWatchValidation,
