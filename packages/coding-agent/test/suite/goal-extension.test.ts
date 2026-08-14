@@ -350,6 +350,37 @@ describe("goal extension contract (budget-free)", () => {
 		expect(sent).toHaveLength(0);
 	});
 
+	it("blocks a claude-sdk-oauth goal when every account is exhausted on a zero-token stop", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const notices: string[] = [];
+		const ctx = await makeNotifyingCtx(notices, "thread-sdk-oauth-exhausted");
+		await tools
+			.get("create_goal")
+			?.execute("c1", { objective: "Survive account exhaustion" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "agent_start", { type: "agent_start" }, ctx);
+		// The account-rotating proxy reports exhaustion as an assistant message with
+		// stopReason "stop" and zero usage, so the goal must treat it as a terminal
+		// provider error, not a clean turn end.
+		const exhaustionMessage = {
+			...assistantMessageWithStopReason("stop"),
+			api: "claude-sdk-oauth",
+			content: [
+				{
+					type: "text",
+					text: "API Error: Server is temporarily limiting requests (not your usage limit) · All 3 accounts exhausted. Retry in 300s.",
+				},
+			],
+		};
+		await runHandlers(handlers, "agent_end", { type: "agent_end", messages: [exhaustionMessage], willRetry: false }, ctx);
+
+		expect(await readGoal(storeRefFor(ctx))).toMatchObject({
+			status: "blocked",
+			blockedReason: "provider error ended the turn (retries exhausted)",
+		});
+		expect(sent).toHaveLength(0);
+	});
+
 	it("keeps a goal active while a provider-error retry is pending", async () => {
 		const { tools, handlers, sent } = createGoalHarness();
 		const notices: string[] = [];
