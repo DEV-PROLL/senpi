@@ -49,9 +49,13 @@ printf '%s\\n' 1
 			const originalPath = process.env.PATH;
 			const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
 			try {
-				await writeFile(fakePgrepPath, `#!/bin/sh
+				await writeFile(
+					fakePgrepPath,
+					`#!/bin/sh
 printf '%s\\n' 1
-`, "utf8");
+`,
+					"utf8",
+				);
 				await chmod(fakePgrepPath, 0o755);
 				process.env.PATH = `${fakeBinDir}${delimiter}${originalPath ?? ""}`;
 

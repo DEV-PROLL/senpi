@@ -50,6 +50,15 @@ function createOpenAiHarness(options: { usageTokens: number }) {
 		api: "openai-responses",
 		provider: "openai",
 		model: OPENAI_REMOTE_MODEL.id,
+		usage: {
+			input: 30_000,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 30_000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
 		timestamp: 2,
 	});
 	sessionManager.appendMessage({
