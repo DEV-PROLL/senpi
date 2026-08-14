@@ -1,5 +1,27 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-14 - Ignore rejected compaction events for resident continuity
+
+### What changed
+
+- The session registry wiring now records a pending compaction fork only when `session_compact.accepted` is true.
+- Focused lifecycle coverage pins accepted, rejected, missing, and undefined `accepted` values so malformed event shapes fail closed.
+
+### Why
+
+- Core emits `session_compact` with `accepted: false` when compaction is rejected. The previous handler treated that
+  notification as a completed transcript rewrite, tainting an unchanged resident SDK session and forcing an
+  unnecessary cache-destroying transcript flatten on the next turn.
+
+### Why an extension could not handle it
+
+- The incorrect pending-fork mutation occurs inside this builtin provider's private resident session registry.
+  External extensions cannot undo that continuity state once recorded.
+
+### Expected merge-conflict zones
+
+- LOW: `session-registry-wiring.ts` at the `session_compact` handler and its focused wiring test.
+
 ## 2026-08-13 - Preserve request cancellation through OAuth refresh
 
 ### What changed
