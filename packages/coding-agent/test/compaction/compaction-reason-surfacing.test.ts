@@ -39,7 +39,11 @@ function createOpenAiHarness(options: { usageTokens: number }) {
 	// Enough content for prepareCompaction to produce a snapshot so the remote
 	// stage runs and times out; the local fallback then reports "unavailable"
 	// because applyCompaction is stubbed to decline.
-	sessionManager.appendMessage({ role: "user", content: [{ type: "text", text: "Summarize old context" }], timestamp: 1 });
+	sessionManager.appendMessage({
+		role: "user",
+		content: [{ type: "text", text: "Summarize old context" }],
+		timestamp: 1,
+	});
 	sessionManager.appendMessage({
 		role: "assistant",
 		content: [{ type: "text", text: "Old assistant context ".repeat(6_000) }],
@@ -48,13 +52,17 @@ function createOpenAiHarness(options: { usageTokens: number }) {
 		model: OPENAI_REMOTE_MODEL.id,
 		timestamp: 2,
 	});
-	sessionManager.appendMessage({ role: "user", content: [{ type: "text", text: "Keep latest request" }], timestamp: 3 });
+	sessionManager.appendMessage({
+		role: "user",
+		content: [{ type: "text", text: "Keep latest request" }],
+		timestamp: 3,
+	});
 	const modelRegistry = Object.create(null) as ExtensionContext["modelRegistry"];
 	// No usable credential: the remote stage reports its fallback with this reason and
 	// the local summarization throws SummaryGenerationError("auth"), which the blocking
 	// route catches and degrades to "unavailable" — both ends of the threaded message.
 	modelRegistry.getApiKeyAndHeaders = (async () => ({ ok: false as const, error: "no API key configured" })) as never;
-	let usageTokens = options.usageTokens;
+	const usageTokens = options.usageTokens;
 	const ctx = {
 		hasUI: false,
 		mode: "print",
@@ -121,6 +129,8 @@ describe("compaction failure reason surfacing (issue #765)", () => {
 		const withReason = calls.find((call) => typeof call.errorMessage === "string");
 		// The remote stage's fallback reason and the terminal local reason are both
 		// surfaced, joined into one diagnosable message instead of the bare generic one.
-		expect(withReason?.errorMessage).toBe("Compaction did not apply: no API key configured; local fallback unavailable");
+		expect(withReason?.errorMessage).toBe(
+			"Compaction did not apply: no API key configured; local fallback unavailable",
+		);
 	});
 });

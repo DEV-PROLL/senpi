@@ -149,7 +149,9 @@ function endCompactionFeedback(
 		const localReason = result.applied ? undefined : result.reason;
 		const parts = [remoteFallbackReason, localReason].filter((part): part is string => Boolean(part));
 		const errorMessage =
-			signal?.aborted || parts.length === 0 ? undefined : `Compaction did not apply: ${parts.join("; local fallback ")}`;
+			signal?.aborted || parts.length === 0
+				? undefined
+				: `Compaction did not apply: ${parts.join("; local fallback ")}`;
 		ctx.endCompaction?.({ reason: "extension", signal, aborted: signal?.aborted, errorMessage });
 	}
 }
