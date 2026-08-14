@@ -1,5 +1,27 @@
 # changes
 
+## Compact cumulative multi-session RPC events per session (2026-08-14)
+
+### What changed
+
+- Multi-session RPC queues now retain structured records until drain time and compact cumulative assistant snapshots within each session and ordering segment.
+- Superseded full snapshots keep their delta while replacing cumulative `message` and `partial` fields with present `null` values; adjacent compatible deltas merge, and the newest update remains the sole full snapshot.
+- Tool progress is latest-wins per tool-call id, with retained updates appended in occurrence order. Protocol, lifecycle, error, delta-only, and unknown records remain barriers and are never coalesced.
+
+### Why
+
+- Long cumulative assistant snapshots produced quadratic queued bytes when a desktop RPC reader stalled, causing visible freezes followed by large output bursts.
+- Delta content and transition boundaries must remain lossless, while repeated cumulative snapshots and accumulated tool progress are redundant before they reach stdout.
+
+### Why extension system couldn't handle this
+
+- Session tagging, JSONL framing, and pending stdout scheduling are owned by the built-in multi-session RPC transport below extension hooks.
+
+### Expected merge conflict zones
+
+- MEDIUM: `session-event-writer.ts` queue representation, compaction keys, and drain serialization.
+- LOW: focused multi-session event-writer tests.
+
 ## Extension request RPC command (2026-08-12)
 
 ### What changed
