@@ -1,5 +1,52 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-14 - Pin native auto-compaction on the SDK lane
+
+### What changed
+
+- Every Claude SDK OAuth query now supplies session-scoped inline settings with `autoCompactEnabled: true`.
+- The lane deliberately leaves `autoCompactWindow` unset and keeps the SDK's supported window behavior.
+- Focused options coverage pins the setting even when the provider configuration has no compaction preference.
+
+### Why
+
+- The ambient lane can load the user's Claude Code settings, including `autoCompactEnabled: false`. Senpi stands down its
+  own compaction while a resident SDK query owns the conversation, so inheriting that preference could leave no
+  compaction owner at all.
+- The SDK's inline `settings` option is loaded into the highest-priority user-controlled flag-settings layer, making the
+  lane contract override filesystem preferences for this query without changing the user's global configuration.
+
+### Why an extension could not handle it
+
+- Query options are assembled inside this builtin provider before the Claude Code subprocess starts. External extensions
+  cannot inject SDK flag settings at that private spawn boundary.
+
+### Expected merge-conflict zones
+
+- LOW: `options.ts` at the query-options literal and its focused options test; LOW in the provider documentation.
+
+## 2026-08-14 - Ignore rejected compaction events for resident continuity
+
+### What changed
+
+- The session registry wiring now records a pending compaction fork only when `session_compact.accepted` is true.
+- Focused lifecycle coverage pins accepted, rejected, missing, and undefined `accepted` values so malformed event shapes fail closed.
+
+### Why
+
+- Core emits `session_compact` with `accepted: false` when compaction is rejected. The previous handler treated that
+  notification as a completed transcript rewrite, tainting an unchanged resident SDK session and forcing an
+  unnecessary cache-destroying transcript flatten on the next turn.
+
+### Why an extension could not handle it
+
+- The incorrect pending-fork mutation occurs inside this builtin provider's private resident session registry.
+  External extensions cannot undo that continuity state once recorded.
+
+### Expected merge-conflict zones
+
+- LOW: `session-registry-wiring.ts` at the `session_compact` handler and its focused wiring test.
+
 ## 2026-08-13 - Preserve request cancellation through OAuth refresh
 
 ### What changed

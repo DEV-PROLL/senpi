@@ -549,7 +549,11 @@ export default function compactionExtension(
 		invalidateSpeculativeCompaction(ctx);
 		try {
 			if (lanePolicy.disablesSenpiCompaction(ctx)) {
-				return { cancel: true, reason: SDK_NATIVE_LANE_REJECTION_REASON };
+				return {
+					cancel: true,
+					rejectionCause: "external-owner",
+					reason: SDK_NATIVE_LANE_REJECTION_REASON,
+				};
 			}
 			if (cap.shouldRejectByCap(state).cancel) {
 				getLogger(ctx).debug("skip_cap", { reason: event.reason, count: state.acceptedAbsolute });

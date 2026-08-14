@@ -1,5 +1,30 @@
 # Builtin compaction extension changes
 
+## Report provider-owned compaction as delegated (2026-08-14)
+
+### What changed
+
+- The SDK-native lane's `session_before_compact` cancellation now carries the structured `external-owner` rejection
+  cause while preserving its existing human-readable reason.
+- The lane-policy documentation now describes the structured ownership signal instead of the former generic
+  extension cancellation.
+
+### Why
+
+- Core admission must distinguish a provider lane that will compact inside the admitted query from an ordinary
+  extension refusal. Treating both as `cancelled-by-extension` made over-threshold SDK-native sessions fail with
+  `RequiredCompactionError` before the provider could run.
+
+### Why an extension could not do this
+
+- The builtin compaction extension owns the lane cancellation verdict and is the only layer that can identify this
+  cancellation as provider ownership before core records the lifecycle failure.
+
+### Expected merge-conflict zones
+
+- LOW: `index.ts`, in the SDK-native lane branch of `session_before_compact`.
+- LOW: `lane-policy.ts`, around `SDK_NATIVE_LANE_REJECTION_REASON` documentation.
+
 ## Stand the idle warm-up watcher down on a retired generation (2026-08-13)
 
 ### What changed

@@ -14,6 +14,16 @@
   conservative family matcher is unchanged, so `k3` still cannot capture arbitrary ids
   ([#793](https://github.com/code-yeongyu/senpi/issues/793)).
 
+- Sessions on the `claude-sdk-oauth` lane no longer fail with `Context remains above the compaction
+  threshold because compaction did not complete` or fatal print-mode exits when the SDK owns
+  compaction. Senpi now recognizes the lane's external-owner rejection and lets the admitted query
+  compact natively; rejected compactions no longer force a cache-losing resident-session restart,
+  and the lane now pins the SDK's native auto-compaction on
+  ([#874](https://github.com/code-yeongyu/senpi/pull/874)).
+  **Note:** `compaction_end` / `session_compact` events may now carry
+  `rejectionCause: "external-owner"`. This is additive for well-formed consumers, but consumers
+  exhaustively matching the rejection-cause union should add the new case.
+
 ### New Features
 
 ### Breaking Changes
