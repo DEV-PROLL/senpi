@@ -20,6 +20,9 @@
   compact natively; rejected compactions no longer force a cache-losing resident-session restart,
   and the lane now pins the SDK's native auto-compaction on
   ([#874](https://github.com/code-yeongyu/senpi/pull/874)).
+  **Note:** `compaction_end` / `session_compact` events may now carry
+  `rejectionCause: "external-owner"`. This is additive for well-formed consumers, but consumers
+  exhaustively matching the rejection-cause union should add the new case.
 
 ### New Features
 
