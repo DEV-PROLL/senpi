@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Stored OAuth request resolution now honors provider availability checks, so sentinel credentials that represent no usable account are not treated as configured.
+
 ### Removed
 
 ## [2026.8.14] - 2026-08-14

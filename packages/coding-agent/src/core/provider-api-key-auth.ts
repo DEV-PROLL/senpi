@@ -35,16 +35,13 @@ export function composeApiKeyAuth(
 	const oauth = extension?.oauth ?? base?.auth.oauth;
 	const rawHeaders = configuredHeaders(config, extension);
 	const headerSource = headerAuthResolutionSource(config?.headers, extension?.headers);
-	if (!inherited && rawKey === undefined && !headerSource && oauth) {
-		// An OAuth provider with no key, no headers and no base normally gets no
-		// api-key auth at all. That is right for providers whose only credential
-		// is the stored one, but `resolveProviderAuth` reads ambient credentials
-		// exclusively through `apiKey.resolve()`: denying it here strands
-		// providers whose credentials live outside auth.json, which pass
-		// `check()` and then fail every request as "Provider is not configured".
-		return ambientOnlyAuth(oauth);
-	}
 	const authHeader = extension?.authHeader ?? config?.authHeader ?? false;
+	if (!inherited && rawKey === undefined && !headerSource && oauth) {
+		// An OAuth provider with no key, no credential headers and no base normally
+		// gets no api-key auth at all. Providers with ambient credentials still
+		// need this path, including metadata headers and authHeader composition.
+		return ambientOnlyAuth(providerId, oauth, rawHeaders, headerSource, authHeader);
+	}
 	return {
 		name: inherited?.name ?? "API key",
 		login:
@@ -99,24 +96,38 @@ function ambientResolverOf(oauth: unknown): AmbientResolver | undefined {
 	return typeof candidate === "function" ? (candidate as AmbientResolver) : undefined;
 }
 
-/**
- * Api-key auth for an OAuth provider that also accepts ambient credentials.
- * Login stays on the OAuth flow, so this deliberately omits `login` — it exists
- * only so ambient credentials have a resolution path. A stored credential wins:
- * `resolveProviderAuth` never reaches the ambient branch once one exists, and
- * the guard here keeps that true if some other caller passes one in.
- */
-function ambientOnlyAuth(oauth: unknown): ApiKeyAuth | undefined {
+/** Api-key adapter for OAuth providers whose credentials live outside auth.json. */
+function ambientOnlyAuth(
+	providerId: string,
+	oauth: unknown,
+	rawHeaders: Record<string, string> | undefined,
+	headerSource: string | undefined,
+	authHeader: boolean,
+): ApiKeyAuth | undefined {
 	const resolveAmbient = ambientResolverOf(oauth);
 	if (!resolveAmbient) return undefined;
+	const resolve = async (input: Parameters<ApiKeyAuth["resolve"]>[0]): Promise<AuthResult | undefined> => {
+		const result = await resolveAmbient({ ctx: input.ctx, signal: input.signal });
+		// Auxiliary callers replay resolved auth as an explicit key. Accept only
+		// this ambient resolver's own marker; unrelated explicit credentials stay
+		// outside an OAuth-only provider.
+		if (!result || (input.credential && input.credential.key !== result.auth.apiKey)) return undefined;
+		const explicitEnv = { ...(input.credential?.env ?? {}), ...(result.env ?? {}) };
+		const headerEnv = await configContextEnv(Object.values(rawHeaders ?? {}), input.ctx, explicitEnv);
+		const headers = resolveHeadersOrThrow(rawHeaders, `provider "${providerId}"`, headerEnv);
+		return {
+			...result,
+			auth: withConfiguredAuth(result.auth, headers, authHeader),
+			source: result.source ?? headerSource,
+		};
+	};
 	return {
 		name: (oauth as { name?: string }).name ?? "Ambient credentials",
-		check: async ({ ctx, credential, signal }) => {
-			if (credential) return undefined;
-			const resolved = await resolveAmbient({ ctx, signal });
+		check: async (input) => {
+			const resolved = await resolve(input);
 			return resolved ? { type: "oauth", source: resolved.source } : undefined;
 		},
-		resolve: async ({ ctx, credential, signal }) => (credential ? undefined : resolveAmbient({ ctx, signal })),
+		resolve,
 	};
 }
 

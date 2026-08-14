@@ -82,16 +82,21 @@ export function createOAuthConfig(deps: {
 	readSettings?: () => { tokenInjection?: "oauth-slots" | "config-dir" | "ambient" } | undefined;
 	loginFlow?: OAuthAuth;
 }): OAuthConfigShape {
+	const claudeEnvironment = async (ctx: AuthContext): Promise<Record<string, string>> => {
+		const entries = await Promise.all(ENV_TOKEN_NAMES.map(async (name) => [name, await ctx.env(name)] as const));
+		return Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => Boolean(entry[1])));
+	};
+
 	/** Single predicate behind both `check` and `resolveAmbient`, so availability and resolution cannot disagree. */
 	const configuredFor = async (
 		ctx: AuthContext,
 		stored: ClaudeSdkOauthCredential | undefined,
 		signal?: AbortSignal,
+		environment?: Record<string, string>,
 	): Promise<boolean> => {
 		const storedAccounts = stored?.type === "oauth" && Array.isArray(stored.accounts) ? stored.accounts : [];
-		const envTokens = await Promise.all(ENV_TOKEN_NAMES.map((name) => ctx.env(name)));
-		const envAccountCount = envTokens.filter((token) => token !== undefined && token.length > 0).length;
-		const accountCount = storedAccounts.length + envAccountCount;
+		const effectiveEnvironment = environment ?? (await claudeEnvironment(ctx));
+		const accountCount = storedAccounts.length + Object.keys(effectiveEnvironment).length;
 		const lane = deps.readSettings?.()?.tokenInjection ?? (accountCount > 0 ? "oauth-slots" : "ambient");
 		if (lane === "ambient") return (deps.readAmbientAuthStatus ?? readAmbientClaudeAuthStatus)(signal);
 		return accountCount > 0;
@@ -107,9 +112,13 @@ export function createOAuthConfig(deps: {
 		},
 
 		async resolveAmbient({ ctx, signal }) {
-			// Only reached with nothing stored: resolveProviderAuth consults the stored credential first.
-			if (!(await configuredFor(ctx, undefined, signal))) return undefined;
-			return { auth: { apiKey: SENTINEL_OAUTH_FIELDS.access }, source: AUTH_CHECK.source };
+			const environment = await claudeEnvironment(ctx);
+			if (!(await configuredFor(ctx, undefined, signal, environment))) return undefined;
+			return {
+				auth: { apiKey: SENTINEL_OAUTH_FIELDS.access },
+				...(Object.keys(environment).length > 0 ? { env: environment } : {}),
+				source: AUTH_CHECK.source,
+			};
 		},
 
 		async login(callbacks) {

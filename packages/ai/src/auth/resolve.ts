@@ -92,6 +92,7 @@ async function resolveProviderAuthWithSignal(
 				provider.id,
 				provider.auth.oauth,
 				stored,
+				requestAuthContext,
 				signal,
 				overrides?.minOAuthValidityMs,
 			);
@@ -129,9 +130,17 @@ async function resolveStoredOAuth(
 	providerId: string,
 	oauth: OAuthAuth,
 	stored: OAuthCredential,
+	authContext: AuthContext,
 	signal: AbortSignal,
 	minOAuthValidityMs?: number,
 ): Promise<AuthResult | undefined> {
+	if (oauth.check) {
+		try {
+			if (!(await oauth.check({ ctx: authContext, credential: stored, signal }))) return undefined;
+		} catch (error) {
+			throw new ModelsError("auth", `OAuth auth check failed for provider ${providerId}`, { cause: error });
+		}
+	}
 	const minimumValidityMs = Math.max(DEFAULT_OAUTH_MINIMUM_VALIDITY_MS, minOAuthValidityMs ?? 0);
 	const expiresSoon = (credential: OAuthCredential) => Date.now() + minimumValidityMs >= credential.expires;
 	let credential = stored;

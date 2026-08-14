@@ -73,6 +73,8 @@ export type AuthenticatedQueryInput = {
 	query: SdkQuery;
 	buildOptions: (lane: ClaudeSdkOauthTokenInjection) => Options;
 	providerSettings: ClaudeSdkOauthProviderSettings;
+	/** Effective request auth environment; overrides the host for account discovery and SDK spawn. */
+	env?: Record<string, string>;
 	signal?: AbortSignal;
 	sessionId?: string;
 	/** Request-scoped CLI pin; takes precedence over persistent settings and account pins. */
@@ -85,6 +87,7 @@ export type AuthenticatedQueryInput = {
 
 type ManagedPool = {
 	accounts: AccountSlot[];
+	environment: NodeJS.ProcessEnv;
 	lane: Exclude<ClaudeSdkOauthTokenInjection, "ambient">;
 	pinnedAccount?: string;
 	store: CredentialStore;
@@ -139,10 +142,13 @@ export function resolveEffectiveLane(
 	return settings.tokenInjection ?? (accounts.length > 0 ? "oauth-slots" : "ambient");
 }
 
-async function managedPool(settings: ClaudeSdkOauthProviderSettings): Promise<ManagedPool | undefined> {
+async function managedPool(
+	settings: ClaudeSdkOauthProviderSettings,
+	requestEnvironment?: Record<string, string>,
+): Promise<ManagedPool | undefined> {
 	const store = activeBoundary.createStore();
 	let credential = await store.read(CLAUDE_SDK_OAUTH_PROVIDER_ID);
-	const environment = activeBoundary.env();
+	const environment = { ...activeBoundary.env(), ...requestEnvironment };
 	let accounts = listAccounts(
 		(credential as ClaudeSdkOauthCredential | undefined) ?? emptyCredential(),
 		(name) => environment[name],
@@ -157,7 +163,7 @@ async function managedPool(settings: ClaudeSdkOauthProviderSettings): Promise<Ma
 	const lane = resolveEffectiveLane(settings, accounts);
 	if (lane === "ambient" || accounts.length === 0) return undefined;
 	const stored = credential?.type === "oauth" ? (credential as ClaudeSdkOauthCredential) : undefined;
-	return { accounts, lane, pinnedAccount: settings.pinnedAccount ?? stored?.pinned, store };
+	return { accounts, environment, lane, pinnedAccount: settings.pinnedAccount ?? stored?.pinned, store };
 }
 
 async function prepareSlot(
@@ -165,7 +171,7 @@ async function prepareSlot(
 	selected: AccountSlot,
 	signal: AbortSignal,
 ): Promise<Record<string, string | undefined>> {
-	const environment = activeBoundary.env();
+	const environment = pool.environment;
 	const slot = selected;
 	if (slot.source !== "env" && activeBoundary.now() >= slot.expires - EXPIRING_WITHIN_MS) {
 		try {
@@ -223,10 +229,10 @@ function visibleSdkMessage(message: SDKMessage): boolean {
 /** Resolves managed OAuth immediately before each subprocess spawn and retries only pre-delta failures. */
 export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncGenerator<SDKMessage> {
 	const signal = input.signal ?? new AbortController().signal;
-	const pool = await managedPool(input.providerSettings);
+	const pool = await managedPool(input.providerSettings, input.env);
 	if (!pool) {
 		const options = input.buildOptions("ambient");
-		const parentEnvironment = activeBoundary.env();
+		const parentEnvironment = { ...activeBoundary.env(), ...input.env };
 		const ambientEnvironment: Record<string, string | undefined> = { ...parentEnvironment };
 		for (const name of Object.keys(ambientEnvironment)) {
 			if (name.startsWith("SENPI_")) delete ambientEnvironment[name];

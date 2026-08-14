@@ -1,5 +1,26 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-14 - Preserve effective ambient request authentication
+
+### What changed
+
+- Ambient resolution now returns the effective `CLAUDE_CODE_OAUTH_TOKEN` slot environment with its sentinel auth result.
+- Both resident and non-resident SDK lanes pass request auth environment into account discovery and subprocess environment construction, with request values overriding the host.
+- Focused coverage drives a request token through `Models.getAuth()`, replay, real session-title generation, and the captured SDK subprocess while a different host token is present.
+
+### Why
+
+- Request-scoped environment overrides were accepted during availability resolution but discarded before SDK spawn. The child then inherited the host token, crossing account and billing boundaries or failing after successful resolution when no host credential existed.
+
+### Why an extension could not handle it
+
+- The effective credential crosses the builtin provider's private auth resolver, resident-session adapter, and SDK subprocess boundary. No external hook can restore a request environment after that boundary drops it.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `oauth-login.ts` around ambient resolution and `auth-lane.ts` around environment/account discovery.
+- LOW: `stream.ts` and `session-stream.ts` where request options enter the auth lane.
+
 ## 2026-08-14 - Pin native auto-compaction on the SDK lane
 
 ### What changed

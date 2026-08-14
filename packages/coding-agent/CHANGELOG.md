@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Ambient Claude SDK OAuth authentication now preserves request-scoped token overrides through SDK subprocess creation, remains valid when auxiliary calls replay resolved auth, rejects logged-out empty account envelopes, and applies configured headers consistently with stored OAuth ([#836](https://github.com/code-yeongyu/senpi/pull/836)).
 - The ambient Claude auth availability probe now passes `windowsHide: true` when spawning `claude auth status`, so the background check no longer opens a console window on Windows ([#870](https://github.com/code-yeongyu/senpi/issues/870)).
 - `senpi --help` now lists the `PI_RULES_DISABLED`, `PI_RULES_MAX_RULE_CHARS`, and `PI_RULES_MAX_RESULT_CHARS` environment settings that the built-in rules extension reads, so the two environment-only character limits are discoverable from the CLI ([#678](https://github.com/code-yeongyu/senpi/issues/678)).
 - Windows shutdown no longer dies with an uncaught `Error: spawn taskkill ENOENT` when `%SystemRoot%\System32` is

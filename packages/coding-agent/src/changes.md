@@ -1,5 +1,25 @@
 # changes
 
+## Idempotent ambient OAuth auth composition (2026-08-14)
+
+### What changed
+
+- `core/provider-api-key-auth.ts` now accepts an ambient OAuth resolver's own synthetic key when resolved auth is replayed as an explicit request key by title, compaction, and branch-summary calls.
+- The ambient adapter now resolves configured metadata headers and `authHeader` through the same composition used by stored OAuth.
+- Coverage compares ambient and stored OAuth auth shapes and drives the replay through real title generation.
+
+### Why
+
+- Auxiliary calls copy resolved request auth into their own options. Rejecting the provider's marker made the second auth pass report unconfigured, while an early ambient return also dropped configured headers and synthesized authorization.
+
+### Why an extension could not do this
+
+- Provider auth composition runs before request hooks and is the mechanism that makes extension-registered providers callable. An extension cannot repair auth that the host composer rejected or omitted.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `core/provider-api-key-auth.ts` around the ambient-only OAuth adapter.
+
 The historical-image transport entry moved to `core/changes.md`, beside the
 other provider-bound image transport behavior that owns the same payload path.
 

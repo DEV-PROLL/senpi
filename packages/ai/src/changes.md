@@ -1,5 +1,20 @@
 # AI Source Changes
 
+## 2026-08-14 - Validate stored OAuth before request derivation
+
+### What changed and why
+
+- `resolveProviderAuth()` now invokes an OAuth provider's optional side-effect-free `check` before refreshing or deriving request auth from a stored credential.
+- Sentinel envelopes that represent zero usable accounts can no longer bypass the same availability predicate used by provider catalog checks.
+
+### Why this cannot be expressed externally
+
+- Stored OAuth credentials short-circuit inside the provider-neutral resolver before coding-agent provider composition or extension request hooks can intervene.
+
+### Expected merge conflict zones
+
+- LOW: `auth/resolve.ts` at the stored-OAuth branch and `resolveStoredOAuth()` signature.
+
 ## 2026-08-13 - Preserve explicit request compatibility fields
 
 ### What changed and why
