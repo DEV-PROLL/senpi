@@ -2263,6 +2263,30 @@ export abstract class TuiBase extends Container {
 			}
 
 			if (viewportTop !== prevViewportTop) {
+				// Content grew above the viewport (e.g. Ctrl+O expanding several tool
+				// blocks at once). Repainting only the visible rows would drop the
+				// inserted above-viewport rows from scrollback while marking them painted,
+				// so fall back to the canonical replay / mux dispatch used by the
+				// firstVisibleChanged === -1 path, which re-emits the full transcript.
+				if (lineCountDelta !== 0) {
+					if (preserveMuxScrollback) {
+						if (!this.renderMuxViewportRepaint(newLines, rawLines, cursorPos, width, height, viewportTop)) {
+							fullRender(true, false);
+						}
+					} else {
+						this.renderScrollbackReplay(
+							newLines,
+							rawLines,
+							cursorPos,
+							width,
+							height,
+							prevViewportTop,
+							hardwareCursorRow,
+						);
+					}
+					return;
+				}
+
 				const previousViewportBottom = Math.min(this.previousLines.length - 1, prevViewportTop + height - 1);
 				let buffer = TUI.FRAME_BEGIN;
 				buffer += this.deleteChangedKittyImages(prevViewportTop, previousViewportBottom);
