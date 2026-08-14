@@ -1,5 +1,27 @@
 # changes
 
+## Pin classic RPC delta batching and immediate barriers (2026-08-14)
+
+### What changed
+
+- Characterization coverage now proves 1000 classic delta-only `message_update` records remain complete while sharing one same-tick raw write.
+- Event, extension-UI request, event, and response ordering is pinned across consecutive immediate-write barriers.
+- Classic connection-handler backpressure remains deliberately attached to every agent-loop event.
+
+### Why
+
+- Classic RPC projects cumulative assistant updates into delta-only public wire records. Those deltas cannot be compacted safely, so per-event backpressure is its flow control and must not be removed as part of the multi-session writer redesign.
+- `RpcClient` consumers depend on the documented delta sequence and on immediate UI/response records never overtaking pending events.
+
+### Why extension system couldn't handle this
+
+- Classic JSONL projection, batching, and agent-loop backpressure are built-in RPC transport contracts below extension hooks.
+
+### Expected merge conflict zones
+
+- LOW: characterization-only additions in `rpc-event-coalescing.test.ts`.
+- NONE: classic runtime code remains unchanged.
+
 ## Single-flight multi-session RPC drain and control lane (2026-08-14)
 
 ### What changed
