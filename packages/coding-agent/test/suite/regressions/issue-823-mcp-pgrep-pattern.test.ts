@@ -1,8 +1,8 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { collectProcessTree } from "../../../src/core/extensions/builtin/mcp/process-tree.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { collectProcessTree, reapProcessTree } from "../../../src/core/extensions/builtin/mcp/process-tree.ts";
 
 const supportedPlatform = ["darwin", "linux"].includes(process.platform);
 
@@ -37,4 +37,33 @@ printf '%s\\n' 1
 			}
 		},
 	);
+
+	describe("killPids defense-in-depth", () => {
+		afterEach(() => {
+			vi.restoreAllMocks();
+		});
+
+		it("never signals PID 1 even if process discovery returns it", async () => {
+			const fakeBinDir = await mkdtemp(join(tmpdir(), "senpi-issue-823-kill-"));
+			const fakePgrepPath = join(fakeBinDir, "pgrep");
+			const originalPath = process.env.PATH;
+			const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+			try {
+				await writeFile(fakePgrepPath, `#!/bin/sh
+printf '%s\\n' 1
+`, "utf8");
+				await chmod(fakePgrepPath, 0o755);
+				process.env.PATH = `${fakeBinDir}${delimiter}${originalPath ?? ""}`;
+
+				await reapProcessTree(999_999, { termWaitMs: 0, killWaitMs: 0 });
+
+				const signaledPids = killSpy.mock.calls.map((call) => call[0]);
+				expect(signaledPids).not.toContain(1);
+			} finally {
+				if (originalPath === undefined) delete process.env.PATH;
+				else process.env.PATH = originalPath;
+				await rm(fakeBinDir, { recursive: true, force: true });
+			}
+		});
+	});
 });

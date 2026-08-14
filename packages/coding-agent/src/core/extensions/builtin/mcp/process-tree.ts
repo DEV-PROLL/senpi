@@ -65,6 +65,10 @@ async function childPids(parentPid: number): Promise<number[]> {
 
 function killPids(pids: Iterable<number>, signal: "SIGTERM" | "SIGKILL"): void {
 	for (const pid of [...pids].reverse()) {
+		// Defense in depth: never signal PID 1 (or a non-positive pid), even if a
+		// broken or substituted discovery executable returns it. A legitimate MCP
+		// child can never be PID 1.
+		if (!Number.isInteger(pid) || pid <= 1) continue;
 		try {
 			process.kill(pid, signal);
 		} catch (error) {
