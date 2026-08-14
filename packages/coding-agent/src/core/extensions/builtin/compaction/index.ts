@@ -138,9 +138,21 @@ function endCompactionFeedback(
 	ctx: ExtensionContext,
 	signal: AbortSignal | undefined,
 	result: SpeculativeCompactionResult,
+	remoteFallbackReason?: string,
 ): void {
 	if (shouldEndFeedback(result)) {
-		ctx.endCompaction?.({ reason: "extension", signal, aborted: signal?.aborted });
+		// Surface the concrete failure instead of the generic "Compaction did not
+		// apply": the remote stage's reason (e.g. remote-compaction-timeout) and the
+		// terminal local reason (unavailable / stale), so the decision log and TUI
+		// show what actually happened. An aborted compaction renders "Compaction
+		// cancelled" downstream and must not carry a failure message.
+		const localReason = result.applied ? undefined : result.reason;
+		const parts = [remoteFallbackReason, localReason].filter((part): part is string => Boolean(part));
+		const errorMessage =
+			signal?.aborted || parts.length === 0
+				? undefined
+				: `Compaction did not apply: ${parts.join("; local fallback ")}`;
+		ctx.endCompaction?.({ reason: "extension", signal, aborted: signal?.aborted, errorMessage });
 	}
 }
 
@@ -398,6 +410,7 @@ export default function compactionExtension(
 		}
 		let feedbackSignal = ctx.beginCompaction?.({ reason: "extension" });
 		try {
+			let remoteFallbackReason: string | undefined;
 			if (isOpenAiRemoteCompactionModel(ctx.model)) {
 				const remoteGeneration = speculativeGeneration + 1;
 				const remoteSnapshot = createSpeculativeCompactionSnapshot(ctx, {
@@ -411,7 +424,12 @@ export default function compactionExtension(
 					const remoteCompaction = await runOpenAiRemoteCompaction(
 						ctx,
 						createBlockingRemoteCompactionEvent(ctx, remoteSnapshot, customInstructions, remoteSignal),
-						(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
+						(data) => {
+							if (data?.action === "remote_fallback" && typeof data.reason === "string") {
+								remoteFallbackReason = data.reason;
+							}
+							pi.events.emit(SENPI_COMPACTION_EVENT, data);
+						},
 						remoteCompactionDependencies,
 					);
 					if (remoteCompaction) {
@@ -498,7 +516,7 @@ export default function compactionExtension(
 			if (!snapshot) {
 				const result = { applied: false, reason: "unavailable" } as const;
 				getLogger(ctx).debug("summary_failed", { reason: "unavailable" });
-				endCompactionFeedback(ctx, feedbackSignal, result);
+				endCompactionFeedback(ctx, feedbackSignal, result, remoteFallbackReason);
 				return result;
 			}
 			let compaction: CompactionResult | undefined;
@@ -521,7 +539,7 @@ export default function compactionExtension(
 				compaction,
 				feedbackSignal,
 			);
-			endCompactionFeedback(ctx, feedbackSignal, result);
+			endCompactionFeedback(ctx, feedbackSignal, result, remoteFallbackReason);
 			return result;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

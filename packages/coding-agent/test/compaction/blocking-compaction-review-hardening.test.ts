@@ -126,16 +126,19 @@ describe("blocking compaction review hardening", () => {
 	});
 
 	describe("Given the summarization response has no text", () => {
-		it("Then blocking compaction degrades silently as before", async () => {
+		it("Then blocking compaction surfaces the unavailable reason", async () => {
 			// Given
 			const { beforeAgentStart } = createCompactionHandlers();
 			const harness = createBlockingContext({ usageTokens: 9_950 });
 			registrations.push(harness.registration);
 			harness.registration.setResponses([fauxAssistantMessage("", { stopReason: "stop" })]);
 
-			// When / Then
+			// When / Then: the concrete reason is surfaced instead of the bare generic
+			// message (issue #765), so the failure is diagnosable after the fact.
 			await expect(beforeAgentStart(createBeforeAgentStartEvent(), harness.ctx)).resolves.toBeUndefined();
-			expect(errorMessages(harness.endCompaction)).toHaveLength(0);
+			expect(
+				errorMessages(harness.endCompaction).map((call) => (call as [{ errorMessage: string }])[0].errorMessage),
+			).toEqual(["Compaction did not apply: unavailable"]);
 		});
 	});
 
