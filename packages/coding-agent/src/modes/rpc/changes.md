@@ -1,5 +1,28 @@
 # changes
 
+## Single-flight multi-session RPC drain and control lane (2026-08-14)
+
+### What changed
+
+- The multi-session writer now hands exactly one complete record to stdout, awaits backpressure, and then selects the next ready session in round-robin order.
+- Untagged host responses use a dedicated non-coalescing control lane, and shutdown waits for all retained and in-flight records before flushing raw stdout.
+- Deterministic buffered-record/byte counters include the in-flight record, control enqueues resolve after their own backpressure boundary, and permanent stdout failures reject the active drain and pending control completions.
+
+### Why
+
+- Direct host response writes could bypass session ordering, while synchronous queue draining still fed an unbounded downstream promise chain during stdout stalls.
+- Keeping the backlog in typed lanes lets per-session compaction remain effective and prevents one busy session from monopolizing the raw writer.
+
+### Why extension system couldn't handle this
+
+- Process-wide stdout ownership, host control responses, session fairness, and shutdown flushing are built-in RPC transport responsibilities.
+
+### Expected merge conflict zones
+
+- HIGH: `session-event-writer.ts` drain lifecycle and constructor contract.
+- MEDIUM: `multi-session-host.ts` output and shutdown wiring.
+- LOW: deterministic multi-session drain tests.
+
 ## Compact cumulative multi-session RPC events per session (2026-08-14)
 
 ### What changed
