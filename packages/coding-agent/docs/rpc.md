@@ -17,6 +17,20 @@ Common options:
 - `--no-session`: Disable session persistence
 - `--session-dir <path>`: Custom session storage directory
 
+### Client capabilities
+
+Optional additive records are enabled through the comma-separated
+`SENPI_RPC_CLIENT_CAPABILITIES` environment variable:
+
+```bash
+SENPI_RPC_CLIENT_CAPABILITIES=extension_events senpi --mode rpc
+```
+
+Rebranded distributions read the equivalent variable under their configured environment prefix
+(for example `OMO_RPC_CLIENT_CAPABILITIES`). Unknown capability names are ignored. Advertising
+`extension_events` opts the client into generic extension-owned event records; clients that omit it
+retain the previous wire stream unchanged.
+
 ## Multi-session mode (D1 wire protocol)
 
 Multi-session mode lets one `senpi --mode rpc` process serve several independent conversations concurrently over the same stdio JSONL stream. Classic single-session mode is byte-identical to today; the only additive classic-mode behavior is that `get_protocol_info` is answered.
@@ -889,6 +903,88 @@ Each command has:
 
 **Note**: Built-in TUI commands (`/settings`, `/hotkeys`, etc.) are not included. They are handled only in interactive mode and would not execute if sent via `prompt`.
 
+#### get_loaded_surfaces
+
+Get the extensions and MCP servers loaded by the active runtime. Skills remain available through `get_commands`, where each loaded skill is represented by one `source: "skill"` row.
+
+```json
+{"type": "get_loaded_surfaces"}
+```
+
+Response:
+
+```json
+{
+  "type": "response",
+  "command": "get_loaded_surfaces",
+  "success": true,
+  "data": {
+    "extensions": [
+      {
+        "name": "my-extension",
+        "path": "/home/user/.senpi/agent/extensions/my-extension.ts",
+        "sourceInfo": {
+          "path": "/home/user/.senpi/agent/extensions/my-extension.ts",
+          "source": "auto",
+          "scope": "user",
+          "origin": "top-level"
+        },
+        "enabled": true
+      }
+    ],
+    "mcpServers": [
+      {
+        "name": "filesystem",
+        "toolCount": 12,
+        "status": "connected",
+        "authStatus": "unsupported"
+      }
+    ]
+  }
+}
+```
+
+Extension rows come directly from the session's loaded resource inventory, not from registered slash commands. A commandless extension therefore appears once, and an extension registering several commands is not duplicated. MCP rows come from the live session-owned MCP service and expose its current server state, listed tool count, and non-secret auth status.
+
+In multi-session mode this is a session-scoped command and requires the routing `sessionId`.
+
+### extension_request
+
+Invoke a request handler registered by an extension through `pi.rpc.handle(name, handler)`:
+
+```json
+{
+  "id": "req-42",
+  "type": "extension_request",
+  "name": "acme.job.cancel",
+  "data": {
+    "jobId": "job-42"
+  }
+}
+```
+
+Success returns the extension-owned structured value:
+
+```json
+{
+  "id": "req-42",
+  "type": "response",
+  "command": "extension_request",
+  "success": true,
+  "data": {
+    "cancelled": true
+  }
+}
+```
+
+The request `name` must resolve to exactly one handler in the active extension generation.
+Unknown names, duplicate names, stale generations, handler failures, and empty names return the
+normal `{ type: "response", success: false, error }` envelope. Senpi treats request and response
+data as opaque; the owning extension and client must validate their payloads.
+
+In multi-session mode this command requires the owning routing `sessionId`. The response receives
+the same `sessionId`, and another session's extension handlers are never consulted.
+
 ## Events
 
 Events are streamed to stdout as JSON lines during agent operation. Events do not generally include an `id` field; `bash_execution_update` includes the `id` of its originating `bash` command when one was provided.
@@ -918,6 +1014,28 @@ Events are streamed to stdout as JSON lines during agent operation. Events do no
 | `summarization_retry_attempt_start` | Retried summarization request starts |
 | `summarization_retry_finished` | Summarization retry loop completes |
 | `extension_error` | Extension threw an error |
+| `extension_event` | Capability-gated extension-owned event (`extension_events` clients only) |
+| `loaded_surfaces_changed` | Loaded skills, extensions, or MCP inventory changed; re-read `get_commands` and `get_loaded_surfaces` |
+
+### extension_event
+
+Emitted when an extension calls `pi.rpc.emit(name, data)` and the client advertised
+`extension_events`:
+
+```json
+{
+  "type": "extension_event",
+  "name": "acme.job.updated",
+  "data": {
+    "jobId": "job-42",
+    "status": "running"
+  }
+}
+```
+
+`name` is extension-owned and `data` is opaque to Senpi. Consumers should validate the payload for
+the specific event name before applying it. In multi-session mode the record also includes the
+routing `sessionId`; delivery preserves the owning session and per-session event order.
 
 ### agent_start
 
@@ -941,7 +1059,7 @@ Emitted when one low-level agent run completes. Contains all messages generated 
 
 ### agent_settled
 
-Emitted after the full session-level run settles. At this point Pi will not continue automatically through retry, compaction retry, or queued follow-up messages.
+Emitted after the full session-level run settles. At this point senpi will not continue automatically through retry, compaction retry, or queued follow-up messages.
 
 ```json
 {"type": "agent_settled"}
@@ -974,17 +1092,15 @@ Emitted when a message begins and completes. The `message` field contains an `Ag
 
 ### message_update (Streaming)
 
-Emitted during streaming of assistant messages. Contains both the partial message and a streaming delta event.
+Emitted during streaming of assistant messages. Contains a delta event without a cumulative message snapshot.
 
 ```json
 {
   "type": "message_update",
-  "message": {...},
   "assistantMessageEvent": {
     "type": "text_delta",
     "contentIndex": 0,
-    "delta": "Hello ",
-    "partial": {...}
+    "delta": "Hello "
   }
 }
 ```
@@ -993,7 +1109,6 @@ The `assistantMessageEvent` field contains one of these delta types:
 
 | Type | Description |
 |------|-------------|
-| `start` | Message generation started |
 | `text_start` | Text content block started |
 | `text_delta` | Text content chunk |
 | `text_end` | Text content block ended |
@@ -1003,16 +1118,20 @@ The `assistantMessageEvent` field contains one of these delta types:
 | `toolcall_start` | Tool call started |
 | `toolcall_delta` | Tool call arguments chunk |
 | `toolcall_end` | Tool call ended (includes full `toolCall` object) |
-| `done` | Message complete (reason: `"stop"`, `"length"`, `"toolUse"`) |
-| `error` | Error occurred (reason: `"aborted"`, `"error"`) |
 
 Example streaming a text response:
 ```json
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_start","contentIndex":0,"partial":{...}}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello","partial":{...}}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" world","partial":{...}}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hello world","partial":{...}}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" world"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hello world"}}
 ```
+
+`message_update` intentionally omits the former cumulative `message` field and
+`assistantMessageEvent.partial`. Clients that need a live partial message must assemble it
+from `message_start` and subsequent events using `contentIndex`. Treat `message_end.message`
+as authoritative. For tool calls, buffer `toolcall_delta.delta`; `toolcall_end.toolCall`
+contains the completed call.
 
 ### bash_execution_update
 
@@ -1185,6 +1304,14 @@ For branch summaries, `source` is `"branchSummary"` and no `reason` is present.
 {
   "type": "summarization_retry_finished"
 }
+```
+
+### loaded_surfaces_changed
+
+Emitted without a request id when the loaded skill, extension, or MCP inventory changes. The event carries no inventory payload; clients re-read `get_commands` for skills and `get_loaded_surfaces` for extensions/MCP, mirroring the app-server `skills/changed` invalidation model.
+
+```json
+{"type": "loaded_surfaces_changed"}
 ```
 
 ### extension_error
@@ -1422,6 +1549,7 @@ Source files:
 - [`packages/ai/src/types.ts`](../../ai/src/types.ts) - `Model`, `UserMessage`, `AssistantMessage`, `ToolResultMessage`
 - [`packages/agent/src/types.ts`](../../agent/src/types.ts) - `AgentMessage`, `AgentEvent`
 - [`src/core/messages.ts`](../src/core/messages.ts) - `BashExecutionMessage`
+- [`src/modes/json-event.ts`](../src/modes/json-event.ts) - `JsonAgentSessionEvent`
 - [`src/modes/rpc/rpc-types.ts`](../src/modes/rpc/rpc-types.ts) - RPC command/response types, extension UI request/response types
 
 ### Model

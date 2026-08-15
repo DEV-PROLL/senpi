@@ -8,6 +8,7 @@ import { createProjectTrustContext } from "./cli/project-trust.ts";
 import {
 	APP_NAME,
 	CONFIG_DIR_NAME,
+	DISPLAY_VERSION,
 	detectInstallMethod,
 	getAgentDir,
 	getPackageDir,
@@ -18,6 +19,7 @@ import {
 	type SelfUpdatePackageTarget,
 	VERSION,
 } from "./config.ts";
+import { brandProfile } from "./core/brand.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { DefaultPackageManager } from "./core/package-manager.ts";
@@ -26,7 +28,7 @@ import { DefaultResourceLoader } from "./core/resource-loader.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { spawnProcess } from "./utils/child-process.ts";
-import { getLatestPiRelease, isNewerPackageVersion } from "./utils/version-check.ts";
+import { formatVersionCheckError, getLatestPiRelease, isNewerPackageVersion } from "./utils/version-check.ts";
 import {
 	cleanupWindowsSelfUpdateQuarantine,
 	quarantineWindowsNativeDependencies,
@@ -410,14 +412,15 @@ function updateTargetIncludesExtensions(target: UpdateTarget): boolean {
 }
 
 async function refreshModelCatalogs(agentDir: string): Promise<void> {
-	const modelRuntime = await ModelRuntime.create({
-		authPath: join(agentDir, "auth.json"),
-		modelsPath: join(agentDir, "models.json"),
-		allowModelNetwork: false,
-	});
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), 15_000);
 	try {
+		const modelRuntime = await ModelRuntime.create({
+			authPath: join(agentDir, "auth.json"),
+			modelsPath: join(agentDir, "models.json"),
+			allowModelNetwork: false,
+			signal: controller.signal,
+		});
 		const result = await modelRuntime.refresh({
 			allowNetwork: true,
 			force: true,
@@ -488,12 +491,25 @@ interface SelfUpdatePlan {
 }
 
 async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
+	const brandUpdate = brandProfile()?.update;
+	if (brandUpdate) {
+		console.log(chalk.yellow(`${APP_NAME} ships inside ${brandUpdate.packageName}. Update it with:`));
+		console.log(chalk.cyan(`  ${brandUpdate.command}`));
+		return {
+			packageName: brandUpdate.packageName,
+			installSpec: brandUpdate.command,
+			version: DISPLAY_VERSION,
+			shouldRun: false,
+		};
+	}
+
 	let latestRelease: Awaited<ReturnType<typeof getLatestPiRelease>>;
 	try {
-		latestRelease = await getLatestPiRelease(VERSION);
+		latestRelease = await getLatestPiRelease(VERSION, { retry: true });
 	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(`Could not determine latest ${APP_NAME} version: ${message}`);
+		throw new Error(`Could not determine latest ${APP_NAME} version: ${formatVersionCheckError(error)}`, {
+			cause: error,
+		});
 	}
 	if (!latestRelease) {
 		throw new Error(`Could not determine latest ${APP_NAME} version.`);

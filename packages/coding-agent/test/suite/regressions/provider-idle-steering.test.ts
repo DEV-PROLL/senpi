@@ -4,7 +4,6 @@ import { createHarness, getMessageText, getUserTexts, type Harness } from "../ha
 
 const DEFAULT_PROVIDER_IDLE_TIMEOUT_MS = 300_000;
 const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
-const RETRY_PROVIDER_TIMEOUT_MS = 30_000;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -115,20 +114,20 @@ describe("provider idle steering", () => {
 		]);
 		expect(harness.faux.getCallLog().map((call) => call.options?.timeoutMs)).toEqual([
 			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
-			RETRY_PROVIDER_TIMEOUT_MS,
-			RETRY_PROVIDER_TIMEOUT_MS,
+			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
+			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
 			DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
 		]);
 		expect(harness.faux.getCallLog().map((call) => getStreamStartTimeoutMs(call.options))).toEqual([
 			DEFAULT_STREAM_START_TIMEOUT_MS,
-			RETRY_PROVIDER_TIMEOUT_MS,
-			RETRY_PROVIDER_TIMEOUT_MS,
+			DEFAULT_STREAM_START_TIMEOUT_MS,
+			DEFAULT_STREAM_START_TIMEOUT_MS,
 			DEFAULT_STREAM_START_TIMEOUT_MS,
 		]);
 		expect(getUserTexts(harness)).toEqual(["original request", "continue"]);
 	});
 
-	it("retains queued input when a capped retry is aborted in flight", async () => {
+	it("retains queued input when a bounded retry is aborted in flight", async () => {
 		const harness = await createHarness({
 			settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 0 } },
 		});
@@ -167,7 +166,7 @@ describe("provider idle steering", () => {
 		await harness.session.waitForSettledSessionWork();
 
 		expect(harness.faux.state.callCount).toBe(2);
-		expect(harness.faux.getCallLog()[1]?.options?.timeoutMs).toBe(RETRY_PROVIDER_TIMEOUT_MS);
+		expect(harness.faux.getCallLog()[1]?.options?.timeoutMs).toBe(DEFAULT_PROVIDER_IDLE_TIMEOUT_MS);
 		expect(harness.session.getSteeringMessages()).toEqual(["retain through retry abort"]);
 		expect(harness.agent.hasQueuedMessages()).toBe(true);
 		expect(harness.eventsOfType("continuation_error")).toEqual([]);

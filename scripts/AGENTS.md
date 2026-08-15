@@ -7,6 +7,8 @@ Build, validation, release, publish, lockfile, and environment tooling for the s
 All `.mjs` files carry `#!/usr/bin/env node` and run as ES modules.
 Shell wrappers `devenv-setup.sh` and `devenv-setup.ps1` locate Node and delegate to `devenv-setup.mjs`; they own no logic of their own.
 Colocated `*.test.mjs` files run via root `npm run test:scripts` (`node --test scripts/*.test.mjs`).
+Root `package.json` runs `preinstall: node scripts/create-bin-stubs.mjs`.
+`scripts/qa/` holds QA render drivers and fixtures.
 
 ## Naming convention
 
@@ -14,6 +16,7 @@ Colocated `*.test.mjs` files run via root `npm run test:scripts` (`node --test s
 |--------|------|
 | `build-*` | Compile and bundle steps |
 | `check-*` | Validation and gate scripts |
+| `create-*` | Stub/wrapper creation (`create-bin-stubs.mjs`, `create-root-senpi-wrapper.mjs`) |
 | `generate-*` | Artifact generation (shrinkwrap, install-lock) |
 | `prepare-*` | Publish staging |
 | `release-*` | Sub-tasks composed by `release.mjs` |
@@ -34,19 +37,30 @@ Colocated `*.test.mjs` files run via root `npm run test:scripts` (`node --test s
 
 - `local-release.mjs`: Smoke-test release to a temp directory. Doesn't push tags.
 
-- `publish.mjs`: Publishes six fork-owned packages in release order:
+- `publish.mjs`: Publishes seven fork-owned packages in release order:
   `@code-yeongyu/senpi-ai`, `@code-yeongyu/senpi-agent-core`,
   `@code-yeongyu/senpi-tui`, `@code-yeongyu/senpi-pty`,
-  `@code-yeongyu/senpi-codemode`, and `@code-yeongyu/senpi`.
-  The four upstream-named source packages remain `private`; the publisher copies
-  each to a temporary manifest under the fork scope. `@code-yeongyu/senpi-server`
-  is `private: true` and explicitly excluded.
+  `@code-yeongyu/senpi-telemetry`, `@code-yeongyu/senpi-codemode`, and
+  `@code-yeongyu/senpi`. Every source package remains `private`; the publisher
+  copies each to a temporary public manifest under the fork scope.
+  `@code-yeongyu/senpi-server` remains private and explicitly excluded.
 
 - `build-binaries.sh`: Mirrors `.github/workflows/build-binaries.yml` for local
   cross-platform binary builds.
 
 - `devenv-setup.mjs`: Universal, idempotent dev-environment setup. Both shell wrappers
   delegate here after locating Node.
+
+- Release/publish helpers: `prepare-senpi-publish-manifest.mjs`, `publish-command.mjs`,
+  `publish-manifest.mjs`, `release-notes.mjs`, `release-test-gate.mjs`,
+  `local-release-runner.mjs`.
+
+- Standalone binaries: `prepare-bun-compile-assets.mjs`, `smoke-standalone-binary.mjs`.
+
+- Gates and upstream: `check-pr-changelog.mjs`, `check-upstream-release.mjs`.
+
+- Model catalog: `diff-model-catalog.mjs`, `publish-model-catalog.mjs`,
+  `generate-thinking-capabilities.mjs`.
 
 ## prepare-senpi-bundled-workspaces.mjs
 
@@ -85,3 +99,6 @@ EBADPLATFORM everywhere else. They remain optional registry deps, resolved per i
 - Never invoke `node scripts/publish.mjs` without a prior build. The script checks for
   `dist/` existence but not for stale output.
 - Never commit `.env` files or print credentials in build log output.
+
+---
+Generated: 2026-08-07 | Commit `4f26b8282`

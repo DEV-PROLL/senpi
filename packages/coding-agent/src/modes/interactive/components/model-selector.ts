@@ -1,18 +1,9 @@
 import { type Model, modelsAreEqual } from "@earendil-works/pi-ai";
-import {
-	Container,
-	type Focusable,
-	fuzzyFilter,
-	getKeybindings,
-	Input,
-	Spacer,
-	Text,
-	type TUI,
-} from "@earendil-works/pi-tui";
+import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
 import { ModelRegistry } from "../../../core/model-registry.ts";
 import type { ModelRuntime } from "../../../core/model-runtime.ts";
 import type { SettingsManager } from "../../../core/settings-manager.ts";
-import { getModelSelectorSearchText } from "../model-search.ts";
+import { rankModelSearchItems } from "../model-search-rank.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint } from "./keybinding-hints.ts";
@@ -70,6 +61,10 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private onSelectCallback: (model: Model<any>) => void;
 	private onCancelCallback: () => void;
 	private favoriteIds: FavoriteModelIds = [];
+	// Favorite membership snapshot taken when the selector opens. Ordering
+	// (base sort and search partition) is frozen against this basis for the
+	// whole session; live `favoriteIds` only drives markers and callbacks.
+	private readonly favoriteIdsAtOpen: FavoriteModelIds;
 	private onFavoriteChangeCallback?: ModelSelectorFavoriteOptions["onFavoriteChange"];
 	private errorMessage?: string;
 	private refreshStatusMessage = "Refreshing model catalogs…";
@@ -105,6 +100,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 		this.favoriteIds = favorites?.favoriteModelIds === null ? null : [...(favorites?.favoriteModelIds ?? [])];
+		this.favoriteIdsAtOpen = this.favoriteIds === null ? null : [...this.favoriteIds];
 		this.onFavoriteChangeCallback = favorites?.onFavoriteChange;
 
 		// Add top border
@@ -216,7 +212,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			} else if (result.errors.size === 1) {
 				this.errorMessage = `Could not refresh ${result.errors.keys().next().value}; showing cached models.`;
 			} else if (result.errors.size > 1) {
-				this.errorMessage = `Could not refresh ${result.errors.size} model catalogs; showing cached models.`;
+				this.errorMessage = `Could not refresh ${result.errors.size} model catalogs (${[...result.errors.keys()].join(", ")}); showing cached models.`;
 			} else {
 				this.errorMessage = this.modelRuntime.getError();
 				if (!this.errorMessage) {
@@ -227,12 +223,21 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			this.loadModelsFromSnapshot();
 			this.filterModels(this.searchInput.getValue());
 			this.tui.requestRender();
+		} catch (error) {
+			if (this.closed) return;
+			this.refreshStatusMessage = "";
+			this.errorMessage = timedOut
+				? "Model refresh timed out; showing cached models."
+				: `Could not refresh model catalogs: ${error instanceof Error ? error.message : String(error)}`;
+			this.updateList();
+			this.tui.requestRender();
 		} finally {
 			if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
 		}
 	}
 
-	private close(): void {
+	dispose(): void {
+		if (this.closed) return;
 		this.closed = true;
 		if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
 		this.refreshAbortController.abort();
@@ -246,8 +251,8 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			const bIsCurrent = modelsAreEqual(this.currentModel, b.model);
 			if (aIsCurrent && !bIsCurrent) return -1;
 			if (!aIsCurrent && bIsCurrent) return 1;
-			const aIsFavorite = isFavoriteModel(this.favoriteIds, a.fullId);
-			const bIsFavorite = isFavoriteModel(this.favoriteIds, b.fullId);
+			const aIsFavorite = isFavoriteModel(this.favoriteIdsAtOpen, a.fullId);
+			const bIsFavorite = isFavoriteModel(this.favoriteIdsAtOpen, b.fullId);
 			if (aIsFavorite && !bIsFavorite) return -1;
 			if (!aIsFavorite && bIsFavorite) return 1;
 			const providerCompare = a.provider.localeCompare(b.provider);
@@ -281,8 +286,14 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 	private filterModels(query: string): void {
 		this.filteredModels = query
-			? fuzzyFilter(this.activeModels, query, ({ id, provider, model }) =>
-					getModelSelectorSearchText({ id, provider, name: model.name }),
+			? rankModelSearchItems(
+					this.activeModels,
+					query,
+					({ id, provider, model }) => ({ id, provider, name: model.name }),
+					{
+						favoritesFirst: this.scope === "all",
+						isFavorite: (item) => isFavoriteModel(this.favoriteIdsAtOpen, item.fullId),
+					},
 				)
 			: this.activeModels;
 		// When filtering by a query, move the selector to the top row so the best
@@ -395,7 +406,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		}
 		// Escape or Ctrl+C
 		else if (kb.matches(keyData, "tui.select.cancel")) {
-			this.close();
+			this.dispose();
 			this.onCancelCallback();
 		}
 		// Pass everything else to search input
@@ -406,7 +417,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	}
 
 	private handleSelect(model: Model<any>): void {
-		this.close();
+		this.dispose();
 		// Save as new default
 		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
 		this.onSelectCallback(model);
@@ -418,8 +429,8 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 		const allModelIds = this.allModels.map((model) => model.fullId);
 		this.favoriteIds = toggleFavoriteModel(this.favoriteIds, allModelIds, selectedModel.fullId);
-		this.allModels = this.sortModels(this.allModels);
-		this.activeModels = this.scope === "narrowed" ? this.scopedModelItems : this.allModels;
+		// Row order is frozen for the session: no re-sort here. The marker
+		// re-renders from live favoriteIds via filterModels/updateList.
 		this.filterModels(this.searchInput.getValue());
 		const selectedIndex = this.filteredModels.findIndex((item) => item.fullId === selectedModel.fullId);
 		if (selectedIndex >= 0) {

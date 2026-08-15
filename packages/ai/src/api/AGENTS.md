@@ -1,5 +1,7 @@
 # packages/ai/src/api
 
+Generated: 2026-08-07. Commit `4f26b8282`.
+
 Provider wire protocol implementations and stream adapters. Each provider ships as a concrete module plus a `.lazy.ts` wrapper that uses `lazyApi()` from `lazy.ts`.
 
 ## MODULE PAIRS
@@ -18,7 +20,9 @@ Provider wire protocol implementations and stream adapters. Each provider ships 
 | `pi-messages.ts` | `pi-messages.lazy.ts` |
 | `openrouter-images.ts` | `openrouter-images.lazy.ts` |
 
-Utility modules with no lazy wrapper: `cloudflare.ts`, `github-copilot-headers.ts`, `openai-prompt-cache.ts`.
+Utility modules with no lazy wrapper: `cloudflare.ts`, `github-copilot-headers.ts`, `openai-prompt-cache.ts`, `anthropic-tool-pairs.ts` (browser-safe Anthropic tool_use/tool_result pair sanitizer; final pre-submit pass), `openai-client-auth.ts` (shared client-auth resolution from credential headers), `constrained-sampling.ts` (JSON-schema-driven constrained sampling helpers).
+
+`openai-codex-responses/` subdir: `fallback-state.ts` (WebSocket fallback state + cooldown), `reasoning.ts` (Codex reasoning summary normalizer).
 
 ## LAZY BOUNDARY
 
@@ -30,7 +34,10 @@ Utility modules with no lazy wrapper: `cloudflare.ts`, `github-copilot-headers.t
 
 - `simple-options.ts` `applyExtraBody()`: merges caller-supplied `extraBody` into a provider request, skipping keys in the provider's `reservedKeys` set. Never overwrite `model`, `messages`, `stream`, tool-call fields, or reasoning fields. Each provider declares its own `RESERVED_BODY_KEYS` set (e.g., `OPENAI_COMPLETIONS_RESERVED_BODY_KEYS`).
 - `transform-messages.ts`: cross-provider message coercion (image downgrade, tool-result flattening). Returns new structures; never mutates shared message arrays. Cross-model transforms drop incompatible opaque state (provider-native content that can't round-trip). Same-model provider-native state (Anthropic signed thinking, redacted thinking blocks, encrypted web-search state) is byte-sensitive and must be preserved exactly.
-- `openai-responses-shared.ts`: shared logic for both `openai-responses.ts` and `openai-codex-responses.ts`.
+- `openai-responses-shared.ts`: shared logic for both `openai-responses.ts` and `openai-codex-responses.ts`. Native
+  `image_generation_call` items are structurally reconciled here (not from the installed SDK type): partial-image
+  events are ignored, terminal output can backfill a missing done frame, and final base64 is aggregate-capped before
+  provider-native content leaves the parser.
 - `google-shared.ts`: shared logic for both `google-generative-ai.ts` and `google-vertex.ts`.
 
 ## PROVIDERSTREAMS CONTRACT

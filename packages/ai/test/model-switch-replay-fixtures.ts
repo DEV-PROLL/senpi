@@ -69,7 +69,9 @@ export const COMPLETIONS_COMPAT = {
 	openRouterRouting: {},
 	vercelGatewayRouting: {},
 	chatTemplateKwargs: {},
+	chatTemplateArgs: {},
 	zaiToolStream: false,
+	supportsThinkingTokenBudget: false,
 	supportsStrictMode: true,
 	supportsOpenAIGrammarTools: false,
 	toolSchemaFlavor: undefined,
@@ -77,6 +79,7 @@ export const COMPLETIONS_COMPAT = {
 	cacheControlFormat: "anthropic",
 	sendSessionAffinityHeaders: false,
 	sessionAffinityFormat: "openai",
+	supportsPromptCacheKey: false,
 	supportsLongCacheRetention: true,
 } satisfies Omit<
 	Required<OpenAICompletionsCompat>,

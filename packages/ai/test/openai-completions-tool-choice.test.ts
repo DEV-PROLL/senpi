@@ -275,7 +275,7 @@ describe("openai-completions tool_choice", () => {
 		expect("strict" in (tool ?? {})).toBe(false);
 	});
 
-	it("maps groq qwen3 reasoning levels to default reasoning_effort", async () => {
+	it("maps Groq Qwen reasoning levels to default reasoning_effort", async () => {
 		const model = getModel("groq", "qwen/qwen3.6-27b")!;
 		let payload: unknown;
 
@@ -1308,7 +1308,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("stores Qwen Token Plan reasoning replay compat in built-in metadata", () => {
-		const providers = ["qwen-token-plan", "qwen-token-plan-cn"] as const;
+		const providers = ["qwen-token-plan", "qwen-token-plan-cn", "qwen-token-plan-individual"] as const;
 
 		for (const provider of providers) {
 			const model = getModel(provider, "qwen3.7-max")!;
@@ -1477,6 +1477,7 @@ describe("openai-completions tool_choice", () => {
 				openRouterRouting: {},
 				vercelGatewayRouting: {},
 				chatTemplateKwargs: {},
+				chatTemplateArgs: {},
 				zaiToolStream: false,
 				supportsStrictMode: true,
 				supportsOpenAIGrammarTools: false,
@@ -1584,7 +1585,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("sends max_tokens for OpenCode completions models", async () => {
-		const cases = [getModel("opencode-go", "kimi-k2.6")!, getModel("opencode", "grok-build-0.1")!] as const;
+		const cases = [getModel("opencode-go", "kimi-k2.6")!, getModel("opencode", "kimi-k2.6")!] as const;
 
 		for (const model of cases) {
 			let payload: unknown;

@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
-import type { ScrollViewScrollbar } from "@earendil-works/pi-tui";
+import type { TuiMode as RendererTuiMode, ScrollViewScrollbar } from "@earendil-works/pi-tui";
 import { createHash, randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
@@ -9,6 +9,7 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { findNearestParentConfigDir } from "../nearest-parent-config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { envValue } from "./brand.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import {
 	type ResolvedHintPolicySettings,
@@ -23,8 +24,6 @@ export type { ProviderRetrySettings, RetrySettings } from "./retry-fallback/sett
 
 export const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
 export const DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS = 30_000;
-
-export type UiMode = "regular" | "fullscreen";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -46,6 +45,7 @@ export interface BranchSummarySettings {
 	skipPrompt?: boolean; // default: false - when true, skips "Summarize branch?" prompt and defaults to no summary
 }
 
+export type TuiMode = RendererTuiMode;
 export interface TerminalSettings {
 	showImages?: boolean; // default: true (only relevant if terminal supports images)
 	imageWidthCells?: number; // default: 60 (preferred inline image width in terminal cells)
@@ -65,14 +65,24 @@ export interface TerminalSettings {
 	monitorWakeBudget?: number; // default: 5 (consecutive monitor-only wake limit)
 }
 
+export interface PromptCacheKeepAliveSettings {
+	enabled?: boolean; // default: false
+	maxRequestsPerSession?: number; // default: 3
+	maxCostUsdPerSession?: number; // default: 0.05
+	marginSeconds?: number; // default: 60
+}
+
 export interface PromptCacheSettings {
 	cacheAwareTimeouts?: boolean; // default: true (size foreground tool waits by the model's prompt-cache TTL)
 	safetyBufferSeconds?: number; // default: 30 (headroom subtracted from the cache TTL)
+	goalBackstopMaxSeconds?: number; // default: 3570 (maximum Goal monitor continuation backstop)
+	keepAlive?: PromptCacheKeepAliveSettings;
 }
 
 export interface ImageSettings {
 	autoResize?: boolean; // default: true (resize images to 2000x2000 max for better model compatibility)
 	blockImages?: boolean; // default: false - when true, prevents all images from being sent to LLM providers
+	maxHistoricalImages?: number; // default: undefined (preserve existing transport behavior)
 }
 
 export interface LookAtSettings {
@@ -87,8 +97,11 @@ export interface ThinkingBudgetsSettings {
 	high?: number;
 }
 
+export type MermaidRenderingMode = "off" | "final" | "streaming";
+
 export interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
+	mermaid?: MermaidRenderingMode; // default: "streaming"
 }
 
 export interface OpenAISettings {
@@ -180,41 +193,42 @@ export interface Settings {
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Pi-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
-	uiMode?: UiMode; // default: "regular"
-	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular UI mode
+	tuiMode?: TuiMode; // default: "regular"
+	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular TUI mode
 }
 
-/**
- * Merge settings one object level deep: project/overrides take precedence.
- * Nested settings such as retry.fallbackChains replace wholesale per scope.
- */
-function deepMergeSettings(base: Settings, overrides: Settings): Settings {
-	const result: Settings = { ...base };
+function isMergeableObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-	for (const key of Object.keys(overrides) as (keyof Settings)[]) {
+function deepMergeObjects(base: Record<string, unknown>, overrides: Record<string, unknown>): Record<string, unknown> {
+	const result = { ...base };
+
+	for (const key of Object.keys(overrides)) {
 		const overrideValue = overrides[key];
-		const baseValue = base[key];
-
 		if (overrideValue === undefined) {
 			continue;
 		}
 
-		// For nested objects, merge recursively
-		if (
-			typeof overrideValue === "object" &&
-			overrideValue !== null &&
-			!Array.isArray(overrideValue) &&
-			typeof baseValue === "object" &&
-			baseValue !== null &&
-			!Array.isArray(baseValue)
-		) {
-			(result as Record<string, unknown>)[key] = { ...baseValue, ...overrideValue };
-		} else {
-			// For primitives and arrays, override value wins
-			(result as Record<string, unknown>)[key] = overrideValue;
-		}
+		const baseValue = base[key];
+		result[key] =
+			isMergeableObject(baseValue) && isMergeableObject(overrideValue)
+				? deepMergeObjects(baseValue, overrideValue)
+				: overrideValue;
 	}
 
+	return result;
+}
+
+/** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
+function deepMergeSettings(base: Settings, overrides: Settings): Settings {
+	const result = deepMergeObjects(base as Record<string, unknown>, overrides as Record<string, unknown>) as Settings;
+	if (overrides.retry?.fallbackChains !== undefined) {
+		result.retry = {
+			...result.retry,
+			fallbackChains: structuredClone(overrides.retry.fallbackChains),
+		};
+	}
 	return result;
 }
 
@@ -597,6 +611,24 @@ export class SettingsManager {
 
 	getProjectSettings(): Settings {
 		return structuredClone(this.projectSettings);
+	}
+
+	getPromptCacheGoalBackstopMaxSeconds(): number {
+		return (
+			this.projectSettings.promptCache?.goalBackstopMaxSeconds ??
+			this.globalSettings.promptCache?.goalBackstopMaxSeconds ??
+			3570
+		);
+	}
+
+	getPromptCacheKeepAliveSettings(): Required<PromptCacheKeepAliveSettings> {
+		const configured = this.settings.promptCache?.keepAlive;
+		return {
+			enabled: configured?.enabled ?? false,
+			maxRequestsPerSession: configured?.maxRequestsPerSession ?? 3,
+			maxCostUsdPerSession: configured?.maxCostUsdPerSession ?? 0.05,
+			marginSeconds: configured?.marginSeconds ?? 60,
+		};
 	}
 
 	isProjectTrusted(): boolean {
@@ -1473,7 +1505,7 @@ export class SettingsManager {
 		if (this.settings.terminal?.clearOnShrink !== undefined) {
 			return this.settings.terminal.clearOnShrink;
 		}
-		return process.env.PI_CLEAR_ON_SHRINK === "1";
+		return envValue("CLEAR_ON_SHRINK") === "1";
 	}
 
 	setClearOnShrink(enabled: boolean): void {
@@ -1498,13 +1530,13 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getUiMode(): UiMode {
-		return this.settings.uiMode === "fullscreen" ? "fullscreen" : "regular";
+	getTuiMode(): TuiMode {
+		return this.settings.tuiMode === "fullscreen" ? "fullscreen" : "regular";
 	}
 
-	setUiMode(mode: UiMode): void {
-		this.globalSettings.uiMode = mode;
-		this.markModified("uiMode");
+	setTuiMode(mode: TuiMode): void {
+		this.globalSettings.tuiMode = mode;
+		this.markModified("tuiMode");
 		this.save();
 	}
 
@@ -1534,6 +1566,11 @@ export class SettingsManager {
 
 	getBlockImages(): boolean {
 		return this.settings.images?.blockImages ?? false;
+	}
+
+	getMaxHistoricalImages(): number | undefined {
+		const value = this.settings.images?.maxHistoricalImages;
+		return Number.isInteger(value) && value !== undefined && value >= 0 ? value : undefined;
 	}
 
 	setBlockImages(blocked: boolean): void {
@@ -1592,7 +1629,7 @@ export class SettingsManager {
 	}
 
 	getShowHardwareCursor(): boolean {
-		return this.settings.showHardwareCursor ?? process.env.PI_HARDWARE_CURSOR === "1";
+		return this.settings.showHardwareCursor ?? envValue("HARDWARE_CURSOR") === "1";
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {
@@ -1633,6 +1670,18 @@ export class SettingsManager {
 
 	getCodeBlockIndent(): string {
 		return this.settings.markdown?.codeBlockIndent ?? "  ";
+	}
+
+	getMermaidRenderingMode(): MermaidRenderingMode {
+		const mode = this.settings.markdown?.mermaid;
+		return mode === "off" || mode === "final" ? mode : "streaming";
+	}
+
+	setMermaidRenderingMode(mode: MermaidRenderingMode): void {
+		this.globalSettings.markdown ??= {};
+		this.globalSettings.markdown.mermaid = mode;
+		this.markModified("markdown", "mermaid");
+		this.save();
 	}
 
 	getWarnings(): WarningSettings {

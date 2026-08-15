@@ -1,7 +1,7 @@
 # Senpi Repository Guide
 
-Generated: 2026-07-17
-Commit: `92fc96389`
+Generated: 2026-08-07
+Commit: `4f26b8282`
 Branch: `main`
 
 Metadata above records the source state used for this generation pass.
@@ -40,7 +40,11 @@ Senpi is an extension-first coding-agent monorepo. Keep changes scoped, preserve
 | `packages/agent/` | Browser-safe agent loop plus optional Node harness |
 | `packages/coding-agent/` | `senpi` CLI, sessions, extensions, RPC, interactive mode |
 | `packages/tui/` | Differential terminal renderer and editor primitives |
-| `packages/server/` | Experimental daemon, IPC, RPC-process supervision |
+| `packages/server/` | Composable, transport-neutral protocol server |
+| `packages/protocol/` | Transport-neutral CBOR protocol for remote pi sessions |
+| `packages/client/` | Transport-neutral client for remote pi sessions (framed CBOR) |
+| `packages/storage/` | Storage backends; `sqlite-node/` Node sqlite session store |
+| `packages/evals/` | Behavioral, model-backed eval suites over real `AgentSession` |
 | `packages/pty/` | TypeScript PTY loader, sessions, registry, pipe fallback |
 | `packages/senpi-codemode/` | Source-only persistent-kernel `eval` extension |
 | `crates/senpi-pty/` | Rust/N-API native PTY implementation and ABI owner |
@@ -64,6 +68,7 @@ Senpi is an extension-first coding-agent monorepo. Keep changes scoped, preserve
 | Change eval prompt/rendering | `packages/senpi-codemode/src/prompt/` and `src/tool/` |
 | Audit changelogs | `.github/agent/commands/cl.md` |
 | Prepare a release | `scripts/release.mjs` and `scripts/release-packages.mjs` |
+| Regenerate model catalog data | `packages/ai/src/providers/data/` via root `npm run hydrate:model-data` / `check:model-data` |
 
 ## CODE MAP
 
@@ -97,6 +102,7 @@ Persistent terminals -> packages/pty -> crates/senpi-pty
 - Changing fork-specific source behavior means reading the nearest `changes.md` first and updating it in the same verified increment, not in a follow-up.
 - Each entry records what changed, why, why an extension couldn't do it, and the expected merge-conflict zones. Merges resolve these files to `ours`, so a stale entry misleads the next upstream sync.
 - Changelog edits are release/audit work only. Follow `.github/agent/commands/cl.md` and never edit released sections.
+- PRs must satisfy the changelog gate (`.github/workflows/changelog-gate.yml`, `scripts/check-pr-changelog.mjs`).
 
 ## QUALITY GATES
 
@@ -113,6 +119,11 @@ Persistent terminals -> packages/pty -> crates/senpi-pty
 - The lockfile hook allows workspace-metadata-only refreshes; other lockfile changes require explicit `PI_ALLOW_LOCKFILE_CHANGE=1` approval.
 - Keep shared environment surfaces synchronized: dependency, Node, provider/env, QA-channel, build-command, and forwarded-port changes must update `scripts/devenv-setup.mjs`, `.devcontainer/devcontainer.json`, and related references together.
 - Regenerate `packages/coding-agent/publish-deps.lock.json` with `node scripts/generate-coding-agent-shrinkwrap.mjs`; never replace it with `npm-shrinkwrap.json`.
+- External registry entries in root, publish, and installer locks must preserve both npm tarball `resolved` URLs
+  and `integrity` hashes; incomplete merge results are invalid even when dependency topology still resolves.
+- `@earendil-works/pi-telemetry` is a runtime dependency and must stay in Senpi's owned CalVer alias, publish,
+  and bundle sets. `@earendil-works/pi-storage-sqlite-node` remains private and independently versioned because
+  it is not reachable from the shipped coding-agent runtime.
 - Dependencies with lifecycle scripts require package/version review and an explicit justified generator allowlist entry; never add one silently to pass the gate.
 
 ## GIT AND DELIVERY
@@ -127,6 +138,6 @@ Persistent terminals -> packages/pty -> crates/senpi-pty
 
 ## RELEASE NOTES
 
-- Releases use CalVer and lockstep-version nine packages listed in `scripts/release-packages.mjs`.
+- Releases use CalVer and lockstep-version the packages listed in `scripts/release-packages.mjs`.
 - Release only from clean `main` after changelog audit and local release smoke tests. `scripts/release.mjs` owns versioning, generated artifacts, checks, commits, tag, and push.
 - Never rerun the release script after its tag is pushed; failed publishing is retried from the existing tag workflow.

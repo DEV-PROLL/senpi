@@ -1,5 +1,19 @@
 # TUI delta rendering fork changes
 
+## 2026-08-14: replay above-viewport growth in the viewport-remap branch
+
+### What changed
+
+- When a frame's content grows above the viewport and a visible row also changes (`viewportTop !== prevViewportTop` with `lineCountDelta !== 0`), the renderer now falls back to the canonical `renderScrollbackReplay` / mux dispatch instead of repainting only the visible rows in place.
+
+### Why
+
+- The in-place repaint emitted exactly `height` rows and returned, so rows inserted above the viewport (e.g. Ctrl+O expanding several tool blocks in one frame) never reached terminal scrollback even though `setPreviousLines` marked them painted — leaving mismatched headers and truncated results. The replay path re-emits the full canonical transcript.
+
+### Expected merge conflict zones
+
+- LOW: `tui.ts` the `viewportTop !== prevViewportTop` branch; LOW in `tui-render.test.ts`.
+
 ## 2026-08-05: dead-terminal raw-mode restoration is best-effort during shutdown
 
 ### What changed

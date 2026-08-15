@@ -26,17 +26,20 @@ export class SessionCommandRouter {
 		"cwd" | "permissionPreset" | "creationModel" | "initialThinkingLevel"
 	>;
 	private readonly createBinding: typeof createRpcSessionBinding;
+	private readonly connectionOptions: Parameters<typeof createRpcSessionBinding>[4];
 
 	constructor(
 		registry: RpcSessionRegistry,
 		writer: SessionEventWriter,
 		defaults: Pick<RpcSessionLaunchProfile, "cwd" | "permissionPreset" | "creationModel" | "initialThinkingLevel">,
 		createBinding: typeof createRpcSessionBinding = createRpcSessionBinding,
+		connectionOptions: Parameters<typeof createRpcSessionBinding>[4] = {},
 	) {
 		this.registry = registry;
 		this.writer = writer;
 		this.defaults = defaults;
 		this.createBinding = createBinding;
+		this.connectionOptions = connectionOptions;
 	}
 
 	async handle(command: RpcCommand): Promise<RpcResponse | undefined> {
@@ -111,6 +114,7 @@ export class SessionCommandRouter {
 					entry,
 					this.writer,
 					() => void this.close({ type: "close_session", sessionId: openedSession.sessionId }),
+					this.connectionOptions,
 				),
 			);
 			const state = entry.runtime!.session;
@@ -175,7 +179,9 @@ export class SessionCommandRouter {
 	}
 
 	private code(cause: unknown): string {
-		if (cause instanceof RpcSessionRegistryError) return cause.code;
+		if (cause instanceof RpcSessionRegistryError) {
+			return cause.code === RPC_ERROR_OPEN_FAILED ? cause.message : cause.code;
+		}
 		if (cause instanceof Error && [RPC_ERROR_UNKNOWN_SESSION, RPC_ERROR_SESSION_CLOSING].includes(cause.message)) {
 			return cause.message;
 		}

@@ -1,5 +1,117 @@
 # changes
 
+## Pin classic RPC delta batching and immediate barriers (2026-08-14)
+
+### What changed
+
+- Characterization coverage now proves 1000 classic delta-only `message_update` records remain complete while sharing one same-tick raw write.
+- Event, extension-UI request, event, and response ordering is pinned across consecutive immediate-write barriers.
+- Classic connection-handler backpressure remains deliberately attached to every agent-loop event.
+
+### Why
+
+- Classic RPC projects cumulative assistant updates into delta-only public wire records. Those deltas cannot be compacted safely, so per-event backpressure is its flow control and must not be removed as part of the multi-session writer redesign.
+- `RpcClient` consumers depend on the documented delta sequence and on immediate UI/response records never overtaking pending events.
+
+### Why extension system couldn't handle this
+
+- Classic JSONL projection, batching, and agent-loop backpressure are built-in RPC transport contracts below extension hooks.
+
+### Expected merge conflict zones
+
+- LOW: characterization-only additions in `rpc-event-coalescing.test.ts`.
+- NONE: classic runtime code remains unchanged.
+
+## Single-flight multi-session RPC drain and control lane (2026-08-14)
+
+### What changed
+
+- The multi-session writer now hands exactly one complete record to stdout, awaits backpressure, and then selects the next ready session in round-robin order.
+- Untagged host responses use a dedicated non-coalescing control lane, and shutdown waits for all retained and in-flight records before flushing raw stdout.
+- Deterministic buffered-record/byte counters include the in-flight record, control enqueues resolve after their own backpressure boundary, and permanent stdout failures reject the active drain and pending control completions.
+
+### Why
+
+- Direct host response writes could bypass session ordering, while synchronous queue draining still fed an unbounded downstream promise chain during stdout stalls.
+- Keeping the backlog in typed lanes lets per-session compaction remain effective and prevents one busy session from monopolizing the raw writer.
+
+### Why extension system couldn't handle this
+
+- Process-wide stdout ownership, host control responses, session fairness, and shutdown flushing are built-in RPC transport responsibilities.
+
+### Expected merge conflict zones
+
+- HIGH: `session-event-writer.ts` drain lifecycle and constructor contract.
+- MEDIUM: `multi-session-host.ts` output and shutdown wiring.
+- LOW: deterministic multi-session drain tests.
+
+## Compact cumulative multi-session RPC events per session (2026-08-14)
+
+### What changed
+
+- Multi-session RPC queues now retain structured records until drain time and compact cumulative assistant snapshots within each session and ordering segment.
+- Superseded full snapshots keep their delta while replacing cumulative `message` and `partial` fields with present `null` values; adjacent compatible deltas merge, and the newest update remains the sole full snapshot.
+- Tool progress is latest-wins per tool-call id, with retained updates appended in occurrence order. Protocol, lifecycle, error, delta-only, and unknown records remain barriers and are never coalesced.
+
+### Why
+
+- Long cumulative assistant snapshots produced quadratic queued bytes when a desktop RPC reader stalled, causing visible freezes followed by large output bursts.
+- Delta content and transition boundaries must remain lossless, while repeated cumulative snapshots and accumulated tool progress are redundant before they reach stdout.
+
+### Why extension system couldn't handle this
+
+- Session tagging, JSONL framing, and pending stdout scheduling are owned by the built-in multi-session RPC transport below extension hooks.
+
+### Expected merge conflict zones
+
+- MEDIUM: `session-event-writer.ts` queue representation, compaction keys, and drain serialization.
+- LOW: focused multi-session event-writer tests.
+
+## Extension request RPC command (2026-08-12)
+
+### What changed
+
+- Added the session-scoped `extension_request` command and structured success/error response.
+- `RpcClient.requestExtension()` exposes the command through the public client.
+- Existing multi-session routing tags the response with the owning `sessionId`.
+
+### Why
+
+- Capability-gated `extension_event` records cover extension-to-client state, but interactive
+  extension controls also need a direct client-to-extension request path that does not become a
+  model prompt.
+
+### Why extension system couldn't handle this
+
+- Request ids, multi-session routing, JSONL response serialization, and public client correlation
+  are owned by the built-in RPC transport.
+
+### Expected merge conflict zones
+
+- MEDIUM: `rpc-types.ts`, `connection-handler.ts`, and `rpc-client.ts`.
+
+## Multi-session open failure details (2026-08-07)
+
+### What changed
+
+- Multi-session `open_session` failures retain the typed `open_failed` registry code while returning the underlying
+  error message on the wire as `open_failed: <reason>` when one is available.
+- All other stable RPC error codes remain exact strings without detail suffixes.
+
+### Why
+
+- The registry rollback path discarded the runtime/session construction error, leaving RPC clients with a bare
+  `open_failed` response that did not identify invalid workspace directories or other actionable causes.
+
+### Why extension system couldn't handle this
+
+- Multi-session lifecycle errors and JSONL response serialization are owned by the built-in RPC transport and are not
+  exposed through extension hooks.
+
+### Expected merge conflict zones
+
+- LOW: `session-registry.ts` error construction and `session-command-router.ts` registry-error serialization.
+
 ## high_reasoning_warning RPC event (2026-07-30)
 
 - New `RpcHighReasoningWarningEvent` contract (`{ type: "high_reasoning_warning"; modelId; provider; thinkingLevel }`), auto-published to RPC stdout via the existing `session.subscribe -> outputEvent` seam. No new wiring; the event is a session event forwarded like `thinking_level_changed`.
@@ -209,3 +321,23 @@ fork change here is a merge-conflict surface on upstream syncs.
 
 - MEDIUM: `connection-handler.ts` command dispatch and `rpc-types.ts` response unions.
 - LOW: `rpc-client.ts` model metadata and `docs/rpc.md` protocol reference.
+
+## Capability-gated extension events reach classic and multi-session clients (2026-08-11)
+
+RPC clients advertising `extension_events` now receive additive
+`extension_event { name, data }` records. Unflagged clients remain byte-identical. Multi-session mode
+parses `SENPI_RPC_CLIENT_CAPABILITIES`, threads capabilities through `SessionCommandRouter` and
+`createRpcSessionBinding`, and preserves the owning routing `sessionId` on emitted records.
+
+## Session-start extension events are subscribed before binding (2026-08-11)
+
+Capability-gated extension RPC listeners now attach before `bindExtensions()` dispatches
+`session_start`. This preserves initial atomic extension snapshots such as native task state while
+keeping rebind cleanup generation-safe; subscribing after binding deterministically dropped those
+events.
+## Public RPC client exposes extension events (2026-08-11)
+
+`RpcClientEvent`, `RpcEventListener`, the modes barrel, and the package root now include
+`RpcExtensionEvent`, so capability-enabled SDK consumers can narrow and validate generic extension
+records. The extension and RPC guides document `pi.rpc.emit`, capability environment variables, the
+wire shape, multi-session tagging, and payload validation responsibilities.

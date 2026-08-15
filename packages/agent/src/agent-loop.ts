@@ -341,6 +341,7 @@ async function runLoop(
 							: nextTurnSnapshot.thinkingLevel === "off"
 								? undefined
 								: nextTurnSnapshot.thinkingLevel,
+					abortServerSideFallback: nextTurnSnapshot.abortServerSideFallback ?? config.abortServerSideFallback,
 				};
 			}
 			if (signal?.aborted) {
@@ -968,7 +969,10 @@ async function prepareToolCall(
 		};
 	}
 
-	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
+	let tool = currentContext.tools?.find((candidate) => candidate.name === toolCall.name);
+	if (!tool && config.resolveUnknownToolCall) {
+		tool = await config.resolveUnknownToolCall(toolCall.name, currentContext);
+	}
 	if (!tool) {
 		const hint = config.removedToolHints?.[toolCall.name];
 		return {
@@ -1003,10 +1007,14 @@ async function prepareToolCall(
 				};
 			}
 			if (beforeResult?.block) {
+				const result = createErrorToolResult(beforeResult.reason || "Tool execution was blocked");
+				if (beforeResult.terminate === true) {
+					result.terminate = true;
+				}
 				return {
 					kind: "immediate",
 					toolCall,
-					result: createErrorToolResult(beforeResult.reason || "Tool execution was blocked"),
+					result,
 					isError: true,
 				};
 			}

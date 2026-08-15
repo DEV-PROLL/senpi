@@ -1,5 +1,351 @@
 # changes
 
+## Admit provider-owned compaction lanes (2026-08-14)
+
+### What changed
+
+- `CompactionRejectionCause` now includes `external-owner`, with an exhaustive fallback description for rejection
+  events that do not carry an extension reason.
+- `AgentSession` treats a failed `external-owner` compaction as delegated only while the lifecycle's recorded model
+  provider matches the active provider. Delegated failures neither throw `RequiredCompactionError`, block final or
+  retry admission, nor arm `_blockedPostCompactionAssistant`.
+- Circuit-breaker cooldown semantics remain unchanged: its final-admission bypass still requires the post-attempt
+  estimate to fall below the threshold, while delegated lanes may proceed despite Senpi's unreliable oversize
+  estimate.
+
+### Why
+
+- SDK-native provider lanes compact inside the admitted query. Rejecting the core compaction route is an ownership
+  handoff, not a failed prerequisite, so stopping before provider dispatch prevents the component that owns
+  compaction from doing its work.
+- Failed lifecycle state survives model selection. Matching the recorded provider prevents a delegated rejection
+  from one provider from suppressing required-compaction errors after switching to another provider.
+
+### Why an extension could not handle it
+
+- Required-compaction admission, retry gating, lifecycle model identity, and blocked-assistant recovery are private
+  `AgentSession` state. An extension can report ownership but cannot alter these core gates.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts`, around required-compaction admission, final provider admission, post-compaction blocking,
+  scheduled continuation revalidation, and retry admission.
+- LOW: `extensions/types.ts`, in the shared compaction rejection-cause union.
+
+## Catalog listing and atomic fallback-chain overrides (2026-08-13)
+
+### What changed
+
+- `--list-models` reads the registered model snapshot without filtering out
+  models whose credentials are not configured.
+- Project `retry.fallbackChains` replaces the global map atomically while
+  sibling retry settings continue to merge recursively.
+- Native provider replacement synchronizes its composed OAuth adapter into the
+  credential store, preserving auth-derived request metadata such as Copilot
+  enterprise base URLs.
+- Core summarization resolves stored provider auth before invoking SDK-style or
+  custom stream wrappers, so account-specific request metadata is not replaced
+  by a legacy catalog key.
+
+### Why
+
+- Model listing is a discovery fast path used before login.
+- Fallback chains are ordered policy maps; retaining unrelated global keys
+  changes project-specific retry behavior.
+
+### Why an extension could not handle it
+
+- CLI fast-path model discovery and settings precedence run before extensions.
+- OAuth adapter composition belongs to the core model runtime and credential
+  store boundary.
+- Summarization auth is assembled inside `AgentSession` before extensions or
+  stream wrappers receive the request.
+
+### Expected merge conflict zones
+
+- LOW: `cli/list-models.ts`, around catalog selection.
+- MEDIUM: `settings-manager.ts`, around global/project deep merge behavior.
+- MEDIUM: `model-runtime.ts`, around native provider registration and OAuth
+  adapter replacement.
+- MEDIUM: `agent-session.ts`, around summarization request auth.
+
+## Compaction terminal-state and retry recovery parity (2026-08-13)
+
+### What changed
+
+- Successful manual compaction now clears its controller before publishing
+  `compaction_end`, so listeners observe a terminal state and may queue prompts.
+- Prompt admission failures during manual compaction report
+  `preflightResult(false)`.
+- Recoverable length-stopped assistants are removed before the post-compaction
+  continuation, matching error-stopped recovery.
+- Summarization reuses an active request API key for ordinary key-auth providers
+  while preserving stored OAuth resolution and its account-specific base URL.
+
+### Why
+
+- The merged lifecycle emitted completion while `isCompacting` was still true,
+  omitted the preflight rejection callback, and retained truncated assistants
+  that prevented the scheduled retry from reaching the provider.
+
+### Why an extension could not handle it
+
+- Prompt admission, lifecycle publication, and continuation message ownership
+  are private `AgentSession` state transitions.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts`, around `isCompacting`, `prompt()`, successful
+  `_executeCompaction()` completion, and `_runAutoCompaction()` continuation.
+
+## Node built-in auth-storage timer import (2026-08-13)
+
+### What changed
+
+- Normalized the auth-storage retry delay import to `node:timers/promises`.
+
+### Why
+
+- Vitest's module runner can resolve bare `timers/promises` relative to an
+  aliased package root, breaking codemode suites that import the coding-agent
+  source graph.
+
+### Why an extension could not handle it
+
+- Auth storage is loaded as core module code before extensions can intercept
+  module resolution.
+
+### Expected merge conflict zones
+
+- LOW: `auth-storage.ts`, in the Node timer import used by bounded retries.
+
+## Historical image transport limits (2026-08-12)
+
+### What changed
+
+- Added `images.maxHistoricalImages` to limit how many images from completed
+  turns are replayed to providers.
+- Images in the active turn remain intact. Older images are replaced only in
+  the provider request payload with the existing recoverable elision marker;
+  persisted session history is unchanged.
+
+### Why
+
+- Long coding sessions could resend tens of megabytes of already-processed
+  screenshots on every request, increasing upload cost and vision prefill even
+  when the active turn contained no image.
+- The setting is opt-in and removing it restores the previous replay behavior.
+
+### Why an extension could not handle it
+
+- Elision runs inside the core-owned transport conversion before provider
+  dispatch and below extension payload hooks.
+- The `images.*` setting and the request conversion are both core `Settings`
+  and SDK responsibilities.
+
+### Expected merge conflict zones
+
+- MEDIUM: `messages.ts`, in the historical-image counting and elision loop.
+- LOW: `settings-manager.ts`, in the `images.*` schema and getter.
+- MEDIUM: `sdk.ts`, where `convertToLlmForTransport()` forwards the limit into
+  the upstream-owned block-image conversion path.
+
+## Extension OAuth runtime credential overlay (2026-08-13)
+
+### What changed
+
+- Preserved `asExtensionOAuthRegistry`, which overlays extension-registered
+  OAuth providers onto the core runtime credential registry.
+
+### Why
+
+- Builtin and third-party OAuth extensions need to participate in model
+  credential resolution without replacing the core credential store.
+
+### Why an extension could not handle it
+
+- The overlay is the core boundary that turns extension registrations into the
+  credential interface consumed by model runtime and auth preflight.
+
+### Expected merge conflict zones
+
+- LOW: `runtime-credentials.ts`, around the registry wrapper and provider
+  lookup delegation.
+
+## OpenGateway display name for /login (2026-08-12)
+
+### What changed
+
+- `BUILT_IN_PROVIDER_DISPLAY_NAMES` maps `opengateway` to `OpenGateway`, which makes the new
+  built-in provider API-key eligible in the `/login` and `/logout` selectors on both the TUI and
+  RPC provider lists.
+- `defaultModelPerProvider` gains the required `opengateway` entry (`moonshotai/kimi-k3`) so the
+  exhaustive `Record<KnownProvider, string>` map stays total.
+
+### Why
+
+- `isApiKeyLoginProvider()` treats a built-in model provider without a display name as ineligible
+  for API-key login; the display-name entry is the single switch that exposes the provider.
+
+### Expected merge conflict zones
+
+- LOW: `provider-display-names.ts` display-name map.
+
+
+## Retire extension generations after reload notifications (2026-08-12)
+
+### What changed
+
+- Session reload invalidates the previous `ExtensionRunner` after removed-extension notifications
+  have been delivered, including when notification delivery throws.
+
+### Why
+
+- Reload replaced the active runner but left captured references to the previous generation callable.
+  Invalidating after the final old-generation lifecycle event preserves notification behavior while
+  closing later request registration, emission, and dispatch.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session.ts` reload lifecycle ordering.
+
+## Standalone binary codemode sidecar resolution (2026-08-11)
+
+### What changed
+
+- `resource-loader.ts` now loads codemode through a statically imported
+  extension factory in compiled Bun binaries, while retaining an explicit
+  `node_modules/@code-yeongyu/senpi-codemode/package.json` sidecar lookup for
+  source/runtime assets and non-compiled package resolution.
+- Source and npm installations retain their existing workspace/package
+  resolution paths and builtin ordering.
+- Standalone relocation smoke now initializes classic RPC and requires one
+  enabled `codemode` extension at `<builtin:codemode>` in
+  `get_loaded_surfaces`.
+
+### Why this cannot be expressed externally
+
+- Bun's compiled `$bunfs` `createRequire()` cannot resolve an external package
+  beside the executable, and Jiti-loaded sidecar source cannot resolve its
+  package dependencies back into the compiled host. The trusted
+  builtin-adjacent loader must embed the factory while the distribution keeps
+  worker and prelude assets beside the executable.
+
+### Expected merge conflict zones
+
+- HIGH: `resource-loader.ts` around bundled builtin package resolution.
+- LOW: standalone binary relocation smoke coverage.
+
+## Preserve extension OAuth availability checks (2026-08-11)
+
+### What changed
+
+- Extension provider OAuth configs can expose the additive `check()` availability hook from `pi-ai`.
+- `provider-composer.ts` carries that hook through `adaptOAuth()` so the canonical model runtime can classify stored
+  sentinel credentials and ambient OAuth sources without provider-specific core branches.
+
+### Why this cannot be expressed externally
+
+- Extension registration is normalized into canonical provider auth inside the core composer; without this adapter
+  field, the provider's hook is discarded before `Models.checkAuth()` runs.
+
+### Expected merge conflict zones
+
+- LOW: the additive `ExtensionOAuthConfig.check` field and `adaptOAuth()` spread in `provider-composer.ts`.
+
+## Refresh server-fallback policy for active-turn model changes (2026-08-10)
+
+### What changed
+
+- `AgentSession` now recomputes `abortServerSideFallback` in its next-turn refresh snapshot from the live retry
+  settings and the newly active model's configured fallback chain.
+- Favorite-model cycling during tool execution previously changed the next request's model but left the agent loop's
+  run-start server-fallback option unchanged. A Fable request entered from an unchained model could therefore accept
+  and persist Anthropic's provider-native Fable-to-Opus fallback instead of routing the refusal through Senpi's
+  configured chain.
+- The explicit `retry.abortServerSideFallback: false` opt-out remains false after the same in-turn model cycle.
+- Coverage reproduces the real request order with a faux tool: unchained model request, favorite cycle during tool
+  execution, then a chained-model continuation.
+
+### Why this cannot be expressed externally
+
+- Extensions can trigger or observe model selection, but the live provider option is assembled by agent-core from the
+  session's next-turn snapshot before the continuation request is sent.
+
+### Expected merge conflict zones
+
+- LOW: `_installAgentNextTurnRefresh()` next-turn snapshot fields in `agent-session.ts`.
+- LOW: `server-fallback-abort-option.test.ts` continuation-policy coverage.
+
+## Extension filesystem policy binding (2026-08-09)
+
+### What changed
+
+- `AgentSession._buildRuntime()` composes factory-registered filesystem policies once and injects the resulting optional
+  checker into Senpi's six built-in file tools.
+- Policy absence produces `undefined`, preserving the previous runtime path without per-call extension dispatch.
+
+### Why this cannot be expressed externally
+
+- Only the session runtime constructs the canonical built-in tool definitions and can install a checker below
+  permission/approval hooks while keeping extension-overridden custom tools separate.
+
+### Expected merge conflict zones
+
+- LOW: `_buildRuntime()` around extension result loading and `createAllToolDefinitions()` options.
+
+## Prompt-cache keep-alive and goal backstop settings (2026-08-09)
+
+### What changed
+
+- `settings-manager.ts` gained `promptCache.goalBackstopMaxSeconds` (default 3570) capping the
+  cache-derived goal continuation backstop, and `promptCache.keepAlive`
+  (`enabled` default false, `maxRequestsPerSession` 3, `maxCostUsdPerSession` 0.05,
+  `marginSeconds` 60) governing the opt-in `cache-keepalive` builtin extension.
+
+### Why not an extension
+
+- Both live on `Settings`, which is core-owned; extensions read them through
+  `ExtensionContext`, they cannot declare new persisted settings keys themselves.
+
+### Merge-conflict zones
+
+- `PromptCacheSettings` interface and the corresponding getters in `settings-manager.ts`.
+
+## Dispatch extension commands before settled session work (2026-08-09)
+
+### What changed
+
+- Registered extension slash commands now dispatch at the head of `AgentSession.prompt()`, after any
+  in-flight user-abort wait but before prompt-start ownership and the settled-session-work gate.
+- A synchronous command lookup avoids adding an await or widening prompt-start admission for unknown
+  leading-slash text. Handled commands preserve the existing `promptDisposition("handled")` and
+  `preflightResult(true)` callbacks; post-handler cancellation reports `preflightResult(false)` and
+  rethrows.
+
+### Why
+
+- Extension commands are UI actions, not prompts. Serializing them behind compaction or the
+  session-work barrier delayed command output until an active continuation run ended, even though
+  the same commands were intended to execute immediately.
+
+### Accepted behavior deltas
+
+- Idle extension commands now skip `_maybeRestoreFallbackPrimary()`. `/fast` and `/fallback` may
+  observe a fallback model whose cooldown has expired; the primary is still restored by the next
+  real prompt.
+- In print mode, a slash command in a scripted `-m` message list executes immediately rather than
+  after pending continuations.
+- App-server handled-command turn lifecycle behavior is unchanged, but command handling can now
+  complete earlier relative to its pre-existing started/user-message events.
+
+### Why this cannot be expressed externally
+
+- The settled-work admission gate and prompt-start bookkeeping live inside `AgentSession.prompt()`;
+  an extension command handler cannot run until core dispatch reaches it.
+- Expected merge-conflict zone: `agent-session.ts` at the head of `prompt()` around user-abort,
+  extension-command dispatch, prompt-start ownership, and settled-work admission.
+
 ## Degrade fallback-unavailable 429s to in-turn retry (2026-08-06)
 
 ### What changed
@@ -1595,3 +1941,15 @@ If upstream modifies any compaction route (manual, threshold, overflow, pre-prom
 ### Expected merge conflict zones
 
 - HIGH: `agent-session.ts` prompt serialization and fallback model-switch logic.
+
+## Extension event bus follows the loaded generation into runtime (2026-08-11)
+
+`LoadExtensionsResult` now retains the event bus used to construct extension APIs, and
+`AgentSession` passes that exact bus into `ExtensionRunner`. RPC subscriptions must bind to this
+generation-owned bus rather than an unrelated runtime or resource-loader instance, especially after
+extension reloads. Test extension results preserve the same ownership contract.
+## Preserve extension event bus after project trust resolution (2026-08-11)
+
+The trusted/untrusted extension result composition now carries forward the shared event bus used by
+both pre-trust and remaining extensions. Dropping it caused `ExtensionRunner` to allocate an
+unrelated fallback bus, silently disconnecting `pi.rpc.emit` on trust-requiring projects.

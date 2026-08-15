@@ -1,5 +1,133 @@
 # Changes
 
+## 2026-08-13 - Summary-safe branch compaction text
+
+### What changed and why
+
+- Branch summarization and compaction use `contentTextForSummary()` instead of
+  the portable-only AI `contentText()` helper.
+- Provider-native replay blocks must be filtered while preserving the text that
+  belongs in a durable branch summary.
+
+### Why the extension system could not handle this
+
+- Harness compaction constructs the summary request before any coding-agent
+  extension can inspect or rewrite the session entry payload.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `harness/compaction/branch-summarization.ts`, in
+  `generateBranchSummary()` content extraction.
+- LOW: `harness/compaction/utils.ts`, where the summary-safe helper is defined.
+
+## 2026-08-13 - Upstream harness type cleanup
+
+### What changed and why
+
+- Removed an unused compaction image type import and adopted optional-chain narrowing in reducer and session-state
+  guards introduced by the upstream harness v2 merge.
+- Runtime behavior is unchanged; the edits make the merged harness pass the repository's warning-as-error gate.
+
+### Why the extension system could not handle this
+
+- These are internal harness compiler and lint boundaries, evaluated before any coding-agent extension loads.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: harness compaction imports, reducer assistant-entry guards, and session fork-target validation.
+
+## 2026-08-11 - Resolve eligible inactive tools at model call time
+
+### What changed and why
+
+- `AgentLoopConfig.resolveUnknownToolCall` is consulted before the existing unknown-tool result is emitted.
+- A host may return a newly activated tool, which then follows the normal argument validation, hooks, execution, and result lifecycle.
+- Returning `undefined` preserves the existing `Tool <name> not found` behavior byte-for-byte.
+
+### Why the extension system could not handle this
+
+- Unknown tool names were rejected inside the low-level agent loop before coding-agent tool hooks or extension callbacks ran.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `types.ts` next to tool-loop callback configuration.
+- LOW: `agent-loop.ts` unknown-tool preparation branch.
+- LOW: `agent.ts` loop-config forwarding.
+
+## 2026-08-11 - Windows process-tree kill survives an unresolvable taskkill
+
+### What changed and why
+
+- `harness/env/nodejs.ts`: the Windows branch of the harness `killProcessTree` moved into the exported
+  `killWindowsProcessTree`, which walks the ordered launcher list from the new `windowsTaskkillCandidates` export
+  (every existing absolute `System32` / `Sysnative` `taskkill.exe`, then the bare PATH-resolved name), runs each with
+  `spawnSync` under a 5s timeout, and only degrades to `process.kill(pid)` when no launcher starts at all.
+- `spawn("taskkill", ...)` resolves through PATH and reports a failed lookup asynchronously on the child's `error`
+  event, so the surrounding `try`/`catch` never observed it. Without a listener Node re-emits ENOENT as an uncaught
+  exception, killing the host process instead of the target tree whenever PATH had lost `%SystemRoot%\System32`.
+- The kill is synchronous so a caller that tears down and exits in the same tick still terminates its children;
+  `spawnSync` also reports a failed lookup on its returned `error` field instead of emitting it. The direct
+  `process.kill` stays a last resort because `TerminateProcess` leaves descendants orphaned.
+- The same fix lands in `packages/coding-agent/src/utils/shell.ts`; the two harnesses keep independent copies of this
+  helper as they already do for `getShellEnv` and bash resolution.
+
+### Why the extension system could not handle this
+
+- The kill runs inside the Node harness's own process supervision, below every extension hook.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: the Windows branch of `killProcessTree` and the `node:child_process` / `node:fs` import lines in
+  `harness/env/nodejs.ts`.
+
+## 2026-08-10 - Refresh server-fallback policy between tool turns
+
+### What changed and why
+
+- `AgentLoopTurnUpdate` can now replace `abortServerSideFallback` together with the model and thinking level before
+  the next provider request in an active run.
+- `agent-loop.ts` applies the refreshed value when rebuilding its request config after tool execution. Previously the
+  loop snapshotted the option at run start, so a host that changed models mid-turn could send the next request with
+  the prior model's server-fallback policy.
+- An explicit `false` remains authoritative because the update uses nullish fallback rather than truthiness.
+
+### Why the extension system could not handle this
+
+- The provider options object is owned and snapshotted inside agent-core before extensions observe the next request;
+  only the loop can replace request policy between tool turns.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `types.ts` `AgentLoopTurnUpdate`.
+- LOW: `agent-loop.ts` next-turn config replacement.
+
+## 2026-08-09 - Recover invisible text-protocol assistant stops
+
+### What changed and why
+
+- Empty-assistant recovery now covers every model selected for text-tool-call recovery or configured with a text tool
+  format, expanding the previous Kimi-only gate to Claude, ANTML, Hermes, morph-XML, YAML-XML, Gemma delimiters, and
+  other configured text protocols. A `stop` turn with no visible text and no tool call is discarded and retried once;
+  a second invisible stop retains the existing explicit `Model returned an empty response twice` failure.
+- Both the completed-message gate and the first-visible-event gate use pi-ai's shared Unicode visibility predicates.
+  Unicode format-only deltas such as the U+200B block emitted by the Apitopia Kimi-K3 gateway remain buffered, so
+  malformed thinking/tool-marker events from the discarded attempt never reach subscribers.
+- The approved universal gate was narrowed after the full-suite audit: buffering all model streams suppressed ordinary
+  thinking updates, changed provider stream-start/idle-timeout semantics, and prevented coding-agent TTSR from
+  observing and aborting malformed reasoning streams. Plain native-protocol models therefore keep direct streaming,
+  while every model exposed to the text-protocol failure mode receives bounded recovery.
+- Healthy visible text, tool calls, and non-`stop` terminal states retain their existing pass-through behavior.
+
+### Why the extension system could not handle this
+
+- Provider stream buffering and retry happen inside agent-core before message-update events are forwarded or an
+  assistant turn is committed; extensions cannot retract leaked attempt-one events or replace the committed turn.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: `empty-assistant-recovery.ts` visibility checks and stream wrapper gate.
+- LOW: `agent-loop.ts` at the recovery wrapper call site.
+
 ## 2026-07-30 - Bound empty Kimi assistant responses
 
 ### What changed and why

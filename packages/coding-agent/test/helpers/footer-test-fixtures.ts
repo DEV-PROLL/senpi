@@ -84,16 +84,18 @@ export function createFooterSession(options: FooterSessionOptions): AgentSession
 		},
 		getContextUsage: () => ({ contextWindow: 200_000, percent: 12.3 }),
 		isFastModeActive: () => options.fastModeActive ?? false,
-		modelRuntime: { isUsingOAuth: () => false },
+		modelRuntime: {
+			isUsingOAuth: () => false,
+			isUsingSubscription: () => false,
+		},
 	} as unknown as AgentSession;
 }
 
-export function createFooterData(providerCount: number, omoNative = false): ReadonlyFooterDataProvider {
+export function createFooterData(providerCount: number): ReadonlyFooterDataProvider {
 	return {
 		getGitBranch: () => "main",
 		getExtensionStatuses: () => new Map<string, string>(),
 		getAvailableProviderCount: () => providerCount,
 		onBranchChange: () => () => {},
-		isOmoNative: () => omoNative,
 	};
 }

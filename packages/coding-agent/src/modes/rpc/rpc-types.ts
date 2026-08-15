@@ -76,8 +76,10 @@ type RpcSessionCommand =
 	// Messages
 	| { id?: string; type: "get_messages" }
 
-	// Commands (available for invocation via prompt)
+	// Commands and loaded runtime surfaces
 	| { id?: string; type: "get_commands" }
+	| { id?: string; type: "get_loaded_surfaces" }
+	| { id?: string; type: "extension_request"; name: string; data?: unknown }
 
 	// Auth (task 13) is additive. get_auth_providers, login_api_key and logout
 	// answer synchronously. login_start responds immediately (flow-started) and
@@ -183,6 +185,34 @@ export interface RpcSlashCommand {
 	source: "extension" | "prompt" | "skill";
 	/** Source metadata for the owning resource */
 	sourceInfo: SourceInfo;
+}
+
+/** One extension module loaded by the session resource loader. */
+export interface RpcLoadedExtension {
+	name: string;
+	path: string;
+	sourceInfo: SourceInfo;
+	enabled: boolean;
+}
+
+export type RpcMcpServerStatus =
+	| "enabled"
+	| "disabled"
+	| "untrusted"
+	| "idle"
+	| "connecting"
+	| "connected"
+	| "degraded"
+	| "suspended"
+	| "needs_auth"
+	| "needs_client_registration";
+
+/** Runtime MCP server state projected from the session-owned MCP service. */
+export interface RpcLoadedMcpServer {
+	name: string;
+	toolCount: number;
+	status: RpcMcpServerStatus;
+	authStatus: "unsupported" | "notLoggedIn" | "bearerToken" | "oAuth";
 }
 
 // ============================================================================
@@ -346,13 +376,27 @@ export type RpcResponse =
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
 
-	// Commands
+	// Commands and loaded runtime surfaces
 	| {
 			id?: string;
 			type: "response";
 			command: "get_commands";
 			success: true;
 			data: { commands: RpcSlashCommand[] };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_loaded_surfaces";
+			success: true;
+			data: { extensions: RpcLoadedExtension[]; mcpServers: RpcLoadedMcpServer[] };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "extension_request";
+			success: true;
+			data: unknown;
 	  }
 
 	// Auth (task 13)
@@ -429,6 +473,12 @@ export type RpcExtensionUIRequest =
 	// returns undefined. Default clients never see it (byte-identical behavior).
 	| { type: "extension_ui_request"; id: string; method: "custom_unsupported"; extensionName: string };
 
+export type RpcExtensionEvent = {
+	type: "extension_event";
+	name: string;
+	data: unknown;
+};
+
 // ============================================================================
 // Extension UI Commands (stdin)
 // ============================================================================
@@ -450,6 +500,11 @@ export interface RpcHighReasoningWarningEvent {
 	modelId: string;
 	provider: string;
 	thinkingLevel: ThinkingLevel;
+}
+
+/** Emitted after the loaded skill, extension, or MCP inventory changes. */
+export interface RpcLoadedSurfacesChangedEvent {
+	type: "loaded_surfaces_changed";
 }
 
 /** Emitted after an account is added, removed, pinned, or blocked by refresh failure. */

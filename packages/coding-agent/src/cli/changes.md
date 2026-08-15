@@ -1,5 +1,45 @@
 # changes
 
+## `OPENGATEWAY_API_KEY` in `--help` environment list (2026-08-12)
+
+### What changed
+
+- `args.ts`: the `Environment Variables:` help block lists `OPENGATEWAY_API_KEY` (with the
+  https://opengateway.ai/api-keys issuance URL) next to the other provider keys.
+
+### Why
+
+- The new `opengateway` built-in provider authenticates with this variable; the help block is the
+  in-CLI discovery surface and stays exhaustive per provider-add convention.
+
+### Expected merge conflict zones
+
+- LOW: `args.ts` environment-variable help rows.
+
+
+||||||| parent of 30188918f (fix(coding-agent): list PI_RULES settings in help)
+
+## PI_RULES environment settings in top-level help (2026-08-03)
+
+### What changed
+
+- `args.ts`: the Environment Variables section now lists `PI_RULES_DISABLED`,
+  `PI_RULES_MAX_RULE_CHARS`, and `PI_RULES_MAX_RESULT_CHARS` with their accepted values and defaults.
+
+### Why
+
+- The settings added in #670 were documented in the README but omitted from `senpi --help`, leaving the two
+  environment-only character limits undiscoverable from the CLI.
+
+### Why extension system couldn't handle this
+
+- The static Environment Variables section belongs to `printHelp()` and extensions can register flags, not help
+  entries for environment settings.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `args.ts` Environment Variables rows.
+
 ## `senpi --list-tips` prints the tip catalog as JSON (2026-07-29)
 
 ### What changed

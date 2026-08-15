@@ -12,14 +12,22 @@ import chalk from "chalk";
 import { handleAppServerCommand } from "./cli/app-server-command.ts";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import {
-	type CredentialPrintCommand,
-	CredentialPrintError,
-	isCredentialPrintHelp,
-	parseCredentialPrintCommand,
-	printCredentialPrintHelp,
-	resolveCredentialForPrint,
-	validateCredentialPrintArgs,
-} from "./cli/credential-print.ts";
+	type AuthCheckResult,
+	checkProviderAuth,
+	createAuthCheckModelRuntime,
+	getProviderCredential,
+} from "./cli/auth-check.ts";
+import {
+	type AuthCommand,
+	AuthCommandError,
+	getAuthCommandName,
+	getAuthCommandUsage,
+	isAuthCommandHelp,
+	parseAuthCommand,
+	printAuthCommandHelp,
+	validateAuthCommandArgs,
+} from "./cli/auth-command.ts";
+import { resolveCredentialForPrint } from "./cli/credential-print.ts";
 import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
 import { listModels } from "./cli/list-models.ts";
@@ -32,7 +40,7 @@ import {
 	shouldShowStartupLoadingIndicator,
 } from "./cli/startup-loading-indicator.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
+import { APP_NAME, DISPLAY_VERSION, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -40,6 +48,8 @@ import {
 	createAgentSessionServices,
 } from "./core/agent-session-services.ts";
 import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
+import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
+import { envValue } from "./core/brand.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
@@ -162,17 +172,17 @@ function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
 	);
 }
 
-async function runCredentialPrintCommand(args: string[]): Promise<boolean> {
-	if (isCredentialPrintHelp(args)) {
-		printCredentialPrintHelp();
+async function runAuthCommand(args: string[]): Promise<boolean> {
+	if (isAuthCommandHelp(args)) {
+		printAuthCommandHelp();
 		return true;
 	}
 
-	let command: CredentialPrintCommand | undefined;
+	let command: AuthCommand | undefined;
 	try {
-		command = parseCredentialPrintCommand(args);
+		command = parseAuthCommand(args);
 	} catch (error) {
-		const message = error instanceof CredentialPrintError ? error.message : "Failed to parse auth command";
+		const message = error instanceof AuthCommandError ? error.message : "Failed to parse auth command";
 		console.error(chalk.red(`Error: ${message}`));
 		process.exitCode = 1;
 		return true;
@@ -180,23 +190,62 @@ async function runCredentialPrintCommand(args: string[]): Promise<boolean> {
 	if (!command) return false;
 
 	const parsed = parseArgs(command.args);
-	if (parsed.diagnostics.length > 0) {
-		for (const diagnostic of parsed.diagnostics) {
-			console.error(chalk.red(`Error: ${diagnostic.message}`));
-		}
+	if (parsed.unknownFlags.size > 0) {
+		const option = parsed.unknownFlags.keys().next().value;
+		console.error(chalk.red(`Unknown option --${option} for "${getAuthCommandName(command.kind)}".`));
+		console.error(chalk.dim(`Use "${APP_NAME} --help" or "${getAuthCommandUsage(command.kind)}".`));
 		process.exitCode = 1;
 		return true;
 	}
-
 	try {
-		validateCredentialPrintArgs(parsed);
-		const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
-		const credential = await resolveCredentialForPrint(parsed, modelRuntime, command.kind, command.minExpiryMs);
-		process.stdout.write(`${credential}\n`);
+		if (parsed.diagnostics.length > 0) {
+			throw new AuthCommandError(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+		}
+		if (command.kind !== "check") {
+			const signal = AbortSignal.timeout(15_000);
+			const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false, signal });
+			const credential = await resolveCredentialForPrint(
+				parsed,
+				modelRuntime,
+				command.kind,
+				command.minExpiryMs,
+				signal,
+			);
+			process.stdout.write(`${credential}\n`);
+			return true;
+		}
+
+		const requestedAuth = validateAuthCommandArgs(parsed, command.kind);
+		let result: AuthCheckResult;
+		let credential: string | undefined;
+		try {
+			const credentials = command.noRefresh ? new ReadOnlyAuthStorage() : AuthStorage.create();
+			const modelRuntime = await createAuthCheckModelRuntime(credentials);
+			result = await checkProviderAuth(parsed, modelRuntime, { refresh: !command.noRefresh });
+			if (command.credentials && result.status === "ready") {
+				credential = await getProviderCredential(result.provider, modelRuntime, credentials, {
+					refresh: !command.noRefresh,
+				});
+				if (!credential) {
+					result = { status: "not_ready", provider: result.provider, reason: "credential_not_available" };
+				}
+			}
+		} catch {
+			result = {
+				status: "invalid",
+				provider: requestedAuth.provider ?? requestedAuth.model!,
+				reason: "invalid_state",
+			};
+		}
+		const output = command.json
+			? JSON.stringify({ ...result, ...(credential ? { credentials: credential } : {}) })
+			: (credential ?? result.status);
+		process.stdout.write(`${output}\n`);
+		process.exitCode = result.status === "ready" ? 0 : result.status === "not_ready" ? 1 : 2;
 	} catch (error) {
-		const message = error instanceof CredentialPrintError ? error.message : "Failed to resolve credential";
+		const message = error instanceof AuthCommandError ? error.message : "Failed to resolve credential";
 		console.error(chalk.red(`Error: ${message}`));
-		process.exitCode = 1;
+		process.exitCode = command.kind === "check" ? 2 : 1;
 	}
 	return true;
 }
@@ -272,7 +321,11 @@ async function resolveSessionPath(sessionArg: string, cwd: string, sessionDir?: 
 	return { type: "not_found", arg: sessionArg };
 }
 
-/** Prompt user for yes/no confirmation */
+/**
+ * Prompt user for yes/no confirmation.
+ * Resolves false on stdin EOF (Ctrl+D, closed pipe): without the close handler a
+ * readline question never settles once the input stream ends, hanging the process.
+ */
 async function promptConfirm(message: string): Promise<boolean> {
 	return new Promise((resolve) => {
 		const rl = createInterface({
@@ -283,6 +336,7 @@ async function promptConfirm(message: string): Promise<boolean> {
 			rl.close();
 			resolve(answer.toLowerCase() === "y" || answer.toLowerCase() === "yes");
 		});
+		rl.on("close", () => resolve(false));
 	});
 }
 
@@ -350,6 +404,7 @@ async function createSessionManager(
 	cwd: string,
 	sessionDir: string | undefined,
 	settingsManager: SettingsManager,
+	appMode: AppMode,
 ): Promise<SessionManager> {
 	if (parsed.noSession || parsed.help || parsed.listModels !== undefined || parsed.listTips) {
 		return SessionManager.inMemory(cwd, parsed.sessionId !== undefined ? { id: parsed.sessionId } : undefined);
@@ -387,6 +442,20 @@ async function createSessionManager(
 				return openSessionOrExit(resolved.path, sessionDir);
 
 			case "global": {
+				if (appMode !== "interactive") {
+					// The fork confirmation below blocks on readline, which only an
+					// interactive session can answer. Print, JSON, RPC, and app-server runs
+					// reach here with a TTY attached too (`-p` from a terminal), where the
+					// question hangs the process or resolves as "no" on stdin EOF. Fail fast
+					// with an actionable message instead.
+					console.error(chalk.red(`Session found in different project: ${resolved.cwd}`));
+					console.error(
+						chalk.red(
+							`Cannot confirm forking without an interactive session. Use --fork '${parsed.session}' to fork it into the current directory, or re-run interactively from ${resolved.cwd}.`,
+						),
+					);
+					process.exit(1);
+				}
 				console.log(chalk.yellow(`Session found in different project: ${resolved.cwd}`));
 				const shouldFork = await promptConfirm("Fork this session into current directory?");
 				if (!shouldFork) {
@@ -578,10 +647,14 @@ export function applyGrokNeoThemeFallback(settingsManager: SettingsManager): voi
 export async function main(args: string[], options?: MainOptions) {
 	resetTimings();
 	const extensionFactories = [...builtInExtensions, ...(options?.extensionFactories ?? [])];
-	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.PI_OFFLINE);
+	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(envValue("OFFLINE"));
 	if (offlineMode) {
 		process.env.PI_OFFLINE = "1";
 		process.env.PI_SKIP_VERSION_CHECK = "1";
+	}
+
+	if (await runAuthCommand(args)) {
+		return;
 	}
 
 	if (process.platform === "win32") {
@@ -619,10 +692,6 @@ export async function main(args: string[], options?: MainOptions) {
 		return;
 	}
 
-	if (await runCredentialPrintCommand(args)) {
-		return;
-	}
-
 	const parsed = parseArgs(args);
 	if (parsed.diagnostics.length > 0) {
 		for (const d of parsed.diagnostics) {
@@ -636,7 +705,7 @@ export async function main(args: string[], options?: MainOptions) {
 	time("parseArgs");
 
 	if (parsed.version) {
-		console.log(VERSION);
+		console.log(DISPLAY_VERSION);
 		process.exit(0);
 	}
 
@@ -735,7 +804,7 @@ export async function main(args: string[], options?: MainOptions) {
 		(parsed.sessionDir ? normalizePath(parsed.sessionDir) : undefined) ??
 		(envSessionDir ? expandTildePath(envSessionDir) : undefined) ??
 		startupSettingsManager.getSessionDir();
-	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager);
+	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager, appMode);
 	const missingSessionCwdIssue = getMissingSessionCwdIssue(sessionManager, cwd);
 	if (missingSessionCwdIssue) {
 		if (appMode === "interactive") {
@@ -812,6 +881,7 @@ export async function main(args: string[], options?: MainOptions) {
 			cwd,
 			agentDir,
 			settingsManager: runtimeSettingsManager,
+			modelRuntimeSignal: AbortSignal.timeout(15_000),
 			extensionFlagValues: parsed.unknownFlags,
 			resourceLoaderReloadOptions: shouldResolveProjectTrust
 				? {
@@ -866,7 +936,9 @@ export async function main(args: string[], options?: MainOptions) {
 			legacyEnabledPatterns: settingsManager.getEnabledModels(),
 		});
 		const scopedModels =
-			modelPatterns && modelPatterns.length > 0 ? await resolveModelScope(modelPatterns, modelRuntime) : [];
+			modelPatterns && modelPatterns.length > 0
+				? await resolveModelScope(modelPatterns, modelRuntime, { signal: AbortSignal.timeout(15_000) })
+				: [];
 		// Multi-session opens carry their per-session startup choices here rather
 		// than through process argv. This deliberately feeds the same resolver as
 		// --provider/--model/--thinking, preserving classic flag semantics.
@@ -905,8 +977,7 @@ export async function main(args: string[], options?: MainOptions) {
 					message: "--api-key requires a model to be specified via --model, --provider/--model, or --models",
 				});
 			} else {
-				await modelRuntime.setRuntimeApiKey(sessionOptions.model.provider, parsed.apiKey, { allowNetwork: false });
-				await services.modelRuntime.getAvailable();
+				await modelRuntime.setRuntimeApiKey(sessionOptions.model.provider, parsed.apiKey);
 			}
 		}
 
@@ -1018,7 +1089,7 @@ export async function main(args: string[], options?: MainOptions) {
 		process.exit(1);
 	}
 
-	const startupBenchmark = isTruthyEnvFlag(process.env.PI_STARTUP_BENCHMARK);
+	const startupBenchmark = isTruthyEnvFlag(envValue("STARTUP_BENCHMARK"));
 	if (startupBenchmark && appMode !== "interactive") {
 		console.error(chalk.red("Error: PI_STARTUP_BENCHMARK only supports interactive mode"));
 		process.exit(1);
@@ -1026,7 +1097,12 @@ export async function main(args: string[], options?: MainOptions) {
 
 	// RPC refreshes catalogs here in the background; interactive mode starts its refresh after TUI initialization.
 	if (!offlineMode && appMode === "rpc") {
-		void modelRuntime.refresh().catch(() => {});
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 15_000);
+		void modelRuntime
+			.refresh({ signal: controller.signal })
+			.catch(() => {})
+			.finally(() => clearTimeout(timeout));
 	}
 
 	if (appMode === "rpc") {
@@ -1043,7 +1119,7 @@ export async function main(args: string[], options?: MainOptions) {
 			initialMessages: parsed.messages,
 			verbose: parsed.verbose,
 			chrome: parsed.grokNeo ? "grok" : undefined,
-			uiMode: parsed.uiMode,
+			tuiMode: parsed.tuiMode,
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();

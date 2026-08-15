@@ -14,6 +14,125 @@
 ### Merge notes
 
 - LOW: `src/core/model-resolver.ts` conflicts only when upstream changes provider defaults.
+## 2026-08-14 — RPC stream regression suites for multi-session compaction
+
+### What changed
+
+- `test/rpc-multi-session-events.test.ts` gained the coverage for the multi-session
+  event writer's per-session compaction and single-flight drain: a 1000-update
+  stalled-writer load case that asserts no assistant transition is lost and the
+  retained bytes stay far below the sum of the cumulative records, latest-wins
+  coalescing keyed by `toolCallId` in occurrence order, barrier isolation, and
+  the seal/late-enqueue contract.
+- `test/rpc-event-coalescing.test.ts` gained two characterization pins for the
+  CLASSIC single-session path: every delta survives same-tick batching into one
+  raw write, and immediate barriers keep event/UI-request/response ordering.
+  Both were proven to bite under their own targeted mutation.
+- The behavior these suites cover is described in `src/modes/rpc/changes.md`
+  (2026-08-14 entry); this entry exists so the package-level log records the
+  test surface that guards it.
+
+### Why this lives in the fork
+
+The compaction and single-flight drain are fork-specific: upstream writes every
+record straight through, so these suites have no upstream counterpart and would
+be dropped by a naive merge resolution.
+
+### Expected merge-conflict zones
+
+`test/rpc-multi-session-events.test.ts` and `test/rpc-event-coalescing.test.ts`
+resolve to `ours`. If upstream adds cases to either file, port them INTO these
+suites rather than replacing them - deleting the compaction or classic-pin cases
+silently removes the only guard against reintroducing the O(n^2) wire
+amplification or dropping classic per-event backpressure.
+
+## 2026-08-12 — Distinguish external-editor launch failures
+
+### What changed
+
+- Prompt editing now reports `launch-failed` when the configured external
+  editor process never starts, instead of returning the same `failed` status
+  used when an editor actually launches and exits nonzero or by signal.
+- Added a deterministic regression that invokes the real prompt-editor code
+  with a guaranteed-missing executable and proves the operating system's
+  process-launch failure remains distinct from an editor exit.
+- Added a bounded stress harness that runs the prompt/file external-editor
+  suites 25 times sequentially and four times concurrently, while asserting
+  every child exit and exact before/after temporary-directory residue.
+
+### Why this lives in the fork
+
+- Senpi's interactive composer owns the external-editor handoff and its
+  temporary prompt file. The return status determines whether callers may
+  assume the editor ran and could have produced side effects.
+- Full-suite subprocess pressure can make `spawn()` fail before launch. Folding
+  that condition into a normal editor failure made tests and callers reason
+  from side effects that never happened.
+
+### Why this cannot be expressed externally
+
+- Extensions receive control after the built-in composer and process lifecycle
+  contract have already been selected. They cannot distinguish a swallowed
+  host `spawn` error from a real editor exit.
+
+### Expected merge conflict zones
+
+- `src/modes/interactive/external-editor.ts` around prompt-editor child-process
+  outcome handling.
+- `test/external-editor.test.ts` around real-child lifecycle coverage.
+
+## 2026-08-11 — Ship codemode with standalone binaries
+
+### What changed
+
+- Added one manifest-driven copier for the source-only codemode runtime payload.
+- Both `npm run build:binary` and the six-platform release archive build now
+  stage codemode under the executable's adjacent
+  `node_modules/@code-yeongyu/senpi-codemode` path.
+- A clean package-level `build:binary` now builds the PTY workspace before
+  coding-agent so its declarations are present without relying on stale root
+  build output.
+- Package-level binary compilation now embeds `css-tree`, matching the
+  six-platform release build instead of externalizing a dependency that Bun's
+  `$bunfs` resolver cannot load from an adjacent `node_modules`.
+- The copier replaces stale output and excludes package tests, development
+  dependencies, and repository-only files.
+
+### Why this lives in the fork
+
+- Codemode is a fork-owned default-on extension distributed with Senpi.
+  npm's `bundleDependencies` controls npm tarballs but does not embed or copy
+  dynamically resolved source packages into Bun standalone archives.
+
+### Why this cannot be expressed externally
+
+- The archive layout and Bun sidecars are constructed before user extensions
+  load, so an extension cannot add its own missing package to the executable
+  distribution.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/package.json` around `copy-binary-assets`.
+- `scripts/build-binaries.sh` around shared platform sidecars.
+- `scripts/copy-codemode-sidecar.mjs` and its contract test.
+
+## 2026-08-09 — General extension filesystem policy API
+
+### What changed
+
+- Documented `pi.registerFilesystemPolicy()` as a factory-time API for canonical read, enumerate, and write decisions.
+- Added deterministic coverage for registration, deny-wins composition, real/missing/symlink path canonicalization, all
+  six built-in file tools, denied-root metadata, approval-hook non-bypassability, and a general extension that limits
+  writes to its own workspace root.
+
+### Why this lives in the fork
+
+- The public extension contract and built-in executor tests are package-level surfaces. A consumer extension can use the
+  policy after it exists but cannot add or verify the host hook itself.
+
+### Expected merge conflict zones
+
+- LOW: `docs/extensions.md`, `test/filesystem-policy.test.ts`, and package type-export lists.
 
 ## 2026-08-03 — Keep Bun off unpublished workspace identities
 
@@ -209,6 +328,19 @@
   remains private.
 - Merge-conflict risk: low. `scripts/publish.mjs` temporary manifest staging
   and `stagePublishManifest()` alias rewriting are the expected conflict zones.
+
+## 2026-08-12 — app-server extension RPC coverage and documentation
+
+- Changed: added focused app-server suites for extension event audience/one-frame delivery and request round-trips with
+  unknown and duplicate handler errors; documented the additive method and notification wire shapes.
+- Why: app-server had no executable contract for the existing extension-owned RPC channel, even though classic RPC did.
+- What changed: `test/suite/app-server-extension-events.test.ts`,
+  `test/suite/app-server-extension-requests.test.ts`, `docs/app-server.md`, and the package `CHANGELOG.md` now cover the
+  real runtime surface and release note with isolated temporary extension directories and no network or credentials.
+- Why the extension system could not handle this: tests and public protocol documentation describe the host connection
+  boundary; an extension cannot install or verify those repository-level contracts.
+- Merge-conflict risk: low. The focused test files are new; the supported-method and notification sections in
+  `docs/app-server.md` are the only shared conflict zones.
 
 ## 2026-07-22 — app-server runtime import test without npm subprocess
 

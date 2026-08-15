@@ -10,6 +10,226 @@
 
 ### Fixed
 
+### Removed
+
+## [2026.8.14] - 2026-08-14
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.13-2] - 2026-08-13
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.13] - 2026-08-13
+
+### Breaking Changes
+
+### Added
+
+- Gave every eval cell a wall-clock hard limit (`hardLimitSeconds`, default 1800s, overridable with `SENPI_CODEMODE_HARD_LIMIT_SECONDS`) so a detached or tool-call-heavy cell can no longer run unbounded: the deadline survives `detach()` and is never paused by bridge tool calls, and a cell it kills reports itself to the agent as killed at the hard limit ([#857](https://github.com/code-yeongyu/senpi/pull/857)).
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.12-4] - 2026-08-12
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.12-3] - 2026-08-12
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.12-2] - 2026-08-12
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.12] - 2026-08-12
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.11-6] - 2026-08-11
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.11-5] - 2026-08-11
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.11-4] - 2026-08-11
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Ruby and Julia `eval` kernels launched from standalone Bun binaries now
+  resolve their external runner files from the shipped codemode sidecar when
+  the embedded `$bunfs` module path has no physical asset
+  ([#818](https://github.com/code-yeongyu/senpi/pull/818)).
+
+### Removed
+
+## [2026.8.11-3] - 2026-08-11
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.11-2] - 2026-08-10
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.11] - 2026-08-10
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.10] - 2026-08-10
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.9-2] - 2026-08-09
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Detached eval cells now emit the shared `wake_source_state` event under source `senpi-codemode` when they detach, complete, stop, or are disposed. The optional host event passthrough remains guarded, synchronous cells emit no lifecycle transition, and per-cell snapshot metadata is preserved.
+
+### Fixed
+
+### Removed
+
+## [2026.8.9] - 2026-08-09
+
+### Breaking Changes
+
+### Added
+
+- Detached eval cells now publish their liveness as a `resumption_channel_state` event (source `eval-detached`) on the
+  host event bus: a full per-source snapshot with `activeCount` and per-cell `id`/`description`/`startedAtMs` entries is
+  emitted whenever a cell detaches, settles, is stopped, or is disposed, and once on `session_start`. The goal builtin
+  consumes this to hold its hidden continuation while detached cells are still computing instead of nagging immediately
+  at turn end. Hosts without an event bus are unaffected (emission is a no-op), and the footer/status rendering is
+  unchanged.
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.7] - 2026-08-07
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
 - Formatted completed eval durations in the simple-result transcript branch with the same compact human-readable units
   used by detailed cell headers and nested tool widgets, so sub-second, seconds, minutes, and hours values render as
   labels such as `<1s`, `12s`, `3m 5s`, or `1h 2m` instead of raw millisecond counts. Live footer, working-status, and

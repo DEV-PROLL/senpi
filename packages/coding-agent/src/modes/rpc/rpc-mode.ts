@@ -66,7 +66,9 @@
  * Full prose docs: `packages/coding-agent/docs/rpc.md` (Multi-session mode).
  */
 
+import type { AgentSessionEvent } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
+import { envValue } from "../../core/brand.ts";
 import {
 	flushRawStdout,
 	takeOverStdout,
@@ -74,6 +76,7 @@ import {
 	writeRawStdout,
 } from "../../core/output-guard.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
+import { toJsonEvent } from "../json-event.ts";
 import { createRpcConnectionHandler, type RpcConnectionSink } from "./connection-handler.ts";
 import { parseClientCapabilities } from "./custom-capability.ts";
 import { attachJsonlLineReader } from "./jsonl.ts";
@@ -95,7 +98,17 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	takeOverStdout();
 
 	const sink: RpcConnectionSink = {
-		writeRaw: writeRawStdout,
+		writeRaw: (chunk) => {
+			const linearized = chunk
+				.split("\n")
+				.filter((line) => line.length > 0)
+				.map((line) => {
+					const value = JSON.parse(line) as { type?: string };
+					return JSON.stringify(value.type === "message_update" ? toJsonEvent(value as AgentSessionEvent) : value);
+				})
+				.join("\n");
+			writeRawStdout(linearized.length > 0 ? `${linearized}\n` : "");
+		},
 		waitForBackpressure: waitForRawStdoutBackpressure,
 	};
 
@@ -103,7 +116,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	// SENPI_RPC_CLIENT_CAPABILITIES env var (comma-separated). A launcher can set
 	// it from a client handshake; a plain stdio client that sets nothing gets
 	// byte-identical default behavior.
-	const capabilities = parseClientCapabilities(process.env.SENPI_RPC_CLIENT_CAPABILITIES);
+	const capabilities = parseClientCapabilities(envValue("RPC_CLIENT_CAPABILITIES"));
 	const handler = createRpcConnectionHandler(runtimeHost, sink, { capabilities });
 
 	let shuttingDown = false;

@@ -1,5 +1,119 @@
 # senpi-codemode fork changes
 
+## Eval cell hard limit (2026-08-13)
+
+### What changed
+
+- A cell now carries a wall-clock kill deadline resolved from the new `hardLimitSeconds` setting
+  (default 1800s, `SENPI_CODEMODE_HARD_LIMIT_SECONDS` override), raised per call by an explicit
+  larger `timeout`.
+- `EvalDetachedCellManager` arms that deadline when the cell is created and clears it only on
+  settlement, so it survives `detach()` and is never paused by bridge tool calls. On expiry the cell
+  is interrupted, settles as cancelled, and the detached-cell notification tells the main agent it
+  was killed at the hard limit.
+
+### Why
+
+- `cellTimeoutSeconds` only feeds the idle watchdog: `CellExecution.detach()` disposes that watchdog
+  and `withBridgeTimeoutPause` pauses it for the whole duration of every host tool call, so a
+  detached or tool-call-heavy cell had no upper bound at all — one observed cell ran 1h13m. The bash
+  tool has enforced a kill deadline since `bash-timeout/timeout.ts`; eval now matches it.
+
+### Why this cannot be expressed externally
+
+- Cell lifetime, kernel interruption, and the detached-cell notification queue all live inside the
+  package; an extension cannot observe a detached cell, let alone kill it.
+
+### Expected merge conflict zones
+
+- MEDIUM in `src/tool/detached-cell-manager.ts` around cell creation and settlement.
+- LOW in `src/config/settings.ts` schema/defaults and the prompt timeout wording.
+
+## Compiled binary runner sidecar resolution (2026-08-11)
+
+### What changed
+
+- Ruby and Julia kernels now preserve their normal module-relative runner path
+  in source/npm execution but fall back to the standalone executable's
+  `node_modules/@code-yeongyu/senpi-codemode/src/kernels/...` sidecar when the
+  embedded `$bunfs` path does not exist.
+- Focused tests pin Ruby, Julia, and non-compiled local-path behavior.
+
+### Why
+
+- The compiled coding-agent embeds the codemode factory and JavaScript
+  dependency graph, but Ruby and Julia execute external runner files that Bun
+  does not expose at the embedded module's `import.meta.dirname`.
+
+### Why this cannot be expressed externally
+
+- Runner paths are selected inside kernel construction before user code or an
+  extension wrapper can replace the subprocess arguments.
+
+### Expected merge conflict zones
+
+- `src/kernels/rb/kernel.ts` and `src/kernels/jl/kernel.ts` runner arguments.
+- `src/kernels/shared/runtime-asset.ts` compiled sidecar layout.
+
+## Detached eval cell wake-source contract (2026-08-09)
+
+### What changed
+
+- The duplicated cross-package event literal is now `wake_source_state`, with source `senpi-codemode` and optional per-cell `items` metadata.
+- Detached-cell detach, completion, stop, and session-dispose transitions publish the current active count through the optional host `events` passthrough; synchronous cells do not emit a lifecycle transition.
+- The focused wiring suite pins event-bus delivery, completion-to-zero, bus-less compatibility, and the exact duplicated literal.
+
+### Why
+
+Goal continuation now aggregates every producer under one wake-source contract, so codemode must use the same event and a stable package-owned source key rather than the retired resumption-channel name.
+
+### Why this cannot be expressed externally
+
+Detach and settlement ownership lives inside `EvalDetachedCellManager`, and only the extension entry has access to the host event bus.
+
+### Expected merge conflict zones
+
+- MEDIUM in `src/index.ts` and `src/tool/detached-cell-manager.ts` around lifecycle snapshot wiring.
+- LOW in the duplicated event contract and focused tests.
+
+## Detached eval cell resumption-channel liveness (2026-08-08)
+
+### What changed
+
+- New `src/extension/resumption-channel.ts` duplicates the cross-package `resumption_channel_state` event literal and
+  payload type locally; senpi-codemode is a separate package and must not import from packages/coding-agent, so a
+  sentinel test pins the literal to catch drift.
+- `src/tool/detached-cell-manager.ts`: new optional `onChannelState` callback fires a full per-source snapshot
+  (`{ source: "eval-detached", activeCount, channels: [{ id, description, startedAtMs }] }`) on the same transitions as
+  the existing `#emitStatus` footer seam (detach / settle / stop / dispose). `description` mirrors the footer label
+  fallback (`summary` else cell id). A public `publishChannelState()` re-publishes the current snapshot.
+- `src/index.ts`: the local `CodemodeExtensionAPI` widens with an optional `events?: { emit(name, data) }`; emission
+  goes through `pi.events?.emit(...)` so hosts without an event bus are a harmless no-op. Both cell-manager
+  constructions wire the callback, and the `session_start` handler re-publishes the snapshot because the consuming
+  goal builtin clears its per-session counts there.
+- `test/eval-resumption-channel.test.ts`: pins the single-cell snapshot, the two-cells-settling count sequence, the
+  bus-less host no-op, the `session_start` re-emit plus bus transport, and the event-name sentinel.
+
+### Why
+
+- The goal builtin delays its hidden "keep going" continuation while a live resumption channel is on duty, but it only
+  ever learned about terminal monitors. Detached eval cells are a real live channel that reported nothing, so the goal
+  nagged itself immediately at turn end while a cell was still computing. This change makes codemode EMIT its liveness;
+  a sibling lane owns the consuming side in the goal builtin.
+- The legacy `terminal_monitor_state` event keeps its single-owner full-snapshot semantics; emitting it from a second
+  source would clobber the terminal's count, so only the new source-keyed event is used.
+
+### Why this cannot be expressed externally
+
+- The liveness transitions live inside the detached-cell manager and the extension entry; an external extension cannot
+  observe detach/settle/dispose without reimplementing the cell lifecycle.
+
+### Expected merge conflict zones
+
+- LOW: `src/index.ts` around the cell-manager constructions and the `session_start` handler.
+- LOW: `src/tool/detached-cell-manager.ts` around `#emitStatus`.
+- MEDIUM: `CHANGELOG.md` `[Unreleased]` when sibling lanes land entries; keep both bullets.
+
 ## Compact elapsed labels for simple eval results (2026-08-06)
 
 ### What changed

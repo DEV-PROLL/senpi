@@ -254,6 +254,14 @@ cd /path/to/brave-search && npm install
 ```
 ````
 
+## Bundled Skills
+
+Senpi contributes built-in skills conditionally based on available credentials and capabilities.
+
+**gpt-image-gen** is contributed by the `imagegen` builtin extension when image-generation credentials exist (a stored OpenAI key, `OPENAI_API_KEY`, or a configured OpenAI-compatible gateway). It provides a prompt-crafting guide for `gpt-image-2`, covering detail-maxxing techniques, verbatim quoted render text, revised-prompt feedback loops, and routing guidance for the native server tool vs. the client `generate_image` tool. The skill is absent from `<available_skills>` when no credentials are configured.
+
+Skill visibility refreshes at startup and on `/reload`. Mid-session credential changes (login, environment variable updates) take effect on the tool and injector immediately but are reflected in the skill list only after the next reload.
+
 ## Skill Repositories
 
 - [Anthropic Skills](https://github.com/anthropics/skills) - Document processing (docx, pdf, pptx, xlsx), web development

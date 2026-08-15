@@ -43,9 +43,9 @@ type AuthLaneBoundary = {
 	refresher: SlotRefresher;
 };
 
-async function refreshWithAnthropicOAuth(refresh: string) {
+async function refreshWithAnthropicOAuth(refresh: string, signal: AbortSignal) {
 	const oauth = await loadAnthropicOAuth();
-	const credential = await oauth.refresh({ type: "oauth", access: "", refresh, expires: 0 });
+	const credential = await oauth.refresh({ type: "oauth", access: "", refresh, expires: 0 }, signal);
 	return { access: credential.access, refresh: credential.refresh, expires: credential.expires };
 }
 
@@ -73,6 +73,7 @@ export type AuthenticatedQueryInput = {
 	query: SdkQuery;
 	buildOptions: (lane: ClaudeSdkOauthTokenInjection) => Options;
 	providerSettings: ClaudeSdkOauthProviderSettings;
+	signal?: AbortSignal;
 	sessionId?: string;
 	/** Request-scoped CLI pin; takes precedence over persistent settings and account pins. */
 	pinnedAccount?: string;
@@ -131,9 +132,14 @@ function writeConfigCredentials(directory: string, slot: AccountSlot, access: st
 	);
 }
 
+export function resolveEffectiveLane(
+	settings: ClaudeSdkOauthProviderSettings,
+	accounts: readonly AccountSlot[],
+): ClaudeSdkOauthTokenInjection {
+	return settings.tokenInjection ?? (accounts.length > 0 ? "oauth-slots" : "ambient");
+}
+
 async function managedPool(settings: ClaudeSdkOauthProviderSettings): Promise<ManagedPool | undefined> {
-	const lane = settings.tokenInjection ?? "ambient";
-	if (lane === "ambient") return undefined;
 	const store = activeBoundary.createStore();
 	let credential = await store.read(CLAUDE_SDK_OAUTH_PROVIDER_ID);
 	const environment = activeBoundary.env();
@@ -148,12 +154,17 @@ async function managedPool(settings: ClaudeSdkOauthProviderSettings): Promise<Ma
 			(name) => environment[name],
 		);
 	}
-	if (accounts.length === 0) return undefined;
+	const lane = resolveEffectiveLane(settings, accounts);
+	if (lane === "ambient" || accounts.length === 0) return undefined;
 	const stored = credential?.type === "oauth" ? (credential as ClaudeSdkOauthCredential) : undefined;
 	return { accounts, lane, pinnedAccount: settings.pinnedAccount ?? stored?.pinned, store };
 }
 
-async function prepareSlot(pool: ManagedPool, selected: AccountSlot): Promise<Record<string, string | undefined>> {
+async function prepareSlot(
+	pool: ManagedPool,
+	selected: AccountSlot,
+	signal: AbortSignal,
+): Promise<Record<string, string | undefined>> {
 	const environment = activeBoundary.env();
 	const slot = selected;
 	if (slot.source !== "env" && activeBoundary.now() >= slot.expires - EXPIRING_WITHIN_MS) {
@@ -163,6 +174,7 @@ async function prepareSlot(pool: ManagedPool, selected: AccountSlot): Promise<Re
 				CLAUDE_SDK_OAUTH_PROVIDER_ID,
 				slot.name,
 				activeBoundary.refresher,
+				signal,
 				(expires) => activeBoundary.now() >= expires - EXPIRING_WITHIN_MS,
 			);
 			const credential = refreshed?.type === "oauth" ? (refreshed as ClaudeSdkOauthCredential) : undefined;
@@ -210,6 +222,7 @@ function visibleSdkMessage(message: SDKMessage): boolean {
 
 /** Resolves managed OAuth immediately before each subprocess spawn and retries only pre-delta failures. */
 export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncGenerator<SDKMessage> {
+	const signal = input.signal ?? new AbortController().signal;
 	const pool = await managedPool(input.providerSettings);
 	if (!pool) {
 		const options = input.buildOptions("ambient");
@@ -238,7 +251,7 @@ export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncG
 		runAttempt: async (slot) => {
 			const options = input.buildOptions(pool.lane);
 			const accounts = pool.accounts.map((account) => ({ ...account }));
-			options.env = await prepareSlot(pool, slot);
+			options.env = await prepareSlot(pool, slot, signal);
 			return createAttemptMessages(input, {
 				accountName: slot.name,
 				accounts,

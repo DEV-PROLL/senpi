@@ -1,5 +1,147 @@
 # changes
 
+## Extension selector windows long option lists (2026-08-13)
+
+### What changed
+
+- `components/extension-selector.ts` renders only a window of options around the selection (sized like
+  `TreeList`: half the terminal rows, minimum 5, defaulting to 10 without a TUI handle) with muted
+  `… N more above/below` markers when clipped. Previously `updateList()` rebuilt every option on every
+  keypress; on large model registries the overflowing list pushed past the viewport and the moved highlight
+  was never painted, so arrows and j/k looked dead in `/fallback` even though the selection moved (issue #795).
+- Coverage: `test/suite/regressions/795-extension-selector-windowing.test.ts` and the real-CLI scenario
+  `.agents/skills/senpi-qa/scripts/scenarios/fallback-selector-nav-repro.mjs` (60-model registry,
+  kitty-encoded and legacy input).
+
+### Why
+
+- Every `/fallback` chain edit on a large registry hit a selector whose visible highlight never updated:
+  the selection index advanced synchronously, but the full-list repaint was lost past the viewport, so the
+  flow looked frozen while Esc (a single cheap repaint of the restored editor) still responded.
+
+### Why this cannot be expressed externally
+
+- The component is the shared extension-dialog selector owned by interactive mode; no extension hook
+  intercepts its per-keypress render.
+
+### Expected merge conflict zones
+
+- LOW: `components/extension-selector.ts` `updateList()` and constructor option handling.
+
+## Deferred assistant messages are not errors (2026-08-13)
+
+### What changed
+
+- The assistant renderer treats upstream's new `deferred` stop reason as a successful non-error terminal state.
+- Focused component coverage proves it does not synthesize an `Error:` row.
+
+### Why
+
+- The exhaustive switch predated the new stop reason, causing both a build failure and the risk of falsely
+  presenting intentionally deferred work as a provider error.
+
+### Why this cannot be expressed externally
+
+- The built-in assistant component owns terminal-state rendering before extension UI contributions are composed.
+
+### Expected merge conflict zones
+
+- LOW: `components/assistant-render-descriptors.ts` stop-reason switch.
+
+## Favorite patterns survive a persist while providers are unavailable (2026-08-12)
+
+### What changed
+
+- `mergeFavoritePatternsForPersist()` in `components/model-favorites.ts` merges the
+  selector's visible selection with stored favorite patterns that currently resolve to
+  no model. `interactive-mode.ts` persists through it from both the model selector's
+  `onFavoriteChange` and the favorites selector's `onPersist`.
+- The persisted list keeps unresolvable patterns in their stored order and appends the
+  user's selection without duplicating entries. `undefined` is still written only when
+  the merged result is genuinely empty.
+
+### Why
+
+- Both selectors derive their favorite ids from `session.favoriteModels`, which is
+  `resolveModelScope()` filtered against the current availability snapshot. Persisting
+  that view verbatim erased every stored favorite whose provider was momentarily
+  unauthenticated or unreachable, and an empty result removed the `favoriteModels` key
+  from `settings.json` entirely.
+
+### Why this cannot be expressed externally
+
+- Interactive mode owns the selector callbacks and the settings write, so no extension
+  hook can intervene between the filtered view and the persist.
+
+### Expected merge conflict zones
+
+- LOW: `components/model-favorites.ts` around the merge helper and `interactive-mode.ts`
+  around the two selector persist callbacks.
+
+## External-editor launch failures remain distinct (2026-08-12)
+
+### What changed
+
+- `editInExternalEditor()` now resolves a discriminated child-process outcome:
+  the `error` event returns `launch-failed`, while `close` after a real launch
+  returns `failed` for nonzero or signal exits and `complete` only for exit 0.
+- The composer still replaces its text only for `complete`, so launch failures
+  and editor failures both preserve the current prompt without widening the
+  UI control flow.
+- Deterministic coverage uses a guaranteed-missing executable to force a real
+  operating-system launch failure, rather than mocking `spawn`, sleeping,
+  increasing timeouts, or relying on an overloaded full suite to reproduce by
+  chance.
+
+### Why
+
+- The old path resolved `error` as `null` and then treated it as an editor
+  nonzero exit. Under full-suite process pressure, the editor could fail to
+  launch while callers and tests received the status that means it did launch.
+- The sibling file-editor path already preserves this distinction because only
+  a launched editor may have modified caller-owned files.
+
+### Why this cannot be expressed externally
+
+- The built-in interactive mode owns the process spawn, temporary prompt
+  directory, editor result type, and composer replacement decision before any
+  extension hook can intervene.
+
+### Expected merge conflict zones
+
+- LOW: `external-editor.ts` around `ExternalEditorResult` and the prompt-editor
+  `spawn` event handlers.
+
+## Correct extension-command immediate-dispatch comments (2026-08-09)
+
+### What changed
+
+- Updated the comments in the `onSubmit` handler and in `handleFollowUp` inside `src/modes/interactive/interactive-mode.ts` so they describe the post-fix dispatch flow accurately: extension commands short-circuit at the `isExtensionCommand` branch (the Enter path returns there) and dispatch immediately inside `AgentSession.prompt()` — including during compaction and barrier-held continuation runs — because `prompt()` now hoists the extension-command branch above the settled-work gate.
+- The `onSubmit` compaction branch comment now states that only non-command text reaches it (queued for post-compaction delivery) and notes that its `isExtensionCommand` re-check is already unreachable today (the earlier `isExtensionCommand` branch returns first) and stays harmless after the fix.
+- `handleFollowUp` is bound directly to `app.message.followUp` (Alt+Enter) and does NOT pass through `onSubmit`, so its `isExtensionCommand` check IS reachable and is the live dispatch point on that path; its comments say so explicitly instead of claiming an `onSubmit` short-circuit.
+- The streaming branch comment now clarifies that the steer/followUp behavior applies only to ordinary text, prompt template expansion, and queueing — extension commands are already dispatched immediately by `prompt()`.
+
+### Why
+
+- The previous comments claimed "extension commands execute immediately" in the compaction and streaming paths, which was false for the barrier-held and compaction cases until the parallel `AgentSession.prompt()` hoist landed. The corrected comments align the code's narrative with the actual post-fix control flow.
+
+### Why extension system couldn't handle this
+
+- The gate that serialized extension commands lives inside `AgentSession.prompt()` (core), not in the interactive mode. The TUI comments merely needed to stop asserting a behavior the TUI does not control.
+
+### Expected merge conflict zones
+
+- `src/modes/interactive/interactive-mode.ts`: the `onSubmit` dispatch block (compaction branch comment ~line 3591, streaming branch comment ~line 3608) and the `handleFollowUp` comments (~line 4785, ~line 4808).
+
+## model selector search ranking and frozen ordering
+
+- Added `src/modes/interactive/model-search-rank.ts` so model search ranks each query token against the independent fields `id`, `name`, `provider`, and `provider/id` through a tier ladder (exact, whole token, boundary substring, substring, then `fuzzyMatch` as a last resort), with a canonical provider-path check and a favorites-first partition ahead of the relevance costs in the composite sort key.
+- Changed `src/modes/interactive/components/model-selector.ts` so `/model` search ranks through `rankModelSearchItems` with favorites-first partitioning in the all-models scope, and so both the base sort and the search partition read a favorite-ids snapshot taken when the selector opens; a `Ctrl+F` toggle updates only the favorite marker and no longer re-sorts rows mid-session.
+- Changed `src/modes/interactive/components/favorite-models-selector.ts` so `/favorite-models` row order is frozen at screen open (a `displayIds` snapshot), favoriting or unfavoriting flips only the marker, explicit reorder keys mirror-swap the snapshot so rows still visibly move, and search ranks through the same module without a favorites partition.
+- Why: user-reported UX bugs. Unfavoriting a row made the whole list jump under the cursor, and the query `opus` ranked `claude-sonnet-4-5` above `claude-opus-5` because the old concatenated-string `fuzzyFilter` let a greedy subsequence match scattered letters across "anthropic…claude…sonnet" and score better than the literal word in the opus id.
+- This was changed in core UI because the selector components and their ranking are internal `InteractiveMode` behavior; no extension hook can replace selector search ranking or row ordering without reimplementing the built-in selectors.
+- Expected merge-conflict zone on upstream sync: `src/modes/interactive/components/model-selector.ts` and `favorite-models-selector.ts` (extending the zone already declared by the favorite model cycling entry), plus `src/modes/interactive/model-search.ts` and the new `src/modes/interactive/model-search-rank.ts`.
+
 ## Server fallback abort uses one TUI notice (2026-08-05)
 
 ### What changed

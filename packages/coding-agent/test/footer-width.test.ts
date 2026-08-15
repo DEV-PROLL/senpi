@@ -4,7 +4,17 @@ import { FooterComponent, formatCwdForFooter } from "../src/modes/interactive/co
 import { type FooterSegment, planFooterLayout } from "../src/modes/interactive/components/footer-layout.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
-import { createFooterData, createFooterSession } from "./helpers/footer-test-fixtures.ts";
+import {
+	createFooterData,
+	createFooterSession as createFooterSessionFixture,
+	type FooterSessionOptions,
+} from "./helpers/footer-test-fixtures.ts";
+
+function createFooterSession(options: FooterSessionOptions) {
+	const session = createFooterSessionFixture(options);
+	Object.assign(session, { modelRuntime: { isUsingSubscription: () => false } });
+	return session;
+}
 
 describe("formatCwdForFooter", () => {
 	it("does not abbreviate sibling paths that share the home prefix", () => {
@@ -105,37 +115,6 @@ describe("FooterComponent width handling", () => {
 		expect(plain).not.toContain("/workspace/client");
 	});
 
-	it("elides the path instead of the OmO Native badge", () => {
-		const width = 130;
-		const session = createFooterSession({
-			sessionName: "",
-			modelId: "test-model",
-			provider: "test",
-			reasoning: true,
-			thinkingLevel: "high",
-			cwd: "/workspace/client/platform/services/senpi/packages/coding-agent",
-			usage: {
-				input: 100,
-				output: 10,
-				cacheRead: 50,
-				cacheWrite: 50,
-				cost: { total: 1.234 },
-			},
-		});
-		const footer = new FooterComponent(session, createFooterData(2, true));
-
-		const lines = footer.render(width);
-		const plain = lines.map((line) => stripAnsi(line)).join("\n");
-		for (const line of lines) {
-			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-		}
-		expect(plain).toContain("(🏴‍☠️ OmO Native)");
-		expect(plain).toContain("coding-agent");
-		expect(plain).not.toContain("/workspace/client");
-		expect(plain).toContain("CH25.0%");
-		expect(plain).toContain("$1.234");
-	});
-
 	it("still renders the model label at very narrow widths", () => {
 		const width = 30;
 		const session = createFooterSession({
@@ -218,5 +197,27 @@ describe("planFooterLayout provider priority", () => {
 		expect(plan.kind).toBe("pwd-elided");
 		if (plan.kind !== "pwd-elided") throw new Error("unexpected plan");
 		expect(plan.pwdPlain.length).toBeGreaterThan(0);
+	});
+
+	it("marks explicitly identified subscription auth", () => {
+		const session = createFooterSession({ sessionName: "", provider: "anthropic" });
+		Object.assign(session, { modelRuntime: { isUsingSubscription: () => true } });
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		expect(stripAnsi(footer.render(120)[0])).toContain("$0.000 (sub)");
+	});
+
+	it("does not mark non-subscription auth as a subscription", () => {
+		const session = createFooterSession({
+			sessionName: "",
+			provider: "openrouter",
+			usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, cost: { total: 1.234 } },
+		});
+		Object.assign(session, { modelRuntime: { isUsingSubscription: () => false } });
+		const footer = new FooterComponent(session, createFooterData(1));
+		const stats = stripAnsi(footer.render(120)[0]);
+
+		expect(stats).toContain("$1.234");
+		expect(stats).not.toContain("(sub)");
 	});
 });

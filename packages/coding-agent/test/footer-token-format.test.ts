@@ -50,6 +50,7 @@ function createSession(latestCacheHitRate = (1_500_000 / (49 + 1_500_000 + 44_00
 		isFastModeActive: () => false,
 		modelRuntime: {
 			isUsingOAuth: () => false,
+			isUsingSubscription: () => false,
 		},
 	};
 
@@ -62,7 +63,6 @@ function createFooterData(): unknown {
 		getExtensionStatuses: () => new Map<string, string>(),
 		getAvailableProviderCount: () => 1,
 		onBranchChange: () => () => {},
-		isOmoNative: () => false,
 	};
 }
 

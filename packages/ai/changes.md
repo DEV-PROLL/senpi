@@ -146,7 +146,7 @@
 - `src/utils/prompt-cache-ttl.ts` (new): `resolvePromptCacheTtlSeconds(model, env?) -> number | undefined`
   plus `PROMPT_CACHE_TTL_SHORT_SECONDS` (300) / `PROMPT_CACHE_TTL_LONG_SECONDS` (3600). It mirrors EACH
   target API's own `resolveCacheRetention` precedence verbatim rather than inventing a unified one:
-  anthropic-messages falls back to `"long"` and honors the bare `process.env.PI_CACHE_RETENTION`
+  anthropic-messages falls back to `"short"` and honors the bare `process.env.PI_CACHE_RETENTION`
   set-but-not-long branch; openai-completions / openai-responses / bedrock fall back to `"short"`;
   pi-messages returns `undefined` (backend default). Retention `"none"` and every API with unknown cache
   semantics (google, mistral, pi-messages, unknown) resolve to `undefined`.

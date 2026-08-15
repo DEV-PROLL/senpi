@@ -1,5 +1,42 @@
 # core/tools changes
 
+## Node 26 path-type compatibility (2026-08-13)
+
+### What changed
+
+- `find.ts` types its injected path implementation as `typeof path.posix`, which remains compatible with the
+  module, POSIX, and Win32 path implementations after `node:path.PlatformPath` was removed.
+
+### Why extension hooks alone could not handle this
+
+- The dependency-injection type is part of the built-in find tool's compile-time test seam.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `find.ts` injected dependency shape.
+
+## extension filesystem policy enforcement (2026-08-09)
+
+### What changed
+
+- Added shared canonicalization and deny-wins composition helpers in `filesystem-policy.ts`.
+- Built-in `read`, `write`, `edit`, `ls`, `find`, and `grep` consult an optional extension policy after canonical path
+  resolution and immediately before target I/O. Read, enumerate, and write operations remain distinct.
+- Existing targets resolve through `realpath`; missing targets resolve through the nearest existing real parent,
+  including dangling symlink targets. A denial throws the policy reason as the normal tool error.
+- With no registered policy, each executor retains its prior path and performs only one checker null test.
+
+### Why extension hooks alone could not handle this
+
+- `tool_call` sees user arguments before the built-in executor resolves Unicode/path variants, symlinks, and missing
+  write parents. It also runs inside permission handling, where unrestricted approval can allow the call.
+- The enforcement point must stay inside each built-in executor to precede actual filesystem operations.
+
+### Expected merge conflict zones on next upstream sync
+
+- MEDIUM: the execute paths in all six built-in file tools.
+- LOW: additive `filesystem-policy.ts` and the optional policy fields on tool options.
+
 ## source-backed write result patches (2026-07-21)
 
 ### What changed

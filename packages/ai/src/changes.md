@@ -1,5 +1,363 @@
 # AI Source Changes
 
+## 2026-08-13 - Preserve explicit request compatibility fields
+
+### What changed and why
+
+- OpenAI-completions compatibility resolution now preserves explicit Baseten `chatTemplateArgs` and vLLM
+  `supportsThinkingTokenBudget` settings when it combines detected defaults with model overrides.
+- Focused Baseten and thinking-budget tests prove those fields reach the final request payload.
+
+### Why this cannot be expressed externally
+
+- The compatibility resolver is the provider-neutral normalization boundary used before any request transform or
+  coding-agent extension can observe the payload.
+
+### Expected merge conflict zones
+
+- MEDIUM: `utils/prompt-cache-ttl.ts` at the explicit compatibility override return object.
+
+## 2026-08-13 - Upstream option and live-test cleanup
+
+### What changed and why
+
+- Removed an obsolete reasoning-budget local and a Baseten live-test key lookup no test consumes after the
+  upstream option/catalog merge.
+- Runtime behavior and live-test gating are unchanged; this keeps warnings fatal without weakening the checks.
+
+### Why this cannot be expressed externally
+
+- Both warnings arise in the provider-neutral option compiler and AI test module before coding-agent extensions
+  exist.
+
+### Expected merge conflict zones
+
+- LOW: `api/simple-options.ts` reasoning-budget setup and `test/context-overflow.test.ts` live-key declarations.
+
+## 2026-08-12 - Throw-based sibling for the bounded assistant retry loop
+
+### What changed and why
+
+- `utils/retry.ts` adds `retryTransientCall(produce, isRetryable, policy, signal, callbacks)`. It reuses the exact
+  sleep, exponential backoff (`baseDelayMs * 2^(attempt-1)`), abort, and `RetryCallbacks` contract that
+  `retryAssistantCall` already implements, for producers that report failure by THROWING rather than by resolving an
+  `AssistantMessage` with `stopReason: "error"`.
+- The classifier is an explicit `isRetryable(error)` parameter, so each caller keeps ownership of what counts as
+  transient instead of inheriting assistant-message semantics that do not apply to it.
+- `retryAssistantCall` is untouched and stays value-based; its full existing suite passes unchanged. The two loops
+  share the private `sleep`/`RetrySleepAbortError` primitives so backoff and cancellation have one implementation.
+- First consumer is senpi's builtin compaction extension, whose summarization request throws and therefore could not
+  reuse the bounded retry without first reshaping failures into assistant messages.
+
+### Why this cannot be expressed externally
+
+- The delay, abort-during-backoff normalization, and retry callback ordering are private to this module. A caller
+  reimplementing them outside `utils/retry.ts` is exactly the duplicated policy this addition removes.
+
+### Expected merge conflict zones
+
+- MEDIUM: `utils/retry.ts` between `RetryCallbacks`/`sleep` and `retryAssistantCall`, where the new function is
+  inserted.
+- LOW: `test/retry-transient-call.test.ts` is a new focused file for the added surface.
+
+## 2026-08-12 - OpenGateway built-in provider
+
+### What changed and why
+
+- Added `opengateway` as a built-in provider for the OpenGateway data plane (`https://apis.opengateway.ai`),
+  an OpenAI-compatible multi-provider gateway serving `owner/model` ids (OpenAI, Anthropic, Google, xAI,
+  Moonshot, DeepSeek, ZAI, MiniMax, Qwen) through a single `OPENGATEWAY_API_KEY` Bearer credential.
+- The generated catalog is hydrated from the gateway's live `/v1/models` at generation time by
+  `scripts/generate-models-opengateway.ts`: chat-completions-capable, non-retired models are kept and
+  enriched with pricing/context/reasoning metadata from models.dev, preferring the owning provider's
+  catalog over the OpenRouter id space. Six models models.dev cannot enrich carry explicit overrides.
+- Env detection maps `OPENGATEWAY_API_KEY`; the provider factory uses the shared `openai-completions`
+  API with standard OpenAI compat auto-detection.
+
+### Why this cannot be expressed externally
+
+- A user-level `models.json` custom provider can point at the gateway, but it cannot ship a generated,
+  validated catalog in `src/providers/data/`, participate in `KnownProvider` typing, or register the
+  built-in display name that makes the provider a first-class `/login` target.
+
+### Expected merge conflict zones
+
+- MEDIUM: `scripts/generate-models.ts` main fetch/assembly flow (new source call + spread).
+- LOW: `src/types.ts` `KnownProvider` union, `src/env-api-keys.ts` env map, `src/providers/all.ts`
+  registration list.
+- LOW: generated artifacts (`models.generated.ts`, `providers/data/`) — resolve by regenerating.
+## 2026-08-12 - Default direct Anthropic prompt caching to five minutes
+
+### What changed and why
+
+- Native `anthropic-messages` requests now use Anthropic's default five-minute prompt-cache retention when neither
+  `cacheRetention` nor `PI_CACHE_RETENTION=long` explicitly selects long retention. The adapter emits bare
+  `{ type: "ephemeral" }` cache-control markers instead of adding `ttl: "1h"`.
+- The browser-safe `resolvePromptCacheTtlSeconds()` mirror now reports 300 seconds for the same omitted-retention
+  path, keeping cache-aware tool waits and goal-monitor timing aligned with the wire request.
+- Explicit `cacheRetention: "long"`, model-level long retention, and `PI_CACHE_RETENTION=long` still request and
+  report one hour on supported canonical Anthropic endpoints. Anthropic-compatible proxies remain five minutes.
+
+### Why this cannot be expressed externally
+
+- Prompt-cache retention is selected while the Anthropic provider serializes system, tool, and conversation cache
+  breakpoints. Extensions only observe higher-level requests and cannot safely rewrite every provider-owned
+  `cache_control` block or the browser-safe TTL estimate consumed by cache-aware runtime scheduling.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/anthropic-messages.ts` around `resolveCacheRetention()` and the cache-session-id setup.
+- MEDIUM: `utils/prompt-cache-ttl.ts` in the native Anthropic branch of `resolvePromptCacheTtlSeconds()`.
+- LOW: focused cache-retention and TTL tests that pin provider-default precedence.
+
+## 2026-08-11 - Native Responses image-generation item reconciliation
+
+### What changed and why
+
+- The shared OpenAI Responses stream loop now structurally recognizes `image_generation_call` output items across
+  SSE, WebSocket, Azure, and Codex adapters. Added and done frames reconcile into one provider-native slot, while a
+  terminal response backfills the final item when providers omit `response.output_item.done`.
+- Completed items retain only validated base64 plus an optional nonempty `revised_prompt`. Missing, empty, or invalid
+  results become short malformed status blocks; failed and provider-specific statuses remain message-local metadata
+  instead of escalating into transport errors. Partial-image events remain intentionally ignored.
+- Native image results have a 24 MiB aggregate base64-character cap. Exceeding it scrubs already collected image bytes
+  before the adapter returns a normalized provider error, so oversized data cannot enter the final assistant content.
+- `OpenAIResponsesCompat.supportsImageGeneration` exposes an explicit native-tool compatibility override, with direct
+  OpenAI Responses endpoints as the default-compatible route.
+
+### Why this cannot be expressed externally
+
+- Output-item slot reconciliation and terminal-response backfill happen inside the shared provider event loop before
+  extensions receive a completed assistant message. External hooks cannot reliably deduplicate frames or prevent
+  oversized native payloads from entering normalized content across all three adapters.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/openai-responses-shared.ts` output-slot lifecycle and terminal response finalization.
+- LOW: `openai-responses-compat.ts` additive compatibility flag.
+- LOW: `api/openai-responses.ts` resolved compatibility defaults.
+
+## 2026-08-11 - OpenAI images provider with generated gpt-image models
+
+### What changed and why
+
+- `scripts/generate-image-models.ts` now also emits `IMAGE_MODELS.openai` with static, hand-authored entries for
+  `gpt-image-2` and `gpt-image-1.5` (api `openai-images`, provider `openai`, baseUrl `https://api.openai.com/v1`,
+  input `["text"]` only - the v1 generations endpoint is text-only). Costs quote models.dev as of 2026-08-11
+  (gpt-image-2: $5 input / $30 output / $1.25 cache-read per 1M tokens; gpt-image-1.5 has no models.dev cost entry
+  as of that date and is zero-filled until pricing is published). The OpenRouter live fetch is unchanged.
+- `providers/openai-images.ts` adds `openaiImagesProvider()` mirroring the OpenRouter images provider, authing via
+  `OPENAI_API_KEY` and serving `Object.values(IMAGE_MODELS.openai)` through the lazy `openaiImagesApi()` accessor.
+- `providers/all.ts` appends the provider to `builtinImagesProviders()`, so `builtinImagesModels()` exposes the
+  `openai` provider and its catalog.
+
+### Why this cannot be expressed externally
+
+- The built-in image model catalog is generated inside `packages/ai`; external providers can register through the
+  images registry but cannot extend the generated `IMAGE_MODELS` catalog or the builtin provider list.
+
+### Expected merge conflict zones
+
+- LOW: additive static model table and provider grouping in `scripts/generate-image-models.ts`.
+- LOW: one-line append in `builtinImagesProviders()` and the import block in `providers/all.ts`.
+
+## 2026-08-11 - Lazy builtin registration for openai-images provider
+
+### What changed and why
+
+- `providers/images/register-builtins.ts` registers the `openai-images` ImagesApi as a lazy builtin alongside the
+  existing `openrouter-images` registration. The lazy wrapper defers the dynamic import of `api/openai-images.ts`
+  until first invocation, and catches any module-load failure into a normalized `AssistantImages` error envelope
+  (stopReason "error", never a thrown rejection).
+- The shared `createLazyLoadErrorImages` helper is generalized over `ImagesApi` so both providers reuse the same
+  error-envelope construction.
+
+### Why this cannot be expressed externally
+
+- Builtin provider registration runs at module load time inside `packages/ai`; external extensions register through
+  the public registry surface but cannot supply the lazy module-promise boundary that keeps the openai-images SDK
+  out of the initial bundle.
+
+### Expected merge conflict zones
+
+- LOW: additive registration entry inside `registerBuiltInImagesApiProviders()` and the new lazy wrapper export in
+  `providers/images/register-builtins.ts`.
+- LOW: additive test file `test/images-registry-builtins.test.ts`.
+
+## 2026-08-11 - OpenAI Images API adapter
+
+### What changed and why
+
+- `api/openai-images.ts` adds the text-only OpenAI Images generations adapter with canonical `/v1` endpoint
+  normalization, shared credential-header auth, provider-owned retries, usage/cost mapping, and normalized error envelopes.
+- Image results accept provider base64, data URLs, or unauthenticated signed HTTP URLs. Hydration validates image MIME or
+  magic bytes, enforces a 24 MiB cap, and keeps generated bytes in memory so packages/ai remains browser-safe.
+- `api/openai-images.lazy.ts` adds the sanctioned dynamic-import boundary, and `types.ts` recognizes `openai-images` as
+  a known images API.
+
+### Why this cannot be expressed externally
+
+- Correct request fields, SDK retry ownership, credential-header suppression, and response hydration are provider wire
+  concerns that must run before the normalized `AssistantImages` result reaches callers.
+
+### Expected merge conflict zones
+
+- LOW: additive API and test modules plus the `KnownImagesApi` union line.
+- LOW: additive entry at the top of `src/changes.md`.
+## 2026-08-11 - Normalize replayed tool IDs for strict OpenAI-compatible gateways
+
+### What changed and why
+
+- `api/openai-completions.ts` now sanitizes every replayed non-Responses tool-call ID to the OpenAI-compatible
+  alphanumeric/underscore/dash shape, preserves already-valid bounded IDs, and uses a deterministic hash suffix when
+  sanitization or the 40-character bound changes the ID.
+- `api/transform-messages.ts` lets strict target adapters opt into applying their supplied tool-call ID normalizer to
+  same-model history as well as cross-model history. OpenAI completions enables that opt-in and remaps the paired
+  tool result through the existing ID map; Responses retains its provider-native IDs.
+- A persisted `apitopia/kimi-k3-unlocked` session stored tool-call IDs such as `eval:18`. After switching to
+  `opengateway/anthropic/claude-fable-5`, the gateway rejected the request before generation with
+  `messages.36.content.1.tool_use.id: String should match pattern '^[a-zA-Z0-9_-]+$'`.
+- This cannot be extension-local: tool-call IDs and their paired results are transformed inside provider request
+  serialization before an extension can safely rewrite the complete outbound history. Rewriting persisted session
+  files would also leave other histories and future provider handoffs exposed.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/openai-completions.ts` near the local `normalizeToolCallId` function in `convertMessages`.
+- LOW: `api/transform-messages.ts` in the assistant `toolCall` transformation branch.
+- LOW: `../test/model-switch-replay-characterization.test.ts` near the non-Responses replay cases.
+
+## 2026-08-11 - Retry gateway model-request rejections
+
+### What changed and why
+
+- `utils/retry.ts` classifies `"model request was rejected"` as retryable so a gateway/proxy-side "The model
+  request was rejected. Check the request and try again." response is absorbed by the bounded same-model retry
+  policy (`settings.retry`) instead of failing the turn or immediately burning the fallback chain. Observed in a
+  live session on 2026-08-11. The classifier couples the rejection sentence to its explicit "Check the request and
+  try again." instruction so permission denials, content refusals, and request-shape errors remain terminal, and
+  the non-retryable list still wins on overlap.
+
+### Why this cannot be expressed externally
+
+- The transient-vs-terminal message classifier is package-internal; callers and extensions consume its verdict
+  through `retryAssistantCall`/`isRetryableAssistantError` and cannot add a message class without forking the
+  retry loop.
+
+### Expected merge conflict zones
+
+- LOW: additive pattern in `utils/retry.ts`, additive cases in `test/retry.test.ts`, additive mock-loop scenario
+  and optional scripted-error `type` under `.agents/skills/senpi-qa/scripts/`.
+
+## 2026-08-11 - Optional availability `check` on `OAuthAuth`
+
+### What changed and why
+
+Added an optional `check?(input)` to `OAuthAuth` (`auth/types.ts`) and taught `checkProviderAuth` (`models.ts`) to consult it in the stored-OAuth-credential branch. Previously that branch was a pure structural short-circuit — `provider.auth.oauth ? {configured} : undefined` — so any stored OAuth credential, including an empty sentinel envelope with zero accounts, reported the provider as configured. The fallback engine reads configured-ness through `hasConfiguredAuth`, so such a provider was never skipped as `unauthenticated`. `ApiKeyAuth` already exposes an equivalent `check`; this makes the OAuth path symmetric. When `check` is absent, behavior is byte-identical to before, so every existing OAuth provider is unaffected. This cannot be extension-local: the short-circuit lives in `ModelsImpl.checkProviderAuth`, which no extension hook reaches, and `OAuthAuth` had no `check` to supply.
+
+### Expected merge-conflict zones
+
+LOW in `auth/types.ts` (additive optional field on `OAuthAuth`); LOW in `models.ts` `checkProviderAuth` (one stored-OAuth branch expanded, existing behavior preserved when `check` is undefined).
+
+## 2026-08-11 - OAuth availability `check` for ambient and no-credential providers
+
+### What changed and why
+
+- Follow-up to the optional `OAuthAuth.check` hook: `Models.checkAuth()` now also invokes the hook for ambient
+  no-credential providers, not only for stored OAuth credentials. Providers without a hook retain the previous
+  behavior where any matching stored OAuth credential is configured.
+- This lets providers confirm usable ambient OAuth without refreshing, resolving, or exposing token material. Hook
+  failures are wrapped in `ModelsError` on both the stored-credential and ambient paths.
+
+### Why this cannot be expressed externally
+
+- Provider availability and model filtering happen inside `Models` before host registries and fallback controllers see
+  the provider, so an extension-only post-filter would leave `checkAuth()` and `getAvailable()` inconsistent.
+
+### Expected merge conflict zones
+
+- MEDIUM: the auth precedence branches in `models.ts`.
+
+## 2026-08-09 - Native Anthropic prompt-cache warming primitive
+
+### What changed and why
+
+- `api/warm-prompt-cache.ts` adds the non-streaming `warmPromptCache()` request primitive for direct Anthropic
+  Messages models. It sends the normal converted system, tools, and conversation cache breakpoints with
+  `max_tokens: 0`, strips streaming, thinking, and forced tool choice, disables SDK retries, and returns normalized
+  input/output/cache-read/cache-write usage alongside the raw provider usage.
+- `api/anthropic-messages.ts` exposes a focused warm-request builder so pre-warming and the normal stream share the
+  same message, tool, cache-control, and tool-pair conversion instead of maintaining a second wire transform.
+- The root package exports the primitive and its exact supported/unsupported result contract. Non-Anthropic APIs and
+  Anthropic-compatible gateways return unsupported before authentication or network work begins.
+
+### Why this cannot be expressed externally
+
+- Correct cache breakpoints depend on adapter-internal Anthropic message and tool conversion. Reconstructing the
+  request outside the package would drift from the normal provider path and could mutate history or send incompatible
+  streaming/thinking options.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/anthropic-messages.ts` near request construction and cache-control conversion.
+- LOW: additive `api/warm-prompt-cache.ts` and root `index.ts` export.
+
+## 2026-08-09 - Prompt-cache correctness across OpenAI-compatible and Bedrock lanes
+
+### What changed and why
+
+- `api/openai-completions.ts` `parseChunkUsage()` now reads Kimi's flat `usage.cached_tokens` only after the
+  existing nested OpenAI and `prompt_cache_hit_tokens` forms, preserving precedence while reporting cache reads and
+  uncached input correctly.
+- `types.ts` adds `OpenAICompletionsCompat.supportsPromptCacheKey`; `utils/prompt-cache-ttl.ts`
+  `detectOpenAICompletionsCompat()` enables it for Moonshot and direct OpenAI endpoints, and
+  `getOpenAICompletionsCompat()` preserves explicit overrides. `buildParams()` uses the resolved flag to emit a
+  clamped stable key without adding provider URL checks at the request boundary.
+- OpenRouter compatibility detection now defaults session affinity on, and `buildParams()` sends the same session ID
+  in both `x-session-id` and the body `session_id` from the first cache-enabled request.
+- Runtime and `scripts/generate-models.ts` detection share the literal `anthropic/`, `qwen/`, `google/` cache-control
+  prefix allowlist and strip one optional leading `~`. Hydrated Moonshot and OpenRouter catalogs bake the resolved
+  compatibility metadata.
+- `utils/prompt-cache-ttl.ts` `supportsOneHourCacheTtl()` is the single Bedrock Claude 4.5 allowlist used by both
+  `api/bedrock-converse-stream.ts` cache-point sites and `resolvePromptCacheTtlSeconds()`, preventing a one-hour
+  resolver estimate when the wire request can only use five minutes.
+- `resolvePromptCacheTtlSeconds()` reports 300 seconds for the actual `claude-sdk-oauth` model shape because the SDK
+  owns that lane's default ephemeral prompt caching.
+
+### Why this cannot be expressed externally
+
+- Usage parsing, provider request fields, cache-point TTLs, and cache lifetime estimates are adapter-internal wire
+  contracts resolved before an extension can observe a normalized assistant message or safely rewrite every request
+  path. Generated compatibility metadata must also stay aligned with runtime detection.
+
+### Expected merge conflict zones
+
+- HIGH: `utils/prompt-cache-ttl.ts` OpenAI-compatible detection/merge and cache TTL resolver switches.
+- HIGH: `api/openai-completions.ts` request construction and streamed usage parsing.
+- MEDIUM: `api/bedrock-converse-stream.ts` system and conversation cache-point construction.
+- MEDIUM: `scripts/generate-models.ts` compatibility detection and generated Moonshot/OpenRouter data.
+
+## 2026-08-09 - Shared visible assistant-content classification
+
+### What changed and why
+
+- `utils/visible-text.ts` defines the shared visibility boundary for assistant text: Unicode format characters
+  (`\p{Cf}`) are removed before whitespace trimming, so zero-width spaces, joiners, word joiners, byte-order marks,
+  and directional formatting marks cannot make an otherwise empty response appear user-visible.
+- `hasVisibleAssistantContent` treats a tool call or text containing a visible scalar as assistant output. Emoji ZWJ
+  sequences remain visible because removing the joiner leaves visible emoji scalars.
+- The browser-safe root exports both predicates so agent-core and other consumers use one classification instead of
+  duplicating JavaScript `trim()` checks that miss U+200B.
+
+### Why this cannot be expressed externally
+
+- Assistant response visibility is a shared message-level contract consumed before coding-agent extensions receive a
+  committed turn; external hooks cannot reliably repair divergent classifiers in each core consumer.
+
+### Expected merge conflict zones
+
+- LOW: additive `utils/visible-text.ts` module and root export in `index.ts`.
+
 ## 2026-08-05 - Root-object tool schemas and request-shape error classification
 
 ### What changed and why
@@ -1204,11 +1562,11 @@ provider request builders in `packages/ai`, below any extension-visible surface.
 
 ### What changed and why
 - `providers/openai-codex-responses.ts` `buildBaseCodexHeaders()`: changed the hardcoded `originator: "pi"` and the `User-Agent: "pi (…)"` string to `"senpi"`. Upstream chose `"pi"` as the Codex CLI identity; this fork's identity is `senpi`.
-- `utils/oauth/openai-codex.ts` `createAuthorizationFlow()`: changed the default `originator` parameter from `"pi"` to `"senpi"` and updated the JSDoc on `loginOpenAICodex` accordingly. Callers can still pass their own originator.
+- `auth/oauth/openai-codex.ts` `createAuthorizationFlow()`: changed the default `originator` parameter from `"pi"` to `"senpi"` and updated the JSDoc on `loginOpenAICodex` accordingly. Callers can still pass their own originator.
 
 ### Files modified
 - `providers/openai-codex-responses.ts`
-- `utils/oauth/openai-codex.ts`
+- `auth/oauth/openai-codex.ts`
 
 ### Why the higher-level extension system couldn't handle this alone
 - The originator + User-Agent headers are built inside `pi-ai`'s Codex header constructor before the request leaves the library. Coding-agent extensions cannot intercept the header construction step.
