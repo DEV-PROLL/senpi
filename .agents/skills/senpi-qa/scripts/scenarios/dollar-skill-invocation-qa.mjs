@@ -19,7 +19,13 @@ import { startFakeModelServer } from "../lib/fake-model-server.mjs";
 import { hermeticEnv, writeMockModelsJson } from "../lib/mock-loop-support.mjs";
 import { TargetRpcClient } from "../lib/target-rpc-client.mjs";
 
-const label = "dollar-skill-invocation";
+const evidenceFlagIndex = process.argv.indexOf("--evidence");
+const label =
+	evidenceFlagIndex >= 0 ? process.argv[evidenceFlagIndex + 1] : "dollar-skill-invocation";
+if (!label) {
+	throw new Error("--evidence requires a value");
+}
+
 const root = repoRoot();
 const checks = createChecks("dollar-skill-invocation-qa.mjs");
 const guard = guardRealAuth();
@@ -36,23 +42,89 @@ writeFileSync(
 	"---\nname: debugging\ndescription: Debug runtime failures\n---\n\n# Debugging\n\nTrace the defect before proposing a fix.",
 );
 
+const extensionPath = join(box.cwd, "dollar-invocation-qa-extension.ts");
+writeFileSync(
+	extensionPath,
+	`export default function dollarInvocationQa(pi) {
+  pi.registerCommand("echo", {
+    description: "Echo QA command",
+    handler: () => {},
+  });
+}
+`,
+);
+
 const client = new TargetRpcClient({
 	env: hermeticEnv(box.env),
 	cwd: box.cwd,
 	targetRoot: root,
-	extraArgs: ["--skill", skillDir],
+	extraArgs: ["--skill", skillDir, "-e", extensionPath],
 });
+const startupTimeoutMs = 240_000;
+
+const waitForEventType = async (type, timeoutMs = 60_000, afterIndex = 0) => {
+	const startedAt = Date.now();
+	process.stderr.write(`[qa] waiting for ${type}\n`);
+	const existing = client.events.slice(afterIndex).find((candidate) => candidate.message.type === type);
+	if (existing) {
+		process.stderr.write(`[qa] received buffered ${type} after ${Date.now() - startedAt}ms\n`);
+		return existing.message;
+	}
+	try {
+		const event = await client.waitFor((candidate) => candidate.message.type === type, timeoutMs);
+		process.stderr.write(`[qa] received ${type} after ${Date.now() - startedAt}ms\n`);
+		return event.message;
+	} catch (error) {
+		process.stderr.write(
+			`[qa] ${type} timed out; observed=${client.events.map((event) => event.message.type).join(",")}\n`,
+		);
+		throw error;
+	}
+};
 
 installCleanupHooks();
 try {
-	await client.send({ type: "set_model", provider: "anthropic", modelId: "mock-claude" });
+	const startupStartedAt = Date.now();
+	await client.send(
+		{ type: "set_model", provider: "anthropic", modelId: "mock-claude" },
+		startupTimeoutMs,
+	);
+	process.stderr.write(`[qa] RPC startup handshake completed after ${Date.now() - startupStartedAt}ms\n`);
+	const initialCommandsResponse = await client.send({ type: "get_commands" }, 60_000);
+	const initialCommands = initialCommandsResponse.data?.commands ?? [];
+	checks.ok(
+		"initial commands response accepted",
+		initialCommandsResponse.success === true,
+		JSON.stringify(initialCommandsResponse),
+	);
+
+	const commandsResponse = await client.send({ type: "get_commands" }, 60_000);
+	const commands = commandsResponse.data?.commands ?? [];
+	const commandsChanged = await waitForEventType("commands_changed");
+	const echoRow = commands.find((command) => command.name === "echo");
+	const skillRow = commands.find((command) => command.name === "skill:debugging");
+	checks.ok("commands response accepted", commandsResponse.success === true, JSON.stringify(commandsResponse));
+	checks.ok("extension command candidate present", echoRow?.syntax === "slash", JSON.stringify(echoRow));
+	checks.ok("skill candidate present", skillRow?.syntax === "dollar", JSON.stringify(skillRow));
+	checks.ok(
+		"commands changed matches ordered candidates",
+		JSON.stringify(commandsChanged.commands) === JSON.stringify(commands),
+		JSON.stringify({ commandsChanged, commands }),
+	);
+	checks.ok(
+		"extension command precedes skill candidate",
+		commands.findIndex((command) => command.name === "echo") <
+			commands.findIndex((command) => command.name === "skill:debugging"),
+		JSON.stringify(commands.map((command) => command.name)),
+	);
+
 	const before = await client.send({ type: "get_loaded_surfaces" });
-	const invocationPromise = client.waitFor((event) => event.message.type === "skill_invocation");
-	const settledPromise = client.waitFor((event) => event.message.type === "agent_settled");
+	const invocationPromise = waitForEventType("skill_invocation");
+	const settledPromise = waitForEventType("agent_settled", 60_000);
 
 	const prompt = "Use $skill:debugging to inspect $HOME safely";
-	const accepted = await client.send({ type: "prompt", message: prompt });
-	const invocation = (await invocationPromise).message;
+	const accepted = await client.send({ type: "prompt", message: prompt }, 60_000);
+	const invocation = await invocationPromise;
 	await settledPromise;
 	const after = await client.send({ type: "get_loaded_surfaces" });
 
@@ -80,6 +152,28 @@ try {
 		JSON.stringify(before.data?.mcpServers ?? []) === JSON.stringify(after.data?.mcpServers ?? []),
 		JSON.stringify({ before: before.data?.mcpServers, after: after.data?.mcpServers }),
 	);
+	const commandInvocationPromise = waitForEventType("command_invocation");
+	const commandAccepted = await client.send({ type: "prompt", message: "/echo" }, 60_000);
+	const commandInvocation = await commandInvocationPromise;
+	checks.ok("command prompt accepted", commandAccepted.success === true, JSON.stringify(commandAccepted));
+	checks.ok(
+		"typed command invocation event",
+		commandInvocation.type === "command_invocation" &&
+			commandInvocation.command?.name === "echo" &&
+			commandInvocation.command?.source === "extension" &&
+			commandInvocation.command?.syntax === "slash",
+		JSON.stringify(commandInvocation),
+	);
+	checks.ok(
+		"command invocation emitted once",
+		client.events.filter((event) => event.message.type === "command_invocation").length === 1,
+		JSON.stringify(client.events.map((event) => event.message.type)),
+	);
+	checks.ok(
+		"skill invocation emitted once",
+		client.events.filter((event) => event.message.type === "skill_invocation").length === 1,
+		JSON.stringify(client.events.map((event) => event.message.type)),
+	);
 	checks.ok("real auth unchanged", guard.assertUnchanged(), guard.path);
 
 	writeFileSync(
@@ -88,6 +182,10 @@ try {
 			{
 				prompt,
 				accepted,
+				commandAccepted,
+				commandsChanged,
+				commands,
+				commandInvocation,
 				invocation,
 				beforeMcpServers: before.data?.mcpServers ?? [],
 				afterMcpServers: after.data?.mcpServers ?? [],
@@ -97,6 +195,22 @@ try {
 			null,
 			2,
 		),
+	);
+	writeFileSync(
+		join(evidence, "rpc-dollar-invocation.jsonl"),
+		[commandsChanged, commandInvocation, invocation].map((event) => JSON.stringify(event)).join("\n") + "\n",
+	);
+	writeFileSync(
+		join(evidence, "VERDICT.md"),
+		[
+			"# Dollar Invocation RPC QA",
+			"",
+			"- PASS: `commands_changed` matches the ordered `get_commands` candidate snapshot.",
+			"- PASS: one accepted `/echo` invocation emits exactly one typed `command_invocation` event.",
+			"- PASS: one `$skill:debugging` token emits exactly one typed `skill_invocation` event.",
+			"- PASS: ordinary `$HOME` text remains literal and MCP loaded surfaces remain unchanged.",
+			"",
+		].join("\n"),
 	);
 	process.stderr.write(`evidence: ${evidence}\n`);
 } finally {
