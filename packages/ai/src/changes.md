@@ -38,6 +38,26 @@
 - LOW: `utils/overflow.ts` pattern list and its header documentation; LOW in
   `test/overflow.test.ts` where the new cases sit beside existing provider patterns.
 
+## 2026-08-14 - Harden stored OAuth request derivation
+
+### What changed and why
+
+- `resolveProviderAuth()` refreshes expired OAuth credentials before invoking the provider's optional side-effect-free `check`.
+- Sentinel envelopes that represent zero usable accounts can no longer bypass the same availability predicate used by provider catalog checks.
+- Stored OAuth derivation transiently merges request environment before both `check()` and `toAuth()`, then returns it for auxiliary replay without persisting request secrets.
+- Explicit empty request environment values mask host values instead of falling back through truthiness.
+- `ApiKeyAuth.ambientOnly` lets compatibility adapters remain fallback-only without changing explicit-key precedence for real dual-auth providers.
+- Ambient-only adapters receive the raw request environment alongside their overlaid context, allowing provider-owned token namespaces to replace sibling host slots instead of importing them during replay.
+
+### Why this cannot be expressed externally
+
+- Stored OAuth credentials short-circuit inside the provider-neutral resolver before coding-agent provider composition or extension request hooks can intervene.
+
+### Expected merge conflict zones
+
+- MEDIUM: `auth/resolve.ts` at explicit-key precedence, environment overlay, and stored-OAuth refresh/check/derivation.
+- LOW: `auth/types.ts` at the additive `ApiKeyAuth.ambientOnly` metadata.
+
 ## 2026-08-13 - Preserve explicit request compatibility fields
 
 ### What changed and why

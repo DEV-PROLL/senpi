@@ -1,5 +1,30 @@
 # changes
 
+## Idempotent ambient OAuth auth composition (2026-08-14)
+
+### What changed
+
+- `core/provider-api-key-auth.ts` now accepts an ambient OAuth resolver's own synthetic key when resolved auth is replayed as an explicit request key by title, compaction, and branch-summary calls.
+- The compatibility adapter identifies itself as ambient-only, so a replayed marker or unrelated explicit key cannot bypass a valid stored OAuth account.
+- The ambient adapter now resolves configured metadata headers and `authHeader` through the same composition used by stored OAuth.
+- Replay-only credential environment participates in configured header resolution while unrelated explicit keys remain rejected.
+- Present-but-empty Claude token slots survive synthetic-marker replay, preventing auxiliary calls from falling back to a host token.
+- When any request Claude token slot is present, ambient resolution treats that request token set as the complete namespace and cannot import a different host slot during replay.
+- Request-backed `config-dir` authentication uses the non-persisting OAuth environment lane for that request, so request credentials are never written below the stable agent directory.
+- Coverage compares ambient and stored OAuth auth shapes, drives replay through real title generation, and pins stored-account precedence.
+
+### Why
+
+- Auxiliary calls copy resolved request auth into their own options. Rejecting the provider's marker made the second auth pass report unconfigured, while allowing the ambient adapter to outrank stored OAuth broke managed-account replay and an early ambient return dropped configured headers and synthesized authorization.
+
+### Why an extension could not do this
+
+- Provider auth composition runs before request hooks and is the mechanism that makes extension-registered providers callable. An extension cannot repair auth that the host composer rejected or omitted.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `core/provider-api-key-auth.ts` around the ambient-only OAuth adapter and its precedence metadata.
+
 The historical-image transport entry moved to `core/changes.md`, beside the
 other provider-bound image transport behavior that owns the same payload path.
 

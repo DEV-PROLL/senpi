@@ -14,6 +14,9 @@
 
 ### Fixed
 
+- Stored OAuth request resolution now refreshes before availability checks, passes transient request environment through both availability and auth derivation, preserves it for replay, and respects explicit empty environment overrides.
+- Ambient-only API-key compatibility adapters can no longer outrank a valid stored OAuth credential.
+- Ambient-only authentication can now apply provider-owned request credential namespaces without importing sibling host credentials.
 - `isContextOverflow` now classifies gateway HTTP 413 byte-size rejections — "Request body too large", "Request Entity Too Large", `body_too_large`, and "Payload Too Large" — as overflow, the same recovery class as Anthropic's native `request_too_large`. Sessions whose requests exceed a gateway body limit previously saw these as terminal errors, which wedged compaction on every fallback model ([#884](https://github.com/code-yeongyu/senpi/issues/884)).
 
 ### Removed
