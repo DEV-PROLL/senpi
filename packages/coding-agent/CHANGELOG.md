@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- GLM 5.3 prompt preset: a new `glm-5.3` system-prompt preset cloned from `glm-5.2` (thin `tuningSection` wrapper over the shared dynamic core, `workstationDialect: "claude"`). The `hasGlm53Signal`/`isGlm53Model` matcher is checked before the 5.2 matcher, `"glm-5.3"` joins `PromptPresetName`/`VALID_PRESETS`, and the settings.md value list is updated. Models selecting GLM 5.3 now get the tuned system prompt instead of the untuned fallback ([#895](https://github.com/code-yeongyu/senpi/pull/895)).
+
 ### Fixed
 
 - Explicit `/skill:<name>` commands now preserve that the user selected the skill: the expanded user message names each invoked skill, marks its workflow as binding, and separates skill instructions from trailing request text. The TUI and HTML export parsers recognize the new payload while retaining legacy parsing for resumed and imported sessions, so skill invocations remain collapsed in transcripts. Previously the expansion flattened both into ordinary prose, so the Intent Gate could route only on the trailing request and ignore the selected skill's rules ([#890](https://github.com/code-yeongyu/senpi/issues/890)).

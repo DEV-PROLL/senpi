@@ -6,6 +6,8 @@
 
 ### Added
 
+- GLM 5.3 is now a fully supported model family: 25 catalog entries cloned across 18 providers (alibaba-token-plan, baseten, cloudflare, fireworks, huggingface, nvidia, opencode, opencode-go, opengateway, openrouter, qwen-token-plan, together, vercel-ai-gateway, zai, zai-coding-cn), the `openai-completions` thinking-level-map matcher generalizes to cover 5.3 (`isGlm52` → `isGlm5x`), and the zai `thinkingFormat` handler forces `{type:"enabled"}` for 5.3 even when no reasoning effort is set (5.3 cannot disable thinking per the Z.AI wire contract). `generate-models.ts` was updated so regeneration preserves the 5.3 entries and their thinkingLevelMaps ([#895](https://github.com/code-yeongyu/senpi/pull/895)).
+
 ### Changed
 
 - Synced the provider transports with upstream v0.84.2: the Anthropic streaming path now uses upstream's SSE decoder with deferred tools (`tool_reference`/`defer_loading`) and adaptive `xhigh` effort, OpenAI Completions gained strict JSON-schema conversion, grammar/custom tool calls and the new thinking backends, and the Responses transports support upstream's `additional_tools` deferred-tool mode. The fork's server-fallback receipts, retry hints, tool-choice fallback, prompt-cache TTL, deterministic tool-call-ID sanitizer and `senpi` wire identity are preserved. `mistral-conversations` moves to upstream's native transport. Provider catalog data was refreshed for the capabilities these features read (`supportsAdditionalTools`, native DeepSeek `max_tokens`, Cloudflare Responses strict mode, DeepSeek V4 Flash `low` effort), and DeepSeek base-URL detection is now case-insensitive ([#892](https://github.com/code-yeongyu/senpi/pull/892)).
