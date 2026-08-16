@@ -1,5 +1,25 @@
 # changes
 
+## Custom-editor Enter submissions are no longer dropped (2026-08-16)
+
+### What changed
+
+- The custom-editor submit bridge in `interactive-mode.ts` (`setCustomEditorComponent`) now expands the submitted value via a new `expandSubmittedText()` in `editor-paste-transfer.ts`, which expands paste markers against the passed text and never re-reads the editor.
+- The previous bridge called `expandEditorSubmission()`, which prefers `editor.getExpandedText()` over the submitted text. That preference is correct for live draft reads (`getExpandedEditorText()`) but wrong at submit time: pi-tui's `Editor.submitValue()` clears the editor state and paste registry *before* invoking `onSubmit`, so any custom editor implementing `getExpandedText()` (e.g. a wrapper delegating to a pi-tui `Editor`) reported "" and the entire submission was silently discarded — Enter cleared the prompt without sending anything.
+- `expandEditorSubmission()` itself is unchanged; only the submit call site switched.
+
+### Why
+
+- With a custom editor installed (for example the `pi-voice-stt` dictation extension), pressing Enter cleared the prompt but no message ever reached the model — the TUI could not send any user input at all.
+
+### Why this cannot be expressed externally
+
+- The submit bridge lives in the core custom-editor wiring; extensions can only supply the editor component, not how the host reads back its submission.
+
+### Expected merge conflict zones
+
+- LOW: one call site and one import in `interactive-mode.ts`, plus one additive export in the fork-only `editor-paste-transfer.ts`.
+
 ## Show the selected settings source (2026-08-16)
 
 ### What changed
