@@ -44,6 +44,10 @@
 			"types": "./dist/bedrock-provider.d.ts",
 			"import": "./dist/bedrock-provider.js"
 		},
+		"./cursor-agent-provider": {
+			"types": "./dist/cursor-agent-provider.d.ts",
+			"import": "./dist/cursor-agent-provider.js"
+		},
 		"./bun-oauth": {
 			"types": "./dist/bun-oauth.d.ts",
 			"import": "./dist/bun-oauth.js"
@@ -73,6 +77,7 @@
 	"dependencies": {
 		"@anthropic-ai/sdk": "0.91.1",
 		"@aws-sdk/client-bedrock-runtime": "3.1095.0",
+		"@bufbuild/protobuf": "2.13.0",
 		"@earendil-works/pi-telemetry": "^2026.8.14",
 		"@google/genai": "2.13.0",
 		"@mistralai/mistralai": "2.5.0",
