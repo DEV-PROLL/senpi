@@ -4,6 +4,8 @@
 
 ### Added
 
+- Grok 4.6 prompt preset: a new `grok-4.6` system-prompt preset (full-core rewrite via the builder's `corePrompt` override) so Grok 4.6 models stop falling back to the untuned dynamic prompt. Unlike the grok-4.5 CEO/orchestrator preset, this is a direct-implementer core tuned per the Grok 4.6 launch field guide: a binding declared-stop-condition contract ("say what done means"), no exhortation language (a measured no-op on this model), a real-surface verification loop (walk the user paths the change touches; for hard-to-inspect output capture the current state, list what is wrong, fix only those), a shared-piece rule against repeated near-identical blocks, and information-dense reporting. `"grok-4.6"` joins `PromptPresetName`/`VALID_PRESETS`, the matcher resolves before 4.5, and the settings.md preset list gains both `grok-4.5` (previously missing) and `grok-4.6`.
+
 - Settings files now support dependency-free JSONC comments and trailing commas. When both `settings.jsonc` and `settings.json` exist in one config directory, JSONC wins; writes remain on the loaded file, config reload watches both formats, RPC emits `settings_source_selected` with the selected path/format/reason, and the interactive TUI shows the choice at startup or reload.
 - GLM 5.3 prompt preset: a new `glm-5.3` system-prompt preset cloned from `glm-5.2` (thin `tuningSection` wrapper over the shared dynamic core, `workstationDialect: "claude"`). The `hasGlm53Signal`/`isGlm53Model` matcher is checked before the 5.2 matcher, `"glm-5.3"` joins `PromptPresetName`/`VALID_PRESETS`, and the settings.md value list is updated. Models selecting GLM 5.3 now get the tuned system prompt instead of the untuned fallback ([#895](https://github.com/code-yeongyu/senpi/pull/895)).
 
