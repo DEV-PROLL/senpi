@@ -215,16 +215,30 @@ function buildFallbackModel(provider: string, modelId: string, availableModels: 
 	};
 }
 
+const SERVICE_TIER_VALUES: readonly ServiceTier[] = ["auto", "flex", "priority"];
+
+function isServiceTier(value: string): value is ServiceTier {
+	return (SERVICE_TIER_VALUES as readonly string[]).includes(value);
+}
+
 /**
- * Parse a pattern to extract model and thinking level.
+ * Parse a pattern to extract model, thinking level, and service tier.
  * Handles models with colons in their IDs (e.g., OpenRouter's :exacto suffix).
  *
+ * Grammar: `<model-pattern>[:<auto|flex|priority>][:<thinking-level>]`
+ *
  * Algorithm:
- * 1. Try to match full pattern as a model
- * 2. If found, return it with "off" thinking level
- * 3. If not found and has colons, split on last colon:
- *    - If suffix is valid thinking level, use it and recurse on prefix
- *    - If suffix is invalid, warn and recurse on prefix with "off"
+ * 1. Try to match the FULL pattern as a model (mandatory first step: real model ids
+ *    contain colons, and one may even end in a decorator-looking segment)
+ * 2. If found, return it with no decorators
+ * 3. If not found and the pattern has colons, split on the last colon and consume
+ *    recognized decorators right-to-left:
+ *    - valid thinking level -> use it and recurse on the prefix
+ *    - valid service tier -> use it and recurse on the prefix
+ *    - anything else -> warn and recurse on the prefix without decorators
+ *
+ * A decorator parsed further right never overrides one parsed further left, so the
+ * leftmost occurrence (the grammar's slot order) wins.
  *
  * @internal Exported for testing
  */
@@ -251,8 +265,19 @@ export function parseModelPattern(
 		if (result.model) {
 			return {
 				model: result.model,
-				thinkingLevel: result.warning ? undefined : suffix,
+				thinkingLevel: result.warning ? undefined : (result.thinkingLevel ?? suffix),
 				serviceTier: result.serviceTier,
+				warning: result.warning,
+			};
+		}
+		return result;
+	} else if (isServiceTier(suffix)) {
+		const result = parseModelPattern(prefix, availableModels, options);
+		if (result.model) {
+			return {
+				model: result.model,
+				thinkingLevel: result.thinkingLevel,
+				serviceTier: result.warning ? undefined : (result.serviceTier ?? suffix),
 				warning: result.warning,
 			};
 		}
@@ -294,9 +319,28 @@ export interface ModelScopeDiagnostic {
 	pattern: string;
 }
 
+/**
+ * Per-stored-pattern ownership record.
+ *
+ * `ownedIds` lists every canonical `provider/id` the pattern resolved to in the CURRENT
+ * registry snapshot, after first-pattern-wins dedupe (a model already claimed by an
+ * earlier pattern is not reported again). Unresolved patterns are reported with an empty
+ * `ownedIds` and `unresolved: true` rather than being dropped.
+ */
+export interface PatternResolution {
+	pattern: string;
+	ownedIds: string[];
+	thinkingLevel?: ThinkingLevel;
+	serviceTier?: ServiceTier;
+	unresolved: boolean;
+	isGlob: boolean;
+}
+
 export interface ResolveModelScopeResult {
 	scopedModels: ScopedModel[];
 	diagnostics: ModelScopeDiagnostic[];
+	/** Additive: per-pattern ownership metadata for favorites persistence. */
+	patternResolutions: PatternResolution[];
 }
 
 export function resolveModelScopeFromModels(
@@ -306,26 +350,51 @@ export function resolveModelScopeFromModels(
 	const availableModels = [...models];
 	const scopedModels: ScopedModel[] = [];
 	const diagnostics: ModelScopeDiagnostic[] = [];
+	const patternResolutions: PatternResolution[] = [];
+	const claimedIds = new Set<string>();
+	const canonicalId = (model: Model<Api>): string => `${model.provider}/${model.id}`;
+	const claim = (model: Model<Api>): string | undefined => {
+		const id = canonicalId(model);
+		if (claimedIds.has(id)) return undefined;
+		claimedIds.add(id);
+		return id;
+	};
 
 	for (const pattern of patterns) {
 		if (pattern.includes("*") || pattern.includes("?") || pattern.includes("[")) {
-			const colonIdx = pattern.lastIndexOf(":");
 			let globPattern = pattern;
 			let thinkingLevel: ThinkingLevel | undefined;
+			let serviceTier: ServiceTier | undefined;
 
-			if (colonIdx !== -1) {
-				const suffix = pattern.substring(colonIdx + 1);
-				if (isValidThinkingLevel(suffix)) {
+			// Consume recognized decorators right-to-left, mirroring parseModelPattern.
+			for (;;) {
+				const colonIdx = globPattern.lastIndexOf(":");
+				if (colonIdx === -1) break;
+				const suffix = globPattern.substring(colonIdx + 1);
+				if (thinkingLevel === undefined && isValidThinkingLevel(suffix)) {
 					thinkingLevel = suffix;
-					globPattern = pattern.substring(0, colonIdx);
+				} else if (serviceTier === undefined && isServiceTier(suffix)) {
+					serviceTier = suffix;
+				} else {
+					break;
 				}
+				globPattern = globPattern.substring(0, colonIdx);
 			}
 
 			const exactMatch = findExactModelReferenceMatch(globPattern, availableModels);
 			if (exactMatch) {
 				if (!scopedModels.find((sm) => modelsAreEqual(sm.model, exactMatch))) {
-					scopedModels.push({ model: exactMatch, thinkingLevel });
+					scopedModels.push({ model: exactMatch, thinkingLevel, serviceTier });
 				}
+				const owned = claim(exactMatch);
+				patternResolutions.push({
+					pattern,
+					ownedIds: owned ? [owned] : [],
+					thinkingLevel,
+					serviceTier,
+					unresolved: false,
+					isGlob: true,
+				});
 				continue;
 			}
 
@@ -345,14 +414,33 @@ export function resolveModelScopeFromModels(
 					message: `No models match pattern "${pattern}"`,
 					pattern,
 				});
+				patternResolutions.push({
+					pattern,
+					ownedIds: [],
+					thinkingLevel,
+					serviceTier,
+					unresolved: true,
+					isGlob: true,
+				});
 				continue;
 			}
 
+			const ownedIds: string[] = [];
 			for (const model of matchingModels) {
 				if (!scopedModels.find((sm) => modelsAreEqual(sm.model, model))) {
-					scopedModels.push({ model, thinkingLevel });
+					scopedModels.push({ model, thinkingLevel, serviceTier });
 				}
+				const owned = claim(model);
+				if (owned) ownedIds.push(owned);
 			}
+			patternResolutions.push({
+				pattern,
+				ownedIds,
+				thinkingLevel,
+				serviceTier,
+				unresolved: false,
+				isGlob: true,
+			});
 			continue;
 		}
 
@@ -369,15 +457,32 @@ export function resolveModelScopeFromModels(
 				message: `No models match pattern "${pattern}"`,
 				pattern,
 			});
+			patternResolutions.push({
+				pattern,
+				ownedIds: [],
+				thinkingLevel,
+				serviceTier,
+				unresolved: true,
+				isGlob: false,
+			});
 			continue;
 		}
 
 		if (!scopedModels.find((sm) => modelsAreEqual(sm.model, model))) {
 			scopedModels.push({ model, thinkingLevel, serviceTier });
 		}
+		const owned = claim(model);
+		patternResolutions.push({
+			pattern,
+			ownedIds: owned ? [owned] : [],
+			thinkingLevel,
+			serviceTier,
+			unresolved: false,
+			isGlob: false,
+		});
 	}
 
-	return { scopedModels, diagnostics };
+	return { scopedModels, diagnostics, patternResolutions };
 }
 
 export interface ResolveModelScopeOptions extends AuthOperationOptions {
