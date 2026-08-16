@@ -33,6 +33,10 @@ The first present key wins; `devenv-setup.mjs` seeds `.env.local` from it.
 `ALIBABA_TOKEN_PLAN_API_KEY`,
 `HF_TOKEN`, and the AWS Bedrock / Google Vertex variable sets.
 
+OAuth-only subscription providers have no env key: `openai-codex` and
+`cursor` (Cursor is also authentication-only — it exposes no models until its
+chat protocol is ported, so no mock-loop channel applies to it).
+
 When you add a provider, add its key here AND to the `.devcontainer`
 `secrets` block AND keep `env-api-keys.ts` as the source of truth.
 

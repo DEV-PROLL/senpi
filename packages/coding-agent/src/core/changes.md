@@ -1,5 +1,26 @@
 # changes
 
+## Cursor provider display name (2026-08-16)
+
+### What changed
+
+- `provider-display-names.ts`: added `cursor: "Cursor"` for the new builtin Cursor OAuth provider
+  (`packages/ai/src/providers/cursor.ts`). The `/login` list and auth status surfaces pick the name up
+  automatically from the provider registration; only the display-name map needed a row.
+
+### Why
+
+- Without the entry the provider id would render raw ("cursor") in provider name surfaces that consult
+  `BUILT_IN_PROVIDER_DISPLAY_NAMES`.
+
+### Why an extension could not do this
+
+- The display-name map for builtin providers is a core lookup table, not an extension surface.
+
+### Expected merge conflict zones
+
+- LOW: the alphabetical map in `provider-display-names.ts` when upstream adds providers.
+
 ## JSONC settings parser, precedence, and write ownership (2026-08-16)
 
 ### What changed

@@ -1,5 +1,42 @@
 # AI Source Changes
 
+## 2026-08-16 - Cursor OAuth authentication and builtin provider
+
+### What changed and why
+
+- `auth/oauth/cursor.ts` (new): Cursor's browser deep-link + poll OAuth flow. `login` generates a PKCE S256
+  pair, notifies `auth_url` for `https://cursor.com/loginDeepControl?challenge&uuid&mode=login&redirectTarget=cli`,
+  and polls `https://api2.cursor.sh/auth/poll?uuid&verifier` with capped geometric backoff (1s ×1.2 up to 10s,
+  150 attempts). 404 means "not approved yet"; 400/401/403/410 fail fast as definitive rejections; 429 keeps
+  polling without burning the transient budget; network errors and 5xx tolerate 3 consecutive failures. The
+  poll sleep is abort-aware, so cancelling the login interaction aborts immediately. `refresh` POSTs the stored
+  refresh token as a bearer to `auth/exchange_user_api_key` and keeps the previous refresh token when the
+  server does not rotate it. Expiry comes from the access-token JWT `exp` claim minus a 5-minute skew, with a
+  1-hour fallback for unreadable tokens. Error messages carry HTTP status plus short server `error` strings,
+  never raw bodies or token material.
+- Compared to the upstream oh-my-pi flow this fixes a self-swallowed error bug (upstream throws its polling
+  `OAuthError` inside its own `try`, so a definitive 401 was retried as if it were a network hiccup), adds
+  abort-signal support, and validates response shapes strictly.
+- `auth/oauth/load.ts` + `bun-oauth.ts`: `cursor` loader added to the lazy registry and the Bun static bundle.
+- `providers/cursor.ts` (new) + `providers/all.ts` + `types.ts`: builtin `cursor` provider (OAuth-only,
+  `isSubscription`), registered with an empty model catalog and an empty API map because Cursor chat runs on a
+  protobuf Connect-RPC agent protocol (`agent.v1.AgentService`) that is not ported. Nothing becomes selectable
+  in model pickers, and `Models.getAuth("cursor")` resolves the stored access token for integrations that speak
+  the Cursor protocol.
+
+### Why this cannot be expressed as an extension
+
+- Builtin OAuth flows are lazy-loaded through the bundler-opaque loader registry in `auth/oauth/load.ts` and
+  statically registered for standalone Bun binaries in `bun-oauth.ts`; both are package-internal seams an
+  extension cannot reach, and `KnownProvider` typing is compile-time.
+
+### Expected merge conflict zones
+
+- LOW: `auth/oauth/load.ts` and `bun-oauth.ts` loader lists when upstream adds flows.
+- LOW: `providers/all.ts` builtin list and `types.ts` `KnownProvider` union (additive lines).
+- NONE expected in `auth/oauth/cursor.ts` / `providers/cursor.ts`: fork-only files; upstream's Cursor
+  implementation lives in a different architecture (`src/registry/oauth/`).
+
 ## 2026-08-16 - GLM 5.3 reasoning effort + zai always-enabled thinking + catalog entries
 
 ### What changed and why
