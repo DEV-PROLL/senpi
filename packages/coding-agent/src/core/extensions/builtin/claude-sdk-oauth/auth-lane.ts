@@ -18,6 +18,7 @@ import {
 } from "./accounts.ts";
 import { selectAccount } from "./affinity.ts";
 import { type AuthenticatedAttemptInput, createAttemptMessages, type RetainableAttempt } from "./auth-attempt.ts";
+import { mergeRequestAuthEnvironment, stripManagedAuthEnvironment } from "./auth-environment.ts";
 import { classifySdkError } from "./errors.ts";
 import { runFailover } from "./failover.ts";
 import type { Options, SDKMessage, SdkQuery } from "./sdk-boundary.ts";
@@ -93,26 +94,6 @@ type ManagedPool = {
 	store: CredentialStore;
 };
 
-function managedEnvironment(parent: NodeJS.ProcessEnv): Record<string, string | undefined> {
-	const {
-		ANTHROPIC_API_KEY: _apiKey,
-		ANTHROPIC_AUTH_TOKEN: _authToken,
-		ANTHROPIC_BASE_URL: _gateway,
-		ANTHROPIC_CUSTOM_HEADERS: _customHeaders,
-		CLAUDE_CODE_OAUTH_TOKEN: _oauthToken,
-		CLAUDE_CODE_USE_BEDROCK: _bedrock,
-		CLAUDE_CODE_USE_FOUNDRY: _foundry,
-		CLAUDE_CODE_USE_GATEWAY: _gatewayMode,
-		CLAUDE_CODE_USE_VERTEX: _vertex,
-		...environment
-	} = parent;
-	for (const name of Object.keys(environment)) {
-		if (/^CLAUDE_CODE_OAUTH_TOKEN_\d+$/.test(name)) delete environment[name];
-		if (name.startsWith("SENPI_")) delete environment[name];
-	}
-	return environment;
-}
-
 function configDirectory(slot: AccountSlot): string {
 	assertValidAccountName(slot.name);
 	return join(activeBoundary.getAgentDir(), "claude-sdk-oauth-accounts", slot.name);
@@ -148,7 +129,7 @@ async function managedPool(
 ): Promise<ManagedPool | undefined> {
 	const store = activeBoundary.createStore();
 	let credential = await store.read(CLAUDE_SDK_OAUTH_PROVIDER_ID);
-	const environment = { ...activeBoundary.env(), ...requestEnvironment };
+	const environment = mergeRequestAuthEnvironment(activeBoundary.env(), requestEnvironment);
 	let accounts = listAccounts(
 		(credential as ClaudeSdkOauthCredential | undefined) ?? emptyCredential(),
 		(name) => environment[name],
@@ -196,7 +177,7 @@ async function prepareSlot(
 	}
 	const access = slot.source === "env" ? envSlotToken((name) => environment[name], slot.name) : slot.access;
 	if (!access) throw new Error("authentication_failed: selected OAuth token is unavailable");
-	const childEnvironment = managedEnvironment(environment);
+	const childEnvironment = stripManagedAuthEnvironment(environment);
 	if (pool.lane === "oauth-slots") return { ...childEnvironment, CLAUDE_CODE_OAUTH_TOKEN: access };
 	const directory = configDirectory(slot);
 	writeConfigCredentials(directory, slot, access);
@@ -232,7 +213,7 @@ export async function* queryWithAuthLane(input: AuthenticatedQueryInput): AsyncG
 	const pool = await managedPool(input.providerSettings, input.env);
 	if (!pool) {
 		const options = input.buildOptions("ambient");
-		const parentEnvironment = { ...activeBoundary.env(), ...input.env };
+		const parentEnvironment = mergeRequestAuthEnvironment(activeBoundary.env(), input.env);
 		const ambientEnvironment: Record<string, string | undefined> = { ...parentEnvironment };
 		for (const name of Object.keys(ambientEnvironment)) {
 			if (name.startsWith("SENPI_")) delete ambientEnvironment[name];

@@ -69,11 +69,12 @@ async function resolveProviderAuthWithSignal(
 ): Promise<AuthResult | undefined> {
 	signal.throwIfAborted();
 	const requestAuthContext = overrides?.env ? overlayEnvAuthContext(authContext, overrides.env) : authContext;
+	const apiKey = provider.auth.apiKey;
 
-	if (overrides?.apiKey !== undefined && provider.auth.apiKey) {
+	if (overrides?.apiKey !== undefined && apiKey && !apiKey.ambientOnly) {
 		return resolveApiKey(
 			requestAuthContext,
-			provider.auth.apiKey,
+			apiKey,
 			provider.id,
 			{
 				type: "api_key",
@@ -93,6 +94,7 @@ async function resolveProviderAuthWithSignal(
 				provider.auth.oauth,
 				stored,
 				requestAuthContext,
+				overrides?.env,
 				signal,
 				overrides?.minOAuthValidityMs,
 			);
@@ -104,15 +106,27 @@ async function resolveProviderAuthWithSignal(
 		return undefined;
 	}
 
+	if (overrides?.apiKey !== undefined && apiKey) {
+		return resolveApiKey(
+			requestAuthContext,
+			apiKey,
+			provider.id,
+			{
+				type: "api_key",
+				key: overrides.apiKey,
+				env: overrides.env,
+			},
+			signal,
+		);
+	}
+
 	// Ambient (env vars, AWS profiles, ADC files).
-	return provider.auth.apiKey
-		? resolveApiKey(requestAuthContext, provider.auth.apiKey, provider.id, undefined, signal)
-		: undefined;
+	return apiKey ? resolveApiKey(requestAuthContext, apiKey, provider.id, undefined, signal) : undefined;
 }
 
 function overlayEnvAuthContext(base: AuthContext, env: ProviderEnv): AuthContext {
 	return {
-		env: async (name) => env[name] || (await base.env(name)),
+		env: async (name) => (env[name] !== undefined ? env[name] : await base.env(name)),
 		fileExists: (path) => base.fileExists(path),
 	};
 }
@@ -131,16 +145,10 @@ async function resolveStoredOAuth(
 	oauth: OAuthAuth,
 	stored: OAuthCredential,
 	authContext: AuthContext,
+	requestEnv: ProviderEnv | undefined,
 	signal: AbortSignal,
 	minOAuthValidityMs?: number,
 ): Promise<AuthResult | undefined> {
-	if (oauth.check) {
-		try {
-			if (!(await oauth.check({ ctx: authContext, credential: stored, signal }))) return undefined;
-		} catch (error) {
-			throw new ModelsError("auth", `OAuth auth check failed for provider ${providerId}`, { cause: error });
-		}
-	}
 	const minimumValidityMs = Math.max(DEFAULT_OAUTH_MINIMUM_VALIDITY_MS, minOAuthValidityMs ?? 0);
 	const expiresSoon = (credential: OAuthCredential) => Date.now() + minimumValidityMs >= credential.expires;
 	let credential = stored;
@@ -180,11 +188,37 @@ async function resolveStoredOAuth(
 		}
 	}
 
+	if (oauth.check) {
+		try {
+			if (!(await oauth.check({ ctx: authContext, credential, signal }))) return undefined;
+		} catch (error) {
+			throw new ModelsError("auth", `OAuth auth check failed for provider ${providerId}`, { cause: error });
+		}
+	}
+
 	try {
-		return { auth: await oauth.toAuth(credential), source: "OAuth" };
+		const storedEnv = credentialEnvironment(credential);
+		const effectiveEnv = requestEnv ? { ...storedEnv, ...requestEnv } : storedEnv;
+		const effectiveCredential = effectiveEnv ? { ...credential, env: effectiveEnv } : credential;
+		return {
+			auth: await oauth.toAuth(effectiveCredential),
+			...(effectiveEnv ? { env: effectiveEnv } : {}),
+			source: "OAuth",
+		};
 	} catch (error) {
 		throw new ModelsError("oauth", `OAuth auth derivation failed for ${providerId}`, { cause: error });
 	}
+}
+
+function credentialEnvironment(credential: OAuthCredential): ProviderEnv | undefined {
+	const value = credential.env;
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const environment: ProviderEnv = {};
+	for (const [name, entry] of Object.entries(value)) {
+		if (typeof entry !== "string") return undefined;
+		environment[name] = entry;
+	}
+	return environment;
 }
 
 async function resolveApiKey(

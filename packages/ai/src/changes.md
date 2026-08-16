@@ -1,11 +1,14 @@
 # AI Source Changes
 
-## 2026-08-14 - Validate stored OAuth before request derivation
+## 2026-08-14 - Harden stored OAuth request derivation
 
 ### What changed and why
 
-- `resolveProviderAuth()` now invokes an OAuth provider's optional side-effect-free `check` before refreshing or deriving request auth from a stored credential.
+- `resolveProviderAuth()` refreshes expired OAuth credentials before invoking the provider's optional side-effect-free `check`.
 - Sentinel envelopes that represent zero usable accounts can no longer bypass the same availability predicate used by provider catalog checks.
+- Stored OAuth derivation transiently merges request environment into `toAuth()` and returns it for auxiliary replay without persisting request secrets.
+- Explicit empty request environment values mask host values instead of falling back through truthiness.
+- `ApiKeyAuth.ambientOnly` lets compatibility adapters remain fallback-only without changing explicit-key precedence for real dual-auth providers.
 
 ### Why this cannot be expressed externally
 
@@ -13,7 +16,8 @@
 
 ### Expected merge conflict zones
 
-- LOW: `auth/resolve.ts` at the stored-OAuth branch and `resolveStoredOAuth()` signature.
+- MEDIUM: `auth/resolve.ts` at explicit-key precedence, environment overlay, and stored-OAuth refresh/check/derivation.
+- LOW: `auth/types.ts` at the additive `ApiKeyAuth.ambientOnly` metadata.
 
 ## 2026-08-13 - Preserve explicit request compatibility fields
 

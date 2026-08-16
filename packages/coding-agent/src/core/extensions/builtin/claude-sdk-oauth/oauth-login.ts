@@ -98,7 +98,10 @@ export function createOAuthConfig(deps: {
 		const effectiveEnvironment = environment ?? (await claudeEnvironment(ctx));
 		const accountCount = storedAccounts.length + Object.keys(effectiveEnvironment).length;
 		const lane = deps.readSettings?.()?.tokenInjection ?? (accountCount > 0 ? "oauth-slots" : "ambient");
-		if (lane === "ambient") return (deps.readAmbientAuthStatus ?? readAmbientClaudeAuthStatus)(signal);
+		if (lane === "ambient") {
+			if (Object.keys(effectiveEnvironment).length > 0) return true;
+			return (deps.readAmbientAuthStatus ?? readAmbientClaudeAuthStatus)(signal);
+		}
 		return accountCount > 0;
 	};
 

@@ -38,6 +38,21 @@ describe("ambient Claude auth status cache", () => {
 		expect(probe).toHaveBeenCalledTimes(1);
 	});
 
+	it("keeps sharing an in-flight probe after its future cache TTL elapses", async () => {
+		let clock = 1_000;
+		const releases: Array<(value: boolean) => void> = [];
+		const probe = vi.fn(() => new Promise<boolean>((resolve) => releases.push(resolve)));
+		const read = createAmbientAuthStatusReader(probe, () => clock, 30_000);
+
+		const first = read();
+		clock += 30_000;
+		const second = read();
+
+		expect(probe).toHaveBeenCalledTimes(1);
+		releases[0]?.(true);
+		expect(await Promise.all([first, second])).toEqual([true, true]);
+	});
+
 	it("stops waiting when the caller aborts, leaving the shared probe for the others", async () => {
 		let release: ((value: boolean) => void) | undefined;
 		const probe = vi.fn(() => new Promise<boolean>((resolve) => (release = resolve)));
@@ -60,6 +75,14 @@ describe("ambient Claude auth status cache", () => {
 		await read();
 
 		await expect(read(AbortSignal.abort(new Error("already gone")))).rejects.toThrow("already gone");
+	});
+
+	it("does not start a cold probe for an already aborted caller", async () => {
+		const probe = vi.fn(async () => true);
+		const read = createAmbientAuthStatusReader(probe, () => 1_000, 30_000);
+
+		await expect(read(AbortSignal.abort(new Error("already gone")))).rejects.toThrow("already gone");
+		expect(probe).not.toHaveBeenCalled();
 	});
 
 	it("does not cache a rejected probe", async () => {

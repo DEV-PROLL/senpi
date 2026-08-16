@@ -22,15 +22,24 @@ export function createAmbientAuthStatusReader(
 	now: () => number = Date.now,
 	ttlMs: number = AMBIENT_STATUS_TTL_MS,
 ): (signal?: AbortSignal) => Promise<boolean> {
-	let cached: { at: number; value: Promise<boolean> } | undefined;
-	return (signal) => {
-		if (cached && now() - cached.at < ttlMs) return untilAborted(cached.value, signal);
-		const value = probe();
-		cached = { at: now(), value };
-		value.catch(() => {
-			if (cached?.value === value) cached = undefined;
+	let cached: { at: number; value: boolean } | undefined;
+	let inFlight: Promise<boolean> | undefined;
+	const startProbe = (): Promise<boolean> => {
+		const status = probe().then((value) => {
+			cached = { at: now(), value };
+			return value;
 		});
-		return untilAborted(value, signal);
+		inFlight = status;
+		const clear = () => {
+			if (inFlight === status) inFlight = undefined;
+		};
+		void status.then(clear, clear);
+		return status;
+	};
+	return (signal) => {
+		if (signal?.aborted) return Promise.reject(signal.reason);
+		if (cached && now() - cached.at < ttlMs) return Promise.resolve(cached.value);
+		return untilAborted(inFlight ?? startProbe(), signal);
 	};
 }
 

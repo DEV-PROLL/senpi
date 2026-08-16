@@ -123,6 +123,7 @@ function ambientOnlyAuth(
 	};
 	return {
 		name: (oauth as { name?: string }).name ?? "Ambient credentials",
+		ambientOnly: true,
 		check: async (input) => {
 			const resolved = await resolve(input);
 			return resolved ? { type: "oauth", source: resolved.source } : undefined;

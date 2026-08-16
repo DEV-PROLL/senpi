@@ -10,7 +10,8 @@
 
 ### Fixed
 
-- Stored OAuth request resolution now honors provider availability checks, so sentinel credentials that represent no usable account are not treated as configured.
+- Stored OAuth request resolution now refreshes before availability checks, preserves transient request environment through auth derivation and replay, and respects explicit empty environment overrides.
+- Ambient-only API-key compatibility adapters can no longer outrank a valid stored OAuth credential.
 
 ### Removed
 

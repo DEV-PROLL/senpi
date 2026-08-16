@@ -5,7 +5,7 @@ import {
 	createModels,
 	InMemoryCredentialStore,
 } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveProviderAuth } from "../../ai/src/auth/resolve.ts";
 import {
 	addAccount,
@@ -20,6 +20,7 @@ import {
 	CLAUDE_SDK_OAUTH_PROVIDER_ID,
 	registerClaudeSdkOauthExtension,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/index.ts";
+import { createOAuthConfig } from "../src/core/extensions/builtin/claude-sdk-oauth/oauth-login.ts";
 import {
 	type Options,
 	overrideSdkBoundary,
@@ -133,6 +134,19 @@ describe("claude-sdk-oauth ambient auth resolution", () => {
 		expect(await resolveProviderAuth(provider, credentialStore(emptyCredential()), authContext())).toBeUndefined();
 	});
 
+	it("preserves request auth after a persisted empty OAuth envelope", async () => {
+		const provider = composedProvider(async () => false);
+		const requestEnvironment = { CLAUDE_CODE_OAUTH_TOKEN: "request-token" };
+		const resolved = await resolveProviderAuth(
+			provider,
+			credentialStore(emptyCredential()),
+			authContext({ CLAUDE_CODE_OAUTH_TOKEN: "host-token" }),
+			{ env: requestEnvironment },
+		);
+
+		expect(resolved?.env).toEqual(requestEnvironment);
+	});
+
 	it("composes configured headers and authHeader identically for ambient and stored OAuth", async () => {
 		const provider = composedProvider(async () => true, {
 			headers: { "User-Agent": "must-survive" },
@@ -187,5 +201,71 @@ describe("claude-sdk-oauth ambient auth resolution", () => {
 		expect(captured).toHaveLength(1);
 		expect(captured[0]?.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("request-token");
 		expect(captured[0]?.env?.CLAUDE_CODE_OAUTH_TOKEN).not.toBe("host-token");
+	});
+
+	it("rejects an unrelated explicit key for an ambient-only OAuth provider", async () => {
+		const provider = composedProvider(async () => true);
+
+		expect(
+			await resolveProviderAuth(provider, credentialStore(), authContext(), {
+				apiKey: "sk-ant-unrelated",
+			}),
+		).toBeUndefined();
+	});
+
+	it("replays the synthetic marker through a valid stored OAuth account", async () => {
+		const provider = composedProvider(async () => false);
+		const stored = addAccount(emptyCredential(), {
+			name: "managed",
+			access: "stored-access",
+			refresh: "stored-refresh",
+			expires: Date.now() + 60_000,
+			source: "login",
+		});
+		const first = await resolveProviderAuth(provider, credentialStore(stored), authContext());
+		if (!first?.auth.apiKey) throw new Error("expected stored OAuth auth");
+
+		const replay = await resolveProviderAuth(provider, credentialStore(stored), authContext(), {
+			apiKey: first.auth.apiKey,
+		});
+
+		expect(replay?.auth).toEqual(first.auth);
+	});
+
+	it("preserves replay-only credential env for configured headers", async () => {
+		const provider = composedProvider(async () => true, {
+			headers: { "X-Extra": "$EXTRA_HEADER_TOKEN" },
+		});
+		if (!provider.auth.apiKey) throw new Error("expected ambient adapter");
+		const replay = await provider.auth.apiKey.resolve({
+			ctx: authContext({ CLAUDE_CODE_OAUTH_TOKEN: "request-token" }),
+			credential: {
+				type: "api_key",
+				key: SENTINEL_OAUTH_FIELDS.access,
+				env: { EXTRA_HEADER_TOKEN: "credential-only" },
+			},
+			signal: new AbortController().signal,
+		});
+
+		expect(replay?.auth.headers?.["X-Extra"]).toBe("credential-only");
+	});
+
+	it("accepts request tokens in explicit ambient mode without a host probe", async () => {
+		const readAmbientAuthStatus = vi.fn(async () => false);
+		const provider = composedProvider(readAmbientAuthStatus, {
+			oauth: createOAuthConfig({
+				readAmbientAuthStatus,
+				readCurrent: async () => undefined,
+				readSettings: () => ({ tokenInjection: "ambient" }),
+			}),
+		});
+		const requestEnvironment = { CLAUDE_CODE_OAUTH_TOKEN: "request-token" };
+
+		const resolved = await resolveProviderAuth(provider, credentialStore(), authContext(), {
+			env: requestEnvironment,
+		});
+
+		expect(resolved?.env).toEqual(requestEnvironment);
+		expect(readAmbientAuthStatus).not.toHaveBeenCalled();
 	});
 });

@@ -9,10 +9,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 	return { ...actual, spawn: vi.fn() };
 });
 
-import {
-	probeAmbientClaudeAuthStatus,
-	readAmbientClaudeAuthStatus,
-} from "../src/core/extensions/builtin/claude-sdk-oauth/availability.ts";
+import { probeAmbientClaudeAuthStatus } from "../src/core/extensions/builtin/claude-sdk-oauth/availability.ts";
 
 const executable = "C:/fixture/claude.exe";
 const previousExecutable = process.env.CLAUDE_CODE_EXECUTABLE;
@@ -46,7 +43,7 @@ describe("readAmbientClaudeAuthStatus", () => {
 	it("hides the Claude auth status probe window", async () => {
 		spawnMock.mockReturnValue(fakeChild(0));
 
-		await expect(readAmbientClaudeAuthStatus()).resolves.toBe(true);
+		await expect(probeAmbientClaudeAuthStatus()).resolves.toBe(true);
 		expect(spawnMock).toHaveBeenCalledWith(executable, ["auth", "status"], {
 			stdio: "ignore",
 			windowsHide: true,
