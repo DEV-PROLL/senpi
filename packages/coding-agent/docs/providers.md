@@ -23,6 +23,7 @@ Use `/login` in interactive mode, then select a provider:
 - xAI (Grok/X subscription)
 - OpenRouter (OAuth-minted API key billed from OpenRouter credits)
 - Radius
+- Cursor (Pro/Ultra/Teams) — authentication only for now, see below
 
 Use `/logout` to clear credentials. Tokens are stored in `~/.senpi/agent/auth.json` and auto-refresh when expired. OpenRouter instead mints a user-controlled API key that does not expire automatically.
 
@@ -132,6 +133,12 @@ senpi sends `prompt_cache_key` (set to the session id) on Moonshot requests. Kim
 ### Radius
 
 Radius is a dynamic `pi-messages` gateway. `/login radius` stores OAuth tokens in `auth.json`; the gateway catalog is refreshed independently and cached in `models-store.json`. Custom Radius gateways can be declared in `models.json` with `"oauth": "radius"` and a gateway `baseUrl`.
+
+### Cursor
+
+- Run `/login cursor`, then approve the request in the browser (`cursor.com/loginDeepControl` deep link; the CLI polls until the browser approval releases the tokens)
+- Tokens are stored in `auth.json` and auto-refresh via `api2.cursor.sh/auth/exchange_user_api_key`, keeping the previous refresh token when Cursor does not rotate it
+- **Authentication only for now:** Cursor chat runs on a protobuf Connect-RPC agent protocol that senpi has not ported, so the provider exposes no models yet. The stored access token resolves through the standard auth pipeline for extensions that implement the Cursor protocol.
 
 ## Ollama Cloud
 

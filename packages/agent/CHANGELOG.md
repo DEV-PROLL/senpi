@@ -12,6 +12,20 @@
 
 ### Removed
 
+## [2026.8.16] - 2026-08-16
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Windows process-tree shutdown now resolves `taskkill.exe` through absolute `System32` and `Sysnative` paths before PATH lookup, executes synchronously so same-tick exits still terminate descendants, and falls back to the direct child only when no launcher can start ([#807](https://github.com/code-yeongyu/senpi/pull/807) by [@yeongjunyoo](https://github.com/yeongjunyoo)).
+
+### Removed
+
 ## [2026.8.14] - 2026-08-14
 
 ### Breaking Changes
