@@ -765,7 +765,13 @@ export class AgentSession {
 	private _currentServiceTier: ServiceTier | undefined = undefined;
 	private _sessionFastMode = false;
 	private readonly _shownHighReasoningWarningKeys = new Set<string>();
-	private _baseSystemPromptOptions!: BuildDynamicSystemPromptOptions;
+	// Widened with the upstream BuildSystemPromptOptions user-override fields so
+	// extensions (prompt-preset) can see CLI/SDK custom prompts via
+	// before_agent_start/model_select systemPromptOptions and ctx.getSystemPromptOptions().
+	private _baseSystemPromptOptions!: BuildDynamicSystemPromptOptions & {
+		customPrompt?: string;
+		appendSystemPrompt?: string;
+	};
 	private _systemPromptOverride?: string;
 
 	constructor(config: AgentSessionConfig) {
@@ -2695,6 +2701,8 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
+			customPrompt: loaderSystemPrompt,
+			appendSystemPrompt: loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined,
 		};
 		const basePrompt = loaderSystemPrompt ?? buildDynamicSystemPrompt(this._baseSystemPromptOptions);
 		return loaderAppendSystemPrompt.length > 0
