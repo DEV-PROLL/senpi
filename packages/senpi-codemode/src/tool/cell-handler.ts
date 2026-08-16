@@ -1,5 +1,6 @@
 import { type AgentToolResult, type ExtensionContext, sanitizeTerminalLabel } from "@code-yeongyu/senpi";
 import type { KernelToHostMessage } from "../bridge/protocol.ts";
+import { RESERVED_SCHEMA_TOOL } from "../bridge/reserved.ts";
 import type { AgentExecuteTool } from "../bridges/agent-bridge.ts";
 import { isReservedToolName, runReservedTool } from "../bridges/reserved-dispatch.ts";
 import type { EvalSchemaToolInfo } from "../bridges/schema-bridge.ts";
@@ -111,9 +112,16 @@ export class CellHandler {
 	}
 
 	async #handleToolCall(message: Extract<KernelToHostMessage, { type: "tool-call" }>): Promise<void> {
+		const capturedArgs = boundToolCallArgs(message.args);
+		const enrich: ToolCallEnrichment = {
+			callId: message.callId,
+			args: capturedArgs.args,
+			startedAt: Date.now(),
+			...(capturedArgs.truncated ? { argsTruncated: true } : {}),
+		};
 		if (message.toolName === "eval") {
 			const error = "recursive eval is not allowed";
-			this.#state.toolCalls.push({ name: message.toolName, ok: false, error });
+			this.#pushToolCall(message.toolName, false, enrich, undefined, error);
 			this.#kernel.deliverToolReply({
 				type: "tool-reply",
 				callId: message.callId,
@@ -123,20 +131,24 @@ export class CellHandler {
 			return;
 		}
 		if (isReservedToolName(message.toolName)) {
-			await this.#deliverToolReply(message, async () => ({
-				value: await runReservedTool(message.toolName, {
-					callId: message.callId,
-					args: message.args,
-					executeTool: this.#runtime.executeTool,
-					taskToolName: this.#runtime.settings.taskTools.task,
-					taskOutputToolName: this.#runtime.settings.taskTools.output,
-					listTools: this.#runtime.listTools,
-					signal: this.#state.signal,
-					emitStatus: (event) => this.#recordStatus(event),
-					marshalToolResult,
+			await this.#deliverToolReply(
+				message,
+				async () => ({
+					value: await runReservedTool(message.toolName, {
+						callId: message.callId,
+						args: message.args,
+						executeTool: this.#runtime.executeTool,
+						taskToolName: this.#runtime.settings.taskTools.task,
+						taskOutputToolName: this.#runtime.settings.taskTools.output,
+						listTools: this.#runtime.listTools,
+						signal: this.#state.signal,
+						emitStatus: (event) => this.#recordStatus(event),
+						marshalToolResult,
+					}),
+					toolCallOk: true,
 				}),
-				toolCallOk: true,
-			}));
+				message.toolName === RESERVED_SCHEMA_TOOL ? undefined : enrich,
+			);
 			return;
 		}
 		if (message.toolName === "completion" && this.#runtime.complete) {
@@ -148,16 +160,10 @@ export class CellHandler {
 				isActive: () => this.#state.active,
 			});
 			if (!this.#state.active) return;
-			this.#state.toolCalls.push(
-				result.ok
-					? { name: message.toolName, ok: true }
-					: { name: message.toolName, ok: false, error: result.error },
-			);
+			this.#pushToolCall(message.toolName, result.ok, enrich, undefined, result.ok ? undefined : result.error);
 			this.#resultBuilder.emitUpdate(false);
 			return;
 		}
-		const capturedArgs = boundToolCallArgs(message.args);
-		const startedAt = Date.now();
 		await this.#deliverToolReply(
 			message,
 			async () => {
@@ -185,12 +191,7 @@ export class CellHandler {
 					...(errorText === undefined ? {} : { errorText }),
 				};
 			},
-			{
-				callId: message.callId,
-				args: capturedArgs.args,
-				startedAt,
-				...(capturedArgs.truncated ? { argsTruncated: true } : {}),
-			},
+			enrich,
 		);
 	}
 
@@ -229,7 +230,12 @@ export class CellHandler {
 		resultPreview: string | undefined,
 		error: string | undefined,
 	): void {
-		const summary = { name, ok, ...(error === undefined ? {} : { error }) };
+		const summary = {
+			name,
+			ok,
+			...(error === undefined ? {} : { error }),
+			...(enrich === undefined ? {} : { durationMs: Date.now() - enrich.startedAt }),
+		};
 		const enrichedCount = this.#state.toolCalls.filter((toolCall) => toolCall.callId !== undefined).length;
 		if (enrich === undefined || enrichedCount >= MAX_ENRICHED_TOOL_CALLS) {
 			this.#state.toolCalls.push(summary);
@@ -239,7 +245,6 @@ export class CellHandler {
 			...summary,
 			callId: enrich.callId,
 			args: enrich.args,
-			durationMs: Date.now() - enrich.startedAt,
 			...(enrich.argsTruncated === true ? { argsTruncated: true } : {}),
 			...(resultPreview === undefined ? {} : { resultPreview }),
 		});

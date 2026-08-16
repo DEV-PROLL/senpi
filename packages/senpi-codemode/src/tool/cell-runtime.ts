@@ -9,6 +9,7 @@ type ToolCall = EvalToolDetails["toolCalls"] extends readonly (infer Item)[] ? I
 
 export interface CellState {
 	readonly input: EvalToolInput;
+	readonly startedAt: number;
 	readonly signal: AbortSignal;
 	readonly onUpdate: AgentToolUpdateCallback<EvalToolDetails> | undefined;
 	readonly toolCalls: ToolCall[];
@@ -17,6 +18,7 @@ export interface CellState {
 	active: boolean;
 	output: string;
 	phase: string | undefined;
+	error: string | undefined;
 	durationMs: number;
 	status: "pending" | "running" | "complete" | "error";
 }
@@ -70,6 +72,7 @@ export class CellResultBuilder {
 			if (result.valueRepr) this.#output.push(`${result.valueRepr}\n`);
 			this.#state.status = "complete";
 		} else {
+			this.#state.error = result.error.message;
 			this.#output.push(`${result.error.message}\n`);
 			this.#state.status = "error";
 		}
@@ -77,6 +80,7 @@ export class CellResultBuilder {
 	}
 
 	async finalizeCancellation(error: Error): Promise<AgentToolResult<EvalToolDetails>> {
+		this.#state.error = error.message;
 		this.#output.push(`${error.message}\n`);
 		this.#state.status = "error";
 		return await this.#finish(true);
