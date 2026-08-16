@@ -308,6 +308,8 @@ export interface AgentSessionConfig {
 	modelRegistry?: ModelRegistry;
 	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
 	initialActiveToolNames?: string[];
+	/** Configured built-in defaults; fork-native builtin extension tools outside this set are omitted. */
+	defaultToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -484,7 +486,7 @@ export type ClearedQueue = {
 };
 
 export interface PromptOptions {
-	/** Whether to expand file-based prompt templates (default: true) */
+	/** Whether to dispatch extension commands and expand skill commands and prompt templates (default: true) */
 	expandPromptTemplates?: boolean;
 	/** Image attachments */
 	images?: ImageContent[];
@@ -679,6 +681,7 @@ export class AgentSession {
 	private _agentDir: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
+	private _defaultToolNames?: Set<string>;
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
@@ -776,6 +779,7 @@ export class AgentSession {
 		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
+		this._defaultToolNames = config.defaultToolNames ? new Set(config.defaultToolNames) : undefined;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -3273,7 +3277,7 @@ export class AgentSession {
 
 			if (options?.deliverAs === "nextTurn") {
 				this._pendingNextTurnMessages.push(appMessage);
-			} else if (this.isStreaming) {
+			} else if (this.isStreaming && options?.triggerTurn !== false) {
 				if (options?.deliverAs === "followUp") {
 					this.agent.followUp(appMessage);
 				} else {
@@ -3334,10 +3338,11 @@ export class AgentSession {
 	 *
 	 * @param content User message content (string or content array)
 	 * @param options.deliverAs Delivery mode when streaming: "steer" or "followUp"
+	 * @param options.expandPromptTemplates Whether to dispatch extension commands and expand skill commands and prompt templates. Default: false.
 	 */
 	async sendUserMessage(
 		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
+		options?: { deliverAs?: "steer" | "followUp"; expandPromptTemplates?: boolean },
 	): Promise<void> {
 		const bindingPromptReadiness = this._extensionBindingPromptReadiness;
 		let resolveBindingPromptReadiness: (() => void) | undefined;
@@ -3374,9 +3379,8 @@ export class AgentSession {
 		let finishSessionWork: (() => void) | undefined;
 		let disposition: PromptDisposition | undefined;
 		try {
-			// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
 			await this.prompt(text, {
-				expandPromptTemplates: false,
+				expandPromptTemplates: options?.expandPromptTemplates ?? false,
 				streamingBehavior: options?.deliverAs,
 				images,
 				source: "extension",
@@ -5226,6 +5230,7 @@ export class AgentSession {
 			this._applyExtensionBindings(this._extensionRunner);
 			this.syncPromptCacheSafeWaitEnv();
 			await this._extensionRunner.emit(this._sessionStartEvent);
+			this._enforceConfiguredDefaultTools();
 			await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 		} finally {
 			if (this._extensionBindingPromptReadiness === bindingPromptReadiness) {
@@ -5581,6 +5586,26 @@ export class AgentSession {
 		return this._fallbackValidationWarnings;
 	}
 
+	private _isBuiltinExtensionPath(path: string): boolean {
+		return path.startsWith("<builtin:") || /[\\/]senpi-codemode[\\/]/u.test(path);
+	}
+
+	private _enforceConfiguredDefaultTools(): void {
+		const defaultToolNames = this._defaultToolNames;
+		if (defaultToolNames === undefined) return;
+		this.setActiveToolsByName(
+			this.getActiveToolNames().filter((name) => {
+				if (defaultToolNames.has(name)) return true;
+				const entry = this._toolDefinitions.get(name);
+				return (
+					entry !== undefined &&
+					!this._isBuiltinExtensionPath(entry.sourceInfo.path) &&
+					entry.sourceInfo.source !== "builtin"
+				);
+			}),
+		);
+	}
+
 	private _refreshToolRegistry(options?: {
 		activeToolNames?: string[];
 		includeAllExtensionTools?: boolean;
@@ -5594,8 +5619,13 @@ export class AgentSession {
 			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
+		const defaultToolNames = this._defaultToolNames;
+		const isConfiguredBuiltinTool = (tool: (typeof registeredTools)[number]): boolean =>
+			(tool.sourceInfo.source !== "builtin" && !this._isBuiltinExtensionPath(tool.sourceInfo.path)) ||
+			defaultToolNames === undefined ||
+			defaultToolNames.has(tool.definition.name);
 		const allCustomTools = [
-			...registeredTools,
+			...registeredTools.filter(isConfiguredBuiltinTool),
 			...this._customTools.map((definition) => ({
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
@@ -6892,11 +6922,13 @@ export class AgentSession {
 	/**
 	 * Export session to HTML.
 	 * @param outputPath Optional output path (defaults to session directory)
+	 * @param options Optional export presentation settings
 	 * @returns Path to exported file
 	 */
-	async exportToHtml(outputPath?: string): Promise<string> {
-		const configuredThemeName = this.settingsManager.getTheme();
-		const themeName = configuredThemeName && getThemeByName(configuredThemeName) ? configuredThemeName : undefined;
+	async exportToHtml(outputPath?: string, options: { themeName?: string } = {}): Promise<string> {
+		const themeName = [options.themeName, this.settingsManager.getTheme()].find(
+			(candidate) => candidate !== undefined && getThemeByName(candidate) !== undefined,
+		);
 
 		// Create tool renderer if we have an extension runner (for custom tool HTML rendering)
 		const toolRenderer: ToolHtmlRenderer = createToolHtmlRenderer({

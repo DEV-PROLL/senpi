@@ -57,6 +57,7 @@ import {
 	createGrammarToolInputProperties,
 	type GrammarToolInputJsonBuffer,
 	getGrammarToolInput,
+	getJsonSchemaToolParameters,
 	resolveGrammarConstrainedSampling,
 	resolveJsonSchemaStrictSampling,
 } from "./constrained-sampling.ts";
@@ -1641,11 +1642,12 @@ function convertTools(
 			throw new Error("Freeform tools cannot be sent to OpenAI Chat Completions; use Responses API");
 		}
 
+		const strict = resolveJsonSchemaStrictSampling(tool, compat.supportsStrictMode !== false);
+		const schemaParameters = getJsonSchemaToolParameters(tool, strict) as Record<string, unknown>;
 		const normalizedParameters =
 			compat.toolSchemaFlavor === "moonshot-mfjs"
-				? normalizeToolParametersForMoonshot(tool.parameters as Record<string, unknown>)
-				: normalizeToolParametersForOpenAICompat(tool.parameters as Record<string, unknown>);
-		const strict = resolveJsonSchemaStrictSampling(tool, compat.supportsStrictMode !== false);
+				? normalizeToolParametersForMoonshot(schemaParameters)
+				: normalizeToolParametersForOpenAICompat(schemaParameters);
 		return {
 			type: "function",
 			function: {

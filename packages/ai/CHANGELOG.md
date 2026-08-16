@@ -8,6 +8,8 @@
 
 ### Changed
 
+- Synced the provider transports with upstream v0.84.2: the Anthropic streaming path now uses upstream's SSE decoder with deferred tools (`tool_reference`/`defer_loading`) and adaptive `xhigh` effort, OpenAI Completions gained strict JSON-schema conversion, grammar/custom tool calls and the new thinking backends, and the Responses transports support upstream's `additional_tools` deferred-tool mode. The fork's server-fallback receipts, retry hints, tool-choice fallback, prompt-cache TTL, deterministic tool-call-ID sanitizer and `senpi` wire identity are preserved. `mistral-conversations` moves to upstream's native transport. Provider catalog data was refreshed for the capabilities these features read (`supportsAdditionalTools`, native DeepSeek `max_tokens`, Cloudflare Responses strict mode, DeepSeek V4 Flash `low` effort), and DeepSeek base-URL detection is now case-insensitive ([#892](https://github.com/code-yeongyu/senpi/pull/892)).
+
 ### Fixed
 
 - `isContextOverflow` now classifies gateway HTTP 413 byte-size rejections — "Request body too large", "Request Entity Too Large", `body_too_large`, and "Payload Too Large" — as overflow, the same recovery class as Anthropic's native `request_too_large`. Sessions whose requests exceed a gateway body limit previously saw these as terminal errors, which wedged compaction on every fallback model ([#884](https://github.com/code-yeongyu/senpi/issues/884)).
