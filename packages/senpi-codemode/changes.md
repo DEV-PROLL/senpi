@@ -1,5 +1,43 @@
 # senpi-codemode fork changes
 
+## Eval execution metadata event (2026-08-16)
+
+### What changed
+
+- Every settled eval cell now publishes one versioned `senpi.eval.execution` event. The in-process
+  event bus receives the full bounded payload, while the external RPC channel receives a
+  metadata-only projection that excludes prompts, arguments, call ids, errors, and result previews.
+- The payload records producer timestamps, true end-to-end eval wall time, kernel-reported runtime,
+  terminal status, detached status, every initiated nested tool-call count (including calls still
+  pending when an error cell settles), distinct tool names, and per-tool aggregate durations.
+- Generic and MCP tools retain the existing 30-call enrichment cap while every call still
+  contributes to exact counts and aggregates. Reserved agent/output calls now receive the same
+  bounded argument and duration capture; internal schema bridge calls preserve their legacy shape.
+- Captured names and identifiers are length-bounded, at most 64 distinct names receive individual
+  aggregates, excess names roll into an exact overflow aggregate, and the RPC projection has a
+  final 32 KiB serialized-byte ceiling with a deterministic aggregate-only fallback.
+- Session-generation fencing suppresses events from retired codemode runtimes.
+
+### Why
+
+- OMO needs producer-side timing data to determine whether eval composition and parallel tool calls
+  actually reduce round trips and wall-clock time, rather than relying on model-side assumptions.
+- OMO can consume rich metadata from the in-process event bus and later publish an explicitly
+  redacted or capability-gated desktop projection. The current desktop adapter decodes but ignores
+  unknown extension event names, so desktop rendering remains a separate consumer change.
+
+### Why this cannot be expressed externally
+
+- The eval extension owns kernel message dispatch, per-call bridge timing, bounded argument/result
+  capture, detached settlement, and session-generation fencing. An external extension cannot
+  reconstruct those facts accurately after the eval tool result has returned.
+
+### Expected merge conflict zones
+
+- MEDIUM in `src/index.ts`, `src/tool/eval-tool.ts`, and `src/tool/cell-handler.ts` around runtime
+  registration, settlement, and nested tool-call capture.
+- LOW in `src/tool/cell-runtime.ts`, `src/tool/eval-tool-options.ts`, and the new event builder.
+
 ## Eval cell hard limit (2026-08-13)
 
 ### What changed

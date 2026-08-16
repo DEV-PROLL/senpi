@@ -29,6 +29,85 @@
 - `agent-session.ts` skill command expansion helpers and `AgentSessionEvent`.
 - Skill-composition regressions under `test/suite/regressions/308-skill-composition.test.ts`.
 
+## Model and service-tier session events (2026-08-16)
+
+### What changed
+
+- `AgentSessionEvent` gained `model_changed` (model, post-switch thinking level, `ModelSelectSource`) and `service_tier_changed` (tier, fastMode). Both are emitted from the existing switch seams: `_switchActiveModel`, `_cycleFavoriteModel`, and `setSessionFastMode`.
+- `service_tier_changed` fires only when the effective tier or the fast-mode indicator actually moved (they move independently).
+- New read-only accessors: `cwd` (the value extensions already receive as `ctx.cwd`) and `effectiveServiceTier` (`serviceTier`, promoted to `"priority"` while session fast mode is on — what the wire actually carries).
+
+### Why
+
+- Host surfaces (RPC) had to infer the active model from session entries and could not see tier or fast-mode state at all. Emitting at the switch seams means every path — command, slash command, cycle, fallback, restore — reports the level actually in force afterwards, which per-model memory makes different from the requested level.
+- `effectiveServiceTier` exists so a client can never be shown `fastMode: true` alongside a tier that disagrees with it.
+
+### Why an extension could not handle it
+
+- Model switching, thinking-level clamping, and tier resolution are session-core state transitions; an extension observing `model_select` cannot report the post-clamp level atomically with the switch.
+
+## /fast per-model service-tier persistence seam (2026-08-16)
+
+### What changed
+
+- `setSessionFastMode(false)` now also clears a cached `"priority"` `_currentServiceTier` when the active model is a codex-responses model AND that priority is inherited from the catalog (`getCompatibilityRequestConfig(model).serviceTier === "priority"`). A priority the catalog does not explain is an explicit scoped/favorite `:priority` pin and is left alone. `_resolveServiceTier` is unchanged.
+
+### Why
+
+`/fast` now persists per model (see `extensions/builtin/changes.md`), and turning it off writes a remembered `"auto"` that must override an inherited catalog-priority tier immediately. The resolved tier is only recomputed on model switches, so a same-session `/fast off` (which deliberately does not swap models) would otherwise keep the badge on and keep sending `service_tier: "priority"` until a restart. The memory itself is applied in the service-tier extension (which holds the fresh settings read); caching it here instead would survive the off and leak the inherited tier back onto the wire.
+
+## Preserve per-model reasoning effort while reasoning is off (2026-08-16)
+
+### What changed
+
+- `SettingsManager` now persists `modelLastOnThinkingLevels` beside `modelThinkingLevels`.
+- Every non-off per-model thinking write refreshes the companion value; writing `off` changes only the effective
+  level, so startup remains off while a later `/reasoning on` can restore the previous effort.
+- The companion accessor validates runtime JSON and marks only the nested model key for concurrent-session merges.
+
+### Why
+
+- Persisting `off` into the only per-model field destroyed the effort the user expected to restore. A
+  session-scoped fallback hid that loss only until restart, making the same off/on sequence produce different
+  results before and after a restart.
+
+### Why an extension could not handle it
+
+- Ordinary thinking-level changes and startup restoration already flow through core settings. The remembered
+  non-off value must therefore be a storage invariant rather than extension-process state.
+
+### Expected merge conflict zones
+
+- LOW: `settings-manager.ts` beside the existing per-model thinking accessors.
+
+## Clamp fallback thinking levels canonically and restore the pre-fallback level (2026-08-16)
+
+### What changed
+
+- `retry-fallback/controller.ts` `selectThinking()` now delegates to `clampThinkingLevel` from
+  `@earendil-works/pi-ai` instead of falling back to the last (highest) supported level.
+- `session-manager.ts` `getSessionContextSettings()` captures the thinking level in effect when a fallback
+  window opens and restores it on `fallback-revert`, or at the end of the path when the window never closed.
+  A manual `model_change` still abandons the window, keeping the in-window level for the newly chosen model.
+
+### Why
+
+- The old fallback clamp escalated: a requested `off` against an always-on fallback model resolved to that
+  model's maximum level, silently spending the largest reasoning budget on an unattended retry. The canonical
+  clamp walks to the nearest supported level in either direction.
+- Session restoration already protected the model half of a fallback window (`originalProvider`/`originalModelId`)
+  but assigned `thinking_level_change` unconditionally, so a session interrupted inside a window came back with
+  the primary model and the fallback model's ephemeral thinking level.
+
+### Why an extension could not handle it
+
+- Both sites are core reducers: the retry controller picks the level before any extension observes the switch, and
+  session context restoration runs while rebuilding state from the session file.
+
+### Expected merge conflict zones
+
+- LOW: `retry-fallback/controller.ts` `selectThinking()`; `session-manager.ts` `getSessionContextSettings()`.
+
 ## Skip pi.dev catalog overlay for fork-only builtin providers (2026-08-16)
 
 ### What changed

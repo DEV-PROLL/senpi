@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- Non-interactive runs (`senpi -p`) no longer die with an uncaught `EPERM: operation not permitted, mkdir <agentDir>/auth.json.lock` when the agent dir is not writable (for example a background worker under a macOS seatbelt profile that grants only the lockfile paths). The async auth read path (`readLatestData`) now degrades lock-acquisition and read failures to last-good in-memory data with a recorded diagnostic warning, mirroring the settings-manager path that already behaved this way; OAuth write/refresh persistence remains fail-closed. proper-lockfile staleness is also unified across `FileAuthStorageBackend` (sync and async) and `FileSettingsStorage` on one shared policy (`realpath: false, stale: 30s, update: 10s` in `core/lockfile-policy.ts`), so a synchronous contender can no longer classify a still-live asynchronous lock as stale mid-update and steal it ([#898](https://github.com/code-yeongyu/senpi/pull/898)).
+
 - Ambient Claude SDK OAuth authentication now preserves request-scoped token overrides and explicit empty masks through stored and ambient auth replay, treats request token slots as a complete namespace so sibling host accounts cannot survive a mask, isolates request tokens from subprocess-control variables, keeps request tokens out of persistent `config-dir` credentials, remains valid across resident and auxiliary calls, recognizes request tokens in explicit ambient mode, and shares bounded availability probes without abandoned-request ownership ([#836](https://github.com/code-yeongyu/senpi/pull/836)).
 - Explicit `/skill:<name>` commands now preserve that the user selected the skill: the expanded user message names each invoked skill, marks its workflow as binding, and separates skill instructions from trailing request text. The TUI and HTML export parsers recognize the new payload while retaining legacy parsing for resumed and imported sessions, so skill invocations remain collapsed in transcripts. Previously the expansion flattened both into ordinary prose, so the Intent Gate could route only on the trailing request and ignore the selected skill's rules ([#890](https://github.com/code-yeongyu/senpi/issues/890)).
 - The model selector no longer chronically warns `Could not refresh opengateway; showing cached models.` and `senpi update --models` no longer fails when an `opengateway` (or `alibaba-token-plan`) credential is configured. Both fork-only builtin providers were wrapped with the pi.dev remote-catalog overlay like every other builtin, but pi.dev is upstream infrastructure that does not serve fork-only provider ids and answers them with a non-404 failure — retried on every refresh because transient failures never persist `lastModified`, so the freshness throttle never engaged. The overlay wrap is now skipped for fork-only providers under the default catalog base URL (a custom `catalogBaseUrl` keeps it); their catalogs remain baked at build time ([#887](https://github.com/code-yeongyu/senpi/issues/887), [#888](https://github.com/code-yeongyu/senpi/pull/888)).
@@ -42,12 +44,24 @@
 
 - A failed compaction now reports the concrete reason — for example `Compaction did not apply: remote-compaction-timeout; local fallback unavailable` — instead of the generic `Compaction did not apply`, so the cause is diagnosable in the TUI and decision log ([#765](https://github.com/code-yeongyu/senpi/issues/765)).
 
+- Fallback retries no longer escalate reasoning. A requested level the fallback model does not support previously resolved to that model's highest supported level, which pushed 191 of 197 always-on models to maximum reasoning on unattended retries; it now clamps to the nearest supported level. A session interrupted inside a fallback window also no longer resumes with the primary model carrying the fallback model's reasoning level, and favorite model patterns keep their `:level` / `:priority` decorators instead of being flattened to bare ids ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+
 
 ### New Features
 
 ### Breaking Changes
 
 ### Added
+
+- Each model now remembers its own reasoning level and service tier. Cycling favorites (ctrl+p) or switching models restores the level you last used for that model, persisted across restarts via the new `modelThinkingLevels` and `modelServiceTiers` settings. Model patterns also accept a service-tier decorator (`provider/id:priority`) alongside the existing `:level` form ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- `/reasoning [on|off]` shows or toggles reasoning for the current model, with behavior tailored to the model's capability class: models without reasoning support, always-on models, on/off-only models, and fully graded models each get a specific response. `/reasoning on` restores the level you last used for that model ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- `/efforts [minimal|low|medium|high|xhigh|max]` shows or sets the reasoning effort ladder for graded models. On/off-only models are told to use `/reasoning` instead; models without reasoning support are informed plainly. Both commands work headless and over RPC ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- `/fast [on|off]` now persists per model. The choice survives restarts via the `modelServiceTiers` setting; `off` records an explicit `"auto"` so it overrides a catalog-inherited priority tier. A `-fast` catalog variant and its base model share one entry, preventing contradictory preferences ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `model_changed` event emitted on every active-model change (any source), carrying the model object, the post-switch thinking level, and the change source ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `service_tier_changed` event emitted when the effective service tier or fast-mode state changes ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `get_state` now includes `serviceTier` and `fastMode` fields reflecting what the next request would carry ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `set_fast_mode` / `get_fast_mode` commands for toggling and reading fast mode over the protocol, with per-model persistence and the same error semantics as `/fast` ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `set_thinking_level` with `scope: "turn"` now validates the requested level against the active model before applying it; a rejected request leaves the session level unchanged ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
 
 ### Changed
 

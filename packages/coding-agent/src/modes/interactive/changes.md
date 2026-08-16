@@ -1,5 +1,68 @@
 # changes
 
+## Favorite persist merges by pattern resolution, keeping `:level` / `:priority` decorators (2026-08-16)
+
+Supersedes "Favorite patterns survive a persist while providers are unavailable (2026-08-12)": the
+`unresolvedPatterns` contract described there no longer exists, and `persistFavoritePatterns` is gone.
+
+### What changed
+
+- `mergeFavoritePatternsForPersist()` in `components/model-favorites.ts` now consumes
+  `PatternResolution[]` (per-pattern ownership metadata from `core/model-resolver.ts`) instead of a
+  flat `unresolvedPatterns` list. Contract, per stored pattern:
+  - unresolved (malformed, empty, or zero-match) passes through verbatim;
+  - resolved with zero owned ids is dropped (it only duplicated models an earlier pattern claimed,
+    so keeping it would resurrect a model the user just removed);
+  - resolved whose visible owned ids are ALL still selected and still an unbroken ordered block is
+    preserved VERBATIM, so `claude-opus-5:xhigh` and `gpt-5.5:priority:high` survive a toggle of an
+    unrelated favorite;
+  - a partially deselected glob EXPLODES into exact decorated entries - still-selected visible ids in
+    selector order, then owned ids outside the candidate set, each re-decorated from the glob's
+    `serviceTier` / `thinkingLevel`;
+  - newly favorited models append as bare canonical ids; identical strings dedupe first-wins;
+    `undefined` is still written only when the merged result is genuinely empty.
+- Stored patterns are paired with their resolutions through a `Map<pattern, PatternResolution>`, not
+  by array position. When the two lists drift - settings mutated externally between snapshot capture
+  and merge, an inserted/removed/reordered entry, or an empty `patternResolutions` - a decorated
+  pattern is still matched by identity. The previous positional guard
+  (`resolution.pattern !== storedPatterns[index] -> continue`) silently skipped such patterns into the
+  bare-id append path, which is exactly the decorator loss this entry exists to prevent. Duplicate
+  identical stored patterns share the first (owning) resolution; the later duplicate resolves to no
+  ownership anyway, so first-wins keeps the output identical.
+- `interactive-mode.ts` replaced `persistFavoritePatterns` with `captureFavoritePatternSnapshot()` +
+  `applyFavoriteSelection()`, so the LIVE session favorites and the persisted settings both derive
+  from the SAME merged pattern list. Previously the session was rebuilt from bare ids before the
+  persist, dropping decorators pre-write.
+- Coverage: `../../../test/favorite-model-pattern-merge.test.ts` (verbatim preservation, glob
+  explosion, unfavorite/refavorite round trip, unresolved pass-through, overlapping-pattern drop,
+  and the drifted-snapshot class: inserted, removed, reordered, empty resolutions, duplicates), plus
+  the existing `favorite-models-preserve-unresolvable`, `favorite-models-frozen-order`, and
+  `favorite-model-selection` suites as the regression fence.
+
+### Why
+
+- Favorite patterns carry per-model reasoning and service-tier intent (`:xhigh`, `:priority:high`).
+  The selectors present favorites as plain ids, so persisting that view collapsed every decorated
+  pattern to a bare id: toggling one unrelated favorite silently reset another model's reasoning
+  level. Ownership metadata is the only way to tell "the user did not touch this pattern" from "the
+  user deselected part of it".
+- Keying by pattern rather than position closes the same bug class at its second entry point: a
+  snapshot that no longer lines up with `settings.json` must not be able to turn a decorated pattern
+  into a bare id.
+
+### Why this cannot be expressed externally
+
+- Interactive mode owns the selector callbacks, the availability-filtered favorites view, and the
+  settings write. No extension hook can intervene between the filtered view and the persist, and the
+  ownership metadata it merges against is internal model-resolver output.
+
+### Expected merge conflict zones
+
+- LOW: `components/model-favorites.ts` around `mergeFavoritePatternsForPersist` (the whole helper is
+  fork-specific; upstream has no equivalent).
+- LOW: `interactive-mode.ts` around `captureFavoritePatternSnapshot()` / `applyFavoriteSelection()`
+  and the two selector persist callbacks - the zone the 2026-08-12 entry declared, now renamed.
+
 ## Extension selector windows long option lists (2026-08-13)
 
 ### What changed
@@ -49,6 +112,15 @@
 - LOW: `components/assistant-render-descriptors.ts` stop-reason switch.
 
 ## Favorite patterns survive a persist while providers are unavailable (2026-08-12)
+
+> SUPERSEDED by "Favorite persist merges by pattern resolution, keeping `:level` / `:priority`
+> decorators (2026-08-16)". Retained for history. Two claims below are no longer accurate:
+> `mergeFavoritePatternsForPersist()` no longer takes an `unresolvedPatterns` list (it takes
+> `PatternResolution[]` and derives unresolved status per pattern), and `persistFavoritePatterns` no
+> longer exists (`interactive-mode.ts` persists through `captureFavoritePatternSnapshot()` +
+> `applyFavoriteSelection()`). The underlying guarantee - stored favorites are not erased by a
+> persist taken while providers are unavailable - still holds, and is now the `unresolved` branch of
+> the newer contract.
 
 ### What changed
 

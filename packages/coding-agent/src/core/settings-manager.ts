@@ -11,6 +11,7 @@ import { findNearestParentConfigDir } from "../nearest-parent-config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { envValue } from "./brand.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import { FILE_STORAGE_LOCK_OPTIONS } from "./lockfile-policy.ts";
 import {
 	type ResolvedHintPolicySettings,
 	type ResolvedRetryFallbackSettings,
@@ -110,6 +111,32 @@ export interface OpenAISettings {
 	serviceTier?: "auto" | "flex" | "priority";
 }
 
+/** Service tier remembered per model; "auto" is an explicit opt-out of an inherited priority tier. */
+export type ModelServiceTier = "auto" | "flex" | "priority";
+
+const THINKING_LEVEL_VALUES: ReadonlySet<string> = new Set<ThinkingLevel>([
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]);
+
+const MODEL_SERVICE_TIER_VALUES: ReadonlySet<string> = new Set<ModelServiceTier>(["auto", "flex", "priority"]);
+
+/** Opaque per-model memory key. Ids may contain `/` and `:`, so keys are never split back apart. */
+function modelMemoryKey(provider: string, modelId: string): string {
+	return `${provider}/${modelId}`;
+}
+
+function readModelMemoryEntry(map: unknown, key: string, allowed: ReadonlySet<string>): string | undefined {
+	if (typeof map !== "object" || map === null || Array.isArray(map)) return undefined;
+	const value = (map as Record<string, unknown>)[key];
+	return typeof value === "string" && allowed.has(value) ? value : undefined;
+}
+
 export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 	offRecommendedModel?: boolean; // default: false
@@ -142,6 +169,9 @@ export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
 	defaultThinkingLevel?: ThinkingLevel;
+	modelThinkingLevels?: Record<string, ThinkingLevel>; // `${provider}/${id}` -> effective thinking level for that model
+	modelLastOnThinkingLevels?: Record<string, ThinkingLevel>; // `${provider}/${id}` -> last non-off thinking level
+	modelServiceTiers?: Record<string, ModelServiceTier>; // `${provider}/${id}` -> last service tier set for that model
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
@@ -365,7 +395,7 @@ export class FileSettingsStorage implements SettingsStorage {
 
 		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 			try {
-				return lockfile.lockSync(path, { realpath: false });
+				return lockfile.lockSync(path, { ...FILE_STORAGE_LOCK_OPTIONS });
 			} catch (error) {
 				const code =
 					typeof error === "object" && error !== null && "code" in error
@@ -932,6 +962,96 @@ export class SettingsManager {
 	setDefaultThinkingLevel(level: ThinkingLevel): void {
 		this.globalSettings.defaultThinkingLevel = level;
 		this.markModified("defaultThinkingLevel");
+		this.save();
+	}
+
+	/** Thinking level last set for this exact model, or undefined when unknown/invalid on disk. */
+	getModelThinkingLevel(provider: string, modelId: string): ThinkingLevel | undefined {
+		return readModelMemoryEntry(
+			this.settings.modelThinkingLevels,
+			modelMemoryKey(provider, modelId),
+			THINKING_LEVEL_VALUES,
+		) as ThinkingLevel | undefined;
+	}
+
+	/** Remember (or with `undefined`, forget) this model's effective thinking level in GLOBAL settings. */
+	setModelThinkingLevel(
+		provider: string,
+		modelId: string,
+		level: ThinkingLevel | undefined,
+		options: { preserveLastOn?: boolean } = {},
+	): void {
+		const key = modelMemoryKey(provider, modelId);
+		const existing = this.globalSettings.modelThinkingLevels;
+		const map: Record<string, ThinkingLevel> =
+			typeof existing === "object" && existing !== null && !Array.isArray(existing) ? { ...existing } : {};
+		if (level === undefined) {
+			delete map[key];
+		} else {
+			map[key] = level;
+		}
+		this.globalSettings.modelThinkingLevels = map;
+		// Nested key only: concurrent sessions writing OTHER models must survive the merge.
+		this.markModified("modelThinkingLevels", key);
+
+		// `off` is durable effective state, but it must not erase the level `/reasoning on` restores.
+		if (level !== "off" && !options.preserveLastOn) {
+			this.updateModelLastOnThinkingLevel(key, level);
+		}
+		this.save();
+	}
+
+	/** Last non-off thinking level for this exact model, or undefined when unknown/invalid on disk. */
+	getModelLastOnThinkingLevel(provider: string, modelId: string): ThinkingLevel | undefined {
+		const level = readModelMemoryEntry(
+			this.settings.modelLastOnThinkingLevels,
+			modelMemoryKey(provider, modelId),
+			THINKING_LEVEL_VALUES,
+		) as ThinkingLevel | undefined;
+		return level === "off" ? undefined : level;
+	}
+
+	/** Remember (or with `undefined`, forget) this model's last non-off level in GLOBAL settings. */
+	setModelLastOnThinkingLevel(provider: string, modelId: string, level: ThinkingLevel | undefined): void {
+		this.updateModelLastOnThinkingLevel(modelMemoryKey(provider, modelId), level === "off" ? undefined : level);
+		this.save();
+	}
+
+	private updateModelLastOnThinkingLevel(key: string, level: ThinkingLevel | undefined): void {
+		const existing = this.globalSettings.modelLastOnThinkingLevels;
+		const map: Record<string, ThinkingLevel> =
+			typeof existing === "object" && existing !== null && !Array.isArray(existing) ? { ...existing } : {};
+		if (level === undefined) {
+			delete map[key];
+		} else {
+			map[key] = level;
+		}
+		this.globalSettings.modelLastOnThinkingLevels = map;
+		this.markModified("modelLastOnThinkingLevels", key);
+	}
+
+	/** Service tier last set for this exact model, or undefined when unknown/invalid on disk. */
+	getModelServiceTier(provider: string, modelId: string): ModelServiceTier | undefined {
+		return readModelMemoryEntry(
+			this.settings.modelServiceTiers,
+			modelMemoryKey(provider, modelId),
+			MODEL_SERVICE_TIER_VALUES,
+		) as ModelServiceTier | undefined;
+	}
+
+	/** Remember (or with `undefined`, forget) this model's service tier in GLOBAL settings. */
+	setModelServiceTier(provider: string, modelId: string, tier: ModelServiceTier | undefined): void {
+		const key = modelMemoryKey(provider, modelId);
+		const existing = this.globalSettings.modelServiceTiers;
+		const map: Record<string, ModelServiceTier> =
+			typeof existing === "object" && existing !== null && !Array.isArray(existing) ? { ...existing } : {};
+		if (tier === undefined) {
+			delete map[key];
+		} else {
+			map[key] = tier;
+		}
+		this.globalSettings.modelServiceTiers = map;
+		this.markModified("modelServiceTiers", key);
 		this.save();
 	}
 
