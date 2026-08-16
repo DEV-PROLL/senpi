@@ -85,7 +85,7 @@ import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "./dynamic-prompt/index.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
-import type { ServiceTier } from "./extensions/builtin/service-tier.ts";
+import { CODEX_RESPONSES_API, type ServiceTier } from "./extensions/builtin/service-tier.ts";
 import { deriveExtensionRegistrationId } from "./extensions/builtin/tool-search/engine/marker.ts";
 import { getToolSearchService } from "./extensions/builtin/tool-search/service.ts";
 import {
@@ -2216,14 +2216,32 @@ export class AgentSession {
 		return this._sessionFastMode || this._currentServiceTier === "priority";
 	}
 
-	/** Session-scoped fast-mode indicator; never persisted, reset on session start. */
+	/**
+	 * Session-scoped fast-mode indicator; never persisted, reset on session start.
+	 *
+	 * Turning fast OFF also clears the cached priority tier: `/fast off` writes a remembered
+	 * `"auto"` that must override an inherited catalog-priority tier immediately (display and
+	 * request side), not only on the next session. Only codex-response models are touched, and
+	 * never when an explicit scoped/favorite `:priority` pin is in force — those are pinned by
+	 * the user's model selection, not by `/fast`.
+	 */
 	setSessionFastMode(enabled: boolean): void {
 		this._sessionFastMode = enabled;
+		if (!enabled && this._currentServiceTier === "priority" && this.model?.api === CODEX_RESPONSES_API) {
+			// Only an INHERITED (catalog) priority is cleared. A priority the catalog does not
+			// explain came from an explicit scoped/favorite `:priority` pin, which `/fast` must not undo.
+			if (this._modelRuntime.getCompatibilityRequestConfig(this.model).serviceTier === "priority") {
+				this._currentServiceTier = undefined;
+			}
+		}
 	}
 
 	/**
 	 * Explicit scoped/favorite tiers win; otherwise fall back to the model's
-	 * configured serviceTier from models.json/extension compatibility config.
+	 * configured serviceTier from models.json/extension compatibility config. The per-model
+	 * `/fast` memory is honored by the service-tier extension (`liveMemoryTier` + the session
+	 * flag in `before_provider_request`), not cached here: caching it would survive a same-session
+	 * `/fast off` (no model switch to re-resolve) and leak an inherited priority onto the wire.
 	 */
 	private _resolveServiceTier(
 		model: Model<any> | undefined,

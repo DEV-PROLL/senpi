@@ -1,15 +1,14 @@
 # changes
 
-## /fast per-model service-tier precedence (2026-08-16)
+## /fast per-model service-tier persistence seam (2026-08-16)
 
 ### What changed
 
-- `AgentSession._resolveServiceTier` now inserts a per-model remembered tier between the explicit scoped/favorite pin and the catalog compat `serviceTier`: explicit > memory > catalog > `openai.serviceTier` (the last still applied in the non-Codex path of the service-tier extension). The memory read goes through `getRememberedServiceTier(settingsManager, modelRegistry, model)`, which normalizes a `-fast` catalog variant onto its base model so the pair shares one key.
-- The remembered `"auto"` is what makes `/fast off` override an inherited catalog/global priority tier; deleting the key would silently re-inherit it. This is a surgical edit to the precedence seam only — no other behavior in this file changes.
+- `setSessionFastMode(false)` now also clears a cached `"priority"` `_currentServiceTier` when the active model is a codex-responses model AND that priority is inherited from the catalog (`getCompatibilityRequestConfig(model).serviceTier === "priority"`). A priority the catalog does not explain is an explicit scoped/favorite `:priority` pin and is left alone. `_resolveServiceTier` is unchanged.
 
 ### Why
 
-`/fast` now persists per model across sessions (see `extensions/builtin/changes.md`); the session core has to honor that memory when resolving the request-side tier.
+`/fast` now persists per model (see `extensions/builtin/changes.md`), and turning it off writes a remembered `"auto"` that must override an inherited catalog-priority tier immediately. The resolved tier is only recomputed on model switches, so a same-session `/fast off` (which deliberately does not swap models) would otherwise keep the badge on and keep sending `service_tier: "priority"` until a restart. The memory itself is applied in the service-tier extension (which holds the fresh settings read); caching it here instead would survive the off and leak the inherited tier back onto the wire.
 
 ## Preserve per-model reasoning effort while reasoning is off (2026-08-16)
 
