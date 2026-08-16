@@ -1,5 +1,62 @@
 # changes
 
+## Unified lockfile staleness policy across auth and settings storage (2026-08-16)
+
+### What changed
+
+- `core/lockfile-policy.ts` exports `FILE_STORAGE_LOCK_OPTIONS` (`stale: 30_000`, `update: 10_000`, `realpath: false`)
+  and both file-backed stores acquire proper-lockfile locks with it: `FileAuthStorageBackend` sync and async paths in
+  `core/auth-storage.ts` and `FileSettingsStorage` in `core/settings-manager.ts`. Lock file locations and read/write
+  semantics are unchanged.
+- Coverage: `test/lockfile-policy.test.ts` captures the options each backend passes to `lockSync`/`lock` and asserts
+  all three acquisitions report the identical policy.
+
+### Why
+
+- Proper-lockfile defaults to `stale: 10_000` and refreshes a held lock's mtime every `stale / 2` ms. The async auth
+  path used `stale: 30_000` (15s refresh) while both sync paths kept the 10s default, so a sync contender could
+  classify a still-live async lock as stale in the 10-15s window and steal it mid-update.
+
+### Why an extension could not do this
+
+- Lock acquisition options are hardcoded inside core storage backends; an extension cannot intercept or reconfigure
+  the proper-lockfile calls used by credential and settings persistence.
+
+### Expected merge conflict zones on next upstream sync
+
+- `core/auth-storage.ts` and `core/settings-manager.ts`, around the lock acquisition helpers.
+
+## Non-interactive auth reads degrade on storage lock failures (2026-08-16)
+
+### What changed
+
+- `core/auth-storage.ts`: asynchronous credential reads now preserve the last valid in-memory snapshot when acquiring
+  or reading the auth storage lock fails, regardless of whether the caller supplied an operation signal. The failure is
+  retained in `AuthStorage.drainErrors()`; an actual caller abort still rejects instead of being converted into stale data.
+- `main.ts`: non-interactive startup/model-listing and completed print runs drain auth-storage failures through the
+  existing warning diagnostic renderer. Interactive-mode reporting is unchanged.
+- OAuth refresh persistence remains fail-closed because `modify` and `delete` still propagate every lock, parse, and
+  write failure without fallback.
+
+### Why
+
+- Model-runtime credential reads always carry a normalized signal. The previous signal-gated branch therefore skipped
+  its intended last-good fallback, so a sandbox-denied `auth.json.lock` mkdir escaped top-level `senpi -p` startup as an
+  uncaught `EPERM` instead of a warning.
+- Corrupt auth data must remain visible even when the last-good snapshot keeps a non-interactive run alive, so degraded
+  reads record the original failure for the CLI diagnostic surface.
+
+### Why an extension could not do this
+
+- Credential storage locking and the non-interactive bootstrap diagnostic boundary run inside core before an extension
+  can intercept model authentication or recover a rejected credential-store read.
+
+### Expected merge conflict zones on next upstream sync
+
+- `core/auth-storage.ts`, around `readLatestData` reload coalescing and abort handling.
+- `main.ts`, around startup diagnostics and print-mode dispatch.
+
+
 ## Idempotent ambient OAuth auth composition (2026-08-14)
 
 ### What changed
@@ -24,6 +81,7 @@
 ### Expected merge conflict zones on next upstream sync
 
 - LOW: `core/provider-api-key-auth.ts` around the ambient-only OAuth adapter and its precedence metadata.
+
 
 The historical-image transport entry moved to `core/changes.md`, beside the
 other provider-bound image transport behavior that owns the same payload path.
