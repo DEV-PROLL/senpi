@@ -499,8 +499,13 @@ export class AuthStorage implements CredentialStore {
 	private async readLatestData(options?: AuthOperationOptions): Promise<AuthStorageData> {
 		options?.signal?.throwIfAborted();
 		if (!this.authPath) {
-			const reload = this.reloadFromStorageAsync(options);
-			return options?.signal ? reload : reload.catch(() => this.readState.data);
+			try {
+				return await this.reloadFromStorageAsync(options);
+			} catch (error) {
+				options?.signal?.throwIfAborted();
+				this.recordError(error);
+				return this.readState.data;
+			}
 		}
 		const revision = getFileRevision(this.authPath);
 		if (revision !== undefined && revision === this.readState.revision) return this.readState.data;
@@ -526,8 +531,12 @@ export class AuthStorage implements CredentialStore {
 		const reload = this.readState.reload;
 		reload.readers++;
 		try {
-			const result = raceWithAbortSignal(reload.promise, options?.signal);
-			return options?.signal ? await result : await result.catch(() => this.readState.data);
+			try {
+				return await raceWithAbortSignal(reload.promise, options?.signal);
+			} catch {
+				options?.signal?.throwIfAborted();
+				return this.readState.data;
+			}
 		} finally {
 			reload.readers--;
 			if (reload.readers === 0 && this.readState.reload === reload) {

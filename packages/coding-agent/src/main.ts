@@ -118,6 +118,13 @@ function collectSettingsDiagnostics(
 	}));
 }
 
+function collectAuthDiagnostics(authStorage: AuthStorage, context: string): AgentSessionRuntimeDiagnostic[] {
+	return authStorage.drainErrors().map((error) => ({
+		type: "warning",
+		message: `(${context}, auth storage) ${error.message}`,
+	}));
+}
+
 export function collectExtensionLoadDiagnostics(
 	errors: readonly { path: string; error: string }[],
 ): AgentSessionRuntimeDiagnostic[] {
@@ -775,6 +782,7 @@ export async function main(args: string[], options?: MainOptions) {
 		reportDiagnostics([
 			...services.diagnostics,
 			...collectSettingsDiagnostics(services.settingsManager, "model listing"),
+			...collectAuthDiagnostics(services.authStorage, "model listing"),
 		]);
 		const searchPattern = typeof parsed.listModels === "string" ? parsed.listModels : undefined;
 		await listModels(services.modelRuntime, searchPattern);
@@ -1080,6 +1088,9 @@ export async function main(args: string[], options?: MainOptions) {
 
 	time("resolveModelScope");
 	reportDiagnostics(runtime.diagnostics);
+	if (appMode !== "interactive") {
+		reportDiagnostics(collectAuthDiagnostics(services.authStorage, "runtime creation"));
+	}
 	if (runtime.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
 		if (runtime.diagnostics.some((diagnostic) => diagnostic.message.includes("Failed to load extension"))) {
 			console.error(chalk.yellow(EXTENSION_LOAD_FAILURE_HINT));
@@ -1154,6 +1165,7 @@ export async function main(args: string[], options?: MainOptions) {
 			initialMessage,
 			initialImages,
 		});
+		reportDiagnostics(collectAuthDiagnostics(services.authStorage, "print mode"));
 		stopThemeWatcher();
 		restoreStdout();
 		if (exitCode !== 0) {
