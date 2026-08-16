@@ -134,7 +134,7 @@ import { ModelRegistry } from "./model-registry.ts";
 import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { PROMPT_CACHE_SAFE_WAIT_ENV, resolvePromptCacheSafeWaitSeconds } from "./prompt-cache-budget.ts";
-import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
+import { expandPromptTemplateWithMetadata, type PromptTemplate } from "./prompt-templates.ts";
 import { createProviderTimeoutRetryPlan, runBoundedRetryContinuation } from "./provider-timeout-retry.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { isBillingErrorMessage } from "./retry-fallback/billing.ts";
@@ -196,8 +196,9 @@ export function formatSkillInvocationPrompt(
 			`The user explicitly invoked the "${skill.name}" skill. Follow the instructions in <skill-instruction> as binding for this request, while respecting higher-priority instructions.\n\n<skill-instruction name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${skill.body}\n</skill-instruction>`,
 	);
 	const expandedSkills = skillBlocks.join("\n\n");
-	const trimmedRequest = userRequest?.trim();
-	return trimmedRequest ? `${expandedSkills}\n\n<user-request>\n${trimmedRequest}\n</user-request>` : expandedSkills;
+	return userRequest && /\S/.test(userRequest)
+		? `${expandedSkills}\n\n<user-request>\n${userRequest}\n</user-request>`
+		: expandedSkills;
 }
 
 /** Parsed skill block from a user message */
@@ -248,6 +249,13 @@ export function parseSkillBlock(text: string): ParsedSkillBlock | null {
 
 export type SkillInvocationSyntax = "dollar" | "slash";
 
+export interface CommandInvocation {
+	name: string;
+	source: "extension" | "prompt";
+	sourceInfo: SourceInfo;
+	syntax: "slash";
+}
+
 export interface SkillInvocationToken {
 	name: string;
 	syntax: SkillInvocationSyntax;
@@ -255,6 +263,8 @@ export interface SkillInvocationToken {
 	end: number;
 	position: "inline" | "leading";
 }
+
+export const MAX_SKILL_INVOCATION_TOKENS_PER_PROMPT = 64;
 
 const LEADING_SKILL_INVOCATION_PATTERN = /^(?:\/skill:([a-zA-Z][a-zA-Z0-9:_-]*)|\$([a-zA-Z][a-zA-Z0-9:_-]*))(?=\s|$)/;
 const INLINE_DOLLAR_SKILL_INVOCATION_PATTERN = /(^|\s)\$skill:([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
@@ -285,6 +295,7 @@ export function parseSkillInvocationTokens(text: string): SkillInvocationToken[]
 			end: cursor + match[0].length,
 			position: "leading",
 		});
+		if (tokens.length >= MAX_SKILL_INVOCATION_TOKENS_PER_PROMPT) return tokens;
 		cursor += match[0].length;
 	}
 
@@ -298,9 +309,24 @@ export function parseSkillInvocationTokens(text: string): SkillInvocationToken[]
 			end: start + `$skill:${match[2]}`.length,
 			position: "inline",
 		});
+		if (tokens.length >= MAX_SKILL_INVOCATION_TOKENS_PER_PROMPT) break;
 	}
 
 	return tokens;
+}
+
+function stripLeadingInvocationSeparators(text: string): string {
+	let cursor = 0;
+	while (text[cursor] === " " || text[cursor] === "\t") cursor++;
+	while (text[cursor] === "\n" || (text[cursor] === "\r" && text[cursor + 1] === "\n")) {
+		cursor += text[cursor] === "\r" ? 2 : 1;
+		const lineStart = cursor;
+		while (text[cursor] === " " || text[cursor] === "\t") cursor++;
+		if (text[cursor] !== "\n" && !(text[cursor] === "\r" && text[cursor + 1] === "\n")) {
+			return text.slice(lineStart);
+		}
+	}
+	return text.slice(cursor);
 }
 
 function removeSkillInvocationTokens(text: string, tokens: readonly SkillInvocationToken[]): string {
@@ -309,13 +335,16 @@ function removeSkillInvocationTokens(text: string, tokens: readonly SkillInvocat
 	for (const token of tokens) {
 		result += text.slice(cursor, token.start);
 		cursor = token.end;
+		if (
+			token.position === "inline" &&
+			(result.endsWith(" ") || result.endsWith("\t")) &&
+			(text[cursor] === " " || text[cursor] === "\t")
+		) {
+			cursor++;
+		}
 	}
 	result += text.slice(cursor);
-	return result
-		.split("\n")
-		.map((line) => line.replace(/[ \t]{2,}/g, " ").trimEnd())
-		.join("\n")
-		.trim();
+	return tokens.some((token) => token.position === "leading") ? stripLeadingInvocationSeparators(result) : result;
 }
 
 /** Session-specific events that extend the core AgentEvent */
@@ -334,6 +363,10 @@ export type AgentSessionEvent =
 				path: string;
 				syntax: SkillInvocationSyntax;
 			}[];
+	  }
+	| {
+			type: "command_invocation";
+			command: CommandInvocation;
 	  }
 	| {
 			type: "queue_update";
@@ -2879,6 +2912,12 @@ export class AgentSession {
 		let titlePrompt: string | undefined;
 		let consumedNextTurnMessages: CustomMessage[] | undefined;
 		let inputId: string | undefined;
+		let pendingCommandInvocation: CommandInvocation | undefined;
+		const emitPendingCommandInvocation = (): void => {
+			if (!pendingCommandInvocation) return;
+			this._emit({ type: "command_invocation", command: pendingCommandInvocation });
+			pendingCommandInvocation = undefined;
+		};
 		const emitInputDisposition = async (
 			disposition: "handled" | "queued" | "started" | "rejected",
 		): Promise<void> => {
@@ -2916,7 +2955,16 @@ export class AgentSession {
 			let expandedText = currentText;
 			if (expandPromptTemplates) {
 				expandedText = this._expandSkillCommand(expandedText);
-				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+				const templateExpansion = expandPromptTemplateWithMetadata(expandedText, [...this.promptTemplates]);
+				expandedText = templateExpansion.text;
+				if (templateExpansion.template) {
+					pendingCommandInvocation = {
+						name: templateExpansion.template.name,
+						source: "prompt",
+						sourceInfo: templateExpansion.template.sourceInfo,
+						syntax: "slash",
+					};
+				}
 			}
 			titlePrompt = options?.sessionTitlePrompt === false ? undefined : (options?.sessionTitlePrompt ?? text);
 
@@ -2935,6 +2983,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				emitPendingCommandInvocation();
 				await emitInputDisposition("queued");
 				promptDisposition?.("queued");
 				preflightResult?.(true);
@@ -2953,6 +3002,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				emitPendingCommandInvocation();
 				await emitInputDisposition("queued");
 				promptDisposition?.("queued");
 				preflightResult?.(true);
@@ -2981,6 +3031,7 @@ export class AgentSession {
 					} else {
 						await this._queueSteer(expandedText, currentImages);
 					}
+					emitPendingCommandInvocation();
 					await emitInputDisposition("queued");
 					promptDisposition?.("queued");
 					preflightResult?.(true);
@@ -3004,6 +3055,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				emitPendingCommandInvocation();
 				await emitInputDisposition("queued");
 				promptDisposition?.("queued");
 				preflightResult?.(true);
@@ -3112,6 +3164,7 @@ export class AgentSession {
 		}
 
 		promptDisposition?.("started");
+		emitPendingCommandInvocation();
 		preflightResult?.(true);
 		if (options?.thinkingLevel !== undefined) {
 			this.setSessionThinkingLevel(options.thinkingLevel);
@@ -3146,6 +3199,15 @@ export class AgentSession {
 
 		const command = this._extensionRunner.getCommand(commandName);
 		if (!command) return false;
+		this._emit({
+			type: "command_invocation",
+			command: {
+				name: commandName,
+				source: "extension",
+				sourceInfo: command.sourceInfo,
+				syntax: "slash",
+			},
+		});
 
 		// Get command context from extension runner (includes session control methods)
 		const ctx = this._extensionRunner.createCommandContext();
@@ -3256,9 +3318,21 @@ export class AgentSession {
 
 		// Expand skill commands and prompt templates
 		let expandedText = this._expandSkillCommand(text);
-		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+		const templateExpansion = expandPromptTemplateWithMetadata(expandedText, [...this.promptTemplates]);
+		expandedText = templateExpansion.text;
 
 		await this._queueSteer(expandedText, images, recovery?.enqueueOrder);
+		if (templateExpansion.template) {
+			this._emit({
+				type: "command_invocation",
+				command: {
+					name: templateExpansion.template.name,
+					source: "prompt",
+					sourceInfo: templateExpansion.template.sourceInfo,
+					syntax: "slash",
+				},
+			});
+		}
 	}
 
 	/**
@@ -3276,9 +3350,21 @@ export class AgentSession {
 
 		// Expand skill commands and prompt templates
 		let expandedText = this._expandSkillCommand(text);
-		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+		const templateExpansion = expandPromptTemplateWithMetadata(expandedText, [...this.promptTemplates]);
+		expandedText = templateExpansion.text;
 
 		await this._queueFollowUp(expandedText, images, recovery?.enqueueOrder);
+		if (templateExpansion.template) {
+			this._emit({
+				type: "command_invocation",
+				command: {
+					name: templateExpansion.template.name,
+					source: "prompt",
+					sourceInfo: templateExpansion.template.sourceInfo,
+					syntax: "slash",
+				},
+			});
+		}
 	}
 
 	private _startSessionTitleGeneration(firstPrompt: string): void {

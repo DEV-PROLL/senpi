@@ -5,13 +5,15 @@
 ### What changed
 
 - RPC exports self-describing `RpcSlashCommand` rows with canonical `syntax`, pushes ordered `commands_changed`
-  snapshots after initial bind and runtime reloads, and publishes typed `command_invocation` metadata after an
-  extension command or prompt template passes prompt preflight.
+  snapshots after initial bind and runtime reloads, and publishes typed `command_invocation` metadata only after the
+  session actually resolves an extension command or an accepted prompt template survives extension input interception.
 - RPC continues to export `RpcSkillInvocationEvent` with ordered `{name,path,syntax}` entries.
-- The classic and routed connection handler explicitly type-checks `skill_invocation` before forwarding it through
-  the existing event buffer.
-- Regression coverage proves candidate ordering, update deduplication, accepted command classification, and skill
-  event delivery while `get_loaded_surfaces` keeps the same revealed MCP inventory before and after invocation.
+- The classic and routed connection handler explicitly type-checks `skill_invocation` and `command_invocation` before
+  forwarding them through the existing event buffer.
+- Prompt, steer, and follow-up text fields reject inputs above one million characters before session dispatch.
+- Regression coverage proves candidate ordering, update deduplication, post-interception command classification,
+  bounded input handling, and skill event delivery while `get_loaded_surfaces` keeps the same revealed MCP inventory
+  before and after invocation.
 
 ### Why
 
@@ -27,7 +29,7 @@
 ### Expected merge conflict zones
 
 - LOW: additive event types in `rpc-types.ts`, `rpc-command-surface.ts`, and `rpc-command-invocation.ts`.
-- MEDIUM: `connection-handler.ts` now owns command-surface invalidation and prompt-preflight invocation emission.
+- MEDIUM: `connection-handler.ts` owns command-surface invalidation, input bounds, and typed event forwarding.
 - LOW: focused RPC contract tests plus `rpc-loaded-surfaces.test.ts` inventory assertions.
 
 ## Model/tier events, fast-mode commands, and turn-scope validation (2026-08-16)

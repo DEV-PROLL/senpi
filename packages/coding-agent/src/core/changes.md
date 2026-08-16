@@ -10,6 +10,10 @@
 - Successful expansion emits one ordered `skill_invocation` session event containing each resolved skill's name,
   source path, and `dollar` or `slash` syntax.
 - Dollar and slash tokens share the existing duplicate, unknown, file-read, and five-skill cap behavior.
+- Token removal preserves unrelated blank lines, indentation, and literal dollar text, and token discovery stops after
+  a bounded 64-token prefix while leaving every unprocessed token literal.
+- Resolved extension commands and accepted prompt templates emit one `command_invocation` session event after
+  extension input interception, so transformed or rejected text cannot be reported as an invocation.
 
 ### Why
 
@@ -17,17 +21,21 @@
   look successful while the runtime silently ignored the invocation.
 - TUI autocomplete needs a concise leading `$name` form without making arbitrary inline shell variables executable.
 - RPC consumers need typed invocation metadata instead of reparsing the expanded user prompt.
+- Prompt content outside explicit invocation token spans must remain byte-meaningful for pasted code and structured text.
 
 ### Why an extension could not handle it
 
 - Prompt, steering, follow-up, RPC, and interactive entry paths must share one pre-provider expansion contract.
 - The session event union and prompt expansion boundary are core-owned and run before extensions can safely
   normalize every entry surface.
+- Prompt-template resolution metadata is private session state; extensions cannot reliably emit accepted invocation
+  events after another extension transforms or handles the original input.
 
 ### Expected merge-conflict zones
 
-- `agent-session.ts` skill command expansion helpers and `AgentSessionEvent`.
-- Skill-composition regressions under `test/suite/regressions/308-skill-composition.test.ts`.
+- `agent-session.ts` skill parsing, prompt-template resolution, command dispatch, queueing, and `AgentSessionEvent`.
+- `prompt-templates.ts` expansion metadata.
+- Skill-composition and command-invocation regressions under `test/suite/regressions/`.
 
 ## Model and service-tier session events (2026-08-16)
 

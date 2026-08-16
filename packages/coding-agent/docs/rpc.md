@@ -148,6 +148,8 @@ Response:
 `success: true` means the prompt was accepted, queued, or handled immediately. `success: false` means the prompt was rejected before acceptance. Failures after acceptance are reported through the normal event and message stream, not as a second `response` for the same request id.
 
 The `images` field is optional. Each image uses `ImageContent` format: `{"type": "image", "data": "base64-encoded-data", "mimeType": "image/png"}`.
+The `message` field for `prompt`, `steer`, and `follow_up` is limited to 1,000,000 characters;
+image payloads are not counted toward this text limit.
 
 #### steer
 
@@ -1478,8 +1480,9 @@ Emitted once after initial RPC bind and again whenever a runtime reload changes 
 
 ### command_invocation
 
-Emitted exactly once after an extension command or prompt template passes prompt preflight. Unknown commands and
-skill invocations do not produce this event; skills continue to use `skill_invocation`.
+Emitted exactly once after the session resolves an extension command, or after a prompt template survives extension
+input interception and prompt acceptance. Unknown, transformed, or rejected commands do not produce this event;
+skills continue to use `skill_invocation`.
 
 ```json
 {

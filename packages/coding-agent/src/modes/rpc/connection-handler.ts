@@ -57,11 +57,12 @@ import {
 	EXTENSION_EVENTS_CAPABILITY,
 } from "./custom-capability.ts";
 import { createRpcEventOutputBuffer } from "./event-output-buffer.ts";
-import { detectRpcCommandInvocation } from "./rpc-command-invocation.ts";
 import { buildRpcCommandsForSession, createCommandsChangedEvent, rpcCommandListDigest } from "./rpc-command-surface.ts";
+import { rpcMessageLengthError } from "./rpc-input-validation.ts";
 import type {
 	RpcAuthProvider,
 	RpcCommand,
+	RpcCommandInvocationEvent,
 	RpcExtensionEvent,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
@@ -640,6 +641,10 @@ export function createRpcConnectionHandler(
 				outputEvent(event satisfies RpcSkillInvocationEvent);
 				return;
 			}
+			if (event.type === "command_invocation") {
+				outputEvent(event satisfies RpcCommandInvocationEvent);
+				return;
+			}
 			outputEvent(event);
 		});
 		unsubscribeBackpressure = session.agent.subscribe(async () => {
@@ -747,7 +752,6 @@ export function createRpcConnectionHandler(
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
 				let preflightSucceeded = false;
-				const commandInvocation = detectRpcCommandInvocation(command.message, buildRpcCommandsForSession(session));
 				void session
 					.prompt(command.message, {
 						images: command.images,
@@ -757,9 +761,6 @@ export function createRpcConnectionHandler(
 						preflightResult: (didSucceed) => {
 							if (didSucceed && !preflightSucceeded) {
 								preflightSucceeded = true;
-								if (commandInvocation) {
-									outputEvent(commandInvocation);
-								}
 								output(success(id, "prompt"));
 							}
 						},
@@ -1187,6 +1188,12 @@ export function createRpcConnectionHandler(
 		}
 
 		const command = parsed as RpcCommand;
+		const messageLengthError = rpcMessageLengthError(command);
+		if (messageLengthError) {
+			output(error(command.id, command.type, messageLengthError));
+			await waitForRpcBackpressure();
+			return;
+		}
 		try {
 			const response = await handleCommand(command);
 			if (response) {
