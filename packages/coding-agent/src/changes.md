@@ -1,5 +1,23 @@
 # changes
 
+## CLI system-prompt overrides rewired into the runtime resource loader (2026-08-17)
+
+### What changed
+
+- `main.ts`: the runtime `resourceLoaderOptions` again forwards `parsed.systemPrompt` / `parsed.appendSystemPrompt` to `DefaultResourceLoader`, re-enabling the documented `--system-prompt` / `--append-system-prompt` flags on the CLI path (the SDK path already honored loader overrides).
+
+### Why
+
+- Commit `0ce8ac312` (2026-07-19, "preserve dynamic prompt policy") disconnected the flags because the prompt-preset extension clobbered user overrides on preset-matching models. The preset extension now yields to a user custom prompt and reapplies user appends (see `core/extensions/builtin/prompt-preset/changes.md`), so the flags can compose with the dynamic prompt policy instead of fighting it.
+
+### Why extension system couldn't handle this
+
+- CLI argv-to-loader wiring is host bootstrap code; extensions load after the resource loader exists.
+
+### Expected merge conflict zones
+
+- LOW: `main.ts` runtime `resourceLoaderOptions` block — keep both fields when upstream reshapes the options.
+
 ## JSONC settings selection and source events (2026-08-16)
 
 ### What changed
