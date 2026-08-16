@@ -14,7 +14,8 @@
 
 - RPC discovery sessions no longer emit an initial `commands_changed` invalidation. Clients read the baseline through
   `get_commands`, while actual post-bind extension reloads still emit one deduplicated ordered snapshot, preventing
-  command-surface refresh consumers from creating an unbounded discovery-session feedback loop.
+  command-surface refresh consumers from creating an unbounded discovery-session feedback loop
+  ([#911](https://github.com/code-yeongyu/senpi/pull/911)).
 - Preserved prompt indentation and literal dollar text around explicit skill tokens, bounded adversarial token parsing
   and RPC text inputs, and prevented transformed prompt templates from emitting stale invocation metadata
   ([#909](https://github.com/code-yeongyu/senpi/pull/909)).
