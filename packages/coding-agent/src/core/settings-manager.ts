@@ -11,6 +11,7 @@ import { findNearestParentConfigDir } from "../nearest-parent-config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { envValue } from "./brand.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import { FILE_STORAGE_LOCK_OPTIONS } from "./lockfile-policy.ts";
 import {
 	type ResolvedHintPolicySettings,
 	type ResolvedRetryFallbackSettings,
@@ -394,7 +395,7 @@ export class FileSettingsStorage implements SettingsStorage {
 
 		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 			try {
-				return lockfile.lockSync(path, { realpath: false });
+				return lockfile.lockSync(path, { ...FILE_STORAGE_LOCK_OPTIONS });
 			} catch (error) {
 				const code =
 					typeof error === "object" && error !== null && "code" in error
