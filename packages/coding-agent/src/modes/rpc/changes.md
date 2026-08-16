@@ -1,5 +1,41 @@
 # changes
 
+## Publish typed command surfaces and invocation events without disturbing MCP inventory (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
+
+### What changed
+
+- RPC exports self-describing `RpcSlashCommand` rows with canonical `syntax`, pushes ordered `commands_changed`
+  snapshots after initial bind and runtime reloads, and publishes typed `command_invocation` metadata only after the
+  session actually resolves an extension command or an accepted prompt template survives extension input interception.
+- RPC continues to export `RpcSkillInvocationEvent` with ordered `{name,path,syntax}` entries.
+- The classic and routed connection handler explicitly type-checks `skill_invocation` and `command_invocation` before
+  forwarding them through the existing event buffer.
+- Prompt, steer, and follow-up text fields reject inputs above one million characters before session dispatch.
+- Classic and multi-session hosts reject valid non-object JSON with parse-style responses instead of dereferencing it
+  as a command, and both enforce a 16 MiB JSONL record ceiling that discards one oversized record through LF before
+  resuming framing.
+- Regression coverage proves candidate ordering, update deduplication, post-interception command classification,
+  bounded text and record handling, malformed-command rejection, JSONL resynchronization, and skill event delivery
+  while `get_loaded_surfaces` keeps the same revealed MCP inventory before and after invocation.
+
+### Why
+
+- OmO Desktop can render and refresh the same mixed command/skill picker without terminal parsing or command-surface
+  polling, and can observe accepted command or skill invocations as typed metadata.
+- Skill expansion must remain orthogonal to MCP inventory reveal; a new event cannot reset or reorder loaded
+  surfaces.
+
+### Why extension system couldn't handle this
+
+- The public JSONL event contract and loaded-surface inventory response are owned by the built-in RPC transport.
+
+### Expected merge conflict zones
+
+- LOW: additive event types in `rpc-types.ts`, `rpc-command-surface.ts`, and `rpc-command-invocation.ts`.
+- MEDIUM: `connection-handler.ts`, `rpc-mode.ts`, `multi-session-host.ts`, `rpc-input-validation.ts`, and `jsonl.ts`
+  own command-surface invalidation, input/framing bounds, and typed event forwarding.
+- LOW: focused RPC contract tests plus `rpc-loaded-surfaces.test.ts` inventory assertions.
+
 ## Settings source selection event (2026-08-16)
 
 ### What changed

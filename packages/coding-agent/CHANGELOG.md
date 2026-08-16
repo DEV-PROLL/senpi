@@ -4,9 +4,19 @@
 
 ### Added
 
+- Added `$`-driven skill invocation in the interactive composer plus typed, ordered RPC command/skill candidate,
+  update, and accepted-invocation events for desktop clients
+  ([#909](https://github.com/code-yeongyu/senpi/pull/909)).
+
 - Cursor subscription models are now fully usable: after `/login cursor` the account's model catalog is discovered automatically and Cursor chat runs over the native agent protocol with complete tool calling — Cursor's server-driven exec channel (read/bash/edit/write/grep/find/ls and MCP/extension tools) executes through the session's real tools, so approvals, sandboxing, output truncation, and tool cards behave exactly like model-issued calls ([#910](https://github.com/code-yeongyu/senpi/pull/910)).
 
 ### Fixed
+
+- Preserved prompt indentation and literal dollar text around explicit skill tokens, bounded adversarial token parsing
+  and RPC text inputs, and prevented transformed prompt templates from emitting stale invocation metadata
+  ([#909](https://github.com/code-yeongyu/senpi/pull/909)).
+- Rejected non-object RPC commands without crashing and bounded JSONL records with discard-through-newline
+  resynchronization after oversized input ([#909](https://github.com/code-yeongyu/senpi/pull/909)).
 
 ### New Features
 

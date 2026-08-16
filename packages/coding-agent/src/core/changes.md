@@ -1,5 +1,42 @@
 # changes
 
+## Expand explicit dollar skill tokens and publish invocation metadata (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
+
+### What changed
+
+- Skill composition accepts a leading `$name` run alongside `/skill:name`.
+- The desktop composer's explicit `$skill:name` token expands even when it appears inline, while bare inline
+  dollar tokens such as `$HOME` remain literal.
+- Successful expansion emits one ordered `skill_invocation` session event containing each resolved skill's name,
+  source path, and `dollar` or `slash` syntax.
+- Dollar and slash tokens share the existing duplicate, unknown, file-read, and five-skill cap behavior.
+- Token removal preserves unrelated blank lines, indentation, and literal dollar text, and token discovery stops after
+  a bounded 64-token prefix while leaving every unprocessed token literal.
+- Resolved extension commands and accepted prompt templates emit one `command_invocation` session event after
+  extension input interception, so transformed or rejected text cannot be reported as an invocation.
+
+### Why
+
+- OmO Desktop serializes a selected skill chip as `$skill:name`; treating it as prose made the new desktop picker
+  look successful while the runtime silently ignored the invocation.
+- TUI autocomplete needs a concise leading `$name` form without making arbitrary inline shell variables executable.
+- RPC consumers need typed invocation metadata instead of reparsing the expanded user prompt.
+- Prompt content outside explicit invocation token spans must remain byte-meaningful for pasted code and structured text.
+
+### Why an extension could not handle it
+
+- Prompt, steering, follow-up, RPC, and interactive entry paths must share one pre-provider expansion contract.
+- The session event union and prompt expansion boundary are core-owned and run before extensions can safely
+  normalize every entry surface.
+- Prompt-template resolution metadata is private session state; extensions cannot reliably emit accepted invocation
+  events after another extension transforms or handles the original input.
+
+### Expected merge-conflict zones
+
+- `agent-session.ts` skill parsing, prompt-template resolution, command dispatch, queueing, and `AgentSessionEvent`.
+- `prompt-templates.ts` expansion metadata.
+- Skill-composition and command-invocation regressions under `test/suite/regressions/`.
+
 ## Cursor exec bridge (2026-08-16)
 
 ### What changed
