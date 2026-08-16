@@ -45,6 +45,8 @@
 
 ### Changed
 
+- Synced with upstream v0.84.2: `--use-theme` per-run theme selection, configurable default tools, managed-tool startup status, collapsed fallback tool output, and upstream's settings storage/locking rewrite are now available, alongside the fork's retry/fallback, compaction and PTY settings. Configured default tools now also filter the fork's builtin-extension tools, which previously bypassed the setting entirely ([#892](https://github.com/code-yeongyu/senpi/pull/892)).
+
 ### Removed
 
 ## [2026.8.14] - 2026-08-14
