@@ -6,7 +6,7 @@
 
 ### Added
 
-- Published one versioned `senpi.eval.execution` event per settled eval cell over the external RPC channel and in-process event bus, with total wall time, terminal status, exact nested tool-call counts, per-tool duration aggregates, and bounded per-call metadata for OMO analytics and future desktop rendering ([#897](https://github.com/code-yeongyu/senpi/pull/897)).
+- Published one versioned `senpi.eval.execution` event per settled eval cell: the in-process bus receives bounded rich call details, while the external RPC projection exposes only byte-capped timing/count metadata for safe OMO analytics; total wall time, kernel runtime, pending calls, exact aggregate totals, and overflow accounting are reported separately ([#897](https://github.com/code-yeongyu/senpi/pull/897)).
 
 ### Changed
 

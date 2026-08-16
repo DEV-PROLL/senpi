@@ -4,22 +4,27 @@
 
 ### What changed
 
-- Every settled eval cell now publishes one versioned `senpi.eval.execution` payload through both
-  the optional external RPC channel and the in-process extension event bus.
-- The payload records producer timestamps, total eval wall time, terminal status, detached status,
-  every nested tool-call count, distinct tool names, per-tool aggregate durations, and a bounded
-  list of per-call ids, arguments, durations, errors, and result previews.
+- Every settled eval cell now publishes one versioned `senpi.eval.execution` event. The in-process
+  event bus receives the full bounded payload, while the external RPC channel receives a
+  metadata-only projection that excludes prompts, arguments, call ids, errors, and result previews.
+- The payload records producer timestamps, true end-to-end eval wall time, kernel-reported runtime,
+  terminal status, detached status, every initiated nested tool-call count (including calls still
+  pending when an error cell settles), distinct tool names, and per-tool aggregate durations.
 - Generic and MCP tools retain the existing 30-call enrichment cap while every call still
   contributes to exact counts and aggregates. Reserved agent/output calls now receive the same
   bounded argument and duration capture; internal schema bridge calls preserve their legacy shape.
+- Captured names and identifiers are length-bounded, at most 64 distinct names receive individual
+  aggregates, excess names roll into an exact overflow aggregate, and the RPC projection has a
+  final 32 KiB serialized-byte ceiling with a deterministic aggregate-only fallback.
 - Session-generation fencing suppresses events from retired codemode runtimes.
 
 ### Why
 
 - OMO needs producer-side timing data to determine whether eval composition and parallel tool calls
   actually reduce round trips and wall-clock time, rather than relying on model-side assumptions.
-- The desktop client also needs structured per-call metadata so it can later render eval-contained
-  tool activity instead of receiving analytics-only aggregates.
+- OMO can consume rich metadata from the in-process event bus and later publish an explicitly
+  redacted or capability-gated desktop projection. The current desktop adapter decodes but ignores
+  unknown extension event names, so desktop rendering remains a separate consumer change.
 
 ### Why this cannot be expressed externally
 
