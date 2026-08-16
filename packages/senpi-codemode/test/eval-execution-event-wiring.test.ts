@@ -1,12 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionContext } from "@code-yeongyu/senpi";
+import type { AgentToolResult, ExtensionContext } from "@code-yeongyu/senpi";
 import { afterEach, describe, expect, it } from "vitest";
+import type { KernelToHostMessage } from "../src/bridge/protocol.ts";
 import type { CodemodeSessionManager } from "../src/extension/session-manager.ts";
 import senpiCodemode, { type CodemodeExtensionAPI } from "../src/index.ts";
 import { EVAL_EXECUTION_EVENT } from "../src/tool/eval-execution-event.ts";
-import type { EvalKernel } from "../src/tool/types.ts";
 import { FakeKernel, fakeExtensionContext, result } from "./eval/fakes.ts";
 
 const directories: string[] = [];
@@ -44,8 +44,11 @@ class WiringPi {
 	getAllTools(): readonly { readonly name: string }[] {
 		return [{ name: "eval" }];
 	}
-	async executeTool(): Promise<never> {
-		throw new Error("nested tool execution was not expected");
+	async executeTool(): Promise<AgentToolResult<unknown>> {
+		return {
+			content: [{ type: "text", text: "PRIVATE RESULT" }],
+			details: {},
+		};
 	}
 	sendUserMessage(): void {}
 	async emit(event: string, payload: unknown, ctx: ExtensionContext): Promise<void> {
@@ -54,11 +57,12 @@ class WiringPi {
 }
 
 class WiringSessionManager implements CodemodeSessionManager {
-	readonly kernel: EvalKernel;
-	constructor(kernel: EvalKernel) {
+	readonly kernel: FakeKernel;
+	constructor(kernel: FakeKernel) {
 		this.kernel = kernel;
 	}
-	async getKernel(): Promise<EvalKernel> {
+	async getKernel(_language: string, onMessage: (message: KernelToHostMessage) => void): Promise<FakeKernel> {
+		this.kernel.onMessage = onMessage;
 		return this.kernel;
 	}
 	async dispose(): Promise<void> {}
@@ -96,7 +100,15 @@ describe("eval execution host wiring", () => {
 		const busEmissions: BusEmission[] = [];
 		pi.rpc = { emit: (name, data) => rpcEmissions.push({ name, data }) };
 		pi.events = { emit: (name, data) => busEmissions.push({ name, data }) };
-		const kernel = new FakeKernel([result("wired-cell", "42", 17)]);
+		const kernel = new FakeKernel([
+			{
+				type: "tool-call",
+				callId: "sensitive-read",
+				toolName: "read",
+				args: { path: "secret.txt", prompt: "PRIVATE PROMPT" },
+			},
+			result("wired-cell", "42", 17),
+		]);
 		senpiCodemode(pi, { createSessionManager: () => new WiringSessionManager(kernel) });
 		const ctx = wiringContext(cwd);
 		await pi.emit("session_start", { reason: "startup" }, ctx);
@@ -106,11 +118,34 @@ describe("eval execution host wiring", () => {
 		await tool.execute("wired-cell", { language: "js", code: "42", summary: "wired" }, undefined, undefined, ctx);
 
 		expect(rpcEmissions).toEqual([
-			{ name: EVAL_EXECUTION_EVENT, data: expect.objectContaining({ cellId: "wired-cell", durationMs: 17 }) },
+			{
+				name: EVAL_EXECUTION_EVENT,
+				data: expect.objectContaining({
+					cellId: "wired-cell",
+					detailLevel: "metadata",
+					toolCalls: [{ name: "read", ok: true, durationMs: expect.any(Number) }],
+				}),
+			},
 		]);
+		expect(rpcEmissions[0]?.data).not.toEqual(
+			expect.objectContaining({
+				error: expect.anything(),
+				toolCalls: [expect.objectContaining({ args: expect.anything() })],
+			}),
+		);
 		expect(busEmissions).toContainEqual({
 			name: EVAL_EXECUTION_EVENT,
-			data: expect.objectContaining({ cellId: "wired-cell", durationMs: 17 }),
+			data: expect.objectContaining({
+				cellId: "wired-cell",
+				detailLevel: "full",
+				toolCalls: [
+					expect.objectContaining({
+						callId: "sensitive-read",
+						args: { path: "secret.txt", prompt: "PRIVATE PROMPT" },
+						resultPreview: "PRIVATE RESULT",
+					}),
+				],
+			}),
 		});
 		await pi.emit("session_shutdown", {}, ctx);
 	});

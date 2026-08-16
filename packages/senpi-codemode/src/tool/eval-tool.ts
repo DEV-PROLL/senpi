@@ -104,6 +104,7 @@ async function runEvalCell(
 		signal: cellSignal,
 		onUpdate: invocation.onUpdate,
 		toolCalls: [],
+		toolCallMetrics: [],
 		pendingBridgeCalls: [],
 		statusEvents: [],
 		active: true,

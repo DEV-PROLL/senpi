@@ -89,14 +89,17 @@ describe("eval execution event contract", () => {
 		expect(emissions).toHaveLength(1);
 		expect(emissions[0]).toEqual({
 			version: 1,
+			detailLevel: "full",
 			cellId: "successful-cell",
 			language: "js",
 			ok: true,
 			startedAt: 1_000,
 			completedAt: 1_018,
-			durationMs: 99,
+			durationMs: 18,
+			kernelDurationMs: 99,
 			detached: false,
 			toolCallCount: 2,
+			pendingToolCallCount: 0,
 			toolCalls: [
 				{
 					name: "read",
@@ -117,9 +120,10 @@ describe("eval execution event contract", () => {
 			],
 			distinctToolsCalled: ["read", "bash"],
 			toolAggregates: {
-				read: { count: 1, totalDurationMs: 11, okCount: 1, errorCount: 0 },
-				bash: { count: 1, totalDurationMs: 7, okCount: 1, errorCount: 0 },
+				read: { count: 1, totalDurationMs: 11, okCount: 1, errorCount: 0, pendingCount: 0 },
+				bash: { count: 1, totalDurationMs: 7, okCount: 1, errorCount: 0, pendingCount: 0 },
 			},
+			toolAggregatesTruncated: false,
 		});
 	});
 
@@ -142,14 +146,17 @@ describe("eval execution event contract", () => {
 		expect(emissions).toHaveLength(1);
 		expect(emissions[0]).toMatchObject({
 			version: 1,
+			detailLevel: "full",
 			cellId: "error-cell",
 			language: "js",
 			ok: false,
 			startedAt: 2_000,
 			completedAt: 2_000,
-			durationMs: 5,
+			durationMs: 0,
+			kernelDurationMs: 5,
 			detached: false,
 			toolCallCount: 0,
+			pendingToolCallCount: 0,
 			toolCalls: [],
 			distinctToolsCalled: [],
 			toolAggregates: {},
@@ -203,8 +210,8 @@ describe("eval execution event contract", () => {
 		expect(payload?.toolCalls.every((call) => call.args !== undefined && call.argsTruncated === true)).toBe(true);
 		expect(payload?.toolCalls.every((call) => call.durationMs === 2)).toBe(true);
 		expect(payload?.toolAggregates).toEqual({
-			read: { count: 20, totalDurationMs: 40, okCount: 20, errorCount: 0 },
-			bash: { count: 20, totalDurationMs: 40, okCount: 20, errorCount: 0 },
+			read: { count: 20, totalDurationMs: 40, okCount: 20, errorCount: 0, pendingCount: 0 },
+			bash: { count: 20, totalDurationMs: 40, okCount: 20, errorCount: 0, pendingCount: 0 },
 		});
 		expect(Object.values(payload?.toolAggregates ?? {}).reduce((sum, item) => sum + item.totalDurationMs, 0)).toBe(
 			80,
@@ -243,7 +250,13 @@ describe("eval execution event contract", () => {
 		kernel.completeDeferredRun(result("detached-cell", "done", 73));
 		const payload = await settled.promise;
 
-		expect(payload).toMatchObject({ cellId: "detached-cell", ok: true, detached: true, durationMs: 73 });
+		expect(payload).toMatchObject({
+			cellId: "detached-cell",
+			ok: true,
+			detached: true,
+			durationMs: 1_000,
+			kernelDurationMs: 73,
+		});
 		expect(emissions).toHaveLength(1);
 		await manager.flushNotifications();
 	});

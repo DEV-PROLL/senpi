@@ -61,6 +61,7 @@ describe("eval execution agent-call metadata", () => {
 			totalDurationMs: expect.any(Number),
 			okCount: 1,
 			errorCount: 0,
+			pendingCount: 0,
 		});
 	});
 });

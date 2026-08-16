@@ -1,5 +1,6 @@
 import type { AgentToolResult, AgentToolUpdateCallback, ExtensionContext } from "@code-yeongyu/senpi";
 import type { KernelToHostMessage } from "../bridge/protocol.ts";
+import type { EvalToolCallMetric } from "./call-capture.ts";
 import { type EvalImageResizer, EvalOutputCollector, type EvalOutputResult } from "./image.ts";
 import type { EvalStatusEvent, EvalToolDetails, EvalToolInput } from "./types.ts";
 
@@ -13,6 +14,7 @@ export interface CellState {
 	readonly signal: AbortSignal;
 	readonly onUpdate: AgentToolUpdateCallback<EvalToolDetails> | undefined;
 	readonly toolCalls: ToolCall[];
+	readonly toolCallMetrics: EvalToolCallMetric[];
 	readonly pendingBridgeCalls: Promise<void>[];
 	readonly statusEvents: EvalStatusEvent[];
 	active: boolean;

@@ -17,7 +17,11 @@ import type { CodemodeSessionManager, CreateCodemodeSessionManagerOptions } from
 import { SessionManagerProxy } from "./extension/session-manager-proxy.ts";
 import { WAKE_SOURCE_STATE_EVENT, type WakeSourceState } from "./extension/wake-source-state.ts";
 import { EvalDetachedCellManager, type EvalDetachedCellStatusEntry } from "./tool/detached-cell-manager.ts";
-import { EVAL_EXECUTION_EVENT, type EvalExecutionEventPayload } from "./tool/eval-execution-event.ts";
+import {
+	EVAL_EXECUTION_EVENT,
+	type EvalExecutionEventPayload,
+	toEvalExecutionRpcPayload,
+} from "./tool/eval-execution-event.ts";
 import { createEvalTool } from "./tool/eval-tool.ts";
 import { renderEvalCall, renderEvalResult } from "./tool/render.ts";
 
@@ -95,7 +99,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 	): void => {
 		const onCellSettled = (payload: EvalExecutionEventPayload): void => {
 			if (activeCells !== cellManager) return;
-			pi.rpc?.emit(EVAL_EXECUTION_EVENT, payload);
+			pi.rpc?.emit(EVAL_EXECUTION_EVENT, toEvalExecutionRpcPayload(payload));
 			pi.events?.emit(EVAL_EXECUTION_EVENT, payload);
 		};
 		pi.registerTool(

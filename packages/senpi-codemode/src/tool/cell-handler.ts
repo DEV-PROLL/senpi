@@ -8,7 +8,15 @@ import { appendSchemaHint } from "../bridges/schema-hint.ts";
 import type { CompletionRequest, CompletionResult } from "../completion/handler.ts";
 import { handleCompletionToolCall } from "../completion/tool-bridge.ts";
 import type { ResolvedCodemodeSettings } from "../config/settings.ts";
-import { boundToolCallArgs, capCodePoints, MAX_ENRICHED_TOOL_CALLS, toolCallResultPreview } from "./call-capture.ts";
+import {
+	boundToolCallArgs,
+	capCodePoints,
+	createToolCallMetric,
+	MAX_CAPTURED_IDENTIFIER_CODE_POINTS,
+	recordToolCall,
+	type ToolCallCapture,
+	toolCallResultPreview,
+} from "./call-capture.ts";
 import { CellResultBuilder, type CellState } from "./cell-runtime.ts";
 import { type EvalImageResizer, marshalToolResult, toolResultIsError } from "./image.ts";
 import { upsertStatusEvent } from "./status-events.ts";
@@ -21,13 +29,6 @@ type ResolvedToolReply = {
 	readonly toolCallOk: boolean;
 	readonly resultPreview?: string;
 	readonly errorText?: string;
-};
-
-type ToolCallEnrichment = {
-	readonly callId: string;
-	readonly args: unknown;
-	readonly startedAt: number;
-	readonly argsTruncated?: true;
 };
 
 export interface CellBridgeRuntime {
@@ -112,16 +113,21 @@ export class CellHandler {
 	}
 
 	async #handleToolCall(message: Extract<KernelToHostMessage, { type: "tool-call" }>): Promise<void> {
+		const startedAt = Date.now();
+		const metric = createToolCallMetric(message.toolName, startedAt);
+		this.#state.toolCallMetrics.push(metric);
 		const capturedArgs = boundToolCallArgs(message.args);
-		const enrich: ToolCallEnrichment = {
-			callId: message.callId,
+		const capture: ToolCallCapture = {
+			callId: capCodePoints(message.callId, MAX_CAPTURED_IDENTIFIER_CODE_POINTS),
 			args: capturedArgs.args,
-			startedAt: Date.now(),
+			startedAt,
+			metric,
+			includeDetails: message.toolName !== RESERVED_SCHEMA_TOOL,
 			...(capturedArgs.truncated ? { argsTruncated: true } : {}),
 		};
 		if (message.toolName === "eval") {
 			const error = "recursive eval is not allowed";
-			this.#pushToolCall(message.toolName, false, enrich, undefined, error);
+			recordToolCall(this.#state.toolCalls, false, capture, undefined, error);
 			this.#kernel.deliverToolReply({
 				type: "tool-reply",
 				callId: message.callId,
@@ -147,7 +153,7 @@ export class CellHandler {
 					}),
 					toolCallOk: true,
 				}),
-				message.toolName === RESERVED_SCHEMA_TOOL ? undefined : enrich,
+				capture,
 			);
 			return;
 		}
@@ -160,7 +166,7 @@ export class CellHandler {
 				isActive: () => this.#state.active,
 			});
 			if (!this.#state.active) return;
-			this.#pushToolCall(message.toolName, result.ok, enrich, undefined, result.ok ? undefined : result.error);
+			recordToolCall(this.#state.toolCalls, result.ok, capture, undefined, result.ok ? undefined : result.error);
 			this.#resultBuilder.emitUpdate(false);
 			return;
 		}
@@ -191,19 +197,19 @@ export class CellHandler {
 					...(errorText === undefined ? {} : { errorText }),
 				};
 			},
-			enrich,
+			capture,
 		);
 	}
 
 	async #deliverToolReply(
 		message: Extract<KernelToHostMessage, { type: "tool-call" }>,
 		resolve: () => Promise<ResolvedToolReply>,
-		enrich?: ToolCallEnrichment,
+		capture: ToolCallCapture,
 	): Promise<void> {
 		try {
 			const reply = await resolve();
 			if (!this.#state.active) return;
-			this.#pushToolCall(message.toolName, reply.toolCallOk, enrich, reply.resultPreview, reply.errorText);
+			recordToolCall(this.#state.toolCalls, reply.toolCallOk, capture, reply.resultPreview, reply.errorText);
 			this.#kernel.deliverToolReply({ type: "tool-reply", callId: message.callId, ok: true, value: reply.value });
 		} catch (error) {
 			if (!this.#state.active) return;
@@ -212,7 +218,7 @@ export class CellHandler {
 				message.toolName,
 				this.#toolParameters(message.toolName),
 			);
-			this.#pushToolCall(message.toolName, false, enrich, undefined, text);
+			recordToolCall(this.#state.toolCalls, false, capture, undefined, text);
 			this.#kernel.deliverToolReply({
 				type: "tool-reply",
 				callId: message.callId,
@@ -221,33 +227,6 @@ export class CellHandler {
 			});
 		}
 		this.#resultBuilder.emitUpdate(false);
-	}
-
-	#pushToolCall(
-		name: string,
-		ok: boolean,
-		enrich: ToolCallEnrichment | undefined,
-		resultPreview: string | undefined,
-		error: string | undefined,
-	): void {
-		const summary = {
-			name,
-			ok,
-			...(error === undefined ? {} : { error }),
-			...(enrich === undefined ? {} : { durationMs: Date.now() - enrich.startedAt }),
-		};
-		const enrichedCount = this.#state.toolCalls.filter((toolCall) => toolCall.callId !== undefined).length;
-		if (enrich === undefined || enrichedCount >= MAX_ENRICHED_TOOL_CALLS) {
-			this.#state.toolCalls.push(summary);
-			return;
-		}
-		this.#state.toolCalls.push({
-			...summary,
-			callId: enrich.callId,
-			args: enrich.args,
-			...(enrich.argsTruncated === true ? { argsTruncated: true } : {}),
-			...(resultPreview === undefined ? {} : { resultPreview }),
-		});
 	}
 
 	#toolParameters(toolName: string): unknown {

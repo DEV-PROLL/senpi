@@ -147,6 +147,8 @@ async function selfTest() {
 
 		const data = event.data ?? {};
 		checks.ok("event carries version 1", data.version === 1, `version=${JSON.stringify(data.version)}`);
+		checks.ok("RPC event is metadata-only", data.detailLevel === "metadata", `detailLevel=${JSON.stringify(data.detailLevel)}`);
+		checks.ok("RPC projection stayed within its byte cap", data.rpcTruncated === false, `rpcTruncated=${JSON.stringify(data.rpcTruncated)}`);
 		checks.ok("cellId present", typeof data.cellId === "string" && data.cellId.length > 0, `cellId=${JSON.stringify(data.cellId)}`);
 		checks.ok("language reported", data.language === "js", `language=${JSON.stringify(data.language)}`);
 		checks.ok("cell settled ok", data.ok === true, `ok=${JSON.stringify(data.ok)}`);
@@ -164,6 +166,17 @@ async function selfTest() {
 			"each tool call has a nonnegative duration",
 			calls.every((call) => typeof call.durationMs === "number" && call.durationMs >= 0),
 			`durations=${calls.map((call) => call.durationMs).join(",")}`,
+		);
+		checks.ok(
+			"RPC tool calls exclude prompts, arguments, outputs, errors, and call ids",
+			calls.every(
+				(call) =>
+					!("args" in call) &&
+					!("resultPreview" in call) &&
+					!("error" in call) &&
+					!("callId" in call),
+			) && !("error" in data),
+			JSON.stringify(calls),
 		);
 
 		const distinct = Array.isArray(data.distinctToolsCalled) ? [...data.distinctToolsCalled].sort() : [];
@@ -187,11 +200,13 @@ async function selfTest() {
 		checks.ok(
 			"wall-clock fields coherent",
 			typeof data.startedAt === "number" &&
-				typeof data.completedAt === "number" &&
+			typeof data.completedAt === "number" &&
 				data.startedAt <= data.completedAt &&
 				typeof data.durationMs === "number" &&
-				data.durationMs >= 0,
-			`startedAt=${data.startedAt} completedAt=${data.completedAt} durationMs=${data.durationMs}`,
+				data.durationMs === data.completedAt - data.startedAt &&
+				typeof data.kernelDurationMs === "number" &&
+				data.kernelDurationMs >= 0,
+			`startedAt=${data.startedAt} completedAt=${data.completedAt} durationMs=${data.durationMs} kernelDurationMs=${data.kernelDurationMs}`,
 		);
 		const matchingEvents = client.events.filter(
 			(message) => message.type === "extension_event" && message.name === EVENT_NAME,
