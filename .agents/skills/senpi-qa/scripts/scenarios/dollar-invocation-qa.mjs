@@ -92,6 +92,7 @@ pre {
 }
 
 if (channel === "rpc") {
+	runNode(join(scriptDir, "rpc-input-hardening-qa.mjs"), ["--evidence", evidenceName]);
 	runNode(join(scriptDir, "dollar-skill-invocation-qa.mjs"), ["--evidence", evidenceName]);
 	process.exit(0);
 }
