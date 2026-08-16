@@ -8,6 +8,7 @@
 - Both resident and non-resident SDK lanes pass only Claude OAuth request slots into account discovery and subprocess environment construction.
 - A request token namespace replaces host token slots instead of joining them, and unrelated request values such as `PATH`, `HOME`, or `NODE_OPTIONS` cannot cross the SDK child boundary.
 - Present-but-empty request token slots remain in the effective environment returned with the synthetic auth marker, so replay cannot substitute a host token.
+- Ambient resolution receives the raw request environment and applies Claude token slots as one namespace. Masking the primary slot therefore cannot import a host secondary slot, and masking a numbered slot cannot import the host primary slot.
 - A request token configured with `tokenInjection: "config-dir"` is routed through the non-persisting OAuth environment lane instead of being written into the stable agent credential directory.
 - Explicit ambient injection treats request token slots as configured without probing host Claude login state.
 - Availability probes reject pre-aborted cold callers, keep one in-flight owner across TTL boundaries, and timestamp only settled cache results.
@@ -15,7 +16,7 @@
 
 ### Why
 
-- Request-scoped environment overrides were accepted during availability resolution but discarded before SDK spawn, widened to unrelated process-control values, or persisted under `config-dir`. Empty masks were also dropped before replay. The child could inherit or fail over to a host account, cross account and billing boundaries, persist a request secret, or accept request-controlled Node startup configuration.
+- Request-scoped environment overrides were accepted during availability resolution but discarded before SDK spawn, widened to unrelated process-control values, persisted under `config-dir`, or merged per variable so a different host token slot survived an explicit mask. Empty masks were also dropped before replay. The child could inherit or fail over to a host account, cross account and billing boundaries, persist a request secret, or accept request-controlled Node startup configuration.
 - A pre-aborted caller could start and populate a shared probe, while a long-running probe could be duplicated once its future cache TTL elapsed.
 
 ### Why an extension could not handle it

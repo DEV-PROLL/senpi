@@ -42,7 +42,11 @@ export type OAuthConfigShape = {
 	 * the whole credential; without this the provider passes `check` and then
 	 * fails every request with "Provider is not configured".
 	 */
-	resolveAmbient(input: { ctx: AuthContext; signal?: AbortSignal }): Promise<AuthResult | undefined>;
+	resolveAmbient(input: {
+		ctx: AuthContext;
+		env?: Record<string, string>;
+		signal?: AbortSignal;
+	}): Promise<AuthResult | undefined>;
 	login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
 	refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials>;
 	getApiKey(credentials: OAuthCredentials): string;
@@ -53,7 +57,17 @@ const ENV_TOKEN_NAMES = [
 	"CLAUDE_CODE_OAUTH_TOKEN",
 	...Array.from({ length: 15 }, (_, index) => `CLAUDE_CODE_OAUTH_TOKEN_${index + 2}`),
 ] as const;
+const ENV_TOKEN_NAME_SET = new Set<string>(ENV_TOKEN_NAMES);
 const AUTH_CHECK = { source: "Claude SDK OAuth", type: "oauth" } as const;
+
+function requestClaudeEnvironment(value: unknown): Record<string, string> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+	const environment: Record<string, string> = {};
+	for (const [name, entry] of Object.entries(value)) {
+		if (ENV_TOKEN_NAME_SET.has(name) && typeof entry === "string") environment[name] = entry;
+	}
+	return environment;
+}
 
 function toSlot(
 	credential: { access: string; refresh: string; expires: number },
@@ -110,13 +124,21 @@ export function createOAuthConfig(deps: {
 		name: CLAUDE_SDK_OAUTH_NAME,
 
 		async check({ ctx, credential, signal }) {
-			return (await configuredFor(ctx, credential as ClaudeSdkOauthCredential | undefined, signal))
+			const requestEnvironment = requestClaudeEnvironment(credential?.env);
+			return (await configuredFor(
+				ctx,
+				credential as ClaudeSdkOauthCredential | undefined,
+				signal,
+				Object.keys(requestEnvironment).length > 0 ? requestEnvironment : undefined,
+			))
 				? AUTH_CHECK
 				: undefined;
 		},
 
-		async resolveAmbient({ ctx, signal }) {
-			const environment = await claudeEnvironment(ctx);
+		async resolveAmbient({ ctx, env, signal }) {
+			const requestEnvironment = requestClaudeEnvironment(env);
+			const environment =
+				Object.keys(requestEnvironment).length > 0 ? requestEnvironment : await claudeEnvironment(ctx);
 			if (!(await configuredFor(ctx, undefined, signal, environment))) return undefined;
 			return {
 				auth: { apiKey: SENTINEL_OAUTH_FIELDS.access },

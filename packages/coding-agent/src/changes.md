@@ -9,6 +9,7 @@
 - The ambient adapter now resolves configured metadata headers and `authHeader` through the same composition used by stored OAuth.
 - Replay-only credential environment participates in configured header resolution while unrelated explicit keys remain rejected.
 - Present-but-empty Claude token slots survive synthetic-marker replay, preventing auxiliary calls from falling back to a host token.
+- When any request Claude token slot is present, ambient resolution treats that request token set as the complete namespace and cannot import a different host slot during replay.
 - Request-backed `config-dir` authentication uses the non-persisting OAuth environment lane for that request, so request credentials are never written below the stable agent directory.
 - Coverage compares ambient and stored OAuth auth shapes, drives replay through real title generation, and pins stored-account precedence.
 

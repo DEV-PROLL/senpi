@@ -9,6 +9,7 @@
 - Stored OAuth derivation transiently merges request environment before both `check()` and `toAuth()`, then returns it for auxiliary replay without persisting request secrets.
 - Explicit empty request environment values mask host values instead of falling back through truthiness.
 - `ApiKeyAuth.ambientOnly` lets compatibility adapters remain fallback-only without changing explicit-key precedence for real dual-auth providers.
+- Ambient-only adapters receive the raw request environment alongside their overlaid context, allowing provider-owned token namespaces to replace sibling host slots instead of importing them during replay.
 
 ### Why this cannot be expressed externally
 

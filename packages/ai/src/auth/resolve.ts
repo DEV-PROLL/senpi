@@ -121,7 +121,9 @@ async function resolveProviderAuthWithSignal(
 	}
 
 	// Ambient (env vars, AWS profiles, ADC files).
-	return apiKey ? resolveApiKey(requestAuthContext, apiKey, provider.id, undefined, signal) : undefined;
+	const ambientCredential =
+		apiKey?.ambientOnly && overrides?.env ? { type: "api_key" as const, key: "", env: overrides.env } : undefined;
+	return apiKey ? resolveApiKey(requestAuthContext, apiKey, provider.id, ambientCredential, signal) : undefined;
 }
 
 function overlayEnvAuthContext(base: AuthContext, env: ProviderEnv): AuthContext {

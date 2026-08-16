@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Ambient Claude SDK OAuth authentication now preserves request-scoped token overrides and explicit empty masks through stored and ambient auth replay, isolates request tokens from host token slots and subprocess-control variables, keeps request tokens out of persistent `config-dir` credentials, remains valid across resident and auxiliary calls, recognizes request tokens in explicit ambient mode, and shares bounded availability probes without abandoned-request ownership ([#836](https://github.com/code-yeongyu/senpi/pull/836)).
+- Ambient Claude SDK OAuth authentication now preserves request-scoped token overrides and explicit empty masks through stored and ambient auth replay, treats request token slots as a complete namespace so sibling host accounts cannot survive a mask, isolates request tokens from subprocess-control variables, keeps request tokens out of persistent `config-dir` credentials, remains valid across resident and auxiliary calls, recognizes request tokens in explicit ambient mode, and shares bounded availability probes without abandoned-request ownership ([#836](https://github.com/code-yeongyu/senpi/pull/836)).
 - Multi-session RPC no longer amplifies a streaming answer into hundreds of megabytes of stdout, which made
   clients freeze and then render walls of text at once. Each `message_update` carried a full cumulative snapshot,
   so a single 96-second answer measured 140 MB on the wire (median line 72 KB, peak 95 KB) for 12 KB of assistant

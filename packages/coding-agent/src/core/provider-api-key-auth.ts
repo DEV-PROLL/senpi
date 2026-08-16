@@ -89,7 +89,11 @@ export function composeApiKeyAuth(
 	};
 }
 
-type AmbientResolver = (input: { ctx: AuthContext; signal?: AbortSignal }) => Promise<AuthResult | undefined>;
+type AmbientResolver = (input: {
+	ctx: AuthContext;
+	env?: Record<string, string>;
+	signal?: AbortSignal;
+}) => Promise<AuthResult | undefined>;
 
 function ambientResolverOf(oauth: unknown): AmbientResolver | undefined {
 	const candidate = (oauth as { resolveAmbient?: unknown } | undefined)?.resolveAmbient;
@@ -107,11 +111,15 @@ function ambientOnlyAuth(
 	const resolveAmbient = ambientResolverOf(oauth);
 	if (!resolveAmbient) return undefined;
 	const resolve = async (input: Parameters<ApiKeyAuth["resolve"]>[0]): Promise<AuthResult | undefined> => {
-		const result = await resolveAmbient({ ctx: input.ctx, signal: input.signal });
+		const result = await resolveAmbient({
+			ctx: input.ctx,
+			env: input.credential?.env,
+			signal: input.signal,
+		});
 		// Auxiliary callers replay resolved auth as an explicit key. Accept only
 		// this ambient resolver's own marker; unrelated explicit credentials stay
 		// outside an OAuth-only provider.
-		if (!result || (input.credential && input.credential.key !== result.auth.apiKey)) return undefined;
+		if (!result || (input.credential?.key && input.credential.key !== result.auth.apiKey)) return undefined;
 		const explicitEnv = { ...(input.credential?.env ?? {}), ...(result.env ?? {}) };
 		const headerEnv = await configContextEnv(Object.values(rawHeaders ?? {}), input.ctx, explicitEnv);
 		const headers = resolveHeadersOrThrow(rawHeaders, `provider "${providerId}"`, headerEnv);
