@@ -1,5 +1,26 @@
 # prompt-preset Extension Changes
 
+## Presets yield to user system-prompt overrides (2026-08-17)
+
+### What changed
+
+- `index.ts`: `before_agent_start` returns no replacement when `event.systemPromptOptions.customPrompt` is set (a `--system-prompt` / SDK loader override) — the base prompt already carries the user's prompt plus appends. When only `appendSystemPrompt` is set, the preset still replaces the base but reappends the user text (`preset + "\n\n" + appends`), so appends survive preset replacement.
+- `model_select` applies the same policy: custom prompt present returns `{ systemPrompt: null }` (reset to the user-carrying base); otherwise the preset prompt gets the user appends reattached.
+- The startup header (`getPresetName`) reports no preset when a custom prompt is active, via the new `ctx.getSystemPromptOptions()` base-context getter.
+- `agent-session.ts` populates `customPrompt` / `appendSystemPrompt` (pre-joined) into `_baseSystemPromptOptions`, which flows into both events and the context getter.
+
+### Why
+
+- Before this, a preset-matching model silently discarded explicit user overrides: the preset replaced the entire base prompt (including `--append-system-prompt` text) on every turn. That made the documented flags unusable on gpt-5.x/claude/kimi/glm/deepseek/grok models and forced the 2026-07-19 decision to disconnect the CLI flags entirely.
+
+### Why extension system couldn't handle this differently
+
+- The gate lives in this builtin, but it needs the user-override facts on the event; those fields exist on the upstream `BuildSystemPromptOptions` contract and are now populated by the session core.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `index.ts` handler bodies; keep the customPrompt yield and append reattachment when upstream reshapes handlers.
+
 ## GLM 5.3 preset (2026-08-16)
 
 ### What changed
