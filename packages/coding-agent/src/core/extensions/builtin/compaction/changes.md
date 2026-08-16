@@ -19,7 +19,9 @@
 - `overflow-retry.ts` request sizing now adds a CJK density correction (weight 3, mirroring the
   base64-run weighting) to the chars/4 estimate: Korean text tokenizes near 1 token per 1.5
   characters, and the 4.00 chars/token estimate let Korean-heavy sessions send first attempts
-  far over provider size limits.
+  far over provider size limits. The correction rides `estimateTotalTokens`, so it also reaches
+  `hardLimitEmergencyPrune` and the `/btw` side-query bound — both prune Korean-heavy sessions
+  slightly earlier, which is the same undercount corrected in the safe direction.
 
 ### Why
 

@@ -61,7 +61,7 @@ const OVERFLOW_PATTERNS = [
 	/too many tokens/i, // Generic fallback
 	/token limit exceeded/i, // Generic fallback
 	/^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i, // Cerebras: 400/413 with no body
-	/(?:request[ _])?(?:body|entity|payload)[_ ]too[_ ]large/i, // Gateway HTTP 413 byte-size rejections ("Request body too large", "Request Entity Too Large", "body_too_large", "Payload Too Large")
+	/(?:request[ _])?(?:body|entity|payload)[_ ]too[_ ]large/i, // Gateway HTTP 413 byte-size rejections ("Request body too large", "Request Entity Too Large", "body_too_large", "Payload Too Large"). Substring-anchored by design (JSON bodies lack an adjacent status code); a non-context size rejection (e.g. an oversized image) can over-match, which costs one bounded shrink-retry, never a wedge.
 ];
 
 /**

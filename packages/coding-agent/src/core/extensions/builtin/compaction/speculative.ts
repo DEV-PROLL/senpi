@@ -289,8 +289,8 @@ async function generateSummaryMessage(options: {
 		const providerRequest = await options.context.prepareProviderRequest?.(requestMessages);
 		const requestContext = {
 			systemPrompt: options.snapshot.systemPrompt ?? options.prompt.system,
-			messages: normalizeSummarizationTurnOrder(
-				repairOrphanedToolResults(convertToLlm(providerRequest?.messages ?? requestMessages)),
+			messages: repairOrphanedToolResults(
+				normalizeSummarizationTurnOrder(convertToLlm(providerRequest?.messages ?? requestMessages)),
 			),
 			...(options.snapshot.tools && options.snapshot.tools.length > 0 ? { tools: options.snapshot.tools } : {}),
 		};

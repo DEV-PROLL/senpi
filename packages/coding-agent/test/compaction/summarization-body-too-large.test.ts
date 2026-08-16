@@ -154,13 +154,18 @@ describe("summarization input sizing for CJK transcripts", () => {
 		expect(estimateTotalTokens(messages)).toBeGreaterThanOrEqual(Math.floor(korean.length / 1.6));
 	});
 
-	it("Given a Korean-heavy oversized history When the input is bounded Then the wire estimate respects the history budget", () => {
-		const messages = Array.from({ length: 30 }, (_, index) => ({
-			role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
-			content: [{ type: "text" as const, text: `히스토리 ${index} ${"한국어 내용 ".repeat(200)}` }],
-			timestamp: index,
-		})) as unknown as AgentMessage[];
-		const bounded = boundSummarizationInput(messages, CONTEXT_WINDOW, 100);
-		expect(estimateTotalTokens(bounded)).toBeLessThanOrEqual(summarizationHistoryBudget(CONTEXT_WINDOW, 100));
+	it("Given equal-length Korean and ASCII histories When the input is bounded Then the Korean history is pruned harder", () => {
+		const buildHistory = (text: (index: number) => string) =>
+			Array.from({ length: 30 }, (_, index) => ({
+				role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+				content: [{ type: "text" as const, text: text(index) }],
+				timestamp: index,
+			})) as unknown as AgentMessage[];
+		const korean = buildHistory((index) => `히스토리 ${index} ${"한국어 내용 ".repeat(200)}`);
+		const ascii = buildHistory((index) => `history ${index} ${"english prose ".repeat(200)}`);
+		const boundedKorean = boundSummarizationInput(korean, CONTEXT_WINDOW, 100);
+		const boundedAscii = boundSummarizationInput(ascii, CONTEXT_WINDOW, 100);
+		expect(boundedKorean.length).toBeLessThan(boundedAscii.length);
+		expect(estimateTotalTokens(boundedKorean)).toBeLessThanOrEqual(summarizationHistoryBudget(CONTEXT_WINDOW, 100));
 	});
 });
