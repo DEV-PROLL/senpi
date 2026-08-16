@@ -10,10 +10,15 @@ other provider-bound image transport behavior that owns the same payload path.
 - `core/agent-session.ts`: each known leading `/skill:<name>` expansion now states that the user explicitly invoked that
   skill, places its binding workflow in a `<skill-instruction>` section, and isolates trailing free text in a
   `<user-request>` section. Chained skills retain written order; unknown-skill fallthrough, duplicate suppression, and
-  the five-skill expansion cap are unchanged.
+  the five-skill expansion cap are unchanged. `parseSkillBlock` recognizes that current format first and retains its
+  legacy `<skill>` fallback so resumed and imported sessions still collapse correctly.
+- `core/export-html/template.js`: the intentionally standalone parser mirrors the runtime parser, preserving collapsed
+  skill rendering in exported transcripts for both current and legacy session payloads.
 - Coverage: `test/suite/agent-session-prompt.test.ts` pins invocation shape with and without trailing arguments and for
   chained skills; `test/suite/regressions/308-skill-composition.test.ts` keeps unknown-skill, cap, deduplication, steer,
-  and follow-up behavior pinned to the new shape.
+  and follow-up behavior pinned to the new shape; `test/export-html-skill-block.test.ts` executes both parsers against
+  payloads from the production formatter and covers chained and legacy messages; the real-expansion hook test confirms
+  `UserPromptSubmit` context injection preserves the new wrapper and request.
 
 ### Why
 
@@ -29,9 +34,10 @@ other provider-bound image transport behavior that owns the same payload path.
 
 ### Expected merge conflict zones on next upstream sync
 
-- `core/agent-session.ts` in `_expandSkillCommand` around skill-block and trailing-request rendering.
-- `test/suite/agent-session-prompt.test.ts` and `test/suite/regressions/308-skill-composition.test.ts` where the exact
-  expanded payload is pinned.
+- `core/agent-session.ts` around skill invocation formatting, parsing, and `_expandSkillCommand`.
+- `core/export-html/template.js` around the standalone `parseSkillBlock` copy.
+- `test/export-html-skill-block.test.ts`, `test/suite/agent-session-prompt.test.ts`, and
+  `test/suite/regressions/308-skill-composition.test.ts` where parsing and the exact expanded payload are pinned.
 
 ## Shipped Fable fallback chain reaches Kimi K3 served as `kimi-k3` (2026-08-13)
 
