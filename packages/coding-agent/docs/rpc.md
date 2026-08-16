@@ -942,7 +942,8 @@ The current session name is available via `get_state` in the `sessionName` field
 
 #### get_commands
 
-Get available commands (extension commands, prompt templates, and skills). These can be invoked via the `prompt` command by prefixing with `/`.
+Get the ordered command surface (extension commands, prompt templates, and skills). Extension and prompt rows are
+invoked through `prompt` with `/name`; skill rows use `$name` or the compatibility form `/skill:name`.
 
 ```json
 {"type": "get_commands"}
@@ -956,17 +957,18 @@ Response:
   "success": true,
   "data": {
     "commands": [
-      {"name": "session-name", "description": "Set or clear session name", "source": "extension", "sourceInfo": {"path": "/home/user/.senpi/agent/extensions/session.ts", "source": "auto", "scope": "user", "origin": "top-level"}},
-      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "sourceInfo": {"path": "/home/user/myproject/.senpi/prompts/fix-tests.md", "source": "auto", "scope": "project", "origin": "top-level"}},
-      {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "sourceInfo": {"path": "/home/user/.senpi/agent/skills/brave-search/SKILL.md", "source": "auto", "scope": "user", "origin": "top-level"}}
+      {"name": "session-name", "description": "Set or clear session name", "source": "extension", "syntax": "slash", "sourceInfo": {"path": "/home/user/.senpi/agent/extensions/session.ts", "source": "auto", "scope": "user", "origin": "top-level"}},
+      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "syntax": "slash", "sourceInfo": {"path": "/home/user/myproject/.senpi/prompts/fix-tests.md", "source": "auto", "scope": "project", "origin": "top-level"}},
+      {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "syntax": "dollar", "sourceInfo": {"path": "/home/user/.senpi/agent/skills/brave-search/SKILL.md", "source": "auto", "scope": "user", "origin": "top-level"}}
     ]
   }
 }
 ```
 
 Each command has:
-- `name`: Command name (invoke with `/name`)
+- `name`: Command identity without its leading invocation marker
 - `description`: Human-readable description (optional for extension commands)
+- `syntax`: Canonical marker clients should insert (`"slash"` for extension/prompt rows, `"dollar"` for skills)
 - `source`: What kind of command:
   - `"extension"`: Registered via `pi.registerCommand()` in an extension
   - `"prompt"`: Loaded from a prompt template `.md` file
@@ -1092,6 +1094,8 @@ Events are streamed to stdout as JSON lines during agent operation. Events do no
 | `summarization_retry_finished` | Summarization retry loop completes |
 | `extension_error` | Extension threw an error |
 | `extension_event` | Capability-gated extension-owned event (`extension_events` clients only) |
+| `commands_changed` | Ordered command/skill candidate snapshot changed |
+| `command_invocation` | Accepted extension-command or prompt-template invocation metadata |
 | `skill_invocation` | Ordered explicit skill metadata after prompt expansion |
 | `loaded_surfaces_changed` | Loaded skills, extensions, or MCP inventory changed; re-read `get_commands` and `get_loaded_surfaces` |
 | `model_changed` | Active model changed (any source), with the thinking level in force afterwards |
@@ -1456,6 +1460,38 @@ Emitted once after one or more explicit skill tokens are expanded. `skills` pres
 
 In multi-session mode the normal routing `sessionId` is added. This event does not mutate loaded
 surfaces; clients continue to use `loaded_surfaces_changed` plus `get_loaded_surfaces` for MCP reveal.
+
+### commands_changed
+
+Emitted once after initial RPC bind and again whenever a runtime reload changes the ordered command surface. The
+`commands` payload has the same shape and ordering as `get_commands`; identical snapshots are not re-emitted.
+
+```json
+{
+  "type": "commands_changed",
+  "commands": [
+    {"name": "session-name", "source": "extension", "syntax": "slash", "sourceInfo": {"path": "/project/extensions/session.ts", "source": "auto", "scope": "project", "origin": "top-level"}},
+    {"name": "skill:debugging", "source": "skill", "syntax": "dollar", "sourceInfo": {"path": "/project/.agents/skills/debugging/SKILL.md", "source": "auto", "scope": "project", "origin": "top-level"}}
+  ]
+}
+```
+
+### command_invocation
+
+Emitted exactly once after an extension command or prompt template passes prompt preflight. Unknown commands and
+skill invocations do not produce this event; skills continue to use `skill_invocation`.
+
+```json
+{
+  "type": "command_invocation",
+  "command": {
+    "name": "session-name",
+    "source": "extension",
+    "syntax": "slash",
+    "sourceInfo": {"path": "/project/extensions/session.ts", "source": "auto", "scope": "project", "origin": "top-level"}
+  }
+}
+```
 
 ### loaded_surfaces_changed
 

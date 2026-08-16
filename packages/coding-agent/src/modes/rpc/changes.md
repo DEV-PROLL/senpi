@@ -1,18 +1,22 @@
 # changes
 
-## Publish typed skill invocation events without disturbing MCP inventory (2026-08-16)
+## Publish typed command surfaces and invocation events without disturbing MCP inventory (2026-08-16)
 
 ### What changed
 
-- RPC exports `RpcSkillInvocationEvent` with ordered `{name,path,syntax}` entries.
+- RPC exports self-describing `RpcSlashCommand` rows with canonical `syntax`, pushes ordered `commands_changed`
+  snapshots after initial bind and runtime reloads, and publishes typed `command_invocation` metadata after an
+  extension command or prompt template passes prompt preflight.
+- RPC continues to export `RpcSkillInvocationEvent` with ordered `{name,path,syntax}` entries.
 - The classic and routed connection handler explicitly type-checks `skill_invocation` before forwarding it through
   the existing event buffer.
-- Regression coverage proves the event reaches clients while `get_loaded_surfaces` keeps the same revealed MCP
-  inventory before and after invocation.
+- Regression coverage proves candidate ordering, update deduplication, accepted command classification, and skill
+  event delivery while `get_loaded_surfaces` keeps the same revealed MCP inventory before and after invocation.
 
 ### Why
 
-- OmO Desktop consumes this event to render skill invocation metadata without reparsing expanded prompt text.
+- OmO Desktop can render and refresh the same mixed command/skill picker without terminal parsing or command-surface
+  polling, and can observe accepted command or skill invocations as typed metadata.
 - Skill expansion must remain orthogonal to MCP inventory reveal; a new event cannot reset or reorder loaded
   surfaces.
 
@@ -22,8 +26,9 @@
 
 ### Expected merge conflict zones
 
-- LOW: additive event types in `rpc-types.ts` and one typed branch in `connection-handler.ts`.
-- LOW: `rpc-loaded-surfaces.test.ts` inventory assertions.
+- LOW: additive event types in `rpc-types.ts`, `rpc-command-surface.ts`, and `rpc-command-invocation.ts`.
+- MEDIUM: `connection-handler.ts` now owns command-surface invalidation and prompt-preflight invocation emission.
+- LOW: focused RPC contract tests plus `rpc-loaded-surfaces.test.ts` inventory assertions.
 
 ## Model/tier events, fast-mode commands, and turn-scope validation (2026-08-16)
 

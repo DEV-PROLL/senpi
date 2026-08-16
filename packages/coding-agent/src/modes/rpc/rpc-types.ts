@@ -13,6 +13,10 @@ import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { ServiceTier } from "../../core/extensions/builtin/service-tier.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
+import type { RpcSlashCommand } from "./rpc-command-surface.ts";
+
+export type { RpcCommandInvocationEvent } from "./rpc-command-invocation.ts";
+export type { RpcCommandsChangedEvent, RpcSlashCommand } from "./rpc-command-surface.ts";
 
 // ============================================================================
 // RPC Commands (stdin)
@@ -179,18 +183,6 @@ export interface RpcProviderAccount {
 // ============================================================================
 // RPC Slash Command (for get_commands response)
 // ============================================================================
-
-/** A command available for invocation via prompt */
-export interface RpcSlashCommand {
-	/** Command name (without leading slash) */
-	name: string;
-	/** Human-readable description */
-	description?: string;
-	/** What kind of command this is */
-	source: "extension" | "prompt" | "skill";
-	/** Source metadata for the owning resource */
-	sourceInfo: SourceInfo;
-}
 
 /** One extension module loaded by the session resource loader. */
 export interface RpcLoadedExtension {

@@ -57,6 +57,8 @@ import {
 	EXTENSION_EVENTS_CAPABILITY,
 } from "./custom-capability.ts";
 import { createRpcEventOutputBuffer } from "./event-output-buffer.ts";
+import { detectRpcCommandInvocation } from "./rpc-command-invocation.ts";
+import { buildRpcCommandsForSession, createCommandsChangedEvent, rpcCommandListDigest } from "./rpc-command-surface.ts";
 import type {
 	RpcAuthProvider,
 	RpcCommand,
@@ -69,7 +71,6 @@ import type {
 	RpcResponse,
 	RpcSessionState,
 	RpcSkillInvocationEvent,
-	RpcSlashCommand,
 } from "./rpc-types.ts";
 import { SessionExtensionUiRequests } from "./session-extension-ui-requests.ts";
 
@@ -211,6 +212,7 @@ export function createRpcConnectionHandler(
 	let unsubscribeExtensionEvents: (() => void) | undefined;
 	let mcpWireStatus: McpWireStatusSnapshot = { servers: [] };
 	let loadedSurfacesDigest: string | undefined;
+	let rpcCommandsDigest: string | undefined;
 	let suppressLoadedSurfaceEvents = false;
 	const eventOutput = createRpcEventOutputBuffer(sink.writeRaw);
 
@@ -550,12 +552,19 @@ export function createRpcConnectionHandler(
 		const wasSuppressed = suppressLoadedSurfaceEvents;
 		suppressLoadedSurfaceEvents = true;
 		if (resetMcp) mcpWireStatus = { servers: [] };
+		let commandsChanged: ReturnType<typeof createCommandsChangedEvent>;
 		try {
 			await operation();
 			await requestMcpWireStatus();
 			loadedSurfacesDigest = currentLoadedSurfaces().digest;
+			const commands = buildRpcCommandsForSession(session);
+			commandsChanged = createCommandsChangedEvent(rpcCommandsDigest, commands);
+			rpcCommandsDigest = rpcCommandListDigest(commands);
 		} finally {
 			suppressLoadedSurfaceEvents = wasSuppressed;
+		}
+		if (!wasSuppressed && commandsChanged) {
+			outputEvent(commandsChanged);
 		}
 		if (!wasSuppressed && previousDigest !== undefined && previousDigest !== loadedSurfacesDigest) {
 			outputEvent({ type: "loaded_surfaces_changed" });
@@ -738,6 +747,7 @@ export function createRpcConnectionHandler(
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
 				let preflightSucceeded = false;
+				const commandInvocation = detectRpcCommandInvocation(command.message, buildRpcCommandsForSession(session));
 				void session
 					.prompt(command.message, {
 						images: command.images,
@@ -745,8 +755,11 @@ export function createRpcConnectionHandler(
 						thinkingLevel: command.thinkingLevel,
 						source: "rpc",
 						preflightResult: (didSucceed) => {
-							if (didSucceed) {
+							if (didSucceed && !preflightSucceeded) {
 								preflightSucceeded = true;
+								if (commandInvocation) {
+									outputEvent(commandInvocation);
+								}
 								output(success(id, "prompt"));
 							}
 						},
@@ -1057,36 +1070,7 @@ export function createRpcConnectionHandler(
 			// =================================================================
 
 			case "get_commands": {
-				const commands: RpcSlashCommand[] = [];
-
-				for (const command of session.extensionRunner.getRegisteredCommands()) {
-					commands.push({
-						name: command.invocationName,
-						description: command.description,
-						source: "extension",
-						sourceInfo: command.sourceInfo,
-					});
-				}
-
-				for (const template of session.promptTemplates) {
-					commands.push({
-						name: template.name,
-						description: template.description,
-						source: "prompt",
-						sourceInfo: template.sourceInfo,
-					});
-				}
-
-				for (const skill of session.resourceLoader.getSkills().skills) {
-					commands.push({
-						name: `skill:${skill.name}`,
-						description: skill.description,
-						source: "skill",
-						sourceInfo: skill.sourceInfo,
-					});
-				}
-
-				return success(id, "get_commands", { commands });
+				return success(id, "get_commands", { commands: buildRpcCommandsForSession(session) });
 			}
 
 			case "get_loaded_surfaces": {
