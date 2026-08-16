@@ -37,6 +37,39 @@
 - `prompt-templates.ts` expansion metadata.
 - Skill-composition and command-invocation regressions under `test/suite/regressions/`.
 
+## Cursor exec bridge (2026-08-16)
+
+### What changed
+
+- `cursor-exec-bridge.ts` (new): maps Cursor exec-channel frames onto the session's real tools through the
+  same wrapped `AgentTool.execute` path model-issued calls use. Legacy frames map read→`read`
+  (offset/limit kwargs), ls→`ls`, grep→`grep`, write→`write`, shell→`bash` (workingDirectory composed as a
+  quoted `cd` prefix; senpi's bash has no cwd kwarg); modern Pi frames map 1:1 (`pi_edit` →
+  `edits[{oldText,newText}]`, `pi_grep` flags, `pi_find` → `find`, `pi_ls` → `ls` with `limit`); MCP calls
+  dispatch by tool name. Args are validated with `validateToolArguments` before execution;
+  `tool_execution_start`/`tool_execution_end` events are emitted so live tool cards resolve. `delete`,
+  `diagnostics`, and `mcpApprovalPreflight` handlers are deliberately absent (typed refusals on the wire).
+- `sdk.ts`: constructs the bridge and passes it to the Agent as `cursorExecHandlers`; tools resolve through a
+  late-bound session ref because the session (and its registry) is created after the Agent; lifecycle events
+  ride `agent.emitExternalEvent`.
+- `agent-session.ts`: `getRegisteredTool()` (new) exposes the full registry (builtin + extension tools)
+  because Cursor drives its native tools over the exec channel regardless of the request's advertised set.
+
+### Why
+
+- Cursor's protocol executes tools server-drivenly mid-stream; without the bridge every Cursor turn that
+  touches a tool would stall and time out.
+
+### Why an extension could not do this
+
+- The bridge must be wired into the Agent's loop config before any extension loads, and it needs the wrapped
+  tool registry (approvals, sandboxing, truncation) rather than raw tool definitions.
+
+### Expected merge conflict zones
+
+- LOW: `sdk.ts` Agent construction options (additive), `agent-session.ts` additive accessor.
+- NONE expected in `cursor-exec-bridge.ts`: fork-only file.
+
 ## Cursor provider display name (2026-08-16)
 
 ### What changed

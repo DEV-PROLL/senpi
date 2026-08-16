@@ -2621,6 +2621,16 @@ export class AgentSession {
 	 * Also rebuilds the system prompt to reflect the new tool set.
 	 * Changes take effect on the next agent turn.
 	 */
+	/**
+	 * Resolve an executable tool from the full registry (builtin + extension
+	 * tools), independent of the active set. The Cursor exec bridge uses this:
+	 * Cursor drives its native tools (read/bash/grep/ls/write) over the exec
+	 * channel regardless of which tools the request advertised.
+	 */
+	getRegisteredTool(name: string): AgentTool | undefined {
+		return this._toolRegistry.get(name);
+	}
+
 	setActiveToolsByName(toolNames: string[]): void {
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
