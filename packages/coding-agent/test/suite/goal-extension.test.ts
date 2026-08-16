@@ -372,7 +372,12 @@ describe("goal extension contract (budget-free)", () => {
 				},
 			],
 		};
-		await runHandlers(handlers, "agent_end", { type: "agent_end", messages: [exhaustionMessage], willRetry: false }, ctx);
+		await runHandlers(
+			handlers,
+			"agent_end",
+			{ type: "agent_end", messages: [exhaustionMessage], willRetry: false },
+			ctx,
+		);
 
 		expect(await readGoal(storeRefFor(ctx))).toMatchObject({
 			status: "blocked",

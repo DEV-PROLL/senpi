@@ -1,5 +1,21 @@
 # AI Source Changes
 
+## 2026-08-16 - GLM 5.3 reasoning effort + zai always-enabled thinking + catalog entries
+
+### What changed and why
+
+- `openai-completions.ts`: generalized the `isGlm52` thinking-level-map matcher to `isGlm5x` (regex `glm-5\.[23]`), so GLM 5.3 inherits the same host-specific thinkingLevelMap branches 5.2 uses (zai → DEEPSEEK map, openrouter → `{xhigh}`, default → `{max}`). Without this, 5.3 returned `undefined` from `getThinkingLevelMap` and reasoning effort was sent raw instead of mapped.
+- `openai-completions.ts`: the zai `thinkingFormat` handler now forces `{type: "enabled"}` for GLM 5.3 ids even when no `reasoningEffort` is set. GLM 5.3 cannot disable thinking (Z.AI wire contract: `thinking.type` must always be `"enabled"`). GLM 5.2 keeps the existing `{type: "disabled"}` behavior when no effort is set.
+- Provider data files (`packages/ai/src/providers/data/`): cloned all 25 glm-5.2 model entries to glm-5.3 across 18 provider files (alibaba-token-plan, baseten, cloudflare-ai-gateway, cloudflare-workers-ai, fireworks, huggingface, nvidia, opencode-go, opencode, opengateway, openrouter, qwen-token-plan-cn, qwen-token-plan-individual, qwen-token-plan, together, vercel-ai-gateway, zai-coding-cn, zai). Each 5.3 entry inherits the 5.2 entry's baseUrl, compat, cost, contextWindow, maxTokens, and thinkingLevelMap with only the id/name version bumped.
+- `scripts/generate-models.ts`: generalized the four 5.2-specific generator sites to also cover 5.3 (zai `isGlm52`→`isGlm5x`, openrouter, fireworks `glm-5p2`→`glm-5p3`, opencode-go) and added `glm-5.3` to the qwen-token-plan-individual allowlist, so regeneration preserves the 5.3 entries and their thinkingLevelMaps.
+- `.manifest.json`: regenerated (structureHash + per-file sha256) to match the changed data files.
+- `test/glm-5.3-thinking.test.ts`: pins both wire contracts through the stream (vi.mock openai + onPayload capture): low/medium effort maps through the zai thinking-level map (not raw), and no-reasoning still enables thinking.
+
+### Expected merge conflict zones
+
+- `openai-completions.ts`: the `isGlm52`→`isGlm5x` rename and the zai handler `isGlm53` guard sit in fork-modified sections; re-apply if upstream touches the same lines.
+- Provider data files: fork-only; upstream has no counterpart.
+
 ## 2026-08-16 - Classify gateway 413 body-size rejections as overflow
 
 ### What changed and why
@@ -21,6 +37,26 @@
 
 - LOW: `utils/overflow.ts` pattern list and its header documentation; LOW in
   `test/overflow.test.ts` where the new cases sit beside existing provider patterns.
+
+## 2026-08-14 - Harden stored OAuth request derivation
+
+### What changed and why
+
+- `resolveProviderAuth()` refreshes expired OAuth credentials before invoking the provider's optional side-effect-free `check`.
+- Sentinel envelopes that represent zero usable accounts can no longer bypass the same availability predicate used by provider catalog checks.
+- Stored OAuth derivation transiently merges request environment before both `check()` and `toAuth()`, then returns it for auxiliary replay without persisting request secrets.
+- Explicit empty request environment values mask host values instead of falling back through truthiness.
+- `ApiKeyAuth.ambientOnly` lets compatibility adapters remain fallback-only without changing explicit-key precedence for real dual-auth providers.
+- Ambient-only adapters receive the raw request environment alongside their overlaid context, allowing provider-owned token namespaces to replace sibling host slots instead of importing them during replay.
+
+### Why this cannot be expressed externally
+
+- Stored OAuth credentials short-circuit inside the provider-neutral resolver before coding-agent provider composition or extension request hooks can intervene.
+
+### Expected merge conflict zones
+
+- MEDIUM: `auth/resolve.ts` at explicit-key precedence, environment overlay, and stored-OAuth refresh/check/derivation.
+- LOW: `auth/types.ts` at the additive `ApiKeyAuth.ambientOnly` metadata.
 
 ## 2026-08-13 - Preserve explicit request compatibility fields
 

@@ -1,7 +1,86 @@
 # changes
 
+## Idempotent ambient OAuth auth composition (2026-08-14)
+
+### What changed
+
+- `core/provider-api-key-auth.ts` now accepts an ambient OAuth resolver's own synthetic key when resolved auth is replayed as an explicit request key by title, compaction, and branch-summary calls.
+- The compatibility adapter identifies itself as ambient-only, so a replayed marker or unrelated explicit key cannot bypass a valid stored OAuth account.
+- The ambient adapter now resolves configured metadata headers and `authHeader` through the same composition used by stored OAuth.
+- Replay-only credential environment participates in configured header resolution while unrelated explicit keys remain rejected.
+- Present-but-empty Claude token slots survive synthetic-marker replay, preventing auxiliary calls from falling back to a host token.
+- When any request Claude token slot is present, ambient resolution treats that request token set as the complete namespace and cannot import a different host slot during replay.
+- Request-backed `config-dir` authentication uses the non-persisting OAuth environment lane for that request, so request credentials are never written below the stable agent directory.
+- Coverage compares ambient and stored OAuth auth shapes, drives replay through real title generation, and pins stored-account precedence.
+
+### Why
+
+- Auxiliary calls copy resolved request auth into their own options. Rejecting the provider's marker made the second auth pass report unconfigured, while allowing the ambient adapter to outrank stored OAuth broke managed-account replay and an early ambient return dropped configured headers and synthesized authorization.
+
+### Why an extension could not do this
+
+- Provider auth composition runs before request hooks and is the mechanism that makes extension-registered providers callable. An extension cannot repair auth that the host composer rejected or omitted.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `core/provider-api-key-auth.ts` around the ambient-only OAuth adapter and its precedence metadata.
+
 The historical-image transport entry moved to `core/changes.md`, beside the
 other provider-bound image transport behavior that owns the same payload path.
+
+## GLM 5.3 full support: preset + catalog + wire (2026-08-16)
+
+### What changed
+
+- `core/extensions/builtin/prompt-preset/`: new `glm-5-3.ts` preset (clone of `glm-5-2.ts`), `presets.ts` matcher + dispatch, `settings.ts` union entry. The preset carries "running on GLM 5.3" tuning; every behavioral directive is identical to 5.2.
+- `packages/ai`: `openai-completions.ts` generalized `isGlm52`→`isGlm5x` (5.3 inherits 5.2's thinkingLevelMap branches) and forces zai `{type:"enabled"}` for 5.3 even without reasoning effort. 25 glm-5.3 catalog entries cloned across 18 provider data files. `generate-models.ts` updated so regeneration preserves 5.3.
+- Tests: `test/suite/prompt-presets-glm-5-3.test.ts` (preset resolution + catalog sweep), `packages/ai/test/glm-5.3-thinking.test.ts` (reasoning effort map + zai always-enabled).
+
+### Why
+
+- GLM 5.3 shipped in upstream catalogs (oh-my-pi's `zai` provider defaults to `glm-5.3`) but senpi had zero 5.3 support: no preset, no catalog entries, no wire-level reasoning effort handling. Users selecting GLM 5.3 got the untuned fallback prompt and unmapped reasoning effort.
+
+### Expected merge conflict zones
+
+- `prompt-preset/presets.ts`/`settings.ts`: shared lists — trivial adjacent-line conflicts if upstream adds presets.
+- `openai-completions.ts`: the `isGlm52`→`isGlm5x` rename and zai handler guard sit in fork-modified sections.
+- Provider data files: fork-only; upstream has no counterpart.
+
+## Explicit `/skill:` invocations retain user authority (2026-08-16)
+
+### What changed
+
+- `core/agent-session.ts`: each known leading `/skill:<name>` expansion now states that the user explicitly invoked that
+  skill, places its binding workflow in a `<skill-instruction>` section, and isolates trailing free text in a
+  `<user-request>` section. Chained skills retain written order; unknown-skill fallthrough, duplicate suppression, and
+  the five-skill expansion cap are unchanged. `parseSkillBlock` recognizes that current format first and retains its
+  legacy `<skill>` fallback so resumed and imported sessions still collapse correctly.
+- `core/export-html/template.js`: the intentionally standalone parser mirrors the runtime parser, preserving collapsed
+  skill rendering in exported transcripts for both current and legacy session payloads.
+- Coverage: `test/suite/agent-session-prompt.test.ts` pins invocation shape with and without trailing arguments and for
+  chained skills; `test/suite/regressions/308-skill-composition.test.ts` keeps unknown-skill, cap, deduplication, steer,
+  and follow-up behavior pinned to the new shape; `test/export-html-skill-block.test.ts` executes both parsers against
+  payloads from the production formatter and covers chained and legacy messages; the real-expansion hook test confirms
+  `UserPromptSubmit` context injection preserves the new wrapper and request.
+
+### Why
+
+- The previous expansion flattened passive `<skill>` content and trailing arguments into one ordinary user message.
+  That erased the user's explicit command authority, allowing the Intent Gate to route only on the trailing prose and
+  ignore the selected skill's rules or workflow (issue #890).
+
+### Why an extension could not do this
+
+- Skill-command expansion happens in the private `AgentSession` prompt, steering, and follow-up dispatch paths before
+  the provider sees the user message. Extensions cannot replace that text transformation consistently across all three
+  paths.
+
+### Expected merge conflict zones on next upstream sync
+
+- `core/agent-session.ts` around skill invocation formatting, parsing, and `_expandSkillCommand`.
+- `core/export-html/template.js` around the standalone `parseSkillBlock` copy.
+- `test/export-html-skill-block.test.ts`, `test/suite/agent-session-prompt.test.ts`, and
+  `test/suite/regressions/308-skill-composition.test.ts` where parsing and the exact expanded payload are pinned.
 
 ## Shipped Fable fallback chain reaches Kimi K3 served as `kimi-k3` (2026-08-13)
 

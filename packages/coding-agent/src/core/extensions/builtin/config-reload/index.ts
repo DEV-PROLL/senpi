@@ -900,11 +900,7 @@ function isProtectedAgentPath(candidate: string, agentDir: string): boolean {
 // never a nested path) and none of those anchored names resolves into a protected
 // path. Unfiltered targets, unanchored filters, and any protected filter stay
 // fail-closed.
-function isSafeFilteredAgentDirTarget(
-	target: ConfigWatchTarget,
-	resolvedPath: string,
-	agentDir: string,
-): boolean {
+function isSafeFilteredAgentDirTarget(target: ConfigWatchTarget, resolvedPath: string, agentDir: string): boolean {
 	if (target.kind !== "dir" || resolvedPath !== resolve(agentDir)) return false;
 	const filterGlobs = target.filterGlobs;
 	if (!filterGlobs || filterGlobs.length === 0) return false;

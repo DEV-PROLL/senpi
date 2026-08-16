@@ -756,7 +756,9 @@ describe("config reload builtin extension", () => {
 			bus.emit(CONFIG_WATCH_REGISTER, {
 				id: c.id,
 				displayName: c.id,
-				targets: [{ path: agentDir, kind: "dir" as const, ...(c.filterGlobs ? { filterGlobs: c.filterGlobs } : {}) }],
+				targets: [
+					{ path: agentDir, kind: "dir" as const, ...(c.filterGlobs ? { filterGlobs: c.filterGlobs } : {}) },
+				],
 			});
 		}
 

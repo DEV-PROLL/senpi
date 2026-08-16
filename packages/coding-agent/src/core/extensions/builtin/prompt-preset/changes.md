@@ -1,5 +1,27 @@
 # prompt-preset Extension Changes
 
+## GLM 5.3 preset (2026-08-16)
+
+### What changed
+
+- `glm-5-3.ts`: new preset for the GLM 5.3 family, cloned from `glm-5-2.ts` (thin `tuningSection` wrapper over the shared dynamic core, `workstationDialect: "claude"`). The tuning text carries "running on GLM 5.3" in place of 5.2; every behavioral directive is identical to 5.2 per the fork direction to copy the system prompt.
+- `presets.ts`: `hasGlm53Signal`/`isGlm53Model` matcher (regex `glm(?:[._-]|p)5(?:[._-]|p)3` with `[/@._-]` boundaries), checked BEFORE the 5.2 matcher so 5.3 never falls through to 5.2. `resolvePresetName` branch + `buildPreset` case added.
+- `settings.ts`: `"glm-5.3"` joins `PromptPresetName` and `VALID_PRESETS`.
+- `docs/settings.md`, `AGENTS.md`, `builtin/AGENTS.md`: preset lists updated.
+- `test/suite/prompt-presets-glm-5-3.test.ts`: id resolution across bare/provider-prefixed/fireworks/highspeed/display-name shapes, non-routing of 5.2/4.x, settings force, and a catalog sweep asserting every built-in GLM 5.3 entry resolves.
+
+### Why
+
+- GLM 5.3 shipped in the model catalogs without a preset, so it fell back to the untuned dynamic prompt. Its lineage is identical to 5.2 (Opus 4.6-class, Fable 5 decisiveness, GPT 5.5 outcome-first coding), so the preset is a direct copy.
+
+### Why extension system couldn't handle this differently
+
+- Content-only addition inside this builtin; follows the thin-wrapper preset architecture (`tuningSection` only).
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `glm-5-3.ts` is fork-only; `presets.ts`/`settings.ts` touch shared lists — trivial adjacent-line conflicts if upstream adds presets.
+
 ## Kimi K3 + GPT-5.6: test-proportionality rules (2026-08-03)
 
 ### What changed

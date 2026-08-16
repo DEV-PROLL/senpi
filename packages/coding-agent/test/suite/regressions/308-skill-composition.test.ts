@@ -21,7 +21,9 @@ type SkillFixture = SkillDefinition & {
 };
 
 const skillBlock = (skill: SkillFixture, baseDir: string): string =>
-	`<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${baseDir}.\n\n${skill.body}\n</skill>`;
+	`The user explicitly invoked the "${skill.name}" skill. Follow the instructions in <skill-instruction> as binding for this request, while respecting higher-priority instructions.\n\n<skill-instruction name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${baseDir}.\n\n${skill.body}\n</skill-instruction>`;
+
+const userRequest = (request: string): string => `<user-request>\n${request}\n</user-request>`;
 
 function createSkillResourceLoader(
 	tempDir: string,
@@ -149,7 +151,7 @@ describe("#308 skill composition", () => {
 		const actual = await promptAndCapture(harness, "/skill:first /skill:second compose both skills");
 
 		expect(actual).toBe(
-			`${skillBlock(skills[0]!, tempDir)}\n\n${skillBlock(skills[1]!, tempDir)}\n\ncompose both skills`,
+			`${skillBlock(skills[0]!, tempDir)}\n\n${skillBlock(skills[1]!, tempDir)}\n\n${userRequest("compose both skills")}`,
 		);
 	});
 
@@ -162,7 +164,7 @@ describe("#308 skill composition", () => {
 		harnesses.push(harness);
 
 		expect(await promptAndCapture(harness, "/skill:first /skill:missing /skill:second keep this literal")).toBe(
-			`${skillBlock(skills[0]!, tempDir)}\n\n/skill:missing /skill:second keep this literal`,
+			`${skillBlock(skills[0]!, tempDir)}\n\n${userRequest("/skill:missing /skill:second keep this literal")}`,
 		);
 		expect(await promptAndCapture(harness, "/skill:missing keep this literal")).toBe(
 			"/skill:missing keep this literal",
@@ -186,7 +188,7 @@ describe("#308 skill composition", () => {
 		harnesses.push(harness);
 
 		expect(await promptAndCapture(harness, "/skill:first /skill:first compose once")).toBe(
-			`${skillBlock(skills[0]!, tempDir)}\n\ncompose once`,
+			`${skillBlock(skills[0]!, tempDir)}\n\n${userRequest("compose once")}`,
 		);
 	});
 
@@ -211,9 +213,9 @@ describe("#308 skill composition", () => {
 			`${skills
 				.slice(0, MAX_SKILL_EXPANSIONS_PER_PROMPT)
 				.map((skill) => skillBlock(skill, tempDir))
-				.join(
-					"\n\n",
-				)}\n\n/skill:${skills[MAX_SKILL_EXPANSIONS_PER_PROMPT]!.name} /skill:${skills[MAX_SKILL_EXPANSIONS_PER_PROMPT + 1]!.name} compose within the cap`,
+				.join("\n\n")}\n\n${userRequest(
+				`/skill:${skills[MAX_SKILL_EXPANSIONS_PER_PROMPT]!.name} /skill:${skills[MAX_SKILL_EXPANSIONS_PER_PROMPT + 1]!.name} compose within the cap`,
+			)}`,
 		);
 		expect(errors).toEqual([
 			`Expanded at most ${MAX_SKILL_EXPANSIONS_PER_PROMPT} skills; remaining skill commands were left as literal text.`,
@@ -243,8 +245,8 @@ describe("#308 skill composition", () => {
 		const expandedSkills = `${skillBlock(skills[0]!, tempDir)}\n\n${skillBlock(skills[1]!, tempDir)}`;
 		expect(getUserTexts(harness)).toEqual([
 			"start",
-			`${expandedSkills}\n\nsteer this`,
-			`${expandedSkills}\n\nfollow this`,
+			`${expandedSkills}\n\n${userRequest("steer this")}`,
+			`${expandedSkills}\n\n${userRequest("follow this")}`,
 		]);
 	});
 });

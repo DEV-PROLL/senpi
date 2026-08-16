@@ -176,8 +176,29 @@ import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
 
 // ============================================================================
-// Skill Block Parsing
+// Skill Invocation Formatting and Parsing
 // ============================================================================
+
+export interface SkillInvocationPromptSkill {
+	name: string;
+	filePath: string;
+	baseDir: string;
+	body: string;
+}
+
+/** Format the user-attributed payload for one or more explicit skill invocations. */
+export function formatSkillInvocationPrompt(
+	skills: readonly SkillInvocationPromptSkill[],
+	userRequest?: string,
+): string {
+	const skillBlocks = skills.map(
+		(skill) =>
+			`The user explicitly invoked the "${skill.name}" skill. Follow the instructions in <skill-instruction> as binding for this request, while respecting higher-priority instructions.\n\n<skill-instruction name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${skill.body}\n</skill-instruction>`,
+	);
+	const expandedSkills = skillBlocks.join("\n\n");
+	const trimmedRequest = userRequest?.trim();
+	return trimmedRequest ? `${expandedSkills}\n\n<user-request>\n${trimmedRequest}\n</user-request>` : expandedSkills;
+}
 
 /** Parsed skill block from a user message */
 export interface ParsedSkillBlock {
@@ -192,13 +213,36 @@ export interface ParsedSkillBlock {
  * Returns null if the text doesn't contain a skill block.
  */
 export function parseSkillBlock(text: string): ParsedSkillBlock | null {
-	const match = text.match(/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/);
-	if (!match) return null;
+	const instructionPattern =
+		/^The user explicitly invoked the "([^"]+)" skill\. Follow the instructions in <skill-instruction> as binding for this request, while respecting higher-priority instructions\.\n\n<skill-instruction name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill-instruction>/;
+	const instructionMatch = text.match(instructionPattern);
+	if (instructionMatch) {
+		if (instructionMatch[1] !== instructionMatch[2]) return null;
+		let remainder = text.slice(instructionMatch[0].length);
+		while (remainder.startsWith("\n\nThe user explicitly invoked the ")) {
+			const chainedMatch = remainder.slice(2).match(instructionPattern);
+			if (!chainedMatch || chainedMatch[1] !== chainedMatch[2]) return null;
+			remainder = remainder.slice(chainedMatch[0].length + 2);
+		}
+		const requestMatch = remainder.match(/^\n\n<user-request>\n([\s\S]*?)\n<\/user-request>$/);
+		if (remainder && !requestMatch) return null;
+		return {
+			name: instructionMatch[1],
+			location: instructionMatch[3],
+			content: instructionMatch[4],
+			userMessage: requestMatch?.[1].trim() || undefined,
+		};
+	}
+
+	const legacyMatch = text.match(
+		/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/,
+	);
+	if (!legacyMatch) return null;
 	return {
-		name: match[1],
-		location: match[2],
-		content: match[3],
-		userMessage: match[4]?.trim() || undefined,
+		name: legacyMatch[1],
+		location: legacyMatch[2],
+		content: legacyMatch[3],
+		userMessage: legacyMatch[4]?.trim() || undefined,
 	};
 }
 
@@ -312,6 +356,8 @@ export interface AgentSessionConfig {
 	modelRegistry?: ModelRegistry;
 	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
 	initialActiveToolNames?: string[];
+	/** Configured built-in defaults; fork-native builtin extension tools outside this set are omitted. */
+	defaultToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -488,7 +534,7 @@ export type ClearedQueue = {
 };
 
 export interface PromptOptions {
-	/** Whether to expand file-based prompt templates (default: true) */
+	/** Whether to dispatch extension commands and expand skill commands and prompt templates (default: true) */
 	expandPromptTemplates?: boolean;
 	/** Image attachments */
 	images?: ImageContent[];
@@ -683,6 +729,7 @@ export class AgentSession {
 	private _agentDir: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
+	private _defaultToolNames?: Set<string>;
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
@@ -780,6 +827,7 @@ export class AgentSession {
 		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
+		this._defaultToolNames = config.defaultToolNames ? new Set(config.defaultToolNames) : undefined;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -3046,7 +3094,7 @@ export class AgentSession {
 
 		const skills = this.resourceLoader.getSkills().skills;
 		const expandedSkillNames = new Set<string>();
-		const skillBlocks: string[] = [];
+		const skillBlocks: SkillInvocationPromptSkill[] = [];
 		let tokenStart = 0;
 
 		while (tokenStart < text.length) {
@@ -3074,9 +3122,12 @@ export class AgentSession {
 				try {
 					const content = readFileSync(skill.filePath, "utf-8");
 					const body = stripFrontmatter(content).trim();
-					skillBlocks.push(
-						`<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`,
-					);
+					skillBlocks.push({
+						name: skill.name,
+						filePath: skill.filePath,
+						baseDir: skill.baseDir,
+						body,
+					});
 					expandedSkillNames.add(skill.name);
 				} catch (err) {
 					this._extensionRunner.emitError({
@@ -3097,8 +3148,7 @@ export class AgentSession {
 		if (skillBlocks.length === 0) return text;
 
 		const args = text.slice(tokenStart).trim();
-		const expandedSkills = skillBlocks.join("\n\n");
-		return args ? `${expandedSkills}\n\n${args}` : expandedSkills;
+		return formatSkillInvocationPrompt(skillBlocks, args);
 	}
 
 	/**
@@ -3327,7 +3377,7 @@ export class AgentSession {
 
 			if (options?.deliverAs === "nextTurn") {
 				this._pendingNextTurnMessages.push(appMessage);
-			} else if (this.isStreaming) {
+			} else if (this.isStreaming && options?.triggerTurn !== false) {
 				if (options?.deliverAs === "followUp") {
 					this.agent.followUp(appMessage);
 				} else {
@@ -3388,10 +3438,11 @@ export class AgentSession {
 	 *
 	 * @param content User message content (string or content array)
 	 * @param options.deliverAs Delivery mode when streaming: "steer" or "followUp"
+	 * @param options.expandPromptTemplates Whether to dispatch extension commands and expand skill commands and prompt templates. Default: false.
 	 */
 	async sendUserMessage(
 		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
+		options?: { deliverAs?: "steer" | "followUp"; expandPromptTemplates?: boolean },
 	): Promise<void> {
 		const bindingPromptReadiness = this._extensionBindingPromptReadiness;
 		let resolveBindingPromptReadiness: (() => void) | undefined;
@@ -3428,9 +3479,8 @@ export class AgentSession {
 		let finishSessionWork: (() => void) | undefined;
 		let disposition: PromptDisposition | undefined;
 		try {
-			// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
 			await this.prompt(text, {
-				expandPromptTemplates: false,
+				expandPromptTemplates: options?.expandPromptTemplates ?? false,
 				streamingBehavior: options?.deliverAs,
 				images,
 				source: "extension",
@@ -4717,7 +4767,9 @@ export class AgentSession {
 			const compacted = await this._runPrePromptCompaction(assistantMessage, skipAbortedCheck, inlineReason);
 			if (compacted) return true;
 		}
-		if (this._isCompactionOnCooldown() || this._isCompactionDelegated()) return false;
+		if (this._isCompactionOnCooldown() || this._isCompactionDelegated() || this._hasSupersedingCompactionClaim()) {
+			return false;
+		}
 		throw new RequiredCompactionError();
 	}
 
@@ -4760,6 +4812,7 @@ export class AgentSession {
 
 		const compacted = await this._runPrePromptCompaction(lastAssistantMessage, false, "pre_prompt");
 		if (!compacted && this._isCompactionDelegated()) return;
+		if (!compacted && this._hasSupersedingCompactionClaim()) return;
 		if (!compacted && !isOversized() && this._isCompactionOnCooldown()) return;
 		if (!compacted || isOversized()) {
 			throw new RequiredCompactionError();
@@ -4872,7 +4925,7 @@ export class AgentSession {
 				this._restoreAgentMessagesFromSession();
 				this._incrementMessageRevision();
 			}
-			if (!compacted && inlineReason && !this._isCompactionDelegated()) {
+			if (!compacted && inlineReason && !this._isCompactionDelegated() && !this._hasSupersedingCompactionClaim()) {
 				throw new RequiredCompactionError();
 			}
 			return compacted;
@@ -4946,6 +4999,18 @@ export class AgentSession {
 	private _isCompactionOnCooldown(): boolean {
 		const state = this._compactionLifecycle.state;
 		return state.status === "failed" && state.rejectionCause === "circuit-breaker";
+	}
+
+	/**
+	 * Compaction claims are last-writer-wins: a newer admission aborts the
+	 * incumbent controller (_claimCompactionController). When the failed attempt
+	 * lost that race, a live claimant now owns the route and re-gates admission
+	 * itself, so the loser must not surface RequiredCompactionError (issue #886).
+	 * A user abort leaves no live claimant behind and keeps throwing.
+	 */
+	private _hasSupersedingCompactionClaim(): boolean {
+		const claimant = this._compactionAbortController ?? this._autoCompactionAbortController;
+		return claimant !== undefined && !claimant.signal.aborted;
 	}
 
 	private _isCompactionDelegated(): boolean {
@@ -5033,7 +5098,9 @@ export class AgentSession {
 
 		const compacted = await this._runPrePromptCompaction(this._findLastAssistantMessage(), true, "pre_prompt");
 		if (!compacted) {
-			if (this._isCompactionOnCooldown() || this._isCompactionDelegated()) return;
+			if (this._isCompactionOnCooldown() || this._isCompactionDelegated() || this._hasSupersedingCompactionClaim()) {
+				return;
+			}
 			throw new RequiredCompactionError();
 		}
 		this._scheduledContinuationRecompacted = true;
@@ -5294,6 +5361,7 @@ export class AgentSession {
 			this._applyExtensionBindings(this._extensionRunner);
 			this.syncPromptCacheSafeWaitEnv();
 			await this._extensionRunner.emit(this._sessionStartEvent);
+			this._enforceConfiguredDefaultTools();
 			await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 		} finally {
 			if (this._extensionBindingPromptReadiness === bindingPromptReadiness) {
@@ -5649,6 +5717,26 @@ export class AgentSession {
 		return this._fallbackValidationWarnings;
 	}
 
+	private _isBuiltinExtensionPath(path: string): boolean {
+		return path.startsWith("<builtin:") || /[\\/]senpi-codemode[\\/]/u.test(path);
+	}
+
+	private _enforceConfiguredDefaultTools(): void {
+		const defaultToolNames = this._defaultToolNames;
+		if (defaultToolNames === undefined) return;
+		this.setActiveToolsByName(
+			this.getActiveToolNames().filter((name) => {
+				if (defaultToolNames.has(name)) return true;
+				const entry = this._toolDefinitions.get(name);
+				return (
+					entry !== undefined &&
+					!this._isBuiltinExtensionPath(entry.sourceInfo.path) &&
+					entry.sourceInfo.source !== "builtin"
+				);
+			}),
+		);
+	}
+
 	private _refreshToolRegistry(options?: {
 		activeToolNames?: string[];
 		includeAllExtensionTools?: boolean;
@@ -5662,8 +5750,13 @@ export class AgentSession {
 			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
+		const defaultToolNames = this._defaultToolNames;
+		const isConfiguredBuiltinTool = (tool: (typeof registeredTools)[number]): boolean =>
+			(tool.sourceInfo.source !== "builtin" && !this._isBuiltinExtensionPath(tool.sourceInfo.path)) ||
+			defaultToolNames === undefined ||
+			defaultToolNames.has(tool.definition.name);
 		const allCustomTools = [
-			...registeredTools,
+			...registeredTools.filter(isConfiguredBuiltinTool),
 			...this._customTools.map((definition) => ({
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
@@ -6388,7 +6481,12 @@ export class AgentSession {
 			shouldCompact(contextTokens, model.contextWindow, compactionSettings)
 		) {
 			const preRetryCompaction = await this._runPrePromptCompaction(message, true, "threshold", true, true);
-			if (!preRetryCompaction && !this._isCompactionOnCooldown() && !this._isCompactionDelegated()) {
+			if (
+				!preRetryCompaction &&
+				!this._isCompactionOnCooldown() &&
+				!this._isCompactionDelegated() &&
+				!this._hasSupersedingCompactionClaim()
+			) {
 				const attempt = this._retryAttempt;
 				this._retryAttempt = 0;
 				this._resetHintTierState();
@@ -6955,11 +7053,13 @@ export class AgentSession {
 	/**
 	 * Export session to HTML.
 	 * @param outputPath Optional output path (defaults to session directory)
+	 * @param options Optional export presentation settings
 	 * @returns Path to exported file
 	 */
-	async exportToHtml(outputPath?: string): Promise<string> {
-		const configuredThemeName = this.settingsManager.getTheme();
-		const themeName = configuredThemeName && getThemeByName(configuredThemeName) ? configuredThemeName : undefined;
+	async exportToHtml(outputPath?: string, options: { themeName?: string } = {}): Promise<string> {
+		const themeName = [options.themeName, this.settingsManager.getTheme()].find(
+			(candidate) => candidate !== undefined && getThemeByName(candidate) !== undefined,
+		);
 
 		// Create tool renderer if we have an extension runner (for custom tool HTML rendering)
 		const toolRenderer: ToolHtmlRenderer = createToolHtmlRenderer({
