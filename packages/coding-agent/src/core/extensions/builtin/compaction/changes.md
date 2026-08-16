@@ -1,5 +1,45 @@
 # Builtin compaction extension changes
 
+## Survive provider body-size rejections and strict turn alternation in summarization requests (2026-08-16)
+
+### What changed
+
+- Gateway HTTP 413 body-size rejections ("Request body too large", "Request Entity Too Large")
+  now flow into the existing overflow shrink-retry: the summarization input halves across
+  attempts and exhaustion throws the classifiable `SummarizationOverflowExhaustedError`, so
+  threshold/overflow compactions degrade through the deterministic fallback instead of wedging
+  the session on `Compaction rejected: compaction generator failed: 413 ...`
+  ([#884](https://github.com/code-yeongyu/senpi/issues/884)).
+- New `summarization-turn-order.ts` normalizes the final summarization message list at the
+  `generateSummaryMessage` seam (after `convertToLlm` + pair repair, where roles are final):
+  adjacent assistant messages merge, and content before the first user message is dropped.
+  Gemini's 400 `function call turn must come immediately after a user turn` fired twice in the
+  incident because sessions carry adjacent assistants (split turns, retries) and budget pruning
+  can drop the leading user message.
+- `overflow-retry.ts` request sizing now adds a CJK density correction (weight 3, mirroring the
+  base64-run weighting) to the chars/4 estimate: Korean text tokenizes near 1 token per 1.5
+  characters, and the 4.00 chars/token estimate let Korean-heavy sessions send first attempts
+  far over provider size limits.
+
+### Why
+
+- A live session hit all three defects in one compaction: two gateway 413 shapes never reached
+  the shrink path (unclassified), gemini-3.7-flash-high rejected the request's turn order twice,
+  and the final model stalled the 120s wall-clock on the oversized input. Every fallback model
+  retried the same payload and failed identically, permanently wedging the session.
+
+### Why an extension could not handle it
+
+- The shrink-retry classification, the request message construction, and the input sizing all
+  live inside this builtin's summarization pipeline; an external extension observes only the
+  final cancel reason.
+
+### Expected merge conflict zones
+
+- LOW: `speculative.ts` at the `requestContext` construction (one wrapped call site);
+  `overflow-retry.ts` estimator internals. New module `summarization-turn-order.ts` is
+  fork-only with no upstream counterpart.
+
 ## Surface the concrete reason a compaction did not apply (2026-08-14)
 
 ### What changed
