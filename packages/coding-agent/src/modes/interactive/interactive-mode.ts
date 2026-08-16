@@ -1126,9 +1126,12 @@ export class InteractiveMode {
 			this.mountInteractiveTui(this.renderer, rootComponents);
 		}
 		// Accept text while startup completes, but only enable interrupt, exit, and submission feedback.
-		this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
-		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
-		this.defaultEditor.onSubmit = (text) => this.handleStartupSubmit(text);
+		// Renderer-only lifecycle hosts may mount the chrome tree without constructing the base editor.
+		if (this.defaultEditor) {
+			this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
+			this.defaultEditor.onCtrlD = () => this.handleCtrlD();
+			this.defaultEditor.onSubmit = (text) => this.handleStartupSubmit(text);
+		}
 		this.ui.setFocus(this.editor);
 
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
@@ -7712,7 +7715,7 @@ export class InteractiveMode {
 		}
 	}
 
-	stop(fullscreenExitOutput = this.settingsManager.getFullscreenExitOutput()): void {
+	stop(fullscreenExitOutput?: FullscreenExitOutput): void {
 		InteractiveMode.restoreCompactionEscapeOverride(this);
 		this.streamingReveal.stop();
 		this.toolResultReveal.stop();
@@ -7734,7 +7737,7 @@ export class InteractiveMode {
 		}
 		if (this.isInitialized) {
 			try {
-				this.stopInteractiveTui(fullscreenExitOutput);
+				this.stopInteractiveTui(fullscreenExitOutput ?? this.settingsManager.getFullscreenExitOutput());
 			} finally {
 				this.isInitialized = false;
 				restoreInteractiveStderr();

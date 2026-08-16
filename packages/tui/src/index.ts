@@ -1,17 +1,9 @@
 // Core TUI interfaces and classes
 
-import { calculateImageCellSize } from "./terminal-image.ts";
 import type { CellDimensions, ImageDimensions } from "./terminal-image.ts";
+import { calculateImageCellSize } from "./terminal-image.ts";
 
 export { Marked, type Token, type Tokens } from "marked";
-// Autocomplete support
-export {
-	type AutocompleteItem,
-	type AutocompleteProvider,
-	type AutocompleteSuggestions,
-	CombinedAutocompleteProvider,
-	type SlashCommand,
-} from "./autocomplete.ts";
 // Fullscreen transcript search
 export {
 	AltScreenSearchComponent,
@@ -20,6 +12,14 @@ export {
 	findAltScreenSearchMatches,
 	getAltScreenSearchMatchKey,
 } from "./alt-screen-search.ts";
+// Autocomplete support
+export {
+	type AutocompleteItem,
+	type AutocompleteProvider,
+	type AutocompleteSuggestions,
+	CombinedAutocompleteProvider,
+	type SlashCommand,
+} from "./autocomplete.ts";
 // Components
 export { Box } from "./components/box.ts";
 export { CancellableLoader } from "./components/cancellable-loader.ts";

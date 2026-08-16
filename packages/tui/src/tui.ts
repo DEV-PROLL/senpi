@@ -1153,13 +1153,18 @@ export abstract class TuiBase extends Container {
 	}
 
 	private handleTerminalInput(data: string): void {
-		const focus = consumeTmuxFocusEvent(data);
-		if (focus.event !== null) {
-			resetCapabilitiesCache();
-			this.invalidate();
-			this.requestRender(true);
-			if (focus.data.length === 0) return;
-			data = focus.data;
+		// Fullscreen renderers own focus events so they can clear only an active drag selection
+		// without forcing idle or completed-selection repaints. Main-screen mode still uses focus
+		// changes to refresh terminal capabilities after returning to a multiplexer pane.
+		if (this.mode !== "fullscreen") {
+			const focus = consumeTmuxFocusEvent(data);
+			if (focus.event !== null) {
+				resetCapabilitiesCache();
+				this.invalidate();
+				this.requestRender(true);
+				if (focus.data.length === 0) return;
+				data = focus.data;
+			}
 		}
 		if (this.consumeOsc11BackgroundResponse(data)) {
 			return;
