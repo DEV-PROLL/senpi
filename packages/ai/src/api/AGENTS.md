@@ -12,6 +12,7 @@ Provider wire protocol implementations and stream adapters. Each provider ships 
 | `openai-responses.ts` | `openai-responses.lazy.ts` |
 | `openai-completions.ts` | `openai-completions.lazy.ts` |
 | `openai-codex-responses.ts` | `openai-codex-responses.lazy.ts` |
+| `cursor-agent.ts` | `cursor-agent.lazy.ts` |
 | `azure-openai-responses.ts` | `azure-openai-responses.lazy.ts` |
 | `google-generative-ai.ts` | `google-generative-ai.lazy.ts` |
 | `google-vertex.ts` | `google-vertex.lazy.ts` |
