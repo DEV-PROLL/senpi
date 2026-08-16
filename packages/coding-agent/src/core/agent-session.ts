@@ -176,8 +176,29 @@ import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
 
 // ============================================================================
-// Skill Block Parsing
+// Skill Invocation Formatting and Parsing
 // ============================================================================
+
+export interface SkillInvocationPromptSkill {
+	name: string;
+	filePath: string;
+	baseDir: string;
+	body: string;
+}
+
+/** Format the user-attributed payload for one or more explicit skill invocations. */
+export function formatSkillInvocationPrompt(
+	skills: readonly SkillInvocationPromptSkill[],
+	userRequest?: string,
+): string {
+	const skillBlocks = skills.map(
+		(skill) =>
+			`The user explicitly invoked the "${skill.name}" skill. Follow the instructions in <skill-instruction> as binding for this request, while respecting higher-priority instructions.\n\n<skill-instruction name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${skill.body}\n</skill-instruction>`,
+	);
+	const expandedSkills = skillBlocks.join("\n\n");
+	const trimmedRequest = userRequest?.trim();
+	return trimmedRequest ? `${expandedSkills}\n\n<user-request>\n${trimmedRequest}\n</user-request>` : expandedSkills;
+}
 
 /** Parsed skill block from a user message */
 export interface ParsedSkillBlock {
@@ -192,13 +213,36 @@ export interface ParsedSkillBlock {
  * Returns null if the text doesn't contain a skill block.
  */
 export function parseSkillBlock(text: string): ParsedSkillBlock | null {
-	const match = text.match(/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/);
-	if (!match) return null;
+	const instructionPattern =
+		/^The user explicitly invoked the "([^"]+)" skill\. Follow the instructions in <skill-instruction> as binding for this request, while respecting higher-priority instructions\.\n\n<skill-instruction name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill-instruction>/;
+	const instructionMatch = text.match(instructionPattern);
+	if (instructionMatch) {
+		if (instructionMatch[1] !== instructionMatch[2]) return null;
+		let remainder = text.slice(instructionMatch[0].length);
+		while (remainder.startsWith("\n\nThe user explicitly invoked the ")) {
+			const chainedMatch = remainder.slice(2).match(instructionPattern);
+			if (!chainedMatch || chainedMatch[1] !== chainedMatch[2]) return null;
+			remainder = remainder.slice(chainedMatch[0].length + 2);
+		}
+		const requestMatch = remainder.match(/^\n\n<user-request>\n([\s\S]*?)\n<\/user-request>$/);
+		if (remainder && !requestMatch) return null;
+		return {
+			name: instructionMatch[1],
+			location: instructionMatch[3],
+			content: instructionMatch[4],
+			userMessage: requestMatch?.[1].trim() || undefined,
+		};
+	}
+
+	const legacyMatch = text.match(
+		/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/,
+	);
+	if (!legacyMatch) return null;
 	return {
-		name: match[1],
-		location: match[2],
-		content: match[3],
-		userMessage: match[4]?.trim() || undefined,
+		name: legacyMatch[1],
+		location: legacyMatch[2],
+		content: legacyMatch[3],
+		userMessage: legacyMatch[4]?.trim() || undefined,
 	};
 }
 
@@ -2996,7 +3040,7 @@ export class AgentSession {
 
 		const skills = this.resourceLoader.getSkills().skills;
 		const expandedSkillNames = new Set<string>();
-		const skillBlocks: string[] = [];
+		const skillBlocks: SkillInvocationPromptSkill[] = [];
 		let tokenStart = 0;
 
 		while (tokenStart < text.length) {
@@ -3024,9 +3068,12 @@ export class AgentSession {
 				try {
 					const content = readFileSync(skill.filePath, "utf-8");
 					const body = stripFrontmatter(content).trim();
-					skillBlocks.push(
-						`<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`,
-					);
+					skillBlocks.push({
+						name: skill.name,
+						filePath: skill.filePath,
+						baseDir: skill.baseDir,
+						body,
+					});
 					expandedSkillNames.add(skill.name);
 				} catch (err) {
 					this._extensionRunner.emitError({
@@ -3047,8 +3094,7 @@ export class AgentSession {
 		if (skillBlocks.length === 0) return text;
 
 		const args = text.slice(tokenStart).trim();
-		const expandedSkills = skillBlocks.join("\n\n");
-		return args ? `${expandedSkills}\n\n${args}` : expandedSkills;
+		return formatSkillInvocationPrompt(skillBlocks, args);
 	}
 
 	/**
