@@ -10,6 +10,7 @@ import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import type { SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
+import type { ServiceTier } from "../../core/extensions/builtin/service-tier.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 
@@ -44,6 +45,10 @@ type RpcSessionCommand =
 	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel; scope?: "turn" }
 	| { id?: string; type: "cycle_thinking_level" }
 	| { id?: string; type: "get_available_thinking_levels" }
+
+	// Fast mode (OpenAI Codex priority service tier)
+	| { id?: string; type: "set_fast_mode"; enabled: boolean }
+	| { id?: string; type: "get_fast_mode" }
 
 	// Queue modes
 	| { id?: string; type: "set_steering_mode"; mode: "all" | "one-at-a-time" }
@@ -222,6 +227,10 @@ export interface RpcLoadedMcpServer {
 export interface RpcSessionState {
 	model?: Model<any>;
 	thinkingLevel: ThinkingLevel;
+	/** Service tier the session resolved for the active model, if any. */
+	serviceTier?: ServiceTier;
+	/** True when the active model is served at the priority ("fast") tier. */
+	fastMode: boolean;
 	isStreaming: boolean;
 	isCompacting: boolean;
 	steeringMode: "all" | "one-at-a-time";
@@ -319,6 +328,22 @@ export type RpcResponse =
 			command: "get_available_thinking_levels";
 			success: true;
 			data: { levels: ThinkingLevel[] };
+	  }
+
+	// Fast mode
+	| {
+			id?: string;
+			type: "response";
+			command: "set_fast_mode";
+			success: true;
+			data: { enabled: boolean; serviceTier: ServiceTier; provider: string; modelId: string };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_fast_mode";
+			success: true;
+			data: { enabled: boolean; serviceTier: ServiceTier | null };
 	  }
 
 	// Queue modes
@@ -500,6 +525,28 @@ export interface RpcHighReasoningWarningEvent {
 	modelId: string;
 	provider: string;
 	thinkingLevel: ThinkingLevel;
+}
+
+/**
+ * Emitted after the session's active model changed, with the thinking level in force AFTER
+ * the switch (per-model memory, a favorite's pinned level, or the clamped previous level).
+ *
+ * Clients that tracked the model by inferring it from `entry_appended` can consume this
+ * instead. Additive: an old client that does not know the type filters it out.
+ */
+export interface RpcModelChangedEvent {
+	type: "model_changed";
+	model: Model<any>;
+	thinkingLevel: ThinkingLevel;
+	/** Why the model changed: "set", "cycle", "restore", "fallback", or "fallback-revert". */
+	source: string;
+}
+
+/** Emitted when the effective service tier or fast-mode state of the session changes. */
+export interface RpcServiceTierChangedEvent {
+	type: "service_tier_changed";
+	tier?: ServiceTier;
+	fastMode: boolean;
 }
 
 /** Emitted after the loaded skill, extension, or MCP inventory changes. */

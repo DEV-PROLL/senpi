@@ -416,19 +416,30 @@ function getSessionContextSettings(path: SessionEntry[]): Pick<SessionContext, "
 	let thinkingLevel = "off";
 	let model: { provider: string; modelId: string } | null = null;
 	let isInFallbackWindow = false;
+	// A fallback switch applies an ephemeral thinking level to the fallback model, so
+	// the level recorded inside the window must not outlive it: restoring the primary
+	// model with the fallback model's level would silently change the reasoning budget.
+	// Mirrors the model restoration above, including the never-reverted (crashed) case.
+	let preFallbackThinkingLevel = thinkingLevel;
 
 	for (const entry of path) {
 		if (entry.type === "thinking_level_change") {
 			thinkingLevel = entry.thinkingLevel;
 		} else if (entry.type === "model_change") {
 			if (entry.reason === "fallback") {
-				if (!isInFallbackWindow && entry.originalProvider && entry.originalModelId) {
-					model = { provider: entry.originalProvider, modelId: entry.originalModelId };
+				if (!isInFallbackWindow) {
+					preFallbackThinkingLevel = thinkingLevel;
+					if (entry.originalProvider && entry.originalModelId) {
+						model = { provider: entry.originalProvider, modelId: entry.originalModelId };
+					}
 				}
 				isInFallbackWindow = true;
 			} else if (entry.reason === "fallback-revert") {
+				if (isInFallbackWindow) thinkingLevel = preFallbackThinkingLevel;
 				isInFallbackWindow = false;
 			} else {
+				// A manual model switch abandons the window: the level the user set inside
+				// it is a deliberate choice and carries over to the newly selected model.
 				isInFallbackWindow = false;
 				model = { provider: entry.provider, modelId: entry.modelId };
 			}
@@ -436,6 +447,10 @@ function getSessionContextSettings(path: SessionEntry[]): Pick<SessionContext, "
 			model = { provider: entry.message.provider, modelId: entry.message.model };
 		}
 	}
+
+	// The process can exit inside a fallback window; the primary model is already
+	// restored above, so its pre-fallback level has to be restored with it.
+	if (isInFallbackWindow) thinkingLevel = preFallbackThinkingLevel;
 
 	return { thinkingLevel, model };
 }

@@ -1,5 +1,20 @@
 # config-reload Extension Changes
 
+## Treat durable last-on reasoning memory as a routine setting (2026-08-16)
+
+### What changed
+
+- Added `modelLastOnThinkingLevels` to the routine settings keys suppressed from full config reloads.
+
+### Why
+
+- Reasoning commands update this per-model companion alongside the already-routine effective thinking memory;
+  other running sessions do not need to reload extensions when it changes.
+
+### Expected merge conflict zones
+
+- LOW: `routine-settings.ts` in `ROUTINE_SETTINGS_KEYS`.
+
 ## Filter-aware agent-directory watch guard (2026-08-14)
 
 ### What changed
