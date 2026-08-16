@@ -89,6 +89,6 @@ export function createCommandsChangedEvent(
 	previousDigest: string | undefined,
 	commands: readonly RpcSlashCommand[],
 ): RpcCommandsChangedEvent | undefined {
-	if (previousDigest === rpcCommandListDigest(commands)) return undefined;
+	if (previousDigest === undefined || previousDigest === rpcCommandListDigest(commands)) return undefined;
 	return { type: "commands_changed", commands };
 }
