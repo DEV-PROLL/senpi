@@ -3,6 +3,24 @@
 The historical-image transport entry moved to `core/changes.md`, beside the
 other provider-bound image transport behavior that owns the same payload path.
 
+## GLM 5.3 full support: preset + catalog + wire (2026-08-16)
+
+### What changed
+
+- `core/extensions/builtin/prompt-preset/`: new `glm-5-3.ts` preset (clone of `glm-5-2.ts`), `presets.ts` matcher + dispatch, `settings.ts` union entry. The preset carries "running on GLM 5.3" tuning; every behavioral directive is identical to 5.2.
+- `packages/ai`: `openai-completions.ts` generalized `isGlm52`→`isGlm5x` (5.3 inherits 5.2's thinkingLevelMap branches) and forces zai `{type:"enabled"}` for 5.3 even without reasoning effort. 25 glm-5.3 catalog entries cloned across 18 provider data files. `generate-models.ts` updated so regeneration preserves 5.3.
+- Tests: `test/suite/prompt-presets-glm-5-3.test.ts` (preset resolution + catalog sweep), `packages/ai/test/glm-5.3-thinking.test.ts` (reasoning effort map + zai always-enabled).
+
+### Why
+
+- GLM 5.3 shipped in upstream catalogs (oh-my-pi's `zai` provider defaults to `glm-5.3`) but senpi had zero 5.3 support: no preset, no catalog entries, no wire-level reasoning effort handling. Users selecting GLM 5.3 got the untuned fallback prompt and unmapped reasoning effort.
+
+### Expected merge conflict zones
+
+- `prompt-preset/presets.ts`/`settings.ts`: shared lists — trivial adjacent-line conflicts if upstream adds presets.
+- `openai-completions.ts`: the `isGlm52`→`isGlm5x` rename and zai handler guard sit in fork-modified sections.
+- Provider data files: fork-only; upstream has no counterpart.
+
 ## Explicit `/skill:` invocations retain user authority (2026-08-16)
 
 ### What changed
