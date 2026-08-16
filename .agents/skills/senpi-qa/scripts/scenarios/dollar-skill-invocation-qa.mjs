@@ -42,23 +42,34 @@ writeFileSync(
 	"---\nname: debugging\ndescription: Debug runtime failures\n---\n\n# Debugging\n\nTrace the defect before proposing a fix.",
 );
 
-const extensionPath = join(box.cwd, "dollar-invocation-qa-extension.ts");
-writeFileSync(
-	extensionPath,
-	`export default function dollarInvocationQa(pi) {
+const extensionPath = join(box.agentDir, "extensions", "dollar-invocation-qa-extension.ts");
+mkdirSync(join(box.agentDir, "extensions"), { recursive: true });
+const writeQaExtension = (includeReloadCommand) => {
+	const reloadCommand = includeReloadCommand
+		? `
+  pi.registerCommand("reload-proof", {
+    description: "Reload proof command",
+    handler: () => {},
+  });`
+		: "";
+	writeFileSync(
+		extensionPath,
+		`export default function dollarInvocationQa(pi) {
   pi.registerCommand("echo", {
     description: "Echo QA command",
     handler: () => {},
-  });
+  });${reloadCommand}
 }
 `,
-);
+	);
+};
+writeQaExtension(false);
 
 const client = new TargetRpcClient({
 	env: hermeticEnv(box.env),
 	cwd: box.cwd,
 	targetRoot: root,
-	extraArgs: ["--skill", skillDir, "-e", extensionPath],
+	extraArgs: ["--skill", skillDir],
 });
 const startupTimeoutMs = 240_000;
 
@@ -97,17 +108,26 @@ try {
 		initialCommandsResponse.success === true,
 		JSON.stringify(initialCommandsResponse),
 	);
+	checks.ok(
+		"initial command snapshot does not invalidate clients",
+		client.events.every((event) => event.message.type !== "commands_changed"),
+		JSON.stringify(client.events.map((event) => event.message.type)),
+	);
 
+	const commandsChangedPromise = waitForEventType("commands_changed", 60_000, client.events.length);
+	writeQaExtension(true);
+	const commandsChanged = await commandsChangedPromise;
 	const commandsResponse = await client.send({ type: "get_commands" }, 60_000);
 	const commands = commandsResponse.data?.commands ?? [];
-	const commandsChanged = await waitForEventType("commands_changed");
 	const echoRow = commands.find((command) => command.name === "echo");
+	const reloadProofRow = commands.find((command) => command.name === "reload-proof");
 	const skillRow = commands.find((command) => command.name === "skill:debugging");
 	checks.ok("commands response accepted", commandsResponse.success === true, JSON.stringify(commandsResponse));
 	checks.ok("extension command candidate present", echoRow?.syntax === "slash", JSON.stringify(echoRow));
+	checks.ok("reloaded command candidate present", reloadProofRow?.syntax === "slash", JSON.stringify(reloadProofRow));
 	checks.ok("skill candidate present", skillRow?.syntax === "dollar", JSON.stringify(skillRow));
 	checks.ok(
-		"commands changed matches ordered candidates",
+		"post-baseline commands changed matches ordered candidates",
 		JSON.stringify(commandsChanged.commands) === JSON.stringify(commands),
 		JSON.stringify({ commandsChanged, commands }),
 	);
@@ -183,6 +203,7 @@ try {
 				prompt,
 				accepted,
 				commandAccepted,
+				initialCommands,
 				commandsChanged,
 				commands,
 				commandInvocation,
@@ -205,7 +226,8 @@ try {
 		[
 			"# Dollar Invocation RPC QA",
 			"",
-			"- PASS: `commands_changed` matches the ordered `get_commands` candidate snapshot.",
+			"- PASS: the initial `get_commands` snapshot does not emit `commands_changed`.",
+			"- PASS: an extension reload emits one `commands_changed` snapshot matching the new ordered candidates.",
 			"- PASS: one accepted `/echo` invocation emits exactly one typed `command_invocation` event.",
 			"- PASS: one `$skill:debugging` token emits exactly one typed `skill_invocation` event.",
 			"- PASS: ordinary `$HOME` text remains literal and MCP loaded surfaces remain unchanged.",
