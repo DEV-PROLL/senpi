@@ -1,5 +1,33 @@
 # changes
 
+## Clamp fallback thinking levels canonically and restore the pre-fallback level (2026-08-16)
+
+### What changed
+
+- `retry-fallback/controller.ts` `selectThinking()` now delegates to `clampThinkingLevel` from
+  `@earendil-works/pi-ai` instead of falling back to the last (highest) supported level.
+- `session-manager.ts` `getSessionContextSettings()` captures the thinking level in effect when a fallback
+  window opens and restores it on `fallback-revert`, or at the end of the path when the window never closed.
+  A manual `model_change` still abandons the window, keeping the in-window level for the newly chosen model.
+
+### Why
+
+- The old fallback clamp escalated: a requested `off` against an always-on fallback model resolved to that
+  model's maximum level, silently spending the largest reasoning budget on an unattended retry. The canonical
+  clamp walks to the nearest supported level in either direction.
+- Session restoration already protected the model half of a fallback window (`originalProvider`/`originalModelId`)
+  but assigned `thinking_level_change` unconditionally, so a session interrupted inside a window came back with
+  the primary model and the fallback model's ephemeral thinking level.
+
+### Why an extension could not handle it
+
+- Both sites are core reducers: the retry controller picks the level before any extension observes the switch, and
+  session context restoration runs while rebuilding state from the session file.
+
+### Expected merge conflict zones
+
+- LOW: `retry-fallback/controller.ts` `selectThinking()`; `session-manager.ts` `getSessionContextSettings()`.
+
 ## Skip pi.dev catalog overlay for fork-only builtin providers (2026-08-16)
 
 ### What changed
