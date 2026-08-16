@@ -309,6 +309,7 @@ const QWEN_TOKEN_PLAN_INDIVIDUAL_MODEL_IDS = new Set<string>([
 	"deepseek-v4-flash-0731",
 	"deepseek-v4-pro",
 	"glm-5.2",
+	"glm-5.3",
 	"qwen3.6-flash",
 	"qwen3.7-max",
 	"qwen3.7-plus",
@@ -985,13 +986,13 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 		// Pi's low/medium/high pass through verbatim; OpenRouter normalizes to Mercury's vocabulary.
 		mergeThinkingLevelMap(model, { off: null });
 	}
-	if (model.provider === "openrouter" && model.id === "z-ai/glm-5.2") {
+	if (model.provider === "openrouter" && (model.id === "z-ai/glm-5.2" || model.id === "z-ai/glm-5.3")) {
 		mergeThinkingLevelMap(model, { xhigh: "xhigh" });
 	}
-	if (model.provider === "fireworks" && model.id.includes("glm-5p2")) {
+	if (model.provider === "fireworks" && (model.id.includes("glm-5p2") || model.id.includes("glm-5p3"))) {
 		mergeThinkingLevelMap(model, { off: "none", minimal: null, low: "high", medium: "high", max: "max" });
 	}
-	if (model.provider === "opencode-go" && model.id === "glm-5.2") {
+	if (model.provider === "opencode-go" && (model.id === "glm-5.2" || model.id === "glm-5.3")) {
 		mergeThinkingLevelMap(model, OPENCODE_GO_GLM52_THINKING_LEVEL_MAP);
 	}
 	if (model.provider === "opencode-go" && model.id === "kimi-k2.6") {
@@ -1743,7 +1744,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					if (m.tool_call !== true) continue;
 					const supportsImage = m.modalities?.input?.includes("image");
 
-					const isGlm52 = modelId === "glm-5.2";
+					const isGlm5x = modelId === "glm-5.2" || modelId === "glm-5.3";
 
 					models.push({
 						id: modelId,
@@ -1752,7 +1753,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 						provider,
 						baseUrl,
 						reasoning: m.reasoning === true,
-						...(isGlm52 ? { thinkingLevelMap: ZAI_GLM52_THINKING_LEVEL_MAP } : {}),
+						...(isGlm5x ? { thinkingLevelMap: ZAI_GLM52_THINKING_LEVEL_MAP } : {}),
 						input: supportsImage ? ["text", "image"] : ["text"],
 						cost: {
 							input: m.cost?.input || 0,
@@ -1763,7 +1764,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 						compat: {
 							supportsDeveloperRole: false,
 							thinkingFormat: "zai",
-							...(isGlm52 ? { supportsReasoningEffort: true } : {}),
+							...(isGlm5x ? { supportsReasoningEffort: true } : {}),
 							...(!ZAI_TOOL_STREAM_UNSUPPORTED_MODELS.has(modelId) ? { zaiToolStream: true } : {}),
 						},
 						contextWindow: m.limit?.context || 4096,
