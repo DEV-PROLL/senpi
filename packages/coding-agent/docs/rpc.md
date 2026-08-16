@@ -1468,8 +1468,9 @@ surfaces; clients continue to use `loaded_surfaces_changed` plus `get_loaded_sur
 
 ### commands_changed
 
-Emitted once after initial RPC bind and again whenever a runtime reload changes the ordered command surface. The
-`commands` payload has the same shape and ordering as `get_commands`; identical snapshots are not re-emitted.
+Emitted whenever a post-bind runtime reload changes the ordered command surface. The initial surface is available
+through `get_commands` and does not emit this invalidation event. The `commands` payload has the same shape and
+ordering as `get_commands`; identical snapshots are not re-emitted.
 
 ```json
 {
