@@ -1,5 +1,38 @@
 # senpi-codemode fork changes
 
+## Eval execution metadata event (2026-08-16)
+
+### What changed
+
+- Every settled eval cell now publishes one versioned `senpi.eval.execution` payload through both
+  the optional external RPC channel and the in-process extension event bus.
+- The payload records producer timestamps, total eval wall time, terminal status, detached status,
+  every nested tool-call count, distinct tool names, per-tool aggregate durations, and a bounded
+  list of per-call ids, arguments, durations, errors, and result previews.
+- Generic and MCP tools retain the existing 30-call enrichment cap while every call still
+  contributes to exact counts and aggregates. Reserved agent/output calls now receive the same
+  bounded argument and duration capture; internal schema bridge calls preserve their legacy shape.
+- Session-generation fencing suppresses events from retired codemode runtimes.
+
+### Why
+
+- OMO needs producer-side timing data to determine whether eval composition and parallel tool calls
+  actually reduce round trips and wall-clock time, rather than relying on model-side assumptions.
+- The desktop client also needs structured per-call metadata so it can later render eval-contained
+  tool activity instead of receiving analytics-only aggregates.
+
+### Why this cannot be expressed externally
+
+- The eval extension owns kernel message dispatch, per-call bridge timing, bounded argument/result
+  capture, detached settlement, and session-generation fencing. An external extension cannot
+  reconstruct those facts accurately after the eval tool result has returned.
+
+### Expected merge conflict zones
+
+- MEDIUM in `src/index.ts`, `src/tool/eval-tool.ts`, and `src/tool/cell-handler.ts` around runtime
+  registration, settlement, and nested tool-call capture.
+- LOW in `src/tool/cell-runtime.ts`, `src/tool/eval-tool-options.ts`, and the new event builder.
+
 ## Eval cell hard limit (2026-08-13)
 
 ### What changed
