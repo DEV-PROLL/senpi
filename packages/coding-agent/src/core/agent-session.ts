@@ -3021,7 +3021,7 @@ export class AgentSession {
 					const content = readFileSync(skill.filePath, "utf-8");
 					const body = stripFrontmatter(content).trim();
 					skillBlocks.push(
-						`<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`,
+						`The user explicitly invoked the "${skill.name}" skill. Follow the instructions in <skill-instruction> as binding for this request, while respecting higher-priority instructions.\n\n<skill-instruction name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill-instruction>`,
 					);
 					expandedSkillNames.add(skill.name);
 				} catch (err) {
@@ -3044,7 +3044,7 @@ export class AgentSession {
 
 		const args = text.slice(tokenStart).trim();
 		const expandedSkills = skillBlocks.join("\n\n");
-		return args ? `${expandedSkills}\n\n${args}` : expandedSkills;
+		return args ? `${expandedSkills}\n\n<user-request>\n${args}\n</user-request>` : expandedSkills;
 	}
 
 	/**

@@ -3,6 +3,36 @@
 The historical-image transport entry moved to `core/changes.md`, beside the
 other provider-bound image transport behavior that owns the same payload path.
 
+## Explicit `/skill:` invocations retain user authority (2026-08-16)
+
+### What changed
+
+- `core/agent-session.ts`: each known leading `/skill:<name>` expansion now states that the user explicitly invoked that
+  skill, places its binding workflow in a `<skill-instruction>` section, and isolates trailing free text in a
+  `<user-request>` section. Chained skills retain written order; unknown-skill fallthrough, duplicate suppression, and
+  the five-skill expansion cap are unchanged.
+- Coverage: `test/suite/agent-session-prompt.test.ts` pins invocation shape with and without trailing arguments and for
+  chained skills; `test/suite/regressions/308-skill-composition.test.ts` keeps unknown-skill, cap, deduplication, steer,
+  and follow-up behavior pinned to the new shape.
+
+### Why
+
+- The previous expansion flattened passive `<skill>` content and trailing arguments into one ordinary user message.
+  That erased the user's explicit command authority, allowing the Intent Gate to route only on the trailing prose and
+  ignore the selected skill's rules or workflow (issue #890).
+
+### Why an extension could not do this
+
+- Skill-command expansion happens in the private `AgentSession` prompt, steering, and follow-up dispatch paths before
+  the provider sees the user message. Extensions cannot replace that text transformation consistently across all three
+  paths.
+
+### Expected merge conflict zones on next upstream sync
+
+- `core/agent-session.ts` in `_expandSkillCommand` around skill-block and trailing-request rendering.
+- `test/suite/agent-session-prompt.test.ts` and `test/suite/regressions/308-skill-composition.test.ts` where the exact
+  expanded payload is pinned.
+
 ## Shipped Fable fallback chain reaches Kimi K3 served as `kimi-k3` (2026-08-13)
 
 ### What changed
