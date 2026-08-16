@@ -138,7 +138,9 @@ Radius is a dynamic `pi-messages` gateway. `/login radius` stores OAuth tokens i
 
 - Run `/login cursor`, then approve the request in the browser (`cursor.com/loginDeepControl` deep link; the CLI polls until the browser approval releases the tokens)
 - Tokens are stored in `auth.json` and auto-refresh via `api2.cursor.sh/auth/exchange_user_api_key`, keeping the previous refresh token when Cursor does not rotate it
-- **Authentication only for now:** Cursor chat runs on a protobuf Connect-RPC agent protocol that senpi has not ported, so the provider exposes no models yet. The stored access token resolves through the standard auth pipeline for extensions that implement the Cursor protocol.
+- The model catalog is per account: after login it is discovered automatically through `GetUsableModels` (max-mode 1M-context variants included) and refreshed with `senpi update --models`
+- Chat runs over Cursor's native agent protocol (HTTP/2 Connect, `agent.v1.AgentService/Run`). Tool calling is fully supported: Cursor's server drives tools over an in-band exec channel, and senpi bridges those calls onto its real tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, plus MCP/extension tools), so approvals, sandboxing, and output truncation behave exactly like model-issued calls
+- Not supported (answered with typed refusals the model can route around): computer use, subagents, Cursor-managed background shells, canvas, smart-mode approval classification, and conversation search
 
 ## Ollama Cloud
 

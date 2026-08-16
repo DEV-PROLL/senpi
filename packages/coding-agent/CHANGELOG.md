@@ -4,6 +4,8 @@
 
 ### Added
 
+- Cursor subscription models are now fully usable: after `/login cursor` the account's model catalog is discovered automatically and Cursor chat runs over the native agent protocol with complete tool calling — Cursor's server-driven exec channel (read/bash/edit/write/grep/find/ls and MCP/extension tools) executes through the session's real tools, so approvals, sandboxing, output truncation, and tool cards behave exactly like model-issued calls ([#910](https://github.com/code-yeongyu/senpi/pull/910)).
+
 ### Fixed
 
 ### New Features

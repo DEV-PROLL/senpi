@@ -1,5 +1,59 @@
 # AI Source Changes
 
+## 2026-08-16 - Cursor agent protocol: full chat + tool calling (`cursor-agent` API)
+
+### What changed and why
+
+- `api/cursor-agent.ts` (new) + `api/cursor-agent.lazy.ts` (new): full port of the Cursor agent protocol from
+  upstream oh-my-pi, adapted to this fork's API architecture. One HTTP/2 Connect stream per assistant turn
+  (`POST /agent.v1.AgentService/Run`, `application/connect+proto`, 5-byte envelope framing, 5s client
+  heartbeats, gRPC-trailer + Connect end-stream error decoding, abort via stream close). Interaction updates
+  map onto assistant events (text/thinking deltas, streamed MCP tool calls with cumulative `args_text_delta`
+  buffering + throttled partial-JSON parsing, `turnEnded`, `tokenDelta` usage). The exec channel is answered
+  in band: the server blocks mid-turn on tool results, so exec frames dispatch onto injected
+  `CursorExecHandlers` (legacy read/ls/grep/write/shell(+stream)/delete frames, modern `pi_*` frames, MCP
+  calls incl. approval-only probes, kv blob get/set, `requestContext` tool advertising, `mcpState` regrouping,
+  neutral hook replies) and every remaining frame gets a typed refusal or `ExecClientThrow` — an unanswered
+  frame strands the turn. Each bridged call is synthesized into the assistant message as an already-resolved
+  `toolCall` block (`kCursorExecResolved`) and paired with a `ToolResultMessage` via `onToolResult`.
+- `api/cursor-agent/gen/agent_pb.ts` (new, vendored): protobuf-es v2.13 codegen of
+  `packages/ai/proto/cursor/agent.proto`, with TS enums rewritten to erasable const objects by
+  `scripts/transform-cursor-agent-proto.mjs` (repo compiles with `erasableSyntaxOnly`; runtime decode uses the
+  embedded descriptor, not the TS enums). Excluded from Biome via `biome.json`.
+- `api/cursor-agent/{types,exec-modern,pi-args,deterministic-id}.ts` (new): browser-safe handler contracts,
+  wire result builders for the Pi frames, and arg translations shared by the API's synthesized display blocks
+  and the coding-agent bridge (senpi's tools take plain kwargs, so `pi_read` maps to `offset`/`limit` instead
+  of upstream's path selectors; `pi_edit` maps 1:1 onto `edits[{oldText,newText}]`; `workingDirectory`
+  composes onto `bash` commands as a quoted `cd` prefix because senpi's bash has no cwd kwarg).
+- Conversation continuity: history is rebuilt per request from `context.messages` into
+  `rootPromptMessagesJson` blobs (system prompt + Vercel-AI-SDK-shaped user/assistant/tool JSON) and
+  `turns[]` display structures over a per-conversation SHA-256 blob store; checkpoints are cached per
+  conversation id; a bare `resource_exhausted` with zero tokens rotates the wire conversation id once.
+- Model discovery: `fetchCursorUsableModels` (unary `GetUsableModels` over HTTP/2) normalizes usable models
+  (1M-context signals, max-mode flag → `Model.compat.cursorMaxMode`); `providers/cursor.ts` now wires
+  `api: cursorAgentApi()` + `fetchModels`, so the catalog appears after `/login cursor` (refresh runs
+  automatically after login).
+- Registration: `KnownApi`/`ApiOptionsMap` gain `"cursor-agent"`; `compat.ts` `BUILTIN_APIS` registers the
+  lazy API; `model.ts` gains `CursorAgentCompat`; `utils/block-symbols.ts` (new) carries the streaming and
+  `kCursorExecResolved` markers; `utils/event-stream.ts` gains `trackLocalWork`/`hasPendingLocalWork` so idle
+  watchdogs can attribute mid-stream tool-run silence to local work.
+- Deliberately not ported from upstream: computer use, subagents, background shells, canvas, smart-mode
+  classifier, conversation search, native todo mirroring (summary-only pairing is kept), Kimi-K3 thinking
+  replay, request-debug capture, and proxy tunneling — each answered with the protocol's typed refusal.
+
+### Why this cannot be expressed as an extension
+
+- The exec channel must be answered on the SAME HTTP/2 stream mid-turn, which requires provider-internal
+  transport access; `KnownApi` registration, `Model.compat` typing, and the event-stream local-work contract
+  are all package-internal seams.
+
+### Expected merge conflict zones
+
+- LOW: `types.ts` (`KnownApi`, `ApiOptionsMap`), `compat.ts` lists, `model.ts` compat conditional,
+  `index.ts` export blocks — additive lines.
+- NONE expected under `api/cursor-agent/`: fork-only files; upstream's implementation lives in a different
+  architecture (`src/providers/cursor.ts`).
+
 ## 2026-08-16 - Cursor OAuth authentication and builtin provider
 
 ### What changed and why
