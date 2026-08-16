@@ -108,6 +108,32 @@ export interface OpenAISettings {
 	serviceTier?: "auto" | "flex" | "priority";
 }
 
+/** Service tier remembered per model; "auto" is an explicit opt-out of an inherited priority tier. */
+export type ModelServiceTier = "auto" | "flex" | "priority";
+
+const THINKING_LEVEL_VALUES: ReadonlySet<string> = new Set<ThinkingLevel>([
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]);
+
+const MODEL_SERVICE_TIER_VALUES: ReadonlySet<string> = new Set<ModelServiceTier>(["auto", "flex", "priority"]);
+
+/** Opaque per-model memory key. Ids may contain `/` and `:`, so keys are never split back apart. */
+function modelMemoryKey(provider: string, modelId: string): string {
+	return `${provider}/${modelId}`;
+}
+
+function readModelMemoryEntry(map: unknown, key: string, allowed: ReadonlySet<string>): string | undefined {
+	if (typeof map !== "object" || map === null || Array.isArray(map)) return undefined;
+	const value = (map as Record<string, unknown>)[key];
+	return typeof value === "string" && allowed.has(value) ? value : undefined;
+}
+
 export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 	offRecommendedModel?: boolean; // default: false
@@ -140,6 +166,8 @@ export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
 	defaultThinkingLevel?: ThinkingLevel;
+	modelThinkingLevels?: Record<string, ThinkingLevel>; // `${provider}/${id}` -> last thinking level set for that model
+	modelServiceTiers?: Record<string, ModelServiceTier>; // `${provider}/${id}` -> last service tier set for that model
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
@@ -928,6 +956,57 @@ export class SettingsManager {
 	setDefaultThinkingLevel(level: ThinkingLevel): void {
 		this.globalSettings.defaultThinkingLevel = level;
 		this.markModified("defaultThinkingLevel");
+		this.save();
+	}
+
+	/** Thinking level last set for this exact model, or undefined when unknown/invalid on disk. */
+	getModelThinkingLevel(provider: string, modelId: string): ThinkingLevel | undefined {
+		return readModelMemoryEntry(
+			this.settings.modelThinkingLevels,
+			modelMemoryKey(provider, modelId),
+			THINKING_LEVEL_VALUES,
+		) as ThinkingLevel | undefined;
+	}
+
+	/** Remember (or with `undefined`, forget) this model's thinking level in GLOBAL settings. */
+	setModelThinkingLevel(provider: string, modelId: string, level: ThinkingLevel | undefined): void {
+		const key = modelMemoryKey(provider, modelId);
+		const existing = this.globalSettings.modelThinkingLevels;
+		const map: Record<string, ThinkingLevel> =
+			typeof existing === "object" && existing !== null && !Array.isArray(existing) ? { ...existing } : {};
+		if (level === undefined) {
+			delete map[key];
+		} else {
+			map[key] = level;
+		}
+		this.globalSettings.modelThinkingLevels = map;
+		// Nested key only: concurrent sessions writing OTHER models must survive the merge.
+		this.markModified("modelThinkingLevels", key);
+		this.save();
+	}
+
+	/** Service tier last set for this exact model, or undefined when unknown/invalid on disk. */
+	getModelServiceTier(provider: string, modelId: string): ModelServiceTier | undefined {
+		return readModelMemoryEntry(
+			this.settings.modelServiceTiers,
+			modelMemoryKey(provider, modelId),
+			MODEL_SERVICE_TIER_VALUES,
+		) as ModelServiceTier | undefined;
+	}
+
+	/** Remember (or with `undefined`, forget) this model's service tier in GLOBAL settings. */
+	setModelServiceTier(provider: string, modelId: string, tier: ModelServiceTier | undefined): void {
+		const key = modelMemoryKey(provider, modelId);
+		const existing = this.globalSettings.modelServiceTiers;
+		const map: Record<string, ModelServiceTier> =
+			typeof existing === "object" && existing !== null && !Array.isArray(existing) ? { ...existing } : {};
+		if (tier === undefined) {
+			delete map[key];
+		} else {
+			map[key] = tier;
+		}
+		this.globalSettings.modelServiceTiers = map;
+		this.markModified("modelServiceTiers", key);
 		this.save();
 	}
 
