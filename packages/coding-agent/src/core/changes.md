@@ -1,5 +1,40 @@
 # changes
 
+## /fast per-model service-tier precedence (2026-08-16)
+
+### What changed
+
+- `AgentSession._resolveServiceTier` now inserts a per-model remembered tier between the explicit scoped/favorite pin and the catalog compat `serviceTier`: explicit > memory > catalog > `openai.serviceTier` (the last still applied in the non-Codex path of the service-tier extension). The memory read goes through `getRememberedServiceTier(settingsManager, modelRegistry, model)`, which normalizes a `-fast` catalog variant onto its base model so the pair shares one key.
+- The remembered `"auto"` is what makes `/fast off` override an inherited catalog/global priority tier; deleting the key would silently re-inherit it. This is a surgical edit to the precedence seam only — no other behavior in this file changes.
+
+### Why
+
+`/fast` now persists per model across sessions (see `extensions/builtin/changes.md`); the session core has to honor that memory when resolving the request-side tier.
+
+## Preserve per-model reasoning effort while reasoning is off (2026-08-16)
+
+### What changed
+
+- `SettingsManager` now persists `modelLastOnThinkingLevels` beside `modelThinkingLevels`.
+- Every non-off per-model thinking write refreshes the companion value; writing `off` changes only the effective
+  level, so startup remains off while a later `/reasoning on` can restore the previous effort.
+- The companion accessor validates runtime JSON and marks only the nested model key for concurrent-session merges.
+
+### Why
+
+- Persisting `off` into the only per-model field destroyed the effort the user expected to restore. A
+  session-scoped fallback hid that loss only until restart, making the same off/on sequence produce different
+  results before and after a restart.
+
+### Why an extension could not handle it
+
+- Ordinary thinking-level changes and startup restoration already flow through core settings. The remembered
+  non-off value must therefore be a storage invariant rather than extension-process state.
+
+### Expected merge conflict zones
+
+- LOW: `settings-manager.ts` beside the existing per-model thinking accessors.
+
 ## Clamp fallback thinking levels canonically and restore the pre-fallback level (2026-08-16)
 
 ### What changed

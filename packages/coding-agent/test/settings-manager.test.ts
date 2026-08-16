@@ -823,6 +823,23 @@ describe("SettingsManager", () => {
 			expect(saved.theme).toBe("dark");
 		});
 
+		it("preserves the last non-off level when the effective level becomes off", async () => {
+			const settingsPath = join(agentDir, "settings.json");
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			manager.setModelThinkingLevel("openai", "gpt-5.5", "high");
+			manager.setModelThinkingLevel("openai", "gpt-5.5", "off");
+			await manager.flush();
+
+			const restarted = SettingsManager.create(projectDir, agentDir);
+			expect(restarted.getModelThinkingLevel("openai", "gpt-5.5")).toBe("off");
+			expect(restarted.getModelLastOnThinkingLevel("openai", "gpt-5.5")).toBe("high");
+			expect(JSON.parse(readFileSync(settingsPath, "utf-8"))).toMatchObject({
+				modelThinkingLevels: { "openai/gpt-5.5": "off" },
+				modelLastOnThinkingLevels: { "openai/gpt-5.5": "high" },
+			});
+		});
+
 		it("keeps ids containing slashes and colons opaque", async () => {
 			const settingsPath = join(agentDir, "settings.json");
 			const manager = SettingsManager.create(projectDir, agentDir);
@@ -880,6 +897,26 @@ describe("SettingsManager", () => {
 			expect(manager.getModelThinkingLevel("openai", "gpt-5.5")).toBeUndefined();
 		});
 
+		it("tolerates malformed persisted last-on levels", () => {
+			writeFileSync(
+				join(agentDir, "settings.json"),
+				JSON.stringify({
+					modelLastOnThinkingLevels: {
+						"openai/number": 3,
+						"openai/off": "off",
+						"openai/unknown": "ultra",
+						"openai/good": "high",
+					},
+				}),
+			);
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getModelLastOnThinkingLevel("openai", "number")).toBeUndefined();
+			expect(manager.getModelLastOnThinkingLevel("openai", "off")).toBeUndefined();
+			expect(manager.getModelLastOnThinkingLevel("openai", "unknown")).toBeUndefined();
+			expect(manager.getModelLastOnThinkingLevel("openai", "good")).toBe("high");
+		});
+
 		it("preserves a concurrently written model key (nested merge)", async () => {
 			const settingsPath = join(agentDir, "settings.json");
 			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
@@ -896,6 +933,25 @@ describe("SettingsManager", () => {
 
 			const saved = JSON.parse(readFileSync(settingsPath, "utf-8"));
 			expect(saved.modelThinkingLevels).toEqual({ "anthropic/opus": "low", "openai/gpt-5.5": "xhigh" });
+		});
+
+		it("preserves a concurrently written last-on key (nested merge)", async () => {
+			const settingsPath = join(agentDir, "settings.json");
+			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			writeFileSync(
+				settingsPath,
+				JSON.stringify({ theme: "dark", modelLastOnThinkingLevels: { "anthropic/opus": "low" } }),
+			);
+
+			manager.setModelLastOnThinkingLevel("openai", "gpt-5.5", "xhigh");
+			await manager.flush();
+
+			expect(JSON.parse(readFileSync(settingsPath, "utf-8")).modelLastOnThinkingLevels).toEqual({
+				"anthropic/opus": "low",
+				"openai/gpt-5.5": "xhigh",
+			});
 		});
 
 		it("does not migrate defaultThinkingLevel into the map", async () => {
@@ -1019,6 +1075,12 @@ describe("routine settings keys", () => {
 	it("suppresses reload for per-model thinking level changes", () => {
 		expect(
 			classify({ theme: "dark" }, { theme: "dark", modelThinkingLevels: { "openai/gpt-5.5": "xhigh" } }),
+		).toEqual([]);
+	});
+
+	it("suppresses reload for per-model last-on thinking level changes", () => {
+		expect(
+			classify({ theme: "dark" }, { theme: "dark", modelLastOnThinkingLevels: { "openai/gpt-5.5": "xhigh" } }),
 		).toEqual([]);
 	});
 

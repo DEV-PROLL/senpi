@@ -1,5 +1,30 @@
 # Builtin extensions changes
 
+## service-tier: per-model /fast persistence across sessions (2026-08-16)
+
+- `/fast [on|off]` now persists the choice per model in settings `modelServiceTiers` (global scope, nested-key write so concurrent sessions merge safely), so fast mode survives a restart instead of dying with the session. No-arg `/fast` keeps the established toggle UX; argument completions are `on` and `off`.
+- `on` writes `${provider}/${id}: "priority"`; `off` writes an explicit `"auto"` — never a deleted key, because deletion silently re-inherits a catalog/`-fast` priority tier that the user just turned off.
+- A `-fast` catalog variant and its base model are one choice to the user, so both read and write ONE key: `-fast` is normalized onto its base model through the existing `findBaseModel` helper, so `model` and `model-fast` can never hold contradictory preferences.
+- `session_start` reads the memory (instead of unconditionally resetting to false): for `openai-codex-responses` models `sessionFastMode = rememberedTier === "priority"`. Malformed/garbage values read back as `undefined` (never throw at startup). The existing `-fast` -> base model swap on start is unchanged.
+- Tier precedence (agent-session `_resolveServiceTier`): explicit scoped/favorite `:priority` pin > per-model memory > catalog compat `serviceTier` > `openai.serviceTier` (still applied in the non-Codex path). While a scoped `:priority` pin is active, `/fast off` notifies `Fast mode is fixed by the active model selection's priority tier.` and writes nothing. Non-Codex models keep `Fast mode is only available for OpenAI Codex models.`
+- Exports a single reusable entry point `applyFastMode(ctx, enabled)` (plus `getRememberedServiceTier` / `resolveServiceTierMemoryModel` for the precedence seam); todo 11's RPC `set_fast_mode` will call the same function so persistence and normalization exist once.
+- Coverage: new `test/suite/fast-mode-persistence.test.ts` (13 cases — restart on/off, on->restart->off->restart->on, no-arg toggle, bad argument, completions, `-fast` normalization, explicit-auto beats catalog priority, malformed memory, stale memory, scoped-pin block, non-Codex, nested-key concurrent write). `test/suite/service-tier-extension.test.ts`'s "drops on restart" case is updated to the new "survives restart, drops only on `/fast off`" contract. Regression fences: `test/model-runtime-catalog-service-tier.test.ts`.
+- Expected merge conflict zones: LOW in `service-tier.ts` (session_start reset + handler rewrite); LOW in `agent-session.ts` at the `_resolveServiceTier` seam (memory read inserted between explicit and catalog).
+
+## reasoning: capability-aware /reasoning and /efforts commands (2026-08-16)
+
+- New builtin `reasoning/` registers `/reasoning [on|off]` (the on/off axis) and `/efforts [minimal|low|medium|high|xhigh|max]` (the effort ladder). Registered next to `service-tier`: both are read-the-active-model command surfaces that only notify, so their relative order is not load-bearing.
+- Behavior branches on `classifyReasoningCapability(model)` (`core/thinking-levels.ts`), never on model ids or `thinkingFormat`. Each invocation re-classifies `ctx.model`, so a mid-session model switch is honored immediately and no capability is cached:
+  - `none` — `/reasoning on` and both `/efforts` forms answer `Model <provider/id> does not support reasoning.`; `/reasoning off` is an idempotent `Reasoning: off.`
+  - `always-on` — `/reasoning off` answers `Reasoning cannot be disabled for <provider/id>.`
+  - `on-off` — `/efforts` answers `Reasoning effort is not configurable for <provider/id>; this model supports on/off only. Use /reasoning on or /reasoning off.`
+  - `graded` — the full ladder, with `xhigh`/`max` offered only when the catalog says the model has them.
+- `/reasoning on` restores, in order: this model's persisted `modelLastOnThinkingLevels` entry, a legacy non-off `modelThinkingLevels` entry, the global `defaultThinkingLevel`, then `medium` — always clamped to a supported non-off level. `/reasoning off` persists the effective `off` state without erasing the companion level, so the same off/on sequence restores identically before and after restart; no session-scoped fallback map remains.
+- No-arg forms notify status only and never open a selector, so both commands work headless and over RPC. No `/thinking` alias is registered.
+- Effort completions are dynamic: the ladder is read from the live model (tracked via `session_start`/`model_select`, since completion callbacks receive only a prefix) and suppressed entirely for non-graded models.
+- Coverage: `test/suite/reasoning-commands.test.ts` (41 cases) pins every user-facing string verbatim across all four capability classes, plus malformed input (wrong case, extra args, unicode, whitespace-only, `off` as an effort) and a mid-session model switch.
+- Expected merge conflict zones: LOW in `builtin/index.ts` at the import block and the registration array entry after `service-tier`.
+
 ## import-repro: guard /ir against mid-run and mid-compaction dispatch (2026-08-09)
 
 - Extension commands now dispatch immediately inside `AgentSession.prompt()` (immediate-extension-commands plan), including while a run is streaming and while compaction is active. `/ir` replaces the live session through `ctx.switchSession()`, which aborts the in-flight turn without confirmation and — during compaction — fire-and-forget aborts the compaction task and disposes the session while that task is still unwinding (`agent-session-runtime.ts` `teardownCurrent` -> `abort()` -> `dispose()`).

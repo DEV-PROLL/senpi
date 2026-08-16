@@ -166,7 +166,8 @@ export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
 	defaultThinkingLevel?: ThinkingLevel;
-	modelThinkingLevels?: Record<string, ThinkingLevel>; // `${provider}/${id}` -> last thinking level set for that model
+	modelThinkingLevels?: Record<string, ThinkingLevel>; // `${provider}/${id}` -> effective thinking level for that model
+	modelLastOnThinkingLevels?: Record<string, ThinkingLevel>; // `${provider}/${id}` -> last non-off thinking level
 	modelServiceTiers?: Record<string, ModelServiceTier>; // `${provider}/${id}` -> last service tier set for that model
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
@@ -968,8 +969,13 @@ export class SettingsManager {
 		) as ThinkingLevel | undefined;
 	}
 
-	/** Remember (or with `undefined`, forget) this model's thinking level in GLOBAL settings. */
-	setModelThinkingLevel(provider: string, modelId: string, level: ThinkingLevel | undefined): void {
+	/** Remember (or with `undefined`, forget) this model's effective thinking level in GLOBAL settings. */
+	setModelThinkingLevel(
+		provider: string,
+		modelId: string,
+		level: ThinkingLevel | undefined,
+		options: { preserveLastOn?: boolean } = {},
+	): void {
 		const key = modelMemoryKey(provider, modelId);
 		const existing = this.globalSettings.modelThinkingLevels;
 		const map: Record<string, ThinkingLevel> =
@@ -982,7 +988,41 @@ export class SettingsManager {
 		this.globalSettings.modelThinkingLevels = map;
 		// Nested key only: concurrent sessions writing OTHER models must survive the merge.
 		this.markModified("modelThinkingLevels", key);
+
+		// `off` is durable effective state, but it must not erase the level `/reasoning on` restores.
+		if (level !== "off" && !options.preserveLastOn) {
+			this.updateModelLastOnThinkingLevel(key, level);
+		}
 		this.save();
+	}
+
+	/** Last non-off thinking level for this exact model, or undefined when unknown/invalid on disk. */
+	getModelLastOnThinkingLevel(provider: string, modelId: string): ThinkingLevel | undefined {
+		const level = readModelMemoryEntry(
+			this.settings.modelLastOnThinkingLevels,
+			modelMemoryKey(provider, modelId),
+			THINKING_LEVEL_VALUES,
+		) as ThinkingLevel | undefined;
+		return level === "off" ? undefined : level;
+	}
+
+	/** Remember (or with `undefined`, forget) this model's last non-off level in GLOBAL settings. */
+	setModelLastOnThinkingLevel(provider: string, modelId: string, level: ThinkingLevel | undefined): void {
+		this.updateModelLastOnThinkingLevel(modelMemoryKey(provider, modelId), level === "off" ? undefined : level);
+		this.save();
+	}
+
+	private updateModelLastOnThinkingLevel(key: string, level: ThinkingLevel | undefined): void {
+		const existing = this.globalSettings.modelLastOnThinkingLevels;
+		const map: Record<string, ThinkingLevel> =
+			typeof existing === "object" && existing !== null && !Array.isArray(existing) ? { ...existing } : {};
+		if (level === undefined) {
+			delete map[key];
+		} else {
+			map[key] = level;
+		}
+		this.globalSettings.modelLastOnThinkingLevels = map;
+		this.markModified("modelLastOnThinkingLevels", key);
 	}
 
 	/** Service tier last set for this exact model, or undefined when unknown/invalid on disk. */

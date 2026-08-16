@@ -26,6 +26,7 @@ import openaiWebSearchExtension from "./openai-web-search/index.ts";
 import permissionSystemExtension from "./permission-system/index.ts";
 import promptPresetExtension from "./prompt-preset/index.ts";
 import promptUrlWidgetExtension from "./prompt-url-widget.ts";
+import reasoningExtension from "./reasoning/index.ts";
 import recommendedModelsExtension from "./recommended-models/index.ts";
 import redrawsExtension from "./redraws.ts";
 import piRulesExtension from "./rules/index.ts";
@@ -68,6 +69,9 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "anthropic-bash", factory: anthropicBashExtension },
 	{ id: "openai-web-search", factory: openaiWebSearchExtension },
 	{ id: "service-tier", factory: serviceTierExtension },
+	// Sits beside service-tier: both are capability-aware model-control commands that only read
+	// the active model and notify; neither mutates payloads, so relative order is not load-bearing.
+	{ id: "reasoning", factory: reasoningExtension },
 	{ id: "model-fallback", factory: modelFallbackExtension },
 	{ id: "recommended-models", factory: recommendedModelsExtension },
 	{ id: "bash-timeout", factory: bashTimeoutExtension },

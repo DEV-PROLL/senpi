@@ -15,6 +15,7 @@ const ROUTINE_SETTINGS_KEYS: ReadonlySet<string> = new Set([
 	"defaultProvider",
 	"defaultThinkingLevel",
 	"modelThinkingLevels",
+	"modelLastOnThinkingLevels",
 	"modelServiceTiers",
 	"lastChangelogVersion",
 	"tipsHistory",
