@@ -63,6 +63,7 @@ import type {
 	RpcMcpServerStatus,
 	RpcResponse,
 	RpcSessionState,
+	RpcSkillInvocationEvent,
 	RpcSlashCommand,
 } from "./rpc-types.ts";
 import { SessionExtensionUiRequests } from "./session-extension-ui-requests.ts";
@@ -595,6 +596,10 @@ export function createRpcConnectionHandler(
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
 		unsubscribe = session.subscribe((event) => {
+			if (event.type === "skill_invocation") {
+				outputEvent(event satisfies RpcSkillInvocationEvent);
+				return;
+			}
 			outputEvent(event);
 		});
 		unsubscribeBackpressure = session.agent.subscribe(async () => {

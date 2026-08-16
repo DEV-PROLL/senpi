@@ -502,6 +502,16 @@ export interface RpcHighReasoningWarningEvent {
 	thinkingLevel: ThinkingLevel;
 }
 
+/** Emitted after explicit skill tokens are expanded for a user-authored request. */
+export interface RpcSkillInvocationEvent {
+	type: "skill_invocation";
+	skills: readonly {
+		name: string;
+		path: string;
+		syntax: "dollar" | "slash";
+	}[];
+}
+
 /** Emitted after the loaded skill, extension, or MCP inventory changes. */
 export interface RpcLoadedSurfacesChangedEvent {
 	type: "loaded_surfaces_changed";

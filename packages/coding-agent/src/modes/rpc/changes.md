@@ -1,5 +1,30 @@
 # changes
 
+## Publish typed skill invocation events without disturbing MCP inventory (2026-08-16)
+
+### What changed
+
+- RPC exports `RpcSkillInvocationEvent` with ordered `{name,path,syntax}` entries.
+- The classic and routed connection handler explicitly type-checks `skill_invocation` before forwarding it through
+  the existing event buffer.
+- Regression coverage proves the event reaches clients while `get_loaded_surfaces` keeps the same revealed MCP
+  inventory before and after invocation.
+
+### Why
+
+- OmO Desktop consumes this event to render skill invocation metadata without reparsing expanded prompt text.
+- Skill expansion must remain orthogonal to MCP inventory reveal; a new event cannot reset or reorder loaded
+  surfaces.
+
+### Why extension system couldn't handle this
+
+- The public JSONL event contract and loaded-surface inventory response are owned by the built-in RPC transport.
+
+### Expected merge conflict zones
+
+- LOW: additive event types in `rpc-types.ts` and one typed branch in `connection-handler.ts`.
+- LOW: `rpc-loaded-surfaces.test.ts` inventory assertions.
+
 ## Pin classic RPC delta batching and immediate barriers (2026-08-14)
 
 ### What changed
