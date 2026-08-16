@@ -136,7 +136,9 @@ Queued prompts cannot include `thinkingLevel`; wait for the current turn to comp
 
 **Extension commands**: If the message is an extension command (e.g., `/mycommand`), it executes immediately even during streaming. Extension commands manage their own LLM interaction via `pi.sendMessage()`.
 
-**Input expansion**: Skill commands (`/skill:name`) and prompt templates (`/template`) are expanded before sending/queueing.
+**Input expansion**: Leading skill tokens (`/skill:name`, `$name`, or `$skill:name`), inline explicit
+desktop skill tokens (`$skill:name`), and prompt templates (`/template`) are expanded before
+sending/queueing. Bare inline dollar text remains literal.
 
 Response:
 ```json
@@ -1015,6 +1017,7 @@ Events are streamed to stdout as JSON lines during agent operation. Events do no
 | `summarization_retry_finished` | Summarization retry loop completes |
 | `extension_error` | Extension threw an error |
 | `extension_event` | Capability-gated extension-owned event (`extension_events` clients only) |
+| `skill_invocation` | Ordered explicit skill metadata after prompt expansion |
 | `loaded_surfaces_changed` | Loaded skills, extensions, or MCP inventory changed; re-read `get_commands` and `get_loaded_surfaces` |
 
 ### extension_event
@@ -1316,6 +1319,32 @@ For branch summaries, `source` is `"branchSummary"` and no `reason` is present.
   "type": "summarization_retry_finished"
 }
 ```
+
+### skill_invocation
+
+Emitted once after one or more explicit skill tokens are expanded. `skills` preserves invocation order.
+`syntax` reports the token form that selected the skill; `path` is the resolved `SKILL.md` path.
+
+```json
+{
+  "type": "skill_invocation",
+  "skills": [
+    {
+      "name": "debugging",
+      "path": "/project/.agents/skills/debugging/SKILL.md",
+      "syntax": "dollar"
+    },
+    {
+      "name": "review",
+      "path": "/project/.agents/skills/review/SKILL.md",
+      "syntax": "slash"
+    }
+  ]
+}
+```
+
+In multi-session mode the normal routing `sessionId` is added. This event does not mutate loaded
+surfaces; clients continue to use `loaded_surfaces_changed` plus `get_loaded_surfaces` for MCP reveal.
 
 ### loaded_surfaces_changed
 
