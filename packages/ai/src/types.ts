@@ -712,7 +712,6 @@ export interface OpenAICompletionsCompat {
 	supportsLongCacheRetention?: boolean;
 }
 
-
 /** Compatibility settings for Anthropic Messages-compatible APIs. */
 export interface AnthropicMessagesCompat {
 	/**

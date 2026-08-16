@@ -176,7 +176,17 @@ type ResponseCustomToolCallOutputItem = {
 	output: string | ResponseFunctionCallOutputItemList;
 };
 
-type ResponseInputItem = OpenAIResponseInputItem | ResponseCustomToolCallItem | ResponseCustomToolCallOutputItem;
+type AdditionalToolsInputItem = {
+	type: "additional_tools";
+	role: "developer";
+	tools: OpenAITool[];
+};
+
+type ResponseInputItem =
+	| OpenAIResponseInputItem
+	| ResponseCustomToolCallItem
+	| ResponseCustomToolCallOutputItem
+	| AdditionalToolsInputItem;
 
 export const CUSTOM_TOOL_CALL_ITEM_ID_SENTINEL = "custom";
 
