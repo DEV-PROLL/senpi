@@ -6,6 +6,8 @@
 
 ### Added
 
+- The agent loop understands Cursor's server-driven tool execution: tool calls the `cursor-agent` provider already executed mid-stream (marked `kCursorExecResolved`) are never re-executed, their provider-buffered results are appended right after the assistant message (also on error/abort paths so calls never end up unpaired), and the stream idle watchdog re-arms while the provider reports pending local tool work instead of aborting a healthy request. `AgentOptions.cursorExecHandlers` carries the host's exec bridge onto the loop config, and `Agent.emitExternalEvent()` lets bridge-run tools surface `tool_execution_*` lifecycle events ([#906](https://github.com/code-yeongyu/senpi/pull/906)).
+
 ### Changed
 
 ### Fixed
