@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type Api, type Context, InMemoryCredentialStore, type Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -51,7 +54,7 @@ function queryCapturing(captured: Options[]): SdkQuery {
 async function captureRequestEnvironment(
 	hostEnvironment: NodeJS.ProcessEnv,
 	requestEnvironment: Record<string, string>,
-	options: { pinnedAccount?: string; tokenInjection?: "ambient" | "oauth-slots" } = {},
+	options: { pinnedAccount?: string; tokenInjection?: "ambient" | "config-dir" | "oauth-slots" } = {},
 ): Promise<NodeJS.ProcessEnv | undefined> {
 	const captured: Options[] = [];
 	overrideAuthLaneBoundary({
@@ -125,5 +128,32 @@ describe("claude-sdk-oauth request environment", () => {
 		}).result();
 
 		expect(captured[0]?.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("request-token");
+	});
+
+	it("does not persist request tokens in config-dir mode", async () => {
+		const agentDir = mkdtempSync(join(tmpdir(), "senpi-request-auth-"));
+		const captured: Options[] = [];
+		overrideAuthLaneBoundary({
+			createStore: () => new InMemoryCredentialStore(),
+			env: () => ({ PATH: "/usr/bin" }),
+			getAgentDir: () => agentDir,
+		});
+		try {
+			for await (const _message of queryWithAuthLane({
+				prompt: "",
+				query: queryCapturing(captured),
+				providerSettings: { tokenInjection: "config-dir" },
+				env: { CLAUDE_CODE_OAUTH_TOKEN: "request-token" },
+				buildOptions: () => ({}),
+			})) {
+				// Drain the synthetic query.
+			}
+
+			expect(captured[0]?.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("request-token");
+			expect(captured[0]?.env).not.toHaveProperty("CLAUDE_CONFIG_DIR");
+			expect(existsSync(join(agentDir, "claude-sdk-oauth-accounts"))).toBe(false);
+		} finally {
+			rmSync(agentDir, { recursive: true, force: true });
+		}
 	});
 });

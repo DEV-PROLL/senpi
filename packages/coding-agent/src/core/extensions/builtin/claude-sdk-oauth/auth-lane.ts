@@ -1,5 +1,3 @@
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import { loadAnthropicOAuth } from "@earendil-works/pi-ai/oauth";
 import { getAgentDir } from "../../../../config.ts";
@@ -8,7 +6,6 @@ import { emitProviderAccountFailover, emitProviderAccountsChanged } from "./acco
 import { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
 import {
 	type AccountSlot,
-	assertValidAccountName,
 	type ClaudeSdkOauthCredential,
 	emptyCredential,
 	envSlotToken,
@@ -18,7 +15,8 @@ import {
 } from "./accounts.ts";
 import { selectAccount } from "./affinity.ts";
 import { type AuthenticatedAttemptInput, createAttemptMessages, type RetainableAttempt } from "./auth-attempt.ts";
-import { mergeRequestAuthEnvironment, stripManagedAuthEnvironment } from "./auth-environment.ts";
+import { hasRequestOauthToken, mergeRequestAuthEnvironment, stripManagedAuthEnvironment } from "./auth-environment.ts";
+import { writeConfigDirCredential } from "./config-dir-credentials.ts";
 import { classifySdkError } from "./errors.ts";
 import { runFailover } from "./failover.ts";
 import type { Options, SDKMessage, SdkQuery } from "./sdk-boundary.ts";
@@ -27,14 +25,6 @@ import type { ClaudeSdkOauthProviderSettings, ClaudeSdkOauthTokenInjection } fro
 export { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
 
 export const EXPIRING_WITHIN_MS = 5 * 60_000;
-const CLI_OAUTH_SCOPES = [
-	"org:create_api_key",
-	"user:profile",
-	"user:inference",
-	"user:sessions:claude_code",
-	"user:mcp_servers",
-	"user:file_upload",
-] as const;
 
 type AuthLaneBoundary = {
 	createStore: () => CredentialStore;
@@ -94,28 +84,6 @@ type ManagedPool = {
 	store: CredentialStore;
 };
 
-function configDirectory(slot: AccountSlot): string {
-	assertValidAccountName(slot.name);
-	return join(activeBoundary.getAgentDir(), "claude-sdk-oauth-accounts", slot.name);
-}
-
-function writeConfigCredentials(directory: string, slot: AccountSlot, access: string): void {
-	mkdirSync(directory, { recursive: true, mode: 0o700 });
-	chmodSync(directory, 0o700);
-	writeFileSync(
-		join(directory, ".credentials.json"),
-		JSON.stringify({
-			claudeAiOauth: {
-				accessToken: access,
-				refreshToken: slot.refresh,
-				expiresAt: slot.expires,
-				scopes: CLI_OAUTH_SCOPES,
-			},
-		}),
-		{ encoding: "utf8", mode: 0o600 },
-	);
-}
-
 export function resolveEffectiveLane(
 	settings: ClaudeSdkOauthProviderSettings,
 	accounts: readonly AccountSlot[],
@@ -141,7 +109,9 @@ async function managedPool(
 			(name) => environment[name],
 		);
 	}
-	const lane = resolveEffectiveLane(settings, accounts);
+	const configuredLane = resolveEffectiveLane(settings, accounts);
+	const lane =
+		configuredLane === "config-dir" && hasRequestOauthToken(requestEnvironment) ? "oauth-slots" : configuredLane;
 	if (lane === "ambient" || accounts.length === 0) return undefined;
 	const stored = credential?.type === "oauth" ? (credential as ClaudeSdkOauthCredential) : undefined;
 	return { accounts, environment, lane, pinnedAccount: settings.pinnedAccount ?? stored?.pinned, store };
@@ -179,8 +149,7 @@ async function prepareSlot(
 	if (!access) throw new Error("authentication_failed: selected OAuth token is unavailable");
 	const childEnvironment = stripManagedAuthEnvironment(environment);
 	if (pool.lane === "oauth-slots") return { ...childEnvironment, CLAUDE_CODE_OAUTH_TOKEN: access };
-	const directory = configDirectory(slot);
-	writeConfigCredentials(directory, slot, access);
+	const directory = writeConfigDirCredential(activeBoundary.getAgentDir(), slot, access);
 	return { ...childEnvironment, CLAUDE_CONFIG_DIR: directory };
 }
 

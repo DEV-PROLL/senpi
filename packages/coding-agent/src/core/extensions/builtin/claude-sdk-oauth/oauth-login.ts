@@ -84,7 +84,7 @@ export function createOAuthConfig(deps: {
 }): OAuthConfigShape {
 	const claudeEnvironment = async (ctx: AuthContext): Promise<Record<string, string>> => {
 		const entries = await Promise.all(ENV_TOKEN_NAMES.map(async (name) => [name, await ctx.env(name)] as const));
-		return Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => Boolean(entry[1])));
+		return Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry[1] !== undefined));
 	};
 
 	/** Single predicate behind both `check` and `resolveAmbient`, so availability and resolution cannot disagree. */
@@ -96,10 +96,11 @@ export function createOAuthConfig(deps: {
 	): Promise<boolean> => {
 		const storedAccounts = stored?.type === "oauth" && Array.isArray(stored.accounts) ? stored.accounts : [];
 		const effectiveEnvironment = environment ?? (await claudeEnvironment(ctx));
-		const accountCount = storedAccounts.length + Object.keys(effectiveEnvironment).length;
+		const environmentTokenCount = Object.values(effectiveEnvironment).filter(Boolean).length;
+		const accountCount = storedAccounts.length + environmentTokenCount;
 		const lane = deps.readSettings?.()?.tokenInjection ?? (accountCount > 0 ? "oauth-slots" : "ambient");
 		if (lane === "ambient") {
-			if (Object.keys(effectiveEnvironment).length > 0) return true;
+			if (environmentTokenCount > 0) return true;
 			return (deps.readAmbientAuthStatus ?? readAmbientClaudeAuthStatus)(signal);
 		}
 		return accountCount > 0;

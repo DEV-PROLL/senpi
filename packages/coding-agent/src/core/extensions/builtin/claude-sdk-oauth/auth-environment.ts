@@ -2,6 +2,12 @@ function isClaudeOauthTokenName(name: string): boolean {
 	return name === "CLAUDE_CODE_OAUTH_TOKEN" || /^CLAUDE_CODE_OAUTH_TOKEN_\d+$/.test(name);
 }
 
+export function hasRequestOauthToken(requestEnvironment: Record<string, string> | undefined): boolean {
+	return Object.entries(requestEnvironment ?? {}).some(
+		([name, value]) => isClaudeOauthTokenName(name) && Boolean(value),
+	);
+}
+
 export function mergeRequestAuthEnvironment(
 	hostEnvironment: NodeJS.ProcessEnv,
 	requestEnvironment: Record<string, string> | undefined,

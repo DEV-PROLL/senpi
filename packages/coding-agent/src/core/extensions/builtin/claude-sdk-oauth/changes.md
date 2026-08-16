@@ -7,13 +7,15 @@
 - Ambient resolution now returns the effective `CLAUDE_CODE_OAUTH_TOKEN` slot environment with its sentinel auth result.
 - Both resident and non-resident SDK lanes pass only Claude OAuth request slots into account discovery and subprocess environment construction.
 - A request token namespace replaces host token slots instead of joining them, and unrelated request values such as `PATH`, `HOME`, or `NODE_OPTIONS` cannot cross the SDK child boundary.
+- Present-but-empty request token slots remain in the effective environment returned with the synthetic auth marker, so replay cannot substitute a host token.
+- A request token configured with `tokenInjection: "config-dir"` is routed through the non-persisting OAuth environment lane instead of being written into the stable agent credential directory.
 - Explicit ambient injection treats request token slots as configured without probing host Claude login state.
 - Availability probes reject pre-aborted cold callers, keep one in-flight owner across TTL boundaries, and timestamp only settled cache results.
 - Focused coverage drives request tokens through stored/ambient auth, true ambient and resident lanes, real session-title generation, and captured SDK subprocess options while a different host token is present.
 
 ### Why
 
-- Request-scoped environment overrides were accepted during availability resolution but discarded before SDK spawn or widened to unrelated process-control values. The child could inherit or fail over to a host account, cross account and billing boundaries, or accept request-controlled Node startup configuration.
+- Request-scoped environment overrides were accepted during availability resolution but discarded before SDK spawn, widened to unrelated process-control values, or persisted under `config-dir`. Empty masks were also dropped before replay. The child could inherit or fail over to a host account, cross account and billing boundaries, persist a request secret, or accept request-controlled Node startup configuration.
 - A pre-aborted caller could start and populate a shared probe, while a long-running probe could be duplicated once its future cache TTL elapsed.
 
 ### Why an extension could not handle it
@@ -22,7 +24,7 @@
 
 ### Expected merge-conflict zones
 
-- MEDIUM: `oauth-login.ts` around ambient resolution, `auth-lane.ts` plus `auth-environment.ts` around environment/account discovery, and `availability.ts` around in-flight/cache ownership.
+- MEDIUM: `oauth-login.ts` around ambient resolution, `auth-lane.ts` plus `auth-environment.ts` around environment/account discovery, `config-dir-credentials.ts` around persistent managed-account materialization, and `availability.ts` around in-flight/cache ownership.
 - LOW: `stream.ts` and `session-stream.ts` where request options enter the auth lane.
 
 ## 2026-08-14 - Pin native auto-compaction on the SDK lane

@@ -10,7 +10,7 @@
 
 ### Fixed
 
-- Stored OAuth request resolution now refreshes before availability checks, preserves transient request environment through auth derivation and replay, and respects explicit empty environment overrides.
+- Stored OAuth request resolution now refreshes before availability checks, passes transient request environment through both availability and auth derivation, preserves it for replay, and respects explicit empty environment overrides.
 - Ambient-only API-key compatibility adapters can no longer outrank a valid stored OAuth credential.
 
 ### Removed

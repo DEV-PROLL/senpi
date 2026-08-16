@@ -6,7 +6,7 @@
 
 - `resolveProviderAuth()` refreshes expired OAuth credentials before invoking the provider's optional side-effect-free `check`.
 - Sentinel envelopes that represent zero usable accounts can no longer bypass the same availability predicate used by provider catalog checks.
-- Stored OAuth derivation transiently merges request environment into `toAuth()` and returns it for auxiliary replay without persisting request secrets.
+- Stored OAuth derivation transiently merges request environment before both `check()` and `toAuth()`, then returns it for auxiliary replay without persisting request secrets.
 - Explicit empty request environment values mask host values instead of falling back through truthiness.
 - `ApiKeyAuth.ambientOnly` lets compatibility adapters remain fallback-only without changing explicit-key precedence for real dual-auth providers.
 

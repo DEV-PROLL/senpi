@@ -188,18 +188,19 @@ async function resolveStoredOAuth(
 		}
 	}
 
+	const storedEnv = credentialEnvironment(credential);
+	const effectiveEnv = requestEnv ? { ...storedEnv, ...requestEnv } : storedEnv;
+	const effectiveCredential = effectiveEnv ? { ...credential, env: effectiveEnv } : credential;
+
 	if (oauth.check) {
 		try {
-			if (!(await oauth.check({ ctx: authContext, credential, signal }))) return undefined;
+			if (!(await oauth.check({ ctx: authContext, credential: effectiveCredential, signal }))) return undefined;
 		} catch (error) {
 			throw new ModelsError("auth", `OAuth auth check failed for provider ${providerId}`, { cause: error });
 		}
 	}
 
 	try {
-		const storedEnv = credentialEnvironment(credential);
-		const effectiveEnv = requestEnv ? { ...storedEnv, ...requestEnv } : storedEnv;
-		const effectiveCredential = effectiveEnv ? { ...credential, env: effectiveEnv } : credential;
 		return {
 			auth: await oauth.toAuth(effectiveCredential),
 			...(effectiveEnv ? { env: effectiveEnv } : {}),

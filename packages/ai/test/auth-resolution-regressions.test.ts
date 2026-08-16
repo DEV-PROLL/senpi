@@ -4,6 +4,12 @@ import { ModelsError } from "../src/auth/resolve.ts";
 import type { ApiKeyAuth, OAuthAuth } from "../src/auth/types.ts";
 import { createModels } from "../src/models.ts";
 
+function requestToken(environment: unknown): string | undefined {
+	if (typeof environment !== "object" || environment === null || Array.isArray(environment)) return undefined;
+	const value = Object.entries(environment).find(([name]) => name === "REQUEST_TOKEN")?.[1];
+	return typeof value === "string" ? value : undefined;
+}
+
 describe("auth resolution regressions", () => {
 	it("wraps a stored OAuth availability failure with provider context", async () => {
 		const credentials = new InMemoryCredentialStore();
@@ -126,5 +132,53 @@ describe("auth resolution regressions", () => {
 		expect(resolved?.auth.apiKey).toBe("fresh-access");
 		expect(refreshes).toBe(1);
 		expect(checkedAccess).toBe("fresh-access");
+	});
+
+	it("passes the effective request environment to OAuth check and derivation", async () => {
+		const credentials = new InMemoryCredentialStore();
+		await credentials.modify("effective-oauth-env", async () => ({
+			type: "oauth",
+			access: "stored-access",
+			refresh: "stored-refresh",
+			expires: Date.now() + 60_000,
+		}));
+		let checkedToken: string | undefined;
+		let derivedToken: string | undefined;
+		const oauth: OAuthAuth = {
+			name: "Effective OAuth environment",
+			login: async () => {
+				throw new Error("not used");
+			},
+			refresh: async (credential) => credential,
+			check: async ({ credential }) => {
+				checkedToken = requestToken(credential?.env);
+				return checkedToken ? { type: "oauth", source: "request" } : undefined;
+			},
+			toAuth: async (credential) => {
+				derivedToken = requestToken(credential.env);
+				return { apiKey: derivedToken };
+			},
+		};
+		const models = createModels({ credentials });
+		models.setProvider({
+			id: "effective-oauth-env",
+			name: "Effective OAuth environment",
+			auth: { oauth },
+			getModels: () => [],
+			stream: () => {
+				throw new Error("not used");
+			},
+			streamSimple: () => {
+				throw new Error("not used");
+			},
+		});
+
+		const resolved = await models.getAuth("effective-oauth-env", {
+			env: { REQUEST_TOKEN: "request-token" },
+		});
+
+		expect(checkedToken).toBe("request-token");
+		expect(derivedToken).toBe("request-token");
+		expect(resolved?.auth.apiKey).toBe("request-token");
 	});
 });
