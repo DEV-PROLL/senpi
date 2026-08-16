@@ -5,6 +5,8 @@
 ### What changed
 
 - `CombinedAutocompleteProvider` recognizes a prompt-leading `$` run.
+- The editor treats `$` as a built-in symbol autocomplete trigger, so the mixed picker opens on real keystrokes
+  rather than only through direct provider calls.
 - The first `$` token lists canonical `/command` rows before `$skill` rows and filters both with the same query.
 - Selecting a command inserts `/name `; selecting a skill inserts `$name `.
 - A second leading `$` token reopens only known skills, while inline or unknown-prefix dollar text stays literal.
@@ -18,6 +20,7 @@
 ### Expected merge conflict zones
 
 - MEDIUM: `autocomplete.ts` trigger ordering and completion replacement.
+- LOW: `components/editor.ts` default autocomplete trigger characters.
 - LOW: additive `dollar-invocation-autocomplete.ts` and its focused test.
 
 ## 2026-08-14: replay above-viewport growth in the viewport-remap branch
