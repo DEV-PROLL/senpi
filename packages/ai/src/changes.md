@@ -1,5 +1,27 @@
 # AI Source Changes
 
+## 2026-08-16 - Classify gateway 413 body-size rejections as overflow
+
+### What changed and why
+
+- `isContextOverflow` now recognizes gateway HTTP 413 byte-size rejections — "Request body too
+  large", "Request Entity Too Large", `body_too_large`, and "Payload Too Large" — as the same
+  recovery class as Anthropic's native `request_too_large`. Both wordings were captured from a
+  live session whose compaction summarization request exceeded a gateway body limit on every
+  fallback model ([#884](https://github.com/code-yeongyu/senpi/issues/884)).
+- Without the classification, a byte-size rejection never reached input-shrinking recovery: it
+  surfaced as a terminal error and wedged sessions above the compaction threshold.
+
+### Why this cannot be expressed externally
+
+- Overflow classification is the provider-neutral boundary every caller (compaction shrink-retry,
+  agent-session overflow admission) keys off; an extension can only observe the final error.
+
+### Expected merge conflict zones
+
+- LOW: `utils/overflow.ts` pattern list and its header documentation; LOW in
+  `test/overflow.test.ts` where the new cases sit beside existing provider patterns.
+
 ## 2026-08-14 - Harden stored OAuth request derivation
 
 ### What changed and why
