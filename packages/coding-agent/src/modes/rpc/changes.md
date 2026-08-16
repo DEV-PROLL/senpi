@@ -1,5 +1,27 @@
 # changes
 
+## Suppress initial command-surface invalidation events (2026-08-17)
+
+### What changed
+
+- RPC records the initial ordered command digest without publishing `commands_changed`.
+- Later distinct command snapshots still publish once, while identical reload snapshots remain deduplicated.
+- Focused coverage distinguishes baseline initialization from an actual post-bind command-surface change.
+
+### Why
+
+- Discovery sessions already fetch their initial command surface with `get_commands`. Treating that baseline as an
+  invalidation made clients refresh provider discovery, whose new sessions emitted another baseline invalidation and
+  created an unbounded refresh loop.
+
+### Why extension system couldn't handle this
+
+- Baseline establishment and JSONL event emission are owned by the built-in RPC transport.
+
+### Expected merge conflict zones
+
+- LOW: `rpc-command-surface.ts` initial-digest guard and its focused regression.
+
 ## Publish typed command surfaces and invocation events without disturbing MCP inventory (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
 
 ### What changed
