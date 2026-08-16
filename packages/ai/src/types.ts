@@ -10,12 +10,19 @@ import type { OpenAICompletionsOptions } from "./api/openai-completions.ts";
 import type { OpenAIResponsesOptions } from "./api/openai-responses.ts";
 import type { PiMessagesOptions } from "./api/pi-messages.ts";
 import type { Model } from "./model.ts";
-import type { SessionAffinityFormat } from "./openai-responses-compat.ts";
+import type {
+	OpenAIResponsesCompat as BaseOpenAIResponsesCompat,
+	SessionAffinityFormat,
+} from "./openai-responses-compat.ts";
 import type { AssistantMessageDiagnostic } from "./utils/diagnostics.ts";
 import type { AssistantMessageEventStream } from "./utils/event-stream.ts";
 
 export type { Model } from "./model.ts";
-export type { OpenAIResponsesCompat, SessionAffinityFormat } from "./openai-responses-compat.ts";
+export type { SessionAffinityFormat } from "./openai-responses-compat.ts";
+export type OpenAIResponsesCompat = BaseOpenAIResponsesCompat & {
+	/** Whether the model supports message-anchored `additional_tools` input items. Default: false. */
+	supportsAdditionalTools?: boolean;
+};
 export type { AssistantMessageEventStream } from "./utils/event-stream.ts";
 
 export type KnownApi =
@@ -415,6 +422,8 @@ export interface ToolCall {
 	/** Error explaining why an incomplete tool call could not be recovered. */
 	errorMessage?: string;
 	thoughtSignature?: string; // Google-specific: opaque signature for reusing thought context
+	/** OpenAI Responses namespace for calls to dynamically loaded or namespaced tools. */
+	namespace?: string;
 }
 
 /**
@@ -503,6 +512,11 @@ export interface AssistantMessage {
 	deferred?: DeferredHandle;
 	errorMessage?: string;
 	rawStopReason?: string;
+	/**
+	 * Provider indication of whether the model explicitly ended its turn.
+	 * Preserved for debugging and does not currently affect agent control flow.
+	 */
+	endTurn?: boolean;
 	timestamp: number; // Unix timestamp in milliseconds
 }
 
@@ -697,6 +711,7 @@ export interface OpenAICompletionsCompat {
 	/** Whether the provider supports long prompt cache retention (`prompt_cache_retention: "24h"` or Anthropic-style `cache_control.ttl: "1h"`, depending on format). Default: true. */
 	supportsLongCacheRetention?: boolean;
 }
+
 
 /** Compatibility settings for Anthropic Messages-compatible APIs. */
 export interface AnthropicMessagesCompat {

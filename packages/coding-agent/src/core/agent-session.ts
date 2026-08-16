@@ -484,7 +484,7 @@ export type ClearedQueue = {
 };
 
 export interface PromptOptions {
-	/** Whether to expand file-based prompt templates (default: true) */
+	/** Whether to dispatch extension commands and expand skill commands and prompt templates (default: true) */
 	expandPromptTemplates?: boolean;
 	/** Image attachments */
 	images?: ImageContent[];
@@ -3273,7 +3273,7 @@ export class AgentSession {
 
 			if (options?.deliverAs === "nextTurn") {
 				this._pendingNextTurnMessages.push(appMessage);
-			} else if (this.isStreaming) {
+			} else if (this.isStreaming && options?.triggerTurn !== false) {
 				if (options?.deliverAs === "followUp") {
 					this.agent.followUp(appMessage);
 				} else {
@@ -3334,10 +3334,11 @@ export class AgentSession {
 	 *
 	 * @param content User message content (string or content array)
 	 * @param options.deliverAs Delivery mode when streaming: "steer" or "followUp"
+	 * @param options.expandPromptTemplates Whether to dispatch extension commands and expand skill commands and prompt templates. Default: false.
 	 */
 	async sendUserMessage(
 		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
+		options?: { deliverAs?: "steer" | "followUp"; expandPromptTemplates?: boolean },
 	): Promise<void> {
 		const bindingPromptReadiness = this._extensionBindingPromptReadiness;
 		let resolveBindingPromptReadiness: (() => void) | undefined;
@@ -3374,9 +3375,8 @@ export class AgentSession {
 		let finishSessionWork: (() => void) | undefined;
 		let disposition: PromptDisposition | undefined;
 		try {
-			// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
 			await this.prompt(text, {
-				expandPromptTemplates: false,
+				expandPromptTemplates: options?.expandPromptTemplates ?? false,
 				streamingBehavior: options?.deliverAs,
 				images,
 				source: "extension",
@@ -6870,11 +6870,13 @@ export class AgentSession {
 	/**
 	 * Export session to HTML.
 	 * @param outputPath Optional output path (defaults to session directory)
+	 * @param options Optional export presentation settings
 	 * @returns Path to exported file
 	 */
-	async exportToHtml(outputPath?: string): Promise<string> {
-		const configuredThemeName = this.settingsManager.getTheme();
-		const themeName = configuredThemeName && getThemeByName(configuredThemeName) ? configuredThemeName : undefined;
+	async exportToHtml(outputPath?: string, options: { themeName?: string } = {}): Promise<string> {
+		const themeName = [options.themeName, this.settingsManager.getTheme()].find(
+			(candidate) => candidate !== undefined && getThemeByName(candidate) !== undefined,
+		);
 
 		// Create tool renderer if we have an extension runner (for custom tool HTML rendering)
 		const toolRenderer: ToolHtmlRenderer = createToolHtmlRenderer({
