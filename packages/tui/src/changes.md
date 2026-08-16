@@ -1,5 +1,25 @@
 # TUI delta rendering fork changes
 
+## 2026-08-16: add a prompt-leading mixed dollar invocation picker
+
+### What changed
+
+- `CombinedAutocompleteProvider` recognizes a prompt-leading `$` run.
+- The first `$` token lists canonical `/command` rows before `$skill` rows and filters both with the same query.
+- Selecting a command inserts `/name `; selecting a skill inserts `$name `.
+- A second leading `$` token reopens only known skills, while inline or unknown-prefix dollar text stays literal.
+
+### Why
+
+- OmO Desktop and Senpi RPC now expose one mixed command/skill surface; the terminal needs the same invocation
+  affordance without teaching providers a new `$command` execution syntax.
+- Canonical insertion keeps existing slash command dispatch and the shared dollar skill parser authoritative.
+
+### Expected merge conflict zones
+
+- MEDIUM: `autocomplete.ts` trigger ordering and completion replacement.
+- LOW: additive `dollar-invocation-autocomplete.ts` and its focused test.
+
 ## 2026-08-14: replay above-viewport growth in the viewport-remap branch
 
 ### What changed
