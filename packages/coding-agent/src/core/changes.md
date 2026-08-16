@@ -1,5 +1,33 @@
 # changes
 
+## Skip pi.dev catalog overlay for fork-only builtin providers (2026-08-16)
+
+### What changed
+
+- `remote-catalog-provider.ts` exports `FORK_ONLY_BUILTIN_PROVIDERS` (`alibaba-token-plan`, `opengateway`) and
+  `remoteCatalogServesProvider(providerId, catalogBaseUrl?)`.
+- `model-runtime.ts` `create` and `createSync` skip the `withRemoteCatalog` wrap for fork-only builtin providers
+  when the default upstream catalog base URL is in use. A custom `catalogBaseUrl` keeps the wrap, so a fork-owned
+  catalog could serve these providers later.
+
+### Why
+
+- pi.dev is upstream infrastructure and does not serve fork-only provider ids. It answers them with a non-404
+  failure, which surfaced as a chronic `Could not refresh <id>; showing cached models` warning on every
+  model-selector refresh: transient-failure persists never write `lastModified`, so the four-hour freshness
+  throttle never engaged for always-failing providers.
+- Fork-only catalogs are already baked at build time, so skipping the overlay loses nothing.
+
+### Why an extension could not handle it
+
+- The wrap is applied inside `ModelRuntime` construction over the core-owned builtin provider list, before any
+  extension registers providers; extensions cannot unwrap a builtin.
+
+### Expected merge conflict zones
+
+- LOW: `model-runtime.ts` at the two `withRemoteCatalog` wrap sites; `remote-catalog-provider.ts` near the
+  top-level constants.
+
 ## Let a superseding compaction claim pass admission quietly (2026-08-16)
 
 ### What changed
