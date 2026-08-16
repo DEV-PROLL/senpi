@@ -308,6 +308,8 @@ export interface AgentSessionConfig {
 	modelRegistry?: ModelRegistry;
 	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
 	initialActiveToolNames?: string[];
+	/** Configured built-in defaults; fork-native builtin extension tools outside this set are omitted. */
+	defaultToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -679,6 +681,7 @@ export class AgentSession {
 	private _agentDir: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
+	private _defaultToolNames?: Set<string>;
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
@@ -776,6 +779,7 @@ export class AgentSession {
 		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
+		this._defaultToolNames = config.defaultToolNames ? new Set(config.defaultToolNames) : undefined;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -5209,6 +5213,7 @@ export class AgentSession {
 			this._applyExtensionBindings(this._extensionRunner);
 			this.syncPromptCacheSafeWaitEnv();
 			await this._extensionRunner.emit(this._sessionStartEvent);
+			this._enforceConfiguredDefaultTools();
 			await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 		} finally {
 			if (this._extensionBindingPromptReadiness === bindingPromptReadiness) {
@@ -5564,6 +5569,26 @@ export class AgentSession {
 		return this._fallbackValidationWarnings;
 	}
 
+	private _isBuiltinExtensionPath(path: string): boolean {
+		return path.startsWith("<builtin:") || /[\\/]senpi-codemode[\\/]/u.test(path);
+	}
+
+	private _enforceConfiguredDefaultTools(): void {
+		const defaultToolNames = this._defaultToolNames;
+		if (defaultToolNames === undefined) return;
+		this.setActiveToolsByName(
+			this.getActiveToolNames().filter((name) => {
+				if (defaultToolNames.has(name)) return true;
+				const entry = this._toolDefinitions.get(name);
+				return (
+					entry !== undefined &&
+					!this._isBuiltinExtensionPath(entry.sourceInfo.path) &&
+					entry.sourceInfo.source !== "builtin"
+				);
+			}),
+		);
+	}
+
 	private _refreshToolRegistry(options?: {
 		activeToolNames?: string[];
 		includeAllExtensionTools?: boolean;
@@ -5577,8 +5602,13 @@ export class AgentSession {
 			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
+		const defaultToolNames = this._defaultToolNames;
+		const isConfiguredBuiltinTool = (tool: (typeof registeredTools)[number]): boolean =>
+			(tool.sourceInfo.source !== "builtin" && !this._isBuiltinExtensionPath(tool.sourceInfo.path)) ||
+			defaultToolNames === undefined ||
+			defaultToolNames.has(tool.definition.name);
 		const allCustomTools = [
-			...registeredTools,
+			...registeredTools.filter(isConfiguredBuiltinTool),
 			...this._customTools.map((definition) => ({
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),

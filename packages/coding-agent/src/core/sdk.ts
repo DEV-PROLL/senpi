@@ -301,6 +301,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
+	const sessionDefaultToolNames =
+		options.tools === undefined && options.noTools === undefined ? configuredDefaultToolNames : undefined;
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
 	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
@@ -425,6 +427,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		modelRuntime,
 		modelRegistry,
 		initialActiveToolNames,
+		defaultToolNames: sessionDefaultToolNames,
 		allowedToolNames,
 		excludedToolNames,
 		extensionRunnerRef,
