@@ -42,6 +42,9 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | [`/llama`](llama-cpp.md) | Download, load, and unload llama.cpp router models |
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
+| `/reasoning [on\|off]` | Show or toggle reasoning for the current model |
+| `/efforts [level]` | Show or set reasoning effort (graded models only) |
+| `/fast [on\|off]` | Toggle fast mode (OpenAI Codex models, persisted per model) |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
@@ -62,6 +65,22 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/keybindings` | Open your `keybindings.json` in `$EDITOR` (seeded with current bindings when missing) and reload it live |
 | `/changelog` | Display version history |
 | `/quit`, `/exit` | Quit senpi |
+
+### Reasoning and Fast Mode Commands
+
+**`/reasoning [on|off]`** shows or toggles reasoning. Behavior adapts to the active model:
+
+- Models without reasoning support are told plainly.
+- Always-on models reject `/reasoning off`.
+- On/off-only and graded models toggle normally.
+
+`/reasoning on` restores the effort level you last used for that model. No-arg shows current status.
+
+**`/efforts [minimal|low|medium|high|xhigh|max]`** sets the reasoning effort ladder for graded models. On/off-only models are directed to use `/reasoning` instead. `xhigh` and `max` appear only when the model supports them. No-arg shows current effort and available levels.
+
+**`/fast [on|off]`** toggles OpenAI Codex fast mode (`service_tier: "priority"`). The choice is remembered per model and survives restarts. No-arg toggles. Non-Codex models are told fast mode is unavailable. If the active model selection pins `:priority` via a favorite decorator, `/fast off` is blocked and explains why.
+
+All three commands work over RPC and headless (no selector opened, status sent as text notifications).
 
 ## Message Queue
 

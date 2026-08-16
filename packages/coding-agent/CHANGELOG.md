@@ -44,6 +44,14 @@
 ### Added
 
 - Each model now remembers its own reasoning level and service tier. Cycling favorites (ctrl+p) or switching models restores the level you last used for that model, persisted across restarts via the new `modelThinkingLevels` and `modelServiceTiers` settings. Model patterns also accept a service-tier decorator (`provider/id:priority`) alongside the existing `:level` form ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- `/reasoning [on|off]` shows or toggles reasoning for the current model, with behavior tailored to the model's capability class: models without reasoning support, always-on models, on/off-only models, and fully graded models each get a specific response. `/reasoning on` restores the level you last used for that model ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- `/efforts [minimal|low|medium|high|xhigh|max]` shows or sets the reasoning effort ladder for graded models. On/off-only models are told to use `/reasoning` instead; models without reasoning support are informed plainly. Both commands work headless and over RPC ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- `/fast [on|off]` now persists per model. The choice survives restarts via the `modelServiceTiers` setting; `off` records an explicit `"auto"` so it overrides a catalog-inherited priority tier. A `-fast` catalog variant and its base model share one entry, preventing contradictory preferences ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `model_changed` event emitted on every active-model change (any source), carrying the model object, the post-switch thinking level, and the change source ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `service_tier_changed` event emitted when the effective service tier or fast-mode state changes ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `get_state` now includes `serviceTier` and `fastMode` fields reflecting what the next request would carry ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `set_fast_mode` / `get_fast_mode` commands for toggling and reading fast mode over the protocol, with per-model persistence and the same error semantics as `/fast` ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
+- RPC `set_thinking_level` with `scope: "turn"` now validates the requested level against the active model before applying it; a rejected request leaves the session level unchanged ([#894](https://github.com/code-yeongyu/senpi/pull/894)).
 
 ### Changed
 
