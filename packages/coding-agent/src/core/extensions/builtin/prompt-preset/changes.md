@@ -1,5 +1,27 @@
 # prompt-preset Extension Changes
 
+## Grok 4.6 preset (2026-08-17)
+
+### What changed
+
+- `grok-4.6.ts`: new full-core preset (builder `corePrompt` override, precedent: kimi-k3.ts / gpt-5.6.ts). Direct-implementer posture — NOT a clone of the grok-4.5 CEO/orchestrator preset. Tuned per the Grok 4.6 launch field guide (Eric Zakariasson, 2026-08-12): binding declared-stop-condition contract in the routing line (the guide's core finding — define what done means or the model decides), no intensity/exhortation language (measured as a no-op on this model), a real-surface verification loop as the highest-leverage rule (walk the user paths the change touches; for hard-to-inspect output: capture current state → list what is wrong → fix only those), a shared-piece rule against its observed repeated-block habit, and information-dense reporting (dense summaries, quiet through small changes, one short update at meaningful phase changes). Reuses `buildTestDisciplineSection()`; no `buildFileOperationsTuning()` because `apply_patch` is gated to gpt-* ids and never activates on Grok.
+- `presets.ts`: `hasGrok46Signal`/`isGrok46Model` matcher (the 4.5 regex with a 4.6 minor version), checked before the 4.5 matcher; `resolvePresetName` branch + `buildPreset` case.
+- `settings.ts`: `"grok-4.6"` joins `PromptPresetName` and `VALID_PRESETS`.
+- `docs/settings.md`: preset value list gains `grok-4.5` (was missing) and `grok-4.6`.
+- `test/suite/prompt-presets-grok-4-6.test.ts`: id-shape resolution, non-routing of 4.5/4.3/4.20/3/build/4.60, 4.5-vs-4.6 distinctness, settings force, and a catalog sweep asserting every built-in Grok 4.6 entry (xai, opencode, openrouter, vercel-ai-gateway) resolves.
+
+### Why
+
+- Grok 4.6 shipped in four built-in catalogs with no preset, falling back to the untuned dynamic prompt; the 4.5 matcher deliberately excludes it. The 4.5 CEO posture is a fork experiment specific to that model; 4.6 is positioned (and field-tested) as an all-round daily driver, so it gets an implementer core.
+
+### Why extension system couldn't handle this differently
+
+- Content-only addition inside this builtin; follows the established corePrompt preset architecture.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `grok-4.6.ts` is fork-only; `presets.ts`/`settings.ts` touch shared lists — trivial adjacent-line conflicts if upstream adds presets.
+
 ## Presets yield to user system-prompt overrides (2026-08-17)
 
 ### What changed
