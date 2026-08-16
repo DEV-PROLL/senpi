@@ -28,6 +28,43 @@
 - LOW: `model-runtime.ts` at the two `withRemoteCatalog` wrap sites; `remote-catalog-provider.ts` near the
   top-level constants.
 
+## Let a superseding compaction claim pass admission quietly (2026-08-16)
+
+### What changed
+
+- New private `AgentSession._hasSupersedingCompactionClaim()`: true when a live (non-aborted)
+  compaction or auto-compaction controller is currently claimed. Compaction claims are
+  last-writer-wins (`_claimCompactionController` aborts the incumbent), so after an admission
+  compaction loses that race, the winner owns the route and re-gates admission itself.
+- The guard joins `_isCompactionOnCooldown()` / `_isCompactionDelegated()` at the admission-family
+  `RequiredCompactionError` sites: `_enforceCompactionBeforeProvider`,
+  `_enforceFinalProviderAdmission`, `_checkCompaction`'s inline overflow throw,
+  `_revalidateScheduledContinuationAdmission`, and the pre-retry compaction gate
+  ([#886](https://github.com/code-yeongyu/senpi/issues/886)).
+- User-initiated aborts keep throwing: `abortCompaction()` aborts the claimed controllers without
+  registering a replacement, so no live claimant exists and the guard stays false.
+
+### Why
+
+- On a resumed over-threshold session, a queued extension message (goal continuation, ttsr nudge)
+  races the user's own prompt; both run pre-prompt admission and the loser's compaction is aborted
+  mid-flight. Treating that abort like a failure threw
+  `Context remains above the compaction threshold because compaction did not complete` at the
+  losing caller (surfaced as `Runtime error (send_message)`), even though a newer compaction was
+  actively running. This mirrors the breaker-cooldown (#531) and SDK-delegation (#874) precedent:
+  when compaction cannot complete for a transient/ownership reason, admission proceeds and
+  overflow recovery remains the safety net.
+
+### Why an extension could not handle it
+
+- Required-compaction admission and the compaction controller registry are private `AgentSession`
+  state; extensions observe only the thrown error.
+
+### Expected merge conflict zones
+
+- `agent-session.ts` around `_isCompactionOnCooldown` and each guarded
+  `throw new RequiredCompactionError()` site.
+
 ## Admit provider-owned compaction lanes (2026-08-14)
 
 ### What changed
