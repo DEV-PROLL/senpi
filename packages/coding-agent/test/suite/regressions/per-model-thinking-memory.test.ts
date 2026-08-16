@@ -1,6 +1,6 @@
-import { fauxAssistantMessage, type Model, type ThinkingLevelMap } from "@earendil-works/pi-ai";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fauxAssistantMessage, type Model, type ThinkingLevelMap } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "../harness.ts";
 
@@ -22,10 +22,7 @@ function makeOnOffOnly(model: Model<string>): void {
 
 async function readSettings(harness: Harness): Promise<Record<string, unknown>> {
 	await harness.settingsManager.flush();
-	return JSON.parse(readFileSync(join(harness.tempDir, "agent", "settings.json"), "utf8")) as Record<
-		string,
-		unknown
-	>;
+	return JSON.parse(readFileSync(join(harness.tempDir, "agent", "settings.json"), "utf8")) as Record<string, unknown>;
 }
 
 describe("per-model thinking memory", () => {

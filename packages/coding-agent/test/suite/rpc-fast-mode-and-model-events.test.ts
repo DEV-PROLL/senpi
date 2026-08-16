@@ -327,6 +327,12 @@ describe("RPC fast-mode commands and model/tier events", () => {
 		expect(onEvents[0].fastMode).toBe(true);
 		expect(onEvents[0].tier).toBe("priority");
 
+		// when: the same state is requested again
+		await rpc.send({ type: "set_fast_mode", enabled: true });
+
+		// then: a no-op must not emit — clients treat the event as a real state change
+		expect(rpc.events().filter((event) => event.type === "service_tier_changed")).toHaveLength(1);
+
 		// when
 		await rpc.send({ type: "set_fast_mode", enabled: false });
 

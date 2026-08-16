@@ -285,6 +285,35 @@ describe("/fast per-model service-tier persistence", () => {
 		});
 	});
 
+	it("keeps the remembered auto after switching away from the model and back", async () => {
+		// given
+		// The memory is per model, so a model switch must RE-DERIVE it for the incoming model
+		// rather than forget it: switching away and back in one session would otherwise leave the
+		// remembered "auto" unable to suppress the catalog-inherited priority, silently re-sending
+		// the tier `/fast off` turned off.
+		const harness = await createCodexHarness({
+			models: [{ id: BASE_MODEL_ID }, { id: "gpt-5.5" }],
+			serviceTier: "priority",
+			settings: { modelServiceTiers: { [BASE_KEY]: "auto" } },
+		});
+		await harness.session.bindExtensions({});
+		const runner = harness.getExtensionRunner();
+		expect(harness.session.isFastModeActive()).toBe(false);
+		const beforeSwitch = { model: BASE_MODEL_ID };
+		expect(await runner.emitBeforeProviderRequest(beforeSwitch)).toBe(beforeSwitch);
+
+		// when: away to another model and back
+		const other = harness.getModel("gpt-5.5");
+		expect(other).toBeDefined();
+		await harness.session.setSessionModel(other!);
+		await harness.session.setSessionModel(harness.getModel());
+
+		// then: the model's own memory is back in force, so nothing reaches the wire
+		expect(harness.session.serviceTier).toBe("priority");
+		const afterSwitch = { model: BASE_MODEL_ID };
+		expect(await runner.emitBeforeProviderRequest(afterSwitch)).toBe(afterSwitch);
+	});
+
 	it("keeps a config-time priority pin on the wire despite a remembered auto", async () => {
 		// given
 		// The pin is resolved BEFORE session_start (as a `--models provider/id:priority` scope is at

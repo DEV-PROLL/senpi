@@ -146,12 +146,9 @@ export async function applyFastMode(ctx: FastModeContext, enabled: boolean): Pro
 		// The pin outranks the memory, so writing "auto" here would be a silent no-op on the wire.
 		const message = "Fast mode is fixed by the active model selection's priority tier.";
 		ctx.notify(message, "info");
-		const prior = getRememberedServiceTier(
-			SettingsManager.create(ctx.cwd, ctx.agentDir, { projectTrusted: ctx.isProjectTrusted() }),
-			ctx.modelRegistry,
-			model,
-		);
-		return { enabled: true, applied: false, recordedTier: (prior ?? PRIORITY_TIER) as ServiceTier, message };
+		// The pin keeps the model on priority no matter what the memory says, so that is the honest
+		// tier to report; nothing was written, and no caller reads this field when `applied` is false.
+		return { enabled: true, applied: false, recordedTier: PRIORITY_TIER, message };
 	}
 
 	const settingsManager = SettingsManager.create(ctx.cwd, ctx.agentDir, { projectTrusted: ctx.isProjectTrusted() });
@@ -217,8 +214,8 @@ export default function serviceTierExtension(pi: ExtensionAPI): void {
 	 * session. Lives only to suppress an inherited priority when the user turns fast off in
 	 * the SAME session: the host's resolved `ctx.serviceTier` is recomputed on model switch,
 	 * not on a memory write, so without this an in-session `/fast off` (no model swap) would
-	 * keep sending `priority` until a restart. Scoped to the active base key (cleared on
-	 * model_select when the key changes) so it never leaks across models.
+	 * keep sending `priority` until a restart. Scoped to the active base key (re-derived on
+	 * model_select for the incoming model) so it never leaks across models.
 	 */
 	let liveMemoryTier: ServiceTier | undefined;
 	let liveMemoryKey: string | undefined;
@@ -257,13 +254,16 @@ export default function serviceTierExtension(pi: ExtensionAPI): void {
 		liveMemoryTier = remembered;
 	});
 
-	pi.on("model_select", () => {
-		// A model switch changes the base key the memory lives under; forget the previous
-		// model's live tier so a stale "auto" cannot suppress a model that legitimately advertises
-		// priority (catalog or a previous session's memory). The host re-resolves `ctx.serviceTier`
-		// on every switch, so this per-key reset keeps parity. `/fast` on the new model repopulates.
-		liveMemoryKey = undefined;
-		liveMemoryTier = undefined;
+	pi.on("model_select", (event, ctx) => {
+		// A model switch changes the base key the memory lives under, so the live tier is RE-DERIVED
+		// for the incoming model instead of merely dropped: dropping it would leave a remembered
+		// "auto" unable to suppress a catalog-inherited priority after switching away and back in one
+		// session, silently re-sending the tier `/fast off` turned off. Per-key scoping is preserved —
+		// each model reads ITS OWN memory, never the previous model's.
+		const settingsManager = SettingsManager.create(ctx.cwd, ctx.agentDir, { projectTrusted: ctx.isProjectTrusted() });
+		const memoryModel = resolveServiceTierMemoryModel(ctx.modelRegistry, event.model);
+		liveMemoryKey = `${memoryModel.provider}/${memoryModel.id}`;
+		liveMemoryTier = getRememberedServiceTier(settingsManager, ctx.modelRegistry, event.model);
 	});
 
 	pi.registerCommand("fast", {

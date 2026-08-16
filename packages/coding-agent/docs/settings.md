@@ -436,9 +436,14 @@ The resolved level is always clamped to what the model actually supports.
 The service tier on outgoing requests is resolved as:
 
 1. A scoped/favorite `:priority` pin
-2. The per-model `modelServiceTiers` memory
-3. The model catalog's `compat.serviceTier`
-4. `openai.serviceTier` (the global OpenAI setting)
+2. The model catalog's `compat.serviceTier`
+3. `openai.serviceTier` (the global OpenAI setting)
+
+The per-model `modelServiceTiers` memory is not part of that resolution: it applies to OpenAI Codex
+models only, through fast mode. It acts as the session-start default for `/fast` (a remembered
+`"priority"` starts the session fast) and as an explicit `"auto"` opt-out of a catalog-inherited
+priority tier, which keeps `service_tier` off the wire. Under a `:priority` pin the memory has no
+effect, because the pin outranks it.
 
 ### Markdown
 
