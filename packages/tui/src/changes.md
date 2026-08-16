@@ -1,6 +1,6 @@
 # TUI delta rendering fork changes
 
-## 2026-08-16: add a prompt-leading mixed dollar invocation picker
+## 2026-08-16: add a prompt-leading mixed dollar invocation picker ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
 
 ### What changed
 

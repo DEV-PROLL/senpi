@@ -7,7 +7,8 @@
 ### Added
 
 - Added a mixed `$` autocomplete surface that groups canonical commands before skills, filters both with one query,
-  inserts the correct `/name` or `$name` syntax, and triggers from real editor input.
+  inserts the correct `/name` or `$name` syntax, and triggers from real editor input
+  ([#909](https://github.com/code-yeongyu/senpi/pull/909)).
 
 ### Changed
 

@@ -5,12 +5,14 @@
 ### Added
 
 - Added `$`-driven skill invocation in the interactive composer plus typed, ordered RPC command/skill candidate,
-  update, and accepted-invocation events for desktop clients.
+  update, and accepted-invocation events for desktop clients
+  ([#909](https://github.com/code-yeongyu/senpi/pull/909)).
 
 ### Fixed
 
 - Preserved prompt indentation and literal dollar text around explicit skill tokens, bounded adversarial token parsing
-  and RPC text inputs, and prevented transformed prompt templates from emitting stale invocation metadata.
+  and RPC text inputs, and prevented transformed prompt templates from emitting stale invocation metadata
+  ([#909](https://github.com/code-yeongyu/senpi/pull/909)).
 
 ### New Features
 

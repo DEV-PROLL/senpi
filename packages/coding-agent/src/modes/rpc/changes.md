@@ -1,6 +1,6 @@
 # changes
 
-## Publish typed command surfaces and invocation events without disturbing MCP inventory (2026-08-16)
+## Publish typed command surfaces and invocation events without disturbing MCP inventory (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
 
 ### What changed
 

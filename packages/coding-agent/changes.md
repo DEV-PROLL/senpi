@@ -1,6 +1,6 @@
 # Local fork changes
 
-## 2026-08-17 — Dollar invocation and RPC contract regression suites
+## 2026-08-17 — Dollar invocation and RPC contract regression suites ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
 
 ### What changed
 

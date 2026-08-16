@@ -1,6 +1,6 @@
 # changes
 
-## Expand explicit dollar skill tokens and publish invocation metadata (2026-08-16)
+## Expand explicit dollar skill tokens and publish invocation metadata (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
 
 ### What changed
 
