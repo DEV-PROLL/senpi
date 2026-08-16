@@ -25,7 +25,7 @@ describe("Editor dollar autocomplete trigger", () => {
 				return { lines, cursorLine, cursorCol };
 			},
 		};
-		const editor = new Editor(new TuiMainScreen(new VirtualTerminal(80, 24)), defaultEditorTheme, (text) => text);
+		const editor = new Editor(new TuiMainScreen(new VirtualTerminal(80, 24)), defaultEditorTheme);
 		editor.setAutocompleteProvider(provider);
 
 		editor.handleInput("$deb");
