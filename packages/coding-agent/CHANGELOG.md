@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Compaction no longer wedges when providers reject the summarization request for its size. Gateway HTTP 413 body-size rejections now route into the overflow shrink-retry (geometric halving, bounded attempts) and exhaust into the deterministic fallback, the summarization request's turn order is normalized so strict-alternation providers (Gemini's `function call turn must come immediately after a user turn` 400) accept it, and request sizing counts CJK text at its real token density so Korean-heavy sessions stop sending oversized first attempts. Previously every fallback-chain model failed the same oversized request and the session stuck on `Compaction rejected: compaction generator failed` ([#884](https://github.com/code-yeongyu/senpi/issues/884)).
 - Multi-session RPC no longer amplifies a streaming answer into hundreds of megabytes of stdout, which made
   clients freeze and then render walls of text at once. Each `message_update` carried a full cumulative snapshot,
   so a single 96-second answer measured 140 MB on the wire (median line 72 KB, peak 95 KB) for 12 KB of assistant
