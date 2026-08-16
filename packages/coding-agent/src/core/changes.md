@@ -1,5 +1,26 @@
 # changes
 
+## JSONC settings parser, precedence, and write ownership (2026-08-16)
+
+### What changed
+
+- `settings-manager.ts` now strips line/block comments only outside quoted strings, removes trailing commas before object/array closers, and delegates final validation to `JSON.parse`; no dependency was added.
+- File storage selects `settings.jsonc` before `settings.json`, retains that selected path for writes, and reselects only at create/reload/project-trust load boundaries.
+- Selected-source metadata includes path, format, reason, and scope; `AgentSession` forwards reload decisions and replays startup decisions once to each host subscriber.
+
+### Why
+
+- A per-write filesystem probe could redirect a session to another flavor after load, while JSON-only parsing prevented maintainable commented settings. Selection boundaries make precedence and write ownership explicit.
+
+### Why an extension could not do this
+
+- Parsing and locking happen before extensions load, and the session emitter is the shared transport boundary used by RPC and TUI hosts.
+
+### Expected merge conflict zones
+
+- HIGH: `settings-manager.ts` path/storage/load/save sections.
+- MEDIUM: `agent-session.ts` event and subscription lifecycle.
+
 ## Model and service-tier session events (2026-08-16)
 
 ### What changed

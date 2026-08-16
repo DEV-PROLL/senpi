@@ -3897,6 +3897,10 @@ export class InteractiveMode {
 				this.showHighReasoningWarning(event);
 				break;
 
+			case "settings_source_selected":
+				this.showSettingsSourceSelected(event);
+				break;
+
 			case "message_start":
 				if (event.message.role === "custom") {
 					this.addMessageToChat(event.message);
@@ -5205,6 +5209,10 @@ export class InteractiveMode {
 		);
 		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
 		this.ui.requestRender();
+	}
+
+	showSettingsSourceSelected(event: Extract<AgentSessionEvent, { type: "settings_source_selected" }>): void {
+		this.showStatus(`Settings: ${path.basename(event.path)} (${event.format.toUpperCase()})`);
 	}
 
 	showHighReasoningWarning(event: { modelId: string; provider: string; thinkingLevel: ThinkingLevel }): void {

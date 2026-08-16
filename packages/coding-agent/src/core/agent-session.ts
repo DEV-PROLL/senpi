@@ -162,7 +162,7 @@ import {
 } from "./session-manager.ts";
 import { generateSessionTitle, sessionTitleRetryPolicy, shouldSkipSessionTitle } from "./session-title-generator.ts";
 import { SessionWorkBarrier } from "./session-work-barrier.ts";
-import type { SettingsManager } from "./settings-manager.ts";
+import type { SettingsManager, SettingsSourceSelection } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinking-levels.ts";
@@ -268,6 +268,7 @@ export type AgentSessionEvent =
 	| SystemPromptChangeEvent
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
 	| { type: "high_reasoning_warning"; modelId: string; provider: string; thinkingLevel: ThinkingLevel }
+	| ({ type: "settings_source_selected" } & SettingsSourceSelection)
 	/** Active model changed; `thinkingLevel` is the level in force AFTER the switch. */
 	| { type: "model_changed"; model: Model<any>; thinkingLevel: ThinkingLevel; source: ModelSelectSource }
 	/** Effective service tier or fast-mode state changed. */
@@ -632,6 +633,7 @@ export class AgentSession {
 
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
+	private _unsubscribeSettingsSource?: () => void;
 	private _eventListeners: AgentSessionEventListener[] = [];
 	private _agentEventQueue: Promise<void> = Promise.resolve();
 	/**
@@ -770,6 +772,9 @@ export class AgentSession {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
+		this._unsubscribeSettingsSource = this.settingsManager.subscribeToSourceSelection((source) => {
+			this._emit({ type: "settings_source_selected", ...source });
+		});
 		const noModelFallback =
 			config.resourceLoader.getExtensions().runtime.flagValues.get("no-model-fallback") === true ||
 			envValue("NO_FALLBACK") === "1";
@@ -2184,6 +2189,9 @@ export class AgentSession {
 	 */
 	subscribe(listener: AgentSessionEventListener): () => void {
 		this._eventListeners.push(listener);
+		for (const source of this.settingsManager.getSelectedSettingsSources()) {
+			listener({ type: "settings_source_selected", ...source });
+		}
 
 		// Return unsubscribe function for this specific listener
 		return () => {
@@ -2236,6 +2244,8 @@ export class AgentSession {
 			"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
 		);
 		this._disconnectFromAgent();
+		this._unsubscribeSettingsSource?.();
+		this._unsubscribeSettingsSource = undefined;
 		this._eventListeners = [];
 		cleanupSessionResources(this.sessionId);
 	}
