@@ -3615,7 +3615,7 @@ export class AgentSession {
 		if (opts.invalidateCompaction && this._modelSelectionChangesContext(previousModel, model)) {
 			this._invalidateCompactionForModelSelection();
 		}
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(opts.ephemeralThinkingLevel);
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(model, opts.ephemeralThinkingLevel);
 		this.agent.state.model = model;
 		this.agent.abortServerSideFallback =
 			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
@@ -3692,7 +3692,7 @@ export class AgentSession {
 		}
 		this._probeBackScheduler.cancel("manual-model-change");
 		this._retryFallback.clearForManualModelChange(next.model);
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.thinkingLevel);
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.model, next.thinkingLevel);
 
 		this.agent.state.model = next.model;
 		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
@@ -3721,7 +3721,7 @@ export class AgentSession {
 	/**
 	 * Set thinking level.
 	 * Clamps to model capabilities based on available thinking levels.
-	 * Saves to session and settings only if the level actually changes.
+	 * Persistent calls refresh per-model memory; session entries and events are emitted only on change.
 	 */
 	setThinkingLevel(level: ThinkingLevel): void {
 		this._setThinkingLevel(level, true);
@@ -3747,6 +3747,13 @@ export class AgentSession {
 		}
 
 		this.agent.state.thinkingLevel = effectiveLevel;
+
+		if (updateGlobalDefault) {
+			const model = this.model;
+			if (model) {
+				this.settingsManager.setModelThinkingLevel(model.provider, model.id, effectiveLevel);
+			}
+		}
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
@@ -3825,11 +3832,13 @@ export class AgentSession {
 		return !!this.model?.reasoning;
 	}
 
-	private _getThinkingLevelForModelSwitch(explicitLevel?: ThinkingLevel): ThinkingLevel {
-		if (explicitLevel !== undefined) {
-			return explicitLevel;
-		}
-		return this.settingsManager.getDefaultThinkingLevel() ?? this.thinkingLevel ?? DEFAULT_THINKING_LEVEL;
+	private _getThinkingLevelForModelSwitch(model: Model<Api>, explicitLevel?: ThinkingLevel): ThinkingLevel {
+		const requestedLevel =
+			explicitLevel ??
+			this.settingsManager.getModelThinkingLevel(model.provider, model.id) ??
+			this.settingsManager.getDefaultThinkingLevel() ??
+			DEFAULT_THINKING_LEVEL;
+		return this._clampThinkingLevel(requestedLevel, getSupportedThinkingLevels(model) as ThinkingLevel[]);
 	}
 
 	private _clampThinkingLevel(level: ThinkingLevel, availableLevels: ThinkingLevel[]): ThinkingLevel {
