@@ -244,6 +244,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	let model = options.model;
 	let initialModelProvenance = options.initialModelProvenance;
+	let initialResolvedThinkingLevel: ThinkingLevel | undefined;
 	let modelFallbackMessage: string | undefined;
 
 	// If session has data, try to restore model from it
@@ -269,6 +270,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 		model = result.model;
 		initialModelProvenance = result.provenance;
+		initialResolvedThinkingLevel = result.thinkingLevel;
 		if (!model) {
 			modelFallbackMessage = formatNoModelsAvailableMessage();
 		} else if (modelFallbackMessage) {
@@ -276,16 +278,16 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 	}
 
-	let thinkingLevel = options.thinkingLevel;
+	let thinkingLevel = options.thinkingLevel ?? initialResolvedThinkingLevel;
 
-	// If session has data, restore thinking level from it
-	if (thinkingLevel === undefined && hasExistingSession) {
-		thinkingLevel = hasThinkingEntry
-			? (existingSession.thinkingLevel as ThinkingLevel)
-			: (settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL);
+	// An exact-session thinking entry wins over settings. Otherwise resolve the selected model's
+	// remembered level before falling back to the global seed for never-seen models.
+	if (thinkingLevel === undefined && hasExistingSession && hasThinkingEntry) {
+		thinkingLevel = existingSession.thinkingLevel as ThinkingLevel;
 	}
-
-	// Fall back to settings default
+	if (thinkingLevel === undefined && model) {
+		thinkingLevel = settingsManager.getModelThinkingLevel(model.provider, model.id);
+	}
 	if (thinkingLevel === undefined) {
 		thinkingLevel = settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
 	}

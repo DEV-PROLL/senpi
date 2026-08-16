@@ -13,7 +13,6 @@ import {
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
-import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ServiceTier } from "./extensions/builtin/service-tier.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -742,7 +741,8 @@ export type InitialModelProvenance = "cli" | "scoped" | "settings" | "provider-d
 
 export interface InitialModelResult {
 	model: Model<Api> | undefined;
-	thinkingLevel: ThinkingLevel;
+	/** Present only when the selected CLI/scoped pattern explicitly pinned a level. */
+	thinkingLevel: ThinkingLevel | undefined;
 	fallbackMessage: string | undefined;
 	provenance: InitialModelProvenance;
 }
@@ -765,19 +765,9 @@ export async function findInitialModel(options: {
 	defaultThinkingLevel?: ThinkingLevel;
 	modelRuntime: ModelRuntime;
 }): Promise<InitialModelResult> {
-	const {
-		cliProvider,
-		cliModel,
-		scopedModels,
-		isContinuing,
-		defaultProvider,
-		defaultModelId,
-		defaultThinkingLevel,
-		modelRuntime,
-	} = options;
+	const { cliProvider, cliModel, scopedModels, isContinuing, defaultProvider, defaultModelId, modelRuntime } = options;
 
 	let model: Model<Api> | undefined;
-	let thinkingLevel: ThinkingLevel = DEFAULT_THINKING_LEVEL;
 
 	// 1. CLI args take priority
 	if (cliProvider && cliModel) {
@@ -793,7 +783,7 @@ export async function findInitialModel(options: {
 		if (resolved.model) {
 			return {
 				model: resolved.model,
-				thinkingLevel: DEFAULT_THINKING_LEVEL,
+				thinkingLevel: resolved.thinkingLevel,
 				fallbackMessage: undefined,
 				provenance: "cli",
 			};
@@ -804,7 +794,7 @@ export async function findInitialModel(options: {
 	if (scopedModels.length > 0 && !isContinuing) {
 		return {
 			model: scopedModels[0].model,
-			thinkingLevel: scopedModels[0].thinkingLevel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+			thinkingLevel: scopedModels[0].thinkingLevel,
 			fallbackMessage: undefined,
 			provenance: "scoped",
 		};
@@ -815,10 +805,7 @@ export async function findInitialModel(options: {
 		const found = modelRuntime.getModel(defaultProvider, defaultModelId);
 		if (found && modelRuntime.hasConfiguredAuth(found.provider)) {
 			model = found;
-			if (defaultThinkingLevel) {
-				thinkingLevel = defaultThinkingLevel;
-			}
-			return { model, thinkingLevel, fallbackMessage: undefined, provenance: "settings" };
+			return { model, thinkingLevel: undefined, fallbackMessage: undefined, provenance: "settings" };
 		}
 	}
 
@@ -838,7 +825,7 @@ export async function findInitialModel(options: {
 			if (match) {
 				return {
 					model: match,
-					thinkingLevel: DEFAULT_THINKING_LEVEL,
+					thinkingLevel: undefined,
 					fallbackMessage: undefined,
 					provenance: "provider-default",
 				};
@@ -848,7 +835,7 @@ export async function findInitialModel(options: {
 		// If no default found, use first available
 		return {
 			model: availableModels[0],
-			thinkingLevel: DEFAULT_THINKING_LEVEL,
+			thinkingLevel: undefined,
 			fallbackMessage: undefined,
 			provenance: "first-available",
 		};
@@ -857,7 +844,7 @@ export async function findInitialModel(options: {
 	// 5. No model found
 	return {
 		model: undefined,
-		thinkingLevel: DEFAULT_THINKING_LEVEL,
+		thinkingLevel: undefined,
 		fallbackMessage: undefined,
 		provenance: "first-available",
 	};
