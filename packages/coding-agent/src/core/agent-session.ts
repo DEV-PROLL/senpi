@@ -4636,7 +4636,9 @@ export class AgentSession {
 			const compacted = await this._runPrePromptCompaction(assistantMessage, skipAbortedCheck, inlineReason);
 			if (compacted) return true;
 		}
-		if (this._isCompactionOnCooldown() || this._isCompactionDelegated()) return false;
+		if (this._isCompactionOnCooldown() || this._isCompactionDelegated() || this._hasSupersedingCompactionClaim()) {
+			return false;
+		}
 		throw new RequiredCompactionError();
 	}
 
@@ -4679,6 +4681,7 @@ export class AgentSession {
 
 		const compacted = await this._runPrePromptCompaction(lastAssistantMessage, false, "pre_prompt");
 		if (!compacted && this._isCompactionDelegated()) return;
+		if (!compacted && this._hasSupersedingCompactionClaim()) return;
 		if (!compacted && !isOversized() && this._isCompactionOnCooldown()) return;
 		if (!compacted || isOversized()) {
 			throw new RequiredCompactionError();
@@ -4791,7 +4794,7 @@ export class AgentSession {
 				this._restoreAgentMessagesFromSession();
 				this._incrementMessageRevision();
 			}
-			if (!compacted && inlineReason && !this._isCompactionDelegated()) {
+			if (!compacted && inlineReason && !this._isCompactionDelegated() && !this._hasSupersedingCompactionClaim()) {
 				throw new RequiredCompactionError();
 			}
 			return compacted;
@@ -4865,6 +4868,18 @@ export class AgentSession {
 	private _isCompactionOnCooldown(): boolean {
 		const state = this._compactionLifecycle.state;
 		return state.status === "failed" && state.rejectionCause === "circuit-breaker";
+	}
+
+	/**
+	 * Compaction claims are last-writer-wins: a newer admission aborts the
+	 * incumbent controller (_claimCompactionController). When the failed attempt
+	 * lost that race, a live claimant now owns the route and re-gates admission
+	 * itself, so the loser must not surface RequiredCompactionError (issue #886).
+	 * A user abort leaves no live claimant behind and keeps throwing.
+	 */
+	private _hasSupersedingCompactionClaim(): boolean {
+		const claimant = this._compactionAbortController ?? this._autoCompactionAbortController;
+		return claimant !== undefined && !claimant.signal.aborted;
 	}
 
 	private _isCompactionDelegated(): boolean {
@@ -4952,7 +4967,9 @@ export class AgentSession {
 
 		const compacted = await this._runPrePromptCompaction(this._findLastAssistantMessage(), true, "pre_prompt");
 		if (!compacted) {
-			if (this._isCompactionOnCooldown() || this._isCompactionDelegated()) return;
+			if (this._isCompactionOnCooldown() || this._isCompactionDelegated() || this._hasSupersedingCompactionClaim()) {
+				return;
+			}
 			throw new RequiredCompactionError();
 		}
 		this._scheduledContinuationRecompacted = true;
@@ -6333,7 +6350,12 @@ export class AgentSession {
 			shouldCompact(contextTokens, model.contextWindow, compactionSettings)
 		) {
 			const preRetryCompaction = await this._runPrePromptCompaction(message, true, "threshold", true, true);
-			if (!preRetryCompaction && !this._isCompactionOnCooldown() && !this._isCompactionDelegated()) {
+			if (
+				!preRetryCompaction &&
+				!this._isCompactionOnCooldown() &&
+				!this._isCompactionDelegated() &&
+				!this._hasSupersedingCompactionClaim()
+			) {
 				const attempt = this._retryAttempt;
 				this._retryAttempt = 0;
 				this._resetHintTierState();
