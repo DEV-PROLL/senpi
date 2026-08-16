@@ -58,7 +58,7 @@ import {
 } from "./custom-capability.ts";
 import { createRpcEventOutputBuffer } from "./event-output-buffer.ts";
 import { buildRpcCommandsForSession, createCommandsChangedEvent, rpcCommandListDigest } from "./rpc-command-surface.ts";
-import { rpcMessageLengthError } from "./rpc-input-validation.ts";
+import { rpcCommandShapeError, rpcMessageLengthError } from "./rpc-input-validation.ts";
 import type {
 	RpcAuthProvider,
 	RpcCommand,
@@ -1167,6 +1167,13 @@ export function createRpcConnectionHandler(
 					`Failed to parse command: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
 				),
 			);
+			await waitForRpcBackpressure();
+			return;
+		}
+
+		const shapeError = rpcCommandShapeError(parsed);
+		if (shapeError) {
+			output(error(undefined, "parse", shapeError));
 			await waitForRpcBackpressure();
 			return;
 		}

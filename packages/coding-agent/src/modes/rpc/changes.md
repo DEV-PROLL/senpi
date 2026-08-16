@@ -11,9 +11,12 @@
 - The classic and routed connection handler explicitly type-checks `skill_invocation` and `command_invocation` before
   forwarding them through the existing event buffer.
 - Prompt, steer, and follow-up text fields reject inputs above one million characters before session dispatch.
+- Classic and multi-session hosts reject valid non-object JSON with parse-style responses instead of dereferencing it
+  as a command, and both enforce a 16 MiB JSONL record ceiling that discards one oversized record through LF before
+  resuming framing.
 - Regression coverage proves candidate ordering, update deduplication, post-interception command classification,
-  bounded input handling, and skill event delivery while `get_loaded_surfaces` keeps the same revealed MCP inventory
-  before and after invocation.
+  bounded text and record handling, malformed-command rejection, JSONL resynchronization, and skill event delivery
+  while `get_loaded_surfaces` keeps the same revealed MCP inventory before and after invocation.
 
 ### Why
 
@@ -29,7 +32,8 @@
 ### Expected merge conflict zones
 
 - LOW: additive event types in `rpc-types.ts`, `rpc-command-surface.ts`, and `rpc-command-invocation.ts`.
-- MEDIUM: `connection-handler.ts` owns command-surface invalidation, input bounds, and typed event forwarding.
+- MEDIUM: `connection-handler.ts`, `rpc-mode.ts`, `multi-session-host.ts`, `rpc-input-validation.ts`, and `jsonl.ts`
+  own command-surface invalidation, input/framing bounds, and typed event forwarding.
 - LOW: focused RPC contract tests plus `rpc-loaded-surfaces.test.ts` inventory assertions.
 
 ## Settings source selection event (2026-08-16)

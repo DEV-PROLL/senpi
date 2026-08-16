@@ -13,6 +13,8 @@
 - Preserved prompt indentation and literal dollar text around explicit skill tokens, bounded adversarial token parsing
   and RPC text inputs, and prevented transformed prompt templates from emitting stale invocation metadata
   ([#909](https://github.com/code-yeongyu/senpi/pull/909)).
+- Rejected non-object RPC commands without crashing and bounded JSONL records with discard-through-newline
+  resynchronization after oversized input ([#909](https://github.com/code-yeongyu/senpi/pull/909)).
 
 ### New Features
 

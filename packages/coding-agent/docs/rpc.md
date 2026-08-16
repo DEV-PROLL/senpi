@@ -97,6 +97,9 @@ This matters for clients:
 - Split records on `\n` only
 - Accept optional `\r\n` input by stripping a trailing `\r`
 - Do not use generic line readers that treat Unicode separators as newlines
+- Send JSON objects only; valid JSON primitives and arrays receive a parse-style error response
+- Keep each encoded input record at or below 16,777,216 characters. Oversized records receive one parse-style error,
+  are discarded through the next LF, and do not desynchronize following records
 
 In particular, Node `readline` is not protocol-compliant for RPC mode because it also splits on `U+2028` and `U+2029`, which are valid inside JSON strings.
 

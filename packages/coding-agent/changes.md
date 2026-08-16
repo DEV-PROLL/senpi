@@ -7,6 +7,8 @@
 - Added focused RPC suites for ordered `commands_changed` snapshots, actual post-interception
   `command_invocation` events, bounded prompt/steer/follow-up text, and `skill_invocation`
   delivery without MCP inventory drift.
+- Added classic and multi-session malformed-command regressions plus JSONL record-cap,
+  discard-through-LF resynchronization, and worst-case escaped-message coverage.
 - Expanded the #308 skill-composition suite to cover dollar/slash ordering, unknown and
   duplicate tokens, ordinary dollar text, indentation preservation, token-discovery bounds,
   the five-skill expansion cap, and queued steering/follow-up behavior.
@@ -21,8 +23,9 @@ would otherwise drop the only regression coverage for the fork contract.
 ### Expected merge-conflict zones
 
 - `test/rpc-command-invocation.test.ts`, `test/rpc-commands-changed.test.ts`,
-  `test/rpc-input-validation.test.ts`, and `test/rpc-loaded-surfaces.test.ts` resolve to `ours`;
-  port upstream additions into the retained suites.
+  `test/rpc-input-validation.test.ts`, `test/rpc-jsonl.test.ts`, `test/rpc-multi-session-input.test.ts`,
+  `test/rpc-loaded-surfaces.test.ts`, and `test/suite/regressions/5868-rpc-unknown-command-id.test.ts`
+  resolve to `ours`; port upstream additions into the retained suites.
 - `test/suite/regressions/308-skill-composition.test.ts` resolves case by case while preserving
   every dollar/slash, indentation, cap, and queueing assertion.
 - TUI dollar autocomplete tests resolve to `ours` unless upstream adds equivalent `$` behavior.
