@@ -246,6 +246,78 @@ export function parseSkillBlock(text: string): ParsedSkillBlock | null {
 	};
 }
 
+export type SkillInvocationSyntax = "dollar" | "slash";
+
+export interface SkillInvocationToken {
+	name: string;
+	syntax: SkillInvocationSyntax;
+	start: number;
+	end: number;
+	position: "inline" | "leading";
+}
+
+const LEADING_SKILL_INVOCATION_PATTERN = /^(?:\/skill:([a-zA-Z][a-zA-Z0-9:_-]*)|\$([a-zA-Z][a-zA-Z0-9:_-]*))(?=\s|$)/;
+const INLINE_DOLLAR_SKILL_INVOCATION_PATTERN = /(^|\s)\$skill:([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
+
+/**
+ * Find explicit skill invocation tokens without treating ordinary inline dollar
+ * prose (for example `$HOME`) as executable.
+ *
+ * Leading runs accept `/skill:name`, `$name`, and `$skill:name`. Outside the
+ * leading run only the desktop's explicit `$skill:name` token is executable.
+ */
+export function parseSkillInvocationTokens(text: string): SkillInvocationToken[] {
+	const tokens: SkillInvocationToken[] = [];
+	let cursor = 0;
+
+	while (cursor < text.length) {
+		while (cursor < text.length && /\s/.test(text[cursor]!)) cursor++;
+		const match = text.slice(cursor).match(LEADING_SKILL_INVOCATION_PATTERN);
+		if (!match) break;
+		const syntax: SkillInvocationSyntax = match[1] ? "slash" : "dollar";
+		const dollarName = match[2];
+		const name = match[1] ?? (dollarName?.startsWith("skill:") ? dollarName.slice("skill:".length) : dollarName);
+		if (!name) break;
+		tokens.push({
+			name,
+			syntax,
+			start: cursor,
+			end: cursor + match[0].length,
+			position: "leading",
+		});
+		cursor += match[0].length;
+	}
+
+	INLINE_DOLLAR_SKILL_INVOCATION_PATTERN.lastIndex = cursor;
+	for (const match of text.matchAll(INLINE_DOLLAR_SKILL_INVOCATION_PATTERN)) {
+		const start = (match.index ?? 0) + match[1].length;
+		tokens.push({
+			name: match[2],
+			syntax: "dollar",
+			start,
+			end: start + `$skill:${match[2]}`.length,
+			position: "inline",
+		});
+	}
+
+	return tokens;
+}
+
+function removeSkillInvocationTokens(text: string, tokens: readonly SkillInvocationToken[]): string {
+	let cursor = 0;
+	let result = "";
+	for (const token of tokens) {
+		result += text.slice(cursor, token.start);
+		cursor = token.end;
+	}
+	result += text.slice(cursor);
+	return result
+		.split("\n")
+		.map((line) => line.replace(/[ \t]{2,}/g, " ").trimEnd())
+		.join("\n")
+		.trim();
+}
+
 /** Session-specific events that extend the core AgentEvent */
 type AgentSessionAgentEndEvent = Extract<AgentEvent, { type: "agent_end" }> & { willRetry: boolean };
 
@@ -255,6 +327,14 @@ export type AgentSessionEvent =
 	| { type: "agent_settled" }
 	| { type: "session_abort" }
 	| { type: "continuation_error"; errorMessage: string }
+	| {
+			type: "skill_invocation";
+			skills: readonly {
+				name: string;
+				path: string;
+				syntax: SkillInvocationSyntax;
+			}[];
+	  }
 	| {
 			type: "queue_update";
 			steering: readonly string[];
@@ -3031,70 +3111,79 @@ export class AgentSession {
 	}
 
 	/**
-	 * Expand a leading run of skill commands (/skill:name /skill:other args) to their full content.
-	 * Returns the expanded text, or the original text if the first skill command is not found.
-	 * Emits errors via extension runner if file reads fail or the expansion cap is reached.
+	 * Expand explicit skill invocations to their full content.
+	 * Leading runs accept slash and dollar syntax; inline expansion is limited to
+	 * the desktop's explicit `$skill:name` token so ordinary dollar prose stays literal.
 	 */
 	private _expandSkillCommand(text: string): string {
-		if (!text.startsWith("/skill:")) return text;
+		const invocationTokens = parseSkillInvocationTokens(text);
+		if (invocationTokens.length === 0) return text;
 
 		const skills = this.resourceLoader.getSkills().skills;
 		const expandedSkillNames = new Set<string>();
 		const skillBlocks: SkillInvocationPromptSkill[] = [];
-		let tokenStart = 0;
+		const invocationMetadata: Array<{
+			name: string;
+			path: string;
+			syntax: SkillInvocationSyntax;
+		}> = [];
+		const removedTokens: SkillInvocationToken[] = [];
 
-		while (tokenStart < text.length) {
-			let tokenEnd = tokenStart;
-			while (tokenEnd < text.length && !/\s/.test(text[tokenEnd]!)) {
-				tokenEnd += 1;
-			}
-			const token = text.slice(tokenStart, tokenEnd);
-			if (!token.startsWith("/skill:")) break;
-
-			const skillName = token.slice(7);
-			const skill = skills.find((candidate) => candidate.name === skillName);
-			if (!skill) break; // Unknown skills and everything after them remain literal text.
-
-			if (!expandedSkillNames.has(skill.name)) {
-				if (skillBlocks.length >= MAX_SKILL_EXPANSIONS_PER_PROMPT) {
-					this._extensionRunner.emitError({
-						extensionPath: "skill:expansion",
-						event: "skill_expansion",
-						error: `Expanded at most ${MAX_SKILL_EXPANSIONS_PER_PROMPT} skills; remaining skill commands were left as literal text.`,
-					});
-					break;
-				}
-
-				try {
-					const content = readFileSync(skill.filePath, "utf-8");
-					const body = stripFrontmatter(content).trim();
-					skillBlocks.push({
-						name: skill.name,
-						filePath: skill.filePath,
-						baseDir: skill.baseDir,
-						body,
-					});
-					expandedSkillNames.add(skill.name);
-				} catch (err) {
-					this._extensionRunner.emitError({
-						extensionPath: skill.filePath,
-						event: "skill_expansion",
-						error: err instanceof Error ? err.message : String(err),
-					});
-					return text; // Return the original prompt when any skill file cannot be read.
-				}
+		for (const token of invocationTokens) {
+			const skill = skills.find((candidate) => candidate.name === token.name);
+			if (!skill) {
+				if (token.position === "leading") break;
+				continue;
 			}
 
-			tokenStart = tokenEnd;
-			while (tokenStart < text.length && /\s/.test(text[tokenStart]!)) {
-				tokenStart += 1;
+			if (skillBlocks.length >= MAX_SKILL_EXPANSIONS_PER_PROMPT) {
+				this._extensionRunner.emitError({
+					extensionPath: "skill:expansion",
+					event: "skill_expansion",
+					error: `Expanded at most ${MAX_SKILL_EXPANSIONS_PER_PROMPT} skills; remaining skill commands were left as literal text.`,
+				});
+				break;
+			}
+
+			removedTokens.push(token);
+			if (expandedSkillNames.has(skill.name)) {
+				this._extensionRunner.emitError({
+					extensionPath: skill.filePath,
+					event: "skill_expansion",
+					error: `Skipped duplicate skill invocation: ${skill.name}`,
+				});
+				continue;
+			}
+
+			try {
+				const content = readFileSync(skill.filePath, "utf-8");
+				const body = stripFrontmatter(content).trim();
+				skillBlocks.push({
+					name: skill.name,
+					filePath: skill.filePath,
+					baseDir: skill.baseDir,
+					body,
+				});
+				expandedSkillNames.add(skill.name);
+				invocationMetadata.push({
+					name: skill.name,
+					path: skill.filePath,
+					syntax: token.syntax,
+				});
+			} catch (err) {
+				this._extensionRunner.emitError({
+					extensionPath: skill.filePath,
+					event: "skill_expansion",
+					error: err instanceof Error ? err.message : String(err),
+				});
+				return text; // Return the original prompt when any skill file cannot be read.
 			}
 		}
 
 		if (skillBlocks.length === 0) return text;
-
-		const args = text.slice(tokenStart).trim();
-		return formatSkillInvocationPrompt(skillBlocks, args);
+		const userRequest = removeSkillInvocationTokens(text, removedTokens);
+		this._emit({ type: "skill_invocation", skills: invocationMetadata });
+		return formatSkillInvocationPrompt(skillBlocks, userRequest);
 	}
 
 	/**

@@ -1,5 +1,34 @@
 # changes
 
+## Expand explicit dollar skill tokens and publish invocation metadata (2026-08-16)
+
+### What changed
+
+- Skill composition accepts a leading `$name` run alongside `/skill:name`.
+- The desktop composer's explicit `$skill:name` token expands even when it appears inline, while bare inline
+  dollar tokens such as `$HOME` remain literal.
+- Successful expansion emits one ordered `skill_invocation` session event containing each resolved skill's name,
+  source path, and `dollar` or `slash` syntax.
+- Dollar and slash tokens share the existing duplicate, unknown, file-read, and five-skill cap behavior.
+
+### Why
+
+- OmO Desktop serializes a selected skill chip as `$skill:name`; treating it as prose made the new desktop picker
+  look successful while the runtime silently ignored the invocation.
+- TUI autocomplete needs a concise leading `$name` form without making arbitrary inline shell variables executable.
+- RPC consumers need typed invocation metadata instead of reparsing the expanded user prompt.
+
+### Why an extension could not handle it
+
+- Prompt, steering, follow-up, RPC, and interactive entry paths must share one pre-provider expansion contract.
+- The session event union and prompt expansion boundary are core-owned and run before extensions can safely
+  normalize every entry surface.
+
+### Expected merge-conflict zones
+
+- `agent-session.ts` skill command expansion helpers and `AgentSessionEvent`.
+- Skill-composition regressions under `test/suite/regressions/308-skill-composition.test.ts`.
+
 ## Skip pi.dev catalog overlay for fork-only builtin providers (2026-08-16)
 
 ### What changed
