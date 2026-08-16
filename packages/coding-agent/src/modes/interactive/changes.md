@@ -1,5 +1,24 @@
 # changes
 
+## Show the selected settings source (2026-08-16)
+
+### What changed
+
+- Interactive mode renders `settings_source_selected` as a concise dim status such as `Settings: settings.jsonc (JSONC)`.
+- Rendering is event-driven: one startup/reload selection produces one status update, with no polling or input-path emission.
+
+### Why
+
+- JSONC precedence is otherwise invisible, especially when both settings flavors exist.
+
+### Why this cannot be expressed externally
+
+- The event can arrive before extension UI binding and the built-in transcript/status lifecycle owns startup rendering.
+
+### Expected merge conflict zones
+
+- LOW: one additive `handleEvent` case and helper in `interactive-mode.ts`.
+
 ## Favorite persist merges by pattern resolution, keeping `:level` / `:priority` decorators (2026-08-16)
 
 Supersedes "Favorite patterns survive a persist while providers are unavailable (2026-08-12)": the

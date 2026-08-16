@@ -1,5 +1,29 @@
 # changes
 
+## JSONC settings selection and source events (2026-08-16)
+
+### What changed
+
+- Settings loading now accepts dependency-free JSONC syntax (line/block comments outside strings and trailing commas) in both `settings.jsonc` and existing settings content.
+- Each global/project config directory prefers `settings.jsonc` over `settings.json`; the selected path remains the write target until the next explicit reload selection.
+- `AgentSessionEvent` gained `settings_source_selected` with `{ path, format, reason, scope }`. Current selections replay once to newly attached host listeners, and reload selections publish through the normal session emitter.
+- The config-reload builtin watches and validates both settings filenames with the same parser.
+
+### Why
+
+- Users need commented settings without losing plain-JSON compatibility, deterministic precedence, or having a UI write silently create the other file flavor.
+- RPC and interactive hosts need an authoritative source decision instead of inferring it from filesystem state.
+
+### Why an extension could not do this
+
+- Settings path selection, parse-before-runtime, merge-before-write, and session listener attachment all occur in core before an extension can replace them. The built-in config watcher also owns reload admission and validation.
+
+### Expected merge conflict zones
+
+- HIGH: `core/settings-manager.ts` around path resolution, storage locking, load/reload, and merge-before-write parsing.
+- MEDIUM: `core/agent-session.ts` event union, subscription replay, and disposal.
+- LOW: additive host handling under `modes/rpc/` and `modes/interactive/`, plus config-reload filename allowlists/validation.
+
 ## Unified lockfile staleness policy across auth and settings storage (2026-08-16)
 
 ### What changed

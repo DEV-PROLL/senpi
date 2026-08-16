@@ -527,6 +527,15 @@ export interface RpcHighReasoningWarningEvent {
 	thinkingLevel: ThinkingLevel;
 }
 
+/** Emitted when startup or reload selects an existing settings file. */
+export interface RpcSettingsSourceSelectedEvent {
+	type: "settings_source_selected";
+	path: string;
+	format: "jsonc" | "json";
+	reason: "explicit-jsonc" | "json-only";
+	scope: "global" | "project";
+}
+
 /**
  * Emitted after the session's active model changed, with the thinking level in force AFTER
  * the switch (per-model memory, a favorite's pinned level, or the clamped previous level).

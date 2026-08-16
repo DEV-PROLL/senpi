@@ -1,5 +1,24 @@
 # changes
 
+## Settings source selection event (2026-08-16)
+
+### What changed
+
+- Classic and multi-session RPC now receive the additive `settings_source_selected` session event with `{ path, format, reason, scope }` at startup/rebind and after settings reload selection.
+- The public RPC type surface documents the event; existing session forwarding and routing remain unchanged.
+
+### Why
+
+- Headless clients need to know whether JSONC won precedence and which path subsequent settings writes target.
+
+### Why the extension system could not handle this
+
+- The source is selected before extension binding, while RPC framing/routing is host-owned.
+
+### Expected merge conflict zones
+
+- LOW: additive event typing in `rpc-types.ts`; event forwarding uses the existing unfiltered session subscription.
+
 ## Model/tier events, fast-mode commands, and turn-scope validation (2026-08-16)
 
 ### What changed
