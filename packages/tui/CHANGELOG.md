@@ -6,6 +6,9 @@
 
 ### Added
 
+- Added a mixed `$` autocomplete surface that groups canonical commands before skills, filters both with one query,
+  inserts the correct `/name` or `$name` syntax, and triggers from real editor input.
+
 ### Changed
 
 ### Fixed
