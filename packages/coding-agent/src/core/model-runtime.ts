@@ -55,7 +55,7 @@ import {
 	resolveConfiguredModelHeaders,
 	validateExtensionProvider,
 } from "./provider-composer.ts";
-import { withRemoteCatalog } from "./remote-catalog-provider.ts";
+import { remoteCatalogServesProvider, withRemoteCatalog } from "./remote-catalog-provider.ts";
 import { RuntimeCredentials } from "./runtime-credentials.ts";
 
 // The product's identity must ride outgoing requests. This lives here because the AI package
@@ -203,7 +203,7 @@ export class ModelRuntime implements Models {
 		const providers = builtinProviderCatalog
 			.builtinProviders()
 			.map((provider) =>
-				provider.refreshModels
+				provider.refreshModels || !remoteCatalogServesProvider(provider.id, options.catalogBaseUrl)
 					? provider
 					: withRemoteCatalog(provider, options.catalogBaseUrl, builtinModelDataGeneratedAt),
 			);
@@ -250,7 +250,11 @@ export class ModelRuntime implements Models {
 				: new InMemoryCodingAgentModelsStore());
 		const providers = builtinProviderCatalog
 			.builtinProviders()
-			.map((provider) => (provider.refreshModels ? provider : withRemoteCatalog(provider, options.catalogBaseUrl)));
+			.map((provider) =>
+				provider.refreshModels || !remoteCatalogServesProvider(provider.id, options.catalogBaseUrl)
+					? provider
+					: withRemoteCatalog(provider, options.catalogBaseUrl),
+			);
 		const runtime = new ModelRuntime(
 			credentials,
 			config,
