@@ -1,5 +1,22 @@
 # changes
 
+## Model and service-tier session events (2026-08-16)
+
+### What changed
+
+- `AgentSessionEvent` gained `model_changed` (model, post-switch thinking level, `ModelSelectSource`) and `service_tier_changed` (tier, fastMode). Both are emitted from the existing switch seams: `_switchActiveModel`, `_cycleFavoriteModel`, and `setSessionFastMode`.
+- `service_tier_changed` fires only when the effective tier or the fast-mode indicator actually moved (they move independently).
+- New read-only accessors: `cwd` (the value extensions already receive as `ctx.cwd`) and `effectiveServiceTier` (`serviceTier`, promoted to `"priority"` while session fast mode is on — what the wire actually carries).
+
+### Why
+
+- Host surfaces (RPC) had to infer the active model from session entries and could not see tier or fast-mode state at all. Emitting at the switch seams means every path — command, slash command, cycle, fallback, restore — reports the level actually in force afterwards, which per-model memory makes different from the requested level.
+- `effectiveServiceTier` exists so a client can never be shown `fastMode: true` alongside a tier that disagrees with it.
+
+### Why an extension could not handle it
+
+- Model switching, thinking-level clamping, and tier resolution are session-core state transitions; an extension observing `model_select` cannot report the post-clamp level atomically with the switch.
+
 ## /fast per-model service-tier persistence seam (2026-08-16)
 
 ### What changed

@@ -38,6 +38,11 @@ import {
 	type McpControlInventoryRequest,
 } from "../../core/extensions/builtin/mcp/control-inventory.ts";
 import type { McpWireStatusServer, McpWireStatusSnapshot } from "../../core/extensions/builtin/mcp/service-types.ts";
+import {
+	applyFastMode,
+	type FastModeContext,
+	resolveServiceTierMemoryModel,
+} from "../../core/extensions/builtin/service-tier.ts";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -130,6 +135,32 @@ function loadedMcpStatus(server: McpWireStatusServer): RpcMcpServerStatus {
 	if (server.serverInfo !== null) return "connected";
 	if (server.authStatus === "notLoggedIn") return "needs_auth";
 	return "enabled";
+}
+
+/**
+ * Project one session into the wire state shape.
+ *
+ * Shared with `open_session` (session-command-router) so both surfaces answer with the SAME
+ * fields: a second hand-rolled literal silently drifts, which is how `serviceTier`/`fastMode`
+ * would otherwise be missing from an opened session's initial state.
+ */
+export function buildRpcSessionState(session: AgentSession): RpcSessionState {
+	return {
+		model: session.model,
+		thinkingLevel: session.thinkingLevel,
+		serviceTier: session.effectiveServiceTier,
+		fastMode: session.isFastModeActive(),
+		isStreaming: session.isStreaming,
+		isCompacting: session.isCompacting,
+		steeringMode: session.steeringMode,
+		followUpMode: session.followUpMode,
+		sessionFile: session.sessionFile,
+		sessionId: session.sessionId,
+		sessionName: session.sessionName,
+		autoCompactionEnabled: session.autoCompactionEnabled,
+		messageCount: session.messages.length,
+		pendingMessageCount: session.pendingMessageCount,
+	};
 }
 
 function loadedMcpServers(snapshot: McpWireStatusSnapshot): RpcLoadedMcpServer[] {
@@ -650,6 +681,27 @@ export function createRpcConnectionHandler(
 		}
 	};
 
+	/**
+	 * Host capabilities for `applyFastMode`, mirroring what the `/fast` command passes from its
+	 * extension context. The notification is dropped: a command response carries the message
+	 * (`data` on success, `error` on refusal), so a duplicate `extension_ui_request` would be noise.
+	 */
+	const fastModeContext = (): FastModeContext => ({
+		cwd: session.cwd,
+		agentDir: session.agentDir,
+		model: session.model,
+		modelRegistry: session.modelRegistry,
+		serviceTier: session.serviceTier,
+		isProjectTrusted: () => session.settingsManager.isProjectTrusted(),
+		notify: () => {},
+		setSessionModel: async (model) => {
+			if (!session.modelRuntime.hasConfiguredAuth(model.provider)) return false;
+			await session.setSessionModel(model);
+			return true;
+		},
+		setSessionFastMode: (enabled) => session.setSessionFastMode(enabled),
+	});
+
 	// Handle a single command
 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
 		const id = command.id;
@@ -730,23 +782,8 @@ export function createRpcConnectionHandler(
 			// State
 			// =================================================================
 
-			case "get_state": {
-				const state: RpcSessionState = {
-					model: session.model,
-					thinkingLevel: session.thinkingLevel,
-					isStreaming: session.isStreaming,
-					isCompacting: session.isCompacting,
-					steeringMode: session.steeringMode,
-					followUpMode: session.followUpMode,
-					sessionFile: session.sessionFile,
-					sessionId: session.sessionId,
-					sessionName: session.sessionName,
-					autoCompactionEnabled: session.autoCompactionEnabled,
-					messageCount: session.messages.length,
-					pendingMessageCount: session.pendingMessageCount,
-				};
-				return success(id, "get_state", state);
-			}
+			case "get_state":
+				return success(id, "get_state", buildRpcSessionState(session));
 
 			// =================================================================
 			// Model
@@ -786,14 +823,17 @@ export function createRpcConnectionHandler(
 
 			case "set_thinking_level": {
 				if (command.scope === "turn") {
-					session.setSessionThinkingLevel(command.level);
-					if (session.thinkingLevel !== command.level) {
+					// Validate BEFORE mutating: the session clamps an unsupported level to a supported
+					// neighbour, so applying first would leave a REJECTED request's clamped level in
+					// place. A failed command must not change session state.
+					if (!session.getAvailableThinkingLevels().includes(command.level)) {
 						return error(
 							id,
 							"set_thinking_level",
 							`Thinking level ${command.level} is not supported by the active model.`,
 						);
 					}
+					session.setSessionThinkingLevel(command.level);
 				} else {
 					session.setThinkingLevel(command.level);
 				}
@@ -811,6 +851,42 @@ export function createRpcConnectionHandler(
 			case "get_available_thinking_levels":
 				return success(id, "get_available_thinking_levels", {
 					levels: session.getAvailableThinkingLevels(),
+				});
+
+			// =================================================================
+			// Fast mode
+			// =================================================================
+
+			case "set_fast_mode": {
+				if (typeof command.enabled !== "boolean") {
+					return error(id, "set_fast_mode", "set_fast_mode requires a boolean 'enabled' field.");
+				}
+				const model = session.model;
+				if (!model) {
+					return error(id, "set_fast_mode", "No active model.");
+				}
+				// Same entry point as the /fast command: persistence, `-fast` key normalization,
+				// and pin precedence live in applyFastMode, never duplicated here.
+				const result = await applyFastMode(fastModeContext(), command.enabled);
+				if (!result.applied) {
+					// A refusal (non-Codex model, active `:priority` pin, failed model switch) has no
+					// notification channel for a command response, so it is reported as an error
+					// instead of a success that silently did nothing.
+					return error(id, "set_fast_mode", result.message);
+				}
+				const memoryModel = resolveServiceTierMemoryModel(session.modelRegistry, session.model ?? model);
+				return success(id, "set_fast_mode", {
+					enabled: result.enabled,
+					serviceTier: result.recordedTier,
+					provider: memoryModel.provider,
+					modelId: memoryModel.id,
+				});
+			}
+
+			case "get_fast_mode":
+				return success(id, "get_fast_mode", {
+					enabled: session.isFastModeActive(),
+					serviceTier: session.effectiveServiceTier ?? null,
 				});
 
 			// =================================================================

@@ -246,6 +246,8 @@ Response:
   "data": {
     "model": {...},
     "thinkingLevel": "medium",
+    "serviceTier": "priority",
+    "fastMode": true,
     "isStreaming": false,
     "isCompacting": false,
     "steeringMode": "all",
@@ -261,6 +263,8 @@ Response:
 ```
 
 The `model` field is a full [Model](#model) object or `null`. The `sessionName` field is the display name set via `set_session_name`, or omitted if not set.
+
+`serviceTier` is the tier a request would carry right now (`"auto"`, `"flex"`, or `"priority"`), omitted when no tier applies. `fastMode` is `true` when the active model is served at the priority ("fast") tier — either because fast mode is on for this session or because the model selection itself pins `priority`. The two never disagree: whenever `fastMode` is `true`, `serviceTier` is `"priority"`.
 
 #### get_messages
 
@@ -365,8 +369,18 @@ Response:
 {"type": "response", "command": "set_thinking_level", "success": true}
 ```
 
-Pass `"scope": "turn"` to change only the current session level without rewriting the global default. The command
-returns an error when the active model cannot apply the requested level.
+Pass `"scope": "turn"` to change only the current session level without rewriting the model's remembered level. The
+command returns an error when the active model cannot apply the requested level, and a rejected request leaves the
+session level unchanged — a failed `set_thinking_level` never mutates state.
+
+```json
+{
+  "type": "response",
+  "command": "set_thinking_level",
+  "success": false,
+  "error": "Thinking level low is not supported by the active model."
+}
+```
 
 #### cycle_thinking_level
 
@@ -405,6 +419,67 @@ Response:
   }
 }
 ```
+
+### Fast mode
+
+#### set_fast_mode
+
+Turn fast mode (the OpenAI Codex `priority` service tier) on or off for the active model. The choice is remembered
+per model, so a later session on the same model starts the same way; `enabled: false` records an explicit `"auto"`
+so it also overrides a tier inherited from the model catalog.
+
+```json
+{"type": "set_fast_mode", "enabled": true}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "set_fast_mode",
+  "success": true,
+  "data": {
+    "enabled": true,
+    "serviceTier": "priority",
+    "provider": "openai-codex",
+    "modelId": "gpt-5.6-sol"
+  }
+}
+```
+
+`serviceTier` is the tier just recorded for the model (`"priority"` on, `"auto"` off). `provider`/`modelId` identify
+the model the preference was stored under: a `-fast` catalog variant and its base model share one entry, so the
+reported id can be the base model rather than the model that was active.
+
+The command returns an error instead of a silent no-op when the request cannot be applied:
+
+| Situation | `error` |
+|-----------|---------|
+| Active model is not an OpenAI Codex model | `Fast mode is only available for OpenAI Codex models.` |
+| `enabled: false` while the model selection pins `:priority` | `Fast mode is fixed by the active model selection's priority tier.` |
+| `enabled` is not a boolean | `set_fast_mode requires a boolean 'enabled' field.` |
+
+A successful call emits a [`service_tier_changed`](#service_tier_changed) event.
+
+#### get_fast_mode
+
+Read the current fast-mode state.
+
+```json
+{"type": "get_fast_mode"}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "get_fast_mode",
+  "success": true,
+  "data": {"enabled": true, "serviceTier": "priority"}
+}
+```
+
+`serviceTier` is `null` when no tier applies. It matches `get_state.serviceTier`.
 
 ### Queue Modes
 
@@ -1016,6 +1091,42 @@ Events are streamed to stdout as JSON lines during agent operation. Events do no
 | `extension_error` | Extension threw an error |
 | `extension_event` | Capability-gated extension-owned event (`extension_events` clients only) |
 | `loaded_surfaces_changed` | Loaded skills, extensions, or MCP inventory changed; re-read `get_commands` and `get_loaded_surfaces` |
+| `model_changed` | Active model changed (any source), with the thinking level in force afterwards |
+| `service_tier_changed` | Effective service tier or fast-mode state changed |
+
+Event types are additive: a client that does not recognise a type must ignore that record rather than fail. `model_changed`
+and `service_tier_changed` were added after the initial protocol and are safe to ignore.
+
+### model_changed
+
+Emitted after the session's active model changed, whatever caused it: a `set_model` or `cycle_model` command, a slash
+command, a retry fallback, or a session restore.
+
+```json
+{
+  "type": "model_changed",
+  "model": {"provider": "openai-codex", "id": "gpt-5.6-sol", "...": "..."},
+  "thinkingLevel": "xhigh",
+  "source": "cycle"
+}
+```
+
+`model` is a full [Model](#model) object. `thinkingLevel` is the level in force **after** the switch — each model
+remembers its own level, so this is that model's restored level (clamped to what it supports), not the level the
+previous model was using. `source` is one of `"set"`, `"cycle"`, `"restore"`, `"fallback"`, or `"fallback-revert"`.
+
+Clients that previously inferred the active model from `entry_appended` records can consume this instead.
+
+### service_tier_changed
+
+Emitted when the tier requests would carry, or the fast-mode indicator, changes — a `set_fast_mode` command, the
+`/fast` slash command, or a model switch that resolves a different tier.
+
+```json
+{"type": "service_tier_changed", "tier": "priority", "fastMode": true}
+```
+
+`tier` is omitted when no tier applies. The pair matches `get_state.serviceTier` / `get_state.fastMode`.
 
 ### extension_event
 

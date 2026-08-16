@@ -224,6 +224,10 @@ export type AgentSessionEvent =
 	| SystemPromptChangeEvent
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
 	| { type: "high_reasoning_warning"; modelId: string; provider: string; thinkingLevel: ThinkingLevel }
+	/** Active model changed; `thinkingLevel` is the level in force AFTER the switch. */
+	| { type: "model_changed"; model: Model<any>; thinkingLevel: ThinkingLevel; source: ModelSelectSource }
+	/** Effective service tier or fast-mode state changed. */
+	| { type: "service_tier_changed"; tier?: ServiceTier; fastMode: boolean }
 	| {
 			type: "compaction_end";
 			reason: CompactionReason;
@@ -1238,6 +1242,14 @@ export class AgentSession {
 		return this._agentDir;
 	}
 
+	/**
+	 * Working directory this session resolves settings against — the same value extensions
+	 * receive as `ctx.cwd`, so a host surface (RPC) reads project settings identically.
+	 */
+	get cwd(): string {
+		return this._cwd;
+	}
+
 	private async _waitForSettledSessionWork(): Promise<void> {
 		await this._sessionWorkBarrier.waitForSettled(() => this._agentEventQueue);
 	}
@@ -2217,6 +2229,15 @@ export class AgentSession {
 	}
 
 	/**
+	 * The tier a request would carry right now: `serviceTier`, promoted to `"priority"` while
+	 * session fast mode is on (which is exactly what the service-tier extension puts on the
+	 * wire). Reported to clients so `serviceTier` and `fastMode` can never disagree.
+	 */
+	get effectiveServiceTier(): ServiceTier | undefined {
+		return this.isFastModeActive() ? "priority" : this._currentServiceTier;
+	}
+
+	/**
 	 * Session-scoped fast-mode indicator; never persisted, reset on session start.
 	 *
 	 * Turning fast OFF also clears the cached priority tier: `/fast off` writes a remembered
@@ -2226,6 +2247,8 @@ export class AgentSession {
 	 * the user's model selection, not by `/fast`.
 	 */
 	setSessionFastMode(enabled: boolean): void {
+		const previousFastMode = this.isFastModeActive();
+		const previousTier = this._currentServiceTier;
 		this._sessionFastMode = enabled;
 		if (!enabled && this._currentServiceTier === "priority" && this.model?.api === CODEX_RESPONSES_API) {
 			// Only an INHERITED (catalog) priority is cleared. A priority the catalog does not
@@ -2234,6 +2257,19 @@ export class AgentSession {
 				this._currentServiceTier = undefined;
 			}
 		}
+		this._emitServiceTierChangeIfNeeded(previousTier, previousFastMode);
+	}
+
+	/**
+	 * Emit `service_tier_changed` when the effective tier or the fast-mode indicator actually
+	 * moved. Both are observable state for RPC clients (`get_state.serviceTier` / `.fastMode`),
+	 * and they can move independently: a session fast-mode toggle need not change the resolved
+	 * tier, and a model switch can change the tier with fast mode untouched.
+	 */
+	private _emitServiceTierChangeIfNeeded(previousTier: ServiceTier | undefined, previousFastMode: boolean): void {
+		const fastMode = this.isFastModeActive();
+		if (previousTier === this._currentServiceTier && previousFastMode === fastMode) return;
+		this._emit({ type: "service_tier_changed", tier: this.effectiveServiceTier, fastMode });
 	}
 
 	/**
@@ -3651,6 +3687,8 @@ export class AgentSession {
 		}
 
 		const scopedMatch = this._scopedModels.find((sm) => modelsAreEqual(sm.model, model));
+		const previousTier = this._currentServiceTier;
+		const previousFastMode = this.isFastModeActive();
 		this._currentServiceTier = this._resolveServiceTier(model, scopedMatch?.serviceTier);
 
 		if (opts.ephemeralThinkingLevel !== undefined) {
@@ -3660,6 +3698,15 @@ export class AgentSession {
 		}
 
 		this._emitHighReasoningWarningIfNeeded();
+		// Post-switch: the level reported here is the one actually in force (clamped, or restored
+		// from this model's memory), not the level requested for the previous model.
+		this._emit({
+			type: "model_changed",
+			model,
+			thinkingLevel: this.thinkingLevel,
+			source: opts.modelSelectSource,
+		});
+		this._emitServiceTierChangeIfNeeded(previousTier, previousFastMode);
 
 		if (!opts.emitModelSelect) return undefined;
 		return await this._emitModelSelect(model, previousModel, opts.modelSelectSource);
@@ -3715,6 +3762,8 @@ export class AgentSession {
 		this.agent.state.model = next.model;
 		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
 		this.settingsManager.setDefaultModelAndProvider(next.model.provider, next.model.id);
+		const previousTier = this._currentServiceTier;
+		const previousFastMode = this.isFastModeActive();
 		this._currentServiceTier = this._resolveServiceTier(next.model, next.serviceTier);
 
 		// Apply thinking level.
@@ -3722,6 +3771,15 @@ export class AgentSession {
 		// - Undefined favorite model thinking level restores the remembered user preference
 		// setSessionThinkingLevel clamps without replacing that preference.
 		this.setSessionThinkingLevel(thinkingLevel);
+
+		// Post-switch, same contract as _switchActiveModel: the level in force AFTER the cycle.
+		this._emit({
+			type: "model_changed",
+			model: next.model,
+			thinkingLevel: this.thinkingLevel,
+			source: "cycle",
+		});
+		this._emitServiceTierChangeIfNeeded(previousTier, previousFastMode);
 
 		const systemPromptChange = await this._emitModelSelect(next.model, currentModel, "cycle");
 
