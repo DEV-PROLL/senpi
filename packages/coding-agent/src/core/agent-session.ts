@@ -174,6 +174,7 @@ import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapp
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
+const DEFERRED_RETRY_QUEUE_OWNERS = new WeakSet<object>();
 
 // ============================================================================
 // Skill Invocation Formatting and Parsing
@@ -1974,8 +1975,9 @@ export class AgentSession {
 				retryContinuationBlocked = !compactedBeforeRetry && !this._isCompactionDelegated();
 			}
 
-			let retryOutcome: "continued" | "blocked" | "not-handled" = "not-handled";
-			const retryOwnedDeferredQueue = this._retryAttempt > 0 && isProviderTimeoutError(msg);
+			let retryOutcome: "continued" | "blocked" | "not-handled" | "cancelled" = "not-handled";
+			const retryOwnedDeferredQueue = DEFERRED_RETRY_QUEUE_OWNERS.has(this);
+			DEFERRED_RETRY_QUEUE_OWNERS.delete(this);
 			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
 				if (retryableError) {
 					retryOutcome = await this._handleRetryableError(msg);
@@ -1992,7 +1994,11 @@ export class AgentSession {
 			// managed retry owner exhausts its budget, hand that retained queue back
 			// to the normal scheduled-continuation path instead of parking it until
 			// an unrelated later prompt arrives.
-			retryExhaustionAllowsQueuedContinuation = retryOwnedDeferredQueue && retryOutcome === "not-handled";
+			retryExhaustionAllowsQueuedContinuation =
+				!userAbortSuppressedQueuedContinuation &&
+				retryOwnedDeferredQueue &&
+				retryOutcome === "not-handled" &&
+				(msg.stopReason === "error" || msg.stopReason === "aborted");
 
 			if (retryOutcome === "not-handled" && this._retryAttempt > 0 && msg.errorMessage) {
 				const attempt = this._retryAttempt;
@@ -5388,8 +5394,14 @@ export class AgentSession {
 		const finishContinuationWork = this._sessionWorkBarrier.begin();
 		const continueAfterEvent = async (): Promise<void> => {
 			try {
-				await this._continueAgentAfterCurrentRun(options, retryTimeoutMs);
+				const outcome = await this._continueAgentAfterCurrentRun(options, retryTimeoutMs);
+				if (retryContinuation && outcome === "taken-over") {
+					DEFERRED_RETRY_QUEUE_OWNERS.delete(this);
+				}
 			} catch (error) {
+				if (retryContinuation) {
+					DEFERRED_RETRY_QUEUE_OWNERS.delete(this);
+				}
 				const message = error instanceof Error ? error.message : String(error);
 				this._emit({
 					type: "continuation_error",
@@ -6363,7 +6375,7 @@ export class AgentSession {
 	private async _handleRetryableError(
 		message: AssistantMessage,
 		options: { hardErrorFallback?: boolean } = {},
-	): Promise<"continued" | "blocked" | "not-handled"> {
+	): Promise<"continued" | "blocked" | "not-handled" | "cancelled"> {
 		const settings = this.settingsManager.getRetrySettings();
 		if (!settings.enabled) {
 			this._resolveRetry();
@@ -6672,7 +6684,7 @@ export class AgentSession {
 				finalError: "Retry cancelled",
 			});
 			this._resolveRetry();
-			return "not-handled";
+			return "cancelled";
 		}
 		this._retryAbortController = undefined;
 
@@ -6727,6 +6739,11 @@ export class AgentSession {
 			timeoutMs: this.agent.timeoutMs,
 			streamStartTimeoutMs: this.agent.streamStartTimeoutMs,
 		});
+		if (continuation.options.deferQueuedMessages === true) {
+			DEFERRED_RETRY_QUEUE_OWNERS.add(this);
+		} else {
+			DEFERRED_RETRY_QUEUE_OWNERS.delete(this);
+		}
 		this.agent.suppressQueuedMessageDrain();
 		this._scheduleContinuationAfterCurrentEvent(continuation.options, true, continuation.watchdogTimeoutMs);
 
