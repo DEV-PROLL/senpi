@@ -76,6 +76,7 @@ async function runScenario({ name, wire, evidence, secrets, playbook, prompt }) 
 	const token = `qa-cursor-${randomUUID()}`;
 	secrets.push(token);
 	const server = await startRunServer(wire, { expectedAuthorization: `Bearer ${token}` });
+	cleanups.push({ box, server });
 	seedCursorProvider(box, { baseUrl: `http://127.0.0.1:${server.port}`, token });
 	const setup = await playbook(box, server);
 	// `.catch` keeps a failing playbook from surfacing as an unhandled
@@ -96,14 +97,14 @@ async function runScenario({ name, wire, evidence, secrets, playbook, prompt }) 
 }
 
 async function main(cleanups) {
-	const options = parseArgs(process.argv.slice(2));
-	const checks = createChecks("cursor-exec-lifecycle-qa");
+	const options = parseArgs(process.argv.slice(2)),
+		checks = createChecks("cursor-exec-lifecycle-qa");
 	const guard = guardRealAuth();
 	installCleanupHooks();
 	if (process.platform === "win32") throw new Error("This scenario needs a POSIX FIFO gate; run on darwin/linux.");
-	const evidence = evidenceDir(options.evidence);
-	const wire = await loadCursorWire();
-	const secrets = [];
+	const evidence = evidenceDir(options.evidence),
+		wire = await loadCursorWire(),
+		secrets = [];
 
 	// ---- Scenario 1: read lifecycle ------------------------------------
 	const one = await runScenario({
@@ -127,7 +128,6 @@ async function main(cleanups) {
 			};
 		},
 	});
-	cleanups.push(one);
 	const readCloses = one.server.all((e) => e.control === "streamClose" && e.id === READ_ID);
 	const readResults = one.server.all((e) => e.message === "readResult" && e.id === READ_ID);
 	checks.ok("S1 readResult{id} decoded (numeric id)", readResults.length === 1 && readResults[0].idIsNumeric, `frames=${readResults.length}`);
@@ -167,7 +167,6 @@ async function main(cleanups) {
 			};
 		},
 	});
-	cleanups.push(two);
 	const shellHeartbeats = two.server.all((e) => e.control === "heartbeat" && e.id === SHELL_ID);
 	const shellResults = two.server.all((e) => e.message === "shellResult" && e.id === SHELL_ID);
 	const shellCloses = two.server.all((e) => e.control === "streamClose" && e.id === SHELL_ID);

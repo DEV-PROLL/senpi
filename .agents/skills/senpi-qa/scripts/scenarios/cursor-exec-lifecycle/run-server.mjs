@@ -21,6 +21,8 @@ export async function startRunServer(wire, { expectedAuthorization }) {
 	let runWaiters = [];
 	let headersReceipt = null;
 	let streamClosed = null;
+	const sessions = new Set();
+	let closePromise = null;
 
 	const waitForRun = (timeoutMs) =>
 		runStream
@@ -71,6 +73,10 @@ export async function startRunServer(wire, { expectedAuthorization }) {
 			waiter.resolve(stream);
 		}
 	});
+	server.on("session", (session) => {
+		sessions.add(session);
+		session.once("close", () => sessions.delete(session));
+	});
 
 	const port = await new Promise((resolve, reject) => {
 		server.once("error", reject);
@@ -104,11 +110,23 @@ export async function startRunServer(wire, { expectedAuthorization }) {
 			runStream.end();
 		},
 		async close() {
-			try {
-				runStream?.end();
-			} catch {}
-			await new Promise((resolve) => server.close(() => resolve()));
-			for (const session of server.clients ?? []) session.destroy();
+			if (closePromise) return closePromise;
+			closePromise = (async () => {
+				if (runStream && !runStream.closed) runStream.close();
+				for (const session of sessions) session.destroy();
+				await new Promise((resolve, reject) => {
+					if (!server.listening) {
+						resolve();
+						return;
+					}
+					const timer = setTimeout(() => reject(new Error("Cursor QA h2 server did not close within 2000ms")), 2000);
+					server.close(() => {
+						clearTimeout(timer);
+						resolve();
+					});
+				});
+			})();
+			return closePromise;
 		},
 		clientClosed() {
 			return streamClosed ?? Promise.reject(new Error("Run stream never opened"));
