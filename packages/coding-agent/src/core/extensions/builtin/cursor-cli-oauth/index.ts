@@ -2,6 +2,7 @@ import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../../../../config.ts";
 import { AuthStorage } from "../../../auth-storage.ts";
 import type { ExtensionAPI, ProviderModelConfig } from "../../types.ts";
+import { registerCursorCliAccountCommand } from "./account-command.ts";
 import { defaultCursorAgentExecutableDeps, resolveCursorAgentExecutable } from "./executable.ts";
 import { resolveCursorCliModelCatalog, STATIC_CURSOR_CLI_MODELS } from "./models.ts";
 import { CURSOR_CLI_OAUTH_PROVIDER_ID, createCursorCliOauthConfig } from "./oauth-login.ts";
@@ -37,6 +38,10 @@ export function registerCursorCliOauthExtension(pi: ExtensionAPI, deps: CursorCl
 	const readCurrent = deps.readCurrent ?? (async () => store.read(CURSOR_CLI_OAUTH_PROVIDER_ID));
 	const loadSettings = deps.loadSettings ?? loadCursorCliOauthProviderSettingsFromDisk;
 	const resolveExecutable = deps.resolveExecutable ?? defaultResolveExecutable;
+
+	// Todo 21: /cursor-account command plus the reload/shutdown teardown for
+	// this extension generation (minimal additive wiring).
+	registerCursorCliAccountCommand(pi);
 
 	const register = (models: readonly ProviderModelConfig[]): void => {
 		pi.registerProvider(CURSOR_CLI_OAUTH_PROVIDER_ID, {
