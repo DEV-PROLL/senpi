@@ -152,6 +152,30 @@
 - Coverage: `test/suite/reasoning-commands.test.ts` (41 cases) pins every user-facing string verbatim across all four capability classes, plus malformed input (wrong case, extra args, unicode, whitespace-only, `off` as an effort) and a mid-session model switch.
 - Expected merge conflict zones: LOW in `builtin/index.ts` at the import block and the registration array entry after `service-tier`.
 
+## loop-guard: hard escalation uses the existing pre-tool and system-abort APIs (2026-08-17)
+
+- Loop-guard moved to the first builtin slot and now combines its
+  `tool_execution_start` observation with the existing vetoable `tool_call`
+  hook. Two ignored identical-loop reminders arm blocking after the current
+  turn; three blocked repeats claim a shared wake-source lease, show a
+  transcript/UI warning, and interrupt with a system abort. Settlement then
+  triggers a hidden recovery message as a fresh provider user-role turn and
+  releases the lease when that turn starts. Similar/cycle warnings remain
+  non-blocking.
+- The implementation stays extension-only: no `types.ts`, runner, agent-loop,
+  or public extension API changes. Existing error-result and system-abort
+  contracts preserve active Goals; shared wake-source plus continuation-hold
+  events prevent immediate and timer-driven duplicate Goal recovery.
+- Why the registration move is required: `ExtensionRunner.emitToolCall`
+  returns on the first blocker. Repeated calls must be stopped before
+  settings-configured PreToolUse hooks and permission prompts repeat their own
+  work.
+- Coverage: focused loop-guard hard-escalation and Goal-isolation suites,
+  saturation detector coverage, package TypeScript, and real CLI QA.
+- Expected merge conflict zones: MEDIUM in `builtin/index.ts` at the first
+  registration slot; LOW in the loop-guard directory and focused tests; NONE
+  in public APIs or Goal production code.
+
 ## import-repro: guard /ir against mid-run and mid-compaction dispatch (2026-08-09)
 
 - Extension commands now dispatch immediately inside `AgentSession.prompt()` (immediate-extension-commands plan), including while a run is streaming and while compaction is active. `/ir` replaces the live session through `ctx.switchSession()`, which aborts the in-flight turn without confirmation and — during compaction — fire-and-forget aborts the compaction task and disposes the session while that task is still unwinding (`agent-session-runtime.ts` `teardownCurrent` -> `abort()` -> `dispose()`).

@@ -15,7 +15,7 @@
  * shows one operation, so a different one must not run.
  */
 
-import type { AgentEvent, AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentTool, AgentToolCall } from "@earendil-works/pi-agent-core";
 import {
 	type CursorExecHandlers,
 	composeCursorShellCommand,
@@ -27,6 +27,7 @@ import {
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
+import type { ToolCallEvent, ToolCallEventResult } from "./extensions/types.ts";
 
 export interface CursorExecBridgeOptions {
 	/**
@@ -42,8 +43,14 @@ export interface CursorExecBridgeOptions {
 	 * synthesized call never resolves.
 	 */
 	emitEvent?: (event: AgentEvent) => void;
+	/** Run the session's vetoable extension preflight before tool execution. */
+	preflightToolCall?: (event: ToolCallEvent) => Promise<ToolCallEventResult | undefined>;
 	/** Abort signal for in-flight bridge executions (the active run's signal). */
 	getAbortSignal?: () => AbortSignal | undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function errorResult(toolCallId: string, toolName: string, text: string): ToolResultMessage {
@@ -83,15 +90,16 @@ async function executeTool(
 	// a present `undefined` fails schema validation on optional fields even
 	// though omitting the key is valid.
 	const cleanArgs = omitUndefinedCursorArgs(args);
+	const toolCall: AgentToolCall = {
+		type: "toolCall",
+		id: toolCallId,
+		name: toolName,
+		arguments: cleanArgs,
+	};
 
 	let params: unknown;
 	try {
-		params = validateToolArguments(tool, {
-			type: "toolCall",
-			id: toolCallId,
-			name: toolName,
-			arguments: cleanArgs,
-		});
+		params = validateToolArguments(tool, toolCall);
 		if (tool.prepareArguments) {
 			params = tool.prepareArguments(params);
 		}
@@ -101,6 +109,26 @@ async function executeTool(
 
 	options.emitEvent?.({ type: "tool_execution_start", toolCallId, toolName, args: cleanArgs });
 	try {
+		if (!isRecord(params)) {
+			throw new Error(`Tool "${toolName}" prepared non-object arguments`);
+		}
+		const preflight = await options.preflightToolCall?.({
+			type: "tool_call",
+			toolCallId,
+			toolName,
+			input: params,
+		});
+		if (preflight?.block) {
+			const message = preflight.reason || "Tool execution was blocked";
+			options.emitEvent?.({
+				type: "tool_execution_end",
+				toolCallId,
+				toolName,
+				result: { content: [{ type: "text", text: message }], details: undefined },
+				isError: true,
+			});
+			return errorResult(toolCallId, toolName, message);
+		}
 		const result = await tool.execute(toolCallId, params, options.getAbortSignal?.(), undefined);
 		const toolResult: ToolResultMessage = {
 			role: "toolResult",

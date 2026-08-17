@@ -1112,7 +1112,7 @@ export class AgentSession {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
 			this._toolExecutionDepth++;
 			try {
-				const result = await this._emitBeforeToolCallHooks(toolCall, args);
+				const result = await this.preflightToolCall(toolCall, args);
 				if (result?.block) {
 					this._toolExecutionDepth--;
 				}
@@ -1132,11 +1132,7 @@ export class AgentSession {
 		};
 	}
 
-	private async _emitBeforeToolCallHooks(
-		toolCall: AgentToolCall,
-		args: unknown,
-		options: { waitForEventQueue?: boolean } = {},
-	) {
+	async preflightToolCall(toolCall: AgentToolCall, args: unknown, options: { waitForEventQueue?: boolean } = {}) {
 		if (options.waitForEventQueue !== false) {
 			await this._agentEventQueue;
 		}
@@ -2577,7 +2573,7 @@ export class AgentSession {
 			);
 		}
 
-		const beforeResult = await this._emitBeforeToolCallHooks(prepared.toolCall, prepared.args, {
+		const beforeResult = await this.preflightToolCall(prepared.toolCall, prepared.args, {
 			waitForEventQueue: this._toolExecutionDepth === 0,
 		});
 		if (beforeResult?.block) {

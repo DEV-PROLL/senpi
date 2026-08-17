@@ -668,19 +668,26 @@
   (offset/limit kwargs), ls→`ls`, grep→`grep`, write→`write`, shell→`bash` (workingDirectory composed as a
   quoted `cd` prefix; senpi's bash has no cwd kwarg); modern Pi frames map 1:1 (`pi_edit` →
   `edits[{oldText,newText}]`, `pi_grep` flags, `pi_find` → `find`, `pi_ls` → `ls` with `limit`); MCP calls
-  dispatch by tool name. Args are validated with `validateToolArguments` before execution;
-  `tool_execution_start`/`tool_execution_end` events are emitted so live tool cards resolve. `delete`,
-  `diagnostics`, and `mcpApprovalPreflight` handlers are deliberately absent (typed refusals on the wire).
-- `sdk.ts`: constructs the bridge and passes it to the Agent as `cursorExecHandlers`; tools resolve through a
-  late-bound session ref because the session (and its registry) is created after the Agent; lifecycle events
-  ride `agent.emitExternalEvent`.
-- `agent-session.ts`: `getRegisteredTool()` (new) exposes the full registry (builtin + extension tools)
-  because Cursor drives its native tools over the exec channel regardless of the request's advertised set.
+  dispatch by tool name. Args are validated with `validateToolArguments` before execution; every valid call
+  emits `tool_execution_start`, runs the session's vetoable extension `tool_call` preflight (including mutable
+  input and first-block semantics), and emits a matching `tool_execution_end`. Blocked calls return the reason
+  as an in-band error without invoking the tool. `delete`, `diagnostics`, and `mcpApprovalPreflight` handlers
+  are deliberately absent (typed refusals on the wire).
+- `cursor-exec-bridge-session.ts` (new): owns the late-bound session/Agent wiring. Tools resolve through the
+  session's full registry, preflight delegates to `AgentSession.preflightToolCall`, lifecycle events ride
+  `agent.emitExternalEvent`, and the active Agent signal remains the abort source.
+- `sdk.ts`: replaces the inline bridge options with one `createSessionCursorExecBridge(...)` call, reducing the
+  already-large session factory while preserving its post-Agent session-ref assignment.
+- `agent-session.ts`: `getRegisteredTool()` exposes the full registry (builtin + extension tools) because Cursor
+  drives its native tools over the exec channel regardless of the request's advertised set. The existing
+  `_emitBeforeToolCallHooks` implementation is renamed `preflightToolCall`; its event-queue wait guarantees
+  lifecycle correlation is visible before Cursor preflight.
 
 ### Why
 
 - Cursor's protocol executes tools server-drivenly mid-stream; without the bridge every Cursor turn that
-  touches a tool would stall and time out.
+  touches a tool would stall and time out. Without the shared preflight, server-driven calls bypassed extension
+  vetoes such as permission policy and loop-guard hard escalation.
 
 ### Why an extension could not do this
 

@@ -1,5 +1,35 @@
 # goal Extension Changes
 
+## External continuation holds pause Goal monitor recovery until release (2026-08-18)
+
+### What changed
+
+- Goal now subscribes to the shared `continuation_hold_state` event through a
+  focused channel-subscription module. An active source maps to the existing
+  `holdDirectInput("external:<source>")` mechanism; release maps to
+  `resolveDirectInput(..., false)`.
+- Existing terminal-monitor and `wake_source_state` subscriptions moved into
+  the same helper without changing their count or timer semantics.
+
+### Why
+
+- A wake source deliberately schedules periodic Goal continuation while work is
+  live. Loop-guard's post-recovery hard stop needs the opposite contract:
+  preserve the active Goal but prevent every automatic continuation until real
+  input releases ownership.
+
+### Why an extension could not handle it
+
+- The continuation timer and direct-input hold set are private to Goal. A
+  generic event is the narrow boundary that lets another builtin claim and
+  release terminal ownership without importing Goal internals or changing Goal
+  status.
+
+### Expected merge conflict zones
+
+- LOW in `monitor-continuation.ts` channel subscription wiring; LOW in the new
+  `channel-state-subscriptions.ts`; LOW in wake-source tests.
+
 ## Claude SDK OAuth account exhaustion blocks the goal (2026-08-14)
 
 ### What changed
