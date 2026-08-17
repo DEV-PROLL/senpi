@@ -16,7 +16,7 @@ interface IdenticalLoopEpisode {
 	fingerprint: string;
 	toolName: string;
 	admittedNoticeCount: number;
-	activateBlockAfterTurn: boolean;
+	activateBlockAfterAttempt: boolean;
 	blockActive: boolean;
 	blockedCallCount: number;
 	hardStopAnnounced: boolean;
@@ -48,7 +48,7 @@ export class IdenticalLoopEscalation {
 						fingerprint: detection.fingerprint,
 						toolName: detection.toolName,
 						admittedNoticeCount: 0,
-						activateBlockAfterTurn: false,
+						activateBlockAfterAttempt: false,
 						blockActive: false,
 						blockedCallCount: 0,
 						hardStopAnnounced: false,
@@ -56,29 +56,27 @@ export class IdenticalLoopEscalation {
 				}
 				this.episode.admittedNoticeCount++;
 				if (this.episode.admittedNoticeCount >= IDENTICAL_BLOCK_NOTICE_THRESHOLD) {
-					this.episode.activateBlockAfterTurn = true;
+					this.episode.activateBlockAfterAttempt = true;
 				}
 			}
 		}
 	}
 
 	finishTurn(): void {
-		if (this.episode?.activateBlockAfterTurn === true) {
-			this.episode.activateBlockAfterTurn = false;
-			this.episode.blockActive = true;
-		}
 		this.attempts.clear();
 	}
 
 	consumeToolCall(toolCallId: string): IdenticalEscalationDecision {
 		const attempt = this.attempts.get(toolCallId);
 		this.attempts.delete(toolCallId);
-		if (
-			attempt === undefined ||
-			this.episode === undefined ||
-			this.episode.fingerprint !== attempt.signature ||
-			!this.episode.blockActive
-		) {
+		if (attempt === undefined || this.episode === undefined || this.episode.fingerprint !== attempt.signature) {
+			return ALLOW_DECISION;
+		}
+		if (!this.episode.blockActive) {
+			if (this.episode.activateBlockAfterAttempt) {
+				this.episode.activateBlockAfterAttempt = false;
+				this.episode.blockActive = true;
+			}
 			return ALLOW_DECISION;
 		}
 		this.episode.blockedCallCount++;

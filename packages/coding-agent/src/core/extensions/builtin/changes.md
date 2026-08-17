@@ -163,9 +163,9 @@
   releases the lease when that turn starts. Similar/cycle warnings remain
   non-blocking.
 - The implementation stays extension-only: no `types.ts`, runner, agent-loop,
-  AgentSession, or Goal production changes. Existing error-result,
-  system-abort, and `wake_source_state` contracts preserve active Goals and
-  prevent duplicate Goal recovery while loop-guard owns the wake.
+  or public extension API changes. Existing error-result and system-abort
+  contracts preserve active Goals; shared wake-source plus continuation-hold
+  events prevent immediate and timer-driven duplicate Goal recovery.
 - Why the registration move is required: `ExtensionRunner.emitToolCall`
   returns on the first blocker. Repeated calls must be stopped before
   settings-configured PreToolUse hooks and permission prompts repeat their own

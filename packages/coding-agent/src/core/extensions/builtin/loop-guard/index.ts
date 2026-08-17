@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "../../types.ts";
-import { WAKE_SOURCE_STATE_EVENT } from "../monitor-state-event.ts";
+import { CONTINUATION_HOLD_STATE_EVENT, WAKE_SOURCE_STATE_EVENT } from "../monitor-state-event.ts";
 import { detectLoop, NoticeGate } from "./detectors.ts";
 import { IdenticalLoopEscalation } from "./escalation.ts";
 import {
@@ -22,6 +22,7 @@ export default function loopGuardExtension(pi: ExtensionAPI): void {
 	const escalation = new IdenticalLoopEscalation();
 	let pendingRecoveryToolName: string | undefined;
 	let recoveryWakeSourceActive = false;
+	let continuationHoldActive = false;
 
 	const setRecoveryWakeSourceActive = (active: boolean): void => {
 		if (recoveryWakeSourceActive === active) return;
@@ -32,12 +33,22 @@ export default function loopGuardExtension(pi: ExtensionAPI): void {
 		});
 	};
 
+	const setContinuationHoldActive = (active: boolean): void => {
+		if (continuationHoldActive === active) return;
+		continuationHoldActive = active;
+		pi.events?.emit(CONTINUATION_HOLD_STATE_EVENT, {
+			source: LOOP_GUARD_HARD_STOP_WAKE_SOURCE,
+			active,
+		});
+	};
+
 	const reset = (): void => {
 		tracker.reset();
 		gate.reset();
 		escalation.reset();
 		pendingRecoveryToolName = undefined;
 		setRecoveryWakeSourceActive(false);
+		setContinuationHoldActive(false);
 	};
 
 	pi.registerMessageRenderer(LOOP_GUARD_NOTICE_CUSTOM_TYPE, renderLoopGuardNotice);
@@ -56,6 +67,7 @@ export default function loopGuardExtension(pi: ExtensionAPI): void {
 		if (patternChanged) {
 			pendingRecoveryToolName = undefined;
 			setRecoveryWakeSourceActive(false);
+			setContinuationHoldActive(false);
 		}
 		const detection = detectLoop(tracker.records, gate);
 		if (detection === undefined) return;
@@ -89,6 +101,7 @@ export default function loopGuardExtension(pi: ExtensionAPI): void {
 			case "hardStop": {
 				const warning = buildLoopGuardHardStopWarning(decision.toolName, decision.blockedCallCount);
 				setRecoveryWakeSourceActive(true);
+				if (!decision.announce) setContinuationHoldActive(true);
 				if (decision.announce) {
 					pi.sendMessage(
 						{
@@ -117,6 +130,7 @@ export default function loopGuardExtension(pi: ExtensionAPI): void {
 
 	pi.on("agent_start", () => {
 		setRecoveryWakeSourceActive(false);
+		setContinuationHoldActive(false);
 	});
 
 	pi.on("agent_settled", () => {

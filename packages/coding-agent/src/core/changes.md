@@ -674,13 +674,14 @@
   as an in-band error without invoking the tool. `delete`, `diagnostics`, and `mcpApprovalPreflight` handlers
   are deliberately absent (typed refusals on the wire).
 - `cursor-exec-bridge-session.ts` (new): owns the late-bound session/Agent wiring. Tools resolve through the
-  session's full registry, preflight delegates to the existing public `extensionRunner.emitToolCall`, lifecycle
-  events ride `agent.emitExternalEvent`, and the active Agent signal remains the abort source.
+  session's full registry, preflight delegates to `AgentSession.preflightToolCall`, lifecycle events ride
+  `agent.emitExternalEvent`, and the active Agent signal remains the abort source.
 - `sdk.ts`: replaces the inline bridge options with one `createSessionCursorExecBridge(...)` call, reducing the
   already-large session factory while preserving its post-Agent session-ref assignment.
 - `agent-session.ts`: `getRegisteredTool()` exposes the full registry (builtin + extension tools) because Cursor
-  drives its native tools over the exec channel regardless of the request's advertised set. No new session method
-  is required: the existing `extensionRunner` getter is the preflight boundary.
+  drives its native tools over the exec channel regardless of the request's advertised set. The existing
+  `_emitBeforeToolCallHooks` implementation is renamed `preflightToolCall`; its event-queue wait guarantees
+  lifecycle correlation is visible before Cursor preflight.
 
 ### Why
 

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { shouldQueueGoalContinuationAfterAgentEnd } from "../../src/core/extensions/builtin/goal/continuation.ts";
 import { readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
 import { goalStoreRef } from "../../src/core/extensions/builtin/goal/store-ref.ts";
-import type { Goal } from "../../src/core/extensions/builtin/goal/types.ts";
+import { type Goal, isRecord } from "../../src/core/extensions/builtin/goal/types.ts";
 import { buildLoopGuardBlockReason } from "../../src/core/extensions/builtin/loop-guard/notice.ts";
 import { WAKE_SOURCE_STATE_EVENT } from "../../src/core/extensions/builtin/monitor-state-event.ts";
 import {
@@ -50,11 +50,18 @@ describe("loop-guard Goal isolation", () => {
 		vi.useFakeTimers();
 		const notices: string[] = [];
 		const harness = createGoalHarness();
-		const ctx = await makeGoalContext(notices, "thread-loop-guard-system-abort");
+		const ctx = await makeGoalContext(notices, "thread-loop-guard-system-abort", {
+			pendingMessages: false,
+			goalBackstopMaxSeconds: 240,
+		});
 		await harness.tools
 			.get("create_goal")
 			?.execute("create", { objective: "Recover from loop guard" }, undefined, undefined, ctx);
 		await runGoalHandlers(harness.handlers, "session_start", { type: "session_start", reason: "reload" }, ctx);
+		harness.events.emit("continuation_hold_state", {
+			source: "loop-guard-hard-stop",
+			active: true,
+		});
 		harness.events.emit(WAKE_SOURCE_STATE_EVENT, {
 			source: "loop-guard-hard-stop",
 			activeCount: 1,
@@ -78,16 +85,25 @@ describe("loop-guard Goal isolation", () => {
 
 		expect(await readGoal(goalStoreRef(ctx.sessionManager, ctx.cwd))).toMatchObject({ status: "active" });
 		expect(harness.sent).toHaveLength(0);
-		expect(harness.events.emitted).toContainEqual({
-			channel: "goal_continuation_scheduled",
-			data: expect.objectContaining({
-				activeMonitorCount: 1,
-				wakeSources: { "loop-guard-hard-stop": 1 },
-			}),
+		const scheduled = harness.events.emitted.find(({ channel }) => channel === "goal_continuation_scheduled");
+		expect(scheduled?.data).toMatchObject({
+			activeMonitorCount: 1,
+			wakeSources: { "loop-guard-hard-stop": 1 },
 		});
+		if (!isRecord(scheduled?.data) || typeof scheduled.data.delayMs !== "number") {
+			throw new Error("goal schedule did not expose delayMs");
+		}
+		await vi.advanceTimersByTimeAsync(scheduled.data.delayMs + 1);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(harness.sent).toHaveLength(0);
 		harness.events.emit(WAKE_SOURCE_STATE_EVENT, {
 			source: "loop-guard-hard-stop",
 			activeCount: 0,
+		});
+		harness.events.emit("continuation_hold_state", {
+			source: "loop-guard-hard-stop",
+			active: false,
 		});
 		await harness.events.flush();
 		await runGoalHandlers(harness.handlers, "session_shutdown", { type: "session_shutdown" }, ctx);

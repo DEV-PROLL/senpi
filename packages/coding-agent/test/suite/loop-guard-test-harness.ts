@@ -56,6 +56,9 @@ export function createLoopGuardHarness(): LoopGuardHarness {
 				if (channel === "wake_source_state" && isRecord(data) && typeof data.activeCount === "number") {
 					actions.push(`wake-source:${data.activeCount}`);
 				}
+				if (channel === "continuation_hold_state" && isRecord(data) && typeof data.active === "boolean") {
+					actions.push(`continuation-hold:${data.active ? 1 : 0}`);
+				}
 			},
 		},
 	});

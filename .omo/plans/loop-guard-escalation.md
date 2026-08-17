@@ -96,7 +96,8 @@ and any active loop-guard wake-source lease.
 ### Cursor server-exec parity
 
 - Cursor's server-driven bridge emits `tool_execution_start` and then calls the
-  same `ExtensionRunner.emitToolCall` preflight before `tool.execute`.
+  session preflight, which awaits the AgentSession event queue before the same
+  `ExtensionRunner.emitToolCall` veto runs.
 - Blocked Cursor calls return the loop-guard reason as an in-band tool error,
   keep matched start/end lifecycle events, and never invoke the underlying tool.
 - Late-bound session/Agent wiring lives in a focused helper; oversized
@@ -123,7 +124,8 @@ and any active loop-guard wake-source lease.
 - The lease remains active through settlement and releases only when the
   loop-guard recovery turn starts.
 - A post-recovery hard stop reclaims the lease without synthesizing another
-  recovery turn, leaving the Goal active but idle until real input.
+  recovery turn and publishes a continuation hold, leaving the Goal active but
+  idle until real input releases both states.
 - A loop-guard blocked `todo` result is an error; Goal's todo-gate handler
   returns before inspecting error results.
 - Tier-2 reasons must not contain `abort`/`aborted`, because Goal's clean-stop

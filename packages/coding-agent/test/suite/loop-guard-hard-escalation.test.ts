@@ -7,7 +7,7 @@ describe("loop-guard hard escalation", () => {
 		expect(builtinExtensions.slice(0, 3).map(({ id }) => id)).toEqual(["loop-guard", "hooks", "permission-system"]);
 	});
 
-	it("blocks the next identical call only after the second notice turn ends", async () => {
+	it("blocks the next identical call after admitting the second-notice call", async () => {
 		const harness = createLoopGuardHarness();
 		for (let index = 1; index <= 6; index++) {
 			expect(await attempt(harness, `call-${index}`, "todo", { op: "view" })).toBeUndefined();
@@ -94,7 +94,7 @@ describe("loop-guard hard escalation", () => {
 			block: true,
 			terminate: false,
 		});
-		expect(harness.actions).toEqual(["wake-source:1", "abort:system"]);
+		expect(harness.actions).toEqual(["wake-source:1", "continuation-hold:1", "abort:system"]);
 		expect(harness.userMessages).toHaveLength(0);
 		expect(harness.customMessages.filter(({ customType }) => customType === "loop-guard:escalation")).toHaveLength(1);
 		expect(harness.customMessages.filter(({ customType }) => customType === "loop-guard:recovery")).toHaveLength(1);
