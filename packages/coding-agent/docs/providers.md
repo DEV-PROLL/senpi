@@ -142,6 +142,53 @@ Radius is a dynamic `pi-messages` gateway. `/login radius` stores OAuth tokens i
 - Chat runs over Cursor's native agent protocol (HTTP/2 Connect, `agent.v1.AgentService/Run`). Tool calling is fully supported: Cursor's server drives tools over an in-band exec channel, and senpi bridges those calls onto its real tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, plus MCP/extension tools), so approvals, sandboxing, and output truncation behave exactly like model-issued calls
 - Not supported (answered with typed refusals the model can route around): computer use, subagents, Cursor-managed background shells, canvas, smart-mode approval classification, and conversation search
 
+### Cursor CLI (fallback lane)
+
+Use the native `cursor` provider above by default - it is the first-party, primary path.
+
+`cursor-cli-oauth` is an optional fallback (never a replacement) that drives the locally installed `cursor-agent` CLI instead of Cursor's network protocol. Fall back to this lane when:
+
+- the native transport misbehaves on your setup - protocol drift after a Cursor update, Connect-RPC/HTTP2 failures the native provider cannot route around, or
+- you explicitly want Cursor's own agent harness - the model running inside the Cursor CLI with its built-in tools - rather than senpi executing the tools.
+
+#### Native Cursor vs the CLI lane
+
+| | Native `cursor` provider | `cursor-cli-oauth` lane |
+| --- | --- | --- |
+| Transport | Protobuf Connect-RPC to `api2.cursor.sh` (HTTP/2, `agent.v1.AgentService/Run`) | Local `cursor-agent -p <prompt> --output-format stream-json` subprocess |
+| Auth | senpi OAuth (`/login cursor`), tokens in `auth.json` | The same senpi OAuth flow; this lane stores multiple named accounts and injects each into a per-account file-store HOME immediately before every turn |
+| Tool execution | Cursor's server-driven exec channel bridges onto senpi's real tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, MCP/extension tools), so approvals, sandboxing, and truncation behave like model-issued calls | Runs INSIDE the Cursor CLI with no senpi approval, no senpi sandboxing, and no tool-level audit - a one-time acknowledgement is required before unattended execution |
+| Model catalog | Per-account `GetUsableModels` discovery, refreshed with `senpi update --models` | `cursor-agent models` listing (the full suffix-expanded effort x thinking x `-fast` ladder, 204 ids on the reference build), cached with a TTL; static fallback list when the CLI is missing or the probe fails |
+| Requirements | None beyond `/login cursor` | The `cursor-agent` CLI installed and logged in, plus the lane enabled in settings |
+
+#### Setup
+
+1. Install the CLI and make sure `~/.local/bin` is on `PATH` (it installs under `~/.local/share/cursor-agent` and symlinks `~/.local/bin/cursor-agent`):
+
+```bash
+curl https://cursor.com/install -fsS | bash
+```
+
+2. Enable the lane (off by default): set `cursorCliOauthProvider.enabled: true` in senpi settings, or export `SENPI_CURSOR_CLI_OAUTH_ENABLED=1`.
+3. Sign in: `/login cursor-cli-oauth` runs the same Cursor OAuth flow as the native provider and stores the account as a named slot (the first slot is named `default`; later logins prompt for a name).
+4. Manage accounts with `/cursor-account`:
+
+```
+/cursor-account [list | add | remove <name> | pin <name> | unpin | import | acknowledge | status]
+```
+
+- `import` copies the locally logged-in Cursor desktop credential into a new slot: the source is read once, on this explicit request only, and copied - never referenced live.
+- `pin <name>` (or the `cursorCliOauthProvider.pinnedAccount` setting) fixes one account for the session.
+- `status` reports the lane, the active account, and the context owner of a resumed CLI chat.
+
+**Multi-account behavior.** Each account gets its own durable credential home under `<agent dir>/cursor-cli-oauth/accounts/<name>/home` (directory mode 0700, `.cursor/auth.json` mode 0600, file credential store), which also holds that account's CLI chat history and is never deleted between turns. One senpi session sticks to one account (rendezvous hashing), and a rate-limited or auth-failing account is blocked with a cooldown while the turn fails over to the next account before any visible output; once output has started, the error surfaces instead of replaying.
+
+**Model switching on resume.** Each turn resumes the same CLI chat id (`--resume`). Switching the model mid-session keeps that chat, and the first post-switch turn carries a short recap block built from senpi's own recent exchanges so the new model re-orients (`contextRecapOnModelSwitch`, default on). A CLI-side context overflow restarts a fresh chat with the same recap instead of wedging the session.
+
+**No-approval acknowledgement.** This lane is the one case where a senpi provider runs tools senpi cannot gate: with force execution, the Cursor CLI executes its own tools autonomously - there is no senpi approval, no senpi sandboxing, and no tool-level audit for what it runs. The first force execution therefore refuses with the exact acknowledgement step: `/cursor-account acknowledge` (or set `cursorCliOauthProvider.noApprovalAcknowledgedAt` to the current ISO-8601 timestamp in senpi settings, once). With force execution disabled instead, the lane still answers but the Cursor CLI auto-rejects every tool call (one warning per session).
+
+**Plan alternative.** `cursorCliOauthProvider.executionMode: "plan"` sends `--mode plan`: the CLI only plans and never executes tools, so no acknowledgement is required - a way to use the lane before deciding to trust force execution. `cursorCliOauthProvider.denyCommands` additionally refuses exact full commands inside the per-account HOME's `cli-config.json` (globs are not supported).
+
 ## Ollama Cloud
 
 Set `OLLAMA_API_KEY` or store an API key under the `ollama` auth key, then refresh the dynamic catalog:

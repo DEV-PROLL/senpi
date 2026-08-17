@@ -12,6 +12,8 @@
 
 - Cursor subscription models are now fully usable: after `/login cursor` the account's model catalog is discovered automatically and Cursor chat runs over the native agent protocol with complete tool calling — Cursor's server-driven exec channel (read/bash/edit/write/grep/find/ls and MCP/extension tools) executes through the session's real tools, so approvals, sandboxing, output truncation, and tool cards behave exactly like model-issued calls ([#910](https://github.com/code-yeongyu/senpi/pull/910)).
 
+- `cursor-cli-oauth`: an optional fallback lane that runs Cursor subscription models through the locally installed `cursor-agent` CLI (`-p` stream-json). The native `cursor` provider stays the first-party, primary path; use this lane only when the native path does not work well (protocol drift, transport failures) or when Cursor's own agent-harness behavior is explicitly wanted. Tools execute inside the Cursor CLI with no senpi approval or sandboxing (one-time acknowledgement required); accounts live in isolated per-slot credential homes with session affinity and pre-output failover, model switching on resume keeps the same chat, and the model catalog degrades to a static list when the CLI is unavailable ([#PR-NUMBER](https://github.com/code-yeongyu/senpi/pull/PR-NUMBER)).
+
 ### Fixed
 
 - Steering queued while a provider stream-start timeout retry is running now starts automatically when that managed
