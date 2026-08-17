@@ -11,7 +11,7 @@
 | 3 | `gpt-apply-patch` | `gpt-apply-patch/` | Codex-style `apply_patch` tool with rich render + freeform grammar |
 | 4 | `prompt-preset` | `prompt-preset/` | Per-model system prompts (gpt-5.x, claude-fable-5, claude-opus-5, claude-opus-4-{5,6,7,8}, glm-5.2, glm-5.3, deepseek-v4-{flash,flash-0731,pro}, kimi-k2-{6,7}, kimi-k3) |
 | 5 | `todowrite` | `todotools/` | Op-based oh-my-pi todo port + `/todo` command; fully diverged from `../pi-extensions/pi-todotools` |
-| 6 | `redraws` | `redraws.ts` | Force-redraw event hooks for stable streaming visuals |
+| 6 | `redraws` | `redraws.ts` | `/tui` full-redraw count diagnostic |
 | 7 | `anthropic-web-search` | `anthropic-web-search/` | Anthropic-native web search tool |
 | 8 | `anthropic-bash` | `anthropic-bash/` | Anthropic-native bash tool variant |
 | 9 | `openai-web-search` | `openai-web-search/` | OpenAI-native web search |
