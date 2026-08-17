@@ -1,5 +1,41 @@
 # changes
 
+## Retry-exhausted provider timeouts release retained steering (2026-08-17)
+
+### What changed
+
+- `core/agent-session.ts`: when a managed provider-timeout retry exhausts its retry/fallback budget, the retry owner
+  now hands steering or follow-up input that was deliberately deferred from the retry request to the existing
+  scheduled-continuation path. Successful retries keep their current queue behavior, and generic terminal
+  provider errors or aborts still park queued work.
+- Queue ownership follows the retry continuation that actually deferred the queue (recorded when the
+  provider-timeout retry plan schedules its continuation), not the class of the final error: a timeout retry that
+  ends in a different retryable failure still releases its deferred queue, while late steering queued during an
+  ordinary non-deferring retry stays parked. User aborts — in flight or during the retry backoff sleep — keep
+  retained input parked; a cancelled backoff reports a distinct outcome from budget exhaustion.
+- Coverage: `test/suite/regressions/provider-idle-steering.test.ts` proves a provider timeout, one failed managed
+  retry, and a steer queued during `auto_retry_start` produce an automatic third request without another prompt.
+  `.agents/skills/senpi-qa/scripts/mock-loop-stream-start-timeout-steering.mjs` drives the same sequence through the
+  real RPC CLI and actual stream-start watchdogs.
+
+### Why
+
+- Provider-timeout retries use `deferQueuedMessages: true` so steering cannot be consumed by another retry request
+  that has not demonstrated responsiveness. If that retry also failed and no fallback remained, the generic Agent
+  terminal-error policy correctly parked the queue, but the coding-agent retry owner had already finished and no
+  lifecycle owner remained to admit it. The queued message therefore ran only after an unrelated later prompt.
+
+### Why an extension could not do this
+
+- Retry attempt accounting, provider-timeout continuation options, terminal `agent_end` admission, compaction
+  revalidation, and queued-message ownership are coordinated inside `AgentSession` before extension callbacks can
+  safely claim or release the queue.
+
+### Expected merge conflict zones
+
+- HIGH: `core/agent-session.ts` around `_processAgentEvent()` retry/compaction continuation admission.
+- LOW: additive coverage in `test/suite/regressions/provider-idle-steering.test.ts` and the Senpi QA scenario.
+
 ## Custom-editor submit callbacks preserve the authoritative value (2026-08-16)
 
 ### What changed
