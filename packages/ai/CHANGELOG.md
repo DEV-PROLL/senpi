@@ -13,7 +13,7 @@
 
 ### Fixed
 
-- Cloudflare AI Gateway live tests now pin `claude-sonnet-5` instead of the retired `claude-sonnet-4-5` id, so root typecheck still passes after model-catalog hydration.
+- Cloudflare AI Gateway live tests now pin `claude-sonnet-5` instead of the retired `claude-sonnet-4-5` id, so root typecheck still passes after model-catalog hydration ([#925](https://github.com/code-yeongyu/senpi/pull/925)).
 - Cursor's server-driven exec channel now keeps pending local tools alive with write-completion-chained 3-second
   exec heartbeats and closes every normal typed result sequence exactly once. Read, shell, MCP, and modern `pi_*`
   tool turns no longer leave the server-side exec pending until the Run stream ends before `turnEnded`
