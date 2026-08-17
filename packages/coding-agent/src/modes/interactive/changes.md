@@ -4,9 +4,9 @@
 
 ### What changed
 
-- The custom-editor submit bridge in `interactive-mode.ts` (`setCustomEditorComponent`) now expands the submitted value via a new `expandSubmittedText()` in `editor-paste-transfer.ts`, which expands paste markers against the passed text and never re-reads the editor.
+- The custom-editor submit bridge in `interactive-mode.ts` (`setCustomEditorComponent`) now expands the submitted value via a new `expandSubmittedText()` in `editor-paste-transfer.ts`. It preserves a non-empty live expanded value for custom editors that submit before clearing, but falls back to the authoritative callback text (and any surviving paste registry) when pi-tui has already cleared the editor.
 - The previous bridge called `expandEditorSubmission()`, which prefers `editor.getExpandedText()` over the submitted text. That preference is correct for live draft reads (`getExpandedEditorText()`) but wrong at submit time: pi-tui's `Editor.submitValue()` clears the editor state and paste registry *before* invoking `onSubmit`, so any custom editor implementing `getExpandedText()` (e.g. a wrapper delegating to a pi-tui `Editor`) reported "" and the entire submission was silently discarded — Enter cleared the prompt without sending anything.
-- `expandEditorSubmission()` itself is unchanged; only the submit call site switched.
+- `expandEditorSubmission()` itself is unchanged; only the submit call site switched. Regression coverage now drives the real host bridge with both clear-before-callback and uncleared custom editors.
 
 ### Why
 
