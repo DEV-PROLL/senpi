@@ -164,8 +164,6 @@ Landed 2026-07-26 (commit ed353b365).
 
 - LOW: the token additions in `packages/coding-agent/src/modes/interactive/grok/chrome-tokens.ts` and the composer wiring in `packages/coding-agent/src/modes/interactive/grok/chrome.ts` (fork-only directory).
 
-||||||| 84514a353
-
 ## Custom-editor Enter submissions are no longer dropped (2026-08-16)
 
 ### What changed

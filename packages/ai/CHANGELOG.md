@@ -13,6 +13,11 @@
 
 ### Fixed
 
+- Cursor's server-driven exec channel now keeps pending local tools alive with write-completion-chained 3-second
+  exec heartbeats and closes every normal typed result sequence exactly once. Read, shell, MCP, and modern `pi_*`
+  tool turns no longer leave the server-side exec pending until the Run stream ends before `turnEnded`
+  ([#915](https://github.com/code-yeongyu/senpi/pull/915)).
+
 ### Removed
 
 ## [2026.8.16] - 2026-08-16

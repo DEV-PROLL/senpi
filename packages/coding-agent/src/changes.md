@@ -196,10 +196,6 @@
 - LOW: per-entrypoint title and environment lines; the `sessionTitlePrompt` threading in `main.ts` and interactive
   mode.
 
-||||||| 84514a353
-
-||||||| d641e7e4d
-
 ## Retry-exhausted provider timeouts release retained steering (2026-08-17)
 
 ### What changed

@@ -1,5 +1,37 @@
 # AI Source Changes
 
+## 2026-08-17 - Cursor exec result closure + per-exec heartbeats
+
+### What changed and why
+
+- `api/cursor-agent.ts`: recognised exec frames now run inside one lifecycle boundary. While a handler is pending,
+  the client emits `ExecClientControlMessage.heartbeat` with the numeric `ExecServerMessage.id` after 3 seconds and
+  schedules each later heartbeat only after the prior HTTP/2 write completes. When a normal typed result sequence
+  finishes — including typed rejection/error results and streamed shell results — the client clears the heartbeat
+  and emits exactly one `ExecClientControlMessage.streamClose` for the same numeric id.
+- Unknown/unset frame fallback remains `ExecClientThrow` followed by `streamClose`; `ExecClientThrow` itself is now
+  a throw-only primitive so the recognised lifecycle and unknown fallback each own exactly one close.
+- Direct capture of `cursor-agent` `2026.08.11-e8db854` established the contract: a normal `readResult` is followed
+  by `streamClose`, and the bundled dispatcher uses write-completion-chained 3-second exec heartbeats. Senpi's prior
+  port inherited oh-my-pi's result-only behaviour for most exec families, leaving the server-side exec pending until
+  the Run stream could end before `turnEnded`.
+- `test/cursor-agent.test.ts` registers focused lifecycle cases split between a small behavior module and reusable
+  h2 harness. They pin typed success/rejection closure, pending-handler heartbeat write serialization and cleanup,
+  unexpected-dispatch throw-close recovery, unknown fallback, and exactly-once shell-stream closure.
+
+### Why this cannot be expressed as an extension
+
+- Heartbeats and close controls must be written on the same provider-owned HTTP/2 Connect stream while the server is
+  blocked on a local tool result. Extensions can observe the outer agent turn but cannot own provider-internal exec
+  control frames or their write-completion timing.
+
+### Expected merge conflict zones
+
+- MEDIUM: `api/cursor-agent.ts` around `handleExecServerMessage`, the exec heartbeat scheduler, and exec control
+  writers. Reapply the single lifecycle owner if upstream changes individual result branches.
+- LOW: `test/cursor-agent-exec-lifecycle-{cases,harness}.ts` and the permanent senpi-qa scenario are fork-only
+  coverage registered by `test/cursor-agent.test.ts`.
+
 > Audit backfill (2026-08-17): the entries between this note and the pre-existing `2026-08-16` Cursor
 > entries were recorded during the repository-wide changes.md audit of divergences from the upstream pin
 > (v0.84.2, `914cf1472e`); each is dated by its underlying work and gives its audited production paths a
