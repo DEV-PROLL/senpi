@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- Steering queued while a provider stream-start timeout retry is running now starts automatically when that managed
+  retry exhausts its budget, instead of remaining parked until another user prompt. Generic terminal provider errors
+  and user-aborted retries keep their existing queue-retention behavior
+  ([#917](https://github.com/code-yeongyu/senpi/pull/917)).
 - RPC discovery sessions no longer emit an initial `commands_changed` invalidation. Clients read the baseline through
   `get_commands`, while actual post-bind extension reloads still emit one deduplicated ordered snapshot, preventing
   command-surface refresh consumers from creating an unbounded discovery-session feedback loop
