@@ -16,6 +16,10 @@
   retry exhausts its budget, instead of remaining parked until another user prompt. Generic terminal provider errors
   and user-aborted retries keep their existing queue-retention behavior
   ([#917](https://github.com/code-yeongyu/senpi/pull/917)).
+- Cursor subscription tool turns now keep long local executions alive with per-exec heartbeats and close every
+  server-requested result lifecycle exactly once, preventing read, shell, MCP, and modern `pi_*` calls from leaving
+  the Cursor Run stream pending until it terminates before `turnEnded`
+  ([#915](https://github.com/code-yeongyu/senpi/pull/915)).
 - RPC discovery sessions no longer emit an initial `commands_changed` invalidation. Clients read the baseline through
   `get_commands`, while actual post-bind extension reloads still emit one deduplicated ordered snapshot, preventing
   command-surface refresh consumers from creating an unbounded discovery-session feedback loop

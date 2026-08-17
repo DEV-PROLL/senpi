@@ -23,6 +23,7 @@ import {
 } from "../src/api/cursor-agent.ts";
 import type { AssistantMessageEvent, Message, Model, ToolResultMessage } from "../src/types.ts";
 import { isCursorExecResolved } from "../src/utils/block-symbols.ts";
+import { registerCursorExecLifecycleTests } from "./cursor-agent-exec-lifecycle.cases.ts";
 
 const neverAbortedSignal = new AbortController().signal;
 
@@ -632,3 +633,5 @@ describe("cursor-agent helpers", () => {
 		expect(decoded.result.case).toBe("error");
 	});
 });
+
+registerCursorExecLifecycleTests();
