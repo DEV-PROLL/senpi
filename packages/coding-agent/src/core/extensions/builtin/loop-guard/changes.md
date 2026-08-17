@@ -1,5 +1,28 @@
 # loop-guard changes
 
+## loop-guard: emit one final notice at the bounded tracker ceiling (2026-08-17)
+
+- `NoticeGate` now admits one final notice when a detection reaches the
+  maximum count observable inside the 64-record tracker window: 64 calls for
+  identical/similar runs and `floor(64 / period)` repetitions for cycles. A
+  per-fingerprint saturation flag keeps subsequent capped detections silent,
+  while the existing geometric 2x escalation remains unchanged below the
+  ceiling.
+- Why: real session `01a00f43` emitted identical notices at 3/6/12/24/48,
+  then the detector count saturated at 64 while the gate demanded 96. The
+  guard remained permanently silent through the final 5m45s of a 197-call
+  `todo view` loop. The escalation policy assumed an unbounded count even
+  though the tracker intentionally bounds it.
+- Extension boundary: the fix stays inside the private detector/gate policy.
+  Tool signatures, renderer details, extension API events, and Goal behavior
+  are unchanged.
+- Coverage: `loop-guard-detectors.test.ts` drives real bounded identical and
+  similar streams and a stable period-2 gate sequence, pinning
+  `3/6/12/24/48/64`, `5/10/20/40/64`, and `3/6/12/24/32` respectively with
+  no repeated capped notice.
+- Expected merge conflict zones: LOW in `detectors.ts` around `NoticeGate`;
+  LOW in the focused detector suite; NONE in public extension APIs.
+
 ## loop-guard: notice renderer delegates to the shared notice kit (2026-08-04)
 
 - `renderer.ts` now builds its box through `noticeMessageRenderer` from `src/core/extensions/notice/`. The exported `renderLoopGuardNotice` symbol, registration, title/why/expanded text, accent tone, and expand behavior are unchanged; existing suites pass unmodified.
