@@ -51,6 +51,7 @@ import { providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { deterministicUuid } from "./cursor-agent/deterministic-id.ts";
+import { armExecHeartbeat } from "./cursor-agent/exec-lifecycle.ts";
 import {
 	buildMcpStateResult,
 	buildNeutralHookResult,
@@ -1157,7 +1158,7 @@ async function handleExecServerMessage(
 		return;
 	}
 
-	const stopExecHeartbeat = armExecHeartbeat(h2Request, execMsg);
+	const stopExecHeartbeat = armCursorExecHeartbeat(h2Request, execMsg);
 	try {
 		await dispatchExecServerMessage({
 			execMsg,
@@ -1169,10 +1170,17 @@ async function handleExecServerMessage(
 			stream,
 			state,
 		});
+	} catch (error) {
+		log("error", "execDispatch", {
+			error: error instanceof Error ? error.message : String(error),
+			id: execMsg.id,
+			execId: execMsg.execId,
+		});
+		sendExecClientThrow(h2Request, execMsg, "Local exec dispatch failed", "exec_dispatch_failed");
 	} finally {
 		stopExecHeartbeat();
+		sendExecClientStreamClose(h2Request, execMsg);
 	}
-	sendExecClientStreamClose(h2Request, execMsg);
 }
 
 async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<void> {
@@ -1865,15 +1873,11 @@ async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<
 	}
 }
 
-function armExecHeartbeat(h2Request: http2.ClientHttp2Stream, execMsg: ExecServerMessage): () => void {
-	let stopped = false;
-	let timer: NodeJS.Timeout | undefined;
-
-	const schedule = () => {
-		timer = setTimeout(() => {
-			timer = undefined;
-			if (stopped || h2Request.closed) return;
-
+function armCursorExecHeartbeat(h2Request: http2.ClientHttp2Stream, execMsg: ExecServerMessage): () => void {
+	return armExecHeartbeat({
+		intervalMs: EXEC_HEARTBEAT_INTERVAL_MS,
+		isClosed: () => h2Request.closed,
+		writeHeartbeat: (onComplete) => {
 			const controlMessage = create(ExecClientControlMessageSchema, {
 				message: {
 					case: "heartbeat",
@@ -1883,22 +1887,10 @@ function armExecHeartbeat(h2Request: http2.ClientHttp2Stream, execMsg: ExecServe
 			const clientMessage = create(AgentClientMessageSchema, {
 				message: { case: "execClientControlMessage", value: controlMessage },
 			});
-			h2Request.write(frameConnectMessage(toBinary(AgentClientMessageSchema, clientMessage)), (error) => {
-				if (error || stopped || h2Request.closed) return;
-				schedule();
-			});
+			h2Request.write(frameConnectMessage(toBinary(AgentClientMessageSchema, clientMessage)), onComplete);
 			log("execClientControl", "heartbeat", { id: execMsg.id, execId: execMsg.execId });
-		}, EXEC_HEARTBEAT_INTERVAL_MS);
-	};
-
-	schedule();
-	return () => {
-		stopped = true;
-		if (timer !== undefined) {
-			clearTimeout(timer);
-			timer = undefined;
-		}
-	};
+		},
+	});
 }
 
 /**

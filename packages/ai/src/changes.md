@@ -15,8 +15,9 @@
   by `streamClose`, and the bundled dispatcher uses write-completion-chained 3-second exec heartbeats. Senpi's prior
   port inherited oh-my-pi's result-only behaviour for most exec families, leaving the server-side exec pending until
   the Run stream could end before `turnEnded`.
-- `test/cursor-agent-exec-lifecycle.test.ts` pins typed success/rejection closure, pending-handler heartbeat, unknown
-  throw-close fallback, and exactly-once shell-stream closure in a focused module.
+- `test/cursor-agent.test.ts` registers focused lifecycle cases split between a small behavior module and reusable
+  h2 harness. They pin typed success/rejection closure, pending-handler heartbeat write serialization and cleanup,
+  unexpected-dispatch throw-close recovery, unknown fallback, and exactly-once shell-stream closure.
 
 ### Why this cannot be expressed as an extension
 
@@ -28,7 +29,8 @@
 
 - MEDIUM: `api/cursor-agent.ts` around `handleExecServerMessage`, the exec heartbeat scheduler, and exec control
   writers. Reapply the single lifecycle owner if upstream changes individual result branches.
-- LOW: `test/cursor-agent-exec-lifecycle.test.ts` and the permanent senpi-qa scenario are fork-only coverage.
+- LOW: `test/cursor-agent-exec-lifecycle-{cases,harness}.ts` and the permanent senpi-qa scenario are fork-only
+  coverage registered by `test/cursor-agent.test.ts`.
 
 ## 2026-08-16 - Cursor agent protocol: full chat + tool calling (`cursor-agent` API)
 
