@@ -17,7 +17,7 @@ const EXEC_IDS: Record<ExecMode, number> = {
 };
 
 class ClientFrameReader {
-	#buffer = Buffer.alloc(0);
+	#buffer: Buffer = Buffer.alloc(0);
 	readonly messages: ClientFrame[] = [];
 	#waiters: Array<() => void> = [];
 
@@ -104,7 +104,7 @@ async function runScenario(mode: ExecMode): Promise<{
 	const reader = new ClientFrameReader();
 	const server = http2.createServer();
 	let serverTask: Promise<unknown> | undefined;
-	server.on("stream", (stream) => {
+	server.on("stream", (stream: http2.ServerHttp2Stream) => {
 		stream.on("data", (chunk: Buffer) => reader.feed(chunk));
 		stream.respond({ ":status": 200, "content-type": "application/connect+proto" });
 		serverTask = observeServerTask(
