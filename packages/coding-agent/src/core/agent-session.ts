@@ -1937,6 +1937,7 @@ export class AgentSession {
 		// Check auto-retry and auto-compaction after agent completes.
 		let launchedContinuation = false;
 		let retryContinuationBlocked = false;
+		let retryExhaustionAllowsQueuedContinuation = false;
 		let allowsPostCompactionUsageExemptContinuation = false;
 		const userAbortSuppressedQueuedContinuation =
 			event.type === "agent_end" && this._suppressQueuedContinuationAfterUserAbort;
@@ -1974,6 +1975,7 @@ export class AgentSession {
 			}
 
 			let retryOutcome: "continued" | "blocked" | "not-handled" = "not-handled";
+			const retryOwnedDeferredQueue = this._retryAttempt > 0 && isProviderTimeoutError(msg);
 			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
 				if (retryableError) {
 					retryOutcome = await this._handleRetryableError(msg);
@@ -1985,6 +1987,12 @@ export class AgentSession {
 				this._abortProvenance.closeAgentEndBoundary();
 				return;
 			}
+			// Provider-timeout retries deliberately skip their first queue poll so
+			// steering cannot be consumed by another doomed retry request. Once the
+			// managed retry owner exhausts its budget, hand that retained queue back
+			// to the normal scheduled-continuation path instead of parking it until
+			// an unrelated later prompt arrives.
+			retryExhaustionAllowsQueuedContinuation = retryOwnedDeferredQueue && retryOutcome === "not-handled";
 
 			if (retryOutcome === "not-handled" && this._retryAttempt > 0 && msg.errorMessage) {
 				const attempt = this._retryAttempt;
@@ -2033,7 +2041,9 @@ export class AgentSession {
 			if (
 				!launchedContinuation &&
 				!retryContinuationBlocked &&
-				(allowsQueuedContinuation || allowsPostCompactionUsageExemptContinuation) &&
+				(allowsQueuedContinuation ||
+					allowsPostCompactionUsageExemptContinuation ||
+					retryExhaustionAllowsQueuedContinuation) &&
 				this.agent.hasQueuedMessages()
 			) {
 				// A scheduled continuation owns the queue now; the stored admission

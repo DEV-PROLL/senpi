@@ -127,6 +127,61 @@ describe("provider idle steering", () => {
 		expect(getUserTexts(harness)).toEqual(["original request", "continue"]);
 	});
 
+	it("runs queued steering after the timed-out retry budget is exhausted", async () => {
+		const harness = await createHarness({
+			settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 0 } },
+		});
+		harnesses.push(harness);
+		harness.agent.timeoutMs = DEFAULT_PROVIDER_IDLE_TIMEOUT_MS;
+		harness.agent.streamStartTimeoutMs = DEFAULT_STREAM_START_TIMEOUT_MS;
+		harness.setResponses([
+			idleTimeoutError(),
+			idleTimeoutError(),
+			fauxAssistantMessage("steering request recovered after retry exhaustion"),
+		]);
+
+		let queuedSteering: Promise<void> | undefined;
+		let resolveSteeringResponse: (() => void) | undefined;
+		const steeringResponse = new Promise<void>((resolve) => {
+			resolveSteeringResponse = resolve;
+		});
+		const unsubscribe = harness.session.subscribe((event) => {
+			if (event.type === "auto_retry_start" && queuedSteering === undefined) {
+				queuedSteering = harness.session.steer("continue after exhausted retry");
+			}
+			if (
+				event.type === "message_end" &&
+				event.message.role === "assistant" &&
+				getMessageText(event.message) === "steering request recovered after retry exhaustion"
+			) {
+				resolveSteeringResponse?.();
+			}
+		});
+
+		try {
+			await harness.session.prompt("original request");
+			await queuedSteering;
+			await withTimeout(
+				steeringResponse,
+				1_000,
+				`queued steering response was not produced after retry exhaustion: ${JSON.stringify(
+					getRequestUserTexts(harness),
+				)}`,
+			);
+		} finally {
+			unsubscribe();
+		}
+
+		expect(getRequestUserTexts(harness)).toEqual([
+			["original request"],
+			["original request"],
+			["original request", "continue after exhausted retry"],
+		]);
+		expect(harness.session.getSteeringMessages()).toEqual([]);
+		expect(harness.agent.hasQueuedMessages()).toBe(false);
+		expect(getUserTexts(harness)).toEqual(["original request", "continue after exhausted retry"]);
+	});
+
 	it("retains queued input when a bounded retry is aborted in flight", async () => {
 		const harness = await createHarness({
 			settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 0 } },
