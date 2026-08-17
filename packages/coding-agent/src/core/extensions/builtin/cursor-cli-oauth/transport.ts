@@ -8,7 +8,10 @@ import {
 import { buildCursorCliArgs, type CursorCliArgsInput } from "./spawn-args.ts";
 import { CursorCliStreamParser, type CursorCliStreamEvent } from "./stream-parser.ts";
 
-export const MAX_CURSOR_CLI_PROMPT_BYTES = 450_000;
+// The prompt rides as ONE argv element, so Linux MAX_ARG_STRLEN (131072 bytes
+// per single argv string) is the binding constraint on every platform; the
+// ~467 KB darwin probe ceiling is not portable.
+export const MAX_CURSOR_CLI_PROMPT_BYTES = 130_000;
 export const CURSOR_CLI_ABORT_GRACE_MS = 5_000;
 const MAX_STDERR_BYTES = 64 * 1024;
 

@@ -265,7 +265,7 @@ describe("Cursor CLI OAuth session router", () => {
 	it("drops the recap to fit the prompt ceiling and never blocks the model switch", async () => {
 		const router = makeRouter();
 		await primeChat(router, "chat-1", "model-a");
-		const longPrompt = "p".repeat(449_500);
+		const longPrompt = "p".repeat(129_500);
 		const { attempts, runAttempt } = scriptedRunner([[initEvent("chat-1", "model-b"), assistantEvent("done")]]);
 
 		await collect(

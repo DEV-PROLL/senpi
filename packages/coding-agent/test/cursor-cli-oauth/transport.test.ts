@@ -163,7 +163,7 @@ describe("cursor CLI transport", () => {
 		);
 	});
 
-	it("rejects 450001 prompt bytes before spawning", () => {
+	it("rejects 130001 prompt bytes before spawning", () => {
 		const directory = temporaryDirectory();
 		const fixture = fixtureExecutable(directory, "happy");
 		const error = (() => {
@@ -176,18 +176,38 @@ describe("cursor CLI transport", () => {
 		})();
 
 		expect(error).toBeInstanceOf(CursorCliPromptTooLargeError);
-		expect(error).toMatchObject({ kind: "context_overflow", limitBytes: 450_000, actualBytes: 450_001 });
+		expect(error).toMatchObject({ kind: "context_overflow", limitBytes: 130_000, actualBytes: 130_001 });
 		expect(() => readFileSync(fixture.dump, "utf8")).toThrow();
 	});
 
-	it("spawns a 449999-byte prompt normally", async () => {
+	it("rejects a 449999-byte prompt before spawning", () => {
+		// 449999 bytes fit darwin's ~467 KB per-arg limit but exceed Linux
+		// MAX_ARG_STRLEN (131072), so it must be rejected by the platform-safe
+		// ceiling instead of dying with spawn E2BIG.
 		const directory = temporaryDirectory();
 		const fixture = fixtureExecutable(directory, "happy");
-		const handle = start(directory, fixture.executable, "x".repeat(449_999));
+		const error = (() => {
+			try {
+				start(directory, fixture.executable, "x".repeat(449_999));
+			} catch (caught) {
+				return caught;
+			}
+			throw new Error("expected prompt rejection");
+		})();
+
+		expect(error).toBeInstanceOf(CursorCliPromptTooLargeError);
+		expect(error).toMatchObject({ kind: "context_overflow", limitBytes: 130_000, actualBytes: 449_999 });
+		expect(() => readFileSync(fixture.dump, "utf8")).toThrow();
+	});
+
+	it("spawns a 129999-byte prompt normally", async () => {
+		const directory = temporaryDirectory();
+		const fixture = fixtureExecutable(directory, "happy");
+		const handle = start(directory, fixture.executable, "x".repeat(129_999));
 		await collect(handle);
 		expect(await handle.completed).toMatchObject({ type: "completed", exitCode: 0 });
 		const invocation = JSON.parse(readFileSync(fixture.dump, "utf8")) as { argv: string[] };
 		expect(invocation.argv[0]).toBe("-p");
-		expect(Buffer.byteLength(invocation.argv[1], "utf8")).toBe(449_999);
+		expect(Buffer.byteLength(invocation.argv[1], "utf8")).toBe(129_999);
 	});
 });
