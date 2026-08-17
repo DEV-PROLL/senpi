@@ -1,5 +1,25 @@
 # changes
 
+## Custom-editor submit callbacks preserve the authoritative value (2026-08-16)
+
+### What changed
+
+- `modes/interactive/interactive-mode.ts` now routes custom-editor submissions through `expandSubmittedText()`.
+- The submit helper preserves a non-empty `getExpandedText()` result from editors that submit before clearing, but uses the callback text when the live editor has already been cleared by pi-tui.
+- The real host bridge is covered in `test/suite/regressions/0000-editor-paste-submit.test.ts` for clear-before-callback, retained paste-state expansion, and uncleared custom-editor compatibility.
+
+### Why
+
+- pi-tui computes the submitted value, clears editor and paste state, then invokes `onSubmit`. Re-reading the cleared editor returned `""`, so Enter cleared the prompt without sending a message.
+
+### Why an extension could not do this
+
+- The host owns the callback bridge between extension-provided editors and the default submission handler.
+
+### Expected merge conflict zones
+
+- LOW: `modes/interactive/editor-paste-transfer.ts`, the `setCustomEditorComponent()` submit callback, and its focused regression suite.
+
 ## CLI system-prompt overrides rewired into the runtime resource loader (2026-08-17)
 
 ### What changed
