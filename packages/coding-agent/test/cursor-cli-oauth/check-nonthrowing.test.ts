@@ -1,5 +1,5 @@
-import type { AuthContext, Model, OAuthAuth, Provider } from "@earendil-works/pi-ai";
-import { createModels } from "@earendil-works/pi-ai";
+import type { AuthContext, Model, OAuthAuth, OAuthCredential, Provider } from "@earendil-works/pi-ai";
+import { createModels, InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import {
 	type CursorCliOauthCredential,
@@ -59,16 +59,14 @@ function dependencies(overrides: Partial<CursorCliOauthConfigDeps> = {}) {
 	};
 }
 
-function configuredCheck(deps: CursorCliOauthConfigDeps) {
-	return createCursorCliOauthConfig(deps).check({ ctx: authContext() });
+function configuredCheck(deps: CursorCliOauthConfigDeps, credential?: OAuthCredential) {
+	return createCursorCliOauthConfig(deps).check({ ctx: authContext(), credential });
 }
 
 describe("cursor-cli-oauth check stays non-throwing", () => {
 	it("resolves undefined when disabled by settings, even with a stored account", async () => {
 		await expect(
-			configuredCheck(
-				dependencies({ readSettings: () => ({ enabled: false, executablePath: undefined }) }),
-			),
+			configuredCheck(dependencies({ readSettings: () => ({ enabled: false, executablePath: undefined }) })),
 		).resolves.toBeUndefined();
 	});
 
@@ -84,19 +82,36 @@ describe("cursor-cli-oauth check stays non-throwing", () => {
 		).resolves.toBeUndefined();
 	});
 
+	it("keeps a credential-backed lane selectable, naming the install guidance, when the executable is missing", async () => {
+		// The auth-resolution path (ModelsImpl.checkAuth / resolveStoredOAuth)
+		// always passes the stored credential; that is the turn gate's signal.
+		// Returning a guidance-naming AuthCheck there lets a TURN reach
+		// streamCursorCliOauth, which throws the typed not-installed error;
+		// without a credential the lane hides exactly as above.
+		const stored = { ...emptyCredential(), accounts: [account()] } as OAuthCredential;
+		const notInstalled = dependencies({
+			resolveExecutable: () => {
+				throw new CursorAgentNotInstalledError();
+			},
+		});
+
+		await expect(configuredCheck(notInstalled, stored)).resolves.toMatchObject({
+			type: "oauth",
+			source: expect.stringContaining("cursor-agent not installed"),
+		});
+		const check = await configuredCheck(notInstalled, stored);
+		expect(check?.source ?? "").toContain("curl https://cursor.com/install -fsS | bash");
+	});
+
 	it("resolves undefined with no accounts, an empty store, or a non-OAuth credential", async () => {
 		await expect(
 			configuredCheck(dependencies({ readCurrent: async () => emptyCredential() })),
 		).resolves.toBeUndefined();
 
-		await expect(
-			configuredCheck(dependencies({ readCurrent: async () => undefined })),
-		).resolves.toBeUndefined();
+		await expect(configuredCheck(dependencies({ readCurrent: async () => undefined }))).resolves.toBeUndefined();
 
 		await expect(
-			configuredCheck(
-				dependencies({ readCurrent: async () => ({ type: "api_key", key: "not-oauth" }) }),
-			),
+			configuredCheck(dependencies({ readCurrent: async () => ({ type: "api_key", key: "not-oauth" }) })),
 		).resolves.toBeUndefined();
 	});
 
@@ -155,6 +170,12 @@ function oauthProvider(config: CursorCliOauthConfig): Provider {
 		baseUrl: "https://example.test",
 		auth: { oauth: asOAuthAuth(config) },
 		getModels: () => [model("cursor-cli-oauth", "cursor-model")],
+		stream: () => {
+			throw new Error("stream is not exercised by getAvailable");
+		},
+		streamSimple: () => {
+			throw new Error("streamSimple is not exercised by getAvailable");
+		},
 	};
 }
 
@@ -175,6 +196,12 @@ function healthyProvider(): Provider {
 			},
 		},
 		getModels: () => [model("healthy-oauth", "healthy-model")],
+		stream: () => {
+			throw new Error("stream is not exercised by getAvailable");
+		},
+		streamSimple: () => {
+			throw new Error("streamSimple is not exercised by getAvailable");
+		},
 	};
 }
 
@@ -194,9 +221,7 @@ describe("ModelsImpl.getAvailable integration", () => {
 
 		const uninstalled = createModels();
 		uninstalled.setProvider(healthyProvider());
-		uninstalled.setProvider(
-			oauthConfigWithMissingExecutable(),
-		);
+		uninstalled.setProvider(oauthConfigWithMissingExecutable());
 		const uninstalledModels = await uninstalled.getAvailable();
 		expect(uninstalledModels.map((entry) => entry.id)).toEqual(["healthy-model"]);
 	});
@@ -207,6 +232,20 @@ describe("ModelsImpl.getAvailable integration", () => {
 		models.setProvider(oauthProvider(createCursorCliOauthConfig(dependencies())));
 
 		const available = await models.getAvailable();
+		expect(available.map((entry) => entry.id).sort()).toEqual(["cursor-model", "healthy-model"]);
+	});
+
+	it("lists an uninstalled lane without throwing once a credential is stored", async () => {
+		// With a stored credential the check names the install guidance instead
+		// of hiding the lane: listing stays non-throwing and the lane stays
+		// visible, while the turn path throws the typed not-installed error.
+		const credentials = new InMemoryCredentialStore();
+		await credentials.modify("cursor-cli-oauth", async () => credential());
+		const stored = createModels({ credentials });
+		stored.setProvider(healthyProvider());
+		stored.setProvider(oauthConfigWithMissingExecutable());
+
+		const available = await stored.getAvailable();
 		expect(available.map((entry) => entry.id).sort()).toEqual(["cursor-model", "healthy-model"]);
 	});
 });

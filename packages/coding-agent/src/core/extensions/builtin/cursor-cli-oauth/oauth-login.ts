@@ -129,7 +129,7 @@ async function configuredFor(deps: CursorCliOauthConfigDeps): Promise<Configurat
 		case "disabled":
 			throw new Error(DISABLED_MESSAGE);
 		case "not-installed":
-			throw new Error(installationMessage(outcome.error));
+			throw cursorAgentNotInstalledError(outcome.error);
 		case "no-accounts":
 			throw new Error(NO_ACCOUNTS_MESSAGE);
 		default:
@@ -162,6 +162,18 @@ function usableAccounts(value: Credential | OAuthCredentials | undefined): Curso
 function installationMessage(error: unknown): string {
 	const detail = error instanceof Error ? error.message : String(error);
 	return `cursor-agent not installed: ${detail.replace(/^Cursor CLI is not installed\.\s*/, "")}`;
+}
+
+/**
+ * The typed turn-path error for a missing cursor-agent binary: carries the
+ * `cursor-agent not installed` marker plus the install guidance verbatim, with
+ * the underlying resolution failure preserved as `cause`.
+ */
+export function cursorAgentNotInstalledError(cause: unknown): Error {
+	const error = new Error(installationMessage(cause));
+	error.name = "CursorAgentNotInstalledError";
+	error.cause = cause;
+	return error;
 }
 
 /** Resolve credentials immediately before execution so a concurrent refresh cannot leave a stale token in memory. */
@@ -271,15 +283,27 @@ export function createCursorCliOauthConfig(deps: CursorCliOauthConfigDeps): Curs
 		name: CURSOR_CLI_OAUTH_NAME,
 		isSubscription: true,
 
-		async check() {
+		async check(input) {
 			// Tolerant by contract: ModelsImpl.getAvailable runs every provider's
 			// check under Promise.all (packages/ai/src/models.ts:544-548) and turns a
 			// throw into a rejecting ModelsError, so one throwing check would reject
 			// all model listing. Not usable (disabled / not installed / no accounts)
 			// reports undefined here - as claude-sdk-oauth's check does - while
 			// turn-time resolution keeps throwing via configuredFor.
+			//
+			// One nuance: the auth-resolution path (checkAuth, resolveStoredOAuth)
+			// always passes the stored credential, while bare model listing does not.
+			// A credential-backed lane whose executable is missing stays selectable
+			// with the install guidance as its source, so a TURN reaches
+			// streamCursorCliOauth, which throws the typed not-installed error;
+			// without a credential the lane hides exactly as before.
 			const outcome = await assessConfiguration(deps);
-			if (outcome.status !== "configured") return undefined;
+			if (outcome.status === "disabled" || outcome.status === "no-accounts") return undefined;
+			if (outcome.status === "not-installed") {
+				return input.credential === undefined
+					? undefined
+					: { type: "oauth", source: installationMessage(outcome.error) };
+			}
 			return { type: "oauth", source: outcome.assessment.message };
 		},
 

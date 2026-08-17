@@ -29,7 +29,12 @@ import {
 	resolveCursorCliExecutionPolicy,
 } from "./guardrails.ts";
 import { runInCursorAccountHome } from "./home-store.ts";
-import { CURSOR_CLI_OAUTH_PROVIDER_ID, type CursorCliOauthConfig, createCursorCliOauthConfig } from "./oauth-login.ts";
+import {
+	CURSOR_CLI_OAUTH_PROVIDER_ID,
+	type CursorCliOauthConfig,
+	createCursorCliOauthConfig,
+	cursorAgentNotInstalledError,
+} from "./oauth-login.ts";
 import {
 	type CursorCliRecapExchange,
 	type CursorCliSessionRestartNotice,
@@ -436,6 +441,19 @@ export function streamCursorCliOauth(
 			// never cached across turns, so back-to-back turns observe changes.
 			const settings = deps.settings ?? loadCursorCliOauthProviderSettingsFromDisk(cwdDirectory);
 			if (!settings.enabled) throw new Error(DISABLED_MESSAGE);
+			const executableDeps: CursorAgentExecutableDeps = {
+				...defaultCursorAgentExecutableDeps(),
+				settings: { executablePath: settings.executablePath },
+			};
+			// The executable gates the TURN before any guardrail or auth work: the
+			// oauth check keeps a credential-backed lane selectable so turns reach
+			// this point, and `cursor-agent not installed` + the install guidance
+			// must originate here - before a spawn could report it without the marker.
+			try {
+				resolveCursorAgentExecutable(deps.executableDeps ?? executableDeps);
+			} catch (error) {
+				throw cursorAgentNotInstalledError(error);
+			}
 			// Guardrails decide before any spawn: an unacknowledged force attempt is
 			// the turn's error outcome, and only the policy's force/plan/sandbox
 			// verdict reaches the argv. Warnings surface as turn notices.
@@ -452,10 +470,6 @@ export function streamCursorCliOauth(
 			);
 			if (policy.status === "refused") throw new CursorCliExecutionRefusalError(policy.refusal);
 			for (const warning of policy.warnings) appendNotice(mapper, warning.message);
-			const executableDeps: CursorAgentExecutableDeps = {
-				...defaultCursorAgentExecutableDeps(),
-				settings: { executablePath: settings.executablePath },
-			};
 			const stored = await store.read(CURSOR_CLI_OAUTH_PROVIDER_ID);
 			const storedAccounts = stored?.type === "oauth" ? listAccounts(stored as CursorCliOauthCredential) : [];
 			if (storedAccounts.length === 0) throw new Error(NO_ACCOUNTS_MESSAGE);

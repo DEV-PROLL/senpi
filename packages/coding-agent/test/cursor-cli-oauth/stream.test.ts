@@ -496,6 +496,40 @@ describe("cursor-cli-oauth stream mapping", () => {
 		expect(existsSync(fixture.dump)).toBe(false);
 	});
 
+	it("surfaces the typed install guidance on the turn path when the executable is missing", async () => {
+		const directory = temporaryDirectory();
+		const fixture = fixtureExecutable(directory, "happy");
+		const deps: CursorCliStreamDeps = {
+			cwd: directory,
+			agentDir: join(directory, "agent"),
+			store: await makeStore([account("alpha")]),
+			settings: enabledSettings(),
+			now: () => NOW,
+			// Resolution fails exactly as a machine without cursor-agent installed
+			// would: no overrides, nothing on PATH, no versions directory.
+			executableDeps: {
+				env: () => undefined,
+				settings: {},
+				homeDirectory: directory,
+				pathDelimiter: ":",
+				isExecutableFile: () => false,
+				readDirectory: () => {
+					throw new Error("no versions directory");
+				},
+			},
+		};
+
+		const events = await collect(runTurn(deps, "hello", "stream-missing-executable"));
+		const failure = errorEvent(events);
+
+		expect(failure.reason).toBe("error");
+		expect(failure.error.errorMessage ?? "").toContain("cursor-agent not installed");
+		expect(failure.error.errorMessage ?? "").toContain("curl https://cursor.com/install -fsS | bash");
+		// The turn must fail before any spawn or credential-home work.
+		expect(existsSync(fixture.dump)).toBe(false);
+		expect(existsSync(join(directory, "agent", "cursor-cli-oauth"))).toBe(false);
+	});
+
 	it("refuses an unacknowledged force turn before any spawn", async () => {
 		const directory = temporaryDirectory();
 		const fixture = fixtureExecutable(directory, "happy");
