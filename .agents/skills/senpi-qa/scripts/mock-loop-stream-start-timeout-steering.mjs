@@ -319,8 +319,10 @@ async function main() {
 		} catch (error) {
 			authGuardError = error instanceof Error ? error.message : String(error);
 		}
+		const cleanupPassed = exitCode === 0 && closed && sandboxRemoved && authUnchanged;
 		summary = {
 			...summary,
+			pass: summary.pass && cleanupPassed,
 			cleanup: { exitCode, portClosed: closed, sandboxRemoved, authUnchanged, authGuardError },
 		};
 		const { events = [], ...summaryWithoutEvents } = summary;
@@ -330,7 +332,7 @@ async function main() {
 		writeFileSync(join(evidencePath, "rpc-summary.json"), `${JSON.stringify(summaryWithoutEvents, null, 2)}\n`);
 		checks.ok(
 			"RPC process, fake server port, sandbox, and auth state are clean",
-			exitCode === 0 && closed && sandboxRemoved && authUnchanged,
+			cleanupPassed,
 			`exit=${exitCode} portClosed=${closed} sandboxRemoved=${sandboxRemoved} authUnchanged=${authUnchanged}`,
 		);
 	}
