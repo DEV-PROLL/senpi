@@ -7,6 +7,7 @@ import cacheKeepAliveExtension from "./cache-keepalive/index.ts";
 import claudeSdkOauthExtension from "./claude-sdk-oauth/index.ts";
 import compactionExtension from "./compaction/index.ts";
 import configReloadExtension from "./config-reload/index.ts";
+import cursorCliOauthExtension from "./cursor-cli-oauth/index.ts";
 import diffExtension from "./diff.ts";
 import filesExtension from "./files.ts";
 import goalExtension from "./goal/index.ts";
@@ -94,6 +95,8 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "ttsr", factory: ttsrExtension },
 	{ id: "btw", factory: btwExtension },
 	{ id: "claude-sdk-oauth", factory: claudeSdkOauthExtension },
+	// Registers unconditionally and reports executable/auth state through its oauth check, so it stays beside the other provider lane.
+	{ id: "cursor-cli-oauth", factory: cursorCliOauthExtension },
 	// Loop guard is a pure observer of tool_execution_start; it never mutates payloads, so it slots before config-reload and leaves MCP last.
 	{ id: "loop-guard", factory: loopGuardExtension },
 	// Config reload follows settings-dependent builtins so reloads rebuild their resolved settings before catalog feeders observe them.
