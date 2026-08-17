@@ -21,8 +21,9 @@ is removed.
 
 ### Scope and compatibility
 
-- Change only the loop-guard builtin, its registration order/documentation,
-  focused tests, QA harness scenario, and release/fork documentation.
+- Change the loop-guard builtin, its registration order/documentation, and the
+  internal Cursor exec bridge wiring required to make the existing `tool_call`
+  veto non-bypassable across supported provider paths.
 - Do not modify Goal production code.
 - Do not modify `ExtensionAPI`, `ExtensionContext`, agent-loop, or runner
   public contracts. Senpi already exposes every required seam:
@@ -55,7 +56,8 @@ is removed.
      `triggerTurn: true`;
    - release the wake-source lease at the recovery `agent_start`.
 6. Later attempts with the same signature remain blocked and system-aborted,
-   but do not repeat the human warning or wake message.
+   reclaim the Goal wake-source lease, but do not repeat the human warning or
+   automatic recovery turn. Real input releases the lease.
 
 ### Correlation and hook ordering
 
@@ -88,6 +90,17 @@ canonical `(toolName, argsJson)` signature. A changed tool or changed arguments
 start a fresh episode. Object key order remains insignificant.
 
 `turn_end` activates a pending Tier-2 block and clears unused correlation IDs.
+A changed signature atomically clears the detector episode, pending recovery,
+and any active loop-guard wake-source lease.
+
+### Cursor server-exec parity
+
+- Cursor's server-driven bridge emits `tool_execution_start` and then calls the
+  same `ExtensionRunner.emitToolCall` preflight before `tool.execute`.
+- Blocked Cursor calls return the loop-guard reason as an in-band tool error,
+  keep matched start/end lifecycle events, and never invoke the underlying tool.
+- Late-bound session/Agent wiring lives in a focused helper; oversized
+  `AgentSession` gains no new method and SDK wiring is net smaller.
 
 ### NoticeGate saturation
 
@@ -109,6 +122,8 @@ start a fresh episode. Object key order remains insignificant.
   monitor-owned waiting instead of its own immediate system recovery.
 - The lease remains active through settlement and releases only when the
   loop-guard recovery turn starts.
+- A post-recovery hard stop reclaims the lease without synthesizing another
+  recovery turn, leaving the Goal active but idle until real input.
 - A loop-guard blocked `todo` result is an error; Goal's todo-gate handler
   returns before inspecting error results.
 - Tier-2 reasons must not contain `abort`/`aborted`, because Goal's clean-stop
@@ -151,6 +166,9 @@ start a fresh episode. Object key order remains insignificant.
    - the blocked result remains `terminate: false`;
    - later same-signature calls do not repeat warning/steer;
    - mixed/multi-tool correlation does not block unobserved sibling calls.
+   - post-recovery call 10 reclaims wake-source ownership without another
+     automatic recovery.
+   - signature replacement clears pending recovery and wake-source state.
 2. Add failing `loop-guard-goal-isolation.test.ts` coverage:
    - system abort leaves active Goal active;
    - loop-guard wake-source ownership prevents competing Goal recovery;
@@ -160,9 +178,11 @@ start a fresh episode. Object key order remains insignificant.
 4. Add Tier-3 message builders and escalation notice renderer/details.
 5. Wire UI warning, user steer, and system abort in the required order.
    Real-CLI QA may refine the delivery boundary while preserving the outcome.
-6. Add only loop-guard-side guards required by the tests; do not edit Goal.
-7. Run Tier-3 and Goal suites GREEN.
-8. Commit the verified increment.
+6. Add Cursor bridge RED/GREEN coverage proving server-exec calls traverse the
+   same first-block preflight and retain lifecycle pairing.
+7. Add only loop-guard-side guards required by the tests; do not edit Goal.
+8. Run Tier-3 and Goal suites GREEN.
+9. Commit the verified increment.
 
 ### Wave D — Documentation and Static Verification
 
@@ -187,6 +207,8 @@ start a fresh episode. Object key order remains insignificant.
    - third blocked call causes system abort and a wake-source lease;
    - settlement starts the recovery request and reaches a non-looping action;
    - Goal production remains untouched and focused Goal contracts stay green;
+   - Cursor server-exec attempts 7-9 return blocked in-band errors and do not
+     execute the tool;
    - auth hash and sandbox isolation stay clean.
 2. Run harness self-check and the new scenario; save evidence under
    `local-ignore/qa-evidence/20260818-loop-guard-escalation/`.

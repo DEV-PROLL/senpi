@@ -18,8 +18,10 @@
   `CustomMessage` with `triggerTurn: true` starts a fresh provider user-role
   turn; the lease releases at that turn's `agent_start`. Later same-signature
   calls remain blocked and system-aborted without repeating the warning or
-  recovery. Loop-guard now occupies the first builtin slot so its veto runs
-  before repeated PreToolUse hooks and permission prompts.
+  recovery. Later hard stops reclaim wake-source ownership without starting
+  another automatic recovery, leaving the Goal idle until real input. Loop-guard
+  now occupies the first builtin slot so its veto runs before repeated
+  PreToolUse hooks and permission prompts.
 - The escalation transcript box uses the shared notice kit with semantic
   `error` tone and a width-stable ASCII marker. This keeps severity
   theme-driven and avoids the one-cell underfill produced when terminals
@@ -33,6 +35,13 @@
   scheduling a competing system recovery; blocked todo errors bypass Goal's
   stale-goal reminder. Goal production code and public extension APIs are
   unchanged.
+- Pattern replacement now clears the state-machine episode, pending recovery,
+  and wake-source lease atomically, so external lifecycle calls cannot revive a
+  stale hard-stop recovery after the model changes tools or arguments.
+- Cursor server-driven exec calls now traverse the same vetoable `tool_call`
+  preflight before `tool.execute`, returning block reasons in-band with matched
+  lifecycle events. This closes the provider path that previously observed
+  loop attempts without enforcing Tier 2/3.
 - Coverage: `loop-guard-hard-escalation.test.ts` pins delayed activation,
   first-veto order, changed-argument reset, uncorrelated bridge/multi-tool
   controls, one-shot warning/recovery, wake-source lease transitions, repeated

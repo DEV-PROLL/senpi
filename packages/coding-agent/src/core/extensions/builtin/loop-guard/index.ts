@@ -52,7 +52,11 @@ export default function loopGuardExtension(pi: ExtensionAPI): void {
 
 	pi.on("tool_execution_start", (event) => {
 		const record = tracker.record(event.toolName, event.args);
-		escalation.observeAttempt(event.toolCallId, record);
+		const patternChanged = escalation.observeAttempt(event.toolCallId, record);
+		if (patternChanged) {
+			pendingRecoveryToolName = undefined;
+			setRecoveryWakeSourceActive(false);
+		}
 		const detection = detectLoop(tracker.records, gate);
 		if (detection === undefined) return;
 		escalation.observeNotice(detection);
@@ -84,8 +88,8 @@ export default function loopGuardExtension(pi: ExtensionAPI): void {
 				};
 			case "hardStop": {
 				const warning = buildLoopGuardHardStopWarning(decision.toolName, decision.blockedCallCount);
+				setRecoveryWakeSourceActive(true);
 				if (decision.announce) {
-					setRecoveryWakeSourceActive(true);
 					pi.sendMessage(
 						{
 							customType: LOOP_GUARD_ESCALATION_CUSTOM_TYPE,

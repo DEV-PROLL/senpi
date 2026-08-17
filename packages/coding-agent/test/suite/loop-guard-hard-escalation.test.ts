@@ -1,115 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { builtinExtensions } from "../../src/core/extensions/builtin/index.ts";
-import loopGuardExtension from "../../src/core/extensions/builtin/loop-guard/index.ts";
-import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
-
-type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
-
-interface LoopGuardHarness {
-	fire: (eventName: string, event: unknown) => Promise<unknown>;
-	actions: string[];
-	customMessages: Array<{
-		customType: string;
-		display: boolean;
-		triggerTurn: boolean | undefined;
-		deliverAs: string | undefined;
-	}>;
-	userMessages: Array<{ content: unknown; deliverAs: string | undefined }>;
-	renderers: Map<string, unknown>;
-}
-
-function createLoopGuardHarness(): LoopGuardHarness {
-	const handlers = new Map<string, Handler[]>();
-	const actions: string[] = [];
-	const customMessages: LoopGuardHarness["customMessages"] = [];
-	const userMessages: Array<{ content: unknown; deliverAs: string | undefined }> = [];
-	const renderers = new Map<string, unknown>();
-	const pi: ExtensionAPI = Object.assign(Object.create(null), {
-		on: (event: string, handler: Handler) => {
-			const eventHandlers = handlers.get(event) ?? [];
-			eventHandlers.push(handler);
-			handlers.set(event, eventHandlers);
-		},
-		sendMessage: (
-			message: { customType: string; display: boolean },
-			options: { triggerTurn?: boolean; deliverAs?: string } | undefined,
-		) => {
-			customMessages.push({
-				customType: message.customType,
-				display: message.display,
-				triggerTurn: options?.triggerTurn,
-				deliverAs: options?.deliverAs,
-			});
-			if (message.customType === "loop-guard:recovery") actions.push("recovery-turn");
-		},
-		sendUserMessage: (content: unknown, options: { deliverAs?: string } | undefined) => {
-			actions.push("user-steer");
-			userMessages.push({ content, deliverAs: options?.deliverAs });
-		},
-		registerMessageRenderer: (customType: string, renderer: unknown) => {
-			renderers.set(customType, renderer);
-		},
-		events: {
-			emit: (channel: string, data: unknown) => {
-				if (channel === "wake_source_state" && isRecord(data) && typeof data.activeCount === "number") {
-					actions.push(`wake-source:${data.activeCount}`);
-				}
-			},
-		},
-	});
-	loopGuardExtension(pi);
-	const ui: ExtensionContext["ui"] = Object.assign(Object.create(null), {
-		notify: () => {
-			actions.push("warning");
-		},
-	});
-	const ctx: ExtensionContext = Object.assign(Object.create(null), {
-		hasUI: true,
-		ui,
-		abort: (source: "user" | "system" | undefined) => {
-			actions.push(`abort:${source ?? "user"}`);
-		},
-	});
-	const fire = async (eventName: string, event: unknown): Promise<unknown> => {
-		let result: unknown;
-		for (const handler of handlers.get(eventName) ?? []) {
-			const candidate = await handler(event, ctx);
-			if (candidate !== undefined) result = candidate;
-		}
-		return result;
-	};
-	return { fire, actions, customMessages, userMessages, renderers };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function attempt(
-	harness: LoopGuardHarness,
-	toolCallId: string,
-	toolName: string,
-	input: Record<string, unknown>,
-): Promise<unknown> {
-	await harness.fire("tool_execution_start", {
-		type: "tool_execution_start",
-		toolCallId,
-		toolName,
-		args: input,
-	});
-	const result = await harness.fire("tool_call", {
-		type: "tool_call",
-		toolCallId,
-		toolName,
-		input,
-	});
-	await harness.fire("turn_end", {
-		type: "turn_end",
-		message: { role: "assistant", content: [] },
-		toolResults: [],
-	});
-	return result;
-}
+import { attempt, createLoopGuardHarness, isRecord } from "./loop-guard-test-harness.ts";
 
 describe("loop-guard hard escalation", () => {
 	it("runs before hooks and permission policy so its block wins first", () => {
@@ -190,7 +81,7 @@ describe("loop-guard hard escalation", () => {
 		expect(harness.renderers.has("loop-guard:escalation")).toBe(true);
 	});
 
-	it("repeats only the system abort after the hard-stop warning is announced", async () => {
+	it("repeats only wake-source ownership and system abort after the warning", async () => {
 		const harness = createLoopGuardHarness();
 		for (let index = 1; index <= 9; index++) {
 			await attempt(harness, `call-${index}`, "todo", { op: "view" });
@@ -203,7 +94,7 @@ describe("loop-guard hard escalation", () => {
 			block: true,
 			terminate: false,
 		});
-		expect(harness.actions).toEqual(["abort:system"]);
+		expect(harness.actions).toEqual(["wake-source:1", "abort:system"]);
 		expect(harness.userMessages).toHaveLength(0);
 		expect(harness.customMessages.filter(({ customType }) => customType === "loop-guard:escalation")).toHaveLength(1);
 		expect(harness.customMessages.filter(({ customType }) => customType === "loop-guard:recovery")).toHaveLength(1);

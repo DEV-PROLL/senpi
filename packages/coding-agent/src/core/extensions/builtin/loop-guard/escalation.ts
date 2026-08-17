@@ -28,11 +28,13 @@ export class IdenticalLoopEscalation {
 	private episode: IdenticalLoopEpisode | undefined;
 	private readonly attempts = new Map<string, ToolCallRecord>();
 
-	observeAttempt(toolCallId: string, record: ToolCallRecord): void {
-		if (this.episode !== undefined && this.episode.fingerprint !== record.signature) {
+	observeAttempt(toolCallId: string, record: ToolCallRecord): boolean {
+		const patternChanged = this.episode !== undefined && this.episode.fingerprint !== record.signature;
+		if (patternChanged) {
 			this.reset();
 		}
 		this.attempts.set(toolCallId, record);
+		return patternChanged;
 	}
 
 	observeNotice(detection: LoopGuardDetection): void {

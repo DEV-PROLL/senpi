@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added hard escalation for ignored identical tool-call loops: after two reminders, repeated calls are blocked before hooks and permissions rerun; persistent blocked calls now show an error notice, interrupt with a system abort, and start one Goal-safe recovery turn
+- Added hard escalation for ignored identical tool-call loops: after two reminders, repeated calls are blocked before hooks and permissions rerun; persistent blocked calls now show an error notice, interrupt with a system abort, and start one Goal-safe recovery turn. Repeated hard stops retain Goal wake ownership without spawning another recovery, and Cursor server-driven exec calls traverse the same veto before execution
   ([#922](https://github.com/code-yeongyu/senpi/pull/922)).
 - Added `$`-driven skill invocation in the interactive composer plus typed, ordered RPC command/skill candidate,
   update, and accepted-invocation events for desktop clients
