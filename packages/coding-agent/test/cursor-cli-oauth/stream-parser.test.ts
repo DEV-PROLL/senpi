@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
 	type CursorCliStreamEvent,
 	CursorCliStreamParser,
 } from "../../src/core/extensions/builtin/cursor-cli-oauth/stream-parser.ts";
 
-const CAPTURE_ROOT =
-	"/Volumes/mengmotaStorage/local-workspaces/senpi/local-ignore/qa-evidence/20260817-cursor-cli-p-lane";
+const CAPTURE_ROOT = fileURLToPath(new URL("./fixtures/captures", import.meta.url));
 const encoder = new TextEncoder();
 
 function capture(name: string): Uint8Array {
