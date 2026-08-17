@@ -1,12 +1,12 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { type ChildProcessByStdio, spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 import {
+	type CursorAgentExecutableDeps,
 	defaultCursorAgentExecutableDeps,
 	resolveCursorAgentExecutable,
-	type CursorAgentExecutableDeps,
 } from "./executable.ts";
 import { buildCursorCliArgs, type CursorCliArgsInput } from "./spawn-args.ts";
-import { CursorCliStreamParser, type CursorCliStreamEvent } from "./stream-parser.ts";
+import { type CursorCliStreamEvent, CursorCliStreamParser } from "./stream-parser.ts";
 
 // The prompt rides as ONE argv element, so Linux MAX_ARG_STRLEN (131072 bytes
 // per single argv string) is the binding constraint on every platform; the

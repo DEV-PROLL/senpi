@@ -25,12 +25,7 @@ export type VersionProbeOptions = {
 export type VersionProbeCallback = (error: Error | null, stdout: string, stderr: string) => void;
 
 export type VersionProbeDeps = {
-	execFile: (
-		file: string,
-		args: string[],
-		options: VersionProbeOptions,
-		callback: VersionProbeCallback,
-	) => void;
+	execFile: (file: string, args: string[], options: VersionProbeOptions, callback: VersionProbeCallback) => void;
 };
 
 export class CursorAgentNotInstalledError extends Error {

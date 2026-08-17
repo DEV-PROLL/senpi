@@ -110,14 +110,7 @@ describe("buildCursorCliArgs", () => {
 		const prompt = "Review this; echo $(whoami) --force --resume stolen-chat";
 		const args = buildCursorCliArgs({ prompt });
 
-		expect(args).toEqual([
-			"-p",
-			prompt,
-			"--output-format",
-			"stream-json",
-			"--stream-partial-output",
-			"--trust",
-		]);
+		expect(args).toEqual(["-p", prompt, "--output-format", "stream-json", "--stream-partial-output", "--trust"]);
 		expect(args[1]).toBe(prompt);
 		expect(args).not.toContain("--force");
 		expect(args).not.toContain("--resume");
@@ -128,14 +121,7 @@ describe("buildCursorCliArgs", () => {
 		(prompt) => {
 			const args = buildCursorCliArgs({ prompt, model: undefined });
 
-			expect(args).toEqual([
-				"-p",
-				prompt,
-				"--output-format",
-				"stream-json",
-				"--stream-partial-output",
-				"--trust",
-			]);
+			expect(args).toEqual(["-p", prompt, "--output-format", "stream-json", "--stream-partial-output", "--trust"]);
 			expect(args[1]).toBe(prompt);
 		},
 	);

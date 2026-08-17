@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	CursorCliAbortError,
 	CursorCliPromptTooLargeError,
+	type CursorCliTransportHandle,
 	MAX_CURSOR_CLI_PROMPT_BYTES,
 	spawnCursorCli,
-	type CursorCliTransportHandle,
 } from "../../src/core/extensions/builtin/cursor-cli-oauth/transport.ts";
 
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
@@ -21,7 +21,10 @@ function temporaryDirectory(): string {
 	return directory;
 }
 
-function fixtureExecutable(directory: string, scenario: "happy" | "grandchild"): { executable: string; dump: string; pidFile: string } {
+function fixtureExecutable(
+	directory: string,
+	scenario: "happy" | "grandchild",
+): { executable: string; dump: string; pidFile: string } {
 	const copiedFixture = join(directory, "fake-cursor-agent.mjs");
 	const executable = join(directory, "cursor-agent");
 	const dump = join(directory, "invocation.json");
@@ -36,7 +39,12 @@ function fixtureExecutable(directory: string, scenario: "happy" | "grandchild"):
 	return { executable, dump, pidFile };
 }
 
-function start(directory: string, executable: string, prompt = "hello", signal?: AbortSignal): CursorCliTransportHandle {
+function start(
+	directory: string,
+	executable: string,
+	prompt = "hello",
+	signal?: AbortSignal,
+): CursorCliTransportHandle {
 	process.env.SENPI_CURSOR_CLI_OAUTH_EXECUTABLE = executable;
 	return spawnCursorCli({
 		prompt,
@@ -71,7 +79,11 @@ describe("cursor CLI transport", () => {
 		const events = await collect(handle);
 		const outcome = await handle.completed;
 
-		expect(events.some((event) => typeof event === "object" && event !== null && "type" in event && event.type === "result")).toBe(true);
+		expect(
+			events.some(
+				(event) => typeof event === "object" && event !== null && "type" in event && event.type === "result",
+			),
+		).toBe(true);
 		expect(outcome).toMatchObject({ type: "completed", exitCode: 0 });
 		assertDead(handle.pid);
 	});
@@ -106,29 +118,25 @@ describe("cursor CLI transport", () => {
 		assertDead(grandchildPid);
 	});
 
-	it(
-		"escalates to SIGKILL when the process ignores SIGTERM",
-		async () => {
-			const directory = temporaryDirectory();
-			const executable = join(directory, "hung-cursor-agent.mjs");
-			writeFileSync(
-				executable,
-				`#!${process.execPath}\nprocess.on("SIGTERM", () => {});\nprocess.stdout.write(JSON.stringify({ type: "system", subtype: "init", apiKeySource: "login", cwd: process.cwd(), session_id: "hung", model: "fake", permissionMode: "default" }) + "\\n");\nsetInterval(() => {}, 1000);\n`,
-				{ mode: 0o700 },
-			);
-			chmodSync(executable, 0o700);
-			const controller = new AbortController();
-			const handle = start(directory, executable, "hang", controller.signal);
-			const iterator = handle.events[Symbol.asyncIterator]();
-			expect((await iterator.next()).value).toMatchObject({ type: "system" });
-			controller.abort();
-			const outcome = await handle.completed;
+	it("escalates to SIGKILL when the process ignores SIGTERM", async () => {
+		const directory = temporaryDirectory();
+		const executable = join(directory, "hung-cursor-agent.mjs");
+		writeFileSync(
+			executable,
+			`#!${process.execPath}\nprocess.on("SIGTERM", () => {});\nprocess.stdout.write(JSON.stringify({ type: "system", subtype: "init", apiKeySource: "login", cwd: process.cwd(), session_id: "hung", model: "fake", permissionMode: "default" }) + "\\n");\nsetInterval(() => {}, 1000);\n`,
+			{ mode: 0o700 },
+		);
+		chmodSync(executable, 0o700);
+		const controller = new AbortController();
+		const handle = start(directory, executable, "hang", controller.signal);
+		const iterator = handle.events[Symbol.asyncIterator]();
+		expect((await iterator.next()).value).toMatchObject({ type: "system" });
+		controller.abort();
+		const outcome = await handle.completed;
 
-			expect(outcome.type).toBe("aborted");
-			assertDead(handle.pid);
-		},
-		8_000,
-	);
+		expect(outcome.type).toBe("aborted");
+		assertDead(handle.pid);
+	}, 8_000);
 
 	it("passes only the explicit environment allowlist", async () => {
 		const directory = temporaryDirectory();

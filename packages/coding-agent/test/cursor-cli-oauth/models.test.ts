@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CursorAgentNotInstalledError } from "../../src/core/extensions/builtin/cursor-cli-oauth/executable.ts";
 import {
+	type CursorCliModelCatalogDeps,
 	parseCursorAgentModelsListing,
 	resolveCursorCliModelCatalog,
 	STATIC_CURSOR_CLI_MODELS,
-	type CursorCliModelCatalogDeps,
 } from "../../src/core/extensions/builtin/cursor-cli-oauth/models.ts";
 
 const FIXTURE_PATH = fileURLToPath(new URL("./fixtures/cursor-agent-models.txt", import.meta.url));
@@ -35,7 +35,9 @@ function probeDeps(
 }
 
 afterEach(async () => {
-	await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+	await Promise.all(
+		temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+	);
 });
 
 describe("parseCursorAgentModelsListing", () => {
@@ -80,7 +82,10 @@ describe("resolveCursorCliModelCatalog", () => {
 		const agentDir = await temporaryDirectory();
 		let now = Date.parse("2026-08-17T00:00:00.000Z");
 		let listing = "model-a - Model A (200K context)\n";
-		const deps = probeDeps(() => now, () => listing);
+		const deps = probeDeps(
+			() => now,
+			() => listing,
+		);
 		const options = { agentDir, settings: { modelCatalogTtlHours: 2 }, deps };
 
 		await expect(resolveCursorCliModelCatalog(options)).resolves.toMatchObject([{ id: "model-a" }]);
@@ -97,15 +102,30 @@ describe("resolveCursorCliModelCatalog", () => {
 		const models = await resolveCursorCliModelCatalog({
 			agentDir,
 			settings: { modelCatalogTtlHours: 24 },
-			deps: { resolveExecutable: () => { throw new CursorAgentNotInstalledError(); } },
+			deps: {
+				resolveExecutable: () => {
+					throw new CursorAgentNotInstalledError();
+				},
+			},
 		});
 
 		expect(models).toEqual(STATIC_CURSOR_CLI_MODELS);
 		expect(models.map((model) => model.id)).toEqual([
-			"auto", "composer-2.5", "composer-2.5-fast", "gpt-5.6-sol-high", "gpt-5.6-luna-high",
-			"gpt-5.5-high", "gpt-5.3-codex", "gpt-5.2", "claude-opus-5-high",
-			"claude-opus-5-thinking-high", "claude-opus-4-8-thinking-high", "claude-fable-5-thinking-high",
-			"claude-sonnet-5-thinking-high", "gemini-3.7-flash-high", "cursor-grok-4.6-high",
+			"auto",
+			"composer-2.5",
+			"composer-2.5-fast",
+			"gpt-5.6-sol-high",
+			"gpt-5.6-luna-high",
+			"gpt-5.5-high",
+			"gpt-5.3-codex",
+			"gpt-5.2",
+			"claude-opus-5-high",
+			"claude-opus-5-thinking-high",
+			"claude-opus-4-8-thinking-high",
+			"claude-fable-5-thinking-high",
+			"claude-sonnet-5-thinking-high",
+			"gemini-3.7-flash-high",
+			"cursor-grok-4.6-high",
 		]);
 	});
 
@@ -132,10 +152,16 @@ describe("resolveCursorCliModelCatalog", () => {
 	it("falls back on failed or misleading probes without poisoning an existing cache", async () => {
 		const agentDir = await temporaryDirectory();
 		let now = 1_000_000;
-		const goodDeps = probeDeps(() => now, () => "model-a - Model A\n");
+		const goodDeps = probeDeps(
+			() => now,
+			() => "model-a - Model A\n",
+		);
 		await resolveCursorCliModelCatalog({ agentDir, settings: { modelCatalogTtlHours: 1 }, deps: goodDeps });
 		now += 2 * 60 * 60 * 1_000;
-		const badDeps = probeDeps(() => now, () => "ERROR - authentication unavailable\n");
+		const badDeps = probeDeps(
+			() => now,
+			() => "ERROR - authentication unavailable\n",
+		);
 
 		await expect(
 			resolveCursorCliModelCatalog({ agentDir, settings: { modelCatalogTtlHours: 1 }, deps: badDeps }),

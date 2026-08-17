@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-	classifyCursorCliError,
 	CURSOR_CONTEXT_OVERFLOW_WORDINGS,
 	type CursorCliErrorKind,
+	classifyCursorCliError,
 } from "../../src/core/extensions/builtin/cursor-cli-oauth/errors.ts";
 
 const ALL_ERROR_KINDS = [

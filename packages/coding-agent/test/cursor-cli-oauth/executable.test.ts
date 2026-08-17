@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	CursorAgentNotInstalledError,
 	type CursorAgentExecutableDeps,
+	CursorAgentNotInstalledError,
 	probeCursorAgentVersion,
 	resolveCursorAgentExecutable,
 	type VersionProbeDeps,
@@ -14,10 +14,7 @@ type FakeFs = {
 	directories?: Record<string, DirectoryEntry[]>;
 };
 
-function makeDeps(
-	overrides: Partial<CursorAgentExecutableDeps> = {},
-	fs: FakeFs = {},
-): CursorAgentExecutableDeps {
+function makeDeps(overrides: Partial<CursorAgentExecutableDeps> = {}, fs: FakeFs = {}): CursorAgentExecutableDeps {
 	const executables = new Set(fs.executables ?? []);
 	const directories = fs.directories ?? {};
 	return {
@@ -155,9 +152,7 @@ describe("probeCursorAgentVersion", () => {
 			callback(null, "2026.08.11-e8db854\n", "");
 		});
 
-		await expect(probeCursorAgentVersion("/opt/cursor-agent", { execFile })).resolves.toBe(
-			"2026.08.11-e8db854",
-		);
+		await expect(probeCursorAgentVersion("/opt/cursor-agent", { execFile })).resolves.toBe("2026.08.11-e8db854");
 		expect(execFile).toHaveBeenCalledOnce();
 	});
 });

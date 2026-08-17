@@ -102,8 +102,7 @@ function findRetryAfterMs(value: unknown, seen: Set<object>, depth: number): num
 
 function retryAfterMs(input: CursorCliErrorInput, text: string): number | undefined {
 	const structured =
-		findRetryAfterMs(input.resultEvent, new Set<object>(), 0) ??
-		findRetryAfterMs(input.thrown, new Set<object>(), 0);
+		findRetryAfterMs(input.resultEvent, new Set<object>(), 0) ?? findRetryAfterMs(input.thrown, new Set<object>(), 0);
 	if (structured !== undefined) return structured;
 	const milliseconds = text.match(/\bretry[-_ ]?after[-_ ]?ms\s*[:=]\s*(\d+(?:\.\d+)?)/i);
 	if (milliseconds) return Math.ceil(Number(milliseconds[1]));

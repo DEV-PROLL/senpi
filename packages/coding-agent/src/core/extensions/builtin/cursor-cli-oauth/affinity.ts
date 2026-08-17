@@ -29,9 +29,7 @@ export class AllCursorAccountsBlockedError extends Error {
 	}
 }
 
-export function getAffinityKey(
-	options: Pick<CursorAffinityOptions, "affinityKey" | "sessionId">,
-): string {
+export function getAffinityKey(options: Pick<CursorAffinityOptions, "affinityKey" | "sessionId">): string {
 	return options.affinityKey ?? options.sessionId ?? DEFAULT_CURSOR_AFFINITY_KEY;
 }
 

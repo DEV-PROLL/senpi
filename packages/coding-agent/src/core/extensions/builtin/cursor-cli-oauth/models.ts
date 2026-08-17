@@ -1,12 +1,9 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProviderModelConfig } from "../../types.ts";
-import {
-	defaultCursorAgentExecutableDeps,
-	resolveCursorAgentExecutable,
-} from "./executable.ts";
+import { defaultCursorAgentExecutableDeps, resolveCursorAgentExecutable } from "./executable.ts";
 
 const MODEL_PROBE_TIMEOUT_MS = 15_000;
 const DEFAULT_MODEL_CATALOG_TTL_HOURS = 24;
@@ -90,8 +87,8 @@ function modelEntry(id: string, label: string): ProviderModelConfig {
 	};
 }
 
-export const STATIC_CURSOR_CLI_MODELS: readonly ProviderModelConfig[] = STATIC_MODEL_DEFINITIONS.map(
-	({ id, label }) => modelEntry(id, label),
+export const STATIC_CURSOR_CLI_MODELS: readonly ProviderModelConfig[] = STATIC_MODEL_DEFINITIONS.map(({ id, label }) =>
+	modelEntry(id, label),
 );
 
 /** Parse the complete `cursor-agent models` listing into extension provider entries. */
@@ -120,7 +117,7 @@ async function runModelsProbe(executable: string, stdoutPath: string, timeoutMs:
 		await new Promise<void>((resolve, reject) => {
 			const child = spawn(executable, ["models"], {
 				stdio: ["ignore", output.fd, "ignore"],
-		});
+			});
 			let timedOut = false;
 			let settled = false;
 			const finish = (error?: Error): void => {
@@ -182,9 +179,8 @@ function defaultDeps(settings: CursorCliModelCatalogSettings): CursorCliModelCat
 
 function catalogTtlMs(settings: CursorCliModelCatalogSettings): number {
 	const hours = settings.modelCatalogTtlHours;
-	const validHours = typeof hours === "number" && Number.isFinite(hours) && hours > 0
-		? hours
-		: DEFAULT_MODEL_CATALOG_TTL_HOURS;
+	const validHours =
+		typeof hours === "number" && Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_MODEL_CATALOG_TTL_HOURS;
 	return validHours * 60 * 60 * 1_000;
 }
 
@@ -212,7 +208,13 @@ function parseCachedCatalog(contents: string): CachedModelCatalog | undefined {
 		}
 		const id = candidate.id;
 		const name = candidate.name;
-		if (typeof id !== "string" || !MODEL_ID.test(id) || typeof name !== "string" || name.length === 0 || seen.has(id)) {
+		if (
+			typeof id !== "string" ||
+			!MODEL_ID.test(id) ||
+			typeof name !== "string" ||
+			name.length === 0 ||
+			seen.has(id)
+		) {
 			return undefined;
 		}
 		seen.add(id);

@@ -3,10 +3,10 @@ import type { AccountSlot } from "../../src/core/extensions/builtin/claude-sdk-o
 import { rendezvousOrder as claudeRendezvousOrder } from "../../src/core/extensions/builtin/claude-sdk-oauth/affinity.ts";
 import {
 	AllCursorAccountsBlockedError,
+	type CursorAffinityAccountSlot,
 	clearExpiredBlocks,
 	rendezvousOrder,
 	selectAccount,
-	type CursorAffinityAccountSlot,
 } from "../../src/core/extensions/builtin/cursor-cli-oauth/affinity.ts";
 
 type TestAccount = CursorAffinityAccountSlot & {
@@ -107,9 +107,7 @@ describe("Cursor CLI OAuth account affinity", () => {
 			{ ...accounts[2]!, blockReason: "auth_error" },
 		];
 
-		expect(() => selectAccount(blocked, { sessionId: "blocked", now: 1_000 })).toThrow(
-			AllCursorAccountsBlockedError,
-		);
+		expect(() => selectAccount(blocked, { sessionId: "blocked", now: 1_000 })).toThrow(AllCursorAccountsBlockedError);
 		try {
 			selectAccount(blocked, { sessionId: "blocked", now: 1_000 });
 		} catch (error) {
