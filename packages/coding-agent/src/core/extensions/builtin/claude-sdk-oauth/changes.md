@@ -1,5 +1,30 @@
 # claude-sdk-oauth extension changes
 
+## Repository audit baseline for the claude-sdk-oauth tracker (2026-08-17)
+
+### What changed
+
+- This entry is the canonical inventory for the repository-wide changes.md audit (`scripts/audit-changes-md.mjs`, pin
+  `914cf1472e715297caa30db4b9535d534a9eb718`). The audited production paths whose exact nearest tracker is this file:
+  none — every file under `packages/coding-agent/src/core/extensions/builtin/claude-sdk-oauth/` is fork-only (absent
+  from the pinned upstream tree), so the audit assigns this tracker no upstream-owned divergence.
+- Two leftover diff3 conflict-separator lines were removed from the historical entries below; the surrounding
+  history is preserved unchanged.
+
+### Why
+
+- Anchoring the tracker in canonical four-section form keeps future divergences under this directory resolvable by
+  the audit gate, and stray conflict markers would corrupt any future structural pass over the history.
+
+### Why an extension could not handle it
+
+- Tracker coverage is repository and release policy, not runtime behavior; it is enforced by repository scripts before
+  any extension loader exists.
+
+### Expected merge conflict zones
+
+- NONE: this tracker is fork-only (upstream has no counterpart file).
+
 ## 2026-08-14 - Preserve effective ambient request authentication
 
 ### What changed
@@ -75,7 +100,6 @@
 
 - LOW: `session-registry-wiring.ts` at the `session_compact` handler and its focused wiring test.
 
-||||||| parent of 2c6a09919 (fix(coding-agent): hide Claude auth probe window)
 
 ## 2026-08-14 - Hide ambient auth probes on Windows
 
@@ -236,7 +260,6 @@ The stored-OAuth branch in `ModelsImpl.checkProviderAuth` is a structural short-
 
 LOW in `oauth-login.ts` (added `check` to the returned shape + optional `readSettings` dep); LOW in `index.ts` (one added `readSettings` line); LOW in `provider-composer.ts` (`ExtensionOAuthConfig.check` + `adaptOAuth` forwarding, both additive).
 
-||||||| parent of 5baf13f11 (fix(claude-sdk-oauth): ignore content-less user messages in continuity hashes)
 
 ## 2026-08-10 - Ignore content-less user messages in sent-stream continuity
 

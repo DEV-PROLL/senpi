@@ -1,5 +1,169 @@
 # changes
 
+## Repository-wide changes.md audit backfill for interactive rendering, selectors, and editor surfaces (2026-08-17)
+
+### What changed
+
+- Backfill from the repository-wide changes.md audit (pin `914cf147`, tag v0.84.2): this entry names every upstream-owned interactive production path that still diverges from the pinned upstream tree. Detailed behavioral history stays in the dated entries of this file; the entries added by this backfill carry the rest.
+- Transcript renderers: `packages/coding-agent/src/modes/interactive/components/assistant-message.ts` (incremental descriptor reconciliation, per-section thinking-duration headers, compact provider-native web-search rendering, descriptor extraction into `assistant-render-descriptors.ts`), `packages/coding-agent/src/modes/interactive/components/tool-execution.ts` (lifecycle/renderer/images split, todo-strike reveal, animation teardown), `packages/coding-agent/src/modes/interactive/components/bash-execution.ts` (bash syntax highlighting in the command header), and `packages/coding-agent/src/modes/interactive/components/compaction-summary-message.ts` (OpenAI remote compaction details plus display-only escape sanitization).
+- Selectors: `packages/coding-agent/src/modes/interactive/components/model-selector.ts` (ranked search with favorites-first partition and frozen favorite ordering), `packages/coding-agent/src/modes/interactive/components/extension-selector.ts` (windowed option lists), `packages/coding-agent/src/modes/interactive/components/settings-selector.ts` (smooth-streaming and streaming-fps controls), `packages/coding-agent/src/modes/interactive/components/status-indicator.ts` (bounded single-row compaction progress with the compact-label collapse), `packages/coding-agent/src/modes/interactive/components/tree-selector.ts` (providerNative content blocks count as non-empty text), `packages/coding-agent/src/modes/interactive/components/thinking-selector.ts` (extended xhigh wording), and `packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts` (still consumed directly for scoped-model configuration; its components-barrel export moved to the favorites selector and the residual diff is comment/format churn).
+- Editor and footer surfaces: `packages/coding-agent/src/modes/interactive/components/custom-editor.ts` (prompt marker and padding floor), `packages/coding-agent/src/modes/interactive/components/diff.ts` (intra-line highlighting with the single-span fast path), `packages/coding-agent/src/modes/interactive/components/keybinding-hints.ts` (`escape` displays as `esc`), `packages/coding-agent/src/modes/interactive/components/footer.ts` (anchor-pinned width ladder, fast-mode glyph, abbreviated tokens; OmO badge removed), `packages/coding-agent/src/modes/interactive/components/index.ts` (exports `FavoriteModelsSelectorComponent`, drops `ScopedModelsSelectorComponent`), `packages/coding-agent/src/modes/interactive/external-editor.ts` (launch-failure discrimination plus the `editFileInExternalEditor()` seam), and `packages/coding-agent/src/modes/interactive/theme/theme.ts` (grok-night/grok-day built-in themes, theme proxy through `Reflect.get`).
+
+### Why
+
+- Merges resolve tracker files to `ours`, so every divergent upstream-owned path needs an entry in its exact nearest tracker that names it; the audit and the next upstream sync read this inventory instead of silently dropping fork behavior.
+
+### Why an extension could not handle it
+
+- These files are the built-in interactive renderer, selector, editor, and theme surfaces themselves. Extension hooks compose around them but cannot replace their private render paths, selector callbacks, or settings writes.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/coding-agent/src/modes/interactive/components/assistant-message.ts`, `packages/coding-agent/src/modes/interactive/components/tool-execution.ts`, `packages/coding-agent/src/modes/interactive/components/footer.ts`, and `packages/coding-agent/src/modes/interactive/components/model-selector.ts` (heavily rewritten render paths).
+- LOW: the remaining component files, `packages/coding-agent/src/modes/interactive/external-editor.ts`, and the builtin-theme loading in `packages/coding-agent/src/modes/interactive/theme/theme.ts`.
+
+## Custom editor keeps its prompt marker and configured padding (2026-08-17)
+
+Landed 2026-08-03 (commits 5573069b1 and ce53fc60d).
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/custom-editor.ts`: the composer reserves a prompt gutter of at least two columns (`promptPaddingX = max(2, configured)`) while `getPaddingX()`/`setPaddingX()` report and accept the configured value, so `paddingX: 0` no longer erases the gutter and custom editors keep the padding they were handed (companion to the `paddingX` propagation on pi-tui's `EditorComponent`).
+- `render()` draws the themed `❯` prompt marker on the first content row and keeps it there when the draft wraps; the marker is skipped only for the history-scroll `↑` row and terminals narrower than five columns.
+
+### Why
+
+- A small or zero `paddingX` collapsed the prompt gutter entirely, and the chevron drifted off the first row on wrapped drafts, leaving the composer without a stable prompt anchor.
+
+### Why an extension could not handle it
+
+- The prompt marker and padding are drawn inside the built-in `CustomEditor` render override; extensions supply editor components but cannot re-anchor the default composer's gutter.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/modes/interactive/components/custom-editor.ts` constructor, padding accessors, and `render()` override.
+
+## Single-span fast path for intra-line diffs (2026-08-17)
+
+Landed 2026-06-16 (commit 1da1ab5e4).
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/diff.ts`: `renderIntraLineDiff()` tries `renderIntraLineDiffFastPath()` first — identical lines return immediately, and a single replacement span (found by trimming the common prefix and suffix) renders directly as prefix plus inverse removed/added text — falling back to the exported `renderIntraLineDiffWithDiffWords()` (`Diff.diffWords`) only for multi-span edits. `LONG_LINE_FAST_PATH_LIMIT` (500) is exported for the bench and focused tests.
+- Coverage: `packages/coding-agent/test/diff-intraline-fastpath.test.ts`, `packages/coding-agent/test/diff-intraline-no-diffwords.test.ts`, and `packages/coding-agent/bench/word-diff.ts` against the pinned `bench/baseline/word-diff-baseline.json`.
+
+### Why
+
+- Most edit-tool diffs change one span per line; routing every line through `diffWords` dominated diff rendering time for large edits.
+
+### Why an extension could not handle it
+
+- Intra-line highlighting is computed by the built-in diff component before any extension result renderer sees the tool output.
+
+### Expected merge conflict zones
+
+- LOW/MEDIUM: `packages/coding-agent/src/modes/interactive/components/diff.ts` around the fast-path helpers and the exported seams.
+
+## Key hints display `escape` as `esc` (2026-08-17)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/keybinding-hints.ts`: `keyText()`/`keyHint()` resolve display names through `KEY_DISPLAY_ALIASES` (`escape` → `esc`) before the existing macOS `alt` → `option` rule, so hints read `esc to cancel` while bindings keep matching the canonical `escape` id.
+
+### Why
+
+- The spelled-out `escape` widened single-row hints (compaction cancel hints, selector footers) beyond the key users actually press.
+
+### Why an extension could not handle it
+
+- Key display formatting is the shared helper every built-in hint row renders through; the alias must stay consistent across all of them.
+
+### Expected merge conflict zones
+
+- LOW: the `KEY_DISPLAY_ALIASES` map and `formatKeyPart()` in `packages/coding-agent/src/modes/interactive/components/keybinding-hints.ts`.
+
+## Model selector search text helper removed (2026-08-17)
+
+Landed 2026-08-09 (commit 444f900d0).
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/model-search.ts`: `getModelSelectorSearchText()` is deleted. `/model` search ranks through `rankModelSearchItems` (see "model selector search ranking and frozen ordering"), which left the selector-specific concatenated-string builder with no consumers; `getModelSearchText()` remains for command autocomplete.
+
+### Why
+
+- Dead helpers in the shared search module invite the next editor to rank through the retired path that mis-ordered `opus` queries.
+
+### Why an extension could not handle it
+
+- The helper was private interactive-mode search plumbing; no extension consumed it.
+
+### Expected merge conflict zones
+
+- LOW: the deletion site in `packages/coding-agent/src/modes/interactive/model-search.ts`; an upstream sync restoring it conflicts trivially.
+
+## Renderer-only hosts: startup guards the default editor and stop defers exit output (2026-08-17)
+
+Landed 2026-08-16 (commit 03f46f57e, shipped in PR #892; see the focus-routing entry in `packages/tui/src/changes.md`).
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: startup wires the `app.clear`, Ctrl-D, and startup-submit handlers on `defaultEditor` only when a base editor exists, because renderer-only lifecycle hosts may mount the chrome tree without constructing one. `stop(fullscreenExitOutput?)` no longer eagerly reads the fullscreen-exit setting at default-parameter evaluation; the value resolves as `fullscreenExitOutput ?? this.settingsManager.getFullscreenExitOutput()` when the TUI is actually stopped.
+
+### Why
+
+- The v0.84.2 sync introduced renderer-only hosts; assuming a default editor and reading settings eagerly broke both paths outside the classic editor lifecycle.
+
+### Why an extension could not handle it
+
+- Startup wiring and `stop()` are `InteractiveMode` lifecycle internals that run before and after extension hooks.
+
+### Expected merge conflict zones
+
+- LOW: the `defaultEditor` guard block and the `stop()` signature/default resolution in `packages/coding-agent/src/modes/interactive/interactive-mode.ts`.
+
+## OmO Native footer badge removed (2026-08-17)
+
+Landed 2026-08-10 (commit c416335e9). Supersedes every copy of "Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)" in this file.
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/footer.ts`: the `(OmO Native)` anchor segment and its `footerData.isOmoNative()` feed are gone; the footer renders no OmO-specific coupling. The width-elision ladder, fast-mode glyph, and the rest of the fork footer behavior are unchanged.
+- The supporting `detectOmoNativeInstall()` module and its tests were deleted with the badge (the core-side data-provider cleanup is tracked by `packages/coding-agent/src/core/changes.md`).
+
+### Why
+
+- The badge coupled the brand-neutral footer to OmO-specific install detection that no longer carries product meaning; removing it deletes the detection path instead of leaving it dark.
+
+### Why an extension could not handle it
+
+- Footer segment composition is built into the interactive footer renderer; an extension cannot remove a built-in anchor segment.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/modes/interactive/components/footer.ts` around the (already removed) anchor construction.
+
+## Grok slash-menu colors resolve through chrome tokens (2026-08-17)
+
+Landed 2026-07-26 (commit ed353b365).
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/grok/chrome-tokens.ts` and `packages/coding-agent/src/modes/interactive/grok/chrome.ts`: the grok chrome colors slash-menu selection prefixes, primary text, and descriptions through chrome tokens backed by the active theme, composing each row via the pi-tui `SelectListTheme.renderRow` seam (see the renderRow entry in `packages/tui/src/changes.md`) instead of inline hex literals.
+- Coverage: `packages/coding-agent/test/grok/chrome.test.ts` pins the token-resolved rows.
+
+### Why
+
+- The mixed command/skill picker needed grok-night and grok-day to color the same rows differently without forking the shared select list.
+
+### Why an extension could not handle it
+
+- Chrome tokens are consumed inside the built-in interactive chrome strategy before extension UI contributions are composed.
+
+### Expected merge conflict zones
+
+- LOW: the token additions in `packages/coding-agent/src/modes/interactive/grok/chrome-tokens.ts` and the composer wiring in `packages/coding-agent/src/modes/interactive/grok/chrome.ts` (fork-only directory).
+
 ## Show the selected settings source (2026-08-16)
 
 ### What changed
@@ -546,6 +710,10 @@ Supersedes "Favorite patterns survive a persist while providers are unavailable 
 
 ## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
 
+> SUPERSEDED by "OmO Native footer badge removed (2026-08-17)". Retained for history: the `(OmO Native)` anchor
+> segment, its `footerData.isOmoNative()` feed, and `detectOmoNativeInstall()` were removed on 2026-08-10 (commit
+> c416335e9), so this badge no longer renders. The width-elision ladder it participated in is unchanged.
+
 ### What changed
 
 - `components/footer.ts`: `render()` prepends an `(OmO Native)` anchor segment (colored `success`) as the leftmost footer element when `footerData.isOmoNative()` returns true, before pwd and branch. The badge participates in the existing width-elision ladder as an anchor (never dropped, only elided with pwd when space is exhausted).
@@ -772,6 +940,10 @@ The tip line was teaching a small slice of the product while most of the surface
 
 ## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
 
+> SUPERSEDED by "OmO Native footer badge removed (2026-08-17)". Retained for history: the `(OmO Native)` anchor
+> segment, its `footerData.isOmoNative()` feed, and `detectOmoNativeInstall()` were removed on 2026-08-10 (commit
+> c416335e9), so this badge no longer renders. The width-elision ladder it participated in is unchanged.
+
 ### What changed
 
 - `components/footer.ts`: `render()` prepends an `(OmO Native)` anchor segment (colored `success`) as the leftmost footer element when `footerData.isOmoNative()` returns true, before pwd and branch. The badge participates in the existing width-elision ladder as an anchor (never dropped, only elided with pwd when space is exhausted).
@@ -941,6 +1113,10 @@ The tip line was teaching a small slice of the product while most of the surface
 ### Expected merge conflict zones
 
 ## Footer prepends (OmO Native) badge when the OMO native stack is active (2026-07-28)
+
+> SUPERSEDED by "OmO Native footer badge removed (2026-08-17)". Retained for history: the `(OmO Native)` anchor
+> segment, its `footerData.isOmoNative()` feed, and `detectOmoNativeInstall()` were removed on 2026-08-10 (commit
+> c416335e9), so this badge no longer renders. The width-elision ladder it participated in is unchanged.
 
 ### What changed
 
