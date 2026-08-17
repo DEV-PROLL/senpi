@@ -55,7 +55,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	opengateway: "moonshotai/kimi-k3",
 	xai: "grok-4.5",
 	groq: "openai/gpt-oss-120b",
-	cerebras: "zai-glm-4.7",
+	cerebras: "gpt-oss-120b",
 	zai: "glm-5.2",
 	"zai-coding-cn": "glm-5.2",
 	mistral: "devstral-medium-latest",

@@ -18,6 +18,10 @@
 
 ### Fixed
 
+- Session reload no longer repeats a full model-availability scan when extensions re-register a provider that is already registered in a fresh snapshot. Startup registration batching defers that refresh until the one post-bind `refresh()`, so create-time leftover scans cannot leak into the next reload ([#926](https://github.com/code-yeongyu/senpi/pull/926)).
+
+- Cerebras no longer defaults to `zai-glm-4.7`, which the live catalog dropped. The bundled default is now `gpt-oss-120b`, which remains in both the committed snapshot and the regenerated catalog, so `npm test` after a live model-data hydrate no longer fails provider-default resolution ([#926](https://github.com/code-yeongyu/senpi/pull/926)).
+
 - Steering queued while a provider stream-start timeout retry is running now starts automatically when that managed
   retry exhausts its budget, instead of remaining parked until another user prompt. Generic terminal provider errors
   and user-aborted retries keep their existing queue-retention behavior
