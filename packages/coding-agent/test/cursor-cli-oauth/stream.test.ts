@@ -62,13 +62,14 @@ function enabledSettings(overrides: Partial<CursorCliOauthProviderSettings> = {}
 		enabled: true,
 		executablePath: undefined,
 		forceExecution: true,
-		noApprovalAcknowledgedAt: undefined,
+		noApprovalAcknowledgedAt: "2026-08-17T00:00:00.000Z",
 		executionMode: "agent",
 		resumeMode: "auto",
 		pinnedAccount: undefined,
 		contextRecapOnModelSwitch: true,
 		modelCatalogTtlHours: 24,
 		sandboxMode: undefined,
+		denyCommands: [],
 		...overrides,
 	};
 }
@@ -493,5 +494,99 @@ describe("cursor-cli-oauth stream mapping", () => {
 
 		expect(failure.error.errorMessage ?? "").toContain("no accounts: run /login cursor-cli-oauth");
 		expect(existsSync(fixture.dump)).toBe(false);
+	});
+
+	it("refuses an unacknowledged force turn before any spawn", async () => {
+		const directory = temporaryDirectory();
+		const fixture = fixtureExecutable(directory, "happy");
+		const agentDir = join(directory, "agent");
+		const deps: CursorCliStreamDeps = {
+			cwd: directory,
+			agentDir,
+			store: await makeStore([account("alpha")]),
+			settings: enabledSettings({ noApprovalAcknowledgedAt: undefined }),
+			now: () => NOW,
+		};
+		process.env.SENPI_CURSOR_CLI_OAUTH_EXECUTABLE = fixture.executable;
+
+		const events = await collect(runTurn(deps, "hello", "stream-refusal"));
+		const failure = errorEvent(events);
+
+		expect(failure.reason).toBe("error");
+		expect(failure.error.errorMessage ?? "").toContain("noApprovalAcknowledgedAt");
+		expect(failure.error.errorMessage ?? "").toContain("acknowledge");
+		// Zero spawns: the fake executable only writes its dump when it actually runs.
+		expect(existsSync(fixture.dump)).toBe(false);
+		// The refusal happens before any account work: no credential home is created either.
+		expect(existsSync(join(agentDir, "cursor-cli-oauth"))).toBe(false);
+	});
+
+	it("applies the deny config inside the spawned HOME and re-applies it after a CLI rewrite", async () => {
+		const directory = temporaryDirectory();
+		const fixture = fixtureExecutable(directory, "happy");
+		const agentDir = join(directory, "agent");
+		const denyConfigPath = join(
+			agentDir,
+			"cursor-cli-oauth",
+			"accounts",
+			"alpha",
+			"home",
+			".cursor",
+			"cli-config.json",
+		);
+		const deps: CursorCliStreamDeps = {
+			cwd: directory,
+			agentDir,
+			store: await makeStore([account("alpha")]),
+			settings: enabledSettings({ denyCommands: ["rm -rf /"] }),
+			now: () => NOW,
+		};
+		process.env.SENPI_CURSOR_CLI_OAUTH_EXECUTABLE = fixture.executable;
+
+		await collect(runTurn(deps, "first turn", "stream-deny"));
+		expect(JSON.parse(readFileSync(denyConfigPath, "utf8"))).toEqual({
+			permissions: { deny: ["Shell(rm -rf /)"] },
+		});
+
+		// Mid-session the CLI rewrites its own config and drops the deny entries.
+		writeFileSync(denyConfigPath, JSON.stringify({ autoUpdates: true, permissions: { allow: ["Shell(ls)"] } }));
+
+		await collect(runTurn(deps, "second turn", "stream-deny"));
+		// The deny list is restored before the second spawn and CLI-owned keys survive.
+		expect(JSON.parse(readFileSync(denyConfigPath, "utf8"))).toEqual({
+			autoUpdates: true,
+			permissions: { allow: ["Shell(ls)"], deny: ["Shell(rm -rf /)"] },
+		});
+	});
+
+	it("includes --force only once acknowledged and honours plan mode without it", async () => {
+		const directory = temporaryDirectory();
+		const fixture = fixtureExecutable(directory, "happy");
+		const acknowledged: CursorCliStreamDeps = {
+			cwd: directory,
+			agentDir: join(directory, "agent"),
+			store: await makeStore([account("alpha")]),
+			settings: enabledSettings(),
+			now: () => NOW,
+		};
+		process.env.SENPI_CURSOR_CLI_OAUTH_EXECUTABLE = fixture.executable;
+
+		await collect(runTurn(acknowledged, "forced turn", "stream-force"));
+		expect(invocation(fixture.dump).argv).toContain("--force");
+
+		const planMode: CursorCliStreamDeps = {
+			cwd: directory,
+			agentDir: join(directory, "agent-plan"),
+			store: await makeStore([account("alpha")]),
+			settings: enabledSettings({ executionMode: "plan", noApprovalAcknowledgedAt: undefined }),
+			now: () => NOW,
+		};
+		const events = await collect(runTurn(planMode, "planning turn", "stream-plan"));
+		expect(events.at(-1)?.type).toBe("done");
+		const argv = invocation(fixture.dump).argv;
+		const modeIndex = argv.indexOf("--mode");
+		expect(modeIndex).toBeGreaterThan(-1);
+		expect(argv[modeIndex + 1]).toBe("plan");
+		expect(argv).not.toContain("--force");
 	});
 });

@@ -1,8 +1,18 @@
-import type { AuthContext, OAuthAuth, OAuthCredential, ProviderAuthInteraction } from "@earendil-works/pi-ai";
 import { readFile } from "node:fs/promises";
+import type {
+	AuthContext,
+	Credential,
+	OAuthAuth,
+	OAuthCredential,
+	ProviderAuthInteraction,
+} from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
-import { emptyCredential, type CursorCliOauthCredential } from "../../src/core/extensions/builtin/cursor-cli-oauth/accounts.ts";
 import {
+	type CursorCliOauthCredential,
+	emptyCredential,
+} from "../../src/core/extensions/builtin/cursor-cli-oauth/accounts.ts";
+import {
+	type CursorCliOauthConfig,
 	createCursorCliOauthConfig,
 	importLocalCursorCredential,
 	resolveCursorCliOauthLane,
@@ -118,7 +128,7 @@ describe("cursor-cli-oauth login and availability", () => {
 			"no accounts: run /login cursor-cli-oauth",
 		);
 
-		const malformed = { type: "api_key", key: "not-oauth" };
+		const malformed: Credential = { type: "api_key", key: "not-oauth" };
 		const malformedConfig = createCursorCliOauthConfig({
 			...dependencies(async () => undefined),
 			readCurrent: async () => malformed,
@@ -130,9 +140,7 @@ describe("cursor-cli-oauth login and availability", () => {
 
 	it("does not count an account with an empty access token as configured", async () => {
 		const config = createCursorCliOauthConfig(dependencies(async () => credential([account("default", "")])));
-		await expect(config.check({ ctx: authContext() })).rejects.toThrow(
-			"no accounts: run /login cursor-cli-oauth",
-		);
+		await expect(config.check({ ctx: authContext() })).rejects.toThrow("no accounts: run /login cursor-cli-oauth");
 	});
 
 	it("check never reads a real Cursor credential source", async () => {
@@ -151,42 +159,54 @@ describe("cursor-cli-oauth login and availability", () => {
 
 	it("names the first login default and prompts when a slot already exists", async () => {
 		const login = vi.fn(oauthFlow().login);
-		const first = createCursorCliOauthConfig({
-			...dependencies(async () => undefined),
-			loadOAuth: async () => oauthFlow({ login }),
-		});
-		const prompt = vi.fn(async () => "work");
+		const prompt = vi.fn(async (ask: { message: string }) =>
+			ask.message.includes("Name for this account") ? "work" : "yes",
+		);
+		const persist = vi.fn();
+		const fixedNow = () => new Date(Date.parse("2026-08-17T12:00:00.000Z"));
 		const callbacks = {
 			onAuth: vi.fn(),
 			onDeviceCode: vi.fn(),
 			onPrompt: prompt,
 			onSelect: vi.fn(async () => undefined),
 		};
+		const first = createCursorCliOauthConfig({
+			...dependencies(async () => undefined),
+			loadOAuth: async () => oauthFlow({ login }),
+			now: fixedNow,
+			persistAcknowledgement: persist,
+		});
 
 		const firstCredential = await first.login(callbacks);
 		expect((firstCredential.accounts as Array<{ name: string }>)[0]?.name).toBe("default");
-		expect(prompt).not.toHaveBeenCalled();
+		// First login presents only the one-screen acknowledgement prompt.
+		expect(prompt).toHaveBeenCalledTimes(1);
 
 		const second = createCursorCliOauthConfig({
 			...dependencies(async () => firstCredential as CursorCliOauthCredential),
 			loadOAuth: async () => oauthFlow({ login }),
+			now: fixedNow,
+			persistAcknowledgement: persist,
 		});
 		const secondCredential = await second.login(callbacks);
 		expect((secondCredential.accounts as Array<{ name: string }>).map((slot) => slot.name)).toEqual([
 			"default",
 			"work",
 		]);
-		expect(prompt).toHaveBeenCalledOnce();
+		// Second login: account-name prompt plus the acknowledgement prompt.
+		expect(prompt).toHaveBeenCalledTimes(3);
 		expect(login).toHaveBeenCalledTimes(2);
 	});
 
 	it("delegates expired slot refresh to the Cursor OAuth loader", async () => {
-		const refresh = vi.fn(async (_stored: OAuthCredential, _signal: AbortSignal): Promise<OAuthCredential> => ({
-			type: "oauth",
-			access: "refreshed-access",
-			refresh: "rotated-refresh",
-			expires: Date.now() + 120_000,
-		}));
+		const refresh = vi.fn(
+			async (_stored: OAuthCredential, _signal: AbortSignal): Promise<OAuthCredential> => ({
+				type: "oauth",
+				access: "refreshed-access",
+				refresh: "rotated-refresh",
+				expires: Date.now() + 120_000,
+			}),
+		);
 		const config = createCursorCliOauthConfig({
 			...dependencies(async () => undefined),
 			loadOAuth: async () => oauthFlow({ refresh }),
@@ -227,6 +247,94 @@ describe("cursor-cli-oauth login and availability", () => {
 
 	it("uses the provider sentinel as its API key", () => {
 		const config = createCursorCliOauthConfig(dependencies(async () => credential()));
-		expect(config.getApiKey(credential())).toBe(PROVIDER_ID + "-managed");
+		expect(config.getApiKey(credential())).toBe(`${PROVIDER_ID}-managed`);
+	});
+});
+
+const ACKNOWLEDGED_AT = "2026-08-17T12:34:56.000Z";
+
+function loginCallbacks(answer: () => Promise<string>) {
+	return {
+		onAuth: vi.fn(),
+		onDeviceCode: vi.fn(),
+		onPrompt: vi.fn(async (_ask: { message: string }) => answer()),
+		onSelect: vi.fn(async () => undefined),
+	};
+}
+
+describe("cursor-cli-oauth no-approval acknowledgement at login", () => {
+	const fixedNow = () => new Date(Date.parse(ACKNOWLEDGED_AT));
+
+	function acknowledgementConfig(
+		persist: ReturnType<typeof vi.fn>,
+		current: () => Promise<CursorCliOauthCredential | undefined> = async () => undefined,
+	) {
+		return createCursorCliOauthConfig({
+			...dependencies(current),
+			loadOAuth: async () => oauthFlow(),
+			now: fixedNow,
+			persistAcknowledgement: persist as (acknowledgedAt: string) => void,
+		});
+	}
+
+	it("presents the one-screen explanation exactly once and persists on explicit confirmation", async () => {
+		const persist = vi.fn();
+		const callbacks = loginCallbacks(async () => "yes");
+		const config = acknowledgementConfig(persist);
+
+		const stored = await config.login(callbacks);
+
+		// Exactly one acknowledgement prompt, carrying the full explanation.
+		const explanations = callbacks.onPrompt.mock.calls
+			.map((call) => call[0])
+			.filter((ask) => !ask.message.includes("Name for this account"));
+		expect(explanations).toHaveLength(1);
+		expect(explanations[0]?.message).toContain("no senpi approval");
+		expect(explanations[0]?.message).toContain("no senpi sandboxing");
+		expect(explanations[0]?.message).toContain("no tool-level audit");
+		expect(explanations[0]?.message).toContain("executionMode");
+		// Confirm means persist: acknowledged-but-unwritten must be impossible.
+		expect(persist).toHaveBeenCalledTimes(1);
+		expect(persist).toHaveBeenCalledWith(ACKNOWLEDGED_AT);
+		// The slot is stored either way.
+		expect((stored.accounts as Array<{ name: string }>).map((slot) => slot.name)).toEqual(["default"]);
+	});
+
+	it("still stores the slot on decline and writes no acknowledgement", async () => {
+		const persist = vi.fn();
+		const callbacks = loginCallbacks(async () => "no");
+		const config = acknowledgementConfig(persist);
+
+		const stored = await config.login(callbacks);
+
+		expect(persist).not.toHaveBeenCalled();
+		expect((stored.accounts as Array<{ name: string }>).map((slot) => slot.name)).toEqual(["default"]);
+	});
+
+	it("keeps the acknowledgement unwritten across repeated declined logins", async () => {
+		const persist = vi.fn();
+		let current: CursorCliOauthCredential | undefined;
+		const config = acknowledgementConfig(persist, async () => current);
+
+		current = (await config.login(loginCallbacks(async () => "no"))) as CursorCliOauthCredential;
+		current = (await config.login(loginCallbacks(async () => ""))) as CursorCliOauthCredential;
+
+		expect((current.accounts as Array<{ name: string }>).map((slot) => slot.name)).toEqual(["default", "account-2"]);
+		expect(persist).not.toHaveBeenCalled();
+	});
+
+	it("skips the prompt and the write when no interaction surface exists", async () => {
+		const persist = vi.fn();
+		const config = acknowledgementConfig(persist);
+		const callbacks = {
+			onAuth: vi.fn(),
+			onDeviceCode: vi.fn(),
+			onSelect: vi.fn(async () => undefined),
+		} as unknown as Parameters<CursorCliOauthConfig["login"]>[0];
+
+		const stored = await config.login(callbacks);
+
+		expect(persist).not.toHaveBeenCalled();
+		expect((stored.accounts as Array<{ name: string }>).map((slot) => slot.name)).toEqual(["default"]);
 	});
 });

@@ -83,7 +83,7 @@ function createHarness(deps: CursorCliAccountCommandDeps = {}): {
 function createContext(
 	storage: AuthStorage,
 	sessionId = "session-01",
-	extra: { hasUI?: boolean; login?: () => Promise<void> } = {},
+	extra: { hasUI?: boolean; login?: () => Promise<void>; input?: (title: string) => Promise<string | undefined> } = {},
 ): { ctx: ExtensionCommandContext; notices: Notice[]; login: ReturnType<typeof vi.fn> } {
 	const notices: Notice[] = [];
 	const login = vi.fn(extra.login ?? (async () => {}));
@@ -100,7 +100,7 @@ function createContext(
 			},
 			ui: {
 				notify: (message: string, type?: Notice["type"]) => notices.push({ message, type }),
-				input: async (title: string) => `${title}-answer`,
+				input: extra.input ?? (async (title: string) => `${title}-answer`),
 			},
 		} as unknown as ExtensionCommandContext,
 		notices,
@@ -362,5 +362,54 @@ describe("/cursor-account", () => {
 		expect(output).not.toContain("below the minimum known-good");
 		expect(output).not.toContain("Recommended default");
 		expect(output).not.toContain("SECRET-ACCESS");
+	});
+});
+
+describe("/cursor-account acknowledge", () => {
+	it("presents the explanation once and persists the acknowledgement on explicit confirmation", async () => {
+		const storage = AuthStorage.inMemory({ [PROVIDER_ID]: credential(slot("alpha")) });
+		const input = vi.fn(async (_title: string) => "yes");
+		const persist = vi.fn();
+		const { ctx, notices } = createContext(storage, "session-01", { input });
+		const harness = createHarness({ persistAcknowledgement: persist, now: () => FIXED_NOW });
+
+		await command(harness).handler("acknowledge", ctx);
+
+		expect(input).toHaveBeenCalledTimes(1);
+		expect(input.mock.calls[0]?.[0]).toContain("no senpi approval");
+		expect(input.mock.calls[0]?.[0]).toContain("no senpi sandboxing");
+		expect(input.mock.calls[0]?.[0]).toContain("no tool-level audit");
+		expect(input.mock.calls[0]?.[0]).toContain("executionMode");
+		expect(persist).toHaveBeenCalledTimes(1);
+		expect(persist).toHaveBeenCalledWith("/tmp/cursor-account-command", new Date(FIXED_NOW).toISOString());
+		expect(lastNotice(notices)).toContain("Acknowledged");
+	});
+
+	it("leaves the acknowledgement unwritten when the user declines", async () => {
+		const storage = AuthStorage.inMemory({ [PROVIDER_ID]: credential(slot("alpha")) });
+		const input = vi.fn(async (_title: string) => "no");
+		const persist = vi.fn();
+		const { ctx, notices } = createContext(storage, "session-01", { input });
+		const harness = createHarness({ persistAcknowledgement: persist, now: () => FIXED_NOW });
+
+		await command(harness).handler("acknowledge", ctx);
+
+		expect(input).toHaveBeenCalledTimes(1);
+		expect(persist).not.toHaveBeenCalled();
+		expect(lastNotice(notices)).toContain("No acknowledgement written");
+	});
+
+	it("requires an interactive UI and persists nothing without one", async () => {
+		const storage = AuthStorage.inMemory({ [PROVIDER_ID]: credential(slot("alpha")) });
+		const input = vi.fn(async (_title: string) => "yes");
+		const persist = vi.fn();
+		const { ctx, notices } = createContext(storage, "session-01", { hasUI: false, input });
+		const harness = createHarness({ persistAcknowledgement: persist, now: () => FIXED_NOW });
+
+		await command(harness).handler("acknowledge", ctx);
+
+		expect(input).not.toHaveBeenCalled();
+		expect(persist).not.toHaveBeenCalled();
+		expect(notices.at(-1)?.type).toBe("error");
 	});
 });

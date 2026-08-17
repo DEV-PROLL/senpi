@@ -109,7 +109,7 @@ function enabledSettings(): CursorCliOauthProviderSettings {
 		enabled: true,
 		executablePath: undefined,
 		forceExecution: true,
-		noApprovalAcknowledgedAt: undefined,
+		noApprovalAcknowledgedAt: "2026-08-17T00:00:00.000Z",
 		executionMode: "agent",
 		resumeMode: "auto",
 		pinnedAccount: undefined,

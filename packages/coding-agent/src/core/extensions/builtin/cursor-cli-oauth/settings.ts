@@ -1,5 +1,5 @@
 import { getAgentDir } from "../../../../config.ts";
-import { type Settings, SettingsManager } from "../../../settings-manager.ts";
+import { FileSettingsStorage, parseSettingsJson, type Settings, SettingsManager } from "../../../settings-manager.ts";
 
 export type CursorCliOauthExecutionMode = "agent" | "plan";
 export type CursorCliOauthResumeMode = "auto" | "off";
@@ -15,6 +15,8 @@ export interface CursorCliOauthProviderSettings {
 	readonly contextRecapOnModelSwitch: boolean;
 	readonly modelCatalogTtlHours: number;
 	readonly sandboxMode: string | undefined;
+	/** Exact full commands the spawned CLI must refuse; globs are not supported. */
+	readonly denyCommands?: string[];
 }
 
 type SettingsWithCursorCliOauthProvider = Settings & {
@@ -35,6 +37,7 @@ const DEFAULT_SETTINGS: CursorCliOauthProviderSettings = {
 	contextRecapOnModelSwitch: true,
 	modelCatalogTtlHours: 24,
 	sandboxMode: undefined,
+	denyCommands: [],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -61,6 +64,24 @@ function parseEnvironmentBoolean(value: string | undefined): boolean | undefined
 
 function parseNonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** Exact full commands only: string entries are trimmed, non-strings and empties are dropped. */
+function parseDenyCommands(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	return value
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => entry.trim())
+		.filter((command) => command.length > 0);
+}
+
+/** Comma-separated exact full commands; a missing or empty value leaves settings untouched. */
+function parseEnvironmentDenyCommands(value: string | undefined): string[] | undefined {
+	if (value === undefined || value.length === 0) return undefined;
+	return value
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter((command) => command.length > 0);
 }
 
 function parseIsoString(value: unknown): string | undefined {
@@ -100,6 +121,7 @@ function parseProviderSettings(value: unknown): ParsedSettings {
 	const contextRecapOnModelSwitch = parseBoolean(value.contextRecapOnModelSwitch);
 	const modelCatalogTtlHours = parsePositiveFiniteNumber(value.modelCatalogTtlHours);
 	const sandboxMode = parseNonEmptyString(value.sandboxMode);
+	const denyCommands = parseDenyCommands(value.denyCommands);
 	return {
 		...(enabled !== undefined ? { enabled } : {}),
 		...(executablePath !== undefined ? { executablePath } : {}),
@@ -111,6 +133,7 @@ function parseProviderSettings(value: unknown): ParsedSettings {
 		...(contextRecapOnModelSwitch !== undefined ? { contextRecapOnModelSwitch } : {}),
 		...(modelCatalogTtlHours !== undefined ? { modelCatalogTtlHours } : {}),
 		...(sandboxMode !== undefined ? { sandboxMode } : {}),
+		...(denyCommands !== undefined ? { denyCommands } : {}),
 	};
 }
 
@@ -128,6 +151,7 @@ function parseEnvironmentSettings(environment: Environment): ParsedSettings {
 		environment.SENPI_CURSOR_CLI_OAUTH_MODEL_CATALOG_TTL_HOURS,
 	);
 	const sandboxMode = parseNonEmptyString(environment.SENPI_CURSOR_CLI_OAUTH_SANDBOX_MODE);
+	const denyCommands = parseEnvironmentDenyCommands(environment.SENPI_CURSOR_CLI_OAUTH_DENY_COMMANDS);
 	return {
 		...(executablePath !== undefined ? { executablePath } : {}),
 		...(enabled !== undefined ? { enabled } : {}),
@@ -138,6 +162,7 @@ function parseEnvironmentSettings(environment: Environment): ParsedSettings {
 		...(contextRecapOnModelSwitch !== undefined ? { contextRecapOnModelSwitch } : {}),
 		...(modelCatalogTtlHours !== undefined ? { modelCatalogTtlHours } : {}),
 		...(sandboxMode !== undefined ? { sandboxMode } : {}),
+		...(denyCommands !== undefined ? { denyCommands } : {}),
 	};
 }
 
@@ -182,4 +207,36 @@ export function loadCursorCliOauthProviderSettingsFromDisk(cwd: string): CursorC
 		parseProviderSettings(project.cursorCliOauthProvider),
 		parseEnvironmentSettings(process.env),
 	);
+}
+
+/**
+ * Read-modify-write `noApprovalAcknowledgedAt` into the provider block of the
+ * global settings file, preserving every other key. An unparseable file is
+ * reported instead of silently clobbered, so an acknowledgement can never
+ * claim success while leaving the settings unwritten.
+ */
+export function persistCursorCliNoApprovalAcknowledgement(cwd: string, acknowledgedAt: string): void {
+	const storage = new FileSettingsStorage(cwd, getAgentDir());
+	storage.selectSource("global");
+	storage.withLock("global", (current) => {
+		let root: Record<string, unknown>;
+		try {
+			root = current === undefined ? {} : parseSettingsJson(current);
+		} catch (error) {
+			throw new Error(
+				`Cannot persist the cursor-cli-oauth acknowledgement: the settings file is unparseable (${error instanceof Error ? error.message : String(error)})`,
+			);
+		}
+		const provider =
+			typeof root.cursorCliOauthProvider === "object" &&
+			root.cursorCliOauthProvider !== null &&
+			!Array.isArray(root.cursorCliOauthProvider)
+				? { ...(root.cursorCliOauthProvider as Record<string, unknown>) }
+				: {};
+		return JSON.stringify(
+			{ ...root, cursorCliOauthProvider: { ...provider, noApprovalAcknowledgedAt: acknowledgedAt } },
+			null,
+			2,
+		);
+	});
 }

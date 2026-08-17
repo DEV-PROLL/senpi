@@ -19,11 +19,16 @@ import {
 } from "./diagnostics.ts";
 import {
 	CURSOR_CLI_OAUTH_PROVIDER_ID,
+	confirmCursorCliNoApprovalAcknowledgement,
 	importLocalCursorCredential,
 	type LocalCursorImportDeps,
 } from "./oauth-login.ts";
 import { type CursorCliSessionRouter, cursorCliSessionRouter } from "./session-router.ts";
-import { type CursorCliOauthProviderSettings, loadCursorCliOauthProviderSettingsFromDisk } from "./settings.ts";
+import {
+	type CursorCliOauthProviderSettings,
+	loadCursorCliOauthProviderSettingsFromDisk,
+	persistCursorCliNoApprovalAcknowledgement,
+} from "./settings.ts";
 
 /** Injectable seams; every default resolves real on-disk state at invocation time. */
 export type CursorCliAccountCommandDeps = {
@@ -34,11 +39,14 @@ export type CursorCliAccountCommandDeps = {
 	readonly readNativeCredential?: () => Credential | undefined | Promise<Credential | undefined>;
 	readonly importCredential?: typeof importLocalCursorCredential;
 	readonly importDeps?: LocalCursorImportDeps;
+	/** Acknowledgement persistence seam; the default read-modify-writes the global settings file. */
+	readonly persistAcknowledgement?: (cwd: string, acknowledgedAt: string) => void;
 	readonly now?: () => number;
 	readonly generation?: CursorCliGenerationGuard;
 };
 
-const USAGE = "Usage: /cursor-account [list | add | remove <name> | pin <name> | unpin | import | status]";
+const USAGE =
+	"Usage: /cursor-account [list | add | remove <name> | pin <name> | unpin | import | acknowledge | status]";
 
 function asCursorCredential(value: Credential | undefined): CursorCliOauthCredential {
 	return value !== undefined && value.type === "oauth" ? (value as CursorCliOauthCredential) : emptyCredential();
@@ -83,7 +91,7 @@ export function registerCursorCliAccountCommand(pi: ExtensionAPI, deps: CursorCl
 
 	pi.registerCommand("cursor-account", {
 		description: "List and manage Cursor CLI (OAuth) accounts.",
-		argumentHint: "[list | add | remove <name> | pin <name> | unpin | import | status]",
+		argumentHint: "[list | add | remove <name> | pin <name> | unpin | import | acknowledge | status]",
 		handler: async (rawArgs: string, ctx: ExtensionCommandContext): Promise<void> => {
 			try {
 				const args = parseArgs(rawArgs);
@@ -110,6 +118,10 @@ export function registerCursorCliAccountCommand(pi: ExtensionAPI, deps: CursorCl
 				}
 				if (action === "import") {
 					await importAccount(ctx, deps);
+					return;
+				}
+				if (action === "acknowledge") {
+					await acknowledgeNoApproval(ctx, deps, generation);
 					return;
 				}
 				if (action === "status") {
@@ -279,6 +291,35 @@ async function importAccount(ctx: ExtensionCommandContext, deps: CursorCliAccoun
 	ctx.ui.notify(
 		`Imported local Cursor credential as '${importedName ?? "a new account"}' (copied into this provider's store).`,
 		"info",
+	);
+}
+
+async function acknowledgeNoApproval(
+	ctx: ExtensionCommandContext,
+	deps: CursorCliAccountCommandDeps,
+	generation: CursorCliGenerationGuard,
+): Promise<void> {
+	if (!ctx.hasUI) {
+		ctx.ui.notify("/cursor-account acknowledge requires an interactive UI.", "error");
+		return;
+	}
+	const persist = deps.persistAcknowledgement ?? persistCursorCliNoApprovalAcknowledgement;
+	const acknowledgedAt = await confirmCursorCliNoApprovalAcknowledgement(
+		async (ask) => (await ctx.ui.input(ask.message)) ?? "",
+		() => new Date((deps.now ?? Date.now)()),
+	);
+	if (acknowledgedAt === undefined) {
+		generation.runFencedSync(ctx, () =>
+			ctx.ui.notify(
+				"No acknowledgement written: unattended Cursor CLI execution stays off until you acknowledge.",
+				"info",
+			),
+		);
+		return;
+	}
+	persist(ctx.cwd, acknowledgedAt);
+	generation.runFencedSync(ctx, () =>
+		ctx.ui.notify(`Acknowledged unattended Cursor CLI tool execution at ${acknowledgedAt}.`, "info"),
 	);
 }
 

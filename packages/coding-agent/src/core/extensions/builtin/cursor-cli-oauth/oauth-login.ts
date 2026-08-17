@@ -1,3 +1,7 @@
+import { execFile as nodeExecFile } from "node:child_process";
+import { readFile as nodeReadFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
 	AuthCheck,
 	AuthContext,
@@ -9,26 +13,24 @@ import type {
 	ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
 import { cursorProvider } from "@earendil-works/pi-ai/providers/cursor";
-import { execFile as nodeExecFile } from "node:child_process";
-import { readFile as nodeReadFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import {
 	addAccount,
+	type CursorCliAccountSlot,
+	type CursorCliOauthCredential,
 	emptyCredential,
 	listAccounts,
 	SENTINEL_OAUTH_FIELDS,
-	type CursorCliAccountSlot,
-	type CursorCliOauthCredential,
 } from "./accounts.ts";
 import {
+	type CursorAgentExecutableDeps,
 	defaultCursorAgentExecutableDeps,
 	resolveCursorAgentExecutable,
-	type CursorAgentExecutableDeps,
 } from "./executable.ts";
+import { CURSOR_CLI_OAUTH_NO_APPROVAL_EXPLANATION } from "./guardrails.ts";
 import {
-	loadCursorCliOauthProviderSettingsFromDisk,
 	type CursorCliOauthProviderSettings,
+	loadCursorCliOauthProviderSettingsFromDisk,
+	persistCursorCliNoApprovalAcknowledgement,
 } from "./settings.ts";
 
 export const CURSOR_CLI_OAUTH_PROVIDER_ID = "cursor-cli-oauth";
@@ -54,6 +56,10 @@ export type CursorCliOauthConfigDeps = {
 	loadOAuth?: () => Promise<OAuthAuth>;
 	readCursorFile?: () => Promise<ImportedCursorCredential | undefined>;
 	readCursorKeychain?: () => Promise<ImportedCursorCredential | undefined>;
+	/** Clock for acknowledgement timestamps; injectable so tests stay deterministic. */
+	now?: () => Date;
+	/** Persists the no-approval acknowledgement; the disk default is wired in defaultCursorCliOauthConfig. */
+	persistAcknowledgement?: (acknowledgedAt: string) => void;
 };
 
 export type CursorCliOauthLaneResolution = {
@@ -87,7 +93,9 @@ type ConfigurationAssessment = {
 	message: string;
 };
 
-function isCursorCliOauthCredential(value: Credential | OAuthCredentials | undefined): value is CursorCliOauthCredential {
+function isCursorCliOauthCredential(
+	value: Credential | OAuthCredentials | undefined,
+): value is CursorCliOauthCredential {
 	if (typeof value !== "object" || value === null) return false;
 	const candidate = value as Partial<CursorCliOauthCredential>;
 	return candidate.type === "oauth" && Array.isArray(candidate.accounts);
@@ -131,9 +139,7 @@ async function configuredFor(deps: CursorCliOauthConfigDeps): Promise<Configurat
 }
 
 /** Resolve credentials immediately before execution so a concurrent refresh cannot leave a stale token in memory. */
-export async function resolveCursorCliOauthLane(
-	deps: CursorCliOauthConfigDeps,
-): Promise<CursorCliOauthLaneResolution> {
+export async function resolveCursorCliOauthLane(deps: CursorCliOauthConfigDeps): Promise<CursorCliOauthLaneResolution> {
 	const assessment = await configuredFor(deps);
 	const account = assessment.accounts[0];
 	if (!account) throw new Error(NO_ACCOUNTS_MESSAGE);
@@ -208,6 +214,32 @@ function slotFromCredential(
 	};
 }
 
+/** The one-screen login explanation: what unattended Cursor CLI execution gives up, and the plan-mode alternative. */
+export const CURSOR_CLI_OAUTH_LOGIN_ACKNOWLEDGEMENT_EXPLANATION = `${CURSOR_CLI_OAUTH_NO_APPROVAL_EXPLANATION} Plan mode (planning only, no tool execution) is available via the executionMode setting.`;
+
+const ACKNOWLEDGEMENT_ACCEPTANCE = new Set(["yes", "y"]);
+
+/**
+ * Present the no-approval explanation exactly once and return the ISO
+ * acknowledgement timestamp on explicit confirmation, undefined otherwise.
+ * Shared by the login flow and the /cursor-account acknowledge subcommand so
+ * both surfaces present the identical explanation and persist identically.
+ */
+export async function confirmCursorCliNoApprovalAcknowledgement(
+	onPrompt: ((prompt: { message: string; placeholder?: string }) => Promise<string>) | undefined,
+	now: () => Date,
+): Promise<string | undefined> {
+	if (!onPrompt) return undefined;
+	const answer = (
+		await onPrompt({
+			message: `${CURSOR_CLI_OAUTH_LOGIN_ACKNOWLEDGEMENT_EXPLANATION}\nType "yes" to acknowledge and allow unattended Cursor CLI tool execution; anything else leaves it off.`,
+		})
+	)
+		.trim()
+		.toLowerCase();
+	return ACKNOWLEDGEMENT_ACCEPTANCE.has(answer) ? now().toISOString() : undefined;
+}
+
 export function createCursorCliOauthConfig(deps: CursorCliOauthConfigDeps): CursorCliOauthConfig {
 	return {
 		name: CURSOR_CLI_OAUTH_NAME,
@@ -225,6 +257,15 @@ export function createCursorCliOauthConfig(deps: CursorCliOauthConfigDeps): Curs
 			const flow = await (deps.loadOAuth ?? loadCursorOAuthFlow)();
 			const loggedIn = await flow.login(providerInteraction(callbacks));
 			const name = await accountName(existing, callbacks.onPrompt);
+			// After the PKCE flow succeeds and before the slot is stored: the
+			// one-screen no-approval explanation, confirmed once. Declining still
+			// stores the slot; only the acknowledgement stays unset, so force turns
+			// refuse until the user acknowledges later.
+			const acknowledgedAt = await confirmCursorCliNoApprovalAcknowledgement(
+				callbacks.onPrompt,
+				deps.now ?? (() => new Date()),
+			);
+			if (acknowledgedAt !== undefined) deps.persistAcknowledgement?.(acknowledgedAt);
 			return addAccount(current, slotFromCredential(loggedIn, name, "login"));
 		},
 
@@ -246,7 +287,12 @@ export function createCursorCliOauthConfig(deps: CursorCliOauthConfigDeps): Curs
 					},
 					signal,
 				);
-				accounts.push({ ...slot, access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires });
+				accounts.push({
+					...slot,
+					access: refreshed.access,
+					refresh: refreshed.refresh,
+					expires: refreshed.expires,
+				});
 			}
 			return { ...credentials, ...SENTINEL_OAUTH_FIELDS, accounts };
 		},
@@ -273,22 +319,8 @@ function execFileOutput(file: string, args: string[]): Promise<string | undefine
 async function defaultKeychainCredential(): Promise<ImportedCursorCredential | undefined> {
 	if (process.platform !== "darwin") return undefined;
 	const [access, refresh] = await Promise.all([
-		execFileOutput("security", [
-			"find-generic-password",
-			"-a",
-			"cursor-user",
-			"-s",
-			"cursor-access-token",
-			"-w",
-		]),
-		execFileOutput("security", [
-			"find-generic-password",
-			"-a",
-			"cursor-user",
-			"-s",
-			"cursor-refresh-token",
-			"-w",
-		]),
+		execFileOutput("security", ["find-generic-password", "-a", "cursor-user", "-s", "cursor-access-token", "-w"]),
+		execFileOutput("security", ["find-generic-password", "-a", "cursor-user", "-s", "cursor-refresh-token", "-w"]),
 	]);
 	return access && refresh ? { access, refresh } : undefined;
 }
@@ -334,7 +366,7 @@ export async function importLocalCursorCredential(
 	const platform = deps.platform ?? process.platform;
 	const readKeychain = deps.readCursorKeychain ?? defaultKeychainCredential;
 	const readFile = deps.readCursorFile ?? (() => defaultFileCredential(platform));
-	const imported = platform === "darwin" ? (await readKeychain()) ?? (await readFile()) : await readFile();
+	const imported = platform === "darwin" ? ((await readKeychain()) ?? (await readFile())) : await readFile();
 	if (!imported) throw new Error("No local Cursor OAuth credential found");
 	const existing = listAccounts(current);
 	const name = await accountName(existing, deps.onPrompt);
@@ -366,5 +398,8 @@ export function defaultCursorCliOauthConfig(
 			};
 			return resolveCursorAgentExecutable(executableDeps);
 		},
+		now: () => new Date(),
+		persistAcknowledgement: (acknowledgedAt: string) =>
+			persistCursorCliNoApprovalAcknowledgement(cwd, acknowledgedAt),
 	});
 }

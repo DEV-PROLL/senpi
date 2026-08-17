@@ -22,6 +22,12 @@ import {
 	resolveCursorAgentExecutable,
 } from "./executable.ts";
 import { type CursorCliAttemptOptions, type CursorCliFailoverNotice, runCursorCliFailover } from "./failover.ts";
+import {
+	applyCursorCliDenyConfig,
+	CursorCliExecutionRefusalError,
+	createCursorCliGuardrailSession,
+	resolveCursorCliExecutionPolicy,
+} from "./guardrails.ts";
 import { runInCursorAccountHome } from "./home-store.ts";
 import { CURSOR_CLI_OAUTH_PROVIDER_ID, type CursorCliOauthConfig, createCursorCliOauthConfig } from "./oauth-login.ts";
 import {
@@ -430,6 +436,22 @@ export function streamCursorCliOauth(
 			// never cached across turns, so back-to-back turns observe changes.
 			const settings = deps.settings ?? loadCursorCliOauthProviderSettingsFromDisk(cwdDirectory);
 			if (!settings.enabled) throw new Error(DISABLED_MESSAGE);
+			// Guardrails decide before any spawn: an unacknowledged force attempt is
+			// the turn's error outcome, and only the policy's force/plan/sandbox
+			// verdict reaches the argv. Warnings surface as turn notices.
+			const guardrailSession = createCursorCliGuardrailSession();
+			const policy = resolveCursorCliExecutionPolicy(
+				{
+					forceExecution: settings.forceExecution,
+					noApprovalAcknowledgedAt: settings.noApprovalAcknowledgedAt,
+					executionMode: settings.executionMode,
+					sandboxMode: settings.sandboxMode,
+				},
+				guardrailSession,
+				settings.denyCommands ?? [],
+			);
+			if (policy.status === "refused") throw new CursorCliExecutionRefusalError(policy.refusal);
+			for (const warning of policy.warnings) appendNotice(mapper, warning.message);
 			const executableDeps: CursorAgentExecutableDeps = {
 				...defaultCursorAgentExecutableDeps(),
 				settings: { executablePath: settings.executablePath },
@@ -468,13 +490,17 @@ export function streamCursorCliOauth(
 							agentDir,
 							slot,
 							async ({ home }) => {
+								// The CLI rewrites cli-config.json during every invocation, so the
+								// deny list must ride the same per-spawn cadence as the home-store
+								// auth.json preparation directly above this spawn.
+								applyCursorCliDenyConfig(home, policy.denyCommands);
 								const handle = spawnCursorCli({
 									prompt: attempt.prompt,
 									model: model.id,
 									resumeChatId: attempt.resumeChatId,
-									force: settings.forceExecution,
-									executionMode: settings.executionMode,
-									sandboxMode: settings.sandboxMode,
+									force: policy.force,
+									executionMode: policy.executionMode,
+									sandboxMode: policy.sandboxMode,
 									accountHome: home,
 									cwd: cwdDirectory,
 									signal,
