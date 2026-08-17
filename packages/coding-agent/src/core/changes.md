@@ -1,5 +1,31 @@
 # changes
 
+## Cursor CLI OAuth provider display name (2026-08-17)
+
+### What changed
+
+- `provider-display-names.ts`: added `"cursor-cli-oauth": "Cursor CLI (OAuth)"` for the new builtin
+  provider lane. The `/login` list and auth status surfaces pick the name up automatically from the
+  provider registration; only the display-name map needed a row. The lane's builtin registry entry is
+  recorded in `extensions/builtin/changes.md` (this directory's nearest record for that file).
+
+### Why
+
+- The lane runs senpi turns through the official `cursor-agent` CLI in print mode as the documented
+  fallback for the native Cursor provider (`cursor`, the api2.cursor.sh protobuf transport): use the
+  native provider by default, and this lane when the native path misbehaves or Cursor's own agent
+  harness is explicitly wanted.
+
+### Why an extension could not handle it
+
+- The display-name map is a core-owned literal with no extension hook: a builtin provider cannot name
+  itself on the `/login` surface without an entry here. All lane behavior lives under
+  `extensions/builtin/cursor-cli-oauth/` (see that directory's `changes.md` and `AGENTS.md`).
+
+### Expected merge-conflict zones
+
+- LOW: `provider-display-names.ts` map rows (one-line additions in a sorted literal).
+
 ## Expand explicit dollar skill tokens and publish invocation metadata (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
 
 ### What changed

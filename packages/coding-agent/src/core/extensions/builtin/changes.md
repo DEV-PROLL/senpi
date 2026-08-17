@@ -1,5 +1,14 @@
 # Builtin extensions changes
 
+## cursor-cli-oauth: register the Cursor CLI fallback lane (2026-08-17)
+
+- `index.ts` imports the `cursor-cli-oauth` extension and registers it in `builtinExtensions` beside `claude-sdk-oauth`, one `BuiltinExtensionFactory` entry: `{ id: "cursor-cli-oauth", factory: cursorCliOauthExtension }`.
+- Registration is unconditional and probing-free: the factory registers the provider immediately with an offline static model catalog (the probe-backed catalog replaces it asynchronously) and reports executable/auth state through its oauth `check`, so the registry itself never blocks on, waits for, or conditions the entry on the external `cursor-agent` binary.
+- Why beside `claude-sdk-oauth`: both are provider-lane extensions whose only ordering requirement is "present before model-catalog feeders observe them"; neither mutates another extension's state, so their relative order is not load-bearing (same slot as the existing entry).
+- Positioning (plan addendum): the native Cursor provider (`cursor`, api2.cursor.sh protobuf transport shipped in v2026.8.16) stays the first-party primary path; this lane is the documented fallback for when the native path does not work well or Cursor's own agent harness is explicitly wanted.
+- Why an extension boundary could not avoid this edit: `builtinExtensions` is a core-owned array with no self-registration hook - a builtin provider cannot join the registry from outside this file. This one entry is the lane's entire footprint here; all behavior lives under `cursor-cli-oauth/` (see that directory's `changes.md`/`AGENTS.md`; the display-name row is recorded in `core/changes.md`).
+- Expected merge conflict zones: MEDIUM in `index.ts` at the import cluster and the registry array — every new builtin lane edits the same two hunks.
+
 ## service-tier: per-model /fast persistence across sessions (2026-08-16)
 
 - `/fast [on|off]` now persists the choice per model in settings `modelServiceTiers` (global scope, nested-key write so concurrent sessions merge safely), so fast mode survives a restart instead of dying with the session. No-arg `/fast` keeps the established toggle UX; argument completions are `on` and `off`.
