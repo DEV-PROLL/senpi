@@ -103,6 +103,7 @@ import {
 	DiagnosticsResultSchema,
 	DiagnosticsSuccessSchema,
 	ExecClientControlMessageSchema,
+	ExecClientHeartbeatSchema,
 	type ExecClientMessage,
 	ExecClientMessageSchema,
 	ExecClientStreamCloseSchema,
@@ -235,6 +236,7 @@ export type {
 
 export const CURSOR_API_URL = "https://api2.cursor.sh";
 export const CURSOR_CLIENT_VERSION = "cli-2026.07.23-e383d2b";
+const EXEC_HEARTBEAT_INTERVAL_MS = 3000;
 
 /**
  * HTTP/1 connection-specific headers that HTTP/2 forbids. Node's
@@ -1012,7 +1014,6 @@ async function handleShellStreamArgs(
 	// Cursor can keep the turn pending when it receives only stream deltas.
 	// Send the final structured shellResult as completion acknowledgement.
 	sendExecClientMessage(h2Request, execMsg, "shellResult", sanitizedExecResult);
-	sendExecClientStreamClose(h2Request, execMsg);
 }
 
 function sendShellStreamExitFromResult(
@@ -1123,6 +1124,17 @@ function sendShellStreamExitFromResult(
 	}
 }
 
+type ExecDispatchContext = {
+	readonly execMsg: ExecServerMessage;
+	readonly h2Request: http2.ClientHttp2Stream;
+	readonly execHandlers: CursorExecHandlers | undefined;
+	readonly onToolResult: CursorToolResultHandler | undefined;
+	readonly requestContextTools: McpToolDefinition[];
+	readonly output: AssistantMessage;
+	readonly stream: AssistantMessageEventStream;
+	readonly state: BlockState;
+};
+
 async function handleExecServerMessage(
 	execMsg: ExecServerMessage,
 	h2Request: http2.ClientHttp2Stream,
@@ -1135,6 +1147,38 @@ async function handleExecServerMessage(
 ): Promise<void> {
 	const execCase = execMsg.message.case;
 	log("exec", "dispatch", { execCase, execId: execMsg.execId, hasHandlers: !!execHandlers });
+	if (!execCase) {
+		// A frame carrying a oneof number this build's `agent.proto` does not
+		// model at all. Returning silently strands the exec id — the server
+		// waits on a reply that never comes.
+		log("warn", "unknownExecVariant", { id: execMsg.id, execId: execMsg.execId });
+		sendExecClientThrow(h2Request, execMsg, "Unknown exec message variant", "unknown_exec_variant");
+		sendExecClientStreamClose(h2Request, execMsg);
+		return;
+	}
+
+	const stopExecHeartbeat = armExecHeartbeat(h2Request, execMsg);
+	try {
+		await dispatchExecServerMessage({
+			execMsg,
+			h2Request,
+			execHandlers,
+			onToolResult,
+			requestContextTools,
+			output,
+			stream,
+			state,
+		});
+	} finally {
+		stopExecHeartbeat();
+	}
+	sendExecClientStreamClose(h2Request, execMsg);
+}
+
+async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<void> {
+	const { execMsg, h2Request, execHandlers, onToolResult, requestContextTools, output, stream, state } = context;
+	const execCase = execMsg.message.case;
+	if (!execCase) throw new Error("Expected a recognized exec message");
 	if (execCase === "requestContextArgs") {
 		const requestContext = create(RequestContextSchema, {
 			rules: [],
@@ -1155,15 +1199,6 @@ async function handleExecServerMessage(
 		});
 
 		sendExecClientMessage(h2Request, execMsg, "requestContextResult", requestContextResult);
-		return;
-	}
-
-	if (!execCase) {
-		// A frame carrying a oneof number this build's `agent.proto` does not
-		// model at all. Returning silently strands the exec id — the server
-		// waits on a reply that never comes.
-		log("warn", "unknownExecVariant", { id: execMsg.id, execId: execMsg.execId });
-		sendExecClientThrow(h2Request, execMsg, "Unknown exec message variant", "unknown_exec_variant");
 		return;
 	}
 
@@ -1830,6 +1865,42 @@ async function handleExecServerMessage(
 	}
 }
 
+function armExecHeartbeat(h2Request: http2.ClientHttp2Stream, execMsg: ExecServerMessage): () => void {
+	let stopped = false;
+	let timer: NodeJS.Timeout | undefined;
+
+	const schedule = () => {
+		timer = setTimeout(() => {
+			timer = undefined;
+			if (stopped || h2Request.closed) return;
+
+			const controlMessage = create(ExecClientControlMessageSchema, {
+				message: {
+					case: "heartbeat",
+					value: create(ExecClientHeartbeatSchema, { id: execMsg.id }),
+				},
+			});
+			const clientMessage = create(AgentClientMessageSchema, {
+				message: { case: "execClientControlMessage", value: controlMessage },
+			});
+			h2Request.write(frameConnectMessage(toBinary(AgentClientMessageSchema, clientMessage)), (error) => {
+				if (error || stopped || h2Request.closed) return;
+				schedule();
+			});
+			log("execClientControl", "heartbeat", { id: execMsg.id, execId: execMsg.execId });
+		}, EXEC_HEARTBEAT_INTERVAL_MS);
+	};
+
+	schedule();
+	return () => {
+		stopped = true;
+		if (timer !== undefined) {
+			clearTimeout(timer);
+			timer = undefined;
+		}
+	};
+}
+
 /**
  * Send one typed answer on the exec channel.
  *
@@ -1884,7 +1955,6 @@ function sendExecClientThrow(
 	});
 	h2Request.write(frameConnectMessage(toBinary(AgentClientMessageSchema, clientMessage)));
 	log("execClientControl", "throw", { id: execMsg.id, execId: execMsg.execId, error, errorCode });
-	sendExecClientStreamClose(h2Request, execMsg);
 }
 
 function sendExecClientStreamClose(h2Request: http2.ClientHttp2Stream, execMsg: ExecServerMessage): void {
