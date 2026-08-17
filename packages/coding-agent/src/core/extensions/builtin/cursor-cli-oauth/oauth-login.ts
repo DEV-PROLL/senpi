@@ -93,6 +93,50 @@ type ConfigurationAssessment = {
 	message: string;
 };
 
+/** The single condition evaluation behind both the tolerant `check` and the throwing turn-time resolution. */
+type ConfigurationOutcome =
+	| { status: "disabled" }
+	| { status: "not-installed"; error: unknown }
+	| { status: "no-accounts" }
+	| { status: "configured"; assessment: ConfigurationAssessment };
+
+/**
+ * One predicate so availability and resolution cannot disagree: evaluates the
+ * same conditions for every caller and reports why the lane is unusable
+ * instead of deciding per call-site whether that is fatal.
+ */
+async function assessConfiguration(deps: CursorCliOauthConfigDeps): Promise<ConfigurationOutcome> {
+	const settings = deps.readSettings();
+	if (!settings.enabled) return { status: "disabled" };
+	try {
+		deps.resolveExecutable(settings);
+	} catch (error) {
+		return { status: "not-installed", error };
+	}
+
+	const accounts = usableAccounts(await deps.readCurrent());
+	if (accounts.length === 0) return { status: "no-accounts" };
+	return {
+		status: "configured",
+		assessment: { accounts, message: `configured (file-store, ${accounts.length} accounts)` },
+	};
+}
+
+/** The throwing view used by turn-time resolution; a turn attempted on an unusable lane must still error clearly. */
+async function configuredFor(deps: CursorCliOauthConfigDeps): Promise<ConfigurationAssessment> {
+	const outcome = await assessConfiguration(deps);
+	switch (outcome.status) {
+		case "disabled":
+			throw new Error(DISABLED_MESSAGE);
+		case "not-installed":
+			throw new Error(installationMessage(outcome.error));
+		case "no-accounts":
+			throw new Error(NO_ACCOUNTS_MESSAGE);
+		default:
+			return outcome.assessment;
+	}
+}
+
 function isCursorCliOauthCredential(
 	value: Credential | OAuthCredentials | undefined,
 ): value is CursorCliOauthCredential {
@@ -118,24 +162,6 @@ function usableAccounts(value: Credential | OAuthCredentials | undefined): Curso
 function installationMessage(error: unknown): string {
 	const detail = error instanceof Error ? error.message : String(error);
 	return `cursor-agent not installed: ${detail.replace(/^Cursor CLI is not installed\.\s*/, "")}`;
-}
-
-/** The sole availability predicate used by status checks and turn-time resolution. */
-async function configuredFor(deps: CursorCliOauthConfigDeps): Promise<ConfigurationAssessment> {
-	const settings = deps.readSettings();
-	if (!settings.enabled) throw new Error(DISABLED_MESSAGE);
-	try {
-		deps.resolveExecutable(settings);
-	} catch (error) {
-		throw new Error(installationMessage(error));
-	}
-
-	const accounts = usableAccounts(await deps.readCurrent());
-	if (accounts.length === 0) throw new Error(NO_ACCOUNTS_MESSAGE);
-	return {
-		accounts,
-		message: `configured (file-store, ${accounts.length} accounts)`,
-	};
 }
 
 /** Resolve credentials immediately before execution so a concurrent refresh cannot leave a stale token in memory. */
@@ -246,8 +272,15 @@ export function createCursorCliOauthConfig(deps: CursorCliOauthConfigDeps): Curs
 		isSubscription: true,
 
 		async check() {
-			const assessment = await configuredFor(deps);
-			return { type: "oauth", source: assessment.message };
+			// Tolerant by contract: ModelsImpl.getAvailable runs every provider's
+			// check under Promise.all (packages/ai/src/models.ts:544-548) and turns a
+			// throw into a rejecting ModelsError, so one throwing check would reject
+			// all model listing. Not usable (disabled / not installed / no accounts)
+			// reports undefined here - as claude-sdk-oauth's check does - while
+			// turn-time resolution keeps throwing via configuredFor.
+			const outcome = await assessConfiguration(deps);
+			if (outcome.status !== "configured") return undefined;
+			return { type: "oauth", source: outcome.assessment.message };
 		},
 
 		async login(callbacks) {

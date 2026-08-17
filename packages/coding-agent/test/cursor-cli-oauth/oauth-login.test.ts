@@ -98,16 +98,16 @@ describe("cursor-cli-oauth login and availability", () => {
 		});
 	});
 
-	it("reports disabled by settings", async () => {
+	it("check tolerates disabled by settings instead of throwing", async () => {
 		const deps = {
 			...dependencies(async () => credential()),
 			readSettings: () => ({ enabled: false, executablePath: undefined }),
 		};
 		const config = createCursorCliOauthConfig(deps);
-		await expect(config.check({ ctx: authContext() })).rejects.toThrow("disabled by settings");
+		await expect(config.check({ ctx: authContext() })).resolves.toBeUndefined();
 	});
 
-	it("reports cursor-agent installation guidance", async () => {
+	it("check tolerates a missing cursor-agent executable instead of throwing", async () => {
 		const deps = {
 			...dependencies(async () => credential()),
 			resolveExecutable: () => {
@@ -117,30 +117,24 @@ describe("cursor-cli-oauth login and availability", () => {
 			},
 		};
 		const config = createCursorCliOauthConfig(deps);
-		await expect(config.check({ ctx: authContext() })).rejects.toThrow(
-			"cursor-agent not installed: Install it with `curl https://cursor.com/install -fsS | bash`, then ensure ~/.local/bin is on your PATH.",
-		);
+		await expect(config.check({ ctx: authContext() })).resolves.toBeUndefined();
 	});
 
-	it("reports no accounts for an empty or malformed provider credential", async () => {
+	it("check tolerates an empty or malformed provider credential instead of throwing", async () => {
 		const emptyConfig = createCursorCliOauthConfig(dependencies(async () => emptyCredential()));
-		await expect(emptyConfig.check({ ctx: authContext() })).rejects.toThrow(
-			"no accounts: run /login cursor-cli-oauth",
-		);
+		await expect(emptyConfig.check({ ctx: authContext() })).resolves.toBeUndefined();
 
 		const malformed: Credential = { type: "api_key", key: "not-oauth" };
 		const malformedConfig = createCursorCliOauthConfig({
 			...dependencies(async () => undefined),
 			readCurrent: async () => malformed,
 		});
-		await expect(malformedConfig.check({ ctx: authContext() })).rejects.toThrow(
-			"no accounts: run /login cursor-cli-oauth",
-		);
+		await expect(malformedConfig.check({ ctx: authContext() })).resolves.toBeUndefined();
 	});
 
 	it("does not count an account with an empty access token as configured", async () => {
 		const config = createCursorCliOauthConfig(dependencies(async () => credential([account("default", "")])));
-		await expect(config.check({ ctx: authContext() })).rejects.toThrow("no accounts: run /login cursor-cli-oauth");
+		await expect(config.check({ ctx: authContext() })).resolves.toBeUndefined();
 	});
 
 	it("check never reads a real Cursor credential source", async () => {

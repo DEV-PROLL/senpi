@@ -130,7 +130,7 @@ describe("cursor-cli-oauth provider registration", () => {
 		expect(registration.name).toBe("cursor-cli-oauth");
 	});
 
-	it("reports the missing executable through the oauth check without breaking registration", async () => {
+	it("tolerates the missing executable in the oauth check without breaking registration", async () => {
 		const store = await storeWithAccount();
 		const registration = await captureRegistration((pi, deps) => registerCursorCliOauthExtension(pi, deps), store);
 		const oauth = registration.config.oauth as {
@@ -138,6 +138,9 @@ describe("cursor-cli-oauth provider registration", () => {
 			check: (input: { ctx: AuthContext; credential?: unknown; signal?: AbortSignal }) => Promise<unknown>;
 		};
 
-		await expect(oauth.check({ ctx: authContext() })).rejects.toThrow(/cursor\.com\/install/);
+		// Non-throwing by contract: ModelsImpl.getAvailable runs every provider's
+		// check under Promise.all, so an unusable lane resolves undefined instead of
+		// rejecting all model listing; turn-time resolution still throws the guidance.
+		await expect(oauth.check({ ctx: authContext() })).resolves.toBeUndefined();
 	});
 });
