@@ -1,5 +1,25 @@
 # changes
 
+## Cerebras default retarget after live catalog drift (2026-08-18)
+
+### What changed
+
+- `model-resolver.ts`: `defaultModelPerProvider.cerebras` is now `gpt-oss-120b` instead of `zai-glm-4.7`.
+- `test/model-resolver.test.ts`: the pinned Cerebras default expectation matches the retarget.
+
+### Why
+
+- The live Cerebras catalog dropped `zai-glm-4.7` and now ships only `gemma-4-31b` and `gpt-oss-120b`. The old default failed `every bundled provider default resolves in its catalog` after `hydrate:model-data` / `release:local` regeneration, which blocked the release smoke.
+- `gpt-oss-120b` is present in both the committed snapshot and the live regenerated catalog, so the default stays resolvable across regen.
+
+### Why an extension could not handle it
+
+- `defaultModelPerProvider` is a core-owned exhaustive `Record<KnownProvider, string>` used by initial model selection. There is no extension hook for bundled provider defaults.
+
+### Expected merge-conflict zones
+
+- LOW: the `cerebras` row in `defaultModelPerProvider` and the matching pin in `test/model-resolver.test.ts`.
+
 <<<<<<< HEAD
 ## Cursor CLI OAuth provider display name (2026-08-17)
 
