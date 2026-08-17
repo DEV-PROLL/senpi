@@ -1,5 +1,25 @@
 # changes
 
+## Single availability scan across overlapping refresh and provider re-register (2026-08-18)
+
+### What changed
+
+- `model-runtime.ts`: `refresh()` is serialized so an unawaited registration refresh cannot overlap a later `refresh()`/`reloadConfig()`.
+- `model-runtime.ts`: `registerProvider` / `registerNativeProvider` skip `refreshAfterRegistration` when the provider is already present in a fresh availability snapshot.
+- `test/model-runtime-registration-refresh.test.ts`: re-registering a native provider already in a fresh snapshot does not run another catalog refresh.
+
+### Why
+
+- Session create fire-and-forgets `registerProvider()` and then awaits `refresh()`. The leftover registration refresh called `credentials.list()` after create returned. Session reload then re-binds the same extension provider and started a second full scan. `reload-efficiency` expected one `list()` per reload and failed deterministically on current main, which blocked `release:local` `npm test`.
+
+### Why an extension could not handle it
+
+- Availability refresh and provider registration are core `ModelRuntime` contracts. Extensions cannot coalesce those scans.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `refresh()`, `registerProvider`, and `registerNativeProvider` in `model-runtime.ts`.
+
 ## Cerebras default retarget after live catalog drift (2026-08-18)
 
 ### What changed

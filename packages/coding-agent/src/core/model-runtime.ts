@@ -169,6 +169,8 @@ export class ModelRuntime implements Models {
 	private readonly providerAvailabilitySeq = new Map<string, number>();
 	private availabilityError: string | undefined;
 	private readonly credentialOperations = new Map<string, Promise<unknown>>();
+	/** Serializes refresh() so an unawaited registration refresh cannot leak a later availability scan. */
+	private refreshChain: Promise<void> = Promise.resolve();
 	private constructor(
 		credentials: RuntimeCredentials,
 		config: ModelConfig,
@@ -777,6 +779,18 @@ export class ModelRuntime implements Models {
 	}
 
 	async refresh(options: ModelsRefreshOptions = {}): Promise<ModelsRefreshResult> {
+		const prior = this.refreshChain;
+		const current = Promise.withResolvers<void>();
+		this.refreshChain = current.promise;
+		await prior;
+		try {
+			return await this.executeRefresh(options);
+		} finally {
+			current.resolve();
+		}
+	}
+
+	private async executeRefresh(options: ModelsRefreshOptions): Promise<ModelsRefreshResult> {
 		this.config = await ModelConfig.load(this.modelsPath);
 		this.configureRadiusProviders();
 		if (options.providers) {
@@ -825,6 +839,14 @@ export class ModelRuntime implements Models {
 	 * usable without a manual refresh. Offline policy restores from the store only and never
 	 * touches the network.
 	 */
+	private providerAlreadyInFreshSnapshot(providerId: string): boolean {
+		if (!this.hasFreshAvailabilitySnapshot()) return false;
+		if (this.snapshot.configuredProviders.has(providerId) || this.snapshot.storedProviders.has(providerId)) {
+			return true;
+		}
+		return this.snapshot.all.some((model) => model.provider === providerId);
+	}
+
 	private refreshAfterRegistration(): Promise<ModelsRefreshResult> {
 		if (!this.modelNetworkEnabled) return this.refresh({ allowNetwork: false });
 		const controller = new AbortController();
@@ -834,6 +856,7 @@ export class ModelRuntime implements Models {
 
 	registerNativeProvider(provider: Provider): Promise<ModelsRefreshResult> {
 		if (!provider.id.trim()) throw new Error("Provider id must not be empty.");
+		const alreadyFresh = this.providerAlreadyInFreshSnapshot(provider.id);
 		this.extensionProviders.delete(provider.id);
 		this.nativeExtensionProviders.set(provider.id, provider);
 		this.recomposeProvider(provider.id);
@@ -841,6 +864,9 @@ export class ModelRuntime implements Models {
 		if (composedOAuth) this.credentials.registerOAuthProvider(provider.id, composedOAuth);
 		else this.credentials.unregisterOAuthProvider(provider.id);
 		this.updateModelSnapshot();
+		if (alreadyFresh) {
+			return Promise.resolve({ aborted: false, errors: new Map() });
+		}
 		return this.refreshAfterRegistration();
 	}
 
@@ -848,6 +874,7 @@ export class ModelRuntime implements Models {
 		// Validate the incoming registration on its own, like the legacy registry:
 		// a broken re-registration must throw without touching the stored config.
 		validateExtensionProvider(providerId, this.builtins.get(providerId), this.config.getProvider(providerId), config);
+		const alreadyFresh = this.providerAlreadyInFreshSnapshot(providerId);
 		this.nativeExtensionProviders.delete(providerId);
 		// Re-registration merges defined values over the previous registration and
 		// preserves undefined ones, matching the legacy ModelRegistry contract.
@@ -881,6 +908,9 @@ export class ModelRuntime implements Models {
 				configuredProviders,
 				available: this.snapshot.all.filter((model) => configuredProviders.has(model.provider)),
 			};
+		}
+		if (alreadyFresh) {
+			return Promise.resolve({ aborted: false, errors: new Map() });
 		}
 		return this.refreshAfterRegistration();
 	}

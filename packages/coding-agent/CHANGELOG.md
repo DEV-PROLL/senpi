@@ -18,6 +18,8 @@
 
 ### Fixed
 
+- Session reload no longer repeats a full model-availability scan when extensions re-register a provider that is already in a fresh snapshot. Overlapping `refresh()` calls are serialized so an unawaited registration refresh cannot leak a second credential listing into the next reload.
+
 - Cerebras no longer defaults to `zai-glm-4.7`, which the live catalog dropped. The bundled default is now `gpt-oss-120b`, which remains in both the committed snapshot and the regenerated catalog, so `npm test` after a live model-data hydrate no longer fails provider-default resolution.
 
 - Steering queued while a provider stream-start timeout retry is running now starts automatically when that managed
