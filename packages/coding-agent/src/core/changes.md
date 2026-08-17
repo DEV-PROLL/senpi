@@ -1,16 +1,16 @@
 # changes
 
-## Single availability scan across overlapping refresh and provider re-register (2026-08-18)
+## Single availability scan across provider re-register (2026-08-18)
 
 ### What changed
 
-- `model-runtime.ts`: `refresh()` is serialized so an unawaited registration refresh cannot overlap a later `refresh()`/`reloadConfig()`.
-- `model-runtime.ts`: `registerProvider` / `registerNativeProvider` skip `refreshAfterRegistration` when the provider is already present in a fresh availability snapshot.
+- `model-runtime.ts`: `registerProvider` / `registerNativeProvider` skip `refreshAfterRegistration` when the provider is already registered and the availability snapshot is fresh. An optional `{ refresh: false }` defers the scan so a caller can do one refresh after a batch.
+- `agent-session-services.ts`: the create-time pending-registration drain uses `{ refresh: false }`, then keeps the existing single `refresh({ allowNetwork: false })`.
 - `test/model-runtime-registration-refresh.test.ts`: re-registering a native provider already in a fresh snapshot does not run another catalog refresh.
 
 ### Why
 
-- Session create fire-and-forgets `registerProvider()` and then awaits `refresh()`. The leftover registration refresh called `credentials.list()` after create returned. Session reload then re-binds the same extension provider and started a second full scan. `reload-efficiency` expected one `list()` per reload and failed deterministically on current main, which blocked `release:local` `npm test`.
+- Session reload re-binds the same extension provider and started a second full availability scan. Create-time drain also fire-and-forgot a registration refresh that could `credentials.list()` after create returned. `reload-efficiency` expected one `list()` per reload and failed deterministically on current main, which blocked `release:local` `npm test`.
 
 ### Why an extension could not handle it
 
@@ -18,7 +18,7 @@
 
 ### Expected merge-conflict zones
 
-- MEDIUM: `refresh()`, `registerProvider`, and `registerNativeProvider` in `model-runtime.ts`.
+- MEDIUM: `registerProvider` / `registerNativeProvider` in `model-runtime.ts` and the drain loop in `agent-session-services.ts`.
 
 ## Cerebras default retarget after live catalog drift (2026-08-18)
 
