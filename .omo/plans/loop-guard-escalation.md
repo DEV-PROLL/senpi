@@ -9,8 +9,8 @@ code or public extension APIs:
 - Tier 2 blocks a repeated byte-identical tool call after the model ignored two
   admitted identical-loop reminders.
 - Tier 3 interrupts the turn after three loop-guard-owned blocked calls, shows
-  a human-visible warning, queues a real user-role steering message, and uses a
-  system abort.
+  a human-visible warning, holds the shared Goal wake-source lease, uses a
+  system abort, and starts a fresh provider user-role recovery turn.
 - NoticeGate emits one final saturation notice instead of becoming permanently
   silent behind the 64-record tracker window.
 
@@ -30,7 +30,9 @@ is removed.
   - `tool_execution_start` provides the model-dispatched tool-call ID and
     canonicalizable arguments before preflight.
   - `ctx.abort("system")` preserves Goal ownership.
-  - `pi.sendUserMessage(..., { deliverAs: "steer" })` queues a user-role wake.
+  - `pi.sendMessage(..., { triggerTurn: true })` is the proven post-settlement
+    recovery path used by TTSR.
+  - `wake_source_state` prevents Goal from scheduling a competing recovery.
 - Hard escalation applies only to exact `identical` detections. `similar` and
   `cycle` remain advisory because they may represent legitimate batch work.
 
@@ -44,11 +46,14 @@ is removed.
    loop-guard reason, `terminate: false`.
 5. Attempt 9 with the same signature: third blocked call, so:
    - mark the hard stop announced before side effects;
+   - claim `wake_source_state` source `loop-guard-hard-stop`;
    - render a one-shot escalation transcript notice;
    - call `ctx.ui.notify(..., "warning")` when UI exists;
-   - queue `pi.sendUserMessage(wake, { deliverAs: "steer" })`;
    - call `ctx.abort("system")`;
    - return `{ block: true, reason, terminate: false }`.
+   - after `agent_settled`, send a hidden recovery custom message with
+     `triggerTurn: true`;
+   - release the wake-source lease at the recovery `agent_start`.
 6. Later attempts with the same signature remain blocked and system-aborted,
    but do not repeat the human warning or wake message.
 
@@ -76,7 +81,7 @@ announcement state, and outstanding correlation IDs on:
 - `input` from interactive or RPC sources.
 
 Extension-sourced input does not reset. This preserves the existing invariant
-that Goal continuation and the Tier-3 wake cannot erase the loop state.
+that Goal continuation and the Tier-3 recovery cannot erase the loop state.
 
 Pattern reset occurs immediately when a correlated attempt has a different
 canonical `(toolName, argsJson)` signature. A changed tool or changed arguments
@@ -100,8 +105,10 @@ start a fresh episode. Object key order remains insignificant.
 
 - Tier 3 always uses `abort("system")`, never `abort("user")`.
 - Goal marks an active goal blocked only for user-owned aborts.
-- The user-role wake is pending when the aborted run settles, so ordinary Goal
-  continuation admission (`active + clean stop + no pending messages`) fails.
+- The loop-guard wake-source lease is active before abort, so Goal schedules
+  monitor-owned waiting instead of its own immediate system recovery.
+- The lease remains active through settlement and releases only when the
+  loop-guard recovery turn starts.
 - A loop-guard blocked `todo` result is an error; Goal's todo-gate handler
   returns before inspecting error results.
 - Tier-2 reasons must not contain `abort`/`aborted`, because Goal's clean-stop
@@ -138,19 +145,21 @@ start a fresh episode. Object key order remains insignificant.
 ### Wave C — Tier 3 and Goal Isolation RED -> GREEN
 
 1. Add failing extension tests proving:
-   - third owned block invokes warning -> user steer -> system abort in order;
+   - third owned block claims wake source, warns, and system-aborts;
+   - settlement starts one hidden provider user-role recovery turn;
+   - recovery `agent_start` releases the wake source;
    - the blocked result remains `terminate: false`;
    - later same-signature calls do not repeat warning/steer;
    - mixed/multi-tool correlation does not block unobserved sibling calls.
 2. Add failing `loop-guard-goal-isolation.test.ts` coverage:
    - system abort leaves active Goal active;
-   - wake remains pending;
-   - ordinary and monitor-driven Goal continuations decline while pending;
+   - loop-guard wake-source ownership prevents competing Goal recovery;
    - blocked todo error bypasses stale-goal reminder;
    - real user input resets loop-guard state.
 3. Capture RED.
 4. Add Tier-3 message builders and escalation notice renderer/details.
 5. Wire UI warning, user steer, and system abort in the required order.
+   Real-CLI QA may refine the delivery boundary while preserving the outcome.
 6. Add only loop-guard-side guards required by the tests; do not edit Goal.
 7. Run Tier-3 and Goal suites GREEN.
 8. Commit the verified increment.
@@ -175,9 +184,9 @@ start a fresh episode. Object key order remains insignificant.
    escalation scenario:
    - scripted model calls `todo view` repeatedly;
    - attempts 7-9 are not executed;
-   - third blocked call causes system abort and queues the user wake;
-   - next request contains the wake and returns a non-looping action;
-   - Goal remains active;
+   - third blocked call causes system abort and a wake-source lease;
+   - settlement starts the recovery request and reaches a non-looping action;
+   - Goal production remains untouched and focused Goal contracts stay green;
    - auth hash and sandbox isolation stay clean.
 2. Run harness self-check and the new scenario; save evidence under
    `local-ignore/qa-evidence/20260818-loop-guard-escalation/`.
@@ -239,8 +248,8 @@ Command:
 npx vitest run packages/coding-agent/test/suite/loop-guard-goal-isolation.test.ts packages/coding-agent/test/suite/goal-system-abort-monitor.test.ts packages/coding-agent/test/suite/goal-todo-stale-reminder.test.ts
 ```
 
-PASS: Goal stays active; no auto-continuation is admitted while wake input is
-pending; blocked todo errors do not add stale-goal reminders.
+PASS: Goal stays active; wake-source ownership prevents competing Goal recovery;
+blocked todo errors do not add stale-goal reminders.
 
 ### SC5 — Static gate
 

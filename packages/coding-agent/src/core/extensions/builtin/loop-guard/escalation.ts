@@ -1,0 +1,104 @@
+import type { LoopGuardDetection } from "./detectors.ts";
+import { IDENTICAL_BLOCK_NOTICE_THRESHOLD, IDENTICAL_HARD_STOP_BLOCK_THRESHOLD } from "./policy.ts";
+import type { ToolCallRecord } from "./tracker.ts";
+
+export type IdenticalEscalationDecision =
+	| { readonly kind: "allow" }
+	| { readonly kind: "block"; readonly toolName: string; readonly blockedCallCount: number }
+	| {
+			readonly kind: "hardStop";
+			readonly toolName: string;
+			readonly blockedCallCount: number;
+			readonly announce: boolean;
+	  };
+
+interface IdenticalLoopEpisode {
+	fingerprint: string;
+	toolName: string;
+	admittedNoticeCount: number;
+	activateBlockAfterTurn: boolean;
+	blockActive: boolean;
+	blockedCallCount: number;
+	hardStopAnnounced: boolean;
+}
+
+const ALLOW_DECISION = { kind: "allow" } as const;
+
+export class IdenticalLoopEscalation {
+	private episode: IdenticalLoopEpisode | undefined;
+	private readonly attempts = new Map<string, ToolCallRecord>();
+
+	observeAttempt(toolCallId: string, record: ToolCallRecord): void {
+		if (this.episode !== undefined && this.episode.fingerprint !== record.signature) {
+			this.reset();
+		}
+		this.attempts.set(toolCallId, record);
+	}
+
+	observeNotice(detection: LoopGuardDetection): void {
+		switch (detection.kind) {
+			case "similar":
+			case "cycle":
+				return;
+			case "identical": {
+				if (this.episode === undefined || this.episode.fingerprint !== detection.fingerprint) {
+					this.episode = {
+						fingerprint: detection.fingerprint,
+						toolName: detection.toolName,
+						admittedNoticeCount: 0,
+						activateBlockAfterTurn: false,
+						blockActive: false,
+						blockedCallCount: 0,
+						hardStopAnnounced: false,
+					};
+				}
+				this.episode.admittedNoticeCount++;
+				if (this.episode.admittedNoticeCount >= IDENTICAL_BLOCK_NOTICE_THRESHOLD) {
+					this.episode.activateBlockAfterTurn = true;
+				}
+			}
+		}
+	}
+
+	finishTurn(): void {
+		if (this.episode?.activateBlockAfterTurn === true) {
+			this.episode.activateBlockAfterTurn = false;
+			this.episode.blockActive = true;
+		}
+		this.attempts.clear();
+	}
+
+	consumeToolCall(toolCallId: string): IdenticalEscalationDecision {
+		const attempt = this.attempts.get(toolCallId);
+		this.attempts.delete(toolCallId);
+		if (
+			attempt === undefined ||
+			this.episode === undefined ||
+			this.episode.fingerprint !== attempt.signature ||
+			!this.episode.blockActive
+		) {
+			return ALLOW_DECISION;
+		}
+		this.episode.blockedCallCount++;
+		if (this.episode.blockedCallCount >= IDENTICAL_HARD_STOP_BLOCK_THRESHOLD) {
+			const announce = !this.episode.hardStopAnnounced;
+			this.episode.hardStopAnnounced = true;
+			return {
+				kind: "hardStop",
+				toolName: this.episode.toolName,
+				blockedCallCount: this.episode.blockedCallCount,
+				announce,
+			};
+		}
+		return {
+			kind: "block",
+			toolName: this.episode.toolName,
+			blockedCallCount: this.episode.blockedCallCount,
+		};
+	}
+
+	reset(): void {
+		this.episode = undefined;
+		this.attempts.clear();
+	}
+}

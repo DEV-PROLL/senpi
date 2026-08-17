@@ -56,6 +56,8 @@ export const globalDefaultExtensionFactories = {
 } satisfies Record<(typeof globalDefaultExtensionIds)[number], ExtensionFactory>;
 
 export const builtinExtensions: BuiltinExtensionFactory[] = [
+	// Loop guard owns the first veto opportunity so repeated calls never re-run hooks or permission prompts.
+	{ id: "loop-guard", factory: loopGuardExtension },
 	{ id: "hooks", factory: hooksExtension },
 	{ id: "permission-system", factory: permissionSystemExtension },
 	{ id: "gpt-apply-patch", factory: gptApplyPatchExtension },
@@ -94,8 +96,6 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "ttsr", factory: ttsrExtension },
 	{ id: "btw", factory: btwExtension },
 	{ id: "claude-sdk-oauth", factory: claudeSdkOauthExtension },
-	// Loop guard is a pure observer of tool_execution_start; it never mutates payloads, so it slots before config-reload and leaves MCP last.
-	{ id: "loop-guard", factory: loopGuardExtension },
 	// Config reload follows settings-dependent builtins so reloads rebuild their resolved settings before catalog feeders observe them.
 	{ id: "config-reload", factory: configReloadExtension },
 	// Shared catalog wiring loads before MCP, which feeds its tools into the shared catalog as the final builtin.

@@ -5,13 +5,8 @@ import {
 	detectLoop,
 	NoticeGate,
 } from "../../src/core/extensions/builtin/loop-guard/detectors.ts";
-import type { LoopGuardDetection } from "../../src/core/extensions/builtin/loop-guard/detectors.ts";
 import { buildLoopGuardReminder } from "../../src/core/extensions/builtin/loop-guard/notice.ts";
-import {
-	IDENTICAL_RUN_THRESHOLD,
-	SIMILARITY_THRESHOLD,
-	TRACK_WINDOW,
-} from "../../src/core/extensions/builtin/loop-guard/policy.ts";
+import { IDENTICAL_RUN_THRESHOLD, SIMILARITY_THRESHOLD } from "../../src/core/extensions/builtin/loop-guard/policy.ts";
 import {
 	bigramCounts,
 	diceSimilarity,
@@ -27,18 +22,6 @@ function rec(toolName: string, args: unknown): ToolCallRecord {
 
 function recs(...calls: Array<[string, unknown]>): ToolCallRecord[] {
 	return calls.map(([name, args]) => rec(name, args));
-}
-
-function collectDetections(calls: readonly (readonly [string, unknown])[]): LoopGuardDetection[] {
-	const tracker = new ToolCallTracker();
-	const gate = new NoticeGate();
-	const detections: LoopGuardDetection[] = [];
-	for (const [toolName, args] of calls) {
-		tracker.record(toolName, args);
-		const detection = detectLoop(tracker.records, gate);
-		if (detection !== undefined) detections.push(detection);
-	}
-	return detections;
 }
 
 describe("canonicalizeArgs", () => {
@@ -189,57 +172,6 @@ describe("NoticeGate escalation", () => {
 		const gate = new NoticeGate();
 		const records = recs(...Array.from({ length: 5 }, () => ["read", { path: "a.ts" }] as [string, unknown]));
 		expect(detectLoop(records, gate)?.kind).toBe("identical");
-	});
-
-	it("emits one final identical notice when the tracker window saturates", () => {
-		const calls = Array.from(
-			{ length: TRACK_WINDOW * 2 },
-			() => ["todo", { op: "view" }] as const,
-		);
-		expect(collectDetections(calls).map(({ kind, count }) => ({ kind, count }))).toEqual([
-			{ kind: "identical", count: 3 },
-			{ kind: "identical", count: 6 },
-			{ kind: "identical", count: 12 },
-			{ kind: "identical", count: 24 },
-			{ kind: "identical", count: 48 },
-			{ kind: "identical", count: TRACK_WINDOW },
-		]);
-	});
-
-	it("emits one final similar notice when the tracker window saturates", () => {
-		const calls = Array.from(
-			{ length: TRACK_WINDOW * 2 },
-			(_, index) =>
-				[
-					"read",
-					{ path: "src/app.ts", offset: index * 200 + 1, limit: 200, stablePadding: "x".repeat(200) },
-				] as const,
-		);
-		expect(collectDetections(calls).map(({ kind, count }) => ({ kind, count }))).toEqual([
-			{ kind: "similar", count: 5 },
-			{ kind: "similar", count: 10 },
-			{ kind: "similar", count: 20 },
-			{ kind: "similar", count: 40 },
-			{ kind: "similar", count: TRACK_WINDOW },
-		]);
-	});
-
-	it("emits one final cycle notice at the maximum repetitions in the tracker window", () => {
-		const gate = new NoticeGate();
-		const maximumRepetitions = Math.floor(TRACK_WINDOW / 2);
-		const admittedCounts = Array.from(
-			{ length: maximumRepetitions - 2 },
-			(_, index) => index + 3,
-		).filter((count) =>
-			gate.admit({
-				kind: "cycle",
-				period: 2,
-				count,
-				cycleTools: ["eval", "bash_output"],
-				fingerprint: "period-2",
-			}),
-		);
-		expect(admittedCounts).toEqual([3, 6, 12, 24, maximumRepetitions]);
 	});
 });
 

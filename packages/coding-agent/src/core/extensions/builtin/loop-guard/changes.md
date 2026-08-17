@@ -1,5 +1,50 @@
 # loop-guard changes
 
+## loop-guard: block ignored identical loops and interrupt persistent hard stops (2026-08-17)
+
+- Exact identical loops now hard-escalate after two admitted reminders. The
+  second reminder arms a block that activates only after its `turn_end`, so
+  calls through count 6 still execute; the next same-signature model call is
+  vetoed by the public `tool_call` hook with a non-terminal error result.
+  Similar and cyclic detections remain advisory.
+- A private `IdenticalLoopEscalation` correlates model attempts by
+  `toolCallId`, canonical signature, and turn boundary. Calls that bypass
+  `tool_execution_start` (including extension bridge subcalls) are never
+  blocked; a changed tool or changed arguments reset the hard-escalation
+  episode immediately.
+- The third loop-guard-owned block claims the shared `wake_source_state`
+  liveness lease, emits a one-shot transcript/UI warning, and calls
+  `ctx.abort("system")`. After `agent_settled`, a hidden recovery
+  `CustomMessage` with `triggerTurn: true` starts a fresh provider user-role
+  turn; the lease releases at that turn's `agent_start`. Later same-signature
+  calls remain blocked and system-aborted without repeating the warning or
+  recovery. Loop-guard now occupies the first builtin slot so its veto runs
+  before repeated PreToolUse hooks and permission prompts.
+- The escalation transcript box uses the shared notice kit with semantic
+  `error` tone and a width-stable ASCII marker. This keeps severity
+  theme-driven and avoids the one-cell underfill produced when terminals
+  disagree about U+26D4 emoji width.
+- Why: session `01a00f43` showed the model correctly restating every reminder
+  ("No more todo", "use apply_patch") while sampling the same `todo view`
+  action 197 times. More advisory prose could not alter the action-level
+  attractor; a failed tool observation and a user-attributed fresh turn can.
+- Goal isolation: hard stops use only system aborts; the wake-source lease
+  makes Goal treat the interrupted interval as externally owned instead of
+  scheduling a competing system recovery; blocked todo errors bypass Goal's
+  stale-goal reminder. Goal production code and public extension APIs are
+  unchanged.
+- Coverage: `loop-guard-hard-escalation.test.ts` pins delayed activation,
+  first-veto order, changed-argument reset, uncorrelated bridge/multi-tool
+  controls, one-shot warning/recovery, wake-source lease transitions, repeated
+  system abort, and `terminate:false`. `loop-guard-goal-isolation.test.ts` plus
+  existing Goal system-abort/reminder suites prove active-goal preservation,
+  wake-source-owned recovery, and error-result reminder isolation. Mutation
+  proof covers user-owned abort, pending-wake omission, and todo-error leakage.
+- Expected merge conflict zones: HIGH in `loop-guard/index.ts` around event
+  wiring; MEDIUM in `builtin/index.ts` registration order; LOW in new
+  `escalation.ts`, notice/renderer/policy support, and focused tests; NONE in
+  Goal or public extension API files.
+
 ## loop-guard: emit one final notice at the bounded tracker ceiling (2026-08-17)
 
 - `NoticeGate` now admits one final notice when a detection reaches the
