@@ -14,6 +14,14 @@
 
 ### Fixed
 
+- Steering queued while a provider stream-start timeout retry is running now starts automatically when that managed
+  retry exhausts its budget, instead of remaining parked until another user prompt. Generic terminal provider errors
+  and user-aborted retries keep their existing queue-retention behavior
+  ([#917](https://github.com/code-yeongyu/senpi/pull/917)).
+- Cursor subscription tool turns now keep long local executions alive with per-exec heartbeats and close every
+  server-requested result lifecycle exactly once, preventing read, shell, MCP, and modern `pi_*` calls from leaving
+  the Cursor Run stream pending until it terminates before `turnEnded`
+  ([#915](https://github.com/code-yeongyu/senpi/pull/915)).
 - RPC discovery sessions no longer emit an initial `commands_changed` invalidation. Clients read the baseline through
   `get_commands`, while actual post-bind extension reloads still emit one deduplicated ordered snapshot, preventing
   command-surface refresh consumers from creating an unbounded discovery-session feedback loop
@@ -46,6 +54,7 @@
 
 ### Fixed
 
+- Custom editors no longer lose Enter submissions when pi-tui clears live editor state before invoking `onSubmit`; editors that submit before clearing still retain their non-empty expanded value ([#908](https://github.com/code-yeongyu/senpi/pull/908)).
 - Non-interactive runs (`senpi -p`) no longer die with an uncaught `EPERM: operation not permitted, mkdir <agentDir>/auth.json.lock` when the agent dir is not writable (for example a background worker under a macOS seatbelt profile that grants only the lockfile paths). The async auth read path (`readLatestData`) now degrades lock-acquisition and read failures to last-good in-memory data with a recorded diagnostic warning, mirroring the settings-manager path that already behaved this way; OAuth write/refresh persistence remains fail-closed. proper-lockfile staleness is also unified across `FileAuthStorageBackend` (sync and async) and `FileSettingsStorage` on one shared policy (`realpath: false, stale: 30s, update: 10s` in `core/lockfile-policy.ts`), so a synchronous contender can no longer classify a still-live asynchronous lock as stale mid-update and steal it ([#898](https://github.com/code-yeongyu/senpi/pull/898)).
 
 - Ambient Claude SDK OAuth authentication now preserves request-scoped token overrides and explicit empty masks through stored and ambient auth replay, treats request token slots as a complete namespace so sibling host accounts cannot survive a mask, isolates request tokens from subprocess-control variables, keeps request tokens out of persistent `config-dir` credentials, remains valid across resident and auxiliary calls, recognizes request tokens in explicit ambient mode, and shares bounded availability probes without abandoned-request ownership ([#836](https://github.com/code-yeongyu/senpi/pull/836) by [@ismetanin](https://github.com/ismetanin)).

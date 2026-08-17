@@ -1,5 +1,257 @@
 # changes
 
+## Repository audit baseline for the src tracker (2026-08-17)
+
+### What changed
+
+- This entry is the canonical inventory for the repository-wide changes.md audit (`scripts/audit-changes-md.mjs`, pin
+  `914cf1472e715297caa30db4b9535d534a9eb718`, tag v0.84.2). It assigns every audited production path whose exact
+  nearest tracker is this file, so the audit gate resolves each divergence even where the per-feature history below
+  predates the gate. `packages/coding-agent/src/cli.ts` and `packages/coding-agent/src/main.ts` are already covered by
+  dated entries below.
+- Entrypoints: `packages/coding-agent/src/bun/cli.ts` (Bun-binary entry now loads the full bootstrap and registers the
+  cursor-agent module), `packages/coding-agent/src/rpc-entry.ts` (RPC entry scrubs the brand environment and exports
+  the branded `AI_AGENT` identity).
+- Brand and config resolution: `packages/coding-agent/src/config.ts` — brand-profile consumption for identity constants,
+  flat-layout agent-directory resolution with nearest-parent discovery, brand-scoped environment reads, and the Bun
+  self-update launcher-repair step (own entry below).
+- Startup migrations: `packages/coding-agent/src/migrations.ts` — brand engine-state copy-forward plus the fork
+  extension-system and legacy-directory migrations replacing upstream's inline commands-to-prompts path (own entry
+  below).
+- Public surface: `packages/coding-agent/src/index.ts` re-exports the extension RPC handler, filesystem-policy,
+  input-disposition, MCP-declaration, and RPC-client event types; `packages/coding-agent/src/modes/index.ts`
+  re-exports `RpcClientEvent` and `RpcExtensionEvent`.
+- Mode and client deltas: `packages/coding-agent/src/modes/print-mode.ts` (one-shot prompts pass
+  `sessionTitlePrompt: false`, the final assistant message is selected with `findLast` so trailing non-assistant
+  entries cannot mask it, provider-native content renders in text mode, and the run waits for settled session work
+  before exiting), `packages/coding-agent/src/client/transcript.ts` (equivalent optional-chaining guard on transcript
+  progress application), `packages/coding-agent/src/package-manager-cli.ts` (branded `update`/`list`/`config` help
+  surface, brand update-channel redirect that defers to the parent package, and the removable omo-local-update beta
+  worker flag).
+- Local provider: `packages/coding-agent/src/extensions/llama/provider.ts` keeps sleeping llama.cpp runners
+  discoverable (own entry below).
+
+### Why
+
+- The pre-backfill audit reported these paths uncovered: the entries that described them either predate the canonical
+  four-section format or never named the exact path. This inventory closes that gap without rewriting the accurate
+  per-feature history below.
+
+### Why an extension could not handle it
+
+- Tracker coverage is repository and release policy, not runtime behavior; it is enforced by repository scripts before
+  any extension loader exists.
+
+### Expected merge conflict zones
+
+- NONE: this tracker file merges to `ours` on upstream sync; the inventory intentionally names pin-relative paths so
+  it stays valid as entries below change.
+
+## Brand profile, config-directory resolution, and engine-state migration (2026-08-17)
+
+### What changed
+
+- `packages/coding-agent/src/config.ts`: consumes a `BrandProfile` injected once per process — `APP_NAME`, `APP_TITLE`,
+  and `CONFIG_DIR_NAME` resolve the brand ahead of the package's `piConfig` metadata, `DISPLAY_VERSION` separates the
+  brand-facing version from the engine `VERSION` used for update comparisons, `CONFIG_FLAT_LAYOUT` marks brands that
+  keep agent state directly under the config directory, and `ENV_PREFIX` builds `ENV_AGENT_DIR`/`ENV_SESSION_DIR`
+  while legacy prefixes stay readable.
+- `packages/coding-agent/src/config.ts`: environment reads go through brand-scoped `envValue()` (`PACKAGE_DIR`,
+  `SHARE_VIEWER_URL`, `CODING_AGENT_DIR`) instead of raw `PI_*` literals; `resolveAgentDir()` adds nearest-parent
+  config discovery with a flat-layout `settings.json` sentinel; Bun self-update composes a launcher-repair step and
+  binary-download guidance points at the senpi releases page.
+- `packages/coding-agent/src/migrations.ts`: `runMigrations()` runs `migrateEngineStateForBrand()` first — a
+  copy-forward (never a move) of the engine's `~/.senpi/agent` state into a flat-layout brand directory, guarded by
+  the `.migrated-from-senpi` marker and skipping regenerable entries — then the fork's `migrateLegacySenpiDirs()` and
+  `migrateExtensionSystem()`, replacing upstream's inline commands-to-prompts and deprecated-directory checks that
+  now live in `extension-system-migration.ts`.
+
+### Why
+
+- A rebranded distribution reads different config and state locations than the engine install it replaces; resolving
+  them once keeps every downstream consumer brand-correct, and copying (not moving) engine state keeps a standalone
+  engine install on the same machine intact.
+- Environment prefixes and display versions are brand identity, not feature behavior, so they must not be hardcoded
+  per call site.
+
+### Why an extension could not handle it
+
+- Config-path, brand, and environment resolution happen at module load and bootstrap, before the extension loader
+  exists; startup migrations run once over directories extensions never see.
+
+### Expected merge conflict zones
+
+- HIGH: `packages/coding-agent/src/config.ts` identity constants and `resolveAgentDir()`.
+- MEDIUM: `packages/coding-agent/src/migrations.ts` `runMigrations()` ordering; upstream may reshape its own
+  command/prompt migrations.
+
+## Split CLI bootstrap: thin launcher, full engine child, branded entries (2026-08-17)
+
+### What changed
+
+- `packages/coding-agent/src/cli.ts` is now a thin bootstrap: it imports the deleted-cwd guard first, answers
+  `--version`/`-v` directly from `DISPLAY_VERSION` without loading the engine, detects package-manager subcommands,
+  and when a package-manager install is missing its bundled workspace dependencies routes through the bootstrap
+  self-update handler before spawning the full CLI as a child process with the parent's `execArgv`, propagating the
+  child's exit signal.
+- `packages/coding-agent/src/cli-main.ts` is the relocated full bootstrap (early inspector-import recovery, brand
+  scrubbing, `PI_CODING_AGENT` marker, HTTP dispatcher configuration) that awaits `main()`.
+- `packages/coding-agent/src/bun/cli.ts` registers Bun OAuth flows, restores the sandbox environment, registers the
+  Bedrock and cursor-agent modules, then loads the full bootstrap instead of the thin launcher.
+- `packages/coding-agent/src/rpc-entry.ts` keeps its dedicated RPC dispatch but now scrubs the brand environment and
+  sets `AI_AGENT` to `APP_NAME` instead of the hardcoded engine name.
+
+### Why
+
+- A broken or half-updated global install must offer a self-repair path instead of dying on module resolution, and
+  version or package-manager queries should not pay full engine startup. RPC host processes need their own process
+  identity and a clean brand environment so nested engine runs keep the engine's identity.
+
+### Why an extension could not handle it
+
+- These are pre-runtime entrypoints: extensions load only after `main()` has bootstrapped settings and the resource
+  loader, so no extension can restructure process spawning, environment scrubbing, or self-repair.
+
+### Expected merge conflict zones
+
+- HIGH: `packages/coding-agent/src/cli.ts` was substantially rewritten relative to upstream's direct `main()` call.
+- MEDIUM: `packages/coding-agent/src/cli-main.ts` bootstrap ordering.
+- LOW: the registration lines in `packages/coding-agent/src/bun/cli.ts` and the identity lines in
+  `packages/coding-agent/src/rpc-entry.ts`.
+
+## Deleted-cwd bootstrap guard (2026-08-17)
+
+### What changed
+
+- New fork-only first-import guard `packages/coding-agent/src/valid-cwd.ts`: when the shell's working directory no
+  longer exists (a removed worktree or checkout), it changes to the home directory with a stderr notice before any
+  other module loads. `packages/coding-agent/src/cli.ts` and `packages/coding-agent/src/cli-main.ts` import it as
+  their first statement.
+
+### Why
+
+- Node boots with a stale cwd handle and only throws `uv_cwd` when something evaluates `process.cwd()`; the bundled
+  agent SDK does that during module evaluation, before user code could recover, so a deleted cwd crashed the CLI at
+  import time with no guidance.
+
+### Why an extension could not handle it
+
+- The guard must run before every other import, including the SDK's module evaluation; the extension loader does not
+  exist yet.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/valid-cwd.ts` is fork-only; the first-import lines in the entrypoints may conflict
+  with upstream import reshuffles.
+
+## llama.cpp local provider keeps sleeping runners discoverable (2026-08-17)
+
+### What changed
+
+- `packages/coding-agent/src/extensions/llama/provider.ts`: the router-fed `setCatalog()` keeps models whose runner
+  status is `loaded` OR `sleeping`, because the llama.cpp router wakes sleeping runners on demand; the persisted
+  `refreshModels()` snapshot still filters to `loaded` only. Credential resolution accepts a stored server URL, the
+  `LLAMA_BASE_URL` environment, or the default local server, with an optional API key.
+
+### Why
+
+- A model whose runner was asleep but wakeable disappeared from the model list, so users could not select exactly
+  the local models the router exists to wake on demand.
+
+### Why an extension could not handle it
+
+- The provider is a builtin registered with the model runtime; catalog filtering happens inside the provider's own
+  model snapshot, which the runtime reads before any extension can post-process it.
+
+### Expected merge conflict zones
+
+- LOW: the status filter in `setCatalog()` and the credential-resolution chain.
+
+## APP_NAME process identity and first-prompt session titles (2026-08-17)
+
+### What changed
+
+- Process identity is derived from the resolved brand: `process.title` is `APP_NAME` in `packages/coding-agent/src/cli.ts`,
+  `packages/coding-agent/src/cli-main.ts`, and `packages/coding-agent/src/bun/cli.ts`, and `${APP_NAME}-rpc` in
+  `packages/coding-agent/src/rpc-entry.ts`; `AI_AGENT` and inherited brand environment variables are set or scrubbed
+  per entrypoint so nested engine runs keep the engine's own identity.
+- Session titles: `buildInitialMessage()` in `packages/coding-agent/src/cli/initial-message.ts` returns the first CLI
+  message as `initialTitlePrompt` when the initial prompt carries no private context (no piped stdin, no `@file` text,
+  no attached images); `main.ts` threads it into interactive mode, which passes it as `sessionTitlePrompt` so the
+  session is titled from the user's actual prompt. One-shot print mode passes `sessionTitlePrompt: false` instead.
+
+### Why
+
+- Process lists, logs, and RPC host spawns must distinguish branded runs (and RPC hosts) from the upstream engine,
+  and an auto-generated title that ignored a plain first prompt produced generic titles for the most common launch
+  shape.
+
+### Why an extension could not handle it
+
+- `process.title`, brand scrubbing, and argv-to-options wiring all execute in the entrypoints before the extension
+  loader exists; the title prompt must be captured before the session consumes the initial message.
+
+### Expected merge conflict zones
+
+- LOW: per-entrypoint title and environment lines; the `sessionTitlePrompt` threading in `main.ts` and interactive
+  mode.
+
+## Retry-exhausted provider timeouts release retained steering (2026-08-17)
+
+### What changed
+
+- `core/agent-session.ts`: when a managed provider-timeout retry exhausts its retry/fallback budget, the retry owner
+  now hands steering or follow-up input that was deliberately deferred from the retry request to the existing
+  scheduled-continuation path. Successful retries keep their current queue behavior, and generic terminal
+  provider errors or aborts still park queued work.
+- Queue ownership follows the retry continuation that actually deferred the queue (recorded when the
+  provider-timeout retry plan schedules its continuation), not the class of the final error: a timeout retry that
+  ends in a different retryable failure still releases its deferred queue, while late steering queued during an
+  ordinary non-deferring retry stays parked. User aborts — in flight or during the retry backoff sleep — keep
+  retained input parked; a cancelled backoff reports a distinct outcome from budget exhaustion.
+- Coverage: `test/suite/regressions/provider-idle-steering.test.ts` proves a provider timeout, one failed managed
+  retry, and a steer queued during `auto_retry_start` produce an automatic third request without another prompt.
+  `.agents/skills/senpi-qa/scripts/mock-loop-stream-start-timeout-steering.mjs` drives the same sequence through the
+  real RPC CLI and actual stream-start watchdogs.
+
+### Why
+
+- Provider-timeout retries use `deferQueuedMessages: true` so steering cannot be consumed by another retry request
+  that has not demonstrated responsiveness. If that retry also failed and no fallback remained, the generic Agent
+  terminal-error policy correctly parked the queue, but the coding-agent retry owner had already finished and no
+  lifecycle owner remained to admit it. The queued message therefore ran only after an unrelated later prompt.
+
+### Why an extension could not do this
+
+- Retry attempt accounting, provider-timeout continuation options, terminal `agent_end` admission, compaction
+  revalidation, and queued-message ownership are coordinated inside `AgentSession` before extension callbacks can
+  safely claim or release the queue.
+
+### Expected merge conflict zones
+
+- HIGH: `core/agent-session.ts` around `_processAgentEvent()` retry/compaction continuation admission.
+- LOW: additive coverage in `test/suite/regressions/provider-idle-steering.test.ts` and the Senpi QA scenario.
+
+## Custom-editor submit callbacks preserve the authoritative value (2026-08-16)
+
+### What changed
+
+- `modes/interactive/interactive-mode.ts` now routes custom-editor submissions through `expandSubmittedText()`.
+- The submit helper preserves a non-empty `getExpandedText()` result from editors that submit before clearing, but uses the callback text when the live editor has already been cleared by pi-tui.
+- The real host bridge is covered in `test/suite/regressions/0000-editor-paste-submit.test.ts` for clear-before-callback, retained paste-state expansion, and uncleared custom-editor compatibility.
+
+### Why
+
+- pi-tui computes the submitted value, clears editor and paste state, then invokes `onSubmit`. Re-reading the cleared editor returned `""`, so Enter cleared the prompt without sending a message.
+
+### Why an extension could not do this
+
+- The host owns the callback bridge between extension-provided editors and the default submission handler.
+
+### Expected merge conflict zones
+
+- LOW: `modes/interactive/editor-paste-transfer.ts`, the `setCustomEditorComponent()` submit callback, and its focused regression suite.
+
 ## CLI system-prompt overrides rewired into the runtime resource loader (2026-08-17)
 
 ### What changed

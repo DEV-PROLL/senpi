@@ -460,6 +460,16 @@ const OPENAI_PRIORITY_TIER_MODEL_IDS = new Set([
 	"o3",
 	"o4-mini",
 ]);
+
+// Codex backend models eligible for Priority-tier -fast variants. Mirrors the
+// OpenAI priority list but restricted to GPT-5.6 reasoning models that ship on
+// the Codex Responses API; older Codex-only SKUs (gpt-5.3-codex-spark) are
+// Priority-ineligible.
+const OPENAI_CODEX_PRIORITY_TIER_MODEL_IDS = new Set([
+	"gpt-5.6-sol",
+	"gpt-5.6-terra",
+	"gpt-5.6-luna",
+]);
 const XAI_RESPONSES_MODEL_ID = "grok-4.5";
 const XAI_BUILTIN_EXCLUDED_MODEL_IDS = new Set([
 	"grok-3",
@@ -3073,10 +3083,11 @@ async function generateModels() {
 	}
 
 	// Emit after metadata application so variants clone fully processed base models.
-	// Cost rates stay at base values: the openai-responses adapter multiplies usage
-	// cost by the service-tier multiplier at request time, so raised catalog rates
-	// would double-count. Scoped to the direct OpenAI provider; Azure clones and the
-	// Codex backend are intentionally excluded.
+	// Cost rates stay at base values: the openai-responses and openai-codex-responses
+	// adapters multiply usage cost by the service-tier multiplier at request time, so
+	// raised catalog rates would double-count. Scoped to the direct OpenAI provider and
+	// the Codex backend (both support Priority service tier via service_tier=priority).
+	// Azure clones are intentionally excluded (they proxy OpenAI and would double-count).
 	const openAiFastVariants: Model<Api>[] = [];
 	for (const model of allModels) {
 		if (model.provider !== "openai" || !OPENAI_PRIORITY_TIER_MODEL_IDS.has(model.id)) continue;
@@ -3088,7 +3099,18 @@ async function generateModels() {
 			serviceTier: "priority",
 		});
 	}
-	allModels.push(...openAiFastVariants);
+	const codexFastVariants: Model<Api>[] = [];
+	for (const model of allModels) {
+		if (model.provider !== "openai-codex" || !OPENAI_CODEX_PRIORITY_TIER_MODEL_IDS.has(model.id)) continue;
+		codexFastVariants.push({
+			...model,
+			id: `${model.id}-fast`,
+			name: `${model.name} Fast`,
+			upstreamModelId: model.id,
+			serviceTier: "priority",
+		});
+	}
+	allModels.push(...openAiFastVariants, ...codexFastVariants);
 
 	// Group by provider and deduplicate by model ID
 	const providers: Record<string, Record<string, Model<any>>> = {};

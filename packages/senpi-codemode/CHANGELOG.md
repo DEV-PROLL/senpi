@@ -6,6 +6,8 @@
 
 ### Added
 
+- Show exact nested tool-call count and calls-per-second in completed eval TUI headers, using true wall-clock elapsed time for both the visible duration and throughput denominator while preserving kernel-reported timing separately ([#916](https://github.com/code-yeongyu/senpi/pull/916)).
+
 ### Changed
 
 ### Fixed

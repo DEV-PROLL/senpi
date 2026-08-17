@@ -6,11 +6,17 @@
 
 ### Added
 
+- `openai-codex` provider now ships `-fast` Priority-tier variants for GPT-5.6 sol/terra/luna, mirroring the existing `openai` provider pattern (`upstreamModelId` + `serviceTier: "priority"`, base cost rates). The Codex Responses adapter already supports Priority service tier and applies the cost multiplier at usage-accounting time, so catalog costs stay at base values to avoid double-counting.
 - Cursor chat and tool calling are now fully supported through the new `cursor-agent` API: one HTTP/2 Connect stream per assistant turn against `agent.v1.AgentService/Run`, streaming text/thinking/tool-call deltas, usage from token deltas, and in-band execution of Cursor's server-driven exec channel (native read/ls/grep/write/shell frames, modern `pi_*` frames, MCP-advertised tools, kv blob store, tool-catalog handshake). Bridged tool runs are synthesized into the assistant message as already-resolved tool calls with paired results, so transcripts and the agent loop stay consistent, and the model catalog is discovered per account through `GetUsableModels` after `/login cursor` (max-mode 1M-context variants included). The Cursor protobuf schema is vendored with a regeneration script; unsupported protocol surfaces (computer use, subagents, background shells, canvas, smart-mode classification, conversation search) answer with typed refusals ([#910](https://github.com/code-yeongyu/senpi/pull/910)).
 
 ### Changed
 
 ### Fixed
+
+- Cursor's server-driven exec channel now keeps pending local tools alive with write-completion-chained 3-second
+  exec heartbeats and closes every normal typed result sequence exactly once. Read, shell, MCP, and modern `pi_*`
+  tool turns no longer leave the server-side exec pending until the Run stream ends before `turnEnded`
+  ([#915](https://github.com/code-yeongyu/senpi/pull/915)).
 
 ### Removed
 
