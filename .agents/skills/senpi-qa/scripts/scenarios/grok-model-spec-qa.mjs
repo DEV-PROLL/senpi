@@ -71,6 +71,29 @@ function nonReasoningGrok420(server) {
 	};
 }
 
+function reasoningGrok420(server) {
+	return {
+		id: "grok-4.20-0309-reasoning",
+		name: "Grok 4.20 (Reasoning)",
+		api: "openai-completions",
+		baseUrl: server.url,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: COST,
+		contextWindow: 1000000,
+		maxTokens: 30000,
+		thinkingLevelMap: {
+			off: null,
+			minimal: null,
+			low: null,
+			medium: null,
+			high: "high",
+			xhigh: null,
+			max: null,
+		},
+	};
+}
+
 function writeXaiSandboxModels(agentDir, server) {
 	writeFileSync(
 		join(agentDir, "models.json"),
@@ -81,7 +104,7 @@ function writeXaiSandboxModels(agentDir, server) {
 						baseUrl: server.url,
 						apiKey: "xai-qa-mock-key",
 						api: "openai-completions",
-						models: [grok46(server), nonReasoningGrok420(server)],
+						models: [grok46(server), reasoningGrok420(server), nonReasoningGrok420(server)],
 					},
 				},
 			},
@@ -99,12 +122,13 @@ async function main() {
 	const box = makeSandbox(`grok-model-spec-${mode}`);
 	const env = hermeticEnv(box.env);
 	const server = await startFakeModelServer({
-		turns: [{ text: FINAL_MARKER }, { text: FINAL_MARKER }],
+		turns: [{ text: FINAL_MARKER }, { text: FINAL_MARKER }, { text: FINAL_MARKER }],
 	});
 	let serverStopped = false;
 	let sandboxRemoved = false;
 	let listResult;
 	let grok46Result;
+	let reasoningResult;
 	let nonReasoningResult;
 
 	try {
@@ -140,6 +164,19 @@ async function main() {
 			],
 			{ env, cwd: box.cwd, timeoutMs: 30000 },
 		);
+		reasoningResult = await runCli(
+			[
+				"--provider",
+				"xai",
+				"--model",
+				"grok-4.20-0309-reasoning",
+				"--thinking",
+				"high",
+				...sharedArgs,
+				"Return the marker.",
+			],
+			{ env, cwd: box.cwd, timeoutMs: 30000 },
+		);
 		nonReasoningResult = await runCli(
 			[
 				"--provider",
@@ -155,15 +192,22 @@ async function main() {
 		);
 
 		checks.ok("Grok 4.6 source CLI exits 0", grok46Result.code === 0, grok46Result.stderr);
+		checks.ok("fixed-reasoning Grok source CLI exits 0", reasoningResult.code === 0, reasoningResult.stderr);
 		checks.ok("non-reasoning Grok source CLI exits 0", nonReasoningResult.code === 0, nonReasoningResult.stderr);
-		checks.ok("fake server captured two requests", server.requests.length === 2, `requests=${server.requests.length}`);
+		checks.ok("fake server captured three requests", server.requests.length === 3, `requests=${server.requests.length}`);
 
 		const grok46Body = server.requests[0]?.body ?? {};
-		const nonReasoningBody = server.requests[1]?.body ?? {};
+		const reasoningBody = server.requests[1]?.body ?? {};
+		const nonReasoningBody = server.requests[2]?.body ?? {};
 		checks.ok(
 			"Grok 4.6 emits xhigh reasoning_effort",
 			grok46Body.reasoning_effort === "xhigh",
 			JSON.stringify(grok46Body),
+		);
+		checks.ok(
+			"fixed-reasoning Grok omits reasoning_effort",
+			!("reasoning_effort" in reasoningBody),
+			JSON.stringify(reasoningBody),
 		);
 		checks.ok(
 			"non-reasoning Grok omits reasoning_effort",
@@ -177,6 +221,7 @@ async function main() {
 			JSON.stringify(
 				{
 					grok46: grok46Body,
+					reasoning: reasoningBody,
 					nonReasoning: nonReasoningBody,
 				},
 				null,
@@ -188,6 +233,8 @@ async function main() {
 			[
 				`grok46Exit=${grok46Result.code}`,
 				grok46Result.stdout,
+				`reasoningExit=${reasoningResult.code}`,
+				reasoningResult.stdout,
 				`nonReasoningExit=${nonReasoningResult.code}`,
 				nonReasoningResult.stdout,
 			].join("\n"),
@@ -213,6 +260,7 @@ async function main() {
 				sandboxRemoved,
 				listExit: listResult?.code,
 				grok46Exit: grok46Result?.code,
+				reasoningExit: reasoningResult?.code,
 				nonReasoningExit: nonReasoningResult?.code,
 			},
 			null,
