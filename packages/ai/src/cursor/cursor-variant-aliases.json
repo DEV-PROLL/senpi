@@ -1,6 +1,6 @@
 {
  "$schema": "cursor-variant-aliases/v1",
- "source": "GetUsableModels live capture 2026-08-18 (204 ids); see local-ignore/qa-evidence/20260818-cursor-reasoning-levels/",
+ "source": "union of GetUsableModels live capture (204 ids) and cursor-agent CLI listing capture (203 ids), 2026-08-18",
  "aliases": {
   "claude-4-sonnet": {
    "targetId": "claude-4-sonnet",
@@ -368,6 +368,12 @@
    "legacyVariantId": "claude-opus-5-medium",
    "encoding": "legacy-variant"
   },
+  "claude-opus-5-max": {
+   "targetId": "claude-opus-5",
+   "level": "max",
+   "legacyVariantId": "claude-opus-5-max",
+   "encoding": "legacy-variant"
+  },
   "claude-opus-5-high-fast": {
    "targetId": "claude-opus-5-high-fast",
    "legacyVariantId": "claude-opus-5-high-fast",
@@ -381,6 +387,11 @@
   "claude-opus-5-medium-fast": {
    "targetId": "claude-opus-5-medium-fast",
    "legacyVariantId": "claude-opus-5-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-opus-5-max-fast": {
+   "targetId": "claude-opus-5-max-fast",
+   "legacyVariantId": "claude-opus-5-max-fast",
    "encoding": "legacy-variant"
   },
   "claude-opus-5-thinking-high": {
@@ -526,6 +537,30 @@
    "legacyVariantId": "cursor-grok-4.5-medium",
    "encoding": "legacy-variant"
   },
+  "cursor-grok-4.5-max": {
+   "targetId": "cursor-grok-4.5",
+   "level": "max",
+   "legacyVariantId": "cursor-grok-4.5-max",
+   "encoding": "legacy-variant"
+  },
+  "cursor-grok-4.5-thinking-low": {
+   "targetId": "cursor-grok-4.5",
+   "level": "low",
+   "legacyVariantId": "cursor-grok-4.5-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "cursor-grok-4.5-thinking-medium": {
+   "targetId": "cursor-grok-4.5",
+   "level": "medium",
+   "legacyVariantId": "cursor-grok-4.5-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "cursor-grok-4.5-thinking-max": {
+   "targetId": "cursor-grok-4.5",
+   "level": "max",
+   "legacyVariantId": "cursor-grok-4.5-thinking-max",
+   "encoding": "legacy-variant"
+  },
   "cursor-grok-4.5-high-fast": {
    "targetId": "cursor-grok-4.5-high-fast",
    "legacyVariantId": "cursor-grok-4.5-high-fast",
@@ -539,6 +574,11 @@
   "cursor-grok-4.5-medium-fast": {
    "targetId": "cursor-grok-4.5-medium-fast",
    "legacyVariantId": "cursor-grok-4.5-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "cursor-grok-4.5-max-fast": {
+   "targetId": "cursor-grok-4.5-max-fast",
+   "legacyVariantId": "cursor-grok-4.5-max-fast",
    "encoding": "legacy-variant"
   },
   "cursor-grok-4.6-high": {
@@ -565,6 +605,30 @@
    "legacyVariantId": "cursor-grok-4.6-xhigh",
    "encoding": "legacy-variant"
   },
+  "cursor-grok-4.6-max": {
+   "targetId": "cursor-grok-4.6",
+   "level": "max",
+   "legacyVariantId": "cursor-grok-4.6-max",
+   "encoding": "legacy-variant"
+  },
+  "cursor-grok-4.6-thinking-low": {
+   "targetId": "cursor-grok-4.6",
+   "level": "low",
+   "legacyVariantId": "cursor-grok-4.6-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "cursor-grok-4.6-thinking-medium": {
+   "targetId": "cursor-grok-4.6",
+   "level": "medium",
+   "legacyVariantId": "cursor-grok-4.6-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "cursor-grok-4.6-thinking-max": {
+   "targetId": "cursor-grok-4.6",
+   "level": "max",
+   "legacyVariantId": "cursor-grok-4.6-thinking-max",
+   "encoding": "legacy-variant"
+  },
   "cursor-grok-4.6-high-fast": {
    "targetId": "cursor-grok-4.6-high-fast",
    "legacyVariantId": "cursor-grok-4.6-high-fast",
@@ -583,6 +647,11 @@
   "cursor-grok-4.6-xhigh-fast": {
    "targetId": "cursor-grok-4.6-xhigh-fast",
    "legacyVariantId": "cursor-grok-4.6-xhigh-fast",
+   "encoding": "legacy-variant"
+  },
+  "cursor-grok-4.6-max-fast": {
+   "targetId": "cursor-grok-4.6-max-fast",
+   "legacyVariantId": "cursor-grok-4.6-max-fast",
    "encoding": "legacy-variant"
   },
   "default": {
@@ -647,6 +716,30 @@
    "legacyVariantId": "gemini-3.7-flash-medium",
    "encoding": "legacy-variant"
   },
+  "gemini-3.7-flash-max": {
+   "targetId": "gemini-3.7-flash",
+   "level": "max",
+   "legacyVariantId": "gemini-3.7-flash-max",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-flash-thinking-low": {
+   "targetId": "gemini-3.7-flash",
+   "level": "low",
+   "legacyVariantId": "gemini-3.7-flash-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-flash-thinking-medium": {
+   "targetId": "gemini-3.7-flash",
+   "level": "medium",
+   "legacyVariantId": "gemini-3.7-flash-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-flash-thinking-max": {
+   "targetId": "gemini-3.7-flash",
+   "level": "max",
+   "legacyVariantId": "gemini-3.7-flash-thinking-max",
+   "encoding": "legacy-variant"
+  },
   "glm-5.2-high": {
    "targetId": "glm-5.2",
    "level": "high",
@@ -704,6 +797,36 @@
    "legacyVariantId": "gpt-5.2-xhigh",
    "encoding": "legacy-variant"
   },
+  "gpt-5.2-medium": {
+   "targetId": "gpt-5.2",
+   "level": "medium",
+   "legacyVariantId": "gpt-5.2-medium",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.2-max": {
+   "targetId": "gpt-5.2",
+   "level": "max",
+   "legacyVariantId": "gpt-5.2-max",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.2-thinking-low": {
+   "targetId": "gpt-5.2",
+   "level": "low",
+   "legacyVariantId": "gpt-5.2-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.2-thinking-medium": {
+   "targetId": "gpt-5.2",
+   "level": "medium",
+   "legacyVariantId": "gpt-5.2-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.2-thinking-max": {
+   "targetId": "gpt-5.2",
+   "level": "max",
+   "legacyVariantId": "gpt-5.2-thinking-max",
+   "encoding": "legacy-variant"
+  },
   "gpt-5.2-fast": {
    "targetId": "gpt-5.2-fast",
    "legacyVariantId": "gpt-5.2-fast",
@@ -722,6 +845,16 @@
   "gpt-5.2-xhigh-fast": {
    "targetId": "gpt-5.2-xhigh-fast",
    "legacyVariantId": "gpt-5.2-xhigh-fast",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.2-medium-fast": {
+   "targetId": "gpt-5.2-medium-fast",
+   "legacyVariantId": "gpt-5.2-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.2-max-fast": {
+   "targetId": "gpt-5.2-max-fast",
+   "legacyVariantId": "gpt-5.2-max-fast",
    "encoding": "legacy-variant"
   },
   "gpt-5.3-codex": {
@@ -747,6 +880,36 @@
    "legacyVariantId": "gpt-5.3-codex-xhigh",
    "encoding": "legacy-variant"
   },
+  "gpt-5.3-codex-medium": {
+   "targetId": "gpt-5.3-codex",
+   "level": "medium",
+   "legacyVariantId": "gpt-5.3-codex-medium",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.3-codex-max": {
+   "targetId": "gpt-5.3-codex",
+   "level": "max",
+   "legacyVariantId": "gpt-5.3-codex-max",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.3-codex-thinking-low": {
+   "targetId": "gpt-5.3-codex",
+   "level": "low",
+   "legacyVariantId": "gpt-5.3-codex-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.3-codex-thinking-medium": {
+   "targetId": "gpt-5.3-codex",
+   "level": "medium",
+   "legacyVariantId": "gpt-5.3-codex-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.3-codex-thinking-max": {
+   "targetId": "gpt-5.3-codex",
+   "level": "max",
+   "legacyVariantId": "gpt-5.3-codex-thinking-max",
+   "encoding": "legacy-variant"
+  },
   "gpt-5.3-codex-fast": {
    "targetId": "gpt-5.3-codex-fast",
    "legacyVariantId": "gpt-5.3-codex-fast",
@@ -765,6 +928,16 @@
   "gpt-5.3-codex-xhigh-fast": {
    "targetId": "gpt-5.3-codex-xhigh-fast",
    "legacyVariantId": "gpt-5.3-codex-xhigh-fast",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.3-codex-medium-fast": {
+   "targetId": "gpt-5.3-codex-medium-fast",
+   "legacyVariantId": "gpt-5.3-codex-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.3-codex-max-fast": {
+   "targetId": "gpt-5.3-codex-max-fast",
+   "legacyVariantId": "gpt-5.3-codex-max-fast",
    "encoding": "legacy-variant"
   },
   "gpt-5.4-high": {
@@ -896,6 +1069,30 @@
    "legacyVariantId": "gpt-5.5-none",
    "encoding": "legacy-variant"
   },
+  "gpt-5.5-max": {
+   "targetId": "gpt-5.5",
+   "level": "max",
+   "legacyVariantId": "gpt-5.5-max",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.5-thinking-low": {
+   "targetId": "gpt-5.5",
+   "level": "low",
+   "legacyVariantId": "gpt-5.5-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.5-thinking-medium": {
+   "targetId": "gpt-5.5",
+   "level": "medium",
+   "legacyVariantId": "gpt-5.5-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.5-thinking-max": {
+   "targetId": "gpt-5.5",
+   "level": "max",
+   "legacyVariantId": "gpt-5.5-thinking-max",
+   "encoding": "legacy-variant"
+  },
   "gpt-5.5-extra-high-fast": {
    "targetId": "gpt-5.5-extra-high-fast",
    "legacyVariantId": "gpt-5.5-extra-high-fast",
@@ -919,6 +1116,11 @@
   "gpt-5.5-none-fast": {
    "targetId": "gpt-5.5-none-fast",
    "legacyVariantId": "gpt-5.5-none-fast",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.5-max-fast": {
+   "targetId": "gpt-5.5-max-fast",
+   "legacyVariantId": "gpt-5.5-max-fast",
    "encoding": "legacy-variant"
   },
   "gpt-5.6-luna-high": {
@@ -955,6 +1157,24 @@
    "targetId": "gpt-5.6-luna",
    "level": "xhigh",
    "legacyVariantId": "gpt-5.6-luna-xhigh",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.6-luna-thinking-low": {
+   "targetId": "gpt-5.6-luna",
+   "level": "low",
+   "legacyVariantId": "gpt-5.6-luna-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.6-luna-thinking-medium": {
+   "targetId": "gpt-5.6-luna",
+   "level": "medium",
+   "legacyVariantId": "gpt-5.6-luna-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.6-luna-thinking-max": {
+   "targetId": "gpt-5.6-luna",
+   "level": "max",
+   "legacyVariantId": "gpt-5.6-luna-thinking-max",
    "encoding": "legacy-variant"
   },
   "gpt-5.6-luna-high-fast": {
@@ -1021,6 +1241,24 @@
    "targetId": "gpt-5.6-sol",
    "level": "xhigh",
    "legacyVariantId": "gpt-5.6-sol-xhigh",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.6-sol-thinking-low": {
+   "targetId": "gpt-5.6-sol",
+   "level": "low",
+   "legacyVariantId": "gpt-5.6-sol-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.6-sol-thinking-medium": {
+   "targetId": "gpt-5.6-sol",
+   "level": "medium",
+   "legacyVariantId": "gpt-5.6-sol-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.6-sol-thinking-max": {
+   "targetId": "gpt-5.6-sol",
+   "level": "max",
+   "legacyVariantId": "gpt-5.6-sol-thinking-max",
    "encoding": "legacy-variant"
   },
   "gpt-5.6-sol-high-fast": {
@@ -1140,6 +1378,515 @@
    "targetId": "kimi-k3",
    "level": "max",
    "legacyVariantId": "kimi-k3-max",
+   "encoding": "legacy-variant"
+  },
+  "auto": {
+   "targetId": "auto",
+   "legacyVariantId": "auto",
+   "encoding": "legacy-variant"
+  },
+  "claude-fable-5-low-fast": {
+   "targetId": "claude-fable-5-low-fast",
+   "legacyVariantId": "claude-fable-5-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-fable-5-medium-fast": {
+   "targetId": "claude-fable-5-medium-fast",
+   "legacyVariantId": "claude-fable-5-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-fable-5-max-fast": {
+   "targetId": "claude-fable-5-max-fast",
+   "legacyVariantId": "claude-fable-5-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-5-low-fast": {
+   "targetId": "claude-sonnet-5-low-fast",
+   "legacyVariantId": "claude-sonnet-5-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-5-medium-fast": {
+   "targetId": "claude-sonnet-5-medium-fast",
+   "legacyVariantId": "claude-sonnet-5-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-5-max-fast": {
+   "targetId": "claude-sonnet-5-max-fast",
+   "legacyVariantId": "claude-sonnet-5-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-4-7-low": {
+   "targetId": "claude-sonnet-4-7",
+   "level": "low",
+   "legacyVariantId": "claude-sonnet-4-7-low",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-4-7-medium": {
+   "targetId": "claude-sonnet-4-7",
+   "level": "medium",
+   "legacyVariantId": "claude-sonnet-4-7-medium",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-4-7-max": {
+   "targetId": "claude-sonnet-4-7",
+   "level": "max",
+   "legacyVariantId": "claude-sonnet-4-7-max",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-4-7-low-fast": {
+   "targetId": "claude-sonnet-4-7-low-fast",
+   "legacyVariantId": "claude-sonnet-4-7-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-4-7-medium-fast": {
+   "targetId": "claude-sonnet-4-7-medium-fast",
+   "legacyVariantId": "claude-sonnet-4-7-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-4-7-max-fast": {
+   "targetId": "claude-sonnet-4-7-max-fast",
+   "legacyVariantId": "claude-sonnet-4-7-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-4-7-thinking-low": {
+   "targetId": "claude-sonnet-4-7-thinking",
+   "level": "low",
+   "legacyVariantId": "claude-sonnet-4-7-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-4-7-thinking-medium": {
+   "targetId": "claude-sonnet-4-7-thinking",
+   "level": "medium",
+   "legacyVariantId": "claude-sonnet-4-7-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "claude-sonnet-4-7-thinking-max": {
+   "targetId": "claude-sonnet-4-7-thinking",
+   "level": "max",
+   "legacyVariantId": "claude-sonnet-4-7-thinking-max",
+   "encoding": "legacy-variant"
+  },
+  "claude-mythos-5-low": {
+   "targetId": "claude-mythos-5",
+   "level": "low",
+   "legacyVariantId": "claude-mythos-5-low",
+   "encoding": "legacy-variant"
+  },
+  "claude-mythos-5-medium": {
+   "targetId": "claude-mythos-5",
+   "level": "medium",
+   "legacyVariantId": "claude-mythos-5-medium",
+   "encoding": "legacy-variant"
+  },
+  "claude-mythos-5-max": {
+   "targetId": "claude-mythos-5",
+   "level": "max",
+   "legacyVariantId": "claude-mythos-5-max",
+   "encoding": "legacy-variant"
+  },
+  "claude-mythos-5-low-fast": {
+   "targetId": "claude-mythos-5-low-fast",
+   "legacyVariantId": "claude-mythos-5-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-mythos-5-medium-fast": {
+   "targetId": "claude-mythos-5-medium-fast",
+   "legacyVariantId": "claude-mythos-5-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-mythos-5-max-fast": {
+   "targetId": "claude-mythos-5-max-fast",
+   "legacyVariantId": "claude-mythos-5-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "claude-mythos-5-thinking-low": {
+   "targetId": "claude-mythos-5-thinking",
+   "level": "low",
+   "legacyVariantId": "claude-mythos-5-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "claude-mythos-5-thinking-medium": {
+   "targetId": "claude-mythos-5-thinking",
+   "level": "medium",
+   "legacyVariantId": "claude-mythos-5-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "claude-mythos-5-thinking-max": {
+   "targetId": "claude-mythos-5-thinking",
+   "level": "max",
+   "legacyVariantId": "claude-mythos-5-thinking-max",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.4-codex-low": {
+   "targetId": "gpt-5.4-codex",
+   "level": "low",
+   "legacyVariantId": "gpt-5.4-codex-low",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.4-codex-medium": {
+   "targetId": "gpt-5.4-codex",
+   "level": "medium",
+   "legacyVariantId": "gpt-5.4-codex-medium",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.4-codex-max": {
+   "targetId": "gpt-5.4-codex",
+   "level": "max",
+   "legacyVariantId": "gpt-5.4-codex-max",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.4-codex-thinking-low": {
+   "targetId": "gpt-5.4-codex",
+   "level": "low",
+   "legacyVariantId": "gpt-5.4-codex-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.4-codex-thinking-medium": {
+   "targetId": "gpt-5.4-codex",
+   "level": "medium",
+   "legacyVariantId": "gpt-5.4-codex-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.4-codex-thinking-max": {
+   "targetId": "gpt-5.4-codex",
+   "level": "max",
+   "legacyVariantId": "gpt-5.4-codex-thinking-max",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.4-codex-low-fast": {
+   "targetId": "gpt-5.4-codex-low-fast",
+   "legacyVariantId": "gpt-5.4-codex-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.4-codex-medium-fast": {
+   "targetId": "gpt-5.4-codex-medium-fast",
+   "legacyVariantId": "gpt-5.4-codex-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "gpt-5.4-codex-max-fast": {
+   "targetId": "gpt-5.4-codex-max-fast",
+   "legacyVariantId": "gpt-5.4-codex-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-flash-low-fast": {
+   "targetId": "gemini-3.7-flash-low-fast",
+   "legacyVariantId": "gemini-3.7-flash-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-flash-medium-fast": {
+   "targetId": "gemini-3.7-flash-medium-fast",
+   "legacyVariantId": "gemini-3.7-flash-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-flash-max-fast": {
+   "targetId": "gemini-3.7-flash-max-fast",
+   "legacyVariantId": "gemini-3.7-flash-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-pro-low": {
+   "targetId": "gemini-3.7-pro",
+   "level": "low",
+   "legacyVariantId": "gemini-3.7-pro-low",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-pro-medium": {
+   "targetId": "gemini-3.7-pro",
+   "level": "medium",
+   "legacyVariantId": "gemini-3.7-pro-medium",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-pro-max": {
+   "targetId": "gemini-3.7-pro",
+   "level": "max",
+   "legacyVariantId": "gemini-3.7-pro-max",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-pro-thinking-low": {
+   "targetId": "gemini-3.7-pro",
+   "level": "low",
+   "legacyVariantId": "gemini-3.7-pro-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-pro-thinking-medium": {
+   "targetId": "gemini-3.7-pro",
+   "level": "medium",
+   "legacyVariantId": "gemini-3.7-pro-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-pro-thinking-max": {
+   "targetId": "gemini-3.7-pro",
+   "level": "max",
+   "legacyVariantId": "gemini-3.7-pro-thinking-max",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-pro-low-fast": {
+   "targetId": "gemini-3.7-pro-low-fast",
+   "legacyVariantId": "gemini-3.7-pro-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-pro-medium-fast": {
+   "targetId": "gemini-3.7-pro-medium-fast",
+   "legacyVariantId": "gemini-3.7-pro-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.7-pro-max-fast": {
+   "targetId": "gemini-3.7-pro-max-fast",
+   "legacyVariantId": "gemini-3.7-pro-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.6-pro-low": {
+   "targetId": "gemini-3.6-pro",
+   "level": "low",
+   "legacyVariantId": "gemini-3.6-pro-low",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.6-pro-medium": {
+   "targetId": "gemini-3.6-pro",
+   "level": "medium",
+   "legacyVariantId": "gemini-3.6-pro-medium",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.6-pro-max": {
+   "targetId": "gemini-3.6-pro",
+   "level": "max",
+   "legacyVariantId": "gemini-3.6-pro-max",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.6-pro-thinking-low": {
+   "targetId": "gemini-3.6-pro",
+   "level": "low",
+   "legacyVariantId": "gemini-3.6-pro-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.6-pro-thinking-medium": {
+   "targetId": "gemini-3.6-pro",
+   "level": "medium",
+   "legacyVariantId": "gemini-3.6-pro-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.6-pro-thinking-max": {
+   "targetId": "gemini-3.6-pro",
+   "level": "max",
+   "legacyVariantId": "gemini-3.6-pro-thinking-max",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.6-pro-low-fast": {
+   "targetId": "gemini-3.6-pro-low-fast",
+   "legacyVariantId": "gemini-3.6-pro-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.6-pro-medium-fast": {
+   "targetId": "gemini-3.6-pro-medium-fast",
+   "legacyVariantId": "gemini-3.6-pro-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.6-pro-max-fast": {
+   "targetId": "gemini-3.6-pro-max-fast",
+   "legacyVariantId": "gemini-3.6-pro-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.5-pro-low": {
+   "targetId": "gemini-3.5-pro",
+   "level": "low",
+   "legacyVariantId": "gemini-3.5-pro-low",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.5-pro-medium": {
+   "targetId": "gemini-3.5-pro",
+   "level": "medium",
+   "legacyVariantId": "gemini-3.5-pro-medium",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.5-pro-max": {
+   "targetId": "gemini-3.5-pro",
+   "level": "max",
+   "legacyVariantId": "gemini-3.5-pro-max",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.5-pro-thinking-low": {
+   "targetId": "gemini-3.5-pro",
+   "level": "low",
+   "legacyVariantId": "gemini-3.5-pro-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.5-pro-thinking-medium": {
+   "targetId": "gemini-3.5-pro",
+   "level": "medium",
+   "legacyVariantId": "gemini-3.5-pro-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.5-pro-thinking-max": {
+   "targetId": "gemini-3.5-pro",
+   "level": "max",
+   "legacyVariantId": "gemini-3.5-pro-thinking-max",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.5-pro-low-fast": {
+   "targetId": "gemini-3.5-pro-low-fast",
+   "legacyVariantId": "gemini-3.5-pro-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.5-pro-medium-fast": {
+   "targetId": "gemini-3.5-pro-medium-fast",
+   "legacyVariantId": "gemini-3.5-pro-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "gemini-3.5-pro-max-fast": {
+   "targetId": "gemini-3.5-pro-max-fast",
+   "legacyVariantId": "gemini-3.5-pro-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-low": {
+   "targetId": "composer-2.6",
+   "level": "low",
+   "legacyVariantId": "composer-2.6-low",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-medium": {
+   "targetId": "composer-2.6",
+   "level": "medium",
+   "legacyVariantId": "composer-2.6-medium",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-max": {
+   "targetId": "composer-2.6",
+   "level": "max",
+   "legacyVariantId": "composer-2.6-max",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-thinking-low": {
+   "targetId": "composer-2.6",
+   "level": "low",
+   "legacyVariantId": "composer-2.6-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-thinking-medium": {
+   "targetId": "composer-2.6",
+   "level": "medium",
+   "legacyVariantId": "composer-2.6-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-thinking-max": {
+   "targetId": "composer-2.6",
+   "level": "max",
+   "legacyVariantId": "composer-2.6-thinking-max",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-low-fast": {
+   "targetId": "composer-2.6-low-fast",
+   "legacyVariantId": "composer-2.6-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-medium-fast": {
+   "targetId": "composer-2.6-medium-fast",
+   "legacyVariantId": "composer-2.6-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-max-fast": {
+   "targetId": "composer-2.6-max-fast",
+   "legacyVariantId": "composer-2.6-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-lite-low": {
+   "targetId": "composer-2.6-lite",
+   "level": "low",
+   "legacyVariantId": "composer-2.6-lite-low",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-lite-medium": {
+   "targetId": "composer-2.6-lite",
+   "level": "medium",
+   "legacyVariantId": "composer-2.6-lite-medium",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-lite-max": {
+   "targetId": "composer-2.6-lite",
+   "level": "max",
+   "legacyVariantId": "composer-2.6-lite-max",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-lite-thinking-low": {
+   "targetId": "composer-2.6-lite",
+   "level": "low",
+   "legacyVariantId": "composer-2.6-lite-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-lite-thinking-medium": {
+   "targetId": "composer-2.6-lite",
+   "level": "medium",
+   "legacyVariantId": "composer-2.6-lite-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-lite-thinking-max": {
+   "targetId": "composer-2.6-lite",
+   "level": "max",
+   "legacyVariantId": "composer-2.6-lite-thinking-max",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-lite-low-fast": {
+   "targetId": "composer-2.6-lite-low-fast",
+   "legacyVariantId": "composer-2.6-lite-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-lite-medium-fast": {
+   "targetId": "composer-2.6-lite-medium-fast",
+   "legacyVariantId": "composer-2.6-lite-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "composer-2.6-lite-max-fast": {
+   "targetId": "composer-2.6-lite-max-fast",
+   "legacyVariantId": "composer-2.6-lite-max-fast",
+   "encoding": "legacy-variant"
+  },
+  "deepseek-v4-low": {
+   "targetId": "deepseek-v4",
+   "level": "low",
+   "legacyVariantId": "deepseek-v4-low",
+   "encoding": "legacy-variant"
+  },
+  "deepseek-v4-medium": {
+   "targetId": "deepseek-v4",
+   "level": "medium",
+   "legacyVariantId": "deepseek-v4-medium",
+   "encoding": "legacy-variant"
+  },
+  "deepseek-v4-max": {
+   "targetId": "deepseek-v4",
+   "level": "max",
+   "legacyVariantId": "deepseek-v4-max",
+   "encoding": "legacy-variant"
+  },
+  "deepseek-v4-thinking-low": {
+   "targetId": "deepseek-v4",
+   "level": "low",
+   "legacyVariantId": "deepseek-v4-thinking-low",
+   "encoding": "legacy-variant"
+  },
+  "deepseek-v4-thinking-medium": {
+   "targetId": "deepseek-v4",
+   "level": "medium",
+   "legacyVariantId": "deepseek-v4-thinking-medium",
+   "encoding": "legacy-variant"
+  },
+  "deepseek-v4-thinking-max": {
+   "targetId": "deepseek-v4",
+   "level": "max",
+   "legacyVariantId": "deepseek-v4-thinking-max",
+   "encoding": "legacy-variant"
+  },
+  "deepseek-v4-low-fast": {
+   "targetId": "deepseek-v4-low-fast",
+   "legacyVariantId": "deepseek-v4-low-fast",
+   "encoding": "legacy-variant"
+  },
+  "deepseek-v4-medium-fast": {
+   "targetId": "deepseek-v4-medium-fast",
+   "legacyVariantId": "deepseek-v4-medium-fast",
+   "encoding": "legacy-variant"
+  },
+  "deepseek-v4-max-fast": {
+   "targetId": "deepseek-v4-max-fast",
+   "legacyVariantId": "deepseek-v4-max-fast",
    "encoding": "legacy-variant"
   }
  }

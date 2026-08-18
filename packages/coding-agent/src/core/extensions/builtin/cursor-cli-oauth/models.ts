@@ -1,3 +1,4 @@
+import { normalizeCursorCatalog } from "@earendil-works/pi-ai";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -75,21 +76,36 @@ function contextWindowFor(id: string, label: string): number {
 	return 200_000;
 }
 
-function modelEntry(id: string, label: string): ProviderModelConfig {
-	return {
-		id,
-		name: label,
-		reasoning: REASONING_SUFFIX.test(id),
-		input: ["text"],
+function normalizeEntries(raw: readonly { id: string; label: string }[]): ProviderModelConfig[] {
+	return normalizeCursorCatalog(
+		raw.map(({ id, label }) => ({ id, name: label, input: ["text"] as const, cursorMaxMode: false })),
+	).map((entry) => ({
+		id: entry.id,
+		name: entry.name,
+		reasoning: entry.reasoning,
+		...(entry.thinkingLevelMap ? { thinkingLevelMap: entry.thinkingLevelMap } : {}),
+		input: ["text"] as ("text" | "image")[],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: contextWindowFor(id, label),
+		contextWindow: entry.window,
 		maxTokens: 64_000,
-	};
+		...(entry.representativeVariantId !== undefined && entry.representativeVariantId !== entry.id
+			? { upstreamModelId: entry.representativeVariantId }
+			: {}),
+		compat: {
+			...(entry.capabilityId !== undefined && entry.representativeVariantId !== undefined
+				? {
+						cursorReasoning: {
+							capabilityId: entry.capabilityId,
+							...(entry.thinkingMode !== undefined ? { thinkingMode: entry.thinkingMode } : {}),
+							representativeVariantId: entry.representativeVariantId,
+						},
+					}
+				: {}),
+		},
+	}));
 }
 
-export const STATIC_CURSOR_CLI_MODELS: readonly ProviderModelConfig[] = STATIC_MODEL_DEFINITIONS.map(({ id, label }) =>
-	modelEntry(id, label),
-);
+export const STATIC_CURSOR_CLI_MODELS: readonly ProviderModelConfig[] = normalizeEntries(STATIC_MODEL_DEFINITIONS);
 
 /** Parse the complete `cursor-agent models` listing into extension provider entries. */
 export function parseCursorAgentModelsListing(listing: string): ProviderModelConfig[] {
@@ -98,7 +114,7 @@ export function parseCursorAgentModelsListing(listing: string): ProviderModelCon
 	if (lines.some((line) => MISLEADING_ERROR_LINE.test(line))) return [];
 
 	const seen = new Set<string>();
-	const models: ProviderModelConfig[] = [];
+	const raw: { id: string; label: string }[] = [];
 	for (const rawLine of lines) {
 		const match = MODEL_LINE.exec(rawLine.trim());
 		if (!match) continue;
@@ -106,9 +122,9 @@ export function parseCursorAgentModelsListing(listing: string): ProviderModelCon
 		const label = match[2].trim();
 		if (!MODEL_ID.test(id) || label.length === 0 || seen.has(id)) continue;
 		seen.add(id);
-		models.push(modelEntry(id, label));
+		raw.push({ id, label });
 	}
-	return models;
+	return normalizeEntries(raw);
 }
 
 async function runModelsProbe(executable: string, stdoutPath: string, timeoutMs: number): Promise<void> {
@@ -200,7 +216,7 @@ function parseCachedCatalog(contents: string): CachedModelCatalog | undefined {
 		return undefined;
 	}
 
-	const normalized: ProviderModelConfig[] = [];
+	const rawCached: { id: string; label: string }[] = [];
 	const seen = new Set<string>();
 	for (const candidate of models) {
 		if (typeof candidate !== "object" || candidate === null || !("id" in candidate) || !("name" in candidate)) {
@@ -218,9 +234,9 @@ function parseCachedCatalog(contents: string): CachedModelCatalog | undefined {
 			return undefined;
 		}
 		seen.add(id);
-		normalized.push(modelEntry(id, name));
+		rawCached.push({ id, label: name });
 	}
-	return { cachedAt, models: normalized };
+	return { cachedAt, models: normalizeEntries(rawCached) };
 }
 
 async function readFreshCache(
