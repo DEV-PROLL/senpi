@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -114,6 +114,45 @@ function listFiles(root) {
 	return files;
 }
 
+function persistedBindingShape(files) {
+	const sessionFile = files.find((path) => path.endsWith(".jsonl"));
+	const sidecarFile = files.find((path) => path.endsWith(".claude-sdk-oauth-binding.json"));
+	let sidecar;
+	let branch = [];
+	try {
+		sidecar = sidecarFile ? JSON.parse(readFileSync(sidecarFile, "utf8")) : undefined;
+	} catch {
+		sidecar = { malformed: true };
+	}
+	try {
+		branch = sessionFile
+			? readFileSync(sessionFile, "utf8")
+					.split("\n")
+					.filter(Boolean)
+					.map((line) => JSON.parse(line))
+					.filter((entry) => entry.type !== "session")
+					.map((entry) => ({
+						id: entry.id,
+						type: entry.type,
+						customType: entry.customType,
+						role: entry.message?.role,
+					}))
+			: [];
+	} catch {
+		branch = [{ malformed: true }];
+	}
+	return {
+		sidecar: sidecar
+			? {
+					sessionPath: sidecar.sessionPath,
+					sessionId: sidecar.sessionId,
+					markerEntryId: sidecar.markerEntryId,
+				}
+			: null,
+		branch,
+	};
+}
+
 const common = (sessionDir) => [
 	"-p",
 	"--provider",
@@ -172,6 +211,7 @@ try {
 		second: { code: second.code, continuity: secondContinuity },
 		sessionFileCount: sessionFiles.length,
 		providerRequests: stack.providerRequests.length,
+		...(!passed ? { persistedBinding: persistedBindingShape(sessionFiles) } : {}),
 		stderr: {
 			first: [
 				...first.stderr.split("\n").filter(Boolean).slice(0, 5),
