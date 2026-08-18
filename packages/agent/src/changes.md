@@ -1,5 +1,34 @@
 # Changes
 
+## Cursor exec handlers bind to their owning run (2026-08-18)
+
+### What changed
+
+- `packages/agent/src/types.ts`: `AgentLoopConfig.cursorExecHandlers` also
+  accepts a `(runSignal: AbortSignal) => CursorExecHandlers` factory.
+- `packages/agent/src/agent-loop.ts`: when a factory is supplied, the loop
+  resolves it with `requestAbortController.signal` — the signal of the run that
+  owns the stream being opened.
+
+### Why
+
+- A host bridge built once per session cannot tell which run an exec frame
+  belongs to. Handing it the owning run's signal at stream creation lets the
+  host refuse a straggler frame from a stream whose run already ended, instead
+  of executing it inside the replacement run.
+- The plain-object form is unchanged, so existing hosts keep working.
+
+### Why an extension could not handle it
+
+- Only the loop knows which run owns the stream it is opening. The owning
+  signal exists solely inside `streamAssistantResponse` at stream creation, so
+  no extension hook can supply it to the host bridge after the fact.
+
+### Expected merge conflict zones
+
+- `agent-loop.ts` `execHandlers` injection block, `types.ts`
+  `cursorExecHandlers` declaration.
+
 ## 2026-08-18 - Thinking-selection provenance through the agent loop
 
 ### What changed

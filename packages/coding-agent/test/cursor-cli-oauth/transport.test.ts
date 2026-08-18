@@ -55,8 +55,20 @@ function start(
 	});
 }
 
-function assertDead(pid: number): void {
-	expect(() => process.kill(pid, 0)).toThrow();
+// Group SIGTERM reaches the grandchild asynchronously after the leader exits, so an
+// instant liveness probe races on loaded CI runners. Poll under a bounded deadline,
+// matching assertProcessDead in test/mcp/fixtures/spawn-fixture.ts.
+async function assertDead(pid: number): Promise<void> {
+	const deadline = Date.now() + 2000;
+	while (Date.now() < deadline) {
+		try {
+			process.kill(pid, 0);
+		} catch {
+			return;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+	throw new Error(`process still alive after abort: ${pid}`);
 }
 
 async function collect(handle: CursorCliTransportHandle): Promise<unknown[]> {
@@ -85,7 +97,7 @@ describe("cursor CLI transport", () => {
 			),
 		).toBe(true);
 		expect(outcome).toMatchObject({ type: "completed", exitCode: 0 });
-		assertDead(handle.pid);
+		await assertDead(handle.pid);
 	});
 
 	it("aborts the exact process group and reaps both leader and descendant", async () => {
@@ -114,8 +126,8 @@ describe("cursor CLI transport", () => {
 
 		expect(events.at(-1)).toBeInstanceOf(CursorCliAbortError);
 		expect(outcome.type).toBe("aborted");
-		assertDead(handle.pid);
-		assertDead(grandchildPid);
+		await assertDead(handle.pid);
+		await assertDead(grandchildPid);
 	});
 
 	it("escalates to SIGKILL when the process ignores SIGTERM", async () => {
@@ -135,7 +147,7 @@ describe("cursor CLI transport", () => {
 		const outcome = await handle.completed;
 
 		expect(outcome.type).toBe("aborted");
-		assertDead(handle.pid);
+		await assertDead(handle.pid);
 	}, 8_000);
 
 	it("passes only the explicit environment allowlist", async () => {

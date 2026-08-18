@@ -35,7 +35,7 @@ describe("resolveCursorCliSpawnModel", () => {
 			},
 		});
 		expect(resolveCursorCliSpawnModel(model, explicit("low"))).toBe(
-			"claude-fable-5[thinking=true,context=300k,effort=low]",
+			"claude-fable-5[thinking=true,context=1m,effort=low]",
 		);
 	});
 
@@ -44,7 +44,7 @@ describe("resolveCursorCliSpawnModel", () => {
 			cursorReasoning: { capabilityId: "gpt-5.5", representativeVariantId: "gpt-5.5-medium" },
 		});
 		expect(resolveCursorCliSpawnModel(model, explicit("xhigh"))).toBe(
-			"gpt-5.5[context=272k,reasoning=extra-high,fast=false]",
+			"gpt-5.5[context=1m,reasoning=extra-high,fast=false]",
 		);
 	});
 

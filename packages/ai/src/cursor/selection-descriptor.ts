@@ -30,9 +30,11 @@ function buildParameters(
 			case "thinking":
 				out.push({ id, value: thinkingMode === true ? "true" : "false" });
 				break;
-			case "context":
-				if (capability.defaultContext !== undefined) out.push({ id, value: capability.defaultContext });
+			case "context": {
+				const context = capability.requestContext ?? capability.defaultContext;
+				if (context !== undefined) out.push({ id, value: context });
 				break;
+			}
 			case "effort":
 			case "reasoning":
 				out.push({ id, value });

@@ -6,6 +6,9 @@
 
 - Pasting a clipboard image in the interactive TUI now attaches the image to the submission instead of inserting its temp file path: the composer shows an atomic `[Image #N]` marker, the bytes ride the user message as an image content part in reading order, and markers transfer between editor instances (or are stripped with their payloads dropped when the destination cannot own them).
 
+- Cursor model listings report corrected context windows (current Claude families and GPT 5.5/5.6 at 1M,
+  Grok at 500K) and the cursor-agent CLI spawn string requests the matching `context` token.
+
 - Cursor reasoning levels now drive both Cursor surfaces: the thinking-level selector, `:suffix` model
   patterns, and favorites carry provenance into the wire request, the native protobuf lane sends per-family
   `RequestedModel.parameters`, and the `cursor-cli-oauth` lane spawns with the matching bracket or suffix
@@ -15,6 +18,15 @@
 
 ### Fixed
 
+- goal: resume an active goal when the user sends a message after a continuation-flooded session load suppressed auto-continuation; previously the "Send a message to resume" notice parked the goal because the follow-up user message only reset the continuation streak without queueing a continuation.
+- session: `sendCustomMessage` with `triggerTurn` no longer waits on the session-work barrier while the session-start binding itself holds it, unblocking goal continuations queued from `session_start` handlers during resume.
+
+- Transient provider stream-start timeouts now spend the full configured `retry.maxRetries` budget instead of
+  ending the turn after a single attempt. The retry-continuation watchdog was bounded by
+  `retry.provider.streamRetryTimeoutMs` (30s) while the same retry was granted the configured
+  `streamStartTimeoutMs` (90s), so a slow-but-alive provider was aborted 60s before its own deadline and the
+  turn surfaced `Provider stream start timed out after 90000ms` followed by `Aborted after 1 retry attempt`.
+  The watchdog is now reconciled to the guard it grants, while still cancelling a retry that outlives it.
 - Published Senpi tarballs now retain the lockfile-recorded Babel 8 dependency closure inside the bundled codemode sidecar, preventing `@babel/parser` resolution failures during extension startup ([#923](https://github.com/code-yeongyu/senpi/issues/923)).
 - Headless Claude SDK OAuth continuation now restores its persisted SDK binding across separate CLI processes, so
   `-p -c` resumes the existing lineage instead of resending the full conversation after a `registry_miss`.
@@ -23,6 +35,9 @@
 
 - Messages typed while auto-compaction is running are no longer silently dropped: input submitted during `Compacting context...` is queued and delivered after compaction settles instead of being accepted and discarded. Manual `/compact` keeps rejecting unqueueable prompts as before ([#950](https://github.com/code-yeongyu/senpi/pull/950)).
 
+- Cursor exec-bridge dispatches are now bound to the run that opened their stream, so a straggler exec frame from a run that already ended (for example after a provider rate-limit error restarts the turn on a fallback lane) is refused instead of executing a dead run's tool inside the replacement run and leaking its lifecycle events into the new transcript.
+
+>>>>>>> origin/main
 ### New Features
 
 ### Breaking Changes

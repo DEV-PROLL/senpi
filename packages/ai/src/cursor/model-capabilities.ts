@@ -17,6 +17,8 @@ export interface CursorModelCapability {
 	readonly maxWindow?: number;
 	readonly parameterOrder: readonly CursorParameterId[];
 	readonly defaultContext?: string;
+	/** Context token matching `window`; cursor truncates to whatever this asks for. */
+	readonly requestContext?: string;
 	readonly levels: Partial<Record<ModelThinkingLevel, CursorLevelSpec>>;
 }
 
@@ -47,17 +49,24 @@ function claude(
 		maxWindow,
 		parameterOrder: CLAUDE_ORDER,
 		defaultContext,
+		requestContext: window >= 1_000_000 ? "1m" : defaultContext,
 		levels: ladder(levels),
 	};
 }
 
-function gpt(levels: readonly string[], order: readonly CursorParameterId[] = GPT_ORDER): CursorModelCapability {
+function gpt(
+	levels: readonly string[],
+	order: readonly CursorParameterId[] = GPT_ORDER,
+	window = 400000,
+	maxWindow = 400000,
+): CursorModelCapability {
 	return {
 		evidence: "available-models",
-		window: 272000,
-		maxWindow: 1000000,
+		window,
+		maxWindow,
 		parameterOrder: order,
 		defaultContext: "272k",
+		requestContext: order.includes("context") && window >= 1_000_000 ? "1m" : undefined,
 		levels: ladder(levels),
 	};
 }
@@ -70,11 +79,11 @@ function gpt(levels: readonly string[], order: readonly CursorParameterId[] = GP
  * authoritative source; see .omo/plans/cursor-reasoning-levels.md §3.1/§6.
  */
 export const CURSOR_MODEL_CAPABILITIES: Record<string, CursorModelCapability> = {
-	"claude-fable-5": claude(300000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
-	"claude-sonnet-5": claude(300000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
-	"claude-opus-4-7": claude(300000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
-	"claude-opus-4-8": claude(300000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
-	"claude-opus-5": claude(300000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
+	"claude-fable-5": claude(1000000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
+	"claude-sonnet-5": claude(1000000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
+	"claude-opus-4-7": claude(1000000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
+	"claude-opus-4-8": claude(1000000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
+	"claude-opus-5": claude(1000000, 1000000, ["low", "medium", "high", "xhigh", "max"], "300k"),
 	"claude-4.6-opus": claude(1000000, 1000000, ["high", "max"], "200k"),
 	"claude-4.6-sonnet": claude(1000000, 1000000, ["medium"], "200k"),
 	"claude-4.5-opus": {
@@ -83,11 +92,11 @@ export const CURSOR_MODEL_CAPABILITIES: Record<string, CursorModelCapability> = 
 		parameterOrder: ["thinking"],
 		levels: { high: { value: "high", encoding: V } },
 	},
-	"gpt-5.6-sol": gpt(["none", "low", "medium", "high", "xhigh", "max"]),
-	"gpt-5.6-luna": gpt(["none", "low", "medium", "high", "xhigh", "max"]),
-	"gpt-5.6-terra": gpt(["none", "low", "medium", "high", "xhigh", "max"]),
+	"gpt-5.6-sol": gpt(["none", "low", "medium", "high", "xhigh", "max"], GPT_ORDER, 1000000, 1000000),
+	"gpt-5.6-luna": gpt(["none", "low", "medium", "high", "xhigh", "max"], GPT_ORDER, 1000000, 1000000),
+	"gpt-5.6-terra": gpt(["none", "low", "medium", "high", "xhigh", "max"], GPT_ORDER, 272000, 272000),
 	"gpt-5.5": {
-		...gpt(["none", "low", "medium", "high"]),
+		...gpt(["none", "low", "medium", "high"], GPT_ORDER, 1000000, 1000000),
 		levels: { ...ladder(["none", "low", "medium", "high"]), xhigh: { value: "extra-high", encoding: P } },
 	},
 	"gpt-5.3-codex": {
@@ -116,7 +125,7 @@ export const CURSOR_MODEL_CAPABILITIES: Record<string, CursorModelCapability> = 
 	},
 	"gpt-5.4-mini": {
 		evidence: "available-models",
-		window: 272000,
+		window: 400_000,
 		parameterOrder: [],
 		levels: ladder(["none", "low", "medium", "high", "xhigh"], V),
 	},
@@ -128,25 +137,25 @@ export const CURSOR_MODEL_CAPABILITIES: Record<string, CursorModelCapability> = 
 	},
 	"gemini-3.7-flash": {
 		evidence: "cli-live",
-		window: 1000000,
+		window: 1_048_576,
 		parameterOrder: ["effort"],
 		levels: ladder(["low", "medium", "high"]),
 	},
 	"gemini-3.6-flash": {
 		evidence: "suffix-only",
-		window: 1000000,
+		window: 1_048_576,
 		parameterOrder: [],
 		levels: ladder(["minimal", "low", "medium", "high"], V),
 	},
 	"cursor-grok-4.6": {
 		evidence: "available-models",
-		window: 256000,
+		window: 500_000,
 		parameterOrder: ["effort", "fast"],
 		levels: ladder(["low", "medium", "high", "xhigh"]),
 	},
 	"cursor-grok-4.5": {
 		evidence: "suffix-only",
-		window: 256000,
+		window: 500_000,
 		parameterOrder: [],
 		levels: ladder(["low", "medium", "high"], V),
 	},
@@ -173,16 +182,16 @@ export const CURSOR_MODEL_CAPABILITIES: Record<string, CursorModelCapability> = 
 	},
 	"claude-4.5-sonnet": {
 		evidence: "available-models",
-		window: 200000,
+		window: 200_000,
 		parameterOrder: ["thinking", "context"],
 		defaultContext: "200k",
 		levels: {},
 	},
-	"kimi-k2.7-code": { evidence: "available-models", window: 262000, parameterOrder: [], levels: {} },
+	"kimi-k2.7-code": { evidence: "available-models", window: 262_144, parameterOrder: [], levels: {} },
 	"gemini-3-flash": { evidence: "available-models", window: 1000000, parameterOrder: [], levels: {} },
 	"gemini-3.1-pro": { evidence: "available-models", window: 1000000, parameterOrder: [], levels: {} },
-	"gemini-3.5-flash": { evidence: "available-models", window: 1000000, parameterOrder: [], levels: {} },
-	"gpt-5-mini": { evidence: "available-models", window: 272000, parameterOrder: [], levels: {} },
+	"gemini-3.5-flash": { evidence: "available-models", window: 1_048_576, parameterOrder: [], levels: {} },
+	"gpt-5-mini": { evidence: "available-models", window: 400_000, parameterOrder: [], levels: {} },
 };
 
 export interface CursorVariantAlias {

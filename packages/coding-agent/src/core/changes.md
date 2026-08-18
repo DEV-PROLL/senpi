@@ -1,5 +1,76 @@
 # changes
 
+## 2026-08-18 - Resume active goals stuck after suppressed continuation-flood loads
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `sendCustomMessage` with `triggerTurn` no longer waits on
+  `_sessionWorkBarrier` while the session-start binding itself holds it (`_extensionBindingPromptReadiness`
+  active). A trigger-turn message queued from the `session_start` emission — a goal continuation queued on
+  resume — previously waited on the very work that was delivering it, so the resumed session rendered the TUI
+  but never started a turn.
+- `core/extensions/builtin/goal/index.ts` + `direct-input-lifecycle.ts`: a suppressed flooded load now arms a
+  one-shot latch; the next accepted user message (the "Send a message to resume" the notice promises) queues
+  the goal continuation immediately instead of only resetting the continuation streak.
+- Coverage: `test/suite/goal-extension.test.ts` (queues a continuation when the user sends a message after a
+  suppressed flooded load) and `test/suite/agent-session-queue.test.ts` (triggerTurn send does not wait on the
+  binding-phase barrier; fails pre-fix via a deadlock race).
+
+### Why
+
+- A resumed session whose branch ends in >= `GOAL_CONTINUATION_CAP` trailing continuations suppresses
+  auto-continuation by design, but the documented resume path was a dead end: the user message reset the
+  streak without queueing a continuation, and even once queued the continuation deadlocked on the
+  binding-held barrier. Reproduced against a clone of the stuck session; post-fix the continuation is
+  delivered and the agent resumes.
+
+### Why an extension could not handle it
+
+- The barrier admission condition lives in `AgentSession.sendCustomMessage`, and the resume latch lives in the
+  builtin goal extension's own load/disposition path; both are core session-lifecycle surfaces.
+
+### Expected merge conflict zones
+
+- `core/agent-session.ts` `sendCustomMessage` wait condition, and the goal extension `session_start`
+  suppressed-load branch in `core/extensions/builtin/goal/index.ts`.
+
+
+## 2026-08-18 - Retry continuation watchdog reconciled with the guards it grants
+
+### What changed
+
+- `core/provider-timeout-retry.ts`: `createProviderTimeoutRetryPlan` now reconciles the retry-continuation
+  liveness cap against the stream-start guard the same retry is handed:
+  `watchdogTimeoutMs = max(streamRetryTimeoutMs, streamStartTimeoutMs)`. An explicitly disabled cap
+  (`undefined`) stays disabled, and a cap that already outlasts the granted guard is returned unchanged.
+- Coverage: `test/provider-timeout-retry-continuation.test.ts` (new; first direct coverage of
+  `runBoundedRetryContinuation`), extended `test/provider-timeout-retry.test.ts`, and updated
+  `test/suite/regressions/provider-idle-recovery.test.ts`.
+
+### Why
+
+- This completes the 2026-08-13 fix below. That change stopped clamping the retry *request* guards to
+  `retry.provider.streamRetryTimeoutMs`, but left the same 30s cap bounding the retry *continuation*, which
+  reproduced the identical defect one layer up: `runBoundedRetryContinuation` aborted the attempt at 30s while
+  the request still had 60s of its configured 90s stream-start budget left.
+- No attempt could therefore finish, so the bounded `retry.maxRetries` budget (default 3) collapsed into the
+  single user-visible `Provider stream start timed out after 90000ms` / `Aborted after 1 retry attempt`
+  outcome. A slow-but-alive provider was again judged dead on a deadline it was never given.
+- Raising the watchdog to the granted guard preserves the wedge protection it was added for: the provider
+  guards still fail a dead upstream, and the watchdog still cancels a retry that outlives every guard it was
+  granted.
+
+### Why an extension could not handle it
+
+- The retry continuation bound and its abort ownership are core session-lifecycle surfaces with no extension
+  hook.
+
+### Expected merge conflict zones
+
+- `core/provider-timeout-retry.ts` plan construction, and the retry-bound constants in
+  `test/suite/regressions/provider-idle-recovery.test.ts`.
+
+
 ## Queue typed input admitted during auto-compaction (2026-08-18)
 
 ### What changed
@@ -34,6 +105,39 @@
 - `packages/coding-agent/src/core/agent-session.ts`: the `prompt()` queue
   eligibility constants and the queue branches preceding the settled-work wait.
 
+## Cursor bridge dispatches bind to the run that owns the stream (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: the session
+  adapter accepts the signal of the run that owns the exec stream and resolves
+  `getAbortSignal` from it, returning `undefined` once that run is no longer
+  the agent's live run.
+- `packages/coding-agent/src/core/sdk.ts`: supplies the bridge as a per-run
+  factory so every Cursor stream gets handlers bound to its own run.
+
+### Why
+
+- The bridge is built once per session, but each exec stream belongs to exactly
+  one run. Resolving ownership from the agent's live signal let a straggler
+  frame from a stream whose run had already ended adopt the replacement run's
+  signal, clear the ownership guard in `Agent.emitExternalEvent`, and execute a
+  dead run's tool inside the new run while emitting its lifecycle events into
+  the new run's transcript.
+- This is the shape the crashed 2026-08-18 session hit: a provider rate-limit
+  error restarted the run on a fallback lane while the previous stream still
+  held buffered exec frames.
+
+### Why an extension could not handle it
+
+- Run ownership of provider-driven exec frames is an engine contract between
+  the agent loop and the Cursor stream; no extension hook sits between the
+  straggler frame and the bridge dispatch.
+
+### Expected merge conflict zones
+
+- `cursor-exec-bridge-session.ts` signature and `getAbortSignal` resolution,
+  `sdk.ts` `cursorExecHandlers` wiring.
 ## 2026-08-18 - Cursor reasoning levels: session provenance and legacy id resolution
 
 ### What changed
@@ -136,7 +240,6 @@
 
 - LOW: the `cerebras` row in `defaultModelPerProvider` and the matching pin in `test/model-resolver.test.ts`.
 
-<<<<<<< HEAD
 ## Cursor CLI OAuth provider display name (2026-08-17)
 
 ### What changed
@@ -163,8 +266,6 @@
 
 - LOW: `provider-display-names.ts` map rows (one-line additions in a sorted literal).
 
-||||||| 84514a353
-=======
 ## Repository audit baseline for the core tracker (2026-08-17)
 
 ### What changed
@@ -756,8 +857,6 @@
 ### Expected merge conflict zones
 
 - LOW: additive block after `restoreStdout()`; the stdout takeover above it is the pattern to follow on sync.
-
->>>>>>> origin/main
 ## Expand explicit dollar skill tokens and publish invocation metadata (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
 
 ### What changed
