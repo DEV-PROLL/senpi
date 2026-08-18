@@ -50,14 +50,20 @@ describe("ServerConnection state machine", () => {
 	it("keeps stale slow-start connect results from overwriting a newer reload generation", async () => {
 		const root = await tmpRoot("stale");
 		const counterFile = join(root, "spawns.txt");
-		const connection = createConnection("stale", root, [
-			"--tools",
-			"1",
-			"--slow-start",
-			"250",
-			"--spawn-counter-file",
-			counterFile,
-		]);
+		// The fixture must still be starting when bumpGeneration() lands, since that
+		// is the state under test. A short slow-start made that a race against the
+		// scheduler: the fixture could finish and resolve `pending` before the test
+		// resumed, leaving `rejects.toThrow` awaiting a promise that never rejects.
+		// The window is instead made unreachable (spawn is observed via the counter
+		// below, and the connect timeout is raised past it), so only bumpGeneration()
+		// can settle the connect. The trailing assertNoFixtureProcessArg still proves
+		// the fixture process is reaped rather than leaked for that duration.
+		const connection = createConnection(
+			"stale",
+			root,
+			["--tools", "1", "--slow-start", "30000", "--spawn-counter-file", counterFile],
+			{ connectTimeoutMs: 60_000 },
+		);
 		connections.push(connection);
 		const events = collectEvents(connection);
 
@@ -202,10 +208,15 @@ describe("ServerConnection state machine", () => {
 	});
 });
 
-function createConnection(serverName: string, logDir: string, fixtureArgs: string[]): ServerConnection {
+function createConnection(
+	serverName: string,
+	logDir: string,
+	fixtureArgs: string[],
+	configOverrides: Partial<McpServerConfig> = {},
+): ServerConnection {
 	const fixture = stdioFixtureCommand();
 	return new ServerConnection({
-		config: serverConfig({ args: [...fixture.args, ...fixtureArgs], command: fixture.command }),
+		config: serverConfig({ args: [...fixture.args, ...fixtureArgs], command: fixture.command, ...configOverrides }),
 		logger: createMcpLogger(serverName, { logDir }),
 		serverName,
 	});
