@@ -1,5 +1,39 @@
 # changes
 
+## Queue typed input admitted during auto-compaction (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `prompt()` gained a
+  `canQueueDuringAutoCompaction` eligibility flag for a queueable submission
+  (`streamingBehavior` set) that arrives while auto-compaction owns the session
+  and no run is streaming. The flag suppresses the settled-session-work wait and
+  routes the message through `_queueSteer`/`_queueFollowUp` beside the existing
+  queue branches, after extension input handling and template expansion.
+
+### Why
+
+- `isCompacting` is true for the auto, manual, and branch-summary controllers,
+  but the admission guard rejects only on `_compactionAbortController`, so
+  auto-compaction never rejected typed input. That input then matched no queue
+  branch — `canQueueWhileStreaming` requires `!isCompacting` — and fell through
+  neither queued nor started, so a message typed while the TUI showed
+  "Compacting context..." was accepted and silently dropped.
+- Gating on the auto controller alone keeps the manual `/compact` fail-closed
+  admission path and the post-compaction recovery continuation unchanged; a
+  broader `isCompacting` relaxation regressed both.
+
+### Why an extension could not handle it
+
+- Prompt admission and queue ownership run inside the session before any
+  extension input hook observes the submission, so an extension cannot recover
+  input the engine has already dropped.
+
+### Expected merge-conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`: the `prompt()` queue
+  eligibility constants and the queue branches preceding the settled-work wait.
+
 ## 2026-08-18 - Cursor reasoning levels: session provenance and legacy id resolution
 
 ### What changed

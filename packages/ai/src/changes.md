@@ -1,5 +1,34 @@
 # AI Source Changes
 
+## 2026-08-18 - Sanitize JSON-Schema composition keywords from advertised Cursor tool schemas
+
+### What changed
+
+- `packages/ai/src/api/cursor-agent.ts`: new exported `sanitizeCursorToolSchema` helper plus
+  `CURSOR_UNSUPPORTED_SCHEMA_KEYS`; `buildMcpToolDefinitions` now recursively strips `oneOf`,
+  `anyOf`, and `allOf` from every advertised tool's inputSchema before proto encoding. `not` and
+  all other keywords pass through untouched. Returns new structures (input never mutated).
+
+### Why
+
+- An advertised tool whose inputSchema carries a composition keyword makes Cursor's gateway
+  reject the ENTIRE request upstream with a wrapped provider 400 (`ERROR_PROVIDER_ERROR`, zero
+  tokens, `resource_exhausted` end-stream) — proven by live A/B on 2026-08-18 with a minimal
+  single-tool `oneOf`/`anyOf`/`allOf` repro against `claude-fable-5-thinking-xhigh`. External MCP
+  servers ship such schemas routinely (ast-grep's `scan` uses a top-level `oneOf`), so every
+  session registering one failed on the cursor provider from turn 1.
+
+### Why an extension could not handle it
+
+- `buildMcpToolDefinitions` runs inside the cursor-agent Run-request construction path; the
+  advertised schema bytes are serialized before any extension-visible surface exists.
+
+### Expected merge-conflict zones
+
+- `packages/ai/src/api/cursor-agent.ts` (`buildMcpToolDefinitions` / schema helpers) — same zone
+  as the reasoning-levels entry; test file
+  `packages/ai/test/cursor-tool-schema-sanitize.test.ts` is new.
+
 ## 2026-08-18 - Cursor reasoning levels end to end
 
 ### What changed
