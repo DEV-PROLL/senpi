@@ -18,6 +18,12 @@
   of executing it inside the replacement run.
 - The plain-object form is unchanged, so existing hosts keep working.
 
+### Why an extension could not handle it
+
+- Only the loop knows which run owns the stream it is opening. The owning
+  signal exists solely inside `streamAssistantResponse` at stream creation, so
+  no extension hook can supply it to the host bridge after the fact.
+
 ### Expected merge conflict zones
 
 - `agent-loop.ts` `execHandlers` injection block, `types.ts`
