@@ -2939,9 +2939,22 @@ export class AgentSession {
 			(this.isStreaming || this._promptStartPending) &&
 			!this.isCompacting &&
 			options?.streamingBehavior !== undefined;
+		// Auto-compaction claims only _autoCompactionAbortController, which the
+		// admission guard above deliberately ignores so background compaction never
+		// rejects typed input. Without a queue route that message matched no branch
+		// below and fell through neither queued nor started (field bug: input typed
+		// while the TUI showed "Compacting context..." was accepted and dropped).
+		// Manual compaction keeps its fail-closed admission path untouched.
+		const canQueueDuringAutoCompaction =
+			this._autoCompactionAbortController !== undefined &&
+			this._compactionAbortController === undefined &&
+			!this.isStreaming &&
+			!this._promptStartPending &&
+			options?.streamingBehavior !== undefined;
 		if (
 			shouldWaitForSessionWork &&
 			!canQueueWhileStreaming &&
+			!canQueueDuringAutoCompaction &&
 			(!this.isStreaming || this.isCompacting || this._sessionWorkBarrier.hasActiveWork)
 		) {
 			await this._waitForSettledSessionWork();
@@ -3048,6 +3061,26 @@ export class AgentSession {
 			// ends while extension input handling or template expansion is pending.
 			// Starting a fresh prompt here would let it overtake the held continuation.
 			if (canQueueWhileStreaming && !this.isStreaming) {
+				if (options?.thinkingLevel !== undefined) {
+					throw new Error("Cannot set thinkingLevel on a queued prompt; set it after the current turn completes.");
+				}
+				if (options?.streamingBehavior === "followUp") {
+					await this._queueFollowUp(expandedText, currentImages);
+				} else {
+					await this._queueSteer(expandedText, currentImages);
+				}
+				emitPendingCommandInvocation();
+				await emitInputDisposition("queued");
+				promptDisposition?.("queued");
+				preflightResult?.(true);
+				return;
+			}
+
+			// Auto-compaction owns the session without claiming the admission controller,
+			// so a queueable submission reaches here with no branch above matching and
+			// would fall through neither queued nor started. Queue it instead of starting
+			// a turn against a context that is still being compacted.
+			if (canQueueDuringAutoCompaction && !this.isStreaming) {
 				if (options?.thinkingLevel !== undefined) {
 					throw new Error("Cannot set thinkingLevel on a queued prompt; set it after the current turn completes.");
 				}

@@ -3402,6 +3402,28 @@ function toolParametersToJsonSchema(tool: Tool): unknown {
 	}
 }
 
+/**
+ * JSON-Schema composition keywords Cursor's gateway cannot carry: an
+ * advertised tool whose inputSchema contains `oneOf`, `anyOf`, or `allOf` is
+ * rejected upstream with a wrapped provider 400 for the WHOLE request
+ * (zero tokens, `resource_exhausted` end-stream). MCP tools imported from
+ * external servers routinely ship such schemas (e.g. ast-grep's `scan`).
+ * `not` is tolerated upstream and kept. Returns a new structure; the input is
+ * never mutated.
+ */
+const CURSOR_UNSUPPORTED_SCHEMA_KEYS = new Set(["oneOf", "anyOf", "allOf"]);
+
+export function sanitizeCursorToolSchema(schema: unknown): unknown {
+	if (Array.isArray(schema)) return schema.map(sanitizeCursorToolSchema);
+	if (schema === null || typeof schema !== "object") return schema;
+	const sanitized: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(schema)) {
+		if (CURSOR_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
+		sanitized[key] = sanitizeCursorToolSchema(value);
+	}
+	return sanitized;
+}
+
 export function buildMcpToolDefinitions(tools: Tool[] | undefined): McpToolDefinition[] {
 	if (!tools || tools.length === 0) {
 		return [];
@@ -3413,7 +3435,7 @@ export function buildMcpToolDefinitions(tools: Tool[] | undefined): McpToolDefin
 	}
 
 	return advertisedTools.map((tool) => {
-		const jsonSchema = toolParametersToJsonSchema(tool);
+		const jsonSchema = sanitizeCursorToolSchema(toolParametersToJsonSchema(tool));
 		const schemaValue: PbJsonValue =
 			jsonSchema && typeof jsonSchema === "object"
 				? (jsonSchema as PbJsonValue)
