@@ -21,6 +21,13 @@
 
 ### Fixed
 
+- Leaked-invoke recovery now resolves upstream wire-aliased tool names (ccapi
+  PascalCase disguises like `TaskSend`, CC-pool hashed prefixes like
+  `mcp_49f0-Todo`, CC-SDK `mcp__server__tool` forms), so a text-leaked
+  `<invoke name="mcp_49f0-Todo">` recovers into the registered `todo` tool
+  call instead of rendering as literal text. Alias collisions between
+  registered tools stay literal text.
+
 ### Removed
 
 ## [2026.8.18-2] - 2026-08-18
