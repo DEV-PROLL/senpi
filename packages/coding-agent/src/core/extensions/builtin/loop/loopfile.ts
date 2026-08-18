@@ -34,12 +34,7 @@ export class LoopFileError extends Error {
 	public readonly code: "stat_failed" | "read_failed";
 	public readonly path: string;
 
-	constructor(
-		message: string,
-		code: "stat_failed" | "read_failed",
-		path: string,
-		options?: { cause?: unknown },
-	) {
+	constructor(message: string, code: "stat_failed" | "read_failed", path: string, options?: { cause?: unknown }) {
 		super(message, options);
 		this.name = "LoopFileError";
 		this.code = code;
@@ -73,7 +68,12 @@ function safeUtf8Truncate(buf: Buffer, maxBytes: number): string {
 }
 
 type TryResolveOutcome =
-	| { readonly found: true; readonly path: string; readonly content: string; readonly fingerprint: LoopFileFingerprint }
+	| {
+			readonly found: true;
+			readonly path: string;
+			readonly content: string;
+			readonly fingerprint: LoopFileFingerprint;
+	  }
 	| { readonly found: false }
 	| { readonly error: LoopFileError };
 
@@ -100,7 +100,7 @@ async function tryResolveOne(path: string, fs: LoopFileResolverDeps["fs"]): Prom
 
 	const truncated = raw.length > MAX_MODEL_BYTES;
 	const modelVisible = truncated
-		? safeUtf8Truncate(raw, MAX_MODEL_BYTES) + "\n" + TRUNCATION_WARNING
+		? `${safeUtf8Truncate(raw, MAX_MODEL_BYTES)}\n${TRUNCATION_WARNING}`
 		: raw.toString("utf-8");
 
 	return {
@@ -118,10 +118,7 @@ async function tryResolveOne(path: string, fs: LoopFileResolverDeps["fs"]): Prom
 
 export async function resolveLoopFile(deps: LoopFileResolverDeps): Promise<LoopFileResult> {
 	const { cwd, homeDir, fs, path } = deps;
-	const candidates = [
-		path.join(cwd, CONFIG_DIR_NAME, "loop.md"),
-		path.join(resolveAgentDir(cwd, homeDir), "loop.md"),
-	];
+	const candidates = [path.join(cwd, CONFIG_DIR_NAME, "loop.md"), path.join(resolveAgentDir(cwd, homeDir), "loop.md")];
 
 	for (const candidate of candidates) {
 		const outcome = await tryResolveOne(candidate, fs);

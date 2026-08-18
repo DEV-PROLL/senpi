@@ -19,9 +19,7 @@ function pluralize(count: number, singular: string, plural: string): string {
  * rounding. Whenever the effective value differs from the request, the result
  * carries a notice naming both the requested and effective cadence.
  */
-export function normalizeInterval(
-	requested: RequestedInterval,
-): EffectiveInterval & { intervalMs: number } {
+export function normalizeInterval(requested: RequestedInterval): EffectiveInterval & { intervalMs: number } {
 	let value: number;
 	let unit: EffectiveIntervalUnit;
 	let rounded: boolean;
@@ -72,12 +70,9 @@ export function normalizeInterval(
 				? pluralize(value, "hour", "hours")
 				: pluralize(value, "day", "days");
 
-	const intervalMs =
-		unit === "m" ? value * MS_PER_MINUTE : unit === "h" ? value * MS_PER_HOUR : value * MS_PER_DAY;
+	const intervalMs = unit === "m" ? value * MS_PER_MINUTE : unit === "h" ? value * MS_PER_HOUR : value * MS_PER_DAY;
 
-	const roundingNotice = rounded
-		? `Requested ${requested.raw} rounds to ${human}.`
-		: undefined;
+	const roundingNotice = rounded ? `Requested ${requested.raw} rounds to ${human}.` : undefined;
 
 	return { value, unit, human, rounded, roundingNotice, intervalMs };
 }

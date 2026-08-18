@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-	normalizeInterval,
-	describeCron,
 	computeNextFireAt,
-	type RequestedInterval,
+	describeCron,
 	type EffectiveInterval,
+	normalizeInterval,
+	type RequestedInterval,
 } from "../../src/core/extensions/builtin/loop/cron-planner.ts";
 
 function req(value: number, unit: "s" | "m" | "h" | "d", raw: string): RequestedInterval {

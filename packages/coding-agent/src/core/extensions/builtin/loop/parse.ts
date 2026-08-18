@@ -107,7 +107,7 @@ export function parseLoopArgs(raw: string): ParsedLoopInvocation {
 	}
 
 	const leadingMatch = /^\s*(\d+[smhd])\b/.exec(raw);
-	if (leadingMatch) {
+	if (leadingMatch !== null && LEADING_INTERVAL_RE.test(leadingMatch[1] ?? "")) {
 		const interval = parseIntervalToken(leadingMatch[1]);
 		const remaining = raw.slice(leadingMatch[0].length).trim();
 		return classifyInterval(interval, remaining, originalArgs);

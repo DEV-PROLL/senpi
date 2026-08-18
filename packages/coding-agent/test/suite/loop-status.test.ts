@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	LOOP_STATUS_KEY,
-	LoopStatusTicker,
 	formatLoopStatus,
 	formatNoopFold,
+	LOOP_STATUS_KEY,
 	type LoopStatusRender,
+	LoopStatusTicker,
 } from "../../src/core/extensions/builtin/loop/status.ts";
 import type {
 	CronEntry,
@@ -105,9 +105,7 @@ function stateWith(entries: CronEntry[]): LoopState {
 
 describe("formatLoopStatus", () => {
 	it("returns undefined when nothing is armed", () => {
-		const state = stateWith([
-			{ ...makeFixed("a", 60_000), phase: "ended", endedAt: 100, endReason: "stopped" },
-		]);
+		const state = stateWith([{ ...makeFixed("a", 60_000), phase: "ended", endedAt: 100, endReason: "stopped" }]);
 		expect(formatLoopStatus(state, 0)).toBeUndefined();
 	});
 

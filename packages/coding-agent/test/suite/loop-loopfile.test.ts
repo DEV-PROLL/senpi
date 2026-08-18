@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONFIG_DIR_NAME, resolveAgentDir } from "../../src/config.ts";
-import { resolveLoopFile, LoopFileError } from "../../src/core/extensions/builtin/loop/loopfile.ts";
+import { LoopFileError, resolveLoopFile } from "../../src/core/extensions/builtin/loop/loopfile.ts";
 
 function sha256(text: string): string {
 	return createHash("sha256").update(text).digest("hex");
@@ -119,8 +119,10 @@ describe("resolveLoopFile", () => {
 		expect(result.found).toBe(true);
 		if (!result.found) return;
 		expect(result.content).toContain("[loop.md truncated to the first 25000 bytes]");
-		expect(result.content.length).toBeLessThanOrEqual(25000 + "[loop.md truncated to the first 25000 bytes]".length + 1);
-		const expectedTruncated = longContent.slice(0, 25000) + "\n[loop.md truncated to the first 25000 bytes]";
+		expect(result.content.length).toBeLessThanOrEqual(
+			25000 + "[loop.md truncated to the first 25000 bytes]".length + 1,
+		);
+		const expectedTruncated = `${longContent.slice(0, 25000)}\n[loop.md truncated to the first 25000 bytes]`;
 		expect(result.content).toBe(expectedTruncated);
 		expect(result.fingerprint.contentHash).toBe(sha256(expectedTruncated));
 		expect(result.fingerprint.size).toBe(30000);
@@ -131,7 +133,7 @@ describe("resolveLoopFile", () => {
 		const homeDir = "/home/user";
 		const projectPath = projectLoopPath(cwd);
 		// 24999 single-byte chars plus one 3-byte CJK char = 25002 bytes.
-		const content = "a".repeat(24999) + "中";
+		const content = `${"a".repeat(24999)}中`;
 		const fs = makeFs({
 			[projectPath]: { content: Buffer.from(content), mtimeMs: 1000 },
 		});
@@ -182,7 +184,7 @@ describe("resolveLoopFile", () => {
 	it("surfaces a non-ENOENT stat error as a typed LoopFileError", async () => {
 		const cwd = "/project";
 		const homeDir = "/home/user";
-		const projectPath = projectLoopPath(cwd);
+		const _projectPath = projectLoopPath(cwd);
 		const fs = {
 			stat: async (_path: string): Promise<{ mtimeMs: number; size: number }> => {
 				const err = new Error("EACCES: permission denied") as NodeJS.ErrnoException;
@@ -202,7 +204,7 @@ describe("resolveLoopFile", () => {
 	it("surfaces a non-ENOENT read error as a typed LoopFileError", async () => {
 		const cwd = "/project";
 		const homeDir = "/home/user";
-		const projectPath = projectLoopPath(cwd);
+		const _projectPath = projectLoopPath(cwd);
 		const fs = {
 			stat: async (_path: string): Promise<{ mtimeMs: number; size: number }> => ({
 				mtimeMs: 1000,
