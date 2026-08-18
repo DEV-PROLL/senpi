@@ -93,6 +93,12 @@ export interface LoopSchedulerDeps {
 	readonly initialState?: LoopState;
 	/** Called after every state revision so the caller can persist it. */
 	readonly onStateChanged?: (state: LoopState) => void;
+	/**
+	 * Invoked when an armed timer fires. The owner is expected to run the due decision AND its
+	 * side effects (persist + dispatch). Without it the scheduler only advances its own state,
+	 * which would deliver a loop's first tick and then silently never recur.
+	 */
+	readonly onFire?: (loopId: LoopId) => void;
 }
 
 export interface CreateFixedRequest {
@@ -960,7 +966,14 @@ export function createLoopScheduler(deps: LoopSchedulerDeps): LoopScheduler {
 
 	// The timer port fires with a loop id; the due decision is always re-derived from the
 	// clock so a stale callback cannot dispatch a tick the state machine would refuse.
+	// When an owner supplies `onFire` it performs the whole due step (persist + dispatch), so
+	// calling `onDue` here as well would consume the occurrence and drop the delivery.
 	fireHandler = (loopId) => {
+		const owner = deps.onFire;
+		if (owner !== undefined) {
+			owner(loopId);
+			return;
+		}
 		scheduler.onDue(loopId, deps.clock.now(), false);
 	};
 

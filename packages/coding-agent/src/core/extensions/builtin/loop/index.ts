@@ -551,6 +551,16 @@ export function createLoopExtension(deps: LoopExtensionDeps = {}): ExtensionFact
 			refreshStatus();
 		}
 
+		/**
+		 * Timer callbacks are synchronous, so the async due step is scheduled and its failure is
+		 * contained: a rejected dispatch must never take down the timer that owns the loop.
+		 */
+		function handleTimerFire(loopId: LoopId): void {
+			void fireDue(loopId).catch((error) => {
+				ctx?.ui.notify(`Loop tick failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+			});
+		}
+
 		function payloadForPrompt(prompt: string): LoopPayload {
 			return { type: "prompt", prompt };
 		}
@@ -716,6 +726,7 @@ export function createLoopExtension(deps: LoopExtensionDeps = {}): ExtensionFact
 					clock,
 					timers,
 					ids,
+					onFire: handleTimerFire,
 				});
 				return;
 			}
@@ -725,6 +736,7 @@ export function createLoopExtension(deps: LoopExtensionDeps = {}): ExtensionFact
 				clock,
 				timers,
 				ids,
+				onFire: handleTimerFire,
 				...(initialState === undefined ? {} : { initialState }),
 			});
 			storeTouched = initialState !== undefined;

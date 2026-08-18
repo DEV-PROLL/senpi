@@ -19,6 +19,19 @@ import { initTheme, theme } from "../../src/modes/interactive/theme/theme.ts";
 
 const MINUTE = 60_000;
 const T0 = 1_700_000_000_000;
+
+/**
+ * Lets a sync timer callback's async dispatch chain finish before assertions run. The chain
+ * resolves the loop file and builds the tick message before sending, so poll for the observable
+ * instead of guessing a fixed number of turns.
+ */
+async function settleUntil(predicate: () => boolean, label: string): Promise<void> {
+	for (let i = 0; i < 200; i += 1) {
+		if (predicate()) return;
+		await new Promise((resolve) => setImmediate(resolve));
+	}
+	throw new Error(`settleUntil timed out waiting for: ${label}`);
+}
 const SESSION_ID = "loop-extension-session";
 /** Stable across fixtures so a resumed fingerprint compares equal to the persisted one. */
 const LOOP_FILE_PATH = "/workspace/.senpi/loop.md";
@@ -343,6 +356,38 @@ describe("loop extension tick dispatch", () => {
 		expect(f.userMessages).toHaveLength(1);
 		expect(f.userMessages[0].deliverAs).toBe("followUp");
 		expect(f.userMessages.some((message) => message.deliverAs === "steer")).toBe(false);
+	});
+
+	it("routes a timer-driven fire through persist-and-dispatch, not scheduler state alone", async () => {
+		// Regression: every other due-tick test calls controller.fireDue() directly, but the real
+		// runtime only ever invokes the armed timer callback. That callback discarded the dispatch
+		// decision, so a recurring loop delivered its first tick and then silently never recurred.
+		const f = await fixture();
+		await f.emit("session_start", { reason: "startup" });
+		const created = await f.controller.startFixed({
+			originalArgs: "5m ping",
+			prompt: "ping",
+			requestedInterval: { value: 5, unit: "m", raw: "5m" },
+		});
+		expect(created.ok).toBe(true);
+		if (!created.ok) return;
+
+		// The immediate first tick runs and its turn completes.
+		await f.emit("agent_end", { messages: [] });
+		await f.emit("agent_settled");
+		f.userMessages.length = 0;
+		const tickCountAfterFirst = (await f.persisted())?.entries[created.loopId]?.tickCount ?? 0;
+
+		// Fire through the timer port exactly as the runtime does - never via fireDue().
+		f.advance(5 * MINUTE);
+		f.timers.fire(created.loopId);
+		await settleUntil(() => f.userMessages.length > 0, "timer-driven tick dispatch");
+
+		expect(f.userMessages).toHaveLength(1);
+		expect(f.userMessages[0].text).toContain("ping");
+		const persisted = await f.persisted();
+		expect(persisted?.entries[created.loopId]?.tickCount ?? 0).toBeGreaterThan(tickCountAfterFirst);
+		expect(f.timers.armedKeys).toEqual([created.loopId]);
 	});
 
 	it("attaches loop attribution details to every dispatched tick", async () => {
