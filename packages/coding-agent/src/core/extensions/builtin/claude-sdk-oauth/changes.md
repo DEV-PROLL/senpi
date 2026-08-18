@@ -1,5 +1,36 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-18 - Anchor restart records at branch state (issue #6981 review)
+
+### What changed
+
+- The persisted record is derived from the resident registry entry plus the sent-hashes the branch actually carries.
+  The process binding map is no longer read at `message_end`: it holds the previous turn's state while that handler
+  runs, and only a prefix digest right after a restart, so reading it anchored this turn's marker to a stale or absent
+  sent-stream (duplicate resend after restart) or threw on the restored shape (orphaned marker, silent flatten on the
+  next restart).
+- The safe-suffix allowlist now admits the whole display-only metadata family the co-resident builtins append after a
+  committed assistant: stop-hook state/diagnostics/output, rule activations, and rule scans. Previously a project with
+  a Stop hook emitting diagnostics or output failed restore on every restart.
+- Records are keyed and compared by canonical session path, so a symlinked directory or another spelling of the same
+  file resolves to one sidecar instead of silently losing the binding.
+- A non-`clean` commit outcome no longer anchors a record, an orphaned record whose session id does not match is
+  deleted rather than left on disk, and the pending-fork labels that lost their producers are gone.
+- `session_before_fork` no longer records a taint: forks mint a new session id and file, so the taint was unreachable;
+  `session_start(fork)` invalidation plus path/session binding is what isolates a fork.
+
+### Trust boundary
+
+- The session JSONL is untrusted input (it can be imported, hand-edited, or copied) and carries only a capability-free
+  marker. The sidecar is the trusted store: mode 0600, strict schema, bounded size, keyed to one canonical session
+  path and session id. Integrity rests on same-user file ownership, the same boundary as the SDK's own config dir.
+
+### Cost
+
+- Each committed assistant appends one small marker entry to the session file and rewrites the fixed-size sidecar, so
+  session files grow by one marker per assistant message (several per tool-loop turn) while the record itself stays
+  constant-size regardless of conversation length.
+
 ## 2026-08-18 - Persist restart bindings for headless continuation (issue #6981)
 
 ### What changed
