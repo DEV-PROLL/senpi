@@ -66,7 +66,7 @@ function gpt(
 		maxWindow,
 		parameterOrder: order,
 		defaultContext: "272k",
-		requestContext: window >= 1_000_000 ? "1m" : "272k",
+		requestContext: order.includes("context") && window >= 1_000_000 ? "1m" : undefined,
 		levels: ladder(levels),
 	};
 }
