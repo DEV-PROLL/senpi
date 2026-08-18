@@ -21,9 +21,7 @@ import { join } from "node:path";
  * (`SENPI_TEST_USE_REAL_AGENT_DIR=1`) is set together with a configured
  * `SENPI_CODING_AGENT_DIR`. Returning `undefined` leaves the env var untouched.
  */
-export function resolveQuarantineAgentDir(
-	env: Record<string, string | undefined> = process.env,
-): string | undefined {
+export function resolveQuarantineAgentDir(env: Record<string, string | undefined> = process.env): string | undefined {
 	const explicitReal = env.SENPI_TEST_USE_REAL_AGENT_DIR === "1";
 	if (explicitReal && env.SENPI_CODING_AGENT_DIR) {
 		return env.SENPI_CODING_AGENT_DIR;
