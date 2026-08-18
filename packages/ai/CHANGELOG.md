@@ -31,7 +31,12 @@
   keywords (`oneOf`/`anyOf`/`allOf`) before reaching the Run request — a single tool carrying one
   (e.g. ast-grep MCP's `scan`) made Cursor's gateway reject the whole request with a wrapped
   provider 400 (`resource_exhausted`, zero tokens) from turn 1.
-
+- Leaked-invoke recovery now resolves upstream wire-aliased tool names (ccapi
+  PascalCase disguises like `TaskSend`, CC-pool hashed prefixes like
+  `mcp_49f0-Todo`, CC-SDK `mcp__server__tool` forms), so a text-leaked
+  `<invoke name="mcp_49f0-Todo">` recovers into the registered `todo` tool
+  call instead of rendering as literal text. Alias collisions between
+  registered tools stay literal text.
 ### Removed
 
 ## [2026.8.18-2] - 2026-08-18
