@@ -6,6 +6,8 @@
 
 ### Added
 
+- Atomic `[Image #N]` editor markers for pasted images: a new `ImageMarkerRegistry` (ids only, never bytes) with contiguous renumbering, whole-marker deletion, registry snapshots for editor-to-editor transfer, and a paired optional image-marker API on `EditorComponent`, exported from the package index.
+
 ### Changed
 
 ### Fixed

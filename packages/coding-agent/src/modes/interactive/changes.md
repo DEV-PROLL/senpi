@@ -2164,3 +2164,23 @@ The tip line was teaching a small slice of the product while most of the surface
 - Changed `src/modes/interactive/interactive-mode.ts` and `compaction-queue-transfer.ts` so every terminal `compaction_end` flushes the TUI compaction queue: accepted compactions keep prompt-admission delivery, while failed/rejected/aborted ones route queued input through the native steer/followUp queues (`deferAdmission`) with a visible held-count status and a `compaction_queue_deferred` session-log event. Previously the queue was flushed only on success, so messages typed during a failing compaction were silently parked forever and lost on session switch (field report 2026-07-30).
 - This was changed in core UI because the compaction queue and `compaction_end` handling are internal `InteractiveMode` state; extensions cannot observe or drain that queue.
 - Expected merge-conflict zone on upstream sync: the `compaction_end` handler and `flushCompactionQueue()` in `src/modes/interactive/interactive-mode.ts`, plus `compaction-queue-transfer.ts` transfer options.
+
+## Pasted clipboard images ride the submission channel as attachments (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: `handleClipboardPaste()` now attaches the pasted image instead of inserting its temp path. When the editor is image-aware it calls `insertImageMarker()`, stores the processed bytes in a `pendingImages` map keyed by marker id, and keeps that map aligned with the visible `[Image #N]` numbers through `onImageMarkersChanged` (`reconcilePendingImages`). On submit, `takeSubmissionImages()` reads only the submitted text plus `pendingImages` (never live editor state) to build the ordered `images: ImageContent[]` carried on the user message, with a pre-resolved path for flows whose `setText("")` prune chain would otherwise destroy the payloads before resolution.
+- `packages/coding-agent/src/modes/interactive/editor-paste-transfer.ts`: `transferEditorContent()` now moves the image-marker registry snapshot alongside the text and paste state, returns `{ imageMarkersTransferred }`, and strips `[Image #N]` markers (collapsing leftover whitespace) when the destination editor cannot own them, so the caller can drop the orphaned payloads instead of shipping a dead literal marker with a live attachment behind it.
+
+### Why
+
+- Inserting the raw `pi-clipboard-*.png` path leaked local temp paths into the composer and the transcript, and nothing carried the image bytes to the model. Markers plus a keyed payload map let one user turn carry both text and image parts in reading order.
+
+### Why an extension could not handle it
+
+- The submission pipeline, the editor wiring, and the pending-payload lifecycle are private `InteractiveMode` state; an extension receives no callback that can attach bytes to a submitted user message or re-key payloads when markers are renumbered.
+
+### Expected merge conflict zones
+
+- MEDIUM: the paste handler, submit path, and editor wiring in `packages/coding-agent/src/modes/interactive/interactive-mode.ts`.
+- LOW: `packages/coding-agent/src/modes/interactive/editor-paste-transfer.ts` (small transfer helper, additive return value).

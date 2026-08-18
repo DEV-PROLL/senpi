@@ -4,6 +4,8 @@
 
 ### Added
 
+- Pasting a clipboard image in the interactive TUI now attaches the image to the submission instead of inserting its temp file path: the composer shows an atomic `[Image #N]` marker, the bytes ride the user message as an image content part in reading order, and markers transfer between editor instances (or are stripped with their payloads dropped when the destination cannot own them).
+
 - Cursor reasoning levels now drive both Cursor surfaces: the thinking-level selector, `:suffix` model
   patterns, and favorites carry provenance into the wire request, the native protobuf lane sends per-family
   `RequestedModel.parameters`, and the `cursor-cli-oauth` lane spawns with the matching bracket or suffix
