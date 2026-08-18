@@ -159,6 +159,61 @@ const authPath = join(agentDir, "auth.json");
 const storage = AuthStorage.create(authPath);
 storage.set("cursor", nativeCredential);
 const nativeBefore = JSON.stringify(storage.get("cursor"));
+let importRefreshObserved = false;
+const fallbackModel: Model<"openai-completions"> = {
+	id: "cursor-cli-import-visible",
+	name: "Cursor CLI Import Visible",
+	api: "openai-completions",
+	provider: "cursor-cli-oauth",
+	baseUrl: "cursor-cli-oauth",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 200_000,
+	maxTokens: 64_000,
+};
+const fallbackProvider: Provider<"openai-completions"> = {
+	id: fallbackModel.provider,
+	name: "Cursor CLI Import QA",
+	auth: {
+		oauth: {
+			name: "Cursor CLI Import QA",
+			isSubscription: true,
+			login: async () => {
+				throw new Error("unused");
+			},
+			refresh: async (credential) => credential,
+			toAuth: async () => ({ apiKey: "cursor-cli-oauth-managed" }),
+			check: async ({ credential }) => {
+				if (credential?.type !== "oauth") return undefined;
+				const accounts = (credential as { accounts?: unknown }).accounts;
+				return Array.isArray(accounts) && accounts.length > 0
+					? { type: "oauth", source: "managed QA account" }
+					: undefined;
+			},
+		},
+	},
+	getModels: () => [fallbackModel],
+	refreshModels: async ({ allowNetwork }) => {
+		if (!allowNetwork) importRefreshObserved = true;
+	},
+	stream: () => {
+		throw new Error("unused");
+	},
+	streamSimple: () => {
+		throw new Error("unused");
+	},
+};
+const importRuntime = await ModelRuntime.create({
+	credentials: storage,
+	modelsPath: null,
+	allowModelNetwork: false,
+});
+await importRuntime.registerNativeProvider(fallbackProvider, { refresh: false });
+await importRuntime.refresh({ allowNetwork: false, providers: [fallbackProvider.id] });
+const modelVisibleBeforeImport = importRuntime
+	.getAvailableSnapshot()
+	.some((entry) => entry.id === fallbackModel.id);
 
 let command: Command | undefined;
 const pi = {
@@ -171,7 +226,6 @@ registerCursorCliAccountCommand(pi);
 if (!command) throw new Error("/cursor-account was not registered");
 
 const notices: Array<{ message: string; type?: string }> = [];
-const refreshCalls: unknown[] = [];
 const ctx = {
 	hasUI: false,
 	cwd,
@@ -180,12 +234,7 @@ const ctx = {
 	sessionManager: { getSessionId: () => "cursor-oauth-catalog-refresh-qa" },
 	modelRegistry: {
 		authStorage: storage,
-		modelRuntime: {
-			refresh: async (options: unknown) => {
-				refreshCalls.push(options);
-				return { aborted: false, errors: new Map() };
-			},
-		},
+		modelRuntime: importRuntime,
 	},
 	ui: {
 		notify: (message: string, type?: string) => notices.push({ message, type }),
@@ -194,6 +243,9 @@ const ctx = {
 } as unknown as ExtensionCommandContext;
 
 await command.handler("import native", ctx);
+const modelVisibleAfterImport = importRuntime
+	.getAvailableSnapshot()
+	.some((entry) => entry.id === fallbackModel.id);
 persistCursorCliNoApprovalAcknowledgement(cwd, "2026-08-18T02:45:00.000Z");
 const postLoginCatalog = await provePostLoginCatalog();
 
@@ -219,14 +271,9 @@ process.stdout.write(
 		enabled: settings.cursorCliOauthProvider?.enabled === true,
 		acknowledged:
 			settings.cursorCliOauthProvider?.noApprovalAcknowledgedAt === "2026-08-18T02:45:00.000Z",
-		refreshRequested: refreshCalls.some(
-			(value) =>
-				typeof value === "object" &&
-				value !== null &&
-				(value as { allowNetwork?: unknown }).allowNetwork === false &&
-				Array.isArray((value as { providers?: unknown }).providers) &&
-				(value as { providers: unknown[] }).providers.includes("cursor-cli-oauth"),
-		),
+		refreshRequested: importRefreshObserved,
+		modelVisibleBeforeImport,
+		modelVisibleAfterImport,
 		successNotice: notices.some(
 			(notice) => notice.type === "info" && notice.message.includes("Imported native Cursor credential"),
 		),

@@ -98,14 +98,16 @@ async function main() {
 	let result;
 	try {
 		const setup = runSetup(root, box);
-		const argvDump = join(box.dir, "fake-cursor-invocation.json");
+		const catalogArgvDump = join(box.dir, "fake-cursor-catalog-invocation.json");
+		const turnArgvDump = join(box.dir, "fake-cursor-turn-invocation.json");
 		const fixture = join(root, "packages", "coding-agent", "test", "fixtures", "fake-cursor-agent.mjs");
 		const executable = join(box.dir, "fake-cursor-agent");
 		writeFileSync(
 			executable,
 			[
 				"#!/bin/sh",
-				`FAKE_CURSOR_ARGV_DUMP=${JSON.stringify(argvDump)} FAKE_CURSOR_SCENARIO=happy exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fixture)} "$@"`,
+				`if [ "$1" = "models" ]; then dump=${JSON.stringify(catalogArgvDump)}; else dump=${JSON.stringify(turnArgvDump)}; fi`,
+				`FAKE_CURSOR_ARGV_DUMP="$dump" FAKE_CURSOR_SCENARIO=happy exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fixture)} "$@"`,
 				"",
 			].join("\n"),
 			{ mode: 0o755 },
@@ -127,7 +129,22 @@ async function main() {
 			{ env, cwd: box.cwd, timeoutMs: 120_000 },
 		);
 		const combined = `${turn.stdout}\n${turn.stderr}`;
-		const invocation = JSON.parse(readFileSync(argvDump, "utf8"));
+		const invocation = JSON.parse(readFileSync(turnArgvDump, "utf8"));
+		const catalogInvocation = existsSync(catalogArgvDump)
+			? JSON.parse(readFileSync(catalogArgvDump, "utf8"))
+			: null;
+		writeFileSync(
+			join(evidencePath, "invocation.json"),
+			`${JSON.stringify(
+				{
+					turnArgv: invocation.argv,
+					turnEnvKeys: Object.keys(invocation.env ?? {}).sort(),
+					catalogArgv: catalogInvocation?.argv ?? null,
+				},
+				null,
+				2,
+			)}\n`,
+		);
 		const cliPass =
 			turn.code === 0 &&
 			turn.timedOut === false &&
@@ -169,6 +186,8 @@ async function main() {
 				setup.acknowledged === true &&
 				setup.refreshRequested === true &&
 				setup.successNotice === true &&
+				setup.modelVisibleBeforeImport === false &&
+				setup.modelVisibleAfterImport === true &&
 				setup.postLoginCatalog?.allowNetworkObserved === true &&
 				setup.postLoginCatalog?.catalogRequests === 1 &&
 				setup.postLoginCatalog?.modelVisibleBefore === false &&
@@ -184,6 +203,8 @@ async function main() {
 				`setup.accountName=${setup.accountName}`,
 				`setup.enabled=${setup.enabled}`,
 				`setup.refreshRequested=${setup.refreshRequested}`,
+				`setup.modelVisibleBeforeImport=${setup.modelVisibleBeforeImport}`,
+				`setup.modelVisibleAfterImport=${setup.modelVisibleAfterImport}`,
 				`setup.postLoginAllowNetwork=${setup.postLoginCatalog?.allowNetworkObserved}`,
 				`setup.postLoginCatalogRequests=${setup.postLoginCatalog?.catalogRequests}`,
 				`setup.postLoginModelVisibleBefore=${setup.postLoginCatalog?.modelVisibleBefore}`,
