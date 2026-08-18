@@ -38,7 +38,10 @@ vi.mock("../src/utils/version-check.ts", () => ({
 }));
 
 import type { ImageContent } from "@earendil-works/pi-ai/compat";
+import { Editor, ProcessTerminal, TUI } from "@earendil-works/pi-tui";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
+import { getEditorTheme, initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { processImage } from "../src/utils/image-process.ts";
 
 /** The widened submission-channel payload: text plus images resolved from markers. */
 type UserSubmission = { text: string; images?: ImageContent[] };
@@ -60,6 +63,7 @@ interface FakeSession {
 	isStreaming: boolean;
 	isBashRunning: boolean;
 	prompt: MockFn;
+	reserveQueuedInputOrder: MockFn;
 	extensionRunner: { getCommand: (name: string) => unknown };
 	modelRuntime: { getError: () => string | undefined; refresh: () => Promise<unknown> };
 	fallbackValidationWarnings: readonly string[];
@@ -70,6 +74,7 @@ interface ModeContext {
 	editor: FakeEditor;
 	session: FakeSession;
 	pendingImages: Map<number, ImageContent>;
+	compactionQueuedMessages: { text: string; mode: string; enqueueOrder: number }[];
 	pendingUserInputs: UserSubmission[];
 	onInputCallback?: (input: UserSubmission) => void;
 	preResolvedSubmissionImages?: ImageContent[];
@@ -104,6 +109,9 @@ interface ModeContext {
 	 * rather than crashing the harness.
 	 */
 	takeSubmissionImages?: (submittedText: string) => ImageContent[];
+	reconcilePendingImages?: (order: number[]) => void;
+	queueCompactionSubmission?: (text: string, mode: "steer" | "followUp") => void;
+	queueCompactionMessage?: (text: string, mode: "steer" | "followUp", droppedImageCount?: number) => void;
 	getUserInput?: () => Promise<UserSubmission>;
 	isExtensionCommand?: (text: string) => boolean;
 	getExpandedEditorText?: () => string;
@@ -116,6 +124,14 @@ type ModePrototype = {
 	handleFollowUp(this: ModeContext): Promise<void>;
 	handleClipboardPaste(this: ModeContext): Promise<void>;
 	reconcilePendingImages(this: ModeContext, order: number[]): void;
+	subscribeImageMarkers(this: ModeContext, editor: unknown): void;
+	queueCompactionSubmission(this: ModeContext, text: string, mode: "steer" | "followUp"): void;
+	queueCompactionMessage(
+		this: ModeContext,
+		text: string,
+		mode: "steer" | "followUp",
+		droppedImageCount?: number,
+	): void;
 	takeSubmissionImages(this: ModeContext, submittedText: string): ImageContent[];
 	isExtensionCommand(this: ModeContext, text: string): boolean;
 	getExpandedEditorText(this: ModeContext): string;
@@ -153,6 +169,7 @@ function createModeContext(): ModeContext {
 		isStreaming: false,
 		isBashRunning: false,
 		prompt: vi.fn(async () => {}),
+		reserveQueuedInputOrder: vi.fn(() => 0),
 		extensionRunner: { getCommand: vi.fn(() => undefined) },
 		modelRuntime: { getError: vi.fn(() => undefined), refresh: vi.fn(async () => undefined) },
 		fallbackValidationWarnings: [],
@@ -163,6 +180,7 @@ function createModeContext(): ModeContext {
 			editor,
 			session,
 			pendingImages: new Map<number, ImageContent>(),
+			compactionQueuedMessages: [],
 			pendingUserInputs: [] as UserSubmission[],
 			onInputCallback: undefined,
 			preResolvedSubmissionImages: undefined,
@@ -222,6 +240,12 @@ function createModeContext(): ModeContext {
 	editor.onImageMarkersChanged = (order: number[]) => {
 		proto.reconcilePendingImages.call(context, order);
 	};
+	// The real subscribeImageMarkers resolves this.reconcilePendingImages
+	// through the receiver; a plain object has no prototype chain, so stand in.
+	context.reconcilePendingImages = (order: number[]) => proto.reconcilePendingImages.call(context, order);
+	context.queueCompactionSubmission = (text, mode) => proto.queueCompactionSubmission.call(context, text, mode);
+	context.queueCompactionMessage = (text, mode, droppedImageCount) =>
+		proto.queueCompactionMessage.call(context, text, mode, droppedImageCount);
 	return context;
 }
 
@@ -240,6 +264,50 @@ function submit(context: ModeContext, text: string): Promise<void> {
 /** Start the real getUserInput() so the widened channel can be observed end-to-end. */
 function beginUserInput(context: ModeContext): Promise<UserSubmission> {
 	return proto.getUserInput.call(context);
+}
+
+/** Distinct solid-color 16x16 PNGs so mispairing is observable, not just count loss. */
+const PNG_RED_BASE64 =
+	"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR42mN4YGBAEmIY1TCqYfhqAADPxkAQTDYcEAAAAABJRU5ErkJggg==";
+const PNG_BLUE_BASE64 =
+	"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR42mMwSHhAEmIY1TCqYfhqAADz/nAQ/ArooAAAAABJRU5ErkJggg==";
+
+function pngBytes(base64: string): Uint8Array {
+	return new Uint8Array(Buffer.from(base64, "base64"));
+}
+
+async function processedData(base64: string): Promise<string> {
+	const processed = await processImage(pngBytes(base64), "image/png", { autoResizeImages: true });
+	if (!processed.ok) throw new Error(`fixture image failed to process: ${processed.message}`);
+	return processed.data;
+}
+
+let themeInitialized = false;
+
+/** Simulate one Ctrl+V image paste of the given bitmap into `context`. */
+async function pasteImage(context: ModeContext, base64: string): Promise<void> {
+	clipboardImageMock.readClipboardImage.mockResolvedValueOnce({ bytes: pngBytes(base64), mimeType: "image/png" });
+	clipboardTextMock.readClipboardText.mockResolvedValue(null);
+	await proto.handleClipboardPaste.call(context);
+}
+
+/**
+ * A ModeContext whose editor is the REAL pi-tui `Editor` on a headless
+ * terminal, subscribed exactly like production. The fake-editor harness above
+ * cannot exercise the notify path inside `insertImageMarker` - the fake's
+ * `insertImageMarker` never fires `onImageMarkersChanged` - and that blind
+ * spot is exactly how a broken multi-image flow shipped green.
+ */
+function createRealEditorContext(): { context: ModeContext; editor: Editor } {
+	if (!themeInitialized) {
+		initTheme("dark");
+		themeInitialized = true;
+	}
+	const context = createModeContext();
+	const editor = new Editor(new TUI(new ProcessTerminal()), getEditorTheme());
+	context.editor = editor as unknown as FakeEditor;
+	proto.subscribeImageMarkers.call(context, editor);
+	return { context, editor };
 }
 
 describe("InteractiveMode image submission - normal channel", () => {
@@ -341,23 +409,30 @@ describe("InteractiveMode image submission - normal channel", () => {
 		expect(context.pendingImages.size).toBe(0);
 	});
 
-	it("orders the array by READING ORDER, not marker number", async () => {
-		const a = image("QUFBQQ==");
-		const b = image("QkJCQg==");
-		const context = createModeContext();
-		context.pendingImages.set(1, a);
-		context.pendingImages.set(2, b);
-		prepareSubmitHandler(context);
+	it("numbers markers canonically so the Nth marker pairs with images[N-1] after an out-of-order paste", async () => {
+		const [redData, blueData] = await Promise.all([processedData(PNG_RED_BASE64), processedData(PNG_BLUE_BASE64)]);
+		const { context, editor } = createRealEditorContext();
+
+		await pasteImage(context, PNG_RED_BASE64);
+		editor.handleInput("\x01"); // Home: the next paste lands BEFORE the marker
+		await pasteImage(context, PNG_BLUE_BASE64);
+
+		// The visible numbers must be canonical 1..k in reading order, so the
+		// marker the user sees first ([Image #1]) is images[0]. The pre-fix text
+		// "[Image #2][Image #1]" shipped one image and mispaired the survivor.
+		expect(editor.getText()).toBe("[Image #1][Image #2]");
+		prepareSubmitHandler(context, { shareEditor: true });
 
 		const userInput = beginUserInput(context);
-		await submit(context, "late [Image #2] early [Image #1]");
+		editor.handleInput("\r"); // the real Enter -> submitValue -> onSubmit path
+		const resolved = await vi.waitFor(async () => await userInput);
 
-		// The first marker in the text must be images[0] so look_at's
-		// [Image #1] resolves to what the user sees first.
-		await expect(userInput).resolves.toEqual({
-			text: "late [Image #2] early [Image #1]",
-			images: [b, a],
-		});
+		expect(resolved.text).toBe("[Image #1][Image #2]");
+		expect(resolved.images).toEqual([
+			{ type: "image", data: blueData, mimeType: "image/png" },
+			{ type: "image", data: redData, mimeType: "image/png" },
+		]);
+		expect(context.pendingImages.size).toBe(0);
 	});
 
 	it("passes no images key when every marker was deleted before submit", async () => {
@@ -390,17 +465,21 @@ describe("InteractiveMode image submission - normal channel", () => {
 		await expect(userInput).resolves.toEqual({ text: "look at [Image #1]" });
 	});
 
-	it("lets a hand-typed marker consume no slot in front of a real one", async () => {
+	it("lets a hand-typed marker with no pending entry consume no slot before a real one", async () => {
 		const pasted = image("UEFTVEVE");
 		const context = createModeContext();
-		context.pendingImages.set(2, pasted);
+		// Reachable state: the user pastes an image ([Image #1], payload-bearing)
+		// and also hand-types a literal [Image #2] in front of it. The hand-typed
+		// marker owns no attachment, so it passes through untouched and the real
+		// marker still resolves to images[0].
+		context.pendingImages.set(1, pasted);
 		prepareSubmitHandler(context);
 
 		const userInput = beginUserInput(context);
-		await submit(context, "typed [Image #1] pasted [Image #2]");
+		await submit(context, "typed [Image #2] by hand then pasted [Image #1]");
 
 		await expect(userInput).resolves.toEqual({
-			text: "typed [Image #1] pasted [Image #2]",
+			text: "typed [Image #2] by hand then pasted [Image #1]",
 			images: [pasted],
 		});
 	});
@@ -540,5 +619,45 @@ describe("InteractiveMode image submission - compaction boundary", () => {
 		expect(context.pendingImages.size).toBe(0);
 		expect(context.showStatus).toHaveBeenCalledTimes(1);
 		expect(String(context.showStatus.mock.calls[0]?.[0])).toMatch(/compact/i);
+	});
+
+	it("shows a visible drop status when Alt+Enter queues an image-bearing message during compaction", async () => {
+		const pending = image("Rk9MTExXUVVFVUU=");
+		const context = createModeContext();
+		context.session.isCompacting = true;
+		context.pendingImages.set(1, pending);
+		context.editor.getText.mockReturnValue("look at [Image #1]");
+
+		await proto.handleFollowUp.call(context);
+
+		// The compaction queue carries text only: the attachment is dropped
+		// VISIBLY (never a silent loss), its dead literal marker never ships in
+		// the queued text, and pendingImages does not leak into a later turn.
+		expect(context.compactionQueuedMessages).toHaveLength(1);
+		expect(context.compactionQueuedMessages[0]?.text).toBe("look at");
+		expect(context.compactionQueuedMessages[0]?.mode).toBe("followUp");
+		expect(context.pendingImages.size).toBe(0);
+		expect(context.showStatus).toHaveBeenCalledTimes(1);
+		const status = String(context.showStatus.mock.calls[0]?.[0]);
+		expect(status).toMatch(/compact/i);
+		expect(status).toMatch(/image/i);
+	});
+
+	it("shows a visible drop status when Enter queues an image-bearing message during compaction", async () => {
+		const pending = image("U1RFRVJRVUVVRR==");
+		const context = createModeContext();
+		context.session.isCompacting = true;
+		context.pendingImages.set(1, pending);
+		prepareSubmitHandler(context);
+
+		await submit(context, "look at [Image #1]");
+
+		expect(context.compactionQueuedMessages).toHaveLength(1);
+		expect(context.compactionQueuedMessages[0]?.text).toBe("look at");
+		expect(context.compactionQueuedMessages[0]?.mode).toBe("steer");
+		expect(context.pendingImages.size).toBe(0);
+		const status = String(context.showStatus.mock.calls[0]?.[0]);
+		expect(status).toMatch(/compact/i);
+		expect(status).toMatch(/image/i);
 	});
 });

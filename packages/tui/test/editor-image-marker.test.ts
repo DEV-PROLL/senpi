@@ -55,6 +55,78 @@ describe("editor image markers", () => {
 		assert.deepStrictEqual(orders, [[1], [1, 2]]);
 	});
 
+	it("renumbers the visible markers when one is inserted before existing ones", () => {
+		const editor = createEditor();
+		editor.insertImageMarker();
+		editor.handleInput(LINE_START);
+		const orders = trackOrders(editor);
+
+		const id = editor.insertImageMarker();
+
+		// The visible numbers must stay canonical 1..k in reading order, and the
+		// returned id must be the FINAL number: the owner registers its payload
+		// under that id, so returning the insertion counter here mispairs every
+		// attachment after an out-of-order insert. The notification carries the
+		// PRE-renumber ids (id 2 inserted in front of id 1) - the keys the owner's
+		// payloads currently sit under - matching removeImageMarker's survivor
+		// contract.
+		assert.strictEqual(editor.getText(), "[Image #1][Image #2]");
+		assert.strictEqual(id, 1);
+		assert.deepStrictEqual(orders, [[2, 1]]);
+	});
+
+	it("canonicalizes the numbering after a setText prune leaves a gap", () => {
+		const editor = createEditor();
+		editor.insertImageMarker();
+		editor.insertImageMarker();
+		const orders = trackOrders(editor);
+
+		editor.setText("tail [Image #2]");
+
+		// Only id 2 survived the prune; it must display as [Image #1] so the
+		// Nth marker in reading order still equals the Nth submitted image.
+		assert.strictEqual(editor.getText(), "tail [Image #1]");
+		assert.deepStrictEqual(orders.at(-1), [2]);
+	});
+
+	it("restores the owner's attachment payloads when undoing a marker delete", () => {
+		const editor = createEditor();
+		const payloads = new Map<number, string>();
+		const restored: Map<number, string>[] = [];
+		editor.snapshotAttachmentState = () => new Map(payloads);
+		editor.restoreAttachmentState = (state) => {
+			restored.push(state as Map<number, string>);
+		};
+
+		editor.insertImageMarker();
+		payloads.set(1, "A");
+		editor.insertImageMarker();
+		payloads.set(2, "B");
+		editor.insertImageMarker();
+		payloads.set(3, "C");
+		editor.handleInput(ARROW_LEFT);
+		editor.handleInput(BACKSPACE);
+		assert.strictEqual(editor.getText(), "[Image #1][Image #2]");
+
+		editor.handleInput(UNDO);
+
+		// The editor's undo restores marker text and registry ids; the PAYLOADS
+		// live with the owner, so undo must hand the captured snapshot back
+		// BEFORE the marker-order notification fires, or the delete's re-keying
+		// permanently destroys the middle image.
+		assert.strictEqual(editor.getText(), "[Image #1][Image #2][Image #3]");
+		const last = restored.at(-1);
+		assert.ok(last);
+		assert.deepStrictEqual(
+			[...last.entries()],
+			[
+				[1, "A"],
+				[2, "B"],
+				[3, "C"],
+			],
+		);
+	});
+
 	it("deletes the whole marker with a single backspace", () => {
 		const editor = createEditor();
 		type(editor, "a ");
