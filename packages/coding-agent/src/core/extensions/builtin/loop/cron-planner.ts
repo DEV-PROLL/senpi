@@ -1,16 +1,8 @@
-export interface RequestedInterval {
-	readonly value: number;
-	readonly unit: "s" | "m" | "h" | "d";
-	readonly raw: string;
-}
+import type { EffectiveInterval, EffectiveIntervalUnit, RequestedInterval } from "./types.ts";
 
-export interface EffectiveInterval {
-	readonly value: number;
-	readonly unit: "m" | "h" | "d";
-	readonly human: string;
-	readonly rounded: boolean;
-	readonly roundingNotice?: string;
-}
+// `types.ts` is the single type home for the whole extension; these are re-exported so
+// existing consumers of the planner keep importing the canonical declarations.
+export type { EffectiveInterval, RequestedInterval };
 
 const MS_PER_MINUTE = 60_000;
 const MS_PER_HOUR = 60 * MS_PER_MINUTE;
@@ -31,7 +23,7 @@ export function normalizeInterval(
 	requested: RequestedInterval,
 ): EffectiveInterval & { intervalMs: number } {
 	let value: number;
-	let unit: "m" | "h" | "d";
+	let unit: EffectiveIntervalUnit;
 	let rounded: boolean;
 
 	switch (requested.unit) {

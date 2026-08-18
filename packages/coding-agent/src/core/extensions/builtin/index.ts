@@ -18,6 +18,7 @@ import hooksExtension from "./hooks/index.ts";
 import imageGenExtension from "./imagegen/index.ts";
 import importReproExtension from "./import-repro.ts";
 import lookAtExtension from "./look-at/index.ts";
+import loopExtension from "./loop/index.ts";
 import loopGuardExtension from "./loop-guard/index.ts";
 import mcpExtension from "./mcp/index.ts";
 import modelFallbackExtension from "./model-fallback/index.ts";
@@ -93,6 +94,7 @@ export const builtinExtensions: BuiltinExtensionFactory[] = [
 	{ id: "nested-agents-md", factory: nestedAgentsMdExtension },
 	{ id: "rules", factory: piRulesExtension },
 	{ id: "goal", factory: goalExtension },
+	{ id: "loop", factory: loopExtension },
 	{ id: "cache-keepalive", factory: cacheKeepAliveExtension },
 	{ id: "ttsr", factory: ttsrExtension },
 	{ id: "btw", factory: btwExtension },

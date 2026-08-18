@@ -1,8 +1,8 @@
-export interface RequestedInterval {
-	readonly value: number;
-	readonly unit: "s" | "m" | "h" | "d";
-	readonly raw: string;
-}
+import type { RequestedInterval, RequestedIntervalUnit } from "./types.ts";
+
+// `types.ts` is the single type home for the whole extension; re-exported so the parser's
+// own consumers keep importing the canonical declaration.
+export type { RequestedInterval };
 
 export type LoopTarget =
 	| { readonly type: "all" }
@@ -39,7 +39,7 @@ Examples:
   /loop pause [id|all]
   /loop resume [id|all]`;
 
-function normalizeUnit(unit: string): "s" | "m" | "h" | "d" {
+function normalizeUnit(unit: string): RequestedIntervalUnit {
 	const lower = unit.toLowerCase();
 	if (lower.startsWith("s")) return "s";
 	if (lower.startsWith("m")) return "m";
@@ -49,7 +49,7 @@ function normalizeUnit(unit: string): "s" | "m" | "h" | "d" {
 
 function parseIntervalToken(token: string): RequestedInterval {
 	const value = Number.parseInt(token.slice(0, -1), 10);
-	const unit = token.slice(-1) as "s" | "m" | "h" | "d";
+	const unit = token.slice(-1) as RequestedIntervalUnit;
 	return { value, unit, raw: token };
 }
 

@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import * as fsPromises from "node:fs/promises";
 import { CONFIG_DIR_NAME, resolveAgentDir } from "../../../../config.ts";
+import type { LoopFileFingerprint as AnchoredLoopFileFingerprint } from "./types.ts";
 
-export interface LoopFileFingerprint {
-	readonly path: string;
-	readonly mtimeMs: number;
-	readonly size: number;
-	readonly contentHash: string;
-}
+/**
+ * Content identity of the resolved loop file. `types.ts` owns the canonical, persisted
+ * fingerprint; the resolver cannot know the delivery that anchors it, so it produces the
+ * same shape minus that field and the tick builder anchors it at fire time.
+ */
+export type LoopFileFingerprint = Omit<AnchoredLoopFileFingerprint, "anchorDeliveryId">;
 
 export interface LoopFileResolverDeps {
 	readonly cwd: string;
