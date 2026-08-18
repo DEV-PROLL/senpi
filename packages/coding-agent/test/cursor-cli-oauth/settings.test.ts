@@ -282,7 +282,10 @@ describe("persisting the Cursor CLI OAuth no-approval acknowledgement", () => {
 		persistCursorCliNoApprovalAcknowledgement(cwd, "2026-08-17T12:05:00.000Z");
 
 		expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
-			cursorCliOauthProvider: { noApprovalAcknowledgedAt: "2026-08-17T12:05:00.000Z" },
+			cursorCliOauthProvider: {
+				enabled: true,
+				noApprovalAcknowledgedAt: "2026-08-17T12:05:00.000Z",
+			},
 		});
 	});
 

@@ -1,5 +1,51 @@
 # cursor-cli-oauth extension changes
 
+## 2026-08-18 - Activate explicit login/import and copy native Cursor credentials
+
+### What changed
+
+- `settings.ts`: provider activation now uses the same locked
+  read-modify-write path as the no-approval acknowledgement.
+  `persistCursorCliOauthEnabled()` preserves every sibling setting, and a
+  successful acknowledgement writes `enabled: true` together with
+  `noApprovalAcknowledgedAt`.
+- `oauth-login.ts`: successful OAuth login requests persisted enablement even
+  when the user declines unattended tool execution. The new
+  `importNativeCursorCredential()` copies a usable flat OAuth credential from
+  the primary `cursor` provider into a canonical named account slot; it never
+  writes or deletes the source credential.
+- `index.ts`: the real builtin registration now wires both acknowledgement
+  and enablement persistence into the OAuth config, instead of leaving the
+  login-time acknowledgement as an unwritten optional callback.
+- `account-command.ts`: `/cursor-account import native` explicitly copies the
+  primary provider credential. Local and native imports persist enablement
+  and run a scoped offline availability refresh so the current session's
+  model selector updates without restart.
+
+### Why
+
+- The fallback provider registered its model catalog but remained hidden after
+  successful login/import because `cursorCliOauthProvider.enabled` defaulted
+  false and the explicit actions never changed it.
+- Users with a valid native `cursor` OAuth credential had to copy token
+  material by hand into the fallback provider's sentinel `accounts[]` shape,
+  risking accidental removal of the primary credential.
+- The login acknowledgement prompt claimed success but the production
+  registration did not supply the persistence callback.
+
+### Why an extension could not handle it
+
+- These are the fallback extension's private OAuth, settings, account-command,
+  and provider-registration boundaries. No external extension can rewrite the
+  builtin provider's credential shape, add persistence to its login callback,
+  or refresh its private model-runtime availability after import.
+
+### Expected merge conflict zones
+
+- LOW: fork-only `settings.ts`, `oauth-login.ts`, `index.ts`, and
+  `account-command.ts`; conflicts are expected only with concurrent hardening
+  of the same Cursor CLI OAuth lane.
+
 ## 2026-08-17 - Initial builtin fallback lane
 
 Plan: `.omo/plans/cursor-cli-oauth.md`. Probe evidence: `local-ignore/qa-evidence/20260817-cursor-cli-p-lane/`.
