@@ -3,7 +3,6 @@
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
 
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -122,8 +121,9 @@ import {
 } from "../../inspector-policy.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
-import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
+import { readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
+import { processImage } from "../../utils/image-process.ts";
 import { openBrowser } from "../../utils/open-browser.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
@@ -449,6 +449,62 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
 }
 
 /**
+ * The InteractiveMode collaborators {@link attachClipboardImage} needs. Passed
+ * explicitly (rather than as `this`) so the paste handler stays a free function
+ * on the prototype and remains callable with a minimal borrowed receiver.
+ */
+interface ClipboardImageDeps {
+	editor: EditorComponent;
+	pendingImages: Map<number, ImageContent>;
+	settings: { getBlockImages(): boolean; getImageAutoResize(): boolean };
+	showStatus: (message: string) => void;
+	requestRender: () => void;
+}
+
+/**
+ * Attach a clipboard bitmap as an in-memory image behind an atomic
+ * `[Image #N]` marker. Returns false when nothing was attached, so the caller
+ * falls through to the plain-text clipboard path.
+ *
+ * The bytes deliberately never touch the filesystem: writing a temp file and
+ * inserting its path as literal text (the previous behavior) shipped an
+ * unreadable `/var/folders/.../pi-clipboard-<uuid>.png` string to the model and
+ * attached no image at all.
+ */
+async function attachClipboardImage(
+	deps: ClipboardImageDeps,
+	image: { bytes: Uint8Array; mimeType: string },
+): Promise<boolean> {
+	if (deps.settings.getBlockImages()) {
+		// Pinned behavior: nothing is attached and nothing is inserted, but the
+		// paste is never a silent no-op - the user must learn why their screenshot
+		// vanished, and which setting to flip.
+		deps.showStatus("Image paste blocked by the images.blockImages setting");
+		return false;
+	}
+	if (!deps.editor.insertImageMarker) {
+		// A marker-unaware editor cannot keep the marker atomic, and a dead literal
+		// `[Image #N]` with a live payload behind it would misnumber every other
+		// attachment at submit.
+		deps.showStatus("Image paste is not supported by the active editor");
+		return false;
+	}
+
+	const processed = await processImage(image.bytes, image.mimeType, {
+		autoResizeImages: deps.settings.getImageAutoResize(),
+	});
+	if (!processed.ok) {
+		deps.showStatus(processed.message);
+		return false;
+	}
+
+	const id = deps.editor.insertImageMarker();
+	deps.pendingImages.set(id, { type: "image", data: processed.data, mimeType: processed.mimeType });
+	deps.requestRender();
+	return true;
+}
+
+/**
  * Options for InteractiveMode initialization.
  */
 export interface InteractiveModeOptions {
@@ -586,6 +642,14 @@ export class InteractiveMode {
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
 	private pendingUserInputs: string[] = [];
+	/**
+	 * Clipboard images pasted into the composer, keyed by their visible
+	 * `[Image #N]` marker number. The editor stores marker ids only, so these
+	 * bytes must live here (and survive an editor swap, which discards the
+	 * editor instance). Kept aligned with the displayed numbers by
+	 * {@link reconcilePendingImages}.
+	 */
+	private pendingImages = new Map<number, ImageContent>();
 	private activeStatusIndicator: StatusIndicator | undefined = undefined;
 	private readonly idleStatus = new IdleStatus();
 	private workingMessage: string | undefined = undefined;
@@ -3276,8 +3340,13 @@ export class InteractiveMode {
 			};
 			newEditor.onChange = this.defaultEditor.onChange;
 
-			// Copy text (and any collapsed paste markers) from previous editor
-			transferEditorContent(this.editor, newEditor);
+			// Copy text (and any collapsed paste/image markers) from previous editor.
+			// Image payloads live on this instance, so they must be dropped when the
+			// destination cannot own their markers.
+			if (!transferEditorContent(this.editor, newEditor).imageMarkersTransferred) {
+				this.pendingImages.clear();
+			}
+			this.subscribeImageMarkers(newEditor);
 
 			// Copy appearance settings if supported
 			if (newEditor.borderColor !== undefined) {
@@ -3334,7 +3403,10 @@ export class InteractiveMode {
 			// hand-off, and a setText round-trip would be pure churn on the
 			// user's draft.
 			if (this.editor !== this.defaultEditor) {
-				transferEditorContent(this.editor, this.defaultEditor);
+				if (!transferEditorContent(this.editor, this.defaultEditor).imageMarkersTransferred) {
+					this.pendingImages.clear();
+				}
+				this.subscribeImageMarkers(this.defaultEditor);
 			}
 			this.editor = this.defaultEditor;
 		}
@@ -3537,8 +3609,12 @@ export class InteractiveMode {
 			this.updateShortcutOverlay(text);
 		};
 
-		// Handle clipboard paste (triggered on Ctrl+V). Images are attached by path;
-		// otherwise, paste plain text from the system clipboard.
+		// Keep pendingImages aligned with the markers the editor displays.
+		this.subscribeImageMarkers(this.defaultEditor);
+
+		// Handle clipboard paste (triggered on Ctrl+V). Images are attached in
+		// memory behind an atomic `[Image #N]` marker; otherwise, paste plain text
+		// from the system clipboard.
 		this.defaultEditor.onPasteImage = () => {
 			this.lastInputWasPaste = true;
 			void this.handleClipboardPaste();
@@ -3568,17 +3644,19 @@ export class InteractiveMode {
 	private async handleClipboardPaste(): Promise<void> {
 		try {
 			const image = await readClipboardImage();
-			if (image) {
-				const tmpDir = os.tmpdir();
-				const ext = extensionForImageMimeType(image.mimeType) ?? "png";
-				const fileName = `pi-clipboard-${crypto.randomUUID()}.${ext}`;
-				const filePath = path.join(tmpDir, fileName);
-				fs.writeFileSync(filePath, Buffer.from(image.bytes));
-
-				this.editor.insertTextAtCursor?.(filePath);
-				this.ui.requestRender();
-				return;
-			}
+			const attached =
+				image &&
+				(await attachClipboardImage(
+					{
+						editor: this.editor,
+						pendingImages: this.pendingImages,
+						settings: this.settingsManager,
+						showStatus: (message) => this.showStatus(message),
+						requestRender: () => this.ui.requestRender(),
+					},
+					image,
+				));
+			if (attached) return;
 
 			const text = await readClipboardText();
 			if (text) {
@@ -3590,6 +3668,30 @@ export class InteractiveMode {
 			this.getSessionLogger().warn("clipboard_error", { op: "paste", error: message });
 			this.showStatus(`Clipboard paste failed: ${sanitizeTuiErrorMessage(message)}`);
 		}
+	}
+
+	/** Route an editor's image-marker changes into {@link reconcilePendingImages}. */
+	private subscribeImageMarkers(editor: EditorComponent): void {
+		if (!editor.insertImageMarker) return;
+		editor.onImageMarkersChanged = (order) => this.reconcilePendingImages(order);
+	}
+
+	/**
+	 * Re-key {@link pendingImages} onto the marker numbers the editor now
+	 * displays. `order` lists the SURVIVING marker ids (pre-renumber) in text
+	 * reading order, which is exactly the editor's new 1..k display numbering, so
+	 * a payload's new key is its position in that list. Ids absent from `order`
+	 * are dropped; reported ids with no payload (a hand-typed marker) are skipped
+	 * without consuming anyone else's slot.
+	 */
+	private reconcilePendingImages(order: number[]): void {
+		if (this.pendingImages.size === 0) return;
+		const reconciled = new Map<number, ImageContent>();
+		order.forEach((id, index) => {
+			const image = this.pendingImages.get(id);
+			if (image) reconciled.set(index + 1, image);
+		});
+		this.pendingImages = reconciled;
 	}
 
 	private getSessionLogger(): SessionLogger {
