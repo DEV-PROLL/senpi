@@ -62,11 +62,13 @@ describe("cursor MCP tool schema sanitization", () => {
 		];
 		const definitions = buildMcpToolDefinitions(tools);
 		const decoded = decodeInputSchema(definitions[0].inputSchema) as {
-			properties: Record<string, Record<string, unknown>>;
+			properties: Record<string, Record<string, unknown> & { items?: Record<string, unknown> }>;
 		};
-		expect(decoded.properties.filter.anyOf).toBeUndefined();
-		expect(decoded.properties.filter.properties.kind).toEqual({ type: "string" });
-		expect(decoded.properties.list.items.allOf).toBeUndefined();
+		const filter = decoded.properties.filter as Record<string, unknown>;
+		expect(filter.anyOf).toBeUndefined();
+		expect((filter.properties as Record<string, unknown>).kind).toEqual({ type: "string" });
+		const items = decoded.properties.list.items as Record<string, unknown>;
+		expect(items.allOf).toBeUndefined();
 	});
 
 	it("passes clean schemas through unchanged", () => {
@@ -80,9 +82,7 @@ describe("cursor MCP tool schema sanitization", () => {
 			required: ["pattern"],
 			additionalProperties: false,
 		};
-		const definitions = buildMcpToolDefinitions([
-			{ name: "clean", description: "clean tool", parameters },
-		]);
+		const definitions = buildMcpToolDefinitions([{ name: "clean", description: "clean tool", parameters }]);
 		const decoded = decodeInputSchema(definitions[0].inputSchema);
 		expect(decoded).toEqual(parameters);
 	});
