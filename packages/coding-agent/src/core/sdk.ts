@@ -447,7 +447,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		timeoutMs: settingsManager.getAgentStreamIdleTimeoutMs(),
 		streamStartTimeoutMs: settingsManager.getAgentStreamStartTimeoutMs(),
 		maxRetryDelayMs: settingsManager.getProviderRetrySettings().maxRetryDelayMs,
-		cursorExecHandlers: createSessionCursorExecBridge(cursorBridgeSessionRef, () => agent),
+		cursorExecHandlers: (runSignal: AbortSignal) =>
+			createSessionCursorExecBridge(cursorBridgeSessionRef, () => agent, runSignal),
 	});
 	// Agent core accepts the field in AgentState but older constructors may not copy it
 	// from initialState; assign the separately computed provenance explicitly.

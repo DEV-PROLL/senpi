@@ -21,6 +21,8 @@
 
 - Messages typed while auto-compaction is running are no longer silently dropped: input submitted during `Compacting context...` is queued and delivered after compaction settles instead of being accepted and discarded. Manual `/compact` keeps rejecting unqueueable prompts as before ([#950](https://github.com/code-yeongyu/senpi/pull/950)).
 
+- Cursor exec-bridge dispatches are now bound to the run that opened their stream, so a straggler exec frame from a run that already ended (for example after a provider rate-limit error restarts the turn on a fallback lane) is refused instead of executing a dead run's tool inside the replacement run and leaking its lifecycle events into the new transcript.
+
 ### New Features
 
 ### Breaking Changes
