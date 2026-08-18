@@ -4,12 +4,15 @@
 
 ### What changed
 
-- Successful resident turns now append a fixed-size branch checkpoint containing the SDK lineage, sent-prefix digest,
-  last assistant boundary, account/model identity, and prompt/tool fingerprints.
-- Startup/resume restores only the newest authoritative checkpoint, only after its assistant ledger entry is present;
-  malformed entries, divergent prefixes, and inherited new/fork branches fail closed instead of guessing a boundary.
-- Assistant rewrites, compaction, forks, and tree navigation append durable invalidations. Reload keeps the fresher
-  process binding, restored identity drift is explicit, and nested binding state is copied at the registry boundary.
+- Successful resident turns append a capability-free branch marker and atomically replace a private, fixed-size
+  sidecar containing the SDK lineage, sent-prefix digest, assistant hash/boundary, identity, and prompt/tool
+  fingerprints.
+- Startup/resume restores only when the sidecar belongs to the current session file and header, its exact marker and
+  adjacent committed assistant remain on the active branch, and the local SDK transcript still contains the stored
+  top-level assistant boundary. Imported JSONL and legacy custom payloads are never lineage authority.
+- Provider exits, assistant rewrites, accepted compaction, forks, tree navigation, and extension removal delete
+  durable and process state. Persisted identity drift and config-dir transcript roots fail closed; reload retains the
+  fresher process binding, and nested binding state is copied at the registry boundary.
 
 ### Why
 
@@ -24,8 +27,9 @@
 
 ### Expected merge-conflict zones
 
-- MEDIUM in `session-binding.ts`, `session-registry-wiring.ts`, and `session-continuity.ts`; LOW in their focused tests
-  and issue #6981 regression.
+- MEDIUM in `session-binding.ts`, `session-binding-store.ts`, `session-registry-wiring.ts`,
+  `session-continuity.ts`, `session-reattach.ts`, and `session-stream.ts`; LOW in their focused tests and issue #6981
+  regression.
 
 ## 2026-08-18 - Select the Claude binary for the host libc
 

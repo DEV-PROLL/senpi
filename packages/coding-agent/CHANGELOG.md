@@ -14,9 +14,9 @@
 ### Fixed
 
 - Published Senpi tarballs now retain the lockfile-recorded Babel 8 dependency closure inside the bundled codemode sidecar, preventing `@babel/parser` resolution failures during extension startup ([#923](https://github.com/code-yeongyu/senpi/issues/923)).
-- Headless Claude SDK OAuth continuation now restores a bounded, ledger-verified SDK checkpoint across separate CLI
-  processes, so `-p -c` sends only the new turn after a `registry_miss`; rewrites, compaction, malformed state, and
-  inherited branches invalidate or reject stale continuity instead of resuming it.
+- Headless Claude SDK OAuth continuation now restores a bounded SDK lineage from a private sidecar only after its
+  session marker, committed assistant, identity, and local SDK transcript all verify, so `-p -c` sends only the new
+  turn while imports, forks, provider switches, rewrites, compaction, malformed state, and drift fail closed.
 
 - Claude SDK OAuth now selects the glibc Claude Code binary before the musl variant on glibc Linux hosts and when libc detection is unavailable, while retaining musl-first selection on detected musl hosts and fallback to either installed package ([code-yeongyu/oh-my-openagent#6963](https://github.com/code-yeongyu/oh-my-openagent/issues/6963)).
 
