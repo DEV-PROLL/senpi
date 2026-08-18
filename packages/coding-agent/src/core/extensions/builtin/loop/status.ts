@@ -82,7 +82,7 @@ export function formatNoopFold(noopStreak: number): string {
 export class LoopStatusTicker {
 	private readonly render: LoopStatusRender;
 	private readonly now: () => number;
-	private intervalId: NodeJS.Timeout | undefined;
+	private timeoutId: NodeJS.Timeout | undefined;
 	private state: LoopState | undefined;
 	private lastRendered: string | undefined;
 
@@ -92,27 +92,39 @@ export class LoopStatusTicker {
 	}
 
 	get running(): boolean {
-		return this.intervalId !== undefined;
+		return this.timeoutId !== undefined;
 	}
 
 	sync(state: LoopState): void {
 		this.state = state;
 		this.lastRendered = undefined;
 		this.tick();
-		if (this.intervalId !== undefined) return;
-		const handle = setInterval(() => this.tick(), LOOP_STATUS_TICK_INTERVAL_MS);
-		handle.unref();
-		this.intervalId = handle;
+		this.scheduleNext();
 	}
 
 	dispose(): void {
-		if (this.intervalId !== undefined) {
-			clearInterval(this.intervalId);
-			this.intervalId = undefined;
+		if (this.timeoutId !== undefined) {
+			clearTimeout(this.timeoutId);
+			this.timeoutId = undefined;
 		}
 		this.state = undefined;
 		this.lastRendered = undefined;
 		this.render(LOOP_STATUS_KEY, undefined);
+	}
+
+	private scheduleNext(): void {
+		if (this.timeoutId !== undefined) {
+			clearTimeout(this.timeoutId);
+		}
+		const handle = setTimeout(() => {
+			this.timeoutId = undefined;
+			this.tick();
+			if (this.state !== undefined) {
+				this.scheduleNext();
+			}
+		}, LOOP_STATUS_TICK_INTERVAL_MS);
+		handle.unref();
+		this.timeoutId = handle;
 	}
 
 	private tick(): void {
