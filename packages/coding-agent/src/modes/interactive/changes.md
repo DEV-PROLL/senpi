@@ -1,5 +1,24 @@
 # changes
 
+## Extension widget updates preserve stacking order (2026-08-18)
+
+### What changed
+
+- `setExtensionWidget()` in `interactive-mode.ts` no longer deletes and re-appends the updated key on every call. It now removes the key only from the OTHER placement map, disposes the replaced component, and writes through `Map.set`, which keeps an existing key at its insertion position. Removal (`content === undefined`) still deletes from both maps, and a placement change still appends the key at the end of the new placement.
+- Regression coverage: `test/interactive-mode-widget-order.test.ts` drives the real `setExtensionWidget` / `renderWidgets` / `renderWidgetContainer` methods and pins that belowEditor and aboveEditor stacking order survives content updates, removals, and placement moves.
+
+### Why
+
+- Every widget refresh used to move the refreshed key to the end of its placement map, so two live widgets with independent refresh timers swapped vertical positions on every paint. With omo-senpi's `omo-task` (250 ms live refresh) and `omo-dag` (1 s live refresh) widgets both active, the below-editor region visibly bounced up and down several times per second.
+
+### Why this cannot be expressed externally
+
+- The stacking maps and `renderWidgets()` are private core state; extensions can only call `setWidget`, not control where an update lands.
+
+### Expected merge conflict zones
+
+- LOW: the body of `setExtensionWidget()` in `interactive-mode.ts` only.
+
 ## Post-login provider catalog refresh explicitly allows network discovery (2026-08-18)
 
 ### What changed

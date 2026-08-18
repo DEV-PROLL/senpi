@@ -2768,16 +2768,18 @@ export class InteractiveMode {
 		options?: ExtensionWidgetOptions,
 	): void {
 		const placement = options?.placement ?? "aboveEditor";
-		const removeExisting = (map: Map<string, Component & { dispose?(): void }>) => {
+		const targetMap = placement === "belowEditor" ? this.extensionWidgetsBelow : this.extensionWidgetsAbove;
+		const otherMap = placement === "belowEditor" ? this.extensionWidgetsAbove : this.extensionWidgetsBelow;
+		const removeFrom = (map: Map<string, Component & { dispose?(): void }>) => {
 			const existing = map.get(key);
 			if (existing?.dispose) existing.dispose();
 			map.delete(key);
 		};
 
-		removeExisting(this.extensionWidgetsAbove);
-		removeExisting(this.extensionWidgetsBelow);
+		removeFrom(otherMap);
 
 		if (content === undefined) {
+			removeFrom(targetMap);
 			this.renderWidgets();
 			return;
 		}
@@ -2799,7 +2801,10 @@ export class InteractiveMode {
 			component = content(this.ui, theme);
 		}
 
-		const targetMap = placement === "belowEditor" ? this.extensionWidgetsBelow : this.extensionWidgetsAbove;
+		// Map.set on an existing key keeps its insertion position, so a refreshing widget stays
+		// put instead of moving past its neighbours and reshuffling the stacking order each paint.
+		const existing = targetMap.get(key);
+		if (existing?.dispose) existing.dispose();
 		targetMap.set(key, component);
 		this.renderWidgets();
 	}
