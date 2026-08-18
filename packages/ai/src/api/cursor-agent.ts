@@ -51,6 +51,7 @@ import { providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { deterministicUuid } from "./cursor-agent/deterministic-id.ts";
+import { buildRequestedModel } from "./cursor-agent/reasoning-params.ts";
 import { armExecHeartbeat } from "./cursor-agent/exec-lifecycle.ts";
 import {
 	buildMcpStateResult,
@@ -711,9 +712,9 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 };
 
 /**
- * `streamSimple` for Cursor: reasoning/thinking is managed server-side per
- * model (there is no client thinking knob on the Run request), so the simple
- * options map through unchanged.
+ * `streamSimple` for Cursor: an explicit thinking selection (`options.thinkingSelection`)
+ * is rendered into `RequestedModel.parameters`; reasoning output itself streams back as
+ * `ThinkingContent` regardless of the selection.
  */
 export const streamSimple: StreamFunction<"cursor-agent", SimpleStreamOptions> = (
 	model: Model<"cursor-agent">,
@@ -3944,17 +3945,14 @@ async function buildGrpcRequest(
 		turns,
 	});
 
-	const wireModelId = model.upstreamModelId ?? model.id;
+	const requestedModel = buildRequestedModel(model, options?.thinkingSelection);
+	const wireModelId = requestedModel.modelId;
 	const cursorMaxMode = model.compat?.cursorMaxMode === true;
 	const modelDetails = create(ModelDetailsSchema, {
 		modelId: wireModelId,
 		displayModelId: model.id,
 		displayName: model.name,
 		...(cursorMaxMode ? { maxMode: true } : undefined),
-	});
-	const requestedModel = create(RequestedModelSchema, {
-		modelId: wireModelId,
-		maxMode: cursorMaxMode,
 	});
 
 	const runRequest = create(AgentRunRequestSchema, {
