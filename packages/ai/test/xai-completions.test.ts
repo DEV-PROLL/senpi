@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getModel, streamSimple } from "../src/compat.ts";
+import { getModels, streamSimple } from "../src/compat.ts";
 import type { Model, SimpleStreamOptions } from "../src/types.ts";
 
 interface OpenAIMockState {
@@ -49,11 +49,11 @@ vi.mock("openai", () => {
 });
 
 function getCompletionModel(id: string): Model<"openai-completions"> {
-	const model = getModel("xai", id);
+	const model = getModels("xai").find((candidate) => candidate.id === id);
 	if (model?.api !== "openai-completions") {
 		throw new Error(`Expected xAI OpenAI Completions model: ${id}`);
 	}
-	return model;
+	return model as Model<"openai-completions">;
 }
 
 async function captureParams(
@@ -94,7 +94,7 @@ describe("xAI Chat Completions reasoning effort", () => {
 	});
 
 	it("omits reasoning effort for non-reasoning Grok 4.20", async () => {
-		const params = await captureParams(getCompletionModel("grok-4.20-0309-non-reasoning"), "off");
+		const params = await captureParams(getCompletionModel("grok-4.20-0309-non-reasoning"));
 		expect(params).not.toHaveProperty("reasoning_effort");
 	});
 });
