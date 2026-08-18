@@ -448,6 +448,15 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
 	return provider.name === provider.id ? authTypes : `${provider.name} · ${authTypes}`;
 }
 
+/** A user submission: editor text plus the images resolved from its `[Image #N]` markers. */
+interface InteractiveUserInput {
+	text: string;
+	images?: ImageContent[];
+}
+
+/** Local copy of pi-tui's image-marker pattern so submission scanning never mutates a shared /g regex. */
+const IMAGE_MARKER_PATTERN = /\[Image #([1-9]\d*)\]/g;
+
 /**
  * The InteractiveMode collaborators {@link attachClipboardImage} needs. Passed
  * explicitly (rather than as `this`) so the paste handler stays a free function
@@ -457,6 +466,8 @@ interface ClipboardImageDeps {
 	editor: EditorComponent;
 	pendingImages: Map<number, ImageContent>;
 	settings: { getBlockImages(): boolean; getImageAutoResize(): boolean };
+	/** True while the compaction queue is active; the queue carries text only, so pasted images are dropped with a visible status. */
+	isCompacting: () => boolean;
 	showStatus: (message: string) => void;
 	requestRender: () => void;
 }
@@ -488,6 +499,16 @@ async function attachClipboardImage(
 		// attachment at submit.
 		deps.showStatus("Image paste is not supported by the active editor");
 		return false;
+	}
+	if (deps.isCompacting()) {
+		// The compaction queue carries text only; an attachment queued behind
+		// compaction would be silently lost at delivery, so drop it here with a
+		// visible status. Consume the paste (true) - the clipboard holds a
+		// bitmap, so the plain-text fallback has nothing useful to insert.
+		deps.showStatus(
+			"Image paste dropped: messages sent during compaction cannot carry images - paste again after compaction finishes",
+		);
+		return true;
 	}
 
 	const processed = await processImage(image.bytes, image.mimeType, {
@@ -640,8 +661,8 @@ export class InteractiveMode {
 	private keybindings: KeybindingsManager;
 	private version: string;
 	private isInitialized = false;
-	private onInputCallback?: (text: string) => void;
-	private pendingUserInputs: string[] = [];
+	private onInputCallback?: (input: InteractiveUserInput) => void;
+	private pendingUserInputs: InteractiveUserInput[] = [];
 	/**
 	 * Clipboard images pasted into the composer, keyed by their visible
 	 * `[Image #N]` marker number. The editor stores marker ids only, so these
@@ -650,6 +671,16 @@ export class InteractiveMode {
 	 * {@link reconcilePendingImages}.
 	 */
 	private pendingImages = new Map<number, ImageContent>();
+	/**
+	 * Images pre-resolved by handleFollowUp's non-streaming branch, which hands
+	 * off through the public string-only `onSubmit(text)` API. Set BEFORE that
+	 * path's `setText("")` (whose prune chain destroys pendingImages) and
+	 * captured-then-cleared UNCONDITIONALLY at the submit-handler entry: slash,
+	 * extension and bash submissions return before the consuming branch, and a
+	 * field cleared only after use would leak a stale image into a later
+	 * ordinary submission that never references it.
+	 */
+	private preResolvedSubmissionImages?: ImageContent[];
 	private activeStatusIndicator: StatusIndicator | undefined = undefined;
 	private readonly idleStatus = new IdleStatus();
 	private workingMessage: string | undefined = undefined;
@@ -1455,7 +1486,10 @@ export class InteractiveMode {
 		while (true) {
 			const userInput = await this.getUserInput();
 			try {
-				await this.session.prompt(userInput, { streamingBehavior: "steer" });
+				await this.session.prompt(userInput.text, {
+					streamingBehavior: "steer",
+					...(userInput.images ? { images: userInput.images } : {}),
+				});
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
@@ -3651,6 +3685,7 @@ export class InteractiveMode {
 						editor: this.editor,
 						pendingImages: this.pendingImages,
 						settings: this.settingsManager,
+						isCompacting: () => (this.session as { isCompacting?: boolean } | undefined)?.isCompacting === true,
 						showStatus: (message) => this.showStatus(message),
 						requestRender: () => this.ui.requestRender(),
 					},
@@ -3694,6 +3729,33 @@ export class InteractiveMode {
 		this.pendingImages = reconciled;
 	}
 
+	/**
+	 * Resolve the `[Image #N]` markers in `submittedText` (in READING order)
+	 * into the image array submitted alongside it, then clear
+	 * {@link pendingImages}.
+	 *
+	 * Reads ONLY the submitted text plus pendingImages - never live editor
+	 * state: pi-tui's `Editor.submitValue()` resets the editor and clears its
+	 * registries BEFORE `onSubmit` fires. A marker with no pending payload (a
+	 * hand-typed `[Image #N]`, or the second half of a kill/yank duplicate) is
+	 * passed through untouched and consumes no slot; a payload-bearing
+	 * marker's FIRST occurrence wins. Slots are assigned 1..k in reading
+	 * order, so the Nth marker in the final text is `images[N-1]`.
+	 */
+	private takeSubmissionImages(submittedText: string): ImageContent[] {
+		const images: ImageContent[] = [];
+		const consumed = new Set<number>();
+		for (const match of submittedText.matchAll(IMAGE_MARKER_PATTERN)) {
+			const id = Number.parseInt(match[1] ?? "0", 10);
+			if (consumed.has(id)) continue;
+			consumed.add(id);
+			const image = this.pendingImages.get(id);
+			if (image) images.push(image);
+		}
+		this.pendingImages.clear();
+		return images;
+	}
+
 	private getSessionLogger(): SessionLogger {
 		this.sessionLogger ??= createSessionLogger(this.runtimeHost.services.agentDir);
 		return this.sessionLogger;
@@ -3706,6 +3768,14 @@ export class InteractiveMode {
 
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (text: string) => {
+			// Capture-then-clear BEFORE any branch: handleFollowUp's non-streaming
+			// path pre-resolves images and hands off here, but slash / extension /
+			// bash submissions return before the consuming branches below. Clearing
+			// only after use would leak a stale array into a later ordinary
+			// submission whose text never references it.
+			const preResolvedImages = this.preResolvedSubmissionImages;
+			this.preResolvedSubmissionImages = undefined;
+
 			this.hideShortcutOverlay();
 			this.lastEditorText = "";
 			text = text.trim();
@@ -3901,9 +3971,15 @@ export class InteractiveMode {
 			// behavior here applies only to ordinary text, prompt template expansion,
 			// and queueing.
 			if (this.session.isStreaming) {
+				// Resolve BEFORE setText(""): the editor's prune chain fires
+				// onImageMarkersChanged([]) and destroys pendingImages.
+				const images = preResolvedImages ?? this.takeSubmissionImages(text);
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
-				await this.session.prompt(text, { streamingBehavior: "steer" });
+				await this.session.prompt(text, {
+					streamingBehavior: "steer",
+					...(images.length > 0 ? { images } : {}),
+				});
 				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
 				return;
@@ -3913,10 +3989,12 @@ export class InteractiveMode {
 			// First, move any pending bash components to chat
 			this.flushPendingBashComponents();
 
+			const images = preResolvedImages ?? this.takeSubmissionImages(text);
+			const submission: InteractiveUserInput = images.length > 0 ? { text, images } : { text };
 			if (this.onInputCallback) {
-				this.onInputCallback(text);
+				this.onInputCallback(submission);
 			} else {
-				this.pendingUserInputs.push(text);
+				this.pendingUserInputs.push(submission);
 			}
 			this.editor.addToHistory?.(text);
 		};
@@ -4852,16 +4930,16 @@ export class InteractiveMode {
 		);
 	}
 
-	async getUserInput(): Promise<string> {
+	async getUserInput(): Promise<InteractiveUserInput> {
 		const queuedInput = this.pendingUserInputs.shift();
 		if (queuedInput !== undefined) {
 			return queuedInput;
 		}
 
 		return new Promise((resolve) => {
-			this.onInputCallback = (text: string) => {
+			this.onInputCallback = (input) => {
 				this.onInputCallback = undefined;
-				resolve(text);
+				resolve(input);
 			};
 		});
 	}
@@ -5087,6 +5165,12 @@ export class InteractiveMode {
 		const text = this.getExpandedEditorText().trim();
 		if (!text) return;
 
+		// Resolve attachments BEFORE any setText("") below: the editor's prune
+		// chain fires onImageMarkersChanged([]) and the reconciler destroys
+		// pendingImages, so resolving after the clear would ship a literal
+		// `[Image #N]` with no attachment behind it.
+		const images = this.takeSubmissionImages(text);
+
 		// Queue non-command input during compaction; dispatch extension commands.
 		// This is the Alt+Enter path (bound directly to app.message.followUp), which
 		// does NOT pass through onSubmit, so the isExtensionCommand check below is the
@@ -5112,12 +5196,20 @@ export class InteractiveMode {
 		if (this.session.isStreaming) {
 			this.editor.addToHistory?.(text);
 			this.editor.setText("");
-			await this.session.prompt(text, { streamingBehavior: "followUp" });
+			await this.session.prompt(text, {
+				streamingBehavior: "followUp",
+				...(images.length > 0 ? { images } : {}),
+			});
 			this.updatePendingMessagesDisplay();
 			this.ui.requestRender();
 		}
 		// If not streaming, Alt+Enter acts like regular Enter (trigger onSubmit)
 		else if (this.editor.onSubmit) {
+			// The public `onSubmit(text: string)` API cannot be widened, so hand
+			// the pre-resolved images over out-of-band; the submit handler
+			// captures-and-clears the field at entry and delivers them through the
+			// widened main-loop channel.
+			this.preResolvedSubmissionImages = images.length > 0 ? images : undefined;
 			this.editor.setText("");
 			this.editor.onSubmit(text);
 		}

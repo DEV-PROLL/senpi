@@ -24,19 +24,22 @@ type SubmitContext = {
 	hideShortcutOverlay: () => void;
 	isExtensionCommand: (text: string) => boolean;
 	lastEditorText: string;
-	onInputCallback?: (text: string) => void;
-	pendingUserInputs: string[];
+	onInputCallback?: (input: { text: string; images?: unknown[] }) => void;
+	pendingUserInputs: { text: string; images?: unknown[] }[];
+	pendingImages: Map<number, unknown>;
+	takeSubmissionImages: (submittedText: string) => unknown[];
 	shutdown: () => Promise<void>;
 };
 
 type InteractiveModePrivate = {
 	setupEditorSubmitHandler(this: SubmitContext): void;
+	takeSubmissionImages(this: SubmitContext, submittedText: string): unknown[];
 };
 
 const interactiveModePrototype = InteractiveMode.prototype as unknown as InteractiveModePrivate;
 
 function createSubmitContext(): SubmitContext {
-	return {
+	const context: SubmitContext = {
 		defaultEditor: {},
 		editor: {
 			addToHistory: vi.fn(),
@@ -53,8 +56,14 @@ function createSubmitContext(): SubmitContext {
 		isExtensionCommand: vi.fn(() => false),
 		lastEditorText: "",
 		pendingUserInputs: [],
+		pendingImages: new Map(),
+		takeSubmissionImages: vi.fn(() => []),
 		shutdown: vi.fn(async () => {}),
 	};
+	// Borrowed receiver: resolve markers with the REAL production helper (its
+	// only dependencies are the pendingImages map above).
+	context.takeSubmissionImages = interactiveModePrototype.takeSubmissionImages.bind(context);
+	return context;
 }
 
 describe("BUILTIN_SLASH_COMMANDS exit alias", () => {
