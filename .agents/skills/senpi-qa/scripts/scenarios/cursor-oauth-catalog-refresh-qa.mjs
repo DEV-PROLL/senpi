@@ -169,6 +169,10 @@ async function main() {
 				setup.acknowledged === true &&
 				setup.refreshRequested === true &&
 				setup.successNotice === true &&
+				setup.postLoginCatalog?.allowNetworkObserved === true &&
+				setup.postLoginCatalog?.catalogRequests === 1 &&
+				setup.postLoginCatalog?.modelVisibleBefore === false &&
+				setup.postLoginCatalog?.modelVisibleAfter === true &&
 				cliPass,
 		};
 		writeFileSync(join(evidencePath, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
@@ -180,6 +184,10 @@ async function main() {
 				`setup.accountName=${setup.accountName}`,
 				`setup.enabled=${setup.enabled}`,
 				`setup.refreshRequested=${setup.refreshRequested}`,
+				`setup.postLoginAllowNetwork=${setup.postLoginCatalog?.allowNetworkObserved}`,
+				`setup.postLoginCatalogRequests=${setup.postLoginCatalog?.catalogRequests}`,
+				`setup.postLoginModelVisibleBefore=${setup.postLoginCatalog?.modelVisibleBefore}`,
+				`setup.postLoginModelVisibleAfter=${setup.postLoginCatalog?.modelVisibleAfter}`,
 				`cli.code=${turn.code}`,
 				`cli.timedOut=${turn.timedOut}`,
 				`cli.resultMarker=${combined.includes("STREAMTEST OK")}`,
@@ -197,7 +205,7 @@ async function main() {
 	process.stdout.write(
 		`[${result.pass && cleanupRemoved ? "PASS" : "FAIL"}] native copy preserved primary credential; ` +
 			`target=${result.setup.accountName}; enabled=${result.setup.enabled}; refresh=${result.setup.refreshRequested}; ` +
-			`CLI marker=${result.cli.resultMarker}\n`,
+			`post-login HTTP catalog=${result.setup.postLoginCatalog?.modelVisibleAfter}; CLI marker=${result.cli.resultMarker}\n`,
 	);
 	process.stdout.write(`auth guard: UNCHANGED (${result.authGuard.before} -> ${result.authGuard.after})\n`);
 	process.stdout.write(`cleanup: sandbox removed=${cleanupRemoved}\n`);
