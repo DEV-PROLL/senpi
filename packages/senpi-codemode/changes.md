@@ -11,8 +11,8 @@
   kernel-reported `durationMs`; the renderer uses wall time for final elapsed and throughput while
   preserving kernel duration for consumers that need interpreter timing.
 - A cell that initiated no tool calls renders no throughput badge at all: both the count and the
-  rate segments are dropped, so the header reads `eval py done · <1s` instead of
-  `eval py done · 0 calls · 0.00 calls/s · <1s`. Positive calls without a positive wall duration
+  rate segments are dropped, so the header reads `eval py done ✓ · <1s` instead of
+  `eval py done ✓ · 0 calls · 0.00 calls/s · <1s`. Positive calls without a positive wall duration
   render `n/a calls/s`, so the TUI never displays `Infinity` or `NaN`.
 - Partial, pending, running, error, and synthetic multi-cell frames do not show a misleading final
   aggregate. The legacy no-cells result path renders the same final metadata when the new fields are
