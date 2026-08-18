@@ -99,7 +99,7 @@ describe("normalizeCursorCatalog (golden 204-id live fixture)", () => {
 		const out = normalized();
 		const byId = new Map(out.map((entry) => [entry.id, entry]));
 		expect(byId.get("kimi-k3")?.window).toBe(1048576);
-		expect(byId.get("claude-fable-5")?.window).toBe(300000);
+		expect(byId.get("claude-fable-5")?.window).toBe(1000000);
 		expect(byId.get("claude-fable-5")?.maxWindow).toBe(1000000);
 		expect(byId.get("claude-fable-5")?.name).toContain("1M");
 		expect(byId.get("claude-fable-5")?.name).toContain("NO ZDR");

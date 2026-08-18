@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Cursor context windows now track the models.dev first-party catalog capped by the context options
+  Cursor offers each family: current Claude families and GPT 5.5/5.6 report 1M, Grok 500K, Gemini Flash
+  1048576, and each request asks Cursor for the matching `context` token.
+
 ### Breaking Changes
 
 ### Added

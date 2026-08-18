@@ -129,7 +129,7 @@ describe("cursor Run request reasoning rendering", () => {
 			request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value })),
 		).toEqual([
 			{ id: "thinking", value: "true" },
-			{ id: "context", value: "300k" },
+			{ id: "context", value: "1m" },
 			{ id: "effort", value: "low" },
 		]);
 	});
@@ -168,7 +168,7 @@ describe("cursor Run request reasoning rendering", () => {
 		expect(
 			request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value })),
 		).toEqual([
-			{ id: "context", value: "272k" },
+			{ id: "context", value: "1m" },
 			{ id: "reasoning", value: "none" },
 			{ id: "fast", value: "false" },
 		]);
@@ -193,7 +193,7 @@ describe("cursor Run request reasoning rendering", () => {
 			request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value })),
 		).toEqual([
 			{ id: "thinking", value: "false" },
-			{ id: "context", value: "300k" },
+			{ id: "context", value: "1m" },
 			{ id: "effort", value: "high" },
 		]);
 	});
