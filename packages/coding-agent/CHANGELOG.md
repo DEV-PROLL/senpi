@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Pasting multiple images in one turn now ships every image: the second and later pastes no longer write into an orphaned payload map, markers pasted in front of existing ones renumber to stay `[Image #1]`..`[Image #k]` in reading order (so `look_at("[Image #N]")` resolves to the exact image the user sees), undo after deleting a marker restores its image along with the marker, and submitting pasted images during compaction now reports the drop instead of silently discarding them.
+
 ### Removed
 
 ## [2026.8.18-3] - 2026-08-18

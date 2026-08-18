@@ -519,6 +519,12 @@ async function attachClipboardImage(
 		return false;
 	}
 
+	// insertImageMarker fires onImageMarkersChanged (with the pre-renumber
+	// ids) synchronously and only then returns the marker's FINAL canonical id,
+	// whose slot the reconcile pass just vacated - so this write can neither
+	// land in an orphaned map (reconcile mutates pendingImages in place) nor
+	// overwrite a surviving payload (the new marker had no payload when the
+	// reconcile ran, so nothing was keyed onto its slot).
 	const id = deps.editor.insertImageMarker();
 	deps.pendingImages.set(id, { type: "image", data: processed.data, mimeType: processed.mimeType });
 	deps.requestRender();
@@ -3709,15 +3715,34 @@ export class InteractiveMode {
 	private subscribeImageMarkers(editor: EditorComponent): void {
 		if (!editor.insertImageMarker) return;
 		editor.onImageMarkersChanged = (order) => this.reconcilePendingImages(order);
+		// The editor's undo stack restores marker TEXT and registry ids, but the
+		// payloads live HERE; mirror them into every undo snapshot so undo restores
+		// both halves of the pairing. Without this, deleting a marker re-keys the
+		// survivors onto its number and a later undo re-displays the deleted marker
+		// with no (or the wrong) payload behind it.
+		editor.snapshotAttachmentState = () => new Map(this.pendingImages);
+		editor.restoreAttachmentState = (state) => {
+			if (!(state instanceof Map)) return;
+			this.pendingImages.clear();
+			for (const [key, image] of state) {
+				this.pendingImages.set(key, image as ImageContent);
+			}
+		};
 	}
 
 	/**
 	 * Re-key {@link pendingImages} onto the marker numbers the editor now
-	 * displays. `order` lists the SURVIVING marker ids (pre-renumber) in text
-	 * reading order, which is exactly the editor's new 1..k display numbering, so
-	 * a payload's new key is its position in that list. Ids absent from `order`
+	 * displays. `order` lists the SURVIVING marker ids (pre-renumber, i.e. the
+	 * keys the payloads currently sit under) in text reading order, and the
+	 * editor keeps the visible numbers canonical 1..k in reading order, so a
+	 * payload's new key is its position in that list. Ids absent from `order`
 	 * are dropped; reported ids with no payload (a hand-typed marker) are skipped
 	 * without consuming anyone else's slot.
+	 *
+	 * The map is mutated IN PLACE, never replaced: handleClipboardPaste hands
+	 * this.pendingImages by reference into attachClipboardImage's deps, and a
+	 * fresh identity would orphan that reference - the second paste in a turn
+	 * then wrote into the dead map and silently destroyed its image.
 	 */
 	private reconcilePendingImages(order: number[]): void {
 		if (this.pendingImages.size === 0) return;
@@ -3726,7 +3751,10 @@ export class InteractiveMode {
 			const image = this.pendingImages.get(id);
 			if (image) reconciled.set(index + 1, image);
 		});
-		this.pendingImages = reconciled;
+		this.pendingImages.clear();
+		for (const [key, image] of reconciled) {
+			this.pendingImages.set(key, image);
+		}
 	}
 
 	/**
@@ -3960,7 +3988,7 @@ export class InteractiveMode {
 					this.editor.setText("");
 					await this.session.prompt(text);
 				} else {
-					this.queueCompactionMessage(text, "steer");
+					this.queueCompactionSubmission(text, "steer");
 				}
 				return;
 			}
@@ -5165,28 +5193,31 @@ export class InteractiveMode {
 		const text = this.getExpandedEditorText().trim();
 		if (!text) return;
 
-		// Resolve attachments BEFORE any setText("") below: the editor's prune
-		// chain fires onImageMarkersChanged([]) and the reconciler destroys
-		// pendingImages, so resolving after the clear would ship a literal
-		// `[Image #N]` with no attachment behind it.
-		const images = this.takeSubmissionImages(text);
-
 		// Queue non-command input during compaction; dispatch extension commands.
 		// This is the Alt+Enter path (bound directly to app.message.followUp), which
 		// does NOT pass through onSubmit, so the isExtensionCommand check below is the
 		// live dispatch point here: commands go straight to AgentSession.prompt(),
 		// which runs them immediately even while compaction is active, while ordinary
-		// text is queued for delivery after compaction settles.
+		// text is queued for delivery after compaction settles. Image attachments
+		// are consumed and dropped VISIBLY inside queueCompactionSubmission - the
+		// queue is text-only, so resolving them here and queueing the text with a
+		// dead marker would lose the images without telling the user.
 		if (this.session.isCompacting) {
 			if (this.isExtensionCommand(text)) {
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
 				await this.session.prompt(text);
 			} else {
-				this.queueCompactionMessage(text, "followUp");
+				this.queueCompactionSubmission(text, "followUp");
 			}
 			return;
 		}
+
+		// Resolve attachments BEFORE any setText("") below: the editor's prune
+		// chain fires onImageMarkersChanged([]) and the reconciler destroys
+		// pendingImages, so resolving after the clear would ship a literal
+		// `[Image #N]` with no attachment behind it.
+		const images = this.takeSubmissionImages(text);
 
 		// Alt+Enter queues a follow-up message (waits until agent finishes).
 		// Extension commands never reach this branch: the compaction branch above
@@ -5581,13 +5612,41 @@ export class InteractiveMode {
 		return allQueued.length;
 	}
 
-	private queueCompactionMessage(text: string, mode: "steer" | "followUp"): void {
+	private queueCompactionMessage(text: string, mode: "steer" | "followUp", droppedImageCount = 0): void {
 		this.compactionQueuedMessages.push({ text, mode, enqueueOrder: this.session.reserveQueuedInputOrder() });
 		this.getSessionLogger().debug("compaction_queue_enqueue", { mode, count: this.compactionQueuedMessages.length });
 		this.editor.addToHistory?.(text);
 		this.editor.setText("");
 		this.updatePendingMessagesDisplay();
-		this.showStatus("Queued message for after compaction");
+		this.showStatus(
+			droppedImageCount > 0
+				? `Queued message for after compaction; dropped ${droppedImageCount} image${droppedImageCount > 1 ? "s" : ""}: messages sent during compaction cannot carry images - paste again after compaction finishes`
+				: "Queued message for after compaction",
+		);
+	}
+
+	/**
+	 * Queue a user submission for delivery after compaction. The compaction
+	 * queue carries text only, so pasted attachments are dropped here -
+	 * VISIBLY, never silently, mirroring attachClipboardImage's paste-time
+	 * contract - and their `[Image #N]` markers are stripped, because a queued
+	 * literal marker has no payload behind it and would ship an unreadable
+	 * `[Image #N]` string to the model once the queue drains.
+	 */
+	private queueCompactionSubmission(text: string, mode: "steer" | "followUp"): void {
+		const images = this.takeSubmissionImages(text);
+		if (images.length === 0) {
+			this.queueCompactionMessage(text, mode);
+			return;
+		}
+		const queued = text.replace(IMAGE_MARKER_PATTERN, "").trim();
+		if (queued) {
+			this.queueCompactionMessage(queued, mode, images.length);
+			return;
+		}
+		this.showStatus(
+			`Dropped ${images.length} image${images.length > 1 ? "s" : ""}: messages sent during compaction cannot carry images - paste again after compaction finishes`,
+		);
 	}
 
 	private hasRegisteredCommand(command: string): boolean {

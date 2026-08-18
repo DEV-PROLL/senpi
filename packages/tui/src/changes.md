@@ -1,5 +1,46 @@
 # TUI delta rendering fork changes
 
+## Image markers canonicalize on insert/prune and carry owner payloads across undo (2026-08-18)
+
+### What changed
+
+- `packages/tui/src/components/editor.ts`: `insertImageMarker()` renumbers the
+  visible markers to canonical 1..k in reading order (via
+  `ImageMarkerRegistry.canonicalize`, previously dead code) and returns the
+  marker's FINAL canonical id instead of the insertion counter; `setText()`
+  canonicalizes after pruning so a surviving high id displays as `[Image #1]`;
+  `EditorSnapshot` carries an opaque `attachmentState` captured through the new
+  owner hooks and `undo()` restores it BEFORE firing the marker-order
+  notification; cursor position is preserved across the renumbering rewrite.
+- `packages/tui/src/editor-component.ts`: new optional paired
+  `snapshotAttachmentState`/`restoreAttachmentState` contract next to
+  `onImageMarkersChanged`, documented together with the tightened
+  `insertImageMarker` id semantics.
+- Regression coverage: `test/editor-image-marker.test.ts` pins out-of-order
+  insert canonicalization, post-prune renumbering, and multi-marker
+  delete+undo payload restoration.
+
+### Why
+
+- The insertion counter only produces reading-order numbers when the cursor
+  sits after every existing marker, so pasting in front of one displayed
+  `[Image #2][Image #1]`; the owner's reconcile-by-position then mispaired or
+  destroyed payloads. Undo restored marker text and registry ids but the
+  payloads live with the owner, so a delete+undo permanently lost the deleted
+  marker's image.
+
+### Why an extension could not handle it
+
+- The marker registry, undo stack, and the id semantics of
+  `insertImageMarker` are `Editor` internals below the component contract;
+  extensions cannot renumber marker text or hook the undo pop.
+
+### Expected merge conflict zones
+
+- MEDIUM: `insertImageMarker()` and the undo snapshot/restore block in
+  `packages/tui/src/components/editor.ts`.
+- LOW: the image-marker section of `packages/tui/src/editor-component.ts`.
+
 ## Repository-wide changes.md audit backfill for renderer, terminal, and component surfaces (2026-08-17)
 
 ### What changed
