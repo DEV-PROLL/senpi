@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Published Senpi tarballs now retain the lockfile-recorded Babel 8 dependency closure inside the bundled codemode sidecar, preventing `@babel/parser` resolution failures during extension startup ([#923](https://github.com/code-yeongyu/senpi/issues/923)).
 - Headless Claude SDK OAuth continuation now restores its persisted SDK binding across separate CLI processes, so
   `-p -c` resumes the existing lineage instead of resending the full conversation after a `registry_miss`.
 
