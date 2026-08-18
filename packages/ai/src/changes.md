@@ -1,5 +1,31 @@
 # AI Source Changes
 
+## 2026-08-18 - Current xAI Grok reasoning specifications
+
+### What changed and why
+
+- `scripts/generate-models.ts` now treats xAI reasoning controls as model-specific instead of inheriting the generic
+  Grok compatibility veto. `grok-4.6` exposes only the documented `low`, `medium`, `high`, and `xhigh` levels and
+  enables OpenAI-compatible `reasoning_effort` serialization. The fixed-reasoning Grok 4.20 variant exposes only
+  `high`, while the non-reasoning variant exposes only `off`; neither Grok 4.20 model sends a reasoning-effort field.
+- The generated xAI catalog again includes `grok-4.20-0309-reasoning` and
+  `grok-4.20-0309-non-reasoning`. They were removed with the older 0.80.9 catalog cleanup, but current official xAI
+  model pages and the live models.dev catalog list both canonical IDs as active tool-capable models.
+- Focused catalog and payload tests pin the exact selectable levels and Chat Completions request bodies so future
+  model-data hydration cannot silently disable Grok 4.6 effort control or remove the non-reasoning option.
+
+### Why this cannot be expressed as an extension
+
+- The model selector reads built-in catalog metadata before extensions can alter provider request compatibility, and
+  `reasoning_effort` is serialized inside the provider-owned OpenAI Completions adapter. An extension cannot safely
+  repair both the catalog and the outbound xAI wire contract.
+
+### Expected merge conflict zones
+
+- MEDIUM: `scripts/generate-models.ts` xAI model filtering and per-model metadata; upstream model-catalog refreshes
+  may edit the same constants and generation loop.
+- LOW: generated `src/providers/data/xai.json`, its manifest hash, and focused xAI tests.
+
 ## 2026-08-17 - Cursor exec result closure + per-exec heartbeats
 
 ### What changed and why
