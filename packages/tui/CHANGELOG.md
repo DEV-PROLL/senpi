@@ -12,6 +12,18 @@
 
 ### Removed
 
+## [2026.8.18-2] - 2026-08-18
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [2026.8.18] - 2026-08-18
 
 ### Breaking Changes

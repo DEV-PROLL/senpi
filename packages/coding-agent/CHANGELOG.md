@@ -6,10 +6,33 @@
 
 ### Fixed
 
+### New Features
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Removed
+
+## [2026.8.18-2] - 2026-08-18
+
+### Added
+
+### Fixed
+
 - Goals no longer stall after a settings hot-reload: a reload `session_start` now re-engages an active goal (re-arming the monitor backstop while wake sources are live, or queueing a continuation through the existing sessionStart admission) instead of parking it until the next user message; stopped goals still never auto-start on reload ([#936](https://github.com/code-yeongyu/senpi/pull/936)).
 - Cursor CLI OAuth is now available by default when its real prerequisites exist: with `cursor-agent` installed and no managed CLI account, a native `cursor` OAuth credential is copied automatically into one canonical `native` slot without modifying the primary credential; explicit `enabled: false` remains a hard opt-out, repeated/concurrent startup is idempotent, and `/login cursor` refreshes the CLI fallback in the same session ([#931](https://github.com/code-yeongyu/senpi/pull/931)).
 
-- Cursor exec-bridge lifecycle events now require their originating run signal and await listener delivery, preventing delayed completions from entering a replacement run or becoming detached unhandled rejections.
+- Cursor exec-bridge lifecycle events now require their originating run signal and await listener delivery, preventing delayed completions from entering a replacement run or becoming detached unhandled rejections ([#935](https://github.com/code-yeongyu/senpi/pull/935)).
+- Model recovery now preserves Cursor's in-memory resolved-tool marker on native tool-call blocks, so Claude/Kimi-id
+  Cursor turns do not execute server-resolved bash/write/delete calls a second time
+  ([#939](https://github.com/code-yeongyu/senpi/pull/939)).
+- GPT-5.6 Sol and Sol Fast now default to a 400,000-token context window in both the direct OpenAI and
+  ChatGPT OAuth (`openai-codex`) catalogs ([#933](https://github.com/code-yeongyu/senpi/pull/933)).
+- Refreshed Vercel AI Gateway pricing for `alibaba/qwen3.8-27b` from zero-value placeholder metadata to the
+  current upstream input, output, and cache-read rates ([#933](https://github.com/code-yeongyu/senpi/pull/933)).
 
 ### New Features
 
