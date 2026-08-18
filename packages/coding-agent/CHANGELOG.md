@@ -18,6 +18,8 @@
 
 ### Added
 
+- Pasting a clipboard image in the interactive TUI now attaches the image to the submission instead of inserting its temp file path: the composer shows an atomic `[Image #N]` marker, the bytes ride the user message as an image content part in reading order, and markers transfer between editor instances (or are stripped with their payloads dropped when the destination cannot own them).
+
 - Cursor model listings report corrected context windows (current Claude families and GPT 5.5/5.6 at 1M,
   Grok at 500K) and the cursor-agent CLI spawn string requests the matching `context` token.
 

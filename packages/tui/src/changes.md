@@ -664,3 +664,26 @@ Component-level caching is added in coding-agent components because high-frequen
   - ANSI escape bytes remain below the content-byte budget,
   - every `DECSET 2026` begin has a matching end,
   - no `fullRender(true)` equivalent clear occurs after the init phase.
+
+## Atomic image markers for clipboard-pasted images (2026-08-18)
+
+### What changed
+
+- `packages/tui/src/image-markers.ts` (new): `ImageMarkerRegistry` tracks the ids of atomic `[Image #N]` markers living in editor text, storing ids only and never image bytes. It guarantees the visible numbers stay a contiguous `1..k` sequence (via `canonicalize()`), exposes `authorizedMarkers()` for markers occurring exactly once (the only ones safe to treat as atomic), and supports single-occurrence removal plus `EditorImageState` snapshots for transfer between editor instances.
+- `packages/tui/src/paste-markers.ts`: marker segmentation generalized so paste markers and image markers share the same atomic-segment machinery instead of the paste path owning a private tokenizer.
+- `packages/tui/src/components/editor.ts`: image markers are treated as atomic editor segments. `insertImageMarker()` inserts the next `[Image #N]` marker at the cursor and returns its id, backspace/delete removes a marker whole, `getImageMarkerState()`/`setImageMarkerState()` export and install registry snapshots, and `onImageMarkersChanged` reports the ids in text reading order whenever markers are added, removed, pruned, or renumbered.
+- `packages/tui/src/editor-component.ts`: the `EditorComponent` interface gains the optional image-marker API (`insertImageMarker`, `getImageMarkerState`, `setImageMarkerState`, `onImageMarkersChanged`) with paired-contract docs: an editor exposing insertion without the change callback is treated as image-unaware and receives the plain text path instead.
+- `packages/tui/src/index.ts`: exports the image-marker surface (`ImageMarkerRegistry`, `EditorImageState`, `ImageMarkerCanonicalization`, `ImageMarkerRemoval`, `IMAGE_MARKER_REGEX`, `IMAGE_MARKER_SINGLE`, `formatImageMarker`, `isImageMarker`, `imageMarkerId`).
+
+### Why
+
+- Pasting a clipboard image used to insert the raw temp file path into the composer, leaking local filesystem paths into prompts and transcripts. Atomic markers let the editor display `[Image #1]` while the payload lives outside the text, and contiguous renumbering keeps the Nth marker mapped to the Nth submitted image.
+
+### Why an extension could not handle it
+
+- Cursor discipline, segment atomics, and the editor's text model are TUI internals; an extension can compose components but cannot make backspace delete a marker whole or keep registry ids synchronized with visible numbers across editor instances.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/tui/src/components/editor.ts` (segment handling around cursor movement and deletion) and `packages/tui/src/paste-markers.ts` (the generalized segmentation shared with paste markers).
+- LOW: `packages/tui/src/image-markers.ts` (new fork-owned file, no upstream counterpart), `packages/tui/src/editor-component.ts` (additive optional interface members), and the `packages/tui/src/index.ts` export lists.

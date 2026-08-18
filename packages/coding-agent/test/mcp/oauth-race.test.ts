@@ -10,7 +10,10 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { beginAuthorization, completeAuthorization } from "../../src/core/extensions/builtin/mcp/auth/oauth.ts";
 import { McpOAuthProvider } from "../../src/core/extensions/builtin/mcp/auth/oauth-provider.ts";
 import { McpTokenStore } from "../../src/core/extensions/builtin/mcp/auth/token-store.ts";
+import { assertWorkspaceBuildPrerequisite } from "../support/workspace-build-prerequisite.ts";
 import { type IdpFixture, spawnOAuthIdp } from "./fixtures/spawn-idp.ts";
+
+assertWorkspaceBuildPrerequisite(import.meta.url);
 
 const execFileAsync = promisify(execFile);
 const workerPath = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "oauth-race-worker.ts");
