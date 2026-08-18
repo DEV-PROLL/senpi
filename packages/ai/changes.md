@@ -32,9 +32,9 @@
 
 ### Modified upstream files
 
-- `scripts/generate-models.ts`
-- `test/openai-fast-models.test.ts`
-- `src/providers/data/*.json`
+- `packages/ai/scripts/generate-models.ts`
+- `packages/ai/test/openai-fast-models.test.ts`
+- `packages/ai/src/providers/data/*.json`
 
 ### Expected merge conflict zones
 
