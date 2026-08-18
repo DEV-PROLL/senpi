@@ -1,6 +1,5 @@
-import type { getSessionMessages, SessionMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ClaudeSdkOauthAuthLane } from "../src/core/extensions/builtin/claude-sdk-oauth/options.ts";
 import {
 	overrideSdkBoundary,
 	resetSdkBoundary,
@@ -10,38 +9,17 @@ import {
 	type ContinuityDecisionInput,
 	decideNativeContinuity,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-continuity.ts";
-import * as sessionReattach from "../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
-
-// Extend the expected SdkBoundary shape so overrideSdkBoundary can carry the
-// getSessionMessages boundary used by verifyRestoredTranscript.
-interface ExtendedSdkBoundary extends SdkBoundary {
-	getSessionMessages: typeof getSessionMessages;
-}
-
-type VerifyRestoredTranscript = (
-	binding: sessionReattach.ContinuityBinding,
-	cwd: string,
-	authLane: ClaudeSdkOauthAuthLane,
-) => Promise<boolean>;
-
-function isVerifyRestoredTranscript(value: unknown): value is VerifyRestoredTranscript {
-	return typeof value === "function";
-}
-
-async function loadVerifyRestoredTranscript(): Promise<VerifyRestoredTranscript> {
-	const value: unknown = Reflect.get(sessionReattach, "verifyRestoredTranscript");
-	if (!isVerifyRestoredTranscript(value)) {
-		throw new Error("verifyRestoredTranscript is not exported as a function from session-reattach.ts");
-	}
-	return value;
-}
+import {
+	type ContinuityBinding,
+	verifyRestoredTranscript,
+} from "../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
 
 const SDK_SESSION_ID = "sdk-session-1";
 const SENPI_SESSION_ID = "senpi-session-1";
 const CWD = "/repo";
 const ASSISTANT_UUID = "uuid-a2";
 
-function persistedBinding(): sessionReattach.ContinuityBinding {
+function persistedBinding(): ContinuityBinding {
 	return {
 		senpiSessionId: SENPI_SESSION_ID,
 		sdkSessionId: SDK_SESSION_ID,
@@ -143,8 +121,7 @@ describe("claude-sdk-oauth restored security", () => {
 
 	describe("verifyRestoredTranscript", () => {
 		async function runVerify(messages: SessionMessage[]): Promise<boolean> {
-			const verifyRestoredTranscript = await loadVerifyRestoredTranscript();
-			const boundary: Partial<ExtendedSdkBoundary> = {
+			const boundary: Partial<SdkBoundary> = {
 				getSessionMessages: async () => messages,
 			};
 			overrideSdkBoundary(boundary);
@@ -181,8 +158,7 @@ describe("claude-sdk-oauth restored security", () => {
 		});
 
 		it("returns false when lookup throws", async () => {
-			const verifyRestoredTranscript = await loadVerifyRestoredTranscript();
-			const boundary: Partial<ExtendedSdkBoundary> = {
+			const boundary: Partial<SdkBoundary> = {
 				getSessionMessages: async () => {
 					throw new Error("lookup failed");
 				},
@@ -192,8 +168,7 @@ describe("claude-sdk-oauth restored security", () => {
 		});
 
 		it("returns false for the config-dir auth lane", async () => {
-			const verifyRestoredTranscript = await loadVerifyRestoredTranscript();
-			const boundary: Partial<ExtendedSdkBoundary> = {
+			const boundary: Partial<SdkBoundary> = {
 				getSessionMessages: async () => {
 					throw new Error("lookup should not be attempted for config-dir");
 				},
