@@ -1,5 +1,25 @@
 # changes
 
+## 2026-08-18 - Cursor reasoning-level startup wiring
+
+### What changed
+
+- `packages/coding-agent/src/main.ts`: startup carries the resolved thinking selection (CLI `--thinking`,
+  `:suffix` model patterns, favorites, legacy cursor variant ids) into session state so the first turn's
+  provider request encodes the user's actual choice.
+
+### Why
+
+- Cursor models encode reasoning on the wire; a defaulted level must not be mistaken for an explicit one.
+
+### Why an extension could not handle it
+
+- CLI argument resolution and initial session construction are core startup surfaces.
+
+### Expected merge conflict zones
+
+- `main.ts` model/thinking option resolution block.
+
 ## Repository audit baseline for the src tracker (2026-08-17)
 
 ### What changed

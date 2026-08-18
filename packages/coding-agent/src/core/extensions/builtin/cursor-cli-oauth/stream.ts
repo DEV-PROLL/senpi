@@ -43,6 +43,7 @@ import {
 	cursorCliSessionRouter,
 } from "./session-router.ts";
 import { type CursorCliOauthProviderSettings, loadCursorCliOauthProviderSettingsFromDisk } from "./settings.ts";
+import { resolveCursorCliSpawnModel } from "./spawn-model.ts";
 import type { CursorCliStreamEvent, CursorCliToolCallEvent } from "./stream-parser.ts";
 import { CursorCliAbortError, type CursorCliTransportHandle, spawnCursorCli } from "./transport.ts";
 
@@ -476,9 +477,10 @@ export function streamCursorCliOauth(
 
 			const prompt = lastUserPrompt(context);
 			const senpiSessionId = options?.affinitySessionId ?? options?.sessionId ?? DEFAULT_CURSOR_AFFINITY_KEY;
+			const spawnModel = resolveCursorCliSpawnModel(model as Model<"cursor-agent">, options?.thinkingSelection);
 			const turnInput: CursorCliSessionTurnInput = {
 				prompt,
-				model: model.id,
+				model: spawnModel,
 				recentExchanges: recapExchanges(context),
 			};
 
@@ -510,7 +512,7 @@ export function streamCursorCliOauth(
 								applyCursorCliDenyConfig(home, policy.denyCommands);
 								const handle = spawnCursorCli({
 									prompt: attempt.prompt,
-									model: model.id,
+									model: spawnModel,
 									resumeChatId: attempt.resumeChatId,
 									force: policy.force,
 									executionMode: policy.executionMode,

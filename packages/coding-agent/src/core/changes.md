@@ -1,5 +1,33 @@
 # changes
 
+## 2026-08-18 - Cursor reasoning levels: session provenance and legacy id resolution
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`, `agent-session-services.ts`, `session-manager.ts`:
+  record, persist, and restore provenance-bearing thinking selections (explicit user actions, CLI `:suffix`,
+  favorites, legacy variant ids); defaulted levels stay selection-free and next-turn refresh returns the
+  selection so mid-run switches propagate.
+- `packages/coding-agent/src/core/model-resolver.ts`: resolve allowlisted legacy Cursor variant ids to their
+  grouped identity plus selection ahead of generic partial matching, and project wildcard/enabled/favorite
+  patterns across the alias union without cross-provider projection.
+- `packages/coding-agent/src/core/sdk.ts`: carry the startup selection into agent state.
+
+### Why
+
+- The Cursor catalog now publishes grouped identities, so sessions, favorites, and enabled-model patterns that
+  referenced the old expanded variant ids must keep resolving, with the level they encoded preserved.
+
+### Why an extension could not handle it
+
+- Session state, persistence entries, startup model resolution, and favorite/enabled pattern expansion are
+  core surfaces with no extension hook.
+
+### Expected merge conflict zones
+
+- `model-resolver.ts` pattern matching and partial-match ordering, `agent-session.ts` thinking-level setters,
+  `session-manager.ts` entry schema.
+
 ## Cursor bridge lifecycle events retain run ownership (2026-08-18)
 
 ### What changed

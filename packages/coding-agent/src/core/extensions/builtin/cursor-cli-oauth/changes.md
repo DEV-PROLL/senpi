@@ -1,5 +1,30 @@
 # cursor-cli-oauth extension changes
 
+## 2026-08-18 - Cursor CLI lane reasoning + catalog normalization
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/cursor-cli-oauth/spawn-model.ts` (new): resolves one
+  `--model` argv element per turn from the shared cursor selection resolver.
+- `packages/coding-agent/src/core/extensions/builtin/cursor-cli-oauth/stream.ts`: resolves the spawn model
+  once and uses it for both session routing and every failover spawn.
+- `packages/coding-agent/src/core/extensions/builtin/cursor-cli-oauth/models.ts`: the CLI listing, the cached
+  catalog, and the offline static fallback all normalize through the shared grouping, replacing the
+  label-derived context-window heuristic with the live capability table.
+
+### Why
+
+- The CLI lane is the second Cursor surface: senpi reasoning levels must drive it through the same
+  abstraction, and its label heuristic reported stale windows (e.g. Grok 4.6 as 200K).
+
+### Why an extension could not handle it
+
+- This is itself the builtin extension that owns the lane's catalog and subprocess spawn arguments.
+
+### Expected merge conflict zones
+
+- `models.ts` entry construction, `stream.ts` spawn/turn-input sites.
+
 ## 2026-08-18 - Default-on native credential bootstrap
 
 ### What changed

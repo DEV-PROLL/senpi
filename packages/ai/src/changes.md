@@ -1,5 +1,39 @@
 # AI Source Changes
 
+## 2026-08-18 - Cursor reasoning levels end to end
+
+### What changed
+
+- `src/cursor/model-capabilities.ts`, `src/cursor/cursor-variant-aliases.json`: committed static capability table
+  (windows, parameter orders, exact level encodings incl. GPT 5.5/Codex 5.3 `extra-high` and off=`none` families)
+  plus the 204-id alias index, both derived from the live aiserver.v1 AvailableModels capture of 2026-08-18.
+- `src/cursor/catalog-grouping.ts`: lossless variant parser + grouping (Claude `base`/`base-thinking` boolean axis,
+  fast variants retained raw) with total seven-key thinkingLevelMaps; golden 204->113/32 pinned by fixture test.
+- `src/cursor/selection-descriptor.ts`: transport-neutral selection resolver (parameters vs suffix-id encodings)
+  shared by the native protobuf lane and the `cursor-cli-oauth` extension.
+- `src/cursor/store-migration.ts`: idempotent stored-catalog regrouping.
+- `providers/cursor.ts`: discovery now publishes grouped identities with `compat.cursorReasoning` and correct
+  windows; `api/cursor-agent.ts` renders `options.thinkingSelection` into `RequestedModel.parameters`; absent
+  selections keep the representative-variant request shape byte-exactly.
+- `packages/ai/src/index.ts`: re-exports the shared cursor capability, grouping, and selection API.
+- `packages/ai/src/models.ts`: new `restoreModels` provider hook (try/catch — stored catalog survives a throwing transform).
+- `packages/ai/src/types.ts` / `packages/ai/src/model.ts`: `ThinkingSelection` type + `CursorAgentCompat.cursorReasoning` capability gate.
+
+### Why
+
+- The Cursor catalog exposed 204 expanded variant ids with reasoning disabled, so senpi thinking
+  levels could not reach the wire and context windows came from stale name heuristics.
+
+### Why an extension couldn't do it
+
+- Provider discovery normalization, protobuf Run-request construction, agent-loop option propagation, and the
+  models-store restore path are core runtime seams an extension cannot reach.
+
+### Expected merge-conflict zones
+
+- `api/cursor-agent.ts` (Run-request builder + streamSimple), `providers/cursor.ts`, `models.ts` restore path,
+  `types.ts` SimpleStreamOptions, `packages/agent/src/agent-loop.ts` prepareNextTurn merge.
+
 ## 2026-08-17 - Cursor exec result closure + per-exec heartbeats
 
 ### What changed and why

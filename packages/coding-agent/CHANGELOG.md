@@ -4,6 +4,13 @@
 
 ### Added
 
+- Cursor reasoning levels now drive both Cursor surfaces: the thinking-level selector, `:suffix` model
+  patterns, and favorites carry provenance into the wire request, the native protobuf lane sends per-family
+  `RequestedModel.parameters`, and the `cursor-cli-oauth` lane spawns with the matching bracket or suffix
+  model string. Cursor catalogs collapse the expanded variant ids into selectable identities with correct
+  live-catalog context windows (Kimi K3 1M, Grok 256K, GPT 272K), while legacy variant ids, stored catalogs,
+  and wildcard enabled/favorite patterns keep resolving to the new identities with their level preserved.
+
 ### Fixed
 
 - Headless Claude SDK OAuth continuation now restores its persisted SDK binding across separate CLI processes, so

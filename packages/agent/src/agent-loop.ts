@@ -362,6 +362,10 @@ async function runLoop(
 							: nextTurnSnapshot.thinkingLevel === "off"
 								? undefined
 								: nextTurnSnapshot.thinkingLevel,
+					thinkingSelection:
+						nextTurnSnapshot.thinkingSelection === undefined
+							? config.thinkingSelection
+							: (nextTurnSnapshot.thinkingSelection ?? undefined),
 					abortServerSideFallback: nextTurnSnapshot.abortServerSideFallback ?? config.abortServerSideFallback,
 				};
 			}

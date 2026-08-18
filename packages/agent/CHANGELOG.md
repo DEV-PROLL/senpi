@@ -6,6 +6,11 @@
 
 ### Added
 
+- `ThinkingSelection` provenance now travels from agent state through `createLoopConfig`, mid-run
+  `prepareNextTurn` updates (undefined leaves unchanged, null clears), and the remote proxy's
+  serializable options, letting providers distinguish an explicit user choice from the
+  always-materialized effective reasoning level.
+
 ### Changed
 
 ### Fixed
