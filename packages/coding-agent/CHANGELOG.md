@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
 ### Added
 
 - Cursor model listings report corrected context windows (current Claude families and GPT 5.5/5.6 at 1M,
@@ -13,6 +15,8 @@
   model string. Cursor catalogs collapse the expanded variant ids into selectable identities with correct
   live-catalog context windows (Kimi K3 1M, Grok 256K, GPT 272K), while legacy variant ids, stored catalogs,
   and wildcard enabled/favorite patterns keep resolving to the new identities with their level preserved.
+
+### Changed
 
 ### Fixed
 
@@ -35,15 +39,6 @@
 - Messages typed while auto-compaction is running are no longer silently dropped: input submitted during `Compacting context...` is queued and delivered after compaction settles instead of being accepted and discarded. Manual `/compact` keeps rejecting unqueueable prompts as before ([#950](https://github.com/code-yeongyu/senpi/pull/950)).
 
 - Cursor exec-bridge dispatches are now bound to the run that opened their stream, so a straggler exec frame from a run that already ended (for example after a provider rate-limit error restarts the turn on a fallback lane) is refused instead of executing a dead run's tool inside the replacement run and leaking its lifecycle events into the new transcript.
-
->>>>>>> origin/main
-### New Features
-
-### Breaking Changes
-
-### Added
-
-### Changed
 
 ### Removed
 
