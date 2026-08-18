@@ -1,5 +1,49 @@
 # changes
 
+## Pasted image markers keep canonical numbering and survive undo with their payloads (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`:
+  `reconcilePendingImages()` now clears and refills the SAME `pendingImages`
+  map instead of reassigning it, so `handleClipboardPaste`'s by-reference handoff
+  into `attachClipboardImage` can never write into an orphaned map;
+  `subscribeImageMarkers()` wires the editor's new
+  `snapshotAttachmentState`/`restoreAttachmentState` hooks so undo restores
+  the payload map alongside the marker text; `queueCompactionSubmission()`
+  (called from the submit handler's steer branch and `handleFollowUp`)
+  consumes image-bearing submissions during compaction with a visible drop
+  status and strips their dead literal markers from the queued text.
+- Regression coverage: `test/interactive-mode-clipboard-paste.test.ts` and
+  `test/interactive-mode-image-submission.test.ts` now drive a REAL pi-tui
+  `Editor` through the REAL paste/notify/submit path (two in-order pastes,
+  paste-before-marker, delete+undo payload restore, compaction drops).
+
+### Why
+
+- The second paste in a turn destroyed its own image:
+  `insertImageMarker()` fired `onImageMarkersChanged` synchronously, the
+  reconciler replaced the map's identity, and the subsequent
+  `pendingImages.set(id, ...)` wrote into the orphaned map - shipping
+  `[Image #1][Image #2]` with one image. An out-of-order paste (Home then
+  paste) shipped `[Image #2][Image #1]` and mispaired the survivor, so
+  `look_at("[Image #1]")` resolved to the wrong attachment or threw. Undo
+  after a whole-marker delete restored the marker text but not its payload,
+  permanently destroying that image. Alt+Enter during compaction consumed and
+  silently discarded pasted images.
+
+### Why an extension could not handle it
+
+- `pendingImages`, the marker notification wiring, and the compaction queue
+  are private `InteractiveMode` composer state; extensions receive neither the
+  marker-id stream nor a hook into the submit/compaction decision points.
+
+### Expected merge conflict zones
+
+- MEDIUM: `reconcilePendingImages()` and `subscribeImageMarkers()` in
+  `interactive-mode.ts` (adjacent to the paste handler wiring), and
+  `queueCompactionSubmission()` next to `queueCompactionMessage()`.
+
 ## Native Cursor login refreshes the CLI fallback lane in the same session (2026-08-18)
 
 ### What changed

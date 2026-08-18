@@ -8,9 +8,13 @@
 
 - Atomic `[Image #N]` editor markers for pasted images: a new `ImageMarkerRegistry` (ids only, never bytes) with contiguous renumbering, whole-marker deletion, registry snapshots for editor-to-editor transfer, and a paired optional image-marker API on `EditorComponent`, exported from the package index.
 
+- Optional paired `snapshotAttachmentState`/`restoreAttachmentState` owner hooks on `Editor` and `EditorComponent`: the editor's undo stack captures the caller's marker-keyed attachment payloads opaquely and restores them before the marker-order notification, so undoing a marker delete revives its image along with its text.
+
 ### Changed
 
 ### Fixed
+
+- `insertImageMarker()` now renumbers the visible markers to canonical `1..k` in reading order and returns the marker's final canonical id (previously the insertion counter), so a paste in front of an existing marker displays `[Image #1][Image #2]` instead of `[Image #2][Image #1]`, and the id the caller keys its payload under matches the number the user sees; `setText()` applies the same canonicalization after pruning so a surviving high id displays as `[Image #1]`.
 
 ### Removed
 
