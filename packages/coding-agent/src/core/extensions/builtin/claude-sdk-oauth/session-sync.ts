@@ -72,8 +72,12 @@ export function isTransmittedMessage(message: { role: string }): message is Sent
 	return !isContentlessUserMessage(message as SentMessage);
 }
 
+/**
+ * Applies the transmitted-message rule itself, so no caller can produce a hash
+ * list that disagrees with another caller's by forgetting the filter.
+ */
 export function sentMessageHashes(messages: readonly SentMessage[]): string[] {
-	const hashes = messages.map((message) =>
+	const hashes = messages.filter(isTransmittedMessage).map((message) =>
 		digest(
 			message.role === "user"
 				? { role: message.role, content: message.content }
