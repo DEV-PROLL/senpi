@@ -46,7 +46,7 @@ describe("resolveCursorSelectionDescriptor", () => {
 			modelId: "claude-fable-5",
 			parameters: [
 				{ id: "thinking", value: "true" },
-				{ id: "context", value: "300k" },
+				{ id: "context", value: "1m" },
 				{ id: "effort", value: "low" },
 			],
 		});
@@ -63,7 +63,7 @@ describe("resolveCursorSelectionDescriptor", () => {
 		const out = resolveCursorSelectionDescriptor(cursorModel("claude-fable-5", compat), explicit("max"));
 		expect(out?.parameters).toEqual([
 			{ id: "thinking", value: "false" },
-			{ id: "context", value: "300k" },
+			{ id: "context", value: "1m" },
 			{ id: "effort", value: "max" },
 		]);
 	});
@@ -73,7 +73,7 @@ describe("resolveCursorSelectionDescriptor", () => {
 		expect(out).toEqual({
 			modelId: "gpt-5.5",
 			parameters: [
-				{ id: "context", value: "272k" },
+				{ id: "context", value: "1m" },
 				{ id: "reasoning", value: "extra-high" },
 				{ id: "fast", value: "false" },
 			],
@@ -128,7 +128,7 @@ describe("resolveCursorSelectionDescriptor", () => {
 	it("renders supported explicit off as reasoning=none", () => {
 		const out = resolveCursorSelectionDescriptor(cursorModel("gpt-5.5", gpt55Compat), explicit("off"));
 		expect(out?.parameters).toEqual([
-			{ id: "context", value: "272k" },
+			{ id: "context", value: "1m" },
 			{ id: "reasoning", value: "none" },
 			{ id: "fast", value: "false" },
 		]);

@@ -17,28 +17,28 @@ describe("cursor model capabilities", () => {
 		const expected: Record<string, number> = {
 			"kimi-k3": 1048576,
 			"glm-5.2": 1000000,
-			"gemini-3.6-flash": 1000000,
-			"gemini-3.7-flash": 1000000,
-			"gpt-5.1": 272000,
-			"gpt-5.2": 272000,
-			"gpt-5.3-codex": 272000,
-			"gpt-5.4": 272000,
-			"gpt-5.4-mini": 272000,
-			"gpt-5.4-nano": 272000,
-			"gpt-5.5": 272000,
-			"gpt-5.6-sol": 272000,
-			"gpt-5.6-luna": 272000,
+			"gemini-3.6-flash": 1048576,
+			"gemini-3.7-flash": 1048576,
+			"gpt-5.1": 400000,
+			"gpt-5.2": 400000,
+			"gpt-5.3-codex": 400000,
+			"gpt-5.4": 400000,
+			"gpt-5.4-mini": 400000,
+			"gpt-5.4-nano": 400000,
+			"gpt-5.5": 1000000,
+			"gpt-5.6-sol": 1000000,
+			"gpt-5.6-luna": 1000000,
 			"gpt-5.6-terra": 272000,
-			"cursor-grok-4.5": 256000,
-			"cursor-grok-4.6": 256000,
-			"kimi-k2.7-code": 262000,
+			"cursor-grok-4.5": 500000,
+			"cursor-grok-4.6": 500000,
+			"kimi-k2.7-code": 262144,
 			"claude-4.6-sonnet": 1000000,
 			"claude-4.6-opus": 1000000,
-			"claude-fable-5": 300000,
-			"claude-sonnet-5": 300000,
-			"claude-opus-4-7": 300000,
-			"claude-opus-4-8": 300000,
-			"claude-opus-5": 300000,
+			"claude-fable-5": 1000000,
+			"claude-sonnet-5": 1000000,
+			"claude-opus-4-7": 1000000,
+			"claude-opus-4-8": 1000000,
+			"claude-opus-5": 1000000,
 			"composer-2.5": 200000,
 			"claude-haiku-4-5": 200000,
 			"claude-4-sonnet": 200000,
@@ -54,8 +54,9 @@ describe("cursor model capabilities", () => {
 
 	it("keeps window and maxWindow distinct", () => {
 		const fable = getCursorCapabilityForBase("claude-fable-5");
-		expect(fable?.window).toBe(300000);
+		expect(fable?.window).toBe(1000000);
 		expect(fable?.maxWindow).toBe(1000000);
+		expect(fable?.defaultContext).toBe("300k");
 		const kimi = getCursorCapabilityForBase("kimi-k3");
 		expect(kimi?.window).toBe(1048576);
 		expect(kimi?.maxWindow).toBeUndefined();

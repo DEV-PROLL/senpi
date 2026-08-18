@@ -4,6 +4,9 @@
 
 ### Added
 
+- Cursor model listings report corrected context windows (current Claude families and GPT 5.5/5.6 at 1M,
+  Grok at 500K) and the cursor-agent CLI spawn string requests the matching `context` token.
+
 - Cursor reasoning levels now drive both Cursor surfaces: the thinking-level selector, `:suffix` model
   patterns, and favorites carry provenance into the wire request, the native protobuf lane sends per-family
   `RequestedModel.parameters`, and the `cursor-cli-oauth` lane spawns with the matching bracket or suffix

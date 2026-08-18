@@ -1,5 +1,32 @@
 # AI Source Changes
 
+## 2026-08-18 - Cursor context windows tracked to the models.dev first-party SSOT
+
+### What changed
+
+- `packages/ai/src/cursor/model-capabilities.ts`: window values now derive from the models.dev
+  first-party catalog capped by the `context` options Cursor actually offers each family, and the
+  capability gains `requestContext` — the context token matching the advertised window.
+- `packages/ai/src/cursor/selection-descriptor.ts`: the wire mapper emits
+  `requestContext ?? defaultContext`, so a family advertising 1M also asks Cursor for `context=1m`.
+
+### Why
+
+- Claude families were encoded at 300000, copied from the cursor-agent CLI listing's stale
+  "(300K context)" display labels; models.dev, Cursor's `1m` context option, and the models' own "1M"
+  display names all agree they are 1000000. Advertising a window larger than the context the request
+  asks for would let compaction overrun what Cursor was told to allocate, so the two values are one
+  contract and are now verified together.
+
+### Why an extension could not handle it
+
+- The capability table and the protobuf/CLI wire mapper are core provider data consumed by both
+  Cursor transports; no extension hook sits between them.
+
+### Expected merge conflict zones
+
+- `model-capabilities.ts` family table and helper signatures, `selection-descriptor.ts` parameter switch.
+
 ## 2026-08-18 - Cursor reasoning levels end to end
 
 ### What changed

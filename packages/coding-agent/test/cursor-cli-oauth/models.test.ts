@@ -50,12 +50,12 @@ describe("parseCursorAgentModelsListing", () => {
 		expect(models.find((model) => model.id === "gemini-3.7-flash")).toMatchObject({
 			reasoning: true,
 			input: ["text"],
-			contextWindow: 1_000_000,
+			contextWindow: 1_048_576,
 			maxTokens: 64_000,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		});
-		expect(models.find((model) => model.id === "claude-opus-5-thinking")?.contextWindow).toBe(300_000);
-		expect(models.find((model) => model.id === "gpt-5.6-sol")?.contextWindow).toBe(272_000);
+		expect(models.find((model) => model.id === "claude-opus-5-thinking")?.contextWindow).toBe(1_000_000);
+		expect(models.find((model) => model.id === "gpt-5.6-sol")?.contextWindow).toBe(1_000_000);
 		expect(models.find((model) => model.id === "composer-2.5")?.contextWindow).toBe(200_000);
 		expect(models.find((model) => model.id === "composer-2.5-fast")?.reasoning).toBe(false);
 	});
@@ -70,7 +70,7 @@ describe("parseCursorAgentModelsListing", () => {
 				id: "claude-opus-5-thinking-max-fast",
 				name: "Claude Opus 5 Thinking Max Fast (300K context)",
 				reasoning: false,
-				contextWindow: 300_000,
+				contextWindow: 1_000_000,
 			}),
 		]);
 	});

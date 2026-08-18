@@ -19,9 +19,9 @@ describe("cursor-cli-oauth catalog normalization", () => {
 		const byId = new Map(parseCursorAgentModelsListing(listing).map((model) => [model.id, model]));
 		// Windows come from the shared live capability table, never from the
 		// listing's own "(200K context)" labels, which are stale for Grok 4.6.
-		expect(byId.get("cursor-grok-4.6")?.contextWindow).toBe(256_000);
-		expect(byId.get("claude-fable-5")?.contextWindow).toBe(300_000);
-		expect(byId.get("claude-opus-4-8")?.contextWindow).toBe(300_000);
+		expect(byId.get("cursor-grok-4.6")?.contextWindow).toBe(500_000);
+		expect(byId.get("claude-fable-5")?.contextWindow).toBe(1_000_000);
+		expect(byId.get("claude-opus-4-8")?.contextWindow).toBe(1_000_000);
 	});
 
 	it("exposes total thinking level maps with per-family wire values", () => {
@@ -37,7 +37,7 @@ describe("cursor-cli-oauth catalog normalization", () => {
 
 	it("keeps the offline static fallback usable with canonical ids and windows", () => {
 		const byId = new Map(STATIC_CURSOR_CLI_MODELS.map((model) => [model.id, model]));
-		expect(byId.get("cursor-grok-4.6")?.contextWindow).toBe(256_000);
+		expect(byId.get("cursor-grok-4.6")?.contextWindow).toBe(500_000);
 		expect(STATIC_CURSOR_CLI_MODELS.some((model) => model.reasoning)).toBe(true);
 	});
 });
