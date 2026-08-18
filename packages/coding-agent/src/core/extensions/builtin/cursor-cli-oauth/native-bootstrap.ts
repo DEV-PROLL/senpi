@@ -5,6 +5,7 @@ import { CURSOR_CLI_OAUTH_PROVIDER_ID, importNativeCursorCredential } from "./oa
 export type CursorCliNativeBootstrapDeps = {
 	store: CredentialStore;
 	readNativeCredential: () => Credential | undefined | Promise<Credential | undefined>;
+	canBootstrap?: () => boolean | Promise<boolean>;
 };
 
 function asManagedCredential(credential: Credential | undefined): CursorCliOauthCredential | undefined {
@@ -20,6 +21,7 @@ async function bootstrapNativeCredential(deps: CursorCliNativeBootstrapDeps): Pr
 		const managed = asManagedCredential(current);
 		if (managed && listAccounts(managed).length > 0) return current;
 		if (current !== undefined && !managed) return current;
+		if (deps.canBootstrap !== undefined && !(await deps.canBootstrap())) return current;
 
 		const native = await deps.readNativeCredential();
 		if (native === undefined) return current;

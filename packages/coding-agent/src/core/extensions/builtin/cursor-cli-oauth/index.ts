@@ -47,6 +47,16 @@ export function registerCursorCliOauthExtension(pi: ExtensionAPI, deps: CursorCl
 		createCursorCliOauthCredentialReader({
 			store,
 			readNativeCredential: deps.readNativeCredential ?? (() => store.read("cursor")),
+			canBootstrap: () => {
+				const settings = loadSettings(cwd);
+				if (!settings.enabled) return false;
+				try {
+					resolveExecutable(settings);
+					return true;
+				} catch {
+					return false;
+				}
+			},
 		});
 	const loadSettings = deps.loadSettings ?? loadCursorCliOauthProviderSettingsFromDisk;
 	const resolveExecutable = deps.resolveExecutable ?? defaultResolveExecutable;

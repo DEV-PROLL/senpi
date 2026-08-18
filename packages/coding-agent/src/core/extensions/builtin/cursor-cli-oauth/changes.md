@@ -12,6 +12,9 @@
   empty. It re-checks the target inside `CredentialStore.modify`, shares only
   in-flight concurrent reads, preserves existing/incompatible credentials,
   never writes the native provider, and returns the previous state on errors.
+  The reader repeats the enabled/executable gate for direct reads outside
+  `assessConfiguration` (notably explicit login), so a cancelled login cannot
+  bypass `enabled:false`.
 - `index.ts`: the builtin registration uses the bootstrap reader only for its
   default `readCurrent`; injected readers keep their existing test/embedding
   behavior.
