@@ -6,6 +6,11 @@
 
 ### Fixed
 
+- Extension widgets no longer change stacking order when their content updates: `setWidget` now replaces the
+  component in place, so two live widgets with independent refresh timers (for example omo-senpi's `omo-task` and
+  `omo-dag` status widgets) stay in a fixed vertical order instead of bouncing on every refresh
+  ([#929](https://github.com/code-yeongyu/senpi/pull/929)).
+
 ### New Features
 
 ### Breaking Changes
