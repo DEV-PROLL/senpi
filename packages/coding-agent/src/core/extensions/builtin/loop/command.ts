@@ -245,6 +245,10 @@ export async function runLoopCommand(
 ): Promise<void> {
 	if (isHeadlessMode(ctx.mode)) {
 		ctx.ui.notify(LOOP_HEADLESS_REJECTION, "warning");
+		// Headless hosts install a no-op UI context, so `notify` alone leaves the refusal
+		// invisible (empty output, exit 0). Write to stderr as well so the message is actually
+		// seen; real stdout stays reserved for `-p` result data.
+		process.stderr.write(`${LOOP_HEADLESS_REJECTION}\n`);
 		return;
 	}
 

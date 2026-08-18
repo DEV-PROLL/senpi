@@ -422,6 +422,31 @@ describe("/loop command", () => {
 		expect(loopStatusFileExists(loop)).toBe(false);
 	});
 
+	it("print-mode rejection reaches a real output channel, not only ctx.ui.notify", async () => {
+		// Regression: headless hosts install `noOpUIContext` (runner.ts), whose notify() is a literal
+		// no-op. This suite injects a capturing UI, so a notify-only rejection passes here while the
+		// real `-p` run prints nothing at all and exits 0 - violating Scope 18's "clear message".
+		// stderr is the right channel: takeOverStdout() reserves real stdout for -p result data.
+		const written: string[] = [];
+		const originalWrite = process.stderr.write;
+		process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+			written.push(String(chunk));
+			return true;
+		}) as typeof process.stderr.write;
+		let loop: LoopHarness;
+		try {
+			loop = await createLoopHarness({ mode: "print" });
+			await prompt(loop, "/loop 5m ping");
+		} finally {
+			process.stderr.write = originalWrite;
+		}
+
+		const emitted = written.join("");
+		expect(emitted, `nothing reached stderr; captured: ${JSON.stringify(written)}`).toContain("interactive");
+		// The refusal must still arm nothing.
+		expect(await loop.store()).toBeNull();
+	});
+
 	it("a slash-command payload dispatches through the command path via expandPromptTemplates", async () => {
 		const loop = await createLoopHarness();
 		loop.harness.setResponses([]);
