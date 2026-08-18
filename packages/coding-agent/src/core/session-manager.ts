@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ImageContent, Message, TextContent, Usage } from "@earendil-works/pi-ai";
+import type { ImageContent, Message, TextContent, ThinkingSelection, Usage } from "@earendil-works/pi-ai";
 import { randomBytes, randomUUID } from "crypto";
 import {
 	appendFileSync,
@@ -105,6 +105,8 @@ export interface SessionMessageEntry extends SessionEntryBase {
 export interface ThinkingLevelChangeEntry extends SessionEntryBase {
 	type: "thinking_level_change";
 	thinkingLevel: string;
+	/** Explicit selector provenance. Omitted by legacy entries and SDK-defaulted fallbacks. */
+	thinkingSelection?: ThinkingSelection;
 }
 
 export interface ModelChangeEntry extends SessionEntryBase {
@@ -220,6 +222,7 @@ export interface SessionTreeNode {
 export interface SessionContext {
 	messages: AgentMessage[];
 	thinkingLevel: string;
+	thinkingSelection?: ThinkingSelection;
 	model: { provider: string; modelId: string } | null;
 }
 
@@ -412,8 +415,11 @@ function buildSessionPath(
 	return path;
 }
 
-function getSessionContextSettings(path: SessionEntry[]): Pick<SessionContext, "thinkingLevel" | "model"> {
+function getSessionContextSettings(
+	path: SessionEntry[],
+): Pick<SessionContext, "thinkingLevel" | "thinkingSelection" | "model"> {
 	let thinkingLevel = "off";
+	let thinkingSelection: ThinkingSelection | undefined;
 	let model: { provider: string; modelId: string } | null = null;
 	let isInFallbackWindow = false;
 	// A fallback switch applies an ephemeral thinking level to the fallback model, so
@@ -421,21 +427,27 @@ function getSessionContextSettings(path: SessionEntry[]): Pick<SessionContext, "
 	// model with the fallback model's level would silently change the reasoning budget.
 	// Mirrors the model restoration above, including the never-reverted (crashed) case.
 	let preFallbackThinkingLevel = thinkingLevel;
+	let preFallbackThinkingSelection = thinkingSelection;
 
 	for (const entry of path) {
 		if (entry.type === "thinking_level_change") {
 			thinkingLevel = entry.thinkingLevel;
+			thinkingSelection = entry.thinkingSelection;
 		} else if (entry.type === "model_change") {
 			if (entry.reason === "fallback") {
 				if (!isInFallbackWindow) {
 					preFallbackThinkingLevel = thinkingLevel;
+					preFallbackThinkingSelection = thinkingSelection;
 					if (entry.originalProvider && entry.originalModelId) {
 						model = { provider: entry.originalProvider, modelId: entry.originalModelId };
 					}
 				}
 				isInFallbackWindow = true;
 			} else if (entry.reason === "fallback-revert") {
-				if (isInFallbackWindow) thinkingLevel = preFallbackThinkingLevel;
+				if (isInFallbackWindow) {
+					thinkingLevel = preFallbackThinkingLevel;
+					thinkingSelection = preFallbackThinkingSelection;
+				}
 				isInFallbackWindow = false;
 			} else {
 				// A manual model switch abandons the window: the level the user set inside
@@ -450,9 +462,12 @@ function getSessionContextSettings(path: SessionEntry[]): Pick<SessionContext, "
 
 	// The process can exit inside a fallback window; the primary model is already
 	// restored above, so its pre-fallback level has to be restored with it.
-	if (isInFallbackWindow) thinkingLevel = preFallbackThinkingLevel;
+	if (isInFallbackWindow) {
+		thinkingLevel = preFallbackThinkingLevel;
+		thinkingSelection = preFallbackThinkingSelection;
+	}
 
-	return { thinkingLevel, model };
+	return { thinkingLevel, thinkingSelection, model };
 }
 
 /**
@@ -555,9 +570,9 @@ export function buildSessionContext(
 	byId?: Map<string, SessionEntry>,
 ): SessionContext {
 	const path = buildSessionPath(entries, leafId, byId);
-	const { thinkingLevel, model } = getSessionContextSettings(path);
+	const { thinkingLevel, thinkingSelection, model } = getSessionContextSettings(path);
 	const messages = buildContextEntries(entries, leafId, byId).flatMap(sessionEntryToContextMessages);
-	return { messages, thinkingLevel, model };
+	return { messages, thinkingLevel, thinkingSelection, model };
 }
 
 /**
@@ -1278,13 +1293,14 @@ export class SessionManager {
 	}
 
 	/** Append a thinking level change as child of current leaf, then advance leaf. Returns entry id. */
-	appendThinkingLevelChange(thinkingLevel: string): string {
+	appendThinkingLevelChange(thinkingLevel: string, thinkingSelection?: ThinkingSelection): string {
 		const entry: ThinkingLevelChangeEntry = {
 			type: "thinking_level_change",
 			id: generateId(this.byId),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			thinkingLevel,
+			thinkingSelection,
 		};
 		this._appendEntry(entry);
 		return entry.id;
