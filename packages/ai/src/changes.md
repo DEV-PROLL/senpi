@@ -4,7 +4,7 @@
 
 ### What changed and why
 
-- `scripts/generate-models.ts` now treats xAI reasoning controls as model-specific instead of inheriting the generic
+- `packages/ai/scripts/generate-models.ts` now treats xAI reasoning controls as model-specific instead of inheriting the generic
   Grok compatibility veto. `grok-4.6` exposes only the documented `low`, `medium`, `high`, and `xhigh` levels and
   enables OpenAI-compatible `reasoning_effort` serialization. The fixed-reasoning Grok 4.20 variant exposes only
   `high`, while the non-reasoning variant exposes only `off`; neither Grok 4.20 model sends a reasoning-effort field.
@@ -22,7 +22,7 @@
 
 ### Expected merge conflict zones
 
-- MEDIUM: `scripts/generate-models.ts` xAI model filtering and per-model metadata; upstream model-catalog refreshes
+- MEDIUM: `packages/ai/scripts/generate-models.ts` xAI model filtering and per-model metadata; upstream model-catalog refreshes
   may edit the same constants and generation loop.
 - LOW: generated `src/providers/data/xai.json`, its manifest hash, and focused xAI tests.
 
