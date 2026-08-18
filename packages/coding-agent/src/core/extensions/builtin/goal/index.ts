@@ -66,6 +66,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		goalStoreRef,
 		beginAgentGoalAccounting,
 		refreshGoalUi: refreshGoalUiBestEffort,
+		resumeAfterSuppressedLoad: (resumeCtx, goal) => queueGoalContinuationForCurrentSession(pi, resumeCtx, goal),
 	});
 
 	const goalTicker = new GoalElapsedTicker({
@@ -163,6 +164,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// leave the goal active (no status rewrite), and tell the user how to resume.
 			const trailingContinuations = countTrailingGoalContinuationEntries(ctx.sessionManager.getBranch());
 			if (trailingContinuations >= GOAL_CONTINUATION_CAP) {
+				// The load-time flood suppression parks the goal without rewriting its
+				// status, so the only resume signal left is the user's next message.
+				// Arm the one-shot latch the direct-input lifecycle fires when that
+				// message is accepted; without it the promise in the notice is a lie
+				// and the resumed session sits idle until the goal is recreated.
+				directInputLifecycle.armSuppressedLoadResume();
 				ctx.ui.notify(
 					`Goal auto-continuation suppressed for this resumed session (${trailingContinuations} historical continuations). Send a message to resume.`,
 					"info",

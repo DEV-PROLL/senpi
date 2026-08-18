@@ -1,5 +1,40 @@
 # changes
 
+## 2026-08-18 - Resume active goals stuck after suppressed continuation-flood loads
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `sendCustomMessage` with `triggerTurn` no longer waits on
+  `_sessionWorkBarrier` while the session-start binding itself holds it (`_extensionBindingPromptReadiness`
+  active). A trigger-turn message queued from the `session_start` emission — a goal continuation queued on
+  resume — previously waited on the very work that was delivering it, so the resumed session rendered the TUI
+  but never started a turn.
+- `core/extensions/builtin/goal/index.ts` + `direct-input-lifecycle.ts`: a suppressed flooded load now arms a
+  one-shot latch; the next accepted user message (the "Send a message to resume" the notice promises) queues
+  the goal continuation immediately instead of only resetting the continuation streak.
+- Coverage: `test/suite/goal-extension.test.ts` (queues a continuation when the user sends a message after a
+  suppressed flooded load) and `test/suite/agent-session-queue.test.ts` (triggerTurn send does not wait on the
+  binding-phase barrier; fails pre-fix via a deadlock race).
+
+### Why
+
+- A resumed session whose branch ends in >= `GOAL_CONTINUATION_CAP` trailing continuations suppresses
+  auto-continuation by design, but the documented resume path was a dead end: the user message reset the
+  streak without queueing a continuation, and even once queued the continuation deadlocked on the
+  binding-held barrier. Reproduced against a clone of the stuck session; post-fix the continuation is
+  delivered and the agent resumes.
+
+### Why an extension could not handle it
+
+- The barrier admission condition lives in `AgentSession.sendCustomMessage`, and the resume latch lives in the
+  builtin goal extension's own load/disposition path; both are core session-lifecycle surfaces.
+
+### Expected merge conflict zones
+
+- `core/agent-session.ts` `sendCustomMessage` wait condition, and the goal extension `session_start`
+  suppressed-load branch in `core/extensions/builtin/goal/index.ts`.
+
+
 ## 2026-08-18 - Retry continuation watchdog reconciled with the guards it grants
 
 ### What changed

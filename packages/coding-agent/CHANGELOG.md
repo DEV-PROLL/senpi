@@ -16,6 +16,9 @@
 
 ### Fixed
 
+- goal: resume an active goal when the user sends a message after a continuation-flooded session load suppressed auto-continuation; previously the "Send a message to resume" notice parked the goal because the follow-up user message only reset the continuation streak without queueing a continuation.
+- session: `sendCustomMessage` with `triggerTurn` no longer waits on the session-work barrier while the session-start binding itself holds it, unblocking goal continuations queued from `session_start` handlers during resume.
+
 - Transient provider stream-start timeouts now spend the full configured `retry.maxRetries` budget instead of
   ending the turn after a single attempt. The retry-continuation watchdog was bounded by
   `retry.provider.streamRetryTimeoutMs` (30s) while the same retry was granted the configured
@@ -32,6 +35,7 @@
 
 - Cursor exec-bridge dispatches are now bound to the run that opened their stream, so a straggler exec frame from a run that already ended (for example after a provider rate-limit error restarts the turn on a fallback lane) is refused instead of executing a dead run's tool inside the replacement run and leaking its lifecycle events into the new transcript.
 
+>>>>>>> origin/main
 ### New Features
 
 ### Breaking Changes
