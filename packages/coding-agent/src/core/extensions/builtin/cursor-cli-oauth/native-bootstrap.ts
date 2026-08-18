@@ -1,5 +1,10 @@
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
-import { type CursorCliOauthCredential, emptyCredential, listAccounts } from "./accounts.ts";
+import {
+	type CursorCliOauthCredential,
+	emptyCredential,
+	listAccounts,
+	SENTINEL_OAUTH_FIELDS,
+} from "./accounts.ts";
 import { CURSOR_CLI_OAUTH_PROVIDER_ID, importNativeCursorCredential } from "./oauth-login.ts";
 
 export type CursorCliNativeBootstrapDeps = {
@@ -11,7 +16,12 @@ export type CursorCliNativeBootstrapDeps = {
 function asManagedCredential(credential: Credential | undefined): CursorCliOauthCredential | undefined {
 	if (credential?.type !== "oauth") return undefined;
 	const managed = credential as CursorCliOauthCredential;
-	return Array.isArray(managed.accounts) ? managed : undefined;
+	return Array.isArray(managed.accounts) &&
+		managed.access === SENTINEL_OAUTH_FIELDS.access &&
+		managed.refresh === SENTINEL_OAUTH_FIELDS.refresh &&
+		managed.expires === SENTINEL_OAUTH_FIELDS.expires
+		? managed
+		: undefined;
 }
 
 async function bootstrapNativeCredential(deps: CursorCliNativeBootstrapDeps): Promise<Credential | undefined> {
