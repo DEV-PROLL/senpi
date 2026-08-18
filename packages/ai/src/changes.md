@@ -2,7 +2,7 @@
 
 ## 2026-08-18 - Cursor reasoning levels end to end
 
-### What changed and why
+### What changed
 
 - `src/cursor/model-capabilities.ts`, `src/cursor/cursor-variant-aliases.json`: committed static capability table
   (windows, parameter orders, exact level encodings incl. GPT 5.5/Codex 5.3 `extra-high` and off=`none` families)
@@ -18,6 +18,11 @@
 - `packages/ai/src/index.ts`: re-exports the shared cursor capability, grouping, and selection API.
 - `packages/ai/src/models.ts`: new `restoreModels` provider hook (try/catch — stored catalog survives a throwing transform).
 - `packages/ai/src/types.ts` / `packages/ai/src/model.ts`: `ThinkingSelection` type + `CursorAgentCompat.cursorReasoning` capability gate.
+
+### Why
+
+- The Cursor catalog exposed 204 expanded variant ids with reasoning disabled, so senpi thinking
+  levels could not reach the wire and context windows came from stale name heuristics.
 
 ### Why an extension couldn't do it
 
