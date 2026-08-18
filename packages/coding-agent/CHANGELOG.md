@@ -8,6 +8,8 @@
 
 - Cursor CLI OAuth is now available by default when its real prerequisites exist: with `cursor-agent` installed and no managed CLI account, a native `cursor` OAuth credential is copied automatically into one canonical `native` slot without modifying the primary credential; explicit `enabled: false` remains a hard opt-out, repeated/concurrent startup is idempotent, and `/login cursor` refreshes the CLI fallback in the same session ([#931](https://github.com/code-yeongyu/senpi/pull/931)).
 
+- Cursor exec-bridge lifecycle events now require their originating run signal and await listener delivery, preventing delayed completions from entering a replacement run or becoming detached unhandled rejections.
+
 ### New Features
 
 ### Breaking Changes
