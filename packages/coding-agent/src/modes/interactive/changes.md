@@ -1,5 +1,32 @@
 # changes
 
+## Native Cursor login refreshes the CLI fallback lane in the same session (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`:
+  `completeProviderAuthentication()` refreshes both `cursor` and
+  `cursor-cli-oauth` after native Cursor login. Every other provider remains
+  scoped to its own id, and the existing network/abort/warning behavior is
+  unchanged.
+
+### Why
+
+- The fallback lane now bootstraps automatically from the native Cursor OAuth
+  credential. Refreshing only `cursor` after `/login cursor` left the CLI
+  provider unavailable until a later model-availability refresh or restart.
+
+### Why an extension could not handle it
+
+- The post-login refresh controller and provider list are private
+  `InteractiveMode` lifecycle state; the fallback extension receives no
+  callback that can extend the native provider's completed login refresh.
+
+### Expected merge conflict zones
+
+- LOW: the provider-list construction immediately before the existing
+  `modelRuntime.refresh()` call.
+
 ## Extension widget updates preserve stacking order (2026-08-18)
 
 ### What changed
