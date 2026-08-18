@@ -65,6 +65,25 @@ export {
 	copyContextProvenance,
 	getContextProvenance,
 } from "./context-provenance.ts";
+export * from "./cursor/catalog-grouping.ts";
+export {
+	CURSOR_MODEL_CAPABILITIES,
+	type CursorCapabilityEvidence,
+	type CursorLevelEncoding,
+	type CursorLevelSpec,
+	type CursorModelCapability,
+	type CursorParameterId,
+	type CursorVariantAlias,
+	type CursorVariantParse,
+	getCursorBaseIdForVariant,
+	getCursorCapabilityForBase,
+	getCursorVariantAlias,
+} from "./cursor/model-capabilities.ts";
+export {
+	type CursorResolvedSelection,
+	renderCursorCliModelString,
+	resolveCursorSelectionDescriptor,
+} from "./cursor/selection-descriptor.ts";
 export * from "./env-api-keys.ts";
 export * from "./images-models.ts";
 export * from "./models.ts";

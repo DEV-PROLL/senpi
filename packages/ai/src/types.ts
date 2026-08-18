@@ -98,6 +98,18 @@ export type ImagesProviderId = KnownImagesProvider | string;
 
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelThinkingLevel = "off" | ThinkingLevel;
+
+/**
+ * Provenance-bearing thinking selection. Distinct from the always-materialized
+ * effective level: a selection exists only when the user (or a legacy variant
+ * alias) explicitly chose a level. See .omo/plans/cursor-reasoning-levels.md §4.1.
+ */
+export interface ThinkingSelection {
+	readonly level: ModelThinkingLevel;
+	readonly source: "explicit" | "legacy-variant";
+	/** Required when source is "legacy-variant": the exact allowlisted original variant id. */
+	readonly legacyVariantId?: string;
+}
 export type ThinkingLevelMap = Partial<Record<ModelThinkingLevel, string | null>>;
 export type ChatTemplateKwargValue =
 	| string

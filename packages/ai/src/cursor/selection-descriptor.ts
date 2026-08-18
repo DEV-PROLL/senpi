@@ -1,0 +1,100 @@
+import type { CursorAgentCompat, Model } from "../model.ts";
+import type { ModelThinkingLevel, ThinkingSelection } from "../types.ts";
+import { CURSOR_MODEL_CAPABILITIES, getCursorVariantAlias, type CursorParameterId } from "./model-capabilities.ts";
+
+export interface CursorResolvedSelection {
+	readonly modelId: string;
+	readonly parameters: readonly { readonly id: CursorParameterId; readonly value: string }[];
+}
+
+function identityCompat(model: Model<"cursor-agent">): CursorAgentCompat["cursorReasoning"] {
+	return model.compat?.cursorReasoning;
+}
+
+function legacySuffixId(baseId: string, level: ModelThinkingLevel, value: string): string | undefined {
+	const suffix = level === "off" ? "none" : value;
+	const candidate = `${baseId}-${suffix}`;
+	return getCursorVariantAlias(candidate)?.legacyVariantId;
+}
+
+function buildParameters(
+	capabilityId: string,
+	level: ModelThinkingLevel,
+	value: string,
+	thinkingMode: boolean | undefined,
+): { id: CursorParameterId; value: string }[] {
+	const capability = CURSOR_MODEL_CAPABILITIES[capabilityId];
+	if (!capability) return [];
+	const out: { id: CursorParameterId; value: string }[] = [];
+	for (const id of capability.parameterOrder) {
+		switch (id) {
+			case "thinking":
+				out.push({ id, value: thinkingMode === true ? "true" : "false" });
+				break;
+			case "context":
+				if (capability.defaultContext !== undefined) out.push({ id, value: capability.defaultContext });
+				break;
+			case "effort":
+			case "reasoning":
+				out.push({ id, value });
+				break;
+			case "fast":
+				out.push({ id, value: "false" });
+				break;
+		}
+	}
+	return out;
+}
+
+/**
+ * Resolve a Cursor model + thinking selection to its wire descriptor: the exact
+ * model id plus ordered parameters. Both Cursor transports consume this; the
+ * native lane renders parameters into protobuf, the CLI lane renders a model
+ * string. Absent/unsupported selections return the representative or upstream
+ * id with zero parameters.
+ */
+export function resolveCursorSelectionDescriptor(
+	model: Model<"cursor-agent">,
+	selection: ThinkingSelection | undefined,
+): CursorResolvedSelection {
+	const compat = identityCompat(model);
+	const fallback: CursorResolvedSelection = { modelId: model.upstreamModelId ?? model.id, parameters: [] };
+	if (!compat) return fallback;
+
+	if (selection === undefined) {
+		return { modelId: compat.representativeVariantId, parameters: [] };
+	}
+
+	if (selection.source === "legacy-variant") {
+		if (selection.legacyVariantId === undefined || getCursorVariantAlias(selection.legacyVariantId) === undefined) {
+			return { modelId: compat.representativeVariantId, parameters: [] };
+		}
+		return { modelId: selection.legacyVariantId, parameters: [] };
+	}
+
+	const capability = CURSOR_MODEL_CAPABILITIES[compat.capabilityId];
+	const spec = capability?.levels[selection.level];
+	if (!capability || !spec) {
+		return { modelId: compat.representativeVariantId, parameters: [] };
+	}
+
+	if (spec.encoding === "variant-id") {
+		const suffixId = legacySuffixId(compat.capabilityId, selection.level, spec.value);
+		if (suffixId === undefined) return { modelId: compat.representativeVariantId, parameters: [] };
+		return { modelId: suffixId, parameters: [] };
+	}
+
+	const bareBase = compat.capabilityId;
+	return {
+		modelId: bareBase,
+		parameters: buildParameters(compat.capabilityId, selection.level, spec.value, compat.thinkingMode),
+	};
+}
+
+/** Render the resolved descriptor as one CLI `--model` argv element (bracket or suffix form). */
+export function renderCursorCliModelString(model: Model<"cursor-agent">, selection: ThinkingSelection | undefined): string {
+	const resolved = resolveCursorSelectionDescriptor(model, selection);
+	if (resolved.parameters.length === 0) return resolved.modelId;
+	const args = resolved.parameters.map((parameter) => `${parameter.id}=${parameter.value}`).join(",");
+	return `${resolved.modelId}[${args}]`;
+}
