@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- Eval cells that initiated no tool calls no longer render a `0 calls · 0.00 calls/s`
+  throughput badge; the footer shows only the elapsed time. Positive call counts are
+  unchanged.
+
 ### Removed
 
 ## [2026.8.18-2] - 2026-08-18

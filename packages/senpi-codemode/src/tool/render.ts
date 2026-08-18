@@ -262,7 +262,8 @@ function renderPrefixed(text: string, environment: RenderEnvironment, prefixStyl
 function cellHeader(cell: EvalCellResult, environment: RenderEnvironment, badges: CellBadges): string {
 	const presentation = cellPresentation(cell.status, environment.spinnerFrame);
 	let header = `eval ${cell.language} ${presentation.label} ${presentation.icon}`;
-	if (badges.throughput !== undefined) header += ` · ${formatThroughputBadge(badges.throughput)}`;
+	const throughputBadge = badges.throughput === undefined ? undefined : formatThroughputBadge(badges.throughput);
+	if (throughputBadge !== undefined) header += ` · ${throughputBadge}`;
 	const elapsedMs = badges.throughput?.wallDurationMs ?? cell.durationMs;
 	if (elapsedMs !== undefined) header += ` · ${formatDuration(elapsedMs)}`;
 	if (badges.reset) header += " · reset";
@@ -293,11 +294,14 @@ function plural(count: number, singular: string, pluralNoun: string): string {
 
 function formatCallsPerSecond(calls: number, wallDurationMs: number | undefined): string {
 	const seconds = typeof wallDurationMs === "number" && Number.isFinite(wallDurationMs) ? wallDurationMs / 1_000 : 0;
-	if (seconds <= 0) return calls === 0 ? "0.00 calls/s" : "n/a calls/s";
+	if (seconds <= 0) return "n/a calls/s";
 	return `${(calls / seconds).toFixed(2)} calls/s`;
 }
 
-function formatThroughputBadge(throughput: CellThroughput): string {
+// A cell that issued no tool calls has no throughput to report: emitting
+// "0 calls · 0.00 calls/s" is noise, so the whole badge is dropped instead.
+function formatThroughputBadge(throughput: CellThroughput): string | undefined {
+	if (throughput.calls <= 0) return undefined;
 	return `${plural(throughput.calls, "call", "calls")} · ${formatCallsPerSecond(
 		throughput.calls,
 		throughput.wallDurationMs,
@@ -789,8 +793,10 @@ function resultMetadata(
 	if (details?.phase) metadata.push(`phase ${details.phase}`);
 	const elapsedMs = details?.wallDurationMs ?? details?.durationMs;
 	if (!options.isPartial && typeof elapsedMs === "number") metadata.push(`took ${formatDuration(elapsedMs)}`);
-	if (status === "done" && typeof details?.toolCallCount === "number")
-		metadata.push(formatThroughputBadge({ calls: details.toolCallCount, wallDurationMs: details.wallDurationMs }));
+	if (status === "done" && typeof details?.toolCallCount === "number") {
+		const badge = formatThroughputBadge({ calls: details.toolCallCount, wallDurationMs: details.wallDurationMs });
+		if (badge !== undefined) metadata.push(badge);
+	}
 	if (metadata.length === 0) return [];
 	return [{ kind: "text", text: style(theme, "muted", metadata.join(" | ")) }];
 }
