@@ -29,6 +29,32 @@
 - NONE: this tracker is fork-only (upstream has no counterpart file); the inventory names pin-relative paths so it
   stays valid as entries below change.
 
+## /loop builtin extension registered (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/index.ts`: one registration entry adds the fork-only `/loop`
+  builtin extension (recurring and self-paced scheduled prompts, ported from Claude Code) to the builtin factory
+  list. The extension itself lives entirely under `builtin/loop/**`; its design is documented in
+  `builtin/loop/AGENTS.md`. Both paths are fork-only at pin `914cf1472e715297caa30db4b9535d534a9eb718` (upstream has
+  no `builtin/` registry file or loop tree), so the audit exempts them; this entry records the registration
+  divergence as feature history.
+
+### Why
+
+- The loop extension must be registered for every session like the other builtins (goal, todo, terminal), and the
+  registration list in `builtin/index.ts` is the only file outside `builtin/loop/**` this feature touches.
+
+### Why an extension could not handle it
+
+- It is an extension; builtin registration is the one hook the extension cannot provide for itself, and
+  `builtin/index.ts` is the only place builtins are wired into the loader.
+
+### Expected merge conflict zones
+
+- NONE: `builtin/index.ts` is fork-only (upstream has no counterpart file); the change is one import and one
+  factory-list entry on adjacent lines.
+
 ## /tui redraw diagnostic relocated in-tree (2026-08-17)
 
 ### What changed
