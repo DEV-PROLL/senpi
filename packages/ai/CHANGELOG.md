@@ -21,6 +21,11 @@
 
 ### Fixed
 
+- Cursor provider: advertised MCP tool schemas are now sanitized of JSON-Schema composition
+  keywords (`oneOf`/`anyOf`/`allOf`) before reaching the Run request — a single tool carrying one
+  (e.g. ast-grep MCP's `scan`) made Cursor's gateway reject the whole request with a wrapped
+  provider 400 (`resource_exhausted`, zero tokens) from turn 1.
+
 ### Removed
 
 ## [2026.8.18-2] - 2026-08-18
