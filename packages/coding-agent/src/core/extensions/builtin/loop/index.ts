@@ -24,6 +24,7 @@ import { getAgentDir } from "../../../../config.ts";
 import type { SessionEntry } from "../../../session-manager.ts";
 import { noticeEntryRenderer } from "../../notice/index.ts";
 import type { EntryRenderer, ExtensionAPI, ExtensionContext, ExtensionFactory } from "../../types.ts";
+import { registerLoopCommand } from "./command-registration.ts";
 import { describeCron, normalizeInterval } from "./cron-planner.ts";
 import { type LoopFileResult, nodeFs, resolveLoopFile as resolveLoopFileDefault } from "./loopfile.ts";
 import {
@@ -687,6 +688,7 @@ export function createLoopExtension(deps: LoopExtensionDeps = {}): ExtensionFact
 		};
 
 		deps.onControllerReady?.(controller);
+		registerLoopCommand(pi, { controller });
 
 		pi.on("session_start", async (_event, nextCtx) => {
 			ctx = nextCtx;
