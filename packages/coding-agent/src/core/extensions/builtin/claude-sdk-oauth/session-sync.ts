@@ -59,11 +59,17 @@ function isContentlessUserMessage(message: SentMessage): boolean {
 }
 
 export function sentMessages(context: Context): SentMessage[] {
-	const messages = context.messages.filter(
-		(message): message is SentMessage =>
-			(message.role === "user" || message.role === "toolResult") && !isContentlessUserMessage(message),
-	);
-	return messages;
+	return context.messages.filter(isTransmittedMessage);
+}
+
+/**
+ * The one selection rule for "message the provider was sent". Branch-derived and
+ * context-derived hashes MUST share it: a content-less user message that only one
+ * side skips shifts every later index and reports a false divergence.
+ */
+export function isTransmittedMessage(message: { role: string }): message is SentMessage {
+	if (message.role !== "user" && message.role !== "toolResult") return false;
+	return !isContentlessUserMessage(message as SentMessage);
 }
 
 export function sentMessageHashes(messages: readonly SentMessage[]): string[] {

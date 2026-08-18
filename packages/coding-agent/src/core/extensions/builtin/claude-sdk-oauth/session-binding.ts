@@ -2,7 +2,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { StoredBinding } from "./session-binding-store.ts";
 import { assistantContentHash } from "./session-commit-boundary.ts";
 import type { ContinuityBinding } from "./session-reattach.ts";
-import { type SentMessage, sentHashPrefixDigest, sentMessageHashes } from "./session-sync.ts";
+import { isTransmittedMessage, type SentMessage, sentHashPrefixDigest, sentMessageHashes } from "./session-sync.ts";
 
 export const BINDING_ENTRY_TYPE = "claude-sdk-oauth-binding";
 export const BINDING_MARKER = { schemaVersion: 2, marker: true } as const;
@@ -78,8 +78,9 @@ export function sentHashesFromBranch(branch: readonly BranchEntry[]): string[] {
 
 function isSentMessage(value: unknown): value is SentMessage {
 	if (typeof value !== "object" || value === null) return false;
-	if (!("role" in value) || (value.role !== "user" && value.role !== "toolResult")) return false;
-	return "content" in value;
+	if (!("role" in value) || typeof value.role !== "string" || !("content" in value)) return false;
+	// Same selection rule the context path uses, so the digests cannot diverge.
+	return isTransmittedMessage(value as { role: string });
 }
 
 export function bindingFromStoredBranch(
