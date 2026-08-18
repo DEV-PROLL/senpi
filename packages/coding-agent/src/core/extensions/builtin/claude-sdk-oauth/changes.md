@@ -1,15 +1,67 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-18 - Anchor restart records at branch state (issue #6981 review)
+
+### What changed
+
+- The persisted record is derived from the resident registry entry plus the sent-hashes the branch actually carries.
+  The process binding map is no longer read at `message_end`: it holds the previous turn's state while that handler
+  runs, and only a prefix digest right after a restart, so reading it anchored this turn's marker to a stale or absent
+  sent-stream (duplicate resend after restart) or threw on the restored shape (orphaned marker, silent flatten on the
+  next restart).
+- The safe-suffix allowlist now admits the whole display-only metadata family the co-resident builtins append after a
+  committed assistant: stop-hook state/diagnostics/output, rule activations, and rule scans. Previously a project with
+  a Stop hook emitting diagnostics or output failed restore on every restart.
+- Records are keyed and compared by canonical session path, so a symlinked directory or another spelling of the same
+  file resolves to one sidecar instead of silently losing the binding.
+- A non-`clean` commit outcome no longer anchors a record, an orphaned record whose session id does not match is
+  deleted rather than left on disk, and the pending-fork labels that lost their producers are gone.
+- `session_before_fork` no longer records a taint: forks mint a new session id and file, so the taint was unreachable;
+  `session_start(fork)` invalidation plus path/session binding is what isolates a fork.
+
+### Declared residuals
+
+- Branch-derived hashes decline to anchor when a compaction boundary sits on the branch: the walk is not
+  compaction-aware while admission compares against the compaction-truncated context, so anchoring across a boundary
+  would inflate `sentCount` and flatten every later restart. Declining leaves restart resume unavailable for that
+  session instead of silently wrong. Not reachable while this lane is active (the lane stands senpi compaction down),
+  so it needs a compaction entry from another provider's turns, a legacy version, or an imported file.
+- `isContentlessUserMessage` matches only a literal zero-length array, while the context path normalizes a null or
+  missing `content` to an empty array before filtering. A legacy, imported, or hand-edited message with a null
+  `content` therefore diverges between the two derivations. It fails closed (cold-seed), and it is the same untrusted
+  input class the trust boundary covers.
+- `verifyRestoredTranscript` requires the stored assistant boundary to exist in the transcript, not to be its tip.
+- A `custom_message` or `branch_summary` entry shifts the same way: the context path converts both to a user message
+  and hashes them, while the branch walk skips them because they persist as their own entry types rather than as
+  `message`. The branch therefore under-counts, never over-counts, so a restart either flattens (divergence inside the
+  anchored prefix) or re-sends the later messages as delta (divergence after it). The cost is a lost cache, not a
+  wrong resume, and unlike the compaction residual it self-corrects rather than persisting.
+
+### Trust boundary
+
+- The session JSONL is untrusted input (it can be imported, hand-edited, or copied) and carries only a capability-free
+  marker. The sidecar is the trusted store: mode 0600, strict schema, bounded size, keyed to one canonical session
+  path and session id. Integrity rests on same-user file ownership, the same boundary as the SDK's own config dir.
+
+### Cost
+
+- Each committed assistant appends one small marker entry to the session file and rewrites the fixed-size sidecar, so
+  session files grow by one marker per assistant message (several per tool-loop turn) while the record itself stays
+  constant-size regardless of conversation length.
+
 ## 2026-08-18 - Persist restart bindings for headless continuation (issue #6981)
 
 ### What changed
 
-- Successful resident Claude SDK OAuth turns now append the complete continuity binding as a branch-local custom
-  session entry, including the SDK session id, sent-message hashes, assistant boundaries, account/model identity,
-  and prompt/tool fingerprints.
-- `session_start` restores the newest valid checkpoint into the resident binding map before the first resumed turn.
-  A missing, invalidated, or malformed checkpoint still fails closed to the existing bootstrap/flatten path.
-- Assistant rewrites and terminal failures do not persist a clean checkpoint.
+- Successful resident turns append a capability-free branch marker and atomically replace a private, fixed-size
+  sidecar containing the SDK lineage, sent-prefix digest, assistant hash/boundary, identity, and prompt/tool
+  fingerprints.
+- Startup/resume restores only when the sidecar belongs to the current session file and header, its exact marker and
+  adjacent committed assistant remain on the active branch, and the local SDK transcript still contains the stored
+  top-level assistant boundary. Imported JSONL and legacy custom payloads are never lineage authority.
+- Provider exits, assistant rewrites, accepted compaction, forks, tree navigation, and extension removal delete
+  durable and process state. Persisted identity drift and config-dir transcript roots fail closed; reload retains the
+  fresher process binding, and nested binding state is copied at the registry boundary.
 
 ### Why
 
@@ -24,7 +76,8 @@
 
 ### Expected merge-conflict zones
 
-- MEDIUM in `session-binding.ts` and `session-registry-wiring.ts`; LOW in their focused tests and issue #6981
+- MEDIUM in `session-binding.ts`, `session-binding-store.ts`, `session-registry-wiring.ts`,
+  `session-continuity.ts`, `session-reattach.ts`, and `session-stream.ts`; LOW in their focused tests and issue #6981
   regression.
 
 ## 2026-08-18 - Select the Claude binary for the host libc
@@ -361,7 +414,7 @@ LOW in `oauth-login.ts` (added `check` to the returned shape + optional `readSet
 - **Abort.** `interrupt()` receipts gate the outcome: `still_queued: []` keeps the live session; a legacy or uncertain receipt closes the query but keeps the binding for reattach. Abort never taints and never flattens. Teardown during resume-initialization is synchronous, so an aborted initialization is torn down before the next assertion point.
 - **Fingerprint.** The generated `Current date:` line is normalized before hashing, so a UTC midnight rollover no longer retires a live conversation; cwd and every other prompt region stay fail-closed. Host tool policy is fingerprinted by an explicit `HOST_TOOL_POLICY_FINGERPRINT` version instead of callback source text, and the executable path plus `includePartialMessages` now participate.
 - **Account failover.** Shared-root lanes (`oauth-slots`, `ambient`) reattach, or fork at the last verified boundary when cross-account resume is denied. The `config-dir` lane keeps per-account credentials inside its own `CLAUDE_CONFIG_DIR` and no official SDK API moves a transcript across roots, so its failover is the one declared residual that still flattens.
-- **Restart.** A branch-local binding checkpoint records `{sdkSessionId, sentCount, sentPrefixHash, lastAssistantUuid, accountName, claudeConfigDir, modelId}`; on the first turn after a restart it is verified against the SDK transcript before resuming, forks at the boundary when the local prefix advanced, and flattens only when the transcript or boundary is gone.
+- **Restart.** A bounded branch-local checkpoint records the SDK lineage, sent-prefix digest, last assistant boundary, account/model identity, and prompt/tool fingerprints. Startup/resume restores it only when the checkpoint is followed by its committed assistant and the current prefix digest matches; malformed, invalidated, divergent, or unavailable SDK state falls back without guessing a fork boundary.
 - **Observability.** Every main turn emits exactly one continuity observation (kind + sanitized reason + delta count) as an assistant diagnostic and a structured `claude_sdk_oauth_session_continuity` `session.log` event (paired with `claude_sdk_oauth_session_close`); the TUI shows a muted notice only for degradations. `closeSession` no longer discards its reason — the retained cause is attributed to the next admission.
 - **Escape hatch.** `resumeMode: "off"` (or `SENPI_CLAUDE_SDK_OAUTH_RESUME=off`) still restores the legacy per-turn behaviour and reports `disabled` observations.
 - Merge-conflict risk: high across this directory. New modules: session-continuity.ts, session-reattach.ts, session-binding.ts, session-commit-boundary.ts, session-observability.ts, session-reaper.ts, session-entry-annotations.ts.

@@ -1,4 +1,5 @@
 import type { ContinuityReason } from "./session-observability.ts";
+import { sentHashPrefixDigest } from "./session-sync.ts";
 
 export type ContinuityEntrySnapshot = {
 	sdkSessionId: string;
@@ -18,6 +19,7 @@ export type ContinuityBindingSnapshot = {
 	sdkSessionId: string;
 	sentCount: number;
 	sentHashes: readonly string[];
+	sentPrefixHash?: string;
 	lastAssistantUuid: string | null;
 	accountName: string;
 	modelId: string;
@@ -46,8 +48,6 @@ export type ContinuityDecision =
 const PENDING_FORK_REASONS: Readonly<Record<string, ContinuityReason>> = {
 	assistant_rewritten: "assistant_rewritten",
 	compaction: "tainted_compaction",
-	fork: "tainted_fork",
-	abort: "tainted_abort",
 };
 
 function commonPrefixLength(left: readonly string[], right: readonly string[]): number {
@@ -86,7 +86,10 @@ function forkOrFlatten(
 	};
 }
 
-function identityDrift(input: ContinuityDecisionInput, entry: ContinuityEntrySnapshot): ContinuityReason | null {
+function identityDrift(
+	input: ContinuityDecisionInput,
+	entry: Pick<ContinuityEntrySnapshot, "accountName" | "modelId" | "systemPromptHash" | "toolsetHash">,
+): ContinuityReason | null {
 	if (entry.accountName !== input.accountName) return "account_changed";
 	if (entry.modelId !== input.modelId) return "model_changed";
 	if (entry.systemPromptHash !== input.fingerprint.systemPromptHash) return "options_changed";
@@ -96,6 +99,25 @@ function identityDrift(input: ContinuityDecisionInput, entry: ContinuityEntrySna
 
 function decideFromBinding(input: ContinuityDecisionInput, binding: ContinuityBindingSnapshot): ContinuityDecision {
 	if (!input.transcriptAvailable) return { kind: "flatten", reason: "transcript_missing" };
+	const drift = identityDrift(input, binding);
+	if (drift) return { kind: "flatten", reason: drift };
+	if (binding.sentPrefixHash !== undefined) {
+		const prefixMatches =
+			input.currentHashes.length >= binding.sentCount &&
+			sentHashPrefixDigest(input.currentHashes, binding.sentCount) === binding.sentPrefixHash;
+		if (prefixMatches) {
+			return {
+				kind: "reattach",
+				sdkSessionId: binding.sdkSessionId,
+				from: binding.sentCount,
+				reason: "registry_miss",
+			};
+		}
+		return {
+			kind: "flatten",
+			reason: input.currentHashes.length < binding.sentCount ? "history_rolled_back" : "sent_stream_diverged",
+		};
+	}
 	const shared = commonPrefixLength(binding.sentHashes, input.currentHashes);
 	if (shared === binding.sentCount) {
 		return { kind: "reattach", sdkSessionId: binding.sdkSessionId, from: binding.sentCount, reason: "registry_miss" };

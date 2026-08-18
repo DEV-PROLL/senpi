@@ -1,4 +1,6 @@
-import type { Options } from "./sdk-boundary.ts";
+import type { ClaudeSdkOauthAuthLane } from "./options.ts";
+import type { Options, SessionMessage } from "./sdk-boundary.ts";
+import { getSdkBoundary } from "./sdk-boundary.ts";
 import { type ClaudeSdkOauthSessionEntry, closeSession, getOrCreateSession } from "./session-registry.ts";
 import { recordSyncedStream } from "./session-sync.ts";
 
@@ -7,6 +9,7 @@ export type ContinuityBinding = {
 	sdkSessionId: string;
 	sentCount: number;
 	sentHashes: readonly string[];
+	sentPrefixHash?: string;
 	lastAssistantUuid: string | null;
 	accountName: string;
 	modelId: string;
@@ -27,6 +30,14 @@ const bindings = new Map<string, ContinuityBinding>();
 
 export type AbortOutcome = "keep" | "reattach";
 
+function cloneBinding(binding: ContinuityBinding): ContinuityBinding {
+	return {
+		...binding,
+		sentHashes: [...binding.sentHashes],
+		assistantUuidByIndex: binding.assistantUuidByIndex?.map(([index, uuid]) => [index, uuid]),
+	};
+}
+
 export function evaluateAbortOutcome(receipt: unknown): AbortOutcome {
 	if (!receipt || typeof receipt !== "object") return "reattach";
 	const queued = (receipt as { still_queued?: unknown }).still_queued;
@@ -34,11 +45,12 @@ export function evaluateAbortOutcome(receipt: unknown): AbortOutcome {
 }
 
 export function rememberBinding(binding: ContinuityBinding): void {
-	bindings.set(binding.senpiSessionId, { ...binding, sentHashes: [...binding.sentHashes] });
+	bindings.set(binding.senpiSessionId, cloneBinding(binding));
 }
 
 export function getBinding(senpiSessionId: string): ContinuityBinding | undefined {
-	return bindings.get(senpiSessionId);
+	const binding = bindings.get(senpiSessionId);
+	return binding ? cloneBinding(binding) : undefined;
 }
 
 export function forgetBinding(senpiSessionId: string): void {
@@ -71,6 +83,31 @@ export function bindingFromEntry(
 		systemPromptHash: entry.systemPromptHash,
 		toolsetHash: entry.toolsetHash,
 	};
+}
+
+export async function verifyRestoredTranscript(
+	binding: ContinuityBinding,
+	cwd: string,
+	authLane: ClaudeSdkOauthAuthLane,
+): Promise<boolean> {
+	if (authLane === "config-dir") return false;
+	let messages: SessionMessage[];
+	try {
+		messages = await getSdkBoundary().getSessionMessages(binding.sdkSessionId, { dir: cwd });
+	} catch (error) {
+		if (error instanceof Error) return false;
+		throw error;
+	}
+	if (messages.length === 0 || messages.some((message) => message.session_id !== binding.sdkSessionId)) {
+		return false;
+	}
+	if (binding.lastAssistantUuid === null) return true;
+	return messages.some(
+		(message) =>
+			message.type === "assistant" &&
+			message.uuid === binding.lastAssistantUuid &&
+			message.parent_tool_use_id === null,
+	);
 }
 
 async function awaitInitialization(entry: ClaudeSdkOauthSessionEntry, signal?: AbortSignal): Promise<void> {

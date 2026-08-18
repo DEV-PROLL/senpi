@@ -26,8 +26,9 @@
   turn surfaced `Provider stream start timed out after 90000ms` followed by `Aborted after 1 retry attempt`.
   The watchdog is now reconciled to the guard it grants, while still cancelling a retry that outlives it.
 - Published Senpi tarballs now retain the lockfile-recorded Babel 8 dependency closure inside the bundled codemode sidecar, preventing `@babel/parser` resolution failures during extension startup ([#923](https://github.com/code-yeongyu/senpi/issues/923)).
-- Headless Claude SDK OAuth continuation now restores its persisted SDK binding across separate CLI processes, so
-  `-p -c` resumes the existing lineage instead of resending the full conversation after a `registry_miss`.
+- Headless Claude SDK OAuth continuation now restores a bounded SDK lineage from a private sidecar only after its
+  session marker, committed assistant, identity, and local SDK transcript all verify, so `-p -c` sends only the new
+  turn while imports, forks, provider switches, rewrites, compaction, malformed state, and drift fail closed.
 
 - Claude SDK OAuth now selects the glibc Claude Code binary before the musl variant on glibc Linux hosts and when libc detection is unavailable, while retaining musl-first selection on detected musl hosts and fallback to either installed package ([code-yeongyu/oh-my-openagent#6963](https://github.com/code-yeongyu/oh-my-openagent/issues/6963)).
 
