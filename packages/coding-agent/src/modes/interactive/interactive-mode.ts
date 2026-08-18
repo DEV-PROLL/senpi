@@ -6785,8 +6785,9 @@ export class InteractiveMode {
 
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), 15_000);
+		const refreshProviders = providerId === "cursor" ? [providerId, "cursor-cli-oauth"] : [providerId];
 		void this.session.modelRuntime
-			.refresh({ allowNetwork: true, providers: [providerId], signal: controller.signal })
+			.refresh({ allowNetwork: true, providers: refreshProviders, signal: controller.signal })
 			.then((result) => {
 				if (result.aborted) {
 					this.showWarning(`${actionLabel}, but its model catalog refresh timed out; using cached models.`);

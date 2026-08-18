@@ -1,5 +1,50 @@
 # cursor-cli-oauth extension changes
 
+## 2026-08-18 - Default-on native credential bootstrap
+
+### What changed
+
+- `settings.ts`: `cursorCliOauthProvider.enabled` now defaults to true. Explicit
+  settings/environment false values remain authoritative.
+- `native-bootstrap.ts`: new default managed-credential reader. After the
+  enabled and executable gates pass, it copies a usable native `cursor` OAuth
+  credential into one canonical `native` slot when managed accounts are
+  empty. It re-checks the target inside `CredentialStore.modify`, shares only
+  in-flight concurrent reads, preserves existing/incompatible credentials,
+  never writes the native provider, and returns the previous state on errors.
+  The reader repeats the enabled/executable gate for direct reads outside
+  `assessConfiguration` (notably explicit login), so a cancelled login cannot
+  bypass `enabled:false`.
+- `index.ts`: the builtin registration uses the bootstrap reader only for its
+  default `readCurrent`; injected readers keep their existing test/embedding
+  behavior.
+- Native Cursor login now refreshes the fallback provider in the same
+  interactive completion pass; that shared-file change is tracked in
+  `packages/coding-agent/src/modes/interactive/changes.md`.
+
+### Why
+
+- A valid native Cursor login plus an installed `cursor-agent` already
+  satisfies the fallback lane's real prerequisites. Requiring a second login,
+  a settings edit, or `/cursor-account import native` hid otherwise usable
+  models and duplicated setup work.
+- Startup and native-login refreshes can overlap, so a lock-rechecked,
+  in-flight-deduplicated reader is required to avoid duplicate `native-*`
+  accounts.
+
+### Why an extension could not handle it
+
+- The bootstrap owns the builtin provider's private credential reader and
+  authentication check boundary. External hooks cannot change the default
+  settings contract, atomically write the managed provider credential before
+  availability is computed, or extend core post-login refresh scoping.
+
+### Expected merge conflict zones
+
+- LOW: fork-only `native-bootstrap.ts`, `settings.ts`, and `index.ts`.
+- LOW: `interactive-mode.ts` post-login refresh option construction, tracked
+  separately in the nearest interactive `changes.md`.
+
 ## 2026-08-18 - Activate explicit login/import and copy native Cursor credentials
 
 ### What changed

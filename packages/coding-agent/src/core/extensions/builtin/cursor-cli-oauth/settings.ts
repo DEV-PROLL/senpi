@@ -27,7 +27,7 @@ type Environment = Readonly<Record<string, string | undefined>>;
 type ParsedSettings = Partial<CursorCliOauthProviderSettings>;
 
 const DEFAULT_SETTINGS: CursorCliOauthProviderSettings = {
-	enabled: false,
+	enabled: true,
 	executablePath: undefined,
 	forceExecution: true,
 	noApprovalAcknowledgedAt: undefined,
