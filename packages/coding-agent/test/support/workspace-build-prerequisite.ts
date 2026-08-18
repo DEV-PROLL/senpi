@@ -11,11 +11,16 @@
  * When they are absent, the child dies during import — before reaching any
  * behavior under test — and the parent test reports only its downstream
  * symptom (`expected 1 to be +0`, an empty stdout, a missing log line). That
- * failure mode is unattributable at the assertion site, which is why this
- * check runs once per worker in the global setup and names the prerequisite
- * plus the exact command that satisfies it. CI already runs `npm run build`
- * before the test shards (`.github/workflows/ci.yml`); this makes the same
- * requirement explicit and self-diagnosing for local runs.
+ * failure mode is unattributable at the assertion site, which is why the
+ * suites that spawn such children opt into this check and it names the
+ * prerequisite plus the exact command that satisfies it.
+ *
+ * The check is OPT-IN, called at the top of each dist-dependent test file, and
+ * deliberately NOT part of the global `test/setup.ts`: CI's `Terminal tools`
+ * job runs a small vitest subset (terminal extension, settings notify, shell
+ * config kind) with no `npm run build` step, and those suites spawn no
+ * workspace-resolving children — a global assertion would fail that job on
+ * every OS. Every other CI vitest job builds the workspace first.
  *
  * Resolution goes through `import.meta.resolve`, not `require.resolve`: these
  * manifests export only the `import` condition, so a CJS-conditioned probe

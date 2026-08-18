@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ENV_AGENT_DIR } from "../src/config.ts";
+import { assertWorkspaceBuildPrerequisite } from "./support/workspace-build-prerequisite.ts";
 import { allowNetwork } from "./test-network-env.ts";
+
+assertWorkspaceBuildPrerequisite(import.meta.url);
 
 const cliPath = resolve(__dirname, "../src/cli.ts");
 

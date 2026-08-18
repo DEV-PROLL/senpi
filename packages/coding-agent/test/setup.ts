@@ -7,16 +7,8 @@
  * which reads this env var. If unset, it resolves to the developer's real
  * $HOME and leaves faux-provider JSONLs there permanently, where downstream
  * tools (e.g. tokscale) then mis-count them as real usage.
- *
- * Also verifies the suite's workspace-build prerequisite up front: the
- * child-process tests resolve the sibling packages through Node's `exports`
- * maps and need their built `dist/*` entrypoints, which no vitest alias can
- * supply. See `./support/workspace-build-prerequisite.ts`.
  */
 import { resolveQuarantineAgentDir } from "./support/quarantine.ts";
-import { assertWorkspaceBuildPrerequisite } from "./support/workspace-build-prerequisite.ts";
-
-assertWorkspaceBuildPrerequisite(import.meta.url);
 
 for (const key of ["PI_RULES_DISABLED", "PI_RULES_MAX_RULE_CHARS", "PI_RULES_MAX_RESULT_CHARS"] as const) {
 	delete process.env[key];
