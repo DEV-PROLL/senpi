@@ -578,6 +578,13 @@ describe("InteractiveMode compaction events", () => {
 			turnWorkingTip: { resetForNewTurn: vi.fn(), resolve: vi.fn() },
 			hideShortcutOverlay: vi.fn(),
 			lastEditorText: "",
+			// setupKeyHandlers subscribes the editor's image-marker channel. Borrow the
+			// real method (and the real payload map it reconciles) rather than stubbing
+			// it, so this fixture exercises production plumbing; it no-ops here because
+			// the fake editor exposes no insertImageMarker.
+			pendingImages: new Map<number, unknown>(),
+			subscribeImageMarkers: Reflect.get(InteractiveMode.prototype, "subscribeImageMarkers"),
+			reconcilePendingImages: Reflect.get(InteractiveMode.prototype, "reconcilePendingImages"),
 			ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() }, onDebug: undefined as unknown },
 		};
 
