@@ -3578,7 +3578,11 @@ export class AgentSession {
 			options?.triggerTurn === true &&
 			options.deliverAs !== "nextTurn" &&
 			!this.isStreaming &&
-			this._sessionWorkBarrier.hasActiveWork;
+			this._sessionWorkBarrier.hasActiveWork &&
+			// The session-start binding itself holds the barrier while it emits
+			// session_start; a triggerTurn message queued from that emission (e.g. a
+			// goal continuation) must not wait on the very work that is delivering it.
+			this._extensionBindingPromptReadiness === undefined;
 		const pendingCompactionAdmission = this._pendingCompactionAdmission;
 		const activeCompactionGeneration =
 			this._compactionLifecycle.state.status === "running" ? this._compactionLifecycle.state.generation : undefined;

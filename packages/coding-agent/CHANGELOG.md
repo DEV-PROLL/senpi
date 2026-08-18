@@ -6,6 +6,9 @@
 
 ### Fixed
 
+- goal: resume an active goal when the user sends a message after a continuation-flooded session load suppressed auto-continuation; previously the "Send a message to resume" notice parked the goal because the follow-up user message only reset the continuation streak without queueing a continuation.
+- session: `sendCustomMessage` with `triggerTurn` no longer waits on the session-work barrier while the session-start binding itself holds it, unblocking goal continuations queued from `session_start` handlers during resume.
+
 ### New Features
 
 ### Breaking Changes
