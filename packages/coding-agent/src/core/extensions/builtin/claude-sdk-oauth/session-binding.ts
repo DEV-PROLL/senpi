@@ -2,7 +2,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { StoredBinding } from "./session-binding-store.ts";
 import { assistantContentHash } from "./session-commit-boundary.ts";
 import type { ContinuityBinding } from "./session-reattach.ts";
-import { sentHashPrefixDigest } from "./session-sync.ts";
+import { type SentMessage, sentHashPrefixDigest, sentMessageHashes } from "./session-sync.ts";
 
 export const BINDING_ENTRY_TYPE = "claude-sdk-oauth-binding";
 export const BINDING_MARKER = { schemaVersion: 2, marker: true } as const;
@@ -23,29 +23,63 @@ type BranchEntry = {
 
 export type StoredBindingAnchor = {
 	readonly sessionPath: string;
+	readonly sessionId: string;
 	readonly markerEntryId: string;
 	readonly assistantContentHash: string;
 };
 
-export function storedBindingFromBinding(binding: ContinuityBinding, anchor: StoredBindingAnchor): StoredBinding {
-	if (binding.sentHashes.length < binding.sentCount) {
-		throw new IncompleteContinuityBindingError(binding.sentCount, binding.sentHashes.length);
-	}
+export type BindingEntryState = {
+	readonly sdkSessionId: string;
+	readonly accountName: string;
+	readonly modelId: string;
+	readonly systemPromptHash: string;
+	readonly toolsetHash: string;
+	readonly assistantUuidByIndex: ReadonlyMap<number, string>;
+};
+
+/**
+ * The record is derived from the registry entry plus the hashes the branch
+ * actually carries, never from the process binding map: that map holds the
+ * previous turn's state while `message_end` runs (and only a prefix digest right
+ * after a restart), so reading it would anchor this turn's marker to a stale or
+ * absent sent-stream.
+ */
+export function storedBindingFromEntry(
+	entry: BindingEntryState,
+	hashes: readonly string[],
+	anchor: StoredBindingAnchor,
+): StoredBinding {
 	return {
 		schemaVersion: 1,
 		sessionPath: anchor.sessionPath,
-		sessionId: binding.senpiSessionId,
+		sessionId: anchor.sessionId,
 		markerEntryId: anchor.markerEntryId,
-		sdkSessionId: binding.sdkSessionId,
-		sentCount: binding.sentCount,
-		sentPrefixHash: sentHashPrefixDigest(binding.sentHashes, binding.sentCount),
+		sdkSessionId: entry.sdkSessionId,
+		sentCount: hashes.length,
+		sentPrefixHash: sentHashPrefixDigest(hashes),
 		assistantContentHash: anchor.assistantContentHash,
-		lastAssistantUuid: binding.lastAssistantUuid,
-		accountName: binding.accountName,
-		modelId: binding.modelId,
-		systemPromptHash: binding.systemPromptHash,
-		toolsetHash: binding.toolsetHash,
+		lastAssistantUuid: entry.assistantUuidByIndex.get(hashes.length) ?? null,
+		accountName: entry.accountName,
+		modelId: entry.modelId,
+		systemPromptHash: entry.systemPromptHash,
+		toolsetHash: entry.toolsetHash,
 	};
+}
+
+/** Hashes for the user/toolResult messages the persisted branch already carries. */
+export function sentHashesFromBranch(branch: readonly BranchEntry[]): string[] {
+	const messages: SentMessage[] = [];
+	for (const entry of branch) {
+		if (entry.type !== "message") continue;
+		if (isSentMessage(entry.message)) messages.push(entry.message);
+	}
+	return sentMessageHashes(messages);
+}
+
+function isSentMessage(value: unknown): value is SentMessage {
+	if (typeof value !== "object" || value === null) return false;
+	if (!("role" in value) || (value.role !== "user" && value.role !== "toolResult")) return false;
+	return "content" in value;
 }
 
 export function bindingFromStoredBranch(
@@ -68,11 +102,22 @@ export function bindingFromStoredBranch(
 	return bindingFromStored(stored);
 }
 
+/**
+ * Display-only metadata the co-resident builtins append after the committed
+ * assistant (stop-hook state/diagnostics/output, rule activations, rule scans).
+ * None participates in the sent stream, so none can shift the prefix digest.
+ */
+const SAFE_BINDING_SUFFIX_TYPES: ReadonlySet<string> = new Set([
+	"senpi.hooks.stop-state",
+	"senpi.hooks.stop-diagnostics",
+	"senpi.hooks.stop-output",
+	"pi-rules.scan",
+	"rule-activation",
+]);
+
 function isSafeBindingSuffix(entry: BranchEntry): boolean {
 	if (entry.type === "label") return true;
-	return (
-		entry.type === "custom" && (entry.customType === "senpi.hooks.stop-state" || entry.customType === "pi-rules.scan")
-	);
+	return entry.type === "custom" && entry.customType !== undefined && SAFE_BINDING_SUFFIX_TYPES.has(entry.customType);
 }
 
 function newestBindingEntryIndex(branch: readonly BranchEntry[]): number {
@@ -118,11 +163,4 @@ function bindingFromStored(stored: StoredBinding): ContinuityBinding {
 		systemPromptHash: stored.systemPromptHash,
 		toolsetHash: stored.toolsetHash,
 	};
-}
-
-class IncompleteContinuityBindingError extends Error {
-	constructor(sentCount: number, availableHashes: number) {
-		super(`Continuity binding has ${availableHashes} hashes for ${sentCount} sent messages`);
-		this.name = "IncompleteContinuityBindingError";
-	}
 }

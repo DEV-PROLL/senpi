@@ -48,8 +48,6 @@ export type ContinuityDecision =
 const PENDING_FORK_REASONS: Readonly<Record<string, ContinuityReason>> = {
 	assistant_rewritten: "assistant_rewritten",
 	compaction: "tainted_compaction",
-	fork: "tainted_fork",
-	abort: "tainted_abort",
 };
 
 function commonPrefixLength(left: readonly string[], right: readonly string[]): number {

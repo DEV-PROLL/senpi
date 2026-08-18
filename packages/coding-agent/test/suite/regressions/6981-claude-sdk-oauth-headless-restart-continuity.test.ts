@@ -24,6 +24,7 @@ import {
 	resetSessionRegistryBoundary,
 } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
 import { registerSessionRegistry } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-registry-wiring.ts";
+import { sentMessageHashes } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../../src/core/extensions/types.ts";
 
 type EventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
@@ -67,7 +68,15 @@ function sessionFixture() {
 	temporaryDirectories.push(directory);
 	const sessionFile = join(directory, "session.jsonl");
 	writeFileSync(sessionFile, "", "utf8");
-	return { sessionFile, branch: [] as BranchEntry[] };
+	// A real `-p -c` turn persists its user message before the assistant commits,
+	// and that message is what the restart record anchors its sent-prefix on.
+	const userMessage = {
+		role: "user" as const,
+		content: [{ type: "text" as const, text: "turn one" }],
+		timestamp: 1,
+	};
+	const branch: BranchEntry[] = [{ type: "message", id: "user-entry", message: userMessage }];
+	return { sessionFile, branch, turnHashes: sentMessageHashes([userMessage]) };
 }
 
 function fakeExtension(branch: BranchEntry[]) {
@@ -118,11 +127,11 @@ afterEach(() => {
 
 describe("issue #6981 headless restart continuity", () => {
 	it("invalidates persisted continuity when the committed assistant is rewritten", async () => {
-		const { sessionFile, branch } = sessionFixture();
+		const { sessionFile, branch, turnHashes } = sessionFixture();
 		const extension = fakeExtension(branch);
 		registerSessionRegistry(extension.api);
 		const entry = residentEntry();
-		rememberBinding(bindingFromEntry(entry, ["user-hash-1"]));
+		rememberBinding(bindingFromEntry(entry, turnHashes));
 		const eventContext = context(sessionFile, branch);
 
 		await emit(
@@ -148,11 +157,11 @@ describe("issue #6981 headless restart continuity", () => {
 	});
 
 	it("restores a sidecar-bound SDK lineage after a separate process starts", async () => {
-		const { sessionFile, branch } = sessionFixture();
+		const { sessionFile, branch, turnHashes } = sessionFixture();
 		const extension = fakeExtension(branch);
 		registerSessionRegistry(extension.api);
 		const entry = residentEntry();
-		rememberBinding(bindingFromEntry(entry, ["user-hash-1"]));
+		rememberBinding(bindingFromEntry(entry, turnHashes));
 		const eventContext = context(sessionFile, branch);
 
 		await emit(extension.handlers, "message_end", { type: "message_end", message: assistant() }, eventContext);
@@ -182,7 +191,7 @@ describe("issue #6981 headless restart continuity", () => {
 			decideNativeContinuity({
 				entry: undefined,
 				binding: restored,
-				currentHashes: ["user-hash-1"],
+				currentHashes: turnHashes,
 				accountName: "default",
 				modelId: "claude-test",
 				fingerprint: { systemPromptHash: PROMPT_HASH, toolsetHash: TOOLSET_HASH },

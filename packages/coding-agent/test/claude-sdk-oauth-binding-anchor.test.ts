@@ -4,11 +4,10 @@ import {
 	BINDING_ENTRY_TYPE,
 	BINDING_MARKER,
 	bindingFromStoredBranch,
-	storedBindingFromBinding,
+	storedBindingFromEntry,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-binding.ts";
 import type { StoredBinding } from "../src/core/extensions/builtin/claude-sdk-oauth/session-binding-store.ts";
 import { assistantContentHash } from "../src/core/extensions/builtin/claude-sdk-oauth/session-commit-boundary.ts";
-import type { ContinuityBinding } from "../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
 
 const PROMPT_HASH = "1".repeat(64);
 const TOOLSET_HASH = "2".repeat(64);
@@ -138,24 +137,28 @@ describe("claude-sdk-oauth stored binding anchor", () => {
 
 	it("keeps the sidecar fixed-size when the conversation grows", () => {
 		const sentCount = 10_000;
-		const binding: ContinuityBinding = {
-			senpiSessionId: "senpi-long",
-			sdkSessionId: "sdk-long",
-			sentCount,
-			sentHashes: Array.from({ length: sentCount }, (_value, index) => `hash-${index}`),
-			lastAssistantUuid: `uuid-${sentCount}`,
-			accountName: "primary",
-			modelId: "claude-test",
-			systemPromptHash: PROMPT_HASH,
-			toolsetHash: TOOLSET_HASH,
-		};
+		const hashes = Array.from({ length: sentCount }, (_value, index) => `hash-${index}`);
 
-		const checkpoint = storedBindingFromBinding(binding, {
-			sessionPath: "/tmp/session.jsonl",
-			markerEntryId: "marker-1",
-			assistantContentHash: assistantContentHash(assistant()),
-		});
+		const checkpoint = storedBindingFromEntry(
+			{
+				sdkSessionId: "sdk-long",
+				accountName: "primary",
+				modelId: "claude-test",
+				systemPromptHash: PROMPT_HASH,
+				toolsetHash: TOOLSET_HASH,
+				assistantUuidByIndex: new Map([[sentCount, `uuid-${sentCount}`]]),
+			},
+			hashes,
+			{
+				sessionPath: "/tmp/session.jsonl",
+				sessionId: "senpi-long",
+				markerEntryId: "marker-1",
+				assistantContentHash: assistantContentHash(assistant()),
+			},
+		);
 
+		expect(checkpoint.sentCount).toBe(sentCount);
+		expect(checkpoint.lastAssistantUuid).toBe(`uuid-${sentCount}`);
 		expect(checkpoint).not.toHaveProperty("sentHashes");
 		expect(checkpoint).not.toHaveProperty("assistantUuidByIndex");
 		expect(JSON.stringify(checkpoint).length).toBeLessThan(1_024);

@@ -6,7 +6,8 @@ import {
 	BINDING_MARKER,
 	type BindingInvalidation,
 	bindingFromStoredBranch,
-	storedBindingFromBinding,
+	sentHashesFromBranch,
+	storedBindingFromEntry,
 } from "./session-binding.ts";
 import { deleteStoredBinding, readStoredBinding, writeStoredBinding } from "./session-binding-store.ts";
 import {
@@ -15,7 +16,7 @@ import {
 	isResidentAssistant,
 	isTerminalFailure,
 } from "./session-commit-boundary.ts";
-import { bindingFromEntry, forgetBinding, getBinding, rememberBinding } from "./session-reattach.ts";
+import { bindingFromEntry, forgetBinding, rememberBinding } from "./session-reattach.ts";
 import {
 	closeSession,
 	getSession,
@@ -71,7 +72,11 @@ export function registerSessionRegistry(
 		}
 		if (!sessionFile) return;
 		const stored = await readStoredBinding(sessionFile);
-		if (!stored || stored.sessionId !== sessionId) return;
+		if (!stored) return;
+		if (stored.sessionId !== sessionId) {
+			await deleteStoredBinding(sessionFile);
+			return;
+		}
 		const binding = bindingFromStoredBranch(ctx.sessionManager.getBranch(), stored);
 		if (!binding) {
 			await deleteStoredBinding(sessionFile);
@@ -122,21 +127,26 @@ export function registerSessionRegistry(
 			commitBoundary.forget(sessionId);
 			return;
 		}
-		if (commitBoundary.commit(sessionId, event.message, entry.modelId) === "rewritten") {
+		const outcome = commitBoundary.commit(sessionId, event.message, entry.modelId);
+		if (outcome === "rewritten") {
 			recordPendingFork(sessionId, "assistant_rewritten");
 			await invalidateBinding(pi, ctx, "assistant_rewritten");
 			return;
 		}
-		const binding = getBinding(sessionId);
+		// Only an assistant this provider actually produced may anchor a record.
+		if (outcome !== "clean") return;
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
-		if (!binding || !sessionFile || !pi.appendEntry) return;
+		if (!sessionFile || !pi.appendEntry) return;
+		const hashes = sentHashesFromBranch(ctx.sessionManager.getBranch());
+		if (hashes.length === 0) return;
 		pi.appendEntry(BINDING_ENTRY_TYPE, BINDING_MARKER);
 		const markerEntryId = ctx.sessionManager.getLeafId();
 		if (!markerEntryId) return;
 		await writeStoredBinding(
 			sessionFile,
-			storedBindingFromBinding(binding, {
+			storedBindingFromEntry(entry, hashes, {
 				sessionPath: sessionFile,
+				sessionId,
 				markerEntryId,
 				assistantContentHash: assistantContentHash(event.message),
 			}),

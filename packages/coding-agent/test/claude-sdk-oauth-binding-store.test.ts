@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { StoredBinding } from "../src/core/extensions/builtin/claude-sdk-oauth/session-binding-store.ts";
 import {
 	bindingSidecarPath,
+	canonicalSessionPath,
 	deleteStoredBinding,
 	readStoredBinding,
 	writeStoredBinding,
@@ -46,7 +47,7 @@ describe("claude-sdk-oauth session binding store", () => {
 
 		expect(typeof sidecar).toBe("string");
 		expect(sidecar).not.toBe(sessionFile);
-		expect(stored?.sessionPath).toBe(sessionFile);
+		expect(stored?.sessionPath).toBe(canonicalSessionPath(sessionFile));
 		expect(stored?.sessionId).toBe("sess-abc-123");
 	});
 

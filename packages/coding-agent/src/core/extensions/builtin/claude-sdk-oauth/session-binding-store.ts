@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
@@ -25,7 +26,25 @@ const storedBindingSchema = z.strictObject({
 export type StoredBinding = Readonly<z.infer<typeof storedBindingSchema>>;
 
 export function bindingSidecarPath(sessionFile: string): string {
-	return `${resolve(sessionFile)}.claude-sdk-oauth-binding.json`;
+	return `${canonicalSessionPath(sessionFile)}.claude-sdk-oauth-binding.json`;
+}
+
+/**
+ * Records are keyed by the canonical session path so a symlinked directory or a
+ * different spelling of the same file resolves to one sidecar instead of
+ * silently losing the binding.
+ */
+export function canonicalSessionPath(sessionFile: string): string {
+	const resolved = resolve(sessionFile);
+	try {
+		return realpathSync(resolved);
+	} catch {
+		try {
+			return join(realpathSync(dirname(resolved)), basename(resolved));
+		} catch {
+			return resolved;
+		}
+	}
 }
 
 export async function readStoredBinding(sessionFile: string): Promise<StoredBinding | undefined> {
@@ -47,17 +66,18 @@ export async function readStoredBinding(sessionFile: string): Promise<StoredBind
 		throw error;
 	}
 	const parsed = storedBindingSchema.safeParse(value);
-	if (!parsed.success || parsed.data.sessionPath !== resolve(sessionFile)) return undefined;
+	if (!parsed.success || parsed.data.sessionPath !== canonicalSessionPath(sessionFile)) return undefined;
 	return parsed.data;
 }
 
 export async function writeStoredBinding(sessionFile: string, record: StoredBinding): Promise<void> {
-	const sessionPath = resolve(sessionFile);
+	const sessionPath = canonicalSessionPath(sessionFile);
 	const parsed = storedBindingSchema.parse(record);
-	if (parsed.sessionPath !== sessionPath) {
+	if (canonicalSessionPath(parsed.sessionPath) !== sessionPath) {
 		throw new StoredBindingPathError(sessionPath, parsed.sessionPath);
 	}
-	const serialized = `${JSON.stringify(parsed)}\n`;
+	const canonical: StoredBinding = { ...parsed, sessionPath };
+	const serialized = `${JSON.stringify(canonical)}\n`;
 	if (Buffer.byteLength(serialized) > MAX_RECORD_BYTES) {
 		throw new StoredBindingSizeError(Buffer.byteLength(serialized), MAX_RECORD_BYTES);
 	}
