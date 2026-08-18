@@ -1,4 +1,6 @@
-import type { Options } from "./sdk-boundary.ts";
+import type { ClaudeSdkOauthAuthLane } from "./options.ts";
+import type { Options, SessionMessage } from "./sdk-boundary.ts";
+import { getSdkBoundary } from "./sdk-boundary.ts";
 import { type ClaudeSdkOauthSessionEntry, closeSession, getOrCreateSession } from "./session-registry.ts";
 import { recordSyncedStream } from "./session-sync.ts";
 
@@ -81,6 +83,31 @@ export function bindingFromEntry(
 		systemPromptHash: entry.systemPromptHash,
 		toolsetHash: entry.toolsetHash,
 	};
+}
+
+export async function verifyRestoredTranscript(
+	binding: ContinuityBinding,
+	cwd: string,
+	authLane: ClaudeSdkOauthAuthLane,
+): Promise<boolean> {
+	if (authLane === "config-dir") return false;
+	let messages: SessionMessage[];
+	try {
+		messages = await getSdkBoundary().getSessionMessages(binding.sdkSessionId, { dir: cwd });
+	} catch (error) {
+		if (error instanceof Error) return false;
+		throw error;
+	}
+	if (messages.length === 0 || messages.some((message) => message.session_id !== binding.sdkSessionId)) {
+		return false;
+	}
+	if (binding.lastAssistantUuid === null) return true;
+	return messages.some(
+		(message) =>
+			message.type === "assistant" &&
+			message.uuid === binding.lastAssistantUuid &&
+			message.parent_tool_use_id === null,
+	);
 }
 
 async function awaitInitialization(entry: ClaudeSdkOauthSessionEntry, signal?: AbortSignal): Promise<void> {

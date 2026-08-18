@@ -101,6 +101,8 @@ function identityDrift(
 
 function decideFromBinding(input: ContinuityDecisionInput, binding: ContinuityBindingSnapshot): ContinuityDecision {
 	if (!input.transcriptAvailable) return { kind: "flatten", reason: "transcript_missing" };
+	const drift = identityDrift(input, binding);
+	if (drift) return { kind: "flatten", reason: drift };
 	if (binding.sentPrefixHash !== undefined) {
 		const prefixMatches =
 			input.currentHashes.length >= binding.sentCount &&
@@ -110,7 +112,7 @@ function decideFromBinding(input: ContinuityDecisionInput, binding: ContinuityBi
 				kind: "reattach",
 				sdkSessionId: binding.sdkSessionId,
 				from: binding.sentCount,
-				reason: identityDrift(input, binding) ?? "registry_miss",
+				reason: "registry_miss",
 			};
 		}
 		return {
