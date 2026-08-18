@@ -16,6 +16,12 @@
 
 ### Fixed
 
+- Transient provider stream-start timeouts now spend the full configured `retry.maxRetries` budget instead of
+  ending the turn after a single attempt. The retry-continuation watchdog was bounded by
+  `retry.provider.streamRetryTimeoutMs` (30s) while the same retry was granted the configured
+  `streamStartTimeoutMs` (90s), so a slow-but-alive provider was aborted 60s before its own deadline and the
+  turn surfaced `Provider stream start timed out after 90000ms` followed by `Aborted after 1 retry attempt`.
+  The watchdog is now reconciled to the guard it grants, while still cancelling a retry that outlives it.
 - Published Senpi tarballs now retain the lockfile-recorded Babel 8 dependency closure inside the bundled codemode sidecar, preventing `@babel/parser` resolution failures during extension startup ([#923](https://github.com/code-yeongyu/senpi/issues/923)).
 - Headless Claude SDK OAuth continuation now restores its persisted SDK binding across separate CLI processes, so
   `-p -c` resumes the existing lineage instead of resending the full conversation after a `registry_miss`.

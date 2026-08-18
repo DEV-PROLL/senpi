@@ -1,5 +1,41 @@
 # changes
 
+## 2026-08-18 - Retry continuation watchdog reconciled with the guards it grants
+
+### What changed
+
+- `core/provider-timeout-retry.ts`: `createProviderTimeoutRetryPlan` now reconciles the retry-continuation
+  liveness cap against the stream-start guard the same retry is handed:
+  `watchdogTimeoutMs = max(streamRetryTimeoutMs, streamStartTimeoutMs)`. An explicitly disabled cap
+  (`undefined`) stays disabled, and a cap that already outlasts the granted guard is returned unchanged.
+- Coverage: `test/provider-timeout-retry-continuation.test.ts` (new; first direct coverage of
+  `runBoundedRetryContinuation`), extended `test/provider-timeout-retry.test.ts`, and updated
+  `test/suite/regressions/provider-idle-recovery.test.ts`.
+
+### Why
+
+- This completes the 2026-08-13 fix below. That change stopped clamping the retry *request* guards to
+  `retry.provider.streamRetryTimeoutMs`, but left the same 30s cap bounding the retry *continuation*, which
+  reproduced the identical defect one layer up: `runBoundedRetryContinuation` aborted the attempt at 30s while
+  the request still had 60s of its configured 90s stream-start budget left.
+- No attempt could therefore finish, so the bounded `retry.maxRetries` budget (default 3) collapsed into the
+  single user-visible `Provider stream start timed out after 90000ms` / `Aborted after 1 retry attempt`
+  outcome. A slow-but-alive provider was again judged dead on a deadline it was never given.
+- Raising the watchdog to the granted guard preserves the wedge protection it was added for: the provider
+  guards still fail a dead upstream, and the watchdog still cancels a retry that outlives every guard it was
+  granted.
+
+### Why an extension could not handle it
+
+- The retry continuation bound and its abort ownership are core session-lifecycle surfaces with no extension
+  hook.
+
+### Expected merge conflict zones
+
+- `core/provider-timeout-retry.ts` plan construction, and the retry-bound constants in
+  `test/suite/regressions/provider-idle-recovery.test.ts`.
+
+
 ## Queue typed input admitted during auto-compaction (2026-08-18)
 
 ### What changed
