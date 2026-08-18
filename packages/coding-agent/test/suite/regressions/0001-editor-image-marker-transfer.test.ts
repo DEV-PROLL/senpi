@@ -1,5 +1,5 @@
-import { Editor, type EditorComponent, setKeybindings } from "@earendil-works/pi-tui";
 import type { ImageContent } from "@earendil-works/pi-ai/compat";
+import { Editor, type EditorComponent, setKeybindings } from "@earendil-works/pi-tui";
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { Container, TUI } from "../../../../tui/src/tui.ts";
 import { VirtualTerminal } from "../../../../tui/test/virtual-terminal.ts";
