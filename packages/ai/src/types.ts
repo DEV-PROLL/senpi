@@ -364,6 +364,12 @@ export type ProviderImagesOptions = ImagesOptions & Record<string, unknown>;
 // Unified options with reasoning passed to streamSimple() and completeSimple()
 export interface SimpleStreamOptions extends StreamOptions {
 	reasoning?: ThinkingLevel;
+	/**
+	 * Provenance-bearing thinking selection. Providers that need to distinguish
+	 * an explicit user choice from the always-materialized effective level read
+	 * this; `reasoning` remains the normalized effective level for everyone.
+	 */
+	thinkingSelection?: ThinkingSelection;
 	/** Ask a capable provider to return a durable handle and continue the request asynchronously. */
 	deferred?: boolean | { window?: "15m" | "1h" | "24h" };
 	/** Custom token budgets for thinking levels (token-based providers only) */
