@@ -19,6 +19,33 @@
 
 - LOW: the body of `setExtensionWidget()` in `interactive-mode.ts` only.
 
+## Post-login provider catalog refresh explicitly allows network discovery (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`:
+  `completeProviderAuthentication()` now passes `allowNetwork: true` to its
+  existing provider-scoped, 15-second background refresh after successful
+  OAuth/API-key login.
+
+### Why
+
+- Ordinary interactive runtimes default model networking off. The post-login
+  refresh inherited that default, so dynamic providers such as native Cursor
+  stored valid credentials but restored only cached models instead of
+  fetching the authenticated account catalog immediately.
+
+### Why an extension could not handle it
+
+- Login completion, its bounded refresh controller, and the status/warning UI
+  are private `InteractiveMode` lifecycle code. Provider extensions cannot
+  alter the options on the core refresh that runs after their login returns.
+
+### Expected merge conflict zones
+
+- LOW: the single `modelRuntime.refresh()` option object inside
+  `completeProviderAuthentication()`.
+
 ## Repository-wide changes.md audit backfill for interactive rendering, selectors, and editor surfaces (2026-08-17)
 
 ### What changed

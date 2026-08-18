@@ -11,6 +11,8 @@
   `omo-dag` status widgets) stay in a fixed vertical order instead of bouncing on every refresh
   ([#929](https://github.com/code-yeongyu/senpi/pull/929)).
 
+- Cursor model catalogs now become available immediately after authentication: dynamic providers perform their scoped network refresh after login, while explicit Cursor CLI fallback login/import enables the lane, `/cursor-account import native` safely copies the primary OAuth credential into managed accounts, and imported accounts refresh model availability in the current session ([#928](https://github.com/code-yeongyu/senpi/pull/928)).
+
 ### New Features
 
 ### Breaking Changes
