@@ -6,7 +6,12 @@ import { registerCursorCliAccountCommand } from "./account-command.ts";
 import { defaultCursorAgentExecutableDeps, resolveCursorAgentExecutable } from "./executable.ts";
 import { resolveCursorCliModelCatalog, STATIC_CURSOR_CLI_MODELS } from "./models.ts";
 import { CURSOR_CLI_OAUTH_PROVIDER_ID, createCursorCliOauthConfig } from "./oauth-login.ts";
-import { type CursorCliOauthProviderSettings, loadCursorCliOauthProviderSettingsFromDisk } from "./settings.ts";
+import {
+	type CursorCliOauthProviderSettings,
+	loadCursorCliOauthProviderSettingsFromDisk,
+	persistCursorCliNoApprovalAcknowledgement,
+	persistCursorCliOauthEnabled,
+} from "./settings.ts";
 import { streamCursorCliOauth } from "./stream.ts";
 
 export { CURSOR_CLI_OAUTH_PROVIDER_ID } from "./oauth-login.ts";
@@ -56,6 +61,8 @@ export function registerCursorCliOauthExtension(pi: ExtensionAPI, deps: CursorCl
 				readCurrent,
 				readSettings: () => loadSettings(cwd),
 				resolveExecutable,
+				persistAcknowledgement: (acknowledgedAt) => persistCursorCliNoApprovalAcknowledgement(cwd, acknowledgedAt),
+				persistEnabled: (enabled) => persistCursorCliOauthEnabled(cwd, enabled),
 			}),
 		});
 	};
