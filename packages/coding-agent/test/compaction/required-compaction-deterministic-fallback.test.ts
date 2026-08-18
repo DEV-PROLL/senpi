@@ -1,5 +1,7 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
+import { transformMessages } from "../../../ai/src/api/transform-messages.ts";
 import { prepareCompaction } from "../../src/core/compaction/index.ts";
 import { StreamDurationBudgetError } from "../../src/core/compaction/stream-watchdog.ts";
 import {
@@ -9,6 +11,22 @@ import {
 import { SummaryRequestError } from "../../src/core/extensions/builtin/compaction/speculative.ts";
 import type { CompactionReason } from "../../src/core/extensions/types.ts";
 import { createBlockingContext, createCompactionHandlers } from "../helpers/blocking-compaction-harness.ts";
+
+function createGeminiAssistantMessage(
+	content: AssistantMessage["content"],
+	options: { timestamp?: number; stopReason?: AssistantMessage["stopReason"] } = {},
+): AssistantMessage {
+	return {
+		...fauxAssistantMessage("", {
+			timestamp: options.timestamp ?? 4,
+			stopReason: options.stopReason ?? "toolUse",
+		}),
+		provider: "google",
+		model: "gemini-3-flash",
+		api: "google-generative-ai",
+		content,
+	};
+}
 
 describe("required compaction deterministic fallback", () => {
 	it("advances to the latest user boundary when the prepared suffix cannot fit", async () => {
@@ -251,14 +269,14 @@ describe("required compaction deterministic fallback", () => {
 		);
 
 		expect(result).toBeDefined();
-		expect(result!.summary).not.toContain("�");
-		expect(result!.summary).toContain("Finish the current repair");
-		expect(result!.summary).toContain("Previous checkpoint:");
-		expect(result!.summary).toContain("[Older checkpoint truncated]");
+		expect(result?.summary).not.toContain("\uFFFD");
+		expect(result?.summary).toContain("Finish the current repair");
+		expect(result?.summary).toContain("Previous checkpoint:");
+		expect(result?.summary).toContain("[Older checkpoint truncated]");
 		expect(Buffer.byteLength(result!.summary)).toBeLessThanOrEqual(40_000);
-		expect(result!.summary).not.toContain("verify recovery");
-		expect(result!.summary).not.toContain("agent-session.ts");
-		expect(result!.details).toEqual({
+		expect(result?.summary).not.toContain("verify recovery");
+		expect(result?.summary).not.toContain("agent-session.ts");
+		expect(result?.details).toEqual({
 			schema: "senpi.compaction.deterministic-fallback.v1",
 			origin: "required-compaction-recovery",
 			failureKind: "summarization-timeout",
@@ -453,5 +471,335 @@ describe("required compaction deterministic fallback", () => {
 
 		expect(result).toBeUndefined();
 		expect(getterCalls).toBe(0);
+	});
+});
+
+describe("deterministic compaction fallback Gemini signed state and recovery cases", () => {
+	const validSig = "c2lnbmF0dXJlMTIzNA=="; // valid base64 multiple of 4
+
+	it("Case A: retains Gemini tool-call-only turn with thoughtSignature and empty visible text without dropping state", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const preparedBoundaryId = harness.sessionManager.appendMessage(
+			createGeminiAssistantMessage([
+				{
+					type: "toolCall",
+					id: "call-1",
+					name: "read",
+					arguments: { path: "foo.ts" },
+					thoughtSignature: validSig,
+				},
+			]),
+		);
+		harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call-1",
+			toolName: "read",
+			content: [{ type: "text", text: "file contents" }],
+			isError: false,
+			timestamp: 5,
+		});
+
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true);
+		expect(preparation).toBeDefined();
+
+		const result = createRequiredCompactionFallback(
+			{ ...preparation!, firstKeptEntryId: preparedBoundaryId },
+			100_000,
+			"summarization-timeout",
+			{},
+			branchEntries,
+		);
+
+		expect(result).toBeDefined();
+		if (!result?.details) throw new Error("Expected fallback result with details");
+		expect(result.firstKeptEntryId).toBe(preparedBoundaryId);
+		expect(result.details.retainedSuffix).toBe("prepared");
+
+		harness.sessionManager.appendCompaction(
+			result.summary,
+			result.firstKeptEntryId,
+			result.tokensBefore,
+			result.details,
+			true,
+		);
+
+		const messages = harness.sessionManager.buildSessionContext().messages;
+		const assistantMsg = messages.find((m) => m.role === "assistant") as AssistantMessage | undefined;
+		expect(assistantMsg).toBeDefined();
+		const firstBlock = assistantMsg?.content[0];
+		if (firstBlock?.type === "toolCall") {
+			expect(firstBlock.thoughtSignature).toBe(validSig);
+		} else {
+			throw new Error("Expected toolCall block");
+		}
+	});
+
+	it("Case B: preserves empty signed text and thinking parts without discarding them", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const preparedBoundaryId = harness.sessionManager.appendMessage(
+			createGeminiAssistantMessage([
+				{
+					type: "thinking",
+					thinking: "",
+					thinkingSignature: validSig,
+				},
+				{
+					type: "text",
+					text: "",
+					textSignature: validSig,
+				},
+				{
+					type: "toolCall",
+					id: "call-empty-text",
+					name: "read",
+					arguments: { path: "bar.ts" },
+					thoughtSignature: validSig,
+				},
+			]),
+		);
+		harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call-empty-text",
+			toolName: "read",
+			content: [{ type: "text", text: "bar content" }],
+			isError: false,
+			timestamp: 5,
+		});
+
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true);
+		expect(preparation).toBeDefined();
+
+		const result = createRequiredCompactionFallback(
+			{ ...preparation!, firstKeptEntryId: preparedBoundaryId },
+			100_000,
+			"summarization-timeout",
+			{},
+			branchEntries,
+		);
+
+		expect(result).toBeDefined();
+		expect(result?.firstKeptEntryId).toBe(preparedBoundaryId);
+	});
+
+	it("Case C: handles sequential function calling chain without invalid cut", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const startId = harness.sessionManager.appendMessage(
+			createGeminiAssistantMessage([
+				{
+					type: "toolCall",
+					id: "call-seq-1",
+					name: "read",
+					arguments: { path: "a.ts" },
+					thoughtSignature: validSig,
+				},
+			]),
+		);
+		harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call-seq-1",
+			toolName: "read",
+			content: [{ type: "text", text: "a content" }],
+			isError: false,
+			timestamp: 5,
+		});
+		harness.sessionManager.appendMessage(
+			createGeminiAssistantMessage(
+				[
+					{
+						type: "toolCall",
+						id: "call-seq-2",
+						name: "read",
+						arguments: { path: "b.ts" },
+						thoughtSignature: validSig,
+					},
+				],
+				{ timestamp: 6 },
+			),
+		);
+		harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call-seq-2",
+			toolName: "read",
+			content: [{ type: "text", text: "b content" }],
+			isError: false,
+			timestamp: 7,
+		});
+
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true);
+		expect(preparation).toBeDefined();
+
+		const result = createRequiredCompactionFallback(
+			{ ...preparation!, firstKeptEntryId: startId },
+			100_000,
+			"summarization-timeout",
+			{},
+			branchEntries,
+		);
+
+		expect(result).toBeDefined();
+		expect(result?.firstKeptEntryId).toBe(startId);
+	});
+
+	it("Case D: attempts earlier safe boundary when boundary would cut through tool call chain", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const assistantId = harness.sessionManager.appendMessage(
+			createGeminiAssistantMessage([
+				{
+					type: "toolCall",
+					id: "call-split",
+					name: "read",
+					arguments: { path: "split.ts" },
+					thoughtSignature: validSig,
+				},
+			]),
+		);
+		const resultId = harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call-split",
+			toolName: "read",
+			content: [{ type: "text", text: "split content" }],
+			isError: false,
+			timestamp: 5,
+		});
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: "follow up request",
+			timestamp: 6,
+		});
+
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true);
+
+		// If initial boundary was positioned at resultId (cutting tool call),
+		// it must find the earlier safe boundary at assistantId
+		const result = createRequiredCompactionFallback(
+			{ ...preparation!, firstKeptEntryId: resultId },
+			100_000,
+			"summarization-timeout",
+			{},
+			branchEntries,
+		);
+
+		expect(result).toBeDefined();
+		if (!result?.details) throw new Error("Expected fallback result with details");
+		expect(result.firstKeptEntryId).toBe(assistantId);
+		expect(result.details.retainedSuffix).toBe("earlier-safe-boundary");
+	});
+
+	it("Case E: fails closed on genuinely unsafe / malformed provider signatures", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const badSigId = harness.sessionManager.appendMessage(
+			createGeminiAssistantMessage([
+				{
+					type: "toolCall",
+					id: "call-bad-sig",
+					name: "read",
+					arguments: { path: "bad.ts" },
+					thoughtSignature: "not!base64!valid!sig", // Invalid base64 characters
+				},
+			]),
+		);
+		harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call-bad-sig",
+			toolName: "read",
+			content: [{ type: "text", text: "bad content" }],
+			isError: false,
+			timestamp: 5,
+		});
+
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true);
+
+		const result = createRequiredCompactionFallback(
+			{ ...preparation!, firstKeptEntryId: badSigId },
+			100_000,
+			"summarization-timeout",
+			{},
+			branchEntries,
+		);
+
+		expect(result).toBeUndefined();
+	});
+
+	it("Case F: budget exhaustion cleanly rejects without unbounded boundary search", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const preparedBoundaryId = harness.sessionManager.appendMessage(
+			createGeminiAssistantMessage([
+				{
+					type: "toolCall",
+					id: "call-huge",
+					name: "read",
+					arguments: { path: "huge.ts" },
+					thoughtSignature: validSig,
+				},
+			]),
+		);
+		harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call-huge",
+			toolName: "read",
+			content: [{ type: "text", text: "huge tool result ".repeat(500) }],
+			isError: false,
+			timestamp: 5,
+		});
+
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true);
+
+		const diagnostics: { rejectionReason?: string; budgetExceeded?: boolean } = {};
+		const result = createRequiredCompactionFallback(
+			{ ...preparation!, firstKeptEntryId: preparedBoundaryId },
+			100, // Tiny context window -> budget exceeded
+			"summarization-timeout",
+			{},
+			branchEntries,
+			diagnostics as never,
+		);
+
+		expect(result).toBeUndefined();
+		expect(diagnostics.rejectionReason).toBe("retained-token-budget-exceeded");
+		expect(diagnostics.budgetExceeded).toBe(true);
+	});
+
+	it("Case G: cross-model handoff transforms Gemini signed state correctly without replaying invalid signatures", () => {
+		const geminiAssistant = createGeminiAssistantMessage([
+			{
+				type: "toolCall",
+				id: "call-1",
+				name: "read",
+				arguments: { path: "foo.ts" },
+				thoughtSignature: validSig,
+			},
+		]);
+		const toolRes = {
+			role: "toolResult" as const,
+			toolCallId: "call-1",
+			toolName: "read",
+			content: [{ type: "text" as const, text: "result" }],
+			isError: false,
+			timestamp: 5,
+		};
+
+		// Transforming to Anthropic target model
+		const targetModel = {
+			id: "claude-sonnet-4",
+			provider: "anthropic",
+			api: "anthropic-messages" as const,
+			input: ["text" as const],
+		};
+
+		const transformed = transformMessages([geminiAssistant, toolRes], targetModel as never);
+		const transformedAssistant = transformed.find((m) => m.role === "assistant") as AssistantMessage | undefined;
+		expect(transformedAssistant).toBeDefined();
+		const block = transformedAssistant?.content[0];
+		if (block?.type === "toolCall") {
+			expect(block.thoughtSignature).toBeUndefined();
+		} else {
+			throw new Error("Expected toolCall block");
+		}
 	});
 });

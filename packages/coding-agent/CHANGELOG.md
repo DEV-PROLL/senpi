@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Deterministic compaction fallback now supports replay-safe Gemini opaque provider state (thoughtSignature, thinkingSignature, textSignature, and empty visible text blocks) and recovers earlier safe boundaries without breaking atomic tool-call chains ([#944](https://github.com/code-yeongyu/senpi/pull/944)).
+
 ### New Features
 
 ### Breaking Changes

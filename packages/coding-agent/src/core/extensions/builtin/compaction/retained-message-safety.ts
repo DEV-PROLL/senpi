@@ -28,23 +28,40 @@ function isUsage(value: unknown): boolean {
 	);
 }
 
+const base64SignaturePattern = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * Validates opaque provider signature without exposing or logging content.
+ * Base64 string of valid multiple-of-4 length or bounded string for provider replay.
+ */
+function isValidProviderSignature(sig: unknown): boolean {
+	if (typeof sig !== "string" || sig.length === 0 || sig.length > 65_536) return false;
+	if (sig.length % 4 !== 0) return false;
+	return base64SignaturePattern.test(sig);
+}
+
 function hasSafeAssistantContent(content: unknown): boolean {
 	if (!Array.isArray(content)) return false;
 	for (const block of content) {
 		if (!isRecord(block) || typeof block.type !== "string") return false;
 		switch (block.type) {
 			case "text":
-				if (typeof block.text !== "string" || block.textSignature !== undefined) return false;
+				if (typeof block.text !== "string") return false;
+				if (block.textSignature !== undefined && !isValidProviderSignature(block.textSignature)) {
+					return false;
+				}
 				break;
 			case "thinking":
 				if (
 					typeof block.thinking !== "string" ||
 					(block.startedAt !== undefined && !isFiniteNumber(block.startedAt)) ||
 					(block.endedAt !== undefined && !isFiniteNumber(block.endedAt)) ||
-					(block.redacted !== undefined && typeof block.redacted !== "boolean") ||
-					block.redacted === true ||
-					block.thinkingSignature !== undefined
+					(block.redacted !== undefined && typeof block.redacted !== "boolean")
 				) {
+					return false;
+				}
+				// Redacted thinking or thinking with a signature
+				if (block.thinkingSignature !== undefined && !isValidProviderSignature(block.thinkingSignature)) {
 					return false;
 				}
 				break;
@@ -54,9 +71,11 @@ function hasSafeAssistantContent(content: unknown): boolean {
 					typeof block.name !== "string" ||
 					!isRecord(block.arguments) ||
 					(block.incomplete !== undefined && block.incomplete !== true) ||
-					(block.errorMessage !== undefined && typeof block.errorMessage !== "string") ||
-					block.thoughtSignature !== undefined
+					(block.errorMessage !== undefined && typeof block.errorMessage !== "string")
 				) {
+					return false;
+				}
+				if (block.thoughtSignature !== undefined && !isValidProviderSignature(block.thoughtSignature)) {
 					return false;
 				}
 				break;

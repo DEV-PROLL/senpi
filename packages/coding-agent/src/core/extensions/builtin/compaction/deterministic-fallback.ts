@@ -18,12 +18,25 @@ interface RecoveryMetadata {
 	checkpoint?: unknown;
 }
 
+export type DeterministicFallbackRejectionReason =
+	| "missing-preparation-boundary"
+	| "unsafe-retained-content"
+	| "retained-token-budget-exceeded"
+	| "atomic-tool-chain-cut"
+	| "context-reconstruction-failed";
+
 interface DeterministicFallbackDetails {
 	schema: "senpi.compaction.deterministic-fallback.v1";
 	origin: "required-compaction-recovery";
 	failureKind: RequiredCompactionFallbackFailure;
 	taskIntent?: string;
-	retainedSuffix?: "prepared" | "latest-user-turn";
+	retainedSuffix?: "prepared" | "latest-user-turn" | "earlier-safe-boundary";
+}
+
+export interface DeterministicFallbackDiagnostic {
+	rejectionReason?: DeterministicFallbackRejectionReason;
+	candidatesChecked?: number;
+	budgetExceeded?: boolean;
 }
 
 const NON_VISIBLE_USER_TEXT = /[\p{White_Space}\p{Default_Ignorable_Code_Point}]/gu;
@@ -40,6 +53,33 @@ function hasMeaningfulUserText(entry: SessionEntry): boolean {
 	if (typeof content === "string") return hasVisibleText(content);
 	if (!Array.isArray(content)) return false;
 	return content.some((block) => isRecord(block) && block.type === "text" && hasVisibleText(block.text));
+}
+
+/**
+ * Validates that retained tool calls and tool results remain paired in proper sequence,
+ * and that we do not cut through an atomic signed/tool chain.
+ */
+function hasValidToolChains(messages: ReturnType<typeof filterContextExcludedMessages>): boolean {
+	const declaredCalls = new Set<string>();
+	const resolvedCalls = new Set<string>();
+
+	for (const msg of messages) {
+		if (!isRecord(msg)) continue;
+		if (msg.role === "assistant" && Array.isArray(msg.content)) {
+			for (const block of msg.content) {
+				if (isRecord(block) && block.type === "toolCall" && typeof block.id === "string") {
+					declaredCalls.add(block.id);
+				}
+			}
+		} else if (msg.role === "toolResult" && typeof msg.toolCallId === "string") {
+			// A tool result without its preceding tool call in the retained messages is an invalid cut
+			if (!declaredCalls.has(msg.toolCallId)) {
+				return false;
+			}
+			resolvedCalls.add(msg.toolCallId);
+		}
+	}
+	return true;
 }
 
 /**
@@ -116,9 +156,11 @@ export function createRequiredCompactionFallback(
 	failureKind: RequiredCompactionFallbackFailure,
 	metadata: RecoveryMetadata,
 	branchEntries: SessionEntry[] = [],
+	diagnostics?: DeterministicFallbackDiagnostic,
 ): CompactionResult<DeterministicFallbackDetails> | undefined {
 	const preparedBoundaryIndex = branchEntries.findIndex((entry) => entry.id === preparation.firstKeptEntryId);
 	if (!preparation.firstKeptEntryId || preparedBoundaryIndex === -1) {
+		if (diagnostics) diagnostics.rejectionReason = "missing-preparation-boundary";
 		return undefined;
 	}
 
@@ -148,10 +190,13 @@ export function createRequiredCompactionFallback(
 		failureKind,
 		...(taskIntent ? { taskIntent } : {}),
 	};
+	let candidateCount = 0;
+
 	const projectCandidate = (
 		firstKeptEntryId: string,
 		retainedSuffix: NonNullable<DeterministicFallbackDetails["retainedSuffix"]>,
 	): CompactionResult<DeterministicFallbackDetails> | undefined => {
+		candidateCount++;
 		const details = { ...baseDetails, retainedSuffix };
 		const result: CompactionResult<DeterministicFallbackDetails> = {
 			summary,
@@ -176,22 +221,62 @@ export function createRequiredCompactionFallback(
 				buildSessionContext([...branchEntries, syntheticCompaction]).messages,
 			);
 		} catch {
+			if (diagnostics) diagnostics.rejectionReason = "context-reconstruction-failed";
 			return undefined;
 		}
-		if (hasUnsafeRetainedContent(retainedMessages)) return undefined;
+		if (hasUnsafeRetainedContent(retainedMessages)) {
+			if (diagnostics) diagnostics.rejectionReason = "unsafe-retained-content";
+			return undefined;
+		}
+		if (!hasValidToolChains(retainedMessages)) {
+			if (diagnostics) diagnostics.rejectionReason = "atomic-tool-chain-cut";
+			return undefined;
+		}
 		const budget = contextWindow - preparation.settings.reserveTokens;
 		const retainedTokens = estimateConservativeTokens(retainedMessages, budget);
-		if (retainedTokens > budget) return undefined;
+		if (retainedTokens > budget) {
+			if (diagnostics) {
+				diagnostics.rejectionReason = "retained-token-budget-exceeded";
+				diagnostics.budgetExceeded = true;
+			}
+			return undefined;
+		}
 		return { ...result, estimatedTokensAfter: retainedTokens };
 	};
 
+	// 1. Try prepared boundary
 	const prepared = projectCandidate(preparation.firstKeptEntryId, "prepared");
-	if (prepared) return prepared;
+	if (prepared) {
+		if (diagnostics) diagnostics.candidatesChecked = candidateCount;
+		return prepared;
+	}
 
+	// 2. If prepared boundary cut an atomic signed chain or was rejected, check if an earlier safe boundary exists
+	// Scan backward up to 5 entries before prepared boundary to find complete chain boundary
+	const minBoundary = Math.max(0, preparedBoundaryIndex - 5);
+	for (let index = preparedBoundaryIndex - 1; index >= minBoundary; index--) {
+		const entry = branchEntries[index];
+		if (entry.type === "compaction") break;
+		// Only consider message turn starts or assistant call starts
+		const earlier = projectCandidate(entry.id, "earlier-safe-boundary");
+		if (earlier) {
+			if (diagnostics) diagnostics.candidatesChecked = candidateCount;
+			return earlier;
+		}
+	}
+
+	// 3. Try latest meaningful user turn
 	for (let index = branchEntries.length - 1; index > preparedBoundaryIndex; index--) {
 		const entry = branchEntries[index];
 		if (!hasMeaningfulUserText(entry)) continue;
-		return projectCandidate(entry.id, "latest-user-turn");
+		const latestUser = projectCandidate(entry.id, "latest-user-turn");
+		if (latestUser) {
+			if (diagnostics) diagnostics.candidatesChecked = candidateCount;
+			return latestUser;
+		}
+		break;
 	}
+
+	if (diagnostics) diagnostics.candidatesChecked = candidateCount;
 	return undefined;
 }
