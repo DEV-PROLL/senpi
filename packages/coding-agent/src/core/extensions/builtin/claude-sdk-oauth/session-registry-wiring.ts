@@ -1,14 +1,20 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "../../types.ts";
+import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
 import {
 	BINDING_ENTRY_TYPE,
+	BINDING_MARKER,
 	type BindingInvalidation,
-	bindingFromCheckpoint,
-	checkpointFromBinding,
-	latestBindingOnBranch,
+	bindingFromStoredBranch,
+	storedBindingFromBinding,
 } from "./session-binding.ts";
-import { AssistantCommitBoundary, isResidentAssistant, isTerminalFailure } from "./session-commit-boundary.ts";
+import { deleteStoredBinding, readStoredBinding, writeStoredBinding } from "./session-binding-store.ts";
+import {
+	AssistantCommitBoundary,
+	assistantContentHash,
+	isResidentAssistant,
+	isTerminalFailure,
+} from "./session-commit-boundary.ts";
 import { bindingFromEntry, forgetBinding, getBinding, rememberBinding } from "./session-reattach.ts";
 import {
 	closeSession,
@@ -17,6 +23,7 @@ import {
 	recordPendingFork,
 	switchSessionModel,
 } from "./session-registry.ts";
+import { sentHashesForEntry } from "./session-sync.ts";
 
 const commitBoundary = new AssistantCommitBoundary();
 
@@ -24,9 +31,21 @@ function persistBindingInvalidation(pi: Partial<Pick<ExtensionAPI, "appendEntry"
 	pi.appendEntry?.(BINDING_ENTRY_TYPE, { schemaVersion: 1, invalidated: true, reason } satisfies BindingInvalidation);
 }
 
+async function invalidateBinding(
+	pi: Partial<Pick<ExtensionAPI, "appendEntry">>,
+	ctx: Pick<ExtensionContext, "sessionManager">,
+	reason: string,
+): Promise<void> {
+	const sessionId = ctx.sessionManager.getSessionId();
+	forgetBinding(sessionId);
+	const sessionFile = ctx.sessionManager.getSessionFile?.();
+	if (sessionFile) await deleteStoredBinding(sessionFile);
+	persistBindingInvalidation(pi, reason);
+}
+
 function keepBindingThenClose(sessionId: string, reason: string): void {
 	const entry = getSession(sessionId);
-	if (entry) rememberBinding(bindingFromEntry(entry, []));
+	if (entry) rememberBinding(bindingFromEntry(entry, sentHashesForEntry(entry) ?? []));
 	closeSession(sessionId, reason);
 }
 
@@ -39,36 +58,45 @@ function residentEntryFor(sessionId: string, message: AssistantMessage) {
 export function registerSessionRegistry(
 	pi: Pick<ExtensionAPI, "on"> & Partial<Pick<ExtensionAPI, "appendEntry">>,
 ): void {
-	pi.on("session_start", (event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		if (event.reason === "reload") return;
 		const sessionId = ctx.sessionManager.getSessionId();
 		forgetBinding(sessionId);
-		if (event.reason === "new" || event.reason === "fork") return;
-		const checkpoint = latestBindingOnBranch(ctx.sessionManager.getBranch());
-		if (!checkpoint) return;
-		rememberBinding(bindingFromCheckpoint(sessionId, checkpoint));
+		const sessionFile = ctx.sessionManager.getSessionFile?.();
+		if (event.reason === "new") return;
+		if (event.reason === "fork") {
+			if (sessionFile) await deleteStoredBinding(sessionFile);
+			persistBindingInvalidation(pi, "fork");
+			return;
+		}
+		if (!sessionFile) return;
+		const stored = await readStoredBinding(sessionFile);
+		if (!stored || stored.sessionId !== sessionId) return;
+		const binding = bindingFromStoredBranch(ctx.sessionManager.getBranch(), stored);
+		if (!binding) {
+			await deleteStoredBinding(sessionFile);
+			return;
+		}
+		rememberBinding(binding);
 	});
-	pi.on("session_compact", (event, ctx) => {
+	pi.on("session_compact", async (event, ctx) => {
 		if (!event.accepted) return;
 		recordPendingFork(ctx.sessionManager.getSessionId(), "compaction");
-		persistBindingInvalidation(pi, "compaction");
+		await invalidateBinding(pi, ctx, "compaction");
 	});
-	pi.on("session_before_fork", (_event, ctx) => {
-		recordPendingFork(ctx.sessionManager.getSessionId(), "fork");
-		persistBindingInvalidation(pi, "fork");
-	});
-	pi.on("session_tree", (event, ctx) => {
+	pi.on("session_tree", async (event, ctx) => {
 		if (event.oldLeafId === null || event.newLeafId === null) return;
 		recordBranchInfo(ctx.sessionManager.getSessionId(), {
 			oldLeafId: event.oldLeafId,
 			newLeafId: event.newLeafId,
 		});
-		persistBindingInvalidation(pi, "tree_changed");
+		await invalidateBinding(pi, ctx, "tree_changed");
 	});
 	pi.on("model_select", async (event, ctx) => {
 		const sessionId = ctx.sessionManager.getSessionId();
 		if (event.model?.provider !== CLAUDE_SDK_OAUTH_PROVIDER_ID) {
 			closeSession(sessionId, "model_selected");
+			await invalidateBinding(pi, ctx, "model_selected");
 			return;
 		}
 		if (!(await switchSessionModel(sessionId, event.model.id))) {
@@ -85,7 +113,7 @@ export function registerSessionRegistry(
 			commitBoundary.captureProviderFinal(sessionId, event.message);
 		}
 	});
-	pi.on("message_end", (event, ctx) => {
+	pi.on("message_end", async (event, ctx) => {
 		if (event.message.role !== "assistant") return;
 		const sessionId = ctx.sessionManager.getSessionId();
 		const entry = getSession(sessionId);
@@ -96,16 +124,29 @@ export function registerSessionRegistry(
 		}
 		if (commitBoundary.commit(sessionId, event.message, entry.modelId) === "rewritten") {
 			recordPendingFork(sessionId, "assistant_rewritten");
-			persistBindingInvalidation(pi, "assistant_rewritten");
+			await invalidateBinding(pi, ctx, "assistant_rewritten");
 			return;
 		}
 		const binding = getBinding(sessionId);
-		if (binding) pi.appendEntry?.(BINDING_ENTRY_TYPE, checkpointFromBinding(binding));
+		const sessionFile = ctx.sessionManager.getSessionFile?.();
+		if (!binding || !sessionFile || !pi.appendEntry) return;
+		pi.appendEntry(BINDING_ENTRY_TYPE, BINDING_MARKER);
+		const markerEntryId = ctx.sessionManager.getLeafId();
+		if (!markerEntryId) return;
+		await writeStoredBinding(
+			sessionFile,
+			storedBindingFromBinding(binding, {
+				sessionPath: sessionFile,
+				markerEntryId,
+				assistantContentHash: assistantContentHash(event.message),
+			}),
+		);
 	});
 	pi.on("session_shutdown", (event, ctx) => {
 		closeSession(ctx.sessionManager.getSessionId(), event.reason);
 	});
-	pi.on("session_extensions_removed", (_event, ctx) => {
+	pi.on("session_extensions_removed", async (_event, ctx) => {
 		closeSession(ctx.sessionManager.getSessionId(), "extensions_removed");
+		await invalidateBinding(pi, ctx, "extensions_removed");
 	});
 }
