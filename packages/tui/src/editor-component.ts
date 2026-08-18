@@ -81,6 +81,13 @@ export interface EditorComponent extends Component {
 	 * Insert the next atomic `[Image #N]` marker at the cursor and return its id.
 	 * The editor stores ids only; the caller keeps the image payload keyed by id.
 	 *
+	 * The returned id is the marker's FINAL canonical number - its 1-based
+	 * reading position after the editor renumbers the visible markers to stay
+	 * 1..k in reading order - and `onImageMarkersChanged` fires (with the
+	 * PRE-renumber ids) before the id is returned, so the caller registering its
+	 * payload under the returned id immediately after the call always lands on
+	 * a vacant slot.
+	 *
 	 * Paired contract: implement insertImageMarker together with
 	 * onImageMarkersChanged. Callers must be told when markers are removed or
 	 * renumbered, otherwise their payload map desynchronizes from the visible
@@ -112,11 +119,37 @@ export interface EditorComponent extends Component {
 	 * Called with the image-marker ids in text reading order whenever markers are
 	 * added, removed, pruned or renumbered.
 	 *
+	 * The reported ids are the keys the caller currently keys its payloads by
+	 * (the PRE-renumber ids), and after every change the visible numbers are
+	 * canonical 1..k in reading order, so the caller re-keys payload
+	 * `order[i]` onto slot `i + 1`.
+	 *
 	 * Paired contract: required whenever insertImageMarker is implemented (see
 	 * above) - the reported order is the only signal that keeps the caller's
 	 * payload map aligned with the displayed `[Image #N]` numbers.
 	 */
 	onImageMarkersChanged?: (order: number[]) => void;
+
+	/**
+	 * Snapshot the attachment payloads keyed by marker id so the editor's undo
+	 * stack can restore them together with the marker text and registry ids.
+	 * The editor stores the returned value opaquely; return `undefined` to store
+	 * nothing.
+	 *
+	 * Paired contract: implement together with restoreAttachmentState. Without
+	 * these hooks an undo that revives a deleted marker displays it with no (or
+	 * the wrong) payload behind it, because the delete re-keyed the survivors.
+	 */
+	snapshotAttachmentState?: () => unknown;
+
+	/**
+	 * Restore the attachment payloads captured by {@link snapshotAttachmentState}
+	 * when the editor's undo pops the matching snapshot. Called before
+	 * `onImageMarkersChanged` fires for that undo.
+	 *
+	 * Paired contract: implement together with snapshotAttachmentState.
+	 */
+	restoreAttachmentState?: (state: unknown) => void;
 
 	// =========================================================================
 	// Autocomplete support (optional)

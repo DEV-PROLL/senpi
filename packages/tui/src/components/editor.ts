@@ -1,5 +1,13 @@
 import type { AutocompleteProvider, AutocompleteSuggestions } from "../autocomplete.ts";
-import { type EditorImageState, ImageMarkerRegistry, imageMarkerId, isImageMarker } from "../image-markers.ts";
+import {
+	type EditorImageState,
+	formatImageMarker,
+	IMAGE_MARKER_REGEX,
+	type ImageMarkerCanonicalization,
+	ImageMarkerRegistry,
+	imageMarkerId,
+	isImageMarker,
+} from "../image-markers.ts";
 import { getKeybindings } from "../keybindings.ts";
 import { decodePrintableKey, matchesKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
@@ -229,6 +237,8 @@ interface EditorSnapshot {
 	state: EditorState;
 	pasteState: EditorPasteState;
 	imageState: EditorImageState;
+	/** Opaque attachment payload snapshot captured from the owner, restored on undo. */
+	attachmentState?: unknown;
 }
 
 interface LayoutLine {
@@ -365,8 +375,28 @@ export class Editor implements Component, Focusable {
 	 * Fired whenever image markers are added, removed, pruned or renumbered.
 	 * Carries the marker ids in text reading order so the owner can keep its
 	 * payload map aligned with the visible numbers.
+	 *
+	 * The reported ids are the ids the OWNER CURRENTLY KEYS ITS PAYLOADS BY -
+	 * i.e. the PRE-renumber ids - and the visible numbers are always canonical
+	 * 1..k in reading order after the change, so the owner re-keys payload
+	 * `order[i]` onto slot `i + 1`.
 	 */
 	public onImageMarkersChanged?: (order: number[]) => void;
+	/**
+	 * Owner hook: capture the attachment payloads keyed by marker id so an undo
+	 * can restore them alongside the editor snapshot. The value is stored
+	 * opaquely - image bytes never cross into the editor - and is handed back
+	 * through {@link restoreAttachmentState} when the matching snapshot is
+	 * popped. Return `undefined` to store nothing (restores are skipped).
+	 */
+	public snapshotAttachmentState?: () => unknown;
+	/**
+	 * Owner hook: restore the attachment payloads captured by
+	 * {@link snapshotAttachmentState} for the snapshot an undo just popped.
+	 * Called BEFORE {@link onImageMarkersChanged} fires for that undo so the
+	 * reconcile pass maps the restored payloads, not the post-delete ones.
+	 */
+	public restoreAttachmentState?: (state: unknown) => void;
 	public disableSubmit: boolean = false;
 
 	constructor(tui: TUI, theme: EditorTheme, options: EditorOptions = {}) {
@@ -1135,7 +1165,11 @@ export class Editor implements Component, Focusable {
 		const previousImageOrder = this.imageMarkers.ids(previousText);
 		this.imageMarkers.prune(normalized, previousText);
 		this.setTextInternal(normalized);
-		const imageOrder = this.imageMarkers.ids(normalized);
+		// A prune can leave a gap (e.g. only id 2 surviving); renumber so the
+		// visible numbers stay 1..k in reading order.
+		const canonicalization = this.imageMarkers.canonicalize(normalized);
+		this.applyCanonicalizedText(canonicalization);
+		const imageOrder = canonicalization.order;
 		if (previousImageOrder.length !== imageOrder.length || previousImageOrder.some((id, i) => id !== imageOrder[i])) {
 			this.onImageMarkersChanged?.(imageOrder);
 		}
@@ -1181,6 +1215,16 @@ export class Editor implements Component, Focusable {
 	 * Insert the next canonical `[Image #N]` marker at the cursor and return its id.
 	 * This is atomic for undo - a single undo restores the entire pre-insert state,
 	 * registry included - matching the insertTextAtCursor() contract.
+	 *
+	 * The text is canonicalized before returning: the insertion counter only
+	 * produces reading-order numbers when the cursor sat after every existing
+	 * marker, so a paste in front of an earlier marker renumbers the visible
+	 * markers to stay 1..k in reading order. The returned id is the marker's
+	 * FINAL canonical number (its 1-based reading position), which is the slot
+	 * the owner must key its payload under; the notification fires with the
+	 * PRE-renumber ids, so that slot is guaranteed vacant by the time this
+	 * returns and a caller registering its payload right after cannot orphan
+	 * or overwrite a surviving payload.
 	 */
 	insertImageMarker(): number {
 		this.cancelAutocomplete();
@@ -1189,8 +1233,44 @@ export class Editor implements Component, Focusable {
 		this.exitHistoryBrowsing();
 		const marker = this.imageMarkers.add();
 		this.insertTextAtCursorInternal(marker);
-		this.notifyImageMarkersChanged();
-		return imageMarkerId(marker)!;
+		const canonicalization = this.imageMarkers.canonicalize(this.getText());
+		this.applyCanonicalizedText(canonicalization);
+		const insertionId = imageMarkerId(marker)!;
+		// An id missing from the order means the inserted marker duplicates a
+		// hand-typed literal, so the registry treats both occurrences as
+		// unauthorized; keep the insertion id so first-occurrence-wins still
+		// attaches the payload at submit.
+		const finalId = canonicalization.order.includes(insertionId)
+			? canonicalization.order.indexOf(insertionId) + 1
+			: insertionId;
+		this.onImageMarkersChanged?.(canonicalization.order);
+		return finalId;
+	}
+
+	/**
+	 * Rewrite the buffer with a canonicalized marker numbering, preserving the
+	 * cursor by folding the length delta of every marker rewrite that ended at
+	 * or before the cursor on the cursor's line (markers never span lines, and
+	 * rewrites never change the line count).
+	 */
+	private applyCanonicalizedText(canonicalization: ImageMarkerCanonicalization): void {
+		if (canonicalization.text === this.getText()) return;
+		const oldLine = this.state.lines[this.state.cursorLine] ?? "";
+		const cursorCol = this.state.cursorCol;
+		const renumbered = new Map<number, number>();
+		for (const [index, id] of canonicalization.order.entries()) {
+			renumbered.set(id, index + 1);
+		}
+		let delta = 0;
+		for (const match of oldLine.matchAll(IMAGE_MARKER_REGEX)) {
+			const end = (match.index ?? 0) + match[0].length;
+			if (end > cursorCol) break;
+			const newId = renumbered.get(Number.parseInt(match[1] ?? "0", 10));
+			if (newId === undefined) continue;
+			delta += formatImageMarker(newId).length - match[0].length;
+		}
+		this.state.lines = canonicalization.text.split("\n");
+		this.setCursorCol(Math.max(0, cursorCol + delta));
 	}
 
 	/**
@@ -2157,6 +2237,7 @@ export class Editor implements Component, Focusable {
 			state: this.state,
 			pasteState: this.pasteMarkers.snapshot(),
 			imageState: this.imageMarkers.snapshot(),
+			attachmentState: this.snapshotAttachmentState?.(),
 		});
 	}
 
@@ -2167,6 +2248,13 @@ export class Editor implements Component, Focusable {
 		Object.assign(this.state, snapshot.state);
 		this.pasteMarkers.restore(snapshot.pasteState);
 		this.imageMarkers.restore(snapshot.imageState);
+		// Restore the owner's payload snapshot BEFORE the marker-order
+		// notification: the reconcile pass maps payloads by the restored ids, so
+		// restoring after it would re-key the post-delete survivors onto the
+		// restored marker set and permanently drop the deleted marker's image.
+		if (snapshot.attachmentState !== undefined) {
+			this.restoreAttachmentState?.(snapshot.attachmentState);
+		}
 		this.lastAction = null;
 		this.preferredVisualCol = null;
 		if (this.onChange) {
