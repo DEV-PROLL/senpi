@@ -31,6 +31,11 @@
   `content` therefore diverges between the two derivations. It fails closed (cold-seed), and it is the same untrusted
   input class the trust boundary covers.
 - `verifyRestoredTranscript` requires the stored assistant boundary to exist in the transcript, not to be its tip.
+- A `custom_message` or `branch_summary` entry shifts the same way: the context path converts both to a user message
+  and hashes them, while the branch walk skips them because they persist as their own entry types rather than as
+  `message`. The branch therefore under-counts, never over-counts, so a restart either flattens (divergence inside the
+  anchored prefix) or re-sends the later messages as delta (divergence after it). The cost is a lost cache, not a
+  wrong resume, and unlike the compaction residual it self-corrects rather than persisting.
 
 ### Trust boundary
 
