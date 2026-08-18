@@ -13,6 +13,9 @@
 
 ### Changed
 
+- `AgentLoopConfig.cursorExecHandlers` additionally accepts a factory taking the owning run's abort signal, so
+  a host bridge can bind each Cursor exec stream to the run that opened it. The plain-object form is unchanged.
+
 ### Fixed
 
 ### Removed
