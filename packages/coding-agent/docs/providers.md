@@ -159,7 +159,7 @@ Use the native `cursor` provider above by default - it is the first-party, prima
 | Auth | senpi OAuth (`/login cursor`), tokens in `auth.json` | The same senpi OAuth flow; this lane stores multiple named accounts and injects each into a per-account file-store HOME immediately before every turn |
 | Tool execution | Cursor's server-driven exec channel bridges onto senpi's real tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, MCP/extension tools), so approvals, sandboxing, and truncation behave like model-issued calls | Runs INSIDE the Cursor CLI with no senpi approval, no senpi sandboxing, and no tool-level audit - a one-time acknowledgement is required before unattended execution |
 | Model catalog | Per-account `GetUsableModels` discovery, refreshed with `senpi update --models` | `cursor-agent models` listing (the full suffix-expanded effort x thinking x `-fast` ladder, 204 ids on the reference build), cached with a TTL; static fallback list when the CLI is missing or the probe fails |
-| Requirements | None beyond `/login cursor` | The `cursor-agent` CLI installed and logged in, plus the lane enabled in settings |
+| Requirements | None beyond `/login cursor` | The `cursor-agent` CLI installed, plus an explicit fallback-lane login or import |
 
 #### Setup
 
@@ -169,15 +169,17 @@ Use the native `cursor` provider above by default - it is the first-party, prima
 curl https://cursor.com/install -fsS | bash
 ```
 
-2. Enable the lane (off by default): set `cursorCliOauthProvider.enabled: true` in senpi settings, or export `SENPI_CURSOR_CLI_OAUTH_ENABLED=1`.
-3. Sign in: `/login cursor-cli-oauth` runs the same Cursor OAuth flow as the native provider and stores the account as a named slot (the first slot is named `default`; later logins prompt for a name).
+2. Sign in: `/login cursor-cli-oauth` runs the same Cursor OAuth flow as the native provider, stores the account as a named slot (the first slot is named `default`; later logins prompt for a name), and enables the fallback lane.
+3. Or reuse an existing credential explicitly: `/cursor-account import native` copies the OAuth credential already stored for the primary `cursor` provider into a managed `native` slot. The primary credential is preserved unchanged. Bare `/cursor-account import` (or `import local`) keeps copying the locally logged-in Cursor desktop/CLI credential.
 4. Manage accounts with `/cursor-account`:
 
 ```
-/cursor-account [list | add | remove <name> | pin <name> | unpin | import | acknowledge | status]
+/cursor-account [list | add | remove <name> | pin <name> | unpin | import [local | native] | acknowledge | status]
 ```
 
-- `import` copies the locally logged-in Cursor desktop credential into a new slot: the source is read once, on this explicit request only, and copied - never referenced live.
+- `add`, `import local`, and `import native` are explicit opt-in actions: each enables the lane and refreshes its model availability. Set `cursorCliOauthProvider.enabled: false` (or `SENPI_CURSOR_CLI_OAUTH_ENABLED=0`) to disable it again.
+- `import local` copies the locally logged-in Cursor desktop credential into a new slot: the source is read once, on this explicit request only, and copied - never referenced live.
+- `import native` copies the primary Senpi `cursor` provider's OAuth credential into a separate managed slot without moving, deleting, or refreshing the primary entry.
 - `pin <name>` (or the `cursorCliOauthProvider.pinnedAccount` setting) fixes one account for the session.
 - `status` reports the lane, the active account, and the context owner of a resumed CLI chat.
 
