@@ -18,6 +18,8 @@
 
 - Claude SDK OAuth now selects the glibc Claude Code binary before the musl variant on glibc Linux hosts and when libc detection is unavailable, while retaining musl-first selection on detected musl hosts and fallback to either installed package ([code-yeongyu/oh-my-openagent#6963](https://github.com/code-yeongyu/oh-my-openagent/issues/6963)).
 
+- Messages typed while auto-compaction is running are no longer silently dropped: input submitted during `Compacting context...` is queued and delivered after compaction settles instead of being accepted and discarded. Manual `/compact` keeps rejecting unqueueable prompts as before ([#950](https://github.com/code-yeongyu/senpi/pull/950)).
+
 ### New Features
 
 ### Breaking Changes
