@@ -51,7 +51,6 @@ import { providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { deterministicUuid } from "./cursor-agent/deterministic-id.ts";
-import { buildRequestedModel } from "./cursor-agent/reasoning-params.ts";
 import { armExecHeartbeat } from "./cursor-agent/exec-lifecycle.ts";
 import {
 	buildMcpStateResult,
@@ -172,7 +171,6 @@ import {
 	RequestContextResultSchema,
 	RequestContextSchema,
 	RequestContextSuccessSchema,
-	RequestedModelSchema,
 	ResumeActionSchema,
 	SelectedContextSchema,
 	SelectedImageSchema,
@@ -215,6 +213,7 @@ import {
 	piReadArgs,
 	piTimeout,
 } from "./cursor-agent/pi-args.ts";
+import { buildRequestedModel } from "./cursor-agent/reasoning-params.ts";
 import type {
 	CursorAgentOptions,
 	CursorExecHandlerResult,

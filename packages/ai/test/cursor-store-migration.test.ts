@@ -48,7 +48,9 @@ describe("regroupStoredCursorModels (C7)", () => {
 		const twice = regroupStoredCursorModels(once);
 		expect(twice.map((model) => model.id)).toEqual(once.map((model) => model.id));
 		for (const key of ["thinkingLevelMap", "contextWindow", "maxTokens"] as const) {
-			expect(twice.map((model) => JSON.stringify(model[key]))).toEqual(once.map((model) => JSON.stringify(model[key])));
+			expect(twice.map((model) => JSON.stringify(model[key]))).toEqual(
+				once.map((model) => JSON.stringify(model[key])),
+			);
 		}
 	});
 

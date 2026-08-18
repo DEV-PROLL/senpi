@@ -2,7 +2,11 @@ import type { Model, ThinkingSelection } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { resolveCursorCliSpawnModel } from "../../src/core/extensions/builtin/cursor-cli-oauth/spawn-model.ts";
 
-function cliModel(id: string, compat?: Model<"cursor-agent">["compat"], upstreamModelId?: string): Model<"cursor-agent"> {
+function cliModel(
+	id: string,
+	compat?: Model<"cursor-agent">["compat"],
+	upstreamModelId?: string,
+): Model<"cursor-agent"> {
 	return {
 		id,
 		name: id,
@@ -30,14 +34,18 @@ describe("resolveCursorCliSpawnModel", () => {
 				representativeVariantId: "claude-fable-5-thinking-medium",
 			},
 		});
-		expect(resolveCursorCliSpawnModel(model, explicit("low"))).toBe("claude-fable-5[thinking=true,context=300k,effort=low]");
+		expect(resolveCursorCliSpawnModel(model, explicit("low"))).toBe(
+			"claude-fable-5[thinking=true,context=300k,effort=low]",
+		);
 	});
 
 	it("translates gpt-5.5 xhigh to extra-high in the bracket form", () => {
 		const model = cliModel("gpt-5.5", {
 			cursorReasoning: { capabilityId: "gpt-5.5", representativeVariantId: "gpt-5.5-medium" },
 		});
-		expect(resolveCursorCliSpawnModel(model, explicit("xhigh"))).toBe("gpt-5.5[context=272k,reasoning=extra-high,fast=false]");
+		expect(resolveCursorCliSpawnModel(model, explicit("xhigh"))).toBe(
+			"gpt-5.5[context=272k,reasoning=extra-high,fast=false]",
+		);
 	});
 
 	it("renders a suffix id for variant-encoded levels", () => {
@@ -59,12 +67,18 @@ describe("resolveCursorCliSpawnModel", () => {
 			cursorReasoning: { capabilityId: "gpt-5.5", representativeVariantId: "gpt-5.5-medium" },
 		});
 		expect(
-			resolveCursorCliSpawnModel(model, { level: "xhigh", source: "legacy-variant", legacyVariantId: "gpt-5.5-extra-high" }),
+			resolveCursorCliSpawnModel(model, {
+				level: "xhigh",
+				source: "legacy-variant",
+				legacyVariantId: "gpt-5.5-extra-high",
+			}),
 		).toBe("gpt-5.5-extra-high");
 	});
 
 	it("falls back to upstreamModelId ?? id for models without reasoning capability", () => {
 		expect(resolveCursorCliSpawnModel(cliModel("composer-2.5"), explicit("high"))).toBe("composer-2.5");
-		expect(resolveCursorCliSpawnModel(cliModel("custom", undefined, "custom-upstream"), undefined)).toBe("custom-upstream");
+		expect(resolveCursorCliSpawnModel(cliModel("custom", undefined, "custom-upstream"), undefined)).toBe(
+			"custom-upstream",
+		);
 	});
 });

@@ -1,6 +1,6 @@
 import type { CursorAgentCompat, Model } from "../model.ts";
 import type { ModelThinkingLevel, ThinkingSelection } from "../types.ts";
-import { CURSOR_MODEL_CAPABILITIES, getCursorVariantAlias, type CursorParameterId } from "./model-capabilities.ts";
+import { CURSOR_MODEL_CAPABILITIES, type CursorParameterId, getCursorVariantAlias } from "./model-capabilities.ts";
 
 export interface CursorResolvedSelection {
 	readonly modelId: string;
@@ -19,7 +19,6 @@ function legacySuffixId(baseId: string, level: ModelThinkingLevel, value: string
 
 function buildParameters(
 	capabilityId: string,
-	level: ModelThinkingLevel,
 	value: string,
 	thinkingMode: boolean | undefined,
 ): { id: CursorParameterId; value: string }[] {
@@ -87,12 +86,15 @@ export function resolveCursorSelectionDescriptor(
 	const bareBase = compat.capabilityId;
 	return {
 		modelId: bareBase,
-		parameters: buildParameters(compat.capabilityId, selection.level, spec.value, compat.thinkingMode),
+		parameters: buildParameters(compat.capabilityId, spec.value, compat.thinkingMode),
 	};
 }
 
 /** Render the resolved descriptor as one CLI `--model` argv element (bracket or suffix form). */
-export function renderCursorCliModelString(model: Model<"cursor-agent">, selection: ThinkingSelection | undefined): string {
+export function renderCursorCliModelString(
+	model: Model<"cursor-agent">,
+	selection: ThinkingSelection | undefined,
+): string {
 	const resolved = resolveCursorSelectionDescriptor(model, selection);
 	if (resolved.parameters.length === 0) return resolved.modelId;
 	const args = resolved.parameters.map((parameter) => `${parameter.id}=${parameter.value}`).join(",");

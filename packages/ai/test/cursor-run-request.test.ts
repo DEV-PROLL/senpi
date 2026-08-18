@@ -1,8 +1,7 @@
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import type { AddressInfo } from "node:net";
 import http2 from "node:http2";
-import { describe, expect, it, afterEach } from "vitest";
-import { stream as streamCursorAgent } from "../src/api/cursor-agent.ts";
+import type { AddressInfo } from "node:net";
+import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	AgentClientMessageSchema,
 	AgentServerMessageSchema,
@@ -10,12 +9,17 @@ import {
 	TextDeltaUpdateSchema,
 	TurnEndedUpdateSchema,
 } from "../src/api/cursor-agent/gen/agent_pb.ts";
-import type { CursorAgentCompat } from "../src/model.ts";
-import type { Model } from "../src/model.ts";
+import { stream as streamCursorAgent } from "../src/api/cursor-agent.ts";
+import type { CursorAgentCompat, Model } from "../src/model.ts";
 
 const neverAbortedSignal = new AbortController().signal;
 
-function buildModel(id: string, baseUrl: string, compat?: CursorAgentCompat, upstreamModelId?: string): Model<"cursor-agent"> {
+function buildModel(
+	id: string,
+	baseUrl: string,
+	compat?: CursorAgentCompat,
+	upstreamModelId?: string,
+): Model<"cursor-agent"> {
 	return {
 		id,
 		name: id,
@@ -45,11 +49,17 @@ function serverMessage(update: ReturnType<typeof create<typeof InteractionUpdate
 }
 
 function textDeltaFrame(text: string): Buffer {
-	return serverMessage(create(InteractionUpdateSchema, { message: { case: "textDelta", value: create(TextDeltaUpdateSchema, { text }) } }));
+	return serverMessage(
+		create(InteractionUpdateSchema, {
+			message: { case: "textDelta", value: create(TextDeltaUpdateSchema, { text }) },
+		}),
+	);
 }
 
 function turnEndedFrame(): Buffer {
-	return serverMessage(create(InteractionUpdateSchema, { message: { case: "turnEnded", value: create(TurnEndedUpdateSchema, {}) } }));
+	return serverMessage(
+		create(InteractionUpdateSchema, { message: { case: "turnEnded", value: create(TurnEndedUpdateSchema, {}) } }),
+	);
 }
 
 let server: http2.Http2Server | undefined;
@@ -101,15 +111,23 @@ describe("cursor Run request reasoning rendering", () => {
 	});
 
 	const fableCompat: CursorAgentCompat = {
-		cursorReasoning: { capabilityId: "claude-fable-5", thinkingMode: true, representativeVariantId: "claude-fable-5-thinking-medium" },
+		cursorReasoning: {
+			capabilityId: "claude-fable-5",
+			thinkingMode: true,
+			representativeVariantId: "claude-fable-5-thinking-medium",
+		},
 	};
 
 	it("renders an explicit selection as bare base id plus ordered parameters", async () => {
 		const model = buildModel("claude-fable-5-thinking", "", fableCompat, "claude-fable-5-thinking-medium");
 		const frame = await captureRunRequest(model, { thinkingSelection: { level: "low", source: "explicit" } });
-		const request = frame.message.value as { requestedModel?: { modelId: string; maxMode: boolean; parameters: { id: string; value: string }[] } };
+		const request = frame.message.value as {
+			requestedModel?: { modelId: string; maxMode: boolean; parameters: { id: string; value: string }[] };
+		};
 		expect(request.requestedModel?.modelId).toBe("claude-fable-5");
-		expect(request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value }))).toEqual([
+		expect(
+			request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value })),
+		).toEqual([
 			{ id: "thinking", value: "true" },
 			{ id: "context", value: "300k" },
 			{ id: "effort", value: "low" },
@@ -119,7 +137,9 @@ describe("cursor Run request reasoning rendering", () => {
 	it("keeps the legacy request shape byte-exact when no selection exists", async () => {
 		const model = buildModel("gpt-5.5-medium", "");
 		const withSelection = await captureRunRequest(model, {});
-		const request = withSelection.message.value as { requestedModel?: { modelId: string; maxMode: boolean; parameters: { id: string; value: string }[] } };
+		const request = withSelection.message.value as {
+			requestedModel?: { modelId: string; maxMode: boolean; parameters: { id: string; value: string }[] };
+		};
 		expect(request.requestedModel?.modelId).toBe("gpt-5.5-medium");
 		expect(request.requestedModel?.parameters ?? []).toEqual([]);
 	});
@@ -141,9 +161,13 @@ describe("cursor Run request reasoning rendering", () => {
 		};
 		const model = buildModel("gpt-5.5", "", compat, "gpt-5.5-medium");
 		const frame = await captureRunRequest(model, { thinkingSelection: { level: "off", source: "explicit" } });
-		const request = frame.message.value as { requestedModel?: { modelId: string; parameters: { id: string; value: string }[] } };
+		const request = frame.message.value as {
+			requestedModel?: { modelId: string; parameters: { id: string; value: string }[] };
+		};
 		expect(request.requestedModel?.modelId).toBe("gpt-5.5");
-		expect(request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value }))).toEqual([
+		expect(
+			request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value })),
+		).toEqual([
 			{ id: "context", value: "272k" },
 			{ id: "reasoning", value: "none" },
 			{ id: "fast", value: "false" },
@@ -153,13 +177,21 @@ describe("cursor Run request reasoning rendering", () => {
 	it("keeps maxMode orthogonal to parameters", async () => {
 		const compat: CursorAgentCompat = {
 			cursorMaxMode: true,
-			cursorReasoning: { capabilityId: "claude-fable-5", thinkingMode: false, representativeVariantId: "claude-fable-5-medium" },
+			cursorReasoning: {
+				capabilityId: "claude-fable-5",
+				thinkingMode: false,
+				representativeVariantId: "claude-fable-5-medium",
+			},
 		};
 		const model = buildModel("claude-fable-5", "", compat, "claude-fable-5-medium");
 		const frame = await captureRunRequest(model, { thinkingSelection: { level: "high", source: "explicit" } });
-		const request = frame.message.value as { requestedModel?: { modelId: string; maxMode: boolean; parameters: { id: string; value: string }[] } };
+		const request = frame.message.value as {
+			requestedModel?: { modelId: string; maxMode: boolean; parameters: { id: string; value: string }[] };
+		};
 		expect(request.requestedModel?.maxMode).toBe(true);
-		expect(request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value }))).toEqual([
+		expect(
+			request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value })),
+		).toEqual([
 			{ id: "thinking", value: "false" },
 			{ id: "context", value: "300k" },
 			{ id: "effort", value: "high" },

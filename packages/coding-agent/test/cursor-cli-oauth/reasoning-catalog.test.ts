@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-	STATIC_CURSOR_CLI_MODELS,
 	parseCursorAgentModelsListing,
+	STATIC_CURSOR_CLI_MODELS,
 } from "../../src/core/extensions/builtin/cursor-cli-oauth/models.ts";
 
 const listing = readFileSync(join(import.meta.dirname, "fixtures/cursor-agent-models.txt"), "utf8");
@@ -26,7 +26,11 @@ describe("cursor-cli-oauth catalog normalization", () => {
 
 	it("exposes total thinking level maps with per-family wire values", () => {
 		const byId = new Map(parseCursorAgentModelsListing(listing).map((model) => [model.id, model]));
-		expect(byId.get("cursor-grok-4.6")?.thinkingLevelMap).toMatchObject({ low: "low", medium: "medium", high: "high" });
+		expect(byId.get("cursor-grok-4.6")?.thinkingLevelMap).toMatchObject({
+			low: "low",
+			medium: "medium",
+			high: "high",
+		});
 		expect(byId.get("claude-fable-5-thinking")?.thinkingLevelMap?.max).toBe("max");
 		expect(byId.get("claude-fable-5")?.thinkingLevelMap?.minimal).toBeNull();
 	});

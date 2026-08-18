@@ -15,8 +15,9 @@
 - `providers/cursor.ts`: discovery now publishes grouped identities with `compat.cursorReasoning` and correct
   windows; `api/cursor-agent.ts` renders `options.thinkingSelection` into `RequestedModel.parameters`; absent
   selections keep the representative-variant request shape byte-exactly.
-- `models.ts`: new `restoreModels` provider hook (try/catch — stored catalog survives a throwing transform).
-- `types.ts`/`model.ts`: `ThinkingSelection` type + `CursorAgentCompat.cursorReasoning` capability gate.
+- `packages/ai/src/index.ts`: re-exports the shared cursor capability, grouping, and selection API.
+- `packages/ai/src/models.ts`: new `restoreModels` provider hook (try/catch — stored catalog survives a throwing transform).
+- `packages/ai/src/types.ts` / `packages/ai/src/model.ts`: `ThinkingSelection` type + `CursorAgentCompat.cursorReasoning` capability gate.
 
 ### Why an extension couldn't do it
 

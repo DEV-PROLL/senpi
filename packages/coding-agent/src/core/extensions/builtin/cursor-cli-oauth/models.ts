@@ -1,8 +1,8 @@
-import { normalizeCursorCatalog } from "@earendil-works/pi-ai";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { normalizeCursorCatalog } from "@earendil-works/pi-ai";
 import type { ProviderModelConfig } from "../../types.ts";
 import { defaultCursorAgentExecutableDeps, resolveCursorAgentExecutable } from "./executable.ts";
 
@@ -12,7 +12,6 @@ const ANSI_ESCAPE_SEQUENCE = /\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 const MODEL_LINE = /^(\S+)\s+-\s+(.+)$/;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:+-]*$/;
 const MISLEADING_ERROR_LINE = /^\s*(?:error|failed|failure)(?=\s|:|-|$)/i;
-const REASONING_SUFFIX = /(?:^|-)(?:thinking(?:-(?:low|medium|high|xhigh|max))?|low|medium|high|xhigh|max)(?:-fast)?$/i;
 
 export type CursorCliModelCatalogSettings = {
 	readonly modelCatalogTtlHours?: number;
@@ -67,13 +66,6 @@ const STATIC_MODEL_DEFINITIONS: readonly StaticModelDefinition[] = [
 
 function stripAnsi(value: string): string {
 	return value.replace(ANSI_ESCAPE_SEQUENCE, "");
-}
-
-function contextWindowFor(id: string, label: string): number {
-	if (/\b1\s*M\b/i.test(label)) return 1_000_000;
-	if (id.toLowerCase().startsWith("claude-") && /\b300\s*K\b/i.test(label)) return 300_000;
-	if (id.toLowerCase().startsWith("gpt-") && /\b272\s*K\b/i.test(label)) return 272_000;
-	return 200_000;
 }
 
 function normalizeEntries(raw: readonly { id: string; label: string }[]): ProviderModelConfig[] {

@@ -23,7 +23,10 @@ export interface CursorModelCapability {
 const P = "parameters" as const;
 const V = "variant-id" as const;
 
-function ladder(values: readonly string[], encoding: CursorLevelEncoding = P): Partial<Record<ModelThinkingLevel, CursorLevelSpec>> {
+function ladder(
+	values: readonly string[],
+	encoding: CursorLevelEncoding = P,
+): Partial<Record<ModelThinkingLevel, CursorLevelSpec>> {
 	const out: Partial<Record<ModelThinkingLevel, CursorLevelSpec>> = {};
 	for (const value of values) out[value === "none" ? "off" : (value as ModelThinkingLevel)] = { value, encoding };
 	return out;
@@ -32,12 +35,31 @@ function ladder(values: readonly string[], encoding: CursorLevelEncoding = P): P
 const CLAUDE_ORDER: readonly CursorParameterId[] = ["thinking", "context", "effort"];
 const GPT_ORDER: readonly CursorParameterId[] = ["context", "reasoning", "fast"];
 
-function claude(window: number, maxWindow: number, levels: readonly string[], defaultContext: string): CursorModelCapability {
-	return { evidence: "available-models", window, maxWindow, parameterOrder: CLAUDE_ORDER, defaultContext, levels: ladder(levels) };
+function claude(
+	window: number,
+	maxWindow: number,
+	levels: readonly string[],
+	defaultContext: string,
+): CursorModelCapability {
+	return {
+		evidence: "available-models",
+		window,
+		maxWindow,
+		parameterOrder: CLAUDE_ORDER,
+		defaultContext,
+		levels: ladder(levels),
+	};
 }
 
 function gpt(levels: readonly string[], order: readonly CursorParameterId[] = GPT_ORDER): CursorModelCapability {
-	return { evidence: "available-models", window: 272000, maxWindow: 1000000, parameterOrder: order, defaultContext: "272k", levels: ladder(levels) };
+	return {
+		evidence: "available-models",
+		window: 272000,
+		maxWindow: 1000000,
+		parameterOrder: order,
+		defaultContext: "272k",
+		levels: ladder(levels),
+	};
 }
 
 /**
@@ -74,7 +96,12 @@ export const CURSOR_MODEL_CAPABILITIES: Record<string, CursorModelCapability> = 
 		defaultContext: undefined,
 		levels: { ...ladder(["low", "medium", "high"]), xhigh: { value: "extra-high", encoding: P } },
 	},
-	"gpt-5.1": { ...gpt([], ["reasoning"]), maxWindow: undefined, defaultContext: undefined, levels: ladder(["low", "high"]) },
+	"gpt-5.1": {
+		...gpt([], ["reasoning"]),
+		maxWindow: undefined,
+		defaultContext: undefined,
+		levels: ladder(["low", "high"]),
+	},
 	"gpt-5.2": {
 		...gpt([], ["reasoning"]),
 		maxWindow: undefined,
@@ -123,12 +150,34 @@ export const CURSOR_MODEL_CAPABILITIES: Record<string, CursorModelCapability> = 
 		parameterOrder: [],
 		levels: ladder(["low", "medium", "high"], V),
 	},
-	"glm-5.2": { evidence: "available-models", window: 1000000, parameterOrder: ["reasoning"], levels: ladder(["high", "max"]) },
-	"kimi-k3": { evidence: "available-models", window: 1048576, parameterOrder: ["reasoning"], levels: ladder(["low", "high", "max"]) },
+	"glm-5.2": {
+		evidence: "available-models",
+		window: 1000000,
+		parameterOrder: ["reasoning"],
+		levels: ladder(["high", "max"]),
+	},
+	"kimi-k3": {
+		evidence: "available-models",
+		window: 1048576,
+		parameterOrder: ["reasoning"],
+		levels: ladder(["low", "high", "max"]),
+	},
 	"composer-2.5": { evidence: "available-models", window: 200000, parameterOrder: ["fast"], levels: {} },
 	"claude-haiku-4-5": { evidence: "available-models", window: 200000, parameterOrder: ["thinking"], levels: {} },
-	"claude-4-sonnet": { evidence: "available-models", window: 200000, parameterOrder: ["thinking", "context"], defaultContext: "200k", levels: {} },
-	"claude-4.5-sonnet": { evidence: "available-models", window: 200000, parameterOrder: ["thinking", "context"], defaultContext: "200k", levels: {} },
+	"claude-4-sonnet": {
+		evidence: "available-models",
+		window: 200000,
+		parameterOrder: ["thinking", "context"],
+		defaultContext: "200k",
+		levels: {},
+	},
+	"claude-4.5-sonnet": {
+		evidence: "available-models",
+		window: 200000,
+		parameterOrder: ["thinking", "context"],
+		defaultContext: "200k",
+		levels: {},
+	},
 	"kimi-k2.7-code": { evidence: "available-models", window: 262000, parameterOrder: [], levels: {} },
 	"gemini-3-flash": { evidence: "available-models", window: 1000000, parameterOrder: [], levels: {} },
 	"gemini-3.1-pro": { evidence: "available-models", window: 1000000, parameterOrder: [], levels: {} },

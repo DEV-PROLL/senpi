@@ -41,10 +41,7 @@ describe("normalizeCursorCatalog (golden 204-id live fixture)", () => {
 		const out = normalized();
 		for (const entry of out.filter((candidate) => candidate.reasoning)) {
 			for (const level of ALL_LEVELS) {
-				expect(
-					Object.prototype.hasOwnProperty.call(entry.thinkingLevelMap, level),
-					`${entry.id} missing key ${level}`,
-				).toBe(true);
+				expect(Object.hasOwn(entry.thinkingLevelMap ?? {}, level), `${entry.id} missing key ${level}`).toBe(true);
 			}
 		}
 	});
@@ -58,7 +55,12 @@ describe("normalizeCursorCatalog (golden 204-id live fixture)", () => {
 		expect(byId.get("cursor-grok-4.5")?.thinkingLevelMap?.xhigh).toBeNull();
 		expect(byId.get("cursor-grok-4.6")?.thinkingLevelMap?.xhigh).toBe("xhigh");
 		expect(byId.get("glm-5.2")?.thinkingLevelMap).toMatchObject({ high: "high", max: "max", low: null });
-		expect(byId.get("kimi-k3")?.thinkingLevelMap).toMatchObject({ low: "low", high: "high", max: "max", medium: null });
+		expect(byId.get("kimi-k3")?.thinkingLevelMap).toMatchObject({
+			low: "low",
+			high: "high",
+			max: "max",
+			medium: null,
+		});
 		expect(byId.get("gemini-3.6-flash")?.thinkingLevelMap?.minimal).toBe("minimal");
 		expect(byId.get("gemini-3.7-flash")?.thinkingLevelMap?.minimal).toBeNull();
 	});
@@ -69,7 +71,14 @@ describe("normalizeCursorCatalog (golden 204-id live fixture)", () => {
 		for (const id of ["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4-mini", "gpt-5.4-nano"]) {
 			expect(byId.get(id)?.thinkingLevelMap?.off, id).toBe("none");
 		}
-		for (const id of ["claude-fable-5", "kimi-k3", "glm-5.2", "cursor-grok-4.6", "gemini-3.7-flash", "gpt-5.3-codex"]) {
+		for (const id of [
+			"claude-fable-5",
+			"kimi-k3",
+			"glm-5.2",
+			"cursor-grok-4.6",
+			"gemini-3.7-flash",
+			"gpt-5.3-codex",
+		]) {
 			expect(byId.get(id)?.thinkingLevelMap?.off, id).toBeNull();
 		}
 	});
@@ -115,11 +124,33 @@ describe("parseCursorVariantId", () => {
 	});
 
 	it("handles both thinking/level orders", () => {
-		expect(parseCursorVariantId("claude-fable-5-thinking-xhigh")).toMatchObject({ baseId: "claude-fable-5", level: "xhigh", thinking: true, fast: false });
-		expect(parseCursorVariantId("claude-4.5-opus-high-thinking")).toMatchObject({ baseId: "claude-4.5-opus", level: "high", thinking: true, fast: false });
-		expect(parseCursorVariantId("gpt-5.5-extra-high")).toMatchObject({ baseId: "gpt-5.5", level: "extra-high", thinking: false });
-		expect(parseCursorVariantId("gpt-5.6-luna-none")).toMatchObject({ baseId: "gpt-5.6-luna", level: "none", thinking: false });
-		expect(parseCursorVariantId("composer-2.5-fast")).toMatchObject({ baseId: "composer-2.5", level: undefined, fast: true });
+		expect(parseCursorVariantId("claude-fable-5-thinking-xhigh")).toMatchObject({
+			baseId: "claude-fable-5",
+			level: "xhigh",
+			thinking: true,
+			fast: false,
+		});
+		expect(parseCursorVariantId("claude-4.5-opus-high-thinking")).toMatchObject({
+			baseId: "claude-4.5-opus",
+			level: "high",
+			thinking: true,
+			fast: false,
+		});
+		expect(parseCursorVariantId("gpt-5.5-extra-high")).toMatchObject({
+			baseId: "gpt-5.5",
+			level: "extra-high",
+			thinking: false,
+		});
+		expect(parseCursorVariantId("gpt-5.6-luna-none")).toMatchObject({
+			baseId: "gpt-5.6-luna",
+			level: "none",
+			thinking: false,
+		});
+		expect(parseCursorVariantId("composer-2.5-fast")).toMatchObject({
+			baseId: "composer-2.5",
+			level: undefined,
+			fast: true,
+		});
 	});
 
 	it("never authorizes migration for syntactically plausible but unknown ids", () => {

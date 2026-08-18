@@ -1,5 +1,5 @@
 import type { Model } from "../types.ts";
-import { normalizeCursorCatalog, type CursorCatalogEntry } from "./catalog-grouping.ts";
+import { type CursorCatalogEntry, normalizeCursorCatalog } from "./catalog-grouping.ts";
 import { getCursorVariantAlias } from "./model-capabilities.ts";
 
 function isGroupedShape(model: Model<"cursor-agent">): boolean {

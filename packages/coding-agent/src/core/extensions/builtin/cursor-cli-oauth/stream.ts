@@ -42,8 +42,8 @@ import {
 	type CursorCliSessionTurnInput,
 	cursorCliSessionRouter,
 } from "./session-router.ts";
-import { resolveCursorCliSpawnModel } from "./spawn-model.ts";
 import { type CursorCliOauthProviderSettings, loadCursorCliOauthProviderSettingsFromDisk } from "./settings.ts";
+import { resolveCursorCliSpawnModel } from "./spawn-model.ts";
 import type { CursorCliStreamEvent, CursorCliToolCallEvent } from "./stream-parser.ts";
 import { CursorCliAbortError, type CursorCliTransportHandle, spawnCursorCli } from "./transport.ts";
 

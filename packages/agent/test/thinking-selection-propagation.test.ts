@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, Model, ThinkingSelection } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, Model, SimpleStreamOptions, ThinkingSelection } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
@@ -24,7 +24,10 @@ function testModel(): Model<"cursor-agent"> {
 
 const explicitHigh: ThinkingSelection = { level: "high", source: "explicit" };
 
-function assistantMessage(stopReason: AssistantMessage["stopReason"], content: AssistantMessage["content"]): AssistantMessage {
+function assistantMessage(
+	stopReason: AssistantMessage["stopReason"],
+	content: AssistantMessage["content"],
+): AssistantMessage {
 	return {
 		role: "assistant",
 		content,
@@ -64,11 +67,7 @@ function streamOnce(message: AssistantMessage) {
 describe("agent loop thinkingSelection transitions", () => {
 	it("applies value, null, and undefined prepareNextTurn updates across iterations", async () => {
 		const seen: (ThinkingSelection | undefined)[] = [];
-		const updates: (ThinkingSelection | null | undefined)[] = [
-			{ level: "max", source: "explicit" },
-			null,
-			undefined,
-		];
+		const updates: (ThinkingSelection | null | undefined)[] = [{ level: "max", source: "explicit" }, null, undefined];
 		const toolCallMessage = assistantMessage("toolUse", [
 			{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "true" } },
 		]);
@@ -98,46 +97,55 @@ describe("agent loop thinkingSelection transitions", () => {
 });
 
 describe("thinking selection propagation", () => {
-	it("passes thinkingSelection from agent state into the loop config", () => {
-		const agent = new Agent({ streamFn: () => {
-			throw new Error("unused");
-		} });
+	async function captureStreamOptions(configure: (agent: Agent) => void) {
+		let seen: SimpleStreamOptions | undefined;
+		const agent = new Agent({
+			streamFn: (_model, _context, options) => {
+				seen = options;
+				return streamOnce(assistantMessage("stop", [{ type: "text", text: "ok" }]));
+			},
+		});
 		agent.state.model = testModel();
-		agent.state.thinkingLevel = "high";
-		agent.state.thinkingSelection = explicitHigh;
-		const config = agent.createLoopConfig();
-		expect(config.reasoning).toBe("high");
-		expect(config.thinkingSelection).toBe(explicitHigh);
+		configure(agent);
+		await agent.prompt([{ role: "user", content: "go", timestamp: 0 }]);
+		return seen;
+	}
+
+	it("passes thinkingSelection from agent state into the provider request", async () => {
+		const options = await captureStreamOptions((agent) => {
+			agent.state.thinkingLevel = "high";
+			agent.state.thinkingSelection = explicitHigh;
+		});
+		expect(options?.reasoning).toBe("high");
+		expect(options?.thinkingSelection).toEqual(explicitHigh);
 	});
 
-	it("keeps reasoning undefined for off while preserving explicit off selection", () => {
-		const agent = new Agent({ streamFn: () => {
-			throw new Error("unused");
-		} });
-		agent.state.model = testModel();
-		agent.state.thinkingLevel = "off";
+	it("keeps reasoning undefined for off while preserving explicit off selection", async () => {
 		const offSelection: ThinkingSelection = { level: "off", source: "explicit" };
-		agent.state.thinkingSelection = offSelection;
-		const config = agent.createLoopConfig();
-		expect(config.reasoning).toBeUndefined();
-		expect(config.thinkingSelection).toBe(offSelection);
+		const options = await captureStreamOptions((agent) => {
+			agent.state.thinkingLevel = "off";
+			agent.state.thinkingSelection = offSelection;
+		});
+		expect(options?.reasoning).toBeUndefined();
+		expect(options?.thinkingSelection).toEqual(offSelection);
 	});
 
-	it("leaves thinkingSelection undefined when nothing was explicitly selected", () => {
-		const agent = new Agent({ streamFn: () => {
-			throw new Error("unused");
-		} });
-		agent.state.model = testModel();
-		agent.state.thinkingLevel = "medium";
-		const config = agent.createLoopConfig();
-		expect(config.reasoning).toBe("medium");
-		expect(config.thinkingSelection).toBeUndefined();
+	it("leaves thinkingSelection undefined when nothing was explicitly selected", async () => {
+		const options = await captureStreamOptions((agent) => {
+			agent.state.thinkingLevel = "medium";
+		});
+		expect(options?.reasoning).toBe("medium");
+		expect(options?.thinkingSelection).toBeUndefined();
 	});
 
 	it("serializes thinkingSelection into proxy request options", async () => {
 		const options = {
 			reasoning: "high" as const,
-			thinkingSelection: { level: "off", source: "legacy-variant", legacyVariantId: "gpt-5.6-luna-none" } as ThinkingSelection,
+			thinkingSelection: {
+				level: "off",
+				source: "legacy-variant",
+				legacyVariantId: "gpt-5.6-luna-none",
+			} as ThinkingSelection,
 			authToken: "token",
 			proxyUrl: "https://proxy.example.com",
 		};
@@ -145,7 +153,7 @@ describe("thinking selection propagation", () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (_url: unknown, init?: { body?: unknown }) => {
 			seen.push(typeof init?.body === "string" ? JSON.parse(init.body) : init?.body);
-			return new Response("data: {\"type\":\"error\",\"reason\":\"error\",\"errorMessage\":\"closed\"}\n\n", {
+			return new Response('data: {"type":"error","reason":"error","errorMessage":"closed"}\n\n', {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			});

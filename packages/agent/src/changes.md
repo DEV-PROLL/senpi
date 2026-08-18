@@ -1,5 +1,30 @@
 # Changes
 
+## 2026-08-18 - Thinking-selection provenance through the agent loop
+
+### What changed
+
+- `packages/agent/src/types.ts`: `AgentState` gains `thinkingSelection`; `AgentLoopTurnUpdate` gains a
+  tri-state `thinkingSelection` (undefined leaves unchanged, null clears).
+- `packages/agent/src/agent.ts`: `createLoopConfig` forwards the state selection alongside `reasoning`.
+- `packages/agent/src/agent-loop.ts`: mid-run `prepareNextTurn` updates re-propagate the selection.
+- `packages/agent/src/proxy.ts`: the selection joins the serializable proxy request options.
+
+### Why
+
+- Providers that encode reasoning on the wire (Cursor) must distinguish an explicit user choice from the
+  always-materialized effective level, which startup defaults to `medium`.
+
+### Why an extension could not handle it
+
+- Loop config assembly, turn-update merging, and proxy request serialization are core agent-loop seams with
+  no extension hook.
+
+### Expected merge conflict zones
+
+- `agent-loop.ts` prepareNextTurn config merge, `proxy.ts` serializable option list, `types.ts` state and
+  turn-update interfaces.
+
 ## Late Cursor bridge lifecycle events after run teardown (2026-08-18)
 
 ### What changed

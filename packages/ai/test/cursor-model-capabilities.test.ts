@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	CURSOR_MODEL_CAPABILITIES,
-	getCursorCapabilityForBase,
 	getCursorBaseIdForVariant,
+	getCursorCapabilityForBase,
 	parseCursorVariantId,
 } from "../src/cursor/model-capabilities.ts";
 import fixture from "./fixtures/cursor-usable-models-20260818.json" with { type: "json" };
@@ -83,10 +83,7 @@ describe("cursor model capabilities", () => {
 
 	it("marks evidence provenance for every entry", () => {
 		for (const [id, cap] of Object.entries(CURSOR_MODEL_CAPABILITIES)) {
-			expect(
-				["available-models", "cli-live", "suffix-only"],
-				`${id} evidence`,
-			).toContain(cap.evidence);
+			expect(["available-models", "cli-live", "suffix-only"], `${id} evidence`).toContain(cap.evidence);
 		}
 	});
 });

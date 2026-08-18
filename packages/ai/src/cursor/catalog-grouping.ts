@@ -32,7 +32,6 @@ export interface CursorCatalogEntry {
 }
 
 const ALL_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-const LADDER = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const FALLBACK_WINDOW = 200000;
 
 interface GroupMember {
@@ -59,13 +58,21 @@ function cleanName(members: readonly GroupMember[], baseId: string, thinkingMode
 	name = name.replace(new RegExp(`\\s+${levelWords.source}\\b`, "g"), "");
 	name = name.replace(/\s+Fast\b/g, "");
 	if (thinkingMode !== true) name = name.replace(/\s+Thinking\b/g, "");
-	name = name.replace(/\u0001/g, "(NO ZDR)").replace(/\s+/g, " ").trim();
+	name = name
+		.replace(/\u0001/g, "(NO ZDR)")
+		.replace(/\s+/g, " ")
+		.trim();
 	if (name.length === 0) name = baseId;
 	return name;
 }
 
-function buildLevelMap(members: readonly GroupMember[], capability: CursorModelCapability | undefined): ThinkingLevelMap {
-	const observed = new Set(members.map((member) => member.level).filter((level): level is string => level !== undefined));
+function buildLevelMap(
+	members: readonly GroupMember[],
+	capability: CursorModelCapability | undefined,
+): ThinkingLevelMap {
+	const observed = new Set(
+		members.map((member) => member.level).filter((level): level is string => level !== undefined),
+	);
 	const map = {} as Record<ModelThinkingLevel, string | null>;
 	for (const level of ALL_LEVELS) {
 		if (level === "off") {
