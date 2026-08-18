@@ -34,6 +34,39 @@
 - `packages/coding-agent/src/core/agent-session.ts`: the `prompt()` queue
   eligibility constants and the queue branches preceding the settled-work wait.
 
+## Cursor bridge dispatches bind to the run that owns the stream (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: the session
+  adapter accepts the signal of the run that owns the exec stream and resolves
+  `getAbortSignal` from it, returning `undefined` once that run is no longer
+  the agent's live run.
+- `packages/coding-agent/src/core/sdk.ts`: supplies the bridge as a per-run
+  factory so every Cursor stream gets handlers bound to its own run.
+
+### Why
+
+- The bridge is built once per session, but each exec stream belongs to exactly
+  one run. Resolving ownership from the agent's live signal let a straggler
+  frame from a stream whose run had already ended adopt the replacement run's
+  signal, clear the ownership guard in `Agent.emitExternalEvent`, and execute a
+  dead run's tool inside the new run while emitting its lifecycle events into
+  the new run's transcript.
+- This is the shape the crashed 2026-08-18 session hit: a provider rate-limit
+  error restarted the run on a fallback lane while the previous stream still
+  held buffered exec frames.
+
+### Why an extension could not handle it
+
+- Run ownership of provider-driven exec frames is an engine contract between
+  the agent loop and the Cursor stream; no extension hook sits between the
+  straggler frame and the bridge dispatch.
+
+### Expected merge conflict zones
+
+- `cursor-exec-bridge-session.ts` signature and `getAbortSignal` resolution,
+  `sdk.ts` `cursorExecHandlers` wiring.
 ## 2026-08-18 - Cursor reasoning levels: session provenance and legacy id resolution
 
 ### What changed
@@ -136,7 +169,6 @@
 
 - LOW: the `cerebras` row in `defaultModelPerProvider` and the matching pin in `test/model-resolver.test.ts`.
 
-<<<<<<< HEAD
 ## Cursor CLI OAuth provider display name (2026-08-17)
 
 ### What changed
@@ -163,8 +195,6 @@
 
 - LOW: `provider-display-names.ts` map rows (one-line additions in a sorted literal).
 
-||||||| 84514a353
-=======
 ## Repository audit baseline for the core tracker (2026-08-17)
 
 ### What changed
@@ -756,8 +786,6 @@
 ### Expected merge conflict zones
 
 - LOW: additive block after `restoreStdout()`; the stdout takeover above it is the pattern to follow on sync.
-
->>>>>>> origin/main
 ## Expand explicit dollar skill tokens and publish invocation metadata (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
 
 ### What changed

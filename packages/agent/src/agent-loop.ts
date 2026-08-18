@@ -493,7 +493,10 @@ async function streamAssistantResponse(
 			// execute mid-stream; their paired results buffer here.
 			...(config.cursorExecHandlers
 				? {
-						execHandlers: config.cursorExecHandlers,
+						execHandlers:
+							typeof config.cursorExecHandlers === "function"
+								? config.cursorExecHandlers(requestAbortController.signal)
+								: config.cursorExecHandlers,
 						onToolResult: (result: ToolResultMessage) => {
 							providerToolResults.push(result);
 						},

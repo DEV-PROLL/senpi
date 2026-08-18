@@ -167,7 +167,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * paired `ToolResultMessage` for emission right after the assistant
 	 * message. Other providers ignore this field.
 	 */
-	cursorExecHandlers?: CursorExecHandlers;
+	cursorExecHandlers?: CursorExecHandlers | ((runSignal: AbortSignal) => CursorExecHandlers);
 
 	/**
 	 * Maximum time in milliseconds to wait for the FIRST provider stream event.
