@@ -68,6 +68,10 @@ export function storedBindingFromEntry(
 
 /** Hashes for the user/toolResult messages the persisted branch already carries. */
 export function sentHashesFromBranch(branch: readonly BranchEntry[]): string[] {
+	// This walk is not compaction-aware, but admission compares against the
+	// compaction-truncated context. Anchoring across a boundary would inflate
+	// sentCount and flatten every later restart, so decline to anchor instead.
+	if (branch.some((entry) => entry.type === "compaction")) return [];
 	const messages: SentMessage[] = [];
 	for (const entry of branch) {
 		if (entry.type !== "message") continue;

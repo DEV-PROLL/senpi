@@ -137,6 +137,21 @@ describe("claude-sdk-oauth stored binding anchor", () => {
 		expect(bindingFromStoredBranch(branch, stored())).toBeUndefined();
 	});
 
+	it("refuses to derive hashes across a compaction boundary", () => {
+		// The branch walk is not compaction-aware, while admission compares against
+		// the compaction-truncated context. Deriving here would inflate sentCount and
+		// flatten every later restart, so refuse to anchor at all.
+		const message = { role: "user" as const, content: [{ type: "text" as const, text: "before" }], timestamp: 1 };
+
+		expect(
+			sentHashesFromBranch([
+				{ type: "message", id: "u1", message },
+				{ type: "compaction", id: "c1" },
+				{ type: "message", id: "u2", message },
+			] as never),
+		).toEqual([]);
+	});
+
 	it("derives branch hashes exactly as the context path does", () => {
 		// A content-less user message is skipped when the provider builds its sent
 		// stream; if only one side skips it, every later index shifts and a restart

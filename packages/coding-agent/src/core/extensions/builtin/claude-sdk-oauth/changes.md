@@ -19,6 +19,19 @@
 - `session_before_fork` no longer records a taint: forks mint a new session id and file, so the taint was unreachable;
   `session_start(fork)` invalidation plus path/session binding is what isolates a fork.
 
+### Declared residuals
+
+- Branch-derived hashes decline to anchor when a compaction boundary sits on the branch: the walk is not
+  compaction-aware while admission compares against the compaction-truncated context, so anchoring across a boundary
+  would inflate `sentCount` and flatten every later restart. Declining leaves restart resume unavailable for that
+  session instead of silently wrong. Not reachable while this lane is active (the lane stands senpi compaction down),
+  so it needs a compaction entry from another provider's turns, a legacy version, or an imported file.
+- `isContentlessUserMessage` matches only a literal zero-length array, while the context path normalizes a null or
+  missing `content` to an empty array before filtering. A legacy, imported, or hand-edited message with a null
+  `content` therefore diverges between the two derivations. It fails closed (cold-seed), and it is the same untrusted
+  input class the trust boundary covers.
+- `verifyRestoredTranscript` requires the stored assistant boundary to exist in the transcript, not to be its tip.
+
 ### Trust boundary
 
 - The session JSONL is untrusted input (it can be imported, hand-edited, or copied) and carries only a capability-free
