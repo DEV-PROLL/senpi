@@ -2,14 +2,41 @@
 
 ## [Unreleased]
 
+### Added
+
+- Cursor context windows now track the models.dev first-party catalog capped by the context options
+  Cursor offers each family: current Claude families and GPT 5.5/5.6 report 1M, Grok 500K, Gemini Flash
+  1048576, and each request asks Cursor for the matching `context` token.
+
 ### Breaking Changes
 
 ### Added
+
+- Cursor reasoning levels: the dynamic Cursor catalog now collapses the 204 account variant ids into
+  selectable base identities (Claude `base` / `base-thinking` boolean identities) with exact
+  `thinkingLevelMap` ladders, live-catalog context windows (Kimi K3 1048576, GLM 5.2 1M, GPT 272K,
+  Grok 256K, Claude 1M-label families 300K), and a shared cursor capability table derived from the
+  2026-08-18 AvailableModels capture; explicit thinking selections render into the protobuf
+  `RequestedModel.parameters` (per-family `thinking`/`context`/`effort`/`reasoning`/`fast` templates,
+  GPT 5.5 / Codex 5.3 `xhigh` → `extra-high`), absent selections keep the representative variant
+  request shape, and stored 204-variant catalogs migrate idempotently through the new
+  `restoreModels` provider hook. Adds `ThinkingSelection` provenance propagation through agent
+  state, loop turn updates, and the remote proxy.
 
 ### Changed
 
 ### Fixed
 
+- Cursor provider: advertised MCP tool schemas are now sanitized of JSON-Schema composition
+  keywords (`oneOf`/`anyOf`/`allOf`) before reaching the Run request — a single tool carrying one
+  (e.g. ast-grep MCP's `scan`) made Cursor's gateway reject the whole request with a wrapped
+  provider 400 (`resource_exhausted`, zero tokens) from turn 1.
+- Leaked-invoke recovery now resolves upstream wire-aliased tool names (ccapi
+  PascalCase disguises like `TaskSend`, CC-pool hashed prefixes like
+  `mcp_49f0-Todo`, CC-SDK `mcp__server__tool` forms), so a text-leaked
+  `<invoke name="mcp_49f0-Todo">` recovers into the registered `todo` tool
+  call instead of rendering as literal text. Alias collisions between
+  registered tools stay literal text.
 ### Removed
 
 ## [2026.8.18-2] - 2026-08-18

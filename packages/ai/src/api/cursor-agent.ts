@@ -171,7 +171,6 @@ import {
 	RequestContextResultSchema,
 	RequestContextSchema,
 	RequestContextSuccessSchema,
-	RequestedModelSchema,
 	ResumeActionSchema,
 	SelectedContextSchema,
 	SelectedImageSchema,
@@ -214,6 +213,7 @@ import {
 	piReadArgs,
 	piTimeout,
 } from "./cursor-agent/pi-args.ts";
+import { buildRequestedModel } from "./cursor-agent/reasoning-params.ts";
 import type {
 	CursorAgentOptions,
 	CursorExecHandlerResult,
@@ -711,9 +711,9 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 };
 
 /**
- * `streamSimple` for Cursor: reasoning/thinking is managed server-side per
- * model (there is no client thinking knob on the Run request), so the simple
- * options map through unchanged.
+ * `streamSimple` for Cursor: an explicit thinking selection (`options.thinkingSelection`)
+ * is rendered into `RequestedModel.parameters`; reasoning output itself streams back as
+ * `ThinkingContent` regardless of the selection.
  */
 export const streamSimple: StreamFunction<"cursor-agent", SimpleStreamOptions> = (
 	model: Model<"cursor-agent">,
@@ -3402,6 +3402,28 @@ function toolParametersToJsonSchema(tool: Tool): unknown {
 	}
 }
 
+/**
+ * JSON-Schema composition keywords Cursor's gateway cannot carry: an
+ * advertised tool whose inputSchema contains `oneOf`, `anyOf`, or `allOf` is
+ * rejected upstream with a wrapped provider 400 for the WHOLE request
+ * (zero tokens, `resource_exhausted` end-stream). MCP tools imported from
+ * external servers routinely ship such schemas (e.g. ast-grep's `scan`).
+ * `not` is tolerated upstream and kept. Returns a new structure; the input is
+ * never mutated.
+ */
+const CURSOR_UNSUPPORTED_SCHEMA_KEYS = new Set(["oneOf", "anyOf", "allOf"]);
+
+export function sanitizeCursorToolSchema(schema: unknown): unknown {
+	if (Array.isArray(schema)) return schema.map(sanitizeCursorToolSchema);
+	if (schema === null || typeof schema !== "object") return schema;
+	const sanitized: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(schema)) {
+		if (CURSOR_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
+		sanitized[key] = sanitizeCursorToolSchema(value);
+	}
+	return sanitized;
+}
+
 export function buildMcpToolDefinitions(tools: Tool[] | undefined): McpToolDefinition[] {
 	if (!tools || tools.length === 0) {
 		return [];
@@ -3413,7 +3435,7 @@ export function buildMcpToolDefinitions(tools: Tool[] | undefined): McpToolDefin
 	}
 
 	return advertisedTools.map((tool) => {
-		const jsonSchema = toolParametersToJsonSchema(tool);
+		const jsonSchema = sanitizeCursorToolSchema(toolParametersToJsonSchema(tool));
 		const schemaValue: PbJsonValue =
 			jsonSchema && typeof jsonSchema === "object"
 				? (jsonSchema as PbJsonValue)
@@ -3944,17 +3966,14 @@ async function buildGrpcRequest(
 		turns,
 	});
 
-	const wireModelId = model.upstreamModelId ?? model.id;
+	const requestedModel = buildRequestedModel(model, options?.thinkingSelection);
+	const wireModelId = requestedModel.modelId;
 	const cursorMaxMode = model.compat?.cursorMaxMode === true;
 	const modelDetails = create(ModelDetailsSchema, {
 		modelId: wireModelId,
 		displayModelId: model.id,
 		displayName: model.name,
 		...(cursorMaxMode ? { maxMode: true } : undefined),
-	});
-	const requestedModel = create(RequestedModelSchema, {
-		modelId: wireModelId,
-		maxMode: cursorMaxMode,
 	});
 
 	const runRequest = create(AgentRunRequestSchema, {

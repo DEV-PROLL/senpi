@@ -8,9 +8,21 @@ export interface CursorExecBridgeSession {
 	preflightToolCall(toolCall: AgentToolCall, args: unknown): Promise<BeforeToolCallResult | undefined>;
 }
 
+/**
+ * Build the exec handlers for ONE Cursor run.
+ *
+ * `runSignal` is the signal of the run that owns this stream, captured when
+ * the loop opens it. Resolving ownership from the agent's live signal instead
+ * would let a straggler frame from a stream whose run already ended (a
+ * provider error or rate-limit fallback restarts the run while its h2 stream
+ * still holds buffered exec frames) adopt the replacement run's signal, clear
+ * the ownership guard in `Agent.emitExternalEvent`, and execute a dead run's
+ * tool inside the new run.
+ */
 export function createSessionCursorExecBridge(
 	sessionRef: { current?: CursorExecBridgeSession },
 	getAgent: () => CursorBridgeAgent,
+	runSignal?: AbortSignal,
 ) {
 	return createCursorExecBridge({
 		getTool: (name) => sessionRef.current?.getRegisteredTool(name),
@@ -26,6 +38,9 @@ export function createSessionCursorExecBridge(
 			),
 		emitEvent: async (event: AgentEvent, runSignal: AbortSignal) =>
 			await getAgent().emitExternalEvent(event, runSignal),
-		getAbortSignal: () => getAgent().signal,
+		getAbortSignal: () => {
+			if (runSignal === undefined) return getAgent().signal;
+			return runSignal === getAgent().signal ? runSignal : undefined;
+		},
 	});
 }

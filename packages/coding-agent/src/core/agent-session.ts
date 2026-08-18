@@ -31,7 +31,7 @@ import type {
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { prepareAgentToolCall } from "@earendil-works/pi-agent-core";
-import { contentText, SERVER_FALLBACK_ABORTED_DIAGNOSTIC } from "@earendil-works/pi-ai";
+import { contentText, SERVER_FALLBACK_ABORTED_DIAGNOSTIC, type ThinkingSelection } from "@earendil-works/pi-ai";
 import type {
 	Api,
 	AssistantMessage,
@@ -458,9 +458,19 @@ export interface AgentSessionConfig {
 	/** Clock override for fallback selector cooldowns (tests only). */
 	fallbackNow?: () => number;
 	/** Global model narrowing for selectors and startup model choice (from --models / enabledModels) */
-	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel; serviceTier?: ServiceTier }>;
+	scopedModels?: Array<{
+		model: Model<any>;
+		thinkingLevel?: ThinkingLevel;
+		thinkingSelection?: ThinkingSelection;
+		serviceTier?: ServiceTier;
+	}>;
 	/** Favorite models to cycle through with Ctrl+P */
-	favoriteModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel; serviceTier?: ServiceTier }>;
+	favoriteModels?: Array<{
+		model: Model<any>;
+		thinkingLevel?: ThinkingLevel;
+		thinkingSelection?: ThinkingSelection;
+		serviceTier?: ServiceTier;
+	}>;
 	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
 	resourceLoader: ResourceLoader;
 	/** SDK custom tools registered outside extensions */
@@ -491,7 +501,12 @@ export interface AgentSessionConfig {
 	autoTitleSessions?: boolean;
 }
 
-type SessionModelEntry = { model: Model<any>; thinkingLevel?: ThinkingLevel; serviceTier?: ServiceTier };
+type SessionModelEntry = {
+	model: Model<any>;
+	thinkingLevel?: ThinkingLevel;
+	thinkingSelection?: ThinkingSelection;
+	serviceTier?: ServiceTier;
+};
 
 interface CompactionExecutionRequest {
 	controller: AbortController;
@@ -1275,6 +1290,7 @@ export class AgentSession {
 				},
 				model: this.agent.state.model,
 				thinkingLevel: this.agent.state.thinkingLevel,
+				thinkingSelection: this.agent.state.thinkingSelection ?? null,
 				abortServerSideFallback:
 					this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain(),
 			};
@@ -2400,6 +2416,11 @@ export class AgentSession {
 		return this.agent.state.thinkingLevel;
 	}
 
+	/** Explicit selector provenance, absent for SDK-defaulted effective levels. */
+	get thinkingSelection(): ThinkingSelection | undefined {
+		return this.agent.state.thinkingSelection;
+	}
+
 	get serviceTier(): ServiceTier | undefined {
 		return this._currentServiceTier;
 	}
@@ -2722,30 +2743,22 @@ export class AgentSession {
 	}
 
 	/** Globally narrowed models (from --models / enabledModels) */
-	get scopedModels(): ReadonlyArray<{ model: Model<any>; thinkingLevel?: ThinkingLevel; serviceTier?: ServiceTier }> {
+	get scopedModels(): ReadonlyArray<SessionModelEntry> {
 		return this._scopedModels;
 	}
 
 	/** Update global model narrowing */
-	setScopedModels(
-		scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel; serviceTier?: ServiceTier }>,
-	): void {
+	setScopedModels(scopedModels: SessionModelEntry[]): void {
 		this._scopedModels = scopedModels;
 	}
 
 	/** Favorite models for Ctrl+P cycling */
-	get favoriteModels(): ReadonlyArray<{
-		model: Model<any>;
-		thinkingLevel?: ThinkingLevel;
-		serviceTier?: ServiceTier;
-	}> {
+	get favoriteModels(): ReadonlyArray<SessionModelEntry> {
 		return this._getCurrentFavoriteModels();
 	}
 
 	/** Update favorite models for Ctrl+P cycling */
-	setFavoriteModels(
-		favoriteModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel; serviceTier?: ServiceTier }>,
-	): void {
+	setFavoriteModels(favoriteModels: SessionModelEntry[]): void {
 		this._favoriteModels = favoriteModels;
 	}
 
@@ -2772,6 +2785,7 @@ export class AgentSession {
 			favoriteModels.push({
 				model,
 				thinkingLevel: favorite.thinkingLevel,
+				thinkingSelection: favorite.thinkingSelection,
 				serviceTier: favorite.serviceTier,
 			});
 		}
@@ -2925,9 +2939,22 @@ export class AgentSession {
 			(this.isStreaming || this._promptStartPending) &&
 			!this.isCompacting &&
 			options?.streamingBehavior !== undefined;
+		// Auto-compaction claims only _autoCompactionAbortController, which the
+		// admission guard above deliberately ignores so background compaction never
+		// rejects typed input. Without a queue route that message matched no branch
+		// below and fell through neither queued nor started (field bug: input typed
+		// while the TUI showed "Compacting context..." was accepted and dropped).
+		// Manual compaction keeps its fail-closed admission path untouched.
+		const canQueueDuringAutoCompaction =
+			this._autoCompactionAbortController !== undefined &&
+			this._compactionAbortController === undefined &&
+			!this.isStreaming &&
+			!this._promptStartPending &&
+			options?.streamingBehavior !== undefined;
 		if (
 			shouldWaitForSessionWork &&
 			!canQueueWhileStreaming &&
+			!canQueueDuringAutoCompaction &&
 			(!this.isStreaming || this.isCompacting || this._sessionWorkBarrier.hasActiveWork)
 		) {
 			await this._waitForSettledSessionWork();
@@ -3034,6 +3061,26 @@ export class AgentSession {
 			// ends while extension input handling or template expansion is pending.
 			// Starting a fresh prompt here would let it overtake the held continuation.
 			if (canQueueWhileStreaming && !this.isStreaming) {
+				if (options?.thinkingLevel !== undefined) {
+					throw new Error("Cannot set thinkingLevel on a queued prompt; set it after the current turn completes.");
+				}
+				if (options?.streamingBehavior === "followUp") {
+					await this._queueFollowUp(expandedText, currentImages);
+				} else {
+					await this._queueSteer(expandedText, currentImages);
+				}
+				emitPendingCommandInvocation();
+				await emitInputDisposition("queued");
+				promptDisposition?.("queued");
+				preflightResult?.(true);
+				return;
+			}
+
+			// Auto-compaction owns the session without claiming the admission controller,
+			// so a queueable submission reaches here with no branch above matching and
+			// would fall through neither queued nor started. Queue it instead of starting
+			// a turn against a context that is still being compacted.
+			if (canQueueDuringAutoCompaction && !this.isStreaming) {
 				if (options?.thinkingLevel !== undefined) {
 					throw new Error("Cannot set thinkingLevel on a queued prompt; set it after the current turn completes.");
 				}
@@ -3938,7 +3985,7 @@ export class AgentSession {
 		if (opts.invalidateCompaction && this._modelSelectionChangesContext(previousModel, model)) {
 			this._invalidateCompactionForModelSelection();
 		}
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(model, opts.ephemeralThinkingLevel);
+		const thinking = this._getThinkingForModelSwitch(model, opts.ephemeralThinkingLevel);
 		this.agent.state.model = model;
 		this.agent.abortServerSideFallback =
 			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
@@ -3961,9 +4008,9 @@ export class AgentSession {
 		this._currentServiceTier = this._resolveServiceTier(model, scopedMatch?.serviceTier);
 
 		if (opts.ephemeralThinkingLevel !== undefined) {
-			this._applyEphemeralThinkingLevel(thinkingLevel);
+			this._applyEphemeralThinkingLevel(thinking.level);
 		} else {
-			this.setSessionThinkingLevel(thinkingLevel);
+			this._setThinkingLevel(thinking.level, false, thinking.selection);
 		}
 
 		this._emitHighReasoningWarningIfNeeded();
@@ -3984,6 +4031,7 @@ export class AgentSession {
 	private _applyEphemeralThinkingLevel(level: ThinkingLevel): void {
 		const previousLevel = this.agent.state.thinkingLevel;
 		this.agent.state.thinkingLevel = level;
+		this.agent.state.thinkingSelection = undefined;
 		if (previousLevel !== level) {
 			this._emit({ type: "thinking_level_changed", level });
 		}
@@ -4026,7 +4074,7 @@ export class AgentSession {
 		}
 		this._probeBackScheduler.cancel("manual-model-change");
 		this._retryFallback.clearForManualModelChange(next.model);
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.model, next.thinkingLevel);
+		const thinking = this._getThinkingForModelSwitch(next.model, next.thinkingLevel, next.thinkingSelection);
 
 		this.agent.state.model = next.model;
 		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
@@ -4035,11 +4083,8 @@ export class AgentSession {
 		const previousFastMode = this.isFastModeActive();
 		this._currentServiceTier = this._resolveServiceTier(next.model, next.serviceTier);
 
-		// Apply thinking level.
-		// - Explicit favorite model thinking level overrides the effective session level
-		// - Undefined favorite model thinking level restores the remembered user preference
-		// setSessionThinkingLevel clamps without replacing that preference.
-		this.setSessionThinkingLevel(thinkingLevel);
+		// Apply thinking level and provenance from the favorite projection or remembered preference.
+		this._setThinkingLevel(thinking.level, false, thinking.selection);
 
 		// Post-switch, same contract as _switchActiveModel: the level in force AFTER the cycle.
 		this._emit({
@@ -4069,7 +4114,7 @@ export class AgentSession {
 	 * Persistent calls refresh per-model memory; session entries and events are emitted only on change.
 	 */
 	setThinkingLevel(level: ThinkingLevel): void {
-		this._setThinkingLevel(level, true);
+		this._setThinkingLevel(level, true, { level, source: "explicit" });
 	}
 
 	/**
@@ -4077,21 +4122,32 @@ export class AgentSession {
 	 * The effective level is still persisted in this session's history.
 	 */
 	setSessionThinkingLevel(level: ThinkingLevel): void {
-		this._setThinkingLevel(level, false);
+		this._setThinkingLevel(level, false, { level, source: "explicit" });
 	}
 
-	private _setThinkingLevel(level: ThinkingLevel, updateGlobalDefault: boolean): void {
+	private _setThinkingLevel(
+		level: ThinkingLevel,
+		updateGlobalDefault: boolean,
+		selection: ThinkingSelection | undefined,
+	): void {
 		const availableLevels = this.getAvailableThinkingLevels();
 		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level, availableLevels);
 
 		// Only persist if actually changing
 		const previousLevel = this.agent.state.thinkingLevel;
+		const previousSelection = this.agent.state.thinkingSelection;
+		const effectiveSelection = selection ? { ...selection, level: effectiveLevel } : undefined;
+		const selectionChanged =
+			previousSelection?.level !== effectiveSelection?.level ||
+			previousSelection?.source !== effectiveSelection?.source ||
+			previousSelection?.legacyVariantId !== effectiveSelection?.legacyVariantId;
 		const isChanging = effectiveLevel !== previousLevel;
-		if (isChanging) {
+		if (isChanging || selectionChanged) {
 			this._retryFallback.noteManualThinkingLevel();
 		}
 
 		this.agent.state.thinkingLevel = effectiveLevel;
+		this.agent.state.thinkingSelection = effectiveSelection;
 
 		if (updateGlobalDefault) {
 			const model = this.model;
@@ -4100,8 +4156,8 @@ export class AgentSession {
 			}
 		}
 
-		if (isChanging) {
-			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
+		if (isChanging || selectionChanged) {
+			this.sessionManager.appendThinkingLevelChange(effectiveLevel, effectiveSelection);
 			if (updateGlobalDefault && (this.supportsThinking() || effectiveLevel !== "off")) {
 				this.settingsManager.setDefaultThinkingLevel(effectiveLevel);
 			}
@@ -4177,13 +4233,31 @@ export class AgentSession {
 		return !!this.model?.reasoning;
 	}
 
-	private _getThinkingLevelForModelSwitch(model: Model<Api>, explicitLevel?: ThinkingLevel): ThinkingLevel {
-		const requestedLevel =
-			explicitLevel ??
-			this.settingsManager.getModelThinkingLevel(model.provider, model.id) ??
-			this.settingsManager.getDefaultThinkingLevel() ??
-			DEFAULT_THINKING_LEVEL;
-		return this._clampThinkingLevel(requestedLevel, getSupportedThinkingLevels(model) as ThinkingLevel[]);
+	private _getThinkingForModelSwitch(
+		model: Model<Api>,
+		explicitLevel?: ThinkingLevel,
+		explicitSelection?: ThinkingSelection,
+	): { level: ThinkingLevel; selection?: ThinkingSelection } {
+		let requestedLevel = explicitLevel;
+		let selection = explicitSelection;
+		if (requestedLevel !== undefined && !selection) selection = { level: requestedLevel, source: "explicit" };
+		if (requestedLevel === undefined) {
+			const remembered = this.settingsManager.getModelThinkingLevel(model.provider, model.id);
+			if (remembered !== undefined) {
+				requestedLevel = remembered;
+				selection = { level: remembered, source: "explicit" };
+			}
+		}
+		if (requestedLevel === undefined) {
+			const configuredDefault = this.settingsManager.getDefaultThinkingLevel();
+			if (configuredDefault !== undefined) {
+				requestedLevel = configuredDefault;
+				selection = { level: configuredDefault, source: "explicit" };
+			}
+		}
+		requestedLevel ??= DEFAULT_THINKING_LEVEL;
+		const level = this._clampThinkingLevel(requestedLevel, getSupportedThinkingLevels(model) as ThinkingLevel[]);
+		return { level, selection: selection ? { ...selection, level } : undefined };
 	}
 
 	private _clampThinkingLevel(level: ThinkingLevel, availableLevels: ThinkingLevel[]): ThinkingLevel {

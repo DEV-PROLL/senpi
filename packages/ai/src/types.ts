@@ -98,6 +98,18 @@ export type ImagesProviderId = KnownImagesProvider | string;
 
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelThinkingLevel = "off" | ThinkingLevel;
+
+/**
+ * Provenance-bearing thinking selection. Distinct from the always-materialized
+ * effective level: a selection exists only when the user (or a legacy variant
+ * alias) explicitly chose a level. See .omo/plans/cursor-reasoning-levels.md §4.1.
+ */
+export interface ThinkingSelection {
+	readonly level: ModelThinkingLevel;
+	readonly source: "explicit" | "legacy-variant";
+	/** Required when source is "legacy-variant": the exact allowlisted original variant id. */
+	readonly legacyVariantId?: string;
+}
 export type ThinkingLevelMap = Partial<Record<ModelThinkingLevel, string | null>>;
 export type ChatTemplateKwargValue =
 	| string
@@ -352,6 +364,12 @@ export type ProviderImagesOptions = ImagesOptions & Record<string, unknown>;
 // Unified options with reasoning passed to streamSimple() and completeSimple()
 export interface SimpleStreamOptions extends StreamOptions {
 	reasoning?: ThinkingLevel;
+	/**
+	 * Provenance-bearing thinking selection. Providers that need to distinguish
+	 * an explicit user choice from the always-materialized effective level read
+	 * this; `reasoning` remains the normalized effective level for everyone.
+	 */
+	thinkingSelection?: ThinkingSelection;
 	/** Ask a capable provider to return a durable handle and continue the request asynchronously. */
 	deferred?: boolean | { window?: "15m" | "1h" | "24h" };
 	/** Custom token budgets for thinking levels (token-based providers only) */

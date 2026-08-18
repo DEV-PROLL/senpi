@@ -362,6 +362,10 @@ async function runLoop(
 							: nextTurnSnapshot.thinkingLevel === "off"
 								? undefined
 								: nextTurnSnapshot.thinkingLevel,
+					thinkingSelection:
+						nextTurnSnapshot.thinkingSelection === undefined
+							? config.thinkingSelection
+							: (nextTurnSnapshot.thinkingSelection ?? undefined),
 					abortServerSideFallback: nextTurnSnapshot.abortServerSideFallback ?? config.abortServerSideFallback,
 				};
 			}
@@ -489,7 +493,10 @@ async function streamAssistantResponse(
 			// execute mid-stream; their paired results buffer here.
 			...(config.cursorExecHandlers
 				? {
-						execHandlers: config.cursorExecHandlers,
+						execHandlers:
+							typeof config.cursorExecHandlers === "function"
+								? config.cursorExecHandlers(requestAbortController.signal)
+								: config.cursorExecHandlers,
 						onToolResult: (result: ToolResultMessage) => {
 							providerToolResults.push(result);
 						},

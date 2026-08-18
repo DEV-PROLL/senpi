@@ -13,7 +13,7 @@
  * safe to import from browser-reachable modules.
  */
 
-import type { StreamOptions, ToolResultMessage } from "../../types.ts";
+import type { StreamOptions, ThinkingSelection, ToolResultMessage } from "../../types.ts";
 import type {
 	DeleteArgs,
 	DeleteResult,
@@ -153,4 +153,10 @@ export interface CursorAgentOptions extends StreamOptions {
 	execHandlers?: CursorExecHandlers;
 	/** Receives every exec-channel tool result for transcript pairing. */
 	onToolResult?: CursorToolResultHandler;
+	/**
+	 * Provenance-bearing thinking selection rendered into
+	 * `RequestedModel.parameters`; absent selections keep the representative
+	 * variant request shape.
+	 */
+	thinkingSelection?: ThinkingSelection;
 }

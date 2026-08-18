@@ -1,5 +1,136 @@
 # changes
 
+## 2026-08-18 - Retry continuation watchdog reconciled with the guards it grants
+
+### What changed
+
+- `core/provider-timeout-retry.ts`: `createProviderTimeoutRetryPlan` now reconciles the retry-continuation
+  liveness cap against the stream-start guard the same retry is handed:
+  `watchdogTimeoutMs = max(streamRetryTimeoutMs, streamStartTimeoutMs)`. An explicitly disabled cap
+  (`undefined`) stays disabled, and a cap that already outlasts the granted guard is returned unchanged.
+- Coverage: `test/provider-timeout-retry-continuation.test.ts` (new; first direct coverage of
+  `runBoundedRetryContinuation`), extended `test/provider-timeout-retry.test.ts`, and updated
+  `test/suite/regressions/provider-idle-recovery.test.ts`.
+
+### Why
+
+- This completes the 2026-08-13 fix below. That change stopped clamping the retry *request* guards to
+  `retry.provider.streamRetryTimeoutMs`, but left the same 30s cap bounding the retry *continuation*, which
+  reproduced the identical defect one layer up: `runBoundedRetryContinuation` aborted the attempt at 30s while
+  the request still had 60s of its configured 90s stream-start budget left.
+- No attempt could therefore finish, so the bounded `retry.maxRetries` budget (default 3) collapsed into the
+  single user-visible `Provider stream start timed out after 90000ms` / `Aborted after 1 retry attempt`
+  outcome. A slow-but-alive provider was again judged dead on a deadline it was never given.
+- Raising the watchdog to the granted guard preserves the wedge protection it was added for: the provider
+  guards still fail a dead upstream, and the watchdog still cancels a retry that outlives every guard it was
+  granted.
+
+### Why an extension could not handle it
+
+- The retry continuation bound and its abort ownership are core session-lifecycle surfaces with no extension
+  hook.
+
+### Expected merge conflict zones
+
+- `core/provider-timeout-retry.ts` plan construction, and the retry-bound constants in
+  `test/suite/regressions/provider-idle-recovery.test.ts`.
+
+
+## Queue typed input admitted during auto-compaction (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `prompt()` gained a
+  `canQueueDuringAutoCompaction` eligibility flag for a queueable submission
+  (`streamingBehavior` set) that arrives while auto-compaction owns the session
+  and no run is streaming. The flag suppresses the settled-session-work wait and
+  routes the message through `_queueSteer`/`_queueFollowUp` beside the existing
+  queue branches, after extension input handling and template expansion.
+
+### Why
+
+- `isCompacting` is true for the auto, manual, and branch-summary controllers,
+  but the admission guard rejects only on `_compactionAbortController`, so
+  auto-compaction never rejected typed input. That input then matched no queue
+  branch — `canQueueWhileStreaming` requires `!isCompacting` — and fell through
+  neither queued nor started, so a message typed while the TUI showed
+  "Compacting context..." was accepted and silently dropped.
+- Gating on the auto controller alone keeps the manual `/compact` fail-closed
+  admission path and the post-compaction recovery continuation unchanged; a
+  broader `isCompacting` relaxation regressed both.
+
+### Why an extension could not handle it
+
+- Prompt admission and queue ownership run inside the session before any
+  extension input hook observes the submission, so an extension cannot recover
+  input the engine has already dropped.
+
+### Expected merge-conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`: the `prompt()` queue
+  eligibility constants and the queue branches preceding the settled-work wait.
+
+## Cursor bridge dispatches bind to the run that owns the stream (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: the session
+  adapter accepts the signal of the run that owns the exec stream and resolves
+  `getAbortSignal` from it, returning `undefined` once that run is no longer
+  the agent's live run.
+- `packages/coding-agent/src/core/sdk.ts`: supplies the bridge as a per-run
+  factory so every Cursor stream gets handlers bound to its own run.
+
+### Why
+
+- The bridge is built once per session, but each exec stream belongs to exactly
+  one run. Resolving ownership from the agent's live signal let a straggler
+  frame from a stream whose run had already ended adopt the replacement run's
+  signal, clear the ownership guard in `Agent.emitExternalEvent`, and execute a
+  dead run's tool inside the new run while emitting its lifecycle events into
+  the new run's transcript.
+- This is the shape the crashed 2026-08-18 session hit: a provider rate-limit
+  error restarted the run on a fallback lane while the previous stream still
+  held buffered exec frames.
+
+### Why an extension could not handle it
+
+- Run ownership of provider-driven exec frames is an engine contract between
+  the agent loop and the Cursor stream; no extension hook sits between the
+  straggler frame and the bridge dispatch.
+
+### Expected merge conflict zones
+
+- `cursor-exec-bridge-session.ts` signature and `getAbortSignal` resolution,
+  `sdk.ts` `cursorExecHandlers` wiring.
+## 2026-08-18 - Cursor reasoning levels: session provenance and legacy id resolution
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`, `agent-session-services.ts`, `session-manager.ts`:
+  record, persist, and restore provenance-bearing thinking selections (explicit user actions, CLI `:suffix`,
+  favorites, legacy variant ids); defaulted levels stay selection-free and next-turn refresh returns the
+  selection so mid-run switches propagate.
+- `packages/coding-agent/src/core/model-resolver.ts`: resolve allowlisted legacy Cursor variant ids to their
+  grouped identity plus selection ahead of generic partial matching, and project wildcard/enabled/favorite
+  patterns across the alias union without cross-provider projection.
+- `packages/coding-agent/src/core/sdk.ts`: carry the startup selection into agent state.
+
+### Why
+
+- The Cursor catalog now publishes grouped identities, so sessions, favorites, and enabled-model patterns that
+  referenced the old expanded variant ids must keep resolving, with the level they encoded preserved.
+
+### Why an extension could not handle it
+
+- Session state, persistence entries, startup model resolution, and favorite/enabled pattern expansion are
+  core surfaces with no extension hook.
+
+### Expected merge conflict zones
+
+- `model-resolver.ts` pattern matching and partial-match ordering, `agent-session.ts` thinking-level setters,
+  `session-manager.ts` entry schema.
+
 ## Cursor bridge lifecycle events retain run ownership (2026-08-18)
 
 ### What changed
@@ -74,7 +205,6 @@
 
 - LOW: the `cerebras` row in `defaultModelPerProvider` and the matching pin in `test/model-resolver.test.ts`.
 
-<<<<<<< HEAD
 ## Cursor CLI OAuth provider display name (2026-08-17)
 
 ### What changed
@@ -101,8 +231,6 @@
 
 - LOW: `provider-display-names.ts` map rows (one-line additions in a sorted literal).
 
-||||||| 84514a353
-=======
 ## Repository audit baseline for the core tracker (2026-08-17)
 
 ### What changed
@@ -694,8 +822,6 @@
 ### Expected merge conflict zones
 
 - LOW: additive block after `restoreStdout()`; the stdout takeover above it is the pattern to follow on sync.
-
->>>>>>> origin/main
 ## Expand explicit dollar skill tokens and publish invocation metadata (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
 
 ### What changed

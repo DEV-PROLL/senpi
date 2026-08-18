@@ -1,5 +1,95 @@
 # AI Source Changes
 
+## 2026-08-18 - Cursor context windows tracked to the models.dev first-party SSOT
+
+### What changed
+
+- `packages/ai/src/cursor/model-capabilities.ts`: window values now derive from the models.dev
+  first-party catalog capped by the `context` options Cursor actually offers each family, and the
+  capability gains `requestContext` — the context token matching the advertised window.
+- `packages/ai/src/cursor/selection-descriptor.ts`: the wire mapper emits
+  `requestContext ?? defaultContext`, so a family advertising 1M also asks Cursor for `context=1m`.
+
+### Why
+
+- Claude families were encoded at 300000, copied from the cursor-agent CLI listing's stale
+  "(300K context)" display labels; models.dev, Cursor's `1m` context option, and the models' own "1M"
+  display names all agree they are 1000000. Advertising a window larger than the context the request
+  asks for would let compaction overrun what Cursor was told to allocate, so the two values are one
+  contract and are now verified together.
+
+### Why an extension could not handle it
+
+- The capability table and the protobuf/CLI wire mapper are core provider data consumed by both
+  Cursor transports; no extension hook sits between them.
+
+### Expected merge conflict zones
+
+- `model-capabilities.ts` family table and helper signatures, `selection-descriptor.ts` parameter switch.
+
+## 2026-08-18 - Sanitize JSON-Schema composition keywords from advertised Cursor tool schemas
+
+### What changed
+
+- `packages/ai/src/api/cursor-agent.ts`: new exported `sanitizeCursorToolSchema` helper plus
+  `CURSOR_UNSUPPORTED_SCHEMA_KEYS`; `buildMcpToolDefinitions` now recursively strips `oneOf`,
+  `anyOf`, and `allOf` from every advertised tool's inputSchema before proto encoding. `not` and
+  all other keywords pass through untouched. Returns new structures (input never mutated).
+
+### Why
+
+- An advertised tool whose inputSchema carries a composition keyword makes Cursor's gateway
+  reject the ENTIRE request upstream with a wrapped provider 400 (`ERROR_PROVIDER_ERROR`, zero
+  tokens, `resource_exhausted` end-stream) — proven by live A/B on 2026-08-18 with a minimal
+  single-tool `oneOf`/`anyOf`/`allOf` repro against `claude-fable-5-thinking-xhigh`. External MCP
+  servers ship such schemas routinely (ast-grep's `scan` uses a top-level `oneOf`), so every
+  session registering one failed on the cursor provider from turn 1.
+
+### Why an extension could not handle it
+
+- `buildMcpToolDefinitions` runs inside the cursor-agent Run-request construction path; the
+  advertised schema bytes are serialized before any extension-visible surface exists.
+
+### Expected merge-conflict zones
+
+- `packages/ai/src/api/cursor-agent.ts` (`buildMcpToolDefinitions` / schema helpers) — same zone
+  as the reasoning-levels entry; test file
+  `packages/ai/test/cursor-tool-schema-sanitize.test.ts` is new.
+
+## 2026-08-18 - Cursor reasoning levels end to end
+
+### What changed
+
+- `src/cursor/model-capabilities.ts`, `src/cursor/cursor-variant-aliases.json`: committed static capability table
+  (windows, parameter orders, exact level encodings incl. GPT 5.5/Codex 5.3 `extra-high` and off=`none` families)
+  plus the 204-id alias index, both derived from the live aiserver.v1 AvailableModels capture of 2026-08-18.
+- `src/cursor/catalog-grouping.ts`: lossless variant parser + grouping (Claude `base`/`base-thinking` boolean axis,
+  fast variants retained raw) with total seven-key thinkingLevelMaps; golden 204->113/32 pinned by fixture test.
+- `src/cursor/selection-descriptor.ts`: transport-neutral selection resolver (parameters vs suffix-id encodings)
+  shared by the native protobuf lane and the `cursor-cli-oauth` extension.
+- `src/cursor/store-migration.ts`: idempotent stored-catalog regrouping.
+- `providers/cursor.ts`: discovery now publishes grouped identities with `compat.cursorReasoning` and correct
+  windows; `api/cursor-agent.ts` renders `options.thinkingSelection` into `RequestedModel.parameters`; absent
+  selections keep the representative-variant request shape byte-exactly.
+- `packages/ai/src/index.ts`: re-exports the shared cursor capability, grouping, and selection API.
+- `packages/ai/src/models.ts`: new `restoreModels` provider hook (try/catch — stored catalog survives a throwing transform).
+- `packages/ai/src/types.ts` / `packages/ai/src/model.ts`: `ThinkingSelection` type + `CursorAgentCompat.cursorReasoning` capability gate.
+
+### Why
+
+- The Cursor catalog exposed 204 expanded variant ids with reasoning disabled, so senpi thinking
+  levels could not reach the wire and context windows came from stale name heuristics.
+
+### Why an extension couldn't do it
+
+- Provider discovery normalization, protobuf Run-request construction, agent-loop option propagation, and the
+  models-store restore path are core runtime seams an extension cannot reach.
+
+### Expected merge-conflict zones
+
+- `api/cursor-agent.ts` (Run-request builder + streamSimple), `providers/cursor.ts`, `models.ts` restore path,
+  `types.ts` SimpleStreamOptions, `packages/agent/src/agent-loop.ts` prepareNextTurn merge.
+
 ## 2026-08-17 - Cursor exec result closure + per-exec heartbeats
 
 ### What changed and why
