@@ -27,6 +27,25 @@
 - MEDIUM in `session-binding.ts` and `session-registry-wiring.ts`; LOW in their focused tests and issue #6981
   regression.
 
+## 2026-08-18 - Select the Claude binary for the host libc
+
+### What changed
+
+- Linux executable resolution now tries the glibc package first on glibc hosts and when libc detection is unavailable, and tries the musl package first only when `process.report` identifies musl.
+- The libc detector is injectable for deterministic coverage, while the non-preferred Linux package remains a fallback and `CLAUDE_CODE_EXECUTABLE` remains the highest-priority override.
+
+### Why
+
+- The resolver previously selected the musl package first on every Linux host. When both optional packages were installed on glibc, the chosen binary exited with code 127 because `/lib/ld-musl-*` was unavailable.
+
+### Why an extension could not handle it
+
+- The executable path is resolved inside this builtin provider before SDK query construction and ambient authentication probes; no external extension hook can replace that private boundary.
+
+### Expected merge conflict zones
+
+- LOW: `executable.ts` around Linux candidate ordering and default dependency detection.
+
 ## Repository audit baseline for the claude-sdk-oauth tracker (2026-08-17)
 
 ### What changed

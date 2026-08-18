@@ -9,6 +9,8 @@
 - Headless Claude SDK OAuth continuation now restores its persisted SDK binding across separate CLI processes, so
   `-p -c` resumes the existing lineage instead of resending the full conversation after a `registry_miss`.
 
+- Claude SDK OAuth now selects the glibc Claude Code binary before the musl variant on glibc Linux hosts and when libc detection is unavailable, while retaining musl-first selection on detected musl hosts and fallback to either installed package ([code-yeongyu/oh-my-openagent#6963](https://github.com/code-yeongyu/oh-my-openagent/issues/6963)).
+
 ### New Features
 
 ### Breaking Changes
