@@ -474,10 +474,32 @@ const XAI_RESPONSES_MODEL_ID = "grok-4.5";
 const XAI_BUILTIN_EXCLUDED_MODEL_IDS = new Set([
 	"grok-3",
 	"grok-3-fast",
-	"grok-4.20-0309-non-reasoning",
-	"grok-4.20-0309-reasoning",
 	"grok-code-fast-1",
 ]);
+const XAI_COMPLETIONS_THINKING_LEVEL_MAPS: Record<
+	string,
+	NonNullable<Model<"openai-completions">["thinkingLevelMap"]>
+> = {
+	"grok-4.6": {
+		off: null,
+		minimal: null,
+		low: "low",
+		medium: "medium",
+		high: "high",
+		xhigh: "xhigh",
+		max: null,
+	},
+	"grok-4.20-0309-reasoning": {
+		off: null,
+		minimal: null,
+		low: null,
+		medium: null,
+		high: "high",
+		xhigh: null,
+		max: null,
+	},
+};
+const XAI_COMPLETIONS_REASONING_EFFORT_MODEL_IDS = new Set(["grok-4.6"]);
 const XAI_RESPONSES_EFFORT_LEVEL_MAP = {
 	off: null,
 	minimal: null,
@@ -1717,6 +1739,8 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				const m = model as ModelsDevModel;
 				if (m.tool_call !== true) continue;
 				const useResponsesApi = modelId === XAI_RESPONSES_MODEL_ID;
+				const thinkingLevelMap = XAI_COMPLETIONS_THINKING_LEVEL_MAPS[modelId];
+				const supportsReasoningEffort = XAI_COMPLETIONS_REASONING_EFFORT_MODEL_IDS.has(modelId);
 
 				models.push({
 					id: modelId,
@@ -1724,8 +1748,13 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					api: useResponsesApi ? "openai-responses" : "openai-completions",
 					provider: "xai",
 					baseUrl: "https://api.x.ai/v1",
-					...(useResponsesApi ? { compat: { ...XAI_RESPONSES_COMPAT } } : {}),
+					...(useResponsesApi
+						? { compat: { ...XAI_RESPONSES_COMPAT } }
+						: supportsReasoningEffort
+							? { compat: { supportsReasoningEffort: true } }
+							: {}),
 					reasoning: m.reasoning === true,
+					...(thinkingLevelMap ? { thinkingLevelMap } : {}),
 					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
 					cost: {
 						input: m.cost?.input || 0,

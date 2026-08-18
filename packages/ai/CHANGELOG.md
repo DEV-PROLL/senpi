@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- xAI Grok model metadata now exposes the documented `low`/`medium`/`high`/`xhigh` effort ladder for Grok 4.6,
+  sends the selected Chat Completions `reasoning_effort`, and restores the current Grok 4.20 reasoning and
+  non-reasoning variants with their correct fixed-thinking behavior ([#930](https://github.com/code-yeongyu/senpi/pull/930)).
+
 ### Removed
 
 ## [2026.8.17] - 2026-08-17
