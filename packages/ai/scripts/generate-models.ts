@@ -386,6 +386,7 @@ const OPENAI_TOOL_SEARCH_MODEL_IDS = new Set([
 const OPENAI_ADDITIONAL_TOOLS_MODEL_IDS = OPENAI_TOOL_SEARCH_MODEL_IDS;
 const OPENAI_CODEX_ADDITIONAL_TOOLS_MODEL_IDS = new Set(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
 const OPENAI_LONG_CONTEXT_INPUT_THRESHOLD = 272000;
+const GPT_56_SOL_DEFAULT_CONTEXT_WINDOW = 400000;
 const OPENAI_SHORT_CONTEXT_CAPPED_MODEL_IDS = new Set([
 	"gpt-5.4",
 	"gpt-5.5",
@@ -2503,6 +2504,9 @@ async function generateModels() {
 			candidate.contextWindow = OPENAI_LONG_CONTEXT_INPUT_THRESHOLD;
 			candidate.maxTokens = 128000;
 		}
+		if (candidate.provider === "openai" && candidate.id === "gpt-5.6-sol") {
+			candidate.contextWindow = GPT_56_SOL_DEFAULT_CONTEXT_WINDOW;
+		}
 		if (candidate.provider === "openai" && OPENAI_LONG_CONTEXT_PRICING_MODEL_IDS.has(candidate.id)) {
 			const standardCost = OPENAI_GPT_56_STANDARD_COSTS[candidate.id];
 			candidate.cost = withOpenAiLongContextPricing(standardCost ?? candidate.cost);
@@ -2733,7 +2737,7 @@ async function generateModels() {
 			reasoning: true,
 			input: ["text", "image"],
 			cost: withOpenAiLongContextPricing({ input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 }),
-			contextWindow: OPENAI_LONG_CONTEXT_INPUT_THRESHOLD,
+			contextWindow: GPT_56_SOL_DEFAULT_CONTEXT_WINDOW,
 			maxTokens: 128000,
 		},
 		{
@@ -2911,7 +2915,8 @@ async function generateModels() {
 
 	// OpenAI Codex (ChatGPT OAuth) models
 	// NOTE: These are not fetched from models.dev; we keep a small, explicit list to avoid aliases.
-	// Older model limits are based on observed server behavior; GPT-5.6 follows Codex's 272k catalog limit (formerly 372k).
+	// Older model limits are based on observed server behavior. GPT-5.6 Luna and Terra follow Codex's 272k
+	// catalog limit (formerly 372k); Sol defaults to 400k.
 	const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 	const CODEX_CONTEXT = 272000;
 	const CODEX_GPT_56_CONTEXT = 272000;
@@ -2987,7 +2992,7 @@ async function generateModels() {
 			reasoning: true,
 			input: ["text", "image"],
 			cost: withOpenAiLongContextPricing({ input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 }),
-			contextWindow: CODEX_GPT_56_CONTEXT,
+			contextWindow: GPT_56_SOL_DEFAULT_CONTEXT_WINDOW,
 			maxTokens: CODEX_MAX_TOKENS,
 		},
 		{

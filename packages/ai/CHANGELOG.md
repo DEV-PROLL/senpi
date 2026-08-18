@@ -10,6 +10,11 @@
 
 ### Fixed
 
+- GPT-5.6 Sol and Sol Fast now default to a 400,000-token context window in both the direct OpenAI and
+  ChatGPT OAuth (`openai-codex`) catalogs ([#933](https://github.com/code-yeongyu/senpi/pull/933)).
+- Refreshed Vercel AI Gateway pricing for `alibaba/qwen3.8-27b` from zero-value placeholder metadata to the
+  current upstream input, output, and cache-read rates ([#933](https://github.com/code-yeongyu/senpi/pull/933)).
+
 ### Removed
 
 ## [2026.8.18] - 2026-08-18

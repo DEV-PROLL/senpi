@@ -4,6 +4,43 @@
 > of divergences from the upstream pin (v0.84.2, `914cf1472e`) so its audited production paths carry a
 > canonical four-section record; it is dated by its underlying work.
 
+## Default GPT-5.6 Sol catalogs to 400k context (2026-08-18)
+
+### What changed
+
+- `scripts/generate-models.ts`: direct `openai` and ChatGPT OAuth `openai-codex` entries for `gpt-5.6-sol`
+  now default to a 400,000-token context window. Their generated `-fast` variants inherit the same limit.
+- `test/openai-fast-models.test.ts`: covers both providers and both base/fast Sol IDs.
+- `src/providers/data/*.json`: regenerated committed catalog data and manifest carry the new default.
+- The same reviewed regeneration refreshed Vercel AI Gateway's `alibaba/qwen3.8-27b` pricing from zero-value
+  placeholder metadata to the current upstream rates: input 0.1, output 0.4, and cache read 0.01.
+
+### Why
+
+- The GPT-5.6 Sol service can accept up to a 1M context, but the default Senpi catalog should reserve a
+  400k operating window instead of inheriting the generic 272k OpenAI short-tier cap or advertising the
+  full service maximum.
+- Luna and Terra remain at their existing defaults; this is intentionally scoped to Sol and Sol Fast.
+- The Vercel Qwen price change is retained because generated provider data is an atomic snapshot of the
+  upstream sources at generation time; keeping a stale per-model value would make the checked-in artifact
+  disagree with a fresh strict regeneration.
+
+### Why this cannot be expressed as an extension
+
+- Context-window metadata is generated before the coding-agent extension runtime loads and is consumed by
+  compaction, admission, and model-selection code throughout the runtime.
+
+### Modified upstream files
+
+- `packages/ai/scripts/generate-models.ts`
+- `packages/ai/test/openai-fast-models.test.ts`
+- `packages/ai/src/providers/data/*.json`
+
+### Expected merge conflict zones
+
+- MEDIUM: the temporary OpenAI metadata override block and explicit OpenAI Codex model list.
+- MEDIUM: generated provider JSON whenever upstream model metadata changes.
+
 ## Current xAI Grok reasoning specifications (2026-08-18)
 
 ### What changed
