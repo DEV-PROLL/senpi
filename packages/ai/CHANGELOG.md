@@ -6,6 +6,17 @@
 
 ### Added
 
+- Cursor reasoning levels: the dynamic Cursor catalog now collapses the 204 account variant ids into
+  selectable base identities (Claude `base` / `base-thinking` boolean identities) with exact
+  `thinkingLevelMap` ladders, live-catalog context windows (Kimi K3 1048576, GLM 5.2 1M, GPT 272K,
+  Grok 256K, Claude 1M-label families 300K), and a shared cursor capability table derived from the
+  2026-08-18 AvailableModels capture; explicit thinking selections render into the protobuf
+  `RequestedModel.parameters` (per-family `thinking`/`context`/`effort`/`reasoning`/`fast` templates,
+  GPT 5.5 / Codex 5.3 `xhigh` → `extra-high`), absent selections keep the representative variant
+  request shape, and stored 204-variant catalogs migrate idempotently through the new
+  `restoreModels` provider hook. Adds `ThinkingSelection` provenance propagation through agent
+  state, loop turn updates, and the remote proxy.
+
 ### Changed
 
 ### Fixed
