@@ -7,10 +7,14 @@
 ### Added
 
 ### Changed
+- Upstream sync (`badlogic/pi-mono` main@`59a71b23`): adopted generalized thinking-token-budget fields (`thinkingTokenBudgetField`, `supportsThinkingTokenBudget`), Google thinking-level maps, Bedrock response smithy headers, Azure Responses tool-choice forwarding, and the simple tool-choice option. Fork pins (`openai@6.26.0`), Kimi top-level cached-token parsing, `-fast` priority-tier emission, and fork-only providers/catalog overlays are unchanged.
+- xAI now routes through the Responses API with Grok 4.6 as the provider default, matching upstream; fork xAI model specs are preserved.
+- Model catalog refreshed with upstream provider updates: Z.AI Chinese Coding Plan entries, Qwen Token Plan DeepSeek V4 Pro, Baseten GLM input modalities, and OpenRouter additions.
 
 ### Fixed
 
 ### Removed
+- Deprecated Xiaomi models dropped, and the unused `@opentelemetry/api` dependency removed from `packages/ai` (no source imports it).
 
 ## [2026.8.18-3] - 2026-08-18
 
