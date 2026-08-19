@@ -133,4 +133,27 @@ describe("cursor exec bridge run ownership across runs", () => {
 		runBStream.push({ type: "done", reason: "stop", message: createAssistantMessage("run B done") });
 		await runB;
 	});
+
+	it("fails closed when a session bridge has no captured owning run", async () => {
+		const execute = vi.fn();
+		const tool = stubReadTool(execute);
+		const sessionRef: { current?: CursorExecBridgeSession } = {
+			current: {
+				getRegisteredTool: (name) => (name === "read" ? tool : undefined),
+				preflightToolCall: async () => undefined,
+			},
+		};
+		const emitExternalEvent = vi.fn();
+		const agent = {
+			signal: new AbortController().signal,
+			emitExternalEvent,
+		};
+		const bridge = createSessionCursorExecBridge(sessionRef, () => agent);
+
+		const result = await bridge.read?.({ path: "a.ts", toolCallId: "unbound-frame" } as never);
+
+		expect(execute).not.toHaveBeenCalled();
+		expect(emitExternalEvent).not.toHaveBeenCalled();
+		expect(isToolResult(result) && result.isError).toBe(true);
+	});
 });

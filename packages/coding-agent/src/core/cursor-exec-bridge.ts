@@ -82,7 +82,7 @@ async function executeTool(
 	args: Record<string, unknown>,
 ): Promise<ToolResultMessage> {
 	const runSignal = options.getAbortSignal();
-	if (!runSignal) {
+	if (!runSignal || runSignal.aborted) {
 		return errorResult(toolCallId, toolName, "Tool execution has no active run");
 	}
 
@@ -125,6 +125,9 @@ async function executeTool(
 			toolName,
 			input: params,
 		});
+		if (runSignal.aborted || options.getAbortSignal() !== runSignal) {
+			return errorResult(toolCallId, toolName, "Tool execution has no active run");
+		}
 		if (preflight?.block) {
 			const message = preflight.reason || "Tool execution was blocked";
 			toolResult = errorResult(toolCallId, toolName, message);

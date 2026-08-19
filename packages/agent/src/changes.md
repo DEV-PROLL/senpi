@@ -14,7 +14,8 @@
   of dropping them); `streamKind: "main"` stamped on the loop's own provider request so auxiliary calls
   stay distinguishable downstream; thinking-block `startedAt` / `endedAt` stamping from the
   `thinkingTiming` map at stream-event receipt; the Cursor exec-channel bridge (handler factory resolved
-  with the owning run's signal, mid-stream tool results buffered and appended, `kCursorExecResolved`
+  with the outer owning-run signal rather than the provider request's idle-timeout signal, mid-stream
+  tool results buffered and appended, `kCursorExecResolved`
   blocks excluded from the executable tool batch); `withEmptyAssistantRecovery` around the stream fn; and
   the `prepareNextTurn` merge of `thinkingSelection` and `abortServerSideFallback`.
 - `packages/agent/src/agent.ts` stays divergent on the run-ownership surface those loop features require:
@@ -56,8 +57,9 @@
 - `packages/agent/src/types.ts`: `AgentLoopConfig.cursorExecHandlers` also
   accepts a `(runSignal: AbortSignal) => CursorExecHandlers` factory.
 - `packages/agent/src/agent-loop.ts`: when a factory is supplied, the loop
-  resolves it with `requestAbortController.signal` — the signal of the run that
-  owns the stream being opened.
+  resolves it with the outer owning-run signal. Direct loop callers without an
+  outer signal retain the request controller as a scoped fallback, and normal
+  request completion aborts that fallback so stale handlers cannot remain live.
 
 ### Why
 

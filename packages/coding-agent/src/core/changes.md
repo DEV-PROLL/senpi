@@ -216,7 +216,11 @@
 - `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: the session
   adapter accepts the signal of the run that owns the exec stream and resolves
   `getAbortSignal` from it, returning `undefined` once that run is no longer
-  the agent's live run.
+  the agent's live run. Adapters created without a captured owner fail closed
+  instead of adopting whichever run is currently live.
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts`: dispatch rechecks the
+  captured signal after awaited preflight work and before `tool.execute()`, so
+  a run that ends during approval cannot start a side effect afterward.
 - `packages/coding-agent/src/core/sdk.ts`: supplies the bridge as a per-run
   factory so every Cursor stream gets handlers bound to its own run.
 

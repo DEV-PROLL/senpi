@@ -507,7 +507,7 @@ async function streamAssistantResponse(
 				? {
 						execHandlers:
 							typeof config.cursorExecHandlers === "function"
-								? config.cursorExecHandlers(requestAbortController.signal)
+								? config.cursorExecHandlers(signal ?? requestAbortController.signal)
 								: config.cursorExecHandlers,
 						onToolResult: (result: ToolResultMessage) => {
 							providerToolResults.push(result);
@@ -629,6 +629,7 @@ async function streamAssistantResponse(
 		await emit({ type: "message_end", message: finalMessage });
 		return { message: finalMessage, providerToolResults };
 	} finally {
+		requestAbortController.abort();
 		detachCallerAbort?.();
 	}
 }
