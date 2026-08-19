@@ -1,32 +1,53 @@
 # changes
 
-## Persistent-memory and mass-ulw graph tips (2026-08-19)
+## Interactive chrome, queued-input recovery, and smooth-streaming settings after the 59a71b23 pin (2026-08-19)
 
 ### What changed
 
-- `tips/catalog/memory-tips.ts` (new): 16 tips covering the persistent-memory suite in plain,
-  jargon-free English - what memory is, saving with `/remember` or by just saying it, `/search`,
-  `/memory`, `/init`, `/people`, `/reflect`, `/dream`, `/sleeptime`, `/memfs`,
-  `/memory-repository`, `/doctor`, `/facts`, and `/recompile`.
-- `tips/catalog/dag-tips.ts` (new): 9 tips covering mass-ulw graph orchestration - the one-keyword
-  hook, dependency ordering, parallel waves, per-node categories, the `/dag` status view, journaled
-  resume, and when a graph beats plain parallel subagents.
-- `tips/registry.ts` composes both new catalogs into `TIP_DEFINITIONS` (88 -> 113 tips).
-- Each entry is gated with `requiresCommand` on the command that provides it, mirroring the
-  existing `tasks` gate, so the tips only surface for users whose extension registers them.
-- Coverage: `test/suite/list-tips.test.ts` pins representative IDs, rendered lines, and gates for
-  both catalogs.
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` stays
+  divergent from upstream pin
+  `59a71b235dadb4ad0d67557a8abb0aaa093e68b4`. It keeps the fork's
+  compaction queue recovery: on `compaction_end` a completed compaction
+  flushes the queue, a `willRetry` outcome defers admission and reports
+  "will send with the next turn" with a `compaction_queue_deferred` session
+  log, and a compaction that neither completed nor will retry restores the
+  held messages into the editor (`restoreQueuedMessagesToEditor()`) with a
+  `compaction_queue_restored` log — where upstream only clears the queue.
+  Image-bearing submissions during compaction are still dropped with a
+  visible status because the queue carries text only.
+- `interactive-mode.ts` also keeps the pluggable chrome
+  (`InteractiveChrome`/`GrokChrome`, chrome-owned editor, footer, welcome
+  content and root arrangement), the `StreamingRevealController` smooth
+  streaming path with `applySmoothStreamingRenderFps()`, the tips runtime
+  (`TIP_DEFINITIONS`, startup/working tips, `recordTipShown()`), the
+  shimmering working-status and tool-hook status rows with `APP_TITLE`
+  terminal titles, keybindings-file editing, and extension notice boxes.
+- `packages/coding-agent/src/modes/interactive/components/settings-selector.ts`
+  keeps the fork's `Smooth streaming` and `Streaming fps` rows in
+  `SettingsConfig`/`SettingsCallbacks` (with the 30/60/90/120 value list and
+  `onSmoothStreamingChange`/`onSmoothStreamingFpsChange` dispatch) and the
+  `xhigh` thinking description that names native xhigh effort, both absent
+  from the new pinned tree.
 
 ### Why
 
-- The rotation advertised workflow skills but never mentioned persistent memory or the dependency-
-  graph orchestration surface, so two of the largest features stayed invisible to users who had
-  them installed.
+- Queued steering input is user text that must never be silently discarded
+  when compaction fails or retries; the chrome, tips, smooth streaming, and
+  status animation are fork product surfaces, and the settings selector must
+  expose the fork-only settings that back them.
+
+### Why an extension could not handle it
+
+- The compaction queue, chrome selection, and streaming reveal are private
+  `InteractiveMode` state driven by session events; the settings selector is
+  a built-in TUI component wired directly to `SettingsManager`.
 
 ### Expected merge conflict zones
 
-- LOW: two new catalog files, two import/spread lines in `tips/registry.ts`, and two additive
-  assertions in the existing catalog test.
+- MEDIUM: the `compaction_end` case in the session-event switch of
+  `interactive-mode.ts`, and its constructor/render wiring where chrome and
+  streaming reveal are installed.
+- LOW: the settings row list and switch arms in `settings-selector.ts`.
 
 ## Pasted image markers keep canonical numbering and survive undo with their payloads (2026-08-18)
 

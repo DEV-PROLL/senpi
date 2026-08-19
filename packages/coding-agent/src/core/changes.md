@@ -1,69 +1,78 @@
 # changes
 
-## Compaction threshold takes max(provider usage, transcript estimate) (2026-08-19)
+## 2026-08-19 upstream sync integration repair (footer-data-provider watcher fallback)
 
 ### What changed
 
-- `packages/coding-agent/src/core/agent-session.ts`: `_getAutoCompactionReason` and
-  `_checkCompaction` Case 2 no longer trust a nonzero provider usage alone. The new
-  `_resolveThresholdContextTokens` returns `max(directContextTokens, estimateMessagesTokens(filtered
-  agent messages))`, so a provider whose usage tracks a server-side summarized conversation (native
-  Cursor checkpoints report ~18k while the locally replayed transcript can be millions of tokens)
-  can no longer hide a transcript that is already past the compaction threshold.
-- `_enforceFinalProviderAdmission` keeps its user-only early return — admission must never brick on
-  a rejected or cooled-down compaction (issues #531/#886) — but the comment now states that design
-  decision accurately instead of implying the gate measures every prompt.
-- Coverage: `test/suite/regressions/usage-vs-transcript-compaction-threshold.test.ts` (threshold
-  fires on a huge transcript with small usage, both control branches pinned).
+- `packages/coding-agent/src/core/footer-data-provider.ts`: `setupGitWatcher` no longer returns early when a
+  watcher fails to register. The `tables.list` polling fallback is armed whenever the file exists, and its path is
+  recorded after the watcher attempt because a failed registration synchronously clears watcher state.
 
 ### Why
 
-- Native Cursor sessions died with `resource_exhausted` at ~4.2M locally-estimated tokens while
-  auto-compaction never fired: the last assistant usage (~18k, the server's own summarized view)
-  always won over the local estimate, so the threshold check never sampled the transcript senpi
-  actually replays to the server each turn.
-
-### Why extension system couldn't handle this
-
-- Threshold arithmetic is a private `AgentSession` internal; no extension hook observes the
-  compaction numerator.
-
-### Expected merge conflict zones on next upstream sync
-
-- `_getAutoCompactionReason` / `_checkCompaction` context-token selection and the
-  `_enforceFinalProviderAdmission` comment prologue.
-
-## Reftable branch detection survives unusable fs.watch (2026-08-19)
-
-### What changed
-
-- `packages/coding-agent/src/core/footer-data-provider.ts`: `setupGitWatcher` no longer
-  returns early when a watcher fails to register. The `tables.list` polling fallback is
-  armed whenever the file exists, and its path is recorded after the watcher attempt
-  because a failed registration synchronously clears watcher state.
-- Coverage: `test/footer-data-provider-watch-fallback.test.ts` forces every
-  `watchWithErrorHandler` call to fail the way the real helper does and asserts the branch
-  still refreshes; it times out pre-fix.
-
-### Why
-
-- `watchWithErrorHandler` returns null when `fs.watch` throws (descriptor limits,
-  unsupported filesystems) and only schedules a retry 5s later. Three early returns skipped
-  the polling fallback in exactly that case, so the provider registered nothing and never
-  observed a branch change until a retry happened to succeed. The footer showed a stale
-  branch indefinitely, and the reftable tests timed out nondeterministically under parallel
-  load, where watch capacity is the first thing to run out.
-- Polling exists precisely to cover unreliable `fs.watch`; making it conditional on
-  `fs.watch` succeeding removed the only fallback at the moment it was needed.
+- Carried forward from `origin/main` during the upstream sync merge. Tracker files resolve to `ours` on merges,
+  which would otherwise drop this entry and leave the path uncovered for the next upstream audit.
 
 ### Why an extension could not handle it
 
-- Watcher setup and the branch cache live inside the core footer data provider, which owns
-  the git-watch lifecycle; no extension hook observes watcher registration failures.
+- Footer git-state polling is core session plumbing owned by the CLI runtime; an extension cannot re-arm the
+  internal watcher fallback or reach the reftable polling path.
 
 ### Expected merge conflict zones
 
 - `footer-data-provider.ts` `setupGitWatcher` reftable block.
+
+## 2026-08-19 - Core session, settings, packaging, and catalog divergence after the upstream 59a71b23 pin
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: the fork session keeps its own compaction stack over
+  upstream's newly centralized one — `CompactionLifecycleCoordinator`, typed `CompactionReason`
+  (`manual`/`threshold`/`overflow`/`pre_prompt`/`branch`/`extension`) and `CompactionRejectionCause` with
+  human-readable rejection text, warm-anchor admission (`isWarmSummaryAnchorValid`), request ids on
+  `compaction_start`/`compaction_progress`/`compaction_end`, and real `CacheFriendlySummaryOptions`
+  (`sourceContext`/`turnPrefixSourceContext`) where upstream still passes `undefined // cacheFriendly`. It also
+  keeps the `-fast` service-tier state machine (`serviceTier`, `isFastModeActive()`, `service_tier_changed`
+  events, per-model tier memory) and the `senpi:`-prefixed hook/diagnostic custom-message types.
+- `packages/coding-agent/src/core/settings-manager.ts`: retains the fork settings schema and loaders upstream has
+  no counterpart for — JSONC parsing that ignores comment-like text inside strings, brand-aware `envValue()` and
+  `findNearestParentConfigDir()` resolution, lockfile policy, retry/fallback settings
+  (`resolveRetryFallbackSettings`, hint policy, abort server-side fallback), speculative/idle compaction and
+  restoration knobs, prompt-cache and look-at settings, per-model thinking/service-tier memory, smooth-streaming
+  and tips settings, `hooks` sources, and builtin-extension enable/disable lists.
+- `packages/coding-agent/src/core/package-manager.ts`: keeps `hooks` as a fifth resource type (`.json` pattern,
+  user and project dirs, override lists, accumulator and resolved-path maps), the legacy `.pi` project base dir
+  scan when it differs from the branded one, and branded offline detection via `envValue("OFFLINE")`. Upstream's
+  `semver.gt` version comparison arrived through the merge and is retained unchanged.
+- `packages/coding-agent/src/core/remote-catalog-provider.ts`: keeps `FORK_ONLY_BUILTIN_PROVIDERS`
+  (`alibaba-token-plan`, `opengateway`) with `remoteCatalogServesProvider()` so the pi.dev overlay is skipped for
+  providers upstream's catalog cannot serve, and `mergeInputModalities()` so an overlay entry never drops an input
+  modality the built-in model already declares.
+- `packages/coding-agent/src/core/skills.ts`: keeps the fork's skill-listing guidance (load a skill whenever its
+  description even loosely matches, because loading an irrelevant skill is cheap and missing a relevant one is
+  not) and the branded `~/.senpi/agent` default in `LoadSkillsOptions.agentDir`. Upstream's nested markdown skill
+  discovery from this sync is retained as-is.
+
+### Why
+
+- These files carry fork-only product behavior — compaction affinity/lifecycle ownership, `-fast` priority tiers,
+  fork-only providers and catalog overlays, hooks packaging, legacy `.pi` layout support, and senpi branding —
+  that the advanced pin does not contain, so they legitimately remain divergent after the merge instead of being
+  reset to upstream's tree.
+
+### Why an extension could not handle it
+
+- Compaction admission, settings resolution, resource discovery, and the model-catalog overlay all execute before
+  or beneath the extension runner: extensions are loaded from the settings and resources these modules resolve,
+  and the compaction hooks they can observe are emitted by this same session code.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts` compaction execution/admission block and the summarization request wiring.
+- MEDIUM: `settings-manager.ts` settings interfaces and load/merge paths; `package-manager.ts` per-resource
+  literal lists (`FILE_PATTERNS`, dirs, overrides, accumulator) where each new resource type must gain `hooks`.
+- LOW: `remote-catalog-provider.ts` around `mergeModels()`; `skills.ts` prompt guidance line and the `agentDir`
+  doc comment.
 
 ## 2026-08-18 - Resume active goals stuck after suppressed continuation-flood loads
 

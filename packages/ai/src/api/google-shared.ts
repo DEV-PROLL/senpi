@@ -7,10 +7,12 @@ import type {
 	Context,
 	ImageContent,
 	Model,
+	ModelThinkingLevel,
 	ProviderNativeContent,
 	StopReason,
 	StreamOptions,
 	TextContent,
+	ThinkingLevel,
 	Tool,
 } from "../types.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
@@ -25,7 +27,30 @@ type GoogleApiType = "google-generative-ai" | "google-vertex";
  * Thinking level for Gemini 3 models.
  * Mirrors Google's ThinkingLevel enum values.
  */
-export type GoogleThinkingLevel = "THINKING_LEVEL_UNSPECIFIED" | "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
+export type GoogleApiThinkingLevel = "THINKING_LEVEL_UNSPECIFIED" | "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
+export type ResolvedGoogleThinkingLevel = Exclude<ThinkingLevel, "xhigh" | "max">;
+
+/** Resolve a supported pi level or model-specific Google mapping to a standard Google level. */
+export function resolveGoogleThinkingLevel<T extends GoogleApiType>(
+	model: Model<T>,
+	level: ModelThinkingLevel,
+): ResolvedGoogleThinkingLevel {
+	if (level === "off") return "high";
+
+	const mapped = model.thinkingLevelMap?.[level];
+	const resolvedLevel = typeof mapped === "string" ? mapped.toLowerCase() : level;
+	switch (resolvedLevel) {
+		case "minimal":
+		case "low":
+		case "medium":
+		case "high":
+			return resolvedLevel;
+		default:
+			throw new Error(
+				`Unsupported Google thinking level mapping for ${model.provider}/${model.id}: ${level} -> ${String(mapped)}`,
+			);
+	}
+}
 
 /**
  * Determines whether a streamed Gemini `Part` should be treated as "thinking".

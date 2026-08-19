@@ -1,5 +1,34 @@
 # TUI delta rendering fork changes
 
+## Alt-screen Kitty teardown keeps its disambiguated helper name after the 59a71b23 sync (2026-08-19)
+
+### What changed
+
+- `packages/tui/src/tui-alt-screen.ts`: re-diverges from upstream `59a71b235d` by exactly one
+  identifier. The private teardown helper stays `deleteAltScreenKittyImages()` (upstream calls it
+  `deleteKittyImages()`), and both call sites keep the fork name: the `stop()` synchronized-output
+  teardown sequence and the full-clear branch that falls back to it when no Kitty placements were
+  uploaded. The emitted escape bytes are byte-identical to upstream in every branch.
+
+### Why
+
+- The fork's alt-screen class shares a file-scope namespace with the module-level Kitty helpers
+  imported from `terminal-image.ts` (`deleteAllKittyImages`, `deleteAllKittyPlacements`). The
+  alt-screen-scoped name states which of the two deletion semantics the method wraps, so a reader
+  resolving the full-clear branch does not have to check whether `deleteKittyImages` is the imported
+  protocol helper or the class method that gates it on `imageProtocol === "kitty"`.
+
+### Why an extension could not handle it
+
+- `TuiAltScreen` teardown and its full-clear frame construction are private renderer internals that
+  emit terminal bytes directly; no extension surface exists between the class and the terminal.
+
+### Expected merge conflict zones
+
+- LOW: `packages/tui/src/tui-alt-screen.ts` — the `stop()` teardown write, the private helper
+  declaration, and the `clearImages` ternary in the full-clear path. Upstream edits to the same three
+  hunks resolve by keeping the fork identifier and taking upstream's byte content.
+
 ## Image markers canonicalize on insert/prune and carry owner payloads across undo (2026-08-18)
 
 ### What changed
