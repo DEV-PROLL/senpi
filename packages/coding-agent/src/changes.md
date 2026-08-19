@@ -1,5 +1,22 @@
 # changes
 
+## 2026-08-19 - Skip Cursor compaction while a Run is live
+
+### What changed
+
+- `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`.
+- Blocking and generated compaction refuse those providers while `!ctx.isIdle()`.
+
+### Why
+
+- Cursor rebuilds full conversation state each hop. Mid-turn compact desyncs `conversationId` and the next hop returns 0-token `resource_exhausted` (session 01a01879).
+
+### Conflict zone
+
+- `packages/coding-agent/src/core/agent-session.ts` `compactBeforeNextAdmission`
+- `packages/coding-agent/src/core/extensions/builtin/compaction/index.ts` `applyBlockingCompaction`
+- `packages/coding-agent/src/core/extensions/builtin/compaction/speculative.ts` `applyGeneratedCompaction`
+
 ## 2026-08-18 - Cursor reasoning-level startup wiring
 
 ### What changed

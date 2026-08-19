@@ -1220,6 +1220,12 @@ export class AgentSession {
 			// completed turn with no continuation keeps pre-PR timing, while the
 			// prior prepare callback and context refresh below still run every turn.
 			const compactBeforeNextAdmission = async (): Promise<boolean> => {
+				const provider = this.model?.provider;
+				// Cursor rebuilds the full conversation each hop. Compacting here
+				// mutates rootPrompt mid-run and poisons conversationId.
+				if (provider === "cursor" || provider === "cursor-cli-oauth") {
+					return false;
+				}
 				if (turn.toolResults.length === 0 && !this.agent.hasQueuedMessages()) {
 					return false;
 				}
