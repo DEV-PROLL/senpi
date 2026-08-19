@@ -13,6 +13,16 @@
 
 ### Fixed
 
+- Native Cursor turns now report real usage: the billed token split on `turnEnded`
+  (input/output/cache read/cache write, taken from the production cursor-agent schema) lands on
+  `usage`, and conversation checkpoints feed the server's live `usedTokens` into the in-flight
+  message so context accounting and the TUI meter move mid-turn instead of showing output-only
+  counts until turn end.
+
+- `resource_exhausted` errors that arrive after tokens already streamed are classified as context
+  overflow (compact-and-retry) instead of rate limit; zero-token `resource_exhausted` rejections
+  keep the rate-limit path so poisoned-conversation rotation still applies.
+
 ### Removed
 - Deprecated Xiaomi models dropped, and the unused `@opentelemetry/api` dependency removed from `packages/ai` (no source imports it).
 
