@@ -1,5 +1,33 @@
 # changes
 
+## Persistent-memory and mass-ulw graph tips (2026-08-19)
+
+### What changed
+
+- `tips/catalog/memory-tips.ts` (new): 16 tips covering the persistent-memory suite in plain,
+  jargon-free English - what memory is, saving with `/remember` or by just saying it, `/search`,
+  `/memory`, `/init`, `/people`, `/reflect`, `/dream`, `/sleeptime`, `/memfs`,
+  `/memory-repository`, `/doctor`, `/facts`, and `/recompile`.
+- `tips/catalog/dag-tips.ts` (new): 9 tips covering mass-ulw graph orchestration - the one-keyword
+  hook, dependency ordering, parallel waves, per-node categories, the `/dag` status view, journaled
+  resume, and when a graph beats plain parallel subagents.
+- `tips/registry.ts` composes both new catalogs into `TIP_DEFINITIONS` (88 -> 113 tips).
+- Each entry is gated with `requiresCommand` on the command that provides it, mirroring the
+  existing `tasks` gate, so the tips only surface for users whose extension registers them.
+- Coverage: `test/suite/list-tips.test.ts` pins representative IDs, rendered lines, and gates for
+  both catalogs.
+
+### Why
+
+- The rotation advertised workflow skills but never mentioned persistent memory or the dependency-
+  graph orchestration surface, so two of the largest features stayed invisible to users who had
+  them installed.
+
+### Expected merge conflict zones
+
+- LOW: two new catalog files, two import/spread lines in `tips/registry.ts`, and two additive
+  assertions in the existing catalog test.
+
 ## Pasted image markers keep canonical numbering and survive undo with their payloads (2026-08-18)
 
 ### What changed

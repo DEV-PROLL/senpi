@@ -6,6 +6,13 @@
 
 ### Added
 
+- Tip rotation now covers persistent memory and mass-ulw graph orchestration (88 -> 113 tips). Sixteen
+  memory tips explain in plain English what cross-session memory is and how to use `/remember`,
+  `/search`, `/memory`, `/init`, `/people`, `/reflect`, `/dream`, `/sleeptime`, `/memfs`,
+  `/memory-repository`, `/doctor`, `/facts`, and `/recompile`; nine mass-ulw tips cover dependency
+  ordering, parallel waves, per-node worker categories, the `/dag` status view, and journaled resume.
+  Every entry is command-gated, so the tips appear only for users whose extension registers them.
+
 - `/loop`: recurring and self-paced scheduled prompts, ported from Claude Code as a fork-only builtin extension.
   Fixed loops re-deliver a prompt or loop-file sentinel on an interval; dynamic loops pick their own next delay via
   the new `schedule_wakeup` tool. Loops coalesce missed fires into one catch-up tick, cap at 5 active per session,
