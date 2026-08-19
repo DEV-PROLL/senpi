@@ -7,6 +7,14 @@ export type ClaudeSdkOauthResumeMode = "auto" | "off";
 export type ClaudeSdkOauthTokenInjection = "oauth-slots" | "config-dir" | "ambient";
 
 export interface ClaudeSdkOauthProviderSettings {
+	/**
+	 * Explicit opt-in for the ambient (host Claude CLI) auth lane. Absent means
+	 * false: a logged-in host CLI alone never makes this provider available,
+	 * because that would silently spend the user's Claude subscription. Stored
+	 * accounts and `CLAUDE_CODE_OAUTH_TOKEN*` are themselves explicit opt-ins
+	 * and stay available without this flag.
+	 */
+	readonly enabled?: boolean;
 	readonly appendSystemPrompt?: boolean;
 	readonly systemPromptMode?: ClaudeSdkOauthSystemPromptMode;
 	readonly systemPromptFile?: string;
@@ -61,12 +69,27 @@ function parseTokenInjection(value: unknown): ClaudeSdkOauthTokenInjection | und
 	return value === "oauth-slots" || value === "config-dir" || value === "ambient" ? value : undefined;
 }
 
+function parseEnvironmentBoolean(value: string | undefined): boolean | undefined {
+	if (value === undefined) return undefined;
+	switch (value.toLowerCase()) {
+		case "1":
+		case "true":
+			return true;
+		case "0":
+		case "false":
+			return false;
+		default:
+			return undefined;
+	}
+}
+
 function parseNonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function parseProviderSettings(value: unknown): ClaudeSdkOauthProviderSettings {
 	if (!isRecord(value)) return {};
+	const enabled = typeof value.enabled === "boolean" ? value.enabled : undefined;
 	const appendSystemPrompt = typeof value.appendSystemPrompt === "boolean" ? value.appendSystemPrompt : undefined;
 	const systemPromptMode = parseSystemPromptMode(value.systemPromptMode);
 	const systemPromptFile = parseNonEmptyString(value.systemPromptFile);
@@ -76,6 +99,7 @@ function parseProviderSettings(value: unknown): ClaudeSdkOauthProviderSettings {
 	const pinnedAccount = parseNonEmptyString(value.pinnedAccount);
 	const tokenInjection = parseTokenInjection(value.tokenInjection);
 	return {
+		...(enabled !== undefined ? { enabled } : {}),
 		...(appendSystemPrompt !== undefined ? { appendSystemPrompt } : {}),
 		...(systemPromptMode !== undefined ? { systemPromptMode } : {}),
 		...(systemPromptFile !== undefined ? { systemPromptFile } : {}),
@@ -88,6 +112,7 @@ function parseProviderSettings(value: unknown): ClaudeSdkOauthProviderSettings {
 }
 
 function parseEnvironmentSettings(environment: Environment): ClaudeSdkOauthProviderSettings {
+	const enabled = parseEnvironmentBoolean(environment.SENPI_CLAUDE_SDK_OAUTH_ENABLED);
 	const systemPromptMode = parseSystemPromptMode(environment.SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_MODE);
 	const systemPromptFile = parseNonEmptyString(environment.SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_FILE);
 	const resumeMode = parseResumeMode(environment.SENPI_CLAUDE_SDK_OAUTH_RESUME);
@@ -95,6 +120,7 @@ function parseEnvironmentSettings(environment: Environment): ClaudeSdkOauthProvi
 	const settingSources = parseEnvironmentSettingSources(environment.SENPI_CLAUDE_SDK_OAUTH_SETTING_SOURCES);
 	const pinnedAccount = parseNonEmptyString(environment.SENPI_CLAUDE_SDK_OAUTH_PINNED_ACCOUNT);
 	return {
+		...(enabled !== undefined ? { enabled } : {}),
 		...(systemPromptMode !== undefined ? { systemPromptMode } : {}),
 		...(systemPromptFile !== undefined ? { systemPromptFile } : {}),
 		...(resumeMode !== undefined ? { resumeMode } : {}),

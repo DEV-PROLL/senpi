@@ -1,5 +1,45 @@
 # claude-sdk-oauth extension changes
 
+## 2026-08-19 - Ambient auth lane requires an explicit opt-in
+
+### What changed
+
+- New provider setting `claudeSdkOauthProvider.enabled` (boolean, absent means false) plus the matching
+  `SENPI_CLAUDE_SDK_OAUTH_ENABLED` env var (`1`/`true`/`0`/`false`, case-insensitive), parsed in `settings.ts` with the
+  same boolean style the cursor-cli-oauth sibling uses. It follows the directory's standing precedence rule:
+  env > project settings > global settings > default.
+- `configuredFor` in `oauth-login.ts` now gates **only** the ambient branch: when the resolved lane is `ambient` and no
+  `CLAUDE_CODE_OAUTH_TOKEN*` env account exists, it returns false unless the flag is true, instead of probing the host
+  Claude CLI. It remains the single predicate behind both `check` and `resolveAmbient`, so availability and resolution
+  still cannot disagree.
+- Stored auth.json accounts and env OAuth tokens stay available with the flag unset: an explicit senpi-side login is
+  itself the opt-in, so this is not a regression for anyone who ran `/claude-account` or exported a token.
+- `index.ts` widens its deliberately narrow `readSettings` projection from `{ tokenInjection }` to
+  `{ tokenInjection, enabled }` so the flag reaches the predicate, and accepts an optional `readSettings` extension dep
+  (alongside the existing `readAmbientAuthStatus`) so tests can declare a settings block without touching disk.
+
+### Why
+
+- The provider reported itself AVAILABLE merely because the host's Claude Code CLI happened to be logged in: the
+  SDK-bundled `claude` binary exits 0 for `auth status`, so on any Mac with Claude Code installed senpi silently spent
+  the user's Claude Pro/Max subscription with zero senpi-side consent. Host state is not consent; opt-in must be
+  explicit and default to off.
+
+### Why an extension could not handle it
+
+- The predicate is the builtin provider's own `oauth.check` / `oauth.resolveAmbient` pair, constructed inside
+  `createOAuthConfig`. An external extension cannot narrow another provider's availability without re-registering the
+  provider id, and doing so would fork the auth lane, session registry, and failover wiring that live here.
+
+### Expected merge-conflict zones
+
+- LOW in `settings.ts` (`ClaudeSdkOauthProviderSettings` field list, `parseProviderSettings` and
+  `parseEnvironmentSettings` return literals - upstream additions land in the same two literals).
+- MEDIUM in `oauth-login.ts` at the `configuredFor` ambient branch, which upstream also touches for lane selection.
+- LOW in `index.ts` at the `createOAuthConfig` deps literal.
+- LOW in `test/support/claude-sdk-oauth-provider.ts` (`composedProvider` gained a third `settings` parameter) and in the
+  ambient tests that now pass `{ enabled: true }`.
+
 ## 2026-08-18 - Anchor restart records at branch state (issue #6981 review)
 
 ### What changed
