@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- The footer's git branch keeps updating in reftable repositories on systems where `fs.watch` cannot register (descriptor limits, unsupported filesystems): the `tables.list` polling fallback is now armed even when watcher creation fails, instead of being skipped by an early return ([#970](https://github.com/code-yeongyu/senpi/pull/970)).
 - Pasting multiple images in one turn now ships every image: the second and later pastes no longer write into an orphaned payload map, markers pasted in front of existing ones renumber to stay `[Image #1]`..`[Image #k]` in reading order (so `look_at("[Image #N]")` resolves to the exact image the user sees), undo after deleting a marker restores its image along with the marker, and submitting pasted images during compaction now reports the drop instead of silently discarding them.
 
 ### Removed

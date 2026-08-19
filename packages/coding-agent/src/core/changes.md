@@ -1,5 +1,37 @@
 # changes
 
+## Reftable branch detection survives unusable fs.watch (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/core/footer-data-provider.ts`: `setupGitWatcher` no longer
+  returns early when a watcher fails to register. The `tables.list` polling fallback is
+  armed whenever the file exists, and its path is recorded after the watcher attempt
+  because a failed registration synchronously clears watcher state.
+- Coverage: `test/footer-data-provider-watch-fallback.test.ts` forces every
+  `watchWithErrorHandler` call to fail the way the real helper does and asserts the branch
+  still refreshes; it times out pre-fix.
+
+### Why
+
+- `watchWithErrorHandler` returns null when `fs.watch` throws (descriptor limits,
+  unsupported filesystems) and only schedules a retry 5s later. Three early returns skipped
+  the polling fallback in exactly that case, so the provider registered nothing and never
+  observed a branch change until a retry happened to succeed. The footer showed a stale
+  branch indefinitely, and the reftable tests timed out nondeterministically under parallel
+  load, where watch capacity is the first thing to run out.
+- Polling exists precisely to cover unreliable `fs.watch`; making it conditional on
+  `fs.watch` succeeding removed the only fallback at the moment it was needed.
+
+### Why an extension could not handle it
+
+- Watcher setup and the branch cache live inside the core footer data provider, which owns
+  the git-watch lifecycle; no extension hook observes watcher registration failures.
+
+### Expected merge conflict zones
+
+- `footer-data-provider.ts` `setupGitWatcher` reftable block.
+
 ## 2026-08-18 - Resume active goals stuck after suppressed continuation-flood loads
 
 ### What changed
