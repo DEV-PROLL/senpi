@@ -122,3 +122,34 @@ Every remaining audited production path with no nearer tracker than the root:
 - Builtin registration and widget internals under
   `packages/coding-agent/src/core/extensions/builtin/` if upstream reworks extension loading
   or adds overlapping notices.
+
+## Pnpm parity for the nested SQLite session backend (2026-08-19)
+
+### What changed
+
+- `pnpm-workspace.yaml` now includes `packages/session-backends/*`, matching the root npm
+  workspace and the package set explicitly built by `scripts/build-all.mjs`.
+- `packages/session-backends/sqlite-node/package.json` declares its shipped
+  `pi-agent-core` / `pi-ai` imports as lockstep runtime dependencies instead of packed
+  `file:` dev dependencies.
+- `scripts/sync-versions.js` keeps the backend's own `0.83.0` version independent while
+  synchronizing those lockstep dependency ranges during Senpi releases.
+
+### Why
+
+- The release pre-commit gate verifies npm, Bun, and pnpm. Pnpm previously excluded the
+  nested backend from its workspace and then, once included, packed its `file:` dependencies
+  before their declarations were built. The ordered build therefore reached the backend with
+  unresolved `pi-agent-core` / `pi-ai` types even though npm and Bun passed.
+
+### Why an extension could not handle it
+
+- This is package-manager workspace topology and release-version synchronization. Runtime
+  extensions load only after packages install and build, so they cannot repair missing
+  workspace membership, dependency links, or manifest pins.
+
+### Expected merge conflict zones
+
+- Upstream changes to the SQLite backend's dependency placement or independent-version policy.
+- Future workspace additions under nested `packages/*/*` paths, which must remain aligned
+  across root npm workspaces, `pnpm-workspace.yaml`, and `scripts/build-all.mjs`.
