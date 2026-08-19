@@ -1,5 +1,27 @@
 # changes
 
+## 2026-08-19 upstream sync integration repair (footer-data-provider watcher fallback)
+
+### What changed
+
+- `packages/coding-agent/src/core/footer-data-provider.ts`: `setupGitWatcher` no longer returns early when a
+  watcher fails to register. The `tables.list` polling fallback is armed whenever the file exists, and its path is
+  recorded after the watcher attempt because a failed registration synchronously clears watcher state.
+
+### Why
+
+- Carried forward from `origin/main` during the upstream sync merge. Tracker files resolve to `ours` on merges,
+  which would otherwise drop this entry and leave the path uncovered for the next upstream audit.
+
+### Why an extension could not handle it
+
+- Footer git-state polling is core session plumbing owned by the CLI runtime; an extension cannot re-arm the
+  internal watcher fallback or reach the reftable polling path.
+
+### Expected merge conflict zones
+
+- `footer-data-provider.ts` `setupGitWatcher` reftable block.
+
 ## 2026-08-19 - Core session, settings, packaging, and catalog divergence after the upstream 59a71b23 pin
 
 ### What changed
