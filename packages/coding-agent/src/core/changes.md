@@ -1,5 +1,35 @@
 # changes
 
+## Provider-declared fallback-expansion eligibility gate (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/core/provider-composer.ts`: `ProviderConfigInput` gained optional
+  `fallbackEligible?(): boolean`, the extension-owned deterministic usability gate for implicit
+  bare-family fallback expansion.
+- `packages/coding-agent/src/core/model-runtime.ts`: new `isFallbackEligible(providerId)` consults the
+  registered hook; hookless providers and throwing hooks stay eligible so expansion never shrinks on
+  uncertainty.
+- `packages/coding-agent/src/core/model-registry.ts`: new `isFallbackEligible(model)` forwards the
+  per-provider verdict to `core/retry-fallback/` chain canonicalization.
+
+### Why
+
+- Bare expansion ranked OAuth-credential providers first without asking whether the lane could execute;
+  a credentialed cursor-cli-oauth lane with an unacknowledged `--force` gate ranked tier 0, entered the
+  shipped `claude-opus-5:xhigh` default chain, and hard-errored on every fallback hop (see
+  `core/extensions/changes.md` 2026-08-19).
+
+### Why an extension could not handle it
+
+- Chain canonicalization runs inside `core/retry-fallback/` against the model registry; no extension
+  hook observes it. The eligibility signal itself stays extension-owned via the registration field.
+
+### Expected merge conflict zones
+
+- `provider-composer.ts` end of `ProviderConfigInput`; `model-runtime.ts` near `hasConfiguredAuth`;
+  `model-registry.ts` near `isUsingOAuth`.
+
 ## Compaction threshold takes max(provider usage, transcript estimate) (2026-08-19)
 
 ### What changed
