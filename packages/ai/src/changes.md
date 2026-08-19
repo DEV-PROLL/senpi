@@ -1,5 +1,43 @@
 # AI Source Changes
 
+## 2026-08-19 - Native Cursor billed usage, live checkpoint context size, and token-gated resource_exhausted overflow
+
+### What changed
+
+- `packages/ai/proto/cursor/agent.proto` + regenerated `src/api/cursor-agent/gen/agent_pb.ts`:
+  `agent.v1.TurnEndedUpdate` now declares the billed token fields the production cursor-agent CLI
+  (2026.08.11-e8db854) defines — `input_tokens = 1`, `output_tokens = 2`, `cache_read_tokens = 3`,
+  `cache_write_tokens = 4`, `reasoning_tokens = 5` (all optional int64). Field numbers were read out
+  of the shipped CLI bundle's own generated schema, not guessed from wire captures.
+- `packages/ai/src/api/cursor-agent.ts`: the `turnEnded` branch copies the billed split onto
+  `output.usage` when any billed field is present (`sawTurnEndedUsage` on `UsageState`); the
+  delta-accumulated output is kept when the server omits `output_tokens`, and reasoning tokens are
+  deliberately not folded into output. `conversationCheckpointUpdate` now feeds
+  `tokenDetails.usedTokens` into the in-flight usage (input backs out already-streamed output) so
+  context accounting moves mid-turn; a checkpoint never overrides billed turnEnded usage. The
+  `tokenDelta` total now includes cacheRead/cacheWrite so totals stay coherent with both sources.
+- `packages/ai/src/utils/overflow.ts`: `isContextOverflow` treats a `resource_exhausted` error as
+  context overflow only when the message carries token evidence (streamed or billed tokens > 0).
+  Zero-token `resource_exhausted` rejections keep their rate-limit classification, preserving the
+  poisoned-conversation rotation path in `cursor-agent.ts`.
+
+### Why
+
+- Native Cursor turns previously reported output-only usage (a few dozen tokens), so the footer,
+  `estimateContextTokens`, and `shouldCompact` never saw the real prompt size (~18k+), auto
+  compaction could not trigger, and a genuine context overflow (`resource_exhausted` after streaming
+  tokens) was retried as a rate limit until the turn died.
+
+### Why an extension could not handle it
+
+- The protobuf schema, the stream state machine, and overflow classification are core provider
+  internals; no extension hook observes turnEnded frames or checkpoint token details.
+
+### Expected merge conflict zones
+
+- `cursor-agent.ts` `processInteractionUpdate` tail (turnEnded/tokenDelta branches) and
+  `handleServerMessage` checkpoint branch; `overflow.ts` pattern lists; regenerated `gen/agent_pb.ts`.
+
 ## 2026-08-18 - Cursor context windows tracked to the models.dev first-party SSOT
 
 ### What changed

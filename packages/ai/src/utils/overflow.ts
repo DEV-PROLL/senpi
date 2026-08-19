@@ -80,6 +80,17 @@ const NON_OVERFLOW_PATTERNS = [
 ];
 
 /**
+ * Cursor's api2.cursor.sh surfaces a context overflow as a bare gRPC
+ * `resource_exhausted` end-stream — the same wording its backend uses for
+ * quota and poisoned-conversation rejections. Token evidence disambiguates:
+ * a request that already streamed or billed tokens overflowed mid-flight,
+ * while a zero-token rejection is a quota/conversation failure that must stay
+ * on the rate-limit path (the cursor client rotates the conversation id for
+ * those and retry handling supplies the backoff).
+ */
+const RESOURCE_EXHAUSTED_PATTERN = /resource.?exhausted/i;
+
+/**
  * Check if an assistant message represents a context overflow error.
  *
  * This handles three cases:
@@ -139,6 +150,12 @@ export function isContextOverflow(message: AssistantMessage, contextWindow?: num
 		// Skip messages matching known non-overflow patterns (e.g. throttling / rate-limit)
 		const isNonOverflow = NON_OVERFLOW_PATTERNS.some((p) => p.test(message.errorMessage!));
 		if (!isNonOverflow && OVERFLOW_PATTERNS.some((p) => p.test(message.errorMessage!))) {
+			return true;
+		}
+		const usage = message.usage;
+		const hasTokenEvidence =
+			(usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite) > 0;
+		if (!isNonOverflow && hasTokenEvidence && RESOURCE_EXHAUSTED_PATTERN.test(message.errorMessage)) {
 			return true;
 		}
 	}

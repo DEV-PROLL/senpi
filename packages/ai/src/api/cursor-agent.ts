@@ -195,6 +195,7 @@ import {
 	SubagentErrorSchema,
 	SubagentResultSchema,
 	ToolCallSchema,
+	type TurnEndedUpdate,
 	UserMessageActionSchema,
 	UserMessageSchema,
 	WebFetchAllowlistPrecheckResultSchema,
@@ -511,7 +512,7 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 			let currentThinkingBlock: (ThinkingContent & { [kStreamingBlockIndex]: number }) | null = null;
 			let currentToolCall: ToolCallState | null = null;
 			const resolvedMcpToolCallIds = new Set<string>();
-			usageState = { sawTokenDelta: false };
+			usageState = { sawTokenDelta: false, sawTurnEndedUsage: false };
 
 			const state: BlockState = {
 				get currentTextBlock() {
@@ -761,6 +762,7 @@ function markCursorExecResolved(block: CursorExecResolvedCarrier): void {
 
 export interface UsageState {
 	sawTokenDelta: boolean;
+	sawTurnEndedUsage: boolean;
 }
 
 /** Exported for tests: drives one Cursor server message through the stream (exec waits mark the stream busy). */
@@ -803,6 +805,7 @@ export async function handleServerMessage(
 			),
 		);
 	} else if (msgCase === "conversationCheckpointUpdate") {
+		applyCheckpointTokenDetails(msg.message.value, output, usageState);
 		onConversationCheckpoint?.(msg.message.value);
 	}
 }
@@ -3360,12 +3363,62 @@ export function processInteractionUpdate(
 		}
 	} else if (updateCase === "turnEnded") {
 		output.stopReason = "stop";
+		applyBilledTurnEndedUsage(update.message.value, output, usageState);
 	} else if (updateCase === "tokenDelta") {
 		const tokenDelta = update.message.value;
 		usageState.sawTokenDelta = true;
 		output.usage.output += tokenDelta.tokens || 0;
-		output.usage.totalTokens = output.usage.input + output.usage.output;
+		output.usage.totalTokens =
+			output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 	}
+}
+
+/**
+ * Cursor's production schema (cursor-agent 2026.08.11) carries the billed
+ * token split on `turnEnded`: 1 input, 2 output, 3 cache read, 4 cache write,
+ * 5 reasoning (optional int64). The billed split is authoritative for context
+ * accounting; the tokenDelta-accumulated output is kept only when the server
+ * omits the billed output field. Reasoning tokens are deliberately not folded
+ * into output: no other field of `Usage` represents them and double counting
+ * against the billed output must be avoided.
+ */
+function applyBilledTurnEndedUsage(update: TurnEndedUpdate, output: AssistantMessage, usageState: UsageState): void {
+	const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = update;
+	if (
+		inputTokens === undefined &&
+		outputTokens === undefined &&
+		cacheReadTokens === undefined &&
+		cacheWriteTokens === undefined
+	) {
+		return;
+	}
+	usageState.sawTurnEndedUsage = true;
+	const usage = output.usage;
+	usage.input = Number(inputTokens ?? 0n);
+	usage.cacheRead = Number(cacheReadTokens ?? 0n);
+	usage.cacheWrite = Number(cacheWriteTokens ?? 0n);
+	if (outputTokens !== undefined) {
+		usage.output = Number(outputTokens);
+	}
+	usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+}
+
+/**
+ * A checkpoint's `tokenDetails.usedTokens` is the server's live conversation
+ * size, sent mid-turn. It feeds context accounting while the turn streams,
+ * but never overrides the billed turnEnded split once that arrived.
+ */
+function applyCheckpointTokenDetails(
+	checkpoint: ConversationStateStructure,
+	output: AssistantMessage,
+	usageState: UsageState,
+): void {
+	if (usageState.sawTurnEndedUsage) return;
+	const usedTokens = checkpoint.tokenDetails?.usedTokens ?? 0;
+	if (usedTokens <= 0) return;
+	const usage = output.usage;
+	usage.input = Math.max(0, usedTokens - usage.output - usage.cacheRead - usage.cacheWrite);
+	usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 }
 
 function createBlobId(data: Uint8Array): Uint8Array {
