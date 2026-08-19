@@ -71,6 +71,7 @@ import { envValue } from "./brand.ts";
 import {
 	type CompactionResult,
 	calculateContextTokens,
+	resolveThresholdContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
 	estimateContextTokens,
@@ -1685,7 +1686,7 @@ export class AgentSession {
 	 */
 	private _resolveThresholdContextTokens(directContextTokens: number): number {
 		const messages = filterContextExcludedMessages(this.agent.state.messages);
-		return Math.max(directContextTokens, estimateMessagesTokens(messages));
+		return resolveThresholdContextTokens(directContextTokens, estimateMessagesTokens(messages));
 	}
 
 	private _getAutoCompactionReason(message: AssistantMessage): "overflow" | "threshold" | undefined {

@@ -191,6 +191,20 @@ export function calculateContextTokens(usage: Usage): number {
 }
 
 /**
+ * Threshold numerator. Prefer the larger of billed usage and the local
+ * transcript estimate, unless billed usage is implausibly larger than the
+ * estimate (Cursor cacheRead spikes of several million vs ~150k local).
+ */
+export function resolveThresholdContextTokens(usageTokens: number, estimateTokens: number): number {
+	const usage = usageTokens > 0 ? usageTokens : 0;
+	const estimate = estimateTokens > 0 ? estimateTokens : 0;
+	if (estimate >= 50_000 && usage > estimate * 8) {
+		return estimate;
+	}
+	return Math.max(usage, estimate);
+}
+
+/**
  * Get usage from an assistant message if available.
  * Skips aborted, error, and all-zero usage messages as they don't have valid usage data.
  */

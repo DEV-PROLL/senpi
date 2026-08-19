@@ -1,5 +1,20 @@
 # changes
 
+## 2026-08-19 - Ignore implausible Cursor usage for compaction threshold
+
+### What changed
+
+- `_resolveThresholdContextTokens` uses `resolveThresholdContextTokens`: if the local estimate is at least 50k and billed usage is more than 8× that estimate, compact against the estimate.
+
+### Why
+
+- Complements the billed-cacheRead guard. When no checkpoint arrived, a 4M `cacheRead` still must not beat a 149k transcript estimate.
+
+### Conflict zone
+
+- `packages/coding-agent/src/core/compaction/compaction.ts`
+- `packages/coding-agent/src/core/agent-session.ts` `_resolveThresholdContextTokens`
+
 ## 2026-08-18 - Cursor reasoning-level startup wiring
 
 ### What changed
