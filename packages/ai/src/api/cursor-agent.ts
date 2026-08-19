@@ -3376,11 +3376,15 @@ export function processInteractionUpdate(
 /**
  * Cursor's production schema (cursor-agent 2026.08.11) carries the billed
  * token split on `turnEnded`: 1 input, 2 output, 3 cache read, 4 cache write,
- * 5 reasoning (optional int64). The billed split is authoritative for context
- * accounting; the tokenDelta-accumulated output is kept only when the server
- * omits the billed output field. Reasoning tokens are deliberately not folded
- * into output: no other field of `Usage` represents them and double counting
- * against the billed output must be avoided.
+ * 5 reasoning (optional int64). Live probes against api2.cursor.sh show
+ * input_tokens is cache-INCLUSIVE (turn 1: input 21357 ≈ cacheWrite 21354;
+ * turn 2: input 17989 ≈ cacheRead 17575 + cacheWrite 411), so the uncached
+ * remainder is backed out for senpi's exclusive `usage.input`. The billed
+ * split is authoritative for context accounting; the tokenDelta-accumulated
+ * output is kept only when the server omits the billed output field.
+ * Reasoning tokens are deliberately not folded into output: no other field of
+ * `Usage` represents them and double counting against the billed output must
+ * be avoided.
  */
 function applyBilledTurnEndedUsage(update: TurnEndedUpdate, output: AssistantMessage, usageState: UsageState): void {
 	const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = update;
@@ -3394,9 +3398,9 @@ function applyBilledTurnEndedUsage(update: TurnEndedUpdate, output: AssistantMes
 	}
 	usageState.sawTurnEndedUsage = true;
 	const usage = output.usage;
-	usage.input = Number(inputTokens ?? 0n);
 	usage.cacheRead = Number(cacheReadTokens ?? 0n);
 	usage.cacheWrite = Number(cacheWriteTokens ?? 0n);
+	usage.input = Math.max(0, Number(inputTokens ?? 0n) - usage.cacheRead - usage.cacheWrite);
 	if (outputTokens !== undefined) {
 		usage.output = Number(outputTokens);
 	}

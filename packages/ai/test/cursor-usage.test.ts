@@ -130,20 +130,23 @@ describe("cursor-agent usage accounting", () => {
 	});
 
 	it("maps billed turnEnded token fields onto usage", async () => {
+		// Field values reproduce a live api2.cursor.sh second turn: input_tokens is
+		// cache-INCLUSIVE (17989 = 17575 cacheRead + 411 cacheWrite + 3 uncached),
+		// so usage.input carries only the uncached remainder.
 		const baseUrl = await startServer((stream) => {
 			stream.write(textDeltaFrame("hi"));
 			stream.write(tokenDeltaFrame(5));
-			stream.write(billedTurnEndedFrame({ 1: 391n, 2: 5n, 3: 17_574n, 4: 12n }));
+			stream.write(billedTurnEndedFrame({ 1: 17_989n, 2: 9n, 3: 17_575n, 4: 411n }));
 			stream.end();
 		});
 
 		const message = await collectMessage(baseUrl);
 		expect(message.stopReason).toBe("stop");
-		expect(message.usage.input).toBe(391);
-		expect(message.usage.output).toBe(5);
-		expect(message.usage.cacheRead).toBe(17_574);
-		expect(message.usage.cacheWrite).toBe(12);
-		expect(message.usage.totalTokens).toBe(391 + 5 + 17_574 + 12);
+		expect(message.usage.input).toBe(3);
+		expect(message.usage.output).toBe(9);
+		expect(message.usage.cacheRead).toBe(17_575);
+		expect(message.usage.cacheWrite).toBe(411);
+		expect(message.usage.totalTokens).toBe(3 + 9 + 17_575 + 411);
 	});
 
 	it("keeps delta-accumulated output when turnEnded omits output tokens", async () => {
@@ -155,10 +158,10 @@ describe("cursor-agent usage accounting", () => {
 		});
 
 		const message = await collectMessage(baseUrl);
-		expect(message.usage.input).toBe(100);
+		expect(message.usage.input).toBe(50);
 		expect(message.usage.output).toBe(7);
 		expect(message.usage.cacheRead).toBe(50);
-		expect(message.usage.totalTokens).toBe(157);
+		expect(message.usage.totalTokens).toBe(107);
 	});
 
 	it("applies checkpoint usedTokens to in-flight usage", async () => {
@@ -182,15 +185,15 @@ describe("cursor-agent usage accounting", () => {
 		const baseUrl = await startServer((stream) => {
 			stream.write(textDeltaFrame("hi"));
 			stream.write(tokenDeltaFrame(5));
-			stream.write(billedTurnEndedFrame({ 1: 391n, 2: 5n, 3: 17_574n }));
+			stream.write(billedTurnEndedFrame({ 1: 17_579n, 2: 5n, 3: 17_574n }));
 			stream.write(checkpointFrame(999_999, 200_000));
 			stream.end();
 		});
 
 		const message = await collectMessage(baseUrl);
-		expect(message.usage.input).toBe(391);
+		expect(message.usage.input).toBe(5);
 		expect(message.usage.output).toBe(5);
 		expect(message.usage.cacheRead).toBe(17_574);
-		expect(message.usage.totalTokens).toBe(391 + 5 + 17_574);
+		expect(message.usage.totalTokens).toBe(5 + 5 + 17_574);
 	});
 });
