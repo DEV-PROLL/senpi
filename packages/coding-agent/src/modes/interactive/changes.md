@@ -1,5 +1,11 @@
 # changes
 
+## Trailing assistant text renders below the last tool card (2026-08-19)
+
+Text that arrives after the last `toolCall` is split onto a sibling `AssistantMessageComponent` placed after the tool cards. Approval questions no longer hide above a pending eval stack.
+
+Conflict zone: `interactive-mode.ts` `message_update` / `message_end`.
+
 ## Interactive chrome, queued-input recovery, and smooth-streaming settings after the 59a71b23 pin (2026-08-19)
 
 ### What changed
