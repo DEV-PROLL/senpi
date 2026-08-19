@@ -1,5 +1,36 @@
 # Changes
 
+## Aborted tool execution releases the run (2026-08-19)
+
+### What changed
+
+- `packages/agent/src/agent-loop.ts`: `executePreparedToolCall` races the tool
+  promise against the run's abort signal instead of awaiting the tool alone. An
+  abort that lands after `execute()` was entered now resolves the call as an
+  error tool result ("Tool execution aborted") rather than waiting forever.
+
+### Why
+
+- Tools receive `signal` but nothing forces them to observe it. A tool that
+  ignores its signal and never settles pinned the await permanently: the run
+  emitted no `tool_execution_end` and no `agent_end`, the session never went
+  idle, the session work barrier stayed held, and queued prompts parked behind
+  it while the TUI showed "Running <tool>" with an unresponsive ESC.
+- Aborting before execution already short-circuited in `prepareToolCall`, so
+  only the mid-execution window hung, which made the failure look intermittent.
+- The provider stream already races its reads against abort in
+  `readNextAssistantEvent`; tool execution now matches that contract.
+
+### Why an extension could not handle it
+
+- The await that strands the run lives inside the loop's tool-execution step.
+  No extension hook observes or interrupts that await, and a tool cannot fix it
+  for the tools that ignore their signal.
+
+### Expected merge conflict zones
+
+- `agent-loop.ts` `executePreparedToolCall` body and the helper directly above it.
+
 ## Cursor exec handlers bind to their owning run (2026-08-18)
 
 ### What changed
