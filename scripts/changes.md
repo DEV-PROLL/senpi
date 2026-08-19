@@ -405,3 +405,31 @@
 - Root `package.json` static-check scripts.
 - Release/dependency lock tests under `scripts/`.
 
+## Independent workspace dependency synchronization (2026-08-19)
+
+### What changed
+
+- `scripts/sync-versions.js` now visits independently versioned private workspaces when it
+  synchronizes dependencies, while still excluding their own package versions from the Senpi
+  CalVer lockstep invariant.
+- `scripts/sync-versions.test.mjs` covers the SQLite backend retaining version `0.83.0` while
+  its `pi-agent-core` and `pi-ai` dependency ranges advance to the current lockstep version.
+
+### Why
+
+- The nested SQLite backend ships imports from the lockstep agent and AI packages. Keeping its
+  own upstream version independent must not leave those runtime dependency ranges stale during
+  a Senpi release.
+
+### Why an extension could not handle it
+
+- Version synchronization mutates package manifests before build, commit, tag, and publication.
+  Extensions run only after installation and cannot participate in release-time manifest
+  generation.
+
+### Expected conflict zones
+
+- Future changes to the independent-package allowlist in `scripts/sync-versions.js`.
+- Upstream changes that add more independently versioned workspaces with lockstep runtime
+  dependencies.
+

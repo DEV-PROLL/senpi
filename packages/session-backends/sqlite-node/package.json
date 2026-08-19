@@ -34,9 +34,11 @@
 	"engines": {
 		"node": ">=22.19.0"
 	},
+	"dependencies": {
+		"@earendil-works/pi-ai": "^2026.8.18-3",
+		"@earendil-works/pi-agent-core": "^2026.8.18-3"
+	},
 	"devDependencies": {
-		"@earendil-works/pi-ai": "file:../../ai",
-		"@earendil-works/pi-agent-core": "file:../../agent",
 		"@vitest/coverage-v8": "4.1.9",
 		"vitest": "4.1.9"
 	}
