@@ -3488,7 +3488,7 @@ export class AgentSession {
 		abortController: AbortController,
 	): Promise<void> {
 		try {
-			const auth = await this._getCompactionRequestAuth(model);
+			const auth = await this._getSummarizationRequestAuth(model);
 			const title = await generateSessionTitle({
 				firstPrompt,
 				model,
