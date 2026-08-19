@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Aborting a run now releases a tool call that ignores its abort signal and never settles. Tool execution races the run's abort signal instead of awaiting the tool alone, so the run reaches `agent_end` and the session goes idle instead of hanging with an unresponsive ESC while the TUI shows `Running <tool>` ([#970](https://github.com/code-yeongyu/senpi/pull/970)).
+
 ### Removed
 
 ## [2026.8.18-3] - 2026-08-18

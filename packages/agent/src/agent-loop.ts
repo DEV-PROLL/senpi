@@ -1122,6 +1122,21 @@ async function prepareToolCall(
 	}
 }
 
+/**
+ * Resolves as soon as `signal` aborts, so a tool that never settles and never
+ * observes its signal cannot pin the run forever. Without this the abort has no
+ * wakeup once `execute()` is entered: no `agent_end`, the session never goes
+ * idle, and every queued prompt parks behind the session work barrier while the
+ * TUI shows "Running <tool>" with a dead ESC.
+ */
+function abortReleasePromise(signal: AbortSignal | undefined): Promise<typeof ABORTED> | undefined {
+	if (signal === undefined) return undefined;
+	if (signal.aborted) return Promise.resolve(ABORTED);
+	return new Promise<typeof ABORTED>((resolve) => {
+		signal.addEventListener("abort", () => resolve(ABORTED), { once: true });
+	});
+}
+
 async function executePreparedToolCall(
 	prepared: PreparedToolCall,
 	signal: AbortSignal | undefined,
@@ -1131,28 +1146,31 @@ async function executePreparedToolCall(
 	let acceptingUpdates = true;
 
 	try {
-		const result = await prepared.tool.execute(
-			prepared.toolCall.id,
-			prepared.args as never,
-			signal,
-			(partialResult) => {
-				if (!acceptingUpdates) return;
-				updateEvents.push(
-					Promise.resolve(
-						emit({
-							type: "tool_execution_update",
-							toolCallId: prepared.toolCall.id,
-							toolName: prepared.toolCall.name,
-							args: prepared.toolCall.arguments,
-							partialResult,
-						}),
-					),
-				);
-			},
-		);
+		const execution = prepared.tool.execute(prepared.toolCall.id, prepared.args as never, signal, (partialResult) => {
+			if (!acceptingUpdates) return;
+			updateEvents.push(
+				Promise.resolve(
+					emit({
+						type: "tool_execution_update",
+						toolCallId: prepared.toolCall.id,
+						toolName: prepared.toolCall.name,
+						args: prepared.toolCall.arguments,
+						partialResult,
+					}),
+				),
+			);
+		});
+		const abortRelease = abortReleasePromise(signal);
+		const settled = abortRelease ? await Promise.race([execution, abortRelease]) : await execution;
+		if (settled === ABORTED) {
+			void Promise.resolve(execution).catch(() => undefined);
+			acceptingUpdates = false;
+			await Promise.all(updateEvents);
+			return { result: createErrorToolResult("Tool execution aborted"), isError: true };
+		}
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);
-		return { result, isError: false };
+		return { result: settled, isError: false };
 	} catch (error) {
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);

@@ -47,9 +47,11 @@ export function registerCursorCliOauthExtension(pi: ExtensionAPI, deps: CursorCl
 		createCursorCliOauthCredentialReader({
 			store,
 			readNativeCredential: deps.readNativeCredential ?? (() => store.read("cursor")),
+			// Copying the host's native Cursor credential IS the ambient lane, so it
+			// requires the explicit flag - never merely a logged-in cursor-agent.
 			canBootstrap: () => {
 				const settings = loadSettings(cwd);
-				if (!settings.enabled) return false;
+				if (!settings.enabled || settings.explicitlyDisabled) return false;
 				try {
 					resolveExecutable(settings);
 					return true;
