@@ -1,5 +1,38 @@
 # changes
 
+## Compaction threshold takes max(provider usage, transcript estimate) (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `_getAutoCompactionReason` and
+  `_checkCompaction` Case 2 no longer trust a nonzero provider usage alone. The new
+  `_resolveThresholdContextTokens` returns `max(directContextTokens, estimateMessagesTokens(filtered
+  agent messages))`, so a provider whose usage tracks a server-side summarized conversation (native
+  Cursor checkpoints report ~18k while the locally replayed transcript can be millions of tokens)
+  can no longer hide a transcript that is already past the compaction threshold.
+- `_enforceFinalProviderAdmission` keeps its user-only early return — admission must never brick on
+  a rejected or cooled-down compaction (issues #531/#886) — but the comment now states that design
+  decision accurately instead of implying the gate measures every prompt.
+- Coverage: `test/suite/regressions/usage-vs-transcript-compaction-threshold.test.ts` (threshold
+  fires on a huge transcript with small usage, both control branches pinned).
+
+### Why
+
+- Native Cursor sessions died with `resource_exhausted` at ~4.2M locally-estimated tokens while
+  auto-compaction never fired: the last assistant usage (~18k, the server's own summarized view)
+  always won over the local estimate, so the threshold check never sampled the transcript senpi
+  actually replays to the server each turn.
+
+### Why extension system couldn't handle this
+
+- Threshold arithmetic is a private `AgentSession` internal; no extension hook observes the
+  compaction numerator.
+
+### Expected merge conflict zones on next upstream sync
+
+- `_getAutoCompactionReason` / `_checkCompaction` context-token selection and the
+  `_enforceFinalProviderAdmission` comment prologue.
+
 ## Reftable branch detection survives unusable fs.watch (2026-08-19)
 
 ### What changed
