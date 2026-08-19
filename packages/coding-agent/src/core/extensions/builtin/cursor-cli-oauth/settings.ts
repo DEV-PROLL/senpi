@@ -5,7 +5,18 @@ export type CursorCliOauthExecutionMode = "agent" | "plan";
 export type CursorCliOauthResumeMode = "auto" | "off";
 
 export interface CursorCliOauthProviderSettings {
+	/**
+	 * Explicit senpi-side opt-in for the AMBIENT lane (host-CLI-derived native
+	 * credential bootstrap). Defaults to false: a logged-in `cursor-agent` on the
+	 * host is not consent to spend that subscription from senpi.
+	 */
 	readonly enabled: boolean;
+	/**
+	 * True only when a settings layer or the environment set `enabled` to false
+	 * verbatim. That is a kill switch and outranks stored accounts, while a merely
+	 * absent flag leaves an explicit senpi-side login usable.
+	 */
+	readonly explicitlyDisabled: boolean;
 	readonly executablePath: string | undefined;
 	readonly forceExecution: boolean;
 	readonly noApprovalAcknowledgedAt: string | undefined;
@@ -27,7 +38,8 @@ type Environment = Readonly<Record<string, string | undefined>>;
 type ParsedSettings = Partial<CursorCliOauthProviderSettings>;
 
 const DEFAULT_SETTINGS: CursorCliOauthProviderSettings = {
-	enabled: true,
+	enabled: false,
+	explicitlyDisabled: false,
 	executablePath: undefined,
 	forceExecution: true,
 	noApprovalAcknowledgedAt: undefined,
@@ -167,7 +179,11 @@ function parseEnvironmentSettings(environment: Environment): ParsedSettings {
 }
 
 function resolveSettings(...layers: readonly ParsedSettings[]): CursorCliOauthProviderSettings {
-	return Object.assign({}, DEFAULT_SETTINGS, ...layers);
+	const resolved: CursorCliOauthProviderSettings = Object.assign({}, DEFAULT_SETTINGS, ...layers);
+	// The last layer that names `enabled` wins, exactly as the value merge does;
+	// only a verbatim false there is the kill switch.
+	const named = layers.filter((layer) => layer.enabled !== undefined);
+	return { ...resolved, explicitlyDisabled: named.length > 0 && named[named.length - 1]?.enabled === false };
 }
 
 /** Parse one provider settings block with environment values taking precedence. */
