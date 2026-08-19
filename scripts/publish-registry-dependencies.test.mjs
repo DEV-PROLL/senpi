@@ -48,6 +48,10 @@ describe("npm publish dependency graph", () => {
 			const manifest = readJson(join(repoRoot, workspace.packageJsonPath));
 			assert.equal(manifest.private, true, `${workspace.packageName} must remain excluded from fork publishing`);
 			assert.doesNotMatch(publishScript, new RegExp(`name: "${workspace.packageName}"`));
+			assert.equal(manifest.dependencies["@earendil-works/pi-agent-core"], "^2026.8.18-3");
+			assert.equal(manifest.dependencies["@earendil-works/pi-ai"], "^2026.8.18-3");
+			assert.equal(manifest.devDependencies["@earendil-works/pi-agent-core"], undefined);
+			assert.equal(manifest.devDependencies["@earendil-works/pi-ai"], undefined);
 		}
 		for (const packageName of OWNED_REGISTRY_ALIASES) {
 			assert.match(publishScript, new RegExp(`name: "${packageName}"`));

@@ -60,6 +60,15 @@ test("synchronizes private dependencies without touching registry aliases, gener
 				"@mariozechner/pi-ai": "npm:@earendil-works/pi-ai@1.0.0",
 			},
 		});
+		await writeManifest(root, "packages/session-backends/sqlite-node", {
+			name: "@earendil-works/pi-storage-sqlite-node",
+			version: "0.83.0",
+			private: true,
+			dependencies: {
+				"@earendil-works/pi-agent-core": "^1.0.0",
+				"@earendil-works/pi-ai": "^1.0.0",
+			},
+		});
 		await writeManifest(root, "packages/coding-agent/install-lock", {
 			name: "generated-install-lock",
 			version: "0.0.0",
@@ -75,6 +84,10 @@ test("synchronizes private dependencies without touching registry aliases, gener
 		const evalsManifest = await readManifest(root, "packages/evals");
 		assert.equal(evalsManifest.dependencies["@code-yeongyu/senpi"], "^2.0.0");
 		assert.equal(evalsManifest.dependencies["@mariozechner/pi-ai"], "npm:@earendil-works/pi-ai@1.0.0");
+		const sqliteManifest = await readManifest(root, "packages/session-backends/sqlite-node");
+		assert.equal(sqliteManifest.version, "0.83.0");
+		assert.equal(sqliteManifest.dependencies["@earendil-works/pi-agent-core"], "^2.0.0");
+		assert.equal(sqliteManifest.dependencies["@earendil-works/pi-ai"], "^2.0.0");
 		const generatedManifest = await readManifest(root, "packages/coding-agent/install-lock");
 		assert.equal(generatedManifest.dependencies["@code-yeongyu/senpi"], "^1.0.0");
 

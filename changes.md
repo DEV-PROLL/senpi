@@ -22,6 +22,9 @@ Every remaining audited production path with no nearer tracker than the root:
   `build:npm`/`build:bun`/`build:pnpm` entry points, root `check` swapped `tsgo --noEmit` for
   `tsc --noEmit` and added `check:claude-sdk-platform-lock` plus script-based browser smoke, and
   fork-only `verify:pms` orchestration was added.
+- `pnpm-workspace.yaml`: mirrors the root npm workspace's nested
+  `packages/session-backends/*` glob so the pnpm parity build installs and links the sqlite
+  session backend's workspace dependencies before `scripts/build-all.mjs` builds it.
 - `tsconfig.base.json`: `target`/`lib` raised from `ES2022` to `ES2024`.
 - `tsconfig.json`: reformatted to the fork's biome multi-line layout; workspace path mappings are
   semantically unchanged.
@@ -37,7 +40,8 @@ Every remaining audited production path with no nearer tracker than the root:
 - `packages/session-backends/sqlite-node/package.json`: renamed
   `@earendil-works/pi-session-backend-sqlite-node` ->
   `@earendil-works/pi-storage-sqlite-node`, made private and independently versioned at
-  `0.83.0`, `tsgo` -> `tsc`, and workspace deps switched to `file:` references.
+  `0.83.0`, `tsgo` -> `tsc`, and keeps its runtime `pi-agent-core` / `pi-ai` dependencies on
+  lockstep semver ranges so npm, Bun, and pnpm all link the live workspace packages.
 - `packages/session-backends/sqlite-node/src/sqlite/repo.ts`: optional-chaining refactor of the
   message-target guard.
 - `packages/telemetry/package.json`: private CalVer `2026.8.16`.
