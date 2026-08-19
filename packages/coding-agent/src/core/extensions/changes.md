@@ -1,5 +1,39 @@
 # Core Extensions Changes
 
+## 2026-08-19 - ProviderConfig.fallbackEligible: deterministic gate for implicit fallback expansion
+
+### What changed
+
+- `types.ts` (`ProviderConfig`) and `core/provider-composer.ts` (`ProviderConfigInput`) gained optional
+  `fallbackEligible?(): boolean`. A provider registration may declare its lane deterministically unusable
+  (for example an unacknowledged approval gate); bare-family fallback expansion then skips it while the
+  provider stays registered, explicitly selectable, and visible to `/login`.
+- `core/model-runtime.ts` exposes `isFallbackEligible(providerId)` (hookless providers and throwing hooks
+  stay eligible), `core/model-registry.ts` forwards it per model, and `core/retry-fallback/`
+  (`expansion.ts`, `chains.ts`, `controller.ts`) filters bare expansion on a definitive `false` only.
+- `builtin/cursor-cli-oauth` declares ineligibility while the kill switch is set or the unacknowledged
+  `--force` gate guarantees a refusal (`cursorCliForceRefusalPending`, shared with the execution policy).
+  `builtin/claude-sdk-oauth` declares ineligibility under its verbatim `enabled: false` kill switch.
+
+### Why
+
+- Bare expansion ranked OAuth-credential providers first but never asked whether the lane could execute.
+  A credentialed cursor-cli-oauth lane whose `noApprovalAcknowledgedAt` was never set ranked tier 0,
+  entered shipped default chains (`claude-opus-5:xhigh`), and every fallback hop into it hard-errored
+  with the acknowledgement message - a guaranteed-refusal lane consumed a slot it could never serve.
+
+### Why an extension could not handle it
+
+- Expansion runs inside `core/retry-fallback/` against the model registry; no extension hook observes or
+  filters chain canonicalization. The eligibility signal itself, however, stays extension-owned via the
+  new registration field.
+
+### Expected merge conflict zones
+
+- `types.ts` end of `ProviderConfig`; `provider-composer.ts` end of `ProviderConfigInput`;
+  `model-runtime.ts` near `hasConfiguredAuth`; `retry-fallback/expansion.ts` `FallbackAuthTiers` and the
+  `rankFamilyModels` filter loop; `retry-fallback/chains.ts` `FallbackModelLookup`/`authTiers`.
+
 ## Extension-system overlays retained over upstream 59a71b23 (2026-08-19)
 
 ### What changed

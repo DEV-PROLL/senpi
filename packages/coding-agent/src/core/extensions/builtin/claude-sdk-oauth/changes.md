@@ -1,4 +1,27 @@
-# claude-sdk-oauth extension changes
+# claude-sdk-oauth
+
+## 2026-08-19 - Kill-switched lane leaves implicit fallback expansion
+
+### What changed
+
+- `index.ts`: the provider registration passes `fallbackEligible`, returning false only under the
+  verbatim `enabled: false` kill switch. An absent flag and unreadable settings stay eligible, so an
+  explicit senpi-side login keeps the lane in bare-family fallback expansion.
+  Tests: `test/suite/claude-sdk-oauth-fallback-eligibility.test.ts`.
+
+### Why
+
+- Bare expansion ranked lanes by credential only; a kill-switched lane could still consume an expansion
+  slot it is guaranteed to refuse (see `core/extensions/changes.md` 2026-08-19).
+
+### Why an extension could not handle it
+
+- This IS the extension side of the `ProviderConfig.fallbackEligible` registration field.
+
+### Expected merge conflict zones
+
+- `index.ts` provider registration object.
+ extension changes
 
 ## 2026-08-19 - Ambient auth lane requires an explicit opt-in
 
