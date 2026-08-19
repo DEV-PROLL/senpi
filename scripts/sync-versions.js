@@ -43,7 +43,7 @@ const lockstepPackages = workspacePackages.filter(
 	(pkg) => !INDEPENDENT_VERSION_PACKAGE_NAMES.has(pkg.data.name),
 );
 const publishedPackages = resolveRegistryPackages(lockstepPackages);
-const versionMap = new Map(workspacePackages.map((pkg) => [pkg.data.name, pkg.data.version]));
+const versionMap = new Map(lockstepPackages.map((pkg) => [pkg.data.name, pkg.data.version]));
 
 console.log("Current versions:");
 for (const pkg of [...publishedPackages].sort((a, b) => a.data.name.localeCompare(b.data.name))) {
