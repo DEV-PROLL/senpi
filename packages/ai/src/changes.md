@@ -1,5 +1,11 @@
 # AI Source Changes
 
+## 2026-08-19 - Persist and retry Cursor conversation-id rotation
+
+Zero-token `resource_exhausted` now rotates the wire conversation id up to three times, retries the same `stream()` before model fallback, and persists the mapping under the agent dir so a TUI restart does not reuse the poisoned id. Token-evidence RE still does not rotate.
+
+Conflict zone: `cursor-agent.ts` `stream()` try/catch.
+
 ## 2026-08-19 - OpenAI-family adapters re-diverge from the 59a71b23 pin
 
 ### What changed

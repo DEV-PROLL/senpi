@@ -48,6 +48,12 @@ import {
 } from "../utils/block-symbols.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { providerHeadersToRecord } from "../utils/headers.ts";
+import {
+	CURSOR_CONVERSATION_POISONED_MESSAGE,
+	createConversationRotationStore,
+	isZeroTokenResourceExhausted,
+	resolveConversationRotationPersistPath,
+} from "./cursor-conversation-rotation.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { deterministicUuid } from "./cursor-agent/deterministic-id.ts";
@@ -297,8 +303,6 @@ export function sanitizeCursorCallerHeaders(headers: Record<string, string> | un
 const NOT_IMPLEMENTED_SUFFIX = "not implemented by this client";
 const NOT_IMPLEMENTED = "Not implemented by this client";
 /** Bare gRPC `resource_exhausted` end-streams (also inside a Connect error message). */
-const RESOURCE_EXHAUSTED_PATTERN = /resource.?exhausted/i;
-
 const conversationStateCache = new Map<string, ConversationStateStructure>();
 const conversationBlobStores = new Map<string, Map<string, Uint8Array>>();
 /**
@@ -308,7 +312,18 @@ const conversationBlobStores = new Map<string, Map<string, Uint8Array>>();
  * and the cached state migrates, so the retry loop's next attempt starts a
  * fresh conversation. Keyed by the base id so a failed rotation never repeats.
  */
-const rotatedConversationIds = new Map<string, string>();
+let conversationRotationStore = createConversationRotationStore({
+	persistPath: resolveConversationRotationPersistPath(),
+});
+let conversationRotationPersistPath = resolveConversationRotationPersistPath();
+function rotationStore() {
+	const persistPath = resolveConversationRotationPersistPath();
+	if (persistPath !== conversationRotationPersistPath) {
+		conversationRotationPersistPath = persistPath;
+		conversationRotationStore = createConversationRotationStore({ persistPath });
+	}
+	return conversationRotationStore;
+}
 
 const CONNECT_END_STREAM_FLAG = 0b00000010;
 
@@ -435,10 +450,6 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 		let openBlockState: BlockState | undefined;
 		let resolveH2: () => void = () => {};
 		let rejectH2: (error: unknown) => void = () => {};
-		const h2Completion = new Promise<void>((resolve, reject) => {
-			resolveH2 = resolve;
-			rejectH2 = reject;
-		});
 		const settleH2 = (error?: unknown): void => {
 			if (h2Settled) return;
 			h2Settled = true;
@@ -462,6 +473,19 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 		let baseConversationId: string | undefined;
 		let conversationId: string | undefined;
 		let usageState: UsageState | undefined;
+		let retryPoisonedConversation = false;
+		let attempt = 0;
+		do {
+			retryPoisonedConversation = false;
+			attempt += 1;
+			h2Settled = false;
+			sawTurnEnded = false;
+			endStreamError = null;
+			openBlockState = undefined;
+			const h2Completion = new Promise<void>((resolve, reject) => {
+				resolveH2 = resolve;
+				rejectH2 = reject;
+			});
 		try {
 			const apiKey = options?.apiKey;
 			if (!apiKey) {
@@ -469,7 +493,10 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 			}
 
 			baseConversationId = options?.conversationId ?? options?.sessionId ?? randomUUID();
-			conversationId = rotatedConversationIds.get(baseConversationId) ?? baseConversationId;
+			if (rotationStore().shouldSkip(baseConversationId)) {
+				throw new Error(CURSOR_CONVERSATION_POISONED_MESSAGE);
+			}
+			conversationId = rotationStore().getWireId(baseConversationId);
 			const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
 			conversationBlobStores.set(conversationId, blobStore);
 			const cachedState = conversationStateCache.get(conversationId);
@@ -505,7 +532,9 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 
 			h2Request = h2Client.request(requestHeaders);
 
-			stream.push({ type: "start", partial: output });
+			if (attempt === 1) {
+				stream.push({ type: "start", partial: output });
+			}
 
 			let pendingBuffer: Buffer = Buffer.alloc(0);
 			let currentTextBlock: (TextContent & { [kStreamingBlockIndex]: number }) | null = null;
@@ -677,27 +706,32 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 			const message = error instanceof Error ? error.message : JSON.stringify(error);
 			// A server-side per-conversation rejection surfaces as a bare
 			// resource_exhausted with zero tokens — the conversation is poisoned,
-			// not the account. Rotate the wire id once and migrate cached state
-			// so the caller's retry loop starts a fresh conversation.
+			// not the account. Rotate the wire id, persist it, and retry this
+			// stream() before the model-fallback chain jumps providers.
 			if (
 				conversationId !== undefined &&
 				baseConversationId !== undefined &&
 				usageState !== undefined &&
-				!usageState.sawTokenDelta &&
-				RESOURCE_EXHAUSTED_PATTERN.test(message) &&
-				!rotatedConversationIds.has(baseConversationId)
+				isZeroTokenResourceExhausted(message, usageState.sawTokenDelta)
 			) {
-				const rotated = randomUUID();
-				rotatedConversationIds.set(baseConversationId, rotated);
-				const cached = conversationStateCache.get(conversationId);
-				if (cached) conversationStateCache.set(rotated, cached);
-				const blobs = conversationBlobStores.get(conversationId);
-				if (blobs) conversationBlobStores.set(rotated, blobs);
+				const decision = rotationStore().recordZeroTokenPoison(
+					baseConversationId,
+					conversationId,
+				);
+				if (decision.kind === "rotated") {
+					const cached = conversationStateCache.get(conversationId);
+					if (cached) conversationStateCache.set(decision.wireId, cached);
+					const blobs = conversationBlobStores.get(conversationId);
+					if (blobs) conversationBlobStores.set(decision.wireId, blobs);
+					retryPoisonedConversation = true;
+				}
 			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = message;
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			if (!retryPoisonedConversation) {
+				output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+				output.errorMessage = message;
+				stream.push({ type: "error", reason: output.stopReason, error: output });
+				stream.end();
+			}
 		} finally {
 			if (heartbeatTimer) {
 				clearInterval(heartbeatTimer);
@@ -705,7 +739,10 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 			}
 			h2Request?.close();
 			h2Client?.close();
+			h2Request = null;
+			h2Client = null;
 		}
+		} while (retryPoisonedConversation);
 	})();
 
 	return stream;
