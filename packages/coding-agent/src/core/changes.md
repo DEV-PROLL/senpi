@@ -1,5 +1,11 @@
 # changes
 
+## Cursor exec emits tool_result after native write/edit (2026-08-19)
+
+`executeTool` now calls `emitToolResult` after `tool_execution_end`. Cursor exec runs `write`/`edit` without the local tool loop, so momus `hasPlanArtifact()` never saw `.omo/plans/*.md` touches.
+
+Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-session.ts`, `agent-session.ts` `emitExecBridgeToolResult`.
+
 ## Provider-declared fallback-expansion eligibility gate (2026-08-19)
 
 ### What changed

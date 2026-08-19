@@ -1,4 +1,11 @@
-import type { Agent, AgentEvent, AgentTool, AgentToolCall, BeforeToolCallResult } from "@earendil-works/pi-agent-core";
+import type {
+	Agent,
+	AgentEvent,
+	AgentTool,
+	AgentToolCall,
+	AgentToolResult,
+	BeforeToolCallResult,
+} from "@earendil-works/pi-agent-core";
 import { createCursorExecBridge } from "./cursor-exec-bridge.ts";
 
 type CursorBridgeAgent = Pick<Agent, "emitExternalEvent" | "signal">;
@@ -6,6 +13,12 @@ type CursorBridgeAgent = Pick<Agent, "emitExternalEvent" | "signal">;
 export interface CursorExecBridgeSession {
 	getRegisteredTool(name: string): AgentTool | undefined;
 	preflightToolCall(toolCall: AgentToolCall, args: unknown): Promise<BeforeToolCallResult | undefined>;
+	emitExecBridgeToolResult(
+		toolName: string,
+		toolCallId: string,
+		args: unknown,
+		result: AgentToolResult,
+	): Promise<void>;
 }
 
 /**
@@ -38,6 +51,9 @@ export function createSessionCursorExecBridge(
 			),
 		emitEvent: async (event: AgentEvent, runSignal: AbortSignal) =>
 			await getAgent().emitExternalEvent(event, runSignal),
+		emitToolResult: async ({ toolName, toolCallId, args, result }) => {
+			await sessionRef.current?.emitExecBridgeToolResult(toolName, toolCallId, args, result);
+		},
 		getAbortSignal: () => {
 			if (runSignal === undefined) return getAgent().signal;
 			return runSignal === getAgent().signal ? runSignal : undefined;

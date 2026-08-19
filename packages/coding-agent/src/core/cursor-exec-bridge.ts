@@ -15,7 +15,7 @@
  * shows one operation, so a different one must not run.
  */
 
-import type { AgentEvent, AgentTool, AgentToolCall } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentTool, AgentToolCall, AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
 	type CursorExecHandlers,
 	composeCursorShellCommand,
@@ -43,6 +43,13 @@ export interface CursorExecBridgeOptions {
 	 * synthesized call never resolves.
 	 */
 	emitEvent: (event: AgentEvent, runSignal: AbortSignal) => Promise<void>;
+	/** Same tool_result hook the local tool loop emits; plan-touch trackers listen here. */
+	emitToolResult?: (event: {
+		toolName: string;
+		toolCallId: string;
+		args: unknown;
+		result: AgentToolResult;
+	}) => Promise<void>;
 	/** Run the session's vetoable extension preflight before tool execution. */
 	preflightToolCall?: (event: ToolCallEvent) => Promise<ToolCallEventResult | undefined>;
 	/** Abort signal for in-flight bridge executions (the active run's signal). */
@@ -161,6 +168,14 @@ async function executeTool(
 		};
 	}
 	await options.emitEvent(endEvent, runSignal);
+	if (options.emitToolResult) {
+		await options.emitToolResult({
+			toolName,
+			toolCallId,
+			args: params ?? cleanArgs,
+			result: toolResult,
+		});
+	}
 	return toolResult;
 }
 
