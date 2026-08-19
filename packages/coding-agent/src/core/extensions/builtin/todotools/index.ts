@@ -10,6 +10,8 @@ import {
 import { getTodoWidgetModel } from "./todo-widget.ts";
 import { TodoWidgetComponent } from "./todo-widget-component.ts";
 import { registerTodoTool } from "./tools/todo.ts";
+import { phasesFromCursorTodos } from "./native-todo-mirror.ts";
+import { TODO_STATE_ENTRY_TYPE } from "./todo-types.ts";
 
 function getLatestPhases(ctx: ExtensionContext): TodoPhase[] {
 	return getLatestPhasesFromBranchEntries(ctx.sessionManager.getBranch());
@@ -43,6 +45,25 @@ export default function todotoolsExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_tree", async (_event, ctx) => {
 		syncFromSession(ctx);
+	});
+
+	pi.on("message_end", async (event, ctx) => {
+		const message = event.message;
+		if (!message || message.role !== "assistant" || !Array.isArray(message.content)) {
+			return;
+		}
+		for (const block of message.content) {
+			if (block.type !== "toolCall" || block.name !== "todo" || block.arguments?.op) {
+				continue;
+			}
+			const phases = phasesFromCursorTodos(block.arguments?.todos);
+			if (phases.length === 0) {
+				continue;
+			}
+			setCurrentPhases(phases);
+			pi.appendEntry(TODO_STATE_ENTRY_TYPE, { schema: "v2", phases });
+			syncWidget(ctx);
+		}
 	});
 
 	pi.on("before_agent_start", async (event) => {
