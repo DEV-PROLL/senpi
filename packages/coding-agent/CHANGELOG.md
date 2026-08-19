@@ -32,11 +32,16 @@
   a live countdown in the footer. `/loop stop|status|pause|resume` manage them.
 
 ### Changed
+- Upstream sync (`badlogic/pi-mono` main@`59a71b23`): adopted cache-friendly compaction primitives, centralized compaction summary requests, compaction routing sessions, compaction usage notices, tool disabling during summarization, extension loading in Node SEA hosts, and nested markdown skill discovery. The fork's compaction affinity/request-identity split, queued-input recovery, and interactive rendering are unchanged.
+- Provider/model changes from `@earendil-works/pi-ai` above apply to the CLI: xAI Responses routing with Grok 4.6 default, generalized thinking-token budgets, and the refreshed model catalog.
 
 ### Fixed
 
+- macOS no longer shows `"senpi_pty.darwin-arm64.node" Not Opened — Apple could not verify ... is free of malware` and the CLI no longer hangs while that dialog waits. When a shipped native PTY prebuild carries the `com.apple.quarantine` attribute (npm tarballs fetched through a browser, AirDrop, or archive extraction), the loader now detects it before `dlopen()` and reports the existing `native-unavailable` diagnostic, so terminals degrade to the pipe fallback instead of blocking the process on Gatekeeper. The attribute is never stripped — that would silently disable the user's malware protection — and non-quarantined installs keep loading the real native PTY unchanged.
 - The footer's git branch keeps updating in reftable repositories on systems where `fs.watch` cannot register (descriptor limits, unsupported filesystems): the `tables.list` polling fallback is now armed even when watcher creation fails, instead of being skipped by an early return ([#970](https://github.com/code-yeongyu/senpi/pull/970)).
 - Pasting multiple images in one turn now ships every image: the second and later pastes no longer write into an orphaned payload map, markers pasted in front of existing ones renumber to stay `[Image #1]`..`[Image #k]` in reading order (so `look_at("[Image #N]")` resolves to the exact image the user sees), undo after deleting a marker restores its image along with the marker, and submitting pasted images during compaction now reports the drop instead of silently discarding them.
+- Subagent project-trust confirmation is kept for untrusted interactive projects while trusted projects skip it, restoring the intended trust boundary after the upstream sync.
+- Post-compaction queued input flushes exactly once again after the compaction rework, and package-manager version comparison uses `semver.gt` so newer installed versions no longer trigger redundant npm update calls.
 
 ### Removed
 
