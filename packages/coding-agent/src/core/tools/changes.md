@@ -1,5 +1,36 @@
 # core/tools changes
 
+## Edit tool keeps filesystem policy and themed diff rendering after the 59a71b23 pin (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/core/tools/edit.ts` stays divergent from upstream pin
+  `59a71b235dadb4ad0d67557a8abb0aaa093e68b4`: `EditToolOptions` keeps `filesystemPolicy`, and the executor still
+  consults the extension-registered checker (`operation: "write"`, canonical target from
+  `canonicalizeFilesystemPath()`, `toolName: "edit"`) after path resolution and before any file access, throwing
+  the policy reason as the tool error and re-checking abort afterwards.
+- `edit.ts` keeps rendering through the fork's `renderToolDiff()` from `./diff-render.ts` (theme-aware, and passed
+  the edited `file_path` in both the preview and result paths) instead of upstream's direct
+  `renderDiff()` import from the interactive diff component, and keeps `component.detachAll()` in place of
+  `component.clear()` for the call and result containers.
+
+### Why
+
+- Filesystem policy is a fork capability enforced inside each built-in executor so it cannot be bypassed by
+  Unicode/symlink path variants or by permission approval, and the fork's tool diff renderer is theme-driven and
+  lives in `core/tools` to keep the tool layer independent of interactive-mode components.
+
+### Why an extension could not handle it
+
+- `tool_call` observes user arguments before this executor canonicalizes the target, and it runs inside permission
+  handling where unrestricted approval can allow the call; the enforcement point must stay in the executor. The
+  render path is the built-in tool's own component construction.
+
+### Expected merge conflict zones
+
+- LOW-MEDIUM: the imports at the top of `edit.ts` (upstream pulls `renderDiff` from the interactive component) and
+  the policy check block at the start of the execute function.
+
 ## Repository audit baseline for the core/tools tracker (2026-08-17)
 
 ### What changed

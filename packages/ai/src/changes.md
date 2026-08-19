@@ -1,5 +1,180 @@
 # AI Source Changes
 
+## 2026-08-19 - OpenAI-family adapters re-diverge from the 59a71b23 pin
+
+### What changed
+
+- `packages/ai/src/api/openai-responses.ts`: keeps the fork's Responses request surface on top of the new
+  pin — `serviceTier` forwarded as `service_tier` with `-fast`/Priority-tier cost correction
+  (`getServiceTierCostMultiplier` / `applyServiceTierPricing`, flex 0.5x, priority 2x and 2.5x for
+  `gpt-5.5`), the `max` ladder resolved through `supportsMax` / `supportsXhigh` / `clampMaxForOpenAI`
+  instead of a flat clamp, the `web_search_preview` compat guard that strips the unsupported
+  `web_search_call.action.sources` include, per-session WebSocket connection reuse with idle expiry, the
+  three-way `sessionAffinityFormat` split (`openai` / `openai-nosession` / `openrouter`),
+  `extraBody` merging, and null-aware `thinkingLevelMap` resolution where a mapped `null` means
+  "reasoning unavailable" rather than "reasoning off".
+- `packages/ai/src/api/openai-completions.ts`: compat resolution now lives in the shared browser-safe
+  `utils/prompt-cache-ttl.ts` (`getOpenAICompletionsCompat`) and is re-exported from here, replacing the
+  pin's file-local `detectCompat`/`getCompat` pair; the params type is a real
+  `OpenAICompletionsRequestParams` (fork fields `tool_stream`, `chat_template_kwargs`,
+  `reasoning_effort` typed instead of `as any` casts); Kimi K3 detection supplies
+  `KIMI_K3_THINKING_LEVEL_MAP`; usage parsing reads cache-read tokens from
+  `prompt_tokens_details.cached_tokens`, then DeepSeek's `prompt_cache_hit_tokens`, then Kimi's
+  documented **top-level** `usage.cached_tokens` on the final usage chunk, and never subtracts writes;
+  per-choice usage is typed via `ChatCompletionChoiceWithUsage`; `applyExtraBody` merges caller fields
+  under `OPENAI_COMPLETIONS_RESERVED_BODY_KEYS`. The `thinkingTokenBudgetField` /
+  `supportsThinkingTokenBudget` budget field upstream generalized is retained through the shared
+  resolver rather than the pin's inline compat table.
+- `packages/ai/src/api/openai-codex-responses.ts`: the fork splits WebSocket fallback/debug state into
+  `openai-codex-responses/fallback-state.ts` and re-exports `OpenAICodexWebSocketDebugStats` from there;
+  ChatGPT account identity resolves through `extractOpenAiCodexAccountId` with an `accountId ?? apiKey`
+  affinity fallback, cache-affinity headers come from `applyOpenAICodexCacheAffinityHeaders`, the same
+  `supportsMax`/`supportsXhigh`/`clampMaxForOpenAI` ladder applies, and `extraBody` merges under
+  `OPENAI_RESPONSES_RESERVED_BODY_KEYS`.
+- `packages/ai/src/api/azure-openai-responses.ts`: accepts upstream's `tool_choice` forwarding while
+  keeping the fork's additions — the `supportsMax` effort ladder in `streamSimple`, `prompt_cache_key`
+  suppressed when the effective `cacheRetention` (option or `model.cacheRetention`) is `"none"`, the
+  null-aware `thinkingLevelMap` resolution with `reasoningRequested` / `reasoningUnavailable`, and
+  `reasoningSummary: null` omitting the summary field entirely.
+- `packages/ai/src/api/simple-options.ts`: fork-owned shared option layer — `applyExtraBody` plus the
+  six per-provider reserved-key sets (OpenAI Completions/Responses, Google, Anthropic, Mistral,
+  Bedrock), `clampMaxForOpenAI`, `cacheRetention` defaulting to `model.cacheRetention`,
+  `abortServerSideFallback` and `extraBody` carried onto base options, integer/finite clamping in
+  `clampMaxTokensToContext`, and `adjustMaxTokensForThinking` treating an unresolvable level as
+  "no thinking" (budget 0) instead of producing a NaN budget.
+
+### Why
+
+- These are the fork's paid-tier accounting, provider-affinity, and wire-compat contracts. Upstream
+  `59a71b235d` has no service-tier pricing, no `-fast` Priority variants, no Kimi top-level cached-token
+  form, no `extraBody` seam, and no shared compat resolver, so each re-diverges on merge. The Kimi read
+  in particular is a correctness fix: Kimi reports cache reads only at `usage.cached_tokens`, so without
+  the top-level branch every Kimi turn bills cache reads as fresh input.
+
+### Why an extension could not handle it
+
+- Request-body construction, usage/cost parsing, WebSocket session reuse, and affinity headers all run
+  inside the provider adapters, below every extension-visible surface. An extension cannot rewrite a
+  streamed usage chunk into corrected cost, nor inject a header on a socket it never sees.
+
+### Expected merge conflict zones
+
+- HIGH: `openai-responses.ts` `buildParams` / request construction and the usage-and-cost block;
+  `openai-completions.ts` compat import and params typing (upstream owns the same `detectCompat` hunk —
+  keep the shared resolver when resolving).
+- MEDIUM: `openai-codex-responses.ts` fallback-state extraction and affinity header application;
+  `azure-openai-responses.ts` `buildParams` reasoning block.
+- LOW: `simple-options.ts` reserved-key sets and clamp helpers.
+
+## 2026-08-19 - Google, Anthropic, Bedrock, and Mistral adapters re-diverge from the 59a71b23 pin
+
+### What changed
+
+- `packages/ai/src/api/google-shared.ts`: tool-call ids normalize through the shared collision-safe
+  `utils/tool-call-id.ts` instead of the pin's local `replace(...).slice(0, 64)` truncation;
+  `convertMessages` takes `preserveThinking` so a non-reasoning turn drops thinking state;
+  `sanitizeForOpenApi` recurses into arrays; the position-aware `stripOptional` removes the non-standard
+  `optional` keyword from schema-keyword position only, preserving it as a property name under
+  `properties`/`patternProperties`/`$defs`/`definitions` and never traversing the value keywords
+  `const`/`default`/`examples`/`enum`; `toProviderNativeContent` maps unrecognized Gemini parts
+  (`executableCode`, `codeExecutionResult`, or the dominant part key) onto the fork's
+  `providerNative` content block.
+- `packages/ai/src/api/google-generative-ai.ts` and `packages/ai/src/api/google-vertex.ts`: both take
+  upstream's thinking-level direction but keep the fork's thinking-off routing — a runtime `"off"`
+  handed through the `ThinkingLevel`-typed `reasoning` option, and a post-clamp `"off"`, both take the
+  disabled wire form rather than an enabled one, which a post-clamp check alone cannot see because
+  Gemini 3 maps `off` to `null`. Both also emit `providerNative` blocks for unhandled parts and for
+  once-per-response `groundingMetadata` / `urlContextMetadata`, merge `extraBody` into the inner
+  `config` under `GOOGLE_RESERVED_BODY_KEYS`, and pass `preserveThinking` into `convertMessages`.
+  `google-generative-ai.ts` additionally replaces the pin's `as any` thinking-level casts with a typed
+  `THINKING_LEVEL_MAP` onto the SDK's `ThinkingLevel` enum; `google-vertex.ts` drops the
+  `Model<"google-generative-ai">` casts in favor of `Pick<Model<Api>, "id">` predicates and takes plain
+  header records so `providerHeadersToRecord` is applied once at the client boundary.
+- `packages/ai/src/api/anthropic-messages.ts`: keeps the fork's adaptive-thinking surface — the
+  `ADAPTIVE_THINKING_MODEL_MARKERS` and `NATIVE_XHIGH_EFFORT_MODEL_MARKERS` families, the
+  `forceAdaptiveThinking` compat override, `sanitizeAdaptiveThinkingPayload` /
+  `sanitizeAdaptiveThinkingHeaders` (which rewrite `thinking` to `{type: "adaptive"}` with an
+  `output_config.effort`, and strip the interleaved-thinking beta an adaptive family rejects), the
+  computer-use beta stripper for families that reject it, effort pinned low on a degraded/disabled turn,
+  the shared `getAnthropicCompat` / `isAnthropicApiBaseUrl` prompt-cache-TTL resolver behind the `1h`
+  retention decision, and server-side-fallback receipt handling.
+- `packages/ai/src/api/bedrock-converse-stream.ts`: keeps `cacheRetention` falling back to
+  `model.cacheRetention`, `preserveThinking` on message conversion, shared `normalizeToolCallId`,
+  `applyExtraBody` with `BEDROCK_RESERVED_BODY_KEYS`, the Mythos 5 adaptive-family marker, and the
+  custom-header build-step middleware — now guarded so no middleware is registered for an empty header
+  map and narrowed through a `hasHeaders` type guard rather than an inline cast. Upstream's response
+  smithy-header deserialize middleware is accepted in the same inline-registration form.
+- `packages/ai/src/api/mistral-conversations.ts`: keeps `preserveThinking` (derived from
+  `promptMode === "reasoning"` or an explicit `reasoningEffort`) on message transformation and
+  `applyExtraBody` with `MISTRAL_RESERVED_BODY_KEYS`, plus the block-type narrowing in `toChatMessages`
+  that skips non-`toolCall` blocks instead of coercing them.
+
+### Why
+
+- Every item here is a wire contract the fork resolved against live provider behavior: truncating tool
+  ids can collapse two distinct calls into one id, replaying thinking state into a non-reasoning turn is
+  rejected, an adaptive Anthropic family 400s on `thinking: {type: "disabled"}` and on the interleaved
+  beta, Gemini 3 cannot express thinking-off through a budget, and `optional` is not a JSON Schema
+  keyword Gemini accepts. Upstream's new thinking-level maps do not encode any of these, so the fork's
+  routing must survive the merge.
+
+### Why an extension could not handle it
+
+- Message conversion, tool-schema emission, beta-header negotiation, and Smithy middleware registration
+  happen inside the adapters while constructing the outbound request; there is no hook between the
+  adapter and the provider SDK where an extension could observe or repair them.
+
+### Expected merge conflict zones
+
+- HIGH: `anthropic-messages.ts` `buildParams` and the beta-header/payload sanitizers.
+- MEDIUM: `google-shared.ts` `convertMessages` and `convertTools`; the `streamSimple` thinking branches
+  in `google-generative-ai.ts` and `google-vertex.ts`; `bedrock-converse-stream.ts` middleware
+  registration and command-input construction.
+- LOW: `mistral-conversations.ts` payload build and stream-block narrowing.
+
+## 2026-08-19 - Public type and export surface re-diverges from the 59a71b23 pin
+
+### What changed
+
+- `packages/ai/src/types.ts`: carries the fork's request and content contracts — the compaction
+  affinity/request-identity split (`affinitySessionId`, the stable originating-session identity that
+  survives auxiliary calls which replace `sessionId`, plus `streamKind: "main" | "auxiliary"` where an
+  absent value must be read as auxiliary), `abortServerSideFallback`, `extraBody`, the three-argument
+  `onPayload` with `ProviderRequestMetadata` (effective model plus fully transformed headers),
+  `ThinkingSelection` provenance, `thinkingBudgets.max`, thinking-block `startedAt`/`endedAt`, the
+  `incomplete`/`errorMessage` tool-call carriers used by text tool-call recovery, `isVideoMimeType` and
+  video payloads riding `ImageContent`, the `providerNative` block, the local `OpenAIResponsesCompat`
+  extension adding `supportsAdditionalTools`, and the fork-only `cursor-agent` API plus
+  `alibaba-token-plan` / `cursor` / `ollama` / `opengateway` provider ids and the `openai-images` images
+  API.
+- `packages/ai/src/index.ts`: publishes the fork's core export surface that upstream has no counterpart
+  for — the cursor capability/grouping/selection API and cursor pi-args helpers, `getApiProvider`,
+  `convertResponsesMessages`, `warmPromptCache`, `sanitizeAnthropicToolPairs`, the tool-call middleware
+  entry points (`wrapStreamWithToolCallMiddleware`, `shouldRecoverTextToolCalls`,
+  `hasKimiTextToolCallRecovery`, the XTML recovery stream parser), context provenance,
+  `env-api-keys`, `auth/headers`, prompt-cache TTL constants, server-fallback receipts, stop details,
+  tool-pair repair, visible text, block symbols (`kCursorExecResolved`), wire identity
+  (`getWireIdentity` / `setWireIdentity`, the senpi branding seam), and `extractOpenAiCodexAccountId`.
+
+### Why
+
+- These two files are the seam through which `packages/agent` and `packages/coding-agent` reach every
+  fork behavior recorded elsewhere in this tracker. If the merge took the pin's version, the affinity
+  split, provenance-bearing thinking selection, provider-native blocks, and the entire cursor and
+  tool-call-middleware surface would stop being reachable and the dependent packages would not compile.
+
+### Why an extension could not handle it
+
+- An extension consumes these types and exports; it cannot add a field to a core request interface or
+  publish a package entry point that other workspace packages import.
+
+### Expected merge conflict zones
+
+- HIGH: `index.ts` export ordering — upstream appends to the same alphabetized lists, so nearly every
+  sync conflicts here; resolve by keeping both sides' exports.
+- MEDIUM: `types.ts` `ProviderRequestOptions` / `StreamOptions` / `SimpleStreamOptions` members and the
+  `KnownProvider` / `KnownApi` unions.
+
 ## 2026-08-18 - Cursor context windows tracked to the models.dev first-party SSOT
 
 ### What changed

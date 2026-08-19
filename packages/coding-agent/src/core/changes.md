@@ -1,5 +1,57 @@
 # changes
 
+## 2026-08-19 - Core session, settings, packaging, and catalog divergence after the upstream 59a71b23 pin
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: the fork session keeps its own compaction stack over
+  upstream's newly centralized one — `CompactionLifecycleCoordinator`, typed `CompactionReason`
+  (`manual`/`threshold`/`overflow`/`pre_prompt`/`branch`/`extension`) and `CompactionRejectionCause` with
+  human-readable rejection text, warm-anchor admission (`isWarmSummaryAnchorValid`), request ids on
+  `compaction_start`/`compaction_progress`/`compaction_end`, and real `CacheFriendlySummaryOptions`
+  (`sourceContext`/`turnPrefixSourceContext`) where upstream still passes `undefined // cacheFriendly`. It also
+  keeps the `-fast` service-tier state machine (`serviceTier`, `isFastModeActive()`, `service_tier_changed`
+  events, per-model tier memory) and the `senpi:`-prefixed hook/diagnostic custom-message types.
+- `packages/coding-agent/src/core/settings-manager.ts`: retains the fork settings schema and loaders upstream has
+  no counterpart for — JSONC parsing that ignores comment-like text inside strings, brand-aware `envValue()` and
+  `findNearestParentConfigDir()` resolution, lockfile policy, retry/fallback settings
+  (`resolveRetryFallbackSettings`, hint policy, abort server-side fallback), speculative/idle compaction and
+  restoration knobs, prompt-cache and look-at settings, per-model thinking/service-tier memory, smooth-streaming
+  and tips settings, `hooks` sources, and builtin-extension enable/disable lists.
+- `packages/coding-agent/src/core/package-manager.ts`: keeps `hooks` as a fifth resource type (`.json` pattern,
+  user and project dirs, override lists, accumulator and resolved-path maps), the legacy `.pi` project base dir
+  scan when it differs from the branded one, and branded offline detection via `envValue("OFFLINE")`. Upstream's
+  `semver.gt` version comparison arrived through the merge and is retained unchanged.
+- `packages/coding-agent/src/core/remote-catalog-provider.ts`: keeps `FORK_ONLY_BUILTIN_PROVIDERS`
+  (`alibaba-token-plan`, `opengateway`) with `remoteCatalogServesProvider()` so the pi.dev overlay is skipped for
+  providers upstream's catalog cannot serve, and `mergeInputModalities()` so an overlay entry never drops an input
+  modality the built-in model already declares.
+- `packages/coding-agent/src/core/skills.ts`: keeps the fork's skill-listing guidance (load a skill whenever its
+  description even loosely matches, because loading an irrelevant skill is cheap and missing a relevant one is
+  not) and the branded `~/.senpi/agent` default in `LoadSkillsOptions.agentDir`. Upstream's nested markdown skill
+  discovery from this sync is retained as-is.
+
+### Why
+
+- These files carry fork-only product behavior — compaction affinity/lifecycle ownership, `-fast` priority tiers,
+  fork-only providers and catalog overlays, hooks packaging, legacy `.pi` layout support, and senpi branding —
+  that the advanced pin does not contain, so they legitimately remain divergent after the merge instead of being
+  reset to upstream's tree.
+
+### Why an extension could not handle it
+
+- Compaction admission, settings resolution, resource discovery, and the model-catalog overlay all execute before
+  or beneath the extension runner: extensions are loaded from the settings and resources these modules resolve,
+  and the compaction hooks they can observe are emitted by this same session code.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts` compaction execution/admission block and the summarization request wiring.
+- MEDIUM: `settings-manager.ts` settings interfaces and load/merge paths; `package-manager.ts` per-resource
+  literal lists (`FILE_PATTERNS`, dirs, overrides, accumulator) where each new resource type must gain `hooks`.
+- LOW: `remote-catalog-provider.ts` around `mergeModels()`; `skills.ts` prompt guidance line and the `agentDir`
+  doc comment.
+
 ## 2026-08-18 - Resume active goals stuck after suppressed continuation-flood loads
 
 ### What changed
