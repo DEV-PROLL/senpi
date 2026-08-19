@@ -6,6 +6,12 @@
 
 ### Fixed
 
+- Implicit fallback expansion no longer routes through provider lanes that are guaranteed to refuse:
+  a registered provider may declare itself ineligible (new `ProviderConfig.fallbackEligible`), and the
+  cursor-cli-oauth lane does so while its `--force` acknowledgement is missing or its kill switch is
+  set, as does claude-sdk-oauth under a verbatim `enabled: false`. Previously a credentialed but
+  unacknowledged cursor-cli-oauth lane ranked first in the shipped `claude-opus-5` fallback chain and
+  hard-errored on every hop. Explicit model selection and `/login` are unaffected.
 - Auto-compaction can no longer be starved by a provider that reports a small context while the
   local transcript keeps growing (native Cursor's server-side summarized usage): the threshold
   check now takes the larger of the provider-reported context and the local transcript estimate.
