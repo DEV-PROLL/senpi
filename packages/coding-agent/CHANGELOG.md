@@ -9,6 +9,9 @@
 - Auto-compaction can no longer be starved by a provider that reports a small context while the
   local transcript keeps growing (native Cursor's server-side summarized usage): the threshold
   check now takes the larger of the provider-reported context and the local transcript estimate.
+- Four coding-agent test suites no longer depend on parallel-load timing: the footer git watcher, the MCP
+  connection state machine, the cross-process OAuth refresh race control case, and resource-loader extension
+  precedence now await the exact signal or force the interleaving they assert on. Four fixed sleeps removed.
 
 ### Added
 
