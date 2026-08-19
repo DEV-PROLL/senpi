@@ -1676,6 +1676,18 @@ export class AgentSession {
 		return reason;
 	}
 
+	/**
+	 * Threshold checks measure the larger of the provider-reported context and
+	 * the plain local-transcript estimate. Providers whose usage tracks a
+	 * server-side summarized conversation (native Cursor checkpoints) can report
+	 * a context far smaller than the transcript this client replays every turn,
+	 * and that small figure must not hide a transcript already past the window.
+	 */
+	private _resolveThresholdContextTokens(directContextTokens: number): number {
+		const messages = filterContextExcludedMessages(this.agent.state.messages);
+		return Math.max(directContextTokens, estimateMessagesTokens(messages));
+	}
+
 	private _getAutoCompactionReason(message: AssistantMessage): "overflow" | "threshold" | undefined {
 		const settings = this.settingsManager.getCompactionSettings();
 		if (!settings.enabled || message.stopReason === "aborted") {
@@ -1704,7 +1716,7 @@ export class AgentSession {
 		let contextTokens: number;
 		const directContextTokens = message.usage ? calculateContextTokens(message.usage) : 0;
 		if (message.stopReason !== "error" && directContextTokens !== 0) {
-			contextTokens = directContextTokens;
+			contextTokens = this._resolveThresholdContextTokens(directContextTokens);
 		} else {
 			const messages = filterContextExcludedMessages(this.agent.state.messages);
 			const estimate = estimateContextTokens(messages);
@@ -5074,9 +5086,12 @@ export class AgentSession {
 	 * reapply their already-assembled one-shot additions after it succeeds.
 	 */
 	private async _enforceFinalProviderAdmission(messages: readonly AgentMessage[]): Promise<void> {
-		// Normal user-only prompts keep the established provider-overflow recovery
-		// path. This final gate closes the separate gap introduced by turn-local
-		// custom additions, which the normal pre-prompt check cannot observe.
+		// User-only prompts are deliberately admitted without this gate: prompt
+		// admission must never brick on a rejected or cooled-down compaction
+		// (issues #531/#886), so oversized user prompts rely on threshold
+		// compaction — which also samples the local transcript estimate — and on
+		// provider-overflow recovery. This gate closes the separate gap opened by
+		// turn-local custom additions, which the pre-prompt check cannot observe.
 		if (!messages.some((message) => message.role === "custom")) return;
 
 		const model = this.model;
@@ -5240,7 +5255,7 @@ export class AgentSession {
 		} else {
 			const directContextTokens = assistantMessage.usage ? calculateContextTokens(assistantMessage.usage) : 0;
 			if (assistantMessage.stopReason !== "error" && directContextTokens !== 0) {
-				contextTokens = directContextTokens;
+				contextTokens = this._resolveThresholdContextTokens(directContextTokens);
 			} else {
 				const messages = filterContextExcludedMessages(this.agent.state.messages);
 				const estimate = estimateContextTokens(messages);

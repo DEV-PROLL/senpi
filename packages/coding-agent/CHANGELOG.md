@@ -4,6 +4,12 @@
 
 ### Breaking Changes
 
+### Fixed
+
+- Auto-compaction can no longer be starved by a provider that reports a small context while the
+  local transcript keeps growing (native Cursor's server-side summarized usage): the threshold
+  check now takes the larger of the provider-reported context and the local transcript estimate.
+
 ### Added
 
 - Tip rotation now covers persistent memory and mass-ulw graph orchestration (88 -> 113 tips). Sixteen
