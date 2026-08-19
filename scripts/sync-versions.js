@@ -13,7 +13,7 @@ import { resolveRegistryPackages } from "./registry-packages.mjs";
 const GENERATED_PACKAGE_SUFFIXES = [join("coding-agent", "install-lock")];
 // Fork-specific: `@earendil-works/pi-storage-sqlite-node` follows upstream's independent
 // semver line (see scripts/publish.mjs), so it stays out of this fork's CalVer lockstep
-// validation and its dependency pins are left alone.
+// validation while its dependencies still follow the current workspace package versions.
 const INDEPENDENT_VERSION_PACKAGE_NAMES = new Set([
 	"@earendil-works/pi-storage-sqlite-node",
 ]);
