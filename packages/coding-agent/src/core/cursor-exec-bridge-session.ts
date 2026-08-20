@@ -39,7 +39,7 @@ export function createSessionCursorExecBridge(
 		emitEvent: async (event: AgentEvent, runSignal: AbortSignal) =>
 			await getAgent().emitExternalEvent(event, runSignal),
 		getAbortSignal: () => {
-			if (runSignal === undefined) return getAgent().signal;
+			if (runSignal === undefined || runSignal.aborted) return undefined;
 			return runSignal === getAgent().signal ? runSignal : undefined;
 		},
 	});
