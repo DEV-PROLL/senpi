@@ -230,6 +230,7 @@ import {
 	isZeroTokenResourceExhausted,
 	resolveConversationRotationPersistPath,
 } from "./cursor-conversation-rotation.ts";
+import { keepUsableCursorTaskArgs } from "./cursor-task-args.ts";
 
 export type {
 	CursorAgentOptions,
@@ -3374,6 +3375,7 @@ export function processInteractionUpdate(
 			const toolCall = update.message.value.toolCall;
 			if (settled[kStreamingBlockKind] === "mcp") {
 				// Authoritative full parse of the accumulated argument buffer.
+				const previousArgs = settled.arguments;
 				const partial = settled[kStreamingPartialJson];
 				if (partial !== undefined) {
 					settled.arguments = parseStreamingJson(partial);
@@ -3383,6 +3385,9 @@ export function processInteractionUpdate(
 					settled.arguments as Record<string, unknown> | undefined,
 					decodedArgs,
 				);
+				if (settled.name === "task") {
+					settled.arguments = keepUsableCursorTaskArgs(previousArgs, settled.arguments);
+				}
 			} else if (settled[kStreamingBlockKind] === "connect-scm") {
 				// The authoritative outcome arrives only here. Late args are merged
 				// too — a start frame may announce the call before the target

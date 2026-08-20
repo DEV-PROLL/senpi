@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Cursor MCP `task` complete no longer overwrites streamed arguments with `{}`; the last usable task args are kept (#1011).
 - Cursor conversation-id rotation now persists under the agent directory (`CODING_AGENT_DIR` or `~/.senpi/agent`) instead of `$HOME/cursor-conversation-ids.json`, so a reminted wire id survives TUI restart.
 - Cursor 0-token `resource_exhausted` surfaces on the first failure of a `stream()` call so the session layer can compact before any conversation-id rotation; rotation and same-stream retry apply only to later attempts, and the poisoned-conversation error surfaces once the 3-rotation cap is reached.
 - Cursor 0-token `resource_exhausted` is treated as overflow without a local-estimate floor, and Cursor overflow compaction keeps no recent-token tail so the retry payload actually shrinks.

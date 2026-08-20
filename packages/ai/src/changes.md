@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Keep usable Cursor task tool arguments when the complete frame parses as empty.
 - Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
 - Persist Cursor conversation-id rotation under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`), not `$HOME/cursor-conversation-ids.json`.
 - Surface the first 0-token `resource_exhausted` of a `stream()` call so session-layer compaction runs before rotation.

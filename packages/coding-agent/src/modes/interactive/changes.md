@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-20 - Late tool_execution_end still draws a TUI card
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: on `tool_execution_end`, create a tool execution card when `pendingTools` misses the id, then reveal and update the result.
+
+### Why
+
+- Cursor can emit `tool_execution_end` without a matching start card, so the result never appeared in the TUI.
+
+### Why an extension could not handle it
+
+- Tool-execution cards are constructed inside InteractiveMode from session events; no extension hook sits between `tool_execution_end` and the chat container.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` `tool_execution_end` case.
+
 ## Large-session retry indicator cadence (2026-08-20)
 
 ### What changed
