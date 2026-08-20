@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Settings hot-reload no longer cascades across sessions that share an agent directory when another session saves a routine preference such as `defaultModel` during a reload. The replacement watcher now compares reload-window changes with the request-time settings snapshot, so routine-only writes remain suppressed while substantive configuration edits still reload.
+
 ### Added
 
 ### Changed
