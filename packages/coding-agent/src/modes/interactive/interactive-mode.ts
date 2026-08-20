@@ -4331,13 +4331,17 @@ export class InteractiveMode {
 			case "tool_execution_end": {
 				this.handleToolExecutionEnd(event);
 				this.toolArgsReveal.finish(event.toolCallId);
-				const component = this.pendingTools.get(event.toolCallId);
-				if (component) {
-					this.toolResultReveal.finish(event.toolCallId);
-					component.updateResult({ ...event.result, isError: event.isError });
-					this.pendingTools.delete(event.toolCallId);
-					this.ui.requestRender();
+				let component = this.pendingTools.get(event.toolCallId);
+				if (!component) {
+					component = this.createToolExecutionComponent(event.toolName, event.toolCallId, event.args ?? {});
+					component.setExpanded(this.toolOutputExpanded);
+					this.chatContainer.addChild(component);
+					this.pendingTools.set(event.toolCallId, component);
 				}
+				this.toolResultReveal.finish(event.toolCallId);
+				component.updateResult({ ...event.result, isError: event.isError });
+				this.pendingTools.delete(event.toolCallId);
+				this.ui.requestRender();
 				break;
 			}
 
