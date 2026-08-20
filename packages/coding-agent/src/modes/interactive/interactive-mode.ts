@@ -7425,8 +7425,6 @@ export class InteractiveMode {
 			return;
 		}
 
-		this.resetExtensionUI();
-
 		const reloadBox = new Container();
 		const borderColor = (s: string) => theme.fg("border", s);
 		reloadBox.addChild(new DynamicBorder(borderColor));
@@ -7461,6 +7459,13 @@ export class InteractiveMode {
 			if (chatRestoredBeforeSessionStart) {
 				return;
 			}
+			// Reset extension UI only once the reload is actually proceeding (this
+			// callback runs after reload()'s internal veto re-check, right before the
+			// new runner's session_start re-registers extension UI). Resetting before
+			// reload() destroyed live extension footers/widgets/tickers on a vetoed
+			// or failed reload with nothing left to restore them, so the TUI stopped
+			// self-repainting until an input event forced a frame.
+			this.resetExtensionUI();
 			this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 			this.outputPad = this.settingsManager.getOutputPad();
 			this.rebuildChatFromMessages();
