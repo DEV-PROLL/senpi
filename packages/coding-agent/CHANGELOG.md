@@ -10,6 +10,8 @@
 
 ### Changed
 
+- The compiled `senpi` binary is now built with Bun 1.4.0 stable (previously 1.3.14), and npm publishing runs on Bun 1.4 stable instead of the canary channel. Dependency pins refreshed: Biome 2.5.9, `@types/node` 26.2.0, `@vitest/coverage-v8` 4.1.11, AWS Bedrock/Smithy client patches, `@bufbuild/protobuf` 2.14.0, `@types/semver` 7.8.0.
+
 ### Fixed
 
 ### Removed
