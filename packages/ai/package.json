@@ -72,13 +72,13 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "0.91.1",
-		"@aws-sdk/client-bedrock-runtime": "3.1095.0",
-		"@bufbuild/protobuf": "2.13.0",
+		"@aws-sdk/client-bedrock-runtime": "3.1112.0",
+		"@bufbuild/protobuf": "2.14.0",
 		"@earendil-works/pi-telemetry": "^2026.8.20",
 		"@google/genai": "2.13.0",
 		"@mistralai/mistralai": "2.5.0",
-		"@smithy/node-http-handler": "4.9.11",
-		"@smithy/types": "4.16.1",
+		"@smithy/node-http-handler": "4.11.2",
+		"@smithy/types": "4.17.2",
 		"chalk": "6.0.0",
 		"http-proxy-agent": "9.1.0",
 		"https-proxy-agent": "9.1.0",
@@ -109,8 +109,8 @@
 		"node": ">=24.0.0"
 	},
 	"devDependencies": {
-		"@types/node": "26.1.1",
+		"@types/node": "26.2.0",
 		"canvas": "3.2.3",
-		"vitest": "4.1.10"
+		"vitest": "4.1.11"
 	}
 }
