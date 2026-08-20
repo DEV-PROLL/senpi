@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Cursor 0-token `resource_exhausted` is treated as overflow without a local-estimate floor, and Cursor overflow compaction keeps no recent-token tail so the retry payload actually shrinks.
 - Cursor billed `cacheRead` that dwarfs the live conversation window is ignored: checkpoint `usedTokens` is treated as the real context size when dashboard-cumulative `cache_read_tokens` is more than 3× that window, so compaction is not fired against a multi-million cache-read figure (#983).
 
 - Explicit Cursor thinking levels no longer die with `Connect error not_found`: Cursor's Run RPC
