@@ -81,6 +81,7 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
+	resolveThresholdContextTokens,
 	shouldCompact,
 } from "./compaction/index.ts";
 import { CompactionLifecycleCoordinator, type CompactionLifecycleState } from "./compaction/lifecycle.ts";
@@ -1766,7 +1767,7 @@ export class AgentSession {
 	 */
 	private _resolveThresholdContextTokens(directContextTokens: number): number {
 		const messages = filterContextExcludedMessages(this.agent.state.messages);
-		return Math.max(directContextTokens, estimateMessagesTokens(messages));
+		return resolveThresholdContextTokens(directContextTokens, estimateMessagesTokens(messages));
 	}
 
 	private _getAutoCompactionReason(message: AssistantMessage): "overflow" | "threshold" | undefined {
@@ -2777,6 +2778,28 @@ export class AgentSession {
 	 */
 	getRegisteredTool(name: string): AgentTool | undefined {
 		return this._toolRegistry.get(name);
+	}
+
+	/** Cursor exec already ran the tool; still emit tool_result so plan-touch trackers see .omo/plans writes. */
+	async emitExecBridgeToolResult(
+		toolName: string,
+		toolCallId: string,
+		args: unknown,
+		result: AgentToolResult<unknown>,
+		isError: boolean,
+	): Promise<void> {
+		await this._emitAfterToolCallHooks(
+			{
+				type: "toolCall",
+				id: toolCallId,
+				name: toolName,
+				arguments:
+					args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {},
+			},
+			args,
+			result,
+			isError,
+		);
 	}
 
 	setActiveToolsByName(toolNames: string[]): void {
@@ -6852,6 +6875,9 @@ export class AgentSession {
 			// because a stall carries no rate-limit markers or retry-after hint.
 			const stallError = isProviderStreamStallError(message);
 			// 429-class detection: retryable AND message carries rate-limit markers.
+			// Every same-model wait derived below is floored by the exponential schedule
+			// inside the pure hint policy, so repeated tiny retry-after hints cannot pin
+			// the cadence at a few milliseconds. Do not recompute that floor here.
 			const is429Class =
 				!stallError &&
 				/rate.?limit|(?:^429(?=\s+\{)|(?:\bHTTP\/1\.[01]\s+|\bHTTP\s+|\bstatus(?:\s+code)?\s+|\berror\s+|\bcode\s+)429\b)|too many requests|resource.?exhausted/i.test(
@@ -7042,6 +7068,8 @@ export class AgentSession {
 		// reach this point with a fallback already applied (hard-error, refusal) set
 		// switchedFallback first and force providerDelayMs undefined, so no branch may
 		// be reordered to fall through here expecting an implicit switch.
+		// 429-tier delays already carry the exponential floor from nextInTurnDelayMs /
+		// degradeWithoutFallback; the non-tier branch keeps its own exponential fallback.
 		const nonTierProviderDelayMs = providerDelayMs === 0 ? undefined : providerDelayMs;
 		const delayMs = switchedFallback
 			? 0

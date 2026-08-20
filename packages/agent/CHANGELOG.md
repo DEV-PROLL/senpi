@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- Cursor exec handler factories now receive the owning run's abort signal instead of the per-request
+  idle-timeout controller, so native Cursor exec tool calls pass the run-ownership check again instead
+  of failing every call with `Tool execution has no active run`.
+
 ### Removed
 
 ## [2026.8.19] - 2026-08-19

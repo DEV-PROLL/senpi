@@ -85,7 +85,7 @@ import type {
 	ProjectTrustContext,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
-import { buildNoticeBox, type NoticeSpec } from "../../core/extensions/notice/index.ts";
+import { buildNoticeBox, type NoticeLine, type NoticeSpec } from "../../core/extensions/notice/index.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 import { appendHiddenTuiStdout } from "../../core/hidden-stdout-log.ts";
 import { buildHighReasoningWarning } from "../../core/high-reasoning-warning.ts";
@@ -307,6 +307,8 @@ function isCompactionCostNotice(item: RenderSessionItem): item is CompactionCost
 }
 
 const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
+const DEFAULT_RETRY_STATUS_REFRESH_INTERVAL_MS = 80;
+const LARGE_SESSION_RETRY_STATUS_REFRESH_INTERVAL_MS = 60_000;
 const DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS = 600;
 const DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS = 32;
 const LARGE_SESSION_WORKING_STATUS_REFRESH_INTERVAL_MS = 60_000;
@@ -1169,7 +1171,11 @@ export class InteractiveMode {
 
 		previousUi.stop({ preserveScreen: true });
 		previousUi.setFocus(null);
-		previousUi.clear();
+		// Detach, not clear: the same live components (spinners, reveals, extension
+		// widgets) are remounted on nextUi below. clear() would dispose them,
+		// killing every interval they own while they keep rendering static frames
+		// forever — the TUI then never self-repaints until an input event forces one.
+		previousUi.detachAll();
 		if (TuiLayouts.isViewportTUI(previousUi)) previousUi.setLayoutRoot(undefined);
 
 		const nextUi = createInteractiveTui({
@@ -2068,8 +2074,11 @@ export class InteractiveMode {
 		return this.formatDisplayPath(p);
 	}
 
-	private formatDiagnostics(diagnostics: readonly ResourceDiagnostic[], sourceInfos: Map<string, SourceInfo>): string {
-		const lines: string[] = [];
+	private formatDiagnostics(
+		diagnostics: readonly ResourceDiagnostic[],
+		sourceInfos: Map<string, SourceInfo>,
+	): NoticeLine[] {
+		const lines: NoticeLine[] = [];
 
 		// Group collision diagnostics by name
 		const collisions = new Map<string, ResourceDiagnostic[]>();
@@ -2089,36 +2098,33 @@ export class InteractiveMode {
 		for (const [name, collisionList] of collisions) {
 			const first = collisionList[0]?.collision;
 			if (!first) continue;
-			lines.push(theme.fg("warning", `  "${name}" collision:`));
-			lines.push(
-				theme.fg(
-					"dim",
-					`    ${theme.fg("success", "✓")} ${this.formatPathWithSource(first.winnerPath, this.findSourceInfoForPath(first.winnerPath, sourceInfos))}`,
-				),
-			);
+			lines.push({ text: `  "${name}" collision:`, tone: "warning" });
+			lines.push({
+				text: `    ✓ ${this.formatPathWithSource(first.winnerPath, this.findSourceInfoForPath(first.winnerPath, sourceInfos))}`,
+				tone: "warning",
+			});
 			for (const d of collisionList) {
 				if (d.collision) {
-					lines.push(
-						theme.fg(
-							"dim",
-							`    ${theme.fg("warning", "✗")} ${this.formatPathWithSource(d.collision.loserPath, this.findSourceInfoForPath(d.collision.loserPath, sourceInfos))} (skipped)`,
-						),
-					);
+					lines.push({
+						text: `    ✗ ${this.formatPathWithSource(d.collision.loserPath, this.findSourceInfoForPath(d.collision.loserPath, sourceInfos))} (skipped)`,
+						tone: "warning",
+					});
 				}
 			}
 		}
 
 		for (const d of otherDiagnostics) {
+			const tone = d.type === "error" ? "error" : "warning";
 			if (d.path) {
 				const formattedPath = this.formatPathWithSource(d.path, this.findSourceInfoForPath(d.path, sourceInfos));
-				lines.push(theme.fg(d.type === "error" ? "error" : "warning", `  ${formattedPath}`));
-				lines.push(theme.fg(d.type === "error" ? "error" : "warning", `    ${d.message}`));
+				lines.push({ text: `  ${formattedPath}`, tone });
+				lines.push({ text: `    ${d.message}`, tone });
 			} else {
-				lines.push(theme.fg(d.type === "error" ? "error" : "warning", `  ${d.message}`));
+				lines.push({ text: `  ${d.message}`, tone });
 			}
 		}
 
-		return lines.join("\n");
+		return lines;
 	}
 
 	private showLoadedResources(options?: {
@@ -2288,22 +2294,30 @@ export class InteractiveMode {
 		}
 
 		if (showDiagnostics) {
-			const skillDiagnostics = skillsResult.diagnostics;
-			if (skillDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(skillDiagnostics, sourceInfos);
+			const addDiagnosticNotice = (title: string, diagnostics: readonly ResourceDiagnostic[]): void => {
 				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Skill conflicts]")}\n${warningLines}`, 0, 0),
+					buildNoticeBox(
+						{
+							title,
+							tone: "warning",
+							why: "Conflicting or invalid loaded resources were found.",
+							extra: this.formatDiagnostics(diagnostics, sourceInfos),
+						},
+						{ expanded: this.toolOutputExpanded },
+						theme,
+					),
 				);
 				this.loadedResourcesContainer.addChild(new Spacer(1));
+			};
+
+			const skillDiagnostics = skillsResult.diagnostics;
+			if (skillDiagnostics.length > 0) {
+				addDiagnosticNotice("Skill conflicts", skillDiagnostics);
 			}
 
 			const promptDiagnostics = promptsResult.diagnostics;
 			if (promptDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(promptDiagnostics, sourceInfos);
-				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Prompt conflicts]")}\n${warningLines}`, 0, 0),
-				);
-				this.loadedResourcesContainer.addChild(new Spacer(1));
+				addDiagnosticNotice("Prompt conflicts", promptDiagnostics);
 			}
 
 			const extensionDiagnostics: ResourceDiagnostic[] = [];
@@ -2326,20 +2340,12 @@ export class InteractiveMode {
 			extensionDiagnostics.push(...shortcutDiagnostics);
 
 			if (extensionDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(extensionDiagnostics, sourceInfos);
-				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, 0, 0),
-				);
-				this.loadedResourcesContainer.addChild(new Spacer(1));
+				addDiagnosticNotice("Extension issues", extensionDiagnostics);
 			}
 
 			const themeDiagnostics = themesResult.diagnostics;
 			if (themeDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(themeDiagnostics, sourceInfos);
-				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Theme conflicts]")}\n${warningLines}`, 0, 0),
-				);
-				this.loadedResourcesContainer.addChild(new Spacer(1));
+				addDiagnosticNotice("Theme conflicts", themeDiagnostics);
 			}
 		}
 	}
@@ -4620,10 +4626,7 @@ export class InteractiveMode {
 
 			case "summarization_retry_scheduled": {
 				this.showError(event.errorMessage);
-				this.showStatusIndicator(
-					new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs),
-				);
-				this.ui.requestRender();
+				this.showSummarizationRetryStatusIndicator(event);
 				break;
 			}
 
@@ -4670,7 +4673,26 @@ export class InteractiveMode {
 	}
 
 	private showRetryStatusIndicator(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): void {
-		this.showStatusIndicator(new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs));
+		this.showRetryStatusIndicatorWithCadence(event);
+	}
+
+	private showSummarizationRetryStatusIndicator(
+		event: Extract<AgentSessionEvent, { type: "summarization_retry_scheduled" }>,
+	): void {
+		this.showRetryStatusIndicatorWithCadence(event);
+	}
+
+	private showRetryStatusIndicatorWithCadence(event: { attempt: number; maxAttempts: number; delayMs: number }): void {
+		const refreshIntervalMs = largeSessionWorkingStatusInterval(
+			this.sessionManager.getEntries().length,
+			DEFAULT_RETRY_STATUS_REFRESH_INTERVAL_MS,
+			LARGE_SESSION_RETRY_STATUS_REFRESH_INTERVAL_MS,
+		);
+		const indicator =
+			refreshIntervalMs === DEFAULT_RETRY_STATUS_REFRESH_INTERVAL_MS ? undefined : { intervalMs: refreshIntervalMs };
+		this.showStatusIndicator(
+			new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs, indicator),
+		);
 		this.ui.requestRender();
 	}
 
@@ -5537,41 +5559,21 @@ export class InteractiveMode {
 	}
 
 	showNewVersionNotification(newVersion: string): void {
-		const action = theme.fg("accent", BRAND?.update?.command ?? `${APP_NAME} update`);
-		const updateInstruction = theme.fg("muted", `New version ${newVersion} is available. Run `) + action;
+		const action = BRAND?.update?.command ?? `${APP_NAME} update`;
 		const changelogUrl = getReleaseChangelogUrl(newVersion);
-		const changelogLink = getCapabilities().hyperlinks
-			? hyperlink(theme.fg("accent", changelogUrl), changelogUrl)
-			: theme.fg("accent", changelogUrl);
-		const changelogLine = theme.fg("muted", "Changelog: ") + changelogLink;
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("warning", "Update Available"))}\n${updateInstruction}\n${changelogLine}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.ui.requestRender();
+		const changelogLink = getCapabilities().hyperlinks ? hyperlink(changelogUrl, changelogUrl) : changelogUrl;
+		this.showNoticeBox({
+			title: "Update Available",
+			tone: "warning",
+			why: `New version ${newVersion} is available. Run ${action}`,
+			extra: [{ text: `Changelog: ${changelogLink}`, tone: "accent" }],
+		});
 	}
 
 	showRiskyMainModelWarning(model: Model<any> | undefined): void {
 		if (!model || !isRiskyMainModel(model)) return;
 
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("error", "Risky model warning"))}\n${theme.fg("error", RISKY_MAIN_MODEL_WARNING)}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
-		this.ui.requestRender();
+		this.showNoticeBox({ title: "Risky model warning", tone: "error", why: RISKY_MAIN_MODEL_WARNING });
 	}
 
 	showSettingsSourceSelected(event: Extract<AgentSessionEvent, { type: "settings_source_selected" }>): void {
@@ -5583,35 +5585,24 @@ export class InteractiveMode {
 			{ id: event.modelId, provider: event.provider },
 			event.thinkingLevel,
 		);
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("error", title))}\n${body.map((line) => theme.fg("error", line)).join("\n")}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
-		this.ui.requestRender();
+		this.showNoticeBox({
+			title,
+			tone: "error",
+			why: body[0] ?? "High reasoning may affect reliability or cost.",
+			extra: body.slice(1).map((text) => ({ text, tone: "error" })),
+		});
 	}
 
 	showPackageUpdateNotification(packages: string[]): void {
-		const action = theme.fg("accent", `${APP_NAME} update --extensions`);
-		const updateInstruction = theme.fg("muted", "Package updates are available. Run ") + action;
-		const packageLines = packages.map((pkg) => `- ${pkg}`).join("\n");
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("warning", "Package Updates Available"))}\n${updateInstruction}\n${theme.fg("muted", "Packages:")}\n${packageLines}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.ui.requestRender();
+		this.showNoticeBox({
+			title: "Package Updates Available",
+			tone: "warning",
+			why: `Package updates are available. Run ${APP_NAME} update --extensions`,
+			extra: [
+				{ text: "Packages:", tone: "dim" },
+				...packages.map((pkg) => ({ text: `- ${pkg}`, tone: "dim" as const })),
+			],
+		});
 	}
 
 	/**
@@ -7452,8 +7443,6 @@ export class InteractiveMode {
 			return;
 		}
 
-		this.resetExtensionUI();
-
 		const reloadBox = new Container();
 		const borderColor = (s: string) => theme.fg("border", s);
 		reloadBox.addChild(new DynamicBorder(borderColor));
@@ -7488,6 +7477,13 @@ export class InteractiveMode {
 			if (chatRestoredBeforeSessionStart) {
 				return;
 			}
+			// Reset extension UI only once the reload is actually proceeding (this
+			// callback runs after reload()'s internal veto re-check, right before the
+			// new runner's session_start re-registers extension UI). Resetting before
+			// reload() destroyed live extension footers/widgets/tickers on a vetoed
+			// or failed reload with nothing left to restore them, so the TUI stopped
+			// self-repainting until an input event forced a frame.
+			this.resetExtensionUI();
 			this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 			this.outputPad = this.settingsManager.getOutputPad();
 			this.rebuildChatFromMessages();
@@ -8033,11 +8029,7 @@ export class InteractiveMode {
 		fs.mkdirSync(path.dirname(debugLogPath), { recursive: true });
 		fs.writeFileSync(debugLogPath, debugData);
 
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(
-			new Text(`${theme.fg("accent", "✓ Debug log written")}\n${theme.fg("muted", debugLogPath)}`, 1, 1),
-		);
-		this.ui.requestRender();
+		this.showNoticeBox({ title: "✓ Debug log written", tone: "success", why: debugLogPath });
 	}
 
 	private handleArminSaysHi(): void {

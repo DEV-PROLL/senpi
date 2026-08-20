@@ -1,5 +1,45 @@
 # changes
 
+## Large-session retry indicator cadence (2026-08-20)
+
+### What changed
+
+- Retry status indicators now reuse the existing large-session cadence policy instead of advancing their decorative spinner every 80 ms.
+- Sessions below the 1,000-entry boundary retain the existing animated retry indicator, while large sessions keep the independent one-second retry countdown visible.
+
+### Why
+
+- Every retry spinner frame requests a whole-TUI render. During provider rate-limit waits, large persisted sessions could spend an entire JavaScript core repeatedly rebuilding the transcript even though the network retry itself was sleeping.
+
+### Why an extension could not handle it
+
+- Retry lifecycle events, persisted session entry counts, status-indicator construction, and TUI render scheduling are owned by the built-in interactive runtime.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` around `showRetryStatusIndicator()`.
+- LOW: `components/status-indicator.ts` around the retry indicator constructor.
+- LOW: `interactive-tui.test.ts` around retry status cadence coverage.
+
+## Canonical interactive notice cards (2026-08-20)
+
+### What changed
+
+- Loaded-resource diagnostics, version and package updates, risky-model and high-reasoning warnings, debug-log completion, and the Earendil announcement text now render through `buildNoticeBox`.
+- Existing notice text, diagnostic severity, changelog hyperlink behavior, package lists, and the optional Earendil image remain intact.
+
+### Why
+
+- These multi-line notice cards used independent borders and foreground styling, so they diverged from the shared transcript notice background and title contract.
+
+### Why an extension could not handle it
+
+- These surfaces are constructed directly by `InteractiveMode` or its built-in announcement component; extensions cannot replace their internal TUI components after insertion.
+
+### Expected merge conflict zones
+
+- MEDIUM: `interactive-mode.ts` loaded-resource diagnostics and notification helpers; LOW: `components/earendil-announcement.ts` textual banner construction.
+
 ## Interactive chrome, queued-input recovery, and smooth-streaming settings after the 59a71b23 pin (2026-08-19)
 
 ### What changed
@@ -2277,3 +2317,17 @@ The tip line was teaching a small slice of the product while most of the surface
 
 - MEDIUM: the paste handler, submit path, and editor wiring in `packages/coding-agent/src/modes/interactive/interactive-mode.ts`.
 - LOW: `packages/coding-agent/src/modes/interactive/editor-paste-transfer.ts` (small transfer helper, additive return value).
+
+## 2026-08-20 — render-stall fixes: mode-switch detach + reload-scoped extension UI reset
+
+- `switchTuiMode()` now moves components to the new renderer with
+  `detachAll()` instead of `clear()`. Clearing disposed the live components
+  (tool spinners, reveals, extension widgets) and remounted the dead
+  instances, killing every interval they owned: the TUI froze until an input
+  event forced a frame. Regression: `test/interactive-tui.test.ts`
+  ("switchTuiMode component lifecycle").
+- `handleReloadCommand()` resets extension UI inside reload()'s
+  `beforeSessionStart` callback instead of up front, so a vetoed or failed
+  reload no longer destroys live extension footers/widgets/tickers.
+  Regression: `test/interactive-tui.test.ts` ("handleReloadCommand extension
+  UI lifecycle").

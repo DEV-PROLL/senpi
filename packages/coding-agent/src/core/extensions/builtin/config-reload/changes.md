@@ -1,5 +1,61 @@
 # config-reload Extension Changes
 
+## Clear orphaned handoff unconditionally after reload (2026-08-20)
+
+### What changed
+
+- `index.ts` now captures the handoff key before `requestReload()` and deletes
+  the registry entry unconditionally when the promise settles, removing the
+  `tornDown` guard that skipped deletion after a real reload.
+- The `tornDown` closure variable was removed entirely; it was only read by
+  the deleted guard.
+- A regression test verifies that a reload whose successor omits config-reload
+  does not leave a stale handoff for a later reload to consume.
+
+### Why
+
+- If the settings change disabled config-reload, the successor never called
+  `take()`, so the handoff survived for the process lifetime — now including
+  plaintext settings contents. A later reload that re-enabled the builtin
+  consumed and replayed the stale change.
+
+### Why an extension could not handle it
+
+- This builtin owns both the session reload handoff and the routine-settings
+  snapshot used by the protected config watcher.
+
+### Expected merge conflict zones
+
+- LOW: `index.ts` `flushPending` try/catch block and `session_shutdown` handler.
+
+## Preserve cross-process routine filtering through reload handoff (2026-08-20)
+
+### What changed
+
+- `index.ts` now carries the pre-reload settings-content snapshots through each
+  session-keyed reload handoff and restores them before classifying filesystem
+  changes found during the reload window.
+- A regression verifies that a concurrent `defaultModel` write does not cause
+  the replacement extension to request a second full reload.
+
+### Why
+
+- Rebuilding a watcher refreshed its settings snapshot before handoff changes
+  were classified. A peer process's routine-only write then compared current
+  content to itself, bypassed routine filtering, and could cascade into reload
+  storms across sessions sharing an agent directory.
+
+### Why an extension could not handle it
+
+- This builtin owns both the session reload handoff and the routine-settings
+  snapshot used by the protected config watcher.
+
+### Expected merge conflict zones
+
+- LOW: `index.ts` `ReloadHandoff`, reload request state capture, and
+  `processReloadHandoff`; LOW in `config-reload-extension.test.ts` around the
+  existing reload-window coverage.
+
 ## Watch and validate JSONC settings (2026-08-16)
 
 ### What changed
@@ -52,3 +108,24 @@
 ### Expected merge conflict zones
 
 - LOW: `index.ts` `registrationHasRestrictedTarget` and the new `isSafeFilteredAgentDirTarget`; LOW in `config-reload-extension.test.ts`.
+
+## Off-main-thread recursive watchers on macOS and non-blocking teardown (2026-08-20)
+
+### What changed
+
+- `watch-event-source.ts` routes recursive watches through the existing worker thread on `darwin` as well as `linux` (`WORKER_OFFLOADED_RECURSIVE_PLATFORMS`); creation and teardown of recursive `fs.watch` handles no longer run on the interactive main thread on macOS. Non-recursive watches are unchanged.
+- `ConfigReloadWatchEngine.close()` now returns `Promise<void>`: it flips the `#closed` dispatch guard and clears the debounce timer synchronously, then drains the unsubscribe loop on a 0ms clock tick. `closeWatchers()` in `index.ts` fires that teardown without awaiting it, logging failures via the existing `watcher_error` logger shape.
+
+### Why
+
+- Hot reload awaits this extension's `session_shutdown` handler. On macOS each recursive `FSWatcher.close()` is an FSEvents stream teardown that blocks the calling thread — measured 5.2-13.9s per watcher on a loaded M4 Pro (44.8-62.8s for 8 watchers; ~150-200ms each idle), making `/reload` and config-watch reloads stall for seconds to a minute. The engine is inert the moment `#closed` flips, so nothing on the reload path needs teardown completion.
+
+### Why an extension could not handle it
+
+- The watch engine, its event source, and the `session_shutdown` ordering are all internal to this builtin; no external extension can change how the host awaits the shutdown handler or where `fs.watch` handles are created.
+
+### Expected merge conflict zones
+
+- MEDIUM: `watch-engine.ts` `close()` signature (`void` -> `Promise<void>`) and any upstream callers that await or type it.
+- LOW: `watch-event-source.ts` platform gate; `index.ts` `closeWatchers`.
+- LOW: `config-reload-extension.test.ts` (macOS offload block appended; two teardown-timing assertions restated as behavior assertions) and the new `config-reload-lazy-teardown.test.ts`.
