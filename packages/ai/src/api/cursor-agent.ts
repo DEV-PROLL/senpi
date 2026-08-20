@@ -21,7 +21,6 @@ import * as http2 from "node:http2";
 import { create, fromBinary, fromJson, type JsonValue as PbJsonValue, toBinary, toJson } from "@bufbuild/protobuf";
 import { ValueSchema } from "@bufbuild/protobuf/wkt";
 import { calculateCost } from "../models.ts";
-import { keepUsableCursorTaskArgs } from "./cursor-task-args.ts";
 import type {
 	Api,
 	AssistantMessage,
@@ -225,6 +224,13 @@ import type {
 	CursorShellStreamCallbacks,
 	CursorToolResultHandler,
 } from "./cursor-agent/types.ts";
+import {
+	CURSOR_CONVERSATION_POISONED_MESSAGE,
+	createConversationRotationStore,
+	isZeroTokenResourceExhausted,
+	resolveConversationRotationPersistPath,
+} from "./cursor-conversation-rotation.ts";
+import { keepUsableCursorTaskArgs } from "./cursor-task-args.ts";
 
 export type {
 	CursorAgentOptions,
@@ -298,8 +304,6 @@ export function sanitizeCursorCallerHeaders(headers: Record<string, string> | un
 const NOT_IMPLEMENTED_SUFFIX = "not implemented by this client";
 const NOT_IMPLEMENTED = "Not implemented by this client";
 /** Bare gRPC `resource_exhausted` end-streams (also inside a Connect error message). */
-const RESOURCE_EXHAUSTED_PATTERN = /resource.?exhausted/i;
-
 const conversationStateCache = new Map<string, ConversationStateStructure>();
 const conversationBlobStores = new Map<string, Map<string, Uint8Array>>();
 /**
@@ -309,7 +313,18 @@ const conversationBlobStores = new Map<string, Map<string, Uint8Array>>();
  * and the cached state migrates, so the retry loop's next attempt starts a
  * fresh conversation. Keyed by the base id so a failed rotation never repeats.
  */
-const rotatedConversationIds = new Map<string, string>();
+let conversationRotationStore = createConversationRotationStore({
+	persistPath: resolveConversationRotationPersistPath(),
+});
+let conversationRotationPersistPath = resolveConversationRotationPersistPath();
+function rotationStore() {
+	const persistPath = resolveConversationRotationPersistPath();
+	if (persistPath !== conversationRotationPersistPath) {
+		conversationRotationPersistPath = persistPath;
+		conversationRotationStore = createConversationRotationStore({ persistPath });
+	}
+	return conversationRotationStore;
+}
 
 const CONNECT_END_STREAM_FLAG = 0b00000010;
 
@@ -436,10 +451,6 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 		let openBlockState: BlockState | undefined;
 		let resolveH2: () => void = () => {};
 		let rejectH2: (error: unknown) => void = () => {};
-		const h2Completion = new Promise<void>((resolve, reject) => {
-			resolveH2 = resolve;
-			rejectH2 = reject;
-		});
 		const settleH2 = (error?: unknown): void => {
 			if (h2Settled) return;
 			h2Settled = true;
@@ -463,250 +474,293 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 		let baseConversationId: string | undefined;
 		let conversationId: string | undefined;
 		let usageState: UsageState | undefined;
-		try {
-			const apiKey = options?.apiKey;
-			if (!apiKey) {
-				throw new Error("Cursor access token is required; run /login cursor");
-			}
-
-			baseConversationId = options?.conversationId ?? options?.sessionId ?? randomUUID();
-			conversationId = rotatedConversationIds.get(baseConversationId) ?? baseConversationId;
-			const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
-			conversationBlobStores.set(conversationId, blobStore);
-			const cachedState = conversationStateCache.get(conversationId);
-			const { requestBytes, conversationState } = await buildGrpcRequest(model, context, options, {
-				conversationId,
-				blobStore,
-				conversationState: cachedState,
+		let retryPoisonedConversation = false;
+		let attempt = 0;
+		do {
+			retryPoisonedConversation = false;
+			attempt += 1;
+			h2Settled = false;
+			sawTurnEnded = false;
+			endStreamError = null;
+			openBlockState = undefined;
+			const h2Completion = new Promise<void>((resolve, reject) => {
+				resolveH2 = resolve;
+				rejectH2 = reject;
 			});
-			conversationStateCache.set(conversationId, conversationState);
-			const requestContextTools = buildMcpToolDefinitions(context.tools);
-
-			const baseUrl = model.baseUrl || CURSOR_API_URL;
-			const requestPath = "/agent.v1.AgentService/Run";
-			// Caller headers are additive, and are spread FIRST so the protocol
-			// framing, auth, and request id below always win.
-			const callerHeaders = sanitizeCursorCallerHeaders(providerHeadersToRecord(options?.headers));
-			const requestHeaders = {
-				...callerHeaders,
-				":method": "POST",
-				":path": requestPath,
-				"content-type": "application/connect+proto",
-				"connect-protocol-version": "1",
-				te: "trailers",
-				authorization: `Bearer ${apiKey}`,
-				"x-ghost-mode": "true",
-				"x-cursor-client-version": CURSOR_CLIENT_VERSION,
-				"x-cursor-client-type": "cli",
-				"x-request-id": randomUUID(),
-			};
-
-			h2Client = http2.connect(baseUrl);
-			h2Client.on("error", (error) => settleH2(mapH2TransportError(error, baseUrl)));
-
-			h2Request = h2Client.request(requestHeaders);
-
-			stream.push({ type: "start", partial: output });
-
-			let pendingBuffer: Buffer = Buffer.alloc(0);
-			let currentTextBlock: (TextContent & { [kStreamingBlockIndex]: number }) | null = null;
-			let currentThinkingBlock: (ThinkingContent & { [kStreamingBlockIndex]: number }) | null = null;
-			let currentToolCall: ToolCallState | null = null;
-			const resolvedMcpToolCallIds = new Set<string>();
-			usageState = { sawTokenDelta: false, sawTurnEndedUsage: false };
-
-			const state: BlockState = {
-				get currentTextBlock() {
-					return currentTextBlock;
-				},
-				get currentThinkingBlock() {
-					return currentThinkingBlock;
-				},
-				get currentToolCall() {
-					return currentToolCall;
-				},
-				openToolCalls: new Map<string, ToolCallState>(),
-				resolvedMcpToolCallIds,
-				setTextBlock: (b) => {
-					currentTextBlock = b;
-				},
-				setThinkingBlock: (b) => {
-					currentThinkingBlock = b;
-				},
-				setToolCall: (t) => {
-					currentToolCall = t;
-				},
-				onToolResult: options?.onToolResult ?? options?.execHandlers?.onToolResult,
-			};
-			openBlockState = state;
-
-			const onConversationCheckpoint = (checkpoint: ConversationStateStructure) => {
-				conversationStateCache.set(conversationId!, checkpoint);
-			};
-
-			h2Request.on("data", (chunk: Buffer) => {
-				// Steady state drains fully per chunk; alias the fresh h2 chunk
-				// instead of copying it through Buffer.concat.
-				pendingBuffer = pendingBuffer.length === 0 ? chunk : Buffer.concat([pendingBuffer, chunk]);
-
-				while (pendingBuffer.length >= 5) {
-					const flags = pendingBuffer[0];
-					const msgLen = pendingBuffer.readUInt32BE(1);
-					if (pendingBuffer.length < 5 + msgLen) break;
-
-					const messageBytes = pendingBuffer.subarray(5, 5 + msgLen);
-					pendingBuffer = pendingBuffer.subarray(5 + msgLen);
-
-					if (flags & CONNECT_END_STREAM_FLAG) {
-						const endError = parseConnectEndStream(messageBytes);
-						if (endError) {
-							endStreamError = endError;
-							h2Request?.close();
-						}
-						continue;
-					}
-
-					try {
-						const serverMessage = fromBinary(AgentServerMessageSchema, messageBytes);
-						const isTurnEnded =
-							serverMessage.message.case === "interactionUpdate" &&
-							serverMessage.message.value.message?.case === "turnEnded";
-						// Dispatch is fire-and-forget so the socket keeps draining
-						// while a handler runs, but the promise is tracked: `done`
-						// must not be pushed while an exec handler is still resolving,
-						// or the buffered tool result is delivered after the turn
-						// already finalized and the call is left unpaired.
-						const dispatch = handleServerMessage(
-							serverMessage,
-							output,
-							stream,
-							state,
-							blobStore,
-							h2Request!,
-							options?.execHandlers,
-							state.onToolResult,
-							usageState!,
-							requestContextTools,
-							onConversationCheckpoint,
-						).catch((error) => {
-							log("error", "handleServerMessage", { error: String(error) });
-						});
-						inFlightDispatches.add(dispatch);
-						void dispatch.finally(() => inFlightDispatches.delete(dispatch));
-
-						// Application completion is not protocol success; wait for a
-						// clean HTTP/2 end.
-						if (isTurnEnded) {
-							sawTurnEnded = true;
-						}
-					} catch (e) {
-						log("error", "parseServerMessage", { error: String(e) });
-					}
+			try {
+				const apiKey = options?.apiKey;
+				if (!apiKey) {
+					throw new Error("Cursor access token is required; run /login cursor");
 				}
-			});
 
-			const sendHeartbeat = () => {
-				if (!h2Request || h2Request.closed) {
-					return;
-				}
-				const heartbeatMessage = create(AgentClientMessageSchema, {
-					message: { case: "clientHeartbeat", value: create(ClientHeartbeatSchema, {}) },
+				baseConversationId = options?.conversationId ?? options?.sessionId ?? randomUUID();
+				conversationId = rotationStore().getWireId(baseConversationId);
+				const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
+				conversationBlobStores.set(conversationId, blobStore);
+				const cachedState = conversationStateCache.get(conversationId);
+				const { requestBytes, conversationState } = await buildGrpcRequest(model, context, options, {
+					conversationId,
+					blobStore,
+					conversationState: cachedState,
 				});
-				const heartbeatBytes = toBinary(AgentClientMessageSchema, heartbeatMessage);
-				h2Request.write(frameConnectMessage(heartbeatBytes));
-			};
+				conversationStateCache.set(conversationId, conversationState);
+				const requestContextTools = buildMcpToolDefinitions(context.tools);
 
-			h2Request.on("trailers", (trailers) => {
-				const status = trailers["grpc-status"];
-				const msg = trailers["grpc-message"];
-				if (status && status !== "0" && !endStreamError) {
-					endStreamError = new Error(`gRPC error ${status}: ${decodeURIComponent(String(msg || ""))}`);
+				const baseUrl = model.baseUrl || CURSOR_API_URL;
+				const requestPath = "/agent.v1.AgentService/Run";
+				// Caller headers are additive, and are spread FIRST so the protocol
+				// framing, auth, and request id below always win.
+				const callerHeaders = sanitizeCursorCallerHeaders(providerHeadersToRecord(options?.headers));
+				const requestHeaders = {
+					...callerHeaders,
+					":method": "POST",
+					":path": requestPath,
+					"content-type": "application/connect+proto",
+					"connect-protocol-version": "1",
+					te: "trailers",
+					authorization: `Bearer ${apiKey}`,
+					"x-ghost-mode": "true",
+					"x-cursor-client-version": CURSOR_CLIENT_VERSION,
+					"x-cursor-client-type": "cli",
+					"x-request-id": randomUUID(),
+				};
+
+				h2Client = http2.connect(baseUrl);
+				h2Client.on("error", (error) => settleH2(mapH2TransportError(error, baseUrl)));
+
+				h2Request = h2Client.request(requestHeaders);
+
+				if (attempt === 1) {
+					stream.push({ type: "start", partial: output });
 				}
-			});
 
-			h2Request.on("end", () => {
-				settleH2();
-			});
+				let pendingBuffer: Buffer = Buffer.alloc(0);
+				let currentTextBlock: (TextContent & { [kStreamingBlockIndex]: number }) | null = null;
+				let currentThinkingBlock: (ThinkingContent & { [kStreamingBlockIndex]: number }) | null = null;
+				let currentToolCall: ToolCallState | null = null;
+				const resolvedMcpToolCallIds = new Set<string>();
+				usageState = { sawTokenDelta: false, sawTurnEndedUsage: false };
 
-			h2Request.on("error", (error) => {
-				settleH2(mapH2TransportError(error, baseUrl));
-			});
+				const state: BlockState = {
+					get currentTextBlock() {
+						return currentTextBlock;
+					},
+					get currentThinkingBlock() {
+						return currentThinkingBlock;
+					},
+					get currentToolCall() {
+						return currentToolCall;
+					},
+					openToolCalls: new Map<string, ToolCallState>(),
+					resolvedMcpToolCallIds,
+					setTextBlock: (b) => {
+						currentTextBlock = b;
+					},
+					setThinkingBlock: (b) => {
+						currentThinkingBlock = b;
+					},
+					setToolCall: (t) => {
+						currentToolCall = t;
+					},
+					onToolResult: options?.onToolResult ?? options?.execHandlers?.onToolResult,
+				};
+				openBlockState = state;
 
-			if (options?.signal) {
-				options.signal.addEventListener("abort", () => {
-					h2Request?.close();
-					settleH2(new Error("Request was aborted"));
+				const onConversationCheckpoint = (checkpoint: ConversationStateStructure) => {
+					conversationStateCache.set(conversationId!, checkpoint);
+				};
+
+				h2Request.on("data", (chunk: Buffer) => {
+					// Steady state drains fully per chunk; alias the fresh h2 chunk
+					// instead of copying it through Buffer.concat.
+					pendingBuffer = pendingBuffer.length === 0 ? chunk : Buffer.concat([pendingBuffer, chunk]);
+
+					while (pendingBuffer.length >= 5) {
+						const flags = pendingBuffer[0];
+						const msgLen = pendingBuffer.readUInt32BE(1);
+						if (pendingBuffer.length < 5 + msgLen) break;
+
+						const messageBytes = pendingBuffer.subarray(5, 5 + msgLen);
+						pendingBuffer = pendingBuffer.subarray(5 + msgLen);
+
+						if (flags & CONNECT_END_STREAM_FLAG) {
+							const endError = parseConnectEndStream(messageBytes);
+							if (endError) {
+								endStreamError = endError;
+								h2Request?.close();
+							}
+							continue;
+						}
+
+						try {
+							const serverMessage = fromBinary(AgentServerMessageSchema, messageBytes);
+							const isTurnEnded =
+								serverMessage.message.case === "interactionUpdate" &&
+								serverMessage.message.value.message?.case === "turnEnded";
+							// Dispatch is fire-and-forget so the socket keeps draining
+							// while a handler runs, but the promise is tracked: `done`
+							// must not be pushed while an exec handler is still resolving,
+							// or the buffered tool result is delivered after the turn
+							// already finalized and the call is left unpaired.
+							const dispatch = handleServerMessage(
+								serverMessage,
+								output,
+								stream,
+								state,
+								blobStore,
+								h2Request!,
+								options?.execHandlers,
+								state.onToolResult,
+								usageState!,
+								requestContextTools,
+								onConversationCheckpoint,
+							).catch((error) => {
+								log("error", "handleServerMessage", { error: String(error) });
+							});
+							inFlightDispatches.add(dispatch);
+							void dispatch.finally(() => inFlightDispatches.delete(dispatch));
+
+							// Application completion is not protocol success; wait for a
+							// clean HTTP/2 end.
+							if (isTurnEnded) {
+								sawTurnEnded = true;
+							}
+						} catch (e) {
+							log("error", "parseServerMessage", { error: String(e) });
+						}
+					}
 				});
-			}
 
-			h2Request.write(frameConnectMessage(requestBytes));
-			heartbeatTimer = setInterval(sendHeartbeat, 5000);
-			await h2Completion;
-			// The transport is done, but a handler decoded from the last chunk
-			// may still be running. Pushing `done` now would let the host drain
-			// its buffered tool results before such a handler reserved its entry,
-			// leaving the call unpaired and stripped from rebuilt transcripts.
-			await drainInFlightDispatches();
+				const sendHeartbeat = () => {
+					if (!h2Request || h2Request.closed) {
+						return;
+					}
+					const heartbeatMessage = create(AgentClientMessageSchema, {
+						message: { case: "clientHeartbeat", value: create(ClientHeartbeatSchema, {}) },
+					});
+					const heartbeatBytes = toBinary(AgentClientMessageSchema, heartbeatMessage);
+					h2Request.write(frameConnectMessage(heartbeatBytes));
+				};
 
-			endCurrentTextBlock(output, stream, state);
-			endCurrentThinkingBlock(output, stream, state);
-			flushOpenToolCalls(output, stream, state);
+				h2Request.on("trailers", (trailers) => {
+					const status = trailers["grpc-status"];
+					const msg = trailers["grpc-message"];
+					if (status && status !== "0" && !endStreamError) {
+						endStreamError = new Error(`gRPC error ${status}: ${decodeURIComponent(String(msg || ""))}`);
+					}
+				});
 
-			calculateCost(model, output.usage);
+				h2Request.on("end", () => {
+					settleH2();
+				});
 
-			stream.push({
-				type: "done",
-				reason: output.stopReason as "stop" | "length" | "toolUse",
-				message: output,
-			});
-			stream.end();
-		} catch (error) {
-			// Same reason as the success path: a handler still running would land
-			// its real result after the turn finalized and be discarded — even
-			// though the tool may already have run side effects. On abort the
-			// drain returns immediately.
-			await drainInFlightDispatches();
-			// A stream that dies mid-turn leaves blocks open. Closing them here
-			// settles their live cards and pairs the server-owned calls that
-			// nothing else answers — an unpaired call is stripped from every
-			// rebuilt transcript.
-			if (openBlockState) {
-				endCurrentTextBlock(output, stream, openBlockState);
-				endCurrentThinkingBlock(output, stream, openBlockState);
-				flushOpenToolCalls(output, stream, openBlockState);
+				h2Request.on("error", (error) => {
+					settleH2(mapH2TransportError(error, baseUrl));
+				});
+
+				if (options?.signal) {
+					options.signal.addEventListener("abort", () => {
+						h2Request?.close();
+						settleH2(new Error("Request was aborted"));
+					});
+				}
+
+				h2Request.write(frameConnectMessage(requestBytes));
+				heartbeatTimer = setInterval(sendHeartbeat, 5000);
+				await h2Completion;
+				// The transport is done, but a handler decoded from the last chunk
+				// may still be running. Pushing `done` now would let the host drain
+				// its buffered tool results before such a handler reserved its entry,
+				// leaving the call unpaired and stripped from rebuilt transcripts.
+				await drainInFlightDispatches();
+
+				endCurrentTextBlock(output, stream, state);
+				endCurrentThinkingBlock(output, stream, state);
+				flushOpenToolCalls(output, stream, state);
+
+				calculateCost(model, output.usage);
+
+				stream.push({
+					type: "done",
+					reason: output.stopReason as "stop" | "length" | "toolUse",
+					message: output,
+				});
+				stream.end();
+			} catch (error) {
+				// Same reason as the success path: a handler still running would land
+				// its real result after the turn finalized and be discarded — even
+				// though the tool may already have run side effects. On abort the
+				// drain returns immediately.
+				await drainInFlightDispatches();
+				// A stream that dies mid-turn leaves blocks open. Closing them here
+				// settles their live cards and pairs the server-owned calls that
+				// nothing else answers — an unpaired call is stripped from every
+				// rebuilt transcript.
+				if (openBlockState) {
+					endCurrentTextBlock(output, stream, openBlockState);
+					endCurrentThinkingBlock(output, stream, openBlockState);
+					flushOpenToolCalls(output, stream, openBlockState);
+				}
+				let message = error instanceof Error ? error.message : JSON.stringify(error);
+				// A server-side per-conversation rejection surfaces as a bare
+				// resource_exhausted with zero tokens. That has two distinct causes:
+				// an oversized payload, and a genuinely poisoned conversationId.
+				// Only the second is fixed by rotating the wire id.
+				//
+				// The FIRST 0-token RE for a base conversation always surfaces without
+				// rotating, so the session layer gets first refusal: agent-session
+				// classifies a surfaced 0-token RE as overflow and compacts before
+				// retrying. Rotating here instead would swallow the error, make that
+				// compaction dead code, and burn the 3-rotation budget replaying the
+				// same oversized payload. Once that surface has happened (the flag is
+				// persisted with the wire id), compaction has had its turn and further
+				// 0-token REs rotate and retry in-call, up to the cap.
+				if (
+					conversationId !== undefined &&
+					baseConversationId !== undefined &&
+					usageState !== undefined &&
+					isZeroTokenResourceExhausted(message, usageState.sawTokenDelta)
+				) {
+					if (rotationStore().shouldSkip(baseConversationId)) {
+						// The base conversation burned its rotation cap; another wire id
+						// will not help, so surface the poisoned-conversation error and
+						// let the session move to a different provider.
+						message = CURSOR_CONVERSATION_POISONED_MESSAGE;
+					} else if (rotationStore().shouldSurfaceBeforeRotating(baseConversationId)) {
+						// First 0-token RE for this conversation: surface it so the
+						// session layer can compact. If the payload really was oversized,
+						// the compacted retry succeeds and no rotation is ever spent.
+						rotationStore().markSurfaced(baseConversationId, conversationId);
+					} else {
+						const decision = rotationStore().recordZeroTokenPoison(baseConversationId, conversationId);
+						if (decision.kind === "rotated") {
+							const cached = conversationStateCache.get(conversationId);
+							if (cached) conversationStateCache.set(decision.wireId, cached);
+							const blobs = conversationBlobStores.get(conversationId);
+							if (blobs) conversationBlobStores.set(decision.wireId, blobs);
+							retryPoisonedConversation = true;
+						} else {
+							message = CURSOR_CONVERSATION_POISONED_MESSAGE;
+						}
+					}
+				}
+				if (!retryPoisonedConversation) {
+					output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+					output.errorMessage = message;
+					stream.push({ type: "error", reason: output.stopReason, error: output });
+					stream.end();
+				}
+			} finally {
+				if (heartbeatTimer) {
+					clearInterval(heartbeatTimer);
+					heartbeatTimer = null;
+				}
+				h2Request?.close();
+				h2Client?.close();
+				h2Request = null;
+				h2Client = null;
 			}
-			const message = error instanceof Error ? error.message : JSON.stringify(error);
-			// A server-side per-conversation rejection surfaces as a bare
-			// resource_exhausted with zero tokens — the conversation is poisoned,
-			// not the account. Rotate the wire id once and migrate cached state
-			// so the caller's retry loop starts a fresh conversation.
-			if (
-				conversationId !== undefined &&
-				baseConversationId !== undefined &&
-				usageState !== undefined &&
-				!usageState.sawTokenDelta &&
-				RESOURCE_EXHAUSTED_PATTERN.test(message) &&
-				!rotatedConversationIds.has(baseConversationId)
-			) {
-				const rotated = randomUUID();
-				rotatedConversationIds.set(baseConversationId, rotated);
-				const cached = conversationStateCache.get(conversationId);
-				if (cached) conversationStateCache.set(rotated, cached);
-				const blobs = conversationBlobStores.get(conversationId);
-				if (blobs) conversationBlobStores.set(rotated, blobs);
-			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = message;
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
-		} finally {
-			if (heartbeatTimer) {
-				clearInterval(heartbeatTimer);
-				heartbeatTimer = null;
-			}
-			h2Request?.close();
-			h2Client?.close();
-		}
+		} while (retryPoisonedConversation);
 	})();
 
 	return stream;
@@ -764,6 +818,8 @@ function markCursorExecResolved(block: CursorExecResolvedCarrier): void {
 export interface UsageState {
 	sawTokenDelta: boolean;
 	sawTurnEndedUsage: boolean;
+	/** Last checkpoint `usedTokens`; conversation window, not billed cache. */
+	liveUsedTokens?: number;
 }
 
 /** Exported for tests: drives one Cursor server message through the stream (exec waits mark the stream busy). */
@@ -3403,8 +3459,24 @@ function applyBilledTurnEndedUsage(update: TurnEndedUpdate, output: AssistantMes
 	}
 	usageState.sawTurnEndedUsage = true;
 	const usage = output.usage;
-	usage.cacheRead = Number(cacheReadTokens ?? 0n);
-	usage.cacheWrite = Number(cacheWriteTokens ?? 0n);
+	const cacheRead = Number(cacheReadTokens ?? 0n);
+	const cacheWrite = Number(cacheWriteTokens ?? 0n);
+	const liveUsed = usageState.liveUsedTokens ?? 0;
+	// Cursor sometimes reports dashboard-cumulative cache_read (millions) while
+	// usedTokens stays at the real window (~150k). Folding that into totalTokens
+	// forces a useless compact and then a 0-token resource_exhausted.
+	if (liveUsed > 0 && cacheRead > liveUsed * 3) {
+		if (outputTokens !== undefined) {
+			usage.output = Number(outputTokens);
+		}
+		usage.cacheRead = 0;
+		usage.cacheWrite = cacheWrite <= liveUsed ? cacheWrite : 0;
+		usage.input = Math.max(0, liveUsed - usage.output - usage.cacheWrite);
+		usage.totalTokens = liveUsed;
+		return;
+	}
+	usage.cacheRead = cacheRead;
+	usage.cacheWrite = cacheWrite;
 	usage.input = Math.max(0, Number(inputTokens ?? 0n) - usage.cacheRead - usage.cacheWrite);
 	if (outputTokens !== undefined) {
 		usage.output = Number(outputTokens);
@@ -3425,6 +3497,7 @@ function applyCheckpointTokenDetails(
 	if (usageState.sawTurnEndedUsage) return;
 	const usedTokens = checkpoint.tokenDetails?.usedTokens ?? 0;
 	if (usedTokens <= 0) return;
+	usageState.liveUsedTokens = usedTokens;
 	const usage = output.usage;
 	usage.input = Math.max(0, usedTokens - usage.output - usage.cacheRead - usage.cacheWrite);
 	usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;

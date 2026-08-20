@@ -6,9 +6,68 @@
 
 ### Fixed
 
+- Session title generation now uses the session model's summarization auth instead of remapped compaction auth, so an explicit compaction model no longer produces `unauthenticated` Cursor title calls (#980).
+- Cursor 0-token `resource_exhausted` retries the same model after remint/compact instead of falling back to another provider, and too-small overflow compact now drops to the last user turn.
+- Cursor native `todo`/`updateTodos` calls now persist as `senpi.todo-state` even when the server resolves them without a local `op`, so the `/todo` widget no longer stays empty after a successful native todo update (#991).
+- Native Cursor sessions no longer compact mid-turn while a Run is live: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`, and blocking/generated compaction refuse those providers until the session is idle, so a mid-turn compact cannot poison `conversationId` and trigger 0-token `resource_exhausted` (#984).
+- Native Cursor `write`/`edit` via the exec bridge now emit `tool_result` after `tool_execution_end`, so plan-touch trackers see `.omo/plans/*.md` writes and momus can unblock (#989).
+- claude-sdk-oauth stream-start-timeout retries now fork the SDK conversation at the last assistant
+  boundary before the stalled turn instead of re-attaching and re-sending it, so each retry re-bills
+  only the turn's own message on a prefix cache read instead of re-writing the whole conversation
+  (fixes #723 retry-storm re-billing: cache writes grew ~8K per attempt, $25/6min, $1084/3days on
+  worker dispatch). A stalled first turn with no boundary to fork at re-seeds byte-identically, which
+  the provider serves from prefix cache after the first write. The retry watchdog cap semantics
+  (`streamRetryTimeoutMs` caps the retry continuation, reconciled to the granted stream-start guard)
+  are now documented on the setting itself.
+- The Cursor exec bridge fails closed when a session bridge has no captured owning run, and rechecks
+  run ownership after awaited preflight work so a run that ends during an approval prompt cannot start
+  a tool side effect afterward.
+- Retry waits no longer animate decorative spinner frames at the default 80 ms cadence for sessions with at least 1,000 persisted entries, while the one-second countdown and small-session animation remain intact.
+- Hot reload no longer stalls on filesystem watcher teardown: recursive config watchers now run in a worker thread on macOS as well as Linux, and the watch engine tears down its subscriptions off the reload critical path (measured 1.5-62s of `session_shutdown` stall eliminated). MCP server reconnect during a hot reload no longer blocks the reload either (startup behavior unchanged).
+- Settings hot-reload no longer cascades across sessions that share an agent directory when another session saves a routine preference such as `defaultModel` during a reload. The replacement watcher now compares reload-window changes with the request-time settings snapshot, so routine-only writes remain suppressed while substantive configuration edits still reload.
+- Settings hot-reload now clears the reload handoff unconditionally after `requestReload()` settles, preventing a stale plaintext settings snapshot from surviving when the reload successor omits the config-reload builtin.
+- Compaction no longer treats implausible Cursor billed usage as context size: when the local transcript estimate is at least 50k and billed usage is more than 8× that estimate, the threshold uses the estimate so a multi-million dashboard-cumulative cacheRead cannot force a useless compact (#983).
+- Goal continuations are no longer stripped down to the newest one on every provider request. Rewriting
+  already-sent history invalidated the provider's conversation cache prefix, so a long-running team-mode
+  session paid a full uncached re-read every turn and drove itself into 429 storms. Continuation history is
+  now append-only and bounded by normal compaction instead of per-request deletion.
+- Same-model 429 retries now floor every wait with the exponential schedule (`baseDelayMs * 2^(attempt-1)`).
+  A provider that answers each rate-limit with the same tiny `retry-after` hint can no longer pin the retry
+  cadence at a few milliseconds; longer provider hints still take precedence.
+
 ### Added
 
+- The notice-box primitives are now part of the public API: `buildNoticeBox`, `noticeMessageRenderer`,
+  `noticeEntryRenderer`, and the `NoticeSpec`/`NoticeLine`/`NoticeTone` types are exported from the package
+  entry so extensions can render transcript notices in the shared visual family instead of re-implementing it.
+
 ### Changed
+
+- Every remaining divergent transcript card now renders through the shared notice box (`customMessageBg`
+  background block, bold tone title, dim body): loaded-resource conflict diagnostics, the update-available
+  and package-update notifications, the risky-main-model and high-reasoning warnings, the rules banner,
+  the prompt URL widget card, and the earendil announcement. Visible text is unchanged.
+- The CLI no longer parses and evaluates the 1.2 MB Claude Agent SDK bundle or the jsdom/Readability/turndown
+  HTML stack while starting up. Both now load on first use behind the repository's documented lazy-boundary
+  pattern — the SDK when a claude-sdk-oauth stream actually opens, the HTML converters when webfetch actually
+  converts an HTML response — which removes 680 modules from the startup import graph (14,203 → 13,523).
+  Behavior is unchanged; only the moment the two dependencies are loaded moved.
+
+- Every launch is one process lighter: `cli.ts` now loads the agent (`cli-main`) in its own process
+  instead of re-spawning Node, unless the run actually needs an isolated process. The child spawn is
+  kept byte-for-byte for the two cases that require it — an inherited Inspector option (`--inspect*`
+  in exec args or `NODE_OPTIONS`), whose debugger socket must be released and re-opened in the process
+  that runs the agent, and any custom exec arguments (for example `--max-old-space-size`), which only
+  apply at process start and so must be replayed onto a fresh process. Brand environment scrubbing is
+  unaffected: `cli-main` scrubs the variable itself, so it is scrubbed in-process before anything the
+  agent spawns can inherit it. Measured on `senpi --help`: 1.206 s -> 1.131 s (-75 ms, -6.2%).
+
+- Startup is faster after the first run: the CLI now enables Node's on-disk module compile cache
+  (`enableCompileCache()`) in both `cli.ts` and `cli-main.ts` and publishes the resolved cache directory
+  through `NODE_COMPILE_CACHE` so the spawned `cli-main` child process reuses it instead of re-compiling
+  the full engine module graph on every launch. An existing `NODE_COMPILE_CACHE` value is never overridden,
+  `NODE_DISABLE_COMPILE_CACHE=1` keeps the cache off, and runtimes without the API (the compiled binary)
+  degrade to plain compilation.
 
 ### Fixed
 

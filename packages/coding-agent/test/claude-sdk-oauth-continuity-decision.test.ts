@@ -7,6 +7,20 @@ import { sentHashPrefixDigest } from "../src/core/extensions/builtin/claude-sdk-
 
 const FINGERPRINT = { systemPromptHash: "prompt-v1", toolsetHash: "tools-v1" };
 
+function restored(overrides: Partial<NonNullable<ContinuityDecisionInput["binding"]>> = {}) {
+	return {
+		sdkSessionId: "sdk-1",
+		sentCount: 2,
+		sentHashes: ["h1", "h2"],
+		lastAssistantUuid: "uuid-a2",
+		accountName: "primary",
+		modelId: "claude-opus-4-5",
+		systemPromptHash: FINGERPRINT.systemPromptHash,
+		toolsetHash: FINGERPRINT.toolsetHash,
+		...overrides,
+	} satisfies NonNullable<ContinuityDecisionInput["binding"]>;
+}
+
 function resident(overrides: Partial<ContinuityDecisionInput["entry"]> = {}) {
 	return {
 		sdkSessionId: "sdk-1",
@@ -196,6 +210,40 @@ describe("claude-sdk-oauth native continuity decisions", () => {
 		);
 
 		expect(decision).toEqual({ kind: "flatten", reason: "sent_stream_diverged" });
+	});
+
+	it("forks at the pre-turn boundary when the same turn is retried after a timeout abort", () => {
+		const decision = decideNativeContinuity(
+			input({
+				entry: undefined,
+				binding: restored({ unansweredTurnDigest: sentHashPrefixDigest(["h1", "h2", "h3"]) }),
+			}),
+		);
+
+		expect(decision).toEqual({
+			kind: "fork",
+			sdkSessionId: "sdk-1",
+			atUuid: "uuid-a2",
+			from: 2,
+			reason: "timeout_retry",
+		});
+	});
+
+	it("cold-seeds a retried first turn that has no assistant boundary to fork at", () => {
+		const decision = decideNativeContinuity(
+			input({
+				entry: undefined,
+				currentHashes: ["h1"],
+				binding: restored({
+					sentCount: 0,
+					sentHashes: [],
+					lastAssistantUuid: null,
+					unansweredTurnDigest: sentHashPrefixDigest(["h1"]),
+				}),
+			}),
+		);
+
+		expect(decision).toEqual({ kind: "flatten", reason: "timeout_retry" });
 	});
 
 	it("flattens when a hash divergence has no assistant boundary to fork at", () => {

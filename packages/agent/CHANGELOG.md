@@ -10,6 +10,12 @@
 
 ### Fixed
 
+- Provider idle after completed Cursor tools (or buffered exec results) now ends the turn as `stop` instead of hanging until `StreamIdleTimeoutError` ([#999](https://github.com/code-yeongyu/senpi/pull/999)).
+- Cursor often ends a turn as `stop` while the assistant message still contains toolCall blocks. Those turns now continue as `toolUse` so pending tools run instead of being dropped ([#1016](https://github.com/code-yeongyu/senpi/pull/1016)).
+- Cursor exec handler factories now receive the owning run's abort signal instead of the per-request
+  idle-timeout controller, so native Cursor exec tool calls pass the run-ownership check again instead
+  of failing every call with `Tool execution has no active run`.
+
 ### Removed
 
 ## [2026.8.19] - 2026-08-19

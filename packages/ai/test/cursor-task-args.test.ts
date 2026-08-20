@@ -7,7 +7,11 @@ describe("keepUsableCursorTaskArgs", () => {
 	});
 
 	it("keeps previous usable task args when the complete frame is empty", () => {
-		const prev = { category: "deep", prompt: "Gap analysis", task_summary: "Gap analysis" };
+		const prev: Record<string, unknown> = {
+			category: "deep",
+			prompt: "Gap analysis",
+			task_summary: "Gap analysis",
+		};
 		expect(keepUsableCursorTaskArgs(prev, {})).toEqual(prev);
 	});
 });

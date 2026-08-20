@@ -112,22 +112,35 @@ export class ConfigReloadWatchEngine {
 		}
 	}
 
-	close(): void {
+	/**
+	 * Marks the engine inert synchronously, then drains the unsubscribe loop off
+	 * the caller's stack. A single `fs.watch` unsubscribe can block for seconds on
+	 * a loaded machine, and a reload awaits this call; every dispatch path already
+	 * checks `#closed`, so the still-attached subscriptions are silent while the
+	 * returned promise settles. Await it only to observe teardown completion.
+	 */
+	close(): Promise<void> {
 		if (this.#closed) {
-			return;
+			return Promise.resolve();
 		}
 		this.#closed = true;
 		if (this.#timer) {
 			this.#clock.clearTimeout(this.#timer);
 			this.#timer = undefined;
 		}
-		for (const unsubscribe of this.#unsubscribes.splice(0)) {
-			try {
-				unsubscribe();
-			} catch (error) {
-				this.#reportError(error, "watch subscription");
-			}
-		}
+		const unsubscribes = this.#unsubscribes.splice(0);
+		return new Promise<void>((settle) => {
+			this.#clock.setTimeout(() => {
+				for (const unsubscribe of unsubscribes) {
+					try {
+						unsubscribe();
+					} catch (error) {
+						this.#reportError(error, "watch subscription");
+					}
+				}
+				settle();
+			}, 0);
+		});
 	}
 
 	getBaselineSnapshot(): ReadonlyMap<string, string> {

@@ -10,6 +10,17 @@
 
 ### Fixed
 
+- Cursor conversation-id rotation now persists under the agent directory (`CODING_AGENT_DIR` or `~/.senpi/agent`) instead of `$HOME/cursor-conversation-ids.json`, so a reminted wire id survives TUI restart.
+- Cursor 0-token `resource_exhausted` surfaces on the first failure of a `stream()` call so the session layer can compact before any conversation-id rotation; rotation and same-stream retry apply only to later attempts, and the poisoned-conversation error surfaces once the 3-rotation cap is reached.
+- Cursor 0-token `resource_exhausted` is treated as overflow without a local-estimate floor, and Cursor overflow compaction keeps no recent-token tail so the retry payload actually shrinks.
+- Cursor billed `cacheRead` that dwarfs the live conversation window is ignored: checkpoint `usedTokens` is treated as the real context size when dashboard-cumulative `cache_read_tokens` is more than 3× that window, so compaction is not fired against a multi-million cache-read figure (#983).
+
+- Explicit Cursor thinking levels no longer die with `Connect error not_found`: Cursor's Run RPC
+  rejects bare capability ids (`kimi-k3`, `claude-fable-5`, …) with `not_found`, so
+  `resolveCursorSelectionDescriptor` now prefers the catalog-guaranteed suffix variant id
+  (`kimi-k3-high`, `claude-fable-5-thinking-low`) whenever a legacy alias exists, keeping bare
+  base id + ordered parameters only as the fallback for alias-less levels (#1008).
+
 ### Removed
 
 ## [2026.8.19] - 2026-08-19
