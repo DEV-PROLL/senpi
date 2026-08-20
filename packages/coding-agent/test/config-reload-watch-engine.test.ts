@@ -327,10 +327,12 @@ describe("config reload watch engine", () => {
 		mocks.fsWatch.mockClear();
 		createEngine({
 			targets: [{ id: "settings", kind: "dir-recursive", path: tempDir, allowList: ["settings.json"] }],
-			// Pin the direct fs.watch backend: on Linux the production source routes
-			// recursive watches through a worker thread (issue #477), which is covered
-			// by test/suite/regressions/477-recursive-watch-main-thread-stall.test.ts.
-			subscribe: createFsWatchEventSource(undefined, { platform: "darwin" }),
+			// Pin the direct fs.watch backend: on Linux (issue #477) and macOS
+			// (FSEvents teardown stalls) the production source routes recursive
+			// watches through a worker thread, covered by
+			// test/suite/regressions/477-recursive-watch-main-thread-stall.test.ts and
+			// the macOS offload block in test/suite/config-reload-extension.test.ts.
+			subscribe: createFsWatchEventSource(undefined, { platform: "win32" }),
 			onRealChange: (change) => {
 				if (change.changedPaths.includes(settingsPath)) resolveSettingsChange?.(change);
 			},
