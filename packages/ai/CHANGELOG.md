@@ -10,12 +10,13 @@
 
 ### Fixed
 
-- Skip ANTML invoke recovery when `model.api === "cursor-agent"` so native Cursor tool starts are not rejected as invalid event order (#1007).
-- Cursor MCP `task` complete no longer overwrites streamed arguments with `{}`; the last usable task args are kept (#1011).
-- Cursor conversation-id rotation now persists under the agent directory (`CODING_AGENT_DIR` or `~/.senpi/agent`) instead of `$HOME/cursor-conversation-ids.json`, so a reminted wire id survives TUI restart.
-- Cursor 0-token `resource_exhausted` surfaces on the first failure of a `stream()` call so the session layer can compact before any conversation-id rotation; rotation and same-stream retry apply only to later attempts, and the poisoned-conversation error surfaces once the 3-rotation cap is reached.
-- Cursor 0-token `resource_exhausted` is treated as overflow without a local-estimate floor, and Cursor overflow compaction keeps no recent-token tail so the retry payload actually shrinks.
-- Cursor billed `cacheRead` that dwarfs the live conversation window is ignored: checkpoint `usedTokens` is treated as the real context size when dashboard-cumulative `cache_read_tokens` is more than 3× that window, so compaction is not fired against a multi-million cache-read figure (#983).
+- Skip ANTML invoke recovery when `model.api === "cursor-agent"` so native Cursor tool starts are not rejected as invalid event order ([#1013](https://github.com/code-yeongyu/senpi/pull/1013) by [@leeseunguk](https://github.com/leeseunguk)).
+- Cursor MCP `task` complete no longer overwrites streamed arguments with `{}`; the last usable task args are kept ([#1017](https://github.com/code-yeongyu/senpi/pull/1017) by [@leeseunguk](https://github.com/leeseunguk)).
+- Cursor conversation-id rotation now persists under the agent directory (`CODING_AGENT_DIR` or `~/.senpi/agent`) instead of `$HOME/cursor-conversation-ids.json`, so a reminted wire id survives TUI restart ([#998](https://github.com/code-yeongyu/senpi/pull/998) by [@leeseunguk](https://github.com/leeseunguk)).
+- Cursor 0-token `resource_exhausted` surfaces on the first failure of a `stream()` call so the session layer can compact before any conversation-id rotation; rotation and same-stream retry apply only to later attempts ([#998](https://github.com/code-yeongyu/senpi/pull/998) by [@leeseunguk](https://github.com/leeseunguk)).
+- After Cursor conversation-id rotation is skipped at the 3-rotation cap, the next `stream()` remints a fresh wire id instead of failing the session with a poisoned-conversation error, and only the dead conversation is abandoned ([#998](https://github.com/code-yeongyu/senpi/pull/998) by [@leeseunguk](https://github.com/leeseunguk)).
+- Cursor 0-token `resource_exhausted` is treated as overflow without a local-estimate floor, and Cursor overflow compaction keeps no recent-token tail so the retry payload actually shrinks ([#1015](https://github.com/code-yeongyu/senpi/pull/1015) by [@leeseunguk](https://github.com/leeseunguk)).
+- Cursor billed `cacheRead` that dwarfs the live conversation window is ignored: checkpoint `usedTokens` is treated as the real context size when dashboard-cumulative `cache_read_tokens` is more than 3× that window, so compaction is not fired against a multi-million cache-read figure ([#985](https://github.com/code-yeongyu/senpi/pull/985) by [@leeseunguk](https://github.com/leeseunguk)).
 
 - Explicit Cursor thinking levels no longer die with `Connect error not_found`: Cursor's Run RPC
   rejects bare capability ids (`kimi-k3`, `claude-fable-5`, …) with `not_found`, so

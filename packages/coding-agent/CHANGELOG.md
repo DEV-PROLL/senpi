@@ -7,13 +7,13 @@
 ### Fixed
 
 - `/resume` now reuses exact, byte-bounded streaming session summaries for unchanged files and paints the visible transcript tail before progressively warming older messages, avoiding repeat parse/render stalls without weakening picker metadata or full-text search.
-- Assistant text that arrives after the last tool call now renders below the tool cards instead of updating the blob above the stack, so approval questions stay visible (#990).
+- Assistant text that arrives after the last tool call now renders below the tool cards instead of updating the blob above the stack, so approval questions stay visible ([#993](https://github.com/code-yeongyu/senpi/pull/993) by [@leeseunguk](https://github.com/leeseunguk)).
 - Late Cursor `tool_execution_end` events now create a TUI tool card when none is pending, so a result is not rendered without a card (#1011).
-- Session title generation now uses the session model's summarization auth instead of remapped compaction auth, so an explicit compaction model no longer produces `unauthenticated` Cursor title calls (#980).
-- Cursor 0-token `resource_exhausted` retries the same model after remint/compact instead of falling back to another provider, and too-small overflow compact now drops to the last user turn.
-- Cursor native `todo`/`updateTodos` calls now persist as `senpi.todo-state` even when the server resolves them without a local `op`, so the `/todo` widget no longer stays empty after a successful native todo update (#991).
-- Native Cursor sessions no longer compact mid-turn while a Run is live: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`, and blocking/generated compaction refuse those providers until the session is idle, so a mid-turn compact cannot poison `conversationId` and trigger 0-token `resource_exhausted` (#984).
-- Native Cursor `write`/`edit` via the exec bridge now emit `tool_result` after `tool_execution_end`, so plan-touch trackers see `.omo/plans/*.md` writes and momus can unblock (#989).
+- Session title generation now uses the session model's summarization auth instead of remapped compaction auth, so an explicit compaction model no longer produces `unauthenticated` Cursor title calls ([#982](https://github.com/code-yeongyu/senpi/pull/982) by [@leeseunguk](https://github.com/leeseunguk)).
+- Cursor 0-token `resource_exhausted` retries the same model after remint/compact instead of falling back to another provider, and too-small overflow compact now drops to the last user turn ([#1015](https://github.com/code-yeongyu/senpi/pull/1015) by [@leeseunguk](https://github.com/leeseunguk)).
+- Cursor native `todo`/`updateTodos` calls now persist as `senpi.todo-state` even when the server resolves them without a local `op`, so the `/todo` widget no longer stays empty after a successful native todo update ([#994](https://github.com/code-yeongyu/senpi/pull/994) by [@leeseunguk](https://github.com/leeseunguk)).
+- Native Cursor sessions no longer compact mid-turn while a Run is live: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`, and blocking/generated compaction refuse those providers until the session is idle, so a mid-turn compact cannot poison `conversationId` and trigger 0-token `resource_exhausted` ([#986](https://github.com/code-yeongyu/senpi/pull/986) by [@leeseunguk](https://github.com/leeseunguk)).
+- Native Cursor `write`/`edit` via the exec bridge now emit `tool_result` after `tool_execution_end`, so plan-touch trackers see `.omo/plans/*.md` writes and momus can unblock ([#992](https://github.com/code-yeongyu/senpi/pull/992) by [@leeseunguk](https://github.com/leeseunguk)).
 - claude-sdk-oauth stream-start-timeout retries now fork the SDK conversation at the last assistant
   boundary before the stalled turn instead of re-attaching and re-sending it, so each retry re-bills
   only the turn's own message on a prefix cache read instead of re-writing the whole conversation
@@ -24,12 +24,12 @@
   are now documented on the setting itself.
 - The Cursor exec bridge fails closed when a session bridge has no captured owning run, and rechecks
   run ownership after awaited preflight work so a run that ends during an approval prompt cannot start
-  a tool side effect afterward.
+  a tool side effect afterward ([#1002](https://github.com/code-yeongyu/senpi/pull/1002) by [@HeiTuz](https://github.com/HeiTuz)).
 - Retry waits no longer animate decorative spinner frames at the default 80 ms cadence for sessions with at least 1,000 persisted entries, while the one-second countdown and small-session animation remain intact.
 - Hot reload no longer stalls on filesystem watcher teardown: recursive config watchers now run in a worker thread on macOS as well as Linux, and the watch engine tears down its subscriptions off the reload critical path (measured 1.5-62s of `session_shutdown` stall eliminated). MCP server reconnect during a hot reload no longer blocks the reload either (startup behavior unchanged).
-- Settings hot-reload no longer cascades across sessions that share an agent directory when another session saves a routine preference such as `defaultModel` during a reload. The replacement watcher now compares reload-window changes with the request-time settings snapshot, so routine-only writes remain suppressed while substantive configuration edits still reload.
-- Settings hot-reload now clears the reload handoff unconditionally after `requestReload()` settles, preventing a stale plaintext settings snapshot from surviving when the reload successor omits the config-reload builtin.
-- Compaction no longer treats implausible Cursor billed usage as context size: when the local transcript estimate is at least 50k and billed usage is more than 8× that estimate, the threshold uses the estimate so a multi-million dashboard-cumulative cacheRead cannot force a useless compact (#983).
+- Settings hot-reload no longer cascades across sessions that share an agent directory when another session saves a routine preference such as `defaultModel` during a reload. The replacement watcher now compares reload-window changes with the request-time settings snapshot, so routine-only writes remain suppressed while substantive configuration edits still reload ([#1006](https://github.com/code-yeongyu/senpi/pull/1006) by [@Indosaram](https://github.com/Indosaram)).
+- Settings hot-reload now clears the reload handoff unconditionally after `requestReload()` settles, preventing a stale plaintext settings snapshot from surviving when the reload successor omits the config-reload builtin ([#1006](https://github.com/code-yeongyu/senpi/pull/1006) by [@Indosaram](https://github.com/Indosaram)).
+- Compaction no longer treats implausible Cursor billed usage as context size: when the local transcript estimate is at least 50k and billed usage is more than 8× that estimate, the threshold uses the estimate so a multi-million dashboard-cumulative cacheRead cannot force a useless compact ([#985](https://github.com/code-yeongyu/senpi/pull/985) by [@leeseunguk](https://github.com/leeseunguk)).
 - Goal continuations are no longer stripped down to the newest one on every provider request. Rewriting
   already-sent history invalidated the provider's conversation cache prefix, so a long-running team-mode
   session paid a full uncached re-read every turn and drove itself into 429 storms. Continuation history is
@@ -37,6 +37,47 @@
 - Same-model 429 retries now floor every wait with the exponential schedule (`baseDelayMs * 2^(attempt-1)`).
   A provider that answers each rate-limit with the same tiny `retry-after` hint can no longer pin the retry
   cadence at a few milliseconds; longer provider hints still take precedence.
+- Goal footer tickers no longer freeze the session TUI after a session replacement or reload: `GoalWaitTicker`
+  and `GoalElapsedTicker` now retire themselves when a tick hits a retired extension context instead of
+  swallowing the error and ticking against a context that can never render again, so the "Pursuing goal"
+  elapsed label and the continuation-wait countdown stop freezing and the session keeps self-painting without
+  an input event; a later `sync()` with a live context re-arms both tickers (#1028).
+- TUI mode switches no longer freeze the session UI: the renderer swap now detaches live components instead of
+  disposing them, so tool spinners, reveal animations, and extension widget intervals keep their periodic
+  repaint across the switch and the TUI does not stall until the next input event (#1028).
+- A vetoed or failed `/reload` no longer destroys live extension footers, task widgets, and hook statuses:
+  extension UI is reset only once the reload actually proceeds, so an idle session keeps its periodic repaint
+  source after a deferred or failed reload (#1028).
+- Config hot-reload no longer registers whole directory subtrees with the OS watcher: recursive watch targets
+  now open one non-recursive subscription per in-scope directory the scan already visits (skipping
+  `node_modules`, `.git`, symlinks, and filtered paths) and reconcile subscriptions after every rescan, so an
+  extensions or skills directory containing `node_modules` no longer drives `fseventsd` to 123% CPU and
+  multi-GB RSS on macOS (#1041).
+- Native Cursor sessions with Claude-named models no longer reject parallel tool starts as invalid event order:
+  ANTML invoke recovery is skipped when `model.api === "cursor-agent"`
+  ([#1013](https://github.com/code-yeongyu/senpi/pull/1013) by [@leeseunguk](https://github.com/leeseunguk)).
+- Cursor turns that end as `stop` while the assistant message still contains toolCall blocks now continue so
+  pending tools run, and a turn whose tool calls were all already resolved on the Cursor exec channel no longer
+  re-enters the agent loop for an extra provider round-trip
+  ([#1016](https://github.com/code-yeongyu/senpi/pull/1016) by [@leeseunguk](https://github.com/leeseunguk)).
+- The `cursor-cli-oauth` lane now spawns with the catalog suffix variant id for explicit thinking levels
+  (`claude-fable-5-thinking-low`, `gpt-5.5-extra-high`) instead of the bracket parameter form, matching the
+  native lane's switch away from bare capability ids that Cursor's Run RPC rejects with
+  `Connect error not_found` (#1020).
+- Cursor exec tool calls that lose their owning run during an awaited preflight (for example after an approval
+  prompt) now emit a `tool_execution_end` error event, so the TUI records the failed tool result instead of
+  leaving a dangling tool call with a start and no end
+  ([#1002](https://github.com/code-yeongyu/senpi/pull/1002) by [@HeiTuz](https://github.com/HeiTuz)).
+- A Cursor turn that goes quiet after all tools have completed now ends normally instead of hanging until the
+  stream idle timeout, both for native Cursor tool runs and buffered exec results
+  ([#999](https://github.com/code-yeongyu/senpi/pull/999) by [@leeseunguk](https://github.com/leeseunguk)).
+- Cursor conversation-id rotation now persists under the agent directory (`CODING_AGENT_DIR` or
+  `~/.senpi/agent`) instead of `$HOME/cursor-conversation-ids.json`, so a reminted wire id survives a TUI
+  restart ([#998](https://github.com/code-yeongyu/senpi/pull/998) by [@leeseunguk](https://github.com/leeseunguk)).
+- A Cursor 0-token `resource_exhausted` now surfaces on the first failure of a `stream()` call so the session
+  compacts before any conversation-id rotation, and a rotation skip at the 3-rotation cap remints a fresh wire
+  id on the next stream instead of failing every later request with a poisoned-conversation error
+  ([#998](https://github.com/code-yeongyu/senpi/pull/998) by [@leeseunguk](https://github.com/leeseunguk)).
 
 ### Added
 
