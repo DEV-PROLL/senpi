@@ -6,6 +6,9 @@
 
 ### Fixed
 
+- The Cursor exec bridge fails closed when a session bridge has no captured owning run, and rechecks
+  run ownership after awaited preflight work so a run that ends during an approval prompt cannot start
+  a tool side effect afterward.
 - Retry waits no longer animate decorative spinner frames at the default 80 ms cadence for sessions with at least 1,000 persisted entries, while the one-second countdown and small-session animation remain intact.
 - Settings hot-reload no longer cascades across sessions that share an agent directory when another session saves a routine preference such as `defaultModel` during a reload. The replacement watcher now compares reload-window changes with the request-time settings snapshot, so routine-only writes remain suppressed while substantive configuration edits still reload.
 - Settings hot-reload now clears the reload handoff unconditionally after `requestReload()` settles, preventing a stale plaintext settings snapshot from surviving when the reload successor omits the config-reload builtin.

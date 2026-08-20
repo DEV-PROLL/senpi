@@ -55,7 +55,7 @@ describe("cursor exec bridge tool_call preflight", () => {
 				});
 			},
 		};
-		const bridge = createSessionCursorExecBridge({ current: session }, () => agent);
+		const bridge = createSessionCursorExecBridge({ current: session }, () => agent, runSignal);
 
 		const results: ToolResultMessage[] = [];
 		for (let attempt = 1; attempt <= 9; attempt++) {
