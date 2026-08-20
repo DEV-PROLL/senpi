@@ -1207,6 +1207,55 @@ describe("config reload builtin extension", () => {
 		expect(reloaded).toContainEqual({ registrationId: "builtin", paths: [settingsPath] });
 	});
 
+	it("suppresses a routine settings change discovered during reload handoff", async () => {
+		vi.useFakeTimers();
+		const agentDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-routine-handoff-"));
+		agentDirs.push(agentDir);
+		const settingsPath = join(agentDir, "settings.json");
+		writeJson(settingsPath, { theme: "dark", defaultModel: "m1" });
+		const bus = createEventBus();
+		const watches = createWatchProbe();
+		const first = createManualExtension(bus);
+		let firstContext: ExtensionContext | undefined;
+		let second: ManualExtension | undefined;
+		const secondReload = vi.fn(async () => {});
+		const firstReload = vi.fn(async () => {
+			if (!firstContext) throw new Error("Missing first context");
+			await invoke(
+				first.handlers,
+				"session_shutdown",
+				{ type: "session_shutdown", reason: "reload" } satisfies SessionShutdownEvent,
+				firstContext,
+			);
+			writeJson(settingsPath, { theme: "light", defaultModel: "m2" });
+			second = createManualExtension(bus);
+			configReloadExtension(second.api, { agentDir, subscribe: watches.subscribe, logger: silentLogger() });
+			await invoke(
+				second.handlers,
+				"session_start",
+				{ type: "session_start", reason: "reload" } satisfies SessionStartEvent,
+				fakeContext({ cwd: agentDir, requestReload: secondReload }),
+			);
+		});
+		configReloadExtension(first.api, { agentDir, subscribe: watches.subscribe, logger: silentLogger() });
+		firstContext = fakeContext({ cwd: agentDir, requestReload: firstReload });
+		await invoke(
+			first.handlers,
+			"session_start",
+			{ type: "session_start", reason: "startup" } satisfies SessionStartEvent,
+			firstContext,
+		);
+		writeJson(settingsPath, { theme: "light", defaultModel: "m1" });
+		watches.emit(agentDir, "settings.json");
+		await vi.advanceTimersByTimeAsync(200);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(firstReload).toHaveBeenCalledTimes(1);
+		expect(second).toBeDefined();
+		expect(secondReload).not.toHaveBeenCalled();
+	});
+
 	it("rejects credential and protected registration targets without filesystem or hash access", async () => {
 		vi.useFakeTimers();
 		const agentDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-credential-"));

@@ -99,6 +99,7 @@ type PendingChange = {
 
 type ReloadHandoff = {
 	readonly hashesAtRequest: ReadonlyMap<string, string>;
+	readonly settingsContentsAtRequest: ReadonlyMap<string, string>;
 	readonly requestedAt: number;
 	readonly changes: readonly { readonly registrationId: string; readonly paths: readonly string[] }[];
 };
@@ -389,6 +390,7 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 		tornDown = false;
 		reloadHandoffs.set(handoffKey(ctx), {
 			hashesAtRequest: engine?.getBaselineSnapshot() ?? new Map<string, string>(),
+			settingsContentsAtRequest: new Map(settingsContents),
 			requestedAt: Date.now(),
 			changes,
 		});
@@ -442,6 +444,8 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 
 		const changedPaths = compareSnapshots(handoff.hashesAtRequest, engine?.getBaselineSnapshot() ?? new Map());
 		if (changedPaths.length > 0) {
+			settingsContents.clear();
+			for (const [path, content] of handoff.settingsContentsAtRequest) settingsContents.set(path, content);
 			enqueueChange({ changedPaths, created: [], deleted: [] });
 			await changeChain;
 		}

@@ -1,5 +1,33 @@
 # config-reload Extension Changes
 
+## Preserve cross-process routine filtering through reload handoff (2026-08-20)
+
+### What changed
+
+- `index.ts` now carries the pre-reload settings-content snapshots through each
+  session-keyed reload handoff and restores them before classifying filesystem
+  changes found during the reload window.
+- A regression verifies that a concurrent `defaultModel` write does not cause
+  the replacement extension to request a second full reload.
+
+### Why
+
+- Rebuilding a watcher refreshed its settings snapshot before handoff changes
+  were classified. A peer process's routine-only write then compared current
+  content to itself, bypassed routine filtering, and could cascade into reload
+  storms across sessions sharing an agent directory.
+
+### Why an extension could not handle it
+
+- This builtin owns both the session reload handoff and the routine-settings
+  snapshot used by the protected config watcher.
+
+### Expected merge conflict zones
+
+- LOW: `index.ts` `ReloadHandoff`, reload request state capture, and
+  `processReloadHandoff`; LOW in `config-reload-extension.test.ts` around the
+  existing reload-window coverage.
+
 ## Watch and validate JSONC settings (2026-08-16)
 
 ### What changed
