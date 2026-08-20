@@ -1,5 +1,33 @@
 # cursor-cli-oauth extension changes
 
+## 2026-08-19 - Guaranteed-refusal lane leaves implicit fallback expansion
+
+### What changed
+
+- `guardrails.ts`: new exported `cursorCliForceRefusalPending(settings)` names the exact condition under
+  which unattended agent-mode execution is refused (force requested outside plan mode without
+  `noApprovalAcknowledgedAt`); `resolveCursorCliExecutionPolicy` now delegates to it so the policy and
+  the eligibility hook can never disagree.
+- `index.ts`: the provider registration passes `fallbackEligible`, returning false while the lane is
+  kill-switched (`explicitlyDisabled`) or the refusal is pending. Bare-family fallback expansion skips
+  the lane in those states; explicit selection, `/login`, and `/cursor-account` are unaffected. A merely
+  flagless lane stays eligible because an explicit senpi-side login is the opt-in.
+
+### Why
+
+- With a managed account present the lane held an OAuth credential and ranked tier 0 in bare expansion,
+  so shipped default chains routed fallback hops into it; each hop then hard-errored with the
+  acknowledgement message instead of serving. Tests: `test/cursor-cli-oauth/fallback-eligibility.test.ts`.
+
+### Why an extension could not handle it
+
+- This IS the extension side: the deterministic signal rides the new `ProviderConfig.fallbackEligible`
+  registration field (see `core/extensions/changes.md` 2026-08-19).
+
+### Expected merge conflict zones
+
+- `index.ts` provider registration object; `guardrails.ts` around `resolveCursorCliExecutionPolicy`.
+
 ## 2026-08-19 - Ambient cursor-agent auth becomes explicit opt-in
 
 ### What changed

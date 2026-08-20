@@ -26,7 +26,11 @@ const T0 = 1_700_000_000_000;
  * instead of guessing a fixed number of turns.
  */
 async function settleUntil(predicate: () => boolean, label: string): Promise<void> {
-	for (let i = 0; i < 200; i += 1) {
+	// Deadline-based rather than iteration-counted: 200 event-loop turns proved too few on a
+	// loaded CI shard worker (the dispatch chain includes real fs reads), while a broken chain
+	// still fails fast because the predicate only flips on the observable dispatch itself.
+	const deadline = Date.now() + 10_000;
+	while (Date.now() < deadline) {
 		if (predicate()) return;
 		await new Promise((resolve) => setImmediate(resolve));
 	}

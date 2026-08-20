@@ -1,35 +1,126 @@
 # Changes
 
-## Aborted tool execution releases the run (2026-08-19)
+## 2026-08-20 - End the turn when idle after completed Cursor tools
 
 ### What changed
 
-- `packages/agent/src/agent-loop.ts`: `executePreparedToolCall` races the tool
-  promise against the run's abort signal instead of awaiting the tool alone. An
-  abort that lands after `execute()` was entered now resolves the call as an
-  error tool result ("Tool execution aborted") rather than waiting forever.
+- `packages/agent/src/agent-loop.ts`: `streamAssistantResponse` catch now treats `StreamIdleTimeoutError` after Cursor-resolved tools or buffered exec results as a finished turn (`stopReason: "stop"`) instead of a terminal error.
+- `packages/agent/src/assistant-terminal-state.ts`: `isStreamIdleTimeoutError` and `shouldFinalizeIdleAsStop` decide when that idle is a completed turn versus a real hang.
 
 ### Why
 
-- Tools receive `signal` but nothing forces them to observe it. A tool that
-  ignores its signal and never settles pinned the await permanently: the run
-  emitted no `tool_execution_end` and no `agent_end`, the session never went
-  idle, the session work barrier stayed held, and queued prompts parked behind
-  it while the TUI showed "Running <tool>" with an unresponsive ESC.
-- Aborting before execution already short-circuited in `prepareToolCall`, so
-  only the mid-execution window hung, which made the failure look intermittent.
-- The provider stream already races its reads against abort in
-  `readNextAssistantEvent`; tool execution now matches that contract.
+- After Cursor-resolved tools (or buffered exec results) the parent stream can sit silent until the 300s idle timeout and die as `StreamIdleTimeoutError` even though the child work already finished (issue #997).
 
 ### Why an extension could not handle it
 
-- The await that strands the run lives inside the loop's tool-execution step.
-  No extension hook observes or interrupts that await, and a tool cannot fix it
-  for the tools that ignore their signal.
+- The idle reader and `streamAssistantResponse` catch live inside the agent loop; no extension hook sits between the idle timeout and the terminal assistant message it currently emits.
 
 ### Expected merge conflict zones
 
-- `agent-loop.ts` `executePreparedToolCall` body and the helper directly above it.
+- `packages/agent/src/agent-loop.ts` `streamAssistantResponse` catch
+- `packages/agent/src/assistant-terminal-state.ts` idle helpers appended after `shouldTerminateAssistantTurn`
+
+## 2026-08-20 - Continue when stop still has pending toolCalls
+
+### What changed
+
+- `packages/agent/src/assistant-terminal-state.ts`: `promoteStopWithPendingToolCalls` rewrites assistant `stopReason` from `stop` to `toolUse` when the message still contains `toolCall` blocks; text-only stop stays terminal.
+- `packages/agent/src/agent-loop.ts`: apply that promotion after streaming so pending (non-exec-channel) tool calls execute in the same turn and their results go back to the model. Cursor exec-resolved blocks stay filtered out of the local batch and do not re-enter the loop.
+
+### Why
+
+- Cursor often ends a turn as `stop` while toolCall blocks are still present. The loop treated that as a finished turn and dropped the pending tools (issue #1010).
+
+### Why an extension could not handle it
+
+- Stop-reason classification lives inside the agent loop after the stream returns; no extension hook sits between stream completion and tool-batch execution.
+
+### Expected merge conflict zones
+
+- `packages/agent/src/assistant-terminal-state.ts` promotion helper
+- `packages/agent/src/agent-loop.ts` success path after `streamAssistantResponse`
+
+## 2026-08-20 - Cursor exec handlers bind to the owning run signal
+
+### What changed
+
+- `packages/agent/src/agent-loop.ts`: when `config.cursorExecHandlers` is a factory, the loop now
+  resolves it with the outer owning-run signal (`signal ?? requestAbortController.signal`) instead of
+  the per-request idle-timeout controller, and normal request completion aborts the request-scoped
+  fallback so signal-less direct loop callers cannot leave stale handlers live.
+
+### Why
+
+- The bridge session (`cursor-exec-bridge-session.ts`) verifies ownership by identity against the
+  agent's live run signal. The per-request controller is a different object by construction, so every
+  native Cursor exec frame failed the check and returned `Tool execution has no active run`
+  (issues #979/#1000/#1003, regression from 31a71f0c5).
+
+### Why an extension could not handle it
+
+- The factory resolution happens inside the loop's provider-request assembly; no extension hook sits
+  between `streamAssistantResponse` and the provider options it constructs.
+
+### Expected merge conflict zones
+
+- `agent-loop.ts` provider-request assembly and the request `finally` teardown (fork-only Cursor exec
+  channel; upstream has no cursor provider).
+
+## Finalize idle-after-completed-tools as stop (2026-08-19)
+
+If the provider stream goes idle after Cursor-resolved tool calls (or buffered exec results) and there is no pending local work, the turn ends as `stop` instead of `StreamIdleTimeoutError`. A hang with no tools is still an idle error.
+
+Conflict zone: `agent-loop.ts` `streamAssistantResponse` catch.
+
+## Loop and agent divergence re-established against upstream 59a71b23 (2026-08-19)
+
+### What changed
+
+- `packages/agent/src/agent-loop.ts` stays divergent from the new pin on the fork's own turn machinery:
+  per-request stream bounds (`StreamStartTimeoutError` / `StreamIdleTimeoutError`, the
+  `initialRequestTimeoutMs` / `initialRequestStreamStartTimeoutMs` overrides that apply to the first
+  provider request only, after which the configured idle timeout resumes so a healthy reasoning gap is
+  not bound by the short liveness probe);
+  queued-input recovery (`drainedTerminatingQueue` plus `refreshTerminatingQueueDrain`, which hands
+  steering/follow-up messages back to `config.restorePendingMessages` on every terminating path instead
+  of dropping them); `streamKind: "main"` stamped on the loop's own provider request so auxiliary calls
+  stay distinguishable downstream; thinking-block `startedAt` / `endedAt` stamping from the
+  `thinkingTiming` map at stream-event receipt; the Cursor exec-channel bridge (handler factory resolved
+  with the outer owning-run signal rather than the provider request's idle-timeout signal, mid-stream
+  tool results buffered and appended, `kCursorExecResolved`
+  blocks excluded from the executable tool batch); `withEmptyAssistantRecovery` around the stream fn; and
+  the `prepareNextTurn` merge of `thinkingSelection` and `abortServerSideFallback`.
+- `packages/agent/src/agent.ts` stays divergent on the run-ownership surface those loop features require:
+  `AgentContinuationOptions` (`deferQueuedMessages`, `timeoutMs`, `streamStartTimeoutMs`),
+  `continueWithQueuedMessages()` — queue-first continuation that re-delivers drained steering input when a
+  compaction leaves custom context at the tail — the `clearGeneration` counter and `prepend()` on the
+  message queue, `suppressQueuedMessageDrain()` for one active run, the `restorePendingMessages` wiring
+  back into the queues, and the runtime options carried onto the loop config (`timeoutMs`,
+  `streamStartTimeoutMs`, `removedToolHints`, `resolveUnknownToolCall`, `abortServerSideFallback`,
+  `cursorExecHandlers`).
+
+### Why
+
+- Upstream `59a71b235d` has no per-request stream bounds, no queued-input ownership contract, and no
+  provider-executed-tool channel, so every one of these behaviors re-diverges on merge rather than being
+  reconciled away. The behavioral rationale for each lives in the dated entries below (stream-start and
+  continuation-scoped timeouts 2026-07-29, empty-assistant recovery 2026-07-30, Cursor exec-channel
+  contract 2026-08-16 and 2026-08-18, thinking-selection provenance 2026-08-18); this entry records that
+  the sync to the new pin leaves both files divergent for exactly those reasons.
+
+### Why an extension could not handle it
+
+- Stream-request construction, abort-signal ownership, the pending-message queues, and the tool-batch
+  filter are the loop's own control flow. An extension observes turn events after the fact and cannot
+  bound a stream that never emits, re-park input the loop already drained, or exclude a block from the
+  batch the loop is about to execute.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-loop.ts` `streamAssistantResponse` request construction and the timeout/idle wrappers;
+  the tool-call collection and execution block; the `prepareNextTurn` config merge.
+- MEDIUM: `agent.ts` `runPromptMessages` / `continue` entry points and the loop-config assembly that
+  forwards the fork's runtime options.
 
 ## Cursor exec handlers bind to their owning run (2026-08-18)
 
@@ -38,8 +129,9 @@
 - `packages/agent/src/types.ts`: `AgentLoopConfig.cursorExecHandlers` also
   accepts a `(runSignal: AbortSignal) => CursorExecHandlers` factory.
 - `packages/agent/src/agent-loop.ts`: when a factory is supplied, the loop
-  resolves it with `requestAbortController.signal` — the signal of the run that
-  owns the stream being opened.
+  resolves it with the outer owning-run signal. Direct loop callers without an
+  outer signal retain the request controller as a scoped fallback, and normal
+  request completion aborts that fallback so stale handlers cannot remain live.
 
 ### Why
 

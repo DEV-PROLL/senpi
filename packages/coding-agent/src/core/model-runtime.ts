@@ -533,6 +533,22 @@ export class ModelRuntime implements Models {
 		return this.snapshot.configuredProviders.has(providerId);
 	}
 
+	/**
+	 * Deterministic fallback-expansion gate declared by the provider's own
+	 * registration. Only a definitive `false` excludes; providers without the
+	 * hook, and hooks that throw, stay eligible so expansion never shrinks on
+	 * uncertainty.
+	 */
+	isFallbackEligible(providerId: string): boolean {
+		const hook = this.extensionProviders.get(providerId)?.fallbackEligible;
+		if (typeof hook !== "function") return true;
+		try {
+			return hook() !== false;
+		} catch {
+			return true;
+		}
+	}
+
 	getAuth(providerId: string, overrides?: ModelRuntimeAuthOverrides): Promise<AuthResult | undefined>;
 	getAuth(model: Model<Api>, overrides?: ModelRuntimeAuthOverrides): Promise<AuthResult | undefined>;
 	async getAuth(

@@ -1,32 +1,93 @@
 # changes
 
-## Persistent-memory and mass-ulw graph tips (2026-08-19)
+## Large-session retry indicator cadence (2026-08-20)
 
 ### What changed
 
-- `tips/catalog/memory-tips.ts` (new): 16 tips covering the persistent-memory suite in plain,
-  jargon-free English - what memory is, saving with `/remember` or by just saying it, `/search`,
-  `/memory`, `/init`, `/people`, `/reflect`, `/dream`, `/sleeptime`, `/memfs`,
-  `/memory-repository`, `/doctor`, `/facts`, and `/recompile`.
-- `tips/catalog/dag-tips.ts` (new): 9 tips covering mass-ulw graph orchestration - the one-keyword
-  hook, dependency ordering, parallel waves, per-node categories, the `/dag` status view, journaled
-  resume, and when a graph beats plain parallel subagents.
-- `tips/registry.ts` composes both new catalogs into `TIP_DEFINITIONS` (88 -> 113 tips).
-- Each entry is gated with `requiresCommand` on the command that provides it, mirroring the
-  existing `tasks` gate, so the tips only surface for users whose extension registers them.
-- Coverage: `test/suite/list-tips.test.ts` pins representative IDs, rendered lines, and gates for
-  both catalogs.
+- Retry status indicators now reuse the existing large-session cadence policy instead of advancing their decorative spinner every 80 ms.
+- Sessions below the 1,000-entry boundary retain the existing animated retry indicator, while large sessions keep the independent one-second retry countdown visible.
 
 ### Why
 
-- The rotation advertised workflow skills but never mentioned persistent memory or the dependency-
-  graph orchestration surface, so two of the largest features stayed invisible to users who had
-  them installed.
+- Every retry spinner frame requests a whole-TUI render. During provider rate-limit waits, large persisted sessions could spend an entire JavaScript core repeatedly rebuilding the transcript even though the network retry itself was sleeping.
+
+### Why an extension could not handle it
+
+- Retry lifecycle events, persisted session entry counts, status-indicator construction, and TUI render scheduling are owned by the built-in interactive runtime.
 
 ### Expected merge conflict zones
 
-- LOW: two new catalog files, two import/spread lines in `tips/registry.ts`, and two additive
-  assertions in the existing catalog test.
+- LOW: `interactive-mode.ts` around `showRetryStatusIndicator()`.
+- LOW: `components/status-indicator.ts` around the retry indicator constructor.
+- LOW: `interactive-tui.test.ts` around retry status cadence coverage.
+
+## Canonical interactive notice cards (2026-08-20)
+
+### What changed
+
+- Loaded-resource diagnostics, version and package updates, risky-model and high-reasoning warnings, debug-log completion, and the Earendil announcement text now render through `buildNoticeBox`.
+- Existing notice text, diagnostic severity, changelog hyperlink behavior, package lists, and the optional Earendil image remain intact.
+
+### Why
+
+- These multi-line notice cards used independent borders and foreground styling, so they diverged from the shared transcript notice background and title contract.
+
+### Why an extension could not handle it
+
+- These surfaces are constructed directly by `InteractiveMode` or its built-in announcement component; extensions cannot replace their internal TUI components after insertion.
+
+### Expected merge conflict zones
+
+- MEDIUM: `interactive-mode.ts` loaded-resource diagnostics and notification helpers; LOW: `components/earendil-announcement.ts` textual banner construction.
+
+## Interactive chrome, queued-input recovery, and smooth-streaming settings after the 59a71b23 pin (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` stays
+  divergent from upstream pin
+  `59a71b235dadb4ad0d67557a8abb0aaa093e68b4`. It keeps the fork's
+  compaction queue recovery: on `compaction_end` a completed compaction
+  flushes the queue, a `willRetry` outcome defers admission and reports
+  "will send with the next turn" with a `compaction_queue_deferred` session
+  log, and a compaction that neither completed nor will retry restores the
+  held messages into the editor (`restoreQueuedMessagesToEditor()`) with a
+  `compaction_queue_restored` log — where upstream only clears the queue.
+  Image-bearing submissions during compaction are still dropped with a
+  visible status because the queue carries text only.
+- `interactive-mode.ts` also keeps the pluggable chrome
+  (`InteractiveChrome`/`GrokChrome`, chrome-owned editor, footer, welcome
+  content and root arrangement), the `StreamingRevealController` smooth
+  streaming path with `applySmoothStreamingRenderFps()`, the tips runtime
+  (`TIP_DEFINITIONS`, startup/working tips, `recordTipShown()`), the
+  shimmering working-status and tool-hook status rows with `APP_TITLE`
+  terminal titles, keybindings-file editing, and extension notice boxes.
+- `packages/coding-agent/src/modes/interactive/components/settings-selector.ts`
+  keeps the fork's `Smooth streaming` and `Streaming fps` rows in
+  `SettingsConfig`/`SettingsCallbacks` (with the 30/60/90/120 value list and
+  `onSmoothStreamingChange`/`onSmoothStreamingFpsChange` dispatch) and the
+  `xhigh` thinking description that names native xhigh effort, both absent
+  from the new pinned tree.
+
+### Why
+
+- Queued steering input is user text that must never be silently discarded
+  when compaction fails or retries; the chrome, tips, smooth streaming, and
+  status animation are fork product surfaces, and the settings selector must
+  expose the fork-only settings that back them.
+
+### Why an extension could not handle it
+
+- The compaction queue, chrome selection, and streaming reveal are private
+  `InteractiveMode` state driven by session events; the settings selector is
+  a built-in TUI component wired directly to `SettingsManager`.
+
+### Expected merge conflict zones
+
+- MEDIUM: the `compaction_end` case in the session-event switch of
+  `interactive-mode.ts`, and its constructor/render wiring where chrome and
+  streaming reveal are installed.
+- LOW: the settings row list and switch arms in `settings-selector.ts`.
 
 ## Pasted image markers keep canonical numbering and survive undo with their payloads (2026-08-18)
 
@@ -2256,3 +2317,17 @@ The tip line was teaching a small slice of the product while most of the surface
 
 - MEDIUM: the paste handler, submit path, and editor wiring in `packages/coding-agent/src/modes/interactive/interactive-mode.ts`.
 - LOW: `packages/coding-agent/src/modes/interactive/editor-paste-transfer.ts` (small transfer helper, additive return value).
+
+## 2026-08-20 — render-stall fixes: mode-switch detach + reload-scoped extension UI reset
+
+- `switchTuiMode()` now moves components to the new renderer with
+  `detachAll()` instead of `clear()`. Clearing disposed the live components
+  (tool spinners, reveals, extension widgets) and remounted the dead
+  instances, killing every interval they owned: the TUI froze until an input
+  event forced a frame. Regression: `test/interactive-tui.test.ts`
+  ("switchTuiMode component lifecycle").
+- `handleReloadCommand()` resets extension UI inside reload()'s
+  `beforeSessionStart` callback instead of up front, so a vetoed or failed
+  reload no longer destroys live extension footers/widgets/tickers.
+  Regression: `test/interactive-tui.test.ts` ("handleReloadCommand extension
+  UI lifecycle").

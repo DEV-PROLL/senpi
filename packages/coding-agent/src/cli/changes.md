@@ -1,5 +1,36 @@
 # changes
 
+## Fork CLI flags and branded help retained over upstream 59a71b23 (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/cli/args.ts` stays divergent from upstream
+  `59a71b235dadb4ad0d67557a8abb0aaa093e68b4` after the pin advance: `parseArgs()` keeps the fork flags
+  `--list-tips`, `--multi-session`, and the gated `--grok-neo` (accepted only when `isGrokNeoEnabled()` from
+  `grok-neo-gate.ts` allows it, with the matching help row emitted conditionally), and `printHelp()` takes the
+  `grokNeoEnabled` parameter that drives that row.
+- `args.ts` help text remains branded and fork-scoped: commands render through `APP_NAME` (including
+  `senpi update [source|self|senpi]`), the `list`/`config` rows carry the fork's `--approve`/`--no-approve`
+  arguments, the `app-server` command and daemon rows plus their usage examples are listed, `--theme` documents
+  register-not-select semantics, and the environment block keeps `OLLAMA_API_KEY`, `OPENGATEWAY_API_KEY`,
+  `ALIBABA_TOKEN_PLAN_API_KEY`, and the `PI_RULES_*` caps.
+
+### Why
+
+- The flags and help rows describe fork-only runtime surfaces (tips catalog, grok chrome, multi-session RPC host,
+  app-server transport, fork-only providers, rules limits) that the new upstream tree has no equivalent for, so
+  taking upstream's parser and help template verbatim would silently drop working CLI entry points.
+
+### Why an extension could not handle it
+
+- Argument parsing and the top-level help surface run before extension flags are registered; extension-provided
+  flags are appended to this template, not able to replace it.
+
+### Expected merge conflict zones
+
+- MEDIUM: the `printHelp()` template literal (upstream edits command/option/environment rows frequently);
+  LOW: the `Args` interface fields and the flag branches in the `parseArgs()` scan loop.
+
 ## Repository audit baseline for the CLI tracker (2026-08-17)
 
 ### What changed
