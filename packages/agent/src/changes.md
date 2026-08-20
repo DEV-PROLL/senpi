@@ -1,5 +1,25 @@
 # Changes
 
+## 2026-08-20 - End the turn when idle after completed Cursor tools
+
+### What changed
+
+- `packages/agent/src/agent-loop.ts`: `streamAssistantResponse` catch now treats `StreamIdleTimeoutError` after Cursor-resolved tools or buffered exec results as a finished turn (`stopReason: "stop"`) instead of a terminal error.
+- `packages/agent/src/assistant-terminal-state.ts`: `isStreamIdleTimeoutError` and `shouldFinalizeIdleAsStop` decide when that idle is a completed turn versus a real hang.
+
+### Why
+
+- After Cursor-resolved tools (or buffered exec results) the parent stream can sit silent until the 300s idle timeout and die as `StreamIdleTimeoutError` even though the child work already finished (issue #997).
+
+### Why an extension could not handle it
+
+- The idle reader and `streamAssistantResponse` catch live inside the agent loop; no extension hook sits between the idle timeout and the terminal assistant message it currently emits.
+
+### Expected merge conflict zones
+
+- `packages/agent/src/agent-loop.ts` `streamAssistantResponse` catch
+- `packages/agent/src/assistant-terminal-state.ts` idle helpers appended after `shouldTerminateAssistantTurn`
+
 ## 2026-08-20 - Continue when stop still has pending toolCalls
 
 ### What changed
@@ -45,6 +65,12 @@
 
 - `agent-loop.ts` provider-request assembly and the request `finally` teardown (fork-only Cursor exec
   channel; upstream has no cursor provider).
+
+## Finalize idle-after-completed-tools as stop (2026-08-19)
+
+If the provider stream goes idle after Cursor-resolved tool calls (or buffered exec results) and there is no pending local work, the turn ends as `stop` instead of `StreamIdleTimeoutError`. A hang with no tools is still an idle error.
+
+Conflict zone: `agent-loop.ts` `streamAssistantResponse` catch.
 
 ## Loop and agent divergence re-established against upstream 59a71b23 (2026-08-19)
 
