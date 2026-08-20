@@ -49,9 +49,17 @@ function endStreamErrorFrame(code: string, message: string): Buffer {
 }
 
 let server: http2.Http2Server | undefined;
+let sessions: http2.ServerHttp2Session[] = [];
 
 async function startServer(handler: (stream: http2.ServerHttp2Stream) => void): Promise<string> {
 	server = http2.createServer();
+	sessions = [];
+	// These cases drive several stream() calls against one server, so each leaves
+	// an idle h2 session behind. server.close() waits for every session to end and
+	// would never resolve, so the sessions are tracked and destroyed at teardown.
+	server.on("session", (session) => {
+		sessions.push(session);
+	});
 	server.on("stream", (stream: http2.ServerHttp2Stream) => {
 		stream.respond({ ":status": 200, "content-type": "application/connect+proto" });
 		handler(stream);
@@ -82,8 +90,12 @@ describe("cursor-agent zero-token RE retry", () => {
 
 	afterEach(async () => {
 		if (!server) return;
-		await new Promise<void>((resolve) => server!.close(() => resolve()));
+		const closing = server;
 		server = undefined;
+		for (const session of sessions.splice(0)) {
+			session.destroy();
+		}
+		await new Promise<void>((resolve) => closing.close(() => resolve()));
 	});
 
 	// The compact-before-rotate policy (#1015) reacts to a SURFACED 0-token RE in
