@@ -388,3 +388,137 @@ describe("clear-on-shrink status spacing", () => {
 		}
 	});
 });
+
+type RetryStatusEvent = {
+	attempt: number;
+	maxAttempts: number;
+	delayMs: number;
+};
+
+type RetryStatusContext = {
+	ui: TUI;
+	statusContainer: Container;
+	activeStatusIndicator: (Component & { dispose(): void }) | undefined;
+	runtimeHost: {
+		session: {
+			sessionManager: { getEntries(): readonly unknown[] };
+		};
+	};
+};
+
+type RetryInteractiveModePrototype = {
+	showRetryStatusIndicator(this: RetryStatusContext, event: RetryStatusEvent & { type: "auto_retry_start" }): void;
+	showSummarizationRetryStatusIndicator(
+		this: RetryStatusContext,
+		event: RetryStatusEvent & { type: "summarization_retry_scheduled" },
+	): void;
+};
+
+const retryInteractiveModePrototype = InteractiveMode.prototype as unknown as RetryInteractiveModePrototype;
+
+function createRetryStatusContext(sessionEntryCount: number): RetryStatusContext {
+	const ui = createInteractiveTui({
+		tuiMode: "regular",
+		showHardwareCursor: false,
+		logDirectory: "/tmp",
+		terminal: new RecordingTerminal(80, 24),
+	});
+	return Object.assign(Object.create(InteractiveMode.prototype), {
+		ui,
+		statusContainer: new Container(),
+		activeStatusIndicator: undefined,
+		runtimeHost: {
+			session: {
+				sessionManager: {
+					getEntries: () => Array.from({ length: sessionEntryCount }, () => ({})),
+				},
+			},
+		},
+	}) as RetryStatusContext;
+}
+
+function renderRetryStatus(context: RetryStatusContext): string {
+	const component = context.statusContainer.children[0];
+	if (!component) throw new Error("retry status indicator was not mounted");
+	return component.render(80).join("\n");
+}
+
+describe("retry indicator cadence", () => {
+	it("throttles retry indicator animation for large sessions", () => {
+		initTheme("dark");
+		vi.useFakeTimers();
+		const context = createRetryStatusContext(1_000);
+
+		try {
+			retryInteractiveModePrototype.showRetryStatusIndicator.call(context, {
+				type: "auto_retry_start",
+				attempt: 1,
+				maxAttempts: 3,
+				delayMs: 5_000,
+			});
+			const initialFrame = renderRetryStatus(context);
+
+			vi.advanceTimersByTime(999);
+			expect(renderRetryStatus(context)).toBe(initialFrame);
+
+			vi.advanceTimersByTime(1);
+			expect(renderRetryStatus(context)).not.toBe(initialFrame);
+		} finally {
+			context.activeStatusIndicator?.dispose();
+			context.ui.stop();
+			vi.clearAllTimers();
+			vi.useRealTimers();
+		}
+	});
+
+	it("keeps retry indicator animation for small sessions", () => {
+		initTheme("dark");
+		vi.useFakeTimers();
+		const context = createRetryStatusContext(999);
+
+		try {
+			retryInteractiveModePrototype.showRetryStatusIndicator.call(context, {
+				type: "auto_retry_start",
+				attempt: 1,
+				maxAttempts: 3,
+				delayMs: 5_000,
+			});
+			const initialFrame = renderRetryStatus(context);
+
+			vi.advanceTimersByTime(80);
+			expect(renderRetryStatus(context)).not.toBe(initialFrame);
+		} finally {
+			context.activeStatusIndicator?.dispose();
+			context.ui.stop();
+			vi.clearAllTimers();
+			vi.useRealTimers();
+		}
+	});
+
+	it("throttles summarization retry animation for large sessions", () => {
+		initTheme("dark");
+		vi.useFakeTimers();
+		const context = createRetryStatusContext(1_000);
+
+		try {
+			retryInteractiveModePrototype.showSummarizationRetryStatusIndicator.call(context, {
+				type: "summarization_retry_scheduled",
+				attempt: 1,
+				maxAttempts: 3,
+				delayMs: 5_000,
+			});
+			const initialFrame = renderRetryStatus(context);
+
+			vi.advanceTimersByTime(999);
+			expect(renderRetryStatus(context)).toBe(initialFrame);
+
+			vi.advanceTimersByTime(1);
+			expect(renderRetryStatus(context)).not.toBe(initialFrame);
+		} finally {
+			context.activeStatusIndicator?.dispose();
+			context.ui.stop();
+			vi.clearAllTimers();
+			vi.useRealTimers();
+		}
+	});
+});

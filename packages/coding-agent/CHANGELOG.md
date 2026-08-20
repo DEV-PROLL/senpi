@@ -7,9 +7,20 @@
 ### Fixed
 
 - Native Cursor sessions no longer compact mid-turn while a Run is live: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`, and blocking/generated compaction refuse those providers until the session is idle, so a mid-turn compact cannot poison `conversationId` and trigger 0-token `resource_exhausted` (#984).
+- The Cursor exec bridge fails closed when a session bridge has no captured owning run, and rechecks
+  run ownership after awaited preflight work so a run that ends during an approval prompt cannot start
+  a tool side effect afterward.
+- Retry waits no longer animate decorative spinner frames at the default 80 ms cadence for sessions with at least 1,000 persisted entries, while the one-second countdown and small-session animation remain intact.
 - Settings hot-reload no longer cascades across sessions that share an agent directory when another session saves a routine preference such as `defaultModel` during a reload. The replacement watcher now compares reload-window changes with the request-time settings snapshot, so routine-only writes remain suppressed while substantive configuration edits still reload.
 - Settings hot-reload now clears the reload handoff unconditionally after `requestReload()` settles, preventing a stale plaintext settings snapshot from surviving when the reload successor omits the config-reload builtin.
 - Compaction no longer treats implausible Cursor billed usage as context size: when the local transcript estimate is at least 50k and billed usage is more than 8× that estimate, the threshold uses the estimate so a multi-million dashboard-cumulative cacheRead cannot force a useless compact (#983).
+- Goal continuations are no longer stripped down to the newest one on every provider request. Rewriting
+  already-sent history invalidated the provider's conversation cache prefix, so a long-running team-mode
+  session paid a full uncached re-read every turn and drove itself into 429 storms. Continuation history is
+  now append-only and bounded by normal compaction instead of per-request deletion.
+- Same-model 429 retries now floor every wait with the exponential schedule (`baseDelayMs * 2^(attempt-1)`).
+  A provider that answers each rate-limit with the same tiny `retry-after` hint can no longer pin the retry
+  cadence at a few milliseconds; longer provider hints still take precedence.
 
 ### Added
 
