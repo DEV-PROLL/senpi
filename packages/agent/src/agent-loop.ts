@@ -17,6 +17,7 @@ import {
 import {
 	createTerminalFailureAssistantMessage,
 	normalizeTerminalAssistantMessage,
+	promoteStopWithPendingToolCalls,
 	shouldTerminateAssistantTurn,
 } from "./assistant-terminal-state.ts";
 import { getDefaultStreamFn, withEmptyAssistantRecovery } from "./stream-fn.ts";
@@ -250,7 +251,7 @@ async function runLoop(
 					}
 				: config;
 			const streamIdleTimeoutMs = isInitialProviderRequest ? config.timeoutMs : requestConfig.timeoutMs;
-			const { message, providerToolResults } = await streamAssistantResponse(
+			const streamed = await streamAssistantResponse(
 				currentContext,
 				requestConfig,
 				signal,
@@ -258,6 +259,8 @@ async function runLoop(
 				withEmptyAssistantRecovery(requestConfig.model, streamFunction),
 				streamIdleTimeoutMs,
 			);
+			const message = promoteStopWithPendingToolCalls(streamed.message);
+			const providerToolResults = streamed.providerToolResults;
 			newMessages.push(message);
 
 			// Provider-resolved (Cursor exec-channel) tool results pair with

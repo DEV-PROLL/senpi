@@ -1,5 +1,25 @@
 # Changes
 
+## 2026-08-20 - Continue when stop still has pending toolCalls
+
+### What changed
+
+- `packages/agent/src/assistant-terminal-state.ts`: `promoteStopWithPendingToolCalls` rewrites assistant `stopReason` from `stop` to `toolUse` when the message still contains `toolCall` blocks; text-only stop stays terminal.
+- `packages/agent/src/agent-loop.ts`: apply that promotion after streaming so pending (non-exec-channel) tool calls execute in the same turn and their results go back to the model. Cursor exec-resolved blocks stay filtered out of the local batch and do not re-enter the loop.
+
+### Why
+
+- Cursor often ends a turn as `stop` while toolCall blocks are still present. The loop treated that as a finished turn and dropped the pending tools (issue #1010).
+
+### Why an extension could not handle it
+
+- Stop-reason classification lives inside the agent loop after the stream returns; no extension hook sits between stream completion and tool-batch execution.
+
+### Expected merge conflict zones
+
+- `packages/agent/src/assistant-terminal-state.ts` promotion helper
+- `packages/agent/src/agent-loop.ts` success path after `streamAssistantResponse`
+
 ## 2026-08-20 - Cursor exec handlers bind to the owning run signal
 
 ### What changed
