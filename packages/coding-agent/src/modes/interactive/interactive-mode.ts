@@ -195,6 +195,7 @@ import { applyKeybindingsFileEdit, seedKeybindingsFile } from "./keybindings-com
 import { refreshModelCatalogs } from "./model-catalog-refresh.ts";
 import { getModelSearchText } from "./model-search.ts";
 import { isRiskyMainModel, RISKY_MAIN_MODEL_WARNING } from "./risky-main-model-warning.ts";
+import { splitTrailingAssistantContent } from "./split-trailing-assistant-text.ts";
 import { DEFAULT_SMOOTH_FPS, StreamingRevealController } from "./streaming-reveal.ts";
 import {
 	getAvailableThemes,
@@ -755,6 +756,7 @@ export class InteractiveMode {
 
 	// Streaming message tracking
 	private streamingComponent: AssistantMessageComponent | undefined = undefined;
+	private trailingAssistantComponent: AssistantMessageComponent | undefined = undefined;
 	private streamingMessage: AssistantMessage | undefined = undefined;
 	private readonly streamingReveal: StreamingRevealController;
 	private readonly toolArgsReveal: ToolArgsRevealController;
@@ -4217,7 +4219,10 @@ export class InteractiveMode {
 			case "message_update":
 				if (this.streamingComponent && event.message.role === "assistant") {
 					this.streamingMessage = event.message;
-					this.streamingReveal.setTarget(this.streamingMessage);
+					{
+						const { head } = splitTrailingAssistantContent(event.message.content);
+						this.streamingReveal.setTarget({ ...event.message, content: head });
+					}
 
 					for (const content of this.streamingMessage.content) {
 						if (content.type === "toolCall") {
@@ -4237,6 +4242,7 @@ export class InteractiveMode {
 							}
 						}
 					}
+					this.syncTrailingAssistantText(event.message);
 					this.ui.requestRender();
 				}
 				break;
@@ -4259,7 +4265,8 @@ export class InteractiveMode {
 						errorMessage = abortedErrorLabel(undefined, this.session.retryAttempt);
 						this.streamingMessage.errorMessage = errorMessage;
 					}
-					this.streamingComponent.updateContent(this.streamingMessage, false);
+					this.syncTrailingAssistantText(this.streamingMessage);
+					this.trailingAssistantComponent = undefined;
 					this.addContinuityNotice(this.streamingMessage);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
@@ -4879,6 +4886,36 @@ export class InteractiveMode {
 				void exhaustive;
 			}
 		}
+	}
+
+	private syncTrailingAssistantText(message: AssistantMessage): void {
+		if (!this.streamingComponent) return;
+		const { head, tail } = splitTrailingAssistantContent(message.content);
+		this.streamingComponent.updateContent({ ...message, content: head }, true);
+		if (tail.length === 0) {
+			if (this.trailingAssistantComponent) {
+				this.chatContainer.detachChild(this.trailingAssistantComponent);
+				this.trailingAssistantComponent = undefined;
+			}
+			return;
+		}
+		const tailMessage: AssistantMessage = { ...message, content: tail };
+		if (!this.trailingAssistantComponent) {
+			this.trailingAssistantComponent = new AssistantMessageComponent(
+				tailMessage,
+				this.hideThinkingBlock,
+				this.getMarkdownThemeWithSettings(),
+				this.hiddenThinkingLabel,
+				this.outputPad,
+				this.getMarkdownTransformers(),
+			);
+			this.trailingAssistantComponent.setExpanded(this.toolOutputExpanded);
+			this.chatContainer.addChild(this.trailingAssistantComponent);
+			return;
+		}
+		this.trailingAssistantComponent.updateContent(tailMessage, true);
+		this.chatContainer.detachChild(this.trailingAssistantComponent);
+		this.chatContainer.addChild(this.trailingAssistantComponent);
 	}
 
 	private createToolExecutionComponent(toolName: string, toolCallId: string, args: unknown): ToolExecutionComponent {

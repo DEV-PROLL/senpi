@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Assistant text that arrives after the last tool call now renders below the tool cards instead of updating the blob above the stack, so approval questions stay visible (#990).
 - Late Cursor `tool_execution_end` events now create a TUI tool card when none is pending, so a result is not rendered without a card (#1011).
 - Session title generation now uses the session model's summarization auth instead of remapped compaction auth, so an explicit compaction model no longer produces `unauthenticated` Cursor title calls (#980).
 - Cursor 0-token `resource_exhausted` retries the same model after remint/compact instead of falling back to another provider, and too-small overflow compact now drops to the last user turn.
