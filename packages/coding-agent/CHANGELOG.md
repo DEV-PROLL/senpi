@@ -6,9 +6,43 @@
 
 ### Fixed
 
+- Compaction no longer treats implausible Cursor billed usage as context size: when the local transcript estimate is at least 50k and billed usage is more than 8× that estimate, the threshold uses the estimate so a multi-million dashboard-cumulative cacheRead cannot force a useless compact (#983).
+
+### Added
+
+- The notice-box primitives are now part of the public API: `buildNoticeBox`, `noticeMessageRenderer`,
+  `noticeEntryRenderer`, and the `NoticeSpec`/`NoticeLine`/`NoticeTone` types are exported from the package
+  entry so extensions can render transcript notices in the shared visual family instead of re-implementing it.
+
+### Changed
+
+- Every remaining divergent transcript card now renders through the shared notice box (`customMessageBg`
+  background block, bold tone title, dim body): loaded-resource conflict diagnostics, the update-available
+  and package-update notifications, the risky-main-model and high-reasoning warnings, the rules banner,
+  the prompt URL widget card, and the earendil announcement. Visible text is unchanged.
+
+### Fixed
+
+### Removed
+
+## [2026.8.19] - 2026-08-19
+
+### Breaking Changes
+
+### Fixed
+
+- Implicit fallback expansion no longer routes through provider lanes that are guaranteed to refuse:
+  a registered provider may declare itself ineligible (new `ProviderConfig.fallbackEligible`), and the
+  cursor-cli-oauth lane does so while its `--force` acknowledgement is missing or its kill switch is
+  set, as does claude-sdk-oauth under a verbatim `enabled: false`. Previously a credentialed but
+  unacknowledged cursor-cli-oauth lane ranked first in the shipped `claude-opus-5` fallback chain and
+  hard-errored on every hop. Explicit model selection and `/login` are unaffected.
 - Auto-compaction can no longer be starved by a provider that reports a small context while the
   local transcript keeps growing (native Cursor's server-side summarized usage): the threshold
   check now takes the larger of the provider-reported context and the local transcript estimate.
+- Four coding-agent test suites no longer depend on parallel-load timing: the footer git watcher, the MCP
+  connection state machine, the cross-process OAuth refresh race control case, and resource-loader extension
+  precedence now await the exact signal or force the interleaving they assert on. Four fixed sleeps removed.
 
 ### Added
 
@@ -26,11 +60,16 @@
   a live countdown in the footer. `/loop stop|status|pause|resume` manage them.
 
 ### Changed
+- Upstream sync (`badlogic/pi-mono` main@`59a71b23`): adopted cache-friendly compaction primitives, centralized compaction summary requests, compaction routing sessions, compaction usage notices, tool disabling during summarization, extension loading in Node SEA hosts, and nested markdown skill discovery. The fork's compaction affinity/request-identity split, queued-input recovery, and interactive rendering are unchanged.
+- Provider/model changes from `@earendil-works/pi-ai` above apply to the CLI: xAI Responses routing with Grok 4.6 default, generalized thinking-token budgets, and the refreshed model catalog.
 
 ### Fixed
 
+- macOS no longer shows `"senpi_pty.darwin-arm64.node" Not Opened — Apple could not verify ... is free of malware` and the CLI no longer hangs while that dialog waits. When a shipped native PTY prebuild carries the `com.apple.quarantine` attribute (npm tarballs fetched through a browser, AirDrop, or archive extraction), the loader now detects it before `dlopen()` and reports the existing `native-unavailable` diagnostic, so terminals degrade to the pipe fallback instead of blocking the process on Gatekeeper. The attribute is never stripped — that would silently disable the user's malware protection — and non-quarantined installs keep loading the real native PTY unchanged.
 - The footer's git branch keeps updating in reftable repositories on systems where `fs.watch` cannot register (descriptor limits, unsupported filesystems): the `tables.list` polling fallback is now armed even when watcher creation fails, instead of being skipped by an early return ([#970](https://github.com/code-yeongyu/senpi/pull/970)).
 - Pasting multiple images in one turn now ships every image: the second and later pastes no longer write into an orphaned payload map, markers pasted in front of existing ones renumber to stay `[Image #1]`..`[Image #k]` in reading order (so `look_at("[Image #N]")` resolves to the exact image the user sees), undo after deleting a marker restores its image along with the marker, and submitting pasted images during compaction now reports the drop instead of silently discarding them.
+- Subagent project-trust confirmation is kept for untrusted interactive projects while trusted projects skip it, restoring the intended trust boundary after the upstream sync.
+- Post-compaction queued input flushes exactly once again after the compaction rework, and package-manager version comparison uses `semver.gt` so newer installed versions no longer trigger redundant npm update calls.
 
 ### Removed
 

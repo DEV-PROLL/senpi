@@ -8,7 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
-import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@earendil-works/pi-ai/compat";
+import type { AssistantMessage, ImageContent, Message, Model, TextContent, Usage } from "@earendil-works/pi-ai/compat";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -85,7 +85,7 @@ import type {
 	ProjectTrustContext,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
-import { buildNoticeBox, type NoticeSpec } from "../../core/extensions/notice/index.ts";
+import { buildNoticeBox, type NoticeLine, type NoticeSpec } from "../../core/extensions/notice/index.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 import { appendHiddenTuiStdout } from "../../core/hidden-stdout-log.ts";
 import { buildHighReasoningWarning } from "../../core/high-reasoning-warning.ts";
@@ -235,6 +235,12 @@ interface Expandable {
 	setExpanded(expanded: boolean): void;
 }
 
+function llamaCppPostLoginGuidance(actionLabel: string, loadedModelCount: number): string {
+	return loadedModelCount === 0
+		? `${actionLabel}. No llama.cpp models are loaded. Use /llama to load a model, then /model to select it.`
+		: `${actionLabel}. Use /model to select a loaded llama.cpp model, or /llama to manage models.`;
+}
+
 function isExpandable(obj: unknown): obj is Expandable {
 	return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
 }
@@ -284,10 +290,20 @@ function formatToolHookTerminalTitle(event: ToolHookStatusStartEvent): string {
 	return `${APP_TITLE} - ${hookName}: ${statusMessage}`;
 }
 
-type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }>;
+type CompactionCostNotice = {
+	type: "compaction_cost";
+	kind: "compaction" | "branch_summary";
+	usage: Usage;
+};
+
+type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }> | CompactionCostNotice;
 
 function isCustomSessionEntry(item: RenderSessionItem): item is Extract<SessionEntry, { type: "custom" }> {
 	return "type" in item && item.type === "custom";
+}
+
+function isCompactionCostNotice(item: RenderSessionItem): item is CompactionCostNotice {
+	return "type" in item && item.type === "compaction_cost";
 }
 
 const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
@@ -298,10 +314,26 @@ const LARGE_SESSION_WORKING_STATUS_MESSAGE_INTERVAL_MS = 1_000;
 const FALLBACK_STATUS_KEY = "fallback";
 const RGB_FOREGROUND_PATTERN = /\x1b\[38;2;(\d+);(\d+);(\d+)m/;
 
-const DARK_DEFAULT_WORKING_TEXT_RGB: WorkingStatusRgbColor = { r: 229, g: 229, b: 231 };
-const LIGHT_DEFAULT_WORKING_TEXT_RGB: WorkingStatusRgbColor = { r: 17, g: 17, b: 17 };
-const DARK_DEFAULT_WORKING_BASE_RGB: WorkingStatusRgbColor = { r: 102, g: 102, b: 102 };
-const LIGHT_DEFAULT_WORKING_BASE_RGB: WorkingStatusRgbColor = { r: 118, g: 118, b: 118 };
+const DARK_DEFAULT_WORKING_TEXT_RGB: WorkingStatusRgbColor = {
+	r: 229,
+	g: 229,
+	b: 231,
+};
+const LIGHT_DEFAULT_WORKING_TEXT_RGB: WorkingStatusRgbColor = {
+	r: 17,
+	g: 17,
+	b: 17,
+};
+const DARK_DEFAULT_WORKING_BASE_RGB: WorkingStatusRgbColor = {
+	r: 102,
+	g: 102,
+	b: 102,
+};
+const LIGHT_DEFAULT_WORKING_BASE_RGB: WorkingStatusRgbColor = {
+	r: 118,
+	g: 118,
+	b: 118,
+};
 
 function parseAnsiRgbForeground(ansi: string): WorkingStatusRgbColor | undefined {
 	const match = RGB_FOREGROUND_PATTERN.exec(ansi);
@@ -526,7 +558,11 @@ async function attachClipboardImage(
 	// overwrite a surviving payload (the new marker had no payload when the
 	// reconcile ran, so nothing was keyed onto its slot).
 	const id = deps.editor.insertImageMarker();
-	deps.pendingImages.set(id, { type: "image", data: processed.data, mimeType: processed.mimeType });
+	deps.pendingImages.set(id, {
+		type: "image",
+		data: processed.data,
+		mimeType: processed.mimeType,
+	});
 	deps.requestRender();
 	return true;
 }
@@ -1133,7 +1169,11 @@ export class InteractiveMode {
 
 		previousUi.stop({ preserveScreen: true });
 		previousUi.setFocus(null);
-		previousUi.clear();
+		// Detach, not clear: the same live components (spinners, reveals, extension
+		// widgets) are remounted on nextUi below. clear() would dispose them,
+		// killing every interval they own while they keep rendering static frames
+		// forever — the TUI then never self-repaints until an input event forces one.
+		previousUi.detachAll();
 		if (TuiLayouts.isViewportTUI(previousUi)) previousUi.setLayoutRoot(undefined);
 
 		const nextUi = createInteractiveTui({
@@ -1209,7 +1249,13 @@ export class InteractiveMode {
 			{ component: this.footerContainer, shrink: 1, minSize: 1 },
 		]);
 		this.fullscreenLayoutRoot = new TuiLayouts.VStack([
-			{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+			{
+				component: this.transcriptScrollView,
+				basis: 0,
+				grow: 1,
+				shrink: 1,
+				minSize: 1,
+			},
 			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
 		]);
 		const rootComponents = [
@@ -1680,7 +1726,10 @@ export class InteractiveMode {
 		}
 
 		const seeded = seedKeybindingsFile(configPath, this.keybindings);
-		const edit = await editFileInExternalEditor({ command: editorCommand, path: configPath });
+		const edit = await editFileInExternalEditor({
+			command: editorCommand,
+			path: configPath,
+		});
 		if (edit.status === "launch-failed") {
 			// The editor never ran, so a file we just seeded carries no user content.
 			if (seeded) fs.rmSync(configPath, { force: true });
@@ -1902,7 +1951,11 @@ export class InteractiveMode {
 		}
 
 		if (source === "cli") {
-			return { label: "path", scopeLabel: scope === "temporary" ? "temp" : undefined, color: "muted" };
+			return {
+				label: "path",
+				scopeLabel: scope === "temporary" ? "temp" : undefined,
+				color: "muted",
+			};
 		}
 
 		const scopeLabel =
@@ -2019,8 +2072,11 @@ export class InteractiveMode {
 		return this.formatDisplayPath(p);
 	}
 
-	private formatDiagnostics(diagnostics: readonly ResourceDiagnostic[], sourceInfos: Map<string, SourceInfo>): string {
-		const lines: string[] = [];
+	private formatDiagnostics(
+		diagnostics: readonly ResourceDiagnostic[],
+		sourceInfos: Map<string, SourceInfo>,
+	): NoticeLine[] {
+		const lines: NoticeLine[] = [];
 
 		// Group collision diagnostics by name
 		const collisions = new Map<string, ResourceDiagnostic[]>();
@@ -2040,36 +2096,33 @@ export class InteractiveMode {
 		for (const [name, collisionList] of collisions) {
 			const first = collisionList[0]?.collision;
 			if (!first) continue;
-			lines.push(theme.fg("warning", `  "${name}" collision:`));
-			lines.push(
-				theme.fg(
-					"dim",
-					`    ${theme.fg("success", "✓")} ${this.formatPathWithSource(first.winnerPath, this.findSourceInfoForPath(first.winnerPath, sourceInfos))}`,
-				),
-			);
+			lines.push({ text: `  "${name}" collision:`, tone: "warning" });
+			lines.push({
+				text: `    ✓ ${this.formatPathWithSource(first.winnerPath, this.findSourceInfoForPath(first.winnerPath, sourceInfos))}`,
+				tone: "warning",
+			});
 			for (const d of collisionList) {
 				if (d.collision) {
-					lines.push(
-						theme.fg(
-							"dim",
-							`    ${theme.fg("warning", "✗")} ${this.formatPathWithSource(d.collision.loserPath, this.findSourceInfoForPath(d.collision.loserPath, sourceInfos))} (skipped)`,
-						),
-					);
+					lines.push({
+						text: `    ✗ ${this.formatPathWithSource(d.collision.loserPath, this.findSourceInfoForPath(d.collision.loserPath, sourceInfos))} (skipped)`,
+						tone: "warning",
+					});
 				}
 			}
 		}
 
 		for (const d of otherDiagnostics) {
+			const tone = d.type === "error" ? "error" : "warning";
 			if (d.path) {
 				const formattedPath = this.formatPathWithSource(d.path, this.findSourceInfoForPath(d.path, sourceInfos));
-				lines.push(theme.fg(d.type === "error" ? "error" : "warning", `  ${formattedPath}`));
-				lines.push(theme.fg(d.type === "error" ? "error" : "warning", `    ${d.message}`));
+				lines.push({ text: `  ${formattedPath}`, tone });
+				lines.push({ text: `    ${d.message}`, tone });
 			} else {
-				lines.push(theme.fg(d.type === "error" ? "error" : "warning", `  ${d.message}`));
+				lines.push({ text: `  ${d.message}`, tone });
 			}
 		}
 
-		return lines.join("\n");
+		return lines;
 	}
 
 	private showLoadedResources(options?: {
@@ -2167,7 +2220,10 @@ export class InteractiveMode {
 			const skills = skillsResult.skills;
 			if (skills.length > 0) {
 				const groups = this.buildScopeGroups(
-					skills.map((skill) => ({ path: skill.filePath, sourceInfo: skill.sourceInfo })),
+					skills.map((skill) => ({
+						path: skill.filePath,
+						sourceInfo: skill.sourceInfo,
+					})),
 				);
 				const skillList = this.formatScopeGroups(groups, {
 					formatPath: (item) => this.formatDisplayPath(item.path),
@@ -2180,7 +2236,10 @@ export class InteractiveMode {
 			const templates = this.session.promptTemplates;
 			if (templates.length > 0) {
 				const groups = this.buildScopeGroups(
-					templates.map((template) => ({ path: template.filePath, sourceInfo: template.sourceInfo })),
+					templates.map((template) => ({
+						path: template.filePath,
+						sourceInfo: template.sourceInfo,
+					})),
 				);
 				const templateByPath = new Map(templates.map((t) => [t.filePath, t]));
 				const templateList = this.formatScopeGroups(groups, {
@@ -2233,29 +2292,41 @@ export class InteractiveMode {
 		}
 
 		if (showDiagnostics) {
-			const skillDiagnostics = skillsResult.diagnostics;
-			if (skillDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(skillDiagnostics, sourceInfos);
+			const addDiagnosticNotice = (title: string, diagnostics: readonly ResourceDiagnostic[]): void => {
 				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Skill conflicts]")}\n${warningLines}`, 0, 0),
+					buildNoticeBox(
+						{
+							title,
+							tone: "warning",
+							why: "Conflicting or invalid loaded resources were found.",
+							extra: this.formatDiagnostics(diagnostics, sourceInfos),
+						},
+						{ expanded: this.toolOutputExpanded },
+						theme,
+					),
 				);
 				this.loadedResourcesContainer.addChild(new Spacer(1));
+			};
+
+			const skillDiagnostics = skillsResult.diagnostics;
+			if (skillDiagnostics.length > 0) {
+				addDiagnosticNotice("Skill conflicts", skillDiagnostics);
 			}
 
 			const promptDiagnostics = promptsResult.diagnostics;
 			if (promptDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(promptDiagnostics, sourceInfos);
-				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Prompt conflicts]")}\n${warningLines}`, 0, 0),
-				);
-				this.loadedResourcesContainer.addChild(new Spacer(1));
+				addDiagnosticNotice("Prompt conflicts", promptDiagnostics);
 			}
 
 			const extensionDiagnostics: ResourceDiagnostic[] = [];
 			const extensionErrors = this.session.resourceLoader.getExtensions().errors;
 			if (extensionErrors.length > 0) {
 				for (const error of extensionErrors) {
-					extensionDiagnostics.push({ type: "error", message: error.error, path: error.path });
+					extensionDiagnostics.push({
+						type: "error",
+						message: error.error,
+						path: error.path,
+					});
 				}
 			}
 
@@ -2267,20 +2338,12 @@ export class InteractiveMode {
 			extensionDiagnostics.push(...shortcutDiagnostics);
 
 			if (extensionDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(extensionDiagnostics, sourceInfos);
-				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, 0, 0),
-				);
-				this.loadedResourcesContainer.addChild(new Spacer(1));
+				addDiagnosticNotice("Extension issues", extensionDiagnostics);
 			}
 
 			const themeDiagnostics = themesResult.diagnostics;
 			if (themeDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(themeDiagnostics, sourceInfos);
-				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Theme conflicts]")}\n${warningLines}`, 0, 0),
-				);
-				this.loadedResourcesContainer.addChild(new Spacer(1));
+				addDiagnosticNotice("Theme conflicts", themeDiagnostics);
 			}
 		}
 	}
@@ -3069,7 +3132,10 @@ export class InteractiveMode {
 	private addExtensionTerminalInputListener(
 		handler: (data: string) => { consume?: boolean; data?: string } | undefined,
 	): () => void {
-		const subscription = { handler, unsubscribe: this.ui.addInputListener(handler) };
+		const subscription = {
+			handler,
+			unsubscribe: this.ui.addInputListener(handler),
+		};
 		this.extensionTerminalInputSubscriptions.add(subscription);
 		return () => {
 			subscription.unsubscribe();
@@ -3199,7 +3265,11 @@ export class InteractiveMode {
 					this.hideExtensionSelector();
 					resolve(undefined);
 				},
-				{ tui: this.ui, timeout: opts?.timeout, onToggleToolsExpanded: () => this.toggleToolOutputExpansion() },
+				{
+					tui: this.ui,
+					timeout: opts?.timeout,
+					onToggleToolsExpanded: () => this.toggleToolOutputExpansion(),
+				},
 			);
 
 			this.disposeActiveSelector();
@@ -3706,7 +3776,10 @@ export class InteractiveMode {
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.getSessionLogger().warn("clipboard_error", { op: "paste", error: message });
+			this.getSessionLogger().warn("clipboard_error", {
+				op: "paste",
+				error: message,
+			});
 			this.showStatus(`Clipboard paste failed: ${sanitizeTuiErrorMessage(message)}`);
 		}
 	}
@@ -4245,7 +4318,9 @@ export class InteractiveMode {
 					}
 					const activity = readToolProgress(event.partialResult.details)?.activity;
 					if (activity) {
-						const label = formatActiveToolWorkingLabel(event.toolName, { command: activity });
+						const label = formatActiveToolWorkingLabel(event.toolName, {
+							command: activity,
+						});
 						this.activeToolExecutions.set(event.toolCallId, label);
 						this.workingMessage = label;
 						this.activeToolExecutionTerminalTitle = `${APP_TITLE} - ${label}`;
@@ -4352,16 +4427,39 @@ export class InteractiveMode {
 						this.showStatus("Auto-compaction cancelled");
 					}
 				} else if (event.result) {
+					// Compaction event consumers in the fork are session-backed and do not
+					// necessarily expose InteractiveMode's SessionManager convenience getter.
+					// Keep the structural fallback for focused handler consumers while using
+					// the session-owned manager on the real TUI path.
+					const sessionManager = this.session.sessionManager ?? this.sessionManager;
+					const entries = sessionManager.buildContextEntries();
+					if (entries[0]?.type !== "compaction") {
+						throw new Error("Completed compaction is missing from the session context");
+					}
 					this.chatContainer.clear();
-					this.rebuildChatFromMessages();
-					this.addMessageToChat(
-						createCompactionSummaryMessage(
-							sanitizeTerminalLabel(event.result.summary),
-							event.result.tokensBefore,
-							new Date().toISOString(),
-							event.result.details,
-						),
+					const summaryMessage = createCompactionSummaryMessage(
+						sanitizeTerminalLabel(event.result.summary),
+						event.result.tokensBefore,
+						new Date().toISOString(),
+						event.result.details,
 					);
+					if (typeof this.renderSessionEntries === "function") {
+						// The latest compaction is prepended for model context; append it below at its chronological position.
+						this.renderSessionEntries(entries.slice(1));
+						this.addMessageToChat(summaryMessage);
+						if (event.result.usage) {
+							this.addCompactionCostNotice({
+								type: "compaction_cost",
+								kind: "compaction",
+								usage: event.result.usage,
+							});
+						}
+					} else {
+						// Fork-owned compaction consumers expose the established rebuild helper,
+						// not InteractiveMode's private entry renderer.
+						this.rebuildChatFromMessages();
+						this.addMessageToChat(summaryMessage);
+					}
 					this.footer.invalidate();
 				} else if (event.errorMessage) {
 					const errorMessage = sanitizeTerminalLabel(event.errorMessage);
@@ -4393,7 +4491,10 @@ export class InteractiveMode {
 				// over-threshold context would just repeat the failure.
 				const compactionSucceeded = event.accepted === true || event.result !== undefined;
 				if (compactionSucceeded) {
-					void this.flushCompactionQueue({ willRetry: event.willRetry, deferAdmission: false });
+					void this.flushCompactionQueue({
+						willRetry: event.willRetry,
+						deferAdmission: false,
+					});
 				} else if (event.willRetry === true) {
 					const heldCount = this.compactionQueuedMessages.length;
 					if (heldCount > 0) {
@@ -4407,7 +4508,10 @@ export class InteractiveMode {
 							`${heldCount} queued message${heldCount === 1 ? "" : "s"} will send with the next turn (compaction will retry)`,
 						);
 					}
-					void this.flushCompactionQueue({ willRetry: true, deferAdmission: true });
+					void this.flushCompactionQueue({
+						willRetry: true,
+						deferAdmission: true,
+					});
 				} else {
 					const restoredCount = this.restoreQueuedMessagesToEditor();
 					if (restoredCount > 0) {
@@ -4814,6 +4918,10 @@ export class InteractiveMode {
 				this.addCustomEntryToChat(item);
 				continue;
 			}
+			if (isCompactionCostNotice(item)) {
+				this.addCompactionCostNotice(item);
+				continue;
+			}
 
 			const message = item;
 			// Assistant messages need special handling for tool calls
@@ -4833,7 +4941,10 @@ export class InteractiveMode {
 							} else {
 								errorMessage = message.errorMessage || "Error";
 							}
-							component.updateResult({ content: [{ type: "text", text: errorMessage }], isError: true });
+							component.updateResult({
+								content: [{ type: "text", text: errorMessage }],
+								isError: true,
+							});
 						} else {
 							renderedPendingTools.set(content.id, component);
 						}
@@ -4880,9 +4991,30 @@ export class InteractiveMode {
 			if (entry.type === "custom") {
 				return [entry];
 			}
-			return sessionEntryToContextMessages(entry);
+			const messages = sessionEntryToContextMessages(entry);
+			if ((entry.type === "compaction" || entry.type === "branch_summary") && entry.usage && messages.length > 0) {
+				return [...messages, { type: "compaction_cost", kind: entry.type, usage: entry.usage }];
+			}
+			return messages;
 		});
 		this.renderSessionItems(items, options);
+	}
+
+	/**
+	 * Render billing usage for a compaction or branch summary. The notice is derived
+	 * from persisted summary usage and is not stored as a separate session entry.
+	 */
+	private addCompactionCostNotice(notice: CompactionCostNotice): void {
+		if (!this.settingsManager.getShowCacheMissNotices()) return;
+
+		const { usage } = notice;
+		const tokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+		const cost = usage.cost.total >= 0.01 ? ` (~$${usage.cost.total.toFixed(2)})` : "";
+		const label = notice.kind === "compaction" ? "Compaction" : "Branch summary";
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(
+			new Text(theme.fg("warning", `${label}: ${formatTokens(tokens)} tokens billed${cost}`), 1, 0),
+		);
 	}
 
 	/**
@@ -5389,7 +5521,12 @@ export class InteractiveMode {
 			why: sanitizeTuiErrorMessage(spec.why),
 			...(spec.extra === undefined
 				? {}
-				: { extra: spec.extra.map((line) => ({ ...line, text: sanitizeTuiErrorMessage(line.text) })) }),
+				: {
+						extra: spec.extra.map((line) => ({
+							...line,
+							text: sanitizeTuiErrorMessage(line.text),
+						})),
+					}),
 			...(spec.expandedLine === undefined ? {} : { expandedLine: sanitizeTuiErrorMessage(spec.expandedLine) }),
 		};
 		this.chatContainer.addChild(new Spacer(1));
@@ -5404,41 +5541,21 @@ export class InteractiveMode {
 	}
 
 	showNewVersionNotification(newVersion: string): void {
-		const action = theme.fg("accent", BRAND?.update?.command ?? `${APP_NAME} update`);
-		const updateInstruction = theme.fg("muted", `New version ${newVersion} is available. Run `) + action;
+		const action = BRAND?.update?.command ?? `${APP_NAME} update`;
 		const changelogUrl = getReleaseChangelogUrl(newVersion);
-		const changelogLink = getCapabilities().hyperlinks
-			? hyperlink(theme.fg("accent", changelogUrl), changelogUrl)
-			: theme.fg("accent", changelogUrl);
-		const changelogLine = theme.fg("muted", "Changelog: ") + changelogLink;
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("warning", "Update Available"))}\n${updateInstruction}\n${changelogLine}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.ui.requestRender();
+		const changelogLink = getCapabilities().hyperlinks ? hyperlink(changelogUrl, changelogUrl) : changelogUrl;
+		this.showNoticeBox({
+			title: "Update Available",
+			tone: "warning",
+			why: `New version ${newVersion} is available. Run ${action}`,
+			extra: [{ text: `Changelog: ${changelogLink}`, tone: "accent" }],
+		});
 	}
 
 	showRiskyMainModelWarning(model: Model<any> | undefined): void {
 		if (!model || !isRiskyMainModel(model)) return;
 
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("error", "Risky model warning"))}\n${theme.fg("error", RISKY_MAIN_MODEL_WARNING)}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
-		this.ui.requestRender();
+		this.showNoticeBox({ title: "Risky model warning", tone: "error", why: RISKY_MAIN_MODEL_WARNING });
 	}
 
 	showSettingsSourceSelected(event: Extract<AgentSessionEvent, { type: "settings_source_selected" }>): void {
@@ -5450,35 +5567,24 @@ export class InteractiveMode {
 			{ id: event.modelId, provider: event.provider },
 			event.thinkingLevel,
 		);
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("error", title))}\n${body.map((line) => theme.fg("error", line)).join("\n")}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("error", text)));
-		this.ui.requestRender();
+		this.showNoticeBox({
+			title,
+			tone: "error",
+			why: body[0] ?? "High reasoning may affect reliability or cost.",
+			extra: body.slice(1).map((text) => ({ text, tone: "error" })),
+		});
 	}
 
 	showPackageUpdateNotification(packages: string[]): void {
-		const action = theme.fg("accent", `${APP_NAME} update --extensions`);
-		const updateInstruction = theme.fg("muted", "Package updates are available. Run ") + action;
-		const packageLines = packages.map((pkg) => `- ${pkg}`).join("\n");
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("warning", "Package Updates Available"))}\n${updateInstruction}\n${theme.fg("muted", "Packages:")}\n${packageLines}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.ui.requestRender();
+		this.showNoticeBox({
+			title: "Package Updates Available",
+			tone: "warning",
+			why: `Package updates are available. Run ${APP_NAME} update --extensions`,
+			extra: [
+				{ text: "Packages:", tone: "dim" },
+				...packages.map((pkg) => ({ text: `- ${pkg}`, tone: "dim" as const })),
+			],
+		});
 	}
 
 	/**
@@ -5507,12 +5613,20 @@ export class InteractiveMode {
 	private clearAllQueues(options: { abortWillFollow: boolean } = { abortWillFollow: false }): {
 		steering: string[];
 		followUp: string[];
-		ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
+		ordered: Array<{
+			text: string;
+			mode: "steer" | "followUp";
+			enqueueOrder: number;
+		}>;
 	} {
 		const clearedNative = this.session.clearQueue(options);
 		const { steering, followUp } = clearedNative;
 		const nativeMessages = clearedNative.ordered ?? [
-			...steering.map((text, enqueueOrder) => ({ text, mode: "steer" as const, enqueueOrder })),
+			...steering.map((text, enqueueOrder) => ({
+				text,
+				mode: "steer" as const,
+				enqueueOrder,
+			})),
 			...followUp.map((text, index) => ({
 				text,
 				mode: "followUp" as const,
@@ -5542,7 +5656,10 @@ export class InteractiveMode {
 			followUp: string[];
 			ordered: typeof ordered;
 		};
-		Object.defineProperty(cleared, "ordered", { value: ordered, enumerable: false });
+		Object.defineProperty(cleared, "ordered", {
+			value: ordered,
+			enumerable: false,
+		});
 		return cleared;
 	}
 
@@ -5566,7 +5683,9 @@ export class InteractiveMode {
 	}
 
 	private restoreQueuedMessagesToEditor(options?: { abort?: boolean; currentText?: string }): number {
-		const { steering, followUp, ordered } = this.clearAllQueues({ abortWillFollow: options?.abort === true });
+		const { steering, followUp, ordered } = this.clearAllQueues({
+			abortWillFollow: options?.abort === true,
+		});
 		const allQueued = ordered?.map((message) => message.text) ?? [...steering, ...followUp];
 		if (allQueued.length === 0) {
 			this.updatePendingMessagesDisplay();
@@ -5596,7 +5715,9 @@ export class InteractiveMode {
 	 * - The helper never auto-prompts restored queue text; the user decides whether to send it.
 	 */
 	private async abortAndFireQueuedMessages(): Promise<number> {
-		const { steering, followUp, ordered } = this.clearAllQueues({ abortWillFollow: true });
+		const { steering, followUp, ordered } = this.clearAllQueues({
+			abortWillFollow: true,
+		});
 		const allQueued = ordered?.map((message) => message.text) ?? [...steering, ...followUp];
 		this.updatePendingMessagesDisplay();
 		await this.session.abort();
@@ -5613,8 +5734,15 @@ export class InteractiveMode {
 	}
 
 	private queueCompactionMessage(text: string, mode: "steer" | "followUp", droppedImageCount = 0): void {
-		this.compactionQueuedMessages.push({ text, mode, enqueueOrder: this.session.reserveQueuedInputOrder() });
-		this.getSessionLogger().debug("compaction_queue_enqueue", { mode, count: this.compactionQueuedMessages.length });
+		this.compactionQueuedMessages.push({
+			text,
+			mode,
+			enqueueOrder: this.session.reserveQueuedInputOrder(),
+		});
+		this.getSessionLogger().debug("compaction_queue_enqueue", {
+			mode,
+			count: this.compactionQueuedMessages.length,
+		});
 		this.editor.addToHistory?.(text);
 		this.editor.setText("");
 		this.updatePendingMessagesDisplay();
@@ -5723,8 +5851,12 @@ export class InteractiveMode {
 							return message.mode === "followUp" ? session.followUp(message.text) : session.steer(message.text);
 						}
 						return message.mode === "followUp"
-							? session.followUp(message.text, undefined, { enqueueOrder: message.enqueueOrder })
-							: session.steer(message.text, undefined, { enqueueOrder: message.enqueueOrder });
+							? session.followUp(message.text, undefined, {
+									enqueueOrder: message.enqueueOrder,
+								})
+							: session.steer(message.text, undefined, {
+									enqueueOrder: message.enqueueOrder,
+								});
 					},
 					reportFailure: (error, undeliveredCount) => {
 						this.showError(
@@ -5773,7 +5905,11 @@ export class InteractiveMode {
 	 * @param create Factory that receives a `done` callback and returns the component and focus target
 	 */
 	private showSelector(
-		create: (done: () => void) => { component: Component; focus: Component; dispose?: () => void },
+		create: (done: () => void) => {
+			component: Component;
+			focus: Component;
+			dispose?: () => void;
+		},
 	): void {
 		const token = {};
 		let dispose: (() => void) | undefined;
@@ -6151,7 +6287,10 @@ export class InteractiveMode {
 		favoriteIds: FavoriteModelIds,
 		candidateModels: readonly Model<any>[],
 		persist: boolean,
-		patternSnapshot: { storedPatterns: string[]; patternResolutions: PatternResolution[] },
+		patternSnapshot: {
+			storedPatterns: string[];
+			patternResolutions: PatternResolution[];
+		},
 	): Promise<void> {
 		const { storedPatterns, patternResolutions } = patternSnapshot;
 		const mergedPatterns = mergeFavoritePatternsForPersist({
@@ -6291,7 +6430,11 @@ export class InteractiveMode {
 					},
 				},
 			);
-			return { component: selector, focus: selector, dispose: () => selector.dispose() };
+			return {
+				component: selector,
+				focus: selector,
+				dispose: () => selector.dispose(),
+			};
 		});
 	}
 
@@ -6764,7 +6907,11 @@ export class InteractiveMode {
 	}
 
 	private async getLogoutProviderOptions(): Promise<AuthSelectorProvider[]> {
-		return (await this.session.modelRuntime.listCredentials({ signal: AbortSignal.timeout(15_000) }))
+		return (
+			await this.session.modelRuntime.listCredentials({
+				signal: AbortSignal.timeout(15_000),
+			})
+		)
 			.map(({ providerId, type }) => ({
 				id: providerId,
 				name: this.session.modelRuntime.getProvider(providerId)?.name ?? providerId,
@@ -6995,7 +7142,10 @@ export class InteractiveMode {
 		if (isUnknownModel(previousModel)) {
 			const availableModels = this.session.modelRuntime.getAvailableSnapshot();
 			const providerModels = availableModels.filter((model) => model.provider === providerId);
-			if (!hasDefaultModelProvider(providerId)) {
+			// Matches LLAMA_PROVIDER_ID from extensions/llama/provider.ts; kept inline to avoid coupling interactive mode to the built-in extension.
+			if (providerId === "llama.cpp") {
+				selectionError = llamaCppPostLoginGuidance(actionLabel, providerModels.length);
+			} else if (!hasDefaultModelProvider(providerId)) {
 				selectionError = `${actionLabel}, but no default model is configured for provider "${providerId}". Use /model to select a model.`;
 			} else if (providerModels.length === 0) {
 				selectionError = `${actionLabel}, but no models are available for that provider. Use /model to select a model.`;
@@ -7040,7 +7190,11 @@ export class InteractiveMode {
 		const timeout = setTimeout(() => controller.abort(), 15_000);
 		const refreshProviders = providerId === "cursor" ? [providerId, "cursor-cli-oauth"] : [providerId];
 		void this.session.modelRuntime
-			.refresh({ allowNetwork: true, providers: refreshProviders, signal: controller.signal })
+			.refresh({
+				allowNetwork: true,
+				providers: refreshProviders,
+				signal: controller.signal,
+			})
 			.then((result) => {
 				if (result.aborted) {
 					this.showWarning(`${actionLabel}, but its model catalog refresh timed out; using cached models.`);
@@ -7271,8 +7425,6 @@ export class InteractiveMode {
 			return;
 		}
 
-		this.resetExtensionUI();
-
 		const reloadBox = new Container();
 		const borderColor = (s: string) => theme.fg("border", s);
 		reloadBox.addChild(new DynamicBorder(borderColor));
@@ -7307,6 +7459,13 @@ export class InteractiveMode {
 			if (chatRestoredBeforeSessionStart) {
 				return;
 			}
+			// Reset extension UI only once the reload is actually proceeding (this
+			// callback runs after reload()'s internal veto re-check, right before the
+			// new runner's session_start re-registers extension UI). Resetting before
+			// reload() destroyed live extension footers/widgets/tickers on a vetoed
+			// or failed reload with nothing left to restore them, so the TUI stopped
+			// self-repainting until an input event forced a frame.
+			this.resetExtensionUI();
 			this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 			this.outputPad = this.settingsManager.getOutputPad();
 			this.rebuildChatFromMessages();
@@ -7315,7 +7474,9 @@ export class InteractiveMode {
 		};
 
 		try {
-			const reloadResult = await this.session.reload({ beforeSessionStart: restoreChatBeforeSessionStart });
+			const reloadResult = await this.session.reload({
+				beforeSessionStart: restoreChatBeforeSessionStart,
+			});
 			if (reloadResult.cancelled) {
 				dismissReloadBox(previousEditor as Component);
 				reloadBoxDismissed = true;
@@ -7454,7 +7615,9 @@ export class InteractiveMode {
 	private async handleShareCommand(): Promise<void> {
 		// Check if gh is available and logged in
 		try {
-			const authResult = spawnSync("gh", ["auth", "status"], { encoding: "utf-8" });
+			const authResult = spawnSync("gh", ["auth", "status"], {
+				encoding: "utf-8",
+			});
 			if (authResult.status !== 0) {
 				this.showError("GitHub CLI is not logged in. Run 'gh auth login' first.");
 				return;
@@ -7502,7 +7665,11 @@ export class InteractiveMode {
 		};
 
 		try {
-			const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
+			const result = await new Promise<{
+				stdout: string;
+				stderr: string;
+				code: number | null;
+			}>((resolve) => {
 				proc = spawn("gh", ["gist", "create", "--public=false", tmpFile]);
 				let stdout = "";
 				let stderr = "";
@@ -7844,11 +8011,7 @@ export class InteractiveMode {
 		fs.mkdirSync(path.dirname(debugLogPath), { recursive: true });
 		fs.writeFileSync(debugLogPath, debugData);
 
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(
-			new Text(`${theme.fg("accent", "✓ Debug log written")}\n${theme.fg("muted", debugLogPath)}`, 1, 1),
-		);
-		this.ui.requestRender();
+		this.showNoticeBox({ title: "✓ Debug log written", tone: "success", why: debugLogPath });
 	}
 
 	private handleArminSaysHi(): void {

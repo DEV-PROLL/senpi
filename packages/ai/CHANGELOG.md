@@ -10,6 +10,29 @@
 
 ### Fixed
 
+- Cursor billed `cacheRead` that dwarfs the live conversation window is ignored: checkpoint `usedTokens` is treated as the real context size when dashboard-cumulative `cache_read_tokens` is more than 3× that window, so compaction is not fired against a multi-million cache-read figure (#983).
+
+- Explicit Cursor thinking levels no longer die with `Connect error not_found`: Cursor's Run RPC
+  rejects bare capability ids (`kimi-k3`, `claude-fable-5`, …) with `not_found`, so
+  `resolveCursorSelectionDescriptor` now prefers the catalog-guaranteed suffix variant id
+  (`kimi-k3-high`, `claude-fable-5-thinking-low`) whenever a legacy alias exists, keeping bare
+  base id + ordered parameters only as the fallback for alias-less levels (#1008).
+
+### Removed
+
+## [2026.8.19] - 2026-08-19
+
+### Breaking Changes
+
+### Added
+
+### Changed
+- Upstream sync (`badlogic/pi-mono` main@`59a71b23`): adopted generalized thinking-token-budget fields (`thinkingTokenBudgetField`, `supportsThinkingTokenBudget`), Google thinking-level maps, Bedrock response smithy headers, Azure Responses tool-choice forwarding, and the simple tool-choice option. Fork pins (`openai@6.26.0`), Kimi top-level cached-token parsing, `-fast` priority-tier emission, and fork-only providers/catalog overlays are unchanged.
+- xAI now routes through the Responses API with Grok 4.6 as the provider default, matching upstream; fork xAI model specs are preserved.
+- Model catalog refreshed with upstream provider updates: Z.AI Chinese Coding Plan entries, Qwen Token Plan DeepSeek V4 Pro, Baseten GLM input modalities, and OpenRouter additions.
+
+### Fixed
+
 - Native Cursor turns now report real usage: the billed token split on `turnEnded`
   (input/output/cache read/cache write, taken from the production cursor-agent schema) lands on
   `usage`, and conversation checkpoints feed the server's live `usedTokens` into the in-flight
@@ -21,6 +44,7 @@
   keep the rate-limit path so poisoned-conversation rotation still applies.
 
 ### Removed
+- Deprecated Xiaomi models dropped, and the unused `@opentelemetry/api` dependency removed from `packages/ai` (no source imports it).
 
 ## [2026.8.18-3] - 2026-08-18
 

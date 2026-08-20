@@ -256,6 +256,10 @@ const EAGER_TOOL_INPUT_STREAMING_UNSUPPORTED_ANTHROPIC_MODELS = new Set([
 	"github-copilot:claude-sonnet-4",
 	"github-copilot:claude-sonnet-4.5",
 ]);
+const ANTHROPIC_ALLOWED_FALLBACK_MODELS = {
+	"claude-fable-5": ["claude-opus-4-8", "claude-opus-5"],
+	"claude-opus-5": ["claude-opus-4-8"],
+} satisfies Record<string, string[]>;
 
 const DEEPSEEK_V4_THINKING_LEVEL_MAP = {
 	minimal: null,
@@ -308,6 +312,7 @@ const QWEN_TOKEN_PLAN_PROVIDER_IDS = new Set<string>([
 const QWEN_TOKEN_PLAN_INDIVIDUAL_MODEL_IDS = new Set<string>([
 	"deepseek-v4-flash-0731",
 	"deepseek-v4-pro",
+	"deepseek-v4-pro-0813",
 	"glm-5.2",
 	"qwen3.6-flash",
 	"qwen3.7-max",
@@ -471,16 +476,15 @@ const OPENAI_CODEX_PRIORITY_TIER_MODEL_IDS = new Set([
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",
 ]);
-const XAI_RESPONSES_MODEL_ID = "grok-4.5";
 const XAI_BUILTIN_EXCLUDED_MODEL_IDS = new Set([
 	"grok-3",
 	"grok-3-fast",
 	"grok-code-fast-1",
 ]);
-const XAI_COMPLETIONS_THINKING_LEVEL_MAPS: Record<
-	string,
-	NonNullable<Model<"openai-completions">["thinkingLevelMap"]>
-> = {
+// Documented per-model xAI reasoning specifications. Grok 4.6 exposes low/medium/high/xhigh;
+// the fixed-reasoning Grok 4.20 variant exposes only `high`. Models without an entry fall back
+// to `applyThinkingLevelMetadata()`'s "no verified effort options" defaults.
+const XAI_THINKING_LEVEL_MAPS: Record<string, NonNullable<Model<"openai-responses">["thinkingLevelMap"]>> = {
 	"grok-4.6": {
 		off: null,
 		minimal: null,
@@ -500,11 +504,6 @@ const XAI_COMPLETIONS_THINKING_LEVEL_MAPS: Record<
 		max: null,
 	},
 };
-const XAI_COMPLETIONS_REASONING_EFFORT_MODEL_IDS = new Set(["grok-4.6"]);
-const XAI_RESPONSES_EFFORT_LEVEL_MAP = {
-	off: null,
-	minimal: null,
-} as const;
 const XAI_RESPONSES_COMPAT: OpenAIResponsesCompat = {
 	supportsLongCacheRetention: false,
 };
@@ -681,7 +680,12 @@ const OPENAI_COMPLETIONS_DEFAULT_COMPAT = {
 	sendSessionAffinityHeaders: false,
 	supportsPromptCacheKey: false,
 	supportsLongCacheRetention: true,
-} satisfies Required<Omit<OpenAICompletionsCompat, "cacheControlFormat" | "deferredToolsMode">> & {
+} satisfies Required<
+	Omit<
+		OpenAICompletionsCompat,
+		"cacheControlFormat" | "deferredToolsMode" | "supportsThinkingTokenBudget" | "thinkingTokenBudgetField"
+	>
+> & {
 	cacheControlFormat?: OpenAICompletionsCompat["cacheControlFormat"];
 	deferredToolsMode?: OpenAICompletionsCompat["deferredToolsMode"];
 };
@@ -823,6 +827,14 @@ function applyOpenAICompletionsCompatMetadata(model: Model<Api>): void {
 	}
 }
 
+function applyAnthropicMessagesCompatMetadata(model: Model<Api>): void {
+	if (model.api !== "anthropic-messages") return;
+	const compat = getAnthropicMessagesCompat(model.provider, model.id);
+	if (compat) {
+		mergeAnthropicMessagesCompat(model, compat);
+	}
+}
+
 function applyStrictToolCompatMetadata(model: Model<Api>): void {
 	if (
 		(model.provider === "openai" || model.provider === "cloudflare-ai-gateway") &&
@@ -915,8 +927,10 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	) {
 		mergeThinkingLevelMap(model, { off: "none" });
 	}
-	if (model.provider === "xai" && model.api === "openai-responses" && model.id === XAI_RESPONSES_MODEL_ID) {
-		mergeThinkingLevelMap(model, XAI_RESPONSES_EFFORT_LEVEL_MAP);
+	// xAI models without verified effort options (e.g. grok-build-0.1) must not
+	// send the undocumented "none"/"minimal" efforts.
+	if (model.provider === "xai" && model.api === "openai-responses" && model.thinkingLevelMap === undefined) {
+		mergeThinkingLevelMap(model, { off: null, minimal: null });
 	}
 	if (supportsOpenAiXhigh(model.id)) {
 		mergeThinkingLevelMap(model, { xhigh: "xhigh" });
@@ -982,7 +996,8 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 			model,
 			model.provider === "openrouter"
 				? { ...DEEPSEEK_V4_THINKING_LEVEL_MAP, xhigh: "xhigh", max: null }
-				: model.provider === "deepseek" && model.id === "deepseek-v4-flash"
+				: (model.provider === "deepseek" || model.provider === "opencode" || model.provider === "opencode-go") &&
+					model.id.includes("deepseek-v4-flash")
 					? DEEPSEEK_V4_FLASH_THINKING_LEVEL_MAP
 					: DEEPSEEK_V4_THINKING_LEVEL_MAP,
 		);
@@ -1051,6 +1066,12 @@ function getAnthropicMessagesCompat(provider: string, modelId: string): Anthropi
 	const compat: AnthropicMessagesCompat = {};
 	if (EAGER_TOOL_INPUT_STREAMING_UNSUPPORTED_ANTHROPIC_MODELS.has(`${provider}:${modelId}`)) {
 		compat.supportsEagerToolInputStreaming = false;
+	}
+	if (provider === "anthropic") {
+		const allowedFallbackModels = ANTHROPIC_ALLOWED_FALLBACK_MODELS[modelId];
+		if (allowedFallbackModels) {
+			compat.allowedFallbackModels = allowedFallbackModels;
+		}
 	}
 	if (provider === "xiaomi" || provider.startsWith("xiaomi-token-plan-")) {
 		compat.allowEmptySignature = true;
@@ -1739,21 +1760,15 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			for (const [modelId, model] of Object.entries(data.xai.models)) {
 				const m = model as ModelsDevModel;
 				if (m.tool_call !== true) continue;
-				const useResponsesApi = modelId === XAI_RESPONSES_MODEL_ID;
-				const thinkingLevelMap = XAI_COMPLETIONS_THINKING_LEVEL_MAPS[modelId];
-				const supportsReasoningEffort = XAI_COMPLETIONS_REASONING_EFFORT_MODEL_IDS.has(modelId);
+				const thinkingLevelMap = XAI_THINKING_LEVEL_MAPS[modelId];
 
 				models.push({
 					id: modelId,
 					name: m.name || modelId,
-					api: useResponsesApi ? "openai-responses" : "openai-completions",
+					api: "openai-responses",
 					provider: "xai",
 					baseUrl: "https://api.x.ai/v1",
-					...(useResponsesApi
-						? { compat: { ...XAI_RESPONSES_COMPAT } }
-						: supportsReasoningEffort
-							? { compat: { supportsReasoningEffort: true } }
-							: {}),
+					compat: { ...XAI_RESPONSES_COMPAT },
 					reasoning: m.reasoning === true,
 					...(thinkingLevelMap ? { thinkingLevelMap } : {}),
 					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
@@ -1772,45 +1787,52 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 
 		// Process zAi models
 		const zaiCodingPlanVariants = [
-			{ provider: "zai", baseUrl: "https://api.z.ai/api/coding/paas/v4" },
-			{ provider: "zai-coding-cn", baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4" },
+			{
+				source: "zai-coding-plan",
+				provider: "zai",
+				baseUrl: "https://api.z.ai/api/coding/paas/v4",
+			},
+			{
+				source: "zhipuai-coding-plan",
+				provider: "zai-coding-cn",
+				baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+			},
 		] as const;
 
-		if (data["zai-coding-plan"]?.models) {
-			for (const { provider, baseUrl } of zaiCodingPlanVariants) {
-				for (const [modelId, model] of Object.entries(data["zai-coding-plan"].models)) {
-					const m = model as ModelsDevModel;
-					if (m.tool_call !== true) continue;
-					const supportsImage = m.modalities?.input?.includes("image");
+		for (const { source, provider, baseUrl } of zaiCodingPlanVariants) {
+			for (const [modelId, model] of Object.entries(data[source]?.models ?? {})) {
+				const m = model as ModelsDevModel;
+				if (m.tool_call !== true) continue;
+				const supportsImage = m.modalities?.input?.includes("image");
 
-					const isGlm5x = modelId === "glm-5.2" || modelId === "glm-5.3";
+				const isGlm5x = modelId === "glm-5.2" || modelId === "glm-5.3";
+				const referenceCost = data.zai?.models[modelId]?.cost ?? m.cost;
 
-					models.push({
-						id: modelId,
-						name: m.name || modelId,
-						api: "openai-completions",
-						provider,
-						baseUrl,
-						reasoning: m.reasoning === true,
-						...(isGlm5x ? { thinkingLevelMap: ZAI_GLM52_THINKING_LEVEL_MAP } : {}),
-						input: supportsImage ? ["text", "image"] : ["text"],
-						cost: {
-							input: m.cost?.input || 0,
-							output: m.cost?.output || 0,
-							cacheRead: m.cost?.cache_read || 0,
-							cacheWrite: m.cost?.cache_write || 0,
-						},
-						compat: {
-							supportsDeveloperRole: false,
-							thinkingFormat: "zai",
-							...(isGlm5x ? { supportsReasoningEffort: true } : {}),
-							...(!ZAI_TOOL_STREAM_UNSUPPORTED_MODELS.has(modelId) ? { zaiToolStream: true } : {}),
-						},
-						contextWindow: m.limit?.context || 4096,
-						maxTokens: m.limit?.output || 4096,
-					});
-					recordModelsDevReasoningOptions(provider, modelId, m);
-				}
+				models.push({
+					id: modelId,
+					name: m.name || modelId,
+					api: "openai-completions",
+					provider,
+					baseUrl,
+					reasoning: m.reasoning === true,
+					...(isGlm5x ? { thinkingLevelMap: ZAI_GLM52_THINKING_LEVEL_MAP } : {}),
+					input: supportsImage ? ["text", "image"] : ["text"],
+					cost: {
+						input: referenceCost?.input || 0,
+						output: referenceCost?.output || 0,
+						cacheRead: referenceCost?.cache_read || 0,
+						cacheWrite: referenceCost?.cache_write || 0,
+					},
+					compat: {
+						supportsDeveloperRole: false,
+						thinkingFormat: "zai",
+						...(isGlm5x ? { supportsReasoningEffort: true } : {}),
+						...(!ZAI_TOOL_STREAM_UNSUPPORTED_MODELS.has(modelId) ? { zaiToolStream: true } : {}),
+					},
+					contextWindow: m.limit?.context || 4096,
+					maxTokens: m.limit?.output || 4096,
+				});
+				recordModelsDevReasoningOptions(provider, modelId, m);
 			}
 		}
 
@@ -2060,10 +2082,10 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 
 				// Claude 4.x and 5.x models route to Anthropic Messages API
 				const isCopilotClaude = /^claude-(haiku|sonnet|opus)-[45]([.\-]|$)/.test(modelId);
-				// Grok 4.5, gpt-5, oswe, and MAI-Code models are only served through
+				// Grok, gpt-5, oswe, and MAI-Code models are only served through
 				// the Copilot /responses endpoint.
 				const needsResponsesApi =
-					modelId === "grok-4.5" ||
+					modelId.startsWith("grok-") ||
 					modelId.startsWith("gpt-5") ||
 					modelId.startsWith("oswe") ||
 					modelId.startsWith("mai-");
@@ -2287,6 +2309,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			for (const [modelId, model] of Object.entries(providerModels)) {
 				const m = model as ModelsDevModel;
 				if (m.tool_call !== true) continue;
+				if (m.status === "deprecated") continue;
 
 				models.push({
 					id: modelId,
@@ -3108,6 +3131,7 @@ async function generateModels() {
 
 	for (const model of allModels) {
 		applyOpenAICompletionsCompatMetadata(model);
+		applyAnthropicMessagesCompatMetadata(model);
 		applyModelsDevReasoningOptionMetadata(model);
 		applyThinkingLevelMetadata(model);
 		applyStrictToolCompatMetadata(model);

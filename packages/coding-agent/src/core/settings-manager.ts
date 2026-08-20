@@ -21,7 +21,10 @@ import {
 	resolveRetryFallbackSettings,
 } from "./retry-fallback/settings.ts";
 
-export type { ProviderRetrySettings, RetrySettings } from "./retry-fallback/settings.ts";
+export type {
+	ProviderRetrySettings,
+	RetrySettings,
+} from "./retry-fallback/settings.ts";
 
 export const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
 export const DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS = 30_000;
@@ -182,7 +185,7 @@ export interface Settings {
 	hideThinkingBlock?: boolean;
 	smoothStreaming?: boolean; // default: true
 	smoothStreamingFps?: number; // default: 60, clamped to 30-120 when read
-	showCacheMissNotices?: boolean; // default: false - show transcript notices for significant prompt-cache misses
+	showCacheMissNotices?: boolean; // default: false - show prompt-cache miss and compaction cost notices
 	externalEditor?: string; // Command for Ctrl+G external editor; takes precedence over VISUAL/EDITOR
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows); supports leading ~ expansion
 	quietStartup?: boolean;
@@ -451,7 +454,12 @@ export function resolveSettingsSource(
 	const directory = getSettingsDirectory(cwd, agentDir, scope, homeDir);
 	const jsoncPath = join(directory, "settings.jsonc");
 	if (existsSync(jsoncPath)) {
-		return { path: jsoncPath, format: "jsonc", reason: "explicit-jsonc", scope };
+		return {
+			path: jsoncPath,
+			format: "jsonc",
+			reason: "explicit-jsonc",
+			scope,
+		};
 	}
 	const jsonPath = join(directory, "settings.json");
 	if (existsSync(jsonPath)) {
@@ -708,7 +716,10 @@ export class SettingsManager {
 		projectTrusted = true,
 	): { settings: Settings; error: Error | null } {
 		try {
-			return { settings: SettingsManager.loadFromStorage(storage, scope, projectTrusted), error: null };
+			return {
+				settings: SettingsManager.loadFromStorage(storage, scope, projectTrusted),
+				error: null,
+			};
 		} catch (error) {
 			return { settings: {}, error: error as Error };
 		}
@@ -1304,7 +1315,11 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getRetrySettings(): { enabled: boolean; maxRetries: number; baseDelayMs: number } {
+	getRetrySettings(): {
+		enabled: boolean;
+		maxRetries: number;
+		baseDelayMs: number;
+	} {
 		return {
 			enabled: this.getRetryEnabled(),
 			maxRetries: this.settings.retry?.maxRetries ?? 3,
@@ -1351,7 +1366,10 @@ export class SettingsManager {
 			this.globalSettings.retry = {};
 		}
 		const chains = this.getGlobalFallbackChains();
-		this.globalSettings.retry.fallbackChains = { ...chains, [key]: [...entries] };
+		this.globalSettings.retry.fallbackChains = {
+			...chains,
+			[key]: [...entries],
+		};
 		this.markModified("retry", "fallbackChains");
 		this.save();
 	}
@@ -1415,7 +1433,11 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getProviderRetrySettings(): { timeoutMs?: number; maxRetries?: number; maxRetryDelayMs: number } {
+	getProviderRetrySettings(): {
+		timeoutMs?: number;
+		maxRetries?: number;
+		maxRetryDelayMs: number;
+	} {
 		return {
 			timeoutMs: this.settings.retry?.provider?.timeoutMs,
 			maxRetries: this.settings.retry?.provider?.maxRetries,

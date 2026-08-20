@@ -1,5 +1,6 @@
 import type { KnownProvider, Model } from "@earendil-works/pi-ai";
 import { getModels } from "@earendil-works/pi-ai/compat";
+import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { describe, expect, test, vi } from "vitest";
 import {
 	defaultModelPerProvider,
@@ -721,12 +722,26 @@ describe("default model selection", () => {
 		}
 	});
 
+	test("built-in defaults exist in generated provider catalogs", () => {
+		for (const provider of getBuiltinProviders()) {
+			const defaultId = defaultModelPerProvider[provider];
+			expect(
+				getBuiltinModels(provider).some((model) => model.id === defaultId),
+				`${provider} default ${defaultId} should exist in its generated catalog`,
+			).toBe(true);
+		}
+	});
+
 	test("ai-gateway default tracks current model", () => {
 		expect(defaultModelPerProvider["vercel-ai-gateway"]).toBe("zai/glm-5.1");
 	});
 
 	test("ollama defaults to its current coding model", () => {
 		expect(defaultModelPerProvider.ollama).toBe("qwen3.5:397b");
+	});
+
+	test("xai default tracks current model", () => {
+		expect(defaultModelPerProvider.xai).toBe("grok-4.5");
 	});
 
 	test("qwen token plan individual default tracks current model", () => {
