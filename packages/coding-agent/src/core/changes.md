@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-20 - Skip Cursor compaction while a native Run is live
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth` so mid-turn tool-loop admission does not compact while a native Cursor Run is live.
+
+### Why
+
+- Cursor rebuilds full conversation state each hop. Mid-turn compact desyncs `conversationId` and the next hop returns 0-token `resource_exhausted` (session 01a01879, issue #984).
+
+### Why an extension could not handle it
+
+- Tool-loop admission and pre-turn compaction live in `AgentSession.prepareNextTurnWithContext`; an extension cannot skip that core call.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `compactBeforeNextAdmission`
+
 ## 2026-08-20 - Ignore implausible Cursor billed usage in compaction threshold
 
 ### What changed

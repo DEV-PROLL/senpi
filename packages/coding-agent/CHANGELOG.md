@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Native Cursor sessions no longer compact mid-turn while a Run is live: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`, and blocking/generated compaction refuse those providers until the session is idle, so a mid-turn compact cannot poison `conversationId` and trigger 0-token `resource_exhausted` (#984).
 - Compaction no longer treats implausible Cursor billed usage as context size: when the local transcript estimate is at least 50k and billed usage is more than 8× that estimate, the threshold uses the estimate so a multi-million dashboard-cumulative cacheRead cannot force a useless compact (#983).
 
 ### Added
