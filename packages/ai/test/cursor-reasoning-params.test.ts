@@ -37,22 +37,15 @@ function explicit(level: ThinkingSelection["level"]): ThinkingSelection {
 }
 
 describe("resolveCursorSelectionDescriptor", () => {
-	it("renders the anthropic template in canonical order", () => {
+	it("prefers the thinking suffix alias for anthropic explicit levels", () => {
 		const out = resolveCursorSelectionDescriptor(
 			cursorModel("claude-fable-5-thinking", fableThinkingCompat),
 			explicit("low"),
 		);
-		expect(out).toEqual({
-			modelId: "claude-fable-5",
-			parameters: [
-				{ id: "thinking", value: "true" },
-				{ id: "context", value: "1m" },
-				{ id: "effort", value: "low" },
-			],
-		});
+		expect(out).toEqual({ modelId: "claude-fable-5-thinking-low", parameters: [] });
 	});
 
-	it("fixes thinking=false for the non-thinking Claude identity", () => {
+	it("prefers the plain suffix alias for the non-thinking Claude identity", () => {
 		const compat: CursorAgentCompat = {
 			cursorReasoning: {
 				capabilityId: "claude-fable-5",
@@ -61,77 +54,77 @@ describe("resolveCursorSelectionDescriptor", () => {
 			},
 		};
 		const out = resolveCursorSelectionDescriptor(cursorModel("claude-fable-5", compat), explicit("max"));
-		expect(out?.parameters).toEqual([
-			{ id: "thinking", value: "false" },
-			{ id: "context", value: "1m" },
-			{ id: "effort", value: "max" },
-		]);
+		expect(out).toEqual({ modelId: "claude-fable-5-max", parameters: [] });
 	});
 
-	it("renders the gpt template with context/reasoning/fast and translates xhigh to extra-high for gpt-5.5", () => {
+	it("translates xhigh to the extra-high suffix alias for gpt-5.5", () => {
 		const out = resolveCursorSelectionDescriptor(cursorModel("gpt-5.5", gpt55Compat), explicit("xhigh"));
-		expect(out).toEqual({
-			modelId: "gpt-5.5",
-			parameters: [
-				{ id: "context", value: "1m" },
-				{ id: "reasoning", value: "extra-high" },
-				{ id: "fast", value: "false" },
-			],
-		});
+		expect(out).toEqual({ modelId: "gpt-5.5-extra-high", parameters: [] });
 	});
 
-	it("renders codex without a context parameter", () => {
+	it("falls back to the level-token suffix alias when the value suffix is absent (codex xhigh)", () => {
 		const compat: CursorAgentCompat = {
 			cursorReasoning: { capabilityId: "gpt-5.3-codex", representativeVariantId: "gpt-5.3-codex-high" },
 		};
 		const out = resolveCursorSelectionDescriptor(cursorModel("gpt-5.3-codex", compat), explicit("xhigh"));
-		expect(out?.parameters).toEqual([
-			{ id: "reasoning", value: "extra-high" },
-			{ id: "fast", value: "false" },
-		]);
+		expect(out).toEqual({ modelId: "gpt-5.3-codex-xhigh", parameters: [] });
 	});
 
-	it("renders gemini/grok/glm/kimi families", () => {
+	it("renders gemini/grok/glm/kimi families as catalog suffix variant ids", () => {
 		const gemini = resolveCursorSelectionDescriptor(
 			cursorModel("gemini-3.7-flash", {
 				cursorReasoning: { capabilityId: "gemini-3.7-flash", representativeVariantId: "gemini-3.7-flash-medium" },
 			}),
 			explicit("low"),
 		);
-		expect(gemini?.parameters).toEqual([{ id: "effort", value: "low" }]);
+		expect(gemini).toEqual({ modelId: "gemini-3.7-flash-low", parameters: [] });
 		const grok = resolveCursorSelectionDescriptor(
 			cursorModel("cursor-grok-4.6", {
 				cursorReasoning: { capabilityId: "cursor-grok-4.6", representativeVariantId: "cursor-grok-4.6-medium" },
 			}),
 			explicit("xhigh"),
 		);
-		expect(grok?.parameters).toEqual([
-			{ id: "effort", value: "xhigh" },
-			{ id: "fast", value: "false" },
-		]);
+		expect(grok).toEqual({ modelId: "cursor-grok-4.6-xhigh", parameters: [] });
 		const glm = resolveCursorSelectionDescriptor(
 			cursorModel("glm-5.2", {
 				cursorReasoning: { capabilityId: "glm-5.2", representativeVariantId: "glm-5.2-high" },
 			}),
 			explicit("max"),
 		);
-		expect(glm?.parameters).toEqual([{ id: "reasoning", value: "max" }]);
+		expect(glm).toEqual({ modelId: "glm-5.2-max", parameters: [] });
 		const kimi = resolveCursorSelectionDescriptor(
 			cursorModel("kimi-k3", {
 				cursorReasoning: { capabilityId: "kimi-k3", representativeVariantId: "kimi-k3-high" },
 			}),
 			explicit("low"),
 		);
-		expect(kimi?.parameters).toEqual([{ id: "reasoning", value: "low" }]);
+		expect(kimi).toEqual({ modelId: "kimi-k3-low", parameters: [] });
 	});
 
-	it("renders supported explicit off as reasoning=none", () => {
+	it("falls back to bare base id plus ordered parameters when no suffix alias exists", () => {
+		const out = resolveCursorSelectionDescriptor(
+			cursorModel("claude-opus-5", {
+				cursorReasoning: {
+					capabilityId: "claude-opus-5",
+					thinkingMode: false,
+					representativeVariantId: "claude-opus-5-medium",
+				},
+			}),
+			explicit("xhigh"),
+		);
+		expect(out).toEqual({
+			modelId: "claude-opus-5",
+			parameters: [
+				{ id: "thinking", value: "false" },
+				{ id: "context", value: "1m" },
+				{ id: "effort", value: "xhigh" },
+			],
+		});
+	});
+
+	it("renders supported explicit off as the none suffix alias", () => {
 		const out = resolveCursorSelectionDescriptor(cursorModel("gpt-5.5", gpt55Compat), explicit("off"));
-		expect(out?.parameters).toEqual([
-			{ id: "context", value: "1m" },
-			{ id: "reasoning", value: "none" },
-			{ id: "fast", value: "false" },
-		]);
+		expect(out).toEqual({ modelId: "gpt-5.5-none", parameters: [] });
 	});
 
 	it("emits no parameters for off on descriptors without none", () => {
