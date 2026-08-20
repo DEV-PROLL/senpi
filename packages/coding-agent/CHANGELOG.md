@@ -45,6 +45,15 @@
   and package-update notifications, the risky-main-model and high-reasoning warnings, the rules banner,
   the prompt URL widget card, and the earendil announcement. Visible text is unchanged.
 
+- Every launch is one process lighter: `cli.ts` now loads the agent (`cli-main`) in its own process
+  instead of re-spawning Node, unless the run actually needs an isolated process. The child spawn is
+  kept byte-for-byte for the two cases that require it — an inherited Inspector option (`--inspect*`
+  in exec args or `NODE_OPTIONS`), whose debugger socket must be released and re-opened in the process
+  that runs the agent, and any custom exec arguments (for example `--max-old-space-size`), which only
+  apply at process start and so must be replayed onto a fresh process. Brand environment scrubbing is
+  unaffected: `cli-main` scrubs the variable itself, so it is scrubbed in-process before anything the
+  agent spawns can inherit it. Measured on `senpi --help`: 1.206 s -> 1.131 s (-75 ms, -6.2%).
+
 - Startup is faster after the first run: the CLI now enables Node's on-disk module compile cache
   (`enableCompileCache()`) in both `cli.ts` and `cli-main.ts` and publishes the resolved cache directory
   through `NODE_COMPILE_CACHE` so the spawned `cli-main` child process reuses it instead of re-compiling

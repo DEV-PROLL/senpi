@@ -50,6 +50,61 @@
 - `packages/coding-agent/src/core/compaction/compaction.ts`
 - `packages/coding-agent/src/core/agent-session.ts` `_resolveThresholdContextTokens`
 
+## In-process CLI fast path when no isolation is required (2026-08-20)
+
+### What changed
+
+- `packages/coding-agent/src/cli.ts` no longer always re-spawns Node to run the agent. It now decides
+  with `requiresIsolatedProcess()` — `process.execArgv.length > 0 || hasInheritedInspectorOption()`.
+  When false (the overwhelmingly common launch), it loads the agent with a dynamic
+  `await import("./cli-main.ts")` in the launcher process itself. When true, the previous child spawn
+  is kept byte-for-byte, including `releaseInheritedInspectorForChild()`, `process.execArgv`
+  forwarding, `stdio: "inherit"`, exit-code forwarding, and signal re-raise via
+  `process.kill(process.pid, signal)`.
+- The former `runFullCli()` is renamed `spawnFullCli()` and is now reached only on the isolation path;
+  the fast path has no result to forward, because `cli-main` runs `main()` at module scope and already
+  owns `process.exitCode` and any `process.exit()` of its own.
+- `packages/coding-agent/src/inspector-policy.ts` exports the previously private
+  `hasInheritedInspectorOption()` (unchanged logic: `--inspect*` in `process.execArgv`, or `--inspect`
+  inside `NODE_OPTIONS`) so `cli.ts` decides with exactly the predicate that governs the existing
+  Inspector handoff, rather than a second, drifting copy of it.
+- Ordering with the compile cache (merged separately, same day) is preserved and is load-bearing:
+  `enableStartupCompileCache()` still runs as the first statement, BEFORE the dynamic import, so on the
+  fast path the dynamically imported engine graph is itself compile-cached in-process, and on the
+  isolation path `NODE_COMPILE_CACHE` is still published for the child to inherit. The comment on that
+  call now states both roles.
+- The two documented reasons for the respawn were re-verified. Inspector socket handoff still requires
+  a separate process and is preserved. Brand env isolation does NOT: `cli-main.ts` calls
+  `scrubBrandFromEnvironment()` itself (`src/core/brand.ts`), so an in-process load scrubs this
+  process's environment before anything the agent later spawns can inherit it.
+
+### Why
+
+- The respawn cost a full Node process launch plus a duplicated entry-module graph on every single
+  launch, for isolation that almost no launch needs. Measured on this fork's built dist (Apple M4 Pro,
+  node v26.7.0, hyperfine 15 runs, 3 warmup): `node dist/cli.js --help` 1.206 s ± 0.049 -> 1.131 s ±
+  0.036 (-75 ms, -6.2%). The untouched control `dist/cli-main.js --help` is unchanged across the same
+  pair of builds, and after the change `cli.js` is faster than `cli-main.js` itself — the launcher no
+  longer pays for a second process. System CPU per launch drops 0.513 s -> 0.397 s (12-run
+  `/usr/bin/time` means), which is where an eliminated spawn is expected to show up.
+
+### Why an extension could not handle it
+
+- This is the process structure of the entrypoint itself: the decision happens in `cli.ts` before any
+  session, extension loader, or extension API exists, and it determines which process the extension
+  loader will eventually run in.
+
+### Expected merge conflict zones
+
+- MEDIUM: `runFullCli()`/`spawnFullCli()` and the trailing dispatch in `packages/coding-agent/src/cli.ts`.
+  Upstream owns this entrypoint and reshapes it periodically; a conflict here should be resolved by
+  re-applying the `requiresIsolatedProcess()` branch around whatever spawn body upstream ends up with,
+  keeping the spawn path unchanged.
+- LOW: the `hasInheritedInspectorOption` export in `packages/coding-agent/src/inspector-policy.ts`
+  (export keyword only; the function body is untouched).
+- LOW: the `enableStartupCompileCache()` call comment in `cli.ts`, shared with the compile-cache entry
+  below.
+
 ## Node module compile cache for CLI startup (2026-08-20)
 
 ### What changed
