@@ -126,9 +126,16 @@ async function executeTool(
 			input: params,
 		});
 		if (runSignal.aborted || options.getAbortSignal() !== runSignal) {
-			return errorResult(toolCallId, toolName, "Tool execution has no active run");
-		}
-		if (preflight?.block) {
+			const message = "Tool execution has no active run";
+			toolResult = errorResult(toolCallId, toolName, message);
+			endEvent = {
+				type: "tool_execution_end",
+				toolCallId,
+				toolName,
+				result: { content: [{ type: "text", text: message }], details: undefined },
+				isError: true,
+			};
+		} else if (preflight?.block) {
 			const message = preflight.reason || "Tool execution was blocked";
 			toolResult = errorResult(toolCallId, toolName, message);
 			endEvent = {
