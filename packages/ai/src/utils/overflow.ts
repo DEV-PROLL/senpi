@@ -196,3 +196,20 @@ export function isRecoverableLength(message: AssistantMessage, desiredMaxOutput:
 export function getOverflowPatterns(): RegExp[] {
 	return [...OVERFLOW_PATTERNS];
 }
+
+const CURSOR_PAYLOAD_RE_MIN_ESTIMATE = 50_000;
+
+export function isCursorPayloadResourceExhausted(
+	message: { stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number } },
+	estimateTokens: number,
+): boolean {
+	if (message.stopReason !== "error" || !/resource.?exhausted/i.test(message.errorMessage || "")) {
+		return false;
+	}
+	const usage = message.usage;
+	const tokens = usage
+		? (usage.totalTokens || (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))
+		: 0;
+	if (tokens > 0) return false;
+	return (estimateTokens || 0) >= CURSOR_PAYLOAD_RE_MIN_ESTIMATE;
+}

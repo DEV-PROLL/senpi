@@ -49,6 +49,7 @@ import {
 	cleanupSessionResources,
 	isClassifierRefusal,
 	isContextOverflow,
+	isCursorPayloadResourceExhausted,
 	isProviderStreamStallError,
 	isProviderTimeoutError,
 	isRecoverableLength,
@@ -1791,6 +1792,9 @@ export class AgentSession {
 			contextUsage.tokens !== null &&
 			shouldCompact(contextUsage.tokens, contextUsage.contextWindow, settings);
 		if (isContextOverflow(message, model.contextWindow) && (sameModel || currentContextNeedsCompaction)) {
+			return "overflow";
+		}
+		if (this._isCursorPayloadOverflow(message)) {
 			return "overflow";
 		}
 
@@ -5418,7 +5422,8 @@ export class AgentSession {
 		const recoverableLength = sameModel && isRecoverableLength(assistantMessage, this.model?.maxTokens ?? 0);
 		const isOverflow =
 			(isContextOverflow(assistantMessage, contextWindow) && (sameModel || currentContextNeedsCompaction)) ||
-			recoverableLength;
+			recoverableLength ||
+			this._isCursorPayloadOverflow(assistantMessage);
 		if (
 			isOverflow &&
 			assistantMessage.stopReason === "stop" &&
@@ -6653,11 +6658,17 @@ export class AgentSession {
 		return isRetryableAssistantError(message);
 	}
 
+	private _isCursorPayloadOverflow(message: AssistantMessage): boolean {
+		const estimate = estimateContextTokens(this.agent.state.messages ?? []);
+		return isCursorPayloadResourceExhausted(message, estimate.tokens ?? 0);
+	}
+
 	private _isHardErrorFallbackEligible(message: AssistantMessage): boolean {
 		return (
 			!message.errorMessage?.startsWith(TURN_RETRY_SUPPRESSION_PREFIX) &&
 			message.stopReason === "error" &&
 			!isContextOverflow(message, this.model?.contextWindow ?? 0) &&
+			!this._isCursorPayloadOverflow(message) &&
 			!isClassifierRefusal(message) &&
 			!message.content.some((content) => content.type === "toolCall") &&
 			this._retryFallback.canTryFallback()

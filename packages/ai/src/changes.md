@@ -1,3 +1,7 @@
+## Unreleased
+
+- Treat large Cursor 0-token resource_exhausted as overflow so the session compacts before rotating or falling back.
+
 # AI Source Changes
 
 ## 2026-08-19 - OpenAI-family adapters re-diverge from the 59a71b23 pin
