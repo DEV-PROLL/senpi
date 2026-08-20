@@ -1,3 +1,7 @@
+## Unreleased
+
+- Promote assistant stopReason stop to toolUse when the message still has toolCall blocks.
+
 # Changes
 
 ## Loop and agent divergence re-established against upstream 59a71b23 (2026-08-19)
