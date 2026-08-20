@@ -1,5 +1,26 @@
 # changes
 
+## 2026-08-20 - Resumed transcripts paint the visible tail first
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: the chat transcript now uses `ProgressiveTranscriptContainer`.
+- `packages/coding-agent/src/modes/interactive/components/progressive-transcript-container.ts`: the first frame renders a bounded tail of real message/tool components, then warms earlier components in bounded macrotask chunks and requests one exact full-history repaint.
+
+### Why
+
+- Resuming a large session eagerly Markdown-rendered every persisted component before the first useful frame. Thousands of off-screen messages could block the TUI for hundreds of milliseconds even though the user initially sees only the transcript tail.
+- Progressive hydration preserves the exact full output and component styling while moving off-screen cache warming out of the input-critical path.
+
+### Why an extension could not handle it
+
+- Initial transcript component construction, chat-container ownership, clearing, disposal, and renderer invalidation are private `InteractiveMode` lifecycle state; extensions cannot replace the built-in transcript container.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/modes/interactive/interactive-mode.ts` chat-container import and constructor.
+- LOW: the new progressive transcript container is a fork-owned component.
+
 ## 2026-08-20 - Trailing assistant text renders below the last tool card
 
 ### What changed
@@ -19,7 +40,6 @@
 
 - `packages/coding-agent/src/modes/interactive/interactive-mode.ts` `message_update` / `message_end`.
 - `packages/coding-agent/src/modes/interactive/split-trailing-assistant-text.ts`
-
 ## 2026-08-20 - Late tool_execution_end still draws a TUI card
 
 ### What changed
