@@ -108,3 +108,24 @@
 ### Expected merge conflict zones
 
 - LOW: `index.ts` `registrationHasRestrictedTarget` and the new `isSafeFilteredAgentDirTarget`; LOW in `config-reload-extension.test.ts`.
+
+## Off-main-thread recursive watchers on macOS and non-blocking teardown (2026-08-20)
+
+### What changed
+
+- `watch-event-source.ts` routes recursive watches through the existing worker thread on `darwin` as well as `linux` (`WORKER_OFFLOADED_RECURSIVE_PLATFORMS`); creation and teardown of recursive `fs.watch` handles no longer run on the interactive main thread on macOS. Non-recursive watches are unchanged.
+- `ConfigReloadWatchEngine.close()` now returns `Promise<void>`: it flips the `#closed` dispatch guard and clears the debounce timer synchronously, then drains the unsubscribe loop on a 0ms clock tick. `closeWatchers()` in `index.ts` fires that teardown without awaiting it, logging failures via the existing `watcher_error` logger shape.
+
+### Why
+
+- Hot reload awaits this extension's `session_shutdown` handler. On macOS each recursive `FSWatcher.close()` is an FSEvents stream teardown that blocks the calling thread — measured 5.2-13.9s per watcher on a loaded M4 Pro (44.8-62.8s for 8 watchers; ~150-200ms each idle), making `/reload` and config-watch reloads stall for seconds to a minute. The engine is inert the moment `#closed` flips, so nothing on the reload path needs teardown completion.
+
+### Why an extension could not handle it
+
+- The watch engine, its event source, and the `session_shutdown` ordering are all internal to this builtin; no external extension can change how the host awaits the shutdown handler or where `fs.watch` handles are created.
+
+### Expected merge conflict zones
+
+- MEDIUM: `watch-engine.ts` `close()` signature (`void` -> `Promise<void>`) and any upstream callers that await or type it.
+- LOW: `watch-event-source.ts` platform gate; `index.ts` `closeWatchers`.
+- LOW: `config-reload-extension.test.ts` (macOS offload block appended; two teardown-timing assertions restated as behavior assertions) and the new `config-reload-lazy-teardown.test.ts`.
