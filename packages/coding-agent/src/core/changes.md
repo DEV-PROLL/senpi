@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-20 - Session title uses session-model auth
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `_generateSessionTitle` now calls `_getSummarizationRequestAuth(model)` instead of `_getCompactionRequestAuth(model)`.
+
+### Why
+
+- Compaction auth can be remapped to another provider (see #974). Title generation still streams with the session model, so a remapped key produces `session_title_generation` `unauthenticated` on Cursor while the main turn works.
+
+### Why an extension could not handle it
+
+- Title generation is private session lifecycle. There is no extension hook for the title complete auth.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `_generateSessionTitle`.
+
 ## 2026-08-20 - Cursor 0-token RE stays on the same model and shrinks
 
 ### What changed

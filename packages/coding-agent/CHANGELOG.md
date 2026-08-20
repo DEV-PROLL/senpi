@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Session title generation now uses the session model's summarization auth instead of remapped compaction auth, so an explicit compaction model no longer produces `unauthenticated` Cursor title calls (#980).
 - Cursor 0-token `resource_exhausted` retries the same model after remint/compact instead of falling back to another provider, and too-small overflow compact now drops to the last user turn.
 - Cursor native `todo`/`updateTodos` calls now persist as `senpi.todo-state` even when the server resolves them without a local `op`, so the `/todo` widget no longer stays empty after a successful native todo update (#991).
 - Native Cursor sessions no longer compact mid-turn while a Run is live: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`, and blocking/generated compaction refuse those providers until the session is idle, so a mid-turn compact cannot poison `conversationId` and trigger 0-token `resource_exhausted` (#984).
