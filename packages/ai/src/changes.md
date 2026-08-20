@@ -1,5 +1,35 @@
 # AI Source Changes
 
+## 2026-08-20 - Cursor explicit levels prefer catalog suffix variant ids
+
+### What changed
+
+- `packages/ai/src/cursor/selection-descriptor.ts`: `resolveCursorSelectionDescriptor` now resolves an
+  explicit thinking level to the catalog-guaranteed legacy suffix alias (`kimi-k3-high`,
+  `claude-fable-5-thinking-low`, `gpt-5.3-codex-xhigh`) whenever one exists, via a new
+  `suffixAliasId` that tries the level's wire value then the level token, with thinking-infixed
+  candidates for thinking Claude identities. Bare base id + ordered parameters remains only as the
+  fallback for levels without any alias; `legacySuffixId` is subsumed.
+
+### Why
+
+- Cursor's Run RPC now rejects bare capability ids with Connect `not_found` for every family
+  (issue #1008; live probes 2026-08-20 in
+  `local-ignore/qa-evidence/20260820-cursor-bare-id-notfound/`: bare `kimi-k3`+parameters and bare
+  `claude-fable-5`+parameters both `not_found`, while `kimi-k3-high` and
+  `claude-fable-5-thinking-low` complete), so every explicit level rendered as base+parameters died
+  at turn start.
+
+### Why an extension could not handle it
+
+- The selection descriptor is core provider data consumed by both Cursor transports (protobuf
+  `RequestedModel` and the CLI model string); no extension hook sits between them.
+
+### Expected merge conflict zones
+
+- `selection-descriptor.ts` resolver body and helper block (fork-only file; upstream has no cursor
+  provider).
+
 ## 2026-08-19 - OpenAI-family adapters re-diverge from the 59a71b23 pin
 
 ### What changed
