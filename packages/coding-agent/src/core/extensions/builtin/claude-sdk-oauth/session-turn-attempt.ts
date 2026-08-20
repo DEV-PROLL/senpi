@@ -8,7 +8,7 @@ import {
 	sessionRegistry,
 } from "./session-registry.ts";
 import { submitSessionTurn } from "./session-registry-pump.ts";
-import { recordSyncedStream } from "./session-sync.ts";
+import { recordSyncedStream, sentHashPrefixDigest } from "./session-sync.ts";
 
 type StagedContinuityDecision = { emit(): void };
 
@@ -20,6 +20,22 @@ function recordAssistantUuid(entry: ClaudeSdkOauthSessionEntry, sentCount: numbe
 	if (message.type === "assistant" && message.parent_tool_use_id === null) {
 		entry.assistantUuidByIndex.set(sentCount, message.uuid);
 	}
+}
+
+/**
+ * An attempt that pushed its user payload and then aborted or failed leaves that
+ * message on the lineage un-answered: `recordSyncedStream` never ran, so the
+ * entry still points at the PRE-TURN boundary. Remembering the binding at that
+ * boundary, tagged with the attempted turn's full sent-stream digest, lets the
+ * SAME turn's retry fork past the orphaned message instead of appending it
+ * twice (issue #723 retry storm). In-memory only — nothing here is persisted.
+ */
+function rememberRetryCheckpoint(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[]): void {
+	if (entry.sentCount < 0 || entry.sentCount > hashes.length) return;
+	rememberBinding({
+		...bindingFromEntry(entry, hashes.slice(0, entry.sentCount)),
+		unansweredTurnDigest: sentHashPrefixDigest(hashes, hashes.length),
+	});
 }
 
 export function createSessionTurnAttempt(
@@ -51,12 +67,21 @@ export function createSessionTurnAttempt(
 				if (!turn.aborted && successfulTurn(turn.messages)) {
 					recordSyncedStream(entry, hashes);
 					rememberBinding(bindingFromEntry(entry, hashes));
+				} else {
+					rememberRetryCheckpoint(entry, hashes);
 				}
+			} catch (error) {
+				// The queue failed (completion rejected: pump failure, query end,
+				// attribution error). The payload was still pushed, so the retry needs
+				// the same checkpoint the aborted path records.
+				rememberRetryCheckpoint(entry, hashes);
+				throw error;
 			} finally {
 				staged.emit();
 			}
 		})(),
 		discard: (): void => {
+			rememberRetryCheckpoint(entry, hashes);
 			if (isCurrentGeneration(entry.senpiSessionId, generation)) {
 				closeSession(entry.senpiSessionId, "attempt_discarded");
 			}

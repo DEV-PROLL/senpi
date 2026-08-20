@@ -119,7 +119,12 @@ describe("issue #447: goal continuation guardrails", () => {
 		expect(notices).not.toContainEqual(expect.stringContaining("continuation cap reached"));
 	});
 
-	it("does not send consumed goal-continuation prompts in the next faux-provider request", async () => {
+	it("sends historical goal-continuation prompts to the provider in stable chronological order", async () => {
+		// #447 bounds how many *new* continuations the goal extension queues (covered by
+		// the queueing tests above). Once a continuation has been sent, it stays in
+		// provider-visible history: deleting it per request would rewrite the cached
+		// prefix and force a full re-read every turn (#1005). Growth is bounded by
+		// normal compaction, not by per-request deletion.
 		const harness = await createHarness();
 		harnesses.push(harness);
 		harness.sessionManager.appendMessage({ role: "user", content: "begin the goal", timestamp: 1 });
@@ -140,8 +145,12 @@ describe("issue #447: goal continuation guardrails", () => {
 		const continuationPrompts = request.context.messages.filter(
 			(message) => message.role === "user" && getMessageText(message).startsWith("consumed continuation"),
 		);
-		expect(continuationPrompts).toHaveLength(1);
-		expect(getMessageText(continuationPrompts[0]!)).toBe("consumed continuation 299");
+		expect(continuationPrompts).toHaveLength(300);
+		expect(getMessageText(continuationPrompts[0]!)).toBe("consumed continuation 0");
+		expect(getMessageText(continuationPrompts[299]!)).toBe("consumed continuation 299");
+		// the freshly typed prompt is still the final turn the provider sees
+		const lastMessage = request.context.messages[request.context.messages.length - 1];
+		expect(getMessageText(lastMessage)).toBe("make the next provider request");
 	});
 
 	it("allows one truncation recovery, then blocks rather than looping on length stops", async () => {

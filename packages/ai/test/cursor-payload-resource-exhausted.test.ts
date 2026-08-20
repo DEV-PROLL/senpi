@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { AssistantMessage } from "../src/types.ts";
 import {
 	cursorOverflowCompactionSettings,
 	isContextOverflow,
@@ -7,10 +8,23 @@ import {
 	shouldSkipProviderFallbackForCursorZeroRe,
 } from "../src/utils/overflow.ts";
 
-const zeroRe = {
-	stopReason: "error" as const,
+const zeroRe: AssistantMessage = {
+	role: "assistant",
+	content: [],
+	api: "cursor",
+	provider: "cursor",
+	model: "composer-1.5",
+	stopReason: "error",
 	errorMessage: "Connect error resource_exhausted: Error",
-	usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+	usage: {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	},
+	timestamp: 0,
 };
 
 describe("isCursorPayloadResourceExhausted", () => {
@@ -22,7 +36,7 @@ describe("isCursorPayloadResourceExhausted", () => {
 		expect(shouldSkipProviderFallbackForCursorZeroRe({ sameModelRemint: true })).toBe(true);
 		expect(
 			cursorOverflowCompactionSettings({ keepRecentTokens: 20_000, restorationEnabled: true }, "cursor", "overflow")
-			.keepRecentTokens,
+				.keepRecentTokens,
 		).toBe(0);
 	});
 });

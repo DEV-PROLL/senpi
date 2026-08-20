@@ -203,13 +203,16 @@ function cursorZeroTokenCount(message: {
 	const usage = message.usage;
 	if (!usage) return 0;
 	return (
-		usage.totalTokens ||
-		(usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
+		usage.totalTokens || (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
 	);
 }
 
 export function isCursorPayloadResourceExhausted(
-	message: { stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number } },
+	message: {
+		stopReason?: string;
+		errorMessage?: string;
+		usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number };
+	},
 	_estimateTokens: number,
 ): boolean {
 	if (message.stopReason !== "error" || !/resource.?exhausted/i.test(message.errorMessage || "")) {
