@@ -6,6 +6,10 @@
 
 ### Fixed
 
+- The Cursor exec bridge fails closed when a session bridge has no captured owning run, and rechecks
+  run ownership after awaited preflight work so a run that ends during an approval prompt cannot start
+  a tool side effect afterward.
+
 ### Added
 
 ### Changed
