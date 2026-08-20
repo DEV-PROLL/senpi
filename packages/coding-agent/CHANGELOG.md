@@ -6,6 +6,15 @@
 
 ### Fixed
 
+- claude-sdk-oauth stream-start-timeout retries now fork the SDK conversation at the last assistant
+  boundary before the stalled turn instead of re-attaching and re-sending it, so each retry re-bills
+  only the turn's own message on a prefix cache read instead of re-writing the whole conversation
+  (fixes #723 retry-storm re-billing: cache writes grew ~8K per attempt, $25/6min, $1084/3days on
+  worker dispatch). A stalled first turn with no boundary to fork at re-seeds byte-identically, which
+  the provider serves from prefix cache after the first write. The retry watchdog cap semantics
+  (`streamRetryTimeoutMs` caps the retry continuation, reconciled to the granted stream-start guard)
+  are now documented on the setting itself.
+
 ### Added
 
 ### Changed

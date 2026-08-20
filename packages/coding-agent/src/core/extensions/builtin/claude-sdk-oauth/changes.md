@@ -1,5 +1,57 @@
 # claude-sdk-oauth
 
+## 2026-08-20 - Same-turn timeout retries fork at the pre-turn boundary (issue #723)
+
+### What changed
+
+- `session-reattach.ts`: `ContinuityBinding` gained an optional in-memory-only `unansweredTurnDigest`. It
+  rides the existing clone/remember paths but is NEVER persisted: `storedBindingFromEntry`
+  (`session-binding.ts`) builds the sidecar record from an explicit field list, and the strict
+  `schemaVersion: 1` schema (`session-binding-store.ts`) rejects any record carrying it.
+  Tests: `test/claude-sdk-oauth-binding-store.test.ts` (round-trip rejects it).
+- `session-turn-attempt.ts`: an attempt that pushed its user payload but ended aborted, failed, or
+  discarded now remembers a retry checkpoint binding anchored at the PRE-TURN boundary
+  (`bindingFromEntry(entry, hashes.slice(0, entry.sentCount))` + the attempted turn's full sent-stream
+  digest). Covers the `turn.aborted` resolution, the queue-failure (completion rejected) path, and
+  `discard()` before `closeSession`.
+- `session-continuity.ts`: `decideFromBinding` gains a branch ahead of the existing prefix logic — when
+  the binding carries a checkpoint, the FULL current sent stream hashes to it, and the prefix at
+  `binding.sentCount` matches, it returns `fork` at `binding.lastAssistantUuid` (`reason:
+  "timeout_retry"`), or the cold-seed `flatten` with the same reason when no boundary exists (first
+  turn). A digest mismatch falls through to the pre-existing branches unchanged.
+- `session-observability.ts`: `ContinuityReason` union and the sanitizer allowlist admit
+  `timeout_retry`. No new event types; one observation per main turn is preserved.
+- Tests: `test/suite/regressions/723-claude-sdk-oauth-timeout-abort-retry-continuity.test.ts`,
+  `test/claude-sdk-oauth-continuity-decision.test.ts`, `test/claude-sdk-oauth-continuity-retry-checkpoint.test.ts`.
+
+### Why
+
+A stream-start-timeout abort closes the SDK session with the turn's user message already appended and
+  un-answered. The retry then re-attached to that lineage and appended the SAME message again — one
+  duplicate per attempt, ~8K tokens of cache re-billing per attempt, and for a first turn (no assistant
+  boundary, binding absent) a full re-flatten of the whole conversation at full price on every attempt
+  (issue #723: $25 per 6 minutes, $1084 over 3 days on worker dispatch). Forking at the pre-turn
+  boundary rewinds past the orphaned message, so the retry's request byte-layout matches the failed
+  attempt's and the provider serves it from prefix cache; a first turn re-seeds byte-identically
+  (flatten is a deterministic function of context), which is likewise cache-read after the first write.
+
+### Why an extension could not handle it
+
+- The retry checkpoint must be recorded where the attempt's outcome is known (`session-turn-attempt.ts`)
+  and consumed by the resident-lane continuity decision table (`session-continuity.ts`) — both are
+  internal to this builtin's resident session machinery; no extension hook observes attempt outcomes or
+  continuity bindings.
+
+### Expected merge conflict zones
+
+- `session-continuity.ts` in `decideFromBinding` (head of the function) — upstream continuity reworks
+  touch the same function.
+- `session-turn-attempt.ts` attempt-outcome block and `discard()` — same file upstream reworked in the
+  2026-08-01 continuity pass.
+- `session-reattach.ts` `ContinuityBinding` field list.
+- `session-observability.ts` `ContinuityReason` union tail and `SANITIZED_REASONS` set (mechanically
+  duplicated literals; both must gain the member).
+
 ## 2026-08-19 - Kill-switched lane leaves implicit fallback expansion
 
 ### What changed

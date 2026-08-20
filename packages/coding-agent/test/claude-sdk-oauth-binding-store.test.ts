@@ -51,6 +51,24 @@ describe("claude-sdk-oauth session binding store", () => {
 		expect(stored?.sessionId).toBe("sess-abc-123");
 	});
 
+	// Issue #723 added an in-memory-only `unansweredTurnDigest` to the process
+	// binding. The sidecar schema is strict and fixed at schemaVersion 1: a record
+	// carrying it must be REJECTED at write, and one smuggled onto disk must not
+	// survive a read, so restart retries can never resume off a stale checkpoint.
+	it("never persists the in-memory retry checkpoint field", async () => {
+		const { sessionFile } = makeSessionFixture();
+		const withDigest = { ...record(sessionFile), unansweredTurnDigest: "5".repeat(64) } as StoredBinding;
+
+		await expect(writeStoredBinding(sessionFile, withDigest)).rejects.toThrow();
+
+		writeFileSync(bindingSidecarPath(sessionFile), `${JSON.stringify(withDigest)}\n`, "utf8");
+		await expect(readStoredBinding(sessionFile)).resolves.toBeUndefined();
+
+		await writeStoredBinding(sessionFile, record(sessionFile));
+		const stored = await readStoredBinding(sessionFile);
+		expect(stored && "unansweredTurnDigest" in stored).toBe(false);
+	});
+
 	it("rejects a malformed sidecar file", async () => {
 		const { sessionFile } = makeSessionFixture();
 		const sidecar = bindingSidecarPath(sessionFile);
