@@ -47,6 +47,7 @@ import {
 	findCutPoint,
 	getLastAssistantUsage,
 	prepareCompaction,
+	resolveThresholdContextTokens,
 	shouldCompact,
 } from "../src/core/compaction/index.ts";
 import compactionExtension from "../src/core/extensions/builtin/compaction/index.ts";
@@ -449,6 +450,15 @@ describe("Token calculation", () => {
 	it("should handle zero values", () => {
 		const usage = createMockUsage(0, 0, 0, 0);
 		expect(calculateContextTokens(usage)).toBe(0);
+	});
+
+	it("keeps max(usage, estimate) when billed usage is plausible", () => {
+		expect(resolveThresholdContextTokens(180_000, 149_000)).toBe(180_000);
+		expect(resolveThresholdContextTokens(20_000, 149_000)).toBe(149_000);
+	});
+
+	it("drops billed usage that is more than 8x a large local estimate", () => {
+		expect(resolveThresholdContextTokens(4_090_000, 149_256)).toBe(149_256);
 	});
 });
 

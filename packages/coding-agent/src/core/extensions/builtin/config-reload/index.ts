@@ -99,6 +99,7 @@ type PendingChange = {
 
 type ReloadHandoff = {
 	readonly hashesAtRequest: ReadonlyMap<string, string>;
+	readonly settingsContentsAtRequest: ReadonlyMap<string, string>;
 	readonly requestedAt: number;
 	readonly changes: readonly { readonly registrationId: string; readonly paths: readonly string[] }[];
 };
@@ -172,7 +173,6 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 	let activeTargets: ActiveTarget[] = [];
 	let currentContext: ExtensionContext | undefined;
 	let started = false;
-	let tornDown = false;
 	let reloadInFlight = false;
 	let deferredNoticeShown = false;
 	let unavailableReloadLogged = false;
@@ -386,24 +386,23 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 		const changes = pendingChanges(pending);
 		const paths = uniquePaths(changes.flatMap((change) => change.paths));
 		reloadInFlight = true;
-		tornDown = false;
 		reloadHandoffs.set(handoffKey(ctx), {
 			hashesAtRequest: engine?.getBaselineSnapshot() ?? new Map<string, string>(),
+			settingsContentsAtRequest: new Map(settingsContents),
 			requestedAt: Date.now(),
 			changes,
 		});
 		ctx.ui.notify(`Hot-reloading: ${formatPaths(paths)}`, "info");
 		logger.info("reload_requested", { reason: "config changed", paths });
 
+		const handoffKeyForReload = handoffKey(ctx);
 		try {
 			await ctx.requestReload();
-			if (!tornDown) {
-				reloadInFlight = false;
-				reloadHandoffs.delete(handoffKey(ctx));
-			}
+			reloadInFlight = false;
+			reloadHandoffs.delete(handoffKeyForReload);
 		} catch (error) {
 			reloadInFlight = false;
-			reloadHandoffs.delete(handoffKey(ctx));
+			reloadHandoffs.delete(handoffKeyForReload);
 			logger.error("watcher_error", { path: "reload", message: errorMessage(error) });
 		}
 	};
@@ -442,6 +441,8 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 
 		const changedPaths = compareSnapshots(handoff.hashesAtRequest, engine?.getBaselineSnapshot() ?? new Map());
 		if (changedPaths.length > 0) {
+			settingsContents.clear();
+			for (const [path, content] of handoff.settingsContentsAtRequest) settingsContents.set(path, content);
 			enqueueChange({ changedPaths, created: [], deleted: [] });
 			await changeChain;
 		}
@@ -451,7 +452,6 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 	eventUnsubscribes.push(pi.events.on(CONFIG_WATCH_UNREGISTER, handleUnregistration));
 
 	pi.on("session_start", async (event, ctx) => {
-		tornDown = false;
 		started = true;
 		currentContext = ctx;
 		rebuildWatchers(ctx);
@@ -472,7 +472,6 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 	});
 	pi.on("session_shutdown", (event) => {
 		const closingContext = currentContext;
-		tornDown = true;
 		started = false;
 		currentContext = undefined;
 		closeWatchers();

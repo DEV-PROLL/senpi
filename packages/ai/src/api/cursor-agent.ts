@@ -763,6 +763,8 @@ function markCursorExecResolved(block: CursorExecResolvedCarrier): void {
 export interface UsageState {
 	sawTokenDelta: boolean;
 	sawTurnEndedUsage: boolean;
+	/** Last checkpoint `usedTokens`; conversation window, not billed cache. */
+	liveUsedTokens?: number;
 }
 
 /** Exported for tests: drives one Cursor server message through the stream (exec waits mark the stream busy). */
@@ -3398,8 +3400,24 @@ function applyBilledTurnEndedUsage(update: TurnEndedUpdate, output: AssistantMes
 	}
 	usageState.sawTurnEndedUsage = true;
 	const usage = output.usage;
-	usage.cacheRead = Number(cacheReadTokens ?? 0n);
-	usage.cacheWrite = Number(cacheWriteTokens ?? 0n);
+	const cacheRead = Number(cacheReadTokens ?? 0n);
+	const cacheWrite = Number(cacheWriteTokens ?? 0n);
+	const liveUsed = usageState.liveUsedTokens ?? 0;
+	// Cursor sometimes reports dashboard-cumulative cache_read (millions) while
+	// usedTokens stays at the real window (~150k). Folding that into totalTokens
+	// forces a useless compact and then a 0-token resource_exhausted.
+	if (liveUsed > 0 && cacheRead > liveUsed * 3) {
+		if (outputTokens !== undefined) {
+			usage.output = Number(outputTokens);
+		}
+		usage.cacheRead = 0;
+		usage.cacheWrite = cacheWrite <= liveUsed ? cacheWrite : 0;
+		usage.input = Math.max(0, liveUsed - usage.output - usage.cacheWrite);
+		usage.totalTokens = liveUsed;
+		return;
+	}
+	usage.cacheRead = cacheRead;
+	usage.cacheWrite = cacheWrite;
 	usage.input = Math.max(0, Number(inputTokens ?? 0n) - usage.cacheRead - usage.cacheWrite);
 	if (outputTokens !== undefined) {
 		usage.output = Number(outputTokens);
@@ -3420,6 +3438,7 @@ function applyCheckpointTokenDetails(
 	if (usageState.sawTurnEndedUsage) return;
 	const usedTokens = checkpoint.tokenDetails?.usedTokens ?? 0;
 	if (usedTokens <= 0) return;
+	usageState.liveUsedTokens = usedTokens;
 	const usage = output.usage;
 	usage.input = Math.max(0, usedTokens - usage.output - usage.cacheRead - usage.cacheWrite);
 	usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;

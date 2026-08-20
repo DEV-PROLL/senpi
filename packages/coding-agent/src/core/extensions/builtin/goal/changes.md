@@ -1119,3 +1119,15 @@ codex-aligned tool naming, and budget-driven behavior removed. An optional
 - LOW in `types.ts` around the `SessionEvent` union and `on()` overloads (additive).
 - LOW in `agent-session.ts` around `abort()` and the `AgentSessionEvent` union (additive).
 - LOW in `goal/index.ts` around the session_start handler and the new session_abort handler.
+
+## 2026-08-20 — tickers retire on stale extension contexts
+
+`GoalWaitTicker`/`GoalElapsedTicker` previously relied on `index.ts` render
+callbacks that swallowed the stale-ctx error thrown after session
+replacement/reload, so a ticker holding a retired ctx kept ticking forever
+while rendering nothing — the footer elapsed/countdown froze and the TUI lost
+its only periodic repaint source in idle sessions. Both tickers now detect the
+stale-ctx error (`stale-context.ts`) inside `tick()` and retire (clear the
+interval, drop the ctx); `GoalWaitTicker.stop()` tolerates a stale ctx on its
+final clear render. A later `sync()` with a live ctx re-arms them. Covered by
+`test/suite/goal-ticker-stale-context.test.ts`.
