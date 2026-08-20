@@ -4,9 +4,14 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { enableStartupCompileCache } from "./compile-cache.ts";
 import { APP_NAME, DISPLAY_VERSION, getPackageDir } from "./config.ts";
 import { releaseInheritedInspectorForChild } from "./inspector-policy.ts";
 import { handleBootstrapSelfUpdate } from "./self-update-bootstrap.ts";
+
+// Publishes NODE_COMPILE_CACHE so the cli-main child below inherits this process's cache directory;
+// that child loads the full engine graph, so it is where the skipped compilation actually pays off.
+enableStartupCompileCache();
 
 process.title = APP_NAME;
 process.env.PI_CODING_AGENT = "true";

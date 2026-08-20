@@ -17,6 +17,14 @@ export type ContinuityBinding = {
 	toolsetHash: string;
 	/** Assistant boundaries kept as entries so a later fork still has a resume point. */
 	assistantUuidByIndex?: readonly (readonly [number, string])[];
+	/**
+	 * Digest of the FULL sent stream an attempt pushed but never got answered
+	 * (stream-start timeout abort/failure). Purely in-memory: it lets the SAME
+	 * turn's retry fork at the pre-turn boundary instead of re-appending its user
+	 * message to a lineage that already carries it. Never persisted — the sidecar
+	 * schema is fixed at schemaVersion 1 and restart retries are out of scope.
+	 */
+	unansweredTurnDigest?: string;
 };
 
 export type ReattachInput = {

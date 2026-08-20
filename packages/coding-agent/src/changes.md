@@ -1,5 +1,98 @@
 # changes
 
+## Public notice renderer primitives (2026-08-20)
+
+### What changed
+
+- `packages/coding-agent/src/index.ts` now exports `buildNoticeBox`, `noticeMessageRenderer`, `noticeEntryRenderer`, and the `NoticeSpec`, `NoticeLine`, and `NoticeTone` types.
+
+### Why
+
+- Extensions and package consumers need the same notice-card contract as built-in transcript surfaces instead of recreating its background, title, and detail styling.
+
+### Why an extension could not handle it
+
+- The package entry point owns the supported public API; an extension cannot export additional symbols from it.
+
+### Expected merge conflict zones
+
+- LOW: the notice export block in `packages/coding-agent/src/index.ts`.
+
+## 2026-08-19 - Skip Cursor compaction while a Run is live
+
+### What changed
+
+- `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`.
+- Blocking and generated compaction refuse those providers while `!ctx.isIdle()`.
+
+### Why
+
+- Cursor rebuilds full conversation state each hop. Mid-turn compact desyncs `conversationId` and the next hop returns 0-token `resource_exhausted` (session 01a01879).
+
+### Conflict zone
+
+- `packages/coding-agent/src/core/agent-session.ts` `compactBeforeNextAdmission`
+- `packages/coding-agent/src/core/extensions/builtin/compaction/index.ts` `applyBlockingCompaction`
+- `packages/coding-agent/src/core/extensions/builtin/compaction/speculative.ts` `applyGeneratedCompaction`
+
+## 2026-08-19 - Ignore implausible Cursor usage for compaction threshold
+
+### What changed
+
+- `_resolveThresholdContextTokens` uses `resolveThresholdContextTokens`: if the local estimate is at least 50k and billed usage is more than 8× that estimate, compact against the estimate.
+
+### Why
+
+- Complements the billed-cacheRead guard. When no checkpoint arrived, a 4M `cacheRead` still must not beat a 149k transcript estimate.
+
+### Conflict zone
+
+- `packages/coding-agent/src/core/compaction/compaction.ts`
+- `packages/coding-agent/src/core/agent-session.ts` `_resolveThresholdContextTokens`
+
+## Node module compile cache for CLI startup (2026-08-20)
+
+### What changed
+
+- `packages/coding-agent/src/compile-cache.ts` (new, fork-only): `enableStartupCompileCache()` enables
+  Node's on-disk V8 module compile cache and publishes the resolved BASE cache directory into
+  `process.env.NODE_COMPILE_CACHE` so child processes inherit the same cache. Node's programmatic
+  `enableCompileCache()` does not export that variable itself, and the value published must be the base
+  directory (not `getCompileCacheDir()`, which already contains Node's versioned segment — handing it
+  back double-nests the child's cache and it misses every parent entry). The API is read off the
+  `node:module` namespace rather than imported by name: a named import of a missing export is a
+  link-time `SyntaxError` no runtime guard can catch, and the bun-compiled binary runs this file.
+- `packages/coding-agent/src/cli.ts` calls it as the first statement after imports (after the existing
+  `valid-cwd.ts` first-import guard): `cli.ts` spawns `cli-main` as a child, and that child loads the
+  full engine graph, so inheritance is what makes the cache reach the process that pays the compile cost.
+- `packages/coding-agent/src/cli-main.ts` calls it first as well, so direct `cli-main` invocations (the
+  bun binary, tests) benefit when no launcher published a directory; when one did, the call keeps the
+  existing value.
+- Guards: never overrides a pre-set `NODE_COMPILE_CACHE`; `NODE_DISABLE_COMPILE_CACHE=1` stays honored
+  (the call is skipped or Node reports failure and nothing is published); any failure degrades to plain
+  compilation instead of failing startup.
+
+### Why
+
+- Cold profiling attributes roughly a quarter of CLI boot CPU to V8 compiling the ~800ms module graph;
+- with the cache warm, repeated launches skip that compilation. Measured on this fork's built dist
+  (Apple M4 Pro, node v26.7.0): `cli-main --help` user CPU -11% to -14%, net user+sys -3% (the cache
+  read IO eats part of the compile saving; wall-clock gains appear on an otherwise idle machine).
+- The first launch after enabling still compiles and writes the cache (cache population), so this is a
+  warm-start optimization only.
+
+### Why an extension could not handle it
+
+- The cache must be enabled before the engine's module graph starts loading, and `NODE_COMPILE_CACHE`
+  must be in the environment before `cli.ts` spawns the `cli-main` child — both happen in the
+  entrypoints, before the extension loader exists.
+
+### Expected merge conflict zones
+
+- LOW: the first-statement call and its import in `cli.ts` and `cli-main.ts` (upstream may reshuffle
+  entrypoint imports; the `valid-cwd.ts` first-import ordering is pinned by test and must stay first).
+  `compile-cache.ts` is fork-only with no upstream counterpart.
+
 ## Entry surface and CLI coordinator re-diverge from upstream 59a71b23 (2026-08-19)
 
 ### What changed

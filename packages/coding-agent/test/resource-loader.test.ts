@@ -1126,10 +1126,9 @@ export default function(pi) {
 				"explicit command",
 				"global command",
 			]);
-			expect(loadedExtensions.map((extension) => extension.tools.get("duplicate-tool")?.definition.description)).toEqual([
-				"explicit tool",
-				"global tool",
-			]);
+			expect(
+				loadedExtensions.map((extension) => extension.tools.get("duplicate-tool")?.definition.description),
+			).toEqual(["explicit tool", "global tool"]);
 		});
 	});
 
