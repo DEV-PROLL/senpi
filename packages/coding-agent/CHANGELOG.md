@@ -7,6 +7,14 @@
 ### Fixed
 
 - Native Cursor sessions no longer compact mid-turn while a Run is live: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`, and blocking/generated compaction refuse those providers until the session is idle, so a mid-turn compact cannot poison `conversationId` and trigger 0-token `resource_exhausted` (#984).
+- claude-sdk-oauth stream-start-timeout retries now fork the SDK conversation at the last assistant
+  boundary before the stalled turn instead of re-attaching and re-sending it, so each retry re-bills
+  only the turn's own message on a prefix cache read instead of re-writing the whole conversation
+  (fixes #723 retry-storm re-billing: cache writes grew ~8K per attempt, $25/6min, $1084/3days on
+  worker dispatch). A stalled first turn with no boundary to fork at re-seeds byte-identically, which
+  the provider serves from prefix cache after the first write. The retry watchdog cap semantics
+  (`streamRetryTimeoutMs` caps the retry continuation, reconciled to the granted stream-start guard)
+  are now documented on the setting itself.
 - The Cursor exec bridge fails closed when a session bridge has no captured owning run, and rechecks
   run ownership after awaited preflight work so a run that ends during an approval prompt cannot start
   a tool side effect afterward.

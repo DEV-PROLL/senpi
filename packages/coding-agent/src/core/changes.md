@@ -1,5 +1,30 @@
 # changes
 
+## 2026-08-20 - streamRetryTimeoutMs docstring aligned with the reconciled watchdog (issue #723 lane)
+
+### What changed
+
+- `core/retry-fallback/settings.ts`: the `streamRetryTimeoutMs` interface comment now states the actual
+  post-2026-08-18 semantics — it caps the retry-CONTINUATION watchdog, reconciled to
+  `max(cap, streamStartTimeoutMs)` — instead of the stale "first-request liveness cap after a provider
+  timeout" wording. Comment-only; no behavior change.
+
+### Why
+
+- Issue #723 diagnosis (M3) read that comment and concluded the setting clamps the stream-start guard
+  itself. It does not: since the 2026-08-18 reconciliation the retry request keeps its full granted
+  guard and only the continuation watchdog takes this cap. A wrong comment on the exact knob a
+  retry-storm investigation reaches first sends the next diagnosis down the same dead end.
+
+### Why an extension could not handle it
+
+- The setting is a core `ProviderRetrySettings` field consumed by `core/provider-timeout-retry.ts`; the
+  doc contract lives with the interface.
+
+### Expected merge conflict zones
+
+- `core/retry-fallback/settings.ts` `ProviderRetrySettings` field list only (comment line).
+
 ## 2026-08-20 - Append-only goal continuations and exponentially floored 429 waits
 
 ### What changed
