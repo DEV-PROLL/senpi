@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Skip ANTML invoke recovery when `model.api === "cursor-agent"` so native Cursor tool starts are not rejected as invalid event order.
 - Keep usable Cursor task tool arguments when the complete frame parses as empty.
 - Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
 - Persist Cursor conversation-id rotation under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`), not `$HOME/cursor-conversation-ids.json`.
