@@ -1,5 +1,23 @@
 # changes.md — compaction
 
+## 2026-08-20 - Ignore implausible billed usage for compaction threshold
+
+### What changed
+
+- `packages/coding-agent/src/core/compaction/compaction.ts`: adds `resolveThresholdContextTokens`. If the local estimate is at least 50k and billed usage is more than 8× that estimate, compact against the estimate; otherwise use `max(usage, estimate)`.
+
+### Why
+
+- Cursor dashboard-cumulative cacheRead can be millions while the live window is ~150k. Folding that into the threshold forced a useless compact and a 0-token `resource_exhausted`.
+
+### Why an extension could not handle it
+
+- Compaction threshold math runs in core before any extension compaction hook is consulted.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/compaction/compaction.ts` `resolveThresholdContextTokens`
+
 ## Summarization request identity, watchdog, and summary-safe filtering after the 59a71b23 pin (2026-08-19)
 
 ### What changed

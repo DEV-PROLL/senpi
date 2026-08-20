@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-20 - Ignore implausible Cursor billed usage in compaction threshold
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `_resolveThresholdContextTokens` now delegates to `resolveThresholdContextTokens` so a billed usage figure more than 8× a ≥50k local estimate is ignored for the compaction threshold.
+
+### Why
+
+- Complements the billed-cacheRead guard in cursor-agent. When no checkpoint arrived, a 4M `cacheRead` still must not beat a 149k transcript estimate.
+
+### Why an extension could not handle it
+
+- Threshold resolution runs inside `AgentSession` before any session hook sees the assistant message.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `_resolveThresholdContextTokens`
+
 ## Shared notice styling for built-in cards (2026-08-20)
 
 ### What changed
