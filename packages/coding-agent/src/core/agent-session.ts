@@ -81,6 +81,7 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
+	resolveThresholdContextTokens,
 	shouldCompact,
 } from "./compaction/index.ts";
 import { CompactionLifecycleCoordinator, type CompactionLifecycleState } from "./compaction/lifecycle.ts";
@@ -1766,7 +1767,7 @@ export class AgentSession {
 	 */
 	private _resolveThresholdContextTokens(directContextTokens: number): number {
 		const messages = filterContextExcludedMessages(this.agent.state.messages);
-		return Math.max(directContextTokens, estimateMessagesTokens(messages));
+		return resolveThresholdContextTokens(directContextTokens, estimateMessagesTokens(messages));
 	}
 
 	private _getAutoCompactionReason(message: AssistantMessage): "overflow" | "threshold" | undefined {

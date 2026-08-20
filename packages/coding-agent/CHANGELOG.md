@@ -9,10 +9,19 @@
 - The Cursor exec bridge fails closed when a session bridge has no captured owning run, and rechecks
   run ownership after awaited preflight work so a run that ends during an approval prompt cannot start
   a tool side effect afterward.
-
+- Compaction no longer treats implausible Cursor billed usage as context size: when the local transcript estimate is at least 50k and billed usage is more than 8× that estimate, the threshold uses the estimate so a multi-million dashboard-cumulative cacheRead cannot force a useless compact (#983).
 ### Added
 
+- The notice-box primitives are now part of the public API: `buildNoticeBox`, `noticeMessageRenderer`,
+  `noticeEntryRenderer`, and the `NoticeSpec`/`NoticeLine`/`NoticeTone` types are exported from the package
+  entry so extensions can render transcript notices in the shared visual family instead of re-implementing it.
+
 ### Changed
+
+- Every remaining divergent transcript card now renders through the shared notice box (`customMessageBg`
+  background block, bold tone title, dim body): loaded-resource conflict diagnostics, the update-available
+  and package-update notifications, the risky-main-model and high-reasoning warnings, the rules banner,
+  the prompt URL widget card, and the earendil announcement. Visible text is unchanged.
 
 ### Fixed
 
