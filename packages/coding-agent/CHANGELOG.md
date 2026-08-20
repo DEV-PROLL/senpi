@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Native Cursor sessions no longer compact mid-turn while a Run is live: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth`, and blocking/generated compaction refuse those providers until the session is idle, so a mid-turn compact cannot poison `conversationId` and trigger 0-token `resource_exhausted` (#984).
 - Native Cursor `write`/`edit` via the exec bridge now emit `tool_result` after `tool_execution_end`, so plan-touch trackers see `.omo/plans/*.md` writes and momus can unblock (#989).
 - claude-sdk-oauth stream-start-timeout retries now fork the SDK conversation at the last assistant
   boundary before the stalled turn instead of re-attaching and re-sending it, so each retry re-bills
