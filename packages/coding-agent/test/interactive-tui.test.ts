@@ -8,6 +8,7 @@ import {
 	createInteractiveTuiReference,
 	InteractiveMode,
 } from "../src/modes/interactive/interactive-mode.ts";
+import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
 const clipboardMocks = vi.hoisted(() => ({
 	copyToClipboard: vi.fn<(text: string) => Promise<void>>(),
@@ -125,6 +126,134 @@ describe("createInteractiveTui", () => {
 
 		expect(stableUi.mode).toBe("fullscreen");
 		expect([terminal.startCount, terminal.stopCount]).toEqual([2, 2]);
+	});
+});
+
+describe("switchTuiMode component lifecycle", () => {
+	it("remounts live components without disposing them", async () => {
+		const terminal = new RecordingTerminal(40, 8);
+		const renderer = createInteractiveTui({
+			tuiMode: "regular",
+			showHardwareCursor: false,
+			logDirectory: "/tmp",
+			terminal,
+		});
+		let stableUi: TUI;
+		const dispose = vi.fn();
+		const component: Component & { focused: boolean } = {
+			focused: false,
+			render: () => ["content"],
+			invalidate: () => {},
+			dispose,
+		};
+		renderer.addChild(component);
+		renderer.setFocus(component);
+
+		type SwitchContext = {
+			renderer: ReturnType<typeof createInteractiveTui>;
+			ui: TUI;
+			fullscreenLayoutRoot: Component;
+			options: { tuiMode?: TuiMode };
+			themeController: { rebindTui: () => void };
+			extensionTerminalInputSubscriptions: Set<never>;
+		};
+		const context = Object.assign(Object.create(InteractiveMode.prototype), {
+			renderer,
+			ui: undefined as unknown as TUI,
+			fullscreenLayoutRoot: component,
+			options: { tuiMode: "regular" as TuiMode },
+			themeController: { rebindTui: () => {} },
+			extensionTerminalInputSubscriptions: new Set<never>(),
+		}) as SwitchContext;
+		stableUi = createInteractiveTuiReference(() => context.renderer);
+		context.ui = stableUi;
+		const { switchTuiMode } = InteractiveMode.prototype as unknown as {
+			switchTuiMode(this: SwitchContext, mode: TuiMode, restoreProgress?: boolean): boolean;
+		};
+
+		renderer.start();
+		await terminal.waitForRender();
+		expect(switchTuiMode.call(context, "fullscreen", false)).toBe(true);
+		await terminal.waitForRender();
+
+		// Components moved to the new renderer must stay alive: disposing them on
+		// switch kills their intervals (spinners, reveals) while they keep
+		// rendering static frames forever.
+		expect(dispose).not.toHaveBeenCalled();
+		expect(context.renderer.children).toEqual([component]);
+	});
+});
+
+describe("handleReloadCommand extension UI lifecycle", () => {
+	function makeContext(session: unknown) {
+		const resetExtensionUI = vi.fn();
+		const editor = new Container();
+		const editorContainer = new Container();
+		editorContainer.addChild(editor);
+		const ui = createInteractiveTui({
+			tuiMode: "regular",
+			showHardwareCursor: false,
+			logDirectory: "/tmp",
+			terminal: new VirtualTerminal(80, 24),
+		});
+		ui.start();
+		const context = Object.assign(Object.create(InteractiveMode.prototype), {
+			runtimeHost: { session },
+			editor,
+			editorContainer,
+			ui,
+			resetExtensionUI,
+			rebuildChatFromMessages: vi.fn(),
+			showWarning: vi.fn(),
+			showError: vi.fn(),
+			showStatus: vi.fn(),
+			hideThinkingBlock: false,
+			outputPad: 0,
+		}) as unknown as InteractiveMode;
+		return { context, resetExtensionUI, ui };
+	}
+	const proto = InteractiveMode.prototype as unknown as {
+		handleReloadCommand(this: InteractiveMode): Promise<void>;
+	};
+
+	it("leaves extension UI untouched when the reload is vetoed", async () => {
+		// resetExtensionUI() disposes every extension footer/header/widget. Running
+		// it before reload() re-checks the extension veto destroys live extension UI
+		// (goal tickers, task widgets, hook statuses) with nothing left to restore
+		// it: the TUI stops self-repainting until an input event forces a frame.
+		initTheme("dark");
+		const session = {
+			isCompacting: false,
+			settingsManager: { getHideThinkingBlock: () => false, getOutputPad: () => 0 },
+			checkReloadVeto: async () => ({ cancelled: false }),
+			reload: async () => ({ cancelled: true, reason: "subagents running" }),
+		};
+		const { context, resetExtensionUI, ui } = makeContext(session);
+
+		await proto.handleReloadCommand.call(context);
+
+		expect(resetExtensionUI).not.toHaveBeenCalled();
+		ui.stop();
+	});
+
+	it("resets extension UI exactly when a proceeding reload rebuilds the session", async () => {
+		initTheme("dark");
+		const sentinel = new Error("boom after commit point");
+		const session = {
+			isCompacting: false,
+			settingsManager: { getHideThinkingBlock: () => false, getOutputPad: () => 0 },
+			checkReloadVeto: async () => ({ cancelled: false }),
+			reload: async (options?: { beforeSessionStart?: () => void | Promise<void> }) => {
+				await options?.beforeSessionStart?.();
+				throw sentinel;
+			},
+		};
+		const { context, resetExtensionUI, ui } = makeContext(session);
+
+		await proto.handleReloadCommand.call(context);
+
+		expect(resetExtensionUI).toHaveBeenCalledOnce();
+		ui.stop();
 	});
 });
 
