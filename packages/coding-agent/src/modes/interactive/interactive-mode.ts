@@ -168,6 +168,11 @@ import {
 	formatAuthSelectorProviderType,
 	OAuthSelectorComponent,
 } from "./components/oauth-selector.ts";
+import {
+	DEFAULT_TAIL_BUDGET,
+	DEFAULT_WARM_CHUNK_SIZE,
+	ProgressiveTranscriptContainer,
+} from "./components/progressive-transcript-container.ts";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
@@ -905,7 +910,14 @@ export class InteractiveMode {
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.headerContainer = new Container();
 		this.loadedResourcesContainer = new Container();
-		this.chatContainer = new Container();
+		// Resuming a long session paints a bounded, fully-styled tail first and warms
+		// the earlier history in background chunks, so /resume is not blocked on
+		// Markdown-rendering every persisted message before the first frame.
+		this.chatContainer = new ProgressiveTranscriptContainer({
+			tailBudget: DEFAULT_TAIL_BUDGET,
+			warmChunkSize: DEFAULT_WARM_CHUNK_SIZE,
+			requestRender: () => this.ui.requestRender(),
+		});
 		this.documentContainer = new Container();
 		this.documentContainer.addChild(this.headerContainer);
 		this.documentContainer.addChild(this.loadedResourcesContainer);
