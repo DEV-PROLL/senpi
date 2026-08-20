@@ -1,6 +1,6 @@
 import type { ClaudeSdkOauthAuthLane } from "./options.ts";
 import type { Options, SessionMessage } from "./sdk-boundary.ts";
-import { getSdkBoundary } from "./sdk-boundary.ts";
+import { getSdkBoundary, loadClaudeAgentSdk } from "./sdk-boundary.ts";
 import { type ClaudeSdkOauthSessionEntry, closeSession, getOrCreateSession } from "./session-registry.ts";
 import { recordSyncedStream } from "./session-sync.ts";
 
@@ -17,6 +17,14 @@ export type ContinuityBinding = {
 	toolsetHash: string;
 	/** Assistant boundaries kept as entries so a later fork still has a resume point. */
 	assistantUuidByIndex?: readonly (readonly [number, string])[];
+	/**
+	 * Digest of the FULL sent stream an attempt pushed but never got answered
+	 * (stream-start timeout abort/failure). Purely in-memory: it lets the SAME
+	 * turn's retry fork at the pre-turn boundary instead of re-appending its user
+	 * message to a lineage that already carries it. Never persisted — the sidecar
+	 * schema is fixed at schemaVersion 1 and restart retries are out of scope.
+	 */
+	unansweredTurnDigest?: string;
 };
 
 export type ReattachInput = {
@@ -134,6 +142,9 @@ async function awaitInitialization(entry: ClaudeSdkOauthSessionEntry, signal?: A
  * (sdk.d.ts:1805-1808) and would otherwise silently start an unrelated session.
  */
 export async function reattachSession(input: ReattachInput): Promise<ClaudeSdkOauthSessionEntry> {
+	// getOrCreateSession() reaches the synchronous SDK `query` through the
+	// session-registry boundary - see sdk-boundary.lazy.ts.
+	await loadClaudeAgentSdk();
 	const { binding, atUuid } = input;
 	closeSession(binding.senpiSessionId, "reattach");
 	const entry = getOrCreateSession({

@@ -19,6 +19,12 @@ const EMPTY_USAGE = {
 
 type TerminalAssistantMessageEvent = Extract<AssistantMessageEvent, { type: "done" | "error" }>;
 
+export function promoteStopWithPendingToolCalls(message: AssistantMessage): AssistantMessage {
+	if (message.stopReason !== "stop") return message;
+	if (!message.content.some((block) => block.type === "toolCall")) return message;
+	return { ...message, stopReason: "toolUse" };
+}
+
 export function shouldTerminateAssistantTurn(message: AssistantMessage): boolean {
 	return message.stopReason === "error" || message.stopReason === "aborted" || isClassifierRefusal(message);
 }

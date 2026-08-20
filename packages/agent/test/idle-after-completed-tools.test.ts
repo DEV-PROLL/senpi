@@ -1,9 +1,6 @@
+import { type AssistantMessage, kCursorExecResolved, type ToolResultMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import {
-	isStreamIdleTimeoutError,
-	shouldFinalizeIdleAsStop,
-} from "../src/assistant-terminal-state.ts";
-import { kCursorExecResolved, type AssistantMessage, type ToolResultMessage } from "@earendil-works/pi-ai";
+import { isStreamIdleTimeoutError, shouldFinalizeIdleAsStop } from "../src/assistant-terminal-state.ts";
 
 function message(content: AssistantMessage["content"]): AssistantMessage {
 	return {
@@ -38,7 +35,9 @@ describe("shouldFinalizeIdleAsStop", () => {
 
 	it("finalizes when exec results are already buffered", () => {
 		const tool = { type: "toolCall" as const, id: "t1", name: "bash", arguments: {} };
-		const results = [{ role: "toolResult", toolCallId: "t1", toolName: "bash", content: [], details: {} }] as ToolResultMessage[];
+		const results: ToolResultMessage[] = [
+			{ role: "toolResult", toolCallId: "t1", toolName: "bash", content: [], isError: false, timestamp: 0 },
+		];
 		expect(shouldFinalizeIdleAsStop(message([tool]), results)).toBe(true);
 	});
 

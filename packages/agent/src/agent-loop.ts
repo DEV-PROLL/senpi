@@ -18,6 +18,7 @@ import {
 	createTerminalFailureAssistantMessage,
 	isStreamIdleTimeoutError,
 	normalizeTerminalAssistantMessage,
+	promoteStopWithPendingToolCalls,
 	shouldFinalizeIdleAsStop,
 	shouldTerminateAssistantTurn,
 } from "./assistant-terminal-state.ts";
@@ -252,7 +253,7 @@ async function runLoop(
 					}
 				: config;
 			const streamIdleTimeoutMs = isInitialProviderRequest ? config.timeoutMs : requestConfig.timeoutMs;
-			const { message, providerToolResults } = await streamAssistantResponse(
+			const streamed = await streamAssistantResponse(
 				currentContext,
 				requestConfig,
 				signal,
@@ -260,6 +261,8 @@ async function runLoop(
 				withEmptyAssistantRecovery(requestConfig.model, streamFunction),
 				streamIdleTimeoutMs,
 			);
+			const message = promoteStopWithPendingToolCalls(streamed.message);
+			const providerToolResults = streamed.providerToolResults;
 			newMessages.push(message);
 
 			// Provider-resolved (Cursor exec-channel) tool results pair with
@@ -509,7 +512,7 @@ async function streamAssistantResponse(
 				? {
 						execHandlers:
 							typeof config.cursorExecHandlers === "function"
-								? config.cursorExecHandlers(requestAbortController.signal)
+								? config.cursorExecHandlers(signal ?? requestAbortController.signal)
 								: config.cursorExecHandlers,
 						onToolResult: (result: ToolResultMessage) => {
 							providerToolResults.push(result);
@@ -662,6 +665,7 @@ async function streamAssistantResponse(
 		await emit({ type: "message_end", message: finalMessage });
 		return { message: finalMessage, providerToolResults };
 	} finally {
+		requestAbortController.abort();
 		detachCallerAbort?.();
 	}
 }
