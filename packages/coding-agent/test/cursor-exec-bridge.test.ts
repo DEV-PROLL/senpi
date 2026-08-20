@@ -310,4 +310,29 @@ describe("cursor exec bridge", () => {
 		expect(result.isError).toBe(true);
 		expect(result.content[0]).toMatchObject({ text: expect.stringContaining("not available") });
 	});
+
+	it("emits tool_result after a successful write so plan-touch trackers see .omo/plans paths", async () => {
+		const results: Array<{ toolName: string; toolCallId: string; args: unknown }> = [];
+		const runSignal = new AbortController().signal;
+		const tool = stubTool("write", Type.Object({ path: Type.String(), content: Type.String() }), () => undefined);
+		const bridge = createCursorExecBridge({
+			getTool: (name) => (name === "write" ? tool : undefined),
+			getAbortSignal: () => runSignal,
+			emitEvent: async () => undefined,
+			emitToolResult: async (event) => {
+				results.push(event);
+			},
+		});
+		await bridge.write?.({
+			path: ".omo/plans/mgitm-opt2-smem-fix.md",
+			contents: "# plan",
+			toolCallId: "call-plan",
+		} as never);
+		expect(results).toHaveLength(1);
+		expect(results[0]).toMatchObject({
+			toolName: "write",
+			toolCallId: "call-plan",
+			args: { path: ".omo/plans/mgitm-opt2-smem-fix.md" },
+		});
+	});
 });

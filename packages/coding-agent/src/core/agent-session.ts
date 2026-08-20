@@ -2786,6 +2786,28 @@ export class AgentSession {
 		return this._toolRegistry.get(name);
 	}
 
+	/** Cursor exec already ran the tool; still emit tool_result so plan-touch trackers see .omo/plans writes. */
+	async emitExecBridgeToolResult(
+		toolName: string,
+		toolCallId: string,
+		args: unknown,
+		result: AgentToolResult<unknown>,
+		isError: boolean,
+	): Promise<void> {
+		await this._emitAfterToolCallHooks(
+			{
+				type: "toolCall",
+				id: toolCallId,
+				name: toolName,
+				arguments:
+					args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {},
+			},
+			args,
+			result,
+			isError,
+		);
+	}
+
 	setActiveToolsByName(toolNames: string[]): void {
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
