@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,19 +52,33 @@ function liveContext(): ExtensionContext {
 	return { isIdle: () => true } as unknown as ExtensionContext;
 }
 
+/**
+ * The fixture publishes the pid file with rename(2) before its first stdout
+ * event, so the file can already exist by the time a watcher is installed -
+ * `fs.watch` then never fires and the wait wedges. Check the published state
+ * first, and let the watcher cover only the not-yet-published case.
+ */
 async function waitForPidFile(pidFile: string): Promise<number> {
+	const readPid = (): number => Number(readFileSync(pidFile, "utf8").trim());
+	if (existsSync(pidFile)) return readPid();
+
 	return new Promise<number>((resolvePid, rejectPid) => {
 		const watcher = watch(dirname(pidFile));
 		const deadline = setTimeout(() => {
 			watcher.close();
 			rejectPid(new Error("fixture did not report its grandchild"));
 		}, 5_000);
-		watcher.on("change", (_eventType, filename) => {
-			if (filename !== "grandchild.pid") return;
+		const settle = () => {
+			if (!existsSync(pidFile)) return;
 			clearTimeout(deadline);
 			watcher.close();
-			resolvePid(Number(readFileSync(pidFile, "utf8").trim()));
-		});
+			resolvePid(readPid());
+		};
+		// rename(2) surfaces as "rename" on macOS and "change" on Linux; both
+		// route through the same published-state check.
+		watcher.on("change", settle);
+		// The event can also land between the existsSync above and this listener.
+		settle();
 	});
 }
 
