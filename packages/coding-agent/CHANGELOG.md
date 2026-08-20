@@ -42,6 +42,11 @@
   background block, bold tone title, dim body): loaded-resource conflict diagnostics, the update-available
   and package-update notifications, the risky-main-model and high-reasoning warnings, the rules banner,
   the prompt URL widget card, and the earendil announcement. Visible text is unchanged.
+- The CLI no longer parses and evaluates the 1.2 MB Claude Agent SDK bundle or the jsdom/Readability/turndown
+  HTML stack while starting up. Both now load on first use behind the repository's documented lazy-boundary
+  pattern — the SDK when a claude-sdk-oauth stream actually opens, the HTML converters when webfetch actually
+  converts an HTML response — which removes 680 modules from the startup import graph (14,203 → 13,523).
+  Behavior is unchanged; only the moment the two dependencies are loaded moved.
 
 - Startup is faster after the first run: the CLI now enables Node's on-disk module compile cache
   (`enableCompileCache()`) in both `cli.ts` and `cli-main.ts` and publishes the resolved cache directory

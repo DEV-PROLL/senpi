@@ -52,6 +52,43 @@ A stream-start-timeout abort closes the SDK session with the turn's user message
 - `session-observability.ts` `ContinuityReason` union tail and `SANITIZED_REASONS` set (mechanically
   duplicated literals; both must gain the member).
 
+## 2026-08-20 - SDK bundle loads on first stream instead of at CLI startup
+
+### What changed
+
+- New `sdk-boundary.lazy.ts` owns the single deferred `import("@anthropic-ai/claude-agent-sdk")`, caching the
+  module and sharing one in-flight promise across concurrent callers. `sdk-boundary.ts` keeps its synchronous
+  `getSdkBoundary()` surface and re-exports `loadClaudeAgentSdk`; its default members read the loaded module
+  (`getSessionMessages` is async and self-loads, `query` / `createSdkMcpServer` are synchronous SDK functions
+  and therefore require the preload). Its exported types are now derived from the loader's module type instead
+  of from value imports.
+- The three async entry points that reach a synchronous SDK member now await the loader first:
+  `stream.ts` (`streamClaudeSdkOauth`, before `getSdkBoundary().query` and the resident-session lane),
+  `session-reattach.ts` (`reattachSession`, before `getOrCreateSession` builds a query), and `custom-tools.ts`
+  (`buildCustomToolServers`, now async, before `createSdkMcpServer`). A future call site that skips the preload
+  fails with a named error at that call rather than silently restoring the startup import.
+- The tiny `@anthropic-ai/claude-agent-sdk/extract` entrypoint used by `executable.ts` is unaffected and stays
+  a static import; only the 1.2 MB `sdk.mjs` bundle moved.
+
+### Why
+
+- Importing `dist/main.js` is roughly 70% of CLI boot wall time, and the SDK bundle was parsed and evaluated on
+  every start even though only the claude-sdk-oauth streaming lane ever calls into it. Deferring it removes that
+  cost from every run that never opens a Claude SDK stream, with no behavior change for runs that do.
+
+### Why an extension could not handle it
+
+- The static import lives in this builtin provider's own SDK boundary module. An extension cannot remove an
+  import edge from a module the core already loads, and re-registering the provider id would fork the auth lane,
+  session registry, and failover wiring that live here.
+
+### Expected merge conflict zones
+
+- MEDIUM in `sdk-boundary.ts`: the import block and the `defaultSdkBoundary` literal, which upstream also touches
+  when adding SDK members. A new member must be added to `sdk-boundary.lazy.ts`'s module projection as well.
+- LOW in `stream.ts` and `session-reattach.ts` at the first statement of the async body (the added `await`).
+- LOW in `custom-tools.ts` at the `buildCustomToolServers` signature, now async.
+
 ## 2026-08-19 - Kill-switched lane leaves implicit fallback expansion
 
 ### What changed
