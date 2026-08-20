@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-	type SpeculativeCompactionContext,
 	applyGeneratedCompaction,
+	type SpeculativeCompactionContext,
 } from "../../../src/core/extensions/builtin/compaction/speculative.ts";
 
 function cursorContext(isIdle: boolean): SpeculativeCompactionContext {
