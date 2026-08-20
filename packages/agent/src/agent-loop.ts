@@ -16,7 +16,10 @@ import {
 } from "@earendil-works/pi-ai";
 import {
 	createTerminalFailureAssistantMessage,
+	isStreamIdleTimeoutError,
 	normalizeTerminalAssistantMessage,
+	promoteStopWithPendingToolCalls,
+	shouldFinalizeIdleAsStop,
 	shouldTerminateAssistantTurn,
 } from "./assistant-terminal-state.ts";
 import { getDefaultStreamFn, withEmptyAssistantRecovery } from "./stream-fn.ts";
@@ -250,7 +253,7 @@ async function runLoop(
 					}
 				: config;
 			const streamIdleTimeoutMs = isInitialProviderRequest ? config.timeoutMs : requestConfig.timeoutMs;
-			const { message, providerToolResults } = await streamAssistantResponse(
+			const streamed = await streamAssistantResponse(
 				currentContext,
 				requestConfig,
 				signal,
@@ -258,6 +261,8 @@ async function runLoop(
 				withEmptyAssistantRecovery(requestConfig.model, streamFunction),
 				streamIdleTimeoutMs,
 			);
+			const message = promoteStopWithPendingToolCalls(streamed.message);
+			const providerToolResults = streamed.providerToolResults;
 			newMessages.push(message);
 
 			// Provider-resolved (Cursor exec-channel) tool results pair with
@@ -507,7 +512,7 @@ async function streamAssistantResponse(
 				? {
 						execHandlers:
 							typeof config.cursorExecHandlers === "function"
-								? config.cursorExecHandlers(requestAbortController.signal)
+								? config.cursorExecHandlers(signal ?? requestAbortController.signal)
 								: config.cursorExecHandlers,
 						onToolResult: (result: ToolResultMessage) => {
 							providerToolResults.push(result);
@@ -613,6 +618,37 @@ async function streamAssistantResponse(
 		await emit({ type: "message_end", message: finalMessage });
 		return { message: finalMessage, providerToolResults };
 	} catch (error) {
+		if (isStreamIdleTimeoutError(error) && shouldFinalizeIdleAsStop(partialMessage, providerToolResults)) {
+			const finalMessage: AssistantMessage = {
+				role: "assistant",
+				content: partialMessage?.content ?? [{ type: "text", text: "" }],
+				api: partialMessage?.api ?? config.model.api,
+				provider: partialMessage?.provider ?? config.model.provider,
+				model: partialMessage?.model ?? config.model.id,
+				responseModel: partialMessage?.responseModel,
+				responseId: partialMessage?.responseId,
+				diagnostics: partialMessage?.diagnostics,
+				usage: partialMessage?.usage ?? {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "stop",
+				timestamp: partialMessage?.timestamp ?? Date.now(),
+			};
+			propagateThinkingTiming(finalMessage);
+			if (addedPartial) {
+				context.messages[context.messages.length - 1] = finalMessage;
+			} else {
+				context.messages.push(finalMessage);
+				await emit({ type: "message_start", message: { ...finalMessage } });
+			}
+			await emit({ type: "message_end", message: finalMessage });
+			return { message: finalMessage, providerToolResults };
+		}
 		const finalMessage = createTerminalFailureAssistantMessage(
 			config.model,
 			signal?.aborted ? "aborted" : "error",
@@ -629,6 +665,7 @@ async function streamAssistantResponse(
 		await emit({ type: "message_end", message: finalMessage });
 		return { message: finalMessage, providerToolResults };
 	} finally {
+		requestAbortController.abort();
 		detachCallerAbort?.();
 	}
 }

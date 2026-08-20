@@ -1,8 +1,95 @@
 ## Unreleased
 
 - Skip ANTML invoke recovery when `model.api === "cursor-agent"` so native Cursor tool starts are not rejected as invalid event order.
+- Keep usable Cursor task tool arguments when the complete frame parses as empty.
+- Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
+- Persist Cursor conversation-id rotation under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`), not `$HOME/cursor-conversation-ids.json`.
+- Surface the first 0-token `resource_exhausted` of a `stream()` call so session-layer compaction runs before rotation.
+
+## 2026-08-20 - Cursor 0-token RE overflow without estimate gate
+
+### What changed
+
+- `packages/ai/src/utils/overflow.ts`: 0-token Cursor `resource_exhausted` is overflow even when the local estimate is 0; same-model remint helpers skip provider fallback; Cursor overflow compaction settings force `keepRecentTokens: 0` and disable restoration.
+
+### Why
+
+- The 50k estimate gate missed sessions whose last billed usage was zeroed after an earlier compact, so Cursor still rejected the payload while senpi treated it as a 429 and jumped providers.
+
+### Why an extension could not handle it
+
+- Overflow classification and retry fallback run in core before extension hooks.
+
+### Expected merge conflict zones
+
+- `packages/ai/src/utils/overflow.ts` after `getOverflowPatterns()`.
 
 # AI Source Changes
+
+## 2026-08-20 - Cursor conversation rotation composes with compact-before-rotate
+
+### What changed
+
+- `packages/ai/src/api/cursor-conversation-rotation.ts` (new): persists the base-id to wire-id mapping under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`, overridable with `CURSOR_CONVERSATION_ID_STORE`), caps rotation at `MAX_CURSOR_CONVERSATION_ROTATIONS` (3), and remints a fresh wire id after the skip so a session is never permanently blocked.
+- `packages/ai/src/api/cursor-agent.ts` `stream()`: the FIRST 0-token `resource_exhausted` of a `stream()` call surfaces as an error with no rotation, so the session layer gets first refusal and can compact. Rotation, cache/blob migration, and same-stream retry apply only to attempts after the first within one `stream()` call. Once the base conversation has burned its 3 rotations, `shouldSkip()` surfaces `CURSOR_CONVERSATION_POISONED_MESSAGE` instead of rotating again.
+
+### Why
+
+- Rotating on the first failure swallowed the error inside `stream()`, so the compact-before-rotate policy added by #1015 (which fires in `agent-session` on a SURFACED 0-token RE via `isCursorPayloadResourceExhausted`) never ran. A large-payload rejection then burned all three rotations replaying the same oversized payload and still failed. Surfacing attempt 1 lets compaction shrink the payload first; rotation remains the fallback for a genuinely poisoned conversation id, which compaction cannot fix.
+
+### Why an extension could not handle it
+
+- The rotation map, the persisted wire id, and the h2 retry loop live inside `cursor-agent` `stream()`, below every extension hook; the retry must reuse the same in-flight event stream so `start` is emitted once.
+
+### Expected merge conflict zones
+
+- `packages/ai/src/api/cursor-agent.ts` `stream()` retry loop and its `catch` block.
+- `packages/ai/src/api/cursor-conversation-rotation.ts` (whole file).
+
+## 2026-08-20 - Cursor explicit levels prefer catalog suffix variant ids
+
+### What changed
+
+- `packages/ai/src/cursor/selection-descriptor.ts`: `resolveCursorSelectionDescriptor` now resolves an
+  explicit thinking level to the catalog-guaranteed legacy suffix alias (`kimi-k3-high`,
+  `claude-fable-5-thinking-low`, `gpt-5.3-codex-xhigh`) whenever one exists, via a new
+  `suffixAliasId` that tries the level's wire value then the level token, with thinking-infixed
+  candidates for thinking Claude identities. Bare base id + ordered parameters remains only as the
+  fallback for levels without any alias; `legacySuffixId` is subsumed.
+
+### Why
+
+- Cursor's Run RPC now rejects bare capability ids with Connect `not_found` for every family
+  (issue #1008; live probes 2026-08-20 in
+  `local-ignore/qa-evidence/20260820-cursor-bare-id-notfound/`: bare `kimi-k3`+parameters and bare
+  `claude-fable-5`+parameters both `not_found`, while `kimi-k3-high` and
+  `claude-fable-5-thinking-low` complete), so every explicit level rendered as base+parameters died
+  at turn start.
+
+### Why an extension could not handle it
+
+- The selection descriptor is core provider data consumed by both Cursor transports (protobuf
+  `RequestedModel` and the CLI model string); no extension hook sits between them.
+
+### Expected merge conflict zones
+
+- `selection-descriptor.ts` resolver body and helper block (fork-only file; upstream has no cursor
+  provider).
+
+## 2026-08-19 - Ignore Cursor billed cacheRead that dwarfs usedTokens
+
+### What changed
+
+- `applyCheckpointTokenDetails` records `UsageState.liveUsedTokens`.
+- `applyBilledTurnEndedUsage` ignores `cache_read_tokens` when it is more than 3× that live window and keeps `totalTokens` at `usedTokens`.
+
+### Why
+
+- Session 01a01879 jumped 148k → 4.09M because field 3 was dashboard-cumulative cache read, not conversation size. `max(usage, estimate)` then forced a useless compact and a 0-token `resource_exhausted`.
+
+### Conflict zone
+
+- `packages/ai/src/api/cursor-agent.ts` `applyBilledTurnEndedUsage` / `UsageState`.
 
 ## 2026-08-19 - OpenAI-family adapters re-diverge from the 59a71b23 pin
 
