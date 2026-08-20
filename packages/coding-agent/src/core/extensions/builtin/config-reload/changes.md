@@ -1,5 +1,45 @@
 # config-reload Extension Changes
 
+## Watch only in-scope directories instead of whole subtrees (2026-08-20)
+
+### What changed
+
+- `watch-engine.ts` no longer hands a `dir-recursive` target root to
+  `fs.watch({ recursive: true })`. The scan already computes the in-scope
+  directory set (skipping `node_modules`, `.git`, symlinks, dot-directories that
+  are not explicitly allow-listed, and anything the target `filter` rejects), so
+  the engine now records those directories as `scannedDirectories` and opens one
+  non-recursive subscription per directory.
+- `#onEvent` takes the watched directory and re-anchors the reported filename to
+  the target root, because a per-directory watcher names children relative to
+  itself.
+- `#attach` / `#detachMissing` reconcile subscriptions after every full and
+  partial rescan, so directories created after startup gain a watcher and
+  directories that leave scope release theirs.
+
+### Why
+
+- `fs.watch({ recursive: true })` registers the entire subtree with the OS
+  watcher (FSEvents on macOS). The target `filter` only discards events after
+  delivery, so a `~/.omo/extensions` or skills directory containing
+  `node_modules` still paid for a full-subtree registration in every session.
+  Measured on this machine: `fseventsd` at 123% CPU and 3-4.3GB RSS with load
+  above 200, and the only available mitigation was disabling `configReload`
+  entirely. Watching the scanned set gives identical change coverage because the
+  scan and the subscriptions now derive from the same scope rules.
+
+### Why an extension could not handle it
+
+- The watch engine and its event source are internal to this builtin; no
+  external extension can change how config watch targets reach `fs.watch`.
+
+### Expected merge conflict zones
+
+- MEDIUM: `watch-engine.ts` constructor subscription loop, `#onEvent` signature,
+  `#evaluateState`, and the `ScanResult` / `TargetState` shapes.
+- LOW: `config-reload-watch-engine.test.ts` event-source probe, which now keeps
+  one listener per watched directory instead of a single listener.
+
 ## Clear orphaned handoff unconditionally after reload (2026-08-20)
 
 ### What changed
