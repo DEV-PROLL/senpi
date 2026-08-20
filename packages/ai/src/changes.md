@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
+- Persist Cursor conversation-id rotation under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`), not `$HOME/cursor-conversation-ids.json`.
 
 # AI Source Changes
 

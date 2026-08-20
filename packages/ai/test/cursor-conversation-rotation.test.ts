@@ -6,6 +6,7 @@ import {
 	createConversationRotationStore,
 	isZeroTokenResourceExhausted,
 	MAX_CURSOR_CONVERSATION_ROTATIONS,
+	resolveConversationRotationPersistPath,
 } from "../src/api/cursor-conversation-rotation.ts";
 
 function storePath(): string {
@@ -56,5 +57,23 @@ describe("cursor conversation rotation", () => {
 		expect(store.shouldSkip("session-c")).toBe(false);
 		expect(isZeroTokenResourceExhausted("Connect error resource_exhausted: Error", true)).toBe(false);
 		expect(isZeroTokenResourceExhausted("Connect error resource_exhausted: Error", false)).toBe(true);
+	});
+
+	it("persists under the agent dir, not $HOME", () => {
+		expect(resolveConversationRotationPersistPath({ HOME: "/home/u" })).toBe(
+			"/home/u/.senpi/agent/cursor-conversation-ids.json",
+		);
+		expect(
+			resolveConversationRotationPersistPath({
+				HOME: "/home/u",
+				CODING_AGENT_DIR: "/home/u/.omo/agent",
+			}),
+		).toBe("/home/u/.omo/agent/cursor-conversation-ids.json");
+		expect(
+			resolveConversationRotationPersistPath({
+				HOME: "/home/u",
+				CURSOR_CONVERSATION_ID_STORE: "/tmp/store.json",
+			}),
+		).toBe("/tmp/store.json");
 	});
 });

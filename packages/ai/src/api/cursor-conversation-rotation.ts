@@ -89,7 +89,10 @@ export function resolveConversationRotationPersistPath(env: NodeJS.ProcessEnv = 
 	if (env.CURSOR_CONVERSATION_ID_STORE) {
 		return env.CURSOR_CONVERSATION_ID_STORE;
 	}
-	const agentDir = env.SENPI_CODING_AGENT_DIR ?? env.HOME ?? ".";
+	const agentDir =
+		env.SENPI_CODING_AGENT_DIR ??
+		env.CODING_AGENT_DIR ??
+		`${(env.HOME ?? ".").replace(/\/$/, "")}/.senpi/agent`;
 	return `${agentDir.replace(/\/$/, "")}/cursor-conversation-ids.json`;
 }
 

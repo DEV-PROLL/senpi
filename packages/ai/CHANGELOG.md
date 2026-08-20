@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Cursor conversation-id rotation now persists under the agent directory (`CODING_AGENT_DIR` or `~/.senpi/agent`) instead of `$HOME/cursor-conversation-ids.json`, so a reminted wire id survives TUI restart.
+
 ### Removed
 
 ## [2026.8.19] - 2026-08-19
