@@ -1,5 +1,58 @@
 # changes
 
+## 2026-08-20 - Append-only goal continuations and exponentially floored 429 waits
+
+### What changed
+
+- `packages/coding-agent/src/core/messages.ts`: removed `keepLatestGoalContinuationMessage()`.
+  `filterContextExcludedMessages()` is now an explicit identity pass and `convertToLlm()` maps the full
+  input array, so every accepted `goal-continuation` custom message stays in provider-visible chronological
+  history. `GOAL_CONTINUATION_MESSAGE_TYPE` and `isContextExcludedCustomMessage() === false` are unchanged;
+  no dedupe by content, goal id, wake source, or streak was added. Session JSONL format and
+  `queueHiddenGoalPrompt()` are untouched.
+- `packages/coding-agent/src/core/retry-fallback/hint-policy.ts`: `nextInTurnDelayMs()` computes
+  `exponentialFloorMs = baseDelayMs * 2 ** (attempt - 1)` and applies it to all three same-model branches
+  (half-used deadline remainder, first hinted idle probe, and the done/hint-override path). The floored
+  delay — not the raw hint — feeds `cumulativeHintedWaitMs`, so cap demotion accounts for time actually
+  slept. `degradeWithoutFallback()` tier 2 raises its cap-clamped wait to the same floor. The probe state
+  machine, tier boundaries, budgets, and the tier-3 terminal verdict are unchanged.
+- `packages/coding-agent/src/core/agent-session.ts`: comments only near 429 detection and retry scheduling,
+  recording that the exponential floor lives in the pure policy and must not be recomputed at the call site.
+  No control-flow change.
+
+### Why
+
+- Anthropic-style prompt caching keys on an exact message-array prefix. Dropping a previously sent
+  continuation made request N stop being a prefix of request N+1, so every token ahead of the deletion point
+  missed cache and was re-read at full price. In team mode, where continuations arrive every turn, that
+  produced sustained cache-miss traffic and 429 storms (#1005). Keeping continuations append-only is the
+  smallest change that restores prefix immutability; context growth is a deliberate trade bounded by normal
+  compaction.
+- The 429 handler previously let a provider hint fully replace the exponential schedule. A provider that
+  repeats a 5 ms `retry-after` on every rate-limit pinned the same-model retry cadence at 5 ms, so the
+  session hammered a model that was already refusing it. Flooring each wait guarantees monotonic pressure
+  relief while still honouring hints longer than the floor.
+
+### Why an extension could not handle it
+
+- `filterContextExcludedMessages()` / `convertToLlm()` run inside the core transport and compaction paths
+  (`agent-session.ts`, `compaction/compaction.ts`); an extension's `transformContext` hook fires before this
+  core-owned filter, so it cannot prevent a core deletion of already-sent turns.
+- The 429 wait is computed by the pure retry policy inside the session's own retry loop. Extensions observe
+  `auto_retry_start` after the delay has been decided and cannot rewrite `delayMs` or the probe state.
+
+### Expected merge conflict zones
+
+- MEDIUM: `messages.ts` top-of-file exclusion helpers and the `convertToLlm()` entry line — any concurrent
+  change that reintroduces context filtering there will collide.
+- MEDIUM: `retry-fallback/hint-policy.ts` `nextInTurnDelayMs()` branch bodies and the
+  `degradeWithoutFallback()` tier-2 return.
+- LOW: `agent-session.ts` 429 detection and retry-delay comments (comment-only lines).
+- LOW: `test/suite/goal-continuation-context-exclusion.test.ts`,
+  `test/suite/retry-fallback-hint-policy.test.ts`, and
+  `test/suite/regressions/issue-447-goal-continuation.test.ts`, whose assertions moved from
+  keep-latest-only to append-only.
+
 ## 2026-08-20 - Ignore implausible Cursor billed usage in compaction threshold
 
 ### What changed
