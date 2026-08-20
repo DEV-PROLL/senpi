@@ -493,9 +493,6 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 			}
 
 			baseConversationId = options?.conversationId ?? options?.sessionId ?? randomUUID();
-			if (rotationStore().shouldSkip(baseConversationId)) {
-				throw new Error(CURSOR_CONVERSATION_POISONED_MESSAGE);
-			}
 			conversationId = rotationStore().getWireId(baseConversationId);
 			const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
 			conversationBlobStores.set(conversationId, blobStore);

@@ -48,7 +48,16 @@ export function createConversationRotationStore(options: {
 
 	return {
 		getWireId(baseId: string): string {
-			return records[baseId]?.wireId ?? baseId;
+			const existing = records[baseId];
+			if (!existing) return baseId;
+			if (!existing.skip) return existing.wireId;
+			const wireId = randomId();
+			existing.wireId = wireId;
+			existing.skip = false;
+			existing.poisonCount = 0;
+			records[baseId] = existing;
+			persist();
+			return wireId;
 		},
 		shouldSkip(baseId: string): boolean {
 			return records[baseId]?.skip === true;

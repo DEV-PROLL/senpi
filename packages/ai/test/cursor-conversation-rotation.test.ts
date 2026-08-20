@@ -51,7 +51,9 @@ describe("cursor conversation rotation", () => {
 		expect(store.recordZeroTokenPoison("session-c", "rot-3")).toEqual({ kind: "exhausted" });
 		expect(n).toBe(MAX_CURSOR_CONVERSATION_ROTATIONS);
 		expect(store.shouldSkip("session-c")).toBe(true);
-		expect(store.getWireId("session-c")).toBe("rot-3");
+		const reopened = store.getWireId("session-c");
+		expect(reopened).not.toBe("rot-3");
+		expect(store.shouldSkip("session-c")).toBe(false);
 		expect(isZeroTokenResourceExhausted("Connect error resource_exhausted: Error", true)).toBe(false);
 		expect(isZeroTokenResourceExhausted("Connect error resource_exhausted: Error", false)).toBe(true);
 	});

@@ -1,3 +1,7 @@
+## Unreleased
+
+- Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
+
 # AI Source Changes
 
 ## 2026-08-19 - Persist and retry Cursor conversation-id rotation
