@@ -128,6 +128,61 @@ describe("createInteractiveTui", () => {
 	});
 });
 
+describe("switchTuiMode component lifecycle", () => {
+	it("remounts live components without disposing them", async () => {
+		const terminal = new RecordingTerminal(40, 8);
+		const renderer = createInteractiveTui({
+			tuiMode: "regular",
+			showHardwareCursor: false,
+			logDirectory: "/tmp",
+			terminal,
+		});
+		let stableUi: TUI;
+		const dispose = vi.fn();
+		const component: Component & { focused: boolean } = {
+			focused: false,
+			render: () => ["content"],
+			invalidate: () => {},
+			dispose,
+		};
+		renderer.addChild(component);
+		renderer.setFocus(component);
+
+		type SwitchContext = {
+			renderer: ReturnType<typeof createInteractiveTui>;
+			ui: TUI;
+			fullscreenLayoutRoot: Component;
+			options: { tuiMode?: TuiMode };
+			themeController: { rebindTui: () => void };
+			extensionTerminalInputSubscriptions: Set<never>;
+		};
+		const context = Object.assign(Object.create(InteractiveMode.prototype), {
+			renderer,
+			ui: undefined as unknown as TUI,
+			fullscreenLayoutRoot: component,
+			options: { tuiMode: "regular" as TuiMode },
+			themeController: { rebindTui: () => {} },
+			extensionTerminalInputSubscriptions: new Set<never>(),
+		}) as SwitchContext;
+		stableUi = createInteractiveTuiReference(() => context.renderer);
+		context.ui = stableUi;
+		const { switchTuiMode } = InteractiveMode.prototype as unknown as {
+			switchTuiMode(this: SwitchContext, mode: TuiMode, restoreProgress?: boolean): boolean;
+		};
+
+		renderer.start();
+		await terminal.waitForRender();
+		expect(switchTuiMode.call(context, "fullscreen", false)).toBe(true);
+		await terminal.waitForRender();
+
+		// Components moved to the new renderer must stay alive: disposing them on
+		// switch kills their intervals (spinners, reveals) while they keep
+		// rendering static frames forever.
+		expect(dispose).not.toHaveBeenCalled();
+		expect(context.renderer.children).toEqual([component]);
+	});
+});
+
 describe("InteractiveMode right-click paste", () => {
 	it("feeds clipboard text to the focused component as a bracketed paste", async () => {
 		clipboardMocks.readClipboardText.mockResolvedValue("clipboard text");

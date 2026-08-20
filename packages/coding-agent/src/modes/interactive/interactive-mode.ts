@@ -1169,7 +1169,11 @@ export class InteractiveMode {
 
 		previousUi.stop({ preserveScreen: true });
 		previousUi.setFocus(null);
-		previousUi.clear();
+		// Detach, not clear: the same live components (spinners, reveals, extension
+		// widgets) are remounted on nextUi below. clear() would dispose them,
+		// killing every interval they own while they keep rendering static frames
+		// forever — the TUI then never self-repaints until an input event forces one.
+		previousUi.detachAll();
 		if (TuiLayouts.isViewportTUI(previousUi)) previousUi.setLayoutRoot(undefined);
 
 		const nextUi = createInteractiveTui({
