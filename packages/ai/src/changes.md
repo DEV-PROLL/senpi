@@ -1,3 +1,7 @@
+## Unreleased
+
+- Skip ANTML invoke recovery when `model.api === "cursor-agent"` so native Cursor tool starts are not rejected as invalid event order.
+
 # AI Source Changes
 
 ## 2026-08-19 - OpenAI-family adapters re-diverge from the 59a71b23 pin
