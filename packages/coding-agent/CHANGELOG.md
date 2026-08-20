@@ -22,6 +22,13 @@
   and package-update notifications, the risky-main-model and high-reasoning warnings, the rules banner,
   the prompt URL widget card, and the earendil announcement. Visible text is unchanged.
 
+- Startup is faster after the first run: the CLI now enables Node's on-disk module compile cache
+  (`enableCompileCache()`) in both `cli.ts` and `cli-main.ts` and publishes the resolved cache directory
+  through `NODE_COMPILE_CACHE` so the spawned `cli-main` child process reuses it instead of re-compiling
+  the full engine module graph on every launch. An existing `NODE_COMPILE_CACHE` value is never overridden,
+  `NODE_DISABLE_COMPILE_CACHE=1` keeps the cache off, and runtimes without the API (the compiled binary)
+  degrade to plain compilation.
+
 ### Fixed
 
 ### Removed
