@@ -1,6 +1,7 @@
 import type { TodoPhase, TodoStatus } from "./todo-types.ts";
 
 const STATUSES = new Set<TodoStatus>(["pending", "in_progress", "completed", "abandoned"]);
+const DEFAULT_PHASE_NAME = "Tasks";
 
 export function phasesFromCursorTodos(todos: unknown): TodoPhase[] {
 	if (!Array.isArray(todos)) {
@@ -19,5 +20,5 @@ export function phasesFromCursorTodos(todos: unknown): TodoPhase[] {
 		const status = STATUSES.has(raw.status as TodoStatus) ? (raw.status as TodoStatus) : "pending";
 		tasks.push({ content, status });
 	}
-	return tasks.length > 0 ? [{ name: "Tasks", tasks }] : [];
+	return tasks.length > 0 ? [{ name: DEFAULT_PHASE_NAME, tasks }] : [];
 }
