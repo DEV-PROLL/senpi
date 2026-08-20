@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { registerTodoCommand } from "./commands.ts";
+import { phasesFromCursorTodos } from "./native-todo-mirror.ts";
 import { TASK_MANAGEMENT_SECTION } from "./prompt.ts";
 import {
 	clonePhases,
@@ -7,11 +8,10 @@ import {
 	type TodoCompletionTransition,
 	type TodoPhase,
 } from "./state.ts";
+import { TODO_STATE_ENTRY_TYPE } from "./todo-types.ts";
 import { getTodoWidgetModel } from "./todo-widget.ts";
 import { TodoWidgetComponent } from "./todo-widget-component.ts";
 import { registerTodoTool } from "./tools/todo.ts";
-import { phasesFromCursorTodos } from "./native-todo-mirror.ts";
-import { TODO_STATE_ENTRY_TYPE } from "./todo-types.ts";
 
 function getLatestPhases(ctx: ExtensionContext): TodoPhase[] {
 	return getLatestPhasesFromBranchEntries(ctx.sessionManager.getBranch());
@@ -49,7 +49,7 @@ export default function todotoolsExtension(pi: ExtensionAPI): void {
 
 	pi.on("message_end", async (event, ctx) => {
 		const message = event.message;
-		if (!message || message.role !== "assistant" || !Array.isArray(message.content)) {
+		if (message?.role !== "assistant" || !Array.isArray(message.content)) {
 			return;
 		}
 		for (const block of message.content) {
