@@ -1,5 +1,25 @@
 # changes
 
+## 2026-08-20 - Trailing assistant text renders below the last tool card
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: split trailing text/thinking after the last `toolCall` onto a sibling `AssistantMessageComponent` placed after the tool cards.
+- `packages/coding-agent/src/modes/interactive/split-trailing-assistant-text.ts`: extract head (through last toolCall) vs tail (trailing text/thinking).
+
+### Why
+
+- All assistant text lived in the first `AssistantMessageComponent` above the tool stack. Text after the last `toolCall` updated that blob, so a pending eval hid the approval question.
+
+### Why an extension could not handle it
+
+- Layout of streaming assistant messages and tool cards is inside InteractiveMode; no extension hook sits between `message_update` / `message_end` and the chat container.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` `message_update` / `message_end`.
+- `packages/coding-agent/src/modes/interactive/split-trailing-assistant-text.ts`
+
 ## 2026-08-20 - Late tool_execution_end still draws a TUI card
 
 ### What changed
