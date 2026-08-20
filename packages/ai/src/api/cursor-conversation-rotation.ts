@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
 
 export const MAX_CURSOR_CONVERSATION_ROTATIONS = 3;
 export const CURSOR_CONVERSATION_POISONED_MESSAGE =
@@ -12,21 +12,32 @@ export type ConversationRotationRecord = {
 	readonly wireId: string;
 	readonly poisonCount: number;
 	readonly skip: boolean;
+	/**
+	 * A 0-token RE was already surfaced to the session layer for this base
+	 * conversation, so compaction has had its turn and rotation may proceed.
+	 */
+	readonly surfaced: boolean;
 };
 
-export type PoisonDecision =
-	| { readonly kind: "rotated"; readonly wireId: string }
-	| { readonly kind: "exhausted" };
+export type PoisonDecision = { readonly kind: "rotated"; readonly wireId: string } | { readonly kind: "exhausted" };
 
 type MutableRecord = {
 	wireId: string;
 	poisonCount: number;
 	skip: boolean;
+	surfaced: boolean;
 };
 
 export type ConversationRotationStore = {
 	getWireId(baseId: string): string;
 	shouldSkip(baseId: string): boolean;
+	/**
+	 * True until a 0-token RE has been surfaced once for `baseId`. The first
+	 * failure must reach the session layer so compact-before-rotate can shrink
+	 * an oversized payload; only after that is rotation the right remedy.
+	 */
+	shouldSurfaceBeforeRotating(baseId: string): boolean;
+	markSurfaced(baseId: string, currentWireId: string): void;
 	recordZeroTokenPoison(baseId: string, currentWireId: string): PoisonDecision;
 };
 
@@ -55,6 +66,9 @@ export function createConversationRotationStore(options: {
 			existing.wireId = wireId;
 			existing.skip = false;
 			existing.poisonCount = 0;
+			// A reminted id is a fresh conversation: it earns its own surface-first
+			// pass so compaction runs again before rotation resumes.
+			existing.surfaced = false;
 			records[baseId] = existing;
 			persist();
 			return wireId;
@@ -62,11 +76,27 @@ export function createConversationRotationStore(options: {
 		shouldSkip(baseId: string): boolean {
 			return records[baseId]?.skip === true;
 		},
+		shouldSurfaceBeforeRotating(baseId: string): boolean {
+			return records[baseId]?.surfaced !== true;
+		},
+		markSurfaced(baseId: string, currentWireId: string): void {
+			const existing = records[baseId] ?? {
+				wireId: currentWireId,
+				poisonCount: 0,
+				skip: false,
+				surfaced: false,
+			};
+			if (existing.surfaced) return;
+			existing.surfaced = true;
+			records[baseId] = existing;
+			persist();
+		},
 		recordZeroTokenPoison(baseId: string, currentWireId: string): PoisonDecision {
 			const existing = records[baseId] ?? {
 				wireId: currentWireId,
 				poisonCount: 0,
 				skip: false,
+				surfaced: false,
 			};
 			if (existing.skip || existing.poisonCount >= MAX_CURSOR_CONVERSATION_ROTATIONS) {
 				existing.skip = true;
@@ -90,9 +120,7 @@ export function resolveConversationRotationPersistPath(env: NodeJS.ProcessEnv = 
 		return env.CURSOR_CONVERSATION_ID_STORE;
 	}
 	const agentDir =
-		env.SENPI_CODING_AGENT_DIR ??
-		env.CODING_AGENT_DIR ??
-		`${(env.HOME ?? ".").replace(/\/$/, "")}/.senpi/agent`;
+		env.SENPI_CODING_AGENT_DIR ?? env.CODING_AGENT_DIR ?? `${(env.HOME ?? ".").replace(/\/$/, "")}/.senpi/agent`;
 	return `${agentDir.replace(/\/$/, "")}/cursor-conversation-ids.json`;
 }
 
@@ -105,12 +133,13 @@ function loadRecords(persistPath: string): Record<string, MutableRecord> {
 		const records: Record<string, MutableRecord> = {};
 		for (const [baseId, value] of Object.entries(parsed)) {
 			if (!value || typeof value !== "object") continue;
-			const raw = value as { wireId?: unknown; poisonCount?: unknown; skip?: unknown };
+			const raw = value as { wireId?: unknown; poisonCount?: unknown; skip?: unknown; surfaced?: unknown };
 			if (typeof raw.wireId !== "string" || raw.wireId.length === 0) continue;
 			records[baseId] = {
 				wireId: raw.wireId,
 				poisonCount: typeof raw.poisonCount === "number" && raw.poisonCount >= 0 ? raw.poisonCount : 0,
 				skip: raw.skip === true,
+				surfaced: raw.surfaced === true,
 			};
 		}
 		return records;
