@@ -1,5 +1,24 @@
 # changes
 
+## Shared notice styling for built-in cards (2026-08-20)
+
+### What changed
+
+- The prompt URL widget and the multi-line pi-rules banner now render through `buildNoticeBox`, retaining their existing titles, paths, diagnostics, and URL details while using the shared notice background and bold tone title.
+- The compact pi-rules footer remains a one-line status surface and is unchanged.
+
+### Why
+
+- These built-in multi-line cards were visually divergent from every transcript notice renderer and did not carry the `customMessageBg` notice background.
+
+### Why an extension could not handle it
+
+- The built-in widget and rules banner own their component rendering before another extension can restyle the returned component.
+
+### Expected merge conflict zones
+
+- LOW: `extensions/builtin/prompt-url-widget.ts` widget construction and `extensions/builtin/rules/ui/rules-banner.ts` multi-line rendering.
+
 ## Provider-declared fallback-expansion eligibility gate (2026-08-19)
 
 ### What changed
