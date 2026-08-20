@@ -22,6 +22,9 @@ Every remaining audited production path with no nearer tracker than the root:
   `build:npm`/`build:bun`/`build:pnpm` entry points, root `check` swapped `tsgo --noEmit` for
   `tsc --noEmit` and added `check:claude-sdk-platform-lock` plus script-based browser smoke, and
   fork-only `verify:pms` orchestration was added.
+- `pnpm-workspace.yaml`: mirrors the root npm workspace's nested
+  `packages/session-backends/*` glob so the pnpm parity build installs and links the sqlite
+  session backend's workspace dependencies before `scripts/build-all.mjs` builds it.
 - `tsconfig.base.json`: `target`/`lib` raised from `ES2022` to `ES2024`.
 - `tsconfig.json`: reformatted to the fork's biome multi-line layout; workspace path mappings are
   semantically unchanged.
@@ -37,7 +40,8 @@ Every remaining audited production path with no nearer tracker than the root:
 - `packages/session-backends/sqlite-node/package.json`: renamed
   `@earendil-works/pi-session-backend-sqlite-node` ->
   `@earendil-works/pi-storage-sqlite-node`, made private and independently versioned at
-  `0.83.0`, `tsgo` -> `tsc`, and workspace deps switched to `file:` references.
+  `0.83.0`, `tsgo` -> `tsc`, and keeps its runtime `pi-agent-core` / `pi-ai` dependencies on
+  lockstep semver ranges so npm, Bun, and pnpm all link the live workspace packages.
 - `packages/session-backends/sqlite-node/src/sqlite/repo.ts`: optional-chaining refactor of the
   message-target guard.
 - `packages/telemetry/package.json`: private CalVer `2026.8.16`.
@@ -118,3 +122,34 @@ Every remaining audited production path with no nearer tracker than the root:
 - Builtin registration and widget internals under
   `packages/coding-agent/src/core/extensions/builtin/` if upstream reworks extension loading
   or adds overlapping notices.
+
+## Pnpm parity for the nested SQLite session backend (2026-08-19)
+
+### What changed
+
+- `pnpm-workspace.yaml` now includes `packages/session-backends/*`, matching the root npm
+  workspace and the package set explicitly built by `scripts/build-all.mjs`.
+- `packages/session-backends/sqlite-node/package.json` declares its shipped
+  `pi-agent-core` / `pi-ai` imports as lockstep runtime dependencies instead of packed
+  `file:` dev dependencies.
+- `scripts/sync-versions.js` keeps the backend's own `0.83.0` version independent while
+  synchronizing those lockstep dependency ranges during Senpi releases.
+
+### Why
+
+- The release pre-commit gate verifies npm, Bun, and pnpm. Pnpm previously excluded the
+  nested backend from its workspace and then, once included, packed its `file:` dependencies
+  before their declarations were built. The ordered build therefore reached the backend with
+  unresolved `pi-agent-core` / `pi-ai` types even though npm and Bun passed.
+
+### Why an extension could not handle it
+
+- This is package-manager workspace topology and release-version synchronization. Runtime
+  extensions load only after packages install and build, so they cannot repair missing
+  workspace membership, dependency links, or manifest pins.
+
+### Expected merge conflict zones
+
+- Upstream changes to the SQLite backend's dependency placement or independent-version policy.
+- Future workspace additions under nested `packages/*/*` paths, which must remain aligned
+  across root npm workspaces, `pnpm-workspace.yaml`, and `scripts/build-all.mjs`.

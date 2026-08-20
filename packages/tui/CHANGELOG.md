@@ -6,6 +6,18 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.19] - 2026-08-19
+
+### Breaking Changes
+
+### Added
+
 - Atomic `[Image #N]` editor markers for pasted images: a new `ImageMarkerRegistry` (ids only, never bytes) with contiguous renumbering, whole-marker deletion, registry snapshots for editor-to-editor transfer, and a paired optional image-marker API on `EditorComponent`, exported from the package index.
 
 - Optional paired `snapshotAttachmentState`/`restoreAttachmentState` owner hooks on `Editor` and `EditorComponent`: the editor's undo stack captures the caller's marker-keyed attachment payloads opaquely and restores them before the marker-order notification, so undoing a marker delete revives its image along with its text.

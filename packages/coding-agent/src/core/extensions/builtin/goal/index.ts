@@ -14,6 +14,7 @@ import { isResumeOfStoppedGoal, queueGoalContinuation } from "./lifecycle-helper
 import { GOAL_CONTINUATION_SCHEDULED_EVENT, MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
 import { migrateLegacyGoalFile } from "./persistence.ts";
 import { reengageGoalAfterReload } from "./reload-reengagement.ts";
+import { isStaleExtensionContextError } from "./stale-context.ts";
 import { accountGoalUsage, readGoal, updateGoal } from "./store.ts";
 import { GOAL_STORE_CHANGED_EVENT, isGoalStoreChangedEvent } from "./store-changed-event.ts";
 import { goalStoreRef as buildGoalStoreRef } from "./store-ref.ts";
@@ -27,7 +28,6 @@ import { GOAL_WAIT_STATUS_KEY, GoalWaitTicker } from "./wait-ticker.ts";
 
 const RESUME_GOAL_CHOICE = "Resume goal";
 const LEAVE_GOAL_STOPPED_CHOICE = "Leave stopped";
-const STALE_EXTENSION_CONTEXT_ERROR_PREFIX = "This extension ctx is stale after session replacement or reload.";
 
 type AgentGoalAccounting = {
 	goalId: string;
@@ -43,15 +43,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	let continuationPending = false;
 	let activeContext: ExtensionContext | undefined;
 	const turnUsage = new TurnUsageTracker();
+	// No stale-ctx swallow here: GoalWaitTicker retires itself on a stale render
+	// (a ticker that keeps ticking against a retired ctx freezes the footer
+	// countdown forever); non-stale render errors still propagate.
 	const goalWaitTicker = new GoalWaitTicker({
-		render: (renderCtx, status) => {
-			try {
-				renderCtx.ui.setStatus(GOAL_WAIT_STATUS_KEY, status);
-			} catch (error) {
-				if (error instanceof Error && error.message.startsWith(STALE_EXTENSION_CONTEXT_ERROR_PREFIX)) return;
-				throw error;
-			}
-		},
+		render: (renderCtx, status) => renderCtx.ui.setStatus(GOAL_WAIT_STATUS_KEY, status),
 	});
 	const monitorContinuation = new MonitorAwareGoalContinuation(
 		pi,
@@ -70,14 +66,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	});
 
 	const goalTicker = new GoalElapsedTicker({
-		render: (renderCtx, renderGoal, live) => {
-			try {
-				updateGoalUi(renderCtx, renderGoal, live);
-			} catch (error) {
-				if (error instanceof Error && error.message.startsWith(STALE_EXTENSION_CONTEXT_ERROR_PREFIX)) return;
-				throw error;
-			}
-		},
+		render: (renderCtx, renderGoal, live) => updateGoalUi(renderCtx, renderGoal, live),
 	});
 
 	pi.registerEntryRenderer(GOAL_CACHE_WARMUP_ENTRY_TYPE, renderGoalCacheWarmupEntry);
@@ -401,7 +390,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		try {
 			refreshGoalUi(ctx, goal);
 		} catch (error) {
-			if (error instanceof Error && error.message.startsWith(STALE_EXTENSION_CONTEXT_ERROR_PREFIX)) {
+			if (isStaleExtensionContextError(error)) {
 				return;
 			}
 			throw error;

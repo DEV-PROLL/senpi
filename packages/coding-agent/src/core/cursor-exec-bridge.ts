@@ -48,7 +48,8 @@ export interface CursorExecBridgeOptions {
 		toolName: string;
 		toolCallId: string;
 		args: unknown;
-		result: AgentToolResult;
+		result: AgentToolResult<unknown>;
+		isError: boolean;
 	}) => Promise<void>;
 	/** Run the session's vetoable extension preflight before tool execution. */
 	preflightToolCall?: (event: ToolCallEvent) => Promise<ToolCallEventResult | undefined>;
@@ -89,7 +90,7 @@ async function executeTool(
 	args: Record<string, unknown>,
 ): Promise<ToolResultMessage> {
 	const runSignal = options.getAbortSignal();
-	if (!runSignal) {
+	if (!runSignal || runSignal.aborted) {
 		return errorResult(toolCallId, toolName, "Tool execution has no active run");
 	}
 
@@ -132,7 +133,17 @@ async function executeTool(
 			toolName,
 			input: params,
 		});
-		if (preflight?.block) {
+		if (runSignal.aborted || options.getAbortSignal() !== runSignal) {
+			const message = "Tool execution has no active run";
+			toolResult = errorResult(toolCallId, toolName, message);
+			endEvent = {
+				type: "tool_execution_end",
+				toolCallId,
+				toolName,
+				result: { content: [{ type: "text", text: message }], details: undefined },
+				isError: true,
+			};
+		} else if (preflight?.block) {
 			const message = preflight.reason || "Tool execution was blocked";
 			toolResult = errorResult(toolCallId, toolName, message);
 			endEvent = {
@@ -173,7 +184,12 @@ async function executeTool(
 			toolName,
 			toolCallId,
 			args: params ?? cleanArgs,
-			result: toolResult,
+			result: {
+				content: toolResult.content,
+				details: toolResult.details,
+				usage: toolResult.usage,
+			},
+			isError: toolResult.isError === true,
 		});
 	}
 	return toolResult;

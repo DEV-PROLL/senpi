@@ -196,4 +196,20 @@ describe("cursor-agent usage accounting", () => {
 		expect(message.usage.cacheRead).toBe(17_574);
 		expect(message.usage.totalTokens).toBe(5 + 5 + 17_574);
 	});
+
+	it("ignores billed cacheRead that dwarfs checkpoint usedTokens", async () => {
+		// Session 01a01879: usedTokens ~148k, billed cache_read ~3.99M.
+		const baseUrl = await startServer((stream) => {
+			stream.write(textDeltaFrame("hi"));
+			stream.write(tokenDeltaFrame(5));
+			stream.write(checkpointFrame(148_256, 200_000));
+			stream.write(billedTurnEndedFrame({ 1: 4_090_000n, 2: 5n, 3: 3_990_000n, 4: 100n }));
+			stream.end();
+		});
+
+		const message = await collectMessage(baseUrl);
+		expect(message.usage.cacheRead).toBe(0);
+		expect(message.usage.totalTokens).toBe(148_256);
+		expect(message.usage.totalTokens).toBeLessThan(200_000);
+	});
 });

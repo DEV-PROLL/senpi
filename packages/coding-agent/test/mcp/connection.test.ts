@@ -56,16 +56,7 @@ describe("ServerConnection state machine", () => {
 		const connection = createConnection(
 			"stale",
 			root,
-			[
-				"--tools",
-				"1",
-				"--slow-start",
-				"30000",
-				"--spawn-counter-file",
-				counterFile,
-				"--pid-file",
-				pidFile,
-			],
+			["--tools", "1", "--slow-start", "30000", "--spawn-counter-file", counterFile, "--pid-file", pidFile],
 			{ connectTimeoutMs: 60_000 },
 		);
 		connections.push(connection);
@@ -95,12 +86,9 @@ describe("ServerConnection state machine", () => {
 		const root = await tmpRoot("dispose-pending");
 		const pidFile = join(root, "pid.txt");
 		await writeFile(pidFile, "");
-		const connection = createConnection(
-			"dispose-pending",
-			root,
-			["--wedge", "--pid-file", pidFile],
-			{ connectTimeoutMs: 60_000 },
-		);
+		const connection = createConnection("dispose-pending", root, ["--wedge", "--pid-file", pidFile], {
+			connectTimeoutMs: 60_000,
+		});
 		connections.push(connection);
 		const spawned = waitForPidWrite(pidFile);
 		const disabled = waitForState(connection, "disabled");
@@ -121,12 +109,9 @@ describe("ServerConnection state machine", () => {
 		const root = await tmpRoot("disable-pending");
 		const pidFile = join(root, "pid.txt");
 		await writeFile(pidFile, "");
-		const connection = createConnection(
-			"disable-pending",
-			root,
-			["--wedge", "--pid-file", pidFile],
-			{ connectTimeoutMs: 60_000 },
-		);
+		const connection = createConnection("disable-pending", root, ["--wedge", "--pid-file", pidFile], {
+			connectTimeoutMs: 60_000,
+		});
 		connections.push(connection);
 		const spawned = waitForPidWrite(pidFile);
 		const disabled = waitForState(connection, "disabled");
@@ -275,11 +260,7 @@ function waitForPidWrite(file: string): Promise<number> {
 			watcher.close();
 			resolve(pid);
 		});
-		signal.addEventListener(
-			"abort",
-			() => reject(new Error(`fixture did not write pid: ${file}`)),
-			{ once: true },
-		);
+		signal.addEventListener("abort", () => reject(new Error(`fixture did not write pid: ${file}`)), { once: true });
 	});
 }
 

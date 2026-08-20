@@ -17,7 +17,8 @@ export interface CursorExecBridgeSession {
 		toolName: string,
 		toolCallId: string,
 		args: unknown,
-		result: AgentToolResult,
+		result: AgentToolResult<unknown>,
+		isError: boolean,
 	): Promise<void>;
 }
 
@@ -51,11 +52,11 @@ export function createSessionCursorExecBridge(
 			),
 		emitEvent: async (event: AgentEvent, runSignal: AbortSignal) =>
 			await getAgent().emitExternalEvent(event, runSignal),
-		emitToolResult: async ({ toolName, toolCallId, args, result }) => {
-			await sessionRef.current?.emitExecBridgeToolResult(toolName, toolCallId, args, result);
+		emitToolResult: async ({ toolName, toolCallId, args, result, isError }) => {
+			await sessionRef.current?.emitExecBridgeToolResult(toolName, toolCallId, args, result, isError);
 		},
 		getAbortSignal: () => {
-			if (runSignal === undefined) return getAgent().signal;
+			if (runSignal === undefined || runSignal.aborted) return undefined;
 			return runSignal === getAgent().signal ? runSignal : undefined;
 		},
 	});

@@ -1,5 +1,117 @@
 # changes
 
+## 2026-08-20 - Cursor exec emits tool_result after native write/edit
+
+### What changed
+
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts`: `executeTool` now calls `emitToolResult` after `tool_execution_end`, passing cleaned args and the real result so plan-touch listeners see native exec writes.
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: wires the bridge's optional `emitToolResult` to `emitExecBridgeToolResult` on the session.
+- `packages/coding-agent/src/core/agent-session.ts`: adds `emitExecBridgeToolResult`, which runs `_emitAfterToolCallHooks` so the same `tool_result` hook path as the local tool loop fires after Cursor exec.
+
+### Why
+
+- Cursor exec runs `write`/`edit` via `tool.execute` and previously only emitted `tool_execution_end`. Plan-touch trackers listen to `tool_result`, so momus stayed gated after a real `.omo/plans/*.md` write (#989).
+
+### Why an extension could not handle it
+
+- The exec-bridge factory is inside `packages/coding-agent` before any omo hook sees the stream; an extension cannot inject `tool_result` into a path that never emitted it.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts` `executeTool` (ownership recheck after preflight plus `emitToolResult`).
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts` session wiring.
+- `packages/coding-agent/src/core/agent-session.ts` `emitExecBridgeToolResult`.
+
+## 2026-08-20 - Append-only goal continuations and exponentially floored 429 waits
+
+### What changed
+
+- `packages/coding-agent/src/core/messages.ts`: removed `keepLatestGoalContinuationMessage()`.
+  `filterContextExcludedMessages()` is now an explicit identity pass and `convertToLlm()` maps the full
+  input array, so every accepted `goal-continuation` custom message stays in provider-visible chronological
+  history. `GOAL_CONTINUATION_MESSAGE_TYPE` and `isContextExcludedCustomMessage() === false` are unchanged;
+  no dedupe by content, goal id, wake source, or streak was added. Session JSONL format and
+  `queueHiddenGoalPrompt()` are untouched.
+- `packages/coding-agent/src/core/retry-fallback/hint-policy.ts`: `nextInTurnDelayMs()` computes
+  `exponentialFloorMs = baseDelayMs * 2 ** (attempt - 1)` and applies it to all three same-model branches
+  (half-used deadline remainder, first hinted idle probe, and the done/hint-override path). The floored
+  delay — not the raw hint — feeds `cumulativeHintedWaitMs`, so cap demotion accounts for time actually
+  slept. `degradeWithoutFallback()` tier 2 raises its cap-clamped wait to the same floor. The probe state
+  machine, tier boundaries, budgets, and the tier-3 terminal verdict are unchanged.
+- `packages/coding-agent/src/core/agent-session.ts`: comments only near 429 detection and retry scheduling,
+  recording that the exponential floor lives in the pure policy and must not be recomputed at the call site.
+  No control-flow change.
+
+### Why
+
+- Anthropic-style prompt caching keys on an exact message-array prefix. Dropping a previously sent
+  continuation made request N stop being a prefix of request N+1, so every token ahead of the deletion point
+  missed cache and was re-read at full price. In team mode, where continuations arrive every turn, that
+  produced sustained cache-miss traffic and 429 storms (#1005). Keeping continuations append-only is the
+  smallest change that restores prefix immutability; context growth is a deliberate trade bounded by normal
+  compaction.
+- The 429 handler previously let a provider hint fully replace the exponential schedule. A provider that
+  repeats a 5 ms `retry-after` on every rate-limit pinned the same-model retry cadence at 5 ms, so the
+  session hammered a model that was already refusing it. Flooring each wait guarantees monotonic pressure
+  relief while still honouring hints longer than the floor.
+
+### Why an extension could not handle it
+
+- `filterContextExcludedMessages()` / `convertToLlm()` run inside the core transport and compaction paths
+  (`agent-session.ts`, `compaction/compaction.ts`); an extension's `transformContext` hook fires before this
+  core-owned filter, so it cannot prevent a core deletion of already-sent turns.
+- The 429 wait is computed by the pure retry policy inside the session's own retry loop. Extensions observe
+  `auto_retry_start` after the delay has been decided and cannot rewrite `delayMs` or the probe state.
+
+### Expected merge conflict zones
+
+- MEDIUM: `messages.ts` top-of-file exclusion helpers and the `convertToLlm()` entry line — any concurrent
+  change that reintroduces context filtering there will collide.
+- MEDIUM: `retry-fallback/hint-policy.ts` `nextInTurnDelayMs()` branch bodies and the
+  `degradeWithoutFallback()` tier-2 return.
+- LOW: `agent-session.ts` 429 detection and retry-delay comments (comment-only lines).
+- LOW: `test/suite/goal-continuation-context-exclusion.test.ts`,
+  `test/suite/retry-fallback-hint-policy.test.ts`, and
+  `test/suite/regressions/issue-447-goal-continuation.test.ts`, whose assertions moved from
+  keep-latest-only to append-only.
+
+## 2026-08-20 - Ignore implausible Cursor billed usage in compaction threshold
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `_resolveThresholdContextTokens` now delegates to `resolveThresholdContextTokens` so a billed usage figure more than 8× a ≥50k local estimate is ignored for the compaction threshold.
+
+### Why
+
+- Complements the billed-cacheRead guard in cursor-agent. When no checkpoint arrived, a 4M `cacheRead` still must not beat a 149k transcript estimate.
+
+### Why an extension could not handle it
+
+- Threshold resolution runs inside `AgentSession` before any session hook sees the assistant message.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `_resolveThresholdContextTokens`
+
+## Shared notice styling for built-in cards (2026-08-20)
+
+### What changed
+
+- The prompt URL widget and the multi-line pi-rules banner now render through `buildNoticeBox`, retaining their existing titles, paths, diagnostics, and URL details while using the shared notice background and bold tone title.
+- The compact pi-rules footer remains a one-line status surface and is unchanged.
+
+### Why
+
+- These built-in multi-line cards were visually divergent from every transcript notice renderer and did not carry the `customMessageBg` notice background.
+
+### Why an extension could not handle it
+
+- The built-in widget and rules banner own their component rendering before another extension can restyle the returned component.
+
+### Expected merge conflict zones
+
+- LOW: `extensions/builtin/prompt-url-widget.ts` widget construction and `extensions/builtin/rules/ui/rules-banner.ts` multi-line rendering.
+
 ## Cursor exec emits tool_result after native write/edit (2026-08-19)
 
 `executeTool` now calls `emitToolResult` after `tool_execution_end`. Cursor exec runs `write`/`edit` without the local tool loop, so momus `hasPlanArtifact()` never saw `.omo/plans/*.md` touches.
@@ -222,7 +334,11 @@ Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-sessio
 - `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: the session
   adapter accepts the signal of the run that owns the exec stream and resolves
   `getAbortSignal` from it, returning `undefined` once that run is no longer
-  the agent's live run.
+  the agent's live run. Adapters created without a captured owner fail closed
+  instead of adopting whichever run is currently live.
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts`: dispatch rechecks the
+  captured signal after awaited preflight work and before `tool.execute()`, so
+  a run that ends during approval cannot start a side effect afterward.
 - `packages/coding-agent/src/core/sdk.ts`: supplies the bridge as a per-run
   factory so every Cursor stream gets handlers bound to its own run.
 
