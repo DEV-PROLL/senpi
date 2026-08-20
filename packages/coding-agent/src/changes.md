@@ -1,5 +1,23 @@
 # changes
 
+## Public notice renderer primitives (2026-08-20)
+
+### What changed
+
+- `packages/coding-agent/src/index.ts` now exports `buildNoticeBox`, `noticeMessageRenderer`, `noticeEntryRenderer`, and the `NoticeSpec`, `NoticeLine`, and `NoticeTone` types.
+
+### Why
+
+- Extensions and package consumers need the same notice-card contract as built-in transcript surfaces instead of recreating its background, title, and detail styling.
+
+### Why an extension could not handle it
+
+- The package entry point owns the supported public API; an extension cannot export additional symbols from it.
+
+### Expected merge conflict zones
+
+- LOW: the notice export block in `packages/coding-agent/src/index.ts`.
+
 ## Entry surface and CLI coordinator re-diverge from upstream 59a71b23 (2026-08-19)
 
 ### What changed

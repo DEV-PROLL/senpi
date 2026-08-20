@@ -1,5 +1,24 @@
 # changes
 
+## Canonical interactive notice cards (2026-08-20)
+
+### What changed
+
+- Loaded-resource diagnostics, version and package updates, risky-model and high-reasoning warnings, debug-log completion, and the Earendil announcement text now render through `buildNoticeBox`.
+- Existing notice text, diagnostic severity, changelog hyperlink behavior, package lists, and the optional Earendil image remain intact.
+
+### Why
+
+- These multi-line notice cards used independent borders and foreground styling, so they diverged from the shared transcript notice background and title contract.
+
+### Why an extension could not handle it
+
+- These surfaces are constructed directly by `InteractiveMode` or its built-in announcement component; extensions cannot replace their internal TUI components after insertion.
+
+### Expected merge conflict zones
+
+- MEDIUM: `interactive-mode.ts` loaded-resource diagnostics and notification helpers; LOW: `components/earendil-announcement.ts` textual banner construction.
+
 ## Interactive chrome, queued-input recovery, and smooth-streaming settings after the 59a71b23 pin (2026-08-19)
 
 ### What changed
