@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Native Cursor `write`/`edit` via the exec bridge now emit `tool_result` after `tool_execution_end`, so plan-touch trackers see `.omo/plans/*.md` writes and momus can unblock (#989).
 - claude-sdk-oauth stream-start-timeout retries now fork the SDK conversation at the last assistant
   boundary before the stalled turn instead of re-attaching and re-sending it, so each retry re-bills
   only the turn's own message on a prefix cache read instead of re-writing the whole conversation

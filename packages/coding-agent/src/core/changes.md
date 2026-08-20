@@ -24,7 +24,27 @@
 ### Expected merge conflict zones
 
 - `core/retry-fallback/settings.ts` `ProviderRetrySettings` field list only (comment line).
+## 2026-08-20 - Cursor exec emits tool_result after native write/edit
 
+### What changed
+
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts`: `executeTool` now calls `emitToolResult` after `tool_execution_end`, passing cleaned args and the real result so plan-touch listeners see native exec writes.
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: wires the bridge's optional `emitToolResult` to `emitExecBridgeToolResult` on the session.
+- `packages/coding-agent/src/core/agent-session.ts`: adds `emitExecBridgeToolResult`, which runs `_emitAfterToolCallHooks` so the same `tool_result` hook path as the local tool loop fires after Cursor exec.
+
+### Why
+
+- Cursor exec runs `write`/`edit` via `tool.execute` and previously only emitted `tool_execution_end`. Plan-touch trackers listen to `tool_result`, so momus stayed gated after a real `.omo/plans/*.md` write (#989).
+
+### Why an extension could not handle it
+
+- The exec-bridge factory is inside `packages/coding-agent` before any omo hook sees the stream; an extension cannot inject `tool_result` into a path that never emitted it.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts` `executeTool` (ownership recheck after preflight plus `emitToolResult`).
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts` session wiring.
+- `packages/coding-agent/src/core/agent-session.ts` `emitExecBridgeToolResult`.
 ## 2026-08-20 - Append-only goal continuations and exponentially floored 429 waits
 
 ### What changed
@@ -114,6 +134,12 @@
 ### Expected merge conflict zones
 
 - LOW: `extensions/builtin/prompt-url-widget.ts` widget construction and `extensions/builtin/rules/ui/rules-banner.ts` multi-line rendering.
+
+## Cursor exec emits tool_result after native write/edit (2026-08-19)
+
+`executeTool` now calls `emitToolResult` after `tool_execution_end`. Cursor exec runs `write`/`edit` without the local tool loop, so momus `hasPlanArtifact()` never saw `.omo/plans/*.md` touches.
+
+Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-session.ts`, `agent-session.ts` `emitExecBridgeToolResult`.
 
 ## Provider-declared fallback-expansion eligibility gate (2026-08-19)
 
