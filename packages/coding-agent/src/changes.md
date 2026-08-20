@@ -1,5 +1,23 @@
 # changes
 
+## Unreleased - Cursor 0-token RE stays on the same model and shrinks
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: 0-token Cursor `resource_exhausted` retries with `sameModelRemint` instead of 429/k3 fallback; overflow compact uses Cursor keep-recent-0 settings; too-small compact truncates to the last user turn.
+
+### Why
+
+- `resource.?exhausted` was classified as a 429 transient fallback, and overflow compact that saved <1% still retried the same Cursor payload.
+
+### Why an extension could not handle it
+
+- Retry fallback and pre-prompt compaction are core AgentSession admission paths.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `_handleRetryableError`, `_executeCompaction`, `_isHardErrorFallbackEligible`.
+
 ## Entry surface and CLI coordinator re-diverge from upstream 59a71b23 (2026-08-19)
 
 ### What changed

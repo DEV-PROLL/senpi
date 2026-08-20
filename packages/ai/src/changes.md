@@ -1,6 +1,20 @@
-## Unreleased
+## Unreleased - Cursor 0-token RE overflow without estimate gate
 
-- Treat large Cursor 0-token resource_exhausted as overflow so the session compacts before rotating or falling back.
+### What changed
+
+- `packages/ai/src/utils/overflow.ts`: 0-token Cursor `resource_exhausted` is overflow even when the local estimate is 0; same-model remint helpers skip provider fallback; Cursor overflow compaction settings force `keepRecentTokens: 0` and disable restoration.
+
+### Why
+
+- The 50k estimate gate missed sessions whose last billed usage was zeroed after an earlier compact, so Cursor still rejected the payload while senpi treated it as a 429 and jumped providers.
+
+### Why an extension could not handle it
+
+- Overflow classification and retry fallback run in core before extension hooks.
+
+### Expected merge conflict zones
+
+- `packages/ai/src/utils/overflow.ts` after `getOverflowPatterns()`.
 
 # AI Source Changes
 

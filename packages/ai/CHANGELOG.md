@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Cursor 0-token `resource_exhausted` is treated as overflow without a local-estimate floor, and Cursor overflow compaction keeps no recent-token tail so the retry payload actually shrinks.
+
 ### Removed
 
 ## [2026.8.19] - 2026-08-19

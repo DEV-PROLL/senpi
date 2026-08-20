@@ -47,9 +47,11 @@ import type {
 } from "@earendil-works/pi-ai/compat";
 import {
 	cleanupSessionResources,
+	cursorOverflowCompactionSettings,
 	isClassifierRefusal,
 	isContextOverflow,
 	isCursorPayloadResourceExhausted,
+	isCursorZeroTokenResourceExhausted,
 	isProviderStreamStallError,
 	isProviderTimeoutError,
 	isRecoverableLength,
@@ -57,6 +59,7 @@ import {
 	modelsAreEqual,
 	type RetryCallbacks,
 	resetApiProviders,
+	shouldRetryOverflowWithoutCompact,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
 import { extract429RetryAfterMs, parseRetryAfterMsMarker } from "@earendil-works/pi-ai/utils/retry-hint";
@@ -864,6 +867,7 @@ export class AgentSession {
 	private readonly _compactionLifecycle = new CompactionLifecycleCoordinator();
 	private readonly _sessionWorkBarrier = new SessionWorkBarrier();
 	private _overflowRecoveryAttempted = false;
+	private _compactionSkippedTooSmall = false;
 	private _requiredCompactionAdmissionError: RequiredCompactionError | undefined;
 	// Preserve provenance across agent-core's conversion of our admission error
 	// into an assistant error message. Matching provider text alone is not proof
@@ -1702,7 +1706,9 @@ export class AgentSession {
 		const lastAssistant = this._findLastAssistantInMessages(event.messages);
 		if (
 			!lastAssistant ||
-			(!this._isRetryableError(lastAssistant) && !this._isHardErrorFallbackEligible(lastAssistant))
+			(!this._isRetryableError(lastAssistant) &&
+				!this._isHardErrorFallbackEligible(lastAssistant) &&
+				!isCursorZeroTokenResourceExhausted(lastAssistant))
 		) {
 			return;
 		}
@@ -1901,6 +1907,9 @@ export class AgentSession {
 		}
 
 		const retryableError = this._isRetryableError(lastAssistant);
+		if (isCursorZeroTokenResourceExhausted(lastAssistant)) {
+			return true;
+		}
 		if (!retryableError && this._isHardErrorFallbackEligible(lastAssistant)) {
 			return true;
 		}
@@ -2069,10 +2078,11 @@ export class AgentSession {
 			// Retry transient failures normally and eligible hard errors only through a fallback.
 			const retryableError = this._isRetryableError(msg);
 			const hardErrorFallbackEligible = this._isHardErrorFallbackEligible(msg);
+			const cursorZeroTokenRe = isCursorZeroTokenResourceExhausted(msg);
 			const retryCanAdmitProvider =
 				!userAbortSuppressedQueuedContinuation &&
 				this.settingsManager.getRetrySettings().enabled &&
-				(retryableError || hardErrorFallbackEligible);
+				(retryableError || hardErrorFallbackEligible || cursorZeroTokenRe);
 			let compactedBeforeRetry = false;
 			if (
 				retryCanAdmitProvider &&
@@ -2088,7 +2098,9 @@ export class AgentSession {
 			const retryOwnedDeferredQueue = DEFERRED_RETRY_QUEUE_OWNERS.has(this);
 			DEFERRED_RETRY_QUEUE_OWNERS.delete(this);
 			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
-				if (retryableError) {
+				if (cursorZeroTokenRe) {
+					retryOutcome = await this._handleRetryableError(msg, { sameModelRemint: true });
+				} else if (retryableError) {
 					retryOutcome = await this._handleRetryableError(msg);
 				} else if (hardErrorFallbackEligible) {
 					retryOutcome = await this._handleRetryableError(msg, {
@@ -4906,7 +4918,11 @@ export class AgentSession {
 				throw new CompactionCancelledError();
 			}
 			const pathEntries = this.sessionManager.getBranch();
-			const settings = this.settingsManager.getCompactionSettings();
+			const settings = cursorOverflowCompactionSettings(
+				this.settingsManager.getCompactionSettings(),
+				this.model?.provider,
+				request.reason,
+			);
 
 			let compactionResult = request.precomputed;
 			let fromExtension = request.precomputed !== undefined;
@@ -5490,6 +5506,14 @@ export class AgentSession {
 				this._incrementMessageRevision();
 			}
 			if (!compacted && inlineReason && !this._isCompactionDelegated() && !this._hasSupersedingCompactionClaim()) {
+				if (this._compactionSkippedTooSmall) {
+					this._compactionSkippedTooSmall = false;
+					const provider = this.model?.provider;
+					if (provider === "cursor" || provider === "cursor-cli-oauth") {
+						this._truncateAgentMessagesToLastUserTurn();
+					}
+					return true;
+				}
 				throw new RequiredCompactionError();
 			}
 			return compacted;
@@ -5628,6 +5652,7 @@ export class AgentSession {
 				this._overflowRecoveryAttempted = false;
 			}
 			const errorMessage = error instanceof Error ? error.message : "compaction failed";
+			this._compactionSkippedTooSmall = shouldRetryOverflowWithoutCompact(false, errorMessage);
 			const aborted = isCompactionExecutionAborted(error);
 			this._emit({
 				type: "compaction_end",
@@ -5822,7 +5847,11 @@ export class AgentSession {
 
 			const preparation = prepareCompaction(
 				this.sessionManager.getBranch(),
-				this.settingsManager.getCompactionSettings(),
+				cursorOverflowCompactionSettings(
+					this.settingsManager.getCompactionSettings(),
+					this.model?.provider,
+					reason,
+				),
 				reason === "overflow",
 			);
 			if (!preparation) {
@@ -6659,8 +6688,22 @@ export class AgentSession {
 	}
 
 	private _isCursorPayloadOverflow(message: AssistantMessage): boolean {
-		const estimate = estimateContextTokens(this.agent.state.messages ?? []);
-		return isCursorPayloadResourceExhausted(message, estimate.tokens ?? 0);
+		return isCursorPayloadResourceExhausted(message, 0);
+	}
+
+	private _truncateAgentMessagesToLastUserTurn(): boolean {
+		const messages = this.agent?.state?.messages;
+		if (!Array.isArray(messages) || messages.length === 0) return false;
+		let lastUser = -1;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i]?.role === "user") {
+				lastUser = i;
+				break;
+			}
+		}
+		if (lastUser <= 0) return false;
+		this.agent.state.messages = messages.slice(lastUser);
+		return true;
 	}
 
 	private _isHardErrorFallbackEligible(message: AssistantMessage): boolean {
@@ -6669,6 +6712,7 @@ export class AgentSession {
 			message.stopReason === "error" &&
 			!isContextOverflow(message, this.model?.contextWindow ?? 0) &&
 			!this._isCursorPayloadOverflow(message) &&
+			!isCursorZeroTokenResourceExhausted(message) &&
 			!isClassifierRefusal(message) &&
 			!message.content.some((content) => content.type === "toolCall") &&
 			this._retryFallback.canTryFallback()
@@ -6778,7 +6822,7 @@ export class AgentSession {
 	 */
 	private async _handleRetryableError(
 		message: AssistantMessage,
-		options: { hardErrorFallback?: boolean } = {},
+		options: { hardErrorFallback?: boolean; sameModelRemint?: boolean } = {},
 	): Promise<"continued" | "blocked" | "not-handled" | "cancelled"> {
 		const settings = this.settingsManager.getRetrySettings();
 		if (!settings.enabled) {
@@ -6797,10 +6841,27 @@ export class AgentSession {
 		const errorMessage = message.errorMessage || "Unknown error";
 		const isRefusal = isClassifierRefusal(message);
 		const hardErrorFallback = options.hardErrorFallback === true;
+		const sameModelRemint = options.sameModelRemint === true;
 		let switchedFallback = false;
 		let is429TierRouted = false;
 		let hintTierDelayMs: number | undefined;
-		if (hardErrorFallback) {
+		if (sameModelRemint) {
+			this._retryAttempt++;
+			if (this._retryAttempt > settings.maxRetries) {
+				if (this._retryAttempt > 1) {
+					this._emit({
+						type: "auto_retry_end",
+						success: false,
+						attempt: this._retryAttempt,
+						finalError: message.errorMessage,
+					});
+				}
+				this._retryAttempt = 0;
+				this._resetHintTierState();
+				this._resolveRetry();
+				return "not-handled";
+			}
+		} else if (hardErrorFallback) {
 			// A non-retryable provider failure must never replay on the same model.
 			// Billing-class failures never recover on this account, so the fallback
 			// switch pins as the session model instead of reverting after the cooldown.

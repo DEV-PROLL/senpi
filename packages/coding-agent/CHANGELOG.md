@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Cursor 0-token `resource_exhausted` retries the same model after remint/compact instead of falling back to another provider, and too-small overflow compact now drops to the last user turn.
+
 ### Added
 
 ### Changed

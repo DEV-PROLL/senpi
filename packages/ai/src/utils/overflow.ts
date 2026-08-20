@@ -197,19 +197,53 @@ export function getOverflowPatterns(): RegExp[] {
 	return [...OVERFLOW_PATTERNS];
 }
 
-const CURSOR_PAYLOAD_RE_MIN_ESTIMATE = 50_000;
+function cursorZeroTokenCount(message: {
+	usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number };
+}): number {
+	const usage = message.usage;
+	if (!usage) return 0;
+	return (
+		usage.totalTokens ||
+		(usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
+	);
+}
 
 export function isCursorPayloadResourceExhausted(
 	message: { stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number } },
-	estimateTokens: number,
+	_estimateTokens: number,
 ): boolean {
 	if (message.stopReason !== "error" || !/resource.?exhausted/i.test(message.errorMessage || "")) {
 		return false;
 	}
-	const usage = message.usage;
-	const tokens = usage
-		? (usage.totalTokens || (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))
-		: 0;
-	if (tokens > 0) return false;
-	return (estimateTokens || 0) >= CURSOR_PAYLOAD_RE_MIN_ESTIMATE;
+	return !(cursorZeroTokenCount(message) > 0);
+}
+
+export function isCursorZeroTokenResourceExhausted(message: {
+	stopReason?: string;
+	errorMessage?: string;
+	usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number };
+}): boolean {
+	if (message.stopReason !== "error" || !/resource.?exhausted/i.test(message.errorMessage || "")) {
+		return false;
+	}
+	return !(cursorZeroTokenCount(message) > 0);
+}
+
+export function shouldSkipProviderFallbackForCursorZeroRe(options: { sameModelRemint?: boolean } | undefined): boolean {
+	return options?.sameModelRemint === true;
+}
+
+export function shouldRetryOverflowWithoutCompact(compacted: boolean, errorMessage: string): boolean {
+	if (compacted) return false;
+	return /Nothing to compact/i.test(errorMessage || "");
+}
+
+export function cursorOverflowCompactionSettings<T extends { keepRecentTokens?: number; restorationEnabled?: boolean }>(
+	settings: T,
+	provider: string | undefined,
+	reason: string | undefined,
+): T {
+	if (reason !== "overflow") return settings;
+	if (provider !== "cursor" && provider !== "cursor-cli-oauth") return settings;
+	return { ...settings, keepRecentTokens: 0, restorationEnabled: false };
 }
