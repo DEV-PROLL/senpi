@@ -2296,3 +2296,17 @@ The tip line was teaching a small slice of the product while most of the surface
 
 - MEDIUM: the paste handler, submit path, and editor wiring in `packages/coding-agent/src/modes/interactive/interactive-mode.ts`.
 - LOW: `packages/coding-agent/src/modes/interactive/editor-paste-transfer.ts` (small transfer helper, additive return value).
+
+## 2026-08-20 — render-stall fixes: mode-switch detach + reload-scoped extension UI reset
+
+- `switchTuiMode()` now moves components to the new renderer with
+  `detachAll()` instead of `clear()`. Clearing disposed the live components
+  (tool spinners, reveals, extension widgets) and remounted the dead
+  instances, killing every interval they owned: the TUI froze until an input
+  event forced a frame. Regression: `test/interactive-tui.test.ts`
+  ("switchTuiMode component lifecycle").
+- `handleReloadCommand()` resets extension UI inside reload()'s
+  `beforeSessionStart` callback instead of up front, so a vetoed or failed
+  reload no longer destroys live extension footers/widgets/tickers.
+  Regression: `test/interactive-tui.test.ts` ("handleReloadCommand extension
+  UI lifecycle").
