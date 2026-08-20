@@ -1,5 +1,86 @@
 # Core Extensions Changes
 
+## 2026-08-19 - ProviderConfig.fallbackEligible: deterministic gate for implicit fallback expansion
+
+### What changed
+
+- `types.ts` (`ProviderConfig`) and `core/provider-composer.ts` (`ProviderConfigInput`) gained optional
+  `fallbackEligible?(): boolean`. A provider registration may declare its lane deterministically unusable
+  (for example an unacknowledged approval gate); bare-family fallback expansion then skips it while the
+  provider stays registered, explicitly selectable, and visible to `/login`.
+- `core/model-runtime.ts` exposes `isFallbackEligible(providerId)` (hookless providers and throwing hooks
+  stay eligible), `core/model-registry.ts` forwards it per model, and `core/retry-fallback/`
+  (`expansion.ts`, `chains.ts`, `controller.ts`) filters bare expansion on a definitive `false` only.
+- `builtin/cursor-cli-oauth` declares ineligibility while the kill switch is set or the unacknowledged
+  `--force` gate guarantees a refusal (`cursorCliForceRefusalPending`, shared with the execution policy).
+  `builtin/claude-sdk-oauth` declares ineligibility under its verbatim `enabled: false` kill switch.
+
+### Why
+
+- Bare expansion ranked OAuth-credential providers first but never asked whether the lane could execute.
+  A credentialed cursor-cli-oauth lane whose `noApprovalAcknowledgedAt` was never set ranked tier 0,
+  entered shipped default chains (`claude-opus-5:xhigh`), and every fallback hop into it hard-errored
+  with the acknowledgement message - a guaranteed-refusal lane consumed a slot it could never serve.
+
+### Why an extension could not handle it
+
+- Expansion runs inside `core/retry-fallback/` against the model registry; no extension hook observes or
+  filters chain canonicalization. The eligibility signal itself, however, stays extension-owned via the
+  new registration field.
+
+### Expected merge conflict zones
+
+- `types.ts` end of `ProviderConfig`; `provider-composer.ts` end of `ProviderConfigInput`;
+  `model-runtime.ts` near `hasConfiguredAuth`; `retry-fallback/expansion.ts` `FallbackAuthTiers` and the
+  `rankFamilyModels` filter loop; `retry-fallback/chains.ts` `FallbackModelLookup`/`authTiers`.
+
+## Extension-system overlays retained over upstream 59a71b23 (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/types.ts` keeps the fork extension contract on top of upstream pin
+  `59a71b235dadb4ad0d67557a8abb0aaa093e68b4`: the `app-server` `ExtensionMode`, the filesystem-policy types
+  (`FilesystemOperation`, `FilesystemPolicyRequest`, `FilesystemPolicyDecision`, `FilesystemPolicy`,
+  `FilesystemPolicyChecker`), `ServiceTier` and the `-fast` tier surface, the compaction contract
+  (`CompactionReason`, `CompactionRejectionCause`, `ApplyCompactionOptions` with `expectedWarmAnchor`,
+  begin/update/end options), `ExtensionSessionSettings` for retry fallback, `executeTool` with
+  `ExecuteToolError`/`ExecuteToolErrorCode`, lazy tool activation and removed-tool hints, MCP server
+  declarations, the `rpc` emit/handle surface, hook-source and tool-hook-status accessors, and
+  `prepareProviderRequest`.
+- `packages/coding-agent/src/core/extensions/loader.ts` keeps the fork loader: per-cwd LRU factory cache
+  (`extensionCacheByCwd`, `MAX_EXTENSION_CACHE_CWD_ENTRIES`) instead of upstream's single global cwd cache, the
+  `@code-yeongyu/senpi` virtual module and alias, bundled-then-workspace-then-source entry resolution
+  (`resolveWorkspaceOrBundled`) with a `require.resolve` fallback where `import.meta.resolve` is unavailable,
+  `alias: getAliases()` also applied on the TypeScript source runtime, one shared jiti importer per batch, the
+  injectable `ExtensionFactoryResolver`, `drainPendingProviderRegistrations()` order-stamped provider queues, the
+  reserved `tool_search` tool name, and the registration surfaces for lazy activators, removed-tool hints,
+  filesystem policies, MCP servers, `executeTool`, session model/thinking/fast-mode setters, and RPC
+  emit/handle. Upstream's Node SEA extension-loading branch (`isNodeSeaBinary` → virtual modules,
+  `tryNative: false`) arrived with this sync and is preserved.
+- `packages/coding-agent/src/core/extensions/index.ts` keeps re-exporting those fork-only members
+  (`McpServerDeclaration`, tool-hook lifecycle types, `ExecuteTool*`, filesystem-policy types,
+  `ExtensionRpcRequestHandler`, `InputDispositionEvent`, `ModelSelectEventResult`, `SystemPromptChangeEvent`,
+  `ExecuteToolError`, `RUNTIME_EXTENSION_PATH`).
+
+### Why
+
+- The fork owns extension lifecycle and its public API: multi-session hosts need per-cwd factory caching, the
+  senpi package name must resolve for extensions written against it, and fork features (filesystem policy, MCP
+  declarations, tool hooks, service tiers, compaction admission, extension RPC) have no upstream contract. The pin
+  advance restored upstream's narrower loader and types around them, so these overlays remain divergent.
+
+### Why an extension could not handle it
+
+- This is the loader and the type contract extensions are written against; both must exist before any extension
+  code runs.
+
+### Expected merge conflict zones
+
+- MEDIUM: `loader.ts` `getAliases()`/`createExtensionModuleImporter()` (upstream changes runtime detection here,
+  as this sync's SEA branch did) and `createExtensionAPI()` registration list; `types.ts` `ExtensionContext` and
+  `ExtensionAPI` member lists.
+- LOW: `index.ts` alphabetized re-export blocks.
+
 ## Repository audit baseline for the extensions tracker (2026-08-17)
 
 ### What changed

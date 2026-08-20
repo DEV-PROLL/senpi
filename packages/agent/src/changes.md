@@ -1,35 +1,53 @@
 # Changes
 
-## Aborted tool execution releases the run (2026-08-19)
+## Loop and agent divergence re-established against upstream 59a71b23 (2026-08-19)
 
 ### What changed
 
-- `packages/agent/src/agent-loop.ts`: `executePreparedToolCall` races the tool
-  promise against the run's abort signal instead of awaiting the tool alone. An
-  abort that lands after `execute()` was entered now resolves the call as an
-  error tool result ("Tool execution aborted") rather than waiting forever.
+- `packages/agent/src/agent-loop.ts` stays divergent from the new pin on the fork's own turn machinery:
+  per-request stream bounds (`StreamStartTimeoutError` / `StreamIdleTimeoutError`, the
+  `initialRequestTimeoutMs` / `initialRequestStreamStartTimeoutMs` overrides that apply to the first
+  provider request only, after which the configured idle timeout resumes so a healthy reasoning gap is
+  not bound by the short liveness probe);
+  queued-input recovery (`drainedTerminatingQueue` plus `refreshTerminatingQueueDrain`, which hands
+  steering/follow-up messages back to `config.restorePendingMessages` on every terminating path instead
+  of dropping them); `streamKind: "main"` stamped on the loop's own provider request so auxiliary calls
+  stay distinguishable downstream; thinking-block `startedAt` / `endedAt` stamping from the
+  `thinkingTiming` map at stream-event receipt; the Cursor exec-channel bridge (handler factory resolved
+  with the owning run's signal, mid-stream tool results buffered and appended, `kCursorExecResolved`
+  blocks excluded from the executable tool batch); `withEmptyAssistantRecovery` around the stream fn; and
+  the `prepareNextTurn` merge of `thinkingSelection` and `abortServerSideFallback`.
+- `packages/agent/src/agent.ts` stays divergent on the run-ownership surface those loop features require:
+  `AgentContinuationOptions` (`deferQueuedMessages`, `timeoutMs`, `streamStartTimeoutMs`),
+  `continueWithQueuedMessages()` — queue-first continuation that re-delivers drained steering input when a
+  compaction leaves custom context at the tail — the `clearGeneration` counter and `prepend()` on the
+  message queue, `suppressQueuedMessageDrain()` for one active run, the `restorePendingMessages` wiring
+  back into the queues, and the runtime options carried onto the loop config (`timeoutMs`,
+  `streamStartTimeoutMs`, `removedToolHints`, `resolveUnknownToolCall`, `abortServerSideFallback`,
+  `cursorExecHandlers`).
 
 ### Why
 
-- Tools receive `signal` but nothing forces them to observe it. A tool that
-  ignores its signal and never settles pinned the await permanently: the run
-  emitted no `tool_execution_end` and no `agent_end`, the session never went
-  idle, the session work barrier stayed held, and queued prompts parked behind
-  it while the TUI showed "Running <tool>" with an unresponsive ESC.
-- Aborting before execution already short-circuited in `prepareToolCall`, so
-  only the mid-execution window hung, which made the failure look intermittent.
-- The provider stream already races its reads against abort in
-  `readNextAssistantEvent`; tool execution now matches that contract.
+- Upstream `59a71b235d` has no per-request stream bounds, no queued-input ownership contract, and no
+  provider-executed-tool channel, so every one of these behaviors re-diverges on merge rather than being
+  reconciled away. The behavioral rationale for each lives in the dated entries below (stream-start and
+  continuation-scoped timeouts 2026-07-29, empty-assistant recovery 2026-07-30, Cursor exec-channel
+  contract 2026-08-16 and 2026-08-18, thinking-selection provenance 2026-08-18); this entry records that
+  the sync to the new pin leaves both files divergent for exactly those reasons.
 
 ### Why an extension could not handle it
 
-- The await that strands the run lives inside the loop's tool-execution step.
-  No extension hook observes or interrupts that await, and a tool cannot fix it
-  for the tools that ignore their signal.
+- Stream-request construction, abort-signal ownership, the pending-message queues, and the tool-batch
+  filter are the loop's own control flow. An extension observes turn events after the fact and cannot
+  bound a stream that never emits, re-park input the loop already drained, or exclude a block from the
+  batch the loop is about to execute.
 
 ### Expected merge conflict zones
 
-- `agent-loop.ts` `executePreparedToolCall` body and the helper directly above it.
+- HIGH: `agent-loop.ts` `streamAssistantResponse` request construction and the timeout/idle wrappers;
+  the tool-call collection and execution block; the `prepareNextTurn` config merge.
+- MEDIUM: `agent.ts` `runPromptMessages` / `continue` entry points and the loop-config assembly that
+  forwards the fork's runtime options.
 
 ## Cursor exec handlers bind to their owning run (2026-08-18)
 

@@ -26,7 +26,7 @@ function cliModel(
 const explicit = (level: ThinkingSelection["level"]): ThinkingSelection => ({ level, source: "explicit" });
 
 describe("resolveCursorCliSpawnModel", () => {
-	it("renders bracket parameters for a parameter-encoded selection", () => {
+	it("renders the catalog suffix variant id for an explicit selection", () => {
 		const model = cliModel("claude-fable-5-thinking", {
 			cursorReasoning: {
 				capabilityId: "claude-fable-5",
@@ -34,18 +34,14 @@ describe("resolveCursorCliSpawnModel", () => {
 				representativeVariantId: "claude-fable-5-thinking-medium",
 			},
 		});
-		expect(resolveCursorCliSpawnModel(model, explicit("low"))).toBe(
-			"claude-fable-5[thinking=true,context=1m,effort=low]",
-		);
+		expect(resolveCursorCliSpawnModel(model, explicit("low"))).toBe("claude-fable-5-thinking-low");
 	});
 
-	it("translates gpt-5.5 xhigh to extra-high in the bracket form", () => {
+	it("translates gpt-5.5 xhigh to the extra-high suffix id", () => {
 		const model = cliModel("gpt-5.5", {
 			cursorReasoning: { capabilityId: "gpt-5.5", representativeVariantId: "gpt-5.5-medium" },
 		});
-		expect(resolveCursorCliSpawnModel(model, explicit("xhigh"))).toBe(
-			"gpt-5.5[context=1m,reasoning=extra-high,fast=false]",
-		);
+		expect(resolveCursorCliSpawnModel(model, explicit("xhigh"))).toBe("gpt-5.5-extra-high");
 	});
 
 	it("renders a suffix id for variant-encoded levels", () => {

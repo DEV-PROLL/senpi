@@ -34,6 +34,8 @@ export interface RetryFallbackControllerDeps {
 		getAll(): Model<Api>[];
 		/** Ranks bare-selector expansion: OAuth-credential providers come first. */
 		isUsingOAuth?(model: Model<Api>): boolean;
+		/** Filters bare-selector expansion: a definitive `false` keeps a lane that can never serve out of the chain. */
+		isFallbackEligible?(model: Model<Api>): boolean;
 	};
 	cooldowns: SelectorCooldowns;
 	logger: FallbackLogger;

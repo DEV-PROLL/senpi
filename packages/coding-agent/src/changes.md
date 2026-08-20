@@ -1,5 +1,23 @@
 # changes
 
+## Public notice renderer primitives (2026-08-20)
+
+### What changed
+
+- `packages/coding-agent/src/index.ts` now exports `buildNoticeBox`, `noticeMessageRenderer`, `noticeEntryRenderer`, and the `NoticeSpec`, `NoticeLine`, and `NoticeTone` types.
+
+### Why
+
+- Extensions and package consumers need the same notice-card contract as built-in transcript surfaces instead of recreating its background, title, and detail styling.
+
+### Why an extension could not handle it
+
+- The package entry point owns the supported public API; an extension cannot export additional symbols from it.
+
+### Expected merge conflict zones
+
+- LOW: the notice export block in `packages/coding-agent/src/index.ts`.
+
 ## 2026-08-19 - Ignore implausible Cursor usage for compaction threshold
 
 ### What changed
@@ -14,6 +32,42 @@
 
 - `packages/coding-agent/src/core/compaction/compaction.ts`
 - `packages/coding-agent/src/core/agent-session.ts` `_resolveThresholdContextTokens`
+
+## Entry surface and CLI coordinator re-diverge from upstream 59a71b23 (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/index.ts` keeps the fork's wider public surface after the sync to upstream
+  `59a71b235dadb4ad0d67557a8abb0aaa093e68b4`: it re-exports `sanitizeTerminalLabel` from
+  `@earendil-works/pi-tui`, the `OAuthCredential` type from `core/auth-storage.ts`, and the fork-only extension
+  contracts `ExtensionRpcRequestHandler`, `FilesystemOperation`/`FilesystemPolicy`/`FilesystemPolicyChecker`/
+  `FilesystemPolicyDecision`/`FilesystemPolicyRequest`, `InputDispositionEvent`, and `McpServerDeclaration`, plus
+  the RPC client event types `RpcClientEvent` and `RpcExtensionEvent`.
+- `packages/coding-agent/src/main.ts` keeps the fork startup coordinator on top of upstream's version: the
+  `app-server` app mode and `handleAppServerCommand()` dispatch (with `toProjectTrustMode()` mapping it to the
+  `print` trust mode), the `--multi-session` plain-RPC host (which pre-calls `initTheme()` because
+  `runMultiSessionHost()` never returns), `--list-tips`, the codex-style startup loading indicator paused around
+  project-trust prompts, `--grok-neo` chrome selection with the non-persistent `grok-night` theme fallback,
+  branded `envValue("OFFLINE")`/`envValue("STARTUP_BENCHMARK")` reads and `DISPLAY_VERSION`, `--list-models`
+  resolved from services before the runtime is built, auth-storage diagnostics drained per phase,
+  `initialTitlePrompt`/auto-title wiring, `initialModelProvenance`/`thinkingSelection` propagation, the
+  `promptConfirm()` stdin-EOF close handler, and the non-interactive fail-fast for cross-project session forks.
+
+### Why
+
+- These are fork product surfaces (app-server transport, multi-session RPC host, senpi branding and version
+  display, grok chrome, tips, model provenance) that upstream does not ship; the merge with the new pin restores
+  upstream's leaner entry point around them, so the files remain divergent by design after the pin advance.
+
+### Why an extension could not handle it
+
+- Both files run before any extension exists: `index.ts` is the module surface extensions import, and `main.ts`
+  parses argv, resolves trust, and constructs the runtime that later loads extensions.
+
+### Expected merge conflict zones
+
+- MEDIUM: `main.ts` `main()` startup ordering (list-models/list-tips early exits, loading indicator, runtime
+  factory) and `resolveAppMode()`/`createSessionManager()`; LOW: the alphabetized export blocks in `index.ts`.
 
 ## 2026-08-18 - Cursor reasoning-level startup wiring
 

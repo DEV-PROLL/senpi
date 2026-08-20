@@ -4,6 +4,61 @@
 > of divergences from the upstream pin (v0.84.2, `914cf1472e`) so its audited production paths carry a
 > canonical four-section record; it is dated by its underlying work.
 
+## Package manifest and catalog generator divergence after the 59a71b23 sync (2026-08-19)
+
+### What changed
+
+- `packages/ai/package.json` stays divergent from upstream `59a71b235d` on four axes. Publication:
+  `private: true` with the fork's CalVer `2026.8.18-3` line and the matching `^2026.8.18-3`
+  `@earendil-works/pi-telemetry` range, instead of upstream's published `0.84.2`. Dependency pins:
+  `openai` remains at `6.26.0` (upstream floats to `6.40.0`), plus fork-only runtime deps the fork's own
+  code imports — `@bufbuild/protobuf` and `@mistralai/mistralai` for the cursor-agent protobuf transport
+  and Mistral Conversations client, `@smithy/types` for the typed Bedrock middleware, `yaml` for the
+  YAML/XML tool-call protocol, alongside the fork's retained `chalk` and `proxy-from-env` entries — and
+  newer floors for
+  `@aws-sdk/client-bedrock-runtime`, `@google/genai`, `@smithy/node-http-handler`, the proxy agents,
+  `typebox`, `@types/node`, and Node itself (`>=24.0.0`). Export map: the fork-only `./utils/*` and
+  `./node/provider-scope` subpath entries. Build scripts: `tsc`-based build/`dev` watch targets with the
+  `dist/cli.js` executable-bit step and `tsx`-driven generator scripts, where upstream drives
+  `node scripts/*.ts` and `tsgo`.
+- `packages/ai/scripts/generate-models.ts` stays divergent as the owner of the fork's catalog overlays:
+  fork-only provider ingestion (`fetchOpenGatewayModels` merged into the model set alongside models.dev,
+  OpenRouter, and AI Gateway; the Alibaba Cloud Model Studio `alibaba-token-plan` prepaid catalog pinned
+  to its `ap-southeast-1` compatible-mode base URL), the Kimi Coding stable-ID floor
+  (`KIMI_CODING_STABLE_MODELS` merged under the live catalog so `kimi-for-coding` and
+  `kimi-k2-thinking` survive an upstream listing gap) with the K3 detector, `KIMI_K3_THINKING_LEVEL_MAP`,
+  and K3's video input modality, the Priority-tier table that generates `-fast` variants for exactly the
+  allowlisted OpenAI/Codex models, the documented per-model xAI reasoning maps
+  (`XAI_THINKING_LEVEL_MAPS`, Grok 4.6 low/medium/high/xhigh), the adaptive-thinking compat facts that
+  encode a thinking-off effort pin instead of `thinkingLevelMap.off: null`, and the GLM 5.2/5.3 and
+  GPT-5.6 per-model overrides.
+
+### Why
+
+- The pinned `openai@6.26.0` is a deliberate dependency decision the fork repairs around at the type
+  level (see `packages/ai/src/changes.md`, PR #892 entry); taking upstream's manifest would silently bump
+  it. The extra runtime dependencies are not optional — fork-only source files import them directly — and
+  the CalVer/private/`workspace` publication identity is what makes the fork's own packages resolvable.
+  The generator overlays exist because the fork ships providers and priority tiers that models.dev does
+  not describe, and because upstream catalog refreshes would otherwise drop stable Kimi IDs and
+  fork-selectable reasoning levels.
+
+### Why an extension could not handle it
+
+- Dependency resolution, the published export map, and Node engine floor are resolved by the package
+  manager before any runtime exists. Generated catalog metadata is written at build time and consumed by
+  model selection, compaction, and admission long before the coding-agent extension runtime loads.
+
+### Expected merge conflict zones
+
+- HIGH: `packages/ai/package.json` — `version`/`private`, the `dependencies` block, and the `scripts`
+  block; upstream edits all three on nearly every release. Keep the fork pins and script runners.
+- MEDIUM: `packages/ai/scripts/generate-models.ts` — the provider ingestion list in the main generation
+  function, the Kimi/Alibaba per-provider blocks, and the reasoning/thinking-level override chain, which
+  upstream also edits when refreshing model metadata.
+- LOW: the export-map subpath entries and the generated `src/providers/data/*.json` snapshots that a
+  strict regeneration rewrites.
+
 ## Default GPT-5.6 Sol catalogs to 400k context (2026-08-18)
 
 ### What changed
