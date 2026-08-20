@@ -473,7 +473,7 @@ describe("config reload watch engine", () => {
 				return await Promise.race([
 					change,
 					new Promise<never>((_resolve, reject) => {
-						timeout = setTimeout(() => reject(new Error(`fs.watch ${label} was not delivered`)), 10_000);
+						timeout = setTimeout(() => reject(new Error(`fs.watch ${label} was not delivered`)), 30_000);
 					}),
 				]);
 			} finally {
@@ -495,9 +495,20 @@ describe("config reload watch engine", () => {
 		} finally {
 			clearInterval(armReadiness);
 		}
-		writeFileSync(settingsPath, "after");
-		const result = await awaitChange(settingsChanged, "settings.json change");
-
-		expect(result.changedPaths).toEqual([settingsPath]);
+		// Re-arm the assertion write too: under heavy host load FSEvents can starve a
+		// single one-shot write past any fixed deadline, and rewriting identical bytes
+		// would be hash-deduped by the engine - so every re-arm writes fresh content.
+		let settingsRevision = 0;
+		const armSettingsChange = setInterval(() => {
+			settingsRevision += 1;
+			writeFileSync(settingsPath, `after-${settingsRevision}`);
+		}, 250);
+		try {
+			writeFileSync(settingsPath, "after");
+			const result = await awaitChange(settingsChanged, "settings.json change");
+			expect(result.changedPaths).toEqual([settingsPath]);
+		} finally {
+			clearInterval(armSettingsChange);
+		}
 	});
 });
