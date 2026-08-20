@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, type Stats } from "node:fs";
-import { basename, isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
 export { createFsWatchEventSource } from "./watch-event-source.ts";
 
@@ -46,6 +46,14 @@ type TargetState = {
 	readonly target: ResolvedWatchTarget;
 	readonly hashes: Map<string, string>;
 	readonly allowedDirectories: Set<string>;
+	/**
+	 * Directories the scan actually descended into, which are exactly the
+	 * directories worth handing to the OS. Recursive targets subscribe per entry
+	 * here instead of registering their whole subtree.
+	 */
+	readonly watchedDirectories: Map<string, () => void>;
+	/** Directories currently in scope, refreshed by every scan. */
+	scannedDirectories: Set<string>;
 };
 
 type ResolvedWatchTarget = Omit<WatchTarget, "path"> & { readonly path: string };
@@ -53,6 +61,8 @@ type ResolvedWatchTarget = Omit<WatchTarget, "path"> & { readonly path: string }
 type ScanResult = {
 	readonly hashes: Map<string, string>;
 	readonly allowedDirectories: Set<string>;
+	/** Directories visited by the scan, i.e. the in-scope directory set. */
+	readonly scannedDirectories: Set<string>;
 };
 
 const DEFAULT_DEBOUNCE_MS = 200;
@@ -92,22 +102,67 @@ export class ConfigReloadWatchEngine {
 				target: resolvedTarget,
 				hashes: scan.hashes,
 				allowedDirectories: scan.allowedDirectories,
+				watchedDirectories: new Map<string, () => void>(),
+				scannedDirectories: scan.scannedDirectories,
 			};
 		});
 
 		for (const state of this.#states) {
+			this.#attach(state, state.scannedDirectories);
+		}
+	}
+
+	/**
+	 * Subscribes to exactly the in-scope directories.
+	 *
+	 * A `dir-recursive` target used to hand its root to `fs.watch({recursive:true})`,
+	 * which registers the entire subtree with the OS watcher (FSEvents on macOS).
+	 * The target `filter` only discards events after delivery, so an extensions or
+	 * skills directory containing `node_modules` still cost a full-subtree
+	 * registration per session. The scan already knows which directories are in
+	 * scope — it skips `node_modules`, `.git`, symlinks, and filtered paths — so
+	 * watching that set directly gives identical coverage at a fraction of the
+	 * OS-level cost.
+	 */
+	#attach(state: TargetState, directories: ReadonlySet<string>): void {
+		const recursive = state.target.kind === "dir-recursive";
+		// The root is always watched so that creations directly beneath it are seen.
+		const wanted = recursive ? new Set([state.target.path, ...directories]) : new Set([state.target.path]);
+		for (const directory of wanted) {
+			if (state.watchedDirectories.has(directory)) {
+				continue;
+			}
 			try {
-				this.#unsubscribes.push(
-					this.#subscribe(
-						state.target.path,
-						(eventType, filename) => {
-							this.#onEvent(state, eventType, filename);
-						},
-						{ recursive: state.target.kind === "dir-recursive" },
-					),
+				const unsubscribe = this.#subscribe(
+					directory,
+					(eventType, filename) => {
+						this.#onEvent(state, eventType, filename, directory);
+					},
+					{ recursive: false },
 				);
+				state.watchedDirectories.set(directory, unsubscribe);
+				this.#unsubscribes.push(unsubscribe);
 			} catch (error) {
-				this.#reportError(error, state.target.path);
+				this.#reportError(error, directory);
+			}
+		}
+	}
+
+	/** Drops subscriptions for directories that left scope (deleted or filtered out). */
+	#detachMissing(state: TargetState, live: ReadonlySet<string>): void {
+		for (const [directory, unsubscribe] of [...state.watchedDirectories]) {
+			if (directory === state.target.path || live.has(directory)) {
+				continue;
+			}
+			state.watchedDirectories.delete(directory);
+			const index = this.#unsubscribes.indexOf(unsubscribe);
+			if (index >= 0) {
+				this.#unsubscribes.splice(index, 1);
+			}
+			try {
+				unsubscribe();
+			} catch (error) {
+				this.#reportError(error, directory);
 			}
 		}
 	}
@@ -153,7 +208,7 @@ export class ConfigReloadWatchEngine {
 		return snapshot;
 	}
 
-	#onEvent(state: TargetState, _eventType: string, filename: string | null): void {
+	#onEvent(state: TargetState, _eventType: string, filename: string | null, watchedDirectory?: string): void {
 		if (this.#closed) {
 			return;
 		}
@@ -161,7 +216,13 @@ export class ConfigReloadWatchEngine {
 			this.#pending.set(state, null);
 		} else if (this.#pending.get(state) !== null) {
 			const affected = this.#pending.get(state) ?? new Set<string>();
-			const relPath = normalizeRelativePath(filename);
+			// Per-directory subscriptions report names relative to their own directory,
+			// so re-anchor them to the target root before matching.
+			const relPath = normalizeRelativePath(
+				watchedDirectory && watchedDirectory !== state.target.path
+					? join(relative(state.target.path, watchedDirectory), filename)
+					: filename,
+			);
 			if (relPath && this.#matches(state.target, relPath)) {
 				affected.add(relPath);
 				this.#pending.set(state, affected);
@@ -217,6 +278,9 @@ export class ConfigReloadWatchEngine {
 			for (const path of next.allowedDirectories) {
 				state.allowedDirectories.add(path);
 			}
+			state.scannedDirectories = next.scannedDirectories;
+			this.#detachMissing(state, state.scannedDirectories);
+			this.#attach(state, state.scannedDirectories);
 			this.#compare(previousHashes, previousDirectories, state.hashes, state.allowedDirectories, changes);
 			return;
 		}
@@ -232,17 +296,29 @@ export class ConfigReloadWatchEngine {
 				state.allowedDirectories.delete(path);
 			}
 		}
+		for (const path of [...state.scannedDirectories]) {
+			if (prefixes.some((prefix) => isWithin(path, prefix))) {
+				state.scannedDirectories.delete(path);
+			}
+		}
 		for (const [path, hash] of next.hashes) {
 			state.hashes.set(path, hash);
 		}
 		for (const path of next.allowedDirectories) {
 			state.allowedDirectories.add(path);
 		}
+		for (const path of next.scannedDirectories) {
+			state.scannedDirectories.add(path);
+		}
+		// A partial rescan can both create and remove directories in scope, so the
+		// subscription set is reconciled in both directions here too.
+		this.#detachMissing(state, state.scannedDirectories);
+		this.#attach(state, state.scannedDirectories);
 		this.#compare(previousHashes, previousDirectories, state.hashes, state.allowedDirectories, changes);
 	}
 
 	#scanAffected(target: ResolvedWatchTarget, affected: Set<string>, state: TargetState): ScanResult {
-		const result: ScanResult = { hashes: new Map(), allowedDirectories: new Set() };
+		const result: ScanResult = { hashes: new Map(), allowedDirectories: new Set(), scannedDirectories: new Set() };
 		for (const relPath of affected) {
 			const absolutePath = join(target.path, relPath);
 			this.#scanPath(target, absolutePath, relPath, result, state);
@@ -251,7 +327,7 @@ export class ConfigReloadWatchEngine {
 	}
 
 	#scan(target: ResolvedWatchTarget): ScanResult {
-		const result: ScanResult = { hashes: new Map(), allowedDirectories: new Set() };
+		const result: ScanResult = { hashes: new Map(), allowedDirectories: new Set(), scannedDirectories: new Set() };
 		this.#scanPath(target, target.path, "", result);
 		return result;
 	}
@@ -301,6 +377,8 @@ export class ConfigReloadWatchEngine {
 		if (dotDirectory && !explicitlyAllowedDirectory) {
 			return;
 		}
+		// Recorded before descending: this is the set the OS watcher subscribes to.
+		result.scannedDirectories.add(absolutePath);
 		try {
 			for (const child of readdirSync(absolutePath, { withFileTypes: true })) {
 				if (child.isSymbolicLink() || child.name === "node_modules" || child.name === ".git") {

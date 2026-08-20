@@ -28,20 +28,35 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 type EventSourceProbe = {
-	readonly subscribe: (_path: string, listener: WatchEventListener) => () => void;
+	readonly subscribe: (path: string, listener: WatchEventListener) => () => void;
+	/** Emits on the root watcher, mirroring how a real parent directory reports its children. */
 	readonly emit: (filename: string | null) => void;
+	/** Emits on the watcher for a specific directory, with a name relative to it. */
+	readonly emitFrom: (directory: string, filename: string | null) => void;
+	readonly watchedPaths: () => string[];
 };
 
+/**
+ * Keeps one listener per watched directory. The engine subscribes per in-scope
+ * directory rather than handing a whole subtree to the OS, so a single-listener
+ * probe would silently drop every watcher but the last.
+ */
 function eventSource(): EventSourceProbe {
-	let listener: WatchEventListener | undefined;
+	const listeners = new Map<string, WatchEventListener>();
+	let rootPath: string | undefined;
 	return {
-		subscribe: (_path, callback) => {
-			listener = callback;
+		subscribe: (path, callback) => {
+			rootPath ??= path;
+			listeners.set(path, callback);
 			return () => {
-				listener = undefined;
+				listeners.delete(path);
 			};
 		},
-		emit: (filename) => listener?.("change", filename),
+		emit: (filename) => {
+			if (rootPath !== undefined) listeners.get(rootPath)?.("change", filename);
+		},
+		emitFrom: (directory, filename) => listeners.get(directory)?.("change", filename),
+		watchedPaths: () => [...listeners.keys()],
 	};
 }
 
@@ -227,6 +242,115 @@ describe("config reload watch engine", () => {
 		expect(snapshot).toEqual(new Map([[settingsPath, sha256("settings")]]));
 		(snapshot as Map<string, string>).set(settingsPath, "changed");
 		expect(engine.getBaselineSnapshot()).toEqual(new Map([[settingsPath, sha256("settings")]]));
+	});
+
+	it("subscribes only to in-scope directories, never a whole subtree", () => {
+		tempDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-watch-"));
+		// A realistic extensions tree: one loadable package plus dependency and VCS
+		// noise that must never reach the OS watcher.
+		mkdirSync(join(tempDir, "my-ext"), { recursive: true });
+		writeFileSync(join(tempDir, "my-ext", "index.ts"), "export default {}");
+		mkdirSync(join(tempDir, "my-ext", "node_modules", "dep", "dist"), { recursive: true });
+		writeFileSync(join(tempDir, "my-ext", "node_modules", "dep", "dist", "index.js"), "noise");
+		mkdirSync(join(tempDir, ".git", "objects"), { recursive: true });
+
+		const source = eventSource();
+		createEngine({
+			targets: [{ id: "extensions", kind: "dir-recursive", path: tempDir }],
+			subscribe: source.subscribe,
+			onRealChange: vi.fn(),
+		});
+
+		const watched = source.watchedPaths();
+		expect(watched).toContain(tempDir);
+		expect(watched).toContain(join(tempDir, "my-ext"));
+		// The regression this locks: `fs.watch({recursive:true})` on the root would
+		// register every one of these with the OS, and the target filter only
+		// discards their events after delivery.
+		expect(watched.filter((path) => path.includes("node_modules"))).toEqual([]);
+		expect(watched.filter((path) => path.includes(".git"))).toEqual([]);
+	});
+
+	it("requests no recursive OS watch for a recursive target", () => {
+		tempDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-watch-"));
+		mkdirSync(join(tempDir, "nested", "deeper"), { recursive: true });
+		const recursiveRequests: (boolean | undefined)[] = [];
+		createEngine({
+			targets: [{ id: "root", kind: "dir-recursive", path: tempDir }],
+			subscribe: (_path, _listener, options) => {
+				recursiveRequests.push(options?.recursive);
+				return () => {};
+			},
+			onRealChange: vi.fn(),
+		});
+
+		expect(recursiveRequests.length).toBeGreaterThan(1);
+		expect(recursiveRequests.some(Boolean)).toBe(false);
+	});
+
+	it("detects a change in a nested directory through its own watcher", () => {
+		vi.useFakeTimers();
+		tempDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-watch-"));
+		const nested = join(tempDir, "pkg", "deep");
+		mkdirSync(nested, { recursive: true });
+		const nestedFile = join(nested, "skill.md");
+		writeFileSync(nestedFile, "before");
+		const source = eventSource();
+		const onRealChange = vi.fn();
+		createEngine({
+			targets: [{ id: "skills", kind: "dir-recursive", path: tempDir }],
+			subscribe: source.subscribe,
+			onRealChange,
+		});
+
+		writeFileSync(nestedFile, "after");
+		// A per-directory watcher reports names relative to its own directory; the
+		// engine must re-anchor that to the target root before matching.
+		source.emitFrom(nested, "skill.md");
+		vi.advanceTimersByTime(200);
+
+		expect(onRealChange.mock.calls).toEqual([[{ changedPaths: [nestedFile], created: [], deleted: [] }]]);
+	});
+
+	it("attaches a watcher to a directory created after startup", () => {
+		vi.useFakeTimers();
+		tempDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-watch-"));
+		const source = eventSource();
+		createEngine({
+			targets: [{ id: "skills", kind: "dir-recursive", path: tempDir }],
+			subscribe: source.subscribe,
+			onRealChange: vi.fn(),
+		});
+		const added = join(tempDir, "added");
+		expect(source.watchedPaths()).not.toContain(added);
+
+		mkdirSync(added);
+		writeFileSync(join(added, "skill.md"), "content");
+		source.emit("added");
+		vi.advanceTimersByTime(200);
+
+		expect(source.watchedPaths()).toContain(added);
+	});
+
+	it("releases the watcher for a directory that leaves scope", () => {
+		vi.useFakeTimers();
+		tempDir = mkdtempSync(join(tmpdir(), "senpi-config-reload-watch-"));
+		const removable = join(tempDir, "removable");
+		mkdirSync(removable);
+		writeFileSync(join(removable, "skill.md"), "content");
+		const source = eventSource();
+		createEngine({
+			targets: [{ id: "skills", kind: "dir-recursive", path: tempDir }],
+			subscribe: source.subscribe,
+			onRealChange: vi.fn(),
+		});
+		expect(source.watchedPaths()).toContain(removable);
+
+		rmSync(removable, { recursive: true });
+		source.emit("removable");
+		vi.advanceTimersByTime(200);
+
+		expect(source.watchedPaths()).not.toContain(removable);
 	});
 
 	it("reports only explicit dot-directory creation and deletion", () => {
