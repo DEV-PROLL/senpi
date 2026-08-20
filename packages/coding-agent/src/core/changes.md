@@ -1,5 +1,29 @@
 # changes
 
+## 2026-08-20 - Resume picker caches exact streaming summaries
+
+### What changed
+
+- `packages/coding-agent/src/core/session-manager.ts`: session listing now delegates picker-row discovery instead of parsing every JSONL record itself.
+- `packages/coding-agent/src/core/session-summary.ts`: streams each cold JSONL file once and preserves the exact prior row contract: first user text, latest name, maximum activity timestamp, parsed message count, parent/cwd, and full search text.
+- `packages/coding-agent/src/core/session-summary-cache.ts`: reuses summaries while canonical path, size, and mtime match.
+- `packages/coding-agent/src/core/session-summary-lru.ts`: caps retained summaries at 4,096 entries and 64 MiB of UTF-8 transcript text, evicting least-recently-used rows and refusing oversized entries without changing their returned result.
+- `packages/coding-agent/src/core/session-discovery.ts`: builds and sorts picker rows from the exact cached summaries with the existing bounded-concurrency loader.
+
+### Why
+
+- `/resume` previously reparsed every message in every unchanged session each time the selector opened. The cost scaled with aggregate session bytes and made repeated selector use visibly slower as histories grew.
+- Cold discovery still performs one exact streaming fold so picker metadata and full-text search do not regress. Reopening `/resume` validates one stat per file and reuses unchanged summaries; byte and entry budgets bound process-lifetime retention.
+
+### Why an extension could not handle it
+
+- Session directory enumeration and `SessionInfo` construction happen inside the core `SessionManager.list()` / `listAll()` path before extensions receive a session or selector hook.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/coding-agent/src/core/session-manager.ts` imports and the `list()` / `listAll()` delegation around session discovery.
+- LOW: the new `session-discovery.ts`, `session-summary*.ts`, and `session-record.ts` modules are fork-owned extraction points.
+
 ## 2026-08-20 - Session title uses session-model auth
 
 ### What changed
