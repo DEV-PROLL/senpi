@@ -1,5 +1,26 @@
 # changes
 
+## Large-session retry indicator cadence (2026-08-20)
+
+### What changed
+
+- Retry status indicators now reuse the existing large-session cadence policy instead of advancing their decorative spinner every 80 ms.
+- Sessions below the 1,000-entry boundary retain the existing animated retry indicator, while large sessions keep the independent one-second retry countdown visible.
+
+### Why
+
+- Every retry spinner frame requests a whole-TUI render. During provider rate-limit waits, large persisted sessions could spend an entire JavaScript core repeatedly rebuilding the transcript even though the network retry itself was sleeping.
+
+### Why an extension could not handle it
+
+- Retry lifecycle events, persisted session entry counts, status-indicator construction, and TUI render scheduling are owned by the built-in interactive runtime.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` around `showRetryStatusIndicator()`.
+- LOW: `components/status-indicator.ts` around the retry indicator constructor.
+- LOW: `interactive-tui.test.ts` around retry status cadence coverage.
+
 ## Canonical interactive notice cards (2026-08-20)
 
 ### What changed

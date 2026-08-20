@@ -307,6 +307,8 @@ function isCompactionCostNotice(item: RenderSessionItem): item is CompactionCost
 }
 
 const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
+const DEFAULT_RETRY_STATUS_REFRESH_INTERVAL_MS = 80;
+const LARGE_SESSION_RETRY_STATUS_REFRESH_INTERVAL_MS = 60_000;
 const DEFAULT_WORKING_STATUS_REFRESH_INTERVAL_MS = 600;
 const DEFAULT_WORKING_STATUS_MESSAGE_ANIMATION_INTERVAL_MS = 32;
 const LARGE_SESSION_WORKING_STATUS_REFRESH_INTERVAL_MS = 60_000;
@@ -4624,10 +4626,7 @@ export class InteractiveMode {
 
 			case "summarization_retry_scheduled": {
 				this.showError(event.errorMessage);
-				this.showStatusIndicator(
-					new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs),
-				);
-				this.ui.requestRender();
+				this.showSummarizationRetryStatusIndicator(event);
 				break;
 			}
 
@@ -4674,7 +4673,26 @@ export class InteractiveMode {
 	}
 
 	private showRetryStatusIndicator(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): void {
-		this.showStatusIndicator(new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs));
+		this.showRetryStatusIndicatorWithCadence(event);
+	}
+
+	private showSummarizationRetryStatusIndicator(
+		event: Extract<AgentSessionEvent, { type: "summarization_retry_scheduled" }>,
+	): void {
+		this.showRetryStatusIndicatorWithCadence(event);
+	}
+
+	private showRetryStatusIndicatorWithCadence(event: { attempt: number; maxAttempts: number; delayMs: number }): void {
+		const refreshIntervalMs = largeSessionWorkingStatusInterval(
+			this.sessionManager.getEntries().length,
+			DEFAULT_RETRY_STATUS_REFRESH_INTERVAL_MS,
+			LARGE_SESSION_RETRY_STATUS_REFRESH_INTERVAL_MS,
+		);
+		const indicator =
+			refreshIntervalMs === DEFAULT_RETRY_STATUS_REFRESH_INTERVAL_MS ? undefined : { intervalMs: refreshIntervalMs };
+		this.showStatusIndicator(
+			new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs, indicator),
+		);
 		this.ui.requestRender();
 	}
 
