@@ -181,8 +181,12 @@ export function configReloadExtension(pi: ExtensionAPI, options: ConfigReloadExt
 	const vetoDeferral = new ReloadVetoDeferral();
 	let changeChain: Promise<void> = Promise.resolve();
 
+	// The engine goes inert the moment close() is called; its unsubscribe loop can
+	// take seconds per watcher, and session_shutdown is awaited by the reload flow.
 	const closeWatchers = (): void => {
-		engine?.close();
+		engine?.close().catch((error: unknown) => {
+			logger.error("watcher_error", { path: "watcher teardown", message: errorMessage(error) });
+		});
 		engine = undefined;
 		activeTargets = [];
 	};
