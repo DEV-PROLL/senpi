@@ -118,20 +118,14 @@ describe("cursor Run request reasoning rendering", () => {
 		},
 	};
 
-	it("renders an explicit selection as bare base id plus ordered parameters", async () => {
+	it("renders an explicit selection as the catalog suffix variant id", async () => {
 		const model = buildModel("claude-fable-5-thinking", "", fableCompat, "claude-fable-5-thinking-medium");
 		const frame = await captureRunRequest(model, { thinkingSelection: { level: "low", source: "explicit" } });
 		const request = frame.message.value as {
 			requestedModel?: { modelId: string; maxMode: boolean; parameters: { id: string; value: string }[] };
 		};
-		expect(request.requestedModel?.modelId).toBe("claude-fable-5");
-		expect(
-			request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value })),
-		).toEqual([
-			{ id: "thinking", value: "true" },
-			{ id: "context", value: "1m" },
-			{ id: "effort", value: "low" },
-		]);
+		expect(request.requestedModel?.modelId).toBe("claude-fable-5-thinking-low");
+		expect(request.requestedModel?.parameters ?? []).toEqual([]);
 	});
 
 	it("keeps the legacy request shape byte-exact when no selection exists", async () => {
@@ -155,7 +149,7 @@ describe("cursor Run request reasoning rendering", () => {
 		expect(request.requestedModel?.parameters ?? []).toEqual([]);
 	});
 
-	it("renders gpt off as reasoning=none with the family template", async () => {
+	it("renders gpt off as the none suffix variant id", async () => {
 		const compat: CursorAgentCompat = {
 			cursorReasoning: { capabilityId: "gpt-5.5", representativeVariantId: "gpt-5.5-medium" },
 		};
@@ -164,17 +158,11 @@ describe("cursor Run request reasoning rendering", () => {
 		const request = frame.message.value as {
 			requestedModel?: { modelId: string; parameters: { id: string; value: string }[] };
 		};
-		expect(request.requestedModel?.modelId).toBe("gpt-5.5");
-		expect(
-			request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value })),
-		).toEqual([
-			{ id: "context", value: "1m" },
-			{ id: "reasoning", value: "none" },
-			{ id: "fast", value: "false" },
-		]);
+		expect(request.requestedModel?.modelId).toBe("gpt-5.5-none");
+		expect(request.requestedModel?.parameters ?? []).toEqual([]);
 	});
 
-	it("keeps maxMode orthogonal to parameters", async () => {
+	it("keeps maxMode orthogonal to the suffix variant id", async () => {
 		const compat: CursorAgentCompat = {
 			cursorMaxMode: true,
 			cursorReasoning: {
@@ -189,12 +177,7 @@ describe("cursor Run request reasoning rendering", () => {
 			requestedModel?: { modelId: string; maxMode: boolean; parameters: { id: string; value: string }[] };
 		};
 		expect(request.requestedModel?.maxMode).toBe(true);
-		expect(
-			request.requestedModel?.parameters.map((parameter) => ({ id: parameter.id, value: parameter.value })),
-		).toEqual([
-			{ id: "thinking", value: "false" },
-			{ id: "context", value: "1m" },
-			{ id: "effort", value: "high" },
-		]);
+		expect(request.requestedModel?.modelId).toBe("claude-fable-5-high");
+		expect(request.requestedModel?.parameters ?? []).toEqual([]);
 	});
 });

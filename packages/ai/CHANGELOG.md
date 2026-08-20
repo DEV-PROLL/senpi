@@ -10,6 +10,12 @@
 
 ### Fixed
 
+- Explicit Cursor thinking levels no longer die with `Connect error not_found`: Cursor's Run RPC
+  rejects bare capability ids (`kimi-k3`, `claude-fable-5`, …) with `not_found`, so
+  `resolveCursorSelectionDescriptor` now prefers the catalog-guaranteed suffix variant id
+  (`kimi-k3-high`, `claude-fable-5-thinking-low`) whenever a legacy alias exists, keeping bare
+  base id + ordered parameters only as the fallback for alias-less levels (#1008).
+
 ### Removed
 
 ## [2026.8.19] - 2026-08-19

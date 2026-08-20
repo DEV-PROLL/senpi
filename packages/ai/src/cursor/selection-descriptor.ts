@@ -1,6 +1,11 @@
 import type { CursorAgentCompat, Model } from "../model.ts";
 import type { ModelThinkingLevel, ThinkingSelection } from "../types.ts";
-import { CURSOR_MODEL_CAPABILITIES, type CursorParameterId, getCursorVariantAlias } from "./model-capabilities.ts";
+import {
+	CURSOR_MODEL_CAPABILITIES,
+	type CursorLevelSpec,
+	type CursorParameterId,
+	getCursorVariantAlias,
+} from "./model-capabilities.ts";
 
 export interface CursorResolvedSelection {
 	readonly modelId: string;
@@ -11,10 +16,33 @@ function identityCompat(model: Model<"cursor-agent">): CursorAgentCompat["cursor
 	return model.compat?.cursorReasoning;
 }
 
-function legacySuffixId(baseId: string, level: ModelThinkingLevel, value: string): string | undefined {
-	const suffix = level === "off" ? "none" : value;
-	const candidate = `${baseId}-${suffix}`;
-	return getCursorVariantAlias(candidate)?.legacyVariantId;
+type CursorReasoningIdentity = NonNullable<CursorAgentCompat["cursorReasoning"]>;
+
+/**
+ * Catalog-guaranteed suffix alias for a base + level, or undefined. Cursor Run
+ * rejects bare capability ids with Connect `not_found` (issue #1008; live
+ * probes 2026-08-20), so every resolvable level prefers the suffix variant id
+ * the `GetUsableModels` catalog actually serves. Candidates try the level's
+ * wire value first, then the level token itself (`extra-high` vs `xhigh`),
+ * with thinking-infixed forms for thinking Claude identities.
+ */
+function suffixAliasId(
+	compat: CursorReasoningIdentity,
+	level: ModelThinkingLevel,
+	spec: CursorLevelSpec,
+): string | undefined {
+	const suffixes = level === "off" ? ["none"] : spec.value === level ? [spec.value] : [spec.value, level];
+	for (const suffix of suffixes) {
+		const candidates =
+			compat.thinkingMode === true
+				? [`${compat.capabilityId}-thinking-${suffix}`, `${compat.capabilityId}-${suffix}-thinking`]
+				: [`${compat.capabilityId}-${suffix}`];
+		for (const candidate of candidates) {
+			const alias = getCursorVariantAlias(candidate);
+			if (alias) return alias.legacyVariantId;
+		}
+	}
+	return undefined;
 }
 
 function buildParameters(
@@ -79,15 +107,15 @@ export function resolveCursorSelectionDescriptor(
 		return { modelId: compat.representativeVariantId, parameters: [] };
 	}
 
+	const suffixId = suffixAliasId(compat, selection.level, spec);
+	if (suffixId !== undefined) return { modelId: suffixId, parameters: [] };
+
 	if (spec.encoding === "variant-id") {
-		const suffixId = legacySuffixId(compat.capabilityId, selection.level, spec.value);
-		if (suffixId === undefined) return { modelId: compat.representativeVariantId, parameters: [] };
-		return { modelId: suffixId, parameters: [] };
+		return { modelId: compat.representativeVariantId, parameters: [] };
 	}
 
-	const bareBase = compat.capabilityId;
 	return {
-		modelId: bareBase,
+		modelId: compat.capabilityId,
 		parameters: buildParameters(compat.capabilityId, spec.value, compat.thinkingMode),
 	};
 }
