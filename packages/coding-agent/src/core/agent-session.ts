@@ -2097,7 +2097,7 @@ export class AgentSession {
 				!(requiredAutoCompaction === "threshold" && this._hasPendingPostCompactionUsageExemption(msg))
 			) {
 				this._retireFailedRetryAssistant(msg);
-				compactedBeforeRetry = await this._runPrePromptCompaction(msg, true, "threshold", true);
+				compactedBeforeRetry = await this._runPrePromptCompaction(msg, true, requiredAutoCompaction, true);
 				retryContinuationBlocked = !compactedBeforeRetry && !this._isCompactionDelegated();
 			}
 

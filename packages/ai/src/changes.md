@@ -1,4 +1,4 @@
-## Unreleased - Cursor 0-token RE overflow without estimate gate
+## 2026-08-20 - Cursor 0-token RE overflow without estimate gate
 
 ### What changed
 

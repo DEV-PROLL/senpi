@@ -1,6 +1,6 @@
 # changes
 
-## Unreleased - Cursor 0-token RE stays on the same model and shrinks
+## 2026-08-20 - Cursor 0-token RE stays on the same model and shrinks
 
 ### What changed
 
