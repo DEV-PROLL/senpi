@@ -14,6 +14,7 @@ import { isResumeOfStoppedGoal, queueGoalContinuation } from "./lifecycle-helper
 import { GOAL_CONTINUATION_SCHEDULED_EVENT, MonitorAwareGoalContinuation } from "./monitor-continuation.ts";
 import { migrateLegacyGoalFile } from "./persistence.ts";
 import { reengageGoalAfterReload } from "./reload-reengagement.ts";
+import { isStaleExtensionContextError } from "./stale-context.ts";
 import { accountGoalUsage, readGoal, updateGoal } from "./store.ts";
 import { GOAL_STORE_CHANGED_EVENT, isGoalStoreChangedEvent } from "./store-changed-event.ts";
 import { goalStoreRef as buildGoalStoreRef } from "./store-ref.ts";
@@ -24,7 +25,6 @@ import { TurnUsageTracker } from "./turn-usage.ts";
 import type { Goal, GoalAccountingMode, GoalStoreRef } from "./types.ts";
 import { updateGoalUi } from "./ui.ts";
 import { GOAL_WAIT_STATUS_KEY, GoalWaitTicker } from "./wait-ticker.ts";
-import { isStaleExtensionContextError } from "./stale-context.ts";
 
 const RESUME_GOAL_CHOICE = "Resume goal";
 const LEAVE_GOAL_STOPPED_CHOICE = "Leave stopped";

@@ -30,6 +30,21 @@
 - `selection-descriptor.ts` resolver body and helper block (fork-only file; upstream has no cursor
   provider).
 
+## 2026-08-19 - Ignore Cursor billed cacheRead that dwarfs usedTokens
+
+### What changed
+
+- `applyCheckpointTokenDetails` records `UsageState.liveUsedTokens`.
+- `applyBilledTurnEndedUsage` ignores `cache_read_tokens` when it is more than 3× that live window and keeps `totalTokens` at `usedTokens`.
+
+### Why
+
+- Session 01a01879 jumped 148k → 4.09M because field 3 was dashboard-cumulative cache read, not conversation size. `max(usage, estimate)` then forced a useless compact and a 0-token `resource_exhausted`.
+
+### Conflict zone
+
+- `packages/ai/src/api/cursor-agent.ts` `applyBilledTurnEndedUsage` / `UsageState`.
+
 ## 2026-08-19 - OpenAI-family adapters re-diverge from the 59a71b23 pin
 
 ### What changed

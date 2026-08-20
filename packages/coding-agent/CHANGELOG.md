@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Compaction no longer treats implausible Cursor billed usage as context size: when the local transcript estimate is at least 50k and billed usage is more than 8× that estimate, the threshold uses the estimate so a multi-million dashboard-cumulative cacheRead cannot force a useless compact (#983).
+
 ### Added
 
 - The notice-box primitives are now part of the public API: `buildNoticeBox`, `noticeMessageRenderer`,

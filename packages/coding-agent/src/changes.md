@@ -18,6 +18,21 @@
 
 - LOW: the notice export block in `packages/coding-agent/src/index.ts`.
 
+## 2026-08-19 - Ignore implausible Cursor usage for compaction threshold
+
+### What changed
+
+- `_resolveThresholdContextTokens` uses `resolveThresholdContextTokens`: if the local estimate is at least 50k and billed usage is more than 8× that estimate, compact against the estimate.
+
+### Why
+
+- Complements the billed-cacheRead guard. When no checkpoint arrived, a 4M `cacheRead` still must not beat a 149k transcript estimate.
+
+### Conflict zone
+
+- `packages/coding-agent/src/core/compaction/compaction.ts`
+- `packages/coding-agent/src/core/agent-session.ts` `_resolveThresholdContextTokens`
+
 ## Entry surface and CLI coordinator re-diverge from upstream 59a71b23 (2026-08-19)
 
 ### What changed

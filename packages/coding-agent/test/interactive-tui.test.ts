@@ -138,7 +138,6 @@ describe("switchTuiMode component lifecycle", () => {
 			logDirectory: "/tmp",
 			terminal,
 		});
-		let stableUi: TUI;
 		const dispose = vi.fn();
 		const component: Component & { focused: boolean } = {
 			focused: false,
@@ -165,7 +164,7 @@ describe("switchTuiMode component lifecycle", () => {
 			themeController: { rebindTui: () => {} },
 			extensionTerminalInputSubscriptions: new Set<never>(),
 		}) as SwitchContext;
-		stableUi = createInteractiveTuiReference(() => context.renderer);
+		const stableUi = createInteractiveTuiReference(() => context.renderer);
 		context.ui = stableUi;
 		const { switchTuiMode } = InteractiveMode.prototype as unknown as {
 			switchTuiMode(this: SwitchContext, mode: TuiMode, restoreProgress?: boolean): boolean;
