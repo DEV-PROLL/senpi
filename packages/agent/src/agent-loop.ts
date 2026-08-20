@@ -293,9 +293,6 @@ async function runLoop(
 
 			hasMoreToolCalls = false;
 			let toolBatchTerminated = false;
-			if (toolCalls.length === 0 && message.content.some((c) => c.type === "toolCall")) {
-				hasMoreToolCalls = true;
-			}
 			if (toolCalls.length > 0) {
 				// A native "length" stop means the output was cut off by the token limit,
 				// so every tool call in the message may carry truncated arguments. Text
