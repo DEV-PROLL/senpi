@@ -1,3 +1,9 @@
+## Unreleased
+
+- Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
+- Persist Cursor conversation-id rotation under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`), not `$HOME/cursor-conversation-ids.json`.
+- Surface the first 0-token `resource_exhausted` of a `stream()` call so session-layer compaction runs before rotation.
+
 ## 2026-08-20 - Cursor 0-token RE overflow without estimate gate
 
 ### What changed
@@ -17,6 +23,26 @@
 - `packages/ai/src/utils/overflow.ts` after `getOverflowPatterns()`.
 
 # AI Source Changes
+
+## 2026-08-20 - Cursor conversation rotation composes with compact-before-rotate
+
+### What changed
+
+- `packages/ai/src/api/cursor-conversation-rotation.ts` (new): persists the base-id to wire-id mapping under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`, overridable with `CURSOR_CONVERSATION_ID_STORE`), caps rotation at `MAX_CURSOR_CONVERSATION_ROTATIONS` (3), and remints a fresh wire id after the skip so a session is never permanently blocked.
+- `packages/ai/src/api/cursor-agent.ts` `stream()`: the FIRST 0-token `resource_exhausted` of a `stream()` call surfaces as an error with no rotation, so the session layer gets first refusal and can compact. Rotation, cache/blob migration, and same-stream retry apply only to attempts after the first within one `stream()` call. Once the base conversation has burned its 3 rotations, `shouldSkip()` surfaces `CURSOR_CONVERSATION_POISONED_MESSAGE` instead of rotating again.
+
+### Why
+
+- Rotating on the first failure swallowed the error inside `stream()`, so the compact-before-rotate policy added by #1015 (which fires in `agent-session` on a SURFACED 0-token RE via `isCursorPayloadResourceExhausted`) never ran. A large-payload rejection then burned all three rotations replaying the same oversized payload and still failed. Surfacing attempt 1 lets compaction shrink the payload first; rotation remains the fallback for a genuinely poisoned conversation id, which compaction cannot fix.
+
+### Why an extension could not handle it
+
+- The rotation map, the persisted wire id, and the h2 retry loop live inside `cursor-agent` `stream()`, below every extension hook; the retry must reuse the same in-flight event stream so `start` is emitted once.
+
+### Expected merge conflict zones
+
+- `packages/ai/src/api/cursor-agent.ts` `stream()` retry loop and its `catch` block.
+- `packages/ai/src/api/cursor-conversation-rotation.ts` (whole file).
 
 ## 2026-08-20 - Cursor explicit levels prefer catalog suffix variant ids
 
