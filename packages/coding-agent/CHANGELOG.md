@@ -14,6 +14,8 @@
 
 - Refreshed dependency pins, including `@anthropic-ai/claude-agent-sdk` 0.3.238, `jsdom` 30, `undici` 8.10.0, `marked` 18.0.10, `highlight.js` 11.12.0, `grok-mermaid` 0.2.3, `minimatch` 10.2.6, `ws` 8.21.3, and `typebox` 1.3.16, and removed the unused `@mistralai/mistralai` and `@types/ms` entries.
 
+- The `monitor` tool's description, schema text, prompt guidance, and terminal docs now state the verified contract (PTY output with stderr merged, event-only filtering, dedup and pause semantics) and include worked recipes plus an anti-pattern reference.
+
 ### Fixed
 
 ### Removed
