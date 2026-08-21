@@ -5,6 +5,23 @@
 - Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
 - Persist Cursor conversation-id rotation under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`), not `$HOME/cursor-conversation-ids.json`.
 - Surface the first 0-token `resource_exhausted` of a `stream()` call so session-layer compaction runs before rotation.
+## 2026-08-20 - Google FinishReason exhaustiveness after the @google/genai 2.18.0 bump
+
+### What changed
+
+- `packages/ai/src/api/google-shared.ts`: `mapStopReason` handles the new `FinishReason.TOO_MANY_TOOL_CALLS` member alongside `UNEXPECTED_TOOL_CALL`, mapping it to the `"error"` stop reason.
+
+### Why
+
+- `@google/genai` 2.18.0 adds that enum member, and the switch closes with a `const _exhaustive: never = reason` guard, so `tsc --noEmit` failed until the new case was handled. Grouping it with the other tool-calling aborts keeps the existing semantics: a run that was stopped by the provider rather than completing is surfaced as an error.
+
+### Why an extension could not handle it
+
+- The mapping runs inside this package's Google streaming adapter, on the provider response path that produces the stop reason an extension would only observe after the fact.
+
+### Expected merge conflict zones
+
+- LOW: the `mapStopReason` case list, which grows only when the upstream SDK adds finish reasons.
 
 ## 2026-08-20 - Cursor 0-token RE overflow without estimate gate
 

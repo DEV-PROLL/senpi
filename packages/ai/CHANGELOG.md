@@ -8,6 +8,9 @@
 
 ### Changed
 
+- Handled the new `TOO_MANY_TOOL_CALLS` Gemini finish reason introduced by `@google/genai` 2.18.0, mapping it to an error stop reason.
+- Refreshed dependency pins (`@aws-sdk/client-bedrock-runtime`, `@google/genai`, `@smithy/node-http-handler`, `typebox`) and removed the unused `chalk`, `proxy-from-env`, and `@mistralai/mistralai` dependencies.
+
 ### Fixed
 
 ### Removed
