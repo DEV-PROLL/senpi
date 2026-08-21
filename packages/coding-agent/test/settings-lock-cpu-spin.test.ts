@@ -50,9 +50,11 @@ describe("FileSettingsStorage lock-retry CPU spin", () => {
 		const storage = new FileSettingsStorage(cwd, join(root, "agent"), root);
 		const cpuBefore = process.cpuUsage();
 		const wallBefore = Date.now();
+		// Reads are lock-free since the atomic temp+rename publish; only a WRITE
+		// acquires the settings lock, so contention is exercised through one.
 		storage.withLock("global", (current) => {
 			expect(current).toBeDefined();
-			return undefined;
+			return JSON.stringify({ x: 2 });
 		});
 		const cpuAfter = process.cpuUsage();
 		const wallMs = Date.now() - wallBefore;
