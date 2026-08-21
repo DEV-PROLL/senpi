@@ -32,9 +32,9 @@ Following pi-mono's extension-first philosophy. All permission logic is in the e
 
 - When a session is cleared (`/clear`), reloaded, or terminated while a tool permission prompt is pending, `session_shutdown` rejects all pending permission requests with `RejectedError`. Previously, `askPromise` was floating without an attached `.catch()` handler until after the UI prompt resolved, causing Node.js to fire an `unhandledRejection` event that crashed interactive mode via `uncaughtException`.
 
-### Why an extension could not handle it
+### Why this belongs in the builtin extension
 
-- The permission system builtin extension itself owns the `tool_call` and `session_shutdown` permission request lifecycle.
+- External extensions cannot observe or attach a rejection handler to `PermissionService`'s private request promise. The permission-system builtin owns that promise and the `tool_call` / `session_shutdown` lifecycle, so it must attach the handler immediately when creating the request.
 
 ### Expected merge conflict zones
 

@@ -117,16 +117,16 @@ export default function permissionSystemExtension(pi: ExtensionAPI): void {
 				metadata: createRequestMetadata(event.toolName, event.input),
 			};
 
-			let askError: unknown;
-			const askPromise = service.ask(request).catch((error) => {
-				askError = error;
-			});
+			const askResultPromise = service.ask(request).then(
+				() => ({ ok: true as const }),
+				(error: unknown) => ({ ok: false as const, error }),
+			);
 			const isPending = service.list().some((pendingRequest) => pendingRequest.id === request.id);
 
 			if (!isPending) {
-				await askPromise;
-				if (askError) {
-					return { block: true, reason: getReason(askError) };
+				const askResult = await askResultPromise;
+				if (!askResult.ok) {
+					return { block: true, reason: getReason(askResult.error) };
 				}
 				continue;
 			}
@@ -145,9 +145,9 @@ export default function permissionSystemExtension(pi: ExtensionAPI): void {
 				}
 			}
 
-			await askPromise;
-			if (askError) {
-				return { block: true, reason: getReason(askError) };
+			const askResult = await askResultPromise;
+			if (!askResult.ok) {
+				return { block: true, reason: getReason(askResult.error) };
 			}
 		}
 
