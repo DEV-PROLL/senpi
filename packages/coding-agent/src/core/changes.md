@@ -1,5 +1,24 @@
 # changes
 
+## 2026-08-21 - Auth-storage lock retry sleeps instead of spinning
+
+### What changed
+
+- `packages/coding-agent/src/core/auth-storage.ts`: `FileAuthStorageBackend.acquireLockSyncWithRetry` replaces the `while (Date.now() - start < delayMs) {}` busy-wait with `Atomics.wait` on a `SharedArrayBuffer`. The wait stays synchronous (callers and the 20ms/10-attempt policy unchanged) but the thread actually sleeps.
+
+### Why
+
+- This is the same defect PR #1056 removed from `settings-manager.ts`, but `auth-storage.ts` was left out of both #1056 and #1057. The sync `withLock` paths (`reload()`, `set()`, `remove()`) reach it, so under multi-session OAuth-refresh contention (auth.json rewritten by other sessions, forcing `reload()` through a contended lock) a synchronous auth write could spin up to 10×20ms of pure CPU on the main thread.
+
+### Why an extension could not handle it
+
+- `FileAuthStorageBackend` is the core credential persistence path with no extension seam.
+
+### Expected merge conflict zones
+
+- `auth-storage.ts` around `acquireLockSyncWithRetry` (line ~95).
+
+
 ## 2026-08-21 - Settings reads are lock-free; writes publish atomically via temp+rename
 
 ### What changed
