@@ -6,11 +6,11 @@
 
 ### Fixed
 
+- The `permission-system` builtin extension now handles rejection during `session_shutdown` without causing an unhandled promise rejection / `uncaughtException` when permission prompts are pending.
+
 ### Added
 
 ### Changed
-
-### Fixed
 
 ### Removed
 
