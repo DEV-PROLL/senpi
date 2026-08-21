@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Refreshed hydrated provider catalog data: vercel-ai-gateway renamed the Grok vendor slug (`xai/grok-4.5|4.6` -> `spacexai/grok-4.5|4.6`) and opencode delisted `deepseek-v4-flash-free`; prompt-preset catalog sentinels track the new ids so releases no longer fail on this drift.
 - Handled the new `TOO_MANY_TOOL_CALLS` Gemini finish reason introduced by `@google/genai` 2.18.0, mapping it to an error stop reason.
 - Refreshed dependency pins (`@aws-sdk/client-bedrock-runtime`, `@google/genai`, `@smithy/node-http-handler`, `typebox`) and removed the unused `chalk`, `proxy-from-env`, and `@mistralai/mistralai` dependencies.
 
