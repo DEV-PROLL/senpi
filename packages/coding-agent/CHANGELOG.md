@@ -14,6 +14,42 @@
 
 ### Removed
 
+## [2026.8.21-3] - 2026-08-21
+
+### Breaking Changes
+
+### Fixed
+
+- Agentic turns no longer shake the transcript up and down: assistant text painted between tool cards keeps its position instead of teleporting above the cards whenever the next tool call arrives. The streaming message component now owns only the content through the first tool call, and each text segment after it renders in a persistent component at its chronological position (#1064).
+
+- Prompts submitted while the agent is streaming (steer/follow-up) render as the queued waiting state (`Steering:`/`Follow-up:` pending display) again instead of appearing as already-sent user messages; the optimistic submit echo now applies only to prompts that actually start immediately. Messages queued during compaction likewise no longer paint a sent-looking bubble.
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.21-2] - 2026-08-21
+
+### Breaking Changes
+
+### Fixed
+
+- Contended auth-storage lock retries now sleep via `Atomics.wait` instead of busy-waiting, matching the settings-lock fix (#1056). The auth store kept the original spin loop, so under multi-session OAuth-refresh contention a synchronous auth write could burn a CPU core on the main thread.
+- Selecting a model now releases the selector and repaints immediately instead of after the provider auth check resolves. The overlay is disposed on Enter, so waiting for that round trip (a network call for subscription-OAuth providers such as Cursor) left the TUI showing a frozen frame on the previous model.
+- Cursor agent turns now finish promptly when `turnEnded` arrives even if the server leaves HTTP/2 open, while silent pre-completion streams fail after a heartbeat-aware health bound instead of freezing until the generic five-minute idle timeout.
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [2026.8.21] - 2026-08-21
 
 ### Breaking Changes
