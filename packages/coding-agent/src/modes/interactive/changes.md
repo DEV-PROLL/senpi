@@ -19,6 +19,26 @@
 - HIGH: `syncTrailingAssistantText`, the `message_start`/`message_update` reveal-target wiring, and the `agent_end` cleanup in `packages/coding-agent/src/modes/interactive/interactive-mode.ts`; any upstream refactor of the streaming render path collides here.
 - LOW: the removed `split-trailing-assistant-text.ts` (fork-added file, now deleted; upstream never carried it).
 
+## 2026-08-21 - Queued input renders as waiting state, not as a sent message
+
+### What changed
+
+- `interactive-mode.ts`: `OptimisticUserEchoController.promptOptions` now keeps an optimistic pending user bubble only when its prompt's `promptDisposition` is `started`. `queued` (steer/follow-up while streaming) and `handled` dispositions unpaint the bubble, so waiting input renders exclusively through `updatePendingMessagesDisplay` (dim `Steering:`/`Follow-up:` lines + dequeue hint) until canonical delivery, matching upstream pi semantics where user messages appear only at `message_start`.
+- `interactive-mode.ts`: `queueCompactionMessage` no longer begins an optimistic echo. Compaction-queued input has no prompt lifecycle until transfer, so its echo could never be resolved by a disposition (the `deliverQueued` transfer path never fires one), leaving a phantom sent-looking message forever.
+
+### Why
+
+- The optimistic echo feature (2026-08-21 below) made prompts submitted while the agent was streaming look already sent at their submission position; the queued/waiting state disappeared and message ordering diverged from actual delivery order. Reported against omo-ai 5.0.0-0.beta.14 (senpi v2026.8.21/-2).
+
+### Why an extension could not handle it
+
+- Same seam as the original feature: pending-echo records and their reconciliation are interactive-mode internals.
+
+### Expected merge conflict zones
+
+- `interactive-mode.ts` `OptimisticUserEchoController.promptOptions` and `queueCompactionMessage`.
+
+
 ## 2026-08-21 - Model selection releases the selector before the auth round trip
 
 ### What changed
