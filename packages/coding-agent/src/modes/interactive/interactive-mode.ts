@@ -536,8 +536,12 @@ export class OptimisticUserEchoController {
 			promptDisposition: (disposition) => {
 				const record = this.pending.find((candidate) => candidate.id === id);
 				if (!record) return;
-				if (disposition === "handled") this.reject(id);
-				else record.eligibleForCanonicalStart = true;
+				// Only a prompt that actually STARTED keeps its optimistic echo; queued
+				// (steer/follow-up) input must render as the pending-queue waiting state,
+				// matching upstream pi where user messages appear only at canonical
+				// message_start and queued text lives in the pending display.
+				if (disposition === "started") record.eligibleForCanonicalStart = true;
+				else this.reject(id);
 			},
 		};
 	}
@@ -5984,12 +5988,12 @@ export class InteractiveMode {
 	}
 
 	private queueCompactionMessage(text: string, mode: "steer" | "followUp", droppedImageCount = 0): void {
-		const pendingEchoId = this.optimisticUserEchoes.begin(text);
+		// No optimistic echo here: compaction-queued input is waiting state and must
+		// render only in the pending-messages display until it is actually delivered.
 		this.compactionQueuedMessages.push({
 			text,
 			mode,
 			enqueueOrder: this.session.reserveQueuedInputOrder(),
-			pendingEchoId,
 		});
 		this.getSessionLogger().debug("compaction_queue_enqueue", {
 			mode,
