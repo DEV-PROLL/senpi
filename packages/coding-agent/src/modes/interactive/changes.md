@@ -1,5 +1,24 @@
 # changes
 
+## 2026-08-21 - Model selection releases the selector before the auth round trip
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: `selectModelFromUi` now calls `done?.()` and `ui.requestRender()` *before* awaiting `session.setModel(model)`, instead of only after it resolves. The error path no longer double-releases.
+
+### Why
+
+- `ModelSelectorComponent.handleSelect` disposes the overlay synchronously on Enter, but the selector was only released after `setModel` resolved. `AgentSession._setModel` awaits `modelRuntime.checkAuth(provider)` as its first step, which for subscription-OAuth providers (Cursor) is a network round trip. Between Enter and that resolution the TUI held a torn-down-but-unreleased overlay with no repaint, so the screen appeared frozen on the old model while the switch was in flight.
+
+### Why an extension could not handle it
+
+- Selector lifecycle and overlay release are interactive-mode internals with no extension seam.
+
+### Expected merge conflict zones
+
+- `interactive-mode.ts` around `selectModelFromUi` (line ~6460).
+
+
 ## 2026-08-21 - Optimistic pending user echo
 
 ### What changed

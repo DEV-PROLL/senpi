@@ -7,6 +7,7 @@
 ### Fixed
 
 - Contended auth-storage lock retries now sleep via `Atomics.wait` instead of busy-waiting, matching the settings-lock fix (#1056). The auth store kept the original spin loop, so under multi-session OAuth-refresh contention a synchronous auth write could burn a CPU core on the main thread.
+- Selecting a model now releases the selector and repaints immediately instead of after the provider auth check resolves. The overlay is disposed on Enter, so waiting for that round trip (a network call for subscription-OAuth providers such as Cursor) left the TUI showing a frozen frame on the previous model.
 
 ### Added
 
