@@ -6458,11 +6458,15 @@ export class InteractiveMode {
 	}
 
 	private async selectModelFromUi(model: Model<any>, done?: () => void): Promise<void> {
+		// The selector overlay is already disposed on Enter, so releasing it only
+		// after setModel resolves leaves a stale frozen frame for the whole provider
+		// auth round trip. Release and repaint first, then apply the switch.
+		done?.();
+		this.ui?.requestRender();
 		try {
 			const systemPromptChange = await this.session.setModel(model);
 			this.footer.invalidate();
 			this.updateEditorBorderColor();
-			done?.();
 			const systemPromptStr = systemPromptChange?.systemPromptName
 				? ` (optimized system prompt applied: ${systemPromptChange.systemPromptName})`
 				: "";
@@ -6471,7 +6475,6 @@ export class InteractiveMode {
 			void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
 			this.checkDaxnutsEasterEgg(model);
 		} catch (error) {
-			done?.();
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
 	}
