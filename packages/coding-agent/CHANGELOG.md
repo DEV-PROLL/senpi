@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Agentic turns no longer shake the transcript up and down: assistant text painted between tool cards keeps its position instead of teleporting above the cards whenever the next tool call arrives. The streaming message component now owns only the content through the first tool call, and each text segment after it renders in a persistent component at its chronological position (#1064).
+
 ### Added
 
 ### Changed
