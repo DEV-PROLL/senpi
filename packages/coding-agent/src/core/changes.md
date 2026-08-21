@@ -1,5 +1,25 @@
 # changes
 
+## 2026-08-21 - Settings-lock retry sleeps instead of spinning; retry-fallback canonicalization memoized
+
+### What changed
+
+- `settings-manager.ts`: `acquireLockSyncWithRetry` replaces the `while (Date.now() - start < delayMs)` busy-wait with `Atomics.wait` on a `SharedArrayBuffer`. The wait stays synchronous (callers and the 20ms/10-attempt policy unchanged) but the thread actually sleeps, so contended retries no longer burn a CPU core per waiter.
+- `retry-fallback/controller.ts`: `RetryFallbackController` memoizes `canonicalizeFallbackChains` by the serialized chains content. `canTryFallback`/`nextCandidate`/`hasConfiguredChain` reuse the canonical result for an unchanged config; a chains edit invalidates immediately; `clear()` drops the memo.
+
+### Why
+
+- Provider-error handling calls `canTryFallback` 4-6 times per error, each re-canonicalizing chains whose oauth-lane eligibility probes create fresh `SettingsManager` instances and locked disk reads. With ~12 sessions sharing one settings.json the lock convoy made every waiter busy-spin on the main thread, starving the TUI render loop and freezing the screen at ~100% CPU under 429/5xx storms. V8 profile of a frozen omo process showed 65% in `acquireLockSyncWithRetry` and 18% in `parseSettingsJson`.
+
+### Why an extension could not handle it
+
+- The settings file lock and the retry-fallback controller are core storage and session-admission paths with no extension seam.
+
+### Expected merge conflict zones
+
+- `settings-manager.ts` around `acquireLockSyncWithRetry` (line ~527). `retry-fallback/controller.ts` around `nextCandidate`/`hasConfiguredChain` and the new `canonicalChains` private method.
+
+
 ## 2026-08-20 - Resume picker caches exact streaming summaries
 
 ### What changed

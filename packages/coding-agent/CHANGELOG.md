@@ -8,6 +8,7 @@
 
 - Interactive submissions now render a local pending user echo immediately, reconcile it with the canonical `message_start`, and remove it for rejected or extension-handled input without writing render-only state to session history.
 - The `claude-sdk-oauth` lane now surfaces Claude policy refusals (for example cybersecurity refusals) as an immediate, user-visible error naming the refusal category and explanation, instead of hanging until the ~90s stream watchdog timeout. Refusals are classified as non-retryable, so they no longer enter the timeout-retry ladder or account failover ([#1052](https://github.com/code-yeongyu/senpi/pull/1052)).
+- Contended settings-lock retries now sleep via `Atomics.wait` instead of busy-waiting, retry-fallback canonicalization is memoized per error burst, and `cursor-cli-oauth`/`claude-sdk-oauth` settings loads are cached by mtime+size. Together these eliminate the settings-lock CPU-spin that froze the TUI at ~100% CPU under provider-error storms ([#1056](https://github.com/code-yeongyu/senpi/pull/1056)).
 
 ### Added
 
