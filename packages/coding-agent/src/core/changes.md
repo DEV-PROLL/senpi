@@ -1,5 +1,24 @@
 # changes
 
+## 2026-08-21 - Settings reads are lock-free; writes publish atomically via temp+rename
+
+### What changed
+
+- `packages/coding-agent/src/core/settings-manager.ts`: `FileSettingsStorage.withLock` no longer acquires the settings lock for read-only callbacks. The initial read happens without the lock; only a callback that returns content acquires the lock, re-reads under it, re-runs the callback when a concurrent winner changed the file, and publishes by writing a same-directory `*.tmp` file then `renameSync`-ing it over the settings path. `recordSelfWrite` fires before the rename so the config-reload watcher's self-write suppression still sees the hash first. A failed publish removes the temp file and rethrows.
+
+### Why
+
+- Follow-up to the settings-lock CPU-spin fix (#1056). Locked reads were the remaining lock-pressure source: every `SettingsManager` load acquired the lock even when nothing was written, so cache misses and multi-session startups still convoyed on `settings.json.lock`. Atomic rename publish makes torn reads impossible, which is the precondition for dropping the read lock entirely.
+
+### Why an extension could not handle it
+
+- `FileSettingsStorage` is the core settings persistence path with no extension seam.
+
+### Expected merge conflict zones
+
+- `settings-manager.ts` around `withLock` (line ~555) and the `fs` import list (line ~5).
+
+
 ## 2026-08-21 - Settings-lock retry sleeps instead of spinning; retry-fallback canonicalization memoized
 
 ### What changed
