@@ -1,5 +1,26 @@
 # changes
 
+## 2026-08-21 - Optimistic pending user echo
+
+### What changed
+
+- Interactive Enter, streaming steer, follow-up, extension-command, and compaction-queued submissions now create a uniquely identified TUI-local user bubble before prompt admission begins.
+- Canonical user `message_start` replaces the oldest matching pending bubble in place; `handled`, failed preflight, and thrown prompt paths remove it, while `queued` and `started` keep it until canonical delivery.
+- Focused lifecycle coverage guards immediate paint, exactly-once replacement, handled/rejected removal, FIFO queued reconciliation, and render-only persistence behavior.
+
+### Why
+
+- The editor cleared immediately but the user bubble waited behind settled-work, extension input, auth/model, compaction, and admission gates, producing a measured 0.45s median perceived submit delay.
+
+### Why an extension could not handle it
+
+- The pending artifact must exist before AgentSession admission and must replace the built-in canonical user renderer without entering extension messages or persisted session history. Only the interactive TUI owns that render lifecycle.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` submit handlers, user `message_start` rendering, and compaction queue transfer wiring.
+- `packages/coding-agent/src/modes/interactive/compaction-queue-transfer.ts` if upstream changes the TUI queue record shape.
+
 ## 2026-08-20 - Cursor 0-token RE stays on the same model and shrinks
 
 ### What changed
