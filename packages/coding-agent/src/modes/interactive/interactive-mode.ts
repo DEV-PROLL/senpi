@@ -496,6 +496,7 @@ type OptimisticUserEchoRenderHandle = {
 type OptimisticUserEchoRecord = {
 	readonly id: string;
 	readonly handle: OptimisticUserEchoRenderHandle;
+	eligibleForCanonicalStart: boolean;
 };
 
 /** Coordinates render-only user echoes with AgentSession's canonical input lifecycle. */
@@ -510,7 +511,7 @@ export class OptimisticUserEchoController {
 
 	begin(text: string): string {
 		const id = `pending-user-${++this.nextId}`;
-		this.pending.push({ id, handle: this.render(text) });
+		this.pending.push({ id, handle: this.render(text), eligibleForCanonicalStart: false });
 		return id;
 	}
 
@@ -523,7 +524,10 @@ export class OptimisticUserEchoController {
 				if (!success) this.reject(id);
 			},
 			promptDisposition: (disposition) => {
+				const record = this.pending.find((candidate) => candidate.id === id);
+				if (!record) return;
 				if (disposition === "handled") this.reject(id);
+				else record.eligibleForCanonicalStart = true;
 			},
 		};
 	}
@@ -535,13 +539,14 @@ export class OptimisticUserEchoController {
 		record?.handle.remove();
 	}
 
-	clear(): void {
-		for (const record of this.pending) record.handle.remove();
-		this.pending.length = 0;
+	remove(id: string): void {
+		this.reject(id);
 	}
 
 	replaceNext(message: AgentMessage): boolean {
-		const record = this.pending.shift();
+		const first = this.pending[0];
+		if (!first?.eligibleForCanonicalStart) return false;
+		const [record] = this.pending.splice(0, 1);
 		if (!record) return false;
 		record.handle.replace(message);
 		return true;
@@ -5840,7 +5845,9 @@ export class InteractiveMode {
 		this.compactionInFlightMessages = [];
 		this.compactionTransferAbortControllers.clear();
 		this.compactionQueuedMessages = [];
-		this.optimisticUserEchoes?.clear();
+		for (const message of compactionMessages) {
+			if (message.pendingEchoId) this.optimisticUserEchoes?.remove(message.pendingEchoId);
+		}
 		const fallbackOrder = nativeMessages.reduce((maximum, message) => Math.max(maximum, message.enqueueOrder), 0);
 		const ordered = [
 			...nativeMessages,

@@ -14,7 +14,8 @@ type EchoController = {
 		promptDisposition(disposition: "handled" | "queued" | "started"): void;
 	};
 	reject(id: string): void;
-	replaceNext(message: AgentMessage): void;
+	remove(id: string): void;
+	replaceNext(message: AgentMessage): boolean;
 };
 
 type EchoControllerConstructor = new (render: (text: string) => RenderHandle) => EchoController;
@@ -102,6 +103,25 @@ describe("optimistic pending user echo", () => {
 		expect(rendered[0]?.removed).toBe(false);
 	});
 
+	it("does not consume a pending bubble for a foreign user message_start", () => {
+		const { controller, rendered } = createController();
+		const id = controller.begin("local submission");
+		const foreign = userMessage("foreign extension prompt");
+		const appended: AgentMessage[] = [];
+
+		if (!controller.replaceNext(foreign)) appended.push(foreign);
+		expect(appended).toEqual([foreign]);
+		controller.promptOptions(id).promptDisposition("started");
+		controller.replaceNext(userMessage("local canonical"));
+
+		expect(rendered).toHaveLength(1);
+		expect(rendered[0]).toMatchObject({ text: "local submission", removed: false });
+		expect(rendered[0]?.replacedWith).toMatchObject({
+			role: "user",
+			content: [{ type: "text", text: "local canonical" }],
+		});
+	});
+
 	it("replaces the pending bubble exactly once at canonical message_start", () => {
 		const { controller, rendered } = createController();
 		const id = controller.begin("original");
@@ -122,6 +142,23 @@ describe("optimistic pending user echo", () => {
 		controller.reject(thrownId);
 
 		expect(rendered.map((entry) => entry.removed)).toEqual([true, true]);
+	});
+
+	it("removes only the specified queue-owned pending echo", () => {
+		const { controller, rendered } = createController();
+		const queuedId = controller.begin("queued for compaction");
+		const inFlightId = controller.begin("independent in-flight prompt");
+
+		controller.remove(queuedId);
+		controller.promptOptions(inFlightId).promptDisposition("started");
+		controller.replaceNext(userMessage("independent canonical"));
+
+		expect(rendered[0]?.removed).toBe(true);
+		expect(rendered[1]?.removed).toBe(false);
+		expect(rendered[1]?.replacedWith).toMatchObject({
+			role: "user",
+			content: [{ type: "text", text: "independent canonical" }],
+		});
 	});
 
 	it("unpaints handled extension-consumed input", () => {
