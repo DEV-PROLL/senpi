@@ -6462,7 +6462,7 @@ export class InteractiveMode {
 		// after setModel resolves leaves a stale frozen frame for the whole provider
 		// auth round trip. Release and repaint first, then apply the switch.
 		done?.();
-		this.ui.requestRender();
+		this.ui?.requestRender();
 		try {
 			const systemPromptChange = await this.session.setModel(model);
 			this.footer.invalidate();
