@@ -541,10 +541,11 @@ export class FileSettingsStorage implements SettingsStorage {
 					throw error;
 				}
 				lastError = error;
-				const start = Date.now();
-				while (Date.now() - start < delayMs) {
-					// Sleep synchronously to avoid changing callers to async.
-				}
+				// Atomics.wait sleeps the thread without spinning, so contended lock retries
+				// no longer burn a CPU core per waiter (root cause of the TUI freeze under
+				// provider-error storms). Stays synchronous to keep callers unchanged.
+				const sleeper = new Int32Array(new SharedArrayBuffer(4));
+				Atomics.wait(sleeper, 0, 0, delayMs);
 			}
 		}
 
