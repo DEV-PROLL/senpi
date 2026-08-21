@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { describe, expect, it, vi } from "vitest";
 import { RetryFallbackController } from "../src/core/retry-fallback/controller.ts";
 
 function makeModel(provider: string, id: string): Model<Api> {
@@ -18,7 +18,11 @@ interface Deps {
 		isUsingOAuth?: (model: Model<Api>) => boolean;
 		isFallbackEligible?: (model: Model<Api>) => boolean;
 	};
-	cooldowns: { isSuppressed: (selector: string) => boolean; note: (selector: string, failure: object) => void; clear: (selector: string) => void };
+	cooldowns: {
+		isSuppressed: (selector: string) => boolean;
+		note: (selector: string, failure: object) => void;
+		clear: (selector: string) => void;
+	};
 	logger: { info: (event: string, meta: object) => void; debug: (event: string, meta: object) => void };
 	switchModel: (model: Model<Api>, thinking: ThinkingLevel, reason: "fallback" | "fallback-revert") => Promise<void>;
 	emit: (event: object) => void;
@@ -26,12 +30,20 @@ interface Deps {
 	isAuthAvailable: (provider: string) => boolean;
 }
 
-function makeController(overrides: Partial<Deps> = {}): { controller: RetryFallbackController; eligibleSpy: ReturnType<typeof vi.fn> } {
+function makeController(overrides: Partial<Deps> = {}): {
+	controller: RetryFallbackController;
+	eligibleSpy: ReturnType<typeof vi.fn>;
+} {
 	const eligibleSpy = vi.fn(() => true);
 	const deps: Deps = {
 		getSettings: () => ({ modelFallback: true, chains: { "claude-fable-5": ["kimi-k3:max"] } }),
 		registry: {
-			find: (provider, id) => (provider === "anthropic" && id === "claude-fable-5" ? CLAUDE : provider === "kimi-coding" && id === "kimi-k3" ? KIMI : undefined),
+			find: (provider, id) =>
+				provider === "anthropic" && id === "claude-fable-5"
+					? CLAUDE
+					: provider === "kimi-coding" && id === "kimi-k3"
+						? KIMI
+						: undefined,
 			getAll: () => [CLAUDE, KIMI],
 			isUsingOAuth: () => false,
 			isFallbackEligible: eligibleSpy,
