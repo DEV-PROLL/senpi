@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Cursor streams no longer fail while the server keeps sending heartbeats or checkpoints: the provider now matches the official Cursor CLI's stream recovery, refreshing its 30s health deadline on every inbound frame and silently retrying pre-`turnEnded` stalls or transport deaths with bounded backoff, resuming from the latest conversation checkpoint with the originally pinned model. Long-running local tools and long `xhigh` thinking turns previously died with `Cursor stream ended before turnEnded: inbound stream stalled` and immediately rotated the fallback chain.
+
 ### Removed
 
 ## [2026.8.21-3] - 2026-08-21
