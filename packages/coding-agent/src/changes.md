@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-22 - Bun-installed CLIs re-exec onto the Bun runtime
+
+### What changed
+
+- `packages/coding-agent/src/cli.ts` now runs a runtime check as its first statement, before `enableStartupCompileCache()`: it realpaths `process.argv[1]`, asks the fork-only `packages/coding-agent/src/bun-runtime.ts` decision function whether this process should run under Bun, and on a positive decision `spawnSync`s the installed `bun` binary with the same script and arguments, propagates the child's signal or exit status, and exits without loading the rest of the entry flow.
+
+### Why
+
+- `bun install -g` links the CLI into `~/.bun/bin`, but the shebang still selects Node, so users who installed with Bun silently ran on the Node runtime. The check has to precede compile-cache setup so a re-exec never pays for Node-only startup work, and it honors `SENPI_RUNTIME=node`/`bun`, keeps debugger runs on Node, and never re-execs when `process.versions.bun` is already set.
+
+### Why an extension could not handle it
+
+- Runtime selection happens before any extension, session, or engine module is loaded; by the time an extension could run, the process is already committed to its interpreter.
+
+### Expected merge conflict zones
+
+- LOW: the import block and the first statements of `packages/coding-agent/src/cli.ts`, immediately above the existing `enableStartupCompileCache()` call.
+
 ## 2026-08-20 - Cursor 0-token RE stays on the same model and shrinks
 
 ### What changed

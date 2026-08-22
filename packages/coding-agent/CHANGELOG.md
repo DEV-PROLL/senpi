@@ -10,6 +10,8 @@
 
 ### Added
 
+- A CLI installed with `bun install -g` now runs on the Bun runtime automatically: the entry point detects that its own script lives in Bun's global install tree and re-execs itself through the installed `bun` binary instead of staying on the Node runtime its shebang picked. Set `SENPI_RUNTIME=node` to force Node or `SENPI_RUNTIME=bun` to request Bun for any install; debugger sessions (`--inspect`) and runs that are already on Bun keep their current runtime, and a missing `bun` binary silently keeps the CLI on Node.
+
 ### Changed
 
 ### Removed
