@@ -165,6 +165,8 @@ export type EvalCellResult = {
 	readonly status: "pending" | "running" | "detached" | "complete" | "error" | "cancelled";
 	readonly exitCode?: number;
 	readonly durationMs?: number;
+	/** Epoch ms when the cell started; lets renderers tick elapsed time between update events. */
+	readonly startedAt?: number;
 	readonly statusEvents?: readonly EvalStatusEvent[];
 	readonly hasMarkdown?: boolean;
 };

@@ -145,6 +145,7 @@ export class CellResultBuilder {
 					output: this.#state.output,
 					status: this.#state.status,
 					durationMs: this.#state.durationMs,
+					startedAt: this.#state.startedAt,
 					...(statusEvents === undefined ? {} : { statusEvents }),
 					...(output?.hasMarkdown ? { hasMarkdown: true } : {}),
 				},

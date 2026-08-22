@@ -10,7 +10,11 @@
 
 ### Changed
 
+- Running eval cell headers now tick their elapsed time in real time (`eval py running · 13s`) instead of freezing between kernel update events; the renderer derives elapsed time from a render-time clock while a cell is pending/running/detached and repaints once per second, while settled cells keep their exact final duration. `EvalCellResult` gains an additive `startedAt` so RPC consumers can compute the same live value.
+
 ### Fixed
+
+- A host tool call from inside an eval cell no longer suspends the cell's timeout indefinitely. The idle watchdog previously cleared its timer for the entire duration of a bridge call, so a call that never returned (e.g. an awaited `dag-wait`) left the cell pending — and the agent loop parked, queueing user messages invisibly — until the 1800s hard limit. The pause is now bounded by a max pause grace (default 600s, floored at the cell's own `timeout`): a long bridge call such as a 5-minute build still runs to completion, but a stuck one now trips the cell's `on_timeout` handling and releases the loop.
 
 ### Removed
 
