@@ -70,6 +70,7 @@ describe("interpreter detection", () => {
 				probes += 1;
 				return { stdout: "Python 3.11.9", stderr: "" };
 			},
+			resolveCommandPath: () => undefined,
 		});
 
 		await expect(detector.detect("py")).resolves.toEqual({ ok: true, path: "python3", version: "3.11.9" });
@@ -88,6 +89,7 @@ describe("interpreter detection", () => {
 				]),
 			),
 			nodeVersion: "24.1.0",
+			resolveCommandPath: () => undefined,
 		});
 
 		const availability = await getInterpreterAvailability(
