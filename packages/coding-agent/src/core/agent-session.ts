@@ -70,7 +70,11 @@ import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { AgentAbortProvenance } from "./agent-abort-provenance.ts";
-import { AgentSettledDelivery, type DeferredAgentSettledAction } from "./agent-settled-delivery.ts";
+import {
+	AgentSettledDelivery,
+	type DeferredAgentSettledAction,
+	type DeferredTurnClaim,
+} from "./agent-settled-delivery.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { envValue } from "./brand.ts";
@@ -368,6 +372,7 @@ export type AgentSessionEvent =
 	| Exclude<AgentEvent, { type: "agent_end" }>
 	| AgentSessionAgentEndEvent
 	| { type: "agent_settled" }
+	| { type: "agent_idle" }
 	| { type: "session_abort" }
 	| { type: "continuation_error"; errorMessage: string }
 	| {
@@ -840,6 +845,7 @@ export class AgentSession {
 	private _nextInputId = 0;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
+	private _settlementEpoch = 0;
 
 	/** Tracks pending steering messages for UI display. Removed when delivered. */
 	private _steeringMessages: string[] = [];
@@ -1580,21 +1586,46 @@ export class AgentSession {
 		}
 		this._isAgentRunActive = false;
 		let deferredActions: DeferredAgentSettledAction[] = [];
+		let deferredTurnClaims: DeferredTurnClaim[] = [];
 		this._agentSettledDelivery.begin(this._userAbortGeneration);
+		const settlementEpoch = ++this._settlementEpoch;
 		try {
 			await this._extensionRunner.emit({ type: "agent_settled" });
 			this._emit({ type: "agent_settled" });
 			if (this._abortProvenance.takeLateUserJoin()) await this._emitSessionAbort();
-			deferredActions = this._agentSettledDelivery.finish(this._userAbortGeneration);
+			({ actions: deferredActions, turnClaims: deferredTurnClaims } = this._agentSettledDelivery.finish(
+				this._userAbortGeneration,
+			));
 		} finally {
 			this._agentSettledDelivery.cancel();
 			this._abortProvenance.closeAgentEndBoundary();
 			this._resolveIdleWaitIfIdle();
 		}
 		for (const action of deferredActions) action();
+		queueMicrotask(() => {
+			void this._emitAgentIdleAfterDeferredTurns(settlementEpoch, deferredTurnClaims);
+		});
 	}
 
-	private async _promptAgent(messages: AgentMessage | AgentMessage[]): Promise<void> {
+	private async _emitAgentIdleAfterDeferredTurns(
+		settlementEpoch: number,
+		deferredTurnClaims: DeferredTurnClaim[],
+	): Promise<void> {
+		const dispositions = await Promise.all(deferredTurnClaims.map((claim) => claim.disposition));
+		if (dispositions.includes("started")) return;
+		if (dispositions.includes("delegated") || this._sessionWorkBarrier.hasActiveWork) {
+			await this._waitForSettledSessionWork();
+		}
+		if (settlementEpoch !== this._settlementEpoch) return;
+		if (this._isAgentRunActive || this._sessionWorkBarrier.hasActiveWork) return;
+		this._emit({ type: "agent_idle" });
+	}
+
+	private async _promptAgent(
+		messages: AgentMessage | AgentMessage[],
+		deferredTurnClaim?: DeferredTurnClaim,
+	): Promise<void> {
+		deferredTurnClaim?.resolve("started");
 		this._isAgentRunActive = true;
 		this._requiredCompactionAdmissionError = undefined;
 		this.agent.abortServerSideFallback =
@@ -3794,6 +3825,7 @@ export class AgentSession {
 			triggerTurn?: boolean;
 			deliverAs?: "steer" | "followUp" | "nextTurn";
 		},
+		deferredTurnClaim?: DeferredTurnClaim,
 	): Promise<void> {
 		const userAbortGeneration = this._userAbortGeneration;
 		const appMessage = {
@@ -3828,6 +3860,7 @@ export class AgentSession {
 			if (options?.deliverAs === "nextTurn") {
 				this._pendingNextTurnMessages.push(appMessage);
 			} else if (this.isStreaming && options?.triggerTurn !== false) {
+				deferredTurnClaim?.resolve("delegated");
 				if (options?.deliverAs === "followUp") {
 					this.agent.followUp(appMessage);
 				} else {
@@ -3840,6 +3873,7 @@ export class AgentSession {
 						this._compactionLifecycle.state.generation === activeCompactionGeneration &&
 						this._compactionLifecycle.state.status !== "completed"))
 			) {
+				deferredTurnClaim?.resolve("delegated");
 				if (options?.deliverAs === "followUp") {
 					this.agent.followUp(appMessage);
 				} else {
@@ -3861,7 +3895,7 @@ export class AgentSession {
 					}
 					throw error;
 				}
-				await this._promptAgent(appMessage);
+				await this._promptAgent(appMessage, deferredTurnClaim);
 			} else {
 				this.agent.state.messages.push(appMessage);
 				this.sessionManager.appendCustomMessageEntry(
@@ -3875,6 +3909,7 @@ export class AgentSession {
 				this._emit({ type: "message_end", message: appMessage });
 			}
 		} finally {
+			deferredTurnClaim?.resolve("finished-without-start");
 			finishSessionWork?.();
 		}
 	}
@@ -3896,6 +3931,7 @@ export class AgentSession {
 			deliverAs?: "steer" | "followUp";
 			expandPromptTemplates?: boolean;
 		},
+		deferredTurnClaim?: DeferredTurnClaim,
 	): Promise<void> {
 		const bindingPromptReadiness = this._extensionBindingPromptReadiness;
 		let resolveBindingPromptReadiness: (() => void) | undefined;
@@ -3905,24 +3941,32 @@ export class AgentSession {
 			});
 			bindingPromptReadiness.add(readiness);
 		}
-		// Normalize content to text string + optional images
+		// Normalize content to text string + optional images. A throw here (null or a
+		// content array whose iterator/part getter throws) happens before the guarded
+		// try below, so resolve the deferred-turn claim first to keep agent_idle reachable.
 		let text: string;
 		let images: ImageContent[] | undefined;
 
-		if (typeof content === "string") {
-			text = content;
-		} else {
-			const textParts: string[] = [];
-			images = [];
-			for (const part of content) {
-				if (part.type === "text") {
-					textParts.push(part.text);
-				} else {
-					images.push(part);
+		try {
+			if (typeof content === "string") {
+				text = content;
+			} else {
+				const textParts: string[] = [];
+				images = [];
+				for (const part of content) {
+					if (part.type === "text") {
+						textParts.push(part.text);
+					} else {
+						images.push(part);
+					}
 				}
+				text = textParts.join("\n");
+				if (images.length === 0) images = undefined;
 			}
-			text = textParts.join("\n");
-			if (images.length === 0) images = undefined;
+		} catch (error) {
+			deferredTurnClaim?.resolve("finished-without-start");
+			resolveBindingPromptReadiness?.();
+			throw error;
 		}
 
 		// An extension binding invokes this method fire-and-forget. When it
@@ -3939,6 +3983,8 @@ export class AgentSession {
 				source: "extension",
 				promptDisposition: (nextDisposition) => {
 					disposition = nextDisposition;
+					if (nextDisposition === "started") deferredTurnClaim?.resolve("started");
+					else if (nextDisposition === "queued") deferredTurnClaim?.resolve("delegated");
 					resolveBindingPromptReadiness?.();
 				},
 				onSessionWorkReady: waitForExistingSessionWork
@@ -3960,6 +4006,9 @@ export class AgentSession {
 			}
 			throw error;
 		} finally {
+			// A path that neither started nor delegated a turn (handled, rejected,
+			// admission failure, cancellation) resolves as finished-without-start.
+			deferredTurnClaim?.resolve("finished-without-start");
 			resolveBindingPromptReadiness?.();
 			finishSessionWork?.();
 		}
@@ -6132,25 +6181,44 @@ export class AgentSession {
 		runner.bindCore(
 			{
 				sendMessage: (message, options) => {
-					const send = () =>
-						this.sendCustomMessage(message, options).catch((err) => {
-							runner.emitError({
-								extensionPath: RUNTIME_EXTENSION_PATH,
-								event: "send_message",
-								error: err instanceof Error ? err.message : String(err),
-							});
+					const reportError = (err: unknown) => {
+						runner.emitError({
+							extensionPath: RUNTIME_EXTENSION_PATH,
+							event: "send_message",
+							error: err instanceof Error ? err.message : String(err),
 						});
+					};
+					if (options?.triggerTurn === true) {
+						if (
+							this._agentSettledDelivery.deferTriggerTurn((claim) => {
+								this.sendCustomMessage(message, options, claim).catch(reportError);
+							})
+						) {
+							return;
+						}
+					}
+					const send = () => this.sendCustomMessage(message, options).catch(reportError);
 					if (this._agentSettledDelivery.defer(send)) return;
 					send();
 				},
 				sendUserMessage: (content, options) => {
-					this.sendUserMessage(content, options).catch((err) => {
+					const reportError = (err: unknown) => {
 						runner.emitError({
 							extensionPath: RUNTIME_EXTENSION_PATH,
 							event: "send_user_message",
 							error: err instanceof Error ? err.message : String(err),
 						});
-					});
+					};
+					// sendUserMessage always triggers a turn; register a settlement-deferred
+					// turn claim so agent_idle is not emitted before its deferred agent_start.
+					if (
+						this._agentSettledDelivery.deferTriggerTurn((claim) => {
+							this.sendUserMessage(content, options, claim).catch(reportError);
+						})
+					) {
+						return;
+					}
+					this.sendUserMessage(content, options).catch(reportError);
 				},
 				appendEntry: (customType, data) => {
 					const entryId = this.sessionManager.appendCustomEntry(customType, data);

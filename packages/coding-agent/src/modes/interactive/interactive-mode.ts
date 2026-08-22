@@ -793,6 +793,7 @@ export class InteractiveMode {
 	private isInitialized = false;
 	private onInputCallback?: (input: InteractiveUserInput) => void;
 	private pendingUserInputs: InteractiveUserInput[] = [];
+	private agentIdle = false;
 	private readonly optimisticUserEchoes: OptimisticUserEchoController;
 	/**
 	 * Clipboard images pasted into the composer, keyed by their visible
@@ -1636,13 +1637,10 @@ export class InteractiveMode {
 		while (true) {
 			const userInput = await this.getUserInput();
 			try {
-				await this.session.prompt(userInput.text, {
-					streamingBehavior: "steer",
-					...(userInput.images ? { images: userInput.images } : {}),
-					...this.optimisticUserEchoes.promptOptions(userInput.pendingEchoId),
-				});
+				await this.session.prompt(userInput.text, this.buildMainLoopPromptOptions(userInput));
 			} catch (error: unknown) {
 				this.optimisticUserEchoes.reject(userInput.pendingEchoId);
+				this.clearStatusIndicator("working");
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
 			}
@@ -2970,13 +2968,18 @@ export class InteractiveMode {
 		}
 		const hadActiveStatusIndicator = this.activeStatusIndicator !== undefined;
 		const isClearingWorking = this.activeStatusIndicator?.kind === "working";
+		const shouldReserveHeight =
+			hadActiveStatusIndicator && this.options.tuiMode === "regular" && this.ui.getClearOnShrink();
+		const renderedHeight = shouldReserveHeight ? this.statusContainer.render(this.ui.terminal.columns).length : 0;
 		this.activeStatusIndicator?.dispose();
 		this.activeStatusIndicator = undefined;
 		if (isClearingWorking) {
 			this.workingStartedAt = undefined;
 		}
 		this.statusContainer.clear();
-		if (hadActiveStatusIndicator && this.options.tuiMode === "regular" && this.ui.getClearOnShrink()) {
+		if (shouldReserveHeight) {
+			const idleHeight = Math.min(this.ui.terminal.rows, Math.max(1, renderedHeight || 2));
+			this.idleStatus.setHeight(idleHeight);
 			this.statusContainer.addChild(this.idleStatus);
 		}
 	}
@@ -4238,6 +4241,7 @@ export class InteractiveMode {
 
 		switch (event.type) {
 			case "agent_start":
+				this.agentIdle = false;
 				this.clearPendingTools();
 				this.clearActiveToolExecutionStatus();
 				this.clearToolHookStatuses();
@@ -4480,7 +4484,6 @@ export class InteractiveMode {
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(false);
 				}
-				this.clearStatusIndicator("working");
 				this.clearActiveToolExecutionStatus();
 				this.clearToolHookStatuses();
 				this.streamingReveal.stop();
@@ -4498,6 +4501,14 @@ export class InteractiveMode {
 
 			case "agent_settled":
 				await this.checkShutdownRequested();
+				break;
+
+			case "agent_idle":
+				this.agentIdle = true;
+				if (this.pendingUserInputs.length === 0) {
+					this.clearStatusIndicator("working");
+				}
+				this.ui.requestRender();
 				break;
 
 			case "continuation_error":
@@ -5346,6 +5357,35 @@ export class InteractiveMode {
 				resolve(input);
 			};
 		});
+	}
+
+	// Build the session.prompt options for a main-loop submission. The optimistic echo
+	// keeps only a prompt that actually started; a buffered prompt consumed by an input
+	// extension with action "handled" clears the retained working dock, but only once
+	// agent_idle has fired (the agentIdle latch) so a settlement-deferred continuation
+	// still in admission keeps its dock.
+	private buildMainLoopPromptOptions(userInput: InteractiveUserInput): {
+		streamingBehavior: "steer";
+		images?: InteractiveUserInput["images"];
+		preflightResult: (success: boolean) => void;
+		promptDisposition: (disposition: "handled" | "queued" | "started") => void;
+	} {
+		const echoOptions = this.optimisticUserEchoes.promptOptions(userInput.pendingEchoId);
+		return {
+			streamingBehavior: "steer",
+			...(userInput.images ? { images: userInput.images } : {}),
+			preflightResult: echoOptions.preflightResult,
+			promptDisposition: (disposition) => {
+				echoOptions.promptDisposition(disposition);
+				// Clear the retained dock on a handled prompt only when it was the last
+				// buffered input; a still-queued follow-up remounts it on agent_start, so
+				// clearing here would bounce the editor/footer.
+				if (disposition === "handled" && this.agentIdle && this.pendingUserInputs.length === 0) {
+					this.clearStatusIndicator("working");
+					this.ui.requestRender();
+				}
+			},
+		};
 	}
 
 	private rebuildChatFromMessages(): void {
