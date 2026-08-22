@@ -2014,7 +2014,7 @@ function buildParams(
 			{
 				type: "text",
 				text: "You are Claude Code, Anthropic's official CLI for Claude.",
-				...(cacheControl ? { cache_control: cacheControl } : {}),
+				...(!context.systemPrompt && cacheControl ? { cache_control: cacheControl } : {}),
 			},
 		];
 		if (context.systemPrompt) {
@@ -2398,10 +2398,8 @@ function convertMessages(
 	}
 
 	if (cacheControl && params.length > 0 && markUserMessageCacheCheckpoint(params[params.length - 1], cacheControl)) {
-		if (!isOAuthToken) {
-			for (let index = params.length - 2; index >= 0; index--) {
-				if (markUserMessageCacheCheckpoint(params[index], cacheControl)) break;
-			}
+		for (let index = params.length - 2; index >= 0; index--) {
+			if (markUserMessageCacheCheckpoint(params[index], cacheControl)) break;
 		}
 	}
 
