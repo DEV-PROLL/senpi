@@ -1,7 +1,7 @@
 # Senpi Repository Guide
 
-Generated: 2026-08-17
-Commit: `abae968e8`
+Generated: 2026-08-22
+Commit: `a5eed4453`
 Branch: `main`
 
 Metadata above records the source state used for this generation pass.

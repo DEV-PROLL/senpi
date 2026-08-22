@@ -14,11 +14,16 @@ session-manager/   Persistence, branching, context construction
 dynamic-prompt/    Dynamic system-prompt + workstation fact coverage
 tool-pair-guard/   Provider payload tool-pair sanitization tests
 client/            RPC/app-server client coverage
+server/            App-server/server surface coverage
 extensions/        Extension loading and API behavior
+cursor-cli-oauth/  Cursor CLI OAuth provider-lane coverage (accounts, spawn, stream, failover)
+tool-search/       Shared tool-catalog / `tool_search` exposure coverage
 grok/              Grok provider coverage
 ttsr/              Stream-rule (ttsr) extension coverage
 support/           Shared test support modules
 helpers/           Shared subprocess/QA/fixture helpers
+benchmarks/        Perf-oriented probes (not part of the default correctness gate)
+examples/          Coverage for the shipped `examples/` extensions
 manual-qa/         Explicit manual QA scripts (not part of default suite)
 qa/app-server/     Real app-server surface drivers
 integration/       Explicitly gated real-provider tests
@@ -26,7 +31,7 @@ fixtures/, goldens/ Shared deterministic inputs and snapshots
 model-runtime*.test.ts / models-store.test.ts / remote-catalog-provider.test.ts / runtime-credentials.test.ts
                    Model/catalog/auth runtime coverage
 claude-sdk-oauth-*.test.ts
-                   Flat cluster (33+ files) at test/ root covering the Claude SDK
+                   Flat cluster (51 files) at test/ root covering the Claude SDK
                    OAuth provider extension
 ```
 
@@ -64,4 +69,4 @@ claude-sdk-oauth-*.test.ts
 - Root `npm run check` is static validation and does not replace tests.
 
 ---
-Generated: 2026-08-07 | Commit: `4f26b8282`
+Generated: 2026-08-22 | Commit: `a5eed4453`
