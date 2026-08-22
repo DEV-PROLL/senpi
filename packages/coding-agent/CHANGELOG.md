@@ -7,6 +7,8 @@
 ### Fixed
 
 - Fixed a session-liveness wait that could pin a CPU core at 100% by resampling settled promises in a tight microtask loop; it now yields a real event-loop turn when a queued work item does not converge, restoring RPC responsiveness under load ([#1084](https://github.com/code-yeongyu/senpi/pull/1084)).
+- The interactive TUI now keeps the working dock painted across adjacent and locally buffered turns, and clears it on the new core `agent_idle` event - emitted only after settlement-deferred turns (TTSR, loop-guard, goal recovery) resolve without starting a run - so the editor/footer no longer bounce at queued-turn boundaries. A buffered prompt consumed with `action: "handled"` (for example a `UserPromptSubmit` hook block) also clears the retained dock, prompt admission failure clears it, and clear-on-shrink reserves the dock's measured height, together eliminating the vertical jitter.
+
 - Goal cache-warm notices now render the expected wake time in the user's local system timezone with a short zone label (for example `ready 2026-08-22 16:51 GMT+9 (4m 30s)`), falling back to the legacy UTC shape when local timezone formatting is unavailable ([#1074](https://github.com/code-yeongyu/senpi/pull/1074)).
 
 ### Added
@@ -14,6 +16,8 @@
 - A CLI installed with `bun install -g` now runs on the Bun runtime automatically: the entry point detects that its own script lives in Bun's global install tree and re-execs itself through the installed `bun` binary instead of staying on the Node runtime its shebang picked. Set `SENPI_RUNTIME=node` to force Node or `SENPI_RUNTIME=bun` to request Bun for any install; debugger sessions (`--inspect`) and runs that are already on Bun keep their current runtime, and a missing `bun` binary silently keeps the CLI on Node.
 
 ### Changed
+
+- Automatic startup selection for the built-in OpenAI and Codex providers now defaults to GPT-5.6 Sol instead of GPT-5.5. Explicitly saved GPT-5.5 selections remain supported.
 
 ### Removed
 

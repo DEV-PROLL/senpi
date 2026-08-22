@@ -1,5 +1,43 @@
 # changes
 
+## 2026-08-22 - Retarget OpenAI automatic defaults to GPT-5.6 Sol
+
+### What changed
+
+- `packages/coding-agent/src/core/model-resolver.ts`: retargeted the `openai` and `openai-codex` provider defaults from `gpt-5.5` to `gpt-5.6-sol` while retaining GPT-5.5 in catalogs and explicit settings resolution.
+
+### Why
+
+- Automatic startup recommendation should follow the current recommended GPT-5.6 Sol model; saved GPT-5.5 selections remain explicitly selectable.
+
+### Why an extension could not handle it
+
+- `defaultModelPerProvider` is consumed by core initial-model resolution before extension recommendations are applied.
+
+### Expected merge conflict zones
+
+- LOW: the OpenAI provider entries in `packages/coding-agent/src/core/model-resolver.ts`.
+
+## 2026-08-22 - emit agent_idle after settlement-deferred turns resolve
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-settled-delivery.ts`: added `DeferredTurnClaim` / `DeferredTurnDisposition` (`started` / `delegated` / `finished-without-start`) and `deferTriggerTurn`, so a settlement-deferred turn request declares whether it actually started a run. Claims resolve at the `_promptAgent` admission boundary.
+- `packages/coding-agent/src/core/agent-session.ts`: after the deferred-action loop in `_emitAgentSettled`, an out-of-band check waits for all deferred turn dispositions, skips emission when any turn `started`, waits for delegated session work to drain, verifies the settlement epoch is still current, and emits `{ type: "agent_idle" }` only when no agent run or session work is active. Both settlement-deferred turn APIs register a claim: `sendMessage(..., { triggerTurn: true })` via `deferTriggerTurn`, and `sendUserMessage` (which always triggers a turn) via a claim resolved from its prompt disposition; its content normalization is wrapped so a throwing iterator/getter resolves the claim instead of hanging the idle wait. `agent_settled` ordering is unchanged for existing subscribers.
+
+### Why
+
+- The TUI cleared its working-status dock on the public `agent_settled`, but settlement-deferred continuations (TTSR, loop-guard, goal recovery) start a turn *after* that event, so the dock was removed and immediately remounted - the same vertical bounce the jitter fix exists to eliminate. `_isAgentRunActive` alone cannot decide this at the deferred-action loop because a deferred `sendCustomMessage`/`sendUserMessage` can be suspended at compaction/provider admission before reaching `_promptAgent`, and a throwing content normalization could leave the claim unresolved forever. `agent_idle` is the single race-free boundary for final cleanup.
+
+### Why an extension could not handle it
+
+- Settlement-deferred turn admission, the settlement epoch, and the deferred-turn claim lifecycle are private `AgentSession` / `AgentSettledDelivery` state.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `_emitAgentSettled`, `_promptAgent`, `sendCustomMessage`, `sendUserMessage`, and the `AgentEvent` union.
+- `packages/coding-agent/src/core/agent-settled-delivery.ts`.
+
 ## 2026-08-21 - Auth-storage lock retry sleeps instead of spinning
 
 ### What changed

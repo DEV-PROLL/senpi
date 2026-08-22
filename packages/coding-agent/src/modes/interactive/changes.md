@@ -1,4 +1,24 @@
 # changes
+## 2026-08-22 - working dock stays painted across queued turn boundaries
+
+### What changed
+
+- `interactive-mode.ts`: `agent_end` keeps the working status mounted; the dock clears on the new core `agent_idle` event (not `agent_settled`) only when no locally buffered input is waiting. An `agentIdle` latch is set on `agent_idle` and cleared on `agent_start`. The main input loop composes the optimistic-echo `promptDisposition` so a buffered prompt that resolves `handled` (for example a `UserPromptSubmit` hook block) clears the retained dock while idle; the prompt-admission catch still clears it when a dequeued prompt throws before `agent_start`.
+- `clearStatusIndicator` measures the outgoing status container before clearing and uses that height for the regular-mode clear-on-shrink idle placeholder, capped to the terminal height. `IdleStatus` now accepts a reserved height while retaining its two-row default.
+
+### Why
+
+- Clearing the four-row working dock at `agent_end` and remounting it at the next `agent_start` moved the editor/footer between adjacent agentic turns. Clearing on the public `agent_settled` was still too early: settlement-deferred continuations (TTSR, loop-guard, goal recovery) start a turn after that event, re-bouncing the dock, and a locally buffered prompt consumed with `action: "handled"` never produced another lifecycle event to clear it. `agent_idle` fires only after deferred turns resolve with no run started, giving one race-free cleanup boundary. The old hardcoded two-row idle placeholder also allowed a four-row dock to shrink by two rows during clear-on-shrink rendering.
+
+### Why an extension could not handle it
+
+- Agent lifecycle rendering, locally buffered prompt admission, status-container ownership, and clear-on-shrink placeholders are private `InteractiveMode` state.
+
+### Expected merge conflict zones
+
+- `interactive-mode.ts` around the main input-loop disposition composition, `clearStatusIndicator`, and the `agent_start`/`agent_settled`/`agent_idle` handlers.
+- `components/status-indicator.ts` around `IdleStatus`.
+
 ## 2026-08-21 — assistant text segments keep their painted position between tool cards (fixes #1064)
 
 ### What changed
