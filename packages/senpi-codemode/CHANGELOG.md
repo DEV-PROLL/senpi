@@ -6,6 +6,8 @@
 
 ### Added
 
+- Eval headers now display the kernel runtime identity, e.g. `eval py (3.14.7, ~/.venv/bin/python3)` and `eval js (node 26.7.0, /opt/…/bin/node)`; the same `runtime` info rides `EvalToolDetails` and its `cells` so RPC consumers receive it, interpreter detection resolves absolute executable paths from PATH, and the eval prompt host line names the JS runtime (`node`/`bun` with version).
+
 ### Changed
 
 ### Fixed

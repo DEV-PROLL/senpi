@@ -19,6 +19,7 @@ import {
 	JSON_TREE_SCALAR_LEN_EXPANDED,
 	renderJsonTreeLines,
 } from "./json-tree.ts";
+import { formatRuntimeBadge } from "./runtime-label.ts";
 import { codePointPrefix, formatDuration, renderToolCallWidget } from "./tool-widgets.ts";
 import type {
 	EvalCellResult,
@@ -261,7 +262,8 @@ function renderPrefixed(text: string, environment: RenderEnvironment, prefixStyl
 
 function cellHeader(cell: EvalCellResult, environment: RenderEnvironment, badges: CellBadges): string {
 	const presentation = cellPresentation(cell.status, environment.spinnerFrame);
-	let header = `eval ${cell.language} ${presentation.label} ${presentation.icon}`;
+	const runtimeBadge = cell.runtime === undefined ? "" : ` (${formatRuntimeBadge(cell.language, cell.runtime)})`;
+	let header = `eval ${cell.language}${runtimeBadge} ${presentation.label} ${presentation.icon}`;
 	const throughputBadge = badges.throughput === undefined ? undefined : formatThroughputBadge(badges.throughput);
 	if (throughputBadge !== undefined) header += ` · ${throughputBadge}`;
 	const elapsedMs = badges.throughput?.wallDurationMs ?? cell.durationMs;
@@ -780,7 +782,9 @@ function resultHeader(
 			color = "error";
 			break;
 	}
-	return style(theme, color, `eval ${details?.language ?? "?"} ${status}`);
+	const runtimeBadge =
+		details?.runtime === undefined ? "" : ` (${formatRuntimeBadge(details.language, details.runtime)})`;
+	return style(theme, color, `eval ${details?.language ?? "?"}${runtimeBadge} ${status}`);
 }
 
 function resultMetadata(
