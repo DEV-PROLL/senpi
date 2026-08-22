@@ -275,4 +275,53 @@ describe("real AgentSession vertical-jitter lifecycle", () => {
 		expect(boundary.map(({ event }) => event)).toEqual(["agent_end", "agent_settled", "agent_start"]);
 		expect(new Set(boundary.map(({ height }) => height)).size).toBe(1);
 	});
+
+	it("C7 keeps the dock when a handled prompt is not the last buffered input", async () => {
+		const harness = await createHarness({
+			extensionFactories: [(pi) => pi.on("input", () => ({ action: "handled" }))],
+		});
+		harnesses.push(harness);
+		const surface = createSurface(harness.session);
+		surface.agentIdle = true;
+		// Two buffered prompts: prompt1 is shifted and handled, but prompt2 is still
+		// queued, so clearing the dock here would bounce it when prompt2 starts.
+		surface.pendingUserInputs.push({ text: "p1", pendingEchoId: "e1" }, { text: "p2", pendingEchoId: "e2" });
+		const first = surface.pendingUserInputs.shift();
+		expect(surface.pendingUserInputs).toHaveLength(1);
+		const options = buildMainLoopPromptOptions.call(surface, first!);
+		let disposition: string | undefined;
+		const realDisposition = options.promptDisposition;
+		options.promptDisposition = (value) => {
+			disposition = value;
+			realDisposition(value);
+		};
+		await harness.session.prompt("p1", options);
+		expect(disposition).toBe("handled");
+		// Dock must survive because another buffered input remains.
+		expect(surface.statusContainer.render(80).length).toBeGreaterThan(0);
+	});
+
+	it("C8 resolves the deferred claim when sendUserMessage content normalization throws", async () => {
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					let sent = false;
+					pi.on("agent_settled", () => {
+						if (sent) return;
+						sent = true;
+						// null content throws in normalization before the guarded try.
+						pi.sendUserMessage(null as unknown as string, { deliverAs: "followUp" });
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("done")]);
+		await harness.session.prompt("start");
+		await harness.session.waitForIdle();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		// The claim must resolve (finished-without-start), so agent_idle still fires
+		// exactly once instead of hanging the settlement's Promise.all.
+		expect(harness.events.filter((event) => event.type === "agent_idle")).toHaveLength(1);
+	});
 });

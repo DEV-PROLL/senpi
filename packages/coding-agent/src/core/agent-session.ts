@@ -3941,24 +3941,32 @@ export class AgentSession {
 			});
 			bindingPromptReadiness.add(readiness);
 		}
-		// Normalize content to text string + optional images
+		// Normalize content to text string + optional images. A throw here (null or a
+		// content array whose iterator/part getter throws) happens before the guarded
+		// try below, so resolve the deferred-turn claim first to keep agent_idle reachable.
 		let text: string;
 		let images: ImageContent[] | undefined;
 
-		if (typeof content === "string") {
-			text = content;
-		} else {
-			const textParts: string[] = [];
-			images = [];
-			for (const part of content) {
-				if (part.type === "text") {
-					textParts.push(part.text);
-				} else {
-					images.push(part);
+		try {
+			if (typeof content === "string") {
+				text = content;
+			} else {
+				const textParts: string[] = [];
+				images = [];
+				for (const part of content) {
+					if (part.type === "text") {
+						textParts.push(part.text);
+					} else {
+						images.push(part);
+					}
 				}
+				text = textParts.join("\n");
+				if (images.length === 0) images = undefined;
 			}
-			text = textParts.join("\n");
-			if (images.length === 0) images = undefined;
+		} catch (error) {
+			deferredTurnClaim?.resolve("finished-without-start");
+			resolveBindingPromptReadiness?.();
+			throw error;
 		}
 
 		// An extension binding invokes this method fire-and-forget. When it

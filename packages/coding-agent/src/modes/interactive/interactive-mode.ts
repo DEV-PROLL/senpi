@@ -5377,7 +5377,10 @@ export class InteractiveMode {
 			preflightResult: echoOptions.preflightResult,
 			promptDisposition: (disposition) => {
 				echoOptions.promptDisposition(disposition);
-				if (disposition === "handled" && this.agentIdle) {
+				// Clear the retained dock on a handled prompt only when it was the last
+				// buffered input; a still-queued follow-up remounts it on agent_start, so
+				// clearing here would bounce the editor/footer.
+				if (disposition === "handled" && this.agentIdle && this.pendingUserInputs.length === 0) {
 					this.clearStatusIndicator("working");
 					this.ui.requestRender();
 				}
