@@ -793,6 +793,7 @@ export class InteractiveMode {
 	private isInitialized = false;
 	private onInputCallback?: (input: InteractiveUserInput) => void;
 	private pendingUserInputs: InteractiveUserInput[] = [];
+	private agentIdle = false;
 	private readonly optimisticUserEchoes: OptimisticUserEchoController;
 	/**
 	 * Clipboard images pasted into the composer, keyed by their visible
@@ -1636,10 +1637,18 @@ export class InteractiveMode {
 		while (true) {
 			const userInput = await this.getUserInput();
 			try {
+				const echoOptions = this.optimisticUserEchoes.promptOptions(userInput.pendingEchoId);
 				await this.session.prompt(userInput.text, {
 					streamingBehavior: "steer",
 					...(userInput.images ? { images: userInput.images } : {}),
-					...this.optimisticUserEchoes.promptOptions(userInput.pendingEchoId),
+					preflightResult: echoOptions.preflightResult,
+					promptDisposition: (disposition) => {
+						echoOptions.promptDisposition(disposition);
+						if (disposition === "handled" && this.agentIdle) {
+							this.clearStatusIndicator("working");
+							this.ui.requestRender();
+						}
+					},
 				});
 			} catch (error: unknown) {
 				this.optimisticUserEchoes.reject(userInput.pendingEchoId);
@@ -4244,6 +4253,7 @@ export class InteractiveMode {
 
 		switch (event.type) {
 			case "agent_start":
+				this.agentIdle = false;
 				this.clearPendingTools();
 				this.clearActiveToolExecutionStatus();
 				this.clearToolHookStatuses();
@@ -4502,10 +4512,15 @@ export class InteractiveMode {
 				break;
 
 			case "agent_settled":
+				await this.checkShutdownRequested();
+				break;
+
+			case "agent_idle":
+				this.agentIdle = true;
 				if (this.pendingUserInputs.length === 0) {
 					this.clearStatusIndicator("working");
 				}
-				await this.checkShutdownRequested();
+				this.ui.requestRender();
 				break;
 
 			case "continuation_error":

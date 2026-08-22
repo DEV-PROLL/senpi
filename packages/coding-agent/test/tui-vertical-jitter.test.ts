@@ -97,17 +97,17 @@ describe("TUI vertical jitter lifecycle", () => {
 		expect(after).toBe(before);
 	});
 
-	it("clears working only when settled without buffered input", async () => {
+	it("clears working only when idle without buffered input", async () => {
 		fixtureStatus = fixture();
 		fixtureStatus.statusContainer.addChild(new Text("working", 0, 0));
 		fixtureStatus.pendingUserInputs.push({ text: "queued" });
 
 		await handleEvent.call(fixtureStatus, { type: "agent_end" });
-		await handleEvent.call(fixtureStatus, { type: "agent_settled" });
+		await handleEvent.call(fixtureStatus, { type: "agent_idle" });
 		expect(fixtureStatus.statusContainer.render(80).length).toBeGreaterThan(0);
 
 		fixtureStatus.pendingUserInputs.length = 0;
-		await handleEvent.call(fixtureStatus, { type: "agent_settled" });
+		await handleEvent.call(fixtureStatus, { type: "agent_idle" });
 		expect(fixtureStatus.statusContainer.render(80).length).toBe(0);
 	});
 
