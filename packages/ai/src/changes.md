@@ -1,6 +1,7 @@
 ## Unreleased
 
-- Treat Cursor `turnEnded` as definitive completion after a bounded exec-dispatch drain, and fail silent pre-completion streams with heartbeat-aware 30s/90s health thresholds.
+- Match the official Cursor CLI's stream recovery: every inbound frame, including heartbeats and checkpoints, refreshes the 30s health timer; pre-`turnEnded` stalls and transport deaths retry with bounded backoff, and checkpointed attempts resume with the original pinned model request.
+- Treat Cursor `turnEnded` as definitive completion after a bounded exec-dispatch drain.
 - Skip ANTML invoke recovery when `model.api === "cursor-agent"` so native Cursor tool starts are not rejected as invalid event order.
 - Keep usable Cursor task tool arguments when the complete frame parses as empty.
 - Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
@@ -43,6 +44,26 @@
 - `packages/ai/src/utils/overflow.ts` after `getOverflowPatterns()`.
 
 # AI Source Changes
+
+## 2026-08-22 - Cursor heartbeat liveness and checkpoint resume retries
+
+### What changed
+
+- `packages/ai/src/api/cursor-agent.ts`: uses one 30s deadline since the last inbound frame of any kind, waits for local exec dispatches before retrying pre-completion stalls or transport termination, and rebuilds checkpointed attempts as `resumeAction` requests without re-resolving the selected model.
+- `packages/ai/src/api/cursor-agent/stream-retry.ts` (new): contains the retry classification, 10-retry default policy, and official-style exponential backoff capped at 60s plus 0-20% jitter. Deterministic delay and budget options support transport harness tests.
+
+### Why
+
+- Cursor heartbeats and conversation checkpoints prove the server stream is alive, especially while a local exec handler is running. Killing heartbeat-only streams after 90s interrupted valid long-running tools. The official CLI instead retries a stream only after 30s with no inbound frame at all, resuming from the latest checkpoint when available.
+
+### Why an extension could not handle it
+
+- HTTP/2 termination, checkpoint caching, request action selection, and exec-dispatch draining all happen inside the native provider below extension-visible events.
+
+### Expected merge conflict zones
+
+- HIGH: `packages/ai/src/api/cursor-agent.ts` `stream()` HTTP/2 lifecycle and retry loop.
+- LOW: `packages/ai/src/api/cursor-agent/types.ts` test-tuning options.
 
 ## 2026-08-21 - Cursor turn completion and stream health bounds
 

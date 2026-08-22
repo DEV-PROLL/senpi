@@ -159,6 +159,7 @@ import {
 	McpToolNotFoundSchema,
 	McpToolResultContentItemSchema,
 	McpToolResultSchema,
+	type ModelDetails,
 	ModelDetailsSchema,
 	ReadErrorSchema,
 	ReadMcpResourceExecResultSchema,
@@ -171,6 +172,7 @@ import {
 	RequestContextResultSchema,
 	RequestContextSchema,
 	RequestContextSuccessSchema,
+	type RequestedModel,
 	ResumeActionSchema,
 	SelectedContextSchema,
 	SelectedImageSchema,
@@ -215,6 +217,12 @@ import {
 	piTimeout,
 } from "./cursor-agent/pi-args.ts";
 import { buildRequestedModel } from "./cursor-agent/reasoning-params.ts";
+import {
+	CursorRetryableStreamError,
+	cursorStreamRetryDelayMs,
+	shouldRetryCursorStream,
+	waitForCursorStreamRetry,
+} from "./cursor-agent/stream-retry.ts";
 import type {
 	CursorAgentOptions,
 	CursorExecHandlerResult,
@@ -248,7 +256,7 @@ export const CURSOR_CLIENT_VERSION = "cli-2026.07.23-e383d2b";
 const EXEC_HEARTBEAT_INTERVAL_MS = 3000;
 /** Maximum inbound silence before a Cursor turn without turnEnded is failed. */
 export const CURSOR_STREAM_HEALTH_FAIL_THRESHOLD_MS = 30_000;
-/** Maximum heartbeat/checkpoint-only silence before a Cursor turn is failed. */
+/** @deprecated Heartbeats and checkpoints count as inbound liveness without a separate deadline. */
 export const CURSOR_STREAM_HEALTH_HEARTBEAT_ONLY_THRESHOLD_MS = CURSOR_STREAM_HEALTH_FAIL_THRESHOLD_MS * 3;
 /** Maximum time allowed to drain exec handlers after turnEnded. */
 export const CURSOR_TURN_END_DRAIN_TIMEOUT_MS = 5000;
@@ -486,10 +494,14 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 		let baseConversationId: string | undefined;
 		let conversationId: string | undefined;
 		let usageState: UsageState | undefined;
-		let retryPoisonedConversation = false;
+		let retryAttempt = false;
 		let attempt = 0;
+		let streamRetries = 0;
+		let forceResumeAction = false;
+		let pinnedRequestedModel: RequestedModel | undefined;
+		let pinnedModelDetails: ModelDetails | undefined;
 		do {
-			retryPoisonedConversation = false;
+			retryAttempt = false;
 			attempt += 1;
 			h2Settled = false;
 			sawTurnEnded = false;
@@ -500,6 +512,7 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 				resolveH2 = resolve;
 				rejectH2 = reject;
 			});
+			let attemptSawCheckpoint = false;
 			try {
 				const apiKey = options?.apiKey;
 				if (!apiKey) {
@@ -511,11 +524,21 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 				const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
 				conversationBlobStores.set(conversationId, blobStore);
 				const cachedState = conversationStateCache.get(conversationId);
-				const { requestBytes, conversationState } = await buildGrpcRequest(model, context, options, {
-					conversationId,
-					blobStore,
-					conversationState: cachedState,
-				});
+				const { requestBytes, conversationState, requestedModel, modelDetails } = await buildGrpcRequest(
+					model,
+					context,
+					options,
+					{
+						conversationId,
+						blobStore,
+						conversationState: cachedState,
+						forceResumeAction,
+						pinnedRequestedModel,
+						pinnedModelDetails,
+					},
+				);
+				pinnedRequestedModel ??= requestedModel;
+				pinnedModelDetails ??= modelDetails;
 				conversationStateCache.set(conversationId, conversationState);
 				const requestContextTools = buildMcpToolDefinitions(context.tools);
 
@@ -538,10 +561,33 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 					"x-request-id": randomUUID(),
 				};
 
-				h2Client = http2.connect(baseUrl);
-				h2Client.on("error", (error) => settleH2(mapH2TransportError(error, baseUrl)));
-
-				h2Request = h2Client.request(requestHeaders);
+				const attemptH2Client = http2.connect(baseUrl);
+				h2Client = attemptH2Client;
+				attemptH2Client.on("error", (error) => {
+					if (h2Client !== attemptH2Client) return;
+					const mapped = mapH2TransportError(error, baseUrl);
+					settleH2(
+						sawTurnEnded
+							? mapped
+							: new CursorRetryableStreamError(
+									mapped instanceof Error ? mapped.message : String(mapped),
+									"transport",
+									{ cause: mapped },
+								),
+					);
+				});
+				attemptH2Client.on("goaway", () => {
+					if (h2Client === attemptH2Client && !h2Settled && !sawTurnEnded) {
+						settleH2(new CursorRetryableStreamError("Cursor HTTP/2 session received GOAWAY", "transport"));
+						h2Request?.close();
+					}
+				});
+				attemptH2Client.on("close", () => {
+					if (h2Client === attemptH2Client && !h2Settled && !sawTurnEnded && !endStreamError) {
+						settleH2(new CursorRetryableStreamError("Cursor HTTP/2 session closed", "transport"));
+					}
+				});
+				h2Request = attemptH2Client.request(requestHeaders);
 
 				if (attempt === 1) {
 					stream.push({ type: "start", partial: output });
@@ -580,34 +626,33 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 				openBlockState = state;
 
 				const onConversationCheckpoint = (checkpoint: ConversationStateStructure) => {
+					attemptSawCheckpoint = true;
 					conversationStateCache.set(conversationId!, checkpoint);
 				};
 				const healthFailThresholdMs =
 					options?.streamHealthFailThresholdMs ?? CURSOR_STREAM_HEALTH_FAIL_THRESHOLD_MS;
-				const heartbeatOnlyThresholdMs =
-					options?.streamHealthHeartbeatOnlyThresholdMs ?? CURSOR_STREAM_HEALTH_HEARTBEAT_ONLY_THRESHOLD_MS;
 				let lastInboundFrameAt = Date.now();
-				let lastMeaningfulFrameAt = lastInboundFrameAt;
 				let turnEndCompletionStarted = false;
 				const armStreamHealthTimer = (): void => {
 					if (streamHealthTimer) clearTimeout(streamHealthTimer);
 					if (sawTurnEnded || h2Settled) return;
 					const now = Date.now();
-					const deadline = Math.min(
-						lastInboundFrameAt + healthFailThresholdMs,
-						lastMeaningfulFrameAt + heartbeatOnlyThresholdMs,
-					);
+					const deadline = lastInboundFrameAt + healthFailThresholdMs;
 					streamHealthTimer = setTimeout(
 						() => {
 							streamHealthTimer = null;
 							if (sawTurnEnded || h2Settled) return;
 							const stalledFor = Date.now() - lastInboundFrameAt;
-							const meaningfulStalledFor = Date.now() - lastMeaningfulFrameAt;
-							if (stalledFor < healthFailThresholdMs && meaningfulStalledFor < heartbeatOnlyThresholdMs) {
+							if (stalledFor < healthFailThresholdMs) {
 								armStreamHealthTimer();
 								return;
 							}
-							settleH2(new Error("Cursor stream ended before turnEnded: inbound stream stalled"));
+							settleH2(
+								new CursorRetryableStreamError(
+									"Cursor stream ended before turnEnded: inbound stream stalled",
+									"stall",
+								),
+							);
 							h2Request?.close();
 						},
 						Math.max(0, deadline - now),
@@ -666,11 +711,7 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 									? serverMessage.message.value.message?.case
 									: undefined;
 							const isTurnEnded = interactionUpdateCase === "turnEnded";
-							const isLivenessOnly =
-								interactionUpdateCase === "heartbeat" ||
-								serverMessage.message.case === "conversationCheckpointUpdate";
 							lastInboundFrameAt = Date.now();
-							if (!isLivenessOnly) lastMeaningfulFrameAt = lastInboundFrameAt;
 							armStreamHealthTimer();
 							// Dispatch is fire-and-forget so the socket keeps draining
 							// while a handler runs, but the promise is tracked: `done`
@@ -729,11 +770,24 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 				});
 
 				h2Request.on("end", () => {
+					if (!sawTurnEnded && !endStreamError) {
+						settleH2(new CursorRetryableStreamError("Cursor stream ended before turnEnded", "clean-end"));
+						return;
+					}
 					settleH2();
 				});
 
 				h2Request.on("error", (error) => {
-					settleH2(mapH2TransportError(error, baseUrl));
+					const mapped = mapH2TransportError(error, baseUrl);
+					settleH2(
+						sawTurnEnded
+							? mapped
+							: new CursorRetryableStreamError(
+									mapped instanceof Error ? mapped.message : String(mapped),
+									"transport",
+									{ cause: mapped },
+								),
+					);
 				});
 
 				if (options?.signal) {
@@ -771,6 +825,39 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 				// drain returns immediately. A post-turn drain timeout is already the
 				// bound: do not wait forever a second time in the error path.
 				if (!turnEndDrainTimedOut) await drainInFlightDispatches();
+				const shouldRetryStream = shouldRetryCursorStream({
+					error,
+					retries: streamRetries,
+					maxRetries: options?.streamStallMaxRetries ?? 10,
+					sawTurnEnded,
+					aborted: options?.signal?.aborted === true,
+				});
+				if (shouldRetryStream) {
+					if (openBlockState) {
+						// Resume responses continue from the server checkpoint. Close any
+						// locally open cards before resetting per-attempt bookkeeping; no
+						// speculative replay deduplication is attempted.
+						endCurrentTextBlock(output, stream, openBlockState);
+						endCurrentThinkingBlock(output, stream, openBlockState);
+						flushOpenToolCalls(output, stream, openBlockState);
+					}
+					forceResumeAction ||= attemptSawCheckpoint;
+					const retryDelayMs = cursorStreamRetryDelayMs({
+						attempt: streamRetries,
+						fixedDelayMs: options?.streamStallRetryDelayMs,
+					});
+					streamRetries += 1;
+					retryAttempt = true;
+					await waitForCursorStreamRetry(retryDelayMs, options?.signal);
+					if (options?.signal?.aborted) {
+						retryAttempt = false;
+						output.stopReason = "aborted";
+						output.errorMessage = "Request was aborted";
+						stream.push({ type: "error", reason: output.stopReason, error: output });
+						stream.end();
+					}
+					continue;
+				}
 				// A stream that dies mid-turn leaves blocks open. Closing them here
 				// settles their live cards and pairs the server-owned calls that
 				// nothing else answers — an unpaired call is stripped from every
@@ -817,13 +904,13 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 							if (cached) conversationStateCache.set(decision.wireId, cached);
 							const blobs = conversationBlobStores.get(conversationId);
 							if (blobs) conversationBlobStores.set(decision.wireId, blobs);
-							retryPoisonedConversation = true;
+							retryAttempt = true;
 						} else {
 							message = CURSOR_CONVERSATION_POISONED_MESSAGE;
 						}
 					}
 				}
-				if (!retryPoisonedConversation) {
+				if (!retryAttempt) {
 					output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 					output.errorMessage = message;
 					stream.push({ type: "error", reason: output.stopReason, error: output });
@@ -839,7 +926,7 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 				h2Request = null;
 				h2Client = null;
 			}
-		} while (retryPoisonedConversation);
+		} while (retryAttempt);
 	})();
 
 	return stream;
@@ -4089,11 +4176,16 @@ async function buildGrpcRequest(
 		conversationId: string;
 		blobStore: Map<string, Uint8Array>;
 		conversationState?: ConversationStateStructure;
+		forceResumeAction?: boolean;
+		pinnedRequestedModel?: RequestedModel;
+		pinnedModelDetails?: ModelDetails;
 	},
 ): Promise<{
 	requestBytes: Uint8Array;
 	blobStore: Map<string, Uint8Array>;
 	conversationState: ConversationStateStructure;
+	requestedModel: RequestedModel;
+	modelDetails: ModelDetails;
 }> {
 	const blobStore = state.blobStore;
 
@@ -4119,7 +4211,7 @@ async function buildGrpcRequest(
 
 	const action = create(ConversationActionSchema, {
 		action:
-			userContent && (userText.trim().length > 0 || hasUserImages)
+			!state.forceResumeAction && userContent && (userText.trim().length > 0 || hasUserImages)
 				? {
 						case: "userMessageAction",
 						value: create(UserMessageActionSchema, {
@@ -4180,15 +4272,17 @@ async function buildGrpcRequest(
 		turns,
 	});
 
-	const requestedModel = buildRequestedModel(model, options?.thinkingSelection);
+	const requestedModel = state.pinnedRequestedModel ?? buildRequestedModel(model, options?.thinkingSelection);
 	const wireModelId = requestedModel.modelId;
 	const cursorMaxMode = model.compat?.cursorMaxMode === true;
-	const modelDetails = create(ModelDetailsSchema, {
-		modelId: wireModelId,
-		displayModelId: model.id,
-		displayName: model.name,
-		...(cursorMaxMode ? { maxMode: true } : undefined),
-	});
+	const modelDetails =
+		state.pinnedModelDetails ??
+		create(ModelDetailsSchema, {
+			modelId: wireModelId,
+			displayModelId: model.id,
+			displayName: model.name,
+			...(cursorMaxMode ? { maxMode: true } : undefined),
+		});
 
 	const runRequest = create(AgentRunRequestSchema, {
 		conversationState,
@@ -4215,7 +4309,7 @@ async function buildGrpcRequest(
 		tools: context.tools?.length ?? 0,
 	});
 
-	return { requestBytes, blobStore, conversationState };
+	return { requestBytes, blobStore, conversationState, requestedModel, modelDetails };
 }
 
 function hasImages(content: (TextContent | ImageContent)[]): boolean {
