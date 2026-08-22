@@ -93,6 +93,7 @@ interface ModeContext {
 	getSessionLogger: () => ModeContext["sessionLogger"];
 	ui: { requestRender: () => void };
 	showStatus: MockFn;
+	clearStatusIndicator: MockFn;
 	showError: (message: string) => void;
 	showWarning: (message: string) => void;
 	hideShortcutOverlay: () => void;
@@ -203,6 +204,7 @@ function createModeContext(): ModeContext {
 			getSessionLogger: () => sessionLogger,
 			ui: { requestRender: vi.fn() },
 			showStatus: vi.fn(),
+			clearStatusIndicator: vi.fn(),
 			showError: vi.fn(),
 			showWarning: vi.fn(),
 			hideShortcutOverlay: vi.fn(),
