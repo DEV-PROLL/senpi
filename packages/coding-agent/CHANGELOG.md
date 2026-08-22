@@ -16,6 +16,8 @@
 
 ### Changed
 
+- Automatic startup selection for the built-in OpenAI and Codex providers now defaults to GPT-5.6 Sol instead of GPT-5.5. Explicitly saved GPT-5.5 selections remain supported.
+
 ### Removed
 
 ## [2026.8.22] - 2026-08-22
