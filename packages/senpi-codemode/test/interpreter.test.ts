@@ -22,6 +22,7 @@ describe("interpreter detection", () => {
 	it("falls through per-platform candidates and rejects empty Store-alias output", async () => {
 		const detector = createInterpreterDetector({
 			platform: "win32",
+			resolveCommandPath: () => undefined,
 			execFile: stubProbe(
 				new Map([
 					["python --version", ""],
@@ -36,6 +37,7 @@ describe("interpreter detection", () => {
 	it("returns unavailable for missing and timed-out interpreters without throwing", async () => {
 		const detector = createInterpreterDetector({
 			platform: "linux",
+			resolveCommandPath: () => undefined,
 			execFile: stubProbe(
 				new Map([
 					["ruby --version", new Error("ENOENT")],
@@ -56,6 +58,7 @@ describe("interpreter detection", () => {
 		// the skip-if-absent jl tests hid it.
 		const detector = createInterpreterDetector({
 			platform: "linux",
+			resolveCommandPath: () => undefined,
 			execFile: stubProbe(new Map([["julia --version", "julia version 1.12.6"]])),
 		});
 
