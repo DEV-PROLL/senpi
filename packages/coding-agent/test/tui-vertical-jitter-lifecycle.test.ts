@@ -11,6 +11,15 @@ const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent(event
 const clearStatusIndicator = (
 	InteractiveMode.prototype as unknown as { clearStatusIndicator(kind?: "working" | "retry"): void }
 ).clearStatusIndicator;
+const buildMainLoopPromptOptions = (
+	InteractiveMode.prototype as unknown as {
+		buildMainLoopPromptOptions(userInput: { text: string; pendingEchoId: string }): {
+			streamingBehavior: "steer";
+			preflightResult(success: boolean): void;
+			promptDisposition(disposition: "handled" | "queued" | "started"): void;
+		};
+	}
+).buildMainLoopPromptOptions;
 
 type Surface = {
 	activeStatusIndicator: { kind: "working"; dispose(): void } | undefined;
@@ -135,6 +144,17 @@ function deferredContinuation(pi: ExtensionAPI): void {
 	});
 }
 
+// Settlement-deferred continuation via the always-triggering sendUserMessage API,
+// which must ALSO hold off agent_idle until its turn starts (blocker B2b).
+function deferredUserContinuation(pi: ExtensionAPI): void {
+	let sent = false;
+	pi.on("agent_settled", () => {
+		if (sent) return;
+		sent = true;
+		pi.sendUserMessage("settlement user continuation", { deliverAs: "followUp" });
+	});
+}
+
 describe("real AgentSession vertical-jitter lifecycle", () => {
 	const harnesses: Harness[] = [];
 	afterEach(() => {
@@ -147,6 +167,30 @@ describe("real AgentSession vertical-jitter lifecycle", () => {
 		harness.setResponses([fauxAssistantMessage("first"), fauxAssistantMessage("continued")]);
 		await harness.session.prompt("start");
 		await harness.session.waitForIdle();
+
+		expect(lifecycle(harness.events)).toEqual([
+			"agent_start",
+			"agent_end",
+			"agent_settled",
+			"agent_start",
+			"agent_end",
+			"agent_settled",
+			"agent_idle",
+		]);
+	});
+
+	it("C6 keeps settlement-deferred sendUserMessage ownership between settled and start", async () => {
+		const harness = await createHarness({ extensionFactories: [deferredUserContinuation] });
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("first"), fauxAssistantMessage("continued")]);
+		await harness.session.prompt("start");
+		// The deferred sendUserMessage turn holds a session-work barrier token while
+		// it awaits admission; drain that, then let the final settlement flush the
+		// queued agent_idle microtask.
+		await harness.session.waitForIdle();
+		await harness.session.waitForSettledSessionWork().catch(() => {});
+		await harness.session.waitForIdle();
+		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		expect(lifecycle(harness.events)).toEqual([
 			"agent_start",
@@ -191,21 +235,17 @@ describe("real AgentSession vertical-jitter lifecycle", () => {
 		harnesses.push(harness);
 		const surface = createSurface(harness.session);
 		surface.agentIdle = true;
-		// Drive the exact disposition composition the main input loop wires in
-		// interactive-mode.ts: echo callbacks plus a dock clear on "handled" while idle.
-		const echoOptions = surface.optimisticUserEchoes.promptOptions("echo-1");
+		// Drive the REAL production composition from the main input loop
+		// (interactive-mode.ts buildMainLoopPromptOptions). Deleting the production
+		// handled-clear makes this test fail; nothing is duplicated here.
+		const options = buildMainLoopPromptOptions.call(surface, { text: "blocked", pendingEchoId: "echo-1" });
 		let disposition: string | undefined;
-		await harness.session.prompt("blocked", {
-			preflightResult: echoOptions.preflightResult,
-			promptDisposition: (value) => {
-				disposition = value;
-				echoOptions.promptDisposition(value);
-				if (value === "handled" && surface.agentIdle) {
-					surface.clearStatusIndicator("working");
-					surface.ui.requestRender();
-				}
-			},
-		});
+		const realDisposition = options.promptDisposition;
+		options.promptDisposition = (value) => {
+			disposition = value;
+			realDisposition(value);
+		};
+		await harness.session.prompt("blocked", options);
 		expect(disposition).toBe("handled");
 		expect(surface.statusContainer.render(80)).toHaveLength(0);
 	});

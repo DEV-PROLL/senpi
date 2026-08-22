@@ -3931,6 +3931,7 @@ export class AgentSession {
 			deliverAs?: "steer" | "followUp";
 			expandPromptTemplates?: boolean;
 		},
+		deferredTurnClaim?: DeferredTurnClaim,
 	): Promise<void> {
 		const bindingPromptReadiness = this._extensionBindingPromptReadiness;
 		let resolveBindingPromptReadiness: (() => void) | undefined;
@@ -3974,6 +3975,8 @@ export class AgentSession {
 				source: "extension",
 				promptDisposition: (nextDisposition) => {
 					disposition = nextDisposition;
+					if (nextDisposition === "started") deferredTurnClaim?.resolve("started");
+					else if (nextDisposition === "queued") deferredTurnClaim?.resolve("delegated");
 					resolveBindingPromptReadiness?.();
 				},
 				onSessionWorkReady: waitForExistingSessionWork
@@ -3995,6 +3998,9 @@ export class AgentSession {
 			}
 			throw error;
 		} finally {
+			// A path that neither started nor delegated a turn (handled, rejected,
+			// admission failure, cancellation) resolves as finished-without-start.
+			deferredTurnClaim?.resolve("finished-without-start");
 			resolveBindingPromptReadiness?.();
 			finishSessionWork?.();
 		}
@@ -6188,13 +6194,23 @@ export class AgentSession {
 					send();
 				},
 				sendUserMessage: (content, options) => {
-					this.sendUserMessage(content, options).catch((err) => {
+					const reportError = (err: unknown) => {
 						runner.emitError({
 							extensionPath: RUNTIME_EXTENSION_PATH,
 							event: "send_user_message",
 							error: err instanceof Error ? err.message : String(err),
 						});
-					});
+					};
+					// sendUserMessage always triggers a turn; register a settlement-deferred
+					// turn claim so agent_idle is not emitted before its deferred agent_start.
+					if (
+						this._agentSettledDelivery.deferTriggerTurn((claim) => {
+							this.sendUserMessage(content, options, claim).catch(reportError);
+						})
+					) {
+						return;
+					}
+					this.sendUserMessage(content, options).catch(reportError);
 				},
 				appendEntry: (customType, data) => {
 					const entryId = this.sessionManager.appendCustomEntry(customType, data);

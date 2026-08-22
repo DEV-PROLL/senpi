@@ -1637,19 +1637,7 @@ export class InteractiveMode {
 		while (true) {
 			const userInput = await this.getUserInput();
 			try {
-				const echoOptions = this.optimisticUserEchoes.promptOptions(userInput.pendingEchoId);
-				await this.session.prompt(userInput.text, {
-					streamingBehavior: "steer",
-					...(userInput.images ? { images: userInput.images } : {}),
-					preflightResult: echoOptions.preflightResult,
-					promptDisposition: (disposition) => {
-						echoOptions.promptDisposition(disposition);
-						if (disposition === "handled" && this.agentIdle) {
-							this.clearStatusIndicator("working");
-							this.ui.requestRender();
-						}
-					},
-				});
+				await this.session.prompt(userInput.text, this.buildMainLoopPromptOptions(userInput));
 			} catch (error: unknown) {
 				this.optimisticUserEchoes.reject(userInput.pendingEchoId);
 				this.clearStatusIndicator("working");
@@ -5369,6 +5357,32 @@ export class InteractiveMode {
 				resolve(input);
 			};
 		});
+	}
+
+	// Build the session.prompt options for a main-loop submission. The optimistic echo
+	// keeps only a prompt that actually started; a buffered prompt consumed by an input
+	// extension with action "handled" clears the retained working dock, but only once
+	// agent_idle has fired (the agentIdle latch) so a settlement-deferred continuation
+	// still in admission keeps its dock.
+	private buildMainLoopPromptOptions(userInput: InteractiveUserInput): {
+		streamingBehavior: "steer";
+		images?: InteractiveUserInput["images"];
+		preflightResult: (success: boolean) => void;
+		promptDisposition: (disposition: "handled" | "queued" | "started") => void;
+	} {
+		const echoOptions = this.optimisticUserEchoes.promptOptions(userInput.pendingEchoId);
+		return {
+			streamingBehavior: "steer",
+			...(userInput.images ? { images: userInput.images } : {}),
+			preflightResult: echoOptions.preflightResult,
+			promptDisposition: (disposition) => {
+				echoOptions.promptDisposition(disposition);
+				if (disposition === "handled" && this.agentIdle) {
+					this.clearStatusIndicator("working");
+					this.ui.requestRender();
+				}
+			},
+		};
 	}
 
 	private rebuildChatFromMessages(): void {

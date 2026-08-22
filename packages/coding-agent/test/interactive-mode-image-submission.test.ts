@@ -124,6 +124,7 @@ interface ModeContext {
 	queueCompactionSubmission?: (text: string, mode: "steer" | "followUp") => void;
 	queueCompactionMessage?: (text: string, mode: "steer" | "followUp", droppedImageCount?: number) => void;
 	getUserInput?: () => Promise<UserSubmission>;
+	buildMainLoopPromptOptions?: (userInput: UserSubmission) => unknown;
 	isExtensionCommand?: (text: string) => boolean;
 	getExpandedEditorText?: () => string;
 }
@@ -144,6 +145,7 @@ type ModePrototype = {
 		droppedImageCount?: number,
 	): void;
 	takeSubmissionImages(this: ModeContext, submittedText: string): ImageContent[];
+	buildMainLoopPromptOptions(this: ModeContext, userInput: UserSubmission): unknown;
 	isExtensionCommand(this: ModeContext, text: string): boolean;
 	getExpandedEditorText(this: ModeContext): string;
 };
@@ -236,6 +238,7 @@ function createModeContext(): ModeContext {
 		"isExtensionCommand",
 		"getExpandedEditorText",
 		"getUserInput",
+		"buildMainLoopPromptOptions",
 	] as const) {
 		const real = proto[method] as unknown as ((this: ModeContext, ...args: never[]) => unknown) | undefined;
 		if (typeof real === "function") {
