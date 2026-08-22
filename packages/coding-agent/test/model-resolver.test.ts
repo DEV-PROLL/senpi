@@ -697,8 +697,8 @@ describe("resolveCliModel", () => {
 
 describe("default model selection", () => {
 	test("openai defaults track current models", () => {
-		expect(defaultModelPerProvider.openai).toBe("gpt-5.5");
-		expect(defaultModelPerProvider["openai-codex"]).toBe("gpt-5.5");
+		expect(defaultModelPerProvider.openai).toBe("gpt-5.6-sol");
+		expect(defaultModelPerProvider["openai-codex"]).toBe("gpt-5.6-sol");
 	});
 
 	test("zai, minimax, cerebras, and ant-ling defaults track current models", () => {
@@ -929,17 +929,23 @@ describe("default model selection", () => {
 			contextWindow: 128000,
 			maxTokens: 8192,
 		};
+		const openAiRecommended = {
+			...openAiDefault,
+			id: "gpt-5.6-sol",
+		};
 		const custom: Model<"anthropic-messages"> = {
 			...openAiDefault,
 			id: "custom-model",
 			provider: "custom",
 		};
 		const runtime = {
-			getModels: () => [openAiDefault, custom],
+			getModels: () => [openAiDefault, openAiRecommended, custom],
 			getModel: (provider: string, modelId: string) =>
-				[openAiDefault, custom].find((candidate) => candidate.provider === provider && candidate.id === modelId),
+				[openAiDefault, openAiRecommended, custom].find(
+					(candidate) => candidate.provider === provider && candidate.id === modelId,
+				),
 			hasConfiguredAuth: () => true,
-			getAvailable: async () => [openAiDefault, custom],
+			getAvailable: async () => [openAiDefault, openAiRecommended, custom],
 		} as unknown as Parameters<typeof findInitialModel>[0]["modelRuntime"];
 
 		const cli = await findInitialModel({
@@ -957,8 +963,8 @@ describe("default model selection", () => {
 		const settings = await findInitialModel({
 			scopedModels: [],
 			isContinuing: false,
-			defaultProvider: "custom",
-			defaultModelId: "custom-model",
+			defaultProvider: "openai",
+			defaultModelId: "gpt-5.5",
 			modelRuntime: runtime,
 		});
 		const providerDefault = await findInitialModel({
@@ -978,7 +984,9 @@ describe("default model selection", () => {
 
 		expect(cli.provenance).toBe("cli");
 		expect(scoped.provenance).toBe("scoped");
+		expect(settings.model?.id).toBe("gpt-5.5");
 		expect(settings.provenance).toBe("settings");
+		expect(providerDefault.model?.id).toBe("gpt-5.6-sol");
 		expect(providerDefault.provenance).toBe("provider-default");
 		expect(firstAvailable.provenance).toBe("first-available");
 	});
