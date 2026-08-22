@@ -1643,6 +1643,7 @@ export class InteractiveMode {
 				});
 			} catch (error: unknown) {
 				this.optimisticUserEchoes.reject(userInput.pendingEchoId);
+				this.clearStatusIndicator("working");
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
 			}
@@ -2970,13 +2971,18 @@ export class InteractiveMode {
 		}
 		const hadActiveStatusIndicator = this.activeStatusIndicator !== undefined;
 		const isClearingWorking = this.activeStatusIndicator?.kind === "working";
+		const shouldReserveHeight =
+			hadActiveStatusIndicator && this.options.tuiMode === "regular" && this.ui.getClearOnShrink();
+		const renderedHeight = shouldReserveHeight ? this.statusContainer.render(this.ui.terminal.columns).length : 0;
 		this.activeStatusIndicator?.dispose();
 		this.activeStatusIndicator = undefined;
 		if (isClearingWorking) {
 			this.workingStartedAt = undefined;
 		}
 		this.statusContainer.clear();
-		if (hadActiveStatusIndicator && this.options.tuiMode === "regular" && this.ui.getClearOnShrink()) {
+		if (shouldReserveHeight) {
+			const idleHeight = Math.min(this.ui.terminal.rows, Math.max(1, renderedHeight || 2));
+			this.idleStatus.setHeight(idleHeight);
 			this.statusContainer.addChild(this.idleStatus);
 		}
 	}
@@ -4480,7 +4486,6 @@ export class InteractiveMode {
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(false);
 				}
-				this.clearStatusIndicator("working");
 				this.clearActiveToolExecutionStatus();
 				this.clearToolHookStatuses();
 				this.streamingReveal.stop();
@@ -4497,6 +4502,9 @@ export class InteractiveMode {
 				break;
 
 			case "agent_settled":
+				if (this.pendingUserInputs.length === 0) {
+					this.clearStatusIndicator("working");
+				}
 				await this.checkShutdownRequested();
 				break;
 
