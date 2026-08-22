@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Goal cache-warm notices now render the expected wake time in the user's local system timezone with a short zone label (for example `ready 2026-08-22 16:51 GMT+9 (4m 30s)`), falling back to the legacy UTC shape when local timezone formatting is unavailable ([#1074](https://github.com/code-yeongyu/senpi/pull/1074)).
+
 ### Added
 
 ### Changed

@@ -1,5 +1,36 @@
 # goal Extension Changes
 
+## Cache-warm ready time renders in the local timezone (2026-08-22)
+
+### What changed
+
+- `cache-warm.ts` gains `formatWakeTimestamp(dueAtMs)`: it formats the expected
+  wake time in the user's local system timezone via `Intl.DateTimeFormat`
+  (`en-CA`, `hourCycle: "h23"`, short `timeZoneName`), producing
+  `2026-08-22 16:51 GMT+9`-style stamps, and falls back to the legacy
+  `<iso> UTC` shape when local formatting throws or returns incomplete parts.
+- `cache-warm-renderer.ts` `formatExpectedWake` now delegates to
+  `formatWakeTimestamp` instead of pinning `toISOString()` UTC output.
+
+### Why
+
+- The cache-warm notice showed `ready 2026-08-22 07:51 UTC (4m 30s)` regardless
+  of the user's timezone, forcing mental conversion on every wait. Users read
+  the line to know when the goal resumes; local time with a zone label answers
+  directly, and UTC remains the fallback for platforms without ICU timezone
+  data.
+
+### Why an extension could not handle it
+
+- The renderer and its formatting helpers live inside the builtin goal
+  extension itself; the change is the extension's own display logic, not a new
+  capability another extension could provide.
+
+### Expected merge conflict zones
+
+- None upstream: `cache-warm.ts` and `cache-warm-renderer.ts` are fork-only
+  files with no pi-mono counterpart.
+
 ## Reload re-engages active goals instead of parking them (2026-08-18, fixes #934)
 
 ### What changed
