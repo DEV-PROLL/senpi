@@ -20,10 +20,16 @@ import { handleBootstrapSelfUpdate } from "./self-update-bootstrap.ts";
  * Node `execArgv` is deliberately dropped — those flags belong to the Node process, not to Bun.
  */
 function reexecUnderBunIfNeeded(): boolean {
-	const scriptPath = process.argv[1] ?? fileURLToPath(import.meta.url);
 	const options = processBunRuntimeOptions(existsSync, realpathSync);
+	let scriptRealPath = process.argv[1] ?? fileURLToPath(import.meta.url);
+	try {
+		// `~/.bun/bin/<name>` is a symlink into the global tree, so the link target is what has
+		// to be classified and re-executed. A path that cannot be resolved is simply used as-is;
+		// runtime selection must never be the reason startup fails.
+		scriptRealPath = realpathSync(scriptRealPath);
+	} catch {}
 	const decision = resolveBunReexec({
-		scriptRealPath: options.realpath(scriptPath),
+		scriptRealPath,
 		versions: process.versions,
 		hasInheritedInspectorOption: hasInheritedInspectorOption(),
 		options,
@@ -31,7 +37,7 @@ function reexecUnderBunIfNeeded(): boolean {
 	if (decision.action === "stay") {
 		return false;
 	}
-	const result = spawnSync(decision.bunPath, [options.realpath(scriptPath), ...process.argv.slice(2)], {
+	const result = spawnSync(decision.bunPath, [scriptRealPath, ...process.argv.slice(2)], {
 		stdio: "inherit",
 		windowsHide: true,
 	});
