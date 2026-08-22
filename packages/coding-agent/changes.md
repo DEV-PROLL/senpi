@@ -1,24 +1,5 @@
 # Local fork changes
 
-## Retarget OpenAI automatic defaults to GPT-5.6 Sol (2026-08-22)
-
-### What changed
-
-- `packages/coding-agent/src/core/model-resolver.ts`: retargeted the `openai` and `openai-codex` provider defaults from `gpt-5.5` to `gpt-5.6-sol` while retaining GPT-5.5 in catalogs and explicit settings resolution.
-
-### Why
-
-- Automatic startup recommendation should follow the current recommended GPT-5.6 Sol model; saved GPT-5.5 selections remain explicitly selectable.
-
-### Why an extension could not handle it
-
-- `defaultModelPerProvider` is consumed by core initial-model resolution before extension recommendations are applied.
-
-### Expected merge conflict zones
-
-- LOW: the OpenAI provider entries in `packages/coding-agent/src/core/model-resolver.ts`.
-
-
 ## Coding-agent dependency refresh and generated install-lock update (2026-08-20)
 
 ### What changed
