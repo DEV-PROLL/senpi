@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Fixed a session-liveness wait that could pin a CPU core at 100% by resampling settled promises in a tight microtask loop; it now yields a real event-loop turn when a queued work item does not converge, restoring RPC responsiveness under load ([#1084](https://github.com/code-yeongyu/senpi/pull/1084)).
 - The interactive TUI now keeps the working dock painted across adjacent and locally buffered turns, and clears it on the new core `agent_idle` event - emitted only after settlement-deferred turns (TTSR, loop-guard, goal recovery) resolve without starting a run - so the editor/footer no longer bounce at queued-turn boundaries. A buffered prompt consumed with `action: "handled"` (for example a `UserPromptSubmit` hook block) also clears the retained dock, prompt admission failure clears it, and clear-on-shrink reserves the dock's measured height, together eliminating the vertical jitter.
 
 - Goal cache-warm notices now render the expected wake time in the user's local system timezone with a short zone label (for example `ready 2026-08-22 16:51 GMT+9 (4m 30s)`), falling back to the legacy UTC shape when local timezone formatting is unavailable ([#1074](https://github.com/code-yeongyu/senpi/pull/1074)).
