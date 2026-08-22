@@ -158,7 +158,9 @@ describe("Anthropic cache checkpoints", () => {
 			],
 		};
 
-		expect(markedToolResultIds(buildAnthropicWarmPromptCacheParams(model, firstToolLoop))).toEqual([FIRST_TOOL_USE_ID]);
+		expect(markedToolResultIds(buildAnthropicWarmPromptCacheParams(model, firstToolLoop))).toEqual([
+			FIRST_TOOL_USE_ID,
+		]);
 		expect(markedToolResultIds(buildAnthropicWarmPromptCacheParams(model, secondToolLoop))).toEqual([
 			FIRST_TOOL_USE_ID,
 			SECOND_TOOL_USE_ID,
