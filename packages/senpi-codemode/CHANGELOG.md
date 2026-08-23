@@ -12,6 +12,20 @@
 
 ### Removed
 
+## [2026.8.23] - 2026-08-23
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Detached eval cell completion notices no longer enter the user-input steering queue. They were delivered via `sendUserMessage`, so hosts projecting that queue (e.g. the OmO desktop composer) rendered the raw `<system-reminder>Detached eval cell …</system-reminder>` notice under the STEERING heading as if the user had typed and queued it. Notices now deliver via `sendMessage` with `customType: "senpi-codemode:notification"` and `display: false` — model-visible, never painted as user input — matching the terminal and monitor notification contract.
+
+### Removed
+
 ## [2026.8.22-2] - 2026-08-22
 
 ### Breaking Changes

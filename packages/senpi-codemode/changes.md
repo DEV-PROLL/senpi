@@ -1,5 +1,27 @@
 # senpi-codemode fork changes
 
+## Detached-cell notices deliver as internal custom messages (2026-08-23)
+
+### What changed
+
+- `packages/senpi-codemode/src/extension/eval-notifier.ts` now delivers detached-cell completion notices through `sendMessage` with the new `EVAL_NOTIFICATION_CUSTOM_TYPE` (`senpi-codemode:notification`) and `display: false`, instead of `sendUserMessage`. Wake/next-turn mode still selects `steer` vs `followUp`, and delivery stays once-per-cell per session generation.
+- `CodemodeExtensionAPI` requires `sendMessage` in place of `sendUserMessage`; the host binding forwards to `pi.sendMessage`.
+
+### Why
+
+- `sendUserMessage` enqueues into the same steering queue that holds real user input, and that queue carries no provenance. A host projecting it (the OmO desktop composer) rendered the raw `<system-reminder>Detached eval cell ... cancelled.` notice under its STEERING heading as if the user had typed and queued it.
+- The sibling injectors already solved this: terminal (`senpi-terminal:notification`), monitor (`senpi-monitor:notification`), and loop-guard notices all use `sendMessage` with a `customType`, documented as "deliver a model-visible notification without rendering synthetic user input". The eval notifier was the sole caller still using the user-input door, so this aligns it with the existing contract rather than adding a new mechanism.
+
+### Why an extension could not handle it
+
+- The notifier is owned by this package and constructed during its extension factory wiring; the delivery door it calls is chosen inside `senpiCodemode`, so no downstream extension can redirect it.
+
+### Expected merge conflict zones
+
+- LOW in `src/extension/eval-notifier.ts` around the deps interface and the notify body.
+- LOW in `src/index.ts` around the `CodemodeExtensionAPI` surface and the notifier construction.
+- LOW in the codemode test fakes that implement the host API surface.
+
 ## Subprocess readiness gates cell execution (2026-08-21)
 
 ### What changed
