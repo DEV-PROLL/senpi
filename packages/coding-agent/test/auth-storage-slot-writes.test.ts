@@ -118,6 +118,27 @@ describe("AuthStorage slot-preserving writes", () => {
 		expect(readAuthJson().openai).toMatchObject({ type: "api_key", key: "legacy-key" });
 	});
 
+	test("set on a pooled provider appends the credential without destroying siblings", () => {
+		writeAuthJson({ openai: flatEntryWithTwoSiblingSlots() });
+		const storage = AuthStorage.create(authJsonPath);
+
+		storage.set("openai", { type: "api_key", key: "rpc-login-key" });
+
+		const entry = readAuthJson().openai;
+		expect(entry?.accounts?.map((slot) => slot.name)).toEqual(["default", "work", "login-2"]);
+		expect(entry?.accounts?.find((slot) => slot.name === "work")).toMatchObject({ key: "work-key" });
+		expect(entry?.pinned).toBe("work");
+	});
+
+	test("set on a flat provider keeps today's whole-write shape", () => {
+		writeAuthJson({ openai: { type: "api_key", key: "legacy-key" } });
+		const storage = AuthStorage.create(authJsonPath);
+
+		storage.set("openai", { type: "api_key", key: "replaced-key" });
+
+		expect(readAuthJson().openai).toEqual({ type: "api_key", key: "replaced-key" });
+	});
+
 	test("reading a flat credential never rewrites auth.json", () => {
 		writeAuthJson({ openai: { type: "api_key", key: "legacy-key" } });
 		const before = readFileSync(authJsonPath, "utf-8");

@@ -19,6 +19,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { findEnvKeys, getEnvApiKey } from "@earendil-works/pi-ai";
 import {
+	appendLoginSlot,
 	type CredentialSlot,
 	listSlots,
 	type PooledCredential,
@@ -454,7 +455,9 @@ export class AuthStorage implements CredentialStore {
 
 	set(provider: string, credential: Credential): void {
 		this.storage.withLock((content) => {
-			const nextData = { ...this.parseStorageData(content), [provider]: credential };
+			const currentData = this.parseStorageData(content);
+			const next = appendLoginSlot(currentData[provider], credential);
+			const nextData = { ...currentData, [provider]: next };
 			this.data = nextData;
 			return { result: undefined, next: JSON.stringify(nextData, null, 2) };
 		});

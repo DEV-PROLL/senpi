@@ -68,7 +68,11 @@ export function findSlot(credential: PooledCredential | undefined, name: string)
  */
 export function upsertSlot(credential: PooledCredential | undefined, slot: CredentialSlot): PooledCredential {
 	assertValidSlotName(slot.name);
-	const base: PooledCredential = credential ?? { type: slot.key !== undefined ? "api_key" : "oauth" };
+	const base: PooledCredential =
+		credential ??
+		(slot.access !== undefined || slot.refresh !== undefined
+			? { type: "oauth", access: slot.access ?? "", refresh: slot.refresh ?? "", expires: slot.expires ?? 0 }
+			: { type: "api_key", key: slot.key });
 	const existing = listSlots(base);
 	const index = existing.findIndex((candidate) => candidate.name === slot.name);
 	const accounts =
@@ -95,4 +99,61 @@ export function removeSlot(credential: PooledCredential | undefined, name: strin
 export function pinSlot(credential: PooledCredential, name: string): PooledCredential {
 	assertValidSlotName(name);
 	return { ...credential, pinned: name };
+}
+
+function slotFromFlatCredentialNamed(credential: Credential, name: string): CredentialSlot {
+	if (credential.type === "oauth") {
+		return {
+			name,
+			source: "login",
+			access: credential.access,
+			refresh: credential.refresh,
+			expires: credential.expires,
+		};
+	}
+	return { name, source: "login", key: credential.key };
+}
+
+function nextLoginSlotName(credential: PooledCredential): string {
+	const taken = new Set(listSlots(credential).map((slot) => slot.name));
+	for (let index = 2; index < 1000; index++) {
+		const candidate = `login-${index}`;
+		if (!taken.has(candidate)) return candidate;
+	}
+	throw new Error("Credential pool is full");
+}
+
+/**
+ * Appends an unnamed flat credential to a pool as a generated `login-N` slot. A
+ * flat or absent current entry keeps today's whole-write shape so no existing
+ * user's stored bytes change until a second credential actually exists.
+ */
+export function appendLoginSlot(current: PooledCredential | undefined, flat: Credential): Credential {
+	if (!current || !Array.isArray(current.accounts) || current.accounts.length === 0) {
+		return flat;
+	}
+	return upsertSlot(current, slotFromFlatCredentialNamed(flat, nextLoginSlotName(current)));
+}
+
+/**
+ * Merges a rotated OAuth credential back into the pool: the slot whose material
+ * matches the pre-refresh flat fields is updated in place together with those
+ * flat fields, while every sibling and the pin survive byte-identical. A flat
+ * current entry keeps today's whole-write shape.
+ */
+export function mergeRefreshed(current: PooledCredential, refreshed: Credential): Credential {
+	if (!Array.isArray(current.accounts) || current.accounts.length === 0) {
+		return refreshed;
+	}
+	if (refreshed.type !== "oauth" || current.type !== "oauth") return refreshed;
+	const target = current.accounts.find((slot) => slot.access === current.access || slot.refresh === current.refresh);
+	const rotated = {
+		access: refreshed.access,
+		refresh: refreshed.refresh,
+		expires: refreshed.expires,
+	};
+	const accounts = target
+		? current.accounts.map((slot) => (slot === target ? { ...slot, ...rotated } : slot))
+		: current.accounts;
+	return { ...current, ...rotated, accounts };
 }
