@@ -40,6 +40,10 @@ Vendored from [`code-yeongyu/pi-webfetch`](https://github.com/code-yeongyu/pi-we
 
 - The upstream [`pi-webfetch` PR #7](https://github.com/code-yeongyu/pi-webfetch/pull/7) identified the remaining lifecycle edge: destroying immediately can leave a readable body undrained, and a failing stream can emit an unhandled error while it is being destroyed. This adaptation preserves the bounded `dump()` path while adopting the safer drain-and-guard behavior for Bun-compatible bodies.
 
+### Why an extension could not handle it
+
+- Redirect and oversized-response disposal happen inside the vendored fetcher's private request loop before the registered webfetch tool receives a response, so downstream extension hooks cannot replace this cleanup.
+
 ### Expected merge conflict zones
 
 - LOW in `packages/coding-agent/src/core/extensions/builtin/webfetch/webfetch/fetcher.ts` at the import and cleanup call sites, and in the new `response-body.ts` cleanup module.
