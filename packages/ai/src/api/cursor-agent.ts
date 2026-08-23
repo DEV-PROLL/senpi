@@ -20,6 +20,7 @@ import { createHash, randomUUID } from "node:crypto";
 import * as http2 from "node:http2";
 import { create, fromBinary, fromJson, type JsonValue as PbJsonValue, toBinary, toJson } from "@bufbuild/protobuf";
 import { ValueSchema } from "@bufbuild/protobuf/wkt";
+import { CURSOR_COMPOSER_PROMPT, isCursorComposerModel } from "../cursor/composer-prompt.ts";
 import { calculateCost } from "../models.ts";
 import type {
 	Api,
@@ -3847,13 +3848,20 @@ function findLastUserMessageIndex(messages: Message[]): number {
  * Build one Cursor system-message JSON blob per system prompt. When no system
  * prompt is provided, returns a single default greeting so we never emit an
  * empty `rootPromptMessagesJson` head.
+ *
+ * Composer models get their operating prefix as its own leading blob rather
+ * than concatenated into the host prompt, so Cursor's per-blob prompt cache
+ * keeps the prefix stable while the host prompt changes underneath it.
  */
-export function buildCursorSystemPromptJsons(systemPrompt: string | undefined): string[] {
+export function buildCursorSystemPromptJsons(systemPrompt: string | undefined, modelId?: string): string[] {
 	const trimmed = systemPrompt?.trim();
-	if (!trimmed) {
-		return [JSON.stringify({ role: "system", content: "You are a helpful assistant." })];
+	const host = trimmed
+		? [JSON.stringify({ role: "system", content: trimmed })]
+		: [JSON.stringify({ role: "system", content: "You are a helpful assistant." })];
+	if (modelId !== undefined && isCursorComposerModel(modelId)) {
+		return [JSON.stringify({ role: "system", content: CURSOR_COMPOSER_PROMPT }), ...host];
 	}
-	return [JSON.stringify({ role: "system", content: trimmed })];
+	return host;
 }
 
 /**
@@ -4189,7 +4197,7 @@ async function buildGrpcRequest(
 }> {
 	const blobStore = state.blobStore;
 
-	const systemPromptIds = buildCursorSystemPromptJsons(context.systemPrompt).map((json) =>
+	const systemPromptIds = buildCursorSystemPromptJsons(context.systemPrompt, model.id).map((json) =>
 		storeCursorBlob(blobStore, new TextEncoder().encode(json)),
 	);
 

@@ -6,6 +6,8 @@
 
 ### Added
 
+- Cursor Composer models receive an operating prefix as their own leading system blob, carrying this client's native tool vocabulary and completion rules in place of the Cursor-harness habits they were trained on. Other Cursor models keep their existing request shape.
+
 ### Changed
 
 ### Fixed
