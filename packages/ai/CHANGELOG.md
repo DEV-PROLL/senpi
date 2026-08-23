@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Kimi XTML channel markers no longer reach user-visible assistant text when a leaked marker arrives without its trailing `<|sep|>` (seen live as a text block ending in the literal `<|close|>think` newline). One shared channel-marker grammar now backs both the stream recovery parser and message-level thinking recovery, which also strips markers from `text` blocks while keeping code-span literals intact ([#1092](https://github.com/code-yeongyu/senpi/pull/1092)).
+
 ### Removed
 
 ## [2026.8.22-2] - 2026-08-22
