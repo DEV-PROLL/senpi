@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchUrl } from "../../../src/core/extensions/builtin/webfetch/webfetch/fetcher.ts";
+import { discardBody } from "../../../src/core/extensions/builtin/webfetch/webfetch/response-body.ts";
 
 const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
 
@@ -45,11 +46,16 @@ function queueRedirectResponses(redirectBody: RedirectBody): void {
 describe("issue #1089 webfetch redirect body cleanup", () => {
 	it("destroys without an error when the redirect body has no dump method", async () => {
 		// Given
-		const redirectDestroy = vi.fn<(error?: Error) => void>();
+		const cleanupOrder: string[] = [];
+		const redirectDestroy = vi.fn<(error?: Error) => void>(() => cleanupOrder.push("destroy"));
 		let drained = false;
 		queueRedirectResponses({
 			destroy: redirectDestroy,
+			on: vi.fn((event: "error") => {
+				cleanupOrder.push(`listen:${event}`);
+			}),
 			async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+				cleanupOrder.push("iterate");
 				yield new TextEncoder().encode("redirect body");
 				drained = true;
 			},
@@ -62,6 +68,7 @@ describe("issue #1089 webfetch redirect body cleanup", () => {
 		expect(result.url).toBe("https://example.test/final");
 		expect(drained).toBe(true);
 		expect(redirectDestroy).toHaveBeenCalledExactlyOnceWith();
+		expect(cleanupOrder).toEqual(["listen:error", "iterate", "destroy"]);
 	});
 
 	it("uses dump and then destroys when the redirect body supports dump", async () => {
@@ -80,7 +87,7 @@ describe("issue #1089 webfetch redirect body cleanup", () => {
 		await fetchUrl({ url: "https://example.test/start", format: "text" });
 
 		// Then
-		expect(dump).toHaveBeenCalledExactlyOnceWith({ limit: 1024 });
+		expect(dump).toHaveBeenCalledExactlyOnceWith({ limit: 1024, signal: expect.any(AbortSignal) });
 		expect(destroy).toHaveBeenCalledExactlyOnceWith();
 	});
 
@@ -125,5 +132,55 @@ describe("issue #1089 webfetch redirect body cleanup", () => {
 		// Then
 		expect(destroy).toHaveBeenCalledExactlyOnceWith();
 		expect(cleanupOrder).toEqual(["listen:error", "destroy"]);
+	});
+
+	it("aborts a fallback drain whose iterator never produces a chunk", async () => {
+		let markIteratorStarted: () => void = () => {};
+		const iteratorStarted = new Promise<void>((resolve) => {
+			markIteratorStarted = resolve;
+		});
+		const destroy = vi.fn<(error?: Error) => void>();
+		const body: RedirectBody = {
+			destroy,
+			[Symbol.asyncIterator]() {
+				return {
+					next(): Promise<IteratorResult<Uint8Array>> {
+						markIteratorStarted();
+						return new Promise<IteratorResult<Uint8Array>>(() => {});
+					},
+				};
+			},
+		};
+		const controller = new AbortController();
+		let settled = false;
+		const discardPromise = discardBody(body, 1024, controller.signal).then(() => {
+			settled = true;
+		});
+
+		await iteratorStarted;
+		controller.abort(new Error("stop drain"));
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		expect(settled).toBe(true);
+		expect(destroy).toHaveBeenCalledExactlyOnceWith();
+		await discardPromise;
+	});
+
+	it("stops fallback iteration after the response-size bound is crossed", async () => {
+		let yieldedAfterLimit = false;
+		const destroy = vi.fn<(error?: Error) => void>();
+		const body: RedirectBody = {
+			destroy,
+			async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+				yield new Uint8Array(1025);
+				yieldedAfterLimit = true;
+				yield new Uint8Array(1);
+			},
+		};
+
+		await discardBody(body, 1024);
+
+		expect(yieldedAfterLimit).toBe(false);
+		expect(destroy).toHaveBeenCalledExactlyOnceWith();
 	});
 });

@@ -170,7 +170,7 @@ async function requestUrl(options: RequestUrlOptions): Promise<HttpResponse> {
 			};
 		}
 
-		await discardBody(response.body, MAX_RESPONSE_SIZE_BYTES);
+		await discardBody(response.body, MAX_RESPONSE_SIZE_BYTES, options.signal);
 		currentUrl = new URL(location, currentUrl).toString();
 	}
 
@@ -182,7 +182,7 @@ async function readHttpResponse(
 	signal: AbortSignal,
 	onProgress: FetchOptions["onProgress"],
 ): Promise<FetchResult> {
-	await rejectOversizedContentLength(response);
+	await rejectOversizedContentLength(response, signal);
 	const body = await readResponseBody(response, signal, onProgress);
 	return {
 		url: response.url,
@@ -195,10 +195,10 @@ async function readHttpResponse(
 	};
 }
 
-async function rejectOversizedContentLength(response: HttpResponse): Promise<void> {
+async function rejectOversizedContentLength(response: HttpResponse, signal: AbortSignal): Promise<void> {
 	const contentLength = getHeader(response.headers, "content-length");
 	if (contentLength && Number.parseInt(contentLength, 10) > MAX_RESPONSE_SIZE_BYTES) {
-		await discardBody(response.body, MAX_RESPONSE_SIZE_BYTES);
+		await discardBody(response.body, MAX_RESPONSE_SIZE_BYTES, signal);
 		throw new WebfetchResponseTooLargeError("Response too large (exceeds 5MB limit)");
 	}
 }

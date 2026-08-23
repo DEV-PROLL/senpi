@@ -33,7 +33,7 @@ Vendored from [`code-yeongyu/pi-webfetch`](https://github.com/code-yeongyu/pi-we
 
 ### What changed
 
-- The no-`dump()` fallback now drains the response body through async iteration, bounded by `MAX_RESPONSE_SIZE_BYTES`, before quiet destruction.
+- The no-`dump()` fallback now drains the response body through abort-aware async iteration, bounded by `MAX_RESPONSE_SIZE_BYTES`, before quiet destruction.
 - Cleanup attaches an error listener before destruction so a stream error emitted during best-effort discard cannot escape as an unhandled process error.
 
 ### Why
