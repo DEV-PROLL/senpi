@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- User `models.json` files may now declare the `video` input modality for custom provider models, matching the runtime model type and the builtin Kimi Coding catalog; previously a video entry failed schema validation, which rejected the entire models.json and unregistered every user-defined provider ([#1087](https://github.com/code-yeongyu/senpi/pull/1087)).
+
 ### Added
 
 ### Changed

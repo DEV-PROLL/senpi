@@ -1,5 +1,25 @@
 # Local fork changes
 
+## models.json schema accepts the video input modality (2026-08-23)
+
+### What changed
+
+- `packages/coding-agent/src/core/model-config-schema.ts`: the `input` unions of `ModelDefinitionSchema` and `ModelOverrideSchema` now accept `video` in addition to `text` and `image`.
+- `packages/coding-agent/test/suite/regressions/0002-models-json-video-input.test.ts`: failing-first regression covering `models[]` acceptance, `modelOverrides` acceptance, and continued `audio` rejection (`audio` exists nowhere in the runtime type).
+- `packages/coding-agent/CHANGELOG.md`: [Unreleased] entry referencing PR #1087.
+
+### Why
+
+- The fork types `Model.input` as `("text" | "image" | "video")[]` (`packages/ai/src/model.ts`) and ships builtin `kimi-coding` k3 declaring `["text","image","video"]`, but the user-facing models.json schema was never extended when video support landed. Any user provider declaring video failed validation, and `ModelConfig.loadSync` rejects the entire file on any schema error — unregistering every user-defined provider and surfacing only a misleading fallback-chain "roles are unsupported" warning downstream. Upstream pi-mono is consistently `text|image` in both the type and the schema, so this gap is fork-introduced; this change closes it on the schema side only. The all-or-nothing rejection semantics and the fallback-warning wording are deliberately untouched (separate design concerns).
+
+### Why an extension could not handle it
+
+- The schema is the load-time gate for every user provider; extensions run after `ModelConfig` has already accepted or rejected the file.
+
+### Expected merge conflict zones
+
+- LOW: two single-line unions in `model-config-schema.ts`; upstream has not touched this schema since the fork split it from `model-config.ts`.
+
 ## Coding-agent dependency refresh and generated install-lock update (2026-08-20)
 
 ### What changed
