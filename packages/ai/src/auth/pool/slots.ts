@@ -1,4 +1,6 @@
-import type { Credential } from "@earendil-works/pi-ai";
+import type { Credential } from "../types.ts";
+
+export type { Credential };
 
 export const DEFAULT_SLOT_NAME = "default";
 
@@ -46,8 +48,8 @@ function slotFromFlatCredential(credential: PooledCredential): CredentialSlot {
 }
 
 /**
- * A flat credential written by an older senpi is read as a one-slot pool without
- * touching the stored bytes; the caller decides whether anything is written back.
+ * A flat credential written by a build predating pools is read as a one-slot pool
+ * without writing anything back; the caller decides whether a write ever happens.
  */
 export function listSlots(credential: PooledCredential | undefined): CredentialSlot[] {
 	if (!credential) return [];
@@ -61,8 +63,8 @@ export function findSlot(credential: PooledCredential | undefined, name: string)
 
 /**
  * Replaces or appends one slot while every sibling, the pin, and the flat
- * top-level credential survive untouched. The flat fields stay as written so an
- * older binary that ignores `accounts` still authenticates with them.
+ * top-level credential survive untouched. The flat fields stay as written so a
+ * build that ignores `accounts` still authenticates from them.
  */
 export function upsertSlot(credential: PooledCredential | undefined, slot: CredentialSlot): PooledCredential {
 	assertValidSlotName(slot.name);
@@ -77,9 +79,9 @@ export function upsertSlot(credential: PooledCredential | undefined, slot: Crede
 }
 
 /**
- * Removes one slot. The provider entry is dropped entirely once its last slot is
- * gone, and a pin naming the removed slot is cleared so selection never points at
- * a slot that no longer exists.
+ * Removes one slot. The credential is dropped entirely once its last slot is gone,
+ * and a pin naming the removed slot is cleared so selection never points at a slot
+ * that no longer exists.
  */
 export function removeSlot(credential: PooledCredential | undefined, name: string): PooledCredential | undefined {
 	if (!credential) return undefined;
