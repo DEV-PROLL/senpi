@@ -29,6 +29,25 @@ Vendored from [`code-yeongyu/pi-webfetch`](https://github.com/code-yeongyu/pi-we
 
 - LOW in `packages/coding-agent/src/core/extensions/builtin/webfetch/webfetch/fetcher.ts` at the `ResponseBodyStream` contract and `discardBody`; re-vendoring may restore a required `dump()` method and error-bearing `destroy(error)` fallback, so retain the runtime feature detection and argument-free destroy behavior.
 
+## 2026-08-23 - Discard fallback drains and guards stream errors
+
+### What changed
+
+- The no-`dump()` fallback now drains the response body through abort-aware async iteration, bounded by `MAX_RESPONSE_SIZE_BYTES`, before quiet destruction.
+- Cleanup attaches an error listener before destruction so a stream error emitted during best-effort discard cannot escape as an unhandled process error.
+
+### Why
+
+- The upstream [`pi-webfetch` PR #7](https://github.com/code-yeongyu/pi-webfetch/pull/7) identified the remaining lifecycle edge: destroying immediately can leave a readable body undrained, and a failing stream can emit an unhandled error while it is being destroyed. This adaptation preserves the bounded `dump()` path while adopting the safer drain-and-guard behavior for Bun-compatible bodies.
+
+### Why an extension could not handle it
+
+- Redirect and oversized-response disposal happen inside the vendored fetcher's private request loop before the registered webfetch tool receives a response, so downstream extension hooks cannot replace this cleanup.
+
+### Expected merge conflict zones
+
+- LOW in `packages/coding-agent/src/core/extensions/builtin/webfetch/webfetch/fetcher.ts` at the import and cleanup call sites, and in the new `response-body.ts` cleanup module.
+
 ## 2026-08-20 - HTML converters load on first conversion instead of at CLI startup
 
 ### What changed

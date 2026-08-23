@@ -129,6 +129,8 @@
 
 ### Fixed
 
+- Webfetch's Bun-compatible response cleanup now drains bodies without `dump()` before destruction and guards discard-time stream errors from escaping as uncaught process errors, adapting the lifecycle hardening proposed by `@Indosaram` in [`pi-webfetch` #7](https://github.com/code-yeongyu/pi-webfetch/pull/7).
+
 ### Added
 
 ### Changed
