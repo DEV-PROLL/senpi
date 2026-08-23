@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Logging in while a provider already holds more than one credential no longer replaces every stored credential with the new one. `AuthStorage` writes (including the RPC `login_api_key` path), `Models.login`, and OAuth token refresh now preserve sibling slots and the pinned slot; a flat single-credential entry keeps its exact previous shape until a second credential actually exists.
 - User `models.json` files may now declare the `video` input modality for custom provider models, matching the runtime model type and the builtin Kimi Coding catalog; previously a video entry failed schema validation, which rejected the entire models.json and unregistered every user-defined provider ([#1087](https://github.com/code-yeongyu/senpi/pull/1087)).
 
 ### Added
