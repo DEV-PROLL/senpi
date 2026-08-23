@@ -25,6 +25,7 @@ import lockfile from "proper-lockfile";
 import { getAgentDir } from "../config.ts";
 import { raceWithAbortSignal } from "../utils/abort.ts";
 import { getFileRevision, normalizePath } from "../utils/paths.ts";
+import { type CredentialSlot, listSlots, type PooledCredential, removeSlot, upsertSlot } from "./credential-slots.ts";
 import { FILE_STORAGE_LOCK_OPTIONS } from "./lockfile-policy.ts";
 import { isCommandConfigValue, resolveConfigValue } from "./resolve-config-value.ts";
 
@@ -457,6 +458,32 @@ export class AuthStorage implements CredentialStore {
 		this.storage.withLock((content) => {
 			const nextData = { ...this.parseStorageData(content) };
 			delete nextData[provider];
+			this.data = nextData;
+			return { result: undefined, next: JSON.stringify(nextData, null, 2) };
+		});
+	}
+
+	listSlots(provider: string): CredentialSlot[] {
+		return listSlots(this.data[provider] as PooledCredential | undefined);
+	}
+
+	setSlot(provider: string, slot: CredentialSlot): void {
+		this.storage.withLock((content) => {
+			const currentData = this.parseStorageData(content);
+			const next = upsertSlot(currentData[provider] as PooledCredential | undefined, slot);
+			const nextData = { ...currentData, [provider]: next };
+			this.data = nextData;
+			return { result: undefined, next: JSON.stringify(nextData, null, 2) };
+		});
+	}
+
+	removeSlot(provider: string, name: string): void {
+		this.storage.withLock((content) => {
+			const currentData = this.parseStorageData(content);
+			const next = removeSlot(currentData[provider] as PooledCredential | undefined, name);
+			const nextData = { ...currentData };
+			if (next === undefined) delete nextData[provider];
+			else nextData[provider] = next;
 			this.data = nextData;
 			return { result: undefined, next: JSON.stringify(nextData, null, 2) };
 		});
