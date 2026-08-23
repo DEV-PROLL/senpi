@@ -11,6 +11,24 @@ Vendored from [`code-yeongyu/pi-webfetch`](https://github.com/code-yeongyu/pi-we
 - Tistory-style article containers are preferred over surrounding blog chrome, noisy related-post/sidebar blocks are stripped from the cloned article, and text conversion uses a DOM pass to preserve readable line breaks.
 - Standalone Bun builds rewrite jsdom 29's eager worker lookup to select the compiled worker entry only in standalone executables while retaining jsdom's normal `require.resolve()` behavior under Node, then compile that worker as an explicit entrypoint. Without both steps, the executable captures the CI checkout path and fails during startup on machines where that path does not exist. This must be handled in the host build because an extension cannot change third-party module resolution inside an already-compiled executable.
 
+## 2026-08-23 - Redirect body cleanup supports Bun's bare Undici response
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/webfetch/webfetch/fetcher.ts` now feature-detects the response body's optional `dump()` method. It preserves Undici's bounded dump when available, falls back to argument-free `destroy()` when unavailable, and uses the same argument-free fallback when dumping fails.
+
+### Why
+
+- Bun 1.4.0 can expose a bare `undici` redirect response body that supports async iteration and `destroy()` but not Undici's `dump()` convenience method. Calling the missing method produced a `TypeError`, and passing that cleanup error to `destroy(error)` could re-emit it as an uncaught stream error.
+
+### Why an extension could not handle it
+
+- Redirect disposal happens inside the vendored fetcher's private HTTP redirect loop before the registered webfetch extension receives a response, so an extension hook cannot replace or intercept this cleanup.
+
+### Expected merge conflict zones
+
+- LOW in `packages/coding-agent/src/core/extensions/builtin/webfetch/webfetch/fetcher.ts` at the `ResponseBodyStream` contract and `discardBody`; re-vendoring may restore a required `dump()` method and error-bearing `destroy(error)` fallback, so retain the runtime feature detection and argument-free destroy behavior.
+
 ## 2026-08-20 - HTML converters load on first conversion instead of at CLI startup
 
 ### What changed

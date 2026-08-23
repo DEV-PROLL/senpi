@@ -48,7 +48,7 @@ interface HttpResponse {
 
 interface ResponseBodyStream extends AsyncIterable<unknown> {
 	destroy(error?: Error): void;
-	dump(options?: { limit: number; signal?: AbortSignal }): Promise<void>;
+	dump?(options?: { limit: number; signal?: AbortSignal }): Promise<void>;
 }
 
 export async function fetchUrl(options: FetchOptions): Promise<FetchResult> {
@@ -214,14 +214,15 @@ function getHeader(headers: IncomingHttpHeaders, name: string): string {
 }
 
 async function discardBody(body: ResponseBodyStream): Promise<void> {
+	if (!body.dump) {
+		body.destroy();
+		return;
+	}
+
 	try {
 		await body.dump({ limit: 1024 });
-	} catch (error) {
-		if (error instanceof Error) {
-			body.destroy(error);
-			return;
-		}
-		throw error;
+	} catch {
+		body.destroy();
 	}
 }
 
