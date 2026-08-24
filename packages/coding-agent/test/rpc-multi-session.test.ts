@@ -32,6 +32,9 @@ describe("multi-session RPC routing", () => {
 			error: RPC_ERROR_UNKNOWN_SESSION,
 		});
 		expect(
+			await routerFor().handle({ id: "live-without-binding", type: "prompt", message: "hello", sessionId: "known" }),
+		).toMatchObject({ error: RPC_ERROR_UNKNOWN_SESSION });
+		expect(
 			await routerFor("closing").handle({ id: "p", type: "prompt", message: "hello", sessionId: "known" }),
 		).toMatchObject({ error: RPC_ERROR_SESSION_CLOSING });
 	});

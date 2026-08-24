@@ -1,5 +1,26 @@
 # changes
 
+## Concurrent Unix-socket host for multi-session RPC (2026-08-23)
+
+### What changed
+
+- `packages/coding-agent/src/modes/rpc/multi-session-host.ts` accepts file and abstract Unix socket listeners, keeps one host-global registry/router across concurrent connections, isolates each connection's inbound JSONL framing and correlated outbound responses, and survives malformed or dropped clients.
+- `packages/coding-agent/src/modes/rpc/session-event-writer.ts` retains its single-sink stdio adapter while adding connection-aware sinks: session lifecycle/agent events broadcast to all current connections with `sessionId`, while responses and extension UI records return only to the issuing connection without bypassing buffered backpressure.
+- `packages/coding-agent/src/modes/rpc/session-command-router.ts` returns `unknown_session` when a live registry entry has no global binding instead of silently swallowing the command.
+
+### Why
+
+- Desktop and automation clients need multiple independent socket connections to share sessions, route commands across connection ownership, and observe foreign session activity without running one RPC process per client.
+
+### Why an extension could not handle it
+
+- Listener ownership, JSONL framing, routing handles, response correlation, event fan-out, and transport backpressure are built-in RPC host responsibilities below extension hooks.
+
+### Expected merge conflict zones
+
+- HIGH: `multi-session-host.ts` host lifecycle and `session-event-writer.ts` scheduling/sink selection.
+- LOW: the missing-binding guard in `session-command-router.ts`.
+
 ## Suppress initial command-surface invalidation events (2026-08-17)
 
 ### What changed

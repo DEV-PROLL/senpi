@@ -38,8 +38,22 @@ Multi-session mode lets one `senpi --mode rpc` process serve several independent
 ### Starting multi-session mode
 
 ```bash
+# Shared JSONL over stdio (legacy multi-session host)
 senpi --mode rpc --multi-session [options]
+
+# One shared host over a Unix socket; each accepted connection has its own JSONL feed
+senpi --mode rpc --listen unix:///tmp/senpi-rpc.sock [options]
+senpi --mode rpc --listen /tmp/senpi-rpc.sock [options]
 ```
+
+`--listen unix://` selects the default per-agent socket path. Unix abstract socket names may be supplied as
+`unix://@name` where supported by the host platform. Socket mode accepts concurrent connections while retaining one
+process-global session registry.
+
+Socket event visibility is an all-sessions broadcast: every connected client receives lifecycle and agent events from
+every open session, each tagged with its routing `sessionId`. Correlated responses and extension UI requests are sent
+only to the connection that issued the command. This lets a non-owner observe a foreign turn without requiring a
+separate subscription protocol.
 
 Startup: `senpi --mode rpc --multi-session` → NO default session is constructed (no default `AgentSessionRuntime`, no default extension/watcher load). Classic `senpi --mode rpc` is byte-identical to today. Mode is fixed at process start; there is no runtime transition.
 

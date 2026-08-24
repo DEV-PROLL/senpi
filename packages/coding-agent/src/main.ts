@@ -1053,6 +1053,7 @@ export async function main(args: string[], options?: MainOptions) {
 			creationModel:
 				parsed.provider && parsed.model ? { provider: parsed.provider, modelId: parsed.model } : undefined,
 			initialThinkingLevel: parsed.thinking,
+			listen: parsed.listen,
 		});
 	}
 	const runtime = await createAgentSessionRuntime(createRuntime, {

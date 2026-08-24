@@ -67,7 +67,9 @@ export class SessionCommandRouter {
 		if (!command.sessionId) return error(command.id, command.type, RPC_ERROR_MISSING_SESSION_ID);
 		try {
 			this.registry.getForCommand(command.sessionId, command.type);
-			await this.bindings.get(command.sessionId)?.handle(command);
+			const binding = this.bindings.get(command.sessionId);
+			if (!binding) return error(command.id, command.type, RPC_ERROR_UNKNOWN_SESSION);
+			await binding.handle(command);
 			return undefined;
 		} catch (cause) {
 			return error(command.id, command.type, this.code(cause));
