@@ -30,6 +30,17 @@ describe("abortedErrorLabel", () => {
 		expect(abortedErrorLabel("System operation aborted", 0, undefined)).toBe("System operation aborted");
 	});
 
+	it("round-trips labels the live path persists without re-prefixing on replay", () => {
+		// A replay has no live provenance; the persisted label must render verbatim.
+		expect(abortedErrorLabel("Provider retry failed after 2 attempts", 0, undefined)).toBe(
+			"Provider retry failed after 2 attempts",
+		);
+		expect(abortedErrorLabel("Provider request failed: 429 usage limit reached", 0, undefined)).toBe(
+			"Provider request failed: 429 usage limit reached",
+		);
+		expect(abortedErrorLabel("Provider request failed", 0, undefined)).toBe("Provider request failed");
+	});
+
 	it("includes a specific provider error without repeating generic abort wording", () => {
 		expect(abortedErrorLabel("429 usage limit reached", 0, undefined)).toBe(
 			"Provider request failed: 429 usage limit reached",
