@@ -42,6 +42,8 @@ import { getPiUserAgent } from "../utils/pi-user-agent.ts";
 import { getAnthropicCompat, isAnthropicApiBaseUrl } from "../utils/prompt-cache-ttl.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
+import { appendAssistantMessageDiagnostic } from "../utils/diagnostics.ts";
+import { normalizeAnthropicRetryFailure } from "../utils/retry-profile/failure.ts";
 import { appendRetryAfterMsMarker, extract429RetryAfterMs } from "../utils/retry-hint.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import {
@@ -1633,6 +1635,18 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					}
 				}
 			}
+			const failure = normalizeAnthropicRetryFailure(error);
+			appendAssistantMessageDiagnostic(output, {
+				type: "provider_retry_failure",
+				timestamp: Date.now(),
+				details: {
+					kind: failure.kind,
+					...(failure.statusCode !== undefined ? { statusCode: failure.statusCode } : {}),
+					...(failure.providerCodes !== undefined ? { providerCodes: failure.providerCodes } : {}),
+					...(failure.retryAfterMs !== undefined ? { retryAfterMs: failure.retryAfterMs } : {}),
+					...(failure.shouldRetry !== undefined ? { shouldRetry: failure.shouldRetry } : {}),
+				},
+			});
 			output.errorMessage = errorMessage;
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
