@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Shift+Enter now inserts a newline instead of submitting in direct Warp-on-WSL sessions, while plain Enter and other terminal paths remain unchanged ([#1109](https://github.com/code-yeongyu/senpi/pull/1109) by [@deopa0402](https://github.com/deopa0402)).
 ### Added
 
 ### Changed

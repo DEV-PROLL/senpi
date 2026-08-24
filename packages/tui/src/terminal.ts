@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setKittyProtocolActive } from "./keys.ts";
+import { isMultiplexerSession } from "./mux.ts";
 import { isNativeModifierPressed } from "./native-modifiers.ts";
 import { StdinBuffer } from "./stdin-buffer.ts";
 
@@ -55,6 +56,24 @@ export function normalizeNativeShiftEnterInput(
 
 export function normalizeAppleTerminalInput(data: string, isAppleTerminal: boolean, isShiftPressed: boolean): string {
 	return normalizeNativeShiftEnterInput(data, isAppleTerminal, isShiftPressed);
+}
+
+export function normalizeWarpWslShiftEnterInput(data: string, env: NodeJS.ProcessEnv = process.env): string {
+	if (data !== "\n") return data;
+	if (
+		isMultiplexerSession(env) ||
+		env.SSH_CONNECTION !== undefined ||
+		env.SSH_CLIENT !== undefined ||
+		env.SSH_TTY !== undefined
+	) {
+		return data;
+	}
+	const isWarp =
+		env.WARP_SESSION_ID !== undefined ||
+		env.WARP_TERMINAL_SESSION_UUID !== undefined ||
+		env.TERM_PROGRAM === "WarpTerminal";
+	const isWsl = env.WSL_DISTRO_NAME !== undefined || env.WSL_INTEROP !== undefined;
+	return isWarp && isWsl ? NATIVE_SHIFT_ENTER_SEQUENCE : data;
 }
 
 export function keyboardEnhancementEnabled(): boolean {
@@ -426,10 +445,11 @@ export class ProcessTerminal implements Terminal {
 
 	private forwardInputSequence(sequence: string): void {
 		if (!this.inputHandler) return;
+		const normalizedSequence = normalizeWarpWslShiftEnterInput(sequence);
 		const shouldDetectNativeShiftEnter =
-			sequence === "\r" && (isAppleTerminalSession() || process.platform === "win32");
+			normalizedSequence === "\r" && (isAppleTerminalSession() || process.platform === "win32");
 		const input = normalizeNativeShiftEnterInput(
-			sequence,
+			normalizedSequence,
 			shouldDetectNativeShiftEnter,
 			shouldDetectNativeShiftEnter && isNativeModifierPressed("shift"),
 		);

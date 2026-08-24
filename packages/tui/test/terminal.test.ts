@@ -6,6 +6,7 @@ import {
 	keyboardEnhancementEnabled,
 	normalizeAppleTerminalInput,
 	normalizeNativeShiftEnterInput,
+	normalizeWarpWslShiftEnterInput,
 	ProcessTerminal,
 	resolveEscapeTimeoutMs,
 } from "../src/terminal.ts";
@@ -138,6 +139,59 @@ describe("normalizeAppleTerminalInput", () => {
 	it("leaves non-Return input unchanged", () => {
 		assert.equal(normalizeAppleTerminalInput("\x1b[13;2u", true, true), "\x1b[13;2u");
 		assert.equal(normalizeAppleTerminalInput("a", true, true), "a");
+	});
+});
+
+describe("normalizeWarpWslShiftEnterInput", () => {
+	it("rewrites Warp-on-WSL LF as explicit Shift+Enter", () => {
+		assert.equal(
+			normalizeWarpWslShiftEnterInput("\n", {
+				TERM_PROGRAM: "WarpTerminal",
+				WSL_DISTRO_NAME: "Ubuntu",
+			}),
+			"\x1b[13;2u",
+		);
+		assert.equal(
+			normalizeWarpWslShiftEnterInput("\n", {
+				WARP_SESSION_ID: "session",
+				WSL_INTEROP: "/run/WSL/1_interop",
+			}),
+			"\x1b[13;2u",
+		);
+	});
+
+	it("leaves other terminals, remote or multiplexed sessions, and input unchanged", () => {
+		assert.equal(normalizeWarpWslShiftEnterInput("\n", { WSL_DISTRO_NAME: "Ubuntu" }), "\n");
+		assert.equal(normalizeWarpWslShiftEnterInput("\n", { TERM_PROGRAM: "WarpTerminal" }), "\n");
+		assert.equal(
+			normalizeWarpWslShiftEnterInput("\r", {
+				TERM_PROGRAM: "WarpTerminal",
+				WSL_DISTRO_NAME: "Ubuntu",
+			}),
+			"\r",
+		);
+		for (const key of ["TMUX", "TMUX_PANE", "STY", "ZELLIJ"] as const) {
+			assert.equal(
+				normalizeWarpWslShiftEnterInput("\n", {
+					TERM_PROGRAM: "WarpTerminal",
+					WSL_DISTRO_NAME: "Ubuntu",
+					[key]: "active",
+				}),
+				"\n",
+				key,
+			);
+		}
+		for (const key of ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] as const) {
+			assert.equal(
+				normalizeWarpWslShiftEnterInput("\n", {
+					TERM_PROGRAM: "WarpTerminal",
+					WSL_DISTRO_NAME: "Ubuntu",
+					[key]: "active",
+				}),
+				"\n",
+				key,
+			);
+		}
 	});
 });
 
@@ -277,6 +331,25 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 
 			assert.equal(harness.getInput(), "a");
 			assert.equal(harness.terminal.kittyProtocolActive, false);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("normalizes Warp-on-WSL LF before forwarding input", () => {
+		const harness = setupNegotiation({
+			TERM_PROGRAM: "WarpTerminal",
+			WARP_SESSION_ID: undefined,
+			WARP_TERMINAL_SESSION_UUID: undefined,
+			WSL_DISTRO_NAME: "Ubuntu",
+			WSL_INTEROP: undefined,
+		});
+		try {
+			harness.send("\n");
+			assert.equal(harness.getInput(), "\x1b[13;2u");
+
+			harness.send("\r");
+			assert.equal(harness.getInput(), "\r");
 		} finally {
 			harness.cleanup();
 		}

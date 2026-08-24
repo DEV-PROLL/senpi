@@ -1,5 +1,40 @@
 # TUI delta rendering fork changes
 
+## Warp on WSL LF is normalized to Shift+Enter (2026-08-24)
+
+### What changed
+
+- `packages/tui/src/terminal.ts`: a standalone LF input event is rewritten to the existing CSI-u
+  Shift+Enter sequence only when both Warp and WSL are detected in a direct local session. Plain CR
+  Enter, non-Warp terminals, non-WSL Warp sessions, SSH/multiplexer sessions, and bracketed paste
+  payloads keep their existing input bytes.
+- `packages/tui/src/mux.ts`: `isMultiplexerSession()` accepts an optional environment so terminal
+  normalization reuses the shared tmux, GNU Screen, and Zellij detection without process-global test setup.
+- `packages/tui/test/terminal.test.ts`: focused coverage proves both supported Warp/WSL environment
+  markers and the non-target boundaries.
+
+### Why
+
+- Warp documents that its terminal sends Shift+Enter as LF (`0x0a`). In Senpi's legacy keyboard path,
+  that byte must also remain recognizable as Enter for terminals that send LF for plain Enter, so the
+  editor's submit binding wins before the Ctrl+J/newline binding. Normalizing only direct local
+  Warp-on-WSL sessions restores an unambiguous Shift+Enter identity while Warp's plain CR Enter
+  continues to submit. SSH and multiplexer sessions are excluded because their active client terminal
+  can differ from the inherited process environment.
+- See [Warp #13782](https://github.com/warpdotdev/Warp/issues/13782) for the terminal byte behavior.
+
+### Why an extension could not handle it
+
+- Coding-agent extensions can transform raw input through `onTerminalInput`, but that hook cannot
+  correct the shared `ProcessTerminal` semantics for other TUI consumers or guarantee the default
+  behavior without optional extension loading. The terminal layer is the single cross-consumer seam.
+
+### Expected merge conflict zones
+
+- LOW: `packages/tui/src/terminal.ts` at `forwardInputSequence()` and its normalization helpers,
+  `packages/tui/src/mux.ts` at shared multiplexer detection, and `packages/tui/test/terminal.test.ts`
+  beside the existing native Shift+Enter normalization coverage.
+
 ## Alt-screen Kitty teardown keeps its disambiguated helper name after the 59a71b23 sync (2026-08-19)
 
 ### What changed
