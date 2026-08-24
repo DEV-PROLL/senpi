@@ -33,6 +33,7 @@ import type {
 	Usage,
 } from "./types.ts";
 import { operationSignal, raceWithAbortSignal } from "./utils/abort.ts";
+import type { RetryPolicyProfile } from "./utils/retry-profile/types.ts";
 
 export { ModelsError, type ModelsErrorCode } from "./auth/resolve.ts";
 
@@ -100,6 +101,8 @@ export interface Provider<TApi extends Api = Api> {
 
 	readonly baseUrl?: string;
 	readonly headers?: ProviderHeaders;
+	/** Omitting it means the shipped senpi default profile applies. */
+	readonly retryPolicy?: RetryPolicyProfile;
 
 	/**
 	 * Required: at least one of `apiKey`/`oauth`. Every provider has auth
@@ -757,6 +760,8 @@ export interface CreateProviderOptions<TApi extends Api = Api> {
 	name?: string;
 	baseUrl?: string;
 	headers?: ProviderHeaders;
+	/** Omitting it means the shipped senpi default profile applies. */
+	retryPolicy?: RetryPolicyProfile;
 	/** Required — every provider has auth semantics, even ambient/keyless ones. */
 	auth: ProviderAuth;
 	/** Static baseline model list (empty for purely dynamic providers). */
@@ -817,6 +822,7 @@ export function createProvider<TApi extends Api = Api>(input: CreateProviderOpti
 		name: input.name ?? input.id,
 		baseUrl: input.baseUrl,
 		headers: input.headers,
+		retryPolicy: input.retryPolicy,
 		auth: input.auth,
 		getModels: currentModels,
 		refreshModels: fetchModels
