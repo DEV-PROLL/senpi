@@ -18,6 +18,7 @@
 import * as crypto from "node:crypto";
 import { basename, dirname, extname } from "node:path";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
+import { VERSION } from "../../config.ts";
 import type { AgentSession } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
@@ -732,7 +733,12 @@ export function createRpcConnectionHandler(
 					type: "response",
 					command: "get_protocol_info",
 					success: true,
-					data: { protocolVersion: 1, capabilities: ["multi_session"], mode: "classic" },
+					data: {
+						protocolVersion: 1,
+						serverVersion: VERSION,
+						capabilities: [...new Set(["multi_session", ...(options.capabilities ?? [])])],
+						mode: "classic",
+					},
 				};
 			case "open_session":
 				return error(id, "open_session", "multi_session_disabled");

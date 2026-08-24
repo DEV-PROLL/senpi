@@ -1,5 +1,26 @@
 # changes
 
+## Client-side ensureHost RPC socket lifecycle (2026-08-24)
+
+### What changed
+
+- Added `ensureHost()` with a `rpc-host-daemon/{host.pid,daemon.lock,settings.json,stderr.log}` state layout, proper-lockfile serialization, protocol/version/capability occupancy probing, validated PID/start-time replacement, detached current-CLI launch, bounded readiness, escalation, and stderr diagnostics.
+- Added additive `serverVersion` and negotiated capability fields to `get_protocol_info`; ensured hosts pin `extension_events` (and `custom_unsupported`) in their launch environment regardless of which client starts them first.
+- Exported the ensure API for client-side callers and added deterministic lifecycle tests plus real-CLI QA.
+
+### Why
+
+- Desktop and terminal clients need one reusable Unix-socket host without a resident supervisor, while preventing incompatible or capability-poor processes from silently owning the shared endpoint.
+
+### Why an extension could not handle it
+
+- Process ownership, Unix-socket probing, PID-reuse safety, file locking, detached launch, and protocol handshake are transport lifecycle responsibilities below extension hooks.
+
+### Expected merge conflict zones
+
+- MEDIUM: `host-ensure.ts` and the additive `get_protocol_info` response in `session-command-router.ts`.
+- LOW: RPC exports, protocol documentation, and focused lifecycle/QA coverage.
+
 ## Concurrent Unix-socket host for multi-session RPC (2026-08-23)
 
 ### What changed
