@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- The goal continuation wait countdown no longer renders over the Working indicator during externally started turns; the `goal-wait` footer segment now hides while a turn runs and restores itself when the session parks again, leaving the cache-warm schedule and iteration accounting untouched ([#1100](https://github.com/code-yeongyu/senpi/pull/1100)).
 - Webfetch now safely discards redirect response bodies under Bun 1.4.0's bare `undici`, which may omit `body.dump()`, by falling back to argument-free stream destruction instead of re-emitting cleanup failures as uncaught stream errors ([#1089](https://github.com/code-yeongyu/senpi/issues/1089)).
 
 ### Added
