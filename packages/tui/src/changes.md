@@ -289,6 +289,7 @@ Landed 2026-08-16 (commit 03f46f57e, shipped in PR #892).
 
 - `ProcessTerminal.stop()` still restores the raw-mode state captured by `start()`, but now treats `EIO`, `EPIPE`,
   and `ENOTCONN` from the teardown-time `setRawMode()` call as a dead terminal instead of crashing the exiting CLI.
+- The EIO classifier accepts both Node's string `code: "EIO"` shape and Bun's macOS numeric `errno: 5` shape.
 - Unexpected raw-mode restoration errors still propagate so shutdown does not hide unrelated defects.
 - `test/terminal.test.ts` covers successful restoration, the dead-terminal `EIO` regression, and unexpected-error
   propagation.
