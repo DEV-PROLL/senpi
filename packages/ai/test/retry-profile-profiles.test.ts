@@ -21,3 +21,28 @@ describe("shipped retry profiles", () => {
 		expect(withProfile.retryPolicy).toBe(KIMI_CODE_RETRY_PROFILE);
 	});
 });
+
+import { anthropicProvider } from "../src/providers/anthropic.ts";
+import { kimiCodingProvider } from "../src/providers/kimi-coding.ts";
+import { moonshotaiProvider } from "../src/providers/moonshotai.ts";
+import { openaiProvider } from "../src/providers/openai.ts";
+import { openrouterProvider } from "../src/providers/openrouter.ts";
+
+describe("provider retry profile declarations", () => {
+	it("kimi-coding declares the kimi-code profile", () => {
+		expect(kimiCodingProvider().retryPolicy?.id).toBe("kimi-code");
+	});
+
+	it("other built-in providers declare no profile", () => {
+		expect(anthropicProvider().retryPolicy).toBeUndefined();
+		expect(openaiProvider().retryPolicy).toBeUndefined();
+		expect(moonshotaiProvider().retryPolicy).toBeUndefined();
+		expect(openrouterProvider().retryPolicy).toBeUndefined();
+	});
+});
+
+describe("phase-2: senpi-default turn cap", () => {
+	it("senpi-default turn backoff caps at 8s", () => {
+		expect(SENPI_DEFAULT_RETRY_PROFILE.turn.backoff.perAttemptCapMs).toBe(8_000);
+	});
+});

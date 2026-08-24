@@ -85,3 +85,26 @@ describe("retryBackoffDelayMs", () => {
 		expect(retryBackoffDelayMs(policy, 3, 0)).toBe(900);
 	});
 });
+
+describe("phase-2: senpi-default 8s local turn cap (C2)", () => {
+	it("caps computed local exponential at 8s for high attempts", () => {
+		const policy = {
+			baseDelayMs: 2000,
+			growthFactor: 2,
+			perAttemptCapMs: 8_000,
+			jitter: { mode: "none" as const },
+		};
+		const delays = [1, 2, 3, 4, 5].map((n) => retryBackoffDelayMs(policy, n, 0));
+		expect(delays).toEqual([2000, 4000, 8000, 8000, 8000]);
+	});
+
+	it("cap applies before jitter", () => {
+		const policy = {
+			baseDelayMs: 2000,
+			growthFactor: 2,
+			perAttemptCapMs: 8_000,
+			jitter: { mode: "additive" as const, ratio: 0.25 },
+		};
+		expect(retryBackoffDelayMs(policy, 4, 1)).toBe(8_000 + 0.25 * 8_000);
+	});
+});

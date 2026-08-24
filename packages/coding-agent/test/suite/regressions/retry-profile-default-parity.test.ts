@@ -41,7 +41,7 @@ describe("default retry parity (no declared profile)", () => {
 		expect(harness.eventsOfType("auto_retry_end").map((event) => event.success)).toEqual([false]);
 	});
 
-	it("default delay sequence is exactly [2000, 4000, 8000] for an unconfigured provider", async () => {
+	it("default delay sequence lands within [floor, floor * 1.25) for an unconfigured provider", async () => {
 		const harness = await createHarness({
 			models: [{ id: "faux-1" }],
 			settings: {
@@ -72,6 +72,12 @@ describe("default retry parity (no declared profile)", () => {
 		await promptPromise.catch(() => {});
 		unsubscribe();
 
-		expect(delays).toEqual([2000, 4000, 8000]);
+		expect(delays).toHaveLength(3);
+		const floors = [2000, 4000, 8000];
+		for (let i = 0; i < 3; i++) {
+			const floor = floors[i]!;
+			expect(delays[i]).toBeGreaterThanOrEqual(floor);
+			expect(delays[i]).toBeLessThan(floor * 1.25);
+		}
 	});
 });

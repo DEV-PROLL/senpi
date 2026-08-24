@@ -32,8 +32,8 @@ export const SENPI_DEFAULT_RETRY_PROFILE: RetryPolicyProfile = {
 		backoff: {
 			baseDelayMs: 2_000,
 			growthFactor: 2,
-			perAttemptCapMs: null,
-			jitter: { mode: "none" },
+			perAttemptCapMs: 8_000,
+			jitter: { mode: "additive", ratio: 0.25 },
 		},
 		extractServerHint: extractNormalizedHint,
 		serverHint: {
@@ -61,7 +61,7 @@ export const KIMI_CODE_RETRY_PROFILE: RetryPolicyProfile = {
 			baseDelayMs: 500,
 			growthFactor: 2,
 			perAttemptCapMs: 32_000,
-			jitter: { mode: "additive", ratio: 0.25 },
+			jitter: { mode: "none" },
 		},
 		extractServerHint: extractNormalizedHint,
 		serverHint: {
@@ -78,7 +78,7 @@ export const KIMI_CODE_RETRY_PROFILE: RetryPolicyProfile = {
 			baseDelayMs: 500,
 			growthFactor: 2,
 			perAttemptCapMs: 32_000,
-			jitter: { mode: "additive", ratio: 0.25 },
+			jitter: { mode: "none" },
 		},
 		extractServerHint: extractNormalizedHint,
 		serverHint: {

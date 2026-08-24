@@ -63,6 +63,7 @@ import {
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
 import { extract429RetryAfterMs, parseRetryAfterMsMarker } from "@earendil-works/pi-ai/utils/retry-hint";
+import { retryBackoffDelayMs } from "@earendil-works/pi-ai/utils/retry-profile/backoff";
 import { getAgentDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
@@ -7275,11 +7276,14 @@ export class AgentSession {
 		// 429-tier delays already carry the exponential floor from nextInTurnDelayMs /
 		// degradeWithoutFallback; the non-tier branch keeps its own exponential fallback.
 		const nonTierProviderDelayMs = providerDelayMs === 0 ? undefined : providerDelayMs;
+		// Locally computed exponential goes through the profile's backoff policy
+		// (cap + jitter); provider-derived hints and fallback switches stay exact.
+		const localExponentialMs = retryBackoffDelayMs(retryProfile.turn.backoff, this._retryAttempt, Math.random());
 		const delayMs = switchedFallback
 			? 0
 			: is429TierRouted
-				? (hintTierDelayMs ?? providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1))
-				: (nonTierProviderDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
+				? (hintTierDelayMs ?? providerDelayMs ?? localExponentialMs)
+				: (nonTierProviderDelayMs ?? localExponentialMs);
 		// Prepare before auto_retry_start so an immediate Esc can cancel the retry sleep.
 		this._retryAbortController = new AbortController();
 
