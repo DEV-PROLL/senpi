@@ -6,6 +6,7 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
 import chalk from "chalk";
@@ -76,6 +77,8 @@ import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/tru
 import { builtInExtensions } from "./extensions/index.ts";
 import { getFromSourceRealConfigWarning } from "./from-source-config-guard.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
+import { runPrintMode, runRpcMode } from "./modes/index.ts";
+import { createInteractiveHostRuntime } from "./modes/interactive/interactive-host-runtime.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { runPrintMode } from "./modes/print-mode.ts";
 import { runMultiSessionHost } from "./modes/rpc/multi-session-host.ts";
@@ -1064,7 +1067,25 @@ export async function main(args: string[], options?: MainOptions) {
 		startupLoadingIndicator.stop();
 	});
 	time("createAgentSessionRuntime");
-	const { services, session, modelFallbackMessage } = runtime;
+	let selectedRuntime = runtime;
+	if (appMode === "interactive") {
+		const socket = envValue("RPC_SOCKET") ?? resolve(agentDir, "rpc", "rpc.sock");
+		selectedRuntime = await createInteractiveHostRuntime(runtime, {
+			socket,
+			agentDir,
+			onWarning: (warning) => console.error(chalk.yellow(warning.message)),
+		});
+	}
+	let selectedRuntime = runtime;
+	if (appMode === "interactive") {
+		const socket = envValue("RPC_SOCKET") ?? resolve(agentDir, "rpc", "rpc.sock");
+		selectedRuntime = await createInteractiveHostRuntime(runtime, {
+			socket,
+			agentDir,
+			onWarning: (warning) => console.error(chalk.yellow(warning.message)),
+		});
+	}
+	const { services, session, modelFallbackMessage } = selectedRuntime;
 	const { settingsManager, modelRuntime, resourceLoader } = services;
 	applyHttpProxySettings(settingsManager.getGlobalSettings().httpProxy);
 	configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
@@ -1145,7 +1166,7 @@ export async function main(args: string[], options?: MainOptions) {
 		// Keep the TUI graph out of headless RPC children. This is intentionally at the
 		// mode seam: interactive startup still loads the same module before first use.
 		const { InteractiveMode } = await import("./modes/interactive/interactive-mode.ts");
-		const interactiveMode = new InteractiveMode(runtime, {
+		const interactiveMode = new InteractiveMode(selectedRuntime, {
 			migratedProviders,
 			modelFallbackMessage,
 			autoTrustOnReloadCwd,
