@@ -13,6 +13,7 @@ import {
 	type GoalStatusUpdate,
 	makeGoalContext,
 	runGoalHandlers,
+	waitForSentCount,
 } from "./goal-monitor-test-harness.ts";
 
 function activeGoal(id: string): Goal {
@@ -96,7 +97,9 @@ describe("goal wait countdown versus externally started turns", () => {
 		expect(waitUpdates(status).at(-1)?.text).toContain("goal continues in");
 		expect(timerStates(harness).filter((state) => state.armed)).toHaveLength(1);
 
+		const delivered = waitForSentCount(harness, 1);
 		await vi.advanceTimersByTimeAsync(300_000);
+		await delivered;
 		expect(harness.sent).toHaveLength(1);
 	});
 });
