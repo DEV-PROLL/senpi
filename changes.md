@@ -8,7 +8,11 @@ Owns every audited production path whose nearest tracker is the repository root.
 ### What changed
 
 - `package.json`: `@biomejs/biome` 2.5.9 -> 2.5.10.
-- `packages/{agent,ai,coding-agent,protocol,senpi-codemode}/package.json`: `typebox` 1.3.16 -> 1.3.18 as one atomic shared-runtime upgrade.
+- `packages/agent/package.json`: `typebox` 1.3.16 -> 1.3.18.
+- `packages/ai/package.json`: `typebox` 1.3.16 -> 1.3.18.
+- `packages/coding-agent/package.json`: `typebox` 1.3.16 -> 1.3.18.
+- `packages/protocol/package.json`: `typebox` 1.3.16 -> 1.3.18.
+- `packages/senpi-codemode/package.json`: `typebox` 1.3.16 -> 1.3.18.
 - `packages/{ai,coding-agent}/package.json`: `@aws-sdk/client-bedrock-runtime` 3.1115.0 -> 3.1116.0.
 - `packages/coding-agent/package.json`: `@anthropic-ai/claude-agent-sdk` 0.3.238 -> 0.3.241.
 - Root and generated release locks were regenerated from those exact pins.
