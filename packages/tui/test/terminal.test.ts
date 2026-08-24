@@ -404,6 +404,21 @@ describe("ProcessTerminal stop", () => {
 		}
 	});
 
+	it("does not throw when Node reports the dead terminal by error code", () => {
+		// Given
+		const eio = Object.assign(new Error("setRawMode failed"), { code: "EIO" });
+		const harness = setupTerminalStopHarness(false, () => {
+			throw eio;
+		});
+
+		try {
+			// When / Then
+			assert.doesNotThrow(() => harness.terminal.stop());
+		} finally {
+			harness.cleanup();
+		}
+	});
+
 	it("rethrows unexpected raw-mode restoration failures", () => {
 		// Given
 		const invalidArgument = Object.assign(new Error("unexpected setRawMode failure"), { code: "EINVAL" });
