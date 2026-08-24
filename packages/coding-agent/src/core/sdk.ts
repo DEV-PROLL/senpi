@@ -397,11 +397,19 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			const websocketConnectTimeoutMs =
 				options?.websocketConnectTimeoutMs ?? settingsManager.getWebSocketConnectTimeoutMs();
 			const headerRunner = extensionRunnerRef.current;
+			// Resolve the providerRequest retry stage from the provider's declared
+			// profile (falls back to senpi-default when none is declared).
+			const profile = settingsManager.resolveRetryProfile(
+				model.provider
+					? { id: model.provider, retryPolicy: modelRuntime.getProvider(model.provider)?.retryPolicy }
+					: undefined,
+			);
+			const profileMaxRetries = profile.providerRequest.enabled ? profile.providerRequest.maxRetries : 0;
 			return modelRuntime.streamSimple(model, context, {
 				...options,
 				timeoutMs,
 				websocketConnectTimeoutMs,
-				maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
+				maxRetries: options?.maxRetries ?? profileMaxRetries,
 				maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
 				transformHeaders: async (requestHeaders) => {
 					const headers = mergeProviderAttributionHeaders(

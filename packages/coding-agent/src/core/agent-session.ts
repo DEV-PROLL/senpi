@@ -900,6 +900,18 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
+
+	/**
+	 * Resolve the effective retry profile for the current model's provider.
+	 * Falls back to the senpi-default profile when the provider declares none.
+	 */
+	private _resolveRetryProfile() {
+		const providerId = this.model?.provider;
+		const declared = providerId !== undefined ? this._modelRuntime.getProvider(providerId)?.retryPolicy : undefined;
+		return this.settingsManager.resolveRetryProfile(
+			providerId !== undefined ? { id: providerId, retryPolicy: declared } : undefined,
+		);
+	}
 	private _probePhase: ProbePhase = "idle";
 	private _hintDeadlineMs: number | undefined = undefined;
 	private _cumulativeHintedWaitMs = 0;
@@ -6927,6 +6939,11 @@ export class AgentSession {
 			return "not-handled";
 		}
 
+		// Resolve the effective retry profile for the current provider.
+		// Profile-driven behaviour only diverges when a provider declares one;
+		// the senpi-default profile preserves today's tier routing exactly.
+		const retryProfile = this._resolveRetryProfile();
+
 		// Retry promise is created synchronously in _handleAgentEvent for agent_end.
 		// Keep a defensive fallback here in case a future refactor bypasses that path.
 		if (!this._retryPromise) {
@@ -7029,7 +7046,42 @@ export class AgentSession {
 				/rate.?limit|(?:^429(?=\s+\{)|(?:\bHTTP\/1\.[01]\s+|\bHTTP\s+|\bstatus(?:\s+code)?\s+|\berror\s+|\bcode\s+)429\b)|too many requests|resource.?exhausted/i.test(
 					errorMessage,
 				);
-			if (is429Class) {
+			// Profile-driven routing: "after-turn-budget" (Kimi) keeps 429s on the
+			// ordinary same-model budget; "tiered" (senpi default) uses hint tiers.
+			if (is429Class && retryProfile.fallback.rateLimited === "after-turn-budget") {
+				// Kimi profile: 429s consume the same-model budget like any transient.
+				// Mark tier-routed so the generic non-429 path below does not double-count.
+				is429TierRouted = true;
+				this._retryAttempt++;
+				if (this._retryAttempt > settings.maxRetries) {
+					switchedFallback = await this._retryFallback.tryFallback("transient", {
+						errorMessage,
+						retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
+					});
+					if (switchedFallback) {
+						this._retryAttempt = 1;
+					} else {
+						const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+						if (exhaustedChainKey) {
+							this._emit({
+								type: "retry_fallback_exhausted",
+								chainKey: exhaustedChainKey,
+								lastError: errorMessage,
+							});
+						}
+						this._emit({
+							type: "auto_retry_end",
+							success: false,
+							attempt: this._retryAttempt - 1,
+							finalError: message.errorMessage,
+						});
+						this._retryAttempt = 0;
+						this._resetHintTierState();
+						this._resolveRetry();
+						return "not-handled";
+					}
+				}
+			} else if (is429Class) {
 				const hintMs = this._getProviderRetryDelayMs(errorMessage);
 				const hintSettings = this.settingsManager.getHintPolicySettings();
 				const tier = classifyRateLimitedWait(hintMs, hintSettings);
@@ -7180,8 +7232,14 @@ export class AgentSession {
 
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
 		const maxRetryDelayMs = this.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
+		// Profile ceiling null (Kimi) bypasses the over-ceiling error path entirely.
+		const profileCeiling =
+			retryProfile.turn.serverHint.mode === "override"
+				? retryProfile.turn.serverHint.ceiling.maxDelayMs
+				: maxRetryDelayMs;
+		const effectiveMaxRetryDelayMs = profileCeiling ?? Number.MAX_SAFE_INTEGER;
 		// For 429-class failures the tier routing replaces the over-budget gate.
-		if (!is429TierRouted && providerDelayMs !== undefined && providerDelayMs > maxRetryDelayMs) {
+		if (!is429TierRouted && providerDelayMs !== undefined && providerDelayMs > effectiveMaxRetryDelayMs) {
 			// A wait this long means the model is unavailable rather than busy, so the
 			// configured chain beats failing the turn. The switch is gated: the over-budget
 			// branch above may have already switched on this same error, and hopping again
