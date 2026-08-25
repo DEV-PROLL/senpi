@@ -97,7 +97,9 @@ describe("retry fallback engine", () => {
 		await harness.session.prompt("hello");
 
 		expect(harness.eventsOfType("retry_fallback_applied")).toEqual([]);
-		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toSatisfy((d: number[]) => d.length === 2 && d[0]! >= 1 && d[0]! < 1.25 && d[1]! >= 2 && d[1]! < 2.5);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toSatisfy(
+			(d: number[]) => d.length === 2 && d[0]! >= 1 && d[0]! < 1.25 && d[1]! >= 2 && d[1]! < 2.5,
+		);
 		expect(harness.eventsOfType("auto_retry_end").map((event) => event.success)).toEqual([true]);
 		expect(harness.faux.state.callCount).toBe(3);
 	});
@@ -126,7 +128,17 @@ describe("retry fallback engine", () => {
 		await harness.session.prompt("hello");
 
 		// 1,2,4 = same-model exponential backoff; the trailing 0 is the fallback switch.
-		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toSatisfy((d: number[]) => d.length === 4 && d[0]! >= 1 && d[0]! < 1.25 && d[1]! >= 2 && d[1]! < 2.5 && d[2]! >= 4 && d[2]! < 5 && d[3]! === 0);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.delayMs)).toSatisfy(
+			(d: number[]) =>
+				d.length === 4 &&
+				d[0]! >= 1 &&
+				d[0]! < 1.25 &&
+				d[1]! >= 2 &&
+				d[1]! < 2.5 &&
+				d[2]! >= 4 &&
+				d[2]! < 5 &&
+				d[3]! === 0,
+		);
 		expect(harness.eventsOfType("retry_fallback_applied")).toMatchObject([
 			{ from: primary, to: fallback, chainKey: primary, reason: "transient" },
 		]);

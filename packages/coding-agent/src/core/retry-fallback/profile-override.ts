@@ -42,7 +42,12 @@ function isFiniteRatio(value: unknown): value is number {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
-function validateStageKnobs(stage: unknown, providerId: string, stageName: string, warnings: string[]): RetryStageOverride | undefined {
+function validateStageKnobs(
+	stage: unknown,
+	providerId: string,
+	stageName: string,
+	warnings: string[],
+): RetryStageOverride | undefined {
 	if (stage === undefined) return undefined;
 	if (!isPlainObject(stage)) {
 		warnings.push(
@@ -86,14 +91,13 @@ function validateStageKnobs(stage: unknown, providerId: string, stageName: strin
 	}
 	if (stage.serverHintMaxDelayMs !== undefined) {
 		if (stage.serverHintMaxDelayMs === null) out.serverHintMaxDelayMs = null;
-		else if (isNonNegativeSafeInteger(stage.serverHintMaxDelayMs)) out.serverHintMaxDelayMs = stage.serverHintMaxDelayMs;
+		else if (isNonNegativeSafeInteger(stage.serverHintMaxDelayMs))
+			out.serverHintMaxDelayMs = stage.serverHintMaxDelayMs;
 		else invalid.push("serverHintMaxDelayMs");
 	}
 
 	if (invalid.length > 0) {
-		warnings.push(
-			`retry.providers.${providerId}.${stageName} has invalid knob(s): ${invalid.join(", ")}.`,
-		);
+		warnings.push(`retry.providers.${providerId}.${stageName} has invalid knob(s): ${invalid.join(", ")}.`);
 		return undefined;
 	}
 	return out;

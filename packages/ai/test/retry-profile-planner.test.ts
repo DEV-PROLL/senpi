@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planRetryDelay } from "../src/utils/retry-profile/planner.ts";
-import type {
-	RetryFailure,
-	RetryStagePolicy,
-} from "../src/utils/retry-profile/types.ts";
+import type { RetryFailure, RetryStagePolicy } from "../src/utils/retry-profile/types.ts";
 
 // kimi-code-like stage: 500ms base, x2, 32s cap, +0..25% additive jitter.
 const kimiBackoff = {

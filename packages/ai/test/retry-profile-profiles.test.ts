@@ -13,8 +13,20 @@ describe("shipped retry profiles", () => {
 	});
 
 	it("forwards retryPolicy through provider creation", () => {
-		const api = { stream: () => { throw new Error("unused"); }, streamSimple: () => { throw new Error("unused"); } };
-		const input = { id: "test", auth: { type: "apiKey", check: async () => ({ type: "not_configured" as const }) }, models: [], api };
+		const api = {
+			stream: () => {
+				throw new Error("unused");
+			},
+			streamSimple: () => {
+				throw new Error("unused");
+			},
+		};
+		const input = {
+			id: "test",
+			auth: { apiKey: { name: "Test API key", resolve: async () => undefined } },
+			models: [],
+			api,
+		};
 		const without = createProvider(input);
 		const withProfile = createProvider({ ...input, retryPolicy: KIMI_CODE_RETRY_PROFILE });
 		expect(without.retryPolicy).toBeUndefined();

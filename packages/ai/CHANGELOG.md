@@ -6,11 +6,44 @@
 
 ### Added
 
+- Credential pool slot algebra under `@earendil-works/pi-ai/auth/pool/slots`: a stored credential can hold sibling slots, and `listSlots` / `upsertSlot` / `removeSlot` / `pinSlot` define slot-preserving mutation. A credential without an `accounts` array reads as a one-slot pool with no write-back, and a pooled entry keeps its flat top-level credential so older builds keep authenticating.
+- `Models.logout` accepts `slotId` to remove exactly one credential slot; calling it without a slot keeps today's remove-everything behavior.
+
+### Changed
+
+### Fixed
+
+- Cursor `resource_exhausted` errors with token usage below half the model context window are now classified as usage-pool exhaustion instead of context overflow, while zero-token errors and legacy no-window detection remain unchanged.
+
+### Removed
+
+## [2026.8.24] - 2026-08-24
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Updated the Bedrock runtime client to 3.1116.0 and the shared TypeBox runtime to 1.3.18.
+
+### Fixed
+
+### Removed
+
+## [2026.8.23] - 2026-08-23
+
+### Breaking Changes
+
+### Added
+
 - Cursor Composer models receive an operating prefix as their own leading system blob, carrying this client's native tool vocabulary and completion rules in place of the Cursor-harness habits they were trained on. Other Cursor models keep their existing request shape.
 
 ### Changed
 
 ### Fixed
+
+- Kimi XTML channel markers no longer reach user-visible assistant text when a leaked marker arrives without its trailing `<|sep|>` (seen live as a text block ending in the literal `<|close|>think` newline). One shared channel-marker grammar now backs both the stream recovery parser and message-level thinking recovery, which also strips markers from `text` blocks while keeping code-span literals intact ([#1092](https://github.com/code-yeongyu/senpi/pull/1092)).
 
 ### Removed
 

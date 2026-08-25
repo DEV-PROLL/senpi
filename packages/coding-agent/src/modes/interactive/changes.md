@@ -1,4 +1,78 @@
 # changes
+
+## 2026-08-25 - Render provider abort labels without mutating messages
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` and `packages/coding-agent/src/modes/interactive/aborted-error-label.ts`: render provider watchdog labels from a copied assistant message while retaining the real provider cause in session state.
+
+### Why
+
+- UI labels must not overwrite `finalError`, transcript persistence, or replay data.
+
+### Why an extension could not handle it
+
+- Interactive message rendering owns this label-only presentation boundary.
+
+### Expected merge conflict zones
+
+- LOW: aborted assistant `message_end` rendering paths.
+
+## 2026-08-25 - resume hint uses the brand executable name
+
+### What changed
+
+- `interactive-mode.ts`: `formatResumeCommand()` starts the printed resume command with `APP_COMMAND` instead of `APP_NAME`, so quitting the TUI shows the real binary (`omo --session <id>`) when the brand display name differs.
+
+### Why
+
+- The quit hint is a copy-paste shell command. Printing the display brand (`OmO`) makes the hint fail when the executable is lowercase `omo`.
+
+### Why an extension could not handle it
+
+- The resume hint is assembled inside `InteractiveMode` teardown from session identity; extensions cannot replace that printed line.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` `formatResumeCommand()` argument list.
+## 2026-08-24 - provider aborts render with explicit provenance
+
+### What changed
+
+- `abortedErrorLabel` receives internal AgentSession abort provenance so user, system, and source-less provider failures render distinct labels in both streaming and replay/tool-result paths.
+
+### Why
+
+- Provider/watchdog exhaustion must not appear as generic `Operation aborted` or user-style retry cancellation.
+
+### Why an extension could not handle it
+
+- Abort ownership is private AgentSession state consumed by interactive rendering.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` aborted assistant rendering call sites.
+## 2026-08-24 — streaming head stays single-written while smooth reveal paces (fixes dual-write flicker)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: `syncTrailingAssistantText` no longer overwrites the streaming head component while `streamingReveal.isPacingHead(head)` is true (smooth streaming on, no toolCall block in the head, component bound). The full-head write still lands when smooth streaming is off, when the head carries a toolCall (the reveal dumps full immediately there), and after the reveal stops at `message_end`. Trailing-segment logic is unchanged.
+- `packages/coding-agent/src/modes/interactive/streaming-reveal.ts`: new `isPacingHead(message)` — the single ownership query for the pacing condition.
+- `packages/coding-agent/test/tui-streaming-head-single-writer.test.ts`: regression test asserting the streaming component's painted text never shrinks before `message_end` with smooth streaming on (mutation-verified).
+
+### Why
+
+- Every assistant `message_update` wrote the head twice: `streamingReveal.setTarget(head)` painted the paced prefix, then `syncTrailingAssistantText` overwrote the component with the full head, and the next reveal tick repainted the shorter prefix. Painted text visibly vanished and burst back (lengths oscillated `[0, 116, 0, 168, ...]` in the regression capture), and the full/prefix height churn tripped the above-viewport scrollback replay, producing the vertical jumping reported after the 2026.8.22 line shipped.
+
+### Why an extension could not handle it
+
+- The streaming component, reveal pacing state, and per-update write ordering are private `InteractiveMode`/`StreamingRevealController` render state; extensions observe session events only.
+
+### Expected merge conflict zones
+
+- HIGH: `syncTrailingAssistantText` and the `message_update` handler in `packages/coding-agent/src/modes/interactive/interactive-mode.ts` (same hunk as the #1064 segment work).
+- LOW: `packages/coding-agent/src/modes/interactive/streaming-reveal.ts` around the new `isPacingHead` query.
+
 ## 2026-08-22 - working dock stays painted across queued turn boundaries
 
 ### What changed

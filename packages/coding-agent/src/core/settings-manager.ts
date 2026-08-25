@@ -1,5 +1,11 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
+import { SENPI_DEFAULT_RETRY_PROFILE } from "@earendil-works/pi-ai/utils/retry-profile/profiles";
+import type {
+	RetryPolicyProfile,
+	RetryStagePolicy,
+	RetryTieredHintStrategy,
+} from "@earendil-works/pi-ai/utils/retry-profile/types";
 import type { TuiMode as RendererTuiMode, ScrollViewScrollbar } from "@earendil-works/pi-tui";
 import { createHash, randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
@@ -12,16 +18,8 @@ import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { envValue } from "./brand.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import { FILE_STORAGE_LOCK_OPTIONS } from "./lockfile-policy.ts";
-import type {
-	RetryPolicyOverride,
-} from "./retry-fallback/profile-override.ts";
+import type { RetryPolicyOverride } from "./retry-fallback/profile-override.ts";
 import { validateRetryProviderOverrides } from "./retry-fallback/profile-override.ts";
-import type {
-	RetryPolicyProfile,
-	RetryStagePolicy,
-	RetryTieredHintStrategy,
-} from "@earendil-works/pi-ai/utils/retry-profile/types";
-import { SENPI_DEFAULT_RETRY_PROFILE } from "@earendil-works/pi-ai/utils/retry-profile/profiles";
 import {
 	type ResolvedHintPolicySettings,
 	type ResolvedRetryFallbackSettings,
@@ -1473,7 +1471,7 @@ export class SettingsManager {
 		const base = provider?.retryPolicy ?? SENPI_DEFAULT_RETRY_PROFILE;
 		const declared = provider?.retryPolicy !== undefined;
 
-		let turnBackoff = { ...base.turn.backoff };
+		const turnBackoff = { ...base.turn.backoff };
 		if (!declared) {
 			if (this.settings.retry?.maxRetries !== undefined) {
 				turnBackoff.baseDelayMs = this.settings.retry.baseDelayMs ?? turnBackoff.baseDelayMs;
@@ -1493,9 +1491,12 @@ export class SettingsManager {
 
 		const turnEnabled = this.getRetryEnabled() ? (providerOverride?.turn?.enabled ?? base.turn.enabled) : false;
 
-		const tierStrategy: RetryTieredHintStrategy = base.turn.serverHint.mode === "tiered"
-			? base.turn.serverHint.strategy
-			: (() => { throw new Error("not tiered"); });
+		const tierStrategy: RetryTieredHintStrategy =
+			base.turn.serverHint.mode === "tiered"
+				? base.turn.serverHint.strategy
+				: () => {
+						throw new Error("not tiered");
+					};
 
 		const turn: RetryStagePolicy = {
 			enabled: turnEnabled,
@@ -1503,9 +1504,7 @@ export class SettingsManager {
 			backoff: { ...base.turn.backoff, baseDelayMs: turnBaseDelayMs },
 			extractServerHint: base.turn.extractServerHint,
 			serverHint:
-				base.turn.serverHint.mode === "tiered"
-					? { mode: "tiered", strategy: tierStrategy }
-					: base.turn.serverHint,
+				base.turn.serverHint.mode === "tiered" ? { mode: "tiered", strategy: tierStrategy } : base.turn.serverHint,
 			classify: base.turn.classify,
 		};
 

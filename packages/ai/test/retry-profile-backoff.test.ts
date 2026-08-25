@@ -45,9 +45,7 @@ describe("retryBackoffDelayMs", () => {
 
 	it("computes the senpi turn delays [2000, 4000, 8000] for any random sample (jitter none)", () => {
 		for (const random of [0, 0.5, 0.999999]) {
-			const delays = [1, 2, 3].map((retryNumber) =>
-				retryBackoffDelayMs(senpiTurnBackoff, retryNumber, random),
-			);
+			const delays = [1, 2, 3].map((retryNumber) => retryBackoffDelayMs(senpiTurnBackoff, retryNumber, random));
 			expect(delays).toEqual([2000, 4000, 8000]);
 		}
 		// Uncapped policy keeps growing past the kimi ramp's attempt-7 plateau.
@@ -67,9 +65,7 @@ describe("retryBackoffDelayMs", () => {
 			perAttemptCapMs: 0,
 			jitter: { mode: "additive", ratio: 0.25 },
 		};
-		const delays = [1, 2, 3, 4, 5].map((retryNumber) =>
-			retryBackoffDelayMs(zeroCap, retryNumber, 0.5),
-		);
+		const delays = [1, 2, 3, 4, 5].map((retryNumber) => retryBackoffDelayMs(zeroCap, retryNumber, 0.5));
 		expect(delays).toEqual([0, 0, 0, 0, 0]);
 	});
 

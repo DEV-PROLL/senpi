@@ -144,6 +144,14 @@ export interface RetryPolicy {
 	maxRetries: number;
 	/** Base delay in ms. Per-attempt delay is `baseDelayMs * 2^(attempt-1)` before jitter. */
 	baseDelayMs: number;
+	/** Injectable source used for Codex-style +/-10% backoff jitter. */
+	random?: () => number;
+}
+
+export function retryDelayMs(baseDelayMs: number, attempt: number, random: () => number = Math.random): number {
+	const scheduledDelayMs = baseDelayMs * 2 ** (attempt - 1);
+	const sample = Math.min(1, Math.max(0, random()));
+	return Math.round(scheduledDelayMs * (0.9 + sample * 0.2));
 }
 
 /** Optional callbacks emitted by {@link retryAssistantCall} around each retry. */
@@ -236,7 +244,7 @@ export async function retryTransientCall<T>(
 
 			attempt++;
 			lastRetry = { attempt, errorMessage: errorMessageOf(error) };
-			const delayMs = policy!.baseDelayMs * 2 ** (attempt - 1);
+			const delayMs = retryDelayMs(policy!.baseDelayMs, attempt, policy!.random);
 			await callbacks?.onRetryScheduled?.(attempt, maxAttempts, delayMs, lastRetry.errorMessage);
 
 			try {
@@ -306,7 +314,7 @@ export async function retryAssistantCall(
 
 		attempt++;
 		lastRetry = { attempt, errorMessage: response.errorMessage || "Unknown error" };
-		const delayMs = policy!.baseDelayMs * 2 ** (attempt - 1);
+		const delayMs = retryDelayMs(policy!.baseDelayMs, attempt, policy!.random);
 		await callbacks?.onRetryScheduled?.(attempt, maxAttempts, delayMs, lastRetry.errorMessage);
 
 		// Normalize aborts during retry backoff to the same AssistantMessage shape as
@@ -365,6 +373,7 @@ export function isProviderStreamStallError(message: AssistantMessage): boolean {
  * failures are ordinary error responses.
  */
 export function isProviderTimeoutError(message: AssistantMessage): boolean {
+	if (message.abortSource === "provider") return true;
 	if (isProviderStreamStallError(message)) return true;
 	if (message.stopReason !== "error" && message.stopReason !== "aborted") return false;
 	return PROVIDER_TRANSPORT_TIMEOUT_ERROR_PATTERN.test(message.errorMessage ?? "");

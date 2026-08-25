@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { createProvider } from "@earendil-works/pi-ai";
 import { KIMI_CODE_RETRY_PROFILE } from "@earendil-works/pi-ai/utils/retry-profile/profiles";
+import { afterEach, describe, expect, it } from "vitest";
 import { ModelConfig } from "../src/core/model-config.ts";
 import { composeModelProvider } from "../src/core/provider-composer.ts";
 
@@ -34,7 +34,7 @@ function createBase(withProfile: boolean) {
 	};
 	return createProvider({
 		id: "test-provider",
-		auth: { type: "apiKey", check: async () => ({ type: "not_configured" as const }) },
+		auth: { apiKey: { name: "Test API key", resolve: async () => undefined } },
 		models: [],
 		api,
 		...(withProfile ? { retryPolicy: KIMI_CODE_RETRY_PROFILE } : {}),

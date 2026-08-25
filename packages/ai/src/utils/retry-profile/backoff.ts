@@ -11,14 +11,9 @@ import type { RetryBackoffPolicy } from "./types.ts";
  * `subtractive` shrinks it by up to `ratio`. No `Math.random` here — callers
  * inject the sample so the schedule stays deterministic and testable.
  */
-export function retryBackoffDelayMs(
-	policy: RetryBackoffPolicy,
-	retryNumber: number,
-	random: number,
-): number {
+export function retryBackoffDelayMs(policy: RetryBackoffPolicy, retryNumber: number, random: number): number {
 	const exponential = policy.baseDelayMs * policy.growthFactor ** (retryNumber - 1);
-	const capped =
-		policy.perAttemptCapMs === null ? exponential : Math.min(exponential, policy.perAttemptCapMs);
+	const capped = policy.perAttemptCapMs === null ? exponential : Math.min(exponential, policy.perAttemptCapMs);
 	switch (policy.jitter.mode) {
 		case "none":
 			return capped;

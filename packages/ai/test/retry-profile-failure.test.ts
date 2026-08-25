@@ -59,7 +59,7 @@ describe("normalizeAnthropicRetryFailure", () => {
 					"exceeded_current_quota_error: You exceeded your current quota, please check your plan and billing details",
 			},
 		};
-		const error = new RateLimitError(429, body, undefined, new Headers({ "retry-after": "2" }), "error");
+		const error = new RateLimitError(429, body, undefined, new Headers({ "retry-after": "2" }), "rate_limit_error");
 
 		const failure = normalizeAnthropicRetryFailure(error);
 

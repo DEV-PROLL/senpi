@@ -1,5 +1,5 @@
-import type { RetryFailure, RetryFailureKind } from "./types.ts";
 import { extract429RetryAfterMs } from "../retry-hint.ts";
+import type { RetryFailure, RetryFailureKind } from "./types.ts";
 
 export interface RetryFailureContext {
 	/** Raw response/error body text captured at the catch boundary, when held. */
@@ -8,8 +8,7 @@ export interface RetryFailureContext {
 
 const MAX_MESSAGE_CHARS = 500;
 
-const QUOTA_WORDING_PATTERN =
-	/exceeded_current_quota_error|insufficient\s+balance|credits?_required|quota|billing/i;
+const QUOTA_WORDING_PATTERN = /exceeded_current_quota_error|insufficient\s+balance|credits?_required|quota|billing/i;
 const IMAGE_FORMAT_PATTERN =
 	/unsupported image format|unsupported media type for base64 image|invalid data url for image/i;
 
@@ -114,8 +113,7 @@ export function normalizeAnthropicRetryFailure(error: unknown, context?: RetryFa
 	const retryAfterMs = extract429RetryAfterMs({ status, headers, bodyText });
 
 	const shouldRetryHeader = headers?.get("x-should-retry");
-	const shouldRetry =
-		shouldRetryHeader === "true" ? true : shouldRetryHeader === "false" ? false : undefined;
+	const shouldRetry = shouldRetryHeader === "true" ? true : shouldRetryHeader === "false" ? false : undefined;
 
 	return {
 		origin: "anthropic-messages",

@@ -44,7 +44,10 @@ export interface CodemodeExtensionAPI {
 	executeTool: AgentExecuteTool;
 	getActiveTools(): string[];
 	getAllTools(): readonly EvalSchemaToolInfo[];
-	sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
+	sendMessage(
+		message: { customType: string; content: string; display: boolean },
+		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
+	): void;
 	/** Optional host event bus; a host without one turns extension event emission into a harmless no-op. */
 	events?: { emit(name: string, data: unknown): void };
 	/** Optional host RPC surface for forwarding extension-owned events to connected clients. */
@@ -69,7 +72,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 	let activeContext: ExtensionContext | undefined;
 	let activeCells: EvalDetachedCellManager | undefined;
 	const notifier = new EvalNotifier({
-		sendUserMessage: (content, notifyOptions) => pi.sendUserMessage(content, notifyOptions),
+		sendMessage: (message, notifyOptions) => pi.sendMessage(message, notifyOptions),
 		getContext: () => activeContext,
 		getMode: () => "wake",
 	});

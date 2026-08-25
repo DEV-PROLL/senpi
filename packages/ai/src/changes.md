@@ -1,5 +1,40 @@
-## Unreleased
+## 2026-08-25 - Distinguish Cursor usage-pool exhaustion from context overflow
 
+### What changed
+
+- `packages/ai/src/utils/overflow.ts`: token-bearing Cursor `resource_exhausted` errors are context overflow only at or above half the supplied context window; added `isCursorQuotaResourceExhausted` for below-half usage-pool failures while preserving zero-token and no-window behavior.
+
+### Why
+
+- Cursor uses the same bare `resource_exhausted` status for quota exhaustion and context overflow. Proximity to the model window is the verified discriminator.
+
+### Why an extension could not handle it
+
+- Overflow classification is a provider-neutral AI utility below extension-visible session behavior.
+
+### Expected merge conflict zones
+
+- LOW: Cursor `resource_exhausted` handling in `packages/ai/src/utils/overflow.ts`.
+
+## 2026-08-25 - Harden bounded retry jitter and provider abort metadata
+
+### What changed
+
+- `packages/ai/src/providers/faux.ts`: preserves `abortSource` in faux assistant messages.
+- `packages/ai/src/types.ts`: adds optional provider abort provenance to assistant messages.
+- `packages/ai/src/utils/retry.ts`: adds injectable Codex-style +/-10% jitter to bounded retry delays; provider hints remain lower bounds.
+
+### Why
+
+- Retry watchdog ownership and deterministic jitter must survive shared AI message and retry utility boundaries. Jitter prevents synchronized retries without shortening provider-directed waits.
+
+### Why an extension could not handle it
+
+- These browser-safe shared types and utilities execute below extension-visible provider/session boundaries.
+
+### Expected merge conflict zones
+
+- LOW: `packages/ai/src/providers/faux.ts`, `packages/ai/src/types.ts`, and `packages/ai/src/utils/retry.ts`.
 - Pin a Cursor Composer operating prefix as its own leading system blob so Composer models arrive with this client's native tool vocabulary and completion rules instead of the Cursor-harness habits they were trained on.
 - Match the official Cursor CLI's stream recovery: every inbound frame, including heartbeats and checkpoints, refreshes the 30s health timer; pre-`turnEnded` stalls and transport deaths retry with bounded backoff, and checkpointed attempts resume with the original pinned model request.
 - Treat Cursor `turnEnded` as definitive completion after a bounded exec-dispatch drain.
@@ -35,6 +70,28 @@
 - MEDIUM: `src/api/anthropic-messages.ts` catch boundary (diagnostic emission before errorMessage assignment).
 - LOW: `src/utils/diagnostics.ts` diagnostic union (append-only).
 - LOW: `src/utils/retry-profile/` (new tree, no upstream owner).
+
+## 2026-08-23 - Browser-safe credential pool slot algebra
+
+### What changed
+
+- `packages/ai/src/auth/pool/slots.ts` (new): pure slot algebra over the stored `Credential` - `listSlots`, `findSlot`, `upsertSlot`, `removeSlot`, `pinSlot`, `assertValidSlotName`, plus `CredentialSlot` / `PooledCredential` types. A credential with no `accounts` array is read as a one-slot pool named `default` derived from its flat fields without any write-back; `upsertSlot` replaces or appends one slot while every sibling, the pin, and the flat top-level credential survive untouched. Exported as the new subpath `@earendil-works/pi-ai/auth/pool/slots`.
+- `packages/ai/package.json`: added the `./auth/pool/slots` export mapping.
+- `packages/ai/src/models.ts`: `login()` now appends the fresh credential to a pool as a generated `login-N` slot instead of replacing the provider entry (flat/absent entries keep today's whole-write shape); `logout()` accepts `slotId` to remove exactly one slot (no-slot keeps remove-everything); `resolveRefreshCredential()` merges the rotated token back via `mergeRefreshed` so sibling slots and the pin survive a refresh.
+- `packages/ai/src/auth/resolve.ts`: the request-path OAuth refresh applies the same `mergeRefreshed` before persisting.
+
+### Why
+
+- Multi-account credential pools need one shared, provider-neutral definition of slot shape and slot-preserving mutation. The module is pure data transformation with zero I/O so the auth root stays browser-safe, and consumers (coding-agent storage, later affinity/failover) import it rather than redefining it.
+
+### Why an extension could not handle it
+
+- The slot shape extends the stored `Credential` contract defined in this package's `src/auth/types.ts`; extensions cannot author new credential-envelope types or their canonical mutation semantics.
+
+### Expected merge conflict zones
+
+- LOW: new file with no upstream counterpart; the `package.json` export insertion sits beside `./oauth`.
+
 ## 2026-08-20 - Google FinishReason exhaustiveness after the @google/genai 2.18.0 bump
 
 ### What changed

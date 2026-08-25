@@ -31,7 +31,7 @@ import type {
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { prepareAgentToolCall } from "@earendil-works/pi-agent-core";
+import { ProviderRetryWatchdogAbortError, prepareAgentToolCall } from "@earendil-works/pi-agent-core";
 import { contentText, SERVER_FALLBACK_ABORTED_DIAGNOSTIC, type ThinkingSelection } from "@earendil-works/pi-ai";
 import type {
 	Api,
@@ -51,6 +51,7 @@ import {
 	isClassifierRefusal,
 	isContextOverflow,
 	isCursorPayloadResourceExhausted,
+	isCursorQuotaResourceExhausted,
 	isCursorZeroTokenResourceExhausted,
 	isProviderStreamStallError,
 	isProviderTimeoutError,
@@ -70,7 +71,7 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
-import { AgentAbortProvenance } from "./agent-abort-provenance.ts";
+import { AgentAbortProvenance, type AgentAbortSource } from "./agent-abort-provenance.ts";
 import {
 	AgentSettledDelivery,
 	type DeferredAgentSettledAction,
@@ -522,6 +523,8 @@ export interface AgentSessionConfig {
 	agentDir?: string;
 	/** Clock override for fallback selector cooldowns (tests only). */
 	fallbackNow?: () => number;
+	/** Random source for retry jitter (tests only). */
+	retryRandom?: () => number;
 	/** Global model narrowing for selectors and startup model choice (from --models / enabledModels) */
 	scopedModels?: Array<{
 		model: Model<any>;
@@ -963,6 +966,7 @@ export class AgentSession {
 	private readonly _selectorCooldowns: SelectorCooldowns;
 	private readonly _probeBackScheduler: ProbeBackScheduler;
 	private readonly _fallbackNow: () => number;
+	private readonly _retryRandom: () => number;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -1027,6 +1031,7 @@ export class AgentSession {
 		}
 		this._selectorCooldowns = new SelectorCooldowns(config.fallbackNow ?? (() => Date.now()));
 		this._fallbackNow = config.fallbackNow ?? (() => Date.now());
+		this._retryRandom = config.retryRandom ?? Math.random;
 		this._retryFallback = new RetryFallbackController({
 			getSettings: () => this.settingsManager.getRetryFallbackSettings(),
 			registry: this._modelRegistry,
@@ -1759,7 +1764,8 @@ export class AgentSession {
 			!lastAssistant ||
 			(!this._isRetryableError(lastAssistant) &&
 				!this._isHardErrorFallbackEligible(lastAssistant) &&
-				!isCursorZeroTokenResourceExhausted(lastAssistant))
+				!isCursorZeroTokenResourceExhausted(lastAssistant) &&
+				!isCursorQuotaResourceExhausted(lastAssistant, this.model?.contextWindow ?? 0))
 		) {
 			return;
 		}
@@ -1965,6 +1971,9 @@ export class AgentSession {
 		if (isCursorZeroTokenResourceExhausted(lastAssistant)) {
 			return true;
 		}
+		if (isCursorQuotaResourceExhausted(lastAssistant, this.model?.contextWindow ?? 0)) {
+			return this._retryFallback.canTryFallback();
+		}
 		if (!retryableError && this._isHardErrorFallbackEligible(lastAssistant)) {
 			return true;
 		}
@@ -2134,10 +2143,11 @@ export class AgentSession {
 			const retryableError = this._isRetryableError(msg);
 			const hardErrorFallbackEligible = this._isHardErrorFallbackEligible(msg);
 			const cursorZeroTokenRe = isCursorZeroTokenResourceExhausted(msg);
+			const cursorQuotaRe = isCursorQuotaResourceExhausted(msg, this.model?.contextWindow ?? 0);
 			const retryCanAdmitProvider =
 				!userAbortSuppressedQueuedContinuation &&
 				this.settingsManager.getRetrySettings().enabled &&
-				(retryableError || hardErrorFallbackEligible || cursorZeroTokenRe);
+				(retryableError || hardErrorFallbackEligible || cursorZeroTokenRe || cursorQuotaRe);
 			let compactedBeforeRetry = false;
 			if (
 				retryCanAdmitProvider &&
@@ -2155,6 +2165,11 @@ export class AgentSession {
 			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
 				if (cursorZeroTokenRe) {
 					retryOutcome = await this._handleRetryableError(msg, { sameModelRemint: true });
+				} else if (cursorQuotaRe) {
+					// Mid-turn Cursor errors may retain unpaired tool calls. Remove the
+					// failed assistant before provider fallback so replay stays valid.
+					this._retireFailedRetryAssistant(msg);
+					retryOutcome = await this._handleRetryableError(msg, { hardErrorFallback: true });
 				} else if (retryableError) {
 					retryOutcome = await this._handleRetryableError(msg);
 				} else if (hardErrorFallbackEligible) {
@@ -2178,6 +2193,9 @@ export class AgentSession {
 				retryOutcome === "not-handled" &&
 				(msg.stopReason === "error" || msg.stopReason === "aborted");
 
+			if (retryOutcome === "not-handled" && cursorQuotaRe && msg.errorMessage) {
+				msg.errorMessage = `${msg.errorMessage} (likely provider usage/quota exhaustion: conversation is well below the model context window)`;
+			}
 			if (retryOutcome === "not-handled" && this._retryAttempt > 0 && msg.errorMessage) {
 				const attempt = this._retryAttempt;
 				this._retryAttempt = 0;
@@ -2697,6 +2715,11 @@ export class AgentSession {
 	/** Current retry attempt (0 if not retrying) */
 	get retryAttempt(): number {
 		return this._retryAttempt;
+	}
+
+	/** Abort owner for the current turn boundary, used by internal renderers. */
+	get currentAbortSource(): AgentAbortSource | undefined {
+		return this._abortProvenance.currentSource;
 	}
 
 	/**
@@ -5818,7 +5841,15 @@ export class AgentSession {
 					}
 				},
 				getActiveSignal: () => this.agent.signal,
-				abortActive: () => this.agent.abort(),
+				abortActive: () =>
+					this.agent.abort(
+						new ProviderRetryWatchdogAbortError(
+							`Provider retry continuation watchdog timed out after ${retryTimeoutMs}ms` +
+								(this.agent.streamStartTimeoutMs === undefined
+									? " (stream-start guard disabled)"
+									: ` (stream-start guard: ${this.agent.streamStartTimeoutMs}ms)`),
+						),
+					),
 				timeoutMs: retryTimeoutMs,
 			});
 			return "continued";
@@ -7284,8 +7315,14 @@ export class AgentSession {
 		// degradeWithoutFallback; the non-tier branch keeps its own exponential fallback.
 		const nonTierProviderDelayMs = providerDelayMs === 0 ? undefined : providerDelayMs;
 		// Locally computed exponential goes through the profile's backoff policy
-		// (cap + jitter); provider-derived hints and fallback switches stay exact.
-		const localExponentialMs = retryBackoffDelayMs(retryProfile.turn.backoff, this._retryAttempt, Math.random());
+		// (cap + jitter), sampled through the injectable retryRandom seam so tests
+		// stay deterministic; provider-derived hints on the non-429 path remain
+		// authoritative and fallback switches stay exact.
+		const localExponentialMs = retryBackoffDelayMs(
+			retryProfile.turn.backoff,
+			this._retryAttempt,
+			this._retryRandom(),
+		);
 		const delayMs = switchedFallback
 			? 0
 			: is429TierRouted

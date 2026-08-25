@@ -1,5 +1,59 @@
 # goal Extension Changes
 
+## 2026-08-24 - provider retry exhaustion uses guarded recovery
+
+### What changed
+
+- `index.ts`, `agent-end-continuation.ts`, `monitor-continuation.ts`, and `continuation.ts` keep active Goals active after terminal provider/watchdog failures and queue one guarded `providerRecovery` continuation after `agent_settled`. Explicit user aborts remain blocked; system aborts retain `systemRecovery`; the legacy provider-error blocked reason remains resumable.
+
+### Why
+
+- Provider retry exhaustion is infrastructure failure, not a user decision. The previous block stranded active Goals.
+
+### Why an extension could not handle it
+
+- Goal state transitions, settlement latches, and continuation admission are private to the builtin Goal extension.
+
+### Expected merge conflict zones
+
+- LOW: Goal agent-end routing and monitor continuation admission.
+
+## Wait countdown hides while a turn runs (2026-08-24)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/goal/wait-ticker.ts`
+  `GoalWaitTicker.tick` now renders `undefined` (clearing the `goal-wait`
+  footer segment) whenever `ctx.isIdle()` is false, and re-renders the
+  countdown on the next idle tick. The armed continuation timer, its
+  cache-TTL deadline, and the cache-warm iteration accounting are untouched;
+  only the render follows session idleness.
+
+### Why
+
+- A turn started by a channel the goal continuation did not deliver (a
+  monitor event, a task completion notification, a scheduled wakeup) left the
+  parked wait countdown rendering over the Working indicator for the whole
+  turn — observed live: `▰▰▰▱… goal continues in 2m 55s · 1 bash on duty`
+  beside `Working (1m 10s)`. The label was doubly false: the goal was being
+  pursued, not waited on, and the timer would no-op on `!ctx.isIdle()` when
+  it fired.
+- Cancelling the timer on foreign turn starts was rejected: the monitor wait
+  schedule is cache-TTL-driven, so re-arming at the next agent_end resets
+  the wake clock and corrupts cache-warm iteration accounting (proven by
+  `goal-cache-warmup.test.ts`).
+
+### Why an extension could not handle it
+
+- The ticker and its render seam live inside the builtin goal extension
+  itself; the idleness contract of its footer segment is the extension's own
+  display logic, not a capability another extension can provide.
+
+### Expected merge conflict zones
+
+- None upstream: `wait-ticker.ts` is a fork-only file with no pi-mono
+  counterpart.
+
 ## Cache-warm ready time renders in the local timezone (2026-08-22)
 
 ### What changed

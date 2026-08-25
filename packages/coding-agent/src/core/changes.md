@@ -27,6 +27,82 @@
 - LOW: `src/core/provider-composer.ts` field forwarding (append-only).
 - LOW: `src/core/retry-fallback/settings.ts` + `profile-override.ts` (new module, no upstream owner).
 
+## 2026-08-23 - Slot-preserving credential writes for multi-account pools
+
+### What changed
+
+- `packages/ai/src/auth/pool/slots.ts` (new, exported as `@earendil-works/pi-ai/auth/pool/slots`): pure slot algebra over a provider credential - `listSlots`, `findSlot`, `upsertSlot`, `removeSlot`, `pinSlot`, `assertValidSlotName`. A stored credential with no `accounts` array is read as a one-slot pool named `default` derived from its flat fields, without writing anything back. `upsertSlot` replaces or appends one slot and leaves every sibling, the pin, and the flat top-level credential untouched. `removeSlot` drops the provider entry once its last slot is gone and clears a pin naming the removed slot.
+- `packages/coding-agent/src/core/auth-storage.ts`: added `listSlots`, `setSlot`, and `removeSlot` delegating to that module; `set()` now appends to a pool (generated `login-N` slot, siblings preserved) instead of replacing the provider entry, so the RPC `login_api_key` path no longer destroys sibling slots; flat providers keep today's whole-write shape (imported via the new vitest source alias for `@earendil-works/pi-ai/auth/*` in `vitest.base.ts`). Each write runs inside the existing `storage.withLock` read-modify-write and rebuilds the provider entry from the locked content, so unrelated providers and sibling slots survive.
+
+### Why
+
+- `set()` replaces a whole provider entry and `remove()` deletes it, so any provider holding more than one credential lost every sibling the moment one slot was written. Multi-account support needs a write path that preserves siblings before any pooled data can exist. The flat top-level credential is deliberately retained on a pooled entry so a senpi build that predates pools still authenticates from it.
+
+### Why an extension could not handle it
+
+- `AuthStorage` is the app-owned `CredentialStore` implementation and the only holder of the `auth.json` lock; slot-preserving semantics must live inside that locked read-modify-write, which no extension can enter.
+
+### Expected merge conflict zones
+
+- LOW: the new methods sit immediately after `remove()` in `packages/coding-agent/src/core/auth-storage.ts`; `credential-slots.ts` is a new file with no upstream counterpart.
+
+## 2026-08-25 - Fall back on Cursor usage-pool exhaustion
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: admits token-bearing Cursor `resource_exhausted` failures as a dedicated fallback class, retires failed assistants before fallback, and annotates terminal no-fallback errors with the likely usage-pool cause.
+
+### Why
+
+- Cursor quota exhaustion was misclassified as overflow and entered compaction loops; mid-turn tool calls also require explicit retry admission outside the generic hard-error gate.
+
+### Why an extension could not handle it
+
+- Retry admission, assistant retirement, and provider fallback are private AgentSession lifecycle boundaries.
+
+### Expected merge conflict zones
+
+- HIGH: Cursor retry admission and fallback dispatch in `packages/coding-agent/src/core/agent-session.ts`.
+
+## 2026-08-25 - Harden watchdog abort accounting and retry jitter
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: carries watchdog provenance and applies injected jitter while preserving provider hints and 429 floors.
+- `packages/coding-agent/src/core/extensions/types.ts`: includes provider abort ownership in `agent_end`.
+
+### Why
+
+- Watchdog aborts must remain retryable and consume the configured budget; delay jitter must not alter provider hints or the 429 exponential floor.
+
+### Why an extension could not handle it
+
+- Session retry admission and lifecycle event typing are core boundaries with no extension seam.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/core/agent-session.ts` retry scheduling and `packages/coding-agent/src/core/extensions/types.ts` event contract.
+
+## 2026-08-24 - expose abort provenance to interactive rendering
+
+### What changed
+
+- `agent-abort-provenance.ts` exposes the current explicit abort owner across the active and settlement boundaries.
+- `agent-session.ts` exposes that owner through the read-only `currentAbortSource` getter for the interactive renderer.
+
+### Why
+
+- An assistant `stopReason: "aborted"` does not prove that the user cancelled. Provider retry watchdogs can produce the same terminal shape without explicit ownership, while user and system aborts are recorded by `AgentAbortProvenance`.
+- The renderer needs the existing provenance at message finalization so it can persist an accurate user, system, or provider label that remains correct when the transcript is replayed.
+
+### Why an extension could not handle it
+
+- Abort ownership is private AgentSession lifecycle state and the assistant message is finalized before the extension-visible `agent_end` event.
+
+### Expected merge conflict zones
+
+- LOW: `agent-abort-provenance.ts` source getter and the `AgentSession` read-only state getters.
+
 ## 2026-08-22 - Retarget OpenAI automatic defaults to GPT-5.6 Sol
 
 ### What changed
@@ -480,6 +556,36 @@ Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-sessio
 - `core/agent-session.ts` `sendCustomMessage` wait condition, and the goal extension `session_start`
   suppressed-load branch in `core/extensions/builtin/goal/index.ts`.
 
+
+## 2026-08-25 - Harden provider retry watchdog ownership and backoff
+
+### What changed
+
+- `core/provider-timeout-retry.ts`: gives the retry-continuation watchdog a proportional 10% grace beyond the granted stream-start guard, preserving `0`/`undefined` opt-out behavior.
+- `packages/coding-agent/src/core/agent-session.ts`: mark watchdog aborts as provider-owned and retain the real watchdog cause for retry classification and terminal reporting; retry delays use injected +/-10% jitter.
+- `packages/coding-agent/src/core/agent-abort-provenance.ts`: carries provider abort ownership through `agent_end`.
+- `packages/coding-agent/src/core/extensions/types.ts`: adds provider abort ownership to the public `agent_end` event type.
+- `packages/coding-agent/src/core/agent-session.ts`: apply injected retry jitter while preserving provider hints and 429 exponential floors.
+- `modes/interactive/interactive-mode.ts` and `modes/interactive/aborted-error-label.ts`: render labels without mutating persisted messages.
+- `modes/interactive/interactive-mode.ts` and `modes/interactive/aborted-error-label.ts`: render abort labels from a copied message rather than mutating session state.
+
+### Why
+
+- The watchdog starts before the retried request starts its stream-start timer, so equal deadlines deterministically laundered a retryable stall into an unclassifiable abort and discarded remaining retry budget.
+- Codex-style jitter prevents synchronized retry storms while provider Retry-After hints remain lower bounds.
+
+### Why an extension could not handle it
+
+- Retry watchdog ownership, Agent abort propagation, session retry accounting, and message finalization are core lifecycle boundaries with no extension seam.
+
+### Policy note
+
+- Non-429 provider retry hints remain authoritative. Jitter applies only when no provider hint is present; 429-tier scheduling remains deterministic so its exponential floor remains a true floor.
+
+### Expected merge conflict zones
+
+- HIGH: `core/provider-timeout-retry.ts`, `core/agent-session.ts`, and `packages/agent/src/{agent.ts,agent-loop.ts}`.
+- LOW: `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/core/extensions/types.ts`, and interactive aborted-label rendering.
 
 ## 2026-08-18 - Retry continuation watchdog reconciled with the guards it grants
 

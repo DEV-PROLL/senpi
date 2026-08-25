@@ -18,6 +18,14 @@ import type {
 	OAuthLoginCallbacks,
 } from "@earendil-works/pi-ai";
 import { findEnvKeys, getEnvApiKey } from "@earendil-works/pi-ai";
+import {
+	appendLoginSlot,
+	type CredentialSlot,
+	listSlots,
+	type PooledCredential,
+	removeSlot,
+	upsertSlot,
+} from "@earendil-works/pi-ai/auth/pool/slots";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -447,7 +455,9 @@ export class AuthStorage implements CredentialStore {
 
 	set(provider: string, credential: Credential): void {
 		this.storage.withLock((content) => {
-			const nextData = { ...this.parseStorageData(content), [provider]: credential };
+			const currentData = this.parseStorageData(content);
+			const next = appendLoginSlot(currentData[provider], credential);
+			const nextData = { ...currentData, [provider]: next };
 			this.data = nextData;
 			return { result: undefined, next: JSON.stringify(nextData, null, 2) };
 		});
@@ -457,6 +467,32 @@ export class AuthStorage implements CredentialStore {
 		this.storage.withLock((content) => {
 			const nextData = { ...this.parseStorageData(content) };
 			delete nextData[provider];
+			this.data = nextData;
+			return { result: undefined, next: JSON.stringify(nextData, null, 2) };
+		});
+	}
+
+	listSlots(provider: string): CredentialSlot[] {
+		return listSlots(this.data[provider] as PooledCredential | undefined);
+	}
+
+	setSlot(provider: string, slot: CredentialSlot): void {
+		this.storage.withLock((content) => {
+			const currentData = this.parseStorageData(content);
+			const next = upsertSlot(currentData[provider] as PooledCredential | undefined, slot);
+			const nextData = { ...currentData, [provider]: next };
+			this.data = nextData;
+			return { result: undefined, next: JSON.stringify(nextData, null, 2) };
+		});
+	}
+
+	removeSlot(provider: string, name: string): void {
+		this.storage.withLock((content) => {
+			const currentData = this.parseStorageData(content);
+			const next = removeSlot(currentData[provider] as PooledCredential | undefined, name);
+			const nextData = { ...currentData };
+			if (next === undefined) delete nextData[provider];
+			else nextData[provider] = next;
 			this.data = nextData;
 			return { result: undefined, next: JSON.stringify(nextData, null, 2) };
 		});
