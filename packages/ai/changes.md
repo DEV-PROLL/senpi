@@ -1,5 +1,67 @@
 # changes.md — ai
 
+## 2026-08-25 - Keep Cloudflare AI Gateway provider divergence covered
+
+### What changed
+
+- Keep `packages/ai/src/providers/cloudflare-ai-gateway.ts` with the fork's Cloudflare AI Gateway provider registration and Workers AI model mapping.
+
+### Why
+
+- The provider is part of the fork's supported gateway surface and must remain covered by the nearest changes tracker during upstream synchronization.
+
+### Why this lives in the fork
+
+- Provider registration and model routing are package-owned runtime behavior below the extension boundary.
+
+### Expected merge conflict zones
+
+- LOW: `packages/ai/src/providers/cloudflare-ai-gateway.ts` and adjacent provider registration during upstream syncs.
+
+## AI package manifest and model generator re-diverge from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/ai/package.json` keeps the calver version, the `./utils/*` and `./node/provider-scope`
+  export subpaths, and `tsx`-driven generator scripts (upstream invokes them with plain `node`).
+- `packages/ai/scripts/generate-models.ts` keeps the fork catalog sources: the OpenGateway fetcher
+  import, `KIMI_K3_THINKING_LEVEL_MAP`, the Kimi coding stable models, and
+  `ZAI_GLM52_THINKING_LEVEL_MAP` — the ZAI map was dropped by this merge's resolution while its
+  usage survived, which broke the `generate` CI job; this sync restores the pre-merge definition
+  verbatim.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- The provider-constant block near the top of `packages/ai/scripts/generate-models.ts` (the exact
+  zone that silently dropped the ZAI map in this merge) and the `exports`/`scripts` blocks of
+  `packages/ai/package.json`.
+
+## Preserve OpenAI completions reasoning details after upstream merge (2026-08-25)
+
+### What changed
+
+- `packages/ai/src/api/openai-completions.ts`: retain structured reasoning details from thinking signatures and legacy encrypted tool-call signatures when constructing assistant messages.
+
+### Why
+
+- The fork's merged adapter computed these details but dropped them before serialization, regressing the upstream reasoning-details contract and fork provider compatibility.
+
+### Why an extension could not handle it
+
+- Assistant message serialization occurs inside the provider adapter before extension hooks can observe or modify the request.
+
+### Expected merge conflict zones
+
+- MEDIUM: assistant-message conversion and reasoning-detail preservation in the OpenAI Completions adapter.
+
 > Audit backfill (2026-08-17): the entry below was recorded during the repository-wide changes.md audit
 > of divergences from the upstream pin (v0.84.2, `914cf1472e`) so its audited production paths carry a
 > canonical four-section record; it is dated by its underlying work.

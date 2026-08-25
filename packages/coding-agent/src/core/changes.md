@@ -1,5 +1,51 @@
 # changes
 
+## Core runtime re-diverges from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` keeps the fork session runtime (prepared tool
+  calls, server-fallback-aborted diagnostics, thinking selection, settlement/idle lifecycle).
+- `packages/coding-agent/src/core/auth-storage.ts` keeps OAuth auth events, interactions, prompts,
+  and login callbacks on the credential store surface.
+- `packages/coding-agent/src/core/footer-data-provider.ts` keeps the polling fallback armed when
+  `fs.watch` creation fails (descriptor limits, unsupported filesystems).
+- `packages/coding-agent/src/core/keybindings.ts` keeps `app.history.search` (ctrl+r) and
+  `app.models.toggleFavorite` (ctrl+f) with their record guards.
+- `packages/coding-agent/src/core/model-config.ts` keeps the extracted `model-config-schema.ts`
+  validation module and `samplingParams` passthrough.
+- `packages/coding-agent/src/core/model-resolver.ts` keeps scoped-model resolution, service tiers,
+  initial-model provenance, and the `AvailableModelsSource` snapshot interface.
+- `packages/coding-agent/src/core/model-runtime.ts` keeps wire identity, payload request metadata,
+  and remote-catalog provider routing.
+- `packages/coding-agent/src/core/package-manager.ts` and `packages/coding-agent/src/core/pi-manifest.ts`
+  keep the `hooks` resource type and branded `envValue("OFFLINE")` reads.
+- `packages/coding-agent/src/core/provider-composer.ts` keeps the extracted api-key/header auth
+  composition modules and tool-call middleware wrapping.
+- `packages/coding-agent/src/core/resource-loader.ts` keeps bundled shim banners, builtin extension
+  factories, and the cwd-scoped extension cache.
+- `packages/coding-agent/src/core/sdk.ts` keeps auth storage, the cursor exec bridge, transport
+  image budgets, model registry wiring, and initial-model provenance.
+- `packages/coding-agent/src/core/session-manager.ts` keeps the session-discovery/resident-store
+  split and the inlined UUIDv7 (upstream depends on the `uuid` package).
+- `packages/coding-agent/src/core/settings-manager.ts` keeps retry/hint policy settings, lockfile
+  policy, nearest-parent config, and atomic settings writes.
+- `packages/coding-agent/src/core/slash-commands.ts` keeps `/favorite-models` and the `/exit` alias.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/core/settings-manager.ts`,
+  and `packages/coding-agent/src/core/session-manager.ts` are the highest-churn files in every sync;
+  expect import-block and constructor-wiring conflicts there first.
+
 ## 2026-08-23 - Slot-preserving credential writes for multi-account pools
 
 ### What changed
@@ -3648,3 +3694,21 @@ extension reloads. Test extension results preserve the same ownership contract.
 The trusted/untrusted extension result composition now carries forward the shared event bus used by
 both pre-trust and remaining extensions. Dropping it caused `ExtensionRunner` to allocate an
 unrelated fallback bus, silently disconnecting `pi.rpc.emit` on trust-requiring projects.
+
+## 2026-08-25 - reject upstream Radius session sharing artifacts
+
+### What changed
+
+- `packages/coding-agent/src/core/radius.ts`: intentionally absent from Senpi; upstream Radius sharing is rejected under the fork sharing policy.
+
+### Why
+
+- Senpi retains its gist-based `/share` flow and `pi.dev` viewer instead of adopting the upstream Radius service.
+
+### Why an extension could not handle it
+
+- Sharing implementation ownership is a core product policy decision, not an extension-level adaptation.
+
+### Expected merge conflict zones
+
+- NONE: the upstream-only Radius artifact remains excluded from the fork tree.

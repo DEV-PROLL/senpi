@@ -9,6 +9,7 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { findNearestParentConfigDir } from "../nearest-parent-config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { stripBom } from "../utils/text.ts";
 import { envValue } from "./brand.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import { FILE_STORAGE_LOCK_OPTIONS } from "./lockfile-policy.ts";
@@ -295,6 +296,7 @@ export type SettingsSourceListener = (source: SettingsSourceSelection) => void;
 
 /** Parse JSON or JSONC without changing comment-like text inside strings. */
 export function parseSettingsJson(content: string): Record<string, unknown> {
+	content = stripBom(content);
 	const withoutComments: string[] = [];
 	let inString = false;
 	let escaped = false;
@@ -497,7 +499,18 @@ export interface SettingsStorage {
 
 export interface SettingsError {
 	scope: SettingsScope;
+	path?: string;
 	error: Error;
+}
+
+type SettingsPaths = Partial<Record<SettingsScope, string>>;
+
+function toSettingsError(scope: SettingsScope, error: unknown, path?: string): SettingsError {
+	return {
+		scope,
+		...(path ? { path } : {}),
+		error: error instanceof Error ? error : new Error(String(error)),
+	};
 }
 
 export class FileSettingsStorage implements SettingsStorage {
@@ -626,6 +639,7 @@ export class SettingsManager {
 	private projectSettingsLoadError: Error | null = null; // Track if project settings file had parse errors
 	private writeQueue: Promise<void> = Promise.resolve();
 	private errors: SettingsError[];
+	private settingsPaths: SettingsPaths;
 	private selectedSources = new Map<SettingsScope, SettingsSourceSelection>();
 	private sourceListeners: SettingsSourceListener[] = [];
 
@@ -638,6 +652,7 @@ export class SettingsManager {
 		initialErrors: SettingsError[] = [],
 		projectTrusted = true,
 		initialSources: readonly SettingsSourceSelection[] = [],
+		settingsPaths: SettingsPaths = {},
 	) {
 		this.storage = storage;
 		this.globalSettings = initialGlobal;
@@ -646,6 +661,7 @@ export class SettingsManager {
 		this.globalSettingsLoadError = globalLoadError;
 		this.projectSettingsLoadError = projectLoadError;
 		this.errors = [...initialErrors];
+		this.settingsPaths = settingsPaths;
 		for (const source of initialSources) this.selectedSources.set(source.scope, source);
 		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
 	}
@@ -664,18 +680,25 @@ export class SettingsManager {
 	static fromStorage(storage: SettingsStorage, options: SettingsManagerCreateOptions = {}): SettingsManager {
 		const projectTrusted = options.projectTrusted ?? true;
 		const initialSources: SettingsSourceSelection[] = [];
+		const settingsPaths: SettingsPaths = {};
 		const globalSource = storage.selectSource?.("global");
-		if (globalSource) initialSources.push(globalSource);
+		if (globalSource) {
+			initialSources.push(globalSource);
+			settingsPaths.global = globalSource.path;
+		}
 		const globalLoad = SettingsManager.tryLoadFromStorage(storage, "global");
 		const projectSource = projectTrusted ? storage.selectSource?.("project") : undefined;
-		if (projectSource) initialSources.push(projectSource);
+		if (projectSource) {
+			initialSources.push(projectSource);
+			settingsPaths.project = projectSource.path;
+		}
 		const projectLoad = SettingsManager.tryLoadFromStorage(storage, "project", projectTrusted);
 		const initialErrors: SettingsError[] = [];
 		if (globalLoad.error) {
-			initialErrors.push({ scope: "global", error: globalLoad.error });
+			initialErrors.push(toSettingsError("global", globalLoad.error, settingsPaths.global));
 		}
 		if (projectLoad.error) {
-			initialErrors.push({ scope: "project", error: projectLoad.error });
+			initialErrors.push(toSettingsError("project", projectLoad.error, settingsPaths.project));
 		}
 
 		return new SettingsManager(
@@ -687,6 +710,7 @@ export class SettingsManager {
 			initialErrors,
 			projectTrusted,
 			initialSources,
+			settingsPaths,
 		);
 	}
 
@@ -935,7 +959,7 @@ export class SettingsManager {
 
 	private recordError(scope: SettingsScope, error: unknown): void {
 		const normalizedError = error instanceof Error ? error : new Error(String(error));
-		this.errors.push({ scope, error: normalizedError });
+		this.errors.push(toSettingsError(scope, normalizedError, this.settingsPaths[scope]));
 	}
 
 	private clearModifiedScope(scope: SettingsScope): void {
@@ -1139,6 +1163,10 @@ export class SettingsManager {
 		this.globalSettings.defaultThinkingLevel = level;
 		this.markModified("defaultThinkingLevel");
 		this.save();
+	}
+
+	getAllModelThinkingLevels(): Record<string, ThinkingLevel> {
+		return { ...(this.settings.modelThinkingLevels ?? {}) };
 	}
 
 	/** Thinking level last set for this exact model, or undefined when unknown/invalid on disk. */

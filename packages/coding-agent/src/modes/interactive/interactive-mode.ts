@@ -664,6 +664,8 @@ export interface InteractiveModeOptions {
 	uiMode?: TuiMode;
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
+	/** Runtime diagnostics collected during session creation. */
+	startupDiagnostics?: Array<{ type: "info" | "warning" | "error"; message: string }>;
 	/** Warning message if session model couldn't be restored */
 	modelFallbackMessage?: string;
 	/** Cwd to trust after reload if it gained a .pi directory during this implicitly trusted session. */
@@ -1583,6 +1585,7 @@ export class InteractiveMode {
 		// Show startup warnings
 		const {
 			migratedProviders,
+			startupDiagnostics,
 			modelFallbackMessage,
 			initialMessage,
 			initialImages,
@@ -1592,6 +1595,10 @@ export class InteractiveMode {
 
 		if (migratedProviders && migratedProviders.length > 0) {
 			this.showWarning(`Migrated credentials to auth.json: ${migratedProviders.join(", ")}`);
+		}
+		for (const diagnostic of startupDiagnostics ?? []) {
+			if (diagnostic.type === "warning") this.showWarning(diagnostic.message);
+			else if (diagnostic.type === "error") this.showError(diagnostic.message);
 		}
 
 		const modelsJsonError = this.session.modelRuntime.getError();
@@ -1653,6 +1660,10 @@ export class InteractiveMode {
 	}
 
 	private async checkTmuxSetup(): Promise<string | undefined> {
+		return this.checkTmuxKeyboardSetup();
+	}
+
+	private async checkTmuxKeyboardSetup(): Promise<string | undefined> {
 		if (!process.env.TMUX) return undefined;
 
 		const runTmux = (args: string[]): Promise<string | undefined> => {

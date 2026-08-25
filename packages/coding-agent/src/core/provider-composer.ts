@@ -218,9 +218,6 @@ function applyModelsJson(
 	config: ModelsJsonProvider | undefined,
 ): Model<Api>[] {
 	if (!config) return [...baseModels];
-	if (config.oauth && !config.baseUrl) {
-		throw new Error(`Provider ${providerId}: "baseUrl" is required when "oauth" is set.`);
-	}
 	const hasOverrides = config.modelOverrides && Object.keys(config.modelOverrides).length > 0;
 	if (
 		!config.models?.length &&
@@ -232,7 +229,6 @@ function applyModelsJson(
 		!config.whitelist &&
 		!config.blacklist &&
 		!config.apiKey &&
-		!config.oauth &&
 		config.authHeader === undefined
 	) {
 		throw new Error(
@@ -244,7 +240,7 @@ function applyModelsJson(
 	const configuredBaseModels = providerId === "ollama" && config.models?.length ? [] : baseModels;
 	const models: Model<Api>[] = configuredBaseModels.map((model) => ({
 		...model,
-		baseUrl: config.oauth === "radius" ? model.baseUrl : (config.baseUrl ?? model.baseUrl),
+		baseUrl: config.baseUrl ?? model.baseUrl,
 		compat: mergeCompat(model.compat, config.compat),
 	}));
 	for (const definition of config.models ?? []) {
@@ -414,7 +410,6 @@ export function composeModelProvider(
 	const oauth = composeOAuthAuth(providerId, base, config, extension);
 	if (!apiKey && !oauth) throw new Error(`Provider ${providerId}: no authentication method configured.`);
 	// The documented local `ollama` models.json catalog must not invoke the Cloud builtin's refresh with its
-	// placeholder key. Other dynamic providers (notably custom Radius gateways) keep their provider-owned refresh.
 	const refreshBase = providerId === "ollama" && config?.models?.length ? undefined : base?.refreshModels?.bind(base);
 
 	const supportsBaseApi = (model: Model<Api>) => base?.getModels().some((entry) => entry.api === model.api) ?? false;

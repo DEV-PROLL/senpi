@@ -5645,9 +5645,7 @@ export class AgentSession {
 			} else {
 				const messages = filterContextExcludedMessages(this.agent.state.messages);
 				const estimate = estimateContextTokens(messages);
-				if (estimate.lastUsageIndex === null) {
-					if (!this._isRequiredCompactionError(assistantMessage)) return false;
-				} else {
+				if (estimate.lastUsageIndex !== null) {
 					// Verify the usage source is post-compaction. Kept pre-compaction messages
 					// have stale usage reflecting the old (larger) context and would falsely
 					// trigger compaction right after one just finished.
