@@ -56,6 +56,7 @@ import {
 	isClassifierRefusal,
 	isContextOverflow,
 	isCursorPayloadResourceExhausted,
+	isCursorQuotaResourceExhausted,
 	isCursorZeroTokenResourceExhausted,
 	isProviderStreamStallError,
 	isProviderTimeoutError,
@@ -1755,7 +1756,8 @@ export class AgentSession {
 			!lastAssistant ||
 			(!this._isRetryableError(lastAssistant) &&
 				!this._isHardErrorFallbackEligible(lastAssistant) &&
-				!isCursorZeroTokenResourceExhausted(lastAssistant))
+				!isCursorZeroTokenResourceExhausted(lastAssistant) &&
+				!isCursorQuotaResourceExhausted(lastAssistant, this.model?.contextWindow ?? 0))
 		) {
 			return;
 		}
@@ -1957,6 +1959,9 @@ export class AgentSession {
 		if (isCursorZeroTokenResourceExhausted(lastAssistant)) {
 			return true;
 		}
+		if (isCursorQuotaResourceExhausted(lastAssistant, this.model?.contextWindow ?? 0)) {
+			return this._retryFallback.canTryFallback();
+		}
 		if (!retryableError && this._isHardErrorFallbackEligible(lastAssistant)) {
 			return true;
 		}
@@ -2126,10 +2131,11 @@ export class AgentSession {
 			const retryableError = this._isRetryableError(msg);
 			const hardErrorFallbackEligible = this._isHardErrorFallbackEligible(msg);
 			const cursorZeroTokenRe = isCursorZeroTokenResourceExhausted(msg);
+			const cursorQuotaRe = isCursorQuotaResourceExhausted(msg, this.model?.contextWindow ?? 0);
 			const retryCanAdmitProvider =
 				!userAbortSuppressedQueuedContinuation &&
 				this.settingsManager.getRetrySettings().enabled &&
-				(retryableError || hardErrorFallbackEligible || cursorZeroTokenRe);
+				(retryableError || hardErrorFallbackEligible || cursorZeroTokenRe || cursorQuotaRe);
 			let compactedBeforeRetry = false;
 			if (
 				retryCanAdmitProvider &&
@@ -2147,6 +2153,11 @@ export class AgentSession {
 			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
 				if (cursorZeroTokenRe) {
 					retryOutcome = await this._handleRetryableError(msg, { sameModelRemint: true });
+				} else if (cursorQuotaRe) {
+					// Mid-turn Cursor errors may retain unpaired tool calls. Remove the
+					// failed assistant before provider fallback so replay stays valid.
+					this._retireFailedRetryAssistant(msg);
+					retryOutcome = await this._handleRetryableError(msg, { hardErrorFallback: true });
 				} else if (retryableError) {
 					retryOutcome = await this._handleRetryableError(msg);
 				} else if (hardErrorFallbackEligible) {
@@ -2170,6 +2181,9 @@ export class AgentSession {
 				retryOutcome === "not-handled" &&
 				(msg.stopReason === "error" || msg.stopReason === "aborted");
 
+			if (retryOutcome === "not-handled" && cursorQuotaRe && msg.errorMessage) {
+				msg.errorMessage = `${msg.errorMessage} (likely provider usage/quota exhaustion: conversation is well below the model context window)`;
+			}
 			if (retryOutcome === "not-handled" && this._retryAttempt > 0 && msg.errorMessage) {
 				const attempt = this._retryAttempt;
 				this._retryAttempt = 0;

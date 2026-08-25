@@ -1,3 +1,21 @@
+## 2026-08-25 - Distinguish Cursor usage-pool exhaustion from context overflow
+
+### What changed
+
+- `packages/ai/src/utils/overflow.ts`: token-bearing Cursor `resource_exhausted` errors are context overflow only at or above half the supplied context window; added `isCursorQuotaResourceExhausted` for below-half usage-pool failures while preserving zero-token and no-window behavior.
+
+### Why
+
+- Cursor uses the same bare `resource_exhausted` status for quota exhaustion and context overflow. Proximity to the model window is the verified discriminator.
+
+### Why an extension could not handle it
+
+- Overflow classification is a provider-neutral AI utility below extension-visible session behavior.
+
+### Expected merge conflict zones
+
+- LOW: Cursor `resource_exhausted` handling in `packages/ai/src/utils/overflow.ts`.
+
 ## 2026-08-25 - Harden bounded retry jitter and provider abort metadata
 
 ### What changed
