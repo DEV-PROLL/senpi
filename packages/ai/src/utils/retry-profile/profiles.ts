@@ -61,7 +61,7 @@ export const KIMI_CODE_RETRY_PROFILE: RetryPolicyProfile = {
 			baseDelayMs: 500,
 			growthFactor: 2,
 			perAttemptCapMs: 32_000,
-			jitter: { mode: "none" },
+			jitter: { mode: "additive", ratio: 0.25 },
 		},
 		extractServerHint: extractNormalizedHint,
 		serverHint: {
@@ -78,7 +78,7 @@ export const KIMI_CODE_RETRY_PROFILE: RetryPolicyProfile = {
 			baseDelayMs: 500,
 			growthFactor: 2,
 			perAttemptCapMs: 32_000,
-			jitter: { mode: "none" },
+			jitter: { mode: "additive", ratio: 0.25 },
 		},
 		extractServerHint: extractNormalizedHint,
 		serverHint: {

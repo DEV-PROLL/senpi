@@ -93,7 +93,7 @@ afterEachCleanup(() => {
 });
 
 describeProfile("resolveRetryProfile precedence", () => {
-	itProfile("kimi-declared provider resolves 9/500/additive/32000/null-ceiling; anthropic resolves 3/2000/none/null-cap", () => {
+	itProfile("kimi-declared provider resolves 9/500/additive/32000/null-ceiling; anthropic resolves 3/2000/additive/8000-cap", () => {
 		const { agentDir, projectDir } = createProfilePaths();
 		const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -106,8 +106,10 @@ describeProfile("resolveRetryProfile precedence", () => {
 		const anthropic = manager.resolveRetryProfile({ id: "anthropic" });
 		expectProfile(anthropic.turn.maxRetries).toBe(3);
 		expectProfile(anthropic.turn.backoff.baseDelayMs).toBe(2000);
-		expectProfile(anthropic.turn.backoff.jitter).toEqual({ mode: "none" });
-		expectProfile(anthropic.turn.backoff.perAttemptCapMs).toBeNull();
+		// Phase-2 default policy: locally computed turn backoff gained +0..25%
+		// additive jitter and an 8s per-attempt cap (see profiles.ts senpi-default).
+		expectProfile(anthropic.turn.backoff.jitter).toEqual({ mode: "additive", ratio: 0.25 });
+		expectProfile(anthropic.turn.backoff.perAttemptCapMs).toBe(8_000);
 	});
 
 	itProfile("user global retry.maxRetries changes anthropic but NOT kimi", () => {
