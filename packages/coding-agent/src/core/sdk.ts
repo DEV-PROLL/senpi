@@ -310,7 +310,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const scopedSelection = selectedModel
 			? scopedModels.find(
 					(entry) => entry.model.provider === selectedModel.provider && entry.model.id === selectedModel.id,
-			  )
+				)
 			: undefined;
 		initialResolvedThinkingLevel = scopedSelection?.thinkingLevel ?? result.thinkingLevel;
 		initialThinkingSelection = scopedSelection?.thinkingSelection ?? result.thinkingSelection;

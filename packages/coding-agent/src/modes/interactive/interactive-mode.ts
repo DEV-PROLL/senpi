@@ -1576,8 +1576,7 @@ export class InteractiveMode {
 			});
 
 		// Check tmux setup asynchronously
-		const checkTmuxSetup = this.checkTmuxKeyboardSetup ?? this.checkTmuxSetup;
-		checkTmuxSetup.call(this).then((warning) => {
+		this.checkTmuxSetup().then((warning) => {
 			if (warning) {
 				this.showWarning(warning);
 			}
