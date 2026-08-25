@@ -86,7 +86,7 @@ describe("Bun terminal session adapter", () => {
 			(data) => chunks.push(new TextDecoder().decode(data)),
 			fake.runtime,
 		);
-		fake.dataHandler()?.({}, new TextEncoder().encode("hello"));
+		fake.dataHandler()?.(undefined as never, new TextEncoder().encode("hello"));
 		session.write("echo hi");
 		session.resize(120, 40);
 		session.kill("SIGTERM");
