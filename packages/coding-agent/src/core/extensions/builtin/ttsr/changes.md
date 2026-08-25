@@ -6,7 +6,7 @@
 
 - TTSR now feeds `toolcall_delta` events into the same collapse, control-leak, and manager-rule watcher used by text and thinking streams, keyed by `tool:<contentIndex>`.
 - Tool-scoped rules resolve the tool name from the partial assistant content block, while text-only rules remain excluded from tool streams.
-- A mid-tool-call collapse aborts system-owned remediation, removes the corrupted tool-call block before persistence, keeps the assistant message coherent, and sends the shared activation record plus hidden corrective nudge.
+- A mid-tool-call collapse aborts system-owned remediation, removes all tool-call blocks from the aborted generation before persistence because the generation's remaining calls are suspect, keeps the assistant message coherent, and sends the shared activation record plus hidden corrective nudge.
 - Control-token-leak detection intentionally runs on tool arguments as part of detector parity; the existing kill switches therefore cover the tool lane without special cases.
 
 ### Why an extension-local change is required

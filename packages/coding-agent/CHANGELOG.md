@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- TTSR now watches streamed tool-call arguments and interrupts collapse floods inside tool inputs, preventing corrupted argument generations from reaching persisted session history.
+
 ### Added
 
 ### Changed
