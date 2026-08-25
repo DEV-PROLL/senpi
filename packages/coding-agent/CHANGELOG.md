@@ -58,6 +58,8 @@
 - Fixed built-in llama.cpp models remaining selectable when autoload is enabled, including sleeping router models and unloaded presets.
 ### Added
 
+- Exposed RPC queue clearing through the public command and client APIs.
+
 - **PowerShell tool** — Use optional native PowerShell command execution on Windows. See [PowerShell Tool](docs/windows.md#powershell-tool).
 - **Safer managed updates** — Stage, verify, and atomically activate updates for installer-managed installations. See [Install and Manage](docs/packages.md#install-and-manage).
 - **Model and thinking controls** — Select thinking levels with `/thinking`, search defaults, keep selections session-scoped, and persist them explicitly with Ctrl+S. See [Models and Thinking](docs/keybindings.md#models-and-thinking).
