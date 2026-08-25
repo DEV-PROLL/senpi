@@ -40,7 +40,9 @@ describe("ModelRegistry Cloudflare compat streaming", () => {
 		resetApiProviders();
 		await modelRuntime.completeSimple(model!, { messages: [] }, { fetch: mockFetch });
 
-		expect(requestState.url).toBe("https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/compat/chat/completions");
+		expect(requestState.url).toBe(
+			"https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/compat/chat/completions",
+		);
 		expect(requestState.headers.get("cf-aig-authorization")).toBe("Bearer test-token");
 	});
 
@@ -61,7 +63,9 @@ describe("ModelRegistry Cloudflare compat streaming", () => {
 
 		await complete(model!, { messages: [] }, { ...auth, fetch: mockFetch });
 
-		expect(requestState.url).toBe("https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/compat/chat/completions");
+		expect(requestState.url).toBe(
+			"https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/compat/chat/completions",
+		);
 		expect(requestState.headers.get("cf-aig-authorization")).toBe("Bearer test-token");
 		expect(requestState.headers.get("Authorization")).toBeNull();
 		expect(requestState.headers.get("x-api-key")).toBeNull();
