@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- Cursor `resource_exhausted` errors with token usage below half the model context window are now classified as usage-pool exhaustion instead of context overflow, while zero-token errors and legacy no-window detection remain unchanged.
+
 ### Removed
 
 ## [2026.8.24] - 2026-08-24
