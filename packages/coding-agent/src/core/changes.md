@@ -3562,3 +3562,21 @@ extension reloads. Test extension results preserve the same ownership contract.
 The trusted/untrusted extension result composition now carries forward the shared event bus used by
 both pre-trust and remaining extensions. Dropping it caused `ExtensionRunner` to allocate an
 unrelated fallback bus, silently disconnecting `pi.rpc.emit` on trust-requiring projects.
+
+## 2026-08-25 - reject upstream Radius session sharing artifacts
+
+### What changed
+
+- `packages/coding-agent/src/core/radius.ts`: intentionally absent from Senpi; upstream Radius sharing is rejected under the fork sharing policy.
+
+### Why
+
+- Senpi retains its gist-based `/share` flow and `pi.dev` viewer instead of adopting the upstream Radius service.
+
+### Why an extension could not handle it
+
+- Sharing implementation ownership is a core product policy decision, not an extension-level adaptation.
+
+### Expected merge conflict zones
+
+- NONE: the upstream-only Radius artifact remains excluded from the fork tree.

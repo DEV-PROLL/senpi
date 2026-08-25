@@ -2551,3 +2551,21 @@ The tip line was teaching a small slice of the product while most of the surface
   reload no longer destroys live extension footers/widgets/tickers.
   Regression: `test/interactive-tui.test.ts` ("handleReloadCommand extension
   UI lifecycle").
+
+## 2026-08-25 - reject upstream Radius interactive sharing surface
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/session-share.ts`: intentionally absent from Senpi; the upstream Radius session-share surface is rejected under the fork sharing policy.
+
+### Why
+
+- Senpi retains the fork's gist-based `/share` flow and `pi.dev` viewer rather than introducing Radius links.
+
+### Why an extension could not handle it
+
+- Interactive sharing command ownership and product policy are implemented in the core interactive mode, before an extension can replace the share surface.
+
+### Expected merge conflict zones
+
+- NONE: the upstream-only Radius session-share artifact remains excluded from the fork tree.
