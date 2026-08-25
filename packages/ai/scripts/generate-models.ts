@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { fetchOpenGatewayModels } from "./generate-models-opengateway.ts";
 import { getEffortThinkingLevelMap, type ModelsDevReasoningOption } from "./models-dev-reasoning-options.ts";
+import { getOpenRouterThinkingLevelMap, type OpenRouterReasoningMetadata } from "./openrouter-reasoning-options.ts";
 import {
 	CLOUDFLARE_AI_GATEWAY_ANTHROPIC_BASE_URL,
 	CLOUDFLARE_AI_GATEWAY_COMPAT_BASE_URL,
