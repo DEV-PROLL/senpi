@@ -1576,7 +1576,8 @@ export class InteractiveMode {
 			});
 
 		// Check tmux setup asynchronously
-		this.checkTmuxKeyboardSetup().then((warning) => {
+		const checkTmuxSetup = this.checkTmuxKeyboardSetup ?? this.checkTmuxSetup;
+		checkTmuxSetup.call(this).then((warning) => {
 			if (warning) {
 				this.showWarning(warning);
 			}
@@ -1657,6 +1658,10 @@ export class InteractiveMode {
 
 	private async checkForPackageUpdates(): Promise<string[]> {
 		return [];
+	}
+
+	private async checkTmuxSetup(): Promise<string | undefined> {
+		return this.checkTmuxKeyboardSetup();
 	}
 
 	private async checkTmuxKeyboardSetup(): Promise<string | undefined> {

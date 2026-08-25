@@ -306,8 +306,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 		model = result.model;
 		initialModelProvenance = result.provenance;
-		initialResolvedThinkingLevel = result.thinkingLevel;
-		initialThinkingSelection = result.thinkingSelection;
+		const selectedModel = model;
+		const scopedSelection = selectedModel
+			? scopedModels.find(
+					(entry) => entry.model.provider === selectedModel.provider && entry.model.id === selectedModel.id,
+			  )
+			: undefined;
+		initialResolvedThinkingLevel = scopedSelection?.thinkingLevel ?? result.thinkingLevel;
+		initialThinkingSelection = scopedSelection?.thinkingSelection ?? result.thinkingSelection;
 		if (!model) {
 			modelFallbackMessage = formatNoModelsAvailableMessage();
 		} else if (modelFallbackMessage) {
