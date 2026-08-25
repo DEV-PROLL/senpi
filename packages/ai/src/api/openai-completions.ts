@@ -380,6 +380,31 @@ function parseLegacyEncryptedReasoningDetail(
 	}
 }
 
+function fillMissingCommonReasoningDetailFields(
+	target: OpenAIReasoningDetailBase,
+	source: OpenAIReasoningDetail,
+): void {
+	target.id ??= source.id;
+	target.format ||= source.format;
+	target.index ??= source.index;
+}
+
+function appendOpenAIReasoningDetail(details: OpenAIReasoningDetail[], detail: OpenAIReasoningDetail): void {
+	const lastDetail = details[details.length - 1];
+	if (detail.type === "reasoning.text" && lastDetail?.type === "reasoning.text") {
+		lastDetail.text += detail.text;
+		lastDetail.signature ||= detail.signature;
+		fillMissingCommonReasoningDetailFields(lastDetail, detail);
+		return;
+	}
+	if (detail.type === "reasoning.summary" && lastDetail?.type === "reasoning.summary") {
+		lastDetail.summary += detail.summary;
+		fillMissingCommonReasoningDetailFields(lastDetail, detail);
+		return;
+	}
+	details.push({ ...detail });
+}
+
 type OpenAICompletionsReasoningField = "reasoning" | "reasoning_content" | "reasoning_text";
 
 type ChatCompletionAssistantMessageParamWithReasoning = ChatCompletionAssistantMessageParam &
@@ -854,7 +879,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 							if (!isOpenAIReasoningDetail(detail)) continue;
 							const block = ensureThinkingBlock("");
 							const preservedDetails = parseOpenAIReasoningDetails(block.thinkingSignature) ?? [];
-							preservedDetails.push(detail);
+							appendOpenAIReasoningDetail(preservedDetails, detail);
 							// Keep provider replay data in the existing signature slot. OpenRouter
 							// requires the complete reasoning_details sequence in its original order.
 							block.thinkingSignature = JSON.stringify(preservedDetails);
@@ -1061,7 +1086,7 @@ function buildParams(
 		applyAnthropicCacheControl(messages, params.tools, cacheControl);
 	}
 
-	if (options?.toolChoice) {
+	if (options?.toolChoice && params.tools?.length) {
 		params.tool_choice = options.toolChoice;
 	}
 

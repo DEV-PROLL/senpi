@@ -865,6 +865,7 @@ export class AgentSession {
 	private readonly _supersededCompactionLogAttemptIds = new Set<string>();
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
+	private _pendingCustomMessages: CustomMessage[] = [];
 	// Queues held while the first post-compaction response is classified. Agent
 	// core otherwise drains steering immediately before AgentSession can consume
 	// the stale-usage exemption and schedule the continuation itself.
@@ -2463,6 +2464,7 @@ export class AgentSession {
 			};
 			await this._extensionRunner.emit(extensionEvent);
 			this._turnIndex++;
+			this._flushPendingCustomMessages();
 		} else if (event.type === "message_start") {
 			const extensionEvent: MessageStartEvent = {
 				type: "message_start",
@@ -3936,22 +3938,34 @@ export class AgentSession {
 					throw error;
 				}
 				await this._promptAgent(appMessage, deferredTurnClaim);
+			} else if (this.isStreaming) {
+				this._pendingCustomMessages.push(appMessage);
 			} else {
-				this.agent.state.messages.push(appMessage);
-				this.sessionManager.appendCustomMessageEntry(
-					message.customType,
-					message.content,
-					message.display,
-					message.details,
-				);
-				this._incrementMessageRevision();
-				this._emit({ type: "message_start", message: appMessage });
-				this._emit({ type: "message_end", message: appMessage });
+				this._appendCustomMessage(appMessage);
 			}
 		} finally {
 			deferredTurnClaim?.resolve("finished-without-start");
 			finishSessionWork?.();
 		}
+	}
+
+	private _appendCustomMessage(appMessage: CustomMessage): void {
+		this.agent.state.messages.push(appMessage);
+		this.sessionManager.appendCustomMessageEntry(
+			appMessage.customType,
+			appMessage.content,
+			appMessage.display,
+			appMessage.details,
+		);
+		this._incrementMessageRevision();
+		this._emit({ type: "message_start", message: appMessage });
+		this._emit({ type: "message_end", message: appMessage });
+	}
+
+	private _flushPendingCustomMessages(): void {
+		const pending = this._pendingCustomMessages;
+		this._pendingCustomMessages = [];
+		for (const message of pending) this._appendCustomMessage(message);
 	}
 
 	/**

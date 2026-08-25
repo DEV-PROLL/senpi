@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { fetchOpenGatewayModels } from "./generate-models-opengateway.ts";
 import { getEffortThinkingLevelMap, type ModelsDevReasoningOption } from "./models-dev-reasoning-options.ts";
+import { getOpenRouterThinkingLevelMap, type OpenRouterReasoningMetadata } from "./openrouter-reasoning-options.ts";
 import {
 	CLOUDFLARE_AI_GATEWAY_ANTHROPIC_BASE_URL,
 	CLOUDFLARE_AI_GATEWAY_COMPAT_BASE_URL,
@@ -1915,7 +1916,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 
 				const isGlm52 = modelId === "glm-5.2" || modelId === "glm-5.2-highspeed";
 				const isGlm5x = isGlm52 || modelId === "glm-5.3";
-				const referenceCost = modelId === "glm-5.2-highspeed" || modelId === "glm-5.3" ? undefined : data.zai?.models[modelId]?.cost ?? m.cost;
+				const referenceCost = modelId === "glm-5.2-highspeed" ? undefined : data.zai?.models[modelId]?.cost ?? m.cost;
 
 				models.push({
 					id: modelId,
