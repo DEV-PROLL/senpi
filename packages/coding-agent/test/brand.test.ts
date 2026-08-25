@@ -145,6 +145,7 @@ describe("config module brand integration", () => {
 		const config = await import("../src/config.ts");
 
 		expect(config.APP_NAME).toBe("senpi");
+		expect(config.APP_COMMAND).toBe("senpi");
 		expect(config.CONFIG_DIR_NAME).toBe(".senpi");
 		expect(config.CONFIG_FLAT_LAYOUT).toBe(false);
 		expect(config.DISPLAY_VERSION).toBe(config.VERSION);
