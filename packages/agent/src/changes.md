@@ -1,5 +1,24 @@
 # Changes
 
+## 2026-08-25 - Preserve provider retry watchdog abort provenance
+
+### What changed
+
+- `packages/agent/src/agent.ts` accepts an abort reason and emits a provider-owned assistant abort for retry-watchdog cancellation.
+- `packages/agent/src/agent-loop.ts` preserves an explicit abort Error instead of replacing it with generic `Request was aborted` text.
+
+### Why
+
+- The session watchdog must carry the real provider stall cause through low-level Agent cancellation so retry classification and terminal reporting do not lose the provider failure.
+
+### Why an extension could not handle it
+
+- Abort reason propagation and assistant failure-message construction occur inside the browser-safe agent lifecycle.
+
+### Expected merge conflict zones
+
+- LOW: `agent.ts` abort API and `agent-loop.ts` event-reader cancellation path.
+
 ## 2026-08-20 - End the turn when idle after completed Cursor tools
 
 ### What changed

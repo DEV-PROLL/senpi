@@ -474,6 +474,28 @@ Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-sessio
   suppressed-load branch in `core/extensions/builtin/goal/index.ts`.
 
 
+## 2026-08-25 - Harden provider retry watchdog ownership and backoff
+
+### What changed
+
+- `core/provider-timeout-retry.ts`: gives the retry-continuation watchdog a proportional 10% grace beyond the granted stream-start guard, preserving `0`/`undefined` opt-out behavior.
+- `core/agent-session.ts` and `core/agent-abort-provenance.ts`: mark watchdog aborts as provider-owned and retain the real provider cause for retry classification and terminal reporting; retry delays use injected +/-10% jitter.
+- `modes/interactive/interactive-mode.ts` and `modes/interactive/aborted-error-label.ts`: render abort labels from a copied message rather than mutating session state.
+
+### Why
+
+- The watchdog starts before the retried request starts its stream-start timer, so equal deadlines deterministically laundered a retryable stall into an unclassifiable abort and discarded remaining retry budget.
+- Codex-style jitter prevents synchronized retry storms while provider Retry-After hints remain lower bounds.
+
+### Why an extension could not handle it
+
+- Retry watchdog ownership, Agent abort propagation, session retry accounting, and message finalization are core lifecycle boundaries with no extension seam.
+
+### Expected merge conflict zones
+
+- HIGH: `core/provider-timeout-retry.ts`, `core/agent-session.ts`, and `packages/agent/src/{agent.ts,agent-loop.ts}`.
+- LOW: interactive aborted-label rendering and retry unit tests.
+
 ## 2026-08-18 - Retry continuation watchdog reconciled with the guards it grants
 
 ### What changed

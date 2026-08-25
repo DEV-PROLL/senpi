@@ -1,5 +1,19 @@
 ## Unreleased
 
+- `packages/ai/src/utils/retry.ts`: add injectable Codex-style +/-10% jitter to bounded retry backoff; provider-supplied retry hints remain lower bounds.
+
+### Why
+
+- Synchronized exponential schedules cause clients to retry providers in lockstep. The injected random source keeps tests deterministic and lets callers preserve Retry-After semantics.
+
+### Why an extension could not handle it
+
+- This browser-safe utility is the shared retry implementation below provider and extension boundaries.
+
+### Expected merge conflict zones
+
+- LOW: `utils/retry.ts` retry delay helper and policy type.
+
 - Pin a Cursor Composer operating prefix as its own leading system blob so Composer models arrive with this client's native tool vocabulary and completion rules instead of the Cursor-harness habits they were trained on.
 - Match the official Cursor CLI's stream recovery: every inbound frame, including heartbeats and checkpoints, refreshes the 30s health timer; pre-`turnEnded` stalls and transport deaths retry with bounded backoff, and checkpointed attempts resume with the original pinned model request.
 - Treat Cursor `turnEnded` as definitive completion after a bounded exec-dispatch drain.

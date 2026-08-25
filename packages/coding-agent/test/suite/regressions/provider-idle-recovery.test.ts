@@ -9,10 +9,6 @@ import { createHarness, type Harness } from "../harness.ts";
 
 const DEFAULT_PROVIDER_IDLE_TIMEOUT_MS = 300_000;
 const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
-const STREAM_RETRY_LIVENESS_CAP_MS = 30_000;
-// The continuation watchdog is reconciled against the guards the same retry was
-// granted, so it expires with the stream-start budget instead of the shorter cap.
-const RETRY_CONTINUATION_BOUND_MS = Math.max(STREAM_RETRY_LIVENESS_CAP_MS, DEFAULT_STREAM_START_TIMEOUT_MS);
 
 function createAssistantStream(): EventStream<AssistantMessageEvent, AssistantMessage> {
 	return new EventStream<AssistantMessageEvent, AssistantMessage>(
@@ -170,6 +166,51 @@ describe("provider idle recovery", () => {
 		}
 	});
 
+	it("spends the full retry budget after watchdog-aborted continuations", async () => {
+		vi.useFakeTimers();
+		const harness = await createHarness({
+			settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 0 } },
+		});
+		harnesses.push(harness);
+		harness.agent.timeoutMs = undefined;
+		harness.agent.streamStartTimeoutMs = 10;
+		let providerCalls = 0;
+		harness.agent.streamFunction = () => {
+			providerCalls++;
+			const stream = createAssistantStream();
+			if (providerCalls === 1) {
+				queueMicrotask(() =>
+					stream.push({
+						type: "error",
+						reason: "error",
+						error: fauxAssistantMessage("", {
+							stopReason: "error",
+							errorMessage: "Provider stream start timed out after 10ms",
+						}),
+					}),
+				);
+			}
+			return stream;
+		};
+
+		const prompt = harness.session.prompt("first request");
+		try {
+			await vi.runOnlyPendingTimersAsync();
+			for (let attempt = 0; attempt < 3; attempt++) {
+				await vi.advanceTimersByTimeAsync(11);
+				await vi.advanceTimersByTimeAsync(0);
+			}
+			await prompt;
+			expect(providerCalls).toBe(4);
+			expect(harness.eventsOfType("auto_retry_end")).toMatchObject([
+				{ success: false, attempt: 3, finalError: "Provider stream start timed out after 10ms" },
+			]);
+			expect(harness.eventsOfType("auto_retry_end").at(-1)?.finalError).not.toContain("Request was aborted");
+		} finally {
+			if (harness.session.isStreaming) await harness.session.abort();
+		}
+	});
+
 	it("expires a no-first-event retry at the reconciled continuation bound without shortening the provider guards", async () => {
 		vi.useFakeTimers();
 		const harness = await createHarness({
@@ -211,13 +252,22 @@ describe("provider idle recovery", () => {
 			await retryStarted;
 			await vi.runOnlyPendingTimersAsync();
 			await secondRequestStarted.promise;
-			await vi.advanceTimersByTimeAsync(RETRY_CONTINUATION_BOUND_MS - 1);
+			await vi.advanceTimersByTimeAsync(DEFAULT_STREAM_START_TIMEOUT_MS - 1);
 			expect(harness.eventsOfType("auto_retry_end")).toEqual([]);
 
 			await vi.advanceTimersByTimeAsync(1);
 			await vi.advanceTimersByTimeAsync(0);
 
-			expect(harness.eventsOfType("auto_retry_end").map((event) => event.success)).toEqual([false]);
+			expect(harness.eventsOfType("auto_retry_end")).toMatchObject([
+				{
+					success: false,
+					attempt: 1,
+					finalError: `Provider stream start timed out after ${DEFAULT_STREAM_START_TIMEOUT_MS}ms`,
+				},
+			]);
+			expect(harness.eventsOfType("auto_retry_end").map((event) => event.finalError)).not.toContain(
+				"Request was aborted",
+			);
 			expect(providerOptions).toEqual([
 				{
 					timeoutMs: DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,

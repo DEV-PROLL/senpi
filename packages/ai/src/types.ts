@@ -543,6 +543,8 @@ export interface AssistantMessage {
 	stopDetails?: AssistantStopDetails;
 	deferred?: DeferredHandle;
 	errorMessage?: string;
+	/** Explicit owner for an abort initiated by the provider retry watchdog. */
+	abortSource?: "provider";
 	rawStopReason?: string;
 	/**
 	 * Provider indication of whether the model explicitly ended its turn.
