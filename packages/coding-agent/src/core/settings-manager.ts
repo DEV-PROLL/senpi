@@ -497,6 +497,7 @@ export interface SettingsStorage {
 
 export interface SettingsError {
 	scope: SettingsScope;
+	path?: string;
 	error: Error;
 }
 
@@ -1139,6 +1140,10 @@ export class SettingsManager {
 		this.globalSettings.defaultThinkingLevel = level;
 		this.markModified("defaultThinkingLevel");
 		this.save();
+	}
+
+	getAllModelThinkingLevels(): Record<string, ThinkingLevel> {
+		return { ...(this.settings.modelThinkingLevels ?? {}) };
 	}
 
 	/** Thinking level last set for this exact model, or undefined when unknown/invalid on disk. */

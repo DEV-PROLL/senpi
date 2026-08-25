@@ -35,6 +35,7 @@ import {
 	createFindTool,
 	createGrepTool,
 	createLsTool,
+	createPowerShellTool,
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,
@@ -149,6 +150,7 @@ export type { Tool } from "./tools/index.ts";
 
 export {
 	createBashTool,
+	createPowerShellTool,
 	// Tool factories (for custom cwd)
 	createCodingTools,
 	createEditTool,
@@ -299,6 +301,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			defaultProvider: settingsManager.getDefaultProvider(),
 			defaultModelId: settingsManager.getDefaultModel(),
 			defaultThinkingLevel: settingsManager.getDefaultThinkingLevel(),
+			modelThinkingLevels: settingsManager.getAllModelThinkingLevels(),
 			modelRuntime,
 		});
 		model = result.model;

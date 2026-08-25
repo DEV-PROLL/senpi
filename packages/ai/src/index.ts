@@ -109,7 +109,6 @@ export {
 	kCursorExecResolved,
 } from "./utils/block-symbols.ts";
 export * from "./utils/diagnostics.ts";
-export { estimateContextTokens } from "./utils/estimate.ts";
 export * from "./utils/event-stream.ts";
 export * from "./utils/json-parse.ts";
 export { extractOpenAiCodexAccountId } from "./utils/openai-codex-auth.ts";

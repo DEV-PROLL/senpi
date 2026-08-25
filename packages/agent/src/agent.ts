@@ -8,11 +8,7 @@ import type {
 	ThinkingBudgets,
 	Transport,
 } from "@earendil-works/pi-ai";
-import {
-	buildProviderContext as buildProviderContextFromAgentContext,
-	runAgentLoop,
-	runAgentLoopContinue,
-} from "./agent-loop.ts";
+import { buildProviderContext as buildProviderContextFromAgentContext, runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AfterToolCallContext,
@@ -256,6 +252,14 @@ export class Agent {
 	/** Cursor exec-channel tool handlers; see {@link AgentLoopConfig.cursorExecHandlers}. */
 	public cursorExecHandlers?: AgentLoopConfig["cursorExecHandlers"];
 
+	async buildProviderContext(context: AgentContext, signal?: AbortSignal): Promise<Context> {
+		return buildProviderContextFromAgentContext(
+			context,
+			{ convertToLlm: this.convertToLlm, transformContext: this.transformContext },
+			signal,
+		);
+	}
+
 	constructor(options: AgentOptions) {
 		// Older compiled consumers may omit options or streamFn even though the current API requires them.
 		const runtimeOptions: Partial<AgentOptions> = options ?? {};
@@ -308,15 +312,6 @@ export class Agent {
 	 */
 	get state(): AgentState {
 		return this._state;
-	}
-
-	/** Build a provider context through the same transform and conversion pipeline used by agent requests. */
-	async buildProviderContext(context: AgentContext, signal?: AbortSignal): Promise<Context> {
-		return buildProviderContextFromAgentContext(
-			context,
-			{ convertToLlm: this.convertToLlm, transformContext: this.transformContext },
-			signal,
-		);
 	}
 
 	/** Controls how queued steering messages are drained. */

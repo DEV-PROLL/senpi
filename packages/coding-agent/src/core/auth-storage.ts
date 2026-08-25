@@ -23,6 +23,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "f
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { getAgentDir } from "../config.ts";
+import { stripBom } from "../utils/text.ts";
 import { raceWithAbortSignal } from "../utils/abort.ts";
 import { getFileRevision, normalizePath } from "../utils/paths.ts";
 import { FILE_STORAGE_LOCK_OPTIONS } from "./lockfile-policy.ts";
@@ -47,6 +48,7 @@ type LockResult<T> = {
 	next?: string;
 };
 
+// The mode applies only on creation so administrator-managed modes and ACLs remain intact.
 const AUTH_FILE_WRITE_OPTIONS = { encoding: "utf-8", mode: 0o600 } as const;
 
 type AuthFileReload = {
@@ -88,7 +90,6 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 	private ensureFileExists(): void {
 		if (!existsSync(this.authPath)) {
 			writeFileSync(this.authPath, "{}", AUTH_FILE_WRITE_OPTIONS);
-			chmodSync(this.authPath, 0o600);
 		}
 	}
 
@@ -131,7 +132,6 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			const { result, next } = fn(current);
 			if (next !== undefined) {
 				writeFileSync(this.authPath, next, AUTH_FILE_WRITE_OPTIONS);
-				chmodSync(this.authPath, 0o600);
 			}
 			return result;
 		} finally {
@@ -212,7 +212,6 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			options?.signal?.throwIfAborted();
 			if (next !== undefined) {
 				writeFileSync(this.authPath, next, AUTH_FILE_WRITE_OPTIONS);
-				chmodSync(this.authPath, 0o600);
 			}
 			throwIfCompromised();
 			return result;
@@ -241,7 +240,7 @@ export class ReadOnlyAuthStorage implements CredentialStore {
 
 		let parsed: unknown;
 		try {
-			parsed = JSON.parse(readFileSync(this.authPath, "utf-8"));
+			parsed = JSON.parse(stripBom(readFileSync(this.authPath, "utf-8")));
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
 				this.data = {};
@@ -395,7 +394,7 @@ export class AuthStorage implements CredentialStore {
 		if (!content) {
 			return {};
 		}
-		return JSON.parse(content) as AuthStorageData;
+		return JSON.parse(stripBom(content)) as AuthStorageData;
 	}
 
 	private recordError(error: unknown): void {
@@ -716,7 +715,7 @@ export function readStoredCredential(
 	authPath: string = join(getAgentDir(), "auth.json"),
 ): Credential | undefined {
 	try {
-		const data = JSON.parse(readFileSync(normalizePath(authPath), "utf-8")) as AuthStorageData;
+		const data = JSON.parse(stripBom(readFileSync(normalizePath(authPath), "utf-8"))) as AuthStorageData;
 		return data[providerId];
 	} catch {
 		return undefined;

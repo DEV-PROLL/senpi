@@ -28,7 +28,6 @@ export { type OAuthCredential, readStoredCredential } from "./core/auth-storage.
 export {
 	type BranchPreparation,
 	type BranchSummaryResult,
-	type CacheFriendlySummaryOptions,
 	type CollectEntriesResult,
 	type CompactionResult,
 	type CutPointResult,
@@ -114,6 +113,7 @@ export type {
 	MessageEndEvent,
 	MessageRenderer,
 	MessageRenderOptions,
+	PowerShellToolCallEvent,
 	MessageStartEvent,
 	MessageUpdateEvent,
 	ProjectTrustContext,
@@ -168,6 +168,7 @@ export {
 	isFindToolResult,
 	isGrepToolResult,
 	isLsToolResult,
+	isPowerShellToolResult,
 	isReadToolResult,
 	isToolCallEventType,
 	isWriteToolResult,
@@ -230,6 +231,7 @@ export {
 	createAgentSessionRuntime,
 	createAgentSessionServices,
 	createBashTool,
+	createPowerShellTool,
 	// Tool factories (for custom cwd)
 	createCodingTools,
 	createEditTool,
@@ -425,4 +427,4 @@ export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.ts";
 export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
 // Shell utilities
-export { getShellConfig } from "./utils/shell.ts";
+export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";
