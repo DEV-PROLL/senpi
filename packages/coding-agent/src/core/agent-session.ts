@@ -1956,6 +1956,10 @@ export class AgentSession {
 		if (!settings.enabled) {
 			return false;
 		}
+		// The same-model budget comes from the resolved profile so a provider-declared
+		// budget (e.g. kimi-code's 9) is honoured; identical to settings.maxRetries for
+		// providers without a profile.
+		const turnMaxRetries = this._resolveRetryProfile().turn.maxRetries;
 
 		const retryableError = this._isRetryableError(lastAssistant);
 		if (isCursorZeroTokenResourceExhausted(lastAssistant)) {
@@ -1970,10 +1974,10 @@ export class AgentSession {
 		}
 
 		if (isClassifierRefusal(lastAssistant)) {
-			return this._retryAttempt + 1 <= settings.maxRetries && this._retryFallback.canTryFallback();
+			return this._retryAttempt + 1 <= turnMaxRetries && this._retryFallback.canTryFallback();
 		}
 
-		if (this._retryAttempt + 1 > settings.maxRetries) {
+		if (this._retryAttempt + 1 > turnMaxRetries) {
 			return this._retryFallback.canTryFallback();
 		}
 
@@ -6883,6 +6887,9 @@ export class AgentSession {
 		errorMessage: string,
 	): number | undefined {
 		const settings = this.settingsManager.getRetrySettings();
+		// Budget checks use the resolved profile (same value as settings.maxRetries
+		// for providers without a declared profile).
+		const turnMaxRetries = this._resolveRetryProfile().turn.maxRetries;
 		const hintSettings = this.settingsManager.getHintPolicySettings();
 		const finishTurn = (attempt: number, finalError: string | undefined) => {
 			const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
@@ -6919,7 +6926,7 @@ export class AgentSession {
 			return undefined;
 		}
 		this._retryAttempt++;
-		if (this._retryAttempt > settings.maxRetries) {
+		if (this._retryAttempt > turnMaxRetries) {
 			finishTurn(this._retryAttempt - 1, message.errorMessage);
 			return undefined;
 		}
@@ -6962,7 +6969,7 @@ export class AgentSession {
 		let hintTierDelayMs: number | undefined;
 		if (sameModelRemint) {
 			this._retryAttempt++;
-			if (this._retryAttempt > settings.maxRetries) {
+			if (this._retryAttempt > retryProfile.turn.maxRetries) {
 				if (this._retryAttempt > 1) {
 					this._emit({
 						type: "auto_retry_end",
@@ -6993,7 +7000,7 @@ export class AgentSession {
 		} else if (isRefusal) {
 			// Refusals are only retried through a new chain candidate. They never use
 			// same-model retries or the transient over-budget fallback escape hatch.
-			if (this._retryAttempt + 1 > settings.maxRetries) {
+			if (this._retryAttempt + 1 > retryProfile.turn.maxRetries) {
 				if (this._retryAttempt > 0) {
 					this._emit({
 						type: "auto_retry_end",
@@ -7033,8 +7040,8 @@ export class AgentSession {
 			this._retryAttempt++;
 		} else {
 			// A provider-stream stall is an ordinary transient failure: it consumes
-			// the same bounded same-model budget (`settings.maxRetries`) as every
-			// other retryable class and escalates to the fallback chain only when
+			// the same bounded same-model budget (the resolved profile's turn
+			// maxRetries) as every other retryable class and escalates to the fallback chain only when
 			// that budget is exhausted. It is excluded from 429-class tier routing
 			// because a stall carries no rate-limit markers or retry-after hint.
 			const stallError = isProviderStreamStallError(message);
@@ -7054,7 +7061,7 @@ export class AgentSession {
 				// Mark tier-routed so the generic non-429 path below does not double-count.
 				is429TierRouted = true;
 				this._retryAttempt++;
-				if (this._retryAttempt > settings.maxRetries) {
+				if (this._retryAttempt > retryProfile.turn.maxRetries) {
 					switchedFallback = await this._retryFallback.tryFallback("transient", {
 						errorMessage,
 						retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
@@ -7100,7 +7107,7 @@ export class AgentSession {
 					}
 				} else if (tier === "tier1-in-turn") {
 					this._retryAttempt++;
-					if (this._retryAttempt > settings.maxRetries) {
+					if (this._retryAttempt > retryProfile.turn.maxRetries) {
 						// Budget exhausted within tier1; fall back.
 						switchedFallback = await this._retryFallback.tryFallback("transient", {
 							errorMessage,
@@ -7200,7 +7207,7 @@ export class AgentSession {
 			if (!is429TierRouted) {
 				this._retryAttempt++;
 			}
-			if (!is429TierRouted && this._retryAttempt > settings.maxRetries) {
+			if (!is429TierRouted && this._retryAttempt > retryProfile.turn.maxRetries) {
 				switchedFallback = await this._retryFallback.tryFallback("transient", {
 					errorMessage,
 					retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
@@ -7290,7 +7297,7 @@ export class AgentSession {
 		this._emit({
 			type: "auto_retry_start",
 			attempt: this._retryAttempt,
-			maxAttempts: settings.maxRetries,
+			maxAttempts: retryProfile.turn.maxRetries,
 			delayMs,
 			errorMessage,
 		});

@@ -19,9 +19,14 @@ describe("retry profile routing", () => {
 			settings: {
 				retry: {
 					enabled: true,
-					maxRetries: 9,
-					baseDelayMs: 1,
 					fallbackChains: { [primary]: [fallback] },
+					// Global retry.maxRetries/baseDelayMs are ignored once the provider
+					// declares a profile; speed the test up through the per-provider
+					// override instead. maxRetries is deliberately NOT overridden so the
+					// 9-retry budget under test comes from the kimi profile itself.
+					providers: {
+						faux: { turn: { baseDelayMs: 1 } },
+					},
 				},
 			},
 		});
