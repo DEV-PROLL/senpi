@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-25 - Do not adopt unwired upstream settings submenu
+
+### What changed
+
+- Deliberately omit the unwired upstream `settings-submenu.ts`; the fork uses its inline `WarningSettingsSubmenu` implementation.
+
+### Why
+
+- The upstream component has no imports in the fork and adding dead UI code would expand the runtime surface without behavior.
+
+### Why this lives in the fork
+
+- Settings submenu wiring is owned by the fork's settings selector implementation.
+
+### Expected merge conflict zones
+
+- LOW: interactive component additions during upstream syncs.
+
 ## Interactive mode re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed
