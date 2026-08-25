@@ -75,6 +75,18 @@ describe("parseBrandProfile", () => {
 			originator: "omo",
 		});
 	});
+
+	test("parses an optional executable command when present", () => {
+		const profile = parseBrandProfile('{"name":"OmO","command":"omo"}');
+
+		expect(profile?.command).toBe("omo");
+	});
+
+	test("leaves command undefined when the profile omits it", () => {
+		const profile = parseBrandProfile('{"name":"OmO"}');
+
+		expect(profile?.command).toBeUndefined();
+	});
 });
 
 describe("consumeBrandProfile", () => {

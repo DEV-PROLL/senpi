@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-25 - brand executable name for shell-command contexts
+
+### What changed
+
+- `packages/coding-agent/src/config.ts`: exports `APP_COMMAND` from `BRAND?.command`, falling back to `APP_NAME`, so shell-command strings can use the real binary when it differs from the display name.
+
+### Why
+
+- A brand can present as `OmO` while the installed executable is `omo`. Resume hints and other copy-paste commands must name the binary the shell can run.
+
+### Why an extension could not handle it
+
+- Brand identity constants are resolved at module load, before the extension loader exists; every later command-line interpolation reads these exports.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/config.ts` identity constants next to `APP_NAME`.
+
 ## 2026-08-25 - Lazy-load the interactive mode at the CLI mode seam
 
 ### What changed
