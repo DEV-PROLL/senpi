@@ -31,8 +31,13 @@ import type {
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { prepareAgentToolCall } from "@earendil-works/pi-agent-core";
-import { contentText, SERVER_FALLBACK_ABORTED_DIAGNOSTIC, type ThinkingSelection } from "@earendil-works/pi-ai";
+import { ProviderRetryWatchdogAbortError, prepareAgentToolCall } from "@earendil-works/pi-agent-core";
+import {
+	contentText,
+	retryDelayMs,
+	SERVER_FALLBACK_ABORTED_DIAGNOSTIC,
+	type ThinkingSelection,
+} from "@earendil-works/pi-ai";
 import type {
 	Api,
 	AssistantMessage,
@@ -521,6 +526,8 @@ export interface AgentSessionConfig {
 	agentDir?: string;
 	/** Clock override for fallback selector cooldowns (tests only). */
 	fallbackNow?: () => number;
+	/** Random source for retry jitter (tests only). */
+	retryRandom?: () => number;
 	/** Global model narrowing for selectors and startup model choice (from --models / enabledModels) */
 	scopedModels?: Array<{
 		model: Model<any>;
@@ -950,6 +957,7 @@ export class AgentSession {
 	private readonly _selectorCooldowns: SelectorCooldowns;
 	private readonly _probeBackScheduler: ProbeBackScheduler;
 	private readonly _fallbackNow: () => number;
+	private readonly _retryRandom: () => number;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -1014,6 +1022,7 @@ export class AgentSession {
 		}
 		this._selectorCooldowns = new SelectorCooldowns(config.fallbackNow ?? (() => Date.now()));
 		this._fallbackNow = config.fallbackNow ?? (() => Date.now());
+		this._retryRandom = config.retryRandom ?? Math.random;
 		this._retryFallback = new RetryFallbackController({
 			getSettings: () => this.settingsManager.getRetryFallbackSettings(),
 			registry: this._modelRegistry,
@@ -5806,7 +5815,15 @@ export class AgentSession {
 					}
 				},
 				getActiveSignal: () => this.agent.signal,
-				abortActive: () => this.agent.abort(),
+				abortActive: () =>
+					this.agent.abort(
+						new ProviderRetryWatchdogAbortError(
+							`Provider retry continuation watchdog timed out after ${retryTimeoutMs}ms` +
+								(this.agent.streamStartTimeoutMs === undefined
+									? " (stream-start guard disabled)"
+									: ` (stream-start guard: ${this.agent.streamStartTimeoutMs}ms)`),
+						),
+					),
 				timeoutMs: retryTimeoutMs,
 			});
 			return "continued";
@@ -7221,12 +7238,17 @@ export class AgentSession {
 		// be reordered to fall through here expecting an implicit switch.
 		// 429-tier delays already carry the exponential floor from nextInTurnDelayMs /
 		// degradeWithoutFallback; the non-tier branch keeps its own exponential fallback.
-		const nonTierProviderDelayMs = providerDelayMs === 0 ? undefined : providerDelayMs;
+		const jitteredDelayMs = retryDelayMs(settings.baseDelayMs, this._retryAttempt, this._retryRandom);
+		// 429-tier policy already applies the exponential floor; preserve its exact
+		// deterministic schedule. Other transient retries receive Codex-style jitter,
+		// while a provider hint on the non-429 path remains authoritative.
 		const delayMs = switchedFallback
 			? 0
 			: is429TierRouted
 				? (hintTierDelayMs ?? providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1))
-				: (nonTierProviderDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
+				: providerDelayMs === 0
+					? jitteredDelayMs
+					: (providerDelayMs ?? jitteredDelayMs);
 		// Prepare before auto_retry_start so an immediate Esc can cancel the retry sleep.
 		this._retryAbortController = new AbortController();
 

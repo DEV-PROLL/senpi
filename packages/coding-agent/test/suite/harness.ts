@@ -82,6 +82,7 @@ export interface HarnessOptions {
 	persistSession?: boolean;
 	autoTitleSessions?: boolean;
 	fallbackNow?: () => number;
+	retryRandom?: () => number;
 	transportImageBudget?: { budgetBytes: number; alwaysKeepNewest: number };
 	modelsJson?: Record<string, unknown>;
 	fileSettings?: boolean;
@@ -243,6 +244,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		extensionRunnerRef,
 		autoTitleSessions: options.autoTitleSessions,
 		fallbackNow: options.fallbackNow,
+		retryRandom: options.retryRandom ?? (() => 0.5),
 	});
 
 	const events: AgentSessionEvent[] = [];
