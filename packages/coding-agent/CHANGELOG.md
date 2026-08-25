@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Logging in while a provider already holds more than one credential no longer replaces every stored credential with the new one. `AuthStorage` writes (including the RPC `login_api_key` path), `Models.login`, and OAuth token refresh now preserve sibling slots and the pinned slot; a flat single-credential entry keeps its exact previous shape until a second credential actually exists.
 - Provider stream stalls can no longer be turned into terminal watchdog aborts after the first retry: the configured retry budget is now spent, the final error preserves the real watchdog/provider cause, and unhinted transient retry delays include bounded jitter while provider hints and 429 floors remain intact.
 - Loop-guard blocks for terminal/task polling now direct the agent to stop
   repeating the target and use a monitor, supported completion notification, or

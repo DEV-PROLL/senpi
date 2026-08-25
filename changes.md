@@ -3,6 +3,24 @@
 Root tracker for repository-level divergence from upstream `badlogic/pi-mono`.
 Owns every audited production path whose nearest tracker is the repository root.
 
+## Vitest source alias for ai auth subpaths (2026-08-25)
+
+### What changed
+
+- `vitest.base.ts`: added a resolve alias mapping `@earendil-works/pi-ai/auth/*` to `packages/ai/src/auth/*.ts` so vitest resolves the new `auth/pool/slots` subpath to source during tests.
+
+### Why
+
+- Workspace tests import `@earendil-works/pi-ai/auth/pool/slots`; without a source alias vitest resolves to the built `dist`, which does not exist for the new module, breaking test runs.
+
+### Why an extension could not handle it
+
+- Test runner aliasing is repository-level tooling configuration.
+
+### Expected merge conflict zones
+
+- LOW: single additive alias line in `vitest.base.ts`.
+
 ## Release dependency refresh (2026-08-24)
 
 ### What changed

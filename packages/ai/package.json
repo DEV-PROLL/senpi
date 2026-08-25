@@ -36,6 +36,10 @@
 			"types": "./dist/oauth.d.ts",
 			"import": "./dist/oauth.js"
 		},
+		"./auth/pool/slots": {
+			"types": "./dist/auth/pool/slots.d.ts",
+			"import": "./dist/auth/pool/slots.js"
+		},
 		"./node/provider-scope": {
 			"types": "./dist/node/provider-scope.d.ts",
 			"import": "./dist/node/provider-scope.js"

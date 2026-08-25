@@ -1,6 +1,7 @@
 import { lazyStream } from "./api/lazy.ts";
 import { defaultProviderAuthContext as defaultAuthContext } from "./auth/context.ts";
 import { InMemoryCredentialStore } from "./auth/credential-store.ts";
+import { appendLoginSlot, mergeRefreshed, removeSlot } from "./auth/pool/slots.ts";
 import { type AuthResolutionOverrides, ModelsError, resolveProviderAuth } from "./auth/resolve.ts";
 import type {
 	AuthCheck,
@@ -198,7 +199,7 @@ export interface Models {
 	login(providerId: string, type: AuthType, interaction: AuthInteraction): Promise<Credential>;
 
 	/** Remove the stored credential for a provider. */
-	logout(providerId: string, options?: AuthOperationOptions): Promise<void>;
+	logout(providerId: string, options?: AuthOperationOptions & { slotId?: string }): Promise<void>;
 
 	stream<TApi extends Api>(
 		model: Model<TApi>,
@@ -459,7 +460,8 @@ class ModelsImpl implements MutableModels {
 				provider.id,
 				async (current) => {
 					if (current?.type !== "oauth" || Date.now() < current.expires) return undefined;
-					return oauth.refresh(current, signal);
+					const refreshed = await oauth.refresh(current, signal);
+					return mergeRefreshed(current, refreshed);
 				},
 				{ signal },
 			);
@@ -595,10 +597,10 @@ class ModelsImpl implements MutableModels {
 		});
 		const mutation = this.credentials.modify(
 			providerId,
-			async () => {
+			async (current) => {
 				mutationStarted = true;
 				markMutationStarted?.();
-				return credential;
+				return appendLoginSlot(current, credential);
 			},
 			{ signal },
 		);
@@ -629,10 +631,20 @@ class ModelsImpl implements MutableModels {
 		return credential;
 	}
 
-	async logout(providerId: string, options?: AuthOperationOptions): Promise<void> {
+	async logout(providerId: string, options?: AuthOperationOptions & { slotId?: string }): Promise<void> {
 		const signal = operationSignal(options?.signal);
 		signal.throwIfAborted();
 		try {
+			if (options?.slotId !== undefined) {
+				const current = await this.credentials.read(providerId, { signal });
+				const next = removeSlot(current, options.slotId);
+				if (next === undefined) {
+					await this.credentials.delete(providerId, { signal });
+					return;
+				}
+				await this.credentials.modify(providerId, async () => next, { signal });
+				return;
+			}
 			await this.credentials.delete(providerId, { signal });
 		} catch (error) {
 			signal.throwIfAborted();
