@@ -499,7 +499,8 @@ Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-sessio
 
 - `core/provider-timeout-retry.ts`: gives the retry-continuation watchdog a proportional 10% grace beyond the granted stream-start guard, preserving `0`/`undefined` opt-out behavior.
 - `packages/coding-agent/src/core/agent-session.ts`: mark watchdog aborts as provider-owned and retain the real watchdog cause for retry classification and terminal reporting; retry delays use injected +/-10% jitter.
-- `packages/coding-agent/src/core/agent-abort-provenance.ts` and `packages/coding-agent/src/core/extensions/types.ts`: carry provider abort ownership through `agent_end`.
+- `packages/coding-agent/src/core/agent-abort-provenance.ts`: carries provider abort ownership through `agent_end`.
+- `packages/coding-agent/src/core/extensions/types.ts`: adds provider abort ownership to the public `agent_end` event type.
 - `packages/coding-agent/src/core/agent-session.ts`: apply injected retry jitter while preserving provider hints and 429 exponential floors.
 - `modes/interactive/interactive-mode.ts` and `modes/interactive/aborted-error-label.ts`: render labels without mutating persisted messages.
 - `modes/interactive/interactive-mode.ts` and `modes/interactive/aborted-error-label.ts`: render abort labels from a copied message rather than mutating session state.

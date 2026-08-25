@@ -7,6 +7,7 @@
 - `packages/agent/src/agent.ts` accepts an abort reason and emits a provider-owned assistant abort for retry-watchdog cancellation.
 - `packages/agent/src/agent-loop.ts` preserves an explicit abort Error instead of replacing it with generic `Request was aborted` text.
 - `packages/agent/src/assistant-terminal-state.ts` stamps provider provenance where terminal stream failures are constructed.
+- `packages/agent/src/index.ts` exports the typed watchdog abort reason for session hosts.
 
 ### Why
 
