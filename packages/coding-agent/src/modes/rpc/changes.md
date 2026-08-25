@@ -1,5 +1,51 @@
 # changes
 
+## RPC host lifetime is bound to its supervisor at the OS level (2026-08-25)
+
+### What changed
+
+- Added `packages/coding-agent/src/modes/rpc/host-watchdog.ts`: an opt-in watchdog that shuts the RPC host down when its lifecycle supervisor dies. The primary binding is EOF on an inherited pipe (`SENPI_RPC_HOST_WATCH_FD`); `SENPI_RPC_HOST_WATCH_PPID` polling is a fallback for platforms that do not inherit the extra fd. On fire, the host removes the supervisor's private internal directory (`SENPI_RPC_HOST_SCRATCH_DIR`) and runs its normal clean shutdown.
+- `host-lifecycle.ts` now spawns the host with `stdio: ["ignore", "ignore", "inherit", "pipe"]`, holds the write end open without ever writing, and exports the three watchdog variables to the child.
+- `multi-session-host.ts` arms the watchdog in the socket-host boot path only when those variables are present, so plain `senpi --mode rpc`, embedders and hand-started hosts are byte-identical to before.
+- QA: `scripts/qa-rpc-socket/host-lifecycle.mjs` gained a fourth scenario that `kill -9`s the supervisor and asserts the internal host is reaped and its private directory removed; focused tests cover the same end to end plus the watchdog's configuration and EOF paths.
+- Closed two smaller windows in the supervisor that leaked the private directory (empty, no socket, no process) without leaking the host: the SIGTERM/SIGHUP handlers are now registered before the startup handshake rather than after it, and the private directory is unlinked before the multi-second child stop, so an external SIGKILL during that wait (`ensureHost` escalates while replacing a host) cannot strand it.
+
+### Why
+
+- `stopChild()` only runs on catchable-signal paths. A `SIGKILL`, OOM kill, or supervisor crash left the internal host as a permanent orphan (PPID 1, ~240 MB resident) still serving RPC on a leaked private socket with no idle-exit logic to ever reap it, since all of that logic lived in the dead supervisor. A lifetime binding has to be enforced by the OS, not by handlers that a dying process never gets to run.
+
+### Why an extension could not handle it
+
+- Inherited file descriptors, process-lifetime binding and private socket-directory ownership are transport lifecycle responsibilities below extension hooks.
+
+### Expected merge conflict zones
+
+- MEDIUM: the `spawn()` options in `host-lifecycle.ts`.
+- LOW: the watchdog arming call in `multi-session-host.ts`, `docs/rpc.md`, the QA script and focused tests.
+
+## Shared RPC socket host lifecycle policy (2026-08-24)
+
+### What changed
+
+- Added `packages/coding-agent/src/modes/rpc/host-lifecycle.ts`: the lifecycle supervisor `ensureHost()` now spawns instead of the CLI directly. It owns the public socket, spawns the real `--mode rpc --multi-session --listen` host on a private internal hop under a 0700 temp directory, and byte-proxies every client connection, which yields exact connection counts without touching the host itself.
+- Cold-start policy + idle-exit window: `ensureHost()` records `coldStart` (`transient` default, `persistent` opt-out) and `idleExitMs` (default 15 min) in `rpc-host-daemon/settings.json` before spawning; runtime overrides come from `SENPI_RPC_HOST_COLD_START` and `SENPI_RPC_HOST_IDLE_EXIT_MS`. After a continuous window with zero client connections and zero active turns the supervisor tears the host down cleanly (host SIGTERM first so pending output flushes, then pidfile/settings/socket removal mirroring `ensureHost()`'s cleanup semantics), and the next `ensureHost()` transparently starts a fresh host.
+- Active turns are observed through an always-on observer connection to the internal host: the all-sessions broadcast delivers `agent_start`/`agent_settled` per routing session even with no client attached, and any activity resets the window, so the host never exits mid-turn or while a client is attached. An unhealthy observer reports as non-idle (can only keep the host alive).
+- `packages/coding-agent/src/modes/rpc/host-ensure.ts` gained the `policy` option, pre-spawn settings persistence, `_test.env`/`_test.hostArgs` passthrough, and supervisor-based default launch; external SIGTERM/SIGHUP to the supervisor performs the same clean teardown.
+- QA: `packages/coding-agent/scripts/qa-rpc-socket/host-lifecycle.mjs` drives the real CLI through short idle windows (idle exit + re-ensure new pid, held active turn past the window, persistent never-exits).
+
+### Why
+
+- The shared socket host previously lived until the machine rebooted: desktop/terminal clients needed a documented way to bound a `transient` host's lifetime without a resident supervisor process, while `persistent` installs must survive idle periods.
+
+### Why an extension could not handle it
+
+- Host process lifetime, socket ownership, pidfile/state cleanup, and detached process supervision are transport lifecycle responsibilities below extension hooks; the RPC host itself must stay unaware of its supervisor.
+
+### Expected merge conflict zones
+
+- MEDIUM: `host-ensure.ts` spawn/settings path and `host-lifecycle.ts` (new fork-only supervisor).
+- LOW: `docs/rpc.md` lifecycle section, focused lifecycle tests, and the QA script.
+
 ## Client-side ensureHost RPC socket lifecycle (2026-08-24)
 
 ### What changed

@@ -12,6 +12,7 @@ import {
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import type { RpcConnectionSink } from "./connection-handler.ts";
 import { parseClientCapabilities } from "./custom-capability.ts";
+import { armHostWatchdog, readHostWatchdogConfigFromBrandEnv } from "./host-watchdog.ts";
 import { attachJsonlLineReader, MAX_RPC_LINE_CHARACTERS } from "./jsonl.ts";
 import { rpcCommandShapeError } from "./rpc-input-validation.ts";
 import type { RpcCommand, RpcResponse } from "./rpc-types.ts";
@@ -167,6 +168,13 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 		process.exit(exitCode);
 	};
 	registerShutdownSignals(shutdown);
+	// Opt-in only: set by the lifecycle supervisor so this host can never outlive
+	// it, including when the supervisor is SIGKILLed and runs no handler at all.
+	armHostWatchdog(readHostWatchdogConfigFromBrandEnv(), (reason) => {
+		process.stderr.write(`senpi rpc host: ${reason}; shutting down\n`);
+		killTrackedDetachedChildren();
+		void shutdown(0);
+	});
 	return new Promise(() => {});
 }
 

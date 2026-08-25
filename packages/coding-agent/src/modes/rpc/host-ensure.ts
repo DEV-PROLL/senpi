@@ -16,6 +16,9 @@ import {
 	EXTENSION_EVENTS_CAPABILITY,
 	RPC_CLIENT_CAPABILITIES_ENV,
 } from "./custom-capability.ts";
+import { DEFAULT_HOST_IDLE_EXIT_MS, type HostColdStart, type HostLifecyclePolicyInput } from "./host-lifecycle.ts";
+
+export type { HostColdStart, HostLifecyclePolicyInput };
 
 export interface HostDaemonPaths {
 	readonly dir: string;
@@ -28,10 +31,16 @@ export interface HostDaemonPaths {
 export interface EnsureHostOptions {
 	readonly socket: string;
 	readonly agentDir?: string;
+	/** Host lifecycle policy recorded in settings.json (env overrides win at runtime). */
+	readonly policy?: HostLifecyclePolicyInput;
 	readonly _test?: {
 		readonly readinessTimeoutMs?: number;
 		readonly stopTimeoutMs?: number;
 		readonly spawn?: { readonly command: string; readonly args: readonly string[] };
+		/** Extra env merged over process.env for the spawned host (hermetic test/QA wiring). */
+		readonly env?: Readonly<Record<string, string>>;
+		/** Extra CLI args forwarded through the supervisor to the host process. */
+		readonly hostArgs?: readonly string[];
 	};
 }
 
@@ -72,7 +81,7 @@ export async function ensureHost(options: EnsureHostOptions): Promise<EnsuredHos
 	await mkdir(paths.dir, { recursive: true });
 	const release = await properLockfile.lock(paths.dir, { ...lockOptions, lockfilePath: paths.lockFile });
 	try {
-		return await ensureHostLocked(paths, socket, options.agentDir ?? getAgentDir(), options._test);
+		return await ensureHostLocked(paths, socket, options.agentDir ?? getAgentDir(), options.policy, options._test);
 	} finally {
 		await release();
 	}
@@ -82,6 +91,7 @@ async function ensureHostLocked(
 	paths: HostDaemonPaths,
 	socket: string,
 	agentDir: string,
+	policy: HostLifecyclePolicyInput | undefined,
 	testOptions: EnsureHostOptions["_test"],
 ): Promise<EnsuredHost> {
 	const pidFile = await readPidFile(paths);
@@ -97,34 +107,37 @@ async function ensureHostLocked(
 		await stopManagedHost(pidFile, testOptions?.stopTimeoutMs ?? 10_000);
 	}
 	await cleanupState(paths);
-	return startHost(paths, socket, agentDir, testOptions);
+	return startHost(paths, socket, agentDir, policy, testOptions);
 }
 
 async function startHost(
 	paths: HostDaemonPaths,
 	socket: string,
 	agentDir: string,
+	policy: HostLifecyclePolicyInput | undefined,
 	testOptions: EnsureHostOptions["_test"],
 ): Promise<EnsuredHost> {
+	// The settings file must exist before the supervisor reads it at boot, so it
+	// records the policy before the spawn instead of beside the pidfile.
+	await writeFile(
+		paths.settingsFile,
+		`${JSON.stringify({
+			socket,
+			capabilities: PINNED_HOST_CLIENT_CAPABILITIES,
+			coldStart: policy?.coldStart ?? "transient",
+			idleExitMs: policy?.idleExitMs ?? DEFAULT_HOST_IDLE_EXIT_MS,
+		})}\n`,
+		{ mode: 0o600 },
+	);
 	const stderr = await open(paths.stderrLog, "w");
 	let pidFile: DaemonPidFile | undefined;
 	try {
-		const launch = testOptions?.spawn ?? {
-			command: process.execPath,
-			args: [
-				...process.execArgv,
-				resolveCliMainPath(),
-				"--mode",
-				"rpc",
-				"--multi-session",
-				"--listen",
-				`unix://${socket}`,
-			],
-		};
+		const launch = testOptions?.spawn ?? defaultHostLaunch(socket, testOptions?.hostArgs ?? []);
 		const child = spawn(launch.command, [...launch.args], {
 			detached: true,
 			env: {
 				...process.env,
+				...(testOptions?.env ?? {}),
 				[ENV_AGENT_DIR]: agentDir,
 				[RPC_CLIENT_CAPABILITIES_ENV]: PINNED_HOST_CLIENT_CAPABILITIES.join(","),
 			},
@@ -134,11 +147,6 @@ async function startHost(
 		if (child.pid === undefined) throw new Error("failed to spawn RPC socket host");
 		pidFile = { pid: child.pid, processStartTime: await waitForStartTime(child.pid, 2_000) };
 		await writeFile(paths.pidFile, `${JSON.stringify(pidFile)}\n`, { mode: 0o600 });
-		await writeFile(
-			paths.settingsFile,
-			`${JSON.stringify({ socket, capabilities: PINNED_HOST_CLIENT_CAPABILITIES })}\n`,
-			{ mode: 0o600 },
-		);
 	} finally {
 		await stderr.close();
 	}
@@ -271,10 +279,28 @@ function normalizeSocketPath(value: string): string {
 	return value;
 }
 
-function resolveCliMainPath(): string {
+/**
+ * Default launch: the host-lifecycle supervisor owns the public socket and the
+ * idle-exit policy; it spawns the committed RPC socket host itself. Any extra
+ * hostArgs are forwarded verbatim to the host CLI (e.g. provider pinning).
+ */
+function defaultHostLaunch(
+	socket: string,
+	hostArgs: readonly string[],
+): {
+	command: string;
+	args: string[];
+} {
+	return {
+		command: process.execPath,
+		args: [...process.execArgv, resolveHostLifecycleEntryPath(), "--socket", socket, ...hostArgs],
+	};
+}
+
+function resolveHostLifecycleEntryPath(): string {
 	const modulePath = fileURLToPath(import.meta.url);
 	const extension = modulePath.endsWith(".ts") ? ".ts" : ".js";
-	return resolve(dirname(modulePath), "..", "..", `cli-main${extension}`);
+	return resolve(dirname(modulePath), `host-lifecycle${extension}`);
 }
 
 function delay(ms: number): Promise<void> {

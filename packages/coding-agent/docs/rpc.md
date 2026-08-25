@@ -57,6 +57,36 @@ separate subscription protocol.
 
 Startup: `senpi --mode rpc --multi-session` → NO default session is constructed (no default `AgentSessionRuntime`, no default extension/watcher load). Classic `senpi --mode rpc` is byte-identical to today. Mode is fixed at process start; there is no runtime transition.
 
+### Shared host lifecycle (cold start + idle exit)
+
+Hosts started through `ensureHost()` are wrapped by a lifecycle supervisor that owns the public socket and spawns the
+real RPC host on a private internal hop. The policy lives in `<agentDir>/rpc-host-daemon/settings.json`:
+
+```json
+{ "socket": "…/rpc.sock", "capabilities": ["extension_events", "custom_unsupported"], "coldStart": "transient", "idleExitMs": 900000 }
+```
+
+- `coldStart` — `transient` (default): the host exists for the current login session and idle-exits. `persistent`:
+  no idle exit; the host stays until it is stopped or dies.
+- `idleExitMs` — idle-exit window in milliseconds, default `900000` (15 minutes).
+
+Environment overrides beat the file, and invalid values fall through to the next source: `SENPI_RPC_HOST_COLD_START`
+(`transient`|`persistent`) and `SENPI_RPC_HOST_IDLE_EXIT_MS` (positive integer milliseconds).
+
+The host exits only after the window elapses with NO attached client connections and NO active turns — continuously.
+Any connection or agent turn resets the window, so a busy host never exits, and the exit itself is clean: the RPC host
+receives SIGTERM first, flushes pending output, removes its socket, and the supervisor then removes `host.pid` and
+`settings.json` (the stderr log stays for diagnostics). After an idle exit, the next `ensureHost()` transparently
+starts a fresh host. `get_protocol_info` over the public socket behaves exactly as before; the supervisor is
+wire-transparent.
+
+The RPC host can never outlive its supervisor. It is spawned with an extra inherited pipe on fd 3 whose write end the
+supervisor holds and never writes to; the kernel closes that end whenever the supervisor dies — including `SIGKILL`, an
+OOM kill, or a crash, where no signal handler runs — so the host reads EOF, shuts down cleanly and removes its private
+internal directory. The supervisor also exports `SENPI_RPC_HOST_WATCH_PPID` as a polling fallback. Both bindings are
+set only by the supervisor: a host started any other way (plain `senpi --mode rpc --listen …`, embedders, hand-started
+hosts) sees neither variable and is unaffected. A host whose supervisor is alive is never touched by this binding.
+
 ### D1 normative table (multi-session mode)
 
 | Command | Params | Success data | Notes |
