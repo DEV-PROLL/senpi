@@ -46,6 +46,25 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
   and `packages/coding-agent/src/core/session-manager.ts` are the highest-churn files in every sync;
   expect import-block and constructor-wiring conflicts there first.
 
+## 2026-08-23 - Slot-preserving credential writes for multi-account pools
+
+### What changed
+
+- `packages/ai/src/auth/pool/slots.ts` (new, exported as `@earendil-works/pi-ai/auth/pool/slots`): pure slot algebra over a provider credential - `listSlots`, `findSlot`, `upsertSlot`, `removeSlot`, `pinSlot`, `assertValidSlotName`. A stored credential with no `accounts` array is read as a one-slot pool named `default` derived from its flat fields, without writing anything back. `upsertSlot` replaces or appends one slot and leaves every sibling, the pin, and the flat top-level credential untouched. `removeSlot` drops the provider entry once its last slot is gone and clears a pin naming the removed slot.
+- `packages/coding-agent/src/core/auth-storage.ts`: added `listSlots`, `setSlot`, and `removeSlot` delegating to that module; `set()` now appends to a pool (generated `login-N` slot, siblings preserved) instead of replacing the provider entry, so the RPC `login_api_key` path no longer destroys sibling slots; flat providers keep today's whole-write shape (imported via the new vitest source alias for `@earendil-works/pi-ai/auth/*` in `vitest.base.ts`). Each write runs inside the existing `storage.withLock` read-modify-write and rebuilds the provider entry from the locked content, so unrelated providers and sibling slots survive.
+
+### Why
+
+- `set()` replaces a whole provider entry and `remove()` deletes it, so any provider holding more than one credential lost every sibling the moment one slot was written. Multi-account support needs a write path that preserves siblings before any pooled data can exist. The flat top-level credential is deliberately retained on a pooled entry so a senpi build that predates pools still authenticates from it.
+
+### Why an extension could not handle it
+
+- `AuthStorage` is the app-owned `CredentialStore` implementation and the only holder of the `auth.json` lock; slot-preserving semantics must live inside that locked read-modify-write, which no extension can enter.
+
+### Expected merge conflict zones
+
+- LOW: the new methods sit immediately after `remove()` in `packages/coding-agent/src/core/auth-storage.ts`; `credential-slots.ts` is a new file with no upstream counterpart.
+
 ## 2026-08-25 - Harden watchdog abort accounting and retry jitter
 
 ### What changed

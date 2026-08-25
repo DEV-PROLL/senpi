@@ -12,6 +12,9 @@
 - Added configurable OpenAI-compatible thinking-token budget fields for vLLM, Qwen/SGLang, and llama.cpp servers ([#8275](https://github.com/earendil-works/pi/pull/8275) by [@bnsd55](https://github.com/bnsd55)).
 - Added China-specific ZAI Coding Plan models, including GLM-4.6V vision support, and API-equivalent usage cost estimates for models with published PAYG prices ([#8220](https://github.com/earendil-works/pi/issues/8220)).
 - Added `deepseek-v4-pro-0813` to the Qwen Token Plan Individual catalog ([#8194](https://github.com/earendil-works/pi/issues/8194)).
+- Credential pool slot algebra under `@earendil-works/pi-ai/auth/pool/slots`: a stored credential can hold sibling slots, and `listSlots` / `upsertSlot` / `removeSlot` / `pinSlot` define slot-preserving mutation. A credential without an `accounts` array reads as a one-slot pool with no write-back, and a pooled entry keeps its flat top-level credential so older builds keep authenticating.
+- `Models.logout` accepts `slotId` to remove exactly one credential slot; calling it without a slot keeps today's remove-everything behavior.
+
 ### Changed
 
 - Changed built-in xAI models to use the Responses API with encrypted reasoning replay and made Grok 4.6 the default xAI model ([#8124](https://github.com/earendil-works/pi/pull/8124) by [@Jaaneek](https://github.com/Jaaneek)).

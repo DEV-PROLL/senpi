@@ -31,6 +31,10 @@
 			"types": "./dist/oauth.d.ts",
 			"import": "./dist/oauth.js"
 		},
+		"./auth/pool/slots": {
+			"types": "./dist/auth/pool/slots.d.ts",
+			"import": "./dist/auth/pool/slots.js"
+		},
 		"./bedrock-provider": {
 			"types": "./dist/bedrock-provider.d.ts",
 			"import": "./dist/bedrock-provider.js"

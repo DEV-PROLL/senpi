@@ -66,6 +66,24 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 > of divergences from the upstream pin (v0.84.2, `914cf1472e`) so its audited production paths carry a
 > canonical four-section record; it is dated by its underlying work.
 
+## Credential pool slot export map (2026-08-25)
+
+### What changed
+
+- `packages/ai/package.json`: added an `exports` entry for `./auth/pool/slots` so consumers (including `packages/coding-agent`) can import the browser-safe credential pool slot algebra module.
+
+### Why
+
+- The slot algebra module introduced for multi-credential pools must be reachable through the package export map; without the subpath export, workspace consumers cannot resolve it.
+
+### Why an extension could not handle it
+
+- Package export maps are build/packaging surface owned by the package itself.
+
+### Expected merge conflict zones
+
+- LOW: single additive line in the `exports` map.
+
 ## Bedrock and TypeBox dependency refresh (2026-08-24)
 
 ### What changed
