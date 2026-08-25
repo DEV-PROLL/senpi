@@ -23,6 +23,7 @@ import {
 	transformContext,
 	wrapStreamWithToolCallMiddleware,
 } from "@earendil-works/pi-ai";
+import type { RetryPolicyProfile } from "@earendil-works/pi-ai/utils/retry-profile/types";
 import type { ModelConfig, ModelsJsonModel, ModelsJsonModelOverride, ModelsJsonProvider } from "./model-config.ts";
 import { composeApiKeyAuth, configuredApiKey, configuredHeaders, withConfiguredAuth } from "./provider-api-key-auth.ts";
 import { configuredHeaderAuthStatus, type HeaderAuthStatusSource } from "./provider-header-auth.ts";
@@ -66,6 +67,7 @@ export interface ProviderConfigInput {
 	extraBody?: Record<string, unknown>;
 	authHeader?: boolean;
 	oauth?: ExtensionOAuthConfig;
+	retryPolicy?: RetryPolicyProfile;
 	models?: Array<{
 		id: string;
 		name: string;
@@ -452,6 +454,8 @@ export function composeModelProvider(
 		name: extension?.name ?? config?.name ?? base?.name ?? extension?.oauth?.name ?? providerId,
 		baseUrl: extension?.baseUrl ?? config?.baseUrl ?? base?.baseUrl,
 		headers: base?.headers,
+		// Composed providers must not silently drop provider-declared retry profiles.
+		retryPolicy: extension?.retryPolicy ?? base?.retryPolicy,
 		auth: { ...(apiKey ? { apiKey } : {}), ...(oauth ? { oauth } : {}) },
 		getModels,
 		refreshModels:

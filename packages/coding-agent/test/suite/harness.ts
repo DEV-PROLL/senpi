@@ -88,6 +88,7 @@ export interface HarnessOptions {
 	fileSettings?: boolean;
 	settingsFileName?: "settings.json" | "settings.jsonc";
 	settingsContent?: string;
+	retryProfile?: import("@earendil-works/pi-ai/utils/retry-profile/types").RetryPolicyProfile;
 }
 
 export interface Harness {
@@ -159,6 +160,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 			baseUrl: model.baseUrl,
 			apiKey: "faux-key",
 			api: fauxProvider.api,
+			...(options.retryProfile !== undefined ? { retryPolicy: options.retryProfile } : {}),
 			models: fauxProvider.models.map((registeredModel) => ({
 				id: registeredModel.id,
 				name: registeredModel.name,

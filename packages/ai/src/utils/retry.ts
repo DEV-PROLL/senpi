@@ -386,7 +386,20 @@ export function isProviderTimeoutError(message: AssistantMessage): boolean {
  * failures that must decide between degrading and surfacing loudly).
  */
 export function isRetryableErrorMessage(errorMessage: string): boolean {
-	if (!errorMessage) return false;
-	if (NON_RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage)) return false;
-	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
+	return classifyErrorMessage(errorMessage) === "retryable";
+}
+
+/**
+ * Tri-state form of {@link isRetryableErrorMessage}. The regexes only carry
+ * three outcomes — a non-retryable match, a retryable match, or no match at
+ * all — and callers that hold structured failure facts (status codes, provider
+ * error codes) need to distinguish "the regexes say terminal" from "the
+ * regexes say nothing" so they can consult the structured facts only in the
+ * latter case. Non-retryable still outranks retryable, exactly as before.
+ */
+export function classifyErrorMessage(errorMessage: string): "non-retryable" | "retryable" | "unknown" {
+	if (!errorMessage) return "unknown";
+	if (NON_RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage)) return "non-retryable";
+	if (RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage)) return "retryable";
+	return "unknown";
 }

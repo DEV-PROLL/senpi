@@ -35,6 +35,7 @@ import type {
 import { isVideoMimeType } from "../types.ts";
 import { combineAbortSignals } from "../utils/abort-signals.ts";
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
+import { appendAssistantMessageDiagnostic } from "../utils/diagnostics.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
@@ -43,6 +44,7 @@ import { getAnthropicCompat, isAnthropicApiBaseUrl } from "../utils/prompt-cache
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { appendRetryAfterMsMarker, extract429RetryAfterMs } from "../utils/retry-hint.ts";
+import { normalizeAnthropicRetryFailure } from "../utils/retry-profile/failure.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import {
 	applyServerFallbackAbort,
@@ -1635,6 +1637,18 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					}
 				}
 			}
+			const failure = normalizeAnthropicRetryFailure(error);
+			appendAssistantMessageDiagnostic(output, {
+				type: "provider_retry_failure",
+				timestamp: Date.now(),
+				details: {
+					kind: failure.kind,
+					...(failure.statusCode !== undefined ? { statusCode: failure.statusCode } : {}),
+					...(failure.providerCodes !== undefined ? { providerCodes: failure.providerCodes } : {}),
+					...(failure.retryAfterMs !== undefined ? { retryAfterMs: failure.retryAfterMs } : {}),
+					...(failure.shouldRetry !== undefined ? { shouldRetry: failure.shouldRetry } : {}),
+				},
+			});
 			output.errorMessage = errorMessage;
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();

@@ -105,6 +105,34 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 - Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
 - Persist Cursor conversation-id rotation under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`), not `$HOME/cursor-conversation-ids.json`.
 - Surface the first 0-token `resource_exhausted` of a `stream()` call so session-layer compaction runs before rotation.
+
+## 2026-08-23 - Provider-declared retry policy profiles
+
+### What changed
+
+- `packages/ai/src/utils/retry-profile/` (new tree): pure retry-profile value types (`types.ts`), backoff calculator (`backoff.ts`), failure normalizer (`failure.ts`), classifiers (`classifiers.ts`), delay planner (`planner.ts`), and shipped profile constants (`profiles.ts`). Two stages per profile (`providerRequest`, `turn`), each carrying enabled/maxRetries/backoff(exponential with factor, per-attempt cap, jitter mode)/serverHint(override with ceiling or tiered)/classify.
+- `packages/ai/src/models.ts`: added optional `retryPolicy?: RetryPolicyProfile` to `Provider` and `CreateProviderOptions`, forwarded through `createProvider`. Omitting it means the shipped senpi-default profile applies.
+- `packages/ai/src/providers/kimi-coding.ts`: declares `KIMI_CODE_RETRY_PROFILE` (10 total attempts, 500ms base, x2 factor, 32s per-attempt cap, +0-25% additive jitter, uncapped server Retry-After, status-whitelist classifier) because kimi-code's managed base (api.kimi.com/coding/v1) and wire protocol (anthropic) match this provider's target exactly.
+- `packages/ai/src/api/anthropic-messages.ts`: the catch boundary emits exactly one `provider_retry_failure` diagnostic via `normalizeAnthropicRetryFailure` before the raw error is reduced to a string, carrying a whitelist of facts (kind, statusCode, providerCodes, retryAfterMs, shouldRetry). `output.errorMessage` remains character-identical including the existing `(retry-after-ms: N)` marker.
+- `packages/ai/src/utils/diagnostics.ts`: the `provider_retry_failure` diagnostic type sits alongside existing diagnostics, never retaining a `Headers` object or authorization value.
+- `packages/ai/src/utils/retry.ts`: `isRetryableErrorMessage` delegates to the new tri-state `classifyErrorMessage` (non-retryable / retryable / unknown). Verdicts are unchanged for every message the regexes match; "unknown" lets profile classifiers consult structured status facts only when the regexes say nothing, with non-retryable still outranking retryable.
+- `packages/ai/src/utils/retry-profile/profiles.ts` (phase 2 defaults): the senpi-default turn backoff gained an 8s per-attempt cap and +0..25% additive jitter for locally computed exponentials; provider-derived hints stay exact. The kimi-code profile keeps its documented +0..25% additive jitter on both stages.
+
+### Why
+
+- senpi's `kimi-coding` provider talks to the same upstream service as the kimi-code CLI, so its own retry policy (10 attempts, shorter first waits, uncapped server hints) applies verbatim. Every other provider keeps senpi's existing default behavior byte-identical because the senpi-default profile delegates to the same functions that already drive it.
+
+### Why an extension could not handle it
+
+- The retry decision lives inside this package's streaming adapters and the failure-catch boundary, before any extension hook observes the error. The profile must be resolved at the provider level to affect classification, delay, and fallback routing together.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/ai/src/models.ts` Provider/CreateProviderOptions field lists and the `createProvider` forwarding block.
+- MEDIUM: `packages/ai/src/api/anthropic-messages.ts` catch boundary (diagnostic emission before errorMessage assignment).
+- LOW: `packages/ai/src/utils/diagnostics.ts` diagnostic union (append-only).
+- LOW: `packages/ai/src/utils/retry-profile/` (new tree, no upstream owner).
+
 ## 2026-08-23 - Browser-safe credential pool slot algebra
 
 ### What changed
@@ -125,7 +153,6 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 ### Expected merge conflict zones
 
 - LOW: new file with no upstream counterpart; the `package.json` export insertion sits beside `./oauth`.
-
 
 ## 2026-08-20 - Google FinishReason exhaustiveness after the @google/genai 2.18.0 bump
 

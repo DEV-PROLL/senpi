@@ -1,5 +1,11 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
+import { SENPI_DEFAULT_RETRY_PROFILE } from "@earendil-works/pi-ai/utils/retry-profile/profiles";
+import type {
+	RetryPolicyProfile,
+	RetryStagePolicy,
+	RetryTieredHintStrategy,
+} from "@earendil-works/pi-ai/utils/retry-profile/types";
 import type { TuiMode as RendererTuiMode, ScrollViewScrollbar } from "@earendil-works/pi-tui";
 import { createHash, randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
@@ -13,6 +19,8 @@ import { stripBom } from "../utils/text.ts";
 import { envValue } from "./brand.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import { FILE_STORAGE_LOCK_OPTIONS } from "./lockfile-policy.ts";
+import type { RetryPolicyOverride } from "./retry-fallback/profile-override.ts";
+import { validateRetryProviderOverrides } from "./retry-fallback/profile-override.ts";
 import {
 	type ResolvedHintPolicySettings,
 	type ResolvedRetryFallbackSettings,
@@ -1476,6 +1484,72 @@ export class SettingsManager {
 			maxRetries: this.settings.retry?.provider?.maxRetries,
 			maxRetryDelayMs: this.settings.retry?.provider?.maxRetryDelayMs ?? 60000,
 		};
+	}
+
+	/**
+	 * Resolve the effective retry profile for a provider. Precedence:
+	 * 1) SENPI_DEFAULT_RETRY_PROFILE is the base.
+	 * 2) A provider-declared retryPolicy replaces the base entirely.
+	 * 3) User global retry.maxRetries / retry.baseDelayMs apply ONLY when the
+	 *    provider declared NO profile (they must not silently re-tune one).
+	 * 4) Validated retry.providers.<id> patches scheduling knobs last.
+	 * 5) retry.enabled === false is a hard gate: resolved turn.enabled is false.
+	 */
+	resolveRetryProfile(provider: { id: string; retryPolicy?: RetryPolicyProfile } | undefined): RetryPolicyProfile {
+		const base = provider?.retryPolicy ?? SENPI_DEFAULT_RETRY_PROFILE;
+		const declared = provider?.retryPolicy !== undefined;
+
+		const turnBackoff = { ...base.turn.backoff };
+		if (!declared) {
+			if (this.settings.retry?.maxRetries !== undefined) {
+				turnBackoff.baseDelayMs = this.settings.retry.baseDelayMs ?? turnBackoff.baseDelayMs;
+			}
+		}
+
+		let turnMaxRetries = base.turn.maxRetries;
+		let turnBaseDelayMs = turnBackoff.baseDelayMs;
+		if (!declared) {
+			if (this.settings.retry?.maxRetries !== undefined) turnMaxRetries = this.settings.retry.maxRetries;
+			if (this.settings.retry?.baseDelayMs !== undefined) turnBaseDelayMs = this.settings.retry.baseDelayMs;
+		}
+
+		const providerOverride = this._resolveRetryProviderOverride(provider?.id);
+		if (providerOverride?.turn?.maxRetries !== undefined) turnMaxRetries = providerOverride.turn.maxRetries;
+		if (providerOverride?.turn?.baseDelayMs !== undefined) turnBaseDelayMs = providerOverride.turn.baseDelayMs;
+
+		const turnEnabled = this.getRetryEnabled() ? (providerOverride?.turn?.enabled ?? base.turn.enabled) : false;
+
+		const tierStrategy: RetryTieredHintStrategy =
+			base.turn.serverHint.mode === "tiered"
+				? base.turn.serverHint.strategy
+				: () => {
+						throw new Error("not tiered");
+					};
+
+		const turn: RetryStagePolicy = {
+			enabled: turnEnabled,
+			maxRetries: turnMaxRetries,
+			backoff: { ...base.turn.backoff, baseDelayMs: turnBaseDelayMs },
+			extractServerHint: base.turn.extractServerHint,
+			serverHint:
+				base.turn.serverHint.mode === "tiered" ? { mode: "tiered", strategy: tierStrategy } : base.turn.serverHint,
+			classify: base.turn.classify,
+		};
+
+		return {
+			id: base.id,
+			providerRequest: base.providerRequest,
+			turn,
+			fallback: base.fallback,
+		};
+	}
+
+	private _resolveRetryProviderOverride(providerId: string | undefined): RetryPolicyOverride | undefined {
+		if (providerId === undefined) return undefined;
+		const raw = this.settings.retry?.providers;
+		if (raw === undefined) return undefined;
+		const { overrides } = validateRetryProviderOverrides(raw, new Set([providerId]));
+		return overrides[providerId];
 	}
 
 	/**
