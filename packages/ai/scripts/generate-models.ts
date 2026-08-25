@@ -1916,7 +1916,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 
 				const isGlm52 = modelId === "glm-5.2" || modelId === "glm-5.2-highspeed";
 				const isGlm5x = isGlm52 || modelId === "glm-5.3";
-				const referenceCost = modelId === "glm-5.2-highspeed" || modelId === "glm-5.3" ? undefined : data.zai?.models[modelId]?.cost ?? m.cost;
+				const referenceCost = modelId === "glm-5.2-highspeed" ? undefined : data.zai?.models[modelId]?.cost ?? m.cost;
 
 				models.push({
 					id: modelId,
