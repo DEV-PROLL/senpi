@@ -397,14 +397,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			const websocketConnectTimeoutMs =
 				options?.websocketConnectTimeoutMs ?? settingsManager.getWebSocketConnectTimeoutMs();
 			const headerRunner = extensionRunnerRef.current;
-			// Resolve the providerRequest retry stage from the provider's declared
-			// profile (falls back to senpi-default when none is declared).
-			const profile = settingsManager.resolveRetryProfile(
-				model.provider
-					? { id: model.provider, retryPolicy: modelRuntime.getProvider(model.provider)?.retryPolicy }
-					: undefined,
-			);
-			const profileMaxRetries = profile.providerRequest.enabled ? profile.providerRequest.maxRetries : 0;
+			// A provider-declared profile owns the transport retry budget: a disabled
+			// providerRequest stage sends 0 so user retry.provider.* cannot hand it a
+			// hidden second budget. Providers without a declared profile keep the
+			// user's retry.provider.maxRetries transport knob exactly as before.
+			const declaredPolicy = model.provider ? modelRuntime.getProvider(model.provider)?.retryPolicy : undefined;
+			const profileMaxRetries =
+				declaredPolicy === undefined
+					? providerRetrySettings.maxRetries
+					: declaredPolicy.providerRequest.enabled
+						? declaredPolicy.providerRequest.maxRetries
+						: 0;
 			return modelRuntime.streamSimple(model, context, {
 				...options,
 				timeoutMs,
