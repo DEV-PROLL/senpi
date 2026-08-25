@@ -44,7 +44,7 @@ export class TerminalSession {
 	private readonly nativeLoadResult: NativePtyLoadResult;
 	private readonly createNativeSessionDependency?: CreateNativeTerminalSession;
 	private readonly env: Readonly<Record<string, string | undefined>>;
-	private readonly runtimeVersions: NodeJS.ProcessVersions & { readonly bun?: unknown };
+	private readonly runtimeVersions: import("./session-bun.ts").BunRuntimeVersions;
 	private readonly bunRuntime: import("./session-bun.ts").BunRuntime | undefined;
 	private readonly rawTailLimit: number;
 	private readonly dataHandlers = new Set<TerminalSessionDataHandler>();
@@ -67,7 +67,7 @@ export class TerminalSession {
 		this.nativeLoadResult = dependencies.nativeLoadResult ?? loadNativePty();
 		this.createNativeSessionDependency = dependencies.createNativeSession;
 		this.env = dependencies.env ?? process.env;
-		this.runtimeVersions = dependencies.runtimeVersions ?? process.versions;
+		this.runtimeVersions = dependencies.runtimeVersions ?? (process.versions as import("./session-bun.ts").BunRuntimeVersions);
 		this.bunRuntime = dependencies.bunRuntime;
 		this.rawTailLimit = normalizeRawTailBytes(options.rawTailBytes);
 	}

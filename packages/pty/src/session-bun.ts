@@ -8,7 +8,7 @@ import type {
 	TerminalSessionSignal,
 } from "./session-types.ts";
 
-interface BunTerminal {
+export interface BunTerminal {
 	readonly write: (data: string | Uint8Array) => void;
 	readonly resize: (cols: number, rows: number) => void;
 }
@@ -29,6 +29,10 @@ interface BunSpawnOptions {
 	};
 }
 
+export interface BunRuntimeVersions {
+	readonly bun?: unknown;
+}
+
 export interface BunRuntime {
 	readonly spawn: (command: readonly string[], options: BunSpawnOptions) => BunSubprocess;
 }
@@ -39,7 +43,7 @@ export const ENV_BUN_TERMINAL = "SENPI_BUN_TERMINAL";
 
 export function isBunTerminalEnabled(
 	env: Readonly<Record<string, string | undefined>> = process.env,
-	versions: NodeJS.ProcessVersions & { readonly bun?: unknown } = process.versions,
+	versions: BunRuntimeVersions = process.versions as BunRuntimeVersions,
 ): boolean {
 	if (typeof versions.bun !== "string") return false;
 	const value = env[ENV_BUN_TERMINAL];

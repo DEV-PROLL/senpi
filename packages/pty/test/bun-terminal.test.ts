@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { TerminalSession } from "../src/session.ts";
-import { type BunRuntime, createBunTerminalSession, isBunTerminalEnabled } from "../src/session-bun.ts";
+import {
+	type BunRuntime,
+	type BunTerminal,
+	createBunTerminalSession,
+	isBunTerminalEnabled,
+} from "../src/session-bun.ts";
 
 const bunVersions = { bun: "1.4.0" };
 const nodeVersions = {};
 
 function fakeRuntime() {
-	let dataHandler: ((terminal: unknown, data: Uint8Array) => void) | undefined;
+	let dataHandler: ((terminal: BunTerminal, data: Uint8Array) => void) | undefined;
 	let resolveExit: ((code: number) => void) | undefined;
 	const writes: string[] = [];
 	const resizes: string[] = [];

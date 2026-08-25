@@ -75,6 +75,6 @@ export interface TerminalSessionDependencies {
 	readonly nativeLoadResult?: NativePtyLoadResult;
 	readonly createNativeSession?: CreateNativeTerminalSession;
 	readonly env?: Readonly<Record<string, string | undefined>>;
-	readonly runtimeVersions?: NodeJS.ProcessVersions & { readonly bun?: unknown };
+	readonly runtimeVersions?: import("./session-bun.ts").BunRuntimeVersions;
 	readonly bunRuntime?: import("./session-bun.ts").BunRuntime;
 }

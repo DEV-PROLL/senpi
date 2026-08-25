@@ -47,6 +47,8 @@ export {
 } from "./session.ts";
 export {
 	type BunRuntime,
+	type BunRuntimeVersions,
+	type BunTerminal,
 	createBunTerminalSession,
 	ENV_BUN_TERMINAL,
 	isBunTerminalEnabled,
