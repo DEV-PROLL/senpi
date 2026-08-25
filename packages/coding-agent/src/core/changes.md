@@ -3739,3 +3739,21 @@ unrelated fallback bus, silently disconnecting `pi.rpc.emit` on trust-requiring 
 ### Expected merge conflict zones
 
 - NONE: the upstream-only Radius artifact remains excluded from the fork tree.
+
+## 2026-08-25 - Preserve upstream session event behavior
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` retains fork queue and compaction behavior while adopting upstream custom-message ordering.
+
+### Why
+
+- Session event ordering is a provider and persistence runtime contract.
+
+### Why this lives in the fork
+
+- Agent session orchestration executes below extension interception.
+
+### Expected merge conflict zones
+
+- Agent event dispatch and custom-message queue handling.

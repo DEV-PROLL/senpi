@@ -2913,3 +2913,21 @@ Detection has to happen inside the Anthropic SSE loop while the stream is still 
 
 - MEDIUM: `api/anthropic-messages.ts` streaming event loop and request-option construction.
 - LOW: `types.ts` `StreamOptions`, `api/simple-options.ts` `buildBaseOptions` field list, `index.ts` export list.
+
+## 2026-08-25 - Preserve upstream provider adapter behavior
+
+### What changed
+
+- `packages/ai/src/api/openai-completions.ts` and `packages/ai/src/providers/cloudflare-ai-gateway.ts` retain fork provider behavior while adopting upstream reasoning and typing fixes.
+
+### Why
+
+- Provider wire behavior is a runtime contract.
+
+### Why this lives in the fork
+
+- Adapter serialization and provider registration run below extension hooks.
+
+### Expected merge conflict zones
+
+- OpenAI Completions reasoning conversion and Cloudflare provider generic declarations.
