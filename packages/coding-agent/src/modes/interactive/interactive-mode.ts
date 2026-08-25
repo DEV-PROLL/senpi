@@ -131,7 +131,7 @@ import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
 import { checkForNewPiVersion, getReleaseChangelogUrl } from "../../utils/version-check.ts";
-import { abortedErrorLabel } from "./aborted-error-label.ts";
+import { abortedMessageForRendering } from "./aborted-error-label.ts";
 import {
 	type CompactionQueuedMessage,
 	transferCompactionQueue,
@@ -4394,18 +4394,15 @@ export class InteractiveMode {
 						}
 					}
 					this.toolArgsReveal.flushAll();
-					let errorMessage: string | undefined;
-					if (this.streamingMessage.stopReason === "aborted") {
-						errorMessage = abortedErrorLabel(
-							this.streamingMessage.errorMessage,
-							this.session.retryAttempt,
-							this.session.currentAbortSource,
-						);
-						this.streamingMessage.errorMessage = errorMessage;
-					}
-					this.syncTrailingAssistantText(this.streamingMessage);
+					const renderedMessage = abortedMessageForRendering(
+						this.streamingMessage,
+						this.session.retryAttempt,
+						this.session.currentAbortSource,
+					);
+					let errorMessage = renderedMessage.errorMessage;
+					this.syncTrailingAssistantText(renderedMessage);
 					this.assistantTextSegments.clear();
-					this.addContinuityNotice(this.streamingMessage);
+					this.addContinuityNotice(renderedMessage);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
 						if (!errorMessage) {
@@ -5216,7 +5213,8 @@ export class InteractiveMode {
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;
 							if (message.stopReason === "aborted") {
-								errorMessage = abortedErrorLabel(message.errorMessage, 0, undefined);
+								errorMessage =
+									abortedMessageForRendering(message, 0, undefined).errorMessage || "Provider request failed";
 							} else {
 								errorMessage = message.errorMessage || "Error";
 							}

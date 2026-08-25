@@ -24,6 +24,24 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 - Export lists of `packages/coding-agent/src/core/extensions/index.ts` and the type unions in
   `packages/coding-agent/src/core/extensions/types.ts`.
 
+## 2026-08-25 - Expose provider watchdog abort ownership
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/types.ts`: adds `"provider"` to `AgentEndEvent.abortSource`.
+
+### Why
+
+- Extensions must distinguish provider watchdog cancellation from user and system aborts when handling terminal turns.
+
+### Why an extension could not handle it
+
+- This is the extension event contract itself and must be typed by the host before handlers run.
+
+### Expected merge conflict zones
+
+- LOW: `AgentEndEvent.abortSource` in `types.ts`.
+
 ## 2026-08-19 - ProviderConfig.fallbackEligible: deterministic gate for implicit fallback expansion
 
 ### What changed

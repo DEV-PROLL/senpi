@@ -25,6 +25,24 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 - `packages/coding-agent/src/modes/interactive/interactive-mode.ts` is a full-file conflict zone in
   every sync; resolve toward the fork coordinator and re-apply upstream's incremental rendering fixes.
 
+## 2026-08-25 - Render provider abort labels without mutating messages
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` and `packages/coding-agent/src/modes/interactive/aborted-error-label.ts`: render provider watchdog labels from a copied assistant message while retaining the real provider cause in session state.
+
+### Why
+
+- UI labels must not overwrite `finalError`, transcript persistence, or replay data.
+
+### Why an extension could not handle it
+
+- Interactive message rendering owns this label-only presentation boundary.
+
+### Expected merge conflict zones
+
+- LOW: aborted assistant `message_end` rendering paths.
+
 ## 2026-08-25 - resume hint uses the brand executable name
 
 ### What changed
@@ -42,7 +60,6 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 ### Expected merge conflict zones
 
 - LOW: `interactive-mode.ts` `formatResumeCommand()` argument list.
-
 ## 2026-08-24 - provider aborts render with explicit provenance
 
 ### What changed

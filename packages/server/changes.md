@@ -19,6 +19,24 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 
 - The name/version/scripts blocks on every upstream release bump.
 
+## 2026-08-25 - Account for provider abort provenance in transcript typing
+
+### What changed
+
+- `packages/server/src/protocol.ts`: includes the optional assistant `abortSource` field in the exhaustive pi-ai transcript shape check.
+
+### Why
+
+- Provider retry watchdog ownership is part of the assistant message contract and must remain explicit across server protocol boundaries rather than being dropped or rejected by compile-time drift checks.
+
+### Why an extension could not handle it
+
+- The server protocol bridge owns the exhaustive transport type contract before extension consumers run.
+
+### Expected merge conflict zones
+
+- LOW: `AssistantMessage` exact-key assertions in `src/protocol.ts`.
+
 ## Repository-wide changes.md audit backfill for package manifest and transport typing (2026-08-17)
 
 ### What changed
