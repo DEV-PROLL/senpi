@@ -510,6 +510,8 @@ export const BRAND: BrandProfile | undefined = brandProfile();
 
 export const PACKAGE_NAME: string = pkg.name || "@earendil-works/pi-coding-agent";
 export const APP_NAME: string = BRAND?.name || piConfigName || "pi";
+/** Command-line name; brands whose binary differs from their display name set this. */
+export const APP_COMMAND: string = BRAND?.command ?? APP_NAME;
 export const APP_TITLE: string = BRAND?.name || (piConfigName ? APP_NAME : "π");
 export const CONFIG_DIR_NAME: string = BRAND?.configDir || pkg.piConfig?.configDir || ".pi";
 /** True when the brand stores agent state directly under the config dir, with no `agent` segment. */

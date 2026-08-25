@@ -48,6 +48,7 @@ import {
 import chalk from "chalk";
 import { spawn, spawnSync } from "child_process";
 import {
+	APP_COMMAND,
 	APP_NAME,
 	APP_TITLE,
 	BRAND,
@@ -416,7 +417,7 @@ export function formatResumeCommand(sessionManager: SessionManager): string | un
 	const sessionFile = sessionManager.getSessionFile();
 	if (!sessionFile || !fs.existsSync(sessionFile)) return undefined;
 
-	const args = [APP_NAME];
+	const args = [APP_COMMAND];
 	if (!sessionManager.usesDefaultSessionDir()) {
 		args.push("--session-dir", quoteIfNeeded(sessionManager.getSessionDir()));
 	}

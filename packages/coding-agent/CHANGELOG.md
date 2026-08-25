@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- The interactive TUI resume hint now uses the brand executable name (`APP_COMMAND`) instead of the display name, so a brand whose binary is `omo` no longer prints `OmO --session <id>`.
+
 ### Added
 
 ### Changed
