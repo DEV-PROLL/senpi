@@ -12,6 +12,9 @@
   extension-system, legacy-senpi dirs) in place of upstream's commands-to-prompts migration.
 - `packages/coding-agent/src/package-manager-cli.ts` keeps senpi-branded update help text and the
   removable `omo-local-update` beta hook.
+- `packages/coding-agent/src/main.ts` keeps the fork stdout contract for JSON mode: stdout takeover
+  also applies to `--help` in JSON mode, and `console.log` is redirected to stderr for the process
+  lifetime so machine-readable stdout stays clean of stray logging.
 
 ### Why
 

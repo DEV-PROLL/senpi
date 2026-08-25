@@ -14,6 +14,9 @@
   and grounding/url-context metadata emission.
 - `packages/ai/src/api/mistral-conversations.ts` keeps `preserveThinking` message transformation and
   `MISTRAL_RESERVED_BODY_KEYS` extra-body support.
+- `packages/ai/src/api/transform-messages.ts` keeps same-model redacted-thinking replay: opaque
+  redacted blocks are preserved for the same model regardless of `preserveProviderState` (upstream
+  additionally gates on it), so Bedrock redacted reasoning replays instead of being dropped.
 - `packages/ai/src/api/openai-completions.ts` keeps moonshot/compat tool-schema normalization,
   forced-tool-choice fallback, stream-aware retries, and `supportsMax`/`supportsXhigh` effort.
 - `packages/ai/src/api/openai-responses.ts` keeps the responses-websockets beta header, Cloudflare
