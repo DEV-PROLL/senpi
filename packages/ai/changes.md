@@ -753,3 +753,39 @@ These failures are in upstream `packages/ai` live integration tests, not in the 
 ### Expected merge conflict zones
 
 - `package.json` `scripts` blocks and `devDependencies` anywhere upstream still references `tsgo` or `@typescript/native-preview`.
+
+## 2026-08-25 - Upstream provider and reasoning sync coverage
+
+### What changed
+
+- `packages/ai/scripts/generate-models.ts`, `packages/ai/src/api/openai-completions.ts`, and `packages/ai/src/providers/cloudflare-ai-gateway.ts` adopt the upstream model metadata, reasoning replay, and provider typing updates while retaining fork behavior.
+
+### Why
+
+- The upstream sync changes provider generation and wire behavior that must remain tracked by the nearest fork tracker.
+
+### Why this lives in the fork
+
+- Provider generation and adapter serialization execute below the extension boundary.
+
+### Expected merge conflict zones
+
+- Generator provider loops and OpenAI/Cloudflare adapter declarations.
+
+## 2026-08-25 - Preserve generated ZAI pricing during upstream sync
+
+### What changed
+
+- `packages/ai/src/providers/data/zai.json` and `packages/ai/src/providers/data/zai-coding-cn.json` retain fork API-equivalent reference pricing for Coding Plan models.
+
+### Why
+
+- Generated catalogs must preserve the fork's pricing contract after upstream regeneration.
+
+### Why this lives in the fork
+
+- Catalog values are consumed directly by provider model resolution and cannot be corrected by extensions.
+
+### Expected merge conflict zones
+
+- Generated ZAI provider catalog entries and the model generator's reference-cost selection.

@@ -2515,3 +2515,21 @@ The retry budget, abortable retry sleep, provider continuation, and active model
 ### Why extension system couldn't handle this
 
 The instrumented transitions (`_emit`, queue internals, `RequiredCompactionError` admission, the TUI compaction queue, clipboard catch) are private `AgentSession`/`InteractiveMode` state with no extension-visible hook carrying the needed fields; field debugging of "stuck forever" sessions (Discord report 2026-07-30) requires a single post-hoc timeline in the logs directory.
+
+## 2026-08-25 - Upstream public runtime surface sync coverage
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/index.ts`, `packages/coding-agent/src/modes/rpc/rpc-client.ts`, and `packages/coding-agent/src/modes/rpc/rpc-types.ts` preserve the fork session behavior and public exports while adopting upstream RPC queue clearing and event additions.
+
+### Why
+
+- These runtime and public API paths are directly changed by the upstream sync and require exact nearest-tracker coverage.
+
+### Why this lives in the fork
+
+- Session orchestration and public API exports execute before extension code can compensate for divergence.
+
+### Expected merge conflict zones
+
+- Agent-session event handling, coding-agent barrel exports, and RPC command/client/response unions.
