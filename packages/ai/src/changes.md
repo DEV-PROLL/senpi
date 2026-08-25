@@ -1,3 +1,21 @@
+## 2026-08-25 - Preserve same-model redacted thinking during message transforms
+
+### What changed
+
+- `packages/ai/src/api/transform-messages.ts` preserves opaque redacted thinking blocks whenever the source and target model are the same, independent of `preserveProviderState`.
+
+### Why
+
+- Bedrock redacted reasoning is provider replay state that must survive same-model transformation; gating it on `preserveProviderState` dropped the block and changed the replayed request.
+
+### Why an extension could not handle it
+
+- Message transformation and provider-state preservation run inside the AI adapter boundary before extension code receives the outbound request.
+
+### Expected merge conflict zones
+
+- LOW: redacted-thinking handling in `transformMessages()` when upstream changes message replay policy.
+
 ## Provider wire layer re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed

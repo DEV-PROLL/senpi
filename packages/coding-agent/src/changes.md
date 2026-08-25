@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-25 - Keep JSON startup logging off stdout
+
+### What changed
+
+- `packages/coding-agent/src/main.ts` takes over stdout for JSON `--help` and redirects `console.log` to stderr for the lifetime of JSON-mode execution, restoring the original logger on process exit.
+
+### Why
+
+- Machine-readable JSON output must remain clean while startup diagnostics and trusted chatter continue to be visible on stderr.
+
+### Why an extension could not handle it
+
+- CLI mode selection and stdout ownership happen before extensions load and are process-wide runtime behavior.
+
+### Expected merge conflict zones
+
+- LOW: JSON-mode startup setup around `resolveAppMode()` and stdout takeover.
+
 ## Coding-agent entry surfaces re-diverge from upstream dcd4619 (2026-08-25)
 
 ### What changed
