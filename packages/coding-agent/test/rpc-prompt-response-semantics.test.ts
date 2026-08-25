@@ -92,7 +92,12 @@ function getPromptResponses(outputLines: string[], id: string): ParsedOutputLine
 	);
 }
 
-async function createRuntimeHost(options: { withAuth: boolean; holdResponse?: boolean; responseDelayMs?: number; model?: Model<any> }): Promise<{
+async function createRuntimeHost(options: {
+	withAuth: boolean;
+	holdResponse?: boolean;
+	responseDelayMs?: number;
+	model?: Model<any>;
+}): Promise<{
 	runtimeHost: AgentSessionRuntime;
 	cleanup: () => Promise<void>;
 }> {
@@ -116,7 +121,8 @@ async function createRuntimeHost(options: { withAuth: boolean; holdResponse?: bo
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: createAssistantMessage("") });
 				if (!options.holdResponse) {
-					const finish = () => stream.push({ type: "done", reason: "stop", message: createAssistantMessage("done") });
+					const finish = () =>
+						stream.push({ type: "done", reason: "stop", message: createAssistantMessage("done") });
 					if (options.responseDelayMs !== undefined) setTimeout(finish, options.responseDelayMs);
 					else finish();
 				}
@@ -168,7 +174,12 @@ async function createRuntimeHost(options: { withAuth: boolean; holdResponse?: bo
 	};
 }
 
-async function startRpcMode(options: { withAuth: boolean; holdResponse?: boolean; responseDelayMs?: number; model?: Model<any> }): Promise<{
+async function startRpcMode(options: {
+	withAuth: boolean;
+	holdResponse?: boolean;
+	responseDelayMs?: number;
+	model?: Model<any>;
+}): Promise<{
 	lineHandler: (line: string) => void;
 	cleanup: () => Promise<void>;
 }> {
@@ -330,7 +341,7 @@ describe("RPC prompt response semantics", () => {
 
 			await vi.waitFor(() => {
 				expect(parseOutputLines(rpcIo.outputLines).filter((record) => record.type === "agent_end")).toHaveLength(1);
-		});
+			});
 		} finally {
 			await cleanup();
 		}

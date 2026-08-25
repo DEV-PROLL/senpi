@@ -380,7 +380,10 @@ function parseLegacyEncryptedReasoningDetail(
 	}
 }
 
-function fillMissingCommonReasoningDetailFields(target: OpenAIReasoningDetailBase, source: OpenAIReasoningDetail): void {
+function fillMissingCommonReasoningDetailFields(
+	target: OpenAIReasoningDetailBase,
+	source: OpenAIReasoningDetail,
+): void {
 	target.id ??= source.id;
 	target.format ||= source.format;
 	target.index ??= source.index;

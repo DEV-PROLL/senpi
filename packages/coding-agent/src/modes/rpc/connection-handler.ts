@@ -792,10 +792,6 @@ export function createRpcConnectionHandler(
 				return success(id, "clear_queue", session.clearQueue());
 			}
 
-			case "clear_queue": {
-				return success(id, "clear_queue", session.clearQueue());
-			}
-
 			case "new_session": {
 				const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
 				const result = await runtimeHost.newSession(options);
