@@ -1,5 +1,24 @@
 # changes
 
+## Restore fork settings paths and interactive startup seams after upstream merge (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/core/settings-manager.ts`: preserve fork `.senpi` settings discovery while adopting upstream BOM-tolerant parsing and path-bearing diagnostics.
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: retain the fork's testable tmux-keyboard startup seam while adopting the upstream startup warning flow.
+
+### Why
+
+- The fork's branded config directory and interactive startup contracts are production behavior; allowing upstream `.pi` assumptions or an unmocked method call breaks settings persistence and startup diagnostics.
+
+### Why an extension could not handle it
+
+- Settings source selection and interactive startup dispatch run before extensions are loaded.
+
+### Expected merge conflict zones
+
+- HIGH: settings source resolution, error reporting, and interactive startup checks.
+
 ## Preserve highlight.js package export compatibility after upstream merge (2026-08-25)
 
 ### What changed
