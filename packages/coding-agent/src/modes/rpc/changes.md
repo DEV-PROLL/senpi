@@ -1,5 +1,12 @@
 # changes
 
+## One lifecycle supervisor across CLI and desktop runtimes (2026-08-25)
+
+- The hidden `--internal-rpc-host-supervisor` CLI route exposes the existing `host-lifecycle.ts` entry to bundled/rebranded callers without changing any public mode. Its socket, agent directory, and child command/args are explicit parameters, so desktop cold starts execute the same proxy, policy, observer, watchdog, pidfile, and cleanup implementation as `ensureHost()`.
+- Updated `host-lifecycle.ts` argument parsing to accept those internal parameters while retaining the existing default launch for senpi callers.
+
+Expected merge conflict zones: MEDIUM in `main.ts` and `host-lifecycle.ts`; LOW in `docs/rpc.md`.
+
 ## RPC host lifetime is bound to its supervisor at the OS level (2026-08-25)
 
 ### What changed

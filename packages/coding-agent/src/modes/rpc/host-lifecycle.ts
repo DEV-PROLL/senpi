@@ -161,20 +161,46 @@ export class IdleExitDecider {
 export interface SupervisorLaunch {
 	readonly socket: string;
 	readonly hostArgs: readonly string[];
+	/** Optional runtime command used by rebranded/bundled callers. */
+	readonly childCommand?: string;
+	readonly childArgs?: readonly string[];
+	/** Explicit ownership directory for callers whose environment is not yet branded. */
+	readonly agentDir?: string;
 }
 
 /** `--socket <path>` selects the public socket; every other argument is forwarded to the host CLI. */
 export function parseSupervisorArgs(argv: readonly string[]): SupervisorLaunch | undefined {
 	const hostArgs: string[] = [];
 	let socket: string | undefined;
+	let childCommand: string | undefined;
+	let childArgs: readonly string[] | undefined;
+	let agentDir: string | undefined;
 	for (let index = 0; index < argv.length; index++) {
-		if (argv[index] === "--socket" && index + 1 < argv.length) {
+		const arg = argv[index];
+		if (arg === "--socket" && index + 1 < argv.length) {
 			socket = argv[++index];
 			continue;
 		}
-		hostArgs.push(argv[index]);
+		if (arg === "--child-command" && index + 1 < argv.length) {
+			childCommand = argv[++index];
+			continue;
+		}
+		if (arg === "--child-args" && index + 1 < argv.length) {
+			try {
+				const parsed: unknown = JSON.parse(argv[++index]);
+				if (Array.isArray(parsed) && parsed.every((value) => typeof value === "string")) childArgs = parsed;
+			} catch {
+				return undefined;
+			}
+			continue;
+		}
+		if (arg === "--agent-dir" && index + 1 < argv.length) {
+			agentDir = argv[++index];
+			continue;
+		}
+		hostArgs.push(arg);
 	}
-	return socket === undefined ? undefined : { socket, hostArgs };
+	return socket === undefined ? undefined : { socket, hostArgs, childCommand, childArgs, agentDir };
 }
 
 /** Resolves the committed CLI entry this supervisor wraps (source tree or built dist). */
@@ -185,7 +211,7 @@ export function resolveCliMainPath(): string {
 }
 
 export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void> {
-	const paths = createHostDaemonPaths(getAgentDir());
+	const paths = createHostDaemonPaths(launch.agentDir ?? getAgentDir());
 	const policy = resolveHostPolicy(await readSettingsFile(paths.settingsFile), process.env);
 	const publicSocket = launch.socket;
 	const internal = await createInternalSocketPath();
@@ -197,17 +223,19 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	let shutdownPromise: Promise<never> | undefined;
 
 	const child = spawn(
-		process.execPath,
-		[
-			...process.execArgv,
-			resolveCliMainPath(),
-			"--mode",
-			"rpc",
-			"--multi-session",
-			"--listen",
-			`unix://${internalSocket}`,
-			...launch.hostArgs,
-		],
+		launch.childCommand ?? process.execPath,
+		launch.childCommand
+			? [...(launch.childArgs ?? []), "--listen", `unix://${internalSocket}`]
+			: [
+					...process.execArgv,
+					resolveCliMainPath(),
+					"--mode",
+					"rpc",
+					"--multi-session",
+					"--listen",
+					`unix://${internalSocket}`,
+					...launch.hostArgs,
+				],
 		{
 			env: {
 				...process.env,

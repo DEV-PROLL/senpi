@@ -34,6 +34,20 @@ describe("ensureHost", () => {
 		expect((await protocolInfo(qa.socket)).data).toMatchObject({ serverVersion: VERSION });
 	});
 
+	it("attaches to a compatible unmanaged host", async () => {
+		const qa = await scratch("compatible-unmanaged");
+		const child = spawn(process.execPath, [fixture, qa.socket, VERSION, "multi_session,extension_events", "answer"], {
+			detached: true,
+			stdio: "ignore",
+		});
+		children.push(child);
+		if (child.pid === undefined) throw new Error("fixture did not spawn");
+		await waitForProtocol(qa.socket);
+		const result = await ensureFixtureHost(qa);
+		expect(result.reused).toBe(true);
+		expect(result.pid).toBe(0);
+	});
+
 	it("replaces a host answering with the wrong server version", async () => {
 		const qa = await scratch("wrong-version");
 		const old = await startManagedFixture(qa, "wrong-version", "multi_session,extension_events");

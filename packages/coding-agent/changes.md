@@ -60,6 +60,10 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 - HIGH: `package.json` and the generated publish/install/platform locks.
 - LOW: the redirect response-body compatibility helper and its regression test.
 
+## 2026-08-25 — Attach compatible shared RPC hosts
+
+`ensureHost` now attaches to any compatible RPC socket, including a host started by another client surface, while retaining typed refusal for incompatible unmanaged owners. Hosts senpi starts continue to use canonical `host.pid` and `settings.json` state; attached hosts are not lifecycle-managed.
+
 ## models.json schema accepts the video input modality (2026-08-23)
 
 ### What changed

@@ -97,8 +97,10 @@ async function ensureHostLocked(
 	const pidFile = await readPidFile(paths);
 	const protocol = await probeProtocolInfo(socket, 1_000);
 	const pidMatches = pidFile ? await processMatchesPidFile(pidFile) : false;
-	if (isCompatible(protocol) && pidFile && pidMatches) {
-		return { pid: pidFile.pid, socket, reused: true };
+	if (isCompatible(protocol)) {
+		// A compatible socket is attachable even when another client surface
+		// started it. Only hosts we spawned are eligible for lifecycle management.
+		return { pid: pidFile?.pid ?? 0, socket, reused: true };
 	}
 	if (protocol && !pidMatches) {
 		throw new Error(`RPC socket ${socket} is owned by an unmanaged host`);
