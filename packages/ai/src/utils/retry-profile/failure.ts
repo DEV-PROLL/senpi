@@ -1,4 +1,3 @@
-import { APIConnectionError, APIConnectionTimeoutError } from "@anthropic-ai/sdk";
 import type { RetryFailure, RetryFailureKind } from "./types.ts";
 import { extract429RetryAfterMs } from "../retry-hint.ts";
 
@@ -13,6 +12,19 @@ const QUOTA_WORDING_PATTERN =
 	/exceeded_current_quota_error|insufficient\s+balance|credits?_required|quota|billing/i;
 const IMAGE_FORMAT_PATTERN =
 	/unsupported image format|unsupported media type for base64 image|invalid data url for image/i;
+
+/**
+ * Anthropic SDK connection-error classes are matched by constructor name
+ * rather than `instanceof`: a static import of the SDK error classes would
+ * break every test that `vi.mock`s `@anthropic-ai/sdk` without re-exporting
+ * them, and the SDK never sets `error.name`. `APIConnectionTimeoutError`
+ * extends `APIConnectionError`, so callers must check the timeout name first.
+ */
+function sdkErrorClassName(error: unknown): string | undefined {
+	if (!(error instanceof Error)) return undefined;
+	const name = error.constructor?.name;
+	return typeof name === "string" && name.length > 0 ? name : undefined;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -84,9 +96,9 @@ export function normalizeAnthropicRetryFailure(error: unknown, context?: RetryFa
 
 	if (error instanceof Error && error.name === "AbortError") {
 		kind = "abort";
-	} else if (error instanceof APIConnectionTimeoutError) {
+	} else if (sdkErrorClassName(error) === "APIConnectionTimeoutError") {
 		kind = "timeout";
-	} else if (error instanceof APIConnectionError) {
+	} else if (sdkErrorClassName(error) === "APIConnectionError") {
 		kind = "connection";
 	} else if (typeof message === "string" && IMAGE_FORMAT_PATTERN.test(message)) {
 		kind = "image-format";
