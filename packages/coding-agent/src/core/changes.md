@@ -4,12 +4,12 @@
 
 ### What changed
 
-- `src/core/provider-composer.ts`: forwards `retryPolicy` through provider composition (`extension?.retryPolicy ?? base?.retryPolicy`) so composed providers never silently drop provider-declared retry profiles. `ProviderConfigInput` gained the `retryPolicy` field for config-layer injection.
-- `src/core/retry-fallback/settings.ts`: `RetrySettings` gained `providers?: Record<string, RetryPolicyOverride>` for per-provider scheduling-knob overrides.
-- `src/core/retry-fallback/profile-override.ts` (new): `validateRetryProviderOverrides` returns warnings (never throws, never mutates) for the `retry.providers.<id>` map, rejecting an entire provider entry atomically when any knob is invalid, and warning once on unknown provider ids.
-- `src/core/settings-manager.ts`: `resolveRetryProfile(provider)` resolves the effective profile with documented precedence: shipped senpi-default -> provider-declared profile -> user global (no-profile providers only) -> `retry.providers.<id>` -> `retry.enabled` hard gate.
-- `src/core/agent-session.ts`: `_handleRetryableError` resolves the profile once per failure. `fallback.rateLimited` decides 429 routing ("tiered" keeps today's hint tiers, "after-turn-budget" routes 429s through the ordinary same-model budget). Profile ceiling null bypasses the over-ceiling error path. The kimi routing marks `is429TierRouted` to prevent double-counting with the generic non-429 path. Every same-model budget check (`_willRetryAfterAgentEnd`, `_degradeRateLimitedWithoutFallback`, and all `_handleRetryableError` branches incl. the `auto_retry_start.maxAttempts` field) reads the resolved profile's `turn.maxRetries` — identical to `settings.maxRetries` for providers without a declared profile, and the declared budget (kimi-code's 9) otherwise.
-- `src/core/sdk.ts`: `streamFn` resolves the profile's `providerRequest` stage for `maxRetries`/`maxRetryDelayMs`; a profile with `providerRequest.enabled === false` sends `maxRetries: 0`.
+- `packages/coding-agent/src/core/provider-composer.ts`: forwards `retryPolicy` through provider composition (`extension?.retryPolicy ?? base?.retryPolicy`) so composed providers never silently drop provider-declared retry profiles. `ProviderConfigInput` gained the `retryPolicy` field for config-layer injection.
+- `packages/coding-agent/src/core/retry-fallback/settings.ts`: `RetrySettings` gained `providers?: Record<string, RetryPolicyOverride>` for per-provider scheduling-knob overrides.
+- `packages/coding-agent/src/core/retry-fallback/profile-override.ts` (new): `validateRetryProviderOverrides` returns warnings (never throws, never mutates) for the `retry.providers.<id>` map, rejecting an entire provider entry atomically when any knob is invalid, and warning once on unknown provider ids.
+- `packages/coding-agent/src/core/settings-manager.ts`: `resolveRetryProfile(provider)` resolves the effective profile with documented precedence: shipped senpi-default -> provider-declared profile -> user global (no-profile providers only) -> `retry.providers.<id>` -> `retry.enabled` hard gate.
+- `packages/coding-agent/src/core/agent-session.ts`: `_handleRetryableError` resolves the profile once per failure. `fallback.rateLimited` decides 429 routing ("tiered" keeps today's hint tiers, "after-turn-budget" routes 429s through the ordinary same-model budget). Profile ceiling null bypasses the over-ceiling error path. The kimi routing marks `is429TierRouted` to prevent double-counting with the generic non-429 path. Every same-model budget check (`_willRetryAfterAgentEnd`, `_degradeRateLimitedWithoutFallback`, and all `_handleRetryableError` branches incl. the `auto_retry_start.maxAttempts` field) reads the resolved profile's `turn.maxRetries` — identical to `settings.maxRetries` for providers without a declared profile, and the declared budget (kimi-code's 9) otherwise.
+- `packages/coding-agent/src/core/sdk.ts`: `streamFn` resolves the profile's `providerRequest` stage for `maxRetries`/`maxRetryDelayMs`; a profile with `providerRequest.enabled === false` sends `maxRetries: 0`.
 
 ### Why
 
@@ -21,11 +21,11 @@
 
 ### Expected merge conflict zones
 
-- MEDIUM: `src/core/settings-manager.ts` getters region (new `resolveRetryProfile` sibling method).
-- MEDIUM: `src/core/agent-session.ts` `_handleRetryableError` profile routing and over-ceiling gate.
-- MEDIUM: `src/core/sdk.ts` `streamFn` provider-request stage resolution.
-- LOW: `src/core/provider-composer.ts` field forwarding (append-only).
-- LOW: `src/core/retry-fallback/settings.ts` + `profile-override.ts` (new module, no upstream owner).
+- MEDIUM: `packages/coding-agent/src/core/settings-manager.ts` getters region (new `resolveRetryProfile` sibling method).
+- MEDIUM: `packages/coding-agent/src/core/agent-session.ts` `_handleRetryableError` profile routing and over-ceiling gate.
+- MEDIUM: `packages/coding-agent/src/core/sdk.ts` `streamFn` provider-request stage resolution.
+- LOW: `packages/coding-agent/src/core/provider-composer.ts` field forwarding (append-only).
+- LOW: `packages/coding-agent/src/core/retry-fallback/settings.ts` + `profile-override.ts` (new module, no upstream owner).
 
 ## 2026-08-23 - Slot-preserving credential writes for multi-account pools
 
