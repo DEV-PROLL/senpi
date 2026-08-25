@@ -65,6 +65,24 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 
 - LOW: the new methods sit immediately after `remove()` in `packages/coding-agent/src/core/auth-storage.ts`; `credential-slots.ts` is a new file with no upstream counterpart.
 
+## 2026-08-25 - Fall back on Cursor usage-pool exhaustion
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: admits token-bearing Cursor `resource_exhausted` failures as a dedicated fallback class, retires failed assistants before fallback, and annotates terminal no-fallback errors with the likely usage-pool cause.
+
+### Why
+
+- Cursor quota exhaustion was misclassified as overflow and entered compaction loops; mid-turn tool calls also require explicit retry admission outside the generic hard-error gate.
+
+### Why an extension could not handle it
+
+- Retry admission, assistant retirement, and provider fallback are private AgentSession lifecycle boundaries.
+
+### Expected merge conflict zones
+
+- HIGH: Cursor retry admission and fallback dispatch in `packages/coding-agent/src/core/agent-session.ts`.
+
 ## 2026-08-25 - Harden watchdog abort accounting and retry jitter
 
 ### What changed
