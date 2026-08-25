@@ -51,7 +51,11 @@
 
 ### Added
 
+- Providers can now declare their own retry policy profile, and the new `retry.providers.<id>` settings map tunes per-provider scheduling knobs (`maxRetries`, `baseDelayMs`) with warn-only validation that rejects an invalid entry atomically. Kimi For Coding adopts kimi-code's own policy: 10 total same-model attempts with 500ms-base exponential backoff (32s per-attempt cap, +0..25% jitter), server-requested waits honored without a ceiling, and rate limits spending the full same-model budget before model fallback. Providers without a declared profile keep their existing behavior, and `retry.enabled: false` remains a hard gate over everything ([#1121](https://github.com/code-yeongyu/senpi/pull/1121)).
+
 ### Changed
+
+- Locally computed retry backoff for the default profile is now capped at 8 seconds per attempt and carries +0..25% additive jitter to avoid synchronized retry bursts; explicit server-requested waits and hint-tier schedules stay exact ([#1121](https://github.com/code-yeongyu/senpi/pull/1121)).
 
 ### Removed
 
