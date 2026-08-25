@@ -6,6 +6,11 @@
 
 ### Fixed
 
+- Provider stream stalls can no longer be turned into terminal watchdog aborts after the first retry: the configured retry budget is now spent, the final error preserves the real watchdog/provider cause, and unhinted transient retry delays include bounded jitter while provider hints and 429 floors remain intact.
+- Loop-guard blocks for terminal/task polling now direct the agent to stop
+  repeating the target and use a monitor, supported completion notification, or
+  re-plan instead of changing arguments to evade escalation.
+- The interactive TUI resume hint now uses the brand executable name (`APP_COMMAND`) instead of the display name, so a brand whose binary is `omo` no longer prints `OmO --session <id>`.
 - TTSR now watches streamed tool-call arguments and interrupts collapse floods inside tool inputs, preventing corrupted argument generations from reaching persisted session history.
 
 ### Added

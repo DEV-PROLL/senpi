@@ -4,22 +4,6 @@
 
 ### What changed
 
-- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: renders provider watchdog labels without mutating the shared assistant message.
-
-### Why
-
-- Session final errors and persisted transcripts must retain the real provider/watchdog cause rather than a UI label.
-
-### Why an extension could not handle it
-
-- Interactive rendering owns this label-only presentation boundary.
-
-### Expected merge conflict zones
-
-- LOW: aborted assistant message rendering in `interactive-mode.ts`.
-
-### What changed
-
 - `packages/coding-agent/src/modes/interactive/interactive-mode.ts` and `packages/coding-agent/src/modes/interactive/aborted-error-label.ts`: render provider watchdog labels from a copied assistant message while retaining the real provider cause in session state.
 
 ### Why
@@ -28,12 +12,29 @@
 
 ### Why an extension could not handle it
 
-- Interactive message rendering owns the label-only presentation boundary.
+- Interactive message rendering owns this label-only presentation boundary.
 
 ### Expected merge conflict zones
 
 - LOW: aborted assistant `message_end` rendering paths.
 
+## 2026-08-25 - resume hint uses the brand executable name
+
+### What changed
+
+- `interactive-mode.ts`: `formatResumeCommand()` starts the printed resume command with `APP_COMMAND` instead of `APP_NAME`, so quitting the TUI shows the real binary (`omo --session <id>`) when the brand display name differs.
+
+### Why
+
+- The quit hint is a copy-paste shell command. Printing the display brand (`OmO`) makes the hint fail when the executable is lowercase `omo`.
+
+### Why an extension could not handle it
+
+- The resume hint is assembled inside `InteractiveMode` teardown from session identity; extensions cannot replace that printed line.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` `formatResumeCommand()` argument list.
 ## 2026-08-24 - provider aborts render with explicit provenance
 
 ### What changed

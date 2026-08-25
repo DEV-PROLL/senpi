@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOAL_USER_GRACE_DELAY_MS } from "../../src/core/extensions/builtin/goal/continuation.ts";
 import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
@@ -118,7 +119,7 @@ describe("goal extension contract (budget-free)", () => {
 		expect(
 			didTerminalProviderErrorEndTurn({
 				type: "agent_end",
-				messages: [{ role: "assistant", stopReason: "aborted" } as never],
+				messages: [fauxAssistantMessage("", { stopReason: "aborted" })],
 				willRetry: false,
 				abortSource: "provider",
 			}),

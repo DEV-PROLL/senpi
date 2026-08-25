@@ -67,7 +67,6 @@ export function createTerminalFailureAssistantMessage(
 	const errorMessage = error instanceof Error ? error.message : String(error);
 	return {
 		role: "assistant",
-
 		content: partialMessage?.content ?? [{ type: "text", text: "" }],
 		api: partialMessage?.api ?? model.api,
 		provider: partialMessage?.provider ?? model.provider,
