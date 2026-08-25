@@ -4,7 +4,7 @@
 
 ### What changed
 
-- Deliberately omit the unwired upstream `settings-submenu.ts`; the fork uses its inline `WarningSettingsSubmenu` implementation.
+- Deliberately omit `packages/coding-agent/src/modes/interactive/components/settings-submenu.ts`; the fork uses its inline `WarningSettingsSubmenu` implementation.
 
 ### Why
 

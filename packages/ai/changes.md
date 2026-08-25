@@ -1,5 +1,23 @@
 # changes.md — ai
 
+## 2026-08-25 - Keep Cloudflare AI Gateway provider divergence covered
+
+### What changed
+
+- Keep `packages/ai/src/providers/cloudflare-ai-gateway.ts` with the fork's Cloudflare AI Gateway provider registration and Workers AI model mapping.
+
+### Why
+
+- The provider is part of the fork's supported gateway surface and must remain covered by the nearest changes tracker during upstream synchronization.
+
+### Why this lives in the fork
+
+- Provider registration and model routing are package-owned runtime behavior below the extension boundary.
+
+### Expected merge conflict zones
+
+- LOW: `packages/ai/src/providers/cloudflare-ai-gateway.ts` and adjacent provider registration during upstream syncs.
+
 ## AI package manifest and model generator re-diverge from upstream dcd4619 (2026-08-25)
 
 ### What changed
