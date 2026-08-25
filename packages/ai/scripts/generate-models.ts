@@ -237,10 +237,12 @@ const NVIDIA_NIM_UNSUPPORTED_MODELS = new Set([
 ]);
 const ZAI_TOOL_STREAM_UNSUPPORTED_MODELS = new Set(["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4.5v"]);
 const ZAI_GLM52_THINKING_LEVEL_MAP = {
+	off: "none",
 	minimal: null,
-	low: "high",
-	medium: "high",
+	low: null,
+	medium: null,
 	high: "high",
+	xhigh: null,
 	max: "max",
 } as const;
 const OPENCODE_GO_GLM52_THINKING_LEVEL_MAP = {
@@ -1302,11 +1304,10 @@ function processZaiModels(data: ModelsDevCatalog): Model<Api>[] {
 			if (m.tool_call !== true) continue;
 			const supportsImage = m.modalities?.input?.includes("image");
 
-			const thinkingLevelMap = getEffortThinkingLevelMap(m.reasoning_options ?? []);
 			const isGlm52 = modelId === "glm-5.2" || modelId === "glm-5.2-highspeed";
-			if (thinkingLevelMap && isGlm52) {
-				thinkingLevelMap.off = "none";
-			}
+			const thinkingLevelMap = isGlm52
+				? { off: "none", minimal: null, low: null, medium: null, high: "high", xhigh: null, max: null }
+				: getEffortThinkingLevelMap(m.reasoning_options ?? []);
 			const supportsReasoningEffort = thinkingLevelMap !== undefined;
 			const referenceCost = data.zai?.models[modelId]?.cost ?? m.cost;
 
@@ -1885,7 +1886,8 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				if (m.tool_call !== true) continue;
 				const supportsImage = m.modalities?.input?.includes("image");
 
-				const isGlm5x = modelId === "glm-5.2" || modelId === "glm-5.3";
+				const isGlm52 = modelId === "glm-5.2" || modelId === "glm-5.2-highspeed";
+				const isGlm5x = isGlm52 || modelId === "glm-5.3";
 				const referenceCost = data.zai?.models[modelId]?.cost ?? m.cost;
 
 				models.push({
@@ -1895,7 +1897,11 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider,
 					baseUrl,
 					reasoning: m.reasoning === true,
-					...(isGlm5x ? { thinkingLevelMap: ZAI_GLM52_THINKING_LEVEL_MAP } : {}),
+					...(isGlm52
+						? { thinkingLevelMap: ZAI_GLM52_THINKING_LEVEL_MAP }
+						: isGlm5x
+							? { thinkingLevelMap: getEffortThinkingLevelMap(m.reasoning_options ?? []) }
+							: {}),
 					input: supportsImage ? ["text", "image"] : ["text"],
 					cost: {
 						input: referenceCost?.input || 0,

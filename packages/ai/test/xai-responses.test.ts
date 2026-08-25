@@ -74,7 +74,7 @@ async function captureCompletionsUserAgent(headers?: Record<string, string>): Pr
 				},
 			},
 		];
-		const body = `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}`).join("\\n\\n")}\\n\\ndata: [DONE]\\n\\n`;
+		const body = `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}`).join("\n\n")}\n\ndata: [DONE]\n\n`;
 		return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 	});
 	const result = await streamOpenAICompletions(

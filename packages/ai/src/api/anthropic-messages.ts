@@ -373,16 +373,10 @@ function mergeHeaders(...headerSources: (Record<string, string | null> | undefin
 }
 
 function mergeClientHeaders(
-	model: Model<"anthropic-messages">,
+	_model: Model<"anthropic-messages">,
 	...headerSources: (Record<string, string | null> | undefined)[]
 ): Record<string, string | null> {
-	const merged = mergeHeaders(...headerSources);
-	if (model.provider === "kimi-coding") {
-		for (const name of Object.keys(merged)) {
-			if (name.toLowerCase() === "user-agent") delete merged[name];
-		}
-		merged["User-Agent"] = getPiUserAgent();
-	}
+	const merged = mergeHeaders({ "User-Agent": getPiUserAgent() }, ...headerSources);
 	return merged;
 }
 
