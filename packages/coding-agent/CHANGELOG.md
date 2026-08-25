@@ -7,6 +7,45 @@
 ### Fixed
 
 - Logging in while a provider already holds more than one credential no longer replaces every stored credential with the new one. `AuthStorage` writes (including the RPC `login_api_key` path), `Models.login`, and OAuth token refresh now preserve sibling slots and the pinned slot; a flat single-credential entry keeps its exact previous shape until a second credential actually exists.
+- Provider stream stalls can no longer be turned into terminal watchdog aborts after the first retry: the configured retry budget is now spent, the final error preserves the real watchdog/provider cause, and unhinted transient retry delays include bounded jitter while provider hints and 429 floors remain intact.
+- Loop-guard blocks for terminal/task polling now direct the agent to stop
+  repeating the target and use a monitor, supported completion notification, or
+  re-plan instead of changing arguments to evade escalation.
+- The interactive TUI resume hint now uses the brand executable name (`APP_COMMAND`) instead of the display name, so a brand whose binary is `omo` no longer prints `OmO --session <id>`.
+- TTSR now watches streamed tool-call arguments and interrupts collapse floods inside tool inputs, preventing corrupted argument generations from reaching persisted session history.
+
+### Added
+
+### Changed
+
+- RPC child startup now lazy-loads the interactive TUI mode graph at mode dispatch, avoiding parsing interactive-only components for headless sessions while preserving the interactive path.
+
+### Removed
+
+## [2026.8.24] - 2026-08-24
+
+### Breaking Changes
+
+### Fixed
+
+- Terminal provider failures and retry-watchdog cancellations no longer masquerade as user aborts or mechanically block an active Goal: the TUI now renders provider, system, and explicit user cancellation with distinct persisted labels, while exhausted provider retries stage one guarded post-settlement Goal recovery and explicit user aborts remain stopped.
+- The read tool now rejects `local://` URIs with actionable guidance instead of resolving them as relative paths and failing with a confusing `ENOENT <cwd>/local:/...`; the error names the eval kernel `read()` helper and the plain-absolute-path alternative, so agents following detached-eval spill notices recover in one step ([#1103](https://github.com/code-yeongyu/senpi/pull/1103)).
+- Assistant text painted during smooth streaming no longer vanishes and bursts back: `syncTrailingAssistantText` now yields the streaming head to the reveal controller while it paces (smooth streaming on, no toolCall in the head), so the paced prefix and the full head can no longer overwrite each other mid-stream ([#1102](https://github.com/code-yeongyu/senpi/pull/1102)).
+- The goal continuation wait countdown no longer renders over the Working indicator during externally started turns; the `goal-wait` footer segment now hides while a turn runs and restores itself when the session parks again, leaving the cache-warm schedule and iteration accounting untouched ([#1100](https://github.com/code-yeongyu/senpi/pull/1100)).
+- Webfetch now safely discards redirect response bodies under Bun 1.4.0's bare `undici`, which may omit `body.dump()`, by falling back to argument-free stream destruction instead of re-emitting cleanup failures as uncaught stream errors ([#1089](https://github.com/code-yeongyu/senpi/issues/1089)).
+
+### Added
+
+### Changed
+
+### Removed
+
+## [2026.8.23] - 2026-08-23
+
+### Breaking Changes
+
+### Fixed
+
 - User `models.json` files may now declare the `video` input modality for custom provider models, matching the runtime model type and the builtin Kimi Coding catalog; previously a video entry failed schema validation, which rejected the entire models.json and unregistered every user-defined provider ([#1087](https://github.com/code-yeongyu/senpi/pull/1087)).
 
 ### Added
@@ -115,6 +154,8 @@
 ### Breaking Changes
 
 ### Fixed
+
+- Webfetch's Bun-compatible response cleanup now drains bodies without `dump()` before destruction and guards discard-time stream errors from escaping as uncaught process errors, adapting the lifecycle hardening proposed by `@Indosaram` in [`pi-webfetch` #7](https://github.com/code-yeongyu/pi-webfetch/pull/7).
 
 ### Added
 

@@ -19,6 +19,45 @@
 
 - LOW: the new methods sit immediately after `remove()` in `packages/coding-agent/src/core/auth-storage.ts`; `credential-slots.ts` is a new file with no upstream counterpart.
 
+## 2026-08-25 - Harden watchdog abort accounting and retry jitter
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: carries watchdog provenance and applies injected jitter while preserving provider hints and 429 floors.
+- `packages/coding-agent/src/core/extensions/types.ts`: includes provider abort ownership in `agent_end`.
+
+### Why
+
+- Watchdog aborts must remain retryable and consume the configured budget; delay jitter must not alter provider hints or the 429 exponential floor.
+
+### Why an extension could not handle it
+
+- Session retry admission and lifecycle event typing are core boundaries with no extension seam.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/core/agent-session.ts` retry scheduling and `packages/coding-agent/src/core/extensions/types.ts` event contract.
+
+## 2026-08-24 - expose abort provenance to interactive rendering
+
+### What changed
+
+- `agent-abort-provenance.ts` exposes the current explicit abort owner across the active and settlement boundaries.
+- `agent-session.ts` exposes that owner through the read-only `currentAbortSource` getter for the interactive renderer.
+
+### Why
+
+- An assistant `stopReason: "aborted"` does not prove that the user cancelled. Provider retry watchdogs can produce the same terminal shape without explicit ownership, while user and system aborts are recorded by `AgentAbortProvenance`.
+- The renderer needs the existing provenance at message finalization so it can persist an accurate user, system, or provider label that remains correct when the transcript is replayed.
+
+### Why an extension could not handle it
+
+- Abort ownership is private AgentSession lifecycle state and the assistant message is finalized before the extension-visible `agent_end` event.
+
+### Expected merge conflict zones
+
+- LOW: `agent-abort-provenance.ts` source getter and the `AgentSession` read-only state getters.
+
 ## 2026-08-22 - Retarget OpenAI automatic defaults to GPT-5.6 Sol
 
 ### What changed
@@ -472,6 +511,36 @@ Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-sessio
 - `core/agent-session.ts` `sendCustomMessage` wait condition, and the goal extension `session_start`
   suppressed-load branch in `core/extensions/builtin/goal/index.ts`.
 
+
+## 2026-08-25 - Harden provider retry watchdog ownership and backoff
+
+### What changed
+
+- `core/provider-timeout-retry.ts`: gives the retry-continuation watchdog a proportional 10% grace beyond the granted stream-start guard, preserving `0`/`undefined` opt-out behavior.
+- `packages/coding-agent/src/core/agent-session.ts`: mark watchdog aborts as provider-owned and retain the real watchdog cause for retry classification and terminal reporting; retry delays use injected +/-10% jitter.
+- `packages/coding-agent/src/core/agent-abort-provenance.ts`: carries provider abort ownership through `agent_end`.
+- `packages/coding-agent/src/core/extensions/types.ts`: adds provider abort ownership to the public `agent_end` event type.
+- `packages/coding-agent/src/core/agent-session.ts`: apply injected retry jitter while preserving provider hints and 429 exponential floors.
+- `modes/interactive/interactive-mode.ts` and `modes/interactive/aborted-error-label.ts`: render labels without mutating persisted messages.
+- `modes/interactive/interactive-mode.ts` and `modes/interactive/aborted-error-label.ts`: render abort labels from a copied message rather than mutating session state.
+
+### Why
+
+- The watchdog starts before the retried request starts its stream-start timer, so equal deadlines deterministically laundered a retryable stall into an unclassifiable abort and discarded remaining retry budget.
+- Codex-style jitter prevents synchronized retry storms while provider Retry-After hints remain lower bounds.
+
+### Why an extension could not handle it
+
+- Retry watchdog ownership, Agent abort propagation, session retry accounting, and message finalization are core lifecycle boundaries with no extension seam.
+
+### Policy note
+
+- Non-429 provider retry hints remain authoritative. Jitter applies only when no provider hint is present; 429-tier scheduling remains deterministic so its exponential floor remains a true floor.
+
+### Expected merge conflict zones
+
+- HIGH: `core/provider-timeout-retry.ts`, `core/agent-session.ts`, and `packages/agent/src/{agent.ts,agent-loop.ts}`.
+- LOW: `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/core/extensions/types.ts`, and interactive aborted-label rendering.
 
 ## 2026-08-18 - Retry continuation watchdog reconciled with the guards it grants
 

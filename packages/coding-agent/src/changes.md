@@ -1,5 +1,41 @@
 # changes
 
+## 2026-08-25 - brand executable name for shell-command contexts
+
+### What changed
+
+- `packages/coding-agent/src/config.ts`: exports `APP_COMMAND` from `BRAND?.command`, falling back to `APP_NAME`, so shell-command strings can use the real binary when it differs from the display name.
+
+### Why
+
+- A brand can present as `OmO` while the installed executable is `omo`. Resume hints and other copy-paste commands must name the binary the shell can run.
+
+### Why an extension could not handle it
+
+- Brand identity constants are resolved at module load, before the extension loader exists; every later command-line interpolation reads these exports.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/config.ts` identity constants next to `APP_NAME`.
+
+## 2026-08-25 - Lazy-load the interactive mode at the CLI mode seam
+
+### What changed
+
+- `packages/coding-agent/src/main.ts`: RPC and print mode imports remain eager, while `InteractiveMode` is loaded dynamically only after the final mode is known to be interactive.
+
+### Why
+
+- RPC children are headless and never construct the interactive TUI. Keeping the interactive mode import in the shared static mode barrel made the full component tree parse during RPC startup. The dynamic boundary removes that interactive-only work from the RPC boot path while preserving the same interactive import immediately before its first use.
+
+### Why an extension could not handle it
+
+- Mode selection and entry-module loading happen before extensions are loaded; only the CLI coordinator can keep an unused mode graph out of the RPC child entry.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/main.ts` mode imports and the final interactive dispatch branch.
+
 ## 2026-08-22 - emit agent_idle after settlement-deferred turns resolve
 
 ### What changed

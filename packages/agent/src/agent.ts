@@ -13,6 +13,7 @@ import {
 	runAgentLoop,
 	runAgentLoopContinue,
 } from "./agent-loop.ts";
+import { ProviderRetryWatchdogAbortError } from "./assistant-terminal-state.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AfterToolCallContext,
@@ -374,8 +375,8 @@ export class Agent {
 	}
 
 	/** Abort the current run, if one is active. */
-	abort(): void {
-		this.activeRun?.abortController.abort();
+	abort(reason?: unknown): void {
+		this.activeRun?.abortController.abort(reason);
 	}
 
 	/**
@@ -722,6 +723,7 @@ export class Agent {
 			usage: EMPTY_USAGE,
 			stopReason: aborted ? "aborted" : "error",
 			errorMessage: error instanceof Error ? error.message : String(error),
+			...(error instanceof ProviderRetryWatchdogAbortError ? { abortSource: "provider" as const } : {}),
 			timestamp: Date.now(),
 		} satisfies AgentMessage;
 		await this.processEvents({ type: "message_start", message: failureMessage });

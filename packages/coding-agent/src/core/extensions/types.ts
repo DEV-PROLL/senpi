@@ -1043,7 +1043,7 @@ export interface AgentEndEvent {
 	/** Whether the session will automatically retry or fall back after this end event. */
 	willRetry?: boolean;
 	/** Present when the host can attribute the abort to a user action or internal operation. */
-	abortSource?: "user" | "system";
+	abortSource?: "user" | "system" | "provider";
 }
 
 /** Fired after an agent run has fully settled and no automatic retry, compaction, or queued continuation will run. */

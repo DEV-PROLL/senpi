@@ -48,6 +48,7 @@ import {
 import chalk from "chalk";
 import { spawn, spawnSync } from "child_process";
 import {
+	APP_COMMAND,
 	APP_NAME,
 	APP_TITLE,
 	BRAND,
@@ -130,7 +131,7 @@ import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
 import { checkForNewPiVersion, getReleaseChangelogUrl } from "../../utils/version-check.ts";
-import { abortedErrorLabel } from "./aborted-error-label.ts";
+import { abortedMessageForRendering } from "./aborted-error-label.ts";
 import {
 	type CompactionQueuedMessage,
 	transferCompactionQueue,
@@ -416,7 +417,7 @@ export function formatResumeCommand(sessionManager: SessionManager): string | un
 	const sessionFile = sessionManager.getSessionFile();
 	if (!sessionFile || !fs.existsSync(sessionFile)) return undefined;
 
-	const args = [APP_NAME];
+	const args = [APP_COMMAND];
 	if (!sessionManager.usesDefaultSessionDir()) {
 		args.push("--session-dir", quoteIfNeeded(sessionManager.getSessionDir()));
 	}
@@ -4382,14 +4383,15 @@ export class InteractiveMode {
 						}
 					}
 					this.toolArgsReveal.flushAll();
-					let errorMessage: string | undefined;
-					if (this.streamingMessage.stopReason === "aborted") {
-						errorMessage = abortedErrorLabel(undefined, this.session.retryAttempt);
-						this.streamingMessage.errorMessage = errorMessage;
-					}
-					this.syncTrailingAssistantText(this.streamingMessage);
+					const renderedMessage = abortedMessageForRendering(
+						this.streamingMessage,
+						this.session.retryAttempt,
+						this.session.currentAbortSource,
+					);
+					let errorMessage = renderedMessage.errorMessage;
+					this.syncTrailingAssistantText(renderedMessage);
 					this.assistantTextSegments.clear();
-					this.addContinuityNotice(this.streamingMessage);
+					this.addContinuityNotice(renderedMessage);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
 						if (!errorMessage) {
@@ -5056,7 +5058,15 @@ export class InteractiveMode {
 
 	private syncTrailingAssistantText(message: AssistantMessage): void {
 		if (!this.streamingComponent) return;
-		this.streamingComponent.updateContent(assistantStreamingHeadMessage(message), true);
+		const head = assistantStreamingHeadMessage(message);
+		// Single writer: while smooth streaming paces the head (no toolCall block),
+		// streamingReveal owns the streaming component. Overwriting the full head
+		// here makes the next reveal tick repaint a shorter prefix (dual-write
+		// flicker). Once the reveal has stopped (message_end), it no longer paces
+		// and the final full paint below still lands.
+		if (!this.streamingReveal?.isPacingHead(head)) {
+			this.streamingComponent.updateContent(head, true);
+		}
 		const content = message.content;
 		const firstToolIndex = content.findIndex((block) => block.type === "toolCall");
 		if (firstToolIndex === -1) {
@@ -5192,7 +5202,8 @@ export class InteractiveMode {
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;
 							if (message.stopReason === "aborted") {
-								errorMessage = abortedErrorLabel(message.errorMessage, this.session.retryAttempt);
+								errorMessage =
+									abortedMessageForRendering(message, 0, undefined).errorMessage || "Provider request failed";
 							} else {
 								errorMessage = message.errorMessage || "Error";
 							}
