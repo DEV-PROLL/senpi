@@ -171,7 +171,11 @@ async function statusDaemon(paths: DaemonPaths, listen: AppServerListen): Promis
 async function spawnDaemon(paths: DaemonPaths, listen: AppServerListen): Promise<SpawnedDaemon> {
 	const stderr = await open(paths.stderrLog, "w");
 	try {
-		const daemonExec = process.versions.bun ? process.env.npm_node_execpath || "/opt/homebrew/bin/node" : process.execPath;
+		const daemonExec = process.versions.bun
+			? process.env.npm_node_execpath && !/[/\\]bun(?:$|[/\\])/.test(process.env.npm_node_execpath)
+				? process.env.npm_node_execpath
+				: "/opt/homebrew/bin/node"
+			: process.execPath;
 		const child = spawn(
 			daemonExec,
 			[
