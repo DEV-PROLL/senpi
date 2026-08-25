@@ -67,7 +67,8 @@ export class TerminalSession {
 		this.nativeLoadResult = dependencies.nativeLoadResult ?? loadNativePty();
 		this.createNativeSessionDependency = dependencies.createNativeSession;
 		this.env = dependencies.env ?? process.env;
-		this.runtimeVersions = dependencies.runtimeVersions ?? (process.versions as import("./session-bun.ts").BunRuntimeVersions);
+		this.runtimeVersions =
+			dependencies.runtimeVersions ?? (process.versions as import("./session-bun.ts").BunRuntimeVersions);
 		this.bunRuntime = dependencies.bunRuntime;
 		this.rawTailLimit = normalizeRawTailBytes(options.rawTailBytes);
 	}
