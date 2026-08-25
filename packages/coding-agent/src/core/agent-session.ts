@@ -5818,9 +5818,10 @@ export class AgentSession {
 				abortActive: () =>
 					this.agent.abort(
 						new ProviderRetryWatchdogAbortError(
-							this.agent.streamStartTimeoutMs !== undefined
-								? `Provider stream start timed out after ${this.agent.streamStartTimeoutMs}ms`
-								: `Provider retry continuation timed out after ${retryTimeoutMs}ms`,
+							`Provider retry continuation watchdog timed out after ${retryTimeoutMs}ms` +
+								(this.agent.streamStartTimeoutMs === undefined
+									? " (stream-start guard disabled)"
+									: ` (stream-start guard: ${this.agent.streamStartTimeoutMs}ms)`),
 						),
 					),
 				timeoutMs: retryTimeoutMs,
@@ -7238,8 +7239,16 @@ export class AgentSession {
 		// 429-tier delays already carry the exponential floor from nextInTurnDelayMs /
 		// degradeWithoutFallback; the non-tier branch keeps its own exponential fallback.
 		const jitteredDelayMs = retryDelayMs(settings.baseDelayMs, this._retryAttempt, this._retryRandom);
-		const hintedDelayMs = hintTierDelayMs ?? providerDelayMs;
-		const delayMs = switchedFallback ? 0 : Math.max(hintedDelayMs ?? 0, jitteredDelayMs);
+		// 429-tier policy already applies the exponential floor; preserve its exact
+		// deterministic schedule. Other transient retries receive Codex-style jitter,
+		// while a provider hint on the non-429 path remains authoritative.
+		const delayMs = switchedFallback
+			? 0
+			: is429TierRouted
+				? (hintTierDelayMs ?? providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1))
+				: providerDelayMs === 0
+					? jitteredDelayMs
+					: (providerDelayMs ?? jitteredDelayMs);
 		// Prepare before auto_retry_start so an immediate Esc can cancel the retry sleep.
 		this._retryAbortController = new AbortController();
 

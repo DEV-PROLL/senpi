@@ -149,9 +149,9 @@ export interface RetryPolicy {
 }
 
 export function retryDelayMs(baseDelayMs: number, attempt: number, random: () => number = Math.random): number {
-	const floor = baseDelayMs * 2 ** (attempt - 1);
+	const scheduledDelayMs = baseDelayMs * 2 ** (attempt - 1);
 	const sample = Math.min(1, Math.max(0, random()));
-	return Math.round(floor * (0.9 + sample * 0.2));
+	return Math.round(scheduledDelayMs * (0.9 + sample * 0.2));
 }
 
 /** Optional callbacks emitted by {@link retryAssistantCall} around each retry. */

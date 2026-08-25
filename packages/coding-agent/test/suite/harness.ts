@@ -244,7 +244,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		extensionRunnerRef,
 		autoTitleSessions: options.autoTitleSessions,
 		fallbackNow: options.fallbackNow,
-		retryRandom: options.retryRandom,
+		retryRandom: options.retryRandom ?? (() => 0.5),
 	});
 
 	const events: AgentSessionEvent[] = [];

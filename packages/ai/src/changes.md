@@ -1,6 +1,27 @@
-## Unreleased
+## 2026-08-25 - Harden bounded retry jitter and provider abort metadata
 
+### What changed
+
+- `packages/ai/src/providers/faux.ts`: preserves `abortSource` in faux assistant messages.
+- `packages/ai/src/types.ts`: adds optional provider abort provenance to assistant messages.
+- `packages/ai/src/utils/retry.ts`: adds injectable bounded jitter to retry delays.
+
+### Why
+
+- Retry watchdog ownership and deterministic retry jitter must survive the shared AI message and retry utility boundaries.
+
+### Why an extension could not handle it
+
+- These browser-safe shared types and utilities execute below extension-visible provider/session boundaries.
+
+### Expected merge conflict zones
+
+- LOW: `packages/ai/src/providers/faux.ts`, `packages/ai/src/types.ts`, and `packages/ai/src/utils/retry.ts`.
+
+- `packages/ai/src/providers/faux.ts`: preserve assistant abort provenance in deterministic faux messages.
+- `packages/ai/src/types.ts`: add provider abort provenance to assistant messages.
 - `packages/ai/src/utils/retry.ts`: add injectable Codex-style +/-10% jitter to bounded retry backoff; provider-supplied retry hints remain lower bounds.
+- `packages/ai/src/providers/faux.ts`, `packages/ai/src/types.ts`, and `packages/ai/src/utils/retry.ts` are the exact production paths covered by this retry-policy change.
 
 ### Why
 

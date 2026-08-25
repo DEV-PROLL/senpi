@@ -56,7 +56,7 @@ export class AgentAbortProvenance {
 		return { abortCurrentAgent: false, userOwned: false };
 	}
 
-	#findProviderAbortSource(messages: AgentMessage[]): { abortSource: "provider" } | Record<string, never> {
+	#findProviderAbortSource(messages: AgentMessage[]): Partial<Pick<AgentEndEvent, "abortSource">> {
 		const message = messages.at(-1);
 		return message?.role === "assistant" && message.abortSource === "provider" ? { abortSource: "provider" } : {};
 	}

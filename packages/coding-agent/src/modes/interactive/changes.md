@@ -1,5 +1,39 @@
 # changes
 
+## 2026-08-25 - Render provider abort labels without mutating messages
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: renders provider watchdog labels without mutating the shared assistant message.
+
+### Why
+
+- Session final errors and persisted transcripts must retain the real provider/watchdog cause rather than a UI label.
+
+### Why an extension could not handle it
+
+- Interactive rendering owns this label-only presentation boundary.
+
+### Expected merge conflict zones
+
+- LOW: aborted assistant message rendering in `interactive-mode.ts`.
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` and `packages/coding-agent/src/modes/interactive/aborted-error-label.ts`: render provider watchdog labels from a copied assistant message while retaining the real provider cause in session state.
+
+### Why
+
+- UI labels must not overwrite `finalError`, transcript persistence, or replay data.
+
+### Why an extension could not handle it
+
+- Interactive message rendering owns the label-only presentation boundary.
+
+### Expected merge conflict zones
+
+- LOW: aborted assistant `message_end` rendering paths.
+
 ## 2026-08-24 - provider aborts render with explicit provenance
 
 ### What changed

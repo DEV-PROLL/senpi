@@ -169,11 +169,13 @@ describe("provider idle recovery", () => {
 	it("spends the full retry budget after watchdog-aborted continuations", async () => {
 		vi.useFakeTimers();
 		const harness = await createHarness({
-			settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 0 } },
+			settings: {
+				retry: { enabled: true, maxRetries: 3, baseDelayMs: 0, provider: { streamRetryTimeoutMs: 50 } },
+			},
 		});
 		harnesses.push(harness);
 		harness.agent.timeoutMs = undefined;
-		harness.agent.streamStartTimeoutMs = 10;
+		harness.agent.streamStartTimeoutMs = undefined;
 		let providerCalls = 0;
 		harness.agent.streamFunction = () => {
 			providerCalls++;
@@ -185,7 +187,7 @@ describe("provider idle recovery", () => {
 						reason: "error",
 						error: fauxAssistantMessage("", {
 							stopReason: "error",
-							errorMessage: "Provider stream start timed out after 10ms",
+							errorMessage: "Provider stream start timed out after 90000ms",
 						}),
 					}),
 				);
@@ -197,15 +199,21 @@ describe("provider idle recovery", () => {
 		try {
 			await vi.runOnlyPendingTimersAsync();
 			for (let attempt = 0; attempt < 3; attempt++) {
-				await vi.advanceTimersByTimeAsync(11);
+				await vi.advanceTimersByTimeAsync(51);
 				await vi.advanceTimersByTimeAsync(0);
 			}
 			await prompt;
 			expect(providerCalls).toBe(4);
 			expect(harness.eventsOfType("auto_retry_end")).toMatchObject([
-				{ success: false, attempt: 3, finalError: "Provider stream start timed out after 10ms" },
+				{
+					success: false,
+					attempt: 3,
+					finalError: expect.stringContaining("Provider retry continuation watchdog timed out"),
+				},
 			]);
 			expect(harness.eventsOfType("auto_retry_end").at(-1)?.finalError).not.toContain("Request was aborted");
+			const tail = harness.session.messages.at(-1);
+			expect(tail).toMatchObject({ stopReason: "aborted", abortSource: "provider" });
 		} finally {
 			if (harness.session.isStreaming) await harness.session.abort();
 		}

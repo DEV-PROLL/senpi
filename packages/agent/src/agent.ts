@@ -13,6 +13,7 @@ import {
 	runAgentLoop,
 	runAgentLoopContinue,
 } from "./agent-loop.ts";
+import { ProviderRetryWatchdogAbortError } from "./assistant-terminal-state.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AfterToolCallContext,
@@ -186,16 +187,6 @@ class PendingMessageQueue {
 	clear(): void {
 		this.messages = [];
 		this.clearGeneration++;
-	}
-}
-
-export class ProviderRetryWatchdogAbortError extends Error {
-	readonly providerCause: string;
-
-	constructor(providerCause: string) {
-		super(providerCause);
-		this.providerCause = providerCause;
-		this.name = "ProviderRetryWatchdogAbortError";
 	}
 }
 

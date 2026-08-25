@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOAL_USER_GRACE_DELAY_MS } from "../../src/core/extensions/builtin/goal/continuation.ts";
 import goalExtension from "../../src/core/extensions/builtin/goal/index.ts";
 import { goalFilePath, readGoal } from "../../src/core/extensions/builtin/goal/store.ts";
+import { didTerminalProviderErrorEndTurn } from "../../src/core/extensions/builtin/goal/terminal-provider-error.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "../../src/core/extensions/types.ts";
 import type { SessionEntry } from "../../src/core/session-manager.ts";
 
@@ -113,6 +114,16 @@ function storeRefFor(ctx: ExtensionContext) {
 }
 
 describe("goal extension contract (budget-free)", () => {
+	it("treats provider-owned watchdog aborts as terminal provider errors", () => {
+		expect(
+			didTerminalProviderErrorEndTurn({
+				type: "agent_end",
+				messages: [{ role: "assistant", stopReason: "aborted" } as never],
+				willRetry: false,
+				abortSource: "provider",
+			}),
+		).toBe(true);
+	});
 	afterEach(async () => {
 		await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 	});
