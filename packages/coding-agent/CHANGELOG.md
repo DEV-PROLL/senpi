@@ -7,6 +7,7 @@
 ### Fixed
 
 - The interactive TUI resume hint now uses the brand executable name (`APP_COMMAND`) instead of the display name, so a brand whose binary is `omo` no longer prints `OmO --session <id>`.
+- TTSR now watches streamed tool-call arguments and interrupts collapse floods inside tool inputs, preventing corrupted argument generations from reaching persisted session history.
 
 ### Added
 
