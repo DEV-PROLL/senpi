@@ -1,5 +1,108 @@
 # changes
 
+## 2026-08-25 - Keep JSON startup logging off stdout
+
+### What changed
+
+- `packages/coding-agent/src/main.ts` takes over stdout for JSON `--help` and redirects `console.log` to stderr for the lifetime of JSON-mode execution, restoring the original logger on process exit.
+
+### Why
+
+- Machine-readable JSON output must remain clean while startup diagnostics and trusted chatter continue to be visible on stderr.
+
+### Why an extension could not handle it
+
+- CLI mode selection and stdout ownership happen before extensions load and are process-wide runtime behavior.
+
+### Expected merge conflict zones
+
+- LOW: JSON-mode startup setup around `resolveAppMode()` and stdout takeover.
+
+## Coding-agent entry surfaces re-diverge from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/config.ts` keeps the bun global-launcher repair command, brand-profile
+  and `envValue` plumbing, nearest-parent config discovery, and multi-step self-update commands.
+- `packages/coding-agent/src/index.ts` keeps the fork public surface: `sanitizeTerminalLabel`,
+  `OAuthCredential`, `CacheFriendlySummaryOptions`, the filesystem-policy and extension-RPC contract types, and notice primitives.
+- `packages/coding-agent/src/migrations.ts` keeps the fork migration chain (brand-dir,
+  extension-system, legacy-senpi dirs) in place of upstream's commands-to-prompts migration.
+- `packages/coding-agent/src/package-manager-cli.ts` keeps senpi-branded update help text and the
+  removable `omo-local-update` beta hook.
+- `packages/coding-agent/src/main.ts` keeps the fork stdout contract for JSON mode: stdout takeover
+  also applies to `--help` in JSON mode, and `console.log` is redirected to stderr for the process
+  lifetime so machine-readable stdout stays clean of stray logging.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- Export lists in `packages/coding-agent/src/index.ts`, the migration registry in
+  `packages/coding-agent/src/migrations.ts`, and update-help templates in
+  `packages/coding-agent/src/package-manager-cli.ts`.
+
+## Preserve zero-usage context estimation for auto-compaction (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: allow the fork-owned estimated context size to drive threshold compaction even when no prior assistant usage index exists.
+
+### Why
+
+- The fork's zero-usage regression guard depends on message estimation; upstream's no-usage early return silently disables compaction for malformed or provider-zero usage responses.
+
+### Why an extension could not handle it
+
+- Automatic compaction admission is internal session state evaluated before extension compaction hooks run.
+
+### Expected merge conflict zones
+
+- HIGH: `_checkCompaction` threshold accounting and fork compaction safeguards.
+
+## Restore fork settings paths and interactive startup seams after upstream merge (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/core/settings-manager.ts`: preserve fork `.senpi` settings discovery while adopting upstream BOM-tolerant parsing and path-bearing diagnostics.
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: retain the fork's testable tmux-keyboard startup seam while adopting the upstream startup warning flow.
+
+### Why
+
+- The fork's branded config directory and interactive startup contracts are production behavior; allowing upstream `.pi` assumptions or an unmocked method call breaks settings persistence and startup diagnostics.
+
+### Why an extension could not handle it
+
+- Settings source selection and interactive startup dispatch run before extensions are loaded.
+
+### Expected merge conflict zones
+
+- HIGH: settings source resolution, error reporting, and interactive startup checks.
+
+## Preserve highlight.js package export compatibility after upstream merge (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/utils/syntax-highlight.ts`: use highlight.js package-export subpaths compatible with the fork's pinned 11.12.0 release, including the root package for lazy grammar loading.
+
+### Why
+
+- Upstream's source import suffixes are not exported by highlight.js 11.12.0 under Node and Vite, preventing child-process startup and causing the test prerequisite to fail.
+
+### Why an extension could not handle it
+
+- Syntax-highlighter module resolution happens during CLI and TUI module loading, before extensions are initialized.
+
+### Expected merge conflict zones
+
+- MEDIUM: highlight.js imports and deferred grammar loading in the syntax-highlighting utility.
+
 ## 2026-08-25 - brand executable name for shell-command contexts
 
 ### What changed

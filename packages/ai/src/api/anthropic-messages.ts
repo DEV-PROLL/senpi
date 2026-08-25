@@ -348,11 +348,7 @@ export interface AnthropicOptions extends StreamOptions {
 	 * Default: true.
 	 */
 	interleavedThinking?: boolean;
-	/**
-	 * Anthropic refusal fallback. When set, the request includes the server-side
-	 * fallback beta and Anthropic retries eligible refusals on the configured
-	 * fallback target before returning a final response.
-	 */
+	/** Anthropic server-side fallback for eligible refusal stop reasons. */
 	refusalFallbacks?: AnthropicRefusalFallback;
 	/**
 	 * Anthropic tool choice behavior. String values map to Anthropic's built-in
@@ -379,16 +375,10 @@ function mergeHeaders(...headerSources: (Record<string, string | null> | undefin
 }
 
 function mergeClientHeaders(
-	model: Model<"anthropic-messages">,
+	_model: Model<"anthropic-messages">,
 	...headerSources: (Record<string, string | null> | undefined)[]
 ): Record<string, string | null> {
-	const merged = mergeHeaders(...headerSources);
-	if (model.provider === "kimi-coding") {
-		for (const name of Object.keys(merged)) {
-			if (name.toLowerCase() === "user-agent") delete merged[name];
-		}
-		merged["User-Agent"] = getPiUserAgent();
-	}
+	const merged = mergeHeaders({ "User-Agent": getPiUserAgent() }, ...headerSources);
 	return merged;
 }
 
@@ -1262,6 +1252,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 		try {
 			let client: Anthropic;
 			let isOAuth: boolean;
+			let usageModel = model;
 
 			if (options?.client) {
 				client = options.client;
@@ -1373,6 +1364,17 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				if (event.type === "message_start") {
 					output.responseId = event.message.id;
 					output.model = event.message.model;
+					const fallback =
+						output.model === model.id
+							? undefined
+							: model.compat?.allowedFallbackModels?.find(
+									(candidate) =>
+										typeof candidate !== "string" &&
+										candidate.provider === model.provider &&
+										candidate.model === output.model,
+								);
+					const fallbackCost = typeof fallback === "string" ? undefined : fallback?.cost;
+					usageModel = fallbackCost ? { ...model, id: output.model, cost: fallbackCost } : model;
 					// Capture initial token usage from message_start event
 					// This ensures we have input token counts even if the stream is aborted early
 					output.usage.input = event.message.usage.input_tokens || 0;
@@ -1581,7 +1583,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					// Anthropic doesn't provide total_tokens, compute from components
 					output.usage.totalTokens =
 						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
-					calculateCost(model, output.usage);
+					calculateCost(usageModel, output.usage);
 				}
 			}
 
@@ -1759,7 +1761,6 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 	if (!options?.reasoning) {
 		return stream(model, context, {
 			...base,
-			refusalFallbacks: options?.refusalFallbacks,
 			thinkingEnabled: false,
 		} satisfies AnthropicOptions);
 	}
@@ -1770,7 +1771,6 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 		const effort = mapThinkingLevelToEffort(model, options.reasoning);
 		return stream(model, context, {
 			...base,
-			refusalFallbacks: options?.refusalFallbacks,
 			thinkingEnabled: true,
 			effort,
 		} satisfies AnthropicOptions);
@@ -1789,7 +1789,6 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 
 	return stream(model, context, {
 		...base,
-		refusalFallbacks: options?.refusalFallbacks,
 		maxTokens,
 		thinkingEnabled: true,
 		thinkingBudgetTokens: Math.min(adjusted.thinkingBudget, Math.max(0, maxTokens - 1024)),

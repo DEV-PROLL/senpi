@@ -1,3 +1,63 @@
+## 2026-08-25 - Preserve same-model redacted thinking during message transforms
+
+### What changed
+
+- `packages/ai/src/api/transform-messages.ts` preserves opaque redacted thinking blocks whenever the source and target model are the same, independent of `preserveProviderState`.
+
+### Why
+
+- Bedrock redacted reasoning is provider replay state that must survive same-model transformation; gating it on `preserveProviderState` dropped the block and changed the replayed request.
+
+### Why an extension could not handle it
+
+- Message transformation and provider-state preservation run inside the AI adapter boundary before extension code receives the outbound request.
+
+### Expected merge conflict zones
+
+- LOW: redacted-thinking handling in `transformMessages()` when upstream changes message replay policy.
+
+## Provider wire layer re-diverges from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/ai/src/providers/cloudflare-ai-gateway.ts` keeps the fork's Cloudflare AI Gateway provider registration and Workers AI model mapping.
+- `packages/ai/src/index.ts` keeps the fork barrel export for `estimateContextTokens`.
+- `packages/ai/src/api/anthropic-messages.ts` keeps refusal fallback, provider-native content,
+  prompt-cache TTL compat, 429 retry-after hints, and combined abort signals.
+- `packages/ai/src/api/azure-openai-responses.ts` keeps `supportsMax`-aware effort mapping and
+  `thinkingLevelMap` resolution.
+- `packages/ai/src/api/bedrock-converse-stream.ts` keeps prompt-cache TTL gating, tool-call id
+  normalization, `applyExtraBody` with reserved keys, and the trimmed smithy type imports.
+- `packages/ai/src/api/google-generative-ai.ts` and `packages/ai/src/api/google-vertex.ts` keep the
+  thinking-level maps, `applyExtraBody` with `GOOGLE_RESERVED_BODY_KEYS`, provider-header records,
+  and grounding/url-context metadata emission.
+- `packages/ai/src/api/mistral-conversations.ts` keeps `preserveThinking` message transformation and
+  `MISTRAL_RESERVED_BODY_KEYS` extra-body support.
+- `packages/ai/src/api/transform-messages.ts` keeps same-model redacted-thinking replay: opaque
+  redacted blocks are preserved for the same model regardless of `preserveProviderState` (upstream
+  additionally gates on it), so Bedrock redacted reasoning replays instead of being dropped.
+- `packages/ai/src/api/openai-completions.ts` keeps moonshot/compat tool-schema normalization,
+  forced-tool-choice fallback, stream-aware retries, and `supportsMax`/`supportsXhigh` effort.
+- `packages/ai/src/api/openai-responses.ts` keeps the responses-websockets beta header, Cloudflare
+  base-url routing, client-auth resolution, reserved body keys, and `clampMaxForOpenAI`.
+- `packages/ai/src/index.ts` keeps fork re-exports (cursor pi-args helpers,
+  `sanitizeAnthropicToolPairs`, cursor exec types).
+- `packages/ai/src/types.ts` keeps the `cursor-agent` API id, the extended `OpenAIResponsesCompat`
+  (`supportsAdditionalTools`), session-affinity formats, and `Model` re-exports.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- Import blocks and option-mapping functions of every listed `packages/ai/src/api/*.ts` file, and the
+  export list of `packages/ai/src/index.ts` — upstream touches these on nearly every provider change.
+
 ## 2026-08-25 - Distinguish Cursor usage-pool exhaustion from context overflow
 
 ### What changed
@@ -15,6 +75,8 @@
 ### Expected merge conflict zones
 
 - LOW: Cursor `resource_exhausted` handling in `packages/ai/src/utils/overflow.ts`.
+
+## Unreleased
 
 ## 2026-08-25 - Harden bounded retry jitter and provider abort metadata
 
