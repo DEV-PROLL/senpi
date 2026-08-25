@@ -1,5 +1,23 @@
 # changes.md — ai
 
+## Preserve OpenAI completions reasoning details after upstream merge (2026-08-25)
+
+### What changed
+
+- `packages/ai/src/api/openai-completions.ts`: retain structured reasoning details from thinking signatures and legacy encrypted tool-call signatures when constructing assistant messages.
+
+### Why
+
+- The fork's merged adapter computed these details but dropped them before serialization, regressing the upstream reasoning-details contract and fork provider compatibility.
+
+### Why an extension could not handle it
+
+- Assistant message serialization occurs inside the provider adapter before extension hooks can observe or modify the request.
+
+### Expected merge conflict zones
+
+- MEDIUM: assistant-message conversion and reasoning-detail preservation in the OpenAI Completions adapter.
+
 > Audit backfill (2026-08-17): the entry below was recorded during the repository-wide changes.md audit
 > of divergences from the upstream pin (v0.84.2, `914cf1472e`) so its audited production paths carry a
 > canonical four-section record; it is dated by its underlying work.

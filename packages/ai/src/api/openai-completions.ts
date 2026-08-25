@@ -271,18 +271,6 @@ function isForcedOpenAICompletionsToolChoice(
 	return toolChoice !== undefined && toolChoice !== "auto" && toolChoice !== "none";
 }
 
-function isEncryptedReasoningDetail(detail: unknown): detail is OpenAIEncryptedReasoningDetail {
-	if (typeof detail !== "object" || detail === null) {
-		return false;
-	}
-	const candidate = detail as Record<string, unknown>;
-	return (
-		(candidate.id === undefined || candidate.id === null || typeof candidate.id === "string") &&
-		(candidate.format === undefined || typeof candidate.format === "string") &&
-		(candidate.index === undefined || typeof candidate.index === "number")
-	);
-}
-
 function isReasoningDetailObject(detail: unknown): detail is Record<string, unknown> {
 	return typeof detail === "object" && detail !== null && !Array.isArray(detail);
 }
@@ -392,13 +380,7 @@ function parseLegacyEncryptedReasoningDetail(
 	}
 }
 
-const OPENAI_COMPLETIONS_REASONING_FIELDS = ["reasoning", "reasoning_content", "reasoning_text"] as const;
-
-type OpenAICompletionsReasoningField = (typeof OPENAI_COMPLETIONS_REASONING_FIELDS)[number];
-
-function isOpenAICompletionsReasoningField(field: string): field is OpenAICompletionsReasoningField {
-	return OPENAI_COMPLETIONS_REASONING_FIELDS.includes(field as OpenAICompletionsReasoningField);
-}
+type OpenAICompletionsReasoningField = "reasoning" | "reasoning_content" | "reasoning_text";
 
 type ChatCompletionAssistantMessageParamWithReasoning = ChatCompletionAssistantMessageParam &
 	Partial<Record<OpenAICompletionsReasoningField, string>> & {
@@ -1607,19 +1589,9 @@ export function convertMessages(
 						},
 					};
 				});
-				const reasoningDetails = toolCalls
-					.filter((tc) => tc.thoughtSignature)
-					.map((tc) => {
-						try {
-							return JSON.parse(tc.thoughtSignature!);
-						} catch {
-							return null;
-						}
-					})
-					.filter(Boolean);
-				if (reasoningDetails.length > 0) {
-					Object.assign(assistantMsg, { reasoning_details: reasoningDetails });
-				}
+			}
+			if (preservedReasoningDetails) {
+				assistantMsg.reasoning_details = preservedReasoningDetails;
 			}
 			if (
 				compat.requiresReasoningContentOnAssistantMessages &&
