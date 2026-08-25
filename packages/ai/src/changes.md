@@ -21,6 +21,7 @@
 ### What changed
 
 - `packages/ai/src/providers/cloudflare-ai-gateway.ts` keeps the fork's Cloudflare AI Gateway provider registration and Workers AI model mapping.
+- `packages/ai/src/index.ts` keeps the fork barrel export for `estimateContextTokens`.
 - `packages/ai/src/api/anthropic-messages.ts` keeps refusal fallback, provider-native content,
   prompt-cache TTL compat, 429 retry-after hints, and combined abort signals.
 - `packages/ai/src/api/azure-openai-responses.ts` keeps `supportsMax`-aware effort mapping and

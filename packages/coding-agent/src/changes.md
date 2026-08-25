@@ -25,7 +25,7 @@
 - `packages/coding-agent/src/config.ts` keeps the bun global-launcher repair command, brand-profile
   and `envValue` plumbing, nearest-parent config discovery, and multi-step self-update commands.
 - `packages/coding-agent/src/index.ts` keeps the fork public surface: `sanitizeTerminalLabel`,
-  `OAuthCredential`, the filesystem-policy and extension-RPC contract types, and notice primitives.
+  `OAuthCredential`, `CacheFriendlySummaryOptions`, the filesystem-policy and extension-RPC contract types, and notice primitives.
 - `packages/coding-agent/src/migrations.ts` keeps the fork migration chain (brand-dir,
   extension-system, legacy-senpi dirs) in place of upstream's commands-to-prompts migration.
 - `packages/coding-agent/src/package-manager-cli.ts` keeps senpi-branded update help text and the
