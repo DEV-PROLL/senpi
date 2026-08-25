@@ -6,12 +6,7 @@
  */
 
 import type { AgentMessage, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import {
-	type RetryCallbacks,
-	type RetryPolicy,
-	retryAssistantCall,
-	uuidv7,
-} from "@earendil-works/pi-ai";
+import { type RetryCallbacks, type RetryPolicy, retryAssistantCall, uuidv7 } from "@earendil-works/pi-ai";
 import type {
 	AssistantMessage,
 	Context,
@@ -57,7 +52,14 @@ function getAnthropicSummarizationFallback(model: Model<any>): readonly { model:
 	}
 	const allowedFallbackModels = (model as Model<"anthropic-messages">).compat?.allowedFallbackModels;
 	return allowedFallbackModels?.length
-		? [{ model: typeof allowedFallbackModels[0] === "string" ? allowedFallbackModels[0] : allowedFallbackModels[0].model }]
+		? [
+				{
+					model:
+						typeof allowedFallbackModels[0] === "string"
+							? allowedFallbackModels[0]
+							: allowedFallbackModels[0].model,
+				},
+			]
 		: undefined;
 }
 
@@ -599,7 +601,8 @@ export function findCutPoint(
 
 export function getSummarizationFailure(response: AssistantMessage, label: string): string | undefined {
 	if (response.stopReason === "error") return `${label} failed: ${response.errorMessage || "Unknown error"}`;
-	if (response.stopReason === "length") return `${label} failed: generation hit the token cap and the summary is incomplete`;
+	if (response.stopReason === "length")
+		return `${label} failed: generation hit the token cap and the summary is incomplete`;
 	return undefined;
 }
 

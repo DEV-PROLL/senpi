@@ -150,13 +150,13 @@ export type { Tool } from "./tools/index.ts";
 
 export {
 	createBashTool,
-	createPowerShellTool,
 	// Tool factories (for custom cwd)
 	createCodingTools,
 	createEditTool,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
+	createPowerShellTool,
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,

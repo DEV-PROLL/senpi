@@ -205,7 +205,7 @@ const ProviderConfigSchema = Type.Object({
 	baseUrl: Type.Optional(Type.String({ minLength: 1 })),
 	apiKey: Type.Optional(Type.String({ minLength: 1 })),
 	api: Type.Optional(Type.String({ minLength: 1 })),
-		headers: Type.Optional(Type.Record(Type.String(), Type.String())),
+	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
 	extraBody: Type.Optional(ExtraBodySchema),
 	cacheRetention: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("short"), Type.Literal("long")])),
 	compat: Type.Optional(ProviderCompatSchema),

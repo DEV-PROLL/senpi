@@ -8,7 +8,11 @@ import type {
 	ThinkingBudgets,
 	Transport,
 } from "@earendil-works/pi-ai";
-import { buildProviderContext as buildProviderContextFromAgentContext, runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
+import {
+	buildProviderContext as buildProviderContextFromAgentContext,
+	runAgentLoop,
+	runAgentLoopContinue,
+} from "./agent-loop.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AfterToolCallContext,

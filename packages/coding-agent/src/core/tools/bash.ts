@@ -272,7 +272,7 @@ function highlightBashCommand(command: string): string {
 	return highlightCode(replaceTabs(normalizeDisplayText(command)), "bash").join("\n");
 }
 
-function formatShellCall(args: { command?: string; timeout?: number } | undefined, prompt: string): string {
+function formatShellCall(args: { command?: string; timeout?: number } | undefined, _prompt: string): string {
 	const command = str(args?.command);
 	const timeout = args?.timeout as number | undefined;
 	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";

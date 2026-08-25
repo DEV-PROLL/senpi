@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { TLocalizedValidationError } from "typebox/error";
 import { stripJsonComments } from "../utils/json.ts";
-import { stripBom } from "../utils/text.ts";
 import { normalizePath } from "../utils/paths.ts";
+import { stripBom } from "../utils/text.ts";
 import {
 	type ModelsJson,
 	type ModelsJsonProvider,
