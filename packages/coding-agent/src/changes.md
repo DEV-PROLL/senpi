@@ -1,5 +1,23 @@
 # changes
 
+## Preserve highlight.js package export compatibility after upstream merge (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/utils/syntax-highlight.ts`: use highlight.js package-export subpaths compatible with the fork's pinned 11.12.0 release, including the root package for lazy grammar loading.
+
+### Why
+
+- Upstream's source import suffixes are not exported by highlight.js 11.12.0 under Node and Vite, preventing child-process startup and causing the test prerequisite to fail.
+
+### Why an extension could not handle it
+
+- Syntax-highlighter module resolution happens during CLI and TUI module loading, before extensions are initialized.
+
+### Expected merge conflict zones
+
+- MEDIUM: highlight.js imports and deferred grammar loading in the syntax-highlighting utility.
+
 ## 2026-08-25 - brand executable name for shell-command contexts
 
 ### What changed
