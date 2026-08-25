@@ -1,5 +1,31 @@
 # changes.md — ai
 
+## AI package manifest and model generator re-diverge from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/ai/package.json` keeps the calver version, the `./utils/*` and `./node/provider-scope`
+  export subpaths, and `tsx`-driven generator scripts (upstream invokes them with plain `node`).
+- `packages/ai/scripts/generate-models.ts` keeps the fork catalog sources: the OpenGateway fetcher
+  import, `KIMI_K3_THINKING_LEVEL_MAP`, the Kimi coding stable models, and
+  `ZAI_GLM52_THINKING_LEVEL_MAP` — the ZAI map was dropped by this merge's resolution while its
+  usage survived, which broke the `generate` CI job; this sync restores the pre-merge definition
+  verbatim.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- The provider-constant block near the top of `packages/ai/scripts/generate-models.ts` (the exact
+  zone that silently dropped the ZAI map in this merge) and the `exports`/`scripts` blocks of
+  `packages/ai/package.json`.
+
 ## Preserve OpenAI completions reasoning details after upstream merge (2026-08-25)
 
 ### What changed

@@ -1,5 +1,32 @@
 # changes
 
+## Coding-agent entry surfaces re-diverge from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/config.ts` keeps the bun global-launcher repair command, brand-profile
+  and `envValue` plumbing, nearest-parent config discovery, and multi-step self-update commands.
+- `packages/coding-agent/src/index.ts` keeps the fork public surface: `sanitizeTerminalLabel`,
+  `OAuthCredential`, the filesystem-policy and extension-RPC contract types, and notice primitives.
+- `packages/coding-agent/src/migrations.ts` keeps the fork migration chain (brand-dir,
+  extension-system, legacy-senpi dirs) in place of upstream's commands-to-prompts migration.
+- `packages/coding-agent/src/package-manager-cli.ts` keeps senpi-branded update help text and the
+  removable `omo-local-update` beta hook.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- Export lists in `packages/coding-agent/src/index.ts`, the migration registry in
+  `packages/coding-agent/src/migrations.ts`, and update-help templates in
+  `packages/coding-agent/src/package-manager-cli.ts`.
+
 ## Preserve zero-usage context estimation for auto-compaction (2026-08-25)
 
 ### What changed

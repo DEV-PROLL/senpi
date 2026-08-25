@@ -1,5 +1,30 @@
 # changes
 
+## Interactive mode re-diverges from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` keeps the fork chrome and
+  startup coordinator (brand/display version, loader indicator, `sanitizeTerminalLabel`, scoped
+  startup thinking, settings diagnostics) on top of upstream's rewrite.
+- `packages/coding-agent/src/modes/interactive/external-editor.ts` keeps the `launch-failed` result
+  status so EAGAIN-style spawn failures stay distinct from real editor exits.
+- `packages/coding-agent/src/modes/interactive/components/thinking-selector.ts` keeps the fork
+  `xhigh` label ("Extended reasoning (~32k tokens or native xhigh effort)").
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts` is a full-file conflict zone in
+  every sync; resolve toward the fork coordinator and re-apply upstream's incremental rendering fixes.
+
 ## 2026-08-25 - resume hint uses the brand executable name
 
 ### What changed
