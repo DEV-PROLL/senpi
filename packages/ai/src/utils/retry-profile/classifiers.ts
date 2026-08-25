@@ -1,4 +1,4 @@
-import { isRetryableErrorMessage } from "../retry.ts";
+import { classifyErrorMessage } from "../retry.ts";
 import type { RetryClassification, RetryClassifier, RetryFailure } from "./types.ts";
 
 /**
@@ -56,15 +56,62 @@ export const classifyKimiFailure: RetryClassifier = (failure) => {
 };
 
 /**
- * Senpi assistant-turn classifier: a pure delegation to the existing message
- * classifier. The regexes (and their non-retryable-wins precedence) stay
- * owned by `../retry.ts`; this adapter only maps its boolean onto the stage
- * classification union.
- *
- * Known, accepted divergence from {@link classifyKimiFailure}: a 500 carrying
- * invalid-tool-schema text is `transient` under Kimi's status table (the
- * whitelisted status decides alone) but `terminal` here (the request-shape
- * patterns outrank any status wording). The source policy requires both.
+ * Structured status codes the senpi default classifier treats as retryable
+ * when — and only when — the message regexes have no opinion. Mirrors the
+ * transient half of Kimi's table plus the Cloudflare gateway codes senpi
+ * already retries by regex.
  */
-export const classifySenpiAssistantFailure: RetryClassifier = (failure) =>
-	isRetryableErrorMessage(failure.message) ? { verdict: "transient" } : { verdict: "terminal" };
+const SENPI_STRUCTURED_RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([
+	408, 409, 429, 500, 502, 503, 504, 522, 524, 529,
+]);
+
+/** Provider error codes that prove a dead account regardless of message text. */
+const SENPI_STRUCTURED_TERMINAL_PROVIDER_CODES: ReadonlySet<string> = new Set([
+	"insufficient_quota",
+	"credits_required",
+]);
+
+/**
+ * Senpi assistant-turn classifier: the existing message regexes decide first;
+ * structured failure facts are consulted only where the regexes are silent.
+ *
+ * Precedence (terminal wins at every tie):
+ * 1. Deterministic failure kinds (abort/refusal/sensitive/quota/image-format)
+ *    are terminal before any text inspection.
+ * 2. A non-retryable regex match is terminal — request-shape and quota wording
+ *    outrank any structured status (a 500 carrying invalid-tool-schema text
+ *    stays terminal, unlike under {@link classifyKimiFailure}).
+ * 3. Structured terminal facts (`shouldRetry: false`, quota provider codes).
+ * 4. A retryable regex match is transient — e.g. a 400 carrying Anthropic's
+ *    server-tool pairing text stays retryable because the request builder
+ *    repairs the replayed history.
+ * 5. Only when the regexes have no opinion does the structured status decide:
+ *    whitelisted transient codes retry, everything else is terminal.
+ * 6. No regex match and no structured facts: terminal, exactly the legacy
+ *    boolean fallback.
+ */
+export const classifySenpiAssistantFailure: RetryClassifier = (failure) => {
+	switch (failure.kind) {
+		case "abort":
+		case "refusal":
+		case "sensitive":
+		case "quota-exhausted":
+		case "image-format":
+			return { verdict: "terminal" };
+	}
+
+	const regexVerdict = classifyErrorMessage(failure.message);
+	if (regexVerdict === "non-retryable") return { verdict: "terminal" };
+
+	if (failure.shouldRetry === false) return { verdict: "terminal" };
+	if (failure.providerCodes?.some((code) => SENPI_STRUCTURED_TERMINAL_PROVIDER_CODES.has(code))) {
+		return { verdict: "terminal" };
+	}
+
+	if (regexVerdict === "retryable") return { verdict: "transient" };
+
+	if (failure.statusCode !== undefined && SENPI_STRUCTURED_RETRYABLE_STATUS_CODES.has(failure.statusCode)) {
+		return failure.statusCode === 429 ? { verdict: "rate-limited" } : { verdict: "transient" };
+	}
+	return { verdict: "terminal" };
+};

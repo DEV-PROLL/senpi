@@ -148,4 +148,89 @@ describe("classifySenpiAssistantFailure", () => {
 		expect(classifyKimiFailure(failure)).toEqual({ verdict: "transient" });
 		expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "terminal" });
 	});
+
+	describe("structured status consulted only when the regexes are unknown", () => {
+		const opaqueFailure = (extra: Partial<RetryFailure>): RetryFailure => ({
+			origin: "senpi-assistant-test",
+			kind: "http-status",
+			message: "The provider could not complete this request right now",
+			...extra,
+		});
+
+		it.each([408, 409, 500, 502, 503, 504, 522, 524] as const)(
+			"retries an opaque %i on its structured status alone",
+			(statusCode) => {
+				const failure = opaqueFailure({ statusCode });
+				expect(isRetryableErrorMessage(failure.message)).toBe(false);
+				expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "transient" });
+			},
+		);
+
+		it("classifies an opaque 429 as rate-limited on its structured status alone", () => {
+			const failure = opaqueFailure({ statusCode: 429 });
+			expect(isRetryableErrorMessage(failure.message)).toBe(false);
+			expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "rate-limited" });
+		});
+
+		it("keeps 529 retryable for an opaque message", () => {
+			const failure = opaqueFailure({ statusCode: 529 });
+			expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "transient" });
+		});
+
+		it("treats a 429 with insufficient_quota provider code as terminal", () => {
+			const failure = opaqueFailure({ statusCode: 429, providerCodes: ["insufficient_quota"] });
+			expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "terminal" });
+		});
+
+		it("treats a 429 with credits_required provider code as terminal", () => {
+			const failure = opaqueFailure({ statusCode: 429, providerCodes: ["credits_required"] });
+			expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "terminal" });
+		});
+
+		it("honours a structured shouldRetry:false over a whitelisted status", () => {
+			const failure = opaqueFailure({ statusCode: 503, shouldRetry: false });
+			expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "terminal" });
+		});
+
+		it("keeps a 500 carrying tool-schema text terminal (non-retryable regex outranks status)", () => {
+			const failure: RetryFailure = {
+				origin: "senpi-assistant-test",
+				kind: "http-status",
+				statusCode: 500,
+				message: moonshotToolSchemaRejectionMessage,
+			};
+			expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "terminal" });
+		});
+
+		it("keeps a 400 carrying server-tool pairing text retryable (retryable regex outranks status)", () => {
+			const failure: RetryFailure = {
+				origin: "senpi-assistant-test",
+				kind: "http-status",
+				statusCode: 400,
+				message: anthropicOrphanServerToolMessage,
+			};
+			expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "transient" });
+		});
+
+		it("falls back to the exact regex verdict when no diagnostic facts exist", () => {
+			const failure: RetryFailure = {
+				origin: "senpi-assistant-test",
+				kind: "unknown",
+				message: "The provider could not complete this request right now",
+			};
+			expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "terminal" });
+		});
+
+		it("keeps deterministic failure kinds terminal before any text or status inspection", () => {
+			for (const kind of ["abort", "refusal", "sensitive", "quota-exhausted", "image-format"] as const) {
+				const failure: RetryFailure = {
+					origin: "senpi-assistant-test",
+					kind,
+					statusCode: 503,
+					message: "overloaded",
+				};
+				expect(classifySenpiAssistantFailure(failure)).toEqual({ verdict: "terminal" });
+			}
+		});
+	});
 });
