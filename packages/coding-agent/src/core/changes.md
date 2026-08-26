@@ -5,6 +5,7 @@
 ### What changed
 
 - `packages/coding-agent/src/core/agent-session.ts`: Cursor quota and eligible hard-error failures now advance the provider fallback chain when required pre-retry compaction is rejected, while ordinary transient retries remain compaction-blocked.
+- `packages/coding-agent/src/core/agent-session.ts`: Hard-error fallback exhaustion now emits `retry_fallback_exhausted` when the fallback chain is spent.
 
 ## 2026-08-26 - Reject no-progress manual compaction before active abort
 

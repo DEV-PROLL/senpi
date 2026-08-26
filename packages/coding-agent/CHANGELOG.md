@@ -7,6 +7,7 @@
 ### Fixed
 
 - Cursor quota and eligible hard-error fallback now advances after required pre-retry compaction is rejected instead of stalling the turn; ordinary transient retry compaction blocking is unchanged.
+- Hard-error fallback exhaustion now emits `retry_fallback_exhausted` when the configured chain has no usable candidate.
 - A goal continuation whose backstop timer fired after the session was replaced or reloaded no longer crashes the session with "This extension ctx is stale after session replacement or reload". The timer callback (and its own error handler) now treats a retired context as "no UI" instead of letting the stale-context error escape as an uncaught exception; unrelated delivery failures are still reported.
 - Idle warm compaction now applies as soon as its summary finishes generating while the session is idle, so the `[compaction]` block renders during the idle gap and the next message stacks below it instead of the prompt waiting behind a compaction that was generated minutes earlier; stale or racy applies keep the previous warm-hold behavior.
 - The canonical user message no longer renders above the `[compaction]` block when a compaction applies during prompt admission: the pending-echo reconciliation now appends it after the rebuilt transcript, matching the session's canonical order.

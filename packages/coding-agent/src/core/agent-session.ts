@@ -7074,6 +7074,14 @@ export class AgentSession {
 				errorMessage,
 			});
 			if (!switchedFallback) {
+				const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+				if (exhaustedChainKey) {
+					this._emit({
+						type: "retry_fallback_exhausted",
+						chainKey: exhaustedChainKey,
+						lastError: errorMessage,
+					});
+				}
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -7098,6 +7106,14 @@ export class AgentSession {
 			}
 			switchedFallback = await this._retryFallback.tryFallback("refusal", {});
 			if (!switchedFallback) {
+				const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+				if (exhaustedChainKey) {
+					this._emit({
+						type: "retry_fallback_exhausted",
+						chainKey: exhaustedChainKey,
+						lastError: errorMessage,
+					});
+				}
 				if (this._retryAttempt > 0) {
 					this._emit({
 						type: "auto_retry_end",
