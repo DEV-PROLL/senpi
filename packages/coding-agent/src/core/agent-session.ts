@@ -4816,6 +4816,41 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
+		const model = this.model;
+		if (!model) throw new Error(formatNoModelSelectedMessage());
+		const pathEntries = this.sessionManager.getBranch();
+		const settings = cursorOverflowCompactionSettings(
+			this.settingsManager.getCompactionSettings(),
+			model.provider,
+			"manual",
+		);
+		if (!prepareCompaction(pathEntries, settings)) {
+			const requestId = randomUUID();
+			const lastEntry = pathEntries[pathEntries.length - 1];
+			const error = new Error(
+				lastEntry?.type === "compaction" ? "Already compacted" : "Nothing to compact (session too small)",
+			);
+			const errorMessage = `Compaction failed: ${error.message}`;
+			this._emit({ type: "compaction_start", reason: "manual", requestId });
+			this._emit({
+				type: "compaction_end",
+				reason: "manual",
+				result: undefined,
+				aborted: false,
+				willRetry: false,
+				requestId,
+				errorMessage,
+			});
+			await this._emitSessionCompactFailed({
+				reason: "manual",
+				errorMessage,
+				aborted: false,
+				willRetry: false,
+				fromExtension: false,
+			});
+			throw error;
+		}
+
 		const admission = this._claimPendingCompactionAdmission();
 		const controller = admission.controller;
 		const requestId = randomUUID();

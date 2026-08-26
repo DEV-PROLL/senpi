@@ -1,5 +1,31 @@
 # changes
 
+## 2026-08-26 - Reject no-progress manual compaction before active abort
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `AgentSession.compact()` now runs the existing
+  `prepareCompaction()` check before claiming manual admission or aborting an active agent run.
+- A no-progress request still emits balanced manual `compaction_start` / failed `compaction_end`
+  events and the existing `session_compact_failed` hook, but it leaves the active continuation alive.
+
+### Why
+
+- A manual compaction request can arrive after automatic tool-result compaction has committed but
+  while that same turn's next provider call is streaming. The old order aborted the provider
+  continuation first and only then discovered that the pre-abort branch had nothing left to
+  summarize, terminally ending otherwise healthy goal work.
+
+### Why an extension could not handle it
+
+- Manual compaction admission, active-agent abort ownership, and the pre-abort branch snapshot are
+  private `AgentSession` lifecycle state. An extension observes compaction hooks only after the core
+  has already admitted the operation.
+
+### Expected merge conflict zones
+
+- HIGH: `packages/coding-agent/src/core/agent-session.ts` around the public `compact()` entry point.
+
 ## 2026-08-23 - Provider-declared retry policy profiles (session wiring)
 
 ### What changed
@@ -128,7 +154,6 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 ### Expected merge conflict zones
 
 - LOW: `packages/coding-agent/src/core/agent-session.ts` retry scheduling and `packages/coding-agent/src/core/extensions/types.ts` event contract.
-
 ## 2026-08-24 - expose abort provenance to interactive rendering
 
 ### What changed

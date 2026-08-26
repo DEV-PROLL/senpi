@@ -1,5 +1,35 @@
 # Builtin compaction extension changes
 
+## Bound todo snapshots and keep successful compaction admission open (2026-08-25)
+
+### What changed
+
+- `todo-bridge.ts` now snapshots only the latest todo phases from the active branch instead of
+  persisting every historical `senpi.todo-state` session envelope. Restore checks use the same
+  branch-local current state, and legacy snapshots containing raw custom entries are normalized
+  to their latest todo payload before any restore message is emitted.
+- `per-turn-cap.ts` retains successful-compaction counters as telemetry but no longer rejects a
+  long-lived session after ten accepted compactions. The independent circuit breaker remains
+  responsible for repeated failed or ineffective attempts.
+
+### Why
+
+- Repeated snapshots recursively retained the full todo-state history, growing from kilobytes to
+  megabytes and immediately refilling context after compaction.
+- The absolute success cap then permanently rejected threshold, overflow, manual, and pre-prompt
+  compaction routes after ten effective compactions, leaving no in-session recovery path.
+
+### Why an extension could not handle it
+
+- Snapshot capture/restore and admission accounting are private policy inside this builtin.
+  External extensions cannot replace the persisted metadata payload or override this builtin's
+  pre-compaction rejection decision.
+
+### Expected merge conflict zones
+
+- LOW: `todo-bridge.ts` around snapshot parsing, current-state capture, and restore suppression.
+- LOW: `per-turn-cap.ts` around the former absolute-cap exports and admission predicate.
+
 ## Skip Cursor compaction while the session is not idle (2026-08-19)
 
 Blocking and generated apply refuse `cursor` / `cursor-cli-oauth` when `!ctx.isIdle()`. Mid-run Cursor compact poisons `conversationId`. Idle `agent_end` / `pre_prompt` still compact.
