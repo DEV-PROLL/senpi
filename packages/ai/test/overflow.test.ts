@@ -94,6 +94,26 @@ describe("isContextOverflow", () => {
 		expect(isContextOverflow(rfcStyle, 200000)).toBe(true);
 	});
 
+	it("detects Kiro byte-limit rejections as byte-size overflow", () => {
+		// Real rejection captured 2026-08-25/26 from a kiro-lb gateway fronting Kiro
+		// (Amazon Q). The cap is on raw request bytes, so a session well inside its
+		// token window still gets refused: the last accepted request billed 276,627
+		// input tokens against a 666,667-token window. Kiro reports the two sizes
+		// instead of saying "too large", so the gateway 413 pattern cannot match it
+		// and the failure surfaced as a terminal error that retried identically
+		// until the session died.
+		const kiroStyle = createErrorMessage(
+			'400 {"type":"error","error":{"type":"invalid_request_error","message":"Request payload is 1095225 bytes, over the 1085435 byte limit Kiro accepts. Shorten the conversation or send fewer tools. Set AUTO_TRIM_PAYLOAD=true to drop the oldest history instead (this silently loses earlier context)."}}',
+		);
+		expect(isContextOverflow(kiroStyle, 666667)).toBe(true);
+
+		// Comma-grouped sizes must match too; the wording is stable, the formatting is not.
+		const groupedStyle = createErrorMessage(
+			"Request payload is 1,095,225 bytes, over the 1,085,435 byte limit Kiro accepts.",
+		);
+		expect(isContextOverflow(groupedStyle, 666667)).toBe(true);
+	});
+
 	it("does not treat tiny token-bearing resource_exhausted usage as context overflow", () => {
 		const message = createErrorMessage("Connect error resource_exhausted");
 		message.usage.output = 12;

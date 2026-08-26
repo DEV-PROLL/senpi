@@ -27,6 +27,7 @@ import type { AssistantMessage } from "../types.ts";
  * - DS4: "Prompt has X tokens, but the configured context size is Y tokens"
  * - Cerebras: "400/413 status code (no body)"
  * - Gateways: "413 Request body too large" / "Request Entity Too Large" / "Payload Too Large" (byte-size overflow)
+ * - Kiro (Amazon Q) gateways: "Request payload is 1095225 bytes, over the 1085435 byte limit Kiro accepts" (HTTP 400 byte-size overflow, no "too large" wording)
  * - Mistral: "Prompt contains X tokens ... too large for model with Y maximum context length"
  * - z.ai: Does NOT error, accepts overflow silently - handled via usage.input > contextWindow
  * - Xiaomi MiMo: Truncates input to fill contextWindow exactly, then returns finish_reason "length"
@@ -62,6 +63,7 @@ const OVERFLOW_PATTERNS = [
 	/token limit exceeded/i, // Generic fallback
 	/^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i, // Cerebras: 400/413 with no body
 	/(?:request[ _])?(?:body|entity|payload)[_ ]too[_ ]large/i, // Gateway HTTP 413 byte-size rejections ("Request body too large", "Request Entity Too Large", "body_too_large", "Payload Too Large"). Substring-anchored by design (JSON bodies lack an adjacent status code); a non-context size rejection (e.g. an oversized image) can over-match, which costs one bounded shrink-retry, never a wedge.
+	/payload is [\d,]+ bytes, over the [\d,]+ byte limit/i, // Kiro (Amazon Q) byte-size cap, surfaced as HTTP 400 invalid_request_error. Reports the two sizes instead of saying "too large", so the gateway 413 pattern above cannot match it. Same class as request_too_large: shrink the input and retry.
 ];
 
 /**

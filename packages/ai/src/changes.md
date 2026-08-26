@@ -58,6 +58,24 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 - Import blocks and option-mapping functions of every listed `packages/ai/src/api/*.ts` file, and the
   export list of `packages/ai/src/index.ts` — upstream touches these on nearly every provider change.
 
+## 2026-08-26 - Detect Kiro byte-limit rejections as context overflow
+
+### What changed
+
+- `packages/ai/src/utils/overflow.ts`: Kiro (Amazon Q) byte-cap rejections (`Request payload is <n> bytes, over the <n> byte limit`) classify as context overflow, joining `request_too_large` and the gateway HTTP 413 family; the provider inventory comment gains the matching line.
+
+### Why
+
+- Kiro caps on raw request bytes and states the two sizes instead of saying "too large", so no existing pattern matched and the HTTP 400 was terminal: nothing shrank the input, the retry re-serialized to the same size, and the session died on repeated identical 400s. Observed against a `kiro-lb` gateway on `claude-opus-5` where the last accepted request billed 276,627 input tokens against a 666,667-token window, so token-threshold compaction could never fire before the ~1.09 MB byte cap.
+
+### Why an extension could not handle it
+
+- Overflow classification is a provider-neutral AI utility below extension-visible session behavior; retry policy reads the verdict before any extension sees the error.
+
+### Expected merge conflict zones
+
+- LOW: the tail of `OVERFLOW_PATTERNS` and the provider inventory comment in `packages/ai/src/utils/overflow.ts`.
+
 ## 2026-08-25 - Distinguish Cursor usage-pool exhaustion from context overflow
 
 ### What changed
