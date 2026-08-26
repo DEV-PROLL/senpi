@@ -4936,8 +4936,12 @@ export class InteractiveMode {
 
 		const removePending = (): number => {
 			const componentIndex = this.chatContainer.children.indexOf(component);
-			const insertionIndex = spacer ? this.chatContainer.children.indexOf(spacer) : componentIndex;
-			if (spacer) this.chatContainer.removeChild(spacer);
+			if (componentIndex === -1) {
+				return this.chatContainer.children.length;
+			}
+			const spacerIndex = spacer ? this.chatContainer.children.indexOf(spacer) : -1;
+			const insertionIndex = spacerIndex >= 0 ? spacerIndex : componentIndex;
+			if (spacerIndex >= 0 && spacer) this.chatContainer.removeChild(spacer);
 			this.chatContainer.removeChild(component);
 			return insertionIndex;
 		};
