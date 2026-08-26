@@ -159,28 +159,12 @@ export async function executeBashWithOperations(
 		}
 	};
 
+	let result: Awaited<ReturnType<BashOperations["exec"]>>;
 	try {
-		const result = await operations.exec(command, cwd, {
+		result = await operations.exec(command, cwd, {
 			onData,
 			signal: options?.signal,
 		});
-
-		finishDecoder();
-		const fullOutput = outputText();
-		const truncationResult = truncateTail(fullOutput);
-		if (truncationResult.truncated) {
-			ensureTempFile();
-		}
-		await closeTempFileStream();
-		const cancelled = options?.signal?.aborted ?? false;
-
-		return {
-			output: truncationResult.truncated ? truncationResult.content : fullOutput,
-			exitCode: cancelled ? undefined : (result.exitCode ?? undefined),
-			cancelled,
-			truncated: truncationResult.truncated,
-			fullOutputPath: tempFilePath,
-		};
 	} catch (err) {
 		// Check if it was an abort
 		if (options?.signal?.aborted) {
@@ -204,4 +188,21 @@ export async function executeBashWithOperations(
 
 		throw err;
 	}
+
+	finishDecoder();
+	const fullOutput = outputText();
+	const truncationResult = truncateTail(fullOutput);
+	if (truncationResult.truncated) {
+		ensureTempFile();
+	}
+	await closeTempFileStream();
+	const cancelled = options?.signal?.aborted ?? false;
+
+	return {
+		output: truncationResult.truncated ? truncationResult.content : fullOutput,
+		exitCode: cancelled ? undefined : (result.exitCode ?? undefined),
+		cancelled,
+		truncated: truncationResult.truncated,
+		fullOutputPath: tempFilePath,
+	};
 }

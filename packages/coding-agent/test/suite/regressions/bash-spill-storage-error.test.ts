@@ -69,6 +69,26 @@ describe("bash spill storage errors", () => {
 		expect(spillState.unhandledErrors).toEqual([]);
 	});
 
+	it("preserves a quota failure when cancellation races with command settlement", async () => {
+		const errorEmitted = nextSpillErrorEmission();
+		const controller = new AbortController();
+		const operations: BashOperations = {
+			exec: async (_command, _cwd, { onData }) => {
+				onData(Buffer.alloc(DEFAULT_MAX_BYTES + 1, "x"));
+				await errorEmitted;
+				controller.abort();
+				return { exitCode: 0 };
+			},
+		};
+
+		const execution = executeBashWithOperations("cancelled large output", process.cwd(), operations, {
+			signal: controller.signal,
+		});
+
+		await expect(execution).rejects.toBe(spillState.quotaError);
+		expect(spillState.unhandledErrors).toEqual([]);
+	});
+
 	it("routes a quota failure through OutputAccumulator.closeTempFile", async () => {
 		const errorEmitted = nextSpillErrorEmission();
 		const output = new OutputAccumulator({ maxBytes: 1 });

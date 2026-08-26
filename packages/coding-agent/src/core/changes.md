@@ -7,6 +7,8 @@
 - `packages/coding-agent/src/core/bash-executor.ts`: attaches an `error` listener as soon as the
   full-output `WriteStream` is created, records the first failure, and rejects the bash execution
   through the existing close boundary even when the stream failed before command settlement.
+- Successful command finalization now runs outside the command-execution catch, so an already-set
+  abort signal cannot reinterpret a spill close failure as a successful cancelled result.
 
 ### Why
 
