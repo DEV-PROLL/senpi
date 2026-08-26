@@ -5,14 +5,17 @@
 ### What changed
 
 - `output-accumulator.ts`: attaches an `error` listener when its full-output `WriteStream` is
-  created, records the first failure, and rejects `closeTempFile()` even when the failure happened
-  before close began.
+  created, records the first failure, and rejects `closeTempFile()` through the terminal `close`
+  boundary, including when a filesystem close failure follows `finish`.
+- `closeTempFile()` preserves the first storage failure and removes its error and close listeners
+  after settlement, preventing a premature success or post-completion listener leak.
 
 ### Why
 
 - Bash output can cross the in-memory limit while `/tmp` is quota-exhausted. The stream previously
   had no listener until `closeTempFile()`, so an early `EDQUOT`/`ENOSPC` event reached
-  `uncaughtException` and killed the TUI. The normal tool promise now owns that failure.
+  `uncaughtException` and killed the TUI. A late filesystem close failure could also arrive after
+  `finish`; waiting for `close` ensures the normal tool promise owns either failure.
 
 ### Why an extension could not handle it
 

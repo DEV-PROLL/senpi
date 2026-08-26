@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const spillState = vi.hoisted(() => {
-	const createdStreams: Array<{ readonly destroyed: boolean }> = [];
+	const createdStreams: Array<{
+		readonly destroyed: boolean;
+		listenerCount(eventName: string | symbol): number;
+	}> = [];
 	let emitQuotaError = true;
+	let emitLateQuotaError = false;
 	const pendingEmissions: Array<() => void> = [];
 	const unhandledErrors: Error[] = [];
 	const quotaError = Object.assign(new Error("unknown error, write"), {
@@ -17,6 +21,12 @@ const spillState = vi.hoisted(() => {
 		},
 		set emitQuotaError(value: boolean) {
 			emitQuotaError = value;
+		},
+		get emitLateQuotaError() {
+			return emitLateQuotaError;
+		},
+		set emitLateQuotaError(value: boolean) {
+			emitLateQuotaError = value;
 		},
 		pendingEmissions,
 		quotaError,
@@ -46,6 +56,17 @@ vi.mock("node:fs", async (importOriginal) => {
 					});
 				},
 			});
+			if (spillState.emitLateQuotaError) {
+				const emit = stream.emit.bind(stream);
+				stream.emit = ((event: string | symbol, ...args: any[]) => {
+					const result = emit(event, ...args);
+					if (event === "finish") {
+						emit("error", spillState.quotaError);
+						emit("close");
+					}
+					return result;
+				}) as typeof stream.emit;
+			}
 			spillState.createdStreams.push(stream);
 			return stream;
 		},
@@ -65,6 +86,7 @@ describe("bash spill storage errors", () => {
 	beforeEach(() => {
 		spillState.createdStreams.length = 0;
 		spillState.emitQuotaError = true;
+		spillState.emitLateQuotaError = false;
 		spillState.pendingEmissions.length = 0;
 		spillState.unhandledErrors.length = 0;
 	});
@@ -127,6 +149,23 @@ describe("bash spill storage errors", () => {
 		expect(spillState.createdStreams[0]?.destroyed).toBe(true);
 	});
 
+	it("rejects a late quota failure after finish in bash executor", async () => {
+		spillState.emitQuotaError = false;
+		spillState.emitLateQuotaError = true;
+		const operations: BashOperations = {
+			exec: async (_command, _cwd, { onData }) => {
+				onData(Buffer.alloc(DEFAULT_MAX_BYTES + 1, "x"));
+				return { exitCode: 0 };
+			},
+		};
+
+		await expect(executeBashWithOperations("late bash spill failure", process.cwd(), operations)).rejects.toBe(
+			spillState.quotaError,
+		);
+		expect(spillState.createdStreams[0]?.listenerCount("error")).toBe(0);
+		expect(spillState.createdStreams[0]?.listenerCount("close")).toBe(0);
+	});
+
 	it("routes a quota failure through OutputAccumulator.closeTempFile", async () => {
 		const errorEmitted = nextSpillErrorEmission();
 		const output = new OutputAccumulator({ maxBytes: 1 });
@@ -136,5 +175,18 @@ describe("bash spill storage errors", () => {
 
 		await expect(output.closeTempFile()).rejects.toBe(spillState.quotaError);
 		expect(spillState.unhandledErrors).toEqual([]);
+	});
+
+	it("rejects a late quota failure after finish in OutputAccumulator", async () => {
+		spillState.emitQuotaError = false;
+		spillState.emitLateQuotaError = true;
+		const output = new OutputAccumulator({ maxBytes: 1 });
+
+		output.append(Buffer.from("too large"));
+
+		await expect(output.closeTempFile()).rejects.toBe(spillState.quotaError);
+		const stream = spillState.createdStreams[0];
+		expect(stream?.listenerCount("error")).toBe(0);
+		expect(stream?.listenerCount("close")).toBe(0);
 	});
 });

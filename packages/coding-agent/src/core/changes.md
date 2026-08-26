@@ -6,7 +6,10 @@
 
 - `packages/coding-agent/src/core/bash-executor.ts`: attaches an `error` listener as soon as the
   full-output `WriteStream` is created, records the first failure, and rejects the bash execution
-  through the existing close boundary even when the stream failed before command settlement.
+  through the terminal `close` boundary even when a late filesystem close failure follows `finish`.
+- The close helper waits for `close`, preserves the first storage failure, and removes its error and
+  close listeners after settlement so a stream cannot resolve successfully before final storage state
+  is known or retain listeners after cleanup.
 - Successful command finalization now runs outside the command-execution catch, so an already-set
   abort signal cannot reinterpret a spill close failure as a successful cancelled result.
 - Decoder flushing and output preparation now close the spill stream before propagating a callback
@@ -15,9 +18,9 @@
 ### Why
 
 - A full `/tmp` or exhausted user quota can make the spill stream emit `ENOSPC` or `EDQUOT` while
-  command output is still arriving. The only previous listener was installed after execution
-  finished, so the early `error` event escaped to the process-level `uncaughtException` handler and
-  terminated the interactive session instead of failing only the bash tool call.
+  command output is still arriving, or during the final filesystem close after `finish`. The close
+  path must therefore wait for `close`, rather than treating `finish` as durable completion; the first
+  storage failure is reported instead of returning a successful result with an incomplete path.
 
 ### Why an extension could not handle it
 

@@ -61,6 +61,7 @@ export async function executeBashWithOperations(
 	let tempFilePath: string | undefined;
 	let tempFileStream: WriteStream | undefined;
 	let tempFileError: Error | undefined;
+	let tempFileErrorListener: ((error: Error) => void) | undefined;
 	let totalBytes = 0;
 
 	const compactOutputChunks = () => {
@@ -80,9 +81,10 @@ export async function executeBashWithOperations(
 		const id = randomBytes(8).toString("hex");
 		tempFilePath = join(tmpdir(), `pi-bash-${id}.log`);
 		tempFileStream = createWriteStream(tempFilePath);
-		tempFileStream.on("error", (error) => {
+		tempFileErrorListener = (error) => {
 			tempFileError ??= error;
-		});
+		};
+		tempFileStream.on("error", tempFileErrorListener);
 		for (let i = outputChunkStart; i < outputChunks.length; i++) {
 			const chunk = outputChunks[i];
 			if (chunk !== undefined) {
@@ -98,21 +100,33 @@ export async function executeBashWithOperations(
 			return;
 		}
 		if (tempFileError) {
+			if (tempFileErrorListener) stream.off("error", tempFileErrorListener);
 			stream.destroy();
 			throw tempFileError;
 		}
 
 		await new Promise<void>((resolve, reject) => {
-			const onError = (error: Error) => {
-				stream.off("finish", onFinish);
-				reject(error);
-			};
-			const onFinish = () => {
+			let settled = false;
+			const cleanup = () => {
 				stream.off("error", onError);
-				resolve();
+				if (tempFileErrorListener) stream.off("error", tempFileErrorListener);
+				stream.off("close", onClose);
 			};
-			stream.once("error", onError);
-			stream.once("finish", onFinish);
+			const settle = (error?: Error) => {
+				if (settled) return;
+				settled = true;
+				cleanup();
+				if (error) reject(error);
+				else resolve();
+			};
+			const onError = (error: Error) => {
+				tempFileError ??= error;
+			};
+			const onClose = () => {
+				settle(tempFileError);
+			};
+			stream.on("error", onError);
+			stream.once("close", onClose);
 			stream.end();
 		});
 	};

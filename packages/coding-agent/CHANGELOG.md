@@ -6,8 +6,10 @@
 
 ### Fixed
 
-- Bash output spill files now capture early `EDQUOT`/`ENOSPC` stream errors and fail only the tool
-  call instead of terminating the interactive session through `uncaughtException`.
+- Bash output spill files now capture early `EDQUOT`/`ENOSPC` stream errors and late filesystem
+  close failures, waiting for the stream's terminal `close` event and failing only the tool call
+  instead of returning an incomplete path or terminating the interactive session through
+  `uncaughtException`.
 
 ### Added
 
