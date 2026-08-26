@@ -1,5 +1,23 @@
 # changes
 
+## Browser-smoke exempts @anthropic-ai/sdk-internal Node builtins (2026-08-26)
+
+### What changed
+
+- `scripts/check-browser-smoke.mjs` gains an esbuild plugin that marks `node:*` specifiers external ONLY when the importer path sits inside `node_modules/@anthropic-ai/sdk/`; senpi-owned browser code keeps failing loudly on Node builtins (mutation-verified).
+
+### Why
+
+- `@anthropic-ai/sdk>=0.93.0` (forced by the claude-agent-sdk peer floor) ships a credentials subsystem behind runtime-guarded dynamic `import('node:fs')` calls that never execute in browsers, but esbuild's browser platform hard-errors on the unresolvable specifiers.
+
+### Why this lives in the fork
+
+- The browser-smoke guardrail is a fork-only check with no upstream counterpart.
+
+### Expected merge conflict zones
+
+- LOW: `scripts/check-browser-smoke.mjs` plugin block during guardrail changes.
+
 ## Binary build script re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed

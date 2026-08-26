@@ -1,5 +1,23 @@
 # Local fork changes
 
+## @anthropic-ai/sdk peer alignment (2026-08-26)
+
+### What changed
+
+- `packages/coding-agent/package.json` bumps `@anthropic-ai/sdk` `0.91.1` -> `0.120.0` so the pin satisfies the `@anthropic-ai/claude-agent-sdk@0.3.241` peer range (`>=0.93.0`).
+
+### Why
+
+- Eliminates the install-time `incorrect peer dependency` warning users reported; audited additive-only API surface changes.
+
+### Why this lives in the fork
+
+- The exact-version pin set is fork-owned dependency policy.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/package.json` dependency pins during upstream syncs.
+
 ## Package identity re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed
