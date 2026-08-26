@@ -6,6 +6,10 @@
 
 ### Fixed
 
+- A manual `/compact` that has nothing left to summarize is now rejected before it aborts the active post-compaction continuation, so an in-flight turn survives instead of terminally ending with "Nothing to compact".
+- Long-lived sessions no longer stop compacting after ten successful compactions: the absolute session cap became telemetry only, while the failure circuit breaker still halts repeated failed or ineffective attempts.
+- Compaction todo snapshots now capture only the latest todo phases from the active branch instead of recursively retaining the full `senpi.todo-state` history, which grew to megabytes and refilled the context right after a compaction; legacy raw-entry snapshots are normalized before restore.
+
 ### Added
 
 ### Changed
