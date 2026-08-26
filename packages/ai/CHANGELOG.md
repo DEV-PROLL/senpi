@@ -10,7 +10,7 @@
 
 ### Fixed
 
-- Classify Kiro (Amazon Q) byte-limit rejections as context overflow so the agent shrinks its input and retries instead of failing the session on repeated identical HTTP 400s.
+- Classify kiro-lb gateway byte/token payload-cap and enhanced upstream context-limit rejections as context overflow so the agent shrinks its input and retries instead of failing the session on HTTP 400s.
 
 ### Removed
 

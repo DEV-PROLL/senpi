@@ -62,11 +62,11 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 
 ### What changed
 
-- `packages/ai/src/utils/overflow.ts`: Kiro (Amazon Q) byte-cap rejections (`Request payload is <n> bytes, over the <n> byte limit`) classify as context overflow, joining `request_too_large` and the gateway HTTP 413 family; the provider inventory comment gains the matching line.
+- `packages/ai/src/utils/overflow.ts`: kiro-lb local byte/token payload-guard rejections (`Request payload is <n> bytes/tokens, over the <n> byte/token limit Kiro accepts.`) and kiro-lb's enhanced upstream context-limit response classify as context overflow.
 
 ### Why
 
-- Kiro caps on raw request bytes and states the two sizes instead of saying "too large", so no existing pattern matched and the HTTP 400 was terminal: nothing shrank the input, the retry re-serialized to the same size, and the session died on repeated identical 400s. Observed against a `kiro-lb` gateway on `claude-opus-5` where the last accepted request billed 276,627 input tokens against a 666,667-token window, so token-threshold compaction could never fire before the ~1.09 MB byte cap.
+- The local `KIRO_MAX_PAYLOAD_BYTES` guard is a gateway limit distinct from Kiro's upstream `CONTENT_LENGTH_EXCEEDS_THRESHOLD` token rejection. Both are client-visible HTTP 400 overflow paths, with route-specific wrappers (Anthropic `invalid_request_error`, OpenAI `detail`, and upstream `kiro_api_error`), so matching the emitted message lets input-shrinking recovery handle each instead of terminating the session.
 
 ### Why an extension could not handle it
 
