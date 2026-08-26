@@ -5497,8 +5497,16 @@ export class InteractiveMode {
 		process.exit(0);
 	}
 
-	private emergencyTerminalExit(): never {
+	private emergencyTerminalExit(crash: { origin: string; error: unknown }): never {
 		this.isShuttingDown = true;
+		// This exit is silent by design (the terminal is gone, so a banner would go
+		// nowhere), which makes the debug log the ONLY surface that can record this
+		// crash class — exactly the EIO case that left the 2026-08-26 diagnosis with no
+		// evidence. Write before the cleanup below, which is unguarded and could throw.
+		// A logging failure must never alter the exit path.
+		try {
+			appendUncaughtCrashLog(crash.origin, crash.error);
+		} catch {}
 		this.unregisterSignalHandlers();
 		killTrackedDetachedChildren();
 		// The terminal is gone. Do not run normal shutdown because TUI and
@@ -5526,7 +5534,7 @@ export class InteractiveMode {
 			// the controlling terminal vanished or this pgrp lost the tty
 			// foreground). Same handling as terminal write errors: exit silently
 			// instead of printing a crash banner to a terminal that is gone.
-			this.emergencyTerminalExit();
+			this.emergencyTerminalExit({ origin: `dead-terminal ${origin}`, error });
 		}
 		if (isRecoverableInspectorVmImportError(error, origin)) {
 			this.showWarning(INSPECTOR_VM_IMPORT_WARNING);
@@ -5585,7 +5593,7 @@ export class InteractiveMode {
 
 		const terminalErrorHandler = (error: Error) => {
 			if (isDeadTerminalError(error)) {
-				this.emergencyTerminalExit();
+				this.emergencyTerminalExit({ origin: "dead-terminal stdio error", error });
 			}
 			throw error;
 		};

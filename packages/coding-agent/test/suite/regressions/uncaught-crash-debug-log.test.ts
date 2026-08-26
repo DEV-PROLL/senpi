@@ -64,6 +64,51 @@ function createCrashContext(): UncaughtCrashThis {
 	};
 }
 
+/**
+ * A crash context that inherits the real prototype, so `this.emergencyTerminalExit()`
+ * resolves to the production method instead of a stub. The sibling suite in
+ * `terminal-detach-uncaught-crash.test.ts` stubs it deliberately (it pins the routing
+ * decision); here the point is what the real emergency exit does, so only the
+ * collaborators are faked.
+ */
+function createRealPrototypeCrashContext(): UncaughtCrashThis {
+	const context = Object.create(InteractiveMode.prototype) as UncaughtCrashThis;
+	context.isShuttingDown = false;
+	context.showWarning = vi.fn();
+	context.ui = { stop: vi.fn() };
+	context.unregisterSignalHandlers = vi.fn();
+	return context;
+}
+
+function createDeadTerminalError(shape: "errno-string" | "errno-number"): Error {
+	return shape === "errno-string"
+		? Object.assign(new Error("EIO: i/o error, read"), { code: "EIO", errno: -5, syscall: "read" })
+		: Object.assign(new Error("read failed with errno: 5"), { errno: 5 });
+}
+
+/** Drives the dead-terminal route and asserts it still ends in the silent `process.exit(129)`. */
+function crashAndExpectEmergencyExit(context: UncaughtCrashThis, error: Error): { bannerCalls: number } {
+	const exit = vi.spyOn(process, "exit").mockImplementation((code) => {
+		throw new ProcessExitError(code);
+	});
+	const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+	try {
+		expect(() => interactiveModePrototype.uncaughtCrash.call(context, error, "uncaughtException")).toThrow(
+			ProcessExitError,
+		);
+		expect(exit).toHaveBeenCalledWith(129);
+		expect(exit).not.toHaveBeenCalledWith(1);
+		return {
+			bannerCalls: consoleError.mock.calls.filter((args) =>
+				args.some((arg) => typeof arg === "string" && arg.includes("exiting due to uncaughtException")),
+			).length,
+		};
+	} finally {
+		consoleError.mockRestore();
+		exit.mockRestore();
+	}
+}
+
 const originalAgentDir = process.env[ENV_AGENT_DIR];
 const tempDirs: string[] = [];
 
@@ -161,5 +206,56 @@ describe("uncaught crash debug log", () => {
 		expect(context.isShuttingDown).toBe(true);
 		expect(restoreObservations).toHaveLength(1);
 		expect(existsSync(agentDir)).toBe(true);
+	});
+});
+
+/**
+ * The dead-terminal class is the one the debug log matters most for:
+ * `emergencyTerminalExit()` exits 129 with no banner precisely because the terminal
+ * is gone, so the log file is the ONLY surface a crash record can reach. Without
+ * these cases the EIO crash that motivated this change still vanishes silently.
+ */
+describe("dead-terminal crash debug log", () => {
+	test("records a dead-terminal crash routed to the silent emergency exit", () => {
+		useTempAgentDir("dead-terminal");
+		const context = createRealPrototypeCrashContext();
+
+		const { bannerCalls } = crashAndExpectEmergencyExit(context, createDeadTerminalError("errno-string"));
+
+		const debugLogPath = getDebugLogPath();
+		const log = readFileSync(debugLogPath, "utf8");
+		expect(log).toContain("uncaught crash (dead-terminal uncaughtException)");
+		expect(log).toContain("EIO: i/o error, read");
+		expect((statSync(debugLogPath).mode & 0o777).toString(8)).toBe("600");
+		// The silent contract from the dead-terminal routing must survive: the record
+		// goes to the log, never to a terminal that is already gone.
+		expect(bannerCalls).toBe(0);
+		expect(context.ui.stop).not.toHaveBeenCalled();
+		expect(context.unregisterSignalHandlers).toHaveBeenCalledTimes(1);
+		expect(context.isShuttingDown).toBe(true);
+		expect(restoreObservations).toEqual([]);
+	});
+
+	test("records the Bun numeric-errno dead-terminal shape too", () => {
+		useTempAgentDir("dead-terminal-bun");
+
+		crashAndExpectEmergencyExit(createRealPrototypeCrashContext(), createDeadTerminalError("errno-number"));
+
+		const log = readFileSync(getDebugLogPath(), "utf8");
+		expect(log).toContain("uncaught crash (dead-terminal uncaughtException)");
+		expect(log).toContain("read failed with errno: 5");
+	});
+
+	test("keeps the silent emergency exit unchanged when the debug log write fails", () => {
+		useTempAgentDir("dead-terminal-failure");
+		// Make the debug log path unwritable by turning it into a directory.
+		mkdirSync(getDebugLogPath(), { recursive: true });
+		const context = createRealPrototypeCrashContext();
+
+		const { bannerCalls } = crashAndExpectEmergencyExit(context, createDeadTerminalError("errno-string"));
+
+		expect(bannerCalls).toBe(0);
+		expect(context.unregisterSignalHandlers).toHaveBeenCalledTimes(1);
+		expect(context.isShuttingDown).toBe(true);
 	});
 });
