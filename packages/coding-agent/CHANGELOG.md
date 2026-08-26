@@ -10,6 +10,8 @@
   close failures, waiting for the stream's terminal `close` event and failing only the tool call
   instead of returning an incomplete path or terminating the interactive session through
   `uncaughtException`.
+- Failed bash spill files are now removed after cleanup while surfaced full-output paths remain
+  readable, and command or update-callback failures preserve any secondary cleanup error.
 
 ### Added
 
