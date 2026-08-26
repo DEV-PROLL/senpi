@@ -8,6 +8,8 @@
 
 ### Added
 
+- Active goals now stop auto-continuing after 150 automatic continuations without accepted direct user input ([#1139](https://github.com/code-yeongyu/senpi/issues/1139)): a persisted unattended budget survives assistant-text changes and tool use, the goal blocks mechanically (`unattended continuation limit reached`), and any user message resumes it with the budget restored. Monitor-delayed deliveries (armed wake sources) do not consume the budget.
+
 ### Changed
 
 ### Removed
