@@ -159,6 +159,25 @@ export async function executeBashWithOperations(
 		}
 	};
 
+	const prepareFinalOutput = async () => {
+		try {
+			finishDecoder();
+			const fullOutput = outputText();
+			const truncationResult = truncateTail(fullOutput);
+			if (truncationResult.truncated) {
+				ensureTempFile();
+			}
+			return { fullOutput, truncationResult };
+		} catch (error) {
+			try {
+				await closeTempFileStream();
+			} catch (closeError) {
+				throw new AggregateError([error, closeError], "Bash output finalization and spill cleanup failed");
+			}
+			throw error;
+		}
+	};
+
 	let result: Awaited<ReturnType<BashOperations["exec"]>>;
 	try {
 		result = await operations.exec(command, cwd, {
@@ -168,12 +187,7 @@ export async function executeBashWithOperations(
 	} catch (err) {
 		// Check if it was an abort
 		if (options?.signal?.aborted) {
-			finishDecoder();
-			const fullOutput = outputText();
-			const truncationResult = truncateTail(fullOutput);
-			if (truncationResult.truncated) {
-				ensureTempFile();
-			}
+			const { fullOutput, truncationResult } = await prepareFinalOutput();
 			await closeTempFileStream();
 			return {
 				output: truncationResult.truncated ? truncationResult.content : fullOutput,
@@ -189,12 +203,7 @@ export async function executeBashWithOperations(
 		throw err;
 	}
 
-	finishDecoder();
-	const fullOutput = outputText();
-	const truncationResult = truncateTail(fullOutput);
-	if (truncationResult.truncated) {
-		ensureTempFile();
-	}
+	const { fullOutput, truncationResult } = await prepareFinalOutput();
 	await closeTempFileStream();
 	const cancelled = options?.signal?.aborted ?? false;
 

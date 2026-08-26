@@ -9,6 +9,8 @@
   through the existing close boundary even when the stream failed before command settlement.
 - Successful command finalization now runs outside the command-execution catch, so an already-set
   abort signal cannot reinterpret a spill close failure as a successful cancelled result.
+- Decoder flushing and output preparation now close the spill stream before propagating a callback
+  or formatting failure; if cleanup also fails, both errors are preserved in an `AggregateError`.
 
 ### Why
 

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const spillState = vi.hoisted(() => {
+	const createdStreams: Array<{ readonly destroyed: boolean }> = [];
+	let emitQuotaError = true;
 	const pendingEmissions: Array<() => void> = [];
 	const unhandledErrors: Error[] = [];
 	const quotaError = Object.assign(new Error("unknown error, write"), {
@@ -8,7 +10,18 @@ const spillState = vi.hoisted(() => {
 		errno: -122,
 		syscall: "write",
 	});
-	return { pendingEmissions, quotaError, unhandledErrors };
+	return {
+		createdStreams,
+		get emitQuotaError() {
+			return emitQuotaError;
+		},
+		set emitQuotaError(value: boolean) {
+			emitQuotaError = value;
+		},
+		pendingEmissions,
+		quotaError,
+		unhandledErrors,
+	};
 });
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -21,7 +34,7 @@ vi.mock("node:fs", async (importOriginal) => {
 			const stream = new Writable({
 				write(_chunk, _encoding, callback) {
 					callback();
-					if (emitted) return;
+					if (emitted || !spillState.emitQuotaError) return;
 					emitted = true;
 					queueMicrotask(() => {
 						for (const resolve of spillState.pendingEmissions.splice(0)) resolve();
@@ -33,6 +46,7 @@ vi.mock("node:fs", async (importOriginal) => {
 					});
 				},
 			});
+			spillState.createdStreams.push(stream);
 			return stream;
 		},
 	};
@@ -49,6 +63,8 @@ function nextSpillErrorEmission(): Promise<void> {
 
 describe("bash spill storage errors", () => {
 	beforeEach(() => {
+		spillState.createdStreams.length = 0;
+		spillState.emitQuotaError = true;
 		spillState.pendingEmissions.length = 0;
 		spillState.unhandledErrors.length = 0;
 	});
@@ -87,6 +103,28 @@ describe("bash spill storage errors", () => {
 
 		await expect(execution).rejects.toBe(spillState.quotaError);
 		expect(spillState.unhandledErrors).toEqual([]);
+	});
+
+	it("closes the spill stream when decoder flush delivery throws", async () => {
+		spillState.emitQuotaError = false;
+		const callbackError = new Error("consumer failed on decoder flush");
+		const operations: BashOperations = {
+			exec: async (_command, _cwd, { onData }) => {
+				onData(Buffer.alloc(DEFAULT_MAX_BYTES + 1, "x"));
+				onData(Buffer.from([0xe2]));
+				return { exitCode: 0 };
+			},
+		};
+
+		const execution = executeBashWithOperations("partial utf8 output", process.cwd(), operations, {
+			onChunk: (chunk) => {
+				if (chunk === "\ufffd") throw callbackError;
+			},
+		});
+
+		await expect(execution).rejects.toBe(callbackError);
+		expect(spillState.createdStreams).toHaveLength(1);
+		expect(spillState.createdStreams[0]?.destroyed).toBe(true);
 	});
 
 	it("routes a quota failure through OutputAccumulator.closeTempFile", async () => {
