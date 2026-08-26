@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- Fixed terminal shutdown still crashing with `setRawMode failed with errno: 5` under Bun, whose tty shim throws
+  the errno only inside the message text with no `code` or `errno` property. Dead-terminal detection now also
+  reads that message form for `EIO` and `EPIPE` while unrelated raw-mode failures keep propagating.
+
 ### Removed
 
 ## [2026.8.26] - 2026-08-26

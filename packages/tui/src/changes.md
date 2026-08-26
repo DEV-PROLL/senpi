@@ -1,5 +1,40 @@
 # TUI delta rendering fork changes
 
+## Dead-terminal detection reads Bun's errno-in-message shape (2026-08-26)
+
+### What changed
+
+- `packages/tui/src/terminal.ts`: `isDeadTerminalError()` gains a third, last-resort branch that parses a
+  trailing `errno: <n>` out of the error message. It fires only when that number is a dead-terminal errno
+  that is stable across darwin and linux — `EIO` (5) and `EPIPE` (32). `ENOTCONN` is deliberately left out of
+  the numeric set because its value differs per platform (57 on darwin, 107 on linux). The existing string
+  `code` and numeric `errno` branches are unchanged and still win first, and any error that matches none of
+  the three branches still propagates out of `ProcessTerminal.stop()`.
+- `test/terminal.test.ts` pins the real Bun shape (a bare `new Error("setRawMode failed with errno: 5")`
+  with neither `code` nor `errno`), the `errno: 32` message form, and two rethrow fences: an unrelated
+  `new Error("boom")` and a live-but-unrelated `errno: 22` message.
+
+### Why
+
+- Bun 1.4.0's tty shim throws a plain `Error` for a failed `setRawMode()` ioctl: `code` and `errno` are both
+  absent and the number survives only in the message text (verified locally:
+  `{"isError":true,"hasCode":false,"hasErrno":false,"msg":"setRawMode failed with errno: 5"}`). The previous
+  classifier recognized only the two property shapes, so on a dead SSH/PTY peer the exception escaped
+  `ProcessTerminal.stop()` into `Tui.stop()` and `stopInteractiveTui()`, aborting shutdown and hanging the
+  session with `error: setRawMode failed with errno: 5`.
+
+### Why this lives in the fork
+
+- Raw-mode ownership and teardown are private `ProcessTerminal` lifecycle responsibilities running inside the
+  shutdown path. No extension surface sits between the saved raw-mode state and the stdin ioctl, so the
+  classification has to happen where the throw occurs.
+
+### Expected merge conflict zones
+
+- LOW: `packages/tui/src/terminal.ts` around the dead-terminal errno constants and the `isDeadTerminalError()`
+  body.
+- LOW: `packages/tui/test/terminal.test.ts` around the `ProcessTerminal stop` suite.
+
 ## TUI runtime re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed
