@@ -1,5 +1,36 @@
 # Builtin compaction extension changes
 
+## Apply idle warm compaction during the idle gap (2026-08-26)
+
+### What changed
+
+- `index.ts` adds an idle-apply watcher (`armIdleApply`) on the speculative job started by the
+  `agent_end` idle trigger (and by the idle warm-up retry timer). When generation completes while
+  the session is still idle and over threshold, the summary is applied immediately through the
+  shared `applyGeneratedCompaction` guards instead of being held warm until the next
+  `before_agent_start`. A new `sessionIdleSinceAgentEnd` flag fences the watcher; it is cleared by
+  `before_agent_start` and `session_shutdown`. Stale or refused applies keep the warm hold, so the
+  next prompt consumes the job exactly as before.
+- `log.ts` adds the `idle_applied` debug event.
+- `test/compaction/idle-compaction.test.ts` updates the two idle warm-up tests to the new contract:
+  one apply at idle, never replayed on the following prompt.
+
+### Why
+
+- Holding the warm summary until the next submit made the user watch their own prompt wait behind
+  a compaction they could not see coming; the [compaction] block rendered at submit time even
+  though generation had finished minutes earlier. Applying during the idle gap renders the block
+  first and lets the next message stack below it.
+
+### Why an extension could not handle it
+
+- The speculative job registry, idle retry timer, and apply admission are private policy inside
+  this builtin; external extensions cannot observe or consume the warm job.
+
+### Expected merge conflict zones
+
+- MEDIUM: `index.ts` `agent_end` / `before_agent_start` handlers during upstream syncs.
+
 ## Bound todo snapshots and keep successful compaction admission open (2026-08-25)
 
 ### What changed

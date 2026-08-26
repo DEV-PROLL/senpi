@@ -1,5 +1,29 @@
 # changes
 
+## 2026-08-26 - Append canonical user message after compaction rebuild
+
+### What changed
+
+- `interactive-mode.ts` `renderPendingUserEcho`'s `removePending()` returns the container end when
+  the pending echo component is already gone (indexOf -1), so `replace()` appends the canonical
+  user message instead of splicing it in before the last child.
+
+### Why
+
+- The `compaction_end` handler clears the chat container and rebuilds it with the compaction
+  summary last. The stale echo handle then computed insertionIndex -1, and `splice(-1, 0, ...)`
+  inserted the canonical user message above the compaction block, inverting the session-canonical
+  order (compaction precedes the user message).
+
+### Why this lives in the fork
+
+- The optimistic pending user echo is a fork-owned chrome feature; upstream has no reconciliation
+  path to fix.
+
+### Expected merge conflict zones
+
+- LOW: `renderPendingUserEcho` internals during upstream syncs.
+
 ## 2026-08-25 - Do not adopt unwired upstream settings submenu
 
 ### What changed
