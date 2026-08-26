@@ -1,5 +1,11 @@
 # changes
 
+## 2026-08-26 - Continue provider fallback after failed required compaction
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: Cursor quota and eligible hard-error failures now advance the provider fallback chain when required pre-retry compaction is rejected, while ordinary transient retries remain compaction-blocked.
+
 ## 2026-08-26 - Reject no-progress manual compaction before active abort
 
 ### What changed
