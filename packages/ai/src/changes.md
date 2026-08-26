@@ -58,6 +58,24 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 - Import blocks and option-mapping functions of every listed `packages/ai/src/api/*.ts` file, and the
   export list of `packages/ai/src/index.ts` — upstream touches these on nearly every provider change.
 
+## 2026-08-26 - Detect Kiro payload-limit/context-limit rejections as context overflow
+
+### What changed
+
+- `packages/ai/src/utils/overflow.ts`: kiro-lb local byte/token payload-guard rejections (`Request payload is <n> bytes/tokens, over the <n> byte/token limit Kiro accepts.`) and kiro-lb's enhanced upstream context-limit response classify as context overflow.
+
+### Why
+
+- The local `KIRO_MAX_PAYLOAD_BYTES` guard is a gateway limit distinct from Kiro's upstream `CONTENT_LENGTH_EXCEEDS_THRESHOLD` token rejection. Both are client-visible HTTP 400 overflow paths, with route-specific wrappers (Anthropic `invalid_request_error`, OpenAI `detail`, and upstream `kiro_api_error`), so matching the emitted message lets input-shrinking recovery handle each instead of terminating the session.
+
+### Why an extension could not handle it
+
+- Overflow classification is a provider-neutral AI utility below extension-visible session behavior; retry policy reads the verdict before any extension sees the error.
+
+### Expected merge conflict zones
+
+- LOW: the tail of `OVERFLOW_PATTERNS` and the provider inventory comment in `packages/ai/src/utils/overflow.ts`.
+
 ## 2026-08-25 - Distinguish Cursor usage-pool exhaustion from context overflow
 
 ### What changed
