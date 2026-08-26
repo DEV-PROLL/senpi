@@ -1,5 +1,47 @@
 # changes
 
+## 2026-08-26 - Record uncaught crashes in the brand debug log
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: `uncaughtCrash` calls
+  `appendUncaughtCrashLog(origin, error)` immediately before `restoreInteractiveStderr()`, wrapped
+  in a `try {} catch {}` so a failed log write cannot alter the crash path. Ordering, exit code,
+  and the stderr banner are unchanged.
+- `emergencyTerminalExit()` takes a required `{ origin, error }` crash context and makes the same
+  guarded `appendUncaughtCrashLog` call before its unguarded cleanup, so the silent exit-129 path
+  also leaves a record. Both call sites supply it: the dead-terminal branch of `uncaughtCrash`
+  (`dead-terminal <origin>`) and the stdout/stderr `terminalErrorHandler` (`dead-terminal stdio
+  error`). The parameter is required rather than optional so no future caller can reintroduce a
+  silent exit with no record.
+
+### Why
+
+- `uncaughtCrash` restores the real stderr and prints the banner to the terminal, so a crash only
+  ever existed in terminal scrollback. When the terminal is closed — or when the crash *is* a
+  terminal/EIO failure — the diagnosis has zero evidence; the 2026-08-26 EIO investigation found no
+  crash record in the brand debug log for exactly this reason. Writing before the terminal handoff
+  means the record survives the very failures that destroy the scrollback.
+- The dead-terminal class is the worst case and needed `emergencyTerminalExit` covered too: it exits
+  129 with no banner *by design* (the terminal is gone), so before this the entire EIO crash class
+  — the one the investigation was chasing — produced no output anywhere at all. Verified against a
+  real detached pty: closing the master under a live session now records
+  `uncaught crash (dead-terminal stdio error)` with the full `EIO: i/o error, write` stack, where
+  the same run previously left the log file non-existent.
+
+### Why an extension could not handle it
+
+- The handler is the process-level `uncaughtException` listener the interactive mode installs, and
+  it exits the process a few statements later. No extension hook runs inside that window, and an
+  extension's own `process.on("uncaughtException")` would be appended after this prepended listener,
+  i.e. after `process.exit(1)`. `emergencyTerminalExit` is stricter still: it is reached from the
+  stdout/stderr `error` handler and exits synchronously, so nothing outside core runs at all.
+
+### Expected merge conflict zones
+
+- LOW: `uncaughtCrash` and `emergencyTerminalExit` bodies in `interactive-mode.ts` (guarded calls,
+  one import, and the `emergencyTerminalExit` signature plus its two call sites).
+
 ## 2026-08-26 - Append canonical user message after compaction rebuild
 
 ### What changed
