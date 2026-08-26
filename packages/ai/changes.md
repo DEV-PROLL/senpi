@@ -1,5 +1,23 @@
 # changes.md — ai
 
+## @anthropic-ai/sdk peer alignment (2026-08-26)
+
+### What changed
+
+- `packages/ai/package.json` bumps `@anthropic-ai/sdk` `0.91.1` -> `0.120.0` in lockstep with the root and coding-agent pins. All imported types/classes were audited symbol-by-symbol against the 0.120.0 tarball; the widened `RefusalStopDetails.category` and `StopReason` unions are additive and unread here.
+
+### Why
+
+- The old pin violated `@anthropic-ai/claude-agent-sdk@0.3.241`'s `>=0.93.0` peer requirement and warned on every bun install.
+
+### Why this lives in the fork
+
+- The exact-version pin discipline is fork-owned; upstream tracks a caret range.
+
+### Expected merge conflict zones
+
+- LOW: `packages/ai/package.json` dependency pins during upstream syncs.
+
 ## 2026-08-25 - Keep Cloudflare AI Gateway provider divergence covered
 
 ### What changed

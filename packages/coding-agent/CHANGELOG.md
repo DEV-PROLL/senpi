@@ -9,6 +9,7 @@
 - A manual `/compact` that has nothing left to summarize is now rejected before it aborts the active post-compaction continuation, so an in-flight turn survives instead of terminally ending with "Nothing to compact".
 - Long-lived sessions no longer stop compacting after ten successful compactions: the absolute session cap became telemetry only, while the failure circuit breaker still halts repeated failed or ineffective attempts.
 - Compaction todo snapshots now capture only the latest todo phases from the active branch instead of recursively retaining the full `senpi.todo-state` history, which grew to megabytes and refilled the context right after a compaction; legacy raw-entry snapshots are normalized before restore.
+- Installing the CLI no longer warns `incorrect peer dependency "@anthropic-ai/sdk@0.91.1"`: the pinned `@anthropic-ai/sdk` now satisfies `@anthropic-ai/claude-agent-sdk`'s `>=0.93.0` peer range.
 
 ### Added
 

@@ -3,6 +3,24 @@
 Root tracker for repository-level divergence from upstream `badlogic/pi-mono`.
 Owns every audited production path whose nearest tracker is the repository root.
 
+## @anthropic-ai/sdk peer alignment (2026-08-26)
+
+### What changed
+
+- `package.json` bumps the pinned `@anthropic-ai/sdk` from `0.91.1` to `0.120.0` so the pin satisfies `@anthropic-ai/claude-agent-sdk@0.3.241`'s `>=0.93.0` peer range.
+
+### Why
+
+- Every bun install printed `warn: incorrect peer dependency "@anthropic-ai/sdk@0.91.1"`; the SDK floor moved to 0.93.0 when the agent SDK gained its credentials subsystem.
+
+### Why this lives in the fork
+
+- The root pin set is fork-owned dependency policy; upstream does not pin these packages together.
+
+### Expected merge conflict zones
+
+- LOW: `package.json` root dependency pins during upstream syncs.
+
 ## Root config and package identities re-diverge from upstream dcd4619 (2026-08-25)
 
 ### What changed
