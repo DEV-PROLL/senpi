@@ -1,5 +1,40 @@
 # goal Extension Changes
 
+## 2026-08-26 - continuation timer survives a retired extension context
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/goal/monitor-continuation.ts`
+  routes every `hasUI` read through a new private `#ctxHasUI(ctx)` helper that
+  treats the stale-ctx error (`stale-context.ts`) as "no UI" and rethrows
+  anything else. The three affected reads are `#armTimer`'s pre-arm wait-ticker
+  sync, the `setTimeout` callback's own `catch` handler, and the toolless stall
+  notice in `#buildContinuationContent`. The timer callback additionally drops a
+  rejection that is itself a stale-ctx error, since that is the expected outcome
+  after a session replacement. Covered by
+  `test/suite/goal-ticker-stale-context.test.ts`.
+
+### Why
+
+- `ctx.hasUI` is an `assertActive()`-guarded getter, so a context retired by
+  session replacement or reload THROWS rather than returning false. The existing
+  `this.#ctx?.hasUI` optional chaining only guarded the `undefined` that
+  `dispose()` leaves behind, not the stale object left when a session is replaced
+  without disposing this monitor. Because the read happened inside a bare
+  `setTimeout` callback, the throw escaped as an uncaughtException and killed the
+  session (reported in the wild from `runner.js` `assertActive` via `hasUI`).
+
+### Why an extension could not handle it
+
+- The armed continuation timer, the retained `#ctx`, and the continuation
+  admission path are all private state inside the builtin Goal extension; no
+  external hook observes or wraps that callback.
+
+### Expected merge conflict zones
+
+- LOW in `monitor-continuation.ts` around `#armTimer` and
+  `#buildContinuationContent` where the `hasUI` reads are now helper calls.
+
 ## 2026-08-24 - provider retry exhaustion uses guarded recovery
 
 ### What changed
