@@ -16,6 +16,14 @@ const DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS = 7;
 const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
 // Bun's macOS tty shim can report synchronous ioctl EIO as raw positive errno 5 without a string code.
 const EIO_ERRNO = 5;
+// Bun's tty shim can also drop both properties and leave the errno only in the message text
+// (`new Error("setRawMode failed with errno: 5")` - no `code`, no `errno`), so the numeric
+// fallback has to read the message. Restricted to errno values that are stable across darwin
+// and linux: EIO (5) and EPIPE (32). ENOTCONN is deliberately excluded because its number
+// differs per platform (57 on darwin, 107 on linux) and a wrong guess would swallow a live error.
+const EPIPE_ERRNO = 32;
+const DEAD_TERMINAL_ERRNOS = new Set([EIO_ERRNO, EPIPE_ERRNO]);
+const ERRNO_IN_MESSAGE_PATTERN = /errno:\s*(\d+)/;
 const KEYBOARD_PROTOCOL_RESPONSE_FRAGMENT_TIMEOUT_MS = 150;
 const KITTY_KEYBOARD_PROTOCOL_QUERY = `\x1b[>${DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS}u\x1b[?u\x1b[c`;
 
@@ -66,7 +74,10 @@ export function keyboardEnhancementEnabled(): boolean {
 function isDeadTerminalError(error: unknown): boolean {
 	if (!(error instanceof Error)) return false;
 	if ("code" in error && typeof error.code === "string") return DEAD_TERMINAL_ERROR_CODES.has(error.code);
-	return "errno" in error && error.errno === EIO_ERRNO;
+	if ("errno" in error && error.errno === EIO_ERRNO) return true;
+	const messageErrno = ERRNO_IN_MESSAGE_PATTERN.exec(error.message);
+	if (!messageErrno) return false;
+	return DEAD_TERMINAL_ERRNOS.has(Number.parseInt(messageErrno[1]!, 10));
 }
 
 /**
