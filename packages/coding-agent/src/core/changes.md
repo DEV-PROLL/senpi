@@ -1,5 +1,37 @@
 # changes
 
+## 2026-08-26 - Continue provider fallback after failed required compaction
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: Cursor token-bearing quota `resource_exhausted`
+  and eligible hard-error failures now advance the provider fallback chain when required pre-retry
+  compaction is rejected (`retryContinuationBlocked` no longer covers those two classes). Ordinary
+  transient retries remain compaction-blocked, and zero-token Cursor `resource_exhausted` keeps its
+  compact-before-rotate contract.
+- `packages/coding-agent/src/core/agent-session.ts`: the hard-error fallback not-switched path now
+  emits `retry_fallback_exhausted` when the configured chain has no usable candidate, mirroring the
+  refusal path.
+
+### Why
+
+- Cursor usage-pool exhaustion surfaces as `resource_exhausted` that also demands required
+  compaction; the compaction generator runs on the same dead lane and always fails, so the old
+  blocking wedged the turn ("Compaction rejected: compaction generator failed" then "Retry failed
+  after 1 attempts") and the fallback chain never advanced to the next provider.
+- The silent not-switched path gave the TUI no signal about why no fallback hop happened.
+
+### Why an extension could not handle it
+
+- `retryContinuationBlocked`, required-compaction admission, and fallback dispatch ordering are
+  private `AgentSession` agent_end lifecycle state; extensions observe compaction and fallback
+  events only after the core has already made the dispatch decision.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/coding-agent/src/core/agent-session.ts` agent_end retry/compaction dispatch
+  block and the `_handleRetryableError` hard-error branch.
+
 ## 2026-08-26 - Reject no-progress manual compaction before active abort
 
 ### What changed

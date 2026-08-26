@@ -2157,7 +2157,8 @@ export class AgentSession {
 			) {
 				this._retireFailedRetryAssistant(msg);
 				compactedBeforeRetry = await this._runPrePromptCompaction(msg, true, requiredAutoCompaction, true);
-				retryContinuationBlocked = !compactedBeforeRetry && !this._isCompactionDelegated();
+				retryContinuationBlocked =
+					!compactedBeforeRetry && !this._isCompactionDelegated() && !cursorQuotaRe && !hardErrorFallbackEligible;
 			}
 
 			let retryOutcome: "continued" | "blocked" | "not-handled" | "cancelled" = "not-handled";
@@ -7070,6 +7071,14 @@ export class AgentSession {
 				errorMessage,
 			});
 			if (!switchedFallback) {
+				const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+				if (exhaustedChainKey) {
+					this._emit({
+						type: "retry_fallback_exhausted",
+						chainKey: exhaustedChainKey,
+						lastError: errorMessage,
+					});
+				}
 				this._resolveRetry();
 				return "not-handled";
 			}
