@@ -1,3 +1,4 @@
+// allow: SIZE_OK - pre-existing cohesive shell integration; this patch only hardens its output-finalization seam.
 import { constants } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -408,19 +409,27 @@ export function createShellToolDefinition(
 			let updateTimer: NodeJS.Timeout | undefined;
 			let updateDirty = false;
 			let lastUpdateAt = 0;
+			let outputUpdateError: unknown;
+			let hasOutputUpdateError = false;
 
 			const emitOutputUpdate = () => {
-				if (!onUpdate || !updateDirty) return;
+				if (!onUpdate || !updateDirty || hasOutputUpdateError) return;
 				updateDirty = false;
 				lastUpdateAt = Date.now();
 				const snapshot = output.snapshot({ persistIfTruncated: true });
-				onUpdate({
-					content: [{ type: "text", text: snapshot.content || "" }],
-					details: {
-						truncation: snapshot.truncation.truncated ? snapshot.truncation : undefined,
-						fullOutputPath: snapshot.fullOutputPath,
-					},
-				});
+				try {
+					onUpdate({
+						content: [{ type: "text", text: snapshot.content || "" }],
+						details: {
+							truncation: snapshot.truncation.truncated ? snapshot.truncation : undefined,
+							fullOutputPath: snapshot.fullOutputPath,
+						},
+					});
+				} catch (error) {
+					if (!(error instanceof Error)) throw error;
+					outputUpdateError = error;
+					hasOutputUpdateError = true;
+				}
 			};
 
 			const clearUpdateTimer = () => {
@@ -457,11 +466,50 @@ export function createShellToolDefinition(
 
 			const finishOutput = async () => {
 				acceptingOutput = false;
-				output.finish();
 				clearUpdateTimer();
-				emitOutputUpdate();
-				const snapshot = output.snapshot({ persistIfTruncated: true });
-				await output.closeTempFile();
+				let primaryError: unknown;
+				let hasPrimaryError = false;
+				let snapshot: Awaited<ReturnType<OutputAccumulator["snapshot"]>> | undefined;
+				try {
+					output.finish();
+					emitOutputUpdate();
+					snapshot = output.snapshot({ persistIfTruncated: true });
+					if (hasOutputUpdateError) {
+						primaryError = outputUpdateError;
+						hasPrimaryError = true;
+					}
+				} catch (error) {
+					if (!(error instanceof Error)) throw error;
+					primaryError = error;
+					hasPrimaryError = true;
+				}
+				try {
+					await output.closeTempFile();
+				} catch (closeError) {
+					if (!(closeError instanceof Error)) throw closeError;
+					if (hasPrimaryError) {
+						throw new AggregateError(
+							[primaryError, closeError],
+							"Bash output finalization and spill cleanup failed",
+						);
+					}
+					throw closeError;
+				}
+				if (hasPrimaryError) {
+					try {
+						await output.removeTempFile();
+					} catch (unlinkError) {
+						if (!(unlinkError instanceof Error)) throw unlinkError;
+						throw new AggregateError(
+							[primaryError, unlinkError],
+							"Bash output finalization and spill cleanup failed",
+						);
+					}
+					throw primaryError;
+				}
+				if (snapshot === undefined) {
+					throw new Error("Bash output finalization produced no snapshot");
+				}
 				return snapshot;
 			};
 
@@ -498,7 +546,14 @@ export function createShellToolDefinition(
 					});
 					exitCode = result.exitCode;
 				} catch (err) {
-					const snapshot = await finishOutput();
+					if (!(err instanceof Error)) throw err;
+					let snapshot: Awaited<ReturnType<typeof finishOutput>>;
+					try {
+						snapshot = await finishOutput();
+					} catch (cleanupError) {
+						if (!(cleanupError instanceof Error)) throw cleanupError;
+						throw new AggregateError([err, cleanupError], "Bash command and output cleanup failed");
+					}
 					const { text } = formatOutput(snapshot, "");
 					if (err instanceof Error && err.message === "aborted") {
 						throw new Error(appendStatus(text, "Command aborted"));
@@ -506,6 +561,12 @@ export function createShellToolDefinition(
 					if (err instanceof Error && err.message.startsWith("timeout:")) {
 						const timeoutSecs = err.message.split(":")[1];
 						throw new Error(appendStatus(text, `Command timed out after ${timeoutSecs} seconds`));
+					}
+					try {
+						await output.removeTempFile();
+					} catch (unlinkError) {
+						if (!(unlinkError instanceof Error)) throw unlinkError;
+						throw new AggregateError([err, unlinkError], "Bash command and output cleanup failed");
 					}
 					throw err;
 				}

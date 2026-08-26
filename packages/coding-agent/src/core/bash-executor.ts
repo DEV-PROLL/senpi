@@ -8,6 +8,7 @@
 
 import { randomBytes } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripAnsi } from "../utils/ansi.ts";
@@ -98,23 +99,80 @@ export async function executeBashWithOperations(
 			return;
 		}
 		if (tempFileError) {
-			stream.destroy();
+			await new Promise<void>((resolve) => {
+				if (stream.closed) {
+					resolve();
+					return;
+				}
+				stream.once("close", resolve);
+				stream.destroy();
+			});
 			throw tempFileError;
 		}
 
 		await new Promise<void>((resolve, reject) => {
-			const onError = (error: Error) => {
+			let finished = false;
+			let closed = false;
+			let streamError: Error | undefined;
+			const settle = () => {
+				if (!closed) {
+					return;
+				}
 				stream.off("finish", onFinish);
-				reject(error);
+				stream.off("error", onError);
+				stream.off("close", onClose);
+				if (streamError) {
+					reject(streamError);
+				} else if (finished) {
+					resolve();
+				} else {
+					reject(new Error("Bash spill stream closed before finish"));
+				}
+			};
+			const onError = (error: Error) => {
+				streamError ??= error;
 			};
 			const onFinish = () => {
-				stream.off("error", onError);
-				resolve();
+				finished = true;
+			};
+			const onClose = () => {
+				closed = true;
+				if (!finished && !stream.destroyed) {
+					stream.destroy();
+				}
+				settle();
 			};
 			stream.once("error", onError);
 			stream.once("finish", onFinish);
+			stream.once("close", onClose);
 			stream.end();
 		});
+	};
+
+	const removeTempFile = async (): Promise<void> => {
+		if (!tempFilePath) {
+			return;
+		}
+		const path = tempFilePath;
+		tempFilePath = undefined;
+		await rm(path, { force: true });
+	};
+
+	const closeTempFileAndCleanup = async (primaryError: unknown): Promise<never> => {
+		let finalError = primaryError;
+		try {
+			await closeTempFileStream();
+		} catch (closeError) {
+			if (!(closeError instanceof Error)) throw closeError;
+			finalError = new AggregateError([primaryError, closeError], "Bash output cleanup failed");
+		}
+		try {
+			await removeTempFile();
+		} catch (unlinkError) {
+			if (!(unlinkError instanceof Error)) throw unlinkError;
+			finalError = new AggregateError([finalError, unlinkError], "Bash output cleanup failed");
+		}
+		throw finalError;
 	};
 
 	const decoder = new TextDecoder();
@@ -169,12 +227,8 @@ export async function executeBashWithOperations(
 			}
 			return { fullOutput, truncationResult };
 		} catch (error) {
-			try {
-				await closeTempFileStream();
-			} catch (closeError) {
-				throw new AggregateError([error, closeError], "Bash output finalization and spill cleanup failed");
-			}
-			throw error;
+			if (!(error instanceof Error)) throw error;
+			return await closeTempFileAndCleanup(error);
 		}
 	};
 
@@ -185,10 +239,16 @@ export async function executeBashWithOperations(
 			signal: options?.signal,
 		});
 	} catch (err) {
+		if (!(err instanceof Error)) throw err;
 		// Check if it was an abort
 		if (options?.signal?.aborted) {
 			const { fullOutput, truncationResult } = await prepareFinalOutput();
-			await closeTempFileStream();
+			try {
+				await closeTempFileStream();
+			} catch (error) {
+				if (!(error instanceof Error)) throw error;
+				return await closeTempFileAndCleanup(error);
+			}
 			return {
 				output: truncationResult.truncated ? truncationResult.content : fullOutput,
 				exitCode: undefined,
@@ -198,13 +258,16 @@ export async function executeBashWithOperations(
 			};
 		}
 
-		await closeTempFileStream();
-
-		throw err;
+		return await closeTempFileAndCleanup(err);
 	}
 
 	const { fullOutput, truncationResult } = await prepareFinalOutput();
-	await closeTempFileStream();
+	try {
+		await closeTempFileStream();
+	} catch (error) {
+		if (!(error instanceof Error)) throw error;
+		return await closeTempFileAndCleanup(error);
+	}
 	const cancelled = options?.signal?.aborted ?? false;
 
 	return {

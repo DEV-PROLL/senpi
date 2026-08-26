@@ -1,5 +1,7 @@
+// allow: SIZE_OK - one cohesive streaming-output state machine owns decoding, truncation, spill, and terminal cleanup.
 import { randomBytes } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TailWindow } from "./tail-window.ts";
@@ -145,23 +147,68 @@ export class OutputAccumulator {
 			return;
 		}
 		if (this.tempFileError) {
-			stream.destroy();
+			await new Promise<void>((resolve) => {
+				if (stream.closed) {
+					resolve();
+					return;
+				}
+				stream.once("close", resolve);
+				stream.destroy();
+			});
+			try {
+				await this.removeTempFile();
+			} catch (unlinkError) {
+				throw new AggregateError([this.tempFileError, unlinkError], "Output spill cleanup failed");
+			}
 			throw this.tempFileError;
 		}
 
-		await new Promise<void>((resolve, reject) => {
-			const onError = (error: Error) => {
-				stream.off("finish", onFinish);
-				reject(error);
-			};
-			const onFinish = () => {
-				stream.off("error", onError);
-				resolve();
-			};
-			stream.once("error", onError);
-			stream.once("finish", onFinish);
-			stream.end();
-		});
+		try {
+			await new Promise<void>((resolve, reject) => {
+				let finished = false;
+				let closed = false;
+				let streamError: Error | undefined;
+				const settle = () => {
+					if (!closed) {
+						return;
+					}
+					stream.off("finish", onFinish);
+					stream.off("error", onError);
+					stream.off("close", onClose);
+					if (streamError) {
+						reject(streamError);
+					} else if (finished) {
+						resolve();
+					} else {
+						reject(new Error("Output spill stream closed before finish"));
+					}
+				};
+				const onError = (error: Error) => {
+					streamError ??= error;
+				};
+				const onFinish = () => {
+					finished = true;
+				};
+				const onClose = () => {
+					closed = true;
+					if (!finished && !stream.destroyed) {
+						stream.destroy();
+					}
+					settle();
+				};
+				stream.once("error", onError);
+				stream.once("finish", onFinish);
+				stream.once("close", onClose);
+				stream.end();
+			});
+		} catch (error) {
+			try {
+				await this.removeTempFile();
+			} catch (unlinkError) {
+				throw new AggregateError([error, unlinkError], "Output spill cleanup failed");
+			}
+			throw error;
+		}
 	}
 
 	getLastLineBytes(): number {
@@ -223,6 +270,15 @@ export class OutputAccumulator {
 			this.tempFileStream.write(chunk);
 		}
 		this.rawChunks = [];
+	}
+
+	async removeTempFile(): Promise<void> {
+		if (!this.tempFilePath) {
+			return;
+		}
+		const path = this.tempFilePath;
+		this.tempFilePath = undefined;
+		await rm(path, { force: true });
 	}
 
 	private takeTempFileStream(): WriteStream | undefined {

@@ -7,6 +7,10 @@
 - `output-accumulator.ts`: attaches an `error` listener when its full-output `WriteStream` is
   created, records the first failure, and rejects `closeTempFile()` even when the failure happened
   before close began.
+- `output-accumulator.ts`: waits for terminal `close` rather than `finish`, rejects premature close,
+  and removes failed unreturnable spills while preserving successful paths.
+- `bash.ts`: captures streaming/final update callback failures, always closes the active
+  `OutputAccumulator`, and aggregates cleanup failures without masking the callback error.
 
 ### Why
 
@@ -21,6 +25,7 @@
 ### Expected merge conflict zones
 
 - LOW: `output-accumulator.ts` stream creation and close lifecycle.
+- MEDIUM: `output-accumulator.ts` close/removal policy and `bash.ts` final update settlement.
 
 ## Tooling layer re-diverges from upstream dcd4619 (2026-08-25)
 
