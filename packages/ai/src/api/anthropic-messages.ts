@@ -2195,6 +2195,23 @@ function convertToolResult(
 	};
 }
 
+function appendUserBlocks(params: MessageParam[], newBlocks: ContentBlockParam[]): void {
+	if (newBlocks.length === 0) return;
+	const lastParam = params[params.length - 1];
+	if (lastParam && lastParam.role === "user") {
+		if (typeof lastParam.content === "string") {
+			lastParam.content = [{ type: "text", text: lastParam.content }, ...newBlocks];
+		} else if (Array.isArray(lastParam.content)) {
+			(lastParam.content as ContentBlockParam[]).push(...newBlocks);
+		}
+	} else {
+		params.push({
+			role: "user",
+			content: newBlocks,
+		});
+	}
+}
+
 function convertMessages(
 	transformedMessages: Message[],
 	model: Model<"anthropic-messages">,
@@ -2224,10 +2241,12 @@ function convertMessages(
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
 				if (msg.content.trim().length > 0) {
-					params.push({
-						role: "user",
-						content: sanitizeSurrogates(msg.content),
-					});
+					appendUserBlocks(params, [
+						{
+							type: "text",
+							text: sanitizeSurrogates(msg.content),
+						},
+					]);
 				}
 			} else {
 				const blocks: ContentBlockParam[] = msg.content.map((item) => {
@@ -2263,10 +2282,7 @@ function convertMessages(
 					return true;
 				});
 				if (filteredBlocks.length === 0) continue;
-				params.push({
-					role: "user",
-					content: filteredBlocks,
-				});
+				appendUserBlocks(params, filteredBlocks);
 			}
 		} else if (msg.role === "assistant") {
 			const blocks: ContentBlockParam[] = [];
@@ -2388,10 +2404,7 @@ function convertMessages(
 			if (toolResults.length === 0) continue;
 
 			// Displaced reference-bearing results must follow every tool_result block.
-			params.push({
-				role: "user",
-				content: [...toolResults, ...siblingContent],
-			});
+			appendUserBlocks(params, [...toolResults, ...siblingContent]);
 		}
 	}
 
