@@ -78,6 +78,24 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 
 ## Unreleased
 
+## 2026-08-26 - Coalesce adjacent Anthropic user turns
+
+### What changed
+
+- `api/anthropic-messages.ts` now appends adjacent user content and trailing tool-result blocks to the existing Anthropic user message instead of emitting consecutive `user` roles.
+
+### Why
+
+- Interrupted tool turns and consecutively dispatched user messages could produce adjacent Anthropic user messages, which the API rejects because message roles must alternate.
+
+### Why an extension could not handle it
+
+- Anthropic wire-message serialization occurs inside the provider adapter after extension-visible message handling, so an extension cannot repair the final role sequence safely.
+
+### Expected merge conflict zones
+
+- LOW: `api/anthropic-messages.ts` around `convertMessages()` user and tool-result serialization.
+
 ## 2026-08-25 - Harden bounded retry jitter and provider abort metadata
 
 ### What changed
