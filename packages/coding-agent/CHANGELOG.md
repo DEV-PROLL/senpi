@@ -10,6 +10,7 @@
 - Idle warm compaction now applies as soon as its summary finishes generating while the session is idle, so the `[compaction]` block renders during the idle gap and the next message stacks below it instead of the prompt waiting behind a compaction that was generated minutes earlier; stale or racy applies keep the previous warm-hold behavior.
 - The canonical user message no longer renders above the `[compaction]` block when a compaction applies during prompt admission: the pending-echo reconciliation now appends it after the rebuilt transcript, matching the session's canonical order.
 - An uncaught dead-terminal error (e.g. a stdin read EIO after the controlling terminal detached) no longer prints the `exiting due to uncaughtException` banner and exits 1: `uncaughtCrash` routes it to the silent `emergencyTerminalExit()`, matching terminal write errors. `isDeadTerminalError` now also accepts Bun's raw `errno: 5`/`-5` shape.
+- config-reload no longer rejects a directory watch target that covers the agent directory when every filter glob is root-anchored and none of the anchored paths intersects a protected path (`auth.json`, `sessions/`, `logs/`) in either direction. With the default `~/.omo/agent` layout this lets the omo extension's `~/.omo` user-config watch register instead of failing with "Configuration watch target is restricted" (code-yeongyu/oh-my-openagent#7064). Unfiltered targets, unanchored filters, and filters resolving into or onto a protected path stay rejected.
 ### Added
 
 ### Changed
