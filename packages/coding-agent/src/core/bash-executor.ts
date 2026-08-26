@@ -60,6 +60,7 @@ export async function executeBashWithOperations(
 
 	let tempFilePath: string | undefined;
 	let tempFileStream: WriteStream | undefined;
+	let tempFileError: Error | undefined;
 	let totalBytes = 0;
 
 	const compactOutputChunks = () => {
@@ -79,6 +80,9 @@ export async function executeBashWithOperations(
 		const id = randomBytes(8).toString("hex");
 		tempFilePath = join(tmpdir(), `pi-bash-${id}.log`);
 		tempFileStream = createWriteStream(tempFilePath);
+		tempFileStream.on("error", (error) => {
+			tempFileError ??= error;
+		});
 		for (let i = outputChunkStart; i < outputChunks.length; i++) {
 			const chunk = outputChunks[i];
 			if (chunk !== undefined) {
@@ -92,6 +96,10 @@ export async function executeBashWithOperations(
 		tempFileStream = undefined;
 		if (!stream) {
 			return;
+		}
+		if (tempFileError) {
+			stream.destroy();
+			throw tempFileError;
 		}
 
 		await new Promise<void>((resolve, reject) => {

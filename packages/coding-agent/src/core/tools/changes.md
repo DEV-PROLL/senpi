@@ -1,5 +1,27 @@
 # core/tools changes
 
+## Output spill streams capture early storage failures (2026-08-26)
+
+### What changed
+
+- `output-accumulator.ts`: attaches an `error` listener when its full-output `WriteStream` is
+  created, records the first failure, and rejects `closeTempFile()` even when the failure happened
+  before close began.
+
+### Why
+
+- Bash output can cross the in-memory limit while `/tmp` is quota-exhausted. The stream previously
+  had no listener until `closeTempFile()`, so an early `EDQUOT`/`ENOSPC` event reached
+  `uncaughtException` and killed the TUI. The normal tool promise now owns that failure.
+
+### Why an extension could not handle it
+
+- The built-in shell tool writes the spill stream before extension result hooks run.
+
+### Expected merge conflict zones
+
+- LOW: `output-accumulator.ts` stream creation and close lifecycle.
+
 ## Tooling layer re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed

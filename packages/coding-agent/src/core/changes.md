@@ -1,5 +1,29 @@
 # changes
 
+## 2026-08-26 - Capture bash spill-file errors before the first write
+
+### What changed
+
+- `packages/coding-agent/src/core/bash-executor.ts`: attaches an `error` listener as soon as the
+  full-output `WriteStream` is created, records the first failure, and rejects the bash execution
+  through the existing close boundary even when the stream failed before command settlement.
+
+### Why
+
+- A full `/tmp` or exhausted user quota can make the spill stream emit `ENOSPC` or `EDQUOT` while
+  command output is still arriving. The only previous listener was installed after execution
+  finished, so the early `error` event escaped to the process-level `uncaughtException` handler and
+  terminated the interactive session instead of failing only the bash tool call.
+
+### Why an extension could not handle it
+
+- The stream is created and written inside the core bash executor before extension result hooks
+  receive control.
+
+### Expected merge conflict zones
+
+- LOW: the temp-file stream creation and close lifecycle in `bash-executor.ts`.
+
 ## 2026-08-26 - Continue provider fallback after failed required compaction
 
 ### What changed
