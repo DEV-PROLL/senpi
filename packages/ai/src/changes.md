@@ -58,7 +58,7 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 - Import blocks and option-mapping functions of every listed `packages/ai/src/api/*.ts` file, and the
   export list of `packages/ai/src/index.ts` — upstream touches these on nearly every provider change.
 
-## 2026-08-26 - Detect Kiro byte-limit rejections as context overflow
+## 2026-08-26 - Detect Kiro payload-limit/context-limit rejections as context overflow
 
 ### What changed
 
