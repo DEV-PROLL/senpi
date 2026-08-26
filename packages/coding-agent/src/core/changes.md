@@ -11,8 +11,9 @@
   abort signal cannot reinterpret a spill close failure as a successful cancelled result.
 - Decoder flushing and output preparation now close the spill stream before propagating a callback
   or formatting failure; if cleanup also fails, both errors are preserved in an `AggregateError`.
-- Spill finalization now settles only after terminal `close`, rejects premature close, and preserves
-  command-plus-close failures in causal `AggregateError` order.
+- `packages/coding-agent/src/core/bash-executor.ts`: spill finalization now settles only after
+  terminal `close`, rejects premature close, and preserves command-plus-close failures in causal
+  `AggregateError` order.
 - Failed executor spills are removed after stream teardown; successful and surfaced cancelled
   results retain their readable `fullOutputPath`, and removal failures are preserved after the
   primary error.
