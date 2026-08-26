@@ -1,6 +1,6 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import compactionExtension from "../../../src/core/extensions/builtin/compaction/index.ts";
 import { afterEach, describe, expect, it } from "vitest";
+import compactionExtension from "../../../src/core/extensions/builtin/compaction/index.ts";
 import type { CompactionReason } from "../../../src/core/extensions/types.ts";
 import { createHarness, type Harness } from "../harness.ts";
 
@@ -39,11 +39,11 @@ describe("Cursor token-bearing resource_exhausted quota fallback", () => {
 				retry: { enabled: true, maxRetries: 0, baseDelayMs: 1, fallbackChains: { [PRIMARY]: [FALLBACK] } },
 			},
 			extensionFactories: [
-			compactionExtension,
-			(pi) => {
-				pi.on("session_before_compact", () => ({ cancel: true }));
-			},
-		],
+				compactionExtension,
+				(pi) => {
+					pi.on("session_before_compact", () => ({ cancel: true }));
+				},
+			],
 		});
 		harnesses.push(harness);
 		const originalStream = harness.agent.streamFunction;

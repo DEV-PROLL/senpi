@@ -93,7 +93,10 @@ describe("retry fallback hard errors", () => {
 		harnesses.push(harness);
 		const internals = harness.session as unknown as {
 			_retryFallback: { exhaustedChainKey: string; tryFallback: () => Promise<boolean> };
-			_handleRetryableError: (message: ReturnType<typeof fauxAssistantMessage>, options: { hardErrorFallback: boolean }) => Promise<string>;
+			_handleRetryableError: (
+				message: ReturnType<typeof fauxAssistantMessage>,
+				options: { hardErrorFallback: boolean },
+			) => Promise<string>;
 		};
 		Object.defineProperty(internals._retryFallback, "exhaustedChainKey", { value: primary, configurable: true });
 		internals._retryFallback.tryFallback = async () => false;
