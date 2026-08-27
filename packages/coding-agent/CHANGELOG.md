@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Imagegen missing-skill diagnostics now go to stderr, keeping RPC NDJSON stdout clean when a compiled binary lacks the optional skill asset.
+
 ### Removed
 
 ## [2026.8.27] - 2026-08-27

@@ -1,5 +1,25 @@
 # imagegen builtin — changes
 
+## RPC-safe missing-skill diagnostics (2026-08-27)
+
+### What changed
+
+- Missing bundled-skill diagnostics now route to stderr instead of stdout.
+- Added regression coverage proving the notice is emitted once without writing to stdout.
+
+### Why
+
+- Bun-compiled RPC binaries can legitimately lack the optional skill file at the module URL. Writing that diagnostic to stdout corrupts the NDJSON RPC wire.
+
+### Why an extension could not handle it
+
+- The diagnostic is emitted inside the builtin extension's resource-discovery path before any downstream extension can redirect the stream.
+
+### Expected merge conflict zones
+
+- LOW: `index.ts` missing-skill branch and `test/imagegen-skill-gating.test.ts` diagnostic assertions.
+
+
 ## 2026-08-13 - Materialize nullable headers only at image requests
 
 ### What changed

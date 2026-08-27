@@ -26,7 +26,7 @@ function bundledSkillPath(baseDir: string): string | undefined {
 	if (existsSync(skillPath)) return skillPath;
 	if (!loggedMissingSkill) {
 		loggedMissingSkill = true;
-		console.debug(`[imagegen] bundled skill not found at ${skillPath}; skipping contribution`);
+		console.error(`[imagegen] bundled skill not found at ${skillPath}; skipping contribution`);
 	}
 	return undefined;
 }
