@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- Goal tool results (`create_goal`, `update_goal`, `get_goal`) now render as a TUI widget — status-colored header with compact token and elapsed usage, objective preview (full objective plus created/updated timestamps when expanded), and the blocked reason — instead of dumping the raw JSON payload into the transcript. The model-facing JSON result text is unchanged.
 - Native todo lists with an explicit empty `todos: []` payload now clear persisted todo state and remove the `todo-sidebar`, while absent payloads remain ignored and lists with pending work remain visible.
 - Bash output spill files now capture early `EDQUOT`/`ENOSPC` stream errors and late filesystem
   close failures, waiting for the stream's terminal `close` event and failing only the tool call
