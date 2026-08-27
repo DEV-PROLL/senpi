@@ -17,6 +17,7 @@ import {
 	type DeferredCancelOptions,
 	type DeferredFetchOptions,
 	type DeferredHandle,
+	getApiKeyEnvVars,
 	lazyStream,
 	type Model,
 	type Models,
@@ -43,12 +44,7 @@ import { APP_NAME, BRAND, getAgentDir } from "../config.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
 import { envValue } from "./brand.ts";
-import {
-	listRotationSlots,
-	type RotationSources,
-	streamWithCredentialRotation,
-} from "./credential-pool/rotation-stream.ts";
-import { CredentialSlotRepository } from "./credential-pool/state-store.ts";
+import type { RotationSources } from "./credential-pool/rotation-stream.ts";
 import { ModelConfig } from "./model-config.ts";
 import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.ts";
 import {
@@ -110,6 +106,35 @@ export interface ModelRuntimeAuthOverrides extends AuthOperationOptions {
  * distributes requests instead of concentrating them.
  */
 export type CredentialRotationStreamOptions = StreamOptions & ModelsRequestTransforms & { affinityKey?: string };
+
+/**
+ * Cheap pre-check answering "could this provider hold more than one credential
+ * at all?" without loading the credential pool. A stored entry pools only
+ * through `accounts`; env slots participate only when nothing is stored, and a
+ * lone primary variable is still a single credential.
+ */
+function mightHoldEnvCredentialPool(providerId: string, env: (name: string) => string | undefined): boolean {
+	const envVars = getApiKeyEnvVars(providerId);
+	const primary = envVars?.find((name) => name.endsWith("_API_KEY")) ?? envVars?.[0];
+	if (primary === undefined) return false;
+	let found = env(primary) ? 1 : 0;
+	for (let index = 2; index <= 16 && found < 2; index++) {
+		if (env(`${primary}_${index}`)) found++;
+	}
+	return found > 1;
+}
+
+function mightHoldCredentialPool(
+	providerId: string,
+	credential: Credential | undefined,
+	env: (name: string) => string | undefined,
+): boolean {
+	if (credential) {
+		const accounts = Object.entries(credential).find(([key]) => key === "accounts")?.[1];
+		return Array.isArray(accounts) && accounts.length > 1;
+	}
+	return mightHoldEnvCredentialPool(providerId, env);
+}
 
 export type CredentialSynchronizationOperation = "login" | "logout" | "setRuntimeApiKey" | "removeRuntimeApiKey";
 
@@ -185,7 +210,18 @@ export class ModelRuntime implements Models {
 	private readonly providerAvailabilitySeq = new Map<string, number>();
 	private availabilityError: string | undefined;
 	private readonly credentialOperations = new Map<string, Promise<unknown>>();
-	private readonly credentialSlots = new CredentialSlotRepository();
+	/**
+	 * The credential pool is loaded lazily and only for a provider that actually
+	 * has more than one slot. Importing it eagerly would pull the pool's schema
+	 * validator - and its module-level global registry - into every consumer of
+	 * ModelRuntime, which the import-graph guard forbids.
+	 */
+	private credentialPoolModules:
+		| Promise<{
+				rotation: typeof import("./credential-pool/rotation-stream.ts");
+				repository: InstanceType<typeof import("./credential-pool/state-store.ts").CredentialSlotRepository>;
+		  }>
+		| undefined;
 	private constructor(
 		credentials: RuntimeCredentials,
 		config: ModelConfig,
@@ -711,21 +747,47 @@ export class ModelRuntime implements Models {
 	 * (a runtime key or an explicit per-request apiKey). Every single-credential
 	 * user therefore keeps byte-identical request behavior.
 	 */
+	private loadCredentialPool(): NonNullable<typeof this.credentialPoolModules> {
+		this.credentialPoolModules ??= (async () => {
+			const [rotation, stateStore] = await Promise.all([
+				import("./credential-pool/rotation-stream.ts"),
+				import("./credential-pool/state-store.ts"),
+			]);
+			return { rotation, repository: new stateStore.CredentialSlotRepository() };
+		})();
+		return this.credentialPoolModules;
+	}
+
+	/**
+	 * Fully synchronous admission check. A provider that cannot possibly hold a
+	 * pool must not even reach the async rotation path: awaiting an async method
+	 * costs a microtask hop, which would reorder an ordinary request's provider
+	 * call relative to the untouched `streamSimple` path.
+	 */
+	private couldRotateCredentials(model: Model<Api>, options: CredentialRotationStreamOptions | undefined): boolean {
+		if (options?.apiKey !== undefined) return false;
+		if (this.credentials.hasRuntimeApiKey(model.provider)) return false;
+		if (this.config.getProvider(model.provider)?.credentials?.rotation === false) return false;
+		const env = (name: string) => options?.env?.[name] ?? process.env[name];
+		if (this.snapshot.storedProviders.has(model.provider)) return true;
+		return mightHoldEnvCredentialPool(model.provider, env);
+	}
+
 	private async credentialRotationSources(
 		model: Model<Api>,
 		options: CredentialRotationStreamOptions | undefined,
 	): Promise<RotationSources | undefined> {
-		if (options?.apiKey !== undefined) return undefined;
-		if (this.credentials.hasRuntimeApiKey(model.provider)) return undefined;
-		if (this.config.getProvider(model.provider)?.credentials?.rotation === false) return undefined;
+		const env = (name: string) => options?.env?.[name] ?? process.env[name];
 		const credential = await this.credentials.read(model.provider, { signal: options?.signal });
+		if (!mightHoldCredentialPool(model.provider, credential, env)) return undefined;
+		const pool = await this.loadCredentialPool();
 		const sources: RotationSources = {
 			providerId: model.provider,
 			credential,
-			env: (name: string) => options?.env?.[name] ?? process.env[name],
-			repository: this.credentialSlots,
+			env,
+			repository: pool.repository,
 		};
-		const slots = await listRotationSlots(sources);
+		const slots = await pool.rotation.listRotationSlots(sources);
 		return slots.length > 1 ? sources : undefined;
 	}
 
@@ -736,9 +798,12 @@ export class ModelRuntime implements Models {
 	): AssistantMessageEventStream {
 		return lazyStream(model, async () => {
 			const streamOptions = options as CredentialRotationStreamOptions | undefined;
-			const sources = await this.credentialRotationSources(model, streamOptions);
+			const sources = this.couldRotateCredentials(model, streamOptions)
+				? await this.credentialRotationSources(model, streamOptions)
+				: undefined;
 			if (sources) {
-				return streamWithCredentialRotation({
+				const { rotation } = await this.loadCredentialPool();
+				return rotation.streamWithCredentialRotation({
 					sources,
 					...(streamOptions?.affinityKey === undefined ? {} : { affinityKey: streamOptions.affinityKey }),
 					runAttempt: async (slot) => {
