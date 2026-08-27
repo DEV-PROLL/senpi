@@ -216,7 +216,7 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 
 ### What changed
 
-- `scripts/generate-models.ts`: direct `openai` and ChatGPT OAuth `openai-codex` entries for `gpt-5.6-sol`
+- `packages/ai/scripts/generate-models.ts`: direct `openai` and ChatGPT OAuth `openai-codex` entries for `gpt-5.6-sol`
   now default to a 650,000-token context window. Their generated `-fast` variants inherit the same limit.
 - `test/openai-fast-models.test.ts`: covers both providers and both base/fast Sol IDs.
 - `src/providers/data/*.json`: regenerated committed catalog data and manifest carry the new default.
