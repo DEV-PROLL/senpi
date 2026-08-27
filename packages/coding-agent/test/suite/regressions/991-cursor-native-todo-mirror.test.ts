@@ -18,9 +18,7 @@ describe("phasesFromCursorTodos", () => {
 				]) ?? [],
 			),
 		).toBeUndefined();
-		expect(
-			getTodoWidgetLines(phasesFromCursorTodos([{ content: "build", status: "pending" }]) ?? []),
-		).toBeDefined();
+		expect(getTodoWidgetLines(phasesFromCursorTodos([{ content: "build", status: "pending" }]) ?? [])).toBeDefined();
 	});
 
 	it("turns native Cursor todos into one Tasks phase", () => {

@@ -685,18 +685,6 @@ export async function main(args: string[], options?: MainOptions) {
 		return;
 	}
 
-	// Internal launch surface used by bundled/rebranded runtimes. It is deliberately
-	// not accepted by parseArgs, so existing CLI modes remain unchanged.
-	if (args[0] === "--internal-rpc-host-supervisor") {
-		const launch = parseSupervisorArgs(args.slice(1));
-		if (!launch) {
-			console.error("invalid internal RPC host supervisor arguments");
-			process.exit(2);
-		}
-		await runHostSupervisor(launch);
-		return;
-	}
-
 	if (process.platform === "win32") {
 		cleanupWindowsSelfUpdateQuarantine(getPackageDir());
 	}
@@ -1092,7 +1080,7 @@ export async function main(args: string[], options?: MainOptions) {
 	});
 	time("createAgentSessionRuntime");
 	let selectedRuntime = runtime;
-	if (appMode === "interactive") {
+	if (appMode === "interactive" && !isTruthyEnvFlag(envValue("DISABLE_SHARED_HOST"))) {
 		const socket = envValue("RPC_SOCKET") ?? resolve(agentDir, "rpc", "rpc.sock");
 		selectedRuntime = await createInteractiveHostRuntime(runtime, {
 			socket,

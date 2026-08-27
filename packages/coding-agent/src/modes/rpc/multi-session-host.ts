@@ -1,4 +1,4 @@
-import { access, mkdir, unlink } from "node:fs/promises";
+import { access, chmod, mkdir, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
 import type { CreateAgentSessionRuntimeFactory } from "../../core/agent-session-runtime.ts";
@@ -256,8 +256,9 @@ function probeSocket(socketPath: string): Promise<boolean> {
 function listen(server: Server, socketPath: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(socketPath, () => {
+		server.listen(socketPath, async () => {
 			server.off("error", reject);
+			if (!socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
 			resolve();
 		});
 	});

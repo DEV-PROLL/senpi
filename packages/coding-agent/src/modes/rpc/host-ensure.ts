@@ -131,7 +131,7 @@ async function startHost(
 		})}\n`,
 		{ mode: 0o600 },
 	);
-	const stderr = await open(paths.stderrLog, "w");
+	const stderr = await open(paths.stderrLog, "w", 0o600);
 	let pidFile: DaemonPidFile | undefined;
 	try {
 		const launch = testOptions?.spawn ?? defaultHostLaunch(socket, testOptions?.hostArgs ?? []);

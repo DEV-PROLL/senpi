@@ -278,6 +278,41 @@ describe("RPC Unix-socket multi-connection host", () => {
 		}
 	});
 
+	it("broadcasts session closure to observers while targeting the close response", async () => {
+		const qa = scratch("close-observer");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const child = spawnRpc(
+			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL],
+			qa,
+		);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const a = await connectPeer(qa.socketPath);
+		const b = await connectPeer(qa.socketPath);
+		try {
+			const opened = await a.peer.request({ id: "close-open", type: "open_session", cwd: qa.cwd });
+			const sessionId = openedSessionId(opened);
+			const observerClosed = b.peer.waitFor(
+				(value) => value.type === "session_closed" && value.sessionId === sessionId,
+			);
+			const requesterResponse = a.peer.request({ id: "close-request", type: "close_session", sessionId });
+			await expect(requesterResponse).resolves.toMatchObject({
+				type: "response",
+				command: "close_session",
+				success: true,
+				sessionId,
+			});
+			await expect(observerClosed).resolves.toMatchObject({ type: "session_closed", sessionId });
+			expect(b.peer.messages.some((value) => value.id === "close-request")).toBe(false);
+		} finally {
+			a.peer.close();
+			a.socket.destroy();
+			b.peer.close();
+			b.socket.destroy();
+			await fake.close();
+		}
+	});
+
 	it("matches classic stdio JSONL for an identical command sequence modulo generated ids and routing tags", async () => {
 		const socketQa = scratch("diff-socket");
 		const stdioQa = scratch("diff-stdio");

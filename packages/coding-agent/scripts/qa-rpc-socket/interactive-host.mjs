@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
@@ -11,10 +12,11 @@ import { cleanupAllAndWait, installCleanupHooks, makeScratch, startFakeModelServ
 
 const lines = [];
 const outPath = flag("--out");
+let scratch;
 installCleanupHooks();
 
 try {
-	const scratch = makeScratch("interactive-host");
+	scratch = makeScratch("interactive-host");
 	const fake = await startFakeModelServer([{ text: "interactive-host-qa" }]);
 	writeMockModelsJson(scratch.agentDir, fake);
 	const socket = join(scratch.dir, "rpc.sock");
@@ -73,8 +75,20 @@ try {
 	lines.push(`FAIL ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
 	process.exitCode = 1;
 } finally {
+	if (scratch) {
+		const pidPath = join(scratch.agentDir, "rpc-host-daemon", "host.pid");
+		if (existsSync(pidPath)) {
+			const { pid } = JSON.parse(readFileSync(pidPath, "utf8"));
+			if (Number.isInteger(pid)) {
+				process.kill(pid, "SIGTERM");
+				await waitForExit(pid, 5000);
+				if (isAlive(pid)) throw new Error(`ensured supervisor still alive after cleanup: ${pid}`);
+				lines.push(`cleanup=supervisor-stopped pid=${pid}`);
+			}
+		}
+	}
 	await cleanupAllAndWait();
-	lines.push("cleanup=managed-host,sockets,scratch-closed");
+	lines.push("cleanup=sockets,scratch-removed,supervisor-stopped");
 	if (outPath) writeFileSync(outPath, `${lines.join("\n")}\n`);
 	process.stdout.write(`${lines.join("\n")}\n`);
 }
@@ -82,4 +96,21 @@ try {
 function flag(name) {
 	const index = process.argv.indexOf(name);
 	return index === -1 ? undefined : process.argv[index + 1];
+}
+
+function isAlive(pid) {
+	try {
+		process.kill(pid, 0);
+		const state = execFileSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8" }).trim();
+		return state.length > 0 && !state.startsWith("Z");
+	} catch {
+		return false;
+	}
+}
+
+async function waitForExit(pid, timeoutMs) {
+	const deadline = Date.now() + timeoutMs;
+	while (isAlive(pid) && Date.now() < deadline) {
+		await new Promise((resolve) => setImmediate(resolve));
+	}
 }

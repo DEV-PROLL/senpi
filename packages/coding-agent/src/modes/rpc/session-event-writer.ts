@@ -167,6 +167,10 @@ export class SessionEventWriter {
 		if (this.sealedSessions.has(sessionId)) return;
 		this.sealedSessions.add(sessionId);
 		const targetId = this.connectionContext.getStore();
+		const lifecycle = { type: "session_closed", sessionId };
+		for (const connectionId of this.connections.keys()) {
+			this.appendSessionRecord(sessionId, lifecycle, connectionId);
+		}
 		this.appendSessionRecord(sessionId, { ...response, sessionId }, targetId);
 		this.requestFlush();
 	}
