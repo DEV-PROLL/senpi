@@ -12,6 +12,7 @@ import {
 } from "./edit-diff.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToolPath } from "./path-utils.ts";
+import { appendPostMutateNote, runPostMutate } from "./post-mutate.ts";
 import type { ExecutionToolContext } from "./tool-context.ts";
 
 const replaceEditSchema = Type.Object(
@@ -99,7 +100,7 @@ export function createEditTool<TContext extends ExecutionToolContext = Execution
 			"Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
 		parameters: editSchema,
 		prepareArguments: prepareEditArguments,
-		async execute(_toolCallId, input, signal, _onUpdate, { env }) {
+		async execute(_toolCallId, input, signal, _onUpdate, { env, postMutate }) {
 			const { path, edits } = validateEditInput(input);
 			const absolutePath = await resolveToolPath(env, path, signal);
 			return withFileMutationQueue(env, absolutePath, async () => {
@@ -125,12 +126,26 @@ export function createEditTool<TContext extends ExecutionToolContext = Execution
 				if (!writeResult.ok) throw editAccessError(path, writeResult.error);
 				if (signal?.aborted) throw new Error("Operation aborted");
 
-				const diffResult = generateDiffString(baseContent, newContent);
+				const outcome = await runPostMutate(postMutate, { tool: "edit", path: absolutePath, signal });
+				if (signal?.aborted) throw new Error("Operation aborted");
+
+				let committedContent = newContent;
+				if (outcome.fileMayHaveChanged) {
+					const postMutateRead = await env.readTextFile(absolutePath, signal);
+					if (!postMutateRead.ok) throw editAccessError(path, postMutateRead.error);
+					committedContent = normalizeToLF(stripBom(postMutateRead.value).text);
+				}
+
+				const diffResult = generateDiffString(baseContent, committedContent);
+				const text = appendPostMutateNote(
+					`Successfully replaced ${edits.length} block(s) in ${path}.`,
+					outcome.note,
+				);
 				return {
-					content: [{ type: "text", text: `Successfully replaced ${edits.length} block(s) in ${path}.` }],
+					content: [{ type: "text", text }],
 					details: {
 						diff: diffResult.diff,
-						patch: generateUnifiedPatch(path, baseContent, newContent),
+						patch: generateUnifiedPatch(path, baseContent, committedContent),
 						firstChangedLine: diffResult.firstChangedLine,
 					},
 				};
