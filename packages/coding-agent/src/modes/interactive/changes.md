@@ -1,5 +1,23 @@
 # changes
 
+## Footer shows the active credential account (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/footer.ts`: when the active provider pools more than one credential slot, the footer's provider prefix becomes `(provider@account)` - the pinned slot when present, else the session's HRW winner computed with the same sha256 hash the rotation engine uses. Flat single credentials render exactly as before, and a credential-storage read failure never breaks footer rendering. Exported `accountFooterSuffix` keeps the logic unit-testable.
+
+### Why
+
+- With rotation on by default, the operator needs to see WHICH account a session is riding without opening /account; mirroring the provider-only-when->1 rule keeps single-account setups noise-free.
+
+### Why an extension could not handle it
+
+- The footer is a core interactive component; extensions cannot compose its right-side segments.
+
+### Expected merge conflict zones
+
+- LOW: right-side prefix composition in `formatSegments`.
+
 ## 2026-08-26 - Record uncaught crashes in the brand debug log
 
 ### What changed

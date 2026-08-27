@@ -1,3 +1,21 @@
+## 2026-08-27 - Storage docs describe pooled entries
+
+### What changed
+
+- `packages/ai/src/auth/types.ts`, `packages/ai/src/auth/credential-store.ts`: the "one credential per provider" doc comments now say one ENTRY per provider, where an entry may pool sibling slots under `accounts` while its flat fields remain a valid credential (matching `auth/AGENTS.md`).
+
+### Why
+
+- The old sentence contradicted the shipped pooled-entry contract; stale invariants misdirect future changes into destroying sibling slots.
+
+### Why an extension could not handle it
+
+- Doc comments live in the module source.
+
+### Expected merge conflict zones
+
+- LOW: comment-only hunks.
+
 ## 2026-08-27 - Export the canonical provider API-key env-var mapping
 
 ### What changed

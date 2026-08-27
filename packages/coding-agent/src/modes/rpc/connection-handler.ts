@@ -23,15 +23,15 @@ import type { AgentSession } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
 import {
+	getCredentialAccounts,
+	pinCredentialAccount,
+	removeCredentialAccount,
+} from "../../core/credential-accounts.ts";
+import {
 	emitProviderAccountsChanged,
 	subscribeProviderAccountEvents,
 } from "../../core/extensions/builtin/claude-sdk-oauth/account-events.ts";
-import {
-	CLAUDE_SDK_OAUTH_PROVIDER_ID,
-	getProviderAccounts,
-	pinProviderAccount,
-	removeProviderAccount,
-} from "../../core/extensions/builtin/claude-sdk-oauth/account-management.ts";
+import { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "../../core/extensions/builtin/claude-sdk-oauth/account-management.ts";
 import {
 	isMcpControlInventoryChanged,
 	MCP_CONTROL_INVENTORY_CHANGED_EVENT,
@@ -1144,17 +1144,17 @@ export function createRpcConnectionHandler(
 			}
 
 			case "get_provider_accounts": {
-				const accounts = getProviderAccounts(session.modelRegistry.authStorage, command.provider);
+				const accounts = await getCredentialAccounts(session.modelRegistry.authStorage, command.provider);
 				return success(id, "get_provider_accounts", { accounts });
 			}
 
 			case "account_pin": {
-				await pinProviderAccount(session.modelRegistry.authStorage, command.provider, command.name);
+				await pinCredentialAccount(session.modelRegistry.authStorage, command.provider, command.name);
 				return success(id, "account_pin");
 			}
 
 			case "account_remove": {
-				await removeProviderAccount(session.modelRegistry.authStorage, command.provider, command.name);
+				await removeCredentialAccount(session.modelRegistry.authStorage, command.provider, command.name);
 				return success(id, "account_remove");
 			}
 

@@ -26,6 +26,8 @@
 
 ### Changed
 
+- Credential storage doc comments describe pooled entries: one entry per provider, optionally pooling sibling slots under `accounts` while the flat fields remain a valid credential.
+
 ### Fixed
 
 ### Removed
