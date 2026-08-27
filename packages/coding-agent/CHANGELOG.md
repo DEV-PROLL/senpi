@@ -16,6 +16,11 @@
   close failures, waiting for the stream's terminal `close` event and failing only the tool call
   instead of returning an incomplete path or terminating the interactive session through
   `uncaughtException`.
+- JavaScript-first `eval` guidance now makes the fastest composition path explicit: the first cells use the persistent JavaScript kernel, independent lookups fan out with `Promise.all`, and a later cell can continue in an idle Python kernel when JavaScript is occupied by detached work. This documents the runtime's actual multi-kernel execution model instead of teaching a serial Python-only workflow.
+- JavaScript kernel persistence transforms now rewrite only top-level declarations and remain literal-safe, so strings and nested function bodies are not accidentally modified when state is carried from one cell to the next.
+- Detached-eval busy diagnostics now identify the occupied cell and list each idle enabled kernel that can continue the step, turning a same-language contention failure into an actionable runtime choice.
+- Eval orchestration keeps detached cells observable and bounded: completion, failure, cancellation, `peek`, and `stop` remain explicit lifecycle states; completion metadata records wall time, kernel time, detach state, and nested tool counts; and the hard wall-clock limit remains active across bridge calls and detachment.
+- JavaScript eval remains available on supported Node runtimes while optional Python, Ruby, and Julia interpreters are capability-gated. The JavaScript kernel uses a persistent worker with a controlled inline fallback, and the runtime exposes bounded `parallel()`/`pipeline()` composition without claiming an unmeasured percentage speedup.
 
 ### Added
 
