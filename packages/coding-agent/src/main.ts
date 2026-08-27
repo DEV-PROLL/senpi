@@ -51,6 +51,7 @@ import {
 import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { envValue } from "./core/brand.ts";
+import { type CredentialAccountSummary, summarizeCredentialAccounts } from "./core/credential-accounts.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
@@ -248,8 +249,17 @@ async function runAuthCommand(args: string[]): Promise<boolean> {
 				reason: "invalid_state",
 			};
 		}
+		let accounts: CredentialAccountSummary[] = [];
+		if (command.json && result.status !== "invalid") {
+			try {
+				const credentials = command.noRefresh ? new ReadOnlyAuthStorage() : AuthStorage.create();
+				accounts = await summarizeCredentialAccounts(result.provider, await credentials.read(result.provider));
+			} catch {
+				// Account enrichment must never turn a readable auth state into a failure.
+			}
+		}
 		const output = command.json
-			? JSON.stringify({ ...result, ...(credential ? { credentials: credential } : {}) })
+			? JSON.stringify({ ...result, accounts, ...(credential ? { credentials: credential } : {}) })
 			: (credential ?? result.status);
 		process.stdout.write(`${output}\n`);
 		process.exitCode = result.status === "ready" ? 0 : result.status === "not_ready" ? 1 : 2;
