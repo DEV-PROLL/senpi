@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
@@ -21,6 +21,9 @@ try {
 	writeMockModelsJson(scratch.agentDir, fake);
 	const socket = join(scratch.dir, "rpc.sock");
 	await ensureHost({ socket, agentDir: scratch.agentDir });
+	const publicSocketMode = (statSync(socket).mode & 0o777).toString(8).padStart(3, "0");
+	if (publicSocketMode !== "600") throw new Error(`public socket mode is ${publicSocketMode}, expected 600`);
+	lines.push(`assert public-socket-mode=srw------- (${publicSocketMode})`);
 	const manager = SessionManager.create(scratch.cwd, scratch.sessionDir);
 	const sessionPath = manager.getSessionFile();
 	if (!sessionPath) throw new Error("interactive session did not allocate a path");
