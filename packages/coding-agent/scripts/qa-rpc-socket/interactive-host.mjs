@@ -75,20 +75,25 @@ try {
 	lines.push(`FAIL ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
 	process.exitCode = 1;
 } finally {
-	if (scratch) {
-		const pidPath = join(scratch.agentDir, "rpc-host-daemon", "host.pid");
-		if (existsSync(pidPath)) {
-			const { pid } = JSON.parse(readFileSync(pidPath, "utf8"));
-			if (Number.isInteger(pid)) {
-				process.kill(pid, "SIGTERM");
-				await waitForExit(pid, 15_000);
-				if (isAlive(pid)) throw new Error(`ensured supervisor still alive after cleanup: ${pid}`);
-				lines.push(`cleanup=supervisor-stopped pid=${pid}`);
+	try {
+		if (scratch) {
+			const pidPath = join(scratch.agentDir, "rpc-host-daemon", "host.pid");
+			if (existsSync(pidPath)) {
+				const { pid } = JSON.parse(readFileSync(pidPath, "utf8"));
+				if (Number.isInteger(pid)) {
+					process.kill(pid, "SIGTERM");
+					await waitForExit(pid, 15_000);
+					if (isAlive(pid)) throw new Error(`ensured supervisor still alive after cleanup: ${pid}`);
+					lines.push(`cleanup=supervisor-stopped pid=${pid}`);
+				}
 			}
 		}
+		await cleanupAllAndWait();
+		lines.push("cleanup=sockets,scratch-removed,supervisor-stopped");
+	} catch (cleanupError) {
+		process.exitCode = 1;
+		lines.push(`cleanup=FAIL ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
 	}
-	await cleanupAllAndWait();
-	lines.push("cleanup=sockets,scratch-removed,supervisor-stopped");
 	if (outPath) writeFileSync(outPath, `${lines.join("\n")}\n`);
 	process.stdout.write(`${lines.join("\n")}\n`);
 }
@@ -111,6 +116,6 @@ function isAlive(pid) {
 async function waitForExit(pid, timeoutMs) {
 	const deadline = Date.now() + timeoutMs;
 	while (isAlive(pid) && Date.now() < deadline) {
-		await new Promise((resolve) => setImmediate(resolve));
+		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 }

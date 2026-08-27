@@ -40,7 +40,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpathSync, writeSync } from "node:fs";
-import { access, mkdir, readFile, rm, unlink } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, rm, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -484,8 +484,9 @@ async function prepareSocketPath(socketPath: string): Promise<void> {
 function listen(server: Server, socketPath: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(socketPath, () => {
+		server.listen(socketPath, async () => {
 			server.off("error", reject);
+			if (!socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
 			resolve();
 		});
 	});
