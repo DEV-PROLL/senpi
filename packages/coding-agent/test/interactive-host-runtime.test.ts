@@ -2,6 +2,7 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentSessionRuntime,
@@ -9,6 +10,7 @@ import {
 	createAgentSessionRuntime,
 	createAgentSessionServices,
 } from "../src/core/agent-session-runtime.ts";
+import { createGoal, updateGoal } from "../src/core/extensions/builtin/goal/store.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import {
@@ -322,6 +324,59 @@ describe("interactive host runtime", () => {
 			await runtime.session.prompt("local-fallback-unique");
 			await runtime.session.waitForIdle();
 			expect(runtime.session.getLastAssistantText()).toBeTruthy();
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("resumes stopped-goal history through the shared host and refreshes the local proxy", async () => {
+		const qa = scratch("switch-session");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const localSessionManager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: localSessionManager,
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		const targetManager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const targetPath = targetManager.getSessionFile();
+		if (!targetPath) throw new Error("Expected persisted target session path");
+		targetManager.appendMessage({ role: "user", content: "target-history", timestamp: 1 });
+		targetManager.appendMessage(fauxAssistantMessage("target-response"));
+		const goalRef = {
+			baseDir: join(targetManager.getSessionDir(), "extensions", "goal"),
+			threadId: targetManager.getSessionId(),
+		};
+		await createGoal(goalRef, "Keep the target goal stopped");
+		await updateGoal(goalRef, { status: "blocked", reason: "user interrupted the turn" });
+		expect(targetManager.buildSessionContext().messages).toContainEqual({
+			role: "user",
+			content: "target-history",
+			timestamp: 1,
+		});
+		const initialSessionId = runtime.session.sessionId;
+
+		try {
+			await runtime.switchSession(targetPath);
+
+			expect(runtime.session.sessionFile).toBe(targetPath);
+			expect(runtime.session.sessionId).not.toBe(initialSessionId);
+			expect(runtime.session.sessionManager.getSessionFile()).toBe(targetPath);
+			expect(runtime.session.sessionManager.buildSessionContext().messages).toContainEqual({
+				role: "user",
+				content: "target-history",
+				timestamp: 1,
+			});
+			expect(runtime.session.messages).toContainEqual({ role: "user", content: "target-history", timestamp: 1 });
 		} finally {
 			await runtime.dispose();
 			await fake.close();

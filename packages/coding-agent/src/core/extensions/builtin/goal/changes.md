@@ -1,5 +1,31 @@
 # goal Extension Changes
 
+## 2026-08-28 - RPC session resume does not deadlock on stopped-goal prompts
+
+### What changed
+
+- `index.ts` leaves paused or blocked Goals stopped during RPC `switch_session` rebinding instead of awaiting the
+  interactive restart prompt inside the in-flight RPC request. It emits an informational notification telling the
+  user to resume explicitly after the session finishes loading.
+- TUI resume behavior is unchanged: interactive sessions still offer `Resume goal` and `Leave stopped`.
+- Coverage in `test/suite/goal-extension.test.ts` pins that RPC resume does not call `ctx.ui.select`, reactivate the
+  Goal, or queue a continuation.
+
+### Why
+
+- The RPC client waits for the `switch_session` response before it can service the Goal extension's nested
+  `ctx.ui.select` request. The host awaited that selection before returning the switch response, so both sides waited
+  until the client timed out and exited without rendering the hidden error.
+
+### Why an extension couldn't do it
+
+- The stopped-goal restart prompt and its persisted status transition are private to the builtin Goal extension. An
+  external extension cannot bypass or reorder that handler during RPC session rebinding.
+
+### Expected merge conflict zones
+
+- LOW in `index.ts` around `maybePromptResumeStoppedGoal` and its mode-specific UI policy.
+
 ## 2026-08-27 - TUI widget rendering for goal tool results
 
 ### What changed

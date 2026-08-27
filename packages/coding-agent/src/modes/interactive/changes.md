@@ -1,5 +1,30 @@
 # changes
 
+## Shared-host session replacement refreshes the interactive proxy (2026-08-28)
+
+### What changed
+
+- `interactive-host-runtime.ts` refreshes the shared host's state and messages after a successful `switch_session`,
+  then updates the interactive proxy's session manager, identity, cwd, and message history before rebinding the TUI.
+- `test/interactive-host-runtime.test.ts` switches to a second persisted session carrying a blocked Goal and pins
+  that the RPC request completes while the proxy exposes the target session file, ID, manager, and historical user
+  message.
+
+### Why
+
+- The shared RPC host changed its authoritative session, but the interactive proxy remained permanently bound to the
+  local bootstrap session. `/resume` therefore reported success while the TUI returned to an empty composer with the
+  old `0/1M` footer and no target history.
+
+### Why an extension could not handle it
+
+- The proxy owns transport state and the `AgentSessionRuntime` seam before extension events reach the TUI. Extensions
+  cannot replace the proxy's session identity, manager, or message mirror after an RPC session replacement.
+
+### Expected merge conflict zones
+
+- LOW in `interactive-host-runtime.ts` around remote session replacement and proxy property routing.
+
 ## Shared-host sessions await async session reads and render thinking level from the event (2026-08-28)
 
 ### What changed
@@ -20,7 +45,6 @@
 
 - MEDIUM: `interactive-mode.ts` handler/event-case edits and the session getter type.
 - LOW: proxy setter overrides in `interactive-host-runtime.ts`.
-
 ## Footer shows the active credential account (2026-08-27)
 
 ### What changed
