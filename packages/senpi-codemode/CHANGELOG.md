@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Detached-eval same-language busy errors now name each idle enabled kernel and tell the agent to continue the step there (`continue this step in an idle kernel: js`), instead of only pointing at peek and the output tail. A busy Python kernel no longer reads as "eval is unavailable", which previously sent agents to `bash`+`python3` while JavaScript (or another idle kernel) was free. Single-language sessions and fully-busy sessions omit the idle-kernel claim.
+
 ### Removed
 
 ## [2026.8.26-2] - 2026-08-26
