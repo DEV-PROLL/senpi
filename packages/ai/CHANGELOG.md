@@ -8,6 +8,8 @@
 
 ### Changed
 
+- GPT-5.6 Sol model catalog entries now advertise a 650,000-token context window for direct OpenAI and ChatGPT OAuth providers; Terra and Luna remain at 272,000.
+
 ### Fixed
 
 ### Removed
