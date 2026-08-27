@@ -1,3 +1,25 @@
+## 2026-08-27 - Credential pool engine: HRW selection, failure taxonomy, slot failover, slot-scoped resolution
+
+### What changed
+
+- `packages/ai/src/auth/pool/select.ts` (new): browser-safe HRW slot selection over an injected `SlotHasher` - `rendezvousOrder` hashes `key\0slot.name` exactly like the claude-sdk-oauth affinity oracle, `selectSlot` honors a pinned slot, skips blocked slots (auth blocks persist, elapsed rate blocks clear), and throws `AllSlotsBlockedError` with the soonest unblock time.
+- `packages/ai/src/auth/pool/classify.ts` (new): three-way in-lane failure taxonomy (`rotate`/`retry`/`fail`) with `retryAfterMs` extraction; unknown errors default-deny to `fail` so the model fallback chain keeps owning them.
+- `packages/ai/src/auth/pool/failover.ts` (new): `runSlotFailover` runs at most one attempt per slot, blocks failed slots (exponential rate-limit windows capped at 48h, expiry-free auth blocks), and reuses the `senpi:no-turn-retry:` suppression marker; `isCommittedOutput` is default-DENY, so absent an explicit bookkeeping filter any yielded event makes rotation non-transparent.
+- `packages/ai/src/auth/pool/slots.ts`: added `projectSlot` (named-slot flat projection with pool fields stripped) and `mergeRefreshedSlot` (named-slot refresh merge that rotates the flat downgrade projection only when it mirrored that slot).
+- `packages/ai/src/auth/resolve.ts`: `AuthResolutionOverrides.slotName` resolves one named slot of a pooled credential; a missing entry or slot resolves to undefined instead of falling back to another account or ambient env, and the locked OAuth refresh path refreshes exactly the named slot via `mergeRefreshedSlot`.
+
+### Why
+
+- Generic multi-credential rotation needs a provider-neutral engine: session-affine slot choice that provably never remaps existing claude-sdk-oauth sessions (golden-oracle test), failover that can rotate accounts mid-lane without replaying committed output, and an auth resolution path that can address a specific slot without disturbing siblings or the flat projection older binaries read.
+
+### Why an extension could not handle it
+
+- Slot-scoped resolution must run inside `resolveProviderAuth`'s locked OAuth refresh path, which is the cross-provider choke point in `packages/ai`; extensions cannot enter that lock or the credential-store modify transaction.
+
+### Expected merge conflict zones
+
+- LOW: `resolve.ts` stored-credential branch and the refresh modify callback; new pool files have no upstream counterpart.
+
 ## 2026-08-27 - Duplicate cursor exec tool-call ids no longer brick Anthropic resumes
 
 ### What changed

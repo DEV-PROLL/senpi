@@ -1,5 +1,23 @@
 # changes.md — ai
 
+## Credential pool export wildcard (2026-08-27)
+
+### What changed
+
+- `packages/ai/package.json`: the `./auth/pool/slots` export entry became the wildcard `./auth/pool/*` so the new `select`, `classify`, and `failover` pool modules resolve through the package export map alongside `slots`.
+
+### Why
+
+- The credential pool engine ships as separate browser-safe modules; consumers (including `packages/coding-agent`) import them by subpath.
+
+### Why an extension could not handle it
+
+- Package export maps are packaging surface owned by the package itself.
+
+### Expected merge conflict zones
+
+- LOW: one wildcard line in the `exports` map.
+
 ## @anthropic-ai/sdk peer alignment (2026-08-26)
 
 ### What changed
