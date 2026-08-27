@@ -10,6 +10,7 @@
 
 - Credential pool engine under `@earendil-works/pi-ai/auth/pool/*`: HRW slot selection with an injected hasher (`select`), a three-way in-lane failure taxonomy (`classify`), and a slot failover runner (`failover`) that rotates accounts only before committed output and marks post-output failures with the turn-retry suppression prefix.
 - `AuthResolutionOverrides.slotName` resolves provider auth against one named credential slot, refreshing exactly that slot under the store lock while siblings and the flat downgrade projection stay untouched.
+- `getApiKeyEnvVars` is exported so consumers can generalize over the canonical provider-id to API-key env-var mapping instead of re-deriving it.
 
 ### Changed
 

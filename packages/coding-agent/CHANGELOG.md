@@ -4,6 +4,11 @@
 
 ### Breaking Changes
 
+### Added
+
+- Any provider holding more than one credential now rotates between them inside a single request: a conversation sticks to one account through session-stable HRW affinity, a 429 or 401 on one account fails over to a healthy sibling before the model fallback chain is consulted, and cooldowns persist across restarts with absolute deadlines. Rotation is transparent only before committed output - a failure after streaming has begun is never replayed. Providers with a single credential are unaffected.
+- A second credential can be added with one environment variable (`OPENAI_API_KEY_2` and up, for any provider's primary key variable) or declared per provider in `models.json` under a validated `credentials` policy block (`rotation`, `affinity`, cooldown bounds, and named slot references). The block holds policy and references only; key material stays in `auth.json` or the environment.
+
 ### Fixed
 
 - Native todo lists with an explicit empty `todos: []` payload now clear persisted todo state and remove the `todo-sidebar`, while absent payloads remain ignored and lists with pending work remain visible.

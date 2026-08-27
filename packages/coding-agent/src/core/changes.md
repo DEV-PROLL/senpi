@@ -1,5 +1,30 @@
 # changes
 
+## 2026-08-27 - Credential pool: health sidecar, policy schema, env slots, in-lane rotation
+
+### What changed
+
+- `packages/coding-agent/src/core/credential-pool/state-store.ts` (new): file-locked health sidecar at `<agent-dir>/credential-pool-state.json` (mode 0600, `FILE_STORAGE_LOCK_OPTIONS`) holding ONLY health - absolute cooldown deadlines, permanent auth/billing blocks, half-open probe leases, `lastSuccessAt`, and HMAC-derived env-slot revisions. `CredentialSlotRepository.mutateSlotState` is an atomic read-modify-write with a `stateVersion` increment; `acquireHalfOpenLease` transitions an elapsed cooldown to half-open for exactly one probing caller. An unreadable or schema-invalid document resets to fresh state rather than failing auth resolution.
+- `packages/coding-agent/src/core/credential-pool/classify.ts` (new): concrete provider-error taxonomy over `normalizeProviderError` and the existing 429 retry-hint parser. 401/invalid-key and account-scoped 403 block permanently and fail over; bare 403 fails the request; 429 fails over with a per-slot exponential cooldown floored (never overridden) by the server hint and capped at 48h; billing/quota-exhausted disables the account; 5xx/529/overload/network retry the SAME slot without blocking it; overflow, invalid model, 400, 404, malformed stream, and abort fail the request.
+- `packages/coding-agent/src/core/credential-pool/failover.ts` (new): `runCredentialFailover` re-reads slots before each distinct-credential attempt (so a newly added slot participates), runs at most one failover attempt per slot per request, settles a failed stream before starting the next, persists the block BEFORE selecting a replacement, and requires an `isCommittedOutput` predicate whose contract is default-DENY. Committed output bars rotation and the rethrow carries the existing `senpi:no-turn-retry:` marker.
+- `packages/coding-agent/src/core/credential-pool/env-slots.ts` (new): numbered env credential slots for any provider (`<VAR>`, `<VAR>_2` .. `<VAR>_16`), gap-tolerant, over the canonical `getApiKeyEnvVars` mapping.
+- `packages/coding-agent/src/core/credential-pool/rotation-stream.ts` (new): lists a provider's rotation slots with sidecar health overlaid (stored lane when a credential exists, env lane otherwise), selects by sha256 HRW over the request affinity key, and persists blocks per lane. An env slot's persisted health applies only while its HMAC revision still matches the current value.
+- `packages/coding-agent/src/core/model-runtime.ts`: `ModelRuntime.stream` engages that rotation only when the provider actually holds more than one slot and nothing pins the request to a single credential (runtime key, explicit per-request `apiKey`, or `credentials.rotation: false`); `prepareRequest` accepts a per-attempt slot override, and `ModelRuntimeAuthOverrides.slotName` plumbs slot-scoped resolution.
+- `packages/coding-agent/src/core/model-config-schema.ts`: per-provider `credentials` policy block (`additionalProperties: false`) with `rotation`/`affinity` toggles, cooldown bounds, and named slot references to env vars or command values; `CREDENTIAL_POLICY_DEFAULTS` re-exports the engine constants so schema and runtime cannot drift.
+
+### Why
+
+- Multi-credential rotation needs durable per-slot health that survives restart with absolute deadlines, a taxonomy that distinguishes credential-scoped from provider-scoped faults (blocking a healthy credential for a provider outage only destroys prompt-cache locality), and a request-level runner that exhausts a lane's slots before the model fallback chain above it is consulted. Health cannot live in `auth.json`: that file is credential material under its own lock, and mixing volatile block state into it would rewrite user credentials on every rate limit.
+
+### Why an extension could not handle it
+
+- `ModelRuntime.stream` is the one place where a request's provider auth is resolved and the provider stream is constructed; per-attempt credential selection has to happen inside it. The sidecar likewise needs `getAgentDir()` and the shared file-storage lock policy, neither of which is reachable through the extension API.
+
+### Expected merge conflict zones
+
+- MEDIUM: `model-runtime.ts` `prepareRequest`/`stream` (upstream-owned request construction; the rotation branch is additive and the single-credential path is unchanged).
+- LOW: `model-config-schema.ts` provider block (one optional property); the `credential-pool/` directory is fork-new with no upstream counterpart.
+
 ## 2026-08-26 - Capture bash spill-file errors before the first write
 
 ### What changed
