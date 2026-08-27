@@ -1,5 +1,24 @@
 # TUI delta rendering fork changes
 
+## 2026-08-27 - Preserve Windows Terminal scrollback during resize redraws
+
+### What changed
+
+- `packages/tui/src/tui.ts`: Windows full redraws continue to clear and repaint the visible screen, but no longer emit `ESC[3J`, which deletes the user's terminal scrollback buffer on ConPTY. Non-Windows non-multiplexer redraws retain their existing scrollback-clearing behavior.
+
+### Why
+
+- Windows Terminal's ConPTY resize and focus transitions can trigger a full redraw outside a multiplexer. Clearing scrollback is destructive and makes prior session output unrecoverable when the user returns to the terminal window.
+
+### Why this lives in the fork
+
+- The platform-specific redraw guard belongs in the TUI renderer's `fullRender()` path, where screen clearing and scrollback deletion are emitted together.
+
+### Expected merge conflict zones
+
+- LOW: `packages/tui/src/tui.ts` around `TuiBase.doRender()` and the `fullRender()` scrollback-clear guard.
+- LOW: `packages/tui/test/mux-scrollback.test.ts` around resize scrollback emission assertions.
+
 ## Dead-terminal detection reads Bun's errno-in-message shape (2026-08-26)
 
 ### What changed
