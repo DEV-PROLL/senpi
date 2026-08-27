@@ -81,7 +81,7 @@ try {
 			const { pid } = JSON.parse(readFileSync(pidPath, "utf8"));
 			if (Number.isInteger(pid)) {
 				process.kill(pid, "SIGTERM");
-				await waitForExit(pid, 5000);
+				await waitForExit(pid, 15_000);
 				if (isAlive(pid)) throw new Error(`ensured supervisor still alive after cleanup: ${pid}`);
 				lines.push(`cleanup=supervisor-stopped pid=${pid}`);
 			}
