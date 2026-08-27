@@ -6,6 +6,20 @@
 
 ### Added
 
+- Harness tool contexts accept an optional `postMutate` hook. It runs inside the file mutation queue immediately after `write` or `edit` commits its bytes, so a formatter or normalizer can adjust the file as an atomic part of the same mutation. `edit` recomputes its diff and unified patch against the post-hook file contents whenever the hook may have touched the file, and a rejecting hook is reported as an appended warning note rather than discarding the landed write. Tool behavior is unchanged when no hook is supplied.
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
+### Breaking Changes
+
+### Added
+
 ### Changed
 
 ### Fixed

@@ -2731,3 +2731,23 @@ The tip line was teaching a small slice of the product while most of the surface
 ### Expected merge conflict zones
 
 - NONE: the upstream-only Radius session-share artifact remains excluded from the fork tree.
+
+## 2026-08-27 - render JSON tool results as a styled key-value fallback
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/tool-execution-fallback.ts`: `createToolResultFallback()` now inspects the rendered text output before styling it. When the trimmed text starts with `{` or `[`, parses as JSON, and yields a non-null object or array, the fallback renders a bounded `key: value` view (keys in `muted`, string values in `toolOutput`, numbers/booleans in `accent`, `null` in `dim`) with 2-space indentation per nesting level. Anything else — prose, logs, malformed JSON — keeps the previous `theme.fg("toolOutput", output)` path byte for byte.
+- The view is bounded so a large payload cannot flood the transcript: max nesting depth 3 (deeper containers collapse to a truncated compact `JSON.stringify`), max 24 rendered rows followed by a single dim `… N more` line, and string values truncated to 100 characters with a trailing ellipsis. The function still returns the same `Text` component type as before.
+- `packages/coding-agent/test/tool-execution-fallback-json.test.ts`: new regression suite covering nested objects, prose passthrough, malformed-JSON passthrough, row/string bounds, and top-level primitive arrays.
+
+### Why
+
+- Tools without a `renderResult` hook — MCP-wrapped tools and third-party extensions in particular — commonly return their payload as a JSON string. The fallback dumped that raw string into the transcript, so a single call could paste an unreadable one-line blob across the viewport. A bounded key-value view keeps the same information scannable without asking every tool author to ship a renderer.
+
+### Why an extension could not handle it
+
+- This is the renderer of last resort inside `ToolExecutionComponent` for tools that have no renderer. An extension can only supply `renderResult` for its own tools; it has no hook covering results produced by other extensions or by MCP-bridged tools, which is exactly the population that hits this path.
+
+### Expected merge conflict zones
+
+- LOW: `createToolResultFallback()` in `packages/coding-agent/src/modes/interactive/components/tool-execution-fallback.ts` (additive helpers plus a two-line branch in one small function).

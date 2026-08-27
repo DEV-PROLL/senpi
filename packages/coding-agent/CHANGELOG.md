@@ -8,16 +8,32 @@
 
 - `/account <provider> [list | pin <name> | unpin | remove <name>]` manages any provider's credential accounts, the TUI footer shows the active account as `(provider@account)` whenever a provider pools more than one credential, `auth check --json` reports a non-secret `accounts` array, and the account RPC/app-server surfaces (`get_provider_accounts`, `account_pin`, `account_remove`, `account/providerAccounts/*`) now work for every provider instead of only the Claude lane.
 
+### Fixed
+
+### Added
+
+### Changed
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
+### Breaking Changes
+
+### Added
+
 - Any provider holding more than one credential now rotates between them inside a single request: a conversation sticks to one account through session-stable HRW affinity, a 429 or 401 on one account fails over to a healthy sibling before the model fallback chain is consulted, and cooldowns persist across restarts with absolute deadlines. Rotation is transparent only before committed output - a failure after streaming has begun is never replayed. Providers with a single credential are unaffected.
 - A second credential can be added with one environment variable (`OPENAI_API_KEY_2` and up, for any provider's primary key variable) or declared per provider in `models.json` under a validated `credentials` policy block (`rotation`, `affinity`, cooldown bounds, and named slot references). The block holds policy and references only; key material stays in `auth.json` or the environment.
 
 ### Fixed
 
+- Goal tool results (`create_goal`, `update_goal`, `get_goal`) now render as a TUI widget — status-colored header with compact token and elapsed usage, objective preview (full objective plus created/updated timestamps when expanded), and the blocked reason — instead of dumping the raw JSON payload into the transcript. The model-facing JSON result text is unchanged.
 - Native todo lists with an explicit empty `todos: []` payload now clear persisted todo state and remove the `todo-sidebar`, while absent payloads remain ignored and lists with pending work remain visible.
 - Bash output spill files now capture early `EDQUOT`/`ENOSPC` stream errors and late filesystem
   close failures, waiting for the stream's terminal `close` event and failing only the tool call
   instead of returning an incomplete path or terminating the interactive session through
   `uncaughtException`.
+- Tool results without a custom renderer (MCP-wrapped tools and third-party extensions in particular) that return a JSON payload now render as a bounded key-value view in the TUI instead of a raw JSON dump; prose and malformed-JSON outputs keep the previous rendering byte for byte.
 - JavaScript-first `eval` guidance now makes the fastest composition path explicit: the first cells use the persistent JavaScript kernel, independent lookups fan out with `Promise.all`, and a later cell can continue in an idle Python kernel when JavaScript is occupied by detached work. This documents the runtime's actual multi-kernel execution model instead of teaching a serial Python-only workflow.
 - JavaScript kernel persistence transforms now rewrite only top-level declarations and remain literal-safe, so strings and nested function bodies are not accidentally modified when state is carried from one cell to the next.
 - Detached-eval busy diagnostics now identify the occupied cell and list each idle enabled kernel that can continue the step, turning a same-language contention failure into an actionable runtime choice.

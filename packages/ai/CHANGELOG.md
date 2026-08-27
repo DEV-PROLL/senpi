@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
 - Duplicate cursor exec tool-call ids no longer brick Anthropic resumes: exec-frame ids are uniquified before block synthesis (Cursor reuses one parent id across compound-tool sub-frames, e.g. StrReplace → read + write), and the Anthropic pre-submit sanitizer repairs already-corrupted transcripts by renaming duplicate `tool_use` ids payload-wide and remapping their `tool_result` blocks in call order (previously such sessions failed every request with `tool_use ids must be unique`).
 
 ### Breaking Changes

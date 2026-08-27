@@ -8,6 +8,18 @@
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
 - Eval tool description examples are now a JS-first mixed set: set up once in JavaScript, fan out batched `Promise.all` session-tool calls in the next cell, then hop to Python when the JS kernel is busy with a detached cell. The detach paragraph now states in the same sentence that another language can continue.
 
 ### Fixed
