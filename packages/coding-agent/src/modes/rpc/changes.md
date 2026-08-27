@@ -1,5 +1,23 @@
 # changes
 
+## Provider-neutral account RPC commands (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/modes/rpc/connection-handler.ts`: `get_provider_accounts`, `account_pin`, and `account_remove` now dispatch to `core/credential-accounts.ts` instead of the claude-sdk-oauth lane's account management, so they work for every provider. An unknown provider returns an empty account list instead of the previous `Provider account management is unavailable for: ...` error.
+
+### Why
+
+- Generic credential pools make account management meaningful for any provider; the hard rejection existed only to confine the surface to one lane.
+
+### Why an extension could not handle it
+
+- The RPC command dispatch table is core connection handling; extensions cannot re-route it.
+
+### Expected merge conflict zones
+
+- LOW: three case arms in the account command section.
+
 ## Shared RPC client transport and protocol surface (2026-08-27)
 
 ### What changed
