@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import type { CredentialBlock } from "../src/core/credential-pool/classify.ts";
 import {
 	CredentialFailoverError,
 	type RunSlot,

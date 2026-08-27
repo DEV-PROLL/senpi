@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
-import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import type { PooledCredential } from "@earendil-works/pi-ai/auth/pool/slots";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
