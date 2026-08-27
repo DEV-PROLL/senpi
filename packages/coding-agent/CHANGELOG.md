@@ -17,6 +17,7 @@
   close failures, waiting for the stream's terminal `close` event and failing only the tool call
   instead of returning an incomplete path or terminating the interactive session through
   `uncaughtException`.
+- Tool results without a custom renderer (MCP-wrapped tools and third-party extensions in particular) that return a JSON payload now render as a bounded key-value view in the TUI instead of a raw JSON dump; prose and malformed-JSON outputs keep the previous rendering byte for byte.
 - JavaScript-first `eval` guidance now makes the fastest composition path explicit: the first cells use the persistent JavaScript kernel, independent lookups fan out with `Promise.all`, and a later cell can continue in an idle Python kernel when JavaScript is occupied by detached work. This documents the runtime's actual multi-kernel execution model instead of teaching a serial Python-only workflow.
 - JavaScript kernel persistence transforms now rewrite only top-level declarations and remain literal-safe, so strings and nested function bodies are not accidentally modified when state is carried from one cell to the next.
 - Detached-eval busy diagnostics now identify the occupied cell and list each idle enabled kernel that can continue the step, turning a same-language contention failure into an actionable runtime choice.
