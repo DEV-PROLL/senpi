@@ -130,16 +130,20 @@ export function createEditTool<TContext extends ExecutionToolContext = Execution
 				if (signal?.aborted) throw new Error("Operation aborted");
 
 				let committedContent = newContent;
+				let rereadNote: string | undefined;
 				if (outcome.fileMayHaveChanged) {
 					const postMutateRead = await env.readTextFile(absolutePath, signal);
-					if (!postMutateRead.ok) throw editAccessError(path, postMutateRead.error);
-					committedContent = normalizeToLF(stripBom(postMutateRead.value).text);
+					// The edit itself already landed, so an unreadable file is the hook's doing, not a
+					// failed edit. Report it as a note rather than an error that misattributes the failure.
+					if (postMutateRead.ok) committedContent = normalizeToLF(stripBom(postMutateRead.value).text);
+					else
+						rereadNote = `postMutate left the file unreadable: ${postMutateRead.error.code}. Reported diff describes the edit before the hook ran.`;
 				}
 
 				const diffResult = generateDiffString(baseContent, committedContent);
 				const text = appendPostMutateNote(
-					`Successfully replaced ${edits.length} block(s) in ${path}.`,
-					outcome.note,
+					appendPostMutateNote(`Successfully replaced ${edits.length} block(s) in ${path}.`, outcome.note),
+					rereadNote,
 				);
 				return {
 					content: [{ type: "text", text }],

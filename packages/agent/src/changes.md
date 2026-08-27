@@ -14,7 +14,8 @@
 - `packages/agent/src/harness/tools/edit.ts` invokes the hook in the same position and re-reads the
   file whenever the hook may have touched it (`changed: true`, or the hook rejected after a partial
   rewrite) so the returned diff, unified patch, and first-changed-line describe the bytes actually
-  on disk.
+  on disk. A hook that leaves the file unreadable is reported as a note on the successful edit
+  rather than as an edit failure, because the edit itself already landed.
 - `packages/agent/src/harness/tools/index.ts` exports the new post-mutate types.
 
 ### Why

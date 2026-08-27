@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import { applyPatch } from "diff";
 import { describe, expect, it } from "vitest";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";
@@ -212,6 +213,30 @@ describe("AgentHarness tools postMutate", () => {
 		expect(textOutput(result)).toBe(
 			"Successfully replaced 1 block(s) in edit.txt.\npostMutate hook failed: formatter exploded after writing",
 		);
+	});
+
+	it("keeps the landed edit result when the post-mutate re-read fails", async () => {
+		const env = createEnv();
+		getOrThrow(await env.writeFile("edit.txt", "alpha\nbeta\n"));
+
+		const result = await createEditTool().execute(
+			"edit-post-mutate-reread-fails",
+			{ path: "edit.txt", edits: [{ oldText: "alpha", newText: "ALPHA" }] },
+			undefined,
+			undefined,
+			{
+				env,
+				postMutate: async (input) => {
+					rmSync(input.path);
+					return { changed: true, note: "replaced the file with nothing" };
+				},
+			},
+		);
+
+		expect(textOutput(result)).toBe(
+			"Successfully replaced 1 block(s) in edit.txt.\nreplaced the file with nothing\npostMutate left the file unreadable: not_found. Reported diff describes the edit before the hook ran.",
+		);
+		expect(result.details?.diff).toContain("ALPHA");
 	});
 
 	it("forwards the abort signal to postMutate and aborts the write when the hook observes it", async () => {
