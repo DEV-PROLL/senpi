@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- JavaScript eval cells now persist only top-level declarations, including destructuring bindings and uninitialized variables, without rewriting declaration-shaped text inside literals or comments.
+
 ### Removed
 
 ## [2026.8.26-2] - 2026-08-26
