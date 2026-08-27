@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+import type { AssistantMessage } from "../src/types.ts";
 import { describe, expect, it } from "vitest";
 import { ensureUniqueCursorExecToolCallId } from "../src/api/cursor-agent.ts";
 
