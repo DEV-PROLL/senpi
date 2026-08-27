@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- JavaScript and Python eval kernels resolve worker and prelude assets from the executable sidecar in Bun-compiled distributions instead of passing unusable `$bunfs` paths to `Worker` and `python3`.
+
 ### Removed
 
 ## [2026.8.27] - 2026-08-27
