@@ -8,11 +8,9 @@
 
 - `/account <provider> [list | pin <name> | unpin | remove <name>]` manages any provider's credential accounts, the TUI footer shows the active account as `(provider@account)` whenever a provider pools more than one credential, `auth check --json` reports a non-secret `accounts` array, and the account RPC/app-server surfaces (`get_provider_accounts`, `account_pin`, `account_remove`, `account/providerAccounts/*`) now work for every provider instead of only the Claude lane.
 
-### Fixed
-
-### Added
-
 ### Changed
+
+### Fixed
 
 ### Removed
 
