@@ -43,6 +43,12 @@ import { APP_NAME, BRAND, getAgentDir } from "../config.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
 import { envValue } from "./brand.ts";
+import {
+	listRotationSlots,
+	type RotationSources,
+	streamWithCredentialRotation,
+} from "./credential-pool/rotation-stream.ts";
+import { CredentialSlotRepository } from "./credential-pool/state-store.ts";
 import { ModelConfig } from "./model-config.ts";
 import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.ts";
 import {
@@ -93,7 +99,17 @@ export interface ModelRuntimeAuthOverrides extends AuthOperationOptions {
 	env?: Record<string, string>;
 	/** Require this much remaining OAuth-token validity; defaults to five minutes. */
 	minOAuthValidityMs?: number;
+	/** Resolve against one named slot of a pooled credential instead of the flat projection. */
+	slotName?: string;
 }
+
+/**
+ * Stream options plus the coding-agent-only affinity key. It is declared here
+ * rather than widening the engine's `StreamOptions`: a stable key (the session
+ * id) keeps one conversation on one credential slot, and its absence simply
+ * distributes requests instead of concentrating them.
+ */
+export type CredentialRotationStreamOptions = StreamOptions & ModelsRequestTransforms & { affinityKey?: string };
 
 export type CredentialSynchronizationOperation = "login" | "logout" | "setRuntimeApiKey" | "removeRuntimeApiKey";
 
@@ -169,6 +185,7 @@ export class ModelRuntime implements Models {
 	private readonly providerAvailabilitySeq = new Map<string, number>();
 	private availabilityError: string | undefined;
 	private readonly credentialOperations = new Map<string, Promise<unknown>>();
+	private readonly credentialSlots = new CredentialSlotRepository();
 	private constructor(
 		credentials: RuntimeCredentials,
 		config: ModelConfig,
@@ -636,6 +653,7 @@ export class ModelRuntime implements Models {
 	private async prepareRequest<TOptions extends ProviderRequestOptions & ModelsRequestTransforms>(
 		model: Model<Api>,
 		options: TOptions | undefined,
+		slotAuth?: { apiKey?: string; slotName?: string },
 	): Promise<{
 		provider: Provider;
 		model: Model<Api>;
@@ -644,9 +662,10 @@ export class ModelRuntime implements Models {
 		const provider = this.models.getProvider(model.provider);
 		if (!provider) throw new ModelsError("provider", `Unknown provider: ${model.provider}`);
 		const resolution = await this.getAuth(model, {
-			apiKey: options?.apiKey,
+			apiKey: slotAuth?.apiKey ?? options?.apiKey,
 			env: options?.env,
 			signal: options?.signal,
+			...(slotAuth?.slotName === undefined ? {} : { slotName: slotAuth.slotName }),
 		});
 		if (!resolution) throw new ModelsError("auth", `Provider is not configured: ${model.provider}`);
 
@@ -678,12 +697,36 @@ export class ModelRuntime implements Models {
 			model: requestModel,
 			options: {
 				...providerOptions,
-				apiKey: providerOptions.apiKey ?? resolution.auth.apiKey,
+				apiKey: slotAuth?.apiKey ?? providerOptions.apiKey ?? resolution.auth.apiKey,
 				headers,
 				extraBody,
 				env,
 			} as Omit<TOptions, "transformHeaders"> & ProviderRequestOptions,
 		};
+	}
+
+	/**
+	 * Rotation engages only for a provider that actually holds more than one
+	 * credential slot and only when nothing pins the request to one credential
+	 * (a runtime key or an explicit per-request apiKey). Every single-credential
+	 * user therefore keeps byte-identical request behavior.
+	 */
+	private async credentialRotationSources(
+		model: Model<Api>,
+		options: CredentialRotationStreamOptions | undefined,
+	): Promise<RotationSources | undefined> {
+		if (options?.apiKey !== undefined) return undefined;
+		if (this.credentials.hasRuntimeApiKey(model.provider)) return undefined;
+		if (this.config.getProvider(model.provider)?.credentials?.rotation === false) return undefined;
+		const credential = await this.credentials.read(model.provider, { signal: options?.signal });
+		const sources: RotationSources = {
+			providerId: model.provider,
+			credential,
+			env: (name: string) => options?.env?.[name] ?? process.env[name],
+			repository: this.credentialSlots,
+		};
+		const slots = await listRotationSlots(sources);
+		return slots.length > 1 ? sources : undefined;
 	}
 
 	stream<TApi extends Api>(
@@ -692,10 +735,30 @@ export class ModelRuntime implements Models {
 		options?: ModelsApiStreamOptions<TApi>,
 	): AssistantMessageEventStream {
 		return lazyStream(model, async () => {
-			const prepared = await this.prepareRequest(
-				model,
-				options as (StreamOptions & ModelsRequestTransforms) | undefined,
-			);
+			const streamOptions = options as CredentialRotationStreamOptions | undefined;
+			const sources = await this.credentialRotationSources(model, streamOptions);
+			if (sources) {
+				return streamWithCredentialRotation({
+					sources,
+					...(streamOptions?.affinityKey === undefined ? {} : { affinityKey: streamOptions.affinityKey }),
+					runAttempt: async (slot) => {
+						const prepared = await this.prepareRequest(
+							model,
+							streamOptions,
+							slot.lane === "env"
+								? { ...(slot.envKey === undefined ? {} : { apiKey: slot.envKey }) }
+								: { slotName: slot.name },
+						);
+						const attempt = prepared.provider.stream(
+							prepared.model as Model<TApi>,
+							context,
+							withPayloadRequestMetadata(prepared.options, prepared.model) as ApiStreamOptions<TApi>,
+						);
+						return wrapStreamWithModelRecovery(attempt, model, context.tools ?? []);
+					},
+				});
+			}
+			const prepared = await this.prepareRequest(model, streamOptions);
 			const inner = prepared.provider.stream(
 				prepared.model as Model<TApi>,
 				context,

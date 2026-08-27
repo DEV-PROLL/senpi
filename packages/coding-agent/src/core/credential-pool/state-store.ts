@@ -18,7 +18,7 @@ const leaseSchema = z.strictObject({
 const slotStateSchema = z.strictObject({
 	stateVersion: z.number().int().nonnegative(),
 	blockedUntil: z.number().int().positive().optional(),
-	blockReason: z.enum(["auth_error", "rate_limit"]).optional(),
+	blockReason: z.enum(["auth_error", "rate_limit", "account_disabled"]).optional(),
 	failureCount: z.number().int().nonnegative().optional(),
 	lastSuccessAt: z.number().int().positive().optional(),
 	credentialRevision: z.string().regex(HEX_256_BIT).optional(),
@@ -74,6 +74,8 @@ export type SlotHealth = "ready" | "blocked" | "half_open";
 /** Deadlines are absolute so a restart never re-enables a cooling credential early. */
 export function slotHealth(state: CredentialSlotState | undefined, now: number): SlotHealth {
 	if (!state) return "ready";
+	// Auth and billing blocks have no expiry; only credential replacement clears them.
+	if (state.blockReason === "auth_error" || state.blockReason === "account_disabled") return "blocked";
 	if (state.blockedUntil !== undefined && state.blockedUntil > now) return "blocked";
 	if (state.blockedUntil !== undefined && state.lease !== undefined && state.lease.expiresAt > now) {
 		return "half_open";

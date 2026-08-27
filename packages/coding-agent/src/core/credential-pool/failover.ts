@@ -54,7 +54,8 @@ export class CredentialFailoverError extends Error {
 }
 
 function isAvailable(slot: RunSlot, now: number): boolean {
-	return slot.blockReason !== "auth_error" && (slot.blockedUntil === undefined || slot.blockedUntil <= now);
+	if (slot.blockReason === "auth_error" || slot.blockReason === "account_disabled") return false;
+	return slot.blockedUntil === undefined || slot.blockedUntil <= now;
 }
 
 function soonestRetryAt(slots: readonly RunSlot[], now: number): number | undefined {
