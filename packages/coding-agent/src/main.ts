@@ -77,7 +77,6 @@ import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/tru
 import { builtInExtensions } from "./extensions/index.ts";
 import { getFromSourceRealConfigWarning } from "./from-source-config-guard.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
-import { runPrintMode, runRpcMode } from "./modes/index.ts";
 import { createInteractiveHostRuntime } from "./modes/interactive/interactive-host-runtime.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { runPrintMode } from "./modes/print-mode.ts";
@@ -1092,15 +1091,6 @@ export async function main(args: string[], options?: MainOptions) {
 		startupLoadingIndicator.stop();
 	});
 	time("createAgentSessionRuntime");
-	let selectedRuntime = runtime;
-	if (appMode === "interactive") {
-		const socket = envValue("RPC_SOCKET") ?? resolve(agentDir, "rpc", "rpc.sock");
-		selectedRuntime = await createInteractiveHostRuntime(runtime, {
-			socket,
-			agentDir,
-			onWarning: (warning) => console.error(chalk.yellow(warning.message)),
-		});
-	}
 	let selectedRuntime = runtime;
 	if (appMode === "interactive") {
 		const socket = envValue("RPC_SOCKET") ?? resolve(agentDir, "rpc", "rpc.sock");
