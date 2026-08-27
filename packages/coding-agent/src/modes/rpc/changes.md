@@ -1,5 +1,25 @@
 # changes
 
+## Shared RPC client transport and protocol surface (2026-08-27)
+
+### What changed
+
+- `rpc-client.ts` adds socket transport and shared-host client operations for connection-aware multi-session use.
+- `rpc-mode.ts` and `rpc-types.ts` preserve the classic JSONL RPC surface while adding the protocol and capability metadata needed for attach-compatible hosts.
+
+### Why
+
+- Socket-host clients need one typed transport and a stable protocol handshake while existing stdio RPC integrations remain compatible.
+
+### Why an extension could not handle it
+
+- RPC framing, transport selection, protocol negotiation, and command/event types are built-in mode contracts established before extensions load.
+
+### Expected merge conflict zones
+
+- MEDIUM: `rpc-client.ts` transport methods and `rpc-types.ts` protocol unions.
+- LOW: `rpc-mode.ts` additive protocol response wiring.
+
 ## One lifecycle supervisor across CLI and desktop runtimes (2026-08-25)
 
 - The hidden `--internal-rpc-host-supervisor` CLI route exposes the existing `host-lifecycle.ts` entry to bundled/rebranded callers without changing any public mode. Its socket, agent directory, and child command/args are explicit parameters, so desktop cold starts execute the same proxy, policy, observer, watchdog, pidfile, and cleanup implementation as `ensureHost()`.
