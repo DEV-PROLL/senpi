@@ -1,5 +1,43 @@
 # changes
 
+## 2026-08-27 - Default retry policy phase-2 close-out (docs)
+
+### What changed
+
+- `packages/coding-agent/src/core/retry-fallback/profile-override.ts`: the `retry.providers.<providerId>` override surface accepts per-provider scheduling-knob overrides validated against `RetryStageOverride` (fields: `enabled`, `maxRetries`, `baseDelayMs`, `growthFactor`, `perAttemptCapMs`, `jitter`, `serverHintMaxDelayMs`). An entire provider entry is rejected atomically when any knob is invalid.
+- Recommended settings snippet for users who configure no fallback chain and want a larger same-model budget:
+  ```jsonc
+  {
+    // Raise the turn retry budget for a single-provider setup.
+    // maxRetries must be a non-negative safe integer.
+    "retry": {
+      "providers": {
+        "<providerId>": {
+          "turn": {
+            "maxRetries": 5
+          }
+        }
+      }
+    }
+  }
+  ```
+- The default same-model turn retry budget stays at 3 retries. This is an intentional non-change: the budget was reviewed during phase-2 close and kept at its existing value for all providers that don't declare their own profile.
+- No new kimi-code observability or telemetry surface was adopted.
+- Regression coverage: `packages/coding-agent/test/suite/regressions/retry-default-no-kimi-leak.test.ts` guards senpi-default against kimi semantics leaking in (no-hint 429 first-failure fallback, 1258000ms hint tier routing, billing 429 pinned fallback, abort during backoff single `auto_retry_end`).
+- Tracked in `packages/ai/src/changes.md` and `packages/coding-agent/src/core/changes.md`.
+
+### Why
+
+- Users running a single provider without a fallback chain benefit from a higher retry budget, but the default stays conservative (3) to avoid masking persistent failures when fallback providers are available. The snippet documents the exact override path so users don't have to read the validation source.
+
+### Why an extension could not handle it
+
+- `retry.providers` overrides are resolved inside `resolveRetryProfile` in `packages/coding-agent/src/core/settings-manager.ts`, before any extension hook. The validation and merge happen at settings load time.
+
+### Expected merge conflict zones
+
+- NONE: doc-only section append; no code files touched.
+
 ## Provider-neutral credential accounts (2026-08-27)
 
 ### What changed
