@@ -20,6 +20,25 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 
 - The `Args` interface and the `parseArgs` flag chain in `packages/coding-agent/src/cli/args.ts`.
 
+## RPC Unix-socket listener flag (2026-08-23)
+
+### What changed
+
+- `packages/coding-agent/src/cli/args.ts` recognizes `--listen` when `--mode rpc` is active, records the listener address, and enables the multi-session host; the help surface documents stdio, Unix URL, and direct path forms.
+
+### Why
+
+- The multi-connection RPC host needs a first-class CLI listener address without stealing `--listen` from unrelated root/experimental command parsing.
+
+### Why an extension could not handle it
+
+- RPC mode selection and listener startup occur before extension flags are loaded.
+
+### Expected merge conflict zones
+
+- LOW: the `Args` fields, parse branch, and help rows in `args.ts`.
+
+
 ## Fork CLI flags and branded help retained over upstream 59a71b23 (2026-08-19)
 
 ### What changed

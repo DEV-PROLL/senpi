@@ -6,6 +6,7 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
 import chalk from "chalk";
@@ -76,8 +77,10 @@ import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/tru
 import { builtInExtensions } from "./extensions/index.ts";
 import { getFromSourceRealConfigWarning } from "./from-source-config-guard.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
+import { createInteractiveHostRuntime } from "./modes/interactive/interactive-host-runtime.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { runPrintMode } from "./modes/print-mode.ts";
+import { parseSupervisorArgs, runHostSupervisor } from "./modes/rpc/host-lifecycle.ts";
 import { runMultiSessionHost } from "./modes/rpc/multi-session-host.ts";
 import { runRpcMode } from "./modes/rpc/rpc-mode.ts";
 import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
@@ -670,6 +673,18 @@ export async function main(args: string[], options?: MainOptions) {
 		return;
 	}
 
+	// Internal launch surface used by bundled/rebranded runtimes. It is deliberately
+	// not accepted by parseArgs, so existing CLI modes remain unchanged.
+	if (args[0] === "--internal-rpc-host-supervisor") {
+		const launch = parseSupervisorArgs(args.slice(1));
+		if (!launch) {
+			console.error("invalid internal RPC host supervisor arguments");
+			process.exit(2);
+		}
+		await runHostSupervisor(launch);
+		return;
+	}
+
 	if (process.platform === "win32") {
 		cleanupWindowsSelfUpdateQuarantine(getPackageDir());
 	}
@@ -1053,6 +1068,7 @@ export async function main(args: string[], options?: MainOptions) {
 			creationModel:
 				parsed.provider && parsed.model ? { provider: parsed.provider, modelId: parsed.model } : undefined,
 			initialThinkingLevel: parsed.thinking,
+			listen: parsed.listen,
 		});
 	}
 	const runtime = await createAgentSessionRuntime(createRuntime, {
@@ -1063,7 +1079,16 @@ export async function main(args: string[], options?: MainOptions) {
 		startupLoadingIndicator.stop();
 	});
 	time("createAgentSessionRuntime");
-	const { services, session, modelFallbackMessage } = runtime;
+	let selectedRuntime = runtime;
+	if (appMode === "interactive" && !isTruthyEnvFlag(envValue("DISABLE_SHARED_HOST"))) {
+		const socket = envValue("RPC_SOCKET") ?? resolve(agentDir, "rpc", "rpc.sock");
+		selectedRuntime = await createInteractiveHostRuntime(runtime, {
+			socket,
+			agentDir,
+			onWarning: (warning) => console.error(chalk.yellow(warning.message)),
+		});
+	}
+	const { services, session, modelFallbackMessage } = selectedRuntime;
 	const { settingsManager, modelRuntime, resourceLoader } = services;
 	applyHttpProxySettings(settingsManager.getGlobalSettings().httpProxy);
 	configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
@@ -1144,7 +1169,7 @@ export async function main(args: string[], options?: MainOptions) {
 		// Keep the TUI graph out of headless RPC children. This is intentionally at the
 		// mode seam: interactive startup still loads the same module before first use.
 		const { InteractiveMode } = await import("./modes/interactive/interactive-mode.ts");
-		const interactiveMode = new InteractiveMode(runtime, {
+		const interactiveMode = new InteractiveMode(selectedRuntime, {
 			migratedProviders,
 			modelFallbackMessage,
 			autoTrustOnReloadCwd,

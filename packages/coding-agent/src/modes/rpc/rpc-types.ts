@@ -247,7 +247,12 @@ export type RpcResponse =
 			type: "response";
 			command: "get_protocol_info";
 			success: true;
-			data: { protocolVersion: 1; capabilities: ["multi_session"]; mode: "classic" | "multi" };
+			data: {
+				protocolVersion: 1;
+				serverVersion: string;
+				capabilities: string[];
+				mode: "classic" | "multi";
+			};
 	  }
 	| {
 			id?: string;

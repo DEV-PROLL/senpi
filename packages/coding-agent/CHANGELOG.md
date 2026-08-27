@@ -14,6 +14,7 @@
 
 ### Added
 
+- Interactive sessions now use the shared multi-session Unix-socket RPC host by default when a persisted session is available, with attach-compatible protocol and capability handshakes; `SENPI_DISABLE_SHARED_HOST=1` opts a launch back into the local runtime. The host lifecycle supervisor provides transient/persistent idle-exit policy and an orphan-proof watchdog, and bundled clients can invoke the hidden supervisor route for the same behavior.
 - Active goals now stop auto-continuing after 150 automatic continuations without accepted direct user input ([#1139](https://github.com/code-yeongyu/senpi/issues/1139)): a persisted unattended budget survives assistant-text changes and tool use, the goal blocks mechanically (`unattended continuation limit reached`), and any user message resumes it with the budget restored. Monitor-delayed deliveries (armed wake sources) do not consume the budget.
 
 ### Changed
