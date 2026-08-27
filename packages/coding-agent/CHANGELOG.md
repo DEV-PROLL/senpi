@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Native todo lists with an explicit empty `todos: []` payload now clear persisted todo state and remove the `todo-sidebar`, while absent payloads remain ignored and lists with pending work remain visible.
 - Bash output spill files now capture early `EDQUOT`/`ENOSPC` stream errors and late filesystem
   close failures, waiting for the stream's terminal `close` event and failing only the tool call
   instead of returning an incomplete path or terminating the interactive session through
