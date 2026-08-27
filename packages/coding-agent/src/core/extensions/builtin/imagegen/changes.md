@@ -1,5 +1,24 @@
 # imagegen builtin — changes
 
+## Bun-compiled skill asset (2026-08-27)
+
+### What changed
+
+- Bun-compiled binaries now resolve the bundled skill through a file-asset import, while Node continues using the copied adjacent skill file.
+
+### Why
+
+- The skill is copied into `dist` for Node execution but was not embedded in the Bun compile graph, leaving compiled binaries without imagegen guidance.
+
+### Why an extension could not handle it
+
+- The skill path is resolved inside the builtin's resource-discovery handler, so no downstream extension can restore an asset absent from the compiled module graph.
+
+### Expected merge conflict zones
+
+- LOW: `index.ts` asset resolution branch.
+
+
 ## RPC-safe missing-skill diagnostics (2026-08-27)
 
 ### What changed
