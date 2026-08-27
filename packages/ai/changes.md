@@ -212,12 +212,12 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 - LOW: the export-map subpath entries and the generated `src/providers/data/*.json` snapshots that a
   strict regeneration rewrites.
 
-## Default GPT-5.6 Sol catalogs to 400k context (2026-08-18)
+## Default GPT-5.6 Sol catalogs to 650k context (2026-08-27)
 
 ### What changed
 
-- `scripts/generate-models.ts`: direct `openai` and ChatGPT OAuth `openai-codex` entries for `gpt-5.6-sol`
-  now default to a 400,000-token context window. Their generated `-fast` variants inherit the same limit.
+- `packages/ai/scripts/generate-models.ts`: direct `openai` and ChatGPT OAuth `openai-codex` entries for `gpt-5.6-sol`
+  now default to a 650,000-token context window. Their generated `-fast` variants inherit the same limit.
 - `test/openai-fast-models.test.ts`: covers both providers and both base/fast Sol IDs.
 - `src/providers/data/*.json`: regenerated committed catalog data and manifest carry the new default.
 - The same reviewed regeneration refreshed Vercel AI Gateway's `alibaba/qwen3.8-27b` pricing from zero-value
@@ -226,9 +226,9 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 ### Why
 
 - The GPT-5.6 Sol service can accept up to a 1M context, but the default Senpi catalog should reserve a
-  400k operating window instead of inheriting the generic 272k OpenAI short-tier cap or advertising the
+  650k operating window instead of inheriting the generic 272k OpenAI short-tier cap or advertising the
   full service maximum.
-- Luna and Terra remain at their existing defaults; this is intentionally scoped to Sol and Sol Fast.
+- Terra and Luna remain at their existing 272k defaults; this change is intentionally scoped to Sol and Sol Fast.
 - The Vercel Qwen price change is retained because generated provider data is an atomic snapshot of the
   upstream sources at generation time; keeping a stale per-model value would make the checked-in artifact
   disagree with a fresh strict regeneration.
