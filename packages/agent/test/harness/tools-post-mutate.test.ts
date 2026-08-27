@@ -1,4 +1,5 @@
 import { rmSync } from "node:fs";
+import { symlink } from "node:fs/promises";
 import { applyPatch } from "diff";
 import { describe, expect, it } from "vitest";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";
@@ -66,6 +67,30 @@ describe("AgentHarness tools postMutate", () => {
 		);
 
 		expect(observed).toBe("written-bytes");
+	});
+
+	it("hands the hook the path the tool wrote, not the canonical target, when editing through a symlink", async () => {
+		const env = createEnv();
+		getOrThrow(await env.writeFile("target.txt", "alpha\nbeta\n"));
+		await symlink("target.txt", `${env.cwd}/link.txt`);
+		const seen: string[] = [];
+
+		await createEditTool().execute(
+			"edit-post-mutate-symlink",
+			{ path: "link.txt", edits: [{ oldText: "alpha", newText: "ALPHA" }] },
+			undefined,
+			undefined,
+			{
+				env,
+				postMutate: async (input) => {
+					seen.push(input.path);
+					return { changed: false };
+				},
+			},
+		);
+
+		expect(seen).toEqual([getOrThrow(await env.absolutePath("link.txt"))]);
+		expect(getOrThrow(await env.readTextFile("target.txt"))).toBe("ALPHA\nbeta\n");
 	});
 
 	it("recomputes edit diff metadata against the post-mutate file contents", async () => {

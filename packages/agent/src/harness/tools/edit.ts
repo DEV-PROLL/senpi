@@ -142,7 +142,8 @@ export function createEditTool<TContext extends ExecutionToolContext = Execution
 
 				const diffResult = generateDiffString(baseContent, committedContent);
 				const text = appendPostMutateNote(
-					appendPostMutateNote(`Successfully replaced ${edits.length} block(s) in ${path}.`, outcome.note),
+					`Successfully replaced ${edits.length} block(s) in ${path}.`,
+					outcome.note,
 					rereadNote,
 				);
 				return {

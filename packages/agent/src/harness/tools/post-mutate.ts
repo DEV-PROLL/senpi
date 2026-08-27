@@ -33,9 +33,9 @@ export async function runPostMutate(
 	return { fileMayHaveChanged: result.changed, note: result.note };
 }
 
-/** Append a `postMutate` note to tool result text. */
-export function appendPostMutateNote(text: string, note: string | undefined): string {
-	return note ? `${text}\n${note}` : text;
+/** Append any `postMutate` notes to tool result text, one per line, skipping absent ones. */
+export function appendPostMutateNote(text: string, ...notes: Array<string | undefined>): string {
+	return [text, ...notes.filter((note) => note !== undefined)].join("\n");
 }
 
 function errorMessage(error: unknown): string {
