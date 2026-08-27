@@ -1,3 +1,25 @@
+## 2026-08-27 - Default retry policy phase-2 close-out (docs)
+
+### What changed
+
+- `packages/ai/src/utils/retry-profile/profiles.ts`: the senpi-default turn stage ships an 8s `perAttemptCapMs` and +0..25% additive jitter on locally computed exponential backoffs (provider-derived `Retry-After` hints stay exact). `classifyErrorMessage` remains tri-state (non-retryable / retryable / unknown) with non-retryable outranking retryable.
+- The default same-model turn retry budget stays at 3 retries. This is an intentional non-change: the budget was reviewed during phase-2 close and kept at its existing value for all providers that don't declare their own profile.
+- No new kimi-code observability or telemetry surface was adopted. The `provider_retry_failure` diagnostic added in phase 1 is the only retry-specific emission, and no additional counters, traces, or structured events were introduced.
+- Regression coverage: `packages/coding-agent/test/suite/regressions/retry-default-no-kimi-leak.test.ts` guards senpi-default against kimi semantics leaking in (no-hint 429 first-failure fallback, 1258000ms hint tier routing, billing 429 pinned fallback, abort during backoff single `auto_retry_end`).
+- Tracked in `packages/ai/src/changes.md` and `packages/coding-agent/src/core/changes.md`.
+
+### Why
+
+- Phase-2 close needs an explicit record that the 3-retry budget and the absence of new telemetry were deliberate decisions, not oversights. The profile defaults recap documents the shipped values in one place for reviewers who don't read `profiles.ts`.
+
+### Why an extension could not handle it
+
+- The profile constants and classifier live inside this package's retry-profile tree, below any extension-visible hook.
+
+### Expected merge conflict zones
+
+- NONE: doc-only section append; no code files touched.
+
 ## 2026-08-27 - Storage docs describe pooled entries
 
 ### What changed
