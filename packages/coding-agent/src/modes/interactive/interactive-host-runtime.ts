@@ -195,6 +195,7 @@ function createRemoteSessionProxy(
 			if (property === "appendLabelChange") {
 				return (entryId: string, label?: string) => void client.setLabel(entryId, label);
 			}
+			if (property === "getSessionName") return () => state.sessionName;
 			return Reflect.get(sessionManager, property, receiver);
 		},
 	});
