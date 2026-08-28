@@ -161,6 +161,16 @@ export class RpcSessionRegistry {
 		}
 	}
 
+	/**
+	 * Read-only lookup with no state transitions or attachment accounting.
+	 * Exists so lifecycle decisions (e.g. deferring a dropped connection's
+	 * release while a turn is still streaming) can inspect the live entry
+	 * without claiming it.
+	 */
+	peek(handle: string): RpcSessionEntry | undefined {
+		return this.entries.get(handle);
+	}
+
 	getForCommand(handle: string, command: string): RpcSessionEntry {
 		const entry = this.entries.get(handle);
 		if (!entry) throw new RpcSessionRegistryError("unknown_session");
