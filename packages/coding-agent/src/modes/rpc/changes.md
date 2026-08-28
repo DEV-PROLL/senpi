@@ -1,5 +1,28 @@
 # changes
 
+## Terminal monitor snapshots ride `extension_event` (2026-08-28)
+
+### What changed
+
+- The terminal builtin now calls `pi.rpc.emit("terminal_monitor_state", payload)`
+  alongside the existing in-process event. Connection-handler forwarding is
+  unchanged: clients that advertised `extension_events` receive
+  `{ type: "extension_event", name: "terminal_monitor_state", data }`.
+
+### Why
+
+- Ordinary `pi.events` channels stay extension-local. Monitor liveness was
+  therefore invisible to RPC clients even though the snapshot existed in-process.
+
+### Why an extension could not handle it
+
+- The emit lives in the terminal builtin; the RPC host already forwards every
+  `pi.rpc.emit`. No connection-handler or schema change is required.
+
+### Expected merge conflict zones
+
+- LOW: `docs/rpc.md` `extension_event` section (payload example).
+
 ## Prompt disposition rides the wire and sessions attach by path (2026-08-28)
 
 ### What changed

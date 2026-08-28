@@ -6,6 +6,8 @@
 
 ### Added
 
+- Terminal monitor snapshots now also publish on the RPC `extension_event` path as `terminal_monitor_state` (`activeCount` plus per-watch `id`/`description`/`paused`/`startedAtMs`). Clients receive them only when they advertise `extension_events`; the in-process `pi.events` channel is unchanged.
+
 - `--auto-title-sessions` opts non-interactive launches into engine-side session auto-titling, so `--mode rpc` hosts (including `--multi-session`) generate session titles and publish them through the existing `session_info_changed` event. Resumed sessions that already have context messages are still never retitled.
 
 ### Changed
