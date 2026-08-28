@@ -813,6 +813,17 @@ export function createRpcConnectionHandler(
 				return undefined;
 			}
 
+			case "append_user_message": {
+				const content = command.content as Parameters<AgentSession["sendUserMessage"]>[0];
+				const message =
+					typeof content === "string"
+						? { role: "user" as const, content, timestamp: Date.now() }
+						: { role: "user" as const, content, timestamp: Date.now() };
+				session.sessionManager.appendMessage(message);
+				session.messages.push(message);
+				return success(id, "append_user_message");
+			}
+
 			case "send_custom_message": {
 				await session.sendCustomMessage(
 					{

@@ -141,15 +141,29 @@ class RemoteInteractiveRuntime {
 			this.#beforeSessionInvalidate?.();
 			this.#remoteSession.abortLocalBash();
 			await this.#remoteSession.refresh();
-			if (options?.setup) await options.setup(this.#remoteSession.session.sessionManager);
-			await this.#rebindSession?.();
 			if (options?.setup) {
-				this.#remoteSession.session.messages.splice(
-					0,
-					this.#remoteSession.session.messages.length,
-					...this.#remoteSession.session.sessionManager.buildSessionContext().messages,
-				);
+				const capture = SessionManager.inMemory(this.#remoteSession.session.sessionManager.getCwd());
+				await options.setup(capture);
+				for (const entry of capture.getEntries()) {
+					if (entry.type === "custom_message") {
+						await this.#client.sendCustomMessage(
+							{
+								customType: entry.customType,
+								content: entry.content,
+								display: entry.display,
+								details: entry.details,
+							},
+							{ triggerTurn: false },
+						);
+					} else if (entry.type === "message" && entry.message.role === "user") {
+						await this.#client.appendUserMessage(entry.message.content);
+					} else {
+						throw new Error(`Shared-host setup cannot transport ${entry.type} entries`);
+					}
+				}
+				await this.#remoteSession.refresh();
 			}
+			await this.#rebindSession?.();
 			if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 		}
 		return result;

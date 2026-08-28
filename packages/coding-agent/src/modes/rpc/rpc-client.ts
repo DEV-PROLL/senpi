@@ -372,6 +372,10 @@ export class RpcClient {
 		}
 	}
 
+	async appendUserMessage(content: unknown): Promise<void> {
+		await this.send({ type: "append_user_message", content });
+	}
+
 	async sendCustomMessage<T = unknown>(
 		message: { customType: string; content: unknown; display: boolean; details?: T },
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
