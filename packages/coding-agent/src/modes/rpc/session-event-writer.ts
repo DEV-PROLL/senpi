@@ -130,6 +130,11 @@ export class SessionEventWriter {
 		return this.connectionContext.run(id, task);
 	}
 
+	/** Connection id of the command currently being dispatched, when one owns it. */
+	currentConnection(): string | undefined {
+		return this.connectionContext.getStore();
+	}
+
 	/** Queue a session record. Lifecycle/events are broadcast; responses/UI are targeted. */
 	enqueue(sessionId: string, value: object): boolean {
 		if (this.sealedSessions.has(sessionId)) return false;
