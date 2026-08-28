@@ -793,6 +793,7 @@ export function createRpcConnectionHandler(
 						images: command.images,
 						streamingBehavior: command.streamingBehavior,
 						thinkingLevel: command.thinkingLevel,
+						expandPromptTemplates: command.expandPromptTemplates,
 						source: "rpc",
 						promptDisposition: (nextDisposition) => {
 							disposition = nextDisposition;
@@ -810,6 +811,19 @@ export function createRpcConnectionHandler(
 						}
 					});
 				return undefined;
+			}
+
+			case "send_custom_message": {
+				await session.sendCustomMessage(
+					{
+						customType: command.customType,
+						content: command.content as Parameters<AgentSession["sendCustomMessage"]>[0]["content"],
+						display: command.display,
+						details: command.details,
+					},
+					{ triggerTurn: command.triggerTurn, deliverAs: command.deliverAs },
+				);
+				return success(id, "send_custom_message");
 			}
 
 			case "steer": {

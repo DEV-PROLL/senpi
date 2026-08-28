@@ -31,6 +31,17 @@ type RpcSessionCommand =
 			images?: ImageContent[];
 			streamingBehavior?: "steer" | "followUp";
 			thinkingLevel?: ThinkingLevel;
+			expandPromptTemplates?: boolean;
+	  }
+	| {
+			id?: string;
+			type: "send_custom_message";
+			customType: string;
+			content: unknown;
+			display: boolean;
+			details?: unknown;
+			triggerTurn?: boolean;
+			deliverAs?: "steer" | "followUp" | "nextTurn";
 	  }
 	| { id?: string; type: "steer"; message: string; images?: ImageContent[]; enqueueOrder?: number }
 	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[]; enqueueOrder?: number }
@@ -316,6 +327,7 @@ export type RpcResponse =
 	// so proxied optimistic-echo contracts resolve exactly like the local path; older
 	// hosts omit it and clients must degrade to canonical-only rendering.
 	| { id?: string; type: "response"; command: "prompt"; success: true; data?: { disposition?: PromptDisposition } }
+	| { id?: string; type: "response"; command: "send_custom_message"; success: true }
 	| { id?: string; type: "response"; command: "steer"; success: true }
 	| { id?: string; type: "response"; command: "follow_up"; success: true }
 	| { id?: string; type: "response"; command: "abort"; success: true }

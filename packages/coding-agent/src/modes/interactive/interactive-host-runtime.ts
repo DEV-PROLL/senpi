@@ -520,12 +520,11 @@ function createRemoteSessionProxy(
 			const context = local.createReplacedSessionContext();
 			Object.defineProperty(context, "cwd", { value: state.cwd });
 			Object.defineProperty(context, "sessionManager", { value: remoteSessionManager });
-			context.sendMessage = (message, options) => {
-				const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
-				return client.prompt(content, {
-					streamingBehavior: options?.deliverAs === "steer" ? "steer" : "followUp",
+			context.sendMessage = (message, options) =>
+				client.sendCustomMessage(message, {
+					triggerTurn: options?.triggerTurn,
+					deliverAs: options?.deliverAs,
 				});
-			};
 			context.sendUserMessage = (content, options) => {
 				if (typeof content === "string") return client.prompt(content, { streamingBehavior: options?.deliverAs });
 				const text = content
@@ -533,7 +532,11 @@ function createRemoteSessionProxy(
 					.map((part) => part.text)
 					.join("\n");
 				const images = content.filter((part) => part.type === "image");
-				return client.prompt(text, { images, streamingBehavior: options?.deliverAs });
+				return client.prompt(text, {
+					images,
+					streamingBehavior: options?.deliverAs,
+					expandPromptTemplates: options?.expandPromptTemplates,
+				});
 			};
 			return context;
 		},
