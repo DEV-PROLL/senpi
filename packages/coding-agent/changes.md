@@ -1,5 +1,10 @@
 # Local fork changes
 
+## Credential rotation and fallback parity fixes (2026-08-28)
+
+- Preserve dotted bare model IDs in fallback tombstone matching, admit policy-only credential slots, avoid consuming half-open leases during runtime preflight, and isolate service-created credential pool state under the requested agent directory.
+
+
 ## Shared RPC attachment lifecycle (2026-08-28)
 
 - Socket RPC dispatch remains re-entrant so extension UI responses can resolve in-flight commands.

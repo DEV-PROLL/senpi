@@ -114,6 +114,7 @@ describe("fallback chain selectors", () => {
 		const model = getModel("anthropic", "claude-fable-5");
 		const namespacedModel = { ...model, id: "global.anthropic.claude-fable-5" };
 		expect(hasExplicitFallbackOptOut({ "claude-fable-5": [] }, namespacedModel, "max")).toBe(true);
+		expect(hasExplicitFallbackOptOut({ "gpt-5.4": [] }, getModel("openai", "gpt-5.4"), undefined)).toBe(true);
 		expect(hasExplicitFallbackOptOut({ "claude-fable-5": [] }, model, "max")).toBe(true);
 		expect(hasExplicitFallbackOptOut({ "anthropic/claude-fable-5": [] }, model, undefined)).toBe(true);
 		expect(hasExplicitFallbackOptOut({ "openai/gpt-5.4": [] }, model, "max")).toBe(false);

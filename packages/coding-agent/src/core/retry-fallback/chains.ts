@@ -1,9 +1,14 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { matchesFamily } from "./expansion.ts";
 import { isValidThinkingLevel } from "../../cli/args.ts";
 import { findExactModelReferenceMatch, parseModelPattern } from "../model-resolver.ts";
-import { type FallbackAuthTiers, MAX_PROVIDERS_PER_FAMILY, parseBareSelector, rankFamilyModels } from "./expansion.ts";
+import {
+	type FallbackAuthTiers,
+	MAX_PROVIDERS_PER_FAMILY,
+	matchesFamily,
+	parseBareSelector,
+	rankFamilyModels,
+} from "./expansion.ts";
 
 export interface FallbackSelector {
 	raw: string;
@@ -155,8 +160,6 @@ export function hasExplicitFallbackOptOut(
 ): boolean {
 	const base = formatSelector(currentModel).toLowerCase();
 	const exact = currentThinking ? `${base}:${currentThinking}`.toLowerCase() : base;
-	const modelId = currentModel.id.toLowerCase();
-	const bareModelId = modelId.includes("/") || modelId.includes(".") ? modelId.slice(Math.max(modelId.lastIndexOf("/"), modelId.lastIndexOf(".")) + 1) : modelId;
 	for (const [key, entries] of Object.entries(chains)) {
 		if (!Array.isArray(entries) || !isChainTombstone(entries)) continue;
 		if (key === WILDCARD_CHAIN_KEY) continue;
@@ -164,7 +167,7 @@ export function hasExplicitFallbackOptOut(
 		const keyBase = normalizedBase(normalizedKey);
 		if (keyBase === base || normalizedKey === exact) return true;
 		// Bare family key (no provider prefix): treat an id match as covering.
-		if (!normalizedKey.includes("/") && matchesFamily({ ...currentModel, id: bareModelId }, keyBase)) return true;
+		if (!normalizedKey.includes("/") && matchesFamily(currentModel, keyBase)) return true;
 	}
 	return false;
 }
