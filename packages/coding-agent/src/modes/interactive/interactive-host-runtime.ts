@@ -237,6 +237,17 @@ function createRemoteSessionProxy(
 					};
 				};
 			if (property === "isStreaming") return state.isStreaming;
+			// The footer and other renderers read session.state.*; surface the
+			// host-authoritative fields there too, not only via the direct getters.
+			if (property === "state") {
+				const localState = target.state;
+				return {
+					...localState,
+					model: state.model ?? localState.model,
+					thinkingLevel: state.thinkingLevel,
+					isStreaming: state.isStreaming,
+				};
+			}
 			if (property === "sessionFile") return state.sessionFile;
 			if (property === "sessionId") return state.sessionId;
 			if (property === "messages") return target.messages;

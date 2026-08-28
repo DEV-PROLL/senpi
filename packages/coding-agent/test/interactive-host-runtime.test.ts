@@ -268,6 +268,36 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("reflects remote thinking-level cycles in session.state for footer rendering", async () => {
+		const qa = scratch("state-sync");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+			onWarning: vi.fn(),
+		});
+		try {
+			const newLevel = await runtime.session.cycleThinkingLevel();
+			expect(newLevel).toBeTruthy();
+			// The footer reads session.state.thinkingLevel; the proxy must surface the
+			// host's level there too, not only through the direct thinkingLevel getter.
+			expect(runtime.session.thinkingLevel).toBe(newLevel);
+			expect(runtime.session.state.thinkingLevel).toBe(newLevel);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("falls back locally with a typed warning when the host remains unreachable", async () => {
 		const qa = scratch("fallback");
 		const fake = await startFakeModelServer();
