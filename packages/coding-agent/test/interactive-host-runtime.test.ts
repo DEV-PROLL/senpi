@@ -538,19 +538,54 @@ describe("interactive host runtime", () => {
 		try {
 			await runtime.newSession({
 				setup: async (manager) => {
-					manager.appendCustomMessageEntry("setup-trace", "SETUP_TRACE", true, { marker: true });
+					manager.appendCustomEntry("setup-state", { marker: true });
+					manager.appendSessionInfo("setup session");
 				},
 			});
 			const listed = await observer.listSessions();
 			const hostSession = listed.find((entry) => entry.status === "open");
 			if (!hostSession?.sessionPath) throw new Error("Expected host session path");
 			await observer.openSession({ sessionPath: hostSession.sessionPath, cwd: qa.cwd });
-			const messages = await observer.getMessages();
-			expect(messages).toContainEqual(
-				expect.objectContaining({ role: "custom", customType: "setup-trace", content: "SETUP_TRACE" }),
+			const entries = await observer.getEntries();
+			expect(entries.entries).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ type: "custom", customType: "setup-state", data: { marker: true } }),
+					expect.objectContaining({ type: "session_info", name: "setup session" }),
+				]),
 			);
 		} finally {
 			await observer.stop();
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("preserves expandPromptTemplates for string replacement messages", async () => {
+		const qa = scratch("opts");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			await runtime.newSession({
+				withSession: async (ctx) => {
+					await ctx.sendUserMessage("/help", { expandPromptTemplates: false });
+				},
+			});
+			await runtime.session.waitForIdle();
+			expect(fake.requests.length).toBe(1);
+			expect(fake.requests[0]?.text).toContain("/help");
+		} finally {
 			await runtime.dispose();
 			await fake.close();
 		}

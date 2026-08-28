@@ -376,6 +376,10 @@ export class RpcClient {
 		await this.send({ type: "append_user_message", content });
 	}
 
+	async appendSessionEntry(entry: import("../../core/session-manager.ts").SessionEntry): Promise<void> {
+		await this.send({ type: "append_session_entry", entry });
+	}
+
 	async sendCustomMessage<T = unknown>(
 		message: { customType: string; content: unknown; display: boolean; details?: T },
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },

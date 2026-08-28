@@ -144,23 +144,7 @@ class RemoteInteractiveRuntime {
 			if (options?.setup) {
 				const capture = SessionManager.inMemory(this.#remoteSession.session.sessionManager.getCwd());
 				await options.setup(capture);
-				for (const entry of capture.getEntries()) {
-					if (entry.type === "custom_message") {
-						await this.#client.sendCustomMessage(
-							{
-								customType: entry.customType,
-								content: entry.content,
-								display: entry.display,
-								details: entry.details,
-							},
-							{ triggerTurn: false },
-						);
-					} else if (entry.type === "message" && entry.message.role === "user") {
-						await this.#client.appendUserMessage(entry.message.content);
-					} else {
-						throw new Error(`Shared-host setup cannot transport ${entry.type} entries`);
-					}
-				}
+				for (const entry of capture.getEntries()) await this.#client.appendSessionEntry(entry);
 				await this.#remoteSession.refresh();
 			}
 			await this.#rebindSession?.();
@@ -540,7 +524,11 @@ function createRemoteSessionProxy(
 					deliverAs: options?.deliverAs,
 				});
 			context.sendUserMessage = (content, options) => {
-				if (typeof content === "string") return client.prompt(content, { streamingBehavior: options?.deliverAs });
+				if (typeof content === "string")
+					return client.prompt(content, {
+						streamingBehavior: options?.deliverAs,
+						expandPromptTemplates: options?.expandPromptTemplates,
+					});
 				const text = content
 					.filter((part) => part.type === "text")
 					.map((part) => part.text)

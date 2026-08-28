@@ -666,3 +666,5 @@ wire shape, multi-session tagging, and payload validation responsibilities.
 ### Expected merge conflict zones
 
 - RPC command unions, response unions, and client methods.
+
+- Added append_session_entry RPC transport for verbatim shared-host setup mutations, preserving entry shape and order.
