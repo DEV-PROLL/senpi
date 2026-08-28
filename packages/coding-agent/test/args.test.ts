@@ -467,6 +467,27 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--auto-title-sessions flag", () => {
+		test("parses --auto-title-sessions", () => {
+			const result = parseArgs(["--auto-title-sessions"]);
+			expect(result.autoTitleSessions).toBe(true);
+			expect(result.unknownFlags.has("auto-title-sessions")).toBe(false);
+		});
+
+		test("is undefined when the flag is absent", () => {
+			const result = parseArgs(["--mode", "rpc", "--multi-session"]);
+			expect(result.autoTitleSessions).toBeUndefined();
+			expect(result.multiSession).toBe(true);
+		});
+
+		test("combines with rpc multi-session flags", () => {
+			const result = parseArgs(["--mode", "rpc", "--multi-session", "--auto-title-sessions"]);
+			expect(result.mode).toBe("rpc");
+			expect(result.multiSession).toBe(true);
+			expect(result.autoTitleSessions).toBe(true);
+		});
+	});
+
 	describe("messages and file args", () => {
 		test("parses plain text messages", () => {
 			const result = parseArgs(["hello", "world"]);

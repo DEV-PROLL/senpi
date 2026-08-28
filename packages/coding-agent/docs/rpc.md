@@ -57,6 +57,19 @@ every open session, each tagged with its routing `sessionId`. Correlated respons
 only to the connection that issued the command. This lets a non-owner observe a foreign turn without requiring a
 separate subscription protocol.
 
+### Session auto-titling
+
+Auto-generated session titles are on by default only for interactive launches. RPC hosts opt in with
+`--auto-title-sessions`:
+
+```bash
+senpi --mode rpc --multi-session --auto-title-sessions
+```
+
+With the flag, every session the host opens (classic or multi-session) generates a title from its first user prompt and
+publishes it to clients through the existing `session_info_changed` event; no new command or event is involved. Sessions
+resumed with existing context messages are never retitled, with or without the flag.
+
 Startup: `senpi --mode rpc --multi-session` → NO default session is constructed (no default `AgentSessionRuntime`, no default extension/watcher load). Classic `senpi --mode rpc` is byte-identical to today. Mode is fixed at process start; there is no runtime transition.
 
 ### Interactive sessions and shared-host opt-out

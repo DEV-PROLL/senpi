@@ -1,5 +1,23 @@
 # changes
 
+## Opt-in session auto-titling flag (2026-08-28)
+
+### What changed
+
+- `packages/coding-agent/src/cli/args.ts` adds `--auto-title-sessions` (`Args.autoTitleSessions`) and a help row for it, so non-interactive launches can request engine-side session titles.
+
+### Why
+
+- RPC hosts (the desktop app spawns `--mode rpc --multi-session`) had no way to enable session auto-titling, which was hardcoded to interactive mode only.
+
+### Why an extension could not handle it
+
+- Flag parsing happens in the entrypoint before extension flags are registered, and the value is consumed while the first session is constructed.
+
+### Expected merge conflict zones
+
+- LOW: the `Args` fields, the parse branch beside `--multi-session`, and the help rows in `args.ts`.
+
 ## CLI argument surface re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed
