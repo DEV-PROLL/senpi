@@ -1,6 +1,7 @@
 # changes
 
 - Shared-host bash lifecycle now composes client-local and host-owned running state, so another client's bash events cannot clear a local operation (NF-1).
+- Shared-host replacement wrappers preserve client-side `setup`, `withSession`, and `projectTrustContextFactory` callbacks after host confirmation and proxy refresh, matching beta.22 callback ordering (N4-B9).
 
 - Shared-host replacement and name readback closure: refreshed session managers retain the host-effective cwd (including a differing override when the stored cwd is unavailable), and all `getSessionName()` consumers read the mirrored `session_info_changed` name.
 

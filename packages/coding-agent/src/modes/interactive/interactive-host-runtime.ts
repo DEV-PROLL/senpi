@@ -3,6 +3,7 @@ import type { AgentSession, AgentSessionEvent, AgentSessionEventListener } from 
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import type { AgentSessionRuntimeDiagnostic } from "../../core/agent-session-services.ts";
 import { executeBashWithOperations } from "../../core/bash-executor.ts";
+import type { ProjectTrustContext, ReplacedSessionContext } from "../../core/extensions/index.ts";
 import { SessionManager } from "../../core/session-manager.ts";
 import { SettingsManager } from "../../core/settings-manager.ts";
 import type { BashOperations } from "../../core/tools/bash.ts";
@@ -130,33 +131,51 @@ class RemoteInteractiveRuntime {
 		await this.#client.stop();
 		await this.#local.dispose();
 	}
-	async newSession(options?: { parentSession?: string }): Promise<{ cancelled: boolean }> {
+	async newSession(options?: {
+		parentSession?: string;
+		setup?: (sessionManager: SessionManager) => Promise<void>;
+		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+	}): Promise<{ cancelled: boolean }> {
 		const result = await this.#client.newSession(options?.parentSession);
 		if (!result.cancelled) {
 			this.#beforeSessionInvalidate?.();
 			this.#remoteSession.abortLocalBash();
-			await this.#refreshAndRebind();
+			await this.#remoteSession.refresh();
+			if (options?.setup) await options.setup(this.#remoteSession.session.sessionManager);
+			await this.#rebindSession?.();
+			if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 		}
 		return result;
 	}
-	async switchSession(sessionPath: string, options?: { cwdOverride?: string }): Promise<{ cancelled: boolean }> {
+	async switchSession(
+		sessionPath: string,
+		options?: {
+			cwdOverride?: string;
+			withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+			projectTrustContextFactory?: (cwd: string) => ProjectTrustContext;
+		},
+	): Promise<{ cancelled: boolean }> {
 		const result = await this.#client.switchSession(sessionPath, options);
 		if (!result.cancelled) {
 			this.#beforeSessionInvalidate?.();
 			this.#remoteSession.abortLocalBash();
-			await this.#refreshAndRebind();
+			await this.#remoteSession.refresh();
+			options?.projectTrustContextFactory?.(this.#remoteSession.session.sessionManager.getCwd());
+			await this.#rebindSession?.();
+			if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 		}
 		return result;
 	}
 	async fork(
 		entryId: string,
-		options?: { position?: "before" | "at" },
+		options?: { position?: "before" | "at"; withSession?: (ctx: ReplacedSessionContext) => Promise<void> },
 	): Promise<{ cancelled: boolean; selectedText?: string }> {
 		const result = await this.#client.fork(entryId, options);
 		if (!result.cancelled) {
 			this.#beforeSessionInvalidate?.();
 			this.#remoteSession.abortLocalBash();
 			await this.#refreshAndRebind();
+			if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 		}
 		return { cancelled: result.cancelled, selectedText: result.text };
 	}
@@ -180,6 +199,7 @@ interface RemoteSessionProxy {
 	readonly session: AgentSession;
 	refresh(): Promise<void>;
 	abortLocalBash(): void;
+	createReplacedSessionContext(): ReplacedSessionContext;
 }
 
 function createRemoteSessionProxy(
@@ -482,6 +502,12 @@ function createRemoteSessionProxy(
 		session,
 		refresh,
 		abortLocalBash: () => localBashAbortController?.abort(),
+		createReplacedSessionContext: () => {
+			const context = local.createReplacedSessionContext();
+			Object.defineProperty(context, "cwd", { value: state.cwd });
+			Object.defineProperty(context, "sessionManager", { value: remoteSessionManager });
+			return context;
+		},
 	};
 }
 

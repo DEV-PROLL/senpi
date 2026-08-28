@@ -434,8 +434,20 @@ describe("interactive host runtime", () => {
 		const initialSessionId = runtime.session.sessionId;
 
 		try {
-			await runtime.switchSession(targetPath);
+			const trustFactory = vi.fn<(cwd: string) => void>();
+			let callbackSessionFile: string | undefined;
+			await runtime.switchSession(targetPath, {
+				projectTrustContextFactory: (cwd) => {
+					trustFactory(cwd);
+					return {} as never;
+				},
+				withSession: async (ctx) => {
+					callbackSessionFile = ctx.sessionManager.getSessionFile();
+				},
+			});
 
+			expect(trustFactory).toHaveBeenCalledWith(qa.cwd);
+			expect(callbackSessionFile).toBe(targetPath);
 			expect(runtime.session.sessionFile).toBe(targetPath);
 			expect(runtime.session.sessionId).not.toBe(initialSessionId);
 			expect(runtime.session.sessionManager.getSessionFile()).toBe(targetPath);
@@ -535,7 +547,13 @@ describe("interactive host runtime", () => {
 			expect(runtime.session.sessionManager.getSessionFile()).toBe(runtime.session.sessionFile);
 			const firstFile = runtime.session.sessionFile;
 			const firstId = runtime.session.sessionId;
-			await runtime.newSession();
+			let callbackSessionFile: string | undefined;
+			await runtime.newSession({
+				withSession: async (ctx) => {
+					callbackSessionFile = ctx.sessionManager.getSessionFile();
+				},
+			});
+			expect(callbackSessionFile).toBe(runtime.session.sessionFile);
 			expect(runtime.session.sessionFile).not.toBe(firstFile);
 			expect(runtime.session.sessionId).not.toBe(firstId);
 			expect(runtime.session.sessionManager.getSessionFile()).toBe(runtime.session.sessionFile);
