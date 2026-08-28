@@ -174,27 +174,47 @@ describe("credential rotation over a pooled provider", () => {
 		expect(attempted).toEqual(["work"]);
 	});
 
-	test("expired cooldown admits exactly one probe", async () => {
+	test("expired stored cooldown admits and runs exactly one probe", async () => {
 		await repository.mutateSlotState("test", "stored", "default", () => ({
 			blockedUntil: NOW - 1,
 			blockReason: "rate_limit",
 		}));
-		const first = await listRotationSlots({
-			providerId: "test",
-			credential: pooled(),
-			env: () => undefined,
-			repository,
-			now: () => NOW,
-		});
-		const second = await listRotationSlots({
-			providerId: "test",
-			credential: pooled(),
-			env: () => undefined,
-			repository,
-			now: () => NOW,
-		});
-		expect(first.some((slot) => slot.name === "default")).toBe(true);
-		expect(second.some((slot) => slot.name === "default")).toBe(false);
+		await repository.mutateSlotState("test", "stored", "work", () => ({
+			blockedUntil: NOW + 60_000,
+			blockReason: "rate_limit",
+		}));
+		const attempted: string[] = [];
+		await collect(
+			streamWithCredentialRotation({
+				sources: {
+					providerId: "test",
+					credential: pooled(),
+					env: () => undefined,
+					repository,
+					now: () => NOW,
+				},
+				runAttempt: (slot) => {
+					attempted.push(slot.name);
+					return stream(startEvent(), textEvent("probe-ok"));
+				},
+			}),
+		);
+		expect(attempted).toEqual(["default"]);
+	});
+
+	test("expired env cooldown admits exactly one leased probe", async () => {
+		const env = (name: string) => ({ TEST_API_KEY: "key-one", TEST_API_KEY_2: "key-two" })[name];
+		const revision = await repository.envCredentialRevision("TEST_API_KEY", "key-one");
+		await repository.mutateSlotState("test", "env", "env", () => ({
+			blockedUntil: NOW - 1,
+			blockReason: "rate_limit",
+			credentialRevision: revision,
+		}));
+		const sources = { providerId: "test", credential: undefined, env, repository, now: () => NOW };
+		const first = await listRotationSlots(sources);
+		const second = await listRotationSlots(sources);
+		expect(first.find((slot) => slot.name === "env")?.lease).toBeDefined();
+		expect(second.some((slot) => slot.name === "env")).toBe(false);
 	});
 
 	test("policy cooldown cap is applied to persisted rate limits", async () => {

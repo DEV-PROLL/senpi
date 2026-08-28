@@ -95,7 +95,15 @@ export async function listRotationSlots(sources: RotationSources): Promise<Rotat
 	for (const slot of envSlots) {
 		const persisted = state[slot.name];
 		const revision = await repository.envCredentialRevision(slot.envVarName, slot.key);
-		const applicable = persisted?.credentialRevision === revision ? persisted : undefined;
+		let applicable = persisted?.credentialRevision === revision ? persisted : undefined;
+		if (applicable?.blockedUntil !== undefined && applicable.blockedUntil <= (sources.now ?? Date.now)()) {
+			const lease = await acquireHalfOpenLease(repository, providerId, "env", slot.name, {
+				now: (sources.now ?? Date.now)(),
+			});
+			if (!lease) continue;
+			const leased = await repository.listSlots(providerId, "env");
+			applicable = leased[slot.name];
+		}
 		slots.push(
 			overlayState(
 				{

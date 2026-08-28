@@ -59,7 +59,9 @@ export class CredentialFailoverError extends Error {
 function isAvailable(slot: RunSlot, now: number): boolean {
 	if (slot.blockReason === "auth_error" || slot.blockReason === "account_disabled") return false;
 	if (slot.blockedUntil !== undefined && slot.blockedUntil > now) return false;
-	return slot.lease === undefined || slot.lease.expiresAt <= now;
+	// A live lease marks the one caller admitted to run the half-open probe.
+	// listSlots excludes that lease for later callers; the holder must remain runnable.
+	return true;
 }
 
 function soonestRetryAt(slots: readonly RunSlot[], now: number): number | undefined {
