@@ -61,6 +61,14 @@ export interface ModelInfo {
 	supportedThinkingLevels?: ThinkingLevel[];
 }
 
+type PromptOptions = {
+	images?: ImageContent[];
+	streamingBehavior?: "steer" | "followUp";
+	thinkingLevel?: ThinkingLevel;
+	promptDisposition?: (disposition: PromptDisposition) => void;
+	preflightResult?: (success: boolean) => void;
+};
+
 export type RpcProviderAccountEvent = RpcAuthAccountsChangedEvent | RpcAccountFailoverEvent;
 export type RpcClientEvent = JsonAgentSessionEvent | RpcProviderAccountEvent | RpcExtensionEvent;
 export type RpcEventListener = (event: RpcClientEvent) => void;
@@ -319,23 +327,19 @@ export class RpcClient {
 	 * order. A success response without a disposition (older host) maps to "handled"
 	 * so the echo degrades to canonical-only rendering instead of double-rendering.
 	 */
-	async prompt(
-		message: string,
-		options?: {
-			images?: ImageContent[];
-			streamingBehavior?: "steer" | "followUp";
-			thinkingLevel?: ThinkingLevel;
-			promptDisposition?: (disposition: PromptDisposition) => void;
-			preflightResult?: (success: boolean) => void;
-		},
-	): Promise<void> {
+	async prompt(message: string, images?: ImageContent[]): Promise<void>;
+	async prompt(message: string, options?: PromptOptions): Promise<void>;
+	async prompt(message: string, optionsOrImages?: PromptOptions | ImageContent[]): Promise<void> {
+		const options: PromptOptions = Array.isArray(optionsOrImages)
+			? { images: optionsOrImages }
+			: (optionsOrImages ?? {});
 		const response = await this.send(
 			{
 				type: "prompt",
 				message,
-				...(options?.images ? { images: options.images } : {}),
-				...(options?.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
-				...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+				...(options.images ? { images: options.images } : {}),
+				...(options.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
+				...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
 			},
 			true,
 			{
