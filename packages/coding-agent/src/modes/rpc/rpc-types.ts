@@ -256,6 +256,10 @@ export interface RpcSessionState {
 	sessionFile?: string;
 	sessionId: string;
 	sessionName?: string;
+	cwd: string;
+	steering: string[];
+	followUp: string[];
+	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
 	autoCompactionEnabled: boolean;
 	messageCount: number;
 	pendingMessageCount: number;
@@ -327,7 +331,11 @@ export type RpcResponse =
 			type: "response";
 			command: "clear_queue";
 			success: true;
-			data: { steering: string[]; followUp: string[] };
+			data: {
+				steering: string[];
+				followUp: string[];
+				ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
+			};
 	  }
 	| { id?: string; type: "response"; command: "new_session"; success: true; data: { cancelled: boolean } }
 

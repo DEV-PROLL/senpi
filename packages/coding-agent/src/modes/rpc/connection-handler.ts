@@ -163,6 +163,16 @@ export function buildRpcSessionState(session: AgentSession): RpcSessionState {
 		sessionFile: session.sessionFile,
 		sessionId: session.sessionId,
 		sessionName: session.sessionName,
+		cwd: session.sessionManager.getCwd(),
+		steering: [...session.getSteeringMessages()],
+		followUp: [...session.getFollowUpMessages()],
+		ordered: [
+			...((
+				session as unknown as {
+					_queuedInputOrder?: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
+				}
+			)._queuedInputOrder ?? []),
+		].sort((a, b) => a.enqueueOrder - b.enqueueOrder),
 		autoCompactionEnabled: session.autoCompactionEnabled,
 		messageCount: session.messages.length,
 		pendingMessageCount: session.pendingMessageCount,
@@ -831,11 +841,12 @@ export function createRpcConnectionHandler(
 			}
 
 			case "clear_queue": {
-				return success(
-					id,
-					"clear_queue",
-					session.clearQueue({ abortWillFollow: command.abortWillFollow ?? false }),
-				);
+				const cleared = session.clearQueue({ abortWillFollow: command.abortWillFollow ?? false });
+				return success(id, "clear_queue", {
+					steering: cleared.steering,
+					followUp: cleared.followUp,
+					ordered: [...cleared.ordered],
+				});
 			}
 
 			case "get_steering_messages":

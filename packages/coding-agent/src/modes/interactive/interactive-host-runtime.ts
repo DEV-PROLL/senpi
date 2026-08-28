@@ -2,7 +2,9 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession, AgentSessionEvent, AgentSessionEventListener } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import type { AgentSessionRuntimeDiagnostic } from "../../core/agent-session-services.ts";
+import { executeBashWithOperations } from "../../core/bash-executor.ts";
 import { SessionManager } from "../../core/session-manager.ts";
+import type { BashOperations } from "../../core/tools/bash.ts";
 import { type EnsuredHost, ensureHost } from "../rpc/host-ensure.ts";
 import { RpcClient, type RpcClientEvent } from "../rpc/rpc-client.ts";
 
@@ -184,7 +186,7 @@ function createRemoteSessionProxy(
 			cause: error,
 		});
 	};
-	let state = { ...initialState, steering: [] as string[], followUp: [] as string[] };
+	let state = { ...initialState };
 	let bashChunk: ((chunk: string) => void) | undefined;
 	let sessionManager = local.sessionManager;
 	const remoteSessionManager = new Proxy({} as SessionManager, {
@@ -244,10 +246,10 @@ function createRemoteSessionProxy(
 	});
 	const refresh = async (): Promise<void> => {
 		const nextState = await client.getState();
-		state = { ...stateFromRpc(nextState), steering: [], followUp: [] };
+		state = { ...stateFromRpc(nextState) };
 		let messages: AgentSession["messages"];
 		if (nextState.sessionFile) {
-			sessionManager = SessionManager.open(nextState.sessionFile);
+			sessionManager = SessionManager.open(nextState.sessionFile, undefined, nextState.cwd);
 			messages = sessionManager.buildSessionContext().messages;
 		} else {
 			messages = await client.getMessages();
@@ -273,13 +275,33 @@ function createRemoteSessionProxy(
 					message: string,
 					images?: Parameters<AgentSession["steer"]>[1],
 					recovery?: { enqueueOrder?: number },
-				) => client.steer(message, images, recovery);
+				) => {
+					const enqueueOrder =
+						recovery?.enqueueOrder ?? Math.max(0, ...state.ordered.map((item) => item.enqueueOrder)) + 1;
+					state = {
+						...state,
+						steering: [...state.steering, message],
+						ordered: [...state.ordered, { text: message, mode: "steer", enqueueOrder }],
+						pendingMessageCount: state.pendingMessageCount + 1,
+					};
+					return client.steer(message, images, { ...recovery, enqueueOrder });
+				};
 			if (property === "followUp")
 				return (
 					message: string,
 					images?: Parameters<AgentSession["followUp"]>[1],
 					recovery?: { enqueueOrder?: number },
-				) => client.followUp(message, images, recovery);
+				) => {
+					const enqueueOrder =
+						recovery?.enqueueOrder ?? Math.max(0, ...state.ordered.map((item) => item.enqueueOrder)) + 1;
+					state = {
+						...state,
+						followUp: [...state.followUp, message],
+						ordered: [...state.ordered, { text: message, mode: "followUp", enqueueOrder }],
+						pendingMessageCount: state.pendingMessageCount + 1,
+					};
+					return client.followUp(message, images, { ...recovery, enqueueOrder });
+				};
 			if (property === "waitForIdle") return () => client.waitForIdle();
 			if (property === "getLastAssistantText") return () => target.getLastAssistantText();
 			if (property === "setModel")
@@ -308,13 +330,23 @@ function createRemoteSessionProxy(
 				return async (
 					command: string,
 					onChunk?: (chunk: string) => void,
-					options?: { excludeFromContext?: boolean; operations?: Record<string, unknown> },
+					options?: { excludeFromContext?: boolean; operations?: BashOperations | Record<string, unknown> },
 				) => {
+					if (options?.operations && typeof options.operations.exec === "function") {
+						const result = await executeBashWithOperations(
+							command,
+							state.cwd,
+							options.operations as BashOperations,
+							{ onChunk },
+						);
+						await client.recordBashResult(command, result, options.excludeFromContext);
+						return result;
+					}
 					bashChunk = onChunk;
 					try {
 						return await client.bash(command, {
 							excludeFromContext: options?.excludeFromContext,
-							operations: options?.operations,
+							operations: options?.operations as Record<string, unknown> | undefined,
 						});
 					} finally {
 						bashChunk = undefined;
@@ -349,17 +381,26 @@ function createRemoteSessionProxy(
 			if (property === "getFollowUpMessages") return () => state.followUp;
 			if (property === "clearQueue")
 				return (options?: { abortWillFollow: boolean }) => {
-					const result = { steering: [...state.steering], followUp: [...state.followUp] };
+					const result = {
+						steering: [...state.steering],
+						followUp: [...state.followUp],
+						ordered: [...state.ordered],
+					};
+					Object.defineProperty(result, "ordered", { value: result.ordered, enumerable: false });
 					void client.clearQueue(options).catch(reportActionFailure("clearQueue"));
 					return result;
 				};
-			if (property === "abortBranchSummary") return () => void client.abortBranchSummary();
+			if (property === "abortBranchSummary")
+				return () => void client.abortBranchSummary().catch(reportActionFailure("abortBranchSummary"));
 			if (property === "recordBashResult")
 				return (
 					command: string,
 					result: Parameters<AgentSession["recordBashResult"]>[1],
 					options?: { excludeFromContext?: boolean },
-				) => void client.recordBashResult(command, result, options?.excludeFromContext);
+				) =>
+					void client
+						.recordBashResult(command, result, options?.excludeFromContext)
+						.catch(reportActionFailure("recordBashResult"));
 			if (property === "set_label") return undefined;
 			if (property === "retryAttempt") return state.retryAttempt;
 			if (property === "isBashRunning") return state.isBashRunning;
@@ -434,6 +475,10 @@ function stateFromRpc(state: {
 	sessionFile?: string;
 	sessionId: string;
 	sessionName?: string;
+	cwd: string;
+	steering: string[];
+	followUp: string[];
+	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
 }) {
 	return state;
 }
