@@ -1250,6 +1250,30 @@ Emitted when an extension calls `pi.rpc.emit(name, data)` and the client adverti
 the specific event name before applying it. In multi-session mode the record also includes the
 routing `sessionId`; delivery preserves the owning session and per-session event order.
 
+The terminal builtin emits `terminal_monitor_state` on this path whenever the active monitor set
+changes. `data` is `{ activeCount, monitors }`, where each monitor entry has `id`, `description`,
+`paused`, and `startedAtMs`. The matching in-process `pi.events` channel is unchanged and is not
+forwarded. Clients receive the wire record only when they advertise the `extension_events`
+capability:
+
+```json
+{
+  "type": "extension_event",
+  "name": "terminal_monitor_state",
+  "data": {
+    "activeCount": 1,
+    "monitors": [
+      {
+        "id": "bash_1",
+        "description": "watch checks",
+        "paused": false,
+        "startedAtMs": 1710000000000
+      }
+    ]
+  }
+}
+```
+
 ### agent_start
 
 Emitted when the agent begins processing a prompt.
