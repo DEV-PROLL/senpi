@@ -791,6 +791,57 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("composes local and host bash lifecycle state", async () => {
+		const qa = scratch("bash-lifecycle");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		const observer = new RpcClient({ socketPath: qa.socket });
+		await observer.start();
+		await observer.openSession({ sessionPath: runtime.session.sessionFile!, cwd: qa.cwd });
+		try {
+			let resolveLocal!: () => void;
+			const localDone = new Promise<void>((resolve) => (resolveLocal = resolve));
+			const hostStarted = new Promise<void>((resolve) => {
+				observer.onEvent((event) => {
+					if (event.type === "bash_start") resolve();
+				});
+			});
+			const hostBash = observer.bash("sleep 1");
+			await hostStarted;
+			const localBash = runtime.session.executeBash("local", undefined, {
+				operations: {
+					exec: async (_command, _cwd, { onData }) => {
+						onData(Buffer.from("local"));
+						await localDone;
+						return { exitCode: 0 };
+					},
+				},
+			});
+			await new Promise<void>((resolve) => queueMicrotask(resolve));
+			expect(runtime.session.isBashRunning).toBe(true);
+			resolveLocal();
+			await localBash;
+			expect(runtime.session.isBashRunning).toBe(true);
+			await hostBash;
+			expect(runtime.session.isBashRunning).toBe(false);
+		} finally {
+			await observer.stop();
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("refreshes a missing stored cwd from a switch override", async () => {
 		const qa = scratch("cwd-override");
 		const missingCwd = join(qa.root, "missing-cwd");

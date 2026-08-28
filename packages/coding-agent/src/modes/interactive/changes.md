@@ -1,5 +1,7 @@
 # changes
 
+- Shared-host bash lifecycle now composes client-local and host-owned running state, so another client's bash events cannot clear a local operation (NF-1).
+
 - Shared-host replacement and name readback closure: refreshed session managers retain the host-effective cwd (including a differing override when the stored cwd is unavailable), and all `getSessionName()` consumers read the mirrored `session_info_changed` name.
 
 ## Shared-host interactive parity regressions (2026-08-28)

@@ -4,6 +4,7 @@ import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import type { AgentSessionRuntimeDiagnostic } from "../../core/agent-session-services.ts";
 import { executeBashWithOperations } from "../../core/bash-executor.ts";
 import { SessionManager } from "../../core/session-manager.ts";
+import { SettingsManager } from "../../core/settings-manager.ts";
 import type { BashOperations } from "../../core/tools/bash.ts";
 import { type EnsuredHost, ensureHost } from "../rpc/host-ensure.ts";
 import { RpcClient, type RpcClientEvent } from "../rpc/rpc-client.ts";
@@ -68,7 +69,13 @@ export async function createInteractiveHostRuntime(
 			modelId: localRuntime.session.model?.id,
 			thinkingLevel: localRuntime.session.thinkingLevel,
 		});
-		const remoteSession = createRemoteSessionProxy(localRuntime.session, client, opened.state, options.onWarning);
+		const remoteSession = createRemoteSessionProxy(
+			localRuntime.session,
+			localRuntime.services.agentDir,
+			client,
+			opened.state,
+			options.onWarning,
+		);
 		return new RemoteInteractiveRuntime(localRuntime, remoteSession, client) as unknown as AgentSessionRuntime;
 	} catch (cause) {
 		await client.stop().catch(() => {});
@@ -127,6 +134,7 @@ class RemoteInteractiveRuntime {
 		const result = await this.#client.newSession(options?.parentSession);
 		if (!result.cancelled) {
 			this.#beforeSessionInvalidate?.();
+			this.#remoteSession.abortLocalBash();
 			await this.#refreshAndRebind();
 		}
 		return result;
@@ -135,6 +143,7 @@ class RemoteInteractiveRuntime {
 		const result = await this.#client.switchSession(sessionPath, options);
 		if (!result.cancelled) {
 			this.#beforeSessionInvalidate?.();
+			this.#remoteSession.abortLocalBash();
 			await this.#refreshAndRebind();
 		}
 		return result;
@@ -146,6 +155,7 @@ class RemoteInteractiveRuntime {
 		const result = await this.#client.fork(entryId, options);
 		if (!result.cancelled) {
 			this.#beforeSessionInvalidate?.();
+			this.#remoteSession.abortLocalBash();
 			await this.#refreshAndRebind();
 		}
 		return { cancelled: result.cancelled, selectedText: result.text };
@@ -154,6 +164,7 @@ class RemoteInteractiveRuntime {
 		const result = await this.#client.importJsonl(inputPath, cwdOverride);
 		if (!result.cancelled) {
 			this.#beforeSessionInvalidate?.();
+			this.#remoteSession.abortLocalBash();
 			await this.#refreshAndRebind();
 		}
 		return result;
@@ -168,10 +179,12 @@ class RemoteInteractiveRuntime {
 interface RemoteSessionProxy {
 	readonly session: AgentSession;
 	refresh(): Promise<void>;
+	abortLocalBash(): void;
 }
 
 function createRemoteSessionProxy(
 	local: AgentSession,
+	agentDir: string,
 	client: RpcClient,
 	initialState: ReturnType<typeof stateFromRpc>,
 	onWarning?: (warning: InteractiveHostWarning) => void,
@@ -189,7 +202,13 @@ function createRemoteSessionProxy(
 	let state = { ...initialState };
 	let bashChunk: ((chunk: string) => void) | undefined;
 	let localBashAbortController: AbortController | undefined;
+	let localBashRunning = false;
+	let hostBashRunning = initialState.isBashRunning;
 	let sessionManager = local.sessionManager;
+	let settingsManager = local.settingsManager;
+	const updateBashState = () => {
+		state = { ...state, isBashRunning: localBashRunning || hostBashRunning };
+	};
 	const remoteSessionManager = new Proxy({} as SessionManager, {
 		get(_target, property, receiver) {
 			if (property === "appendLabelChange") {
@@ -203,8 +222,14 @@ function createRemoteSessionProxy(
 	const listeners = new Set<AgentSessionEventListener>();
 	client.onEvent((wireEvent) => {
 		if (wireEvent.type === "agent_settled") state = { ...state, isStreaming: false, retryAttempt: 0 };
-		if (wireEvent.type === "bash_start") state = { ...state, isBashRunning: true };
-		if (wireEvent.type === "bash_end") state = { ...state, isBashRunning: false };
+		if (wireEvent.type === "bash_start") {
+			hostBashRunning = true;
+			updateBashState();
+		}
+		if (wireEvent.type === "bash_end") {
+			hostBashRunning = false;
+			updateBashState();
+		}
 		if (wireEvent.type === "bash_execution_update") bashChunk?.(wireEvent.delta);
 		if (wireEvent.type === "agent_start") state = { ...state, isStreaming: true };
 		if (wireEvent.type === "compaction_start") state = { ...state, isCompacting: true };
@@ -253,6 +278,7 @@ function createRemoteSessionProxy(
 		let messages: AgentSession["messages"];
 		if (nextState.sessionFile) {
 			sessionManager = SessionManager.open(nextState.sessionFile, undefined, nextState.cwd);
+			settingsManager = SettingsManager.create(nextState.cwd, agentDir);
 			messages = sessionManager.buildSessionContext().messages;
 		} else {
 			messages = await client.getMessages();
@@ -338,8 +364,10 @@ function createRemoteSessionProxy(
 					if (options?.operations && typeof options.operations.exec === "function") {
 						const abortController = new AbortController();
 						localBashAbortController = abortController;
-						state = { ...state, isBashRunning: true };
-						const prefix = local.settingsManager.getShellCommandPrefix();
+						localBashRunning = true;
+						updateBashState();
+						const sessionAtStart = state.sessionId;
+						const prefix = settingsManager.getShellCommandPrefix();
 						const resolvedCommand = prefix ? `${prefix}\n${command}` : command;
 						try {
 							const result = await executeBashWithOperations(
@@ -348,11 +376,14 @@ function createRemoteSessionProxy(
 								options.operations as BashOperations,
 								{ onChunk, signal: abortController.signal },
 							);
-							await client.recordBashResult(command, result, options.excludeFromContext);
+							if (state.sessionId === sessionAtStart) {
+								await client.recordBashResult(command, result, options.excludeFromContext);
+							}
 							return result;
 						} finally {
 							localBashAbortController = undefined;
-							state = { ...state, isBashRunning: false };
+							localBashRunning = false;
+							updateBashState();
 						}
 					}
 					bashChunk = onChunk;
@@ -447,7 +478,11 @@ function createRemoteSessionProxy(
 			return Reflect.get(target, property, receiver);
 		},
 	});
-	return { session, refresh };
+	return {
+		session,
+		refresh,
+		abortLocalBash: () => localBashAbortController?.abort(),
+	};
 }
 
 function hydrateMessageUpdate(
