@@ -1,3 +1,24 @@
+## 2026-08-28 - Restore Bedrock global GPT-5.6 strict tool sampling
+
+### What changed
+
+- `packages/ai/src/providers/data/amazon-bedrock.json`: `global.openai.gpt-5.6-luna`, `global.openai.gpt-5.6-sol`, and `global.openai.gpt-5.6-terra` carry `compat.supportsStrictMode: true` again (plus the matching `.manifest.json` hash). A catalog regeneration had dropped the field, so `bedrock-converse-stream.ts` read `model.compat?.supportsStrictMode ?? false` and rejected `constrainedSampling.strict: "require"` as unsupported while silently downgrading `"prefer"` to an unconstrained schema.
+- `packages/ai/scripts/generate-models.ts`: `applyStrictToolCompatMetadata()` now re-stamps `supportsStrictMode` on those three Bedrock global inference profiles, so the capability survives future regenerations instead of depending on models.dev reporting `structured_output` (it reports it only for the regional `openai.gpt-5.6-*` IDs).
+- `packages/ai/test/bedrock-strict-tool-compat.test.ts`: asserts the shipped catalog data and re-runs the generator offline against an upstream payload with no `structured_output` to prove the override survives regeneration.
+
+### Why
+
+- Strict JSON-schema tool sampling is a wire-visible provider capability. Losing it turned working `strict: "require"` requests into unsupported-capability failures on the global Bedrock GPT-5.6 profiles.
+
+### Why an extension could not handle it
+
+- The capability is read from the generated model catalog inside the Bedrock adapter; there is no extension-visible hook between the catalog and `convertToolConfig()`.
+
+### Expected merge conflict zones
+
+- LOW: three generated entries in `amazon-bedrock.json` plus its manifest hash line during catalog regeneration syncs.
+- LOW: one `else if` branch in `applyStrictToolCompatMetadata()`.
+
 ## 2026-08-27 - Default retry policy phase-2 close-out (docs)
 
 ### What changed
