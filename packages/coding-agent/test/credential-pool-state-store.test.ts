@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { createAgentSessionServices } from "../src/core/agent-session-services.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import {
 	acquireHalfOpenLease,
@@ -98,6 +99,21 @@ describe("credential pool state sidecar", () => {
 		});
 		const repoOne = (await (runtimeOne as any).loadCredentialPool()).repository as CredentialSlotRepository;
 		const repoTwo = (await (runtimeTwo as any).loadCredentialPool()).repository as CredentialSlotRepository;
+		await repoOne.mutateSlotState("openai", "stored", "work", () => ({ failureCount: 2 }));
+		expect(await repoTwo.listSlots("openai", "stored")).toEqual({});
+		expect(readFileSync(join(one, "credential-pool-state.json"), "utf8")).toContain("work");
+		expect(readFileSync(join(two, "credential-pool-state.json"), "utf8")).not.toContain("work");
+	});
+
+	test("createAgentSessionServices keeps pool sidecars under each custom agent directory", async () => {
+		const one = join(dir, "service-one");
+		const two = join(dir, "service-two");
+		const servicesOne = await createAgentSessionServices({ cwd: dir, agentDir: one });
+		const servicesTwo = await createAgentSessionServices({ cwd: dir, agentDir: two });
+		const repoOne = (await (servicesOne.modelRuntime as any).loadCredentialPool())
+			.repository as CredentialSlotRepository;
+		const repoTwo = (await (servicesTwo.modelRuntime as any).loadCredentialPool())
+			.repository as CredentialSlotRepository;
 		await repoOne.mutateSlotState("openai", "stored", "work", () => ({ failureCount: 2 }));
 		expect(await repoTwo.listSlots("openai", "stored")).toEqual({});
 		expect(readFileSync(join(one, "credential-pool-state.json"), "utf8")).toContain("work");

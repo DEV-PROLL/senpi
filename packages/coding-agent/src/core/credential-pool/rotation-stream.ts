@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { resolveConfigValue } from "../resolve-config-value.ts";
 import type { AssistantMessageEvent, Credential } from "@earendil-works/pi-ai";
 import { rendezvousOrder, type SlotHasher } from "@earendil-works/pi-ai/auth/pool/select";
 import { listSlots as listCredentialSlots, type PooledCredential } from "@earendil-works/pi-ai/auth/pool/slots";
+import { resolveConfigValue } from "../resolve-config-value.ts";
 import { type CredentialBlock, classifyCredentialFailure } from "./classify.ts";
 import { discoverEnvSlots } from "./env-slots.ts";
 import { type RunSlot, runCredentialFailover } from "./failover.ts";
@@ -52,11 +52,16 @@ function overlayState(slot: RotationSlot, state: CredentialSlotState | undefined
  * persisted health applies only while its HMAC revision still matches the
  * current env value, so rotating a key in place clears its own stale block.
  */
-export async function listRotationSlots(sources: RotationSources): Promise<RotationSlot[]> {
+export async function listRotationSlots(
+	sources: RotationSources,
+	options: { acquireLeases?: boolean } = {},
+): Promise<RotationSlot[]> {
+	const acquireLeases = options.acquireLeases !== false;
 	const { providerId, credential, env, repository } = sources;
 	const policySlots = Object.entries(sources.policy?.slots ?? {}).flatMap(([name, ref]) => {
 		const envVarName = ref.env ?? `models.json:${name}`;
-		const key = ref.env !== undefined ? env(ref.env) : ref.value !== undefined ? resolveConfigValue(ref.value, {}) : undefined;
+		const key =
+			ref.env !== undefined ? env(ref.env) : ref.value !== undefined ? resolveConfigValue(ref.value, {}) : undefined;
 		if (!key) return [];
 		return [{ name, envVarName, key, source: "env" as const }];
 	});
@@ -65,7 +70,11 @@ export async function listRotationSlots(sources: RotationSources): Promise<Rotat
 		const slots: RotationSlot[] = [];
 		for (const slot of listCredentialSlots(credential)) {
 			const current = state[slot.name];
-			if (current?.blockedUntil !== undefined && current.blockedUntil <= (sources.now ?? Date.now)()) {
+			if (
+				acquireLeases &&
+				current?.blockedUntil !== undefined &&
+				current.blockedUntil <= (sources.now ?? Date.now)()
+			) {
 				const lease = await acquireHalfOpenLease(repository, providerId, "stored", slot.name, {
 					now: (sources.now ?? Date.now)(),
 				});
@@ -95,17 +104,22 @@ export async function listRotationSlots(sources: RotationSources): Promise<Rotat
 			);
 		}
 		if (policySlots.length === 0) return slots;
-		const namedSources: RotationSources = { ...sources, credential: undefined, policy: { ...sources.policy, slots: {} } };
-		const namedSlots = await listEnvRotationSlots(namedSources, policySlots);
+		const namedSources: RotationSources = {
+			...sources,
+			credential: undefined,
+			policy: { ...sources.policy, slots: {} },
+		};
+		const namedSlots = await listEnvRotationSlots(namedSources, policySlots, acquireLeases);
 		return [...slots, ...namedSlots];
 	}
 	const envSlots = [...discoverEnvSlots(providerId, env), ...policySlots];
-	return listEnvRotationSlots(sources, envSlots);
+	return listEnvRotationSlots(sources, envSlots, acquireLeases);
 }
 
 async function listEnvRotationSlots(
 	sources: RotationSources,
 	envSlots: readonly { name: string; envVarName: string; key: string }[],
+	acquireLeases = true,
 ): Promise<RotationSlot[]> {
 	if (envSlots.length === 0) return [];
 	const { providerId, repository } = sources;
@@ -115,7 +129,11 @@ async function listEnvRotationSlots(
 		const persisted = state[slot.name];
 		const revision = await repository.envCredentialRevision(slot.envVarName, slot.key);
 		let applicable = persisted?.credentialRevision === revision ? persisted : undefined;
-		if (applicable?.blockedUntil !== undefined && applicable.blockedUntil <= (sources.now ?? Date.now)()) {
+		if (
+			acquireLeases &&
+			applicable?.blockedUntil !== undefined &&
+			applicable.blockedUntil <= (sources.now ?? Date.now)()
+		) {
 			const lease = await acquireHalfOpenLease(repository, providerId, "env", slot.name, {
 				now: (sources.now ?? Date.now)(),
 			});
@@ -154,9 +172,7 @@ function blockPatch(
 	if (block.reason === "rate_limit") {
 		return {
 			...base,
-			blockedUntil:
-				now +
-				Math.min(policy?.cooldownCapMs ?? block.cooldownMs, block.cooldownMs),
+			blockedUntil: now + Math.min(policy?.cooldownCapMs ?? block.cooldownMs, block.cooldownMs),
 			blockReason: "rate_limit",
 		};
 	}

@@ -1,16 +1,19 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { rendezvousOrder } from "@earendil-works/pi-ai/auth/pool/select";
 import type { PooledCredential } from "@earendil-works/pi-ai/auth/pool/slots";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { AuthStorage } from "../src/core/auth-storage.ts";
 import {
 	listRotationSlots,
 	sha256SlotHasher,
 	streamWithCredentialRotation,
 } from "../src/core/credential-pool/rotation-stream.ts";
 import { CredentialSlotRepository } from "../src/core/credential-pool/state-store.ts";
+import { ModelRuntime } from "../src/core/model-runtime.ts";
 
 const NOW = 1_756_000_000_000;
 
@@ -86,6 +89,60 @@ async function collect(source: AsyncGenerator<AssistantMessageEvent>): Promise<A
 }
 
 describe("credential rotation over a pooled provider", () => {
+	test("runtime admission runs an expired stored probe once", async () => {
+		const faux = fauxProvider();
+		const credentials = AuthStorage.inMemory();
+		await credentials.modify("faux", async () => pooled());
+		const runtime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false });
+		runtime.registerNativeProvider(faux.provider);
+		await runtime.refresh({ allowNetwork: false, providers: ["faux"] });
+		const pool = (await (runtime as any).loadCredentialPool()).repository as CredentialSlotRepository;
+		await pool.mutateSlotState("faux", "stored", "default", () => ({
+			blockedUntil: NOW - 1,
+			blockReason: "rate_limit",
+		}));
+		await pool.mutateSlotState("faux", "stored", "work", () => ({
+			blockedUntil: NOW + 60_000,
+			blockReason: "rate_limit",
+		}));
+		faux.setResponses([fauxAssistantMessage("probe")]);
+		const events: AssistantMessageEvent[] = [];
+		for await (const event of runtime.stream(
+			faux.getModel(),
+			{ messages: [], tools: [] },
+			{ sessionId: "runtime-probe" },
+		))
+			events.push(event);
+		expect(events.some((event) => event.type === "done")).toBe(true);
+		expect(faux.getCallLog()).toHaveLength(1);
+	});
+
+	test("runtime admits policy-only credential slots", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "policy-only-runtime-"));
+		const faux = fauxProvider({ provider: "policy-only" });
+		writeFileSync(
+			join(dir, "models.json"),
+			JSON.stringify({
+				providers: {
+					"policy-only": { credentials: { slots: { one: { value: "key-one" }, two: { value: "key-two" } } } },
+				},
+			}),
+		);
+		const runtime = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory(),
+			modelsPath: join(dir, "models.json"),
+			allowModelNetwork: false,
+		});
+		runtime.registerNativeProvider(faux.provider);
+		await runtime.refresh({ allowNetwork: false, providers: ["policy-only"] });
+		faux.setResponses([fauxAssistantMessage("policy-ok")]);
+		const events: AssistantMessageEvent[] = [];
+		for await (const event of runtime.stream(faux.getModel(), { messages: [], tools: [] })) events.push(event);
+		expect(events.some((event) => event.type === "done")).toBe(true);
+		expect(faux.getCallLog()).toHaveLength(1);
+		rmSync(dir, { recursive: true, force: true });
+	});
+
 	test("ordinary streamSimple requests rotate before output", async () => {
 		const attempted: string[] = [];
 		const events = await collect(
