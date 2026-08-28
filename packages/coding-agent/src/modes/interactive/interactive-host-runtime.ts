@@ -296,9 +296,9 @@ function createRemoteSessionProxy(
 		const nextState = await client.getState();
 		state = { ...stateFromRpc(nextState) };
 		let messages: AgentSession["messages"];
+		settingsManager = SettingsManager.create(nextState.cwd, agentDir);
 		if (nextState.sessionFile) {
 			sessionManager = SessionManager.open(nextState.sessionFile, undefined, nextState.cwd);
-			settingsManager = SettingsManager.create(nextState.cwd, agentDir);
 			messages = sessionManager.buildSessionContext().messages;
 		} else {
 			messages = await client.getMessages();
