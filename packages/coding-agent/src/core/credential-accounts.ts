@@ -1,3 +1,4 @@
+import { dirname, join } from "node:path";
 import type { Credential } from "@earendil-works/pi-ai";
 import { listSlots, type PooledCredential, pinSlot, removeSlot } from "@earendil-works/pi-ai/auth/pool/slots";
 import type { AuthStorage } from "./auth-storage.ts";
@@ -38,6 +39,11 @@ function numberField(value: object, key: string): number | undefined {
 	return typeof found === "number" ? found : undefined;
 }
 
+function defaultRepository(storage: AuthStorage): CredentialSlotRepository {
+	const authPath = storage.getStoragePath();
+	return new CredentialSlotRepository(authPath ? join(dirname(authPath), "credential-pool-state.json") : undefined);
+}
+
 function stringField(value: object, key: string): string | undefined {
 	const found = Object.entries(value).find(([candidate]) => candidate === key)?.[1];
 	return typeof found === "string" ? found : undefined;
@@ -68,9 +74,9 @@ export async function getCredentialAccounts(
 	storage: AuthStorage,
 	provider: string,
 	env: NodeJS.ProcessEnv = process.env,
-	repository: CredentialSlotRepository = new CredentialSlotRepository(),
+	repository?: CredentialSlotRepository,
 ): Promise<CredentialAccountSummary[]> {
-	return summarizeCredentialAccounts(provider, storage.get(provider), env, repository);
+	return summarizeCredentialAccounts(provider, storage.get(provider), env, repository ?? defaultRepository(storage));
 }
 
 /** Storage-free variant for callers that already hold the credential (e.g. auth check). */
@@ -117,11 +123,12 @@ export async function pinCredentialAccount(
 	provider: string,
 	name: string | null,
 	env: NodeJS.ProcessEnv = process.env,
-	repository: CredentialSlotRepository = new CredentialSlotRepository(),
+	repository?: CredentialSlotRepository,
 ): Promise<void> {
+	const repo = repository ?? defaultRepository(storage);
 	if (name !== null) {
 		assertValidAccountName(name);
-		const accounts = await getCredentialAccounts(storage, provider, env, repository);
+		const accounts = await getCredentialAccounts(storage, provider, env, repo);
 		if (!accounts.some((account) => account.name === name)) {
 			throw new Error(`Provider account not found: ${name}`);
 		}
@@ -150,9 +157,10 @@ export async function removeCredentialAccount(
 	provider: string,
 	name: string,
 	env: NodeJS.ProcessEnv = process.env,
-	repository: CredentialSlotRepository = new CredentialSlotRepository(),
+	repository?: CredentialSlotRepository,
 ): Promise<void> {
-	const accounts = await getCredentialAccounts(storage, provider, env, repository);
+	const repo = repository ?? defaultRepository(storage);
+	const accounts = await getCredentialAccounts(storage, provider, env, repo);
 	const account = accounts.find((candidate) => candidate.name === name);
 	if (!account) throw new Error(`Provider account not found: ${name}`);
 	if (account.source === "env") {
@@ -163,6 +171,6 @@ export async function removeCredentialAccount(
 	const remaining = removeSlot(next, name);
 	if (remaining === undefined) await storage.delete(provider);
 	else await storage.modify(provider, async () => remaining);
-	await repository.mutateSlotState(provider, "stored", name, () => undefined);
+	await repo.mutateSlotState(provider, "stored", name, () => undefined);
 	emitProviderAccountsChanged(provider);
 }

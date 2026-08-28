@@ -112,6 +112,8 @@ describe("fallback chain selectors", () => {
 		// The `[]` tombstone is the documented way to switch fallback off. The
 		// shipped wildcard lane must not resurrect it against that instruction.
 		const model = getModel("anthropic", "claude-fable-5");
+		const namespacedModel = { ...model, id: "global.anthropic.claude-fable-5" };
+		expect(hasExplicitFallbackOptOut({ "claude-fable-5": [] }, namespacedModel, "max")).toBe(true);
 		expect(hasExplicitFallbackOptOut({ "claude-fable-5": [] }, model, "max")).toBe(true);
 		expect(hasExplicitFallbackOptOut({ "anthropic/claude-fable-5": [] }, model, undefined)).toBe(true);
 		expect(hasExplicitFallbackOptOut({ "openai/gpt-5.4": [] }, model, "max")).toBe(false);

@@ -66,7 +66,10 @@ function isOverflowText(text: string): boolean {
  * outage only destroys prompt-cache locality; everything else fails the
  * request so the model fallback chain above keeps owning it.
  */
-export function classifyCredentialFailure(error: unknown, context: { failureCount?: number } = {}): CredentialAction {
+export function classifyCredentialFailure(
+	error: unknown,
+	context: { failureCount?: number; cooldownBaseMs?: number; cooldownCapMs?: number } = {},
+): CredentialAction {
 	const normalized = normalizeProviderError(error);
 	const text = normalized.messageCarriesBody ? normalized.message : `${normalized.message} ${normalized.body ?? ""}`;
 	const status = normalized.status;
@@ -91,7 +94,13 @@ export function classifyCredentialFailure(error: unknown, context: { failureCoun
 		});
 		return {
 			kind: "failover",
-			block: { reason: "rate_limit", ...rateLimitCooldown(failureCount, hint) },
+			block: {
+				reason: "rate_limit",
+				...rateLimitCooldown(failureCount, hint, {
+					baseMs: context.cooldownBaseMs,
+					capMs: context.cooldownCapMs,
+				}),
+			},
 		};
 	}
 	if (isOverflowText(text) || status === 400 || status === 404 || FAIL_FAST_TEXT.test(text)) {
