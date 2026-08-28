@@ -1,5 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -103,7 +103,13 @@ function scratch(label: string): {
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(sessionDir, { recursive: true });
 	mkdirSync(cwd, { recursive: true });
-	return { root, agentDir, sessionDir, cwd, socketPath: join(root, "rpc.sock") };
+	return {
+		root,
+		agentDir,
+		sessionDir,
+		cwd,
+		socketPath: join(root, "rpc.sock"),
+	};
 }
 
 function spawnRpc(args: string[], qa: ReturnType<typeof scratch>): ChildProcessWithoutNullStreams {
@@ -206,15 +212,42 @@ describe("RPC Unix-socket multi-connection host", () => {
 		const qa = scratch("reent");
 		const fake = await startFakeModelServer();
 		writeRpcModelsJson(qa.agentDir, fake.origin);
+		mkdirSync(join(qa.agentDir, "extensions"), { recursive: true });
+		writeFileSync(
+			join(qa.agentDir, "extensions", "reentrant-ui.ts"),
+			`export default function (pi) {
+				pi.on("session_before_switch", async (_event, ctx) => {
+					await ctx.ui.confirm("Reentrant switch", "Allow session switch?");
+				});
+			}\n`,
+		);
 		const child = spawnRpc(
-			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL],
+			[
+				"--mode",
+				"rpc",
+				"--listen",
+				`unix://${qa.socketPath}`,
+				"--provider",
+				MOCK_PROVIDER,
+				"--model",
+				MOCK_MODEL,
+				"--extension",
+				join(qa.agentDir, "extensions", "reentrant-ui.ts"),
+			],
 			qa,
 		);
 		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
 		const peer = await connectPeer(qa.socketPath);
 		try {
-			const opened = await peer.peer.request({ id: "open", type: "open_session", cwd: qa.cwd });
-			const ui = peer.peer.waitFor((value) => value.type === "extension_ui_request", 2_000).catch(() => undefined);
+			const opened = await peer.peer.request({
+				id: "open",
+				type: "open_session",
+				cwd: qa.cwd,
+			});
+			const ui = peer.peer.waitFor(
+				(value) => value.type === "extension_ui_request" && value.method === "confirm",
+				5_000,
+			);
 			const switched = peer.peer.request(
 				{
 					id: "switch",
@@ -225,8 +258,20 @@ describe("RPC Unix-socket multi-connection host", () => {
 				5_000,
 			);
 			const request = await ui;
-			if (request) peer.peer.write({ type: "extension_ui_response", id: request.id, confirmed: true });
-			await expect(switched).resolves.toMatchObject({ success: true, command: "switch_session" });
+			expect(request).toMatchObject({
+				type: "extension_ui_request",
+				method: "confirm",
+			});
+			peer.peer.write({
+				type: "extension_ui_response",
+				id: request.id,
+				sessionId: openedSessionId(opened),
+				confirmed: true,
+			});
+			await expect(switched).resolves.toMatchObject({
+				success: true,
+				command: "switch_session",
+			});
 			expect(opened).toMatchObject({ success: true });
 		} finally {
 			peer.peer.close();
@@ -272,17 +317,30 @@ describe("RPC Unix-socket multi-connection host", () => {
 				success: true,
 			});
 
-			const opened = await a.peer.request({ id: "open-a", type: "open_session", cwd: qa.cwd });
+			const opened = await a.peer.request({
+				id: "open-a",
+				type: "open_session",
+				cwd: qa.cwd,
+			});
 			const sessionId = openedSessionId(opened);
 
 			const settledA = a.peer.waitFor((value) => value.type === "agent_settled" && value.sessionId === sessionId);
 			const settledB = b.peer.waitFor((value) => value.type === "agent_settled" && value.sessionId === sessionId);
 			await expect(
-				b.peer.request({ id: "foreign-prompt", type: "prompt", sessionId, message: "unique-424242" }),
+				b.peer.request({
+					id: "foreign-prompt",
+					type: "prompt",
+					sessionId,
+					message: "unique-424242",
+				}),
 			).resolves.toMatchObject({ success: true, sessionId });
 			await Promise.all([settledA, settledB]);
 
-			const transcript = await b.peer.request({ id: "foreign-transcript", type: "get_messages", sessionId });
+			const transcript = await b.peer.request({
+				id: "foreign-transcript",
+				type: "get_messages",
+				sessionId,
+			});
 			const messages = ((transcript.data as { messages?: unknown[] }).messages ?? []).map(messageText);
 			expect(messages).toContain("unique-424242");
 
@@ -298,7 +356,11 @@ describe("RPC Unix-socket multi-connection host", () => {
 			const reconnected = await connectPeer(qa.socketPath);
 			try {
 				await expect(
-					reconnected.peer.request({ id: "reconnected", type: "get_state", sessionId }),
+					reconnected.peer.request({
+						id: "reconnected",
+						type: "get_state",
+						sessionId,
+					}),
 				).resolves.toMatchObject({ success: true, sessionId });
 			} finally {
 				reconnected.peer.close();
@@ -324,19 +386,30 @@ describe("RPC Unix-socket multi-connection host", () => {
 		const a = await connectPeer(qa.socketPath);
 		const b = await connectPeer(qa.socketPath);
 		try {
-			const opened = await a.peer.request({ id: "close-open", type: "open_session", cwd: qa.cwd });
+			const opened = await a.peer.request({
+				id: "close-open",
+				type: "open_session",
+				cwd: qa.cwd,
+			});
 			const sessionId = openedSessionId(opened);
 			const observerClosed = b.peer.waitFor(
 				(value) => value.type === "session_closed" && value.sessionId === sessionId,
 			);
-			const requesterResponse = a.peer.request({ id: "close-request", type: "close_session", sessionId });
+			const requesterResponse = a.peer.request({
+				id: "close-request",
+				type: "close_session",
+				sessionId,
+			});
 			await expect(requesterResponse).resolves.toMatchObject({
 				type: "response",
 				command: "close_session",
 				success: true,
 				sessionId,
 			});
-			await expect(observerClosed).resolves.toMatchObject({ type: "session_closed", sessionId });
+			await expect(observerClosed).resolves.toMatchObject({
+				type: "session_closed",
+				sessionId,
+			});
 			expect(b.peer.messages.some((value) => value.id === "close-request")).toBe(false);
 		} finally {
 			a.peer.close();
@@ -371,7 +444,11 @@ describe("RPC Unix-socket multi-connection host", () => {
 		const stdioChild = spawnRpc(["--mode", "rpc", "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL], stdioQa);
 		const stdio = new JsonlPeer(stdioChild.stdout, (line) => stdioChild.stdin.write(line));
 		try {
-			const opened = await socket.peer.request({ id: "setup-open", type: "open_session", cwd: socketQa.cwd });
+			const opened = await socket.peer.request({
+				id: "setup-open",
+				type: "open_session",
+				cwd: socketQa.cwd,
+			});
 			const sessionId = openedSessionId(opened);
 			const commands = [
 				{ id: "same-state", type: "get_state" },
@@ -403,7 +480,12 @@ describe("RPC Unix-socket multi-connection host", () => {
 		const sessionPath = join(qa.sessionDir, "dropped.jsonl");
 		const first = await connectPeer(qa.socketPath);
 		try {
-			const opened = await first.peer.request({ id: "open-1", type: "open_session", cwd: qa.cwd, sessionPath });
+			const opened = await first.peer.request({
+				id: "open-1",
+				type: "open_session",
+				cwd: qa.cwd,
+				sessionPath,
+			});
 			expect(opened).toMatchObject({ success: true });
 			expect((opened.data as RecordValue | undefined)?.attached ?? false).toBe(false);
 
@@ -420,12 +502,21 @@ describe("RPC Unix-socket multi-connection host", () => {
 
 		const second = await connectPeer(qa.socketPath);
 		try {
-			const reopened = await second.peer.request({ id: "open-2", type: "open_session", cwd: qa.cwd, sessionPath });
+			const reopened = await second.peer.request({
+				id: "open-2",
+				type: "open_session",
+				cwd: qa.cwd,
+				sessionPath,
+			});
 			expect(reopened).toMatchObject({ success: true });
 			// A fresh open, NOT an attach to the orphaned runtime.
 			expect((reopened.data as RecordValue | undefined)?.attached ?? false).toBe(false);
 			await expect(
-				second.peer.request({ id: "close-2", type: "close_session", sessionId: openedSessionId(reopened) }),
+				second.peer.request({
+					id: "close-2",
+					type: "close_session",
+					sessionId: openedSessionId(reopened),
+				}),
 			).resolves.toMatchObject({ success: true });
 		} finally {
 			second.peer.close();
@@ -467,7 +558,12 @@ describe("RPC Unix-socket multi-connection host", () => {
 			});
 			const event = b.peer.waitFor((value) => value.type === "agent_settled" && value.sessionId === sessionId);
 			await expect(
-				b.peer.request({ id: "prompt-b", type: "prompt", sessionId, message: "survivor" }),
+				b.peer.request({
+					id: "prompt-b",
+					type: "prompt",
+					sessionId,
+					message: "survivor",
+				}),
 			).resolves.toMatchObject({ success: true });
 			await expect(event).resolves.toMatchObject({ sessionId });
 			expect(
@@ -496,9 +592,19 @@ describe("RPC Unix-socket multi-connection host", () => {
 		const b = await connectPeer(qa.socketPath);
 		try {
 			const path = join(qa.sessionDir, "live.jsonl");
-			const opened = await a.peer.request({ id: "open", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			const opened = await a.peer.request({
+				id: "open",
+				type: "open_session",
+				cwd: qa.cwd,
+				sessionPath: path,
+			});
 			const sessionId = openedSessionId(opened);
-			await b.peer.request({ id: "attach", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			await b.peer.request({
+				id: "attach",
+				type: "open_session",
+				cwd: qa.cwd,
+				sessionPath: path,
+			});
 			await a.peer.request({ id: "close", type: "close_session", sessionId });
 			await expect(b.peer.request({ id: "state", type: "get_state", sessionId })).resolves.toMatchObject({
 				success: true,
@@ -529,9 +635,19 @@ describe("RPC Unix-socket multi-connection host", () => {
 		const b = await connectPeer(qa.socketPath);
 		const path = join(qa.sessionDir, "reopen.jsonl");
 		try {
-			const opened = await a.peer.request({ id: "open", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			const opened = await a.peer.request({
+				id: "open",
+				type: "open_session",
+				cwd: qa.cwd,
+				sessionPath: path,
+			});
 			const sessionId = openedSessionId(opened);
-			await b.peer.request({ id: "attach", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			await b.peer.request({
+				id: "attach",
+				type: "open_session",
+				cwd: qa.cwd,
+				sessionPath: path,
+			});
 			await a.peer.request({ id: "close", type: "close_session", sessionId });
 			b.peer.close();
 			b.socket.destroy();
@@ -539,7 +655,12 @@ describe("RPC Unix-socket multi-connection host", () => {
 			const c = await connectPeer(qa.socketPath);
 			try {
 				await expect(
-					c.peer.request({ id: "fresh", type: "open_session", cwd: qa.cwd, sessionPath: path }),
+					c.peer.request({
+						id: "fresh",
+						type: "open_session",
+						cwd: qa.cwd,
+						sessionPath: path,
+					}),
 				).resolves.toMatchObject({ success: true });
 				expect(
 					(c.peer.messages.find((value) => value.id === "fresh")?.data as RecordValue | undefined)?.attached ??
@@ -571,7 +692,12 @@ describe("RPC Unix-socket multi-connection host", () => {
 		const holder = await connectPeer(qa.socketPath);
 		const dropper = await connectPeer(qa.socketPath);
 		try {
-			const held = await holder.peer.request({ id: "open-hold", type: "open_session", cwd: qa.cwd, sessionPath });
+			const held = await holder.peer.request({
+				id: "open-hold",
+				type: "open_session",
+				cwd: qa.cwd,
+				sessionPath,
+			});
 			expect(held).toMatchObject({ success: true });
 			const heldId = openedSessionId(held);
 
@@ -591,10 +717,18 @@ describe("RPC Unix-socket multi-connection host", () => {
 			await new Promise((resolve) => setTimeout(resolve, 500));
 
 			await expect(
-				holder.peer.request({ id: "probe-hold", type: "get_protocol_info", sessionId: heldId }),
+				holder.peer.request({
+					id: "probe-hold",
+					type: "get_protocol_info",
+					sessionId: heldId,
+				}),
 			).resolves.toMatchObject({ success: true });
 			await expect(
-				holder.peer.request({ id: "close-hold", type: "close_session", sessionId: heldId }),
+				holder.peer.request({
+					id: "close-hold",
+					type: "close_session",
+					sessionId: heldId,
+				}),
 			).resolves.toMatchObject({ success: true });
 		} finally {
 			holder.peer.close();
