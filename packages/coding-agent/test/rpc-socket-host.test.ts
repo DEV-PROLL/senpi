@@ -357,6 +357,96 @@ describe("RPC Unix-socket multi-connection host", () => {
 			await fake.close();
 		}
 	});
+	it("releases a dropped connection's session so the same path reopens fresh", async () => {
+		const qa = scratch("drop-release");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const child = spawnRpc(
+			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL],
+			qa,
+		);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const sessionPath = join(qa.sessionDir, "dropped.jsonl");
+		const first = await connectPeer(qa.socketPath);
+		try {
+			const opened = await first.peer.request({ id: "open-1", type: "open_session", cwd: qa.cwd, sessionPath });
+			expect(opened).toMatchObject({ success: true });
+			expect((opened.data as RecordValue | undefined)?.attached ?? false).toBe(false);
+
+			// Ungraceful drop: the terminal closed / the client was SIGKILLed, so no
+			// close_session ever arrives. The host must still release what this
+			// connection held, otherwise the path stays reserved by a runtime whose
+			// client is gone and every later resume of it is wrong.
+			first.peer.close();
+			first.socket.destroy();
+			await new Promise((resolve) => setTimeout(resolve, 500));
+		} finally {
+			first.socket.destroy();
+		}
+
+		const second = await connectPeer(qa.socketPath);
+		try {
+			const reopened = await second.peer.request({ id: "open-2", type: "open_session", cwd: qa.cwd, sessionPath });
+			expect(reopened).toMatchObject({ success: true });
+			// A fresh open, NOT an attach to the orphaned runtime.
+			expect((reopened.data as RecordValue | undefined)?.attached ?? false).toBe(false);
+			await expect(
+				second.peer.request({ id: "close-2", type: "close_session", sessionId: openedSessionId(reopened) }),
+			).resolves.toMatchObject({ success: true });
+		} finally {
+			second.peer.close();
+			second.socket.destroy();
+			await fake.close();
+			await stopChild(child);
+		}
+	});
+
+	it("keeps a co-attached session alive when one of its connections drops", async () => {
+		const qa = scratch("drop-survivor");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const child = spawnRpc(
+			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL],
+			qa,
+		);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const sessionPath = join(qa.sessionDir, "shared.jsonl");
+		const holder = await connectPeer(qa.socketPath);
+		const dropper = await connectPeer(qa.socketPath);
+		try {
+			const held = await holder.peer.request({ id: "open-hold", type: "open_session", cwd: qa.cwd, sessionPath });
+			expect(held).toMatchObject({ success: true });
+			const heldId = openedSessionId(held);
+
+			const attached = await dropper.peer.request({
+				id: "open-attach",
+				type: "open_session",
+				cwd: qa.cwd,
+				sessionPath,
+			});
+			expect(attached).toMatchObject({ success: true });
+			expect((attached.data as RecordValue | undefined)?.attached).toBe(true);
+
+			// Only the second attachment dies. The runtime is refcounted, so the
+			// holder must keep serving commands on its own handle.
+			dropper.peer.close();
+			dropper.socket.destroy();
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			await expect(
+				holder.peer.request({ id: "probe-hold", type: "get_protocol_info", sessionId: heldId }),
+			).resolves.toMatchObject({ success: true });
+			await expect(
+				holder.peer.request({ id: "close-hold", type: "close_session", sessionId: heldId }),
+			).resolves.toMatchObject({ success: true });
+		} finally {
+			holder.peer.close();
+			holder.socket.destroy();
+			dropper.socket.destroy();
+			await fake.close();
+			await stopChild(child);
+		}
+	});
 });
 
 async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {

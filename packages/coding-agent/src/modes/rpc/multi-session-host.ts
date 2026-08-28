@@ -143,6 +143,15 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 			detachReader();
 			writer.unregisterConnection(id);
 			connections.delete(id);
+			// A socket that dies without close_session still owns its sessions' attachments
+			// and path reservations. Release them on the command chain so this runs after any
+			// in-flight command for this connection settles, otherwise the path stays pinned
+			// by a runtime whose client is gone and later resumes attach to that orphan.
+			commandChain = commandChain
+				.then(() => router.releaseConnection(id))
+				.catch((cause) => {
+					process.stderr.write(`senpi rpc connection ${id} release failed: ${errorMessage(cause)}\n`);
+				});
 		};
 		connections.set(id, { id, sink, detach, close: () => socket.destroy() });
 		socket.once("close", detach);

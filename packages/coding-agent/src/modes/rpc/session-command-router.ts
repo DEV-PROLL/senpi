@@ -26,6 +26,8 @@ function error(id: string | undefined, command: string, code: string): RpcRespon
 /** Routes control messages and enforces a routing handle for every session command. */
 export class SessionCommandRouter {
 	private readonly bindings = new Map<string, RpcSessionBinding>();
+	/** Session handles opened by each connection, so a dropped socket releases exactly its own. */
+	private readonly sessionsByConnection = new Map<string, Set<string>>();
 	private readonly registry: RpcSessionRegistry;
 	private readonly writer: SessionEventWriter;
 	private readonly defaults: Pick<
@@ -125,6 +127,15 @@ export class SessionCommandRouter {
 			});
 			const openedSession = opened;
 			const entry = this.registry.getForCommand(openedSession.sessionId, "open_session");
+			// A client that dies without close_session (terminal closed, SIGKILL, dropped
+			// SSH) still holds this handle's attachment and its path reservation. Remember
+			// which connection owns it so releaseConnection() can close exactly that.
+			const owner = this.writer.currentConnection();
+			if (owner !== undefined) {
+				const owned = this.sessionsByConnection.get(owner) ?? new Set<string>();
+				owned.add(openedSession.sessionId);
+				this.sessionsByConnection.set(owner, owned);
+			}
 			this.bindings.set(
 				openedSession.sessionId,
 				await this.createBinding(
@@ -160,6 +171,32 @@ export class SessionCommandRouter {
 		}
 	}
 
+	/**
+	 * Releases every session a dropped connection still owned. Each handle goes through
+	 * the same refcounted close as an explicit close_session, so a session another
+	 * connection is still attached to keeps running and only the last owner tears it down.
+	 */
+	async releaseConnection(connectionId: string): Promise<void> {
+		const owned = this.sessionsByConnection.get(connectionId);
+		this.sessionsByConnection.delete(connectionId);
+		if (owned === undefined) return;
+		for (const sessionId of owned) {
+			let entry: RpcSessionEntry | undefined;
+			try {
+				entry = this.registry.beginClose(sessionId);
+			} catch {
+				// Already closed or claimed by another lifecycle path; nothing to release.
+				continue;
+			}
+			try {
+				await this.bindings.get(sessionId)?.dispose();
+			} finally {
+				this.bindings.delete(sessionId);
+				if (entry.state === "closing") await this.registry.closeMarked(sessionId);
+			}
+		}
+	}
+
 	private async close(command: Extract<RpcCommand, { type: "close_session" }>): Promise<RpcResponse | undefined> {
 		try {
 			// This must be the first operation: binding.dispose() awaits teardown and
@@ -169,6 +206,7 @@ export class SessionCommandRouter {
 				await this.bindings.get(command.sessionId)?.dispose();
 			} finally {
 				this.bindings.delete(command.sessionId);
+				for (const owned of this.sessionsByConnection.values()) owned.delete(command.sessionId);
 				// Other attachments may still own the live session; only the last
 				// close finalizes the runtime teardown.
 				if (entry.state === "closing") await this.registry.closeMarked(command.sessionId);
