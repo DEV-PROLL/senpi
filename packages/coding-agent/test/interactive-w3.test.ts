@@ -49,7 +49,7 @@ describe("interactive-w3 shared-host regression contracts", () => {
     const f = await fixture("r9"); const before = f.opened.state.sessionId; const next = await f.client.newSession(); expect(next.cancelled).toBe(false); expect((await f.client.getState()).sessionId).not.toBe(before); await f.client.stop(); await f.fake.close();
   });
   it("R10 routes branch abort, bash persistence, and labels to the host", async () => {
-    const f = await fixture("r10"); await f.client.abortBranchSummary(); await f.client.recordBashResult("echo", { output: "x", exitCode: 0, cancelled: false, truncated: false }); await f.client.setLabel(f.opened.state.sessionId, "label").catch(() => {}); expect(true).toBe(true); await f.client.stop(); await f.fake.close();
+    const f = await fixture("r10"); await f.client.abortBranchSummary(); await f.client.recordBashResult("echo", { output: "x", exitCode: 0, cancelled: false, truncated: false }); await f.client.prompt("persist label entry"); await f.client.waitForIdle(); const leaf = (await f.client.getEntries()).leafId!; await f.client.setLabel(leaf, "label"); const tree = await f.client.getTree(); expect(JSON.stringify(tree.tree)).toContain("label"); await f.client.stop(); await f.fake.close();
   });
   it("R12 exposes command rejection through the client error channel", async () => {
     const f = await fixture("r12"); await expect(f.client.setModel("missing-provider", "missing-model")).rejects.toThrow(); await f.client.stop(); await f.fake.close();
