@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
+import { rendezvousOrder } from "@earendil-works/pi-ai/auth/pool/select";
 import type { PooledCredential } from "@earendil-works/pi-ai/auth/pool/slots";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
@@ -62,7 +63,12 @@ function startEvent(): AssistantMessageEvent {
 }
 
 function textEvent(text: string): AssistantMessageEvent {
-	return { type: "text_delta", contentIndex: 0, delta: text, partial: partialMessage() };
+	return {
+		type: "text_delta",
+		contentIndex: 0,
+		delta: text,
+		partial: partialMessage(),
+	};
 }
 
 function errorEvent(message: string): AssistantMessageEvent {
@@ -84,7 +90,13 @@ describe("credential rotation over a pooled provider", () => {
 		const attempted: string[] = [];
 		const events = await collect(
 			streamWithCredentialRotation({
-				sources: { providerId: "test", credential: pooled(), env: () => undefined, repository, now: () => NOW },
+				sources: {
+					providerId: "test",
+					credential: pooled(),
+					env: () => undefined,
+					repository,
+					now: () => NOW,
+				},
 				affinityKey: "ordinary-agent-session",
 				runAttempt: (slot) => {
 					attempted.push(slot.name);
@@ -98,41 +110,47 @@ describe("credential rotation over a pooled provider", () => {
 		expect(events.some((event) => event.type === "text_delta")).toBe(true);
 	});
 
-	test("policy disables affinity and bounds cooldown", async () => {
-		const chosen: string[] = [];
+	test("policy disables affinity and selects in declaration order", async () => {
+		const affinityKey = "affinity-off-regression-0";
+		const sources = {
+			providerId: "test",
+			credential: pooled(),
+			env: () => undefined,
+			repository,
+			now: () => NOW,
+		};
+		const slots = await listRotationSlots(sources);
+		const declarationOrder = slots.map((slot) => slot.name);
+		const affinityOrder = rendezvousOrder(affinityKey, slots, sha256SlotHasher).map((slot) => slot.name);
+		expect(affinityOrder).not.toEqual(declarationOrder);
+
+		const affinityChosen: string[] = [];
 		await collect(
 			streamWithCredentialRotation({
-				sources: {
-					providerId: "test",
-					credential: pooled(),
-					env: () => undefined,
-					repository,
-					policy: { affinity: false, cooldownBaseMs: 5, cooldownCapMs: 10 },
-					now: () => NOW,
-				},
+				sources,
+				affinityKey,
+				hasher: sha256SlotHasher,
 				runAttempt: (slot) => {
-					chosen.push(slot.name);
+					affinityChosen.push(slot.name);
 					return stream(startEvent(), textEvent("ok"));
 				},
 			}),
 		);
+		expect(affinityChosen).toEqual([affinityOrder[0]]);
+
+		const policyChosen: string[] = [];
 		await collect(
 			streamWithCredentialRotation({
-				sources: {
-					providerId: "test",
-					credential: pooled(),
-					env: () => undefined,
-					repository,
-					policy: { affinity: false },
-					now: () => NOW,
-				},
+				sources: { ...sources, policy: { affinity: false } },
+				affinityKey,
+				hasher: sha256SlotHasher,
 				runAttempt: (slot) => {
-					chosen.push(slot.name);
+					policyChosen.push(slot.name);
 					return stream(startEvent(), textEvent("ok"));
 				},
 			}),
 		);
-		expect(chosen).toHaveLength(2);
+		expect(policyChosen).toEqual([declarationOrder[0]]);
 	});
 
 	test("pinned account wins selection over HRW affinity", async () => {
@@ -203,12 +221,22 @@ describe("credential rotation over a pooled provider", () => {
 	});
 
 	test("successful pooled request completes after selection", async () => {
-		await repository.mutateSlotState("test", "stored", "default", () => undefined);
-		await repository.mutateSlotState("test", "stored", "work", () => undefined);
+		await repository.mutateSlotState("test", "stored", "default", () => ({
+			blockedUntil: NOW + 60_000,
+			blockReason: "rate_limit",
+		}));
+		await repository.mutateSlotState("test", "stored", "work", () => ({}));
 		const attempted: string[] = [];
-		await collect(
+		const events = await collect(
 			streamWithCredentialRotation({
-				sources: { providerId: "test", credential: pooled(), env: () => undefined, repository, now: () => NOW },
+				sources: {
+					providerId: "test",
+					credential: pooled(),
+					env: () => undefined,
+					repository,
+					policy: { affinity: false },
+					now: () => NOW,
+				},
 				affinityKey: "probe-regression",
 				runAttempt: (slot) => {
 					attempted.push(slot.name);
@@ -216,8 +244,13 @@ describe("credential rotation over a pooled provider", () => {
 				},
 			}),
 		);
-		expect(attempted).toHaveLength(1);
-		expect(attempted).toHaveLength(1);
+		expect(attempted).toEqual(["work"]);
+		expect(events.some((event) => event.type === "text_delta" && event.delta === "ok")).toBe(true);
+		const successfulState = (await repository.listSlots("test", "stored")).work;
+		expect(successfulState?.lastSuccessAt).toBe(NOW);
+		expect(successfulState?.lease).toBeUndefined();
+		expect(successfulState?.blockedUntil).toBeUndefined();
+		expect(successfulState?.blockReason).toBeUndefined();
 	});
 	test("lists both stored slots with sidecar health overlaid", async () => {
 		await repository.mutateSlotState("test", "stored", "work", () => ({
@@ -233,14 +266,24 @@ describe("credential rotation over a pooled provider", () => {
 		});
 
 		expect(slots.map((slot) => slot.name)).toEqual(["default", "work"]);
-		expect(slots[1]).toMatchObject({ lane: "stored", blockedUntil: NOW + 60_000, blockReason: "rate_limit" });
+		expect(slots[1]).toMatchObject({
+			lane: "stored",
+			blockedUntil: NOW + 60_000,
+			blockReason: "rate_limit",
+		});
 	});
 
 	test("a 429 before any delta rotates to the sibling slot and persists the cooldown", async () => {
 		const attempted: string[] = [];
 		const events = await collect(
 			streamWithCredentialRotation({
-				sources: { providerId: "test", credential: pooled(), env: () => undefined, repository, now: () => NOW },
+				sources: {
+					providerId: "test",
+					credential: pooled(),
+					env: () => undefined,
+					repository,
+					now: () => NOW,
+				},
 				affinityKey: "session-1",
 				hasher: sha256SlotHasher,
 				runAttempt: (slot) => {
@@ -266,7 +309,12 @@ describe("credential rotation over a pooled provider", () => {
 		for (let index = 0; index < 3; index++) {
 			await collect(
 				streamWithCredentialRotation({
-					sources: { providerId: "test", credential: pooled(), env: () => undefined, repository },
+					sources: {
+						providerId: "test",
+						credential: pooled(),
+						env: () => undefined,
+						repository,
+					},
 					affinityKey: "stable-session",
 					runAttempt: (slot) => {
 						chosen.push(slot.name);
@@ -284,7 +332,12 @@ describe("credential rotation over a pooled provider", () => {
 		try {
 			await collect(
 				streamWithCredentialRotation({
-					sources: { providerId: "test", credential: pooled(), env: () => undefined, repository },
+					sources: {
+						providerId: "test",
+						credential: pooled(),
+						env: () => undefined,
+						repository,
+					},
 					affinityKey: "session-2",
 					runAttempt: (slot) => {
 						attempted.push(slot.name);
@@ -308,7 +361,12 @@ describe("credential rotation over a pooled provider", () => {
 			credentialRevision: staleRevision,
 		}));
 
-		const slots = await listRotationSlots({ providerId: "openai", credential: undefined, env, repository });
+		const slots = await listRotationSlots({
+			providerId: "openai",
+			credential: undefined,
+			env,
+			repository,
+		});
 
 		expect(slots.map((slot) => slot.name)).toEqual(["env", "env-2"]);
 		// The persisted block belonged to the previous value of OPENAI_API_KEY.

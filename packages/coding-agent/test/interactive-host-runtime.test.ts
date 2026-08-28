@@ -88,7 +88,12 @@ async function createAgentSessionRuntimeFixture(options: {
 			cwd,
 			agentDir: options.agentDir,
 			settingsManager: options.settingsManager,
-			resourceLoaderOptions: { noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true },
+			resourceLoaderOptions: {
+				noExtensions: true,
+				noSkills: true,
+				noPromptTemplates: true,
+				noThemes: true,
+			},
 		});
 		return {
 			...(await createAgentSessionFromServices({ services, sessionManager })),
@@ -212,7 +217,10 @@ describe("interactive host runtime", () => {
 					resolve();
 				});
 			});
-			await runtime.session.prompt("disposition-probe", { promptDisposition, preflightResult });
+			await runtime.session.prompt("disposition-probe", {
+				promptDisposition,
+				preflightResult,
+			});
 			await settled;
 			expect(promptDisposition).toHaveBeenCalledWith("started");
 			expect(preflightResult).toHaveBeenCalledWith(true);
@@ -403,14 +411,21 @@ describe("interactive host runtime", () => {
 		const targetManager = SessionManager.create(qa.cwd, qa.sessionDir);
 		const targetPath = targetManager.getSessionFile();
 		if (!targetPath) throw new Error("Expected persisted target session path");
-		targetManager.appendMessage({ role: "user", content: "target-history", timestamp: 1 });
+		targetManager.appendMessage({
+			role: "user",
+			content: "target-history",
+			timestamp: 1,
+		});
 		targetManager.appendMessage(fauxAssistantMessage("target-response"));
 		const goalRef = {
 			baseDir: join(targetManager.getSessionDir(), "extensions", "goal"),
 			threadId: targetManager.getSessionId(),
 		};
 		await createGoal(goalRef, "Keep the target goal stopped");
-		await updateGoal(goalRef, { status: "blocked", reason: "user interrupted the turn" });
+		await updateGoal(goalRef, {
+			status: "blocked",
+			reason: "user interrupted the turn",
+		});
 		expect(targetManager.buildSessionContext().messages).toContainEqual({
 			role: "user",
 			content: "target-history",
@@ -429,7 +444,11 @@ describe("interactive host runtime", () => {
 				content: "target-history",
 				timestamp: 1,
 			});
-			expect(runtime.session.messages).toContainEqual({ role: "user", content: "target-history", timestamp: 1 });
+			expect(runtime.session.messages).toContainEqual({
+				role: "user",
+				content: "target-history",
+				timestamp: 1,
+			});
 		} finally {
 			await runtime.dispose();
 			await fake.close();
@@ -460,7 +479,11 @@ describe("interactive host runtime", () => {
 		const targetManager = SessionManager.create(qa.cwd, qa.sessionDir);
 		const targetPath = targetManager.getSessionFile();
 		if (!targetPath) throw new Error("Expected persisted target session path");
-		targetManager.appendMessage({ role: "user", content: "tree-entry-from-target", timestamp: 1 });
+		targetManager.appendMessage({
+			role: "user",
+			content: "tree-entry-from-target",
+			timestamp: 1,
+		});
 		targetManager.appendMessage(fauxAssistantMessage("tree-response-from-target"));
 
 		// The bootstrap session's tree never contains the target session's entries, so a proxy that keeps
@@ -487,7 +510,11 @@ describe("interactive host runtime", () => {
 		const host = spawnHost(qa);
 		await waitForHost(host, qa.socket);
 		const bootstrap = SessionManager.create(qa.cwd, qa.sessionDir);
-		bootstrap.appendMessage({ role: "user", content: "fork-source", timestamp: 1 });
+		bootstrap.appendMessage({
+			role: "user",
+			content: "fork-source",
+			timestamp: 1,
+		});
 		bootstrap.appendMessage(fauxAssistantMessage("fork-answer"));
 		const local = await createAgentSessionRuntimeFixture({
 			cwd: qa.cwd,
@@ -511,7 +538,6 @@ describe("interactive host runtime", () => {
 			await runtime.newSession();
 			expect(runtime.session.sessionFile).not.toBe(firstFile);
 			expect(runtime.session.sessionId).not.toBe(firstId);
-			expect(runtime.session.sessionManager.getSessionFile()).toBe(runtime.session.sessionFile);
 			expect(runtime.session.sessionManager.getSessionFile()).toBe(runtime.session.sessionFile);
 		} finally {
 			await runtime.dispose();
@@ -545,7 +571,11 @@ describe("interactive host runtime", () => {
 			const persistedHostSession = SessionManager.open(runtime.session.sessionFile!);
 			expect(before).not.toBe(persistedHostSession.getLeafId());
 			expect(persistedHostSession.getLeafId()).toBe(runtime.session.sessionManager.getLeafId());
-			expect(runtime.session.messages).toContainEqual({ role: "user", content: "nav-user", timestamp: 1 });
+			expect(runtime.session.messages).toContainEqual({
+				role: "user",
+				content: "nav-user",
+				timestamp: 1,
+			});
 		} finally {
 			await runtime.dispose();
 			await fake.close();
@@ -559,7 +589,11 @@ describe("interactive host runtime", () => {
 		const host = spawnHost(qa);
 		await waitForHost(host, qa.socket);
 		const imported = SessionManager.create(qa.cwd, qa.sessionDir);
-		imported.appendMessage({ role: "user", content: "imported-history", timestamp: 1 });
+		imported.appendMessage({
+			role: "user",
+			content: "imported-history",
+			timestamp: 1,
+		});
 		imported.appendMessage(fauxAssistantMessage("imported-answer"));
 		const inputPath = join(qa.root, "import.jsonl");
 		copyFileSync(imported.getSessionFile()!, inputPath);
@@ -576,7 +610,11 @@ describe("interactive host runtime", () => {
 		try {
 			await runtime.importFromJsonl(inputPath);
 			expect(runtime.session.sessionFile).toContain("import.jsonl");
-			expect(runtime.session.messages).toContainEqual({ role: "user", content: "imported-history", timestamp: 1 });
+			expect(runtime.session.messages).toContainEqual({
+				role: "user",
+				content: "imported-history",
+				timestamp: 1,
+			});
 			expect(runtime.session.sessionManager.buildSessionContext().messages).toContainEqual({
 				role: "user",
 				content: "imported-history",
@@ -598,7 +636,10 @@ describe("interactive host runtime", () => {
 		const client = new RpcClient({ socketPath: qa.socket });
 		await client.start();
 		try {
-			const opened = await client.openSession({ sessionPath: sessionManager.getSessionFile(), cwd: qa.cwd });
+			const opened = await client.openSession({
+				sessionPath: sessionManager.getSessionFile(),
+				cwd: qa.cwd,
+			});
 			const events = client.collectEvents(30_000);
 			await client.prompt("legacy-image", [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }]);
 			const received = await events;
@@ -627,10 +668,18 @@ describe("interactive host runtime", () => {
 		const host = spawnHost(qa);
 		await waitForHost(host, qa.socket);
 		const bootstrap = SessionManager.create(qa.cwd, qa.sessionDir);
-		bootstrap.appendMessage({ role: "user", content: "bootstrap-only", timestamp: 1 });
+		bootstrap.appendMessage({
+			role: "user",
+			content: "bootstrap-only",
+			timestamp: 1,
+		});
 		const target = SessionManager.create(qa.cwd, qa.sessionDir);
 		for (let index = 0; index < 4; index++) {
-			target.appendMessage({ role: "user", content: `target-only-${index}`, timestamp: index + 2 });
+			target.appendMessage({
+				role: "user",
+				content: `target-only-${index}`,
+				timestamp: index + 2,
+			});
 			target.appendMessage(fauxAssistantMessage(`target-answer-${index}`));
 		}
 		const local = await createAgentSessionRuntimeFixture({
@@ -646,8 +695,16 @@ describe("interactive host runtime", () => {
 		try {
 			await runtime.switchSession(target.getSessionFile()!);
 			await runtime.session.compact();
-			expect(runtime.session.messages).toContainEqual({ role: "user", content: "target-only-3", timestamp: 5 });
-			expect(runtime.session.messages).not.toContainEqual({ role: "user", content: "bootstrap-only", timestamp: 1 });
+			expect(runtime.session.messages).toContainEqual({
+				role: "user",
+				content: "target-only-3",
+				timestamp: 5,
+			});
+			expect(runtime.session.messages).not.toContainEqual({
+				role: "user",
+				content: "bootstrap-only",
+				timestamp: 1,
+			});
 			expect(runtime.session.sessionManager.getSessionFile()).toBe(target.getSessionFile());
 		} finally {
 			await runtime.dispose();
