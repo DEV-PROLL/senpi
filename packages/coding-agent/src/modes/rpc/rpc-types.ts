@@ -275,7 +275,7 @@ export type RpcResponse =
 			type: "response";
 			command: "open_session";
 			success: true;
-			data: { sessionId: string; state: RpcSessionState };
+			data: { sessionId: string; state: RpcSessionState; attached?: boolean };
 	  }
 	| { id?: string; type: "response"; command: "close_session"; success: true; data: Record<string, never> }
 	| {

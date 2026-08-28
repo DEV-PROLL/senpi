@@ -863,6 +863,7 @@ export class RpcClient {
 				const writeError = error instanceof Error ? error : new Error(String(error));
 				const pending = this.pendingRequests.get(id);
 				this.pendingRequests.delete(id);
+				pending?.onReject?.(writeError);
 				pending?.reject(writeError);
 			}
 		});

@@ -4,6 +4,8 @@
 
 - Socket RPC dispatch remains re-entrant so extension UI responses can resolve in-flight commands.
 - Shared-path session attachments retain one runtime binding and only emit terminal closure on the final attachment.
+- Per-connection attachment ownership now preserves duplicate-open counts and waits for in-flight opens before disconnect cleanup.
+- The exported open-session response and protocol table expose `attached`, and synchronous prompt transport failures report failed preflight.
 
 
 ## Bun-compiled runtime assets (2026-08-27)
