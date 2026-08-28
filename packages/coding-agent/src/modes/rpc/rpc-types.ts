@@ -98,8 +98,8 @@ type RpcSessionCommand =
 	| { id?: string; type: "get_session_stats" }
 	| { id?: string; type: "export_html"; outputPath?: string }
 	| { id?: string; type: "export_jsonl"; outputPath?: string }
-	| { id?: string; type: "switch_session"; sessionPath: string }
-	| { id?: string; type: "fork"; entryId: string }
+	| { id?: string; type: "switch_session"; sessionPath: string; cwdOverride?: string }
+	| { id?: string; type: "fork"; entryId: string; position?: "before" | "at" }
 	| { id?: string; type: "clone" }
 	| { id?: string; type: "get_fork_messages" }
 	| { id?: string; type: "get_entries"; since?: string }
@@ -502,7 +502,15 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "account_remove"; success: true }
 
 	// Error response (any command can fail)
-	| { id?: string; type: "response"; command: string; success: false; error: string };
+	| {
+			id?: string;
+			type: "response";
+			command: string;
+			success: false;
+			error: string;
+			errorCode?: string;
+			errorData?: unknown;
+	  };
 
 // ============================================================================
 // Extension UI Events (stdout)

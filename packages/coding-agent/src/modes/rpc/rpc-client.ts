@@ -10,6 +10,7 @@ import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core"
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { PromptDisposition, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
+import { MissingSessionCwdError } from "../../core/session-cwd.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { ServiceTier } from "../../core/extensions/builtin/service-tier.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
@@ -630,8 +631,8 @@ export class RpcClient {
 	 * Switch to a different session file.
 	 * @returns Object with `cancelled: true` if an extension cancelled the switch
 	 */
-	async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
-		const response = await this.send({ type: "switch_session", sessionPath });
+	async switchSession(sessionPath: string, options?: { cwdOverride?: string }): Promise<{ cancelled: boolean }> {
+		const response = await this.send({ type: "switch_session", sessionPath, cwdOverride: options?.cwdOverride });
 		return this.getData(response);
 	}
 
@@ -639,8 +640,8 @@ export class RpcClient {
 	 * Fork from a specific message.
 	 * @returns Object with `text` (the message text) and `cancelled` (if extension cancelled)
 	 */
-	async fork(entryId: string): Promise<{ text: string; cancelled: boolean }> {
-		const response = await this.send({ type: "fork", entryId });
+	async fork(entryId: string, options?: { position?: "before" | "at" }): Promise<{ text: string; cancelled: boolean }> {
+		const response = await this.send({ type: "fork", entryId, position: options?.position });
 		return this.getData(response);
 	}
 
@@ -913,6 +914,9 @@ export class RpcClient {
 	private getData<T>(response: RpcResponse): T {
 		if (!response.success) {
 			const errorResponse = response as Extract<RpcResponse, { success: false }>;
+			if (errorResponse.errorCode === "missing_session_cwd" && errorResponse.errorData) {
+				throw new MissingSessionCwdError(errorResponse.errorData as ConstructorParameters<typeof MissingSessionCwdError>[0]);
+			}
 			throw new Error(errorResponse.error);
 		}
 		// Type assertion: we trust response.data matches T based on the command sent.

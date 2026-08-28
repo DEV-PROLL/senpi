@@ -303,8 +303,8 @@ export function createRpcConnectionHandler(
 		return { id, type: "response", command, success: true, data } as RpcResponse;
 	};
 
-	const error = (id: string | undefined, command: string, message: string): RpcResponse => {
-		return { id, type: "response", command, success: false, error: message };
+	const error = (id: string | undefined, command: string, message: string, errorCode?: string, errorData?: unknown): RpcResponse => {
+		return { id, type: "response", command, success: false, error: message, ...(errorCode ? { errorCode } : {}), ...(errorData === undefined ? {} : { errorData }) };
 	};
 
 	// Pending extension UI requests waiting for response
@@ -1071,7 +1071,7 @@ export function createRpcConnectionHandler(
 			}
 
 			case "switch_session": {
-				const result = await runtimeHost.switchSession(command.sessionPath);
+				const result = await runtimeHost.switchSession(command.sessionPath, { cwdOverride: command.cwdOverride });
 				if (!result.cancelled) {
 					await rebindSession();
 				}
@@ -1079,7 +1079,7 @@ export function createRpcConnectionHandler(
 			}
 
 			case "fork": {
-				const result = await runtimeHost.fork(command.entryId);
+				const result = await runtimeHost.fork(command.entryId, { position: command.position });
 				if (!result.cancelled) {
 					await rebindSession();
 				}
@@ -1291,11 +1291,14 @@ export function createRpcConnectionHandler(
 				await waitForRpcBackpressure();
 			}
 		} catch (commandError: unknown) {
+			const missingCwd = commandError instanceof Error && commandError.name === "MissingSessionCwdError" && "issue" in commandError;
 			output(
 				error(
 					command.id,
 					command.type,
 					commandError instanceof Error ? commandError.message : String(commandError),
+					missingCwd ? "missing_session_cwd" : undefined,
+					missingCwd ? commandError.issue : undefined,
 				),
 			);
 			await waitForRpcBackpressure();

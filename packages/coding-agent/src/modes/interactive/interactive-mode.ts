@@ -8161,7 +8161,7 @@ export class InteractiveMode {
 		}
 
 		await this.session.setSessionName(name);
-		const sessionName = this.sessionManager.getSessionName();
+		const sessionName = this.session.sessionName;
 		if (sessionName !== name) {
 			this.showWarning(`Session name was normalized from ${JSON.stringify(name)} to ${JSON.stringify(sessionName)}`);
 		}

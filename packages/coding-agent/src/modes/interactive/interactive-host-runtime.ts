@@ -121,28 +121,36 @@ class RemoteInteractiveRuntime {
 		await this.#client.stop();
 		await this.#local.dispose();
 	}
-	async newSession(): Promise<{ cancelled: boolean }> {
-		this.#beforeSessionInvalidate?.();
-		const result = await this.#client.newSession();
-		if (!result.cancelled) await this.#refreshAndRebind();
+	async newSession(options?: { parentSession?: string }): Promise<{ cancelled: boolean }> {
+		const result = await this.#client.newSession(options?.parentSession);
+		if (!result.cancelled) {
+			this.#beforeSessionInvalidate?.();
+			await this.#refreshAndRebind();
+		}
 		return result;
 	}
-	async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
-		this.#beforeSessionInvalidate?.();
-		const result = await this.#client.switchSession(sessionPath);
-		if (!result.cancelled) await this.#refreshAndRebind();
+	async switchSession(sessionPath: string, options?: { cwdOverride?: string }): Promise<{ cancelled: boolean }> {
+		const result = await this.#client.switchSession(sessionPath, options);
+		if (!result.cancelled) {
+			this.#beforeSessionInvalidate?.();
+			await this.#refreshAndRebind();
+		}
 		return result;
 	}
-	async fork(entryId: string): Promise<{ cancelled: boolean; selectedText?: string }> {
-		this.#beforeSessionInvalidate?.();
-		const result = await this.#client.fork(entryId);
-		if (!result.cancelled) await this.#refreshAndRebind();
+	async fork(entryId: string, options?: { position?: "before" | "at" }): Promise<{ cancelled: boolean; selectedText?: string }> {
+		const result = await this.#client.fork(entryId, options);
+		if (!result.cancelled) {
+			this.#beforeSessionInvalidate?.();
+			await this.#refreshAndRebind();
+		}
 		return { cancelled: result.cancelled, selectedText: result.text };
 	}
 	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
-		this.#beforeSessionInvalidate?.();
 		const result = await this.#client.importJsonl(inputPath, cwdOverride);
-		if (!result.cancelled) await this.#refreshAndRebind();
+		if (!result.cancelled) {
+			this.#beforeSessionInvalidate?.();
+			await this.#refreshAndRebind();
+		}
 		return result;
 	}
 
@@ -208,6 +216,7 @@ function createRemoteSessionProxy(
 			state = { ...state, model: wireEvent.model, thinkingLevel: wireEvent.thinkingLevel };
 		}
 		if (wireEvent.type === "thinking_level_changed") state = { ...state, thinkingLevel: wireEvent.level };
+		if (wireEvent.type === "session_info_changed") state = { ...state, sessionName: wireEvent.name };
 		if (wireEvent.type === "message_start") {
 			if (wireEvent.message.role === "assistant") streamingAssistant = structuredClone(wireEvent.message);
 			local.agent.state.messages.push(structuredClone(wireEvent.message));
@@ -369,6 +378,7 @@ function createRemoteSessionProxy(
 			}
 			if (property === "sessionFile") return state.sessionFile;
 			if (property === "sessionId") return state.sessionId;
+			if (property === "sessionName") return state.sessionName;
 			if (property === "sessionManager") return remoteSessionManager;
 			if (property === "messages") return target.messages;
 			if (property === "model") return state.model ?? target.model;
@@ -420,6 +430,7 @@ function stateFromRpc(state: {
 	isBashRunning: boolean;
 	sessionFile?: string;
 	sessionId: string;
+	sessionName?: string;
 }) {
 	return state;
 }
