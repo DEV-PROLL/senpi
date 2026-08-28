@@ -143,6 +143,46 @@ describe("credential rotation over a pooled provider", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
+	test("runtime admits one canonical env slot plus one policy slot", async () => {
+		const configDir = mkdtempSync(join(tmpdir(), "combined-runtime-"));
+		const faux = fauxProvider({ provider: "anthropic" });
+		writeFileSync(
+			join(configDir, "models.json"),
+			JSON.stringify({ providers: { anthropic: { credentials: { slots: { broker: { value: "key-policy" } } } } } }),
+		);
+		const runtime = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory(),
+			modelsPath: join(configDir, "models.json"),
+			allowModelNetwork: false,
+		});
+		runtime.registerNativeProvider(faux.provider);
+		await runtime.refresh({ allowNetwork: false, providers: ["anthropic"] });
+		faux.setResponses([
+			() => {
+				throw new Error("401 unauthorized");
+			},
+			fauxAssistantMessage("combined-ok"),
+		]);
+		const events: AssistantMessageEvent[] = [];
+		for await (const event of runtime.stream(
+			faux.getModel(),
+			{ messages: [], tools: [] },
+			{
+				env: { ANTHROPIC_API_KEY: "key-env" },
+			},
+		))
+			events.push(event);
+		expect(events.some((event) => event.type === "done")).toBe(true);
+		expect(faux.getCallLog()).toHaveLength(2);
+		expect(
+			faux
+				.getCallLog()
+				.map((call) => call.options?.apiKey)
+				.sort(),
+		).toEqual(["key-env", "key-policy"]);
+		rmSync(configDir, { recursive: true, force: true });
+	});
+
 	test("ordinary streamSimple requests rotate before output", async () => {
 		const attempted: string[] = [];
 		const events = await collect(

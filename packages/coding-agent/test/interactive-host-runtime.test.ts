@@ -698,6 +698,152 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("does not resurrect a consumed queue item during proxy recovery", async () => {
+		const qa = scratch("queue-consume");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			void runtime.session.prompt("hold-open-1500 first");
+			while (!runtime.session.isStreaming) await new Promise((resolve) => setImmediate(resolve));
+			const consumed = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type !== "queue_update" || event.ordered.length !== 0) return;
+					unsubscribe();
+					resolve();
+				});
+			});
+			await runtime.session.steer("A");
+			await consumed;
+			const cleared = runtime.session.clearQueue({ abortWillFollow: false });
+			expect(cleared.ordered.map((item) => item.text)).not.toContain("A");
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("pins local bash prefix, running state, and abort signal", async () => {
+		const qa = scratch("local-bash-abort");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const settingsManager = SettingsManager.create(qa.cwd, qa.agentDir);
+		settingsManager.setShellCommandPrefix("set -e");
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager,
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			let observedSignal: AbortSignal | undefined;
+			let observedCommand = "";
+			let startedResolve: (() => void) | undefined;
+			const started = new Promise<void>((resolve) => {
+				startedResolve = resolve;
+			});
+			const execution = runtime.session.executeBash("echo local", undefined, {
+				operations: {
+					exec: async (command, _cwd, options) => {
+						observedCommand = command;
+						observedSignal = options.signal;
+						startedResolve?.();
+						await new Promise<void>((done) =>
+							options.signal?.addEventListener("abort", () => done(), { once: true }),
+						);
+						return { exitCode: null };
+					},
+				},
+			});
+			await started;
+			while (!runtime.session.isBashRunning) await new Promise((resolve) => setImmediate(resolve));
+			expect(runtime.session.isBashRunning).toBe(true);
+			expect(observedCommand).toBe(`set -e\necho local`);
+			expect(observedSignal).toBeDefined();
+			runtime.session.abortBash();
+			await execution;
+			expect(observedSignal?.aborted).toBe(true);
+			expect(runtime.session.isBashRunning).toBe(false);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("refreshes a missing stored cwd from a switch override", async () => {
+		const qa = scratch("cwd-override");
+		const missingCwd = join(qa.root, "missing-cwd");
+		mkdirSync(missingCwd);
+		const target = SessionManager.create(missingCwd, qa.sessionDir);
+		const targetPath = target.getSessionFile()!;
+		rmSync(missingCwd, { recursive: true, force: true });
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			await runtime.switchSession(targetPath, { cwdOverride: qa.cwd });
+			expect(runtime.session.sessionManager.getCwd()).toBe(qa.cwd);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("mirrors remote session names through the proxied session manager", async () => {
+		const qa = scratch("session-name");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const manager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: manager,
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		const observer = new RpcClient({ socketPath: qa.socket });
+		await observer.start();
+		try {
+			await observer.openSession({ sessionPath: runtime.session.sessionFile!, cwd: qa.cwd });
+			await observer.setSessionName("remote-footer-name");
+			await new Promise((resolve) => setImmediate(resolve));
+			expect(runtime.session.sessionManager.getSessionName()).toBe("remote-footer-name");
+		} finally {
+			await observer.stop();
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("accepts the legacy image-array prompt API through a real host", async () => {
 		const qa = scratch("images");
 		const fake = await startFakeModelServer();
