@@ -1,5 +1,9 @@
 # changes
 
+## 2026-08-28 - Hydrate setup-only proxy mirrors from host state
+
+- Proxy refresh now hydrates the explicit session path with authoritative host entries when deferred persistence has not created the file yet, so setup entries are visible immediately in replacement contexts.
+
 - Shared-host setup callbacks now run against a detached capture and transport appended custom/user messages to the authoritative host before proxy refresh and rebind.
 
 - Shared-host proxy refresh now carries the host's project trust state into local settings, preventing untrusted project-scoped shell prefixes from leaking into client-local bash (NF-3).

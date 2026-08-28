@@ -1,5 +1,11 @@
 # changes
 
+## 2026-08-28 - Preserve derived state for verbatim setup entries
+
+- Added the public `SessionManager.appendEntry()` transport seam. It preserves captured entry IDs, timestamps, and parent IDs while updating session names, labels, usage, and message identity tracking.
+- The RPC append handler now uses that seam instead of the private `_appendEntry()` implementation.
+- `get_state` carries authoritative entries so setup-only sessions remain inspectable before deferred persistence creates a file.
+
 ## 2026-08-28 - Dropped-connection release defers while a turn is streaming
 
 ### What changed
