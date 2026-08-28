@@ -404,6 +404,20 @@ function isDeadTerminalError(error: unknown): boolean {
 	return false;
 }
 
+function storageWriteCrashMessage(error: unknown): string | undefined {
+	if (!error || typeof error !== "object" || !("code" in error)) {
+		return undefined;
+	}
+	const code = (error as NodeJS.ErrnoException).code;
+	if (code === "EDQUOT") {
+		return "Disk quota exceeded (EDQUOT). Free space or quota on the filesystem, then retry.";
+	}
+	if (code === "ENOSPC") {
+		return "Disk full (ENOSPC). Free space on the filesystem, then retry.";
+	}
+	return undefined;
+}
+
 const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
 	"Anthropic subscription auth is active. Third-party harness usage draws from extra usage and is billed per token, not your Claude plan limits. Manage extra usage at https://claude.ai/settings/usage. Disable this warning in /settings.";
 
@@ -5561,6 +5575,10 @@ export class InteractiveMode {
 			appendUncaughtCrashLog(origin, error);
 		} catch {}
 		restoreInteractiveStderr();
+		const storageMessage = storageWriteCrashMessage(error);
+		if (storageMessage !== undefined) {
+			console.error(storageMessage);
+		}
 		console.error(`${APP_NAME} exiting due to uncaughtException:`);
 		console.error(error);
 		process.exit(1);
