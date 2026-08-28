@@ -1,5 +1,10 @@
 # changes
 
+## Shared-host interactive parity regressions (2026-08-28)
+
+- Shared-host session replacement now refreshes the client proxy after /new, /fork, /import, and /resume; tree navigation, reload/veto, compaction abort, queue recovery ordering, bash options/output, model prompt metadata, and JSONL export route to the authoritative host session.
+- RPC state mirrors host compaction, retry, bash, and pending-queue lifecycle fields so TUI interrupt and reload guards do not consult the bootstrap session.
+
 ## Shared-host session replacement refreshes the interactive proxy (2026-08-28)
 
 ### What changed

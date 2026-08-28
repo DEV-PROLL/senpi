@@ -1,5 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
@@ -475,6 +475,180 @@ describe("interactive host runtime", () => {
 			expect(tree.length).toBeGreaterThan(0);
 			expect(contents).toContain("tree-entry-from-target");
 			expect(runtime.session.sessionManager.getLeafId()).not.toBeNull();
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+	it("refreshes the proxy after new and fork replacements", async () => {
+		const qa = scratch("replace");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const bootstrap = SessionManager.create(qa.cwd, qa.sessionDir);
+		bootstrap.appendMessage({ role: "user", content: "fork-source", timestamp: 1 });
+		bootstrap.appendMessage(fauxAssistantMessage("fork-answer"));
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: bootstrap,
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			const entryId = bootstrap.getEntries().find((entry) => entry.type === "message")?.id;
+			expect(entryId).toBeTruthy();
+			const beforeFork = runtime.session.sessionId;
+			await runtime.fork(entryId!);
+			expect(runtime.session.sessionId).not.toBe(beforeFork);
+			expect(runtime.session.sessionManager.getSessionFile()).toBe(runtime.session.sessionFile);
+			const firstFile = runtime.session.sessionFile;
+			const firstId = runtime.session.sessionId;
+			await runtime.newSession();
+			expect(runtime.session.sessionFile).not.toBe(firstFile);
+			expect(runtime.session.sessionId).not.toBe(firstId);
+			expect(runtime.session.sessionManager.getSessionFile()).toBe(runtime.session.sessionFile);
+			expect(runtime.session.sessionManager.getSessionFile()).toBe(runtime.session.sessionFile);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("routes tree navigation to the host and refreshes proxy history", async () => {
+		const qa = scratch("nav");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const manager = SessionManager.create(qa.cwd, qa.sessionDir);
+		manager.appendMessage({ role: "user", content: "nav-user", timestamp: 1 });
+		const userId = manager.getLeafId()!;
+		manager.appendMessage(fauxAssistantMessage("nav-assistant"));
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: manager,
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			const before = runtime.session.sessionManager.getLeafId();
+			await runtime.session.navigateTree(userId, { summarize: false });
+			const persistedHostSession = SessionManager.open(runtime.session.sessionFile!);
+			expect(before).not.toBe(persistedHostSession.getLeafId());
+			expect(persistedHostSession.getLeafId()).toBe(runtime.session.sessionManager.getLeafId());
+			expect(runtime.session.messages).toContainEqual({ role: "user", content: "nav-user", timestamp: 1 });
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("imports JSONL through the host and exposes imported history", async () => {
+		const qa = scratch("import");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const imported = SessionManager.create(qa.cwd, qa.sessionDir);
+		imported.appendMessage({ role: "user", content: "imported-history", timestamp: 1 });
+		imported.appendMessage(fauxAssistantMessage("imported-answer"));
+		const inputPath = join(qa.root, "import.jsonl");
+		copyFileSync(imported.getSessionFile()!, inputPath);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			await runtime.importFromJsonl(inputPath);
+			expect(runtime.session.sessionFile).toContain("import.jsonl");
+			expect(runtime.session.messages).toContainEqual({ role: "user", content: "imported-history", timestamp: 1 });
+			expect(runtime.session.sessionManager.buildSessionContext().messages).toContainEqual({
+				role: "user",
+				content: "imported-history",
+				timestamp: 1,
+			});
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("accepts the legacy image-array prompt API through a real host", async () => {
+		const qa = scratch("images");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const sessionManager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const client = new RpcClient({ socketPath: qa.socket });
+		await client.start();
+		try {
+			const opened = await client.openSession({ sessionPath: sessionManager.getSessionFile(), cwd: qa.cwd });
+			const events = client.collectEvents(30_000);
+			await client.prompt("legacy-image", [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }]);
+			const received = await events;
+			expect(received).toContainEqual(
+				expect.objectContaining({
+					type: "message_start",
+					message: expect.objectContaining({
+						role: "user",
+						content: expect.arrayContaining([expect.objectContaining({ type: "image" })]),
+					}),
+				}),
+			);
+			await client.closeSession(opened.sessionId);
+		} finally {
+			await client.stop();
+			await fake.close();
+		}
+	});
+
+	it("keeps target history after target compaction following a switch", async () => {
+		const qa = scratch("postcomp");
+		mkdirSync(qa.agentDir, { recursive: true });
+		writeFileSync(join(qa.agentDir, "settings.json"), JSON.stringify({ compaction: { keepRecentTokens: 10 } }));
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const bootstrap = SessionManager.create(qa.cwd, qa.sessionDir);
+		bootstrap.appendMessage({ role: "user", content: "bootstrap-only", timestamp: 1 });
+		const target = SessionManager.create(qa.cwd, qa.sessionDir);
+		for (let index = 0; index < 4; index++) {
+			target.appendMessage({ role: "user", content: `target-only-${index}`, timestamp: index + 2 });
+			target.appendMessage(fauxAssistantMessage(`target-answer-${index}`));
+		}
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: bootstrap,
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			await runtime.switchSession(target.getSessionFile()!);
+			await runtime.session.compact();
+			expect(runtime.session.messages).toContainEqual({ role: "user", content: "target-only-3", timestamp: 5 });
+			expect(runtime.session.messages).not.toContainEqual({ role: "user", content: "bootstrap-only", timestamp: 1 });
+			expect(runtime.session.sessionManager.getSessionFile()).toBe(target.getSessionFile());
 		} finally {
 			await runtime.dispose();
 			await fake.close();

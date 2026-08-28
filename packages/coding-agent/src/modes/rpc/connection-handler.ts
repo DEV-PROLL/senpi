@@ -156,6 +156,8 @@ export function buildRpcSessionState(session: AgentSession): RpcSessionState {
 		fastMode: session.isFastModeActive(),
 		isStreaming: session.isStreaming,
 		isCompacting: session.isCompacting,
+		retryAttempt: session.retryAttempt,
+		isBashRunning: session.isBashRunning,
 		steeringMode: session.steeringMode,
 		followUpMode: session.followUpMode,
 		sessionFile: session.sessionFile,
@@ -786,18 +788,32 @@ export function createRpcConnectionHandler(
 			}
 
 			case "steer": {
-				await session.steer(command.message, command.images);
+				await session.steer(command.message, command.images, { enqueueOrder: command.enqueueOrder });
 				return success(id, "steer");
 			}
 
 			case "follow_up": {
-				await session.followUp(command.message, command.images);
+				await session.followUp(command.message, command.images, { enqueueOrder: command.enqueueOrder });
 				return success(id, "follow_up");
 			}
 
 			case "abort": {
 				await session.abort();
 				return success(id, "abort");
+			}
+
+			case "abort_compaction": {
+				session.abortCompaction();
+				return success(id, "abort_compaction");
+			}
+
+			case "reload": {
+				const result = await session.reload();
+				return success(id, "reload", result);
+			}
+
+			case "check_reload_veto": {
+				return success(id, "check_reload_veto", await session.checkReloadVeto());
 			}
 
 			case "clear_queue": {
@@ -830,8 +846,8 @@ export function createRpcConnectionHandler(
 				if (!model) {
 					return error(id, "set_model", `Model not found: ${command.provider}/${command.modelId}`);
 				}
-				await session.setModel(model);
-				return success(id, "set_model", model);
+				const systemPromptChange = await session.setModel(model);
+				return success(id, "set_model", { ...model, systemPromptName: systemPromptChange?.systemPromptName });
 			}
 
 			case "cycle_model": {
@@ -970,6 +986,16 @@ export function createRpcConnectionHandler(
 			// Bash
 			// =================================================================
 
+			case "navigate_tree": {
+				const result = await session.navigateTree(command.targetId, {
+					summarize: command.summarize,
+					customInstructions: command.customInstructions,
+					replaceInstructions: command.replaceInstructions,
+					label: command.label,
+				});
+				return success(id, "navigate_tree", result);
+			}
+
 			case "bash": {
 				const eventResult = await session.extensionRunner.emitUserBash({
 					type: "user_bash",
@@ -1007,6 +1033,10 @@ export function createRpcConnectionHandler(
 			case "export_html": {
 				const path = await session.exportToHtml(command.outputPath);
 				return success(id, "export_html", { path });
+			}
+
+			case "export_jsonl": {
+				return success(id, "export_jsonl", { path: session.exportToJsonl(command.outputPath) });
 			}
 
 			case "switch_session": {
@@ -1063,6 +1093,12 @@ export function createRpcConnectionHandler(
 			case "get_last_assistant_text": {
 				const text = session.getLastAssistantText();
 				return success(id, "get_last_assistant_text", { text });
+			}
+
+			case "import_jsonl": {
+				const result = await runtimeHost.importFromJsonl(command.inputPath, command.cwdOverride);
+				if (!result.cancelled) await rebindSession();
+				return success(id, "import_jsonl", result);
 			}
 
 			case "set_session_name": {
