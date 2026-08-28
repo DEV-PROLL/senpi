@@ -100,11 +100,12 @@ export class SessionCommandRouter {
 					return;
 				}
 				try {
+					if (entry.state === "open") {
+						while (entry.state === "open") entry = this.registry.beginClose(sessionId);
+					}
 					await binding.dispose();
 				} finally {
 					this.bindings.delete(sessionId);
-					// Attached sessions outlive this connection: only the last
-					// attachment's close transitions the entry to "closing".
 					if (entry.state === "closing") await this.registry.closeMarked(sessionId);
 				}
 			}),
@@ -136,16 +137,18 @@ export class SessionCommandRouter {
 				owned.add(openedSession.sessionId);
 				this.sessionsByConnection.set(owner, owned);
 			}
-			this.bindings.set(
-				openedSession.sessionId,
-				await this.createBinding(
+			if (!this.bindings.has(openedSession.sessionId)) {
+				this.bindings.set(
 					openedSession.sessionId,
-					entry,
-					this.writer,
-					() => void this.close({ type: "close_session", sessionId: openedSession.sessionId }),
-					this.connectionOptions,
-				),
-			);
+					await this.createBinding(
+						openedSession.sessionId,
+						entry,
+						this.writer,
+						() => void this.close({ type: "close_session", sessionId: openedSession.sessionId }),
+						this.connectionOptions,
+					),
+				);
+			}
 			const state = entry.runtime!.session;
 			this.writer.enqueue(opened.sessionId, {
 				id: command.id,
@@ -189,10 +192,12 @@ export class SessionCommandRouter {
 				continue;
 			}
 			try {
-				await this.bindings.get(sessionId)?.dispose();
+				if (entry.state === "closing") await this.bindings.get(sessionId)?.dispose();
 			} finally {
-				this.bindings.delete(sessionId);
-				if (entry.state === "closing") await this.registry.closeMarked(sessionId);
+				if (entry.state === "closing") {
+					this.bindings.delete(sessionId);
+					await this.registry.closeMarked(sessionId);
+				}
 			}
 		}
 	}
@@ -202,22 +207,26 @@ export class SessionCommandRouter {
 			// This must be the first operation: binding.dispose() awaits teardown and
 			// otherwise leaves a window where commands can enter the old handler.
 			const entry = this.registry.beginClose(command.sessionId);
-			try {
-				await this.bindings.get(command.sessionId)?.dispose();
-			} finally {
-				this.bindings.delete(command.sessionId);
-				for (const owned of this.sessionsByConnection.values()) owned.delete(command.sessionId);
-				// Other attachments may still own the live session; only the last
-				// close finalizes the runtime teardown.
-				if (entry.state === "closing") await this.registry.closeMarked(command.sessionId);
-			}
-			this.writer.closeSession(command.sessionId, {
+			const owner = this.writer.currentConnection();
+			if (owner !== undefined) this.sessionsByConnection.get(owner)?.delete(command.sessionId);
+			const response = {
 				id: command.id,
-				type: "response",
-				command: "close_session",
-				success: true,
+				type: "response" as const,
+				command: "close_session" as const,
+				success: true as const,
 				data: {},
-			});
+			};
+			try {
+				if (entry.state === "closing") await this.bindings.get(command.sessionId)?.dispose();
+			} finally {
+				if (entry.state === "closing") {
+					this.bindings.delete(command.sessionId);
+					await this.registry.closeMarked(command.sessionId);
+					this.writer.closeSession(command.sessionId, response);
+				} else {
+					this.writer.enqueue(command.sessionId, response);
+				}
+			}
 			return undefined;
 		} catch (cause) {
 			return error(command.id, "close_session", this.code(cause));
