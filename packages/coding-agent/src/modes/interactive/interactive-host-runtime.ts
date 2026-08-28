@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession, AgentSessionEvent, AgentSessionEventListener } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import type { AgentSessionRuntimeDiagnostic } from "../../core/agent-session-services.ts";
@@ -7,10 +8,31 @@ import { RpcClient, type RpcClientEvent } from "../rpc/rpc-client.ts";
 export const INTERACTIVE_HOST_FALLBACK_WARNING = "Warning: shared interactive host unavailable; continuing locally";
 
 export interface InteractiveHostWarning {
-	readonly type: "interactive_host_fallback";
+	readonly type: "interactive_host_fallback" | "interactive_host_action_failed";
 	readonly message: string;
 	readonly cause: unknown;
 }
+
+/**
+ * The session contract InteractiveMode actually runs against. The local
+ * AgentSession answers these reads synchronously; the shared-host proxy answers
+ * them over RPC. Declaring the union here keeps the proxy honest (no more
+ * `as unknown as` lie at the boundary) and lets the compiler find every TUI
+ * call site that must await.
+ */
+export type InteractiveSession = Omit<
+	AgentSession,
+	"cycleThinkingLevel" | "getAvailableThinkingLevels" | "getSessionStats" | "getUserMessagesForForking"
+> & {
+	cycleThinkingLevel(): ThinkingLevel | undefined | Promise<ThinkingLevel | undefined>;
+	getAvailableThinkingLevels(): ThinkingLevel[] | Promise<ThinkingLevel[]>;
+	getSessionStats():
+		| ReturnType<AgentSession["getSessionStats"]>
+		| Promise<ReturnType<AgentSession["getSessionStats"]>>;
+	getUserMessagesForForking():
+		| ReturnType<AgentSession["getUserMessagesForForking"]>
+		| Promise<ReturnType<AgentSession["getUserMessagesForForking"]>>;
+};
 
 export interface InteractiveHostRuntimeOptions {
 	readonly socket: string;
@@ -43,7 +65,7 @@ export async function createInteractiveHostRuntime(
 			modelId: localRuntime.session.model?.id,
 			thinkingLevel: localRuntime.session.thinkingLevel,
 		});
-		const remoteSession = createRemoteSessionProxy(localRuntime.session, client, opened.state);
+		const remoteSession = createRemoteSessionProxy(localRuntime.session, client, opened.state, options.onWarning);
 		return new RemoteInteractiveRuntime(localRuntime, remoteSession, client) as unknown as AgentSessionRuntime;
 	} catch (cause) {
 		await client.stop().catch(() => {});
@@ -125,7 +147,18 @@ function createRemoteSessionProxy(
 	local: AgentSession,
 	client: RpcClient,
 	initialState: ReturnType<typeof stateFromRpc>,
+	onWarning?: (warning: InteractiveHostWarning) => void,
 ): AgentSession {
+	// Fire-and-forget setters keep the sync AgentSession signature, but their RPC
+	// failures must not vanish: the matching *_changed wire event confirms success,
+	// and a rejection here is the only signal of failure.
+	const reportActionFailure = (action: string) => (error: unknown) => {
+		onWarning?.({
+			type: "interactive_host_action_failed",
+			message: `Warning: shared interactive host ${action} failed: ${error instanceof Error ? error.message : String(error)}`,
+			cause: error,
+		});
+	};
 	let state = initialState;
 	let streamingAssistant: Extract<AgentSession["messages"][number], { role: "assistant" }> | undefined;
 	const listeners = new Set<AgentSessionEventListener>();
@@ -154,7 +187,13 @@ function createRemoteSessionProxy(
 		get(target, property, receiver) {
 			if (property === "prompt")
 				return (message: string, options?: Parameters<AgentSession["prompt"]>[1]) =>
-					client.prompt(message, options?.images);
+					client.prompt(message, {
+						...(options?.images ? { images: options.images } : {}),
+						...(options?.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
+						...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+						...(options?.promptDisposition ? { promptDisposition: options.promptDisposition } : {}),
+						...(options?.preflightResult ? { preflightResult: options.preflightResult } : {}),
+					});
 			if (property === "abort") return () => client.abort();
 			if (property === "steer")
 				return (message: string, images?: Parameters<AgentSession["steer"]>[1]) => client.steer(message, images);
@@ -169,23 +208,28 @@ function createRemoteSessionProxy(
 				};
 			if (property === "cycleModel") return () => client.cycleModel();
 			if (property === "setThinkingLevel")
-				return (level: AgentSession["thinkingLevel"]) => void client.setThinkingLevel(level);
+				return (level: AgentSession["thinkingLevel"]) =>
+					void client.setThinkingLevel(level).catch(reportActionFailure("setThinkingLevel"));
 			if (property === "cycleThinkingLevel")
 				return () => client.cycleThinkingLevel().then((result) => result?.level);
 			if (property === "getAvailableThinkingLevels") return () => client.getAvailableThinkingLevels();
 			if (property === "setSteeringMode")
-				return (mode: AgentSession["steeringMode"]) => void client.setSteeringMode(mode);
+				return (mode: AgentSession["steeringMode"]) =>
+					void client.setSteeringMode(mode).catch(reportActionFailure("setSteeringMode"));
 			if (property === "setFollowUpMode")
-				return (mode: AgentSession["followUpMode"]) => void client.setFollowUpMode(mode);
+				return (mode: AgentSession["followUpMode"]) =>
+					void client.setFollowUpMode(mode).catch(reportActionFailure("setFollowUpMode"));
 			if (property === "compact") return (instructions?: string) => client.compact(instructions);
 			if (property === "setAutoCompactionEnabled")
-				return (enabled: boolean) => void client.setAutoCompaction(enabled);
+				return (enabled: boolean) =>
+					void client.setAutoCompaction(enabled).catch(reportActionFailure("setAutoCompaction"));
 			if (property === "executeBash") return (command: string) => client.bash(command);
-			if (property === "abortBash") return () => void client.abortBash();
+			if (property === "abortBash") return () => void client.abortBash().catch(reportActionFailure("abortBash"));
 			if (property === "getSessionStats") return () => client.getSessionStats();
 			if (property === "exportToHtml")
 				return (outputPath?: string) => client.exportHtml(outputPath).then((result) => result.path);
-			if (property === "setSessionName") return (name: string) => void client.setSessionName(name);
+			if (property === "setSessionName")
+				return (name: string) => void client.setSessionName(name).catch(reportActionFailure("setSessionName"));
 			if (property === "getUserMessagesForForking") return () => client.getForkMessages();
 			if (property === "subscribe")
 				return (listener: AgentSessionEventListener) => {
@@ -197,6 +241,17 @@ function createRemoteSessionProxy(
 					};
 				};
 			if (property === "isStreaming") return state.isStreaming;
+			// The footer and other renderers read session.state.*; surface the
+			// host-authoritative fields there too, not only via the direct getters.
+			if (property === "state") {
+				const localState = target.state;
+				return {
+					...localState,
+					model: state.model ?? localState.model,
+					thinkingLevel: state.thinkingLevel,
+					isStreaming: state.isStreaming,
+				};
+			}
 			if (property === "sessionFile") return state.sessionFile;
 			if (property === "sessionId") return state.sessionId;
 			if (property === "messages") return target.messages;

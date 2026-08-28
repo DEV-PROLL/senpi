@@ -1,5 +1,28 @@
 # changes
 
+## Prompt disposition rides the wire and sessions attach by path (2026-08-28)
+
+### What changed
+
+- `connection-handler.ts`: the `prompt` success response now carries `data.disposition` (`started`/`queued`/`handled`), captured from the host session's own `promptDisposition` callback, which always fires strictly before `preflightResult(true)`.
+- `rpc-types.ts`: the prompt success response gains the additive optional `data.disposition` field; older hosts omit it and clients degrade to canonical-only rendering.
+- `rpc-client.ts`: pending requests accept `onResponse`/`onReject` hooks that run synchronously inside frame dispatch (before the next frame), so ordering-sensitive contracts never route through a resolved promise's microtask. `prompt()` takes an options object (`images`, `streamingBehavior`, `thinkingLevel`, `promptDisposition`, `preflightResult`); a success response without a disposition maps to `"handled"`, and transport rejection/timeout reports `preflightResult(false)`.
+- `session-registry.ts`: `openSession` with a path reserved by a live, fully-open session now ATTACHES (same handle, `attached: true`, attachment count incremented) instead of throwing `session_path_in_use`. Entries still opening or closing keep the exclusive reservation. `beginClose` releases one attachment and only transitions to `closing` when the last one closes.
+- `session-command-router.ts`: close paths finalize the runtime teardown only when the entry actually transitioned to `closing`; `open_session` responses include `attached: true` on attach.
+
+### Why
+
+- Interactive sessions run through the shared host by default; the proxy's dropped disposition callbacks left optimistic user echoes permanently ineligible, so every canonical user message rendered twice. The attach semantics make resume of a host-held session possible at all — previously any live attachment (desktop app, second terminal) made `open_session` throw by construction.
+
+### Why an extension could not handle it
+
+- Wire framing, response dispatch order, and the process-local session registry are core RPC contracts established before extensions load.
+
+### Expected merge conflict zones
+
+- MEDIUM: `session-registry.ts` openSession/beginClose attachment semantics.
+- LOW: `connection-handler.ts` prompt case, `rpc-client.ts` prompt options, `rpc-types.ts` additive response field.
+
 ## Provider-neutral account RPC commands (2026-08-27)
 
 ### What changed

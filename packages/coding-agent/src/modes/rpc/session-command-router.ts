@@ -9,7 +9,12 @@ import {
 } from "./rpc-types.ts";
 import { createRpcSessionBinding, type RpcSessionBinding } from "./session-binding.ts";
 import type { SessionEventWriter } from "./session-event-writer.ts";
-import type { RpcSessionLaunchProfile, RpcSessionRegistry } from "./session-registry.ts";
+import type {
+	OpenRpcSession,
+	RpcSessionEntry,
+	RpcSessionLaunchProfile,
+	RpcSessionRegistry,
+} from "./session-registry.ts";
 import { RpcSessionRegistryError } from "./session-registry.ts";
 
 const controls = new Set(["get_protocol_info", "open_session", "close_session", "list_sessions"]);
@@ -86,8 +91,9 @@ export class SessionCommandRouter {
 	async dispose(): Promise<void> {
 		await Promise.all(
 			[...this.bindings.entries()].map(async ([sessionId, binding]) => {
+				let entry: RpcSessionEntry | undefined;
 				try {
-					this.registry.beginClose(sessionId);
+					entry = this.registry.beginClose(sessionId);
 				} catch {
 					return;
 				}
@@ -95,7 +101,9 @@ export class SessionCommandRouter {
 					await binding.dispose();
 				} finally {
 					this.bindings.delete(sessionId);
-					await this.registry.closeMarked(sessionId);
+					// Attached sessions outlive this connection: only the last
+					// attachment's close transitions the entry to "closing".
+					if (entry.state === "closing") await this.registry.closeMarked(sessionId);
 				}
 			}),
 		);
@@ -103,7 +111,7 @@ export class SessionCommandRouter {
 	}
 
 	private async open(command: Extract<RpcCommand, { type: "open_session" }>): Promise<RpcResponse | undefined> {
-		let opened: { sessionId: string } | undefined;
+		let opened: OpenRpcSession | undefined;
 		try {
 			opened = await this.registry.openSession({
 				cwd: command.cwd ?? this.defaults.cwd,
@@ -136,6 +144,7 @@ export class SessionCommandRouter {
 				data: {
 					sessionId: opened.sessionId,
 					state: buildRpcSessionState(state),
+					...(opened.attached ? { attached: true } : {}),
 				},
 			});
 			return undefined;
@@ -155,12 +164,14 @@ export class SessionCommandRouter {
 		try {
 			// This must be the first operation: binding.dispose() awaits teardown and
 			// otherwise leaves a window where commands can enter the old handler.
-			this.registry.beginClose(command.sessionId);
+			const entry = this.registry.beginClose(command.sessionId);
 			try {
 				await this.bindings.get(command.sessionId)?.dispose();
 			} finally {
 				this.bindings.delete(command.sessionId);
-				await this.registry.closeMarked(command.sessionId);
+				// Other attachments may still own the live session; only the last
+				// close finalizes the runtime teardown.
+				if (entry.state === "closing") await this.registry.closeMarked(command.sessionId);
 			}
 			this.writer.closeSession(command.sessionId, {
 				id: command.id,

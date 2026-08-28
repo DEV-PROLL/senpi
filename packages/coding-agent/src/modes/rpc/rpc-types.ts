@@ -7,7 +7,7 @@
 
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
-import type { SessionStats } from "../../core/agent-session.ts";
+import type { PromptDisposition, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { ServiceTier } from "../../core/extensions/builtin/service-tier.ts";
@@ -279,7 +279,10 @@ export type RpcResponse =
 			};
 	  }
 	// Prompting (async - events follow)
-	| { id?: string; type: "response"; command: "prompt"; success: true }
+	// data.disposition reports how the host disposed the prompt (started/queued/handled)
+	// so proxied optimistic-echo contracts resolve exactly like the local path; older
+	// hosts omit it and clients must degrade to canonical-only rendering.
+	| { id?: string; type: "response"; command: "prompt"; success: true; data?: { disposition?: PromptDisposition } }
 	| { id?: string; type: "response"; command: "steer"; success: true }
 	| { id?: string; type: "response"; command: "follow_up"; success: true }
 	| { id?: string; type: "response"; command: "abort"; success: true }
