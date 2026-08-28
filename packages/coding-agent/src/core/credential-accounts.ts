@@ -40,7 +40,7 @@ function numberField(value: object, key: string): number | undefined {
 }
 
 function defaultRepository(storage: AuthStorage): CredentialSlotRepository {
-	const authPath = (storage as AuthStorage & { authPath?: string }).authPath;
+	const authPath = storage.getStoragePath();
 	return new CredentialSlotRepository(authPath ? join(dirname(authPath), "credential-pool-state.json") : undefined);
 }
 
