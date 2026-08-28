@@ -208,6 +208,19 @@ function createRemoteSessionProxy(
 		const event = hydrateMessageUpdate(wireEvent, streamingAssistant);
 		for (const listener of listeners) listener(event);
 	});
+	const refresh = async (): Promise<void> => {
+		const nextState = await client.getState();
+		state = stateFromRpc(nextState);
+		let messages: AgentSession["messages"];
+		if (nextState.sessionFile) {
+			sessionManager = SessionManager.open(nextState.sessionFile);
+			messages = sessionManager.buildSessionContext().messages;
+		} else {
+			messages = await client.getMessages();
+		}
+		local.agent.state.messages.splice(0, local.agent.state.messages.length, ...structuredClone(messages));
+		streamingAssistant = undefined;
+	};
 	const session = new Proxy(local, {
 		get(target, property, receiver) {
 			if (property === "prompt")
@@ -277,8 +290,11 @@ function createRemoteSessionProxy(
 			if (property === "setSessionName")
 				return (name: string) => client.setSessionName(name).catch(reportActionFailure("setSessionName"));
 			if (property === "navigateTree")
-				return (targetId: string, options?: Parameters<AgentSession["navigateTree"]>[1]) =>
-					client.navigateTree(targetId, options);
+				return async (targetId: string, options?: Parameters<AgentSession["navigateTree"]>[1]) => {
+					const result = await client.navigateTree(targetId, options);
+					if (!result.cancelled) await refresh();
+					return result;
+				};
 			if (property === "getUserMessagesForForking") return () => client.getForkMessages();
 			if (property === "subscribe")
 				return (listener: AgentSessionEventListener) => {
@@ -318,22 +334,7 @@ function createRemoteSessionProxy(
 			return Reflect.get(target, property, receiver);
 		},
 	});
-	return {
-		session,
-		async refresh() {
-			const nextState = await client.getState();
-			state = stateFromRpc(nextState);
-			let messages: AgentSession["messages"];
-			if (nextState.sessionFile) {
-				sessionManager = SessionManager.open(nextState.sessionFile);
-				messages = sessionManager.buildSessionContext().messages;
-			} else {
-				messages = await client.getMessages();
-			}
-			local.agent.state.messages.splice(0, local.agent.state.messages.length, ...structuredClone(messages));
-			streamingAssistant = undefined;
-		},
-	};
+	return { session, refresh };
 }
 
 function hydrateMessageUpdate(
