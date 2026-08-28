@@ -834,9 +834,11 @@ export class ModelRuntime implements Models {
 				const { rotation } = await this.loadCredentialPool();
 				return rotation.streamWithCredentialRotation({
 					sources,
-					...(streamOptions?.affinityKey ?? streamOptions?.sessionId
-						? { affinityKey: streamOptions.affinityKey ?? streamOptions.sessionId }
-						: {}),
+					...(streamOptions?.affinityKey !== undefined
+						? { affinityKey: streamOptions.affinityKey }
+						: streamOptions?.sessionId !== undefined
+							? { affinityKey: streamOptions.sessionId }
+							: {}),
 					runAttempt: async (slot) => {
 						const prepared = await this.prepareRequest(
 							model,
