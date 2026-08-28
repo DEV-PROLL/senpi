@@ -1,6 +1,6 @@
 import { type Component, truncateToWidth } from "@earendil-works/pi-tui";
-import type { InteractiveSession } from "../interactive-host-runtime.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
+import type { InteractiveSession } from "../interactive-host-runtime.ts";
 import { getGrokChromeTokens } from "./chrome-tokens.ts";
 
 /** Compact status footer for grok chrome. */

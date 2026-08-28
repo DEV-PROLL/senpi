@@ -26,8 +26,12 @@ export type InteractiveSession = Omit<
 > & {
 	cycleThinkingLevel(): ThinkingLevel | undefined | Promise<ThinkingLevel | undefined>;
 	getAvailableThinkingLevels(): ThinkingLevel[] | Promise<ThinkingLevel[]>;
-	getSessionStats(): ReturnType<AgentSession["getSessionStats"]> | Promise<ReturnType<AgentSession["getSessionStats"]>>;
-	getUserMessagesForForking(): ReturnType<AgentSession["getUserMessagesForForking"]> | Promise<ReturnType<AgentSession["getUserMessagesForForking"]>>;
+	getSessionStats():
+		| ReturnType<AgentSession["getSessionStats"]>
+		| Promise<ReturnType<AgentSession["getSessionStats"]>>;
+	getUserMessagesForForking():
+		| ReturnType<AgentSession["getUserMessagesForForking"]>
+		| Promise<ReturnType<AgentSession["getUserMessagesForForking"]>>;
 };
 
 export interface InteractiveHostRuntimeOptions {

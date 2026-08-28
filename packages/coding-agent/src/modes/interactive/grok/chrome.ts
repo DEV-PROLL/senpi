@@ -1,11 +1,11 @@
 import type { Component, EditorOptions, EditorTheme, TUI } from "@earendil-works/pi-tui";
-import type { InteractiveSession } from "../interactive-host-runtime.ts";
 import type { WorkingIndicatorOptions } from "../../../core/extensions/index.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import type { KeybindingsManager } from "../../../core/keybindings.ts";
 import { CustomEditor } from "../components/custom-editor.ts";
 import { WorkingStatusIndicator } from "../components/status-indicator.ts";
 import type { ToolExecutionPresentation } from "../components/tool-execution.ts";
+import type { InteractiveSession } from "../interactive-host-runtime.ts";
 import { theme } from "../theme/theme.ts";
 import { getGrokChromeTokens } from "./chrome-tokens.ts";
 import { GrokFooter } from "./footer.ts";

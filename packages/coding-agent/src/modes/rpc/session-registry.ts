@@ -93,7 +93,12 @@ export class RpcSessionRegistry {
 			const [handle, entry] = existing;
 			entry.attachments += 1;
 			if (!entry.durableSessionId) throw new RpcSessionRegistryError("session_path_in_use");
-			return { sessionId: handle, durableSessionId: entry.durableSessionId, sessionPath: entry.sessionPath, attached: true };
+			return {
+				sessionId: handle,
+				durableSessionId: entry.durableSessionId,
+				sessionPath: entry.sessionPath,
+				attached: true,
+			};
 		}
 		if (sessionPath) this.reservations.add(sessionPath);
 
