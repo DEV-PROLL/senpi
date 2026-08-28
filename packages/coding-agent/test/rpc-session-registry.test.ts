@@ -259,6 +259,31 @@ describe("RPC session registry", () => {
 		await expect(registry.openSession(profile(dir, path))).resolves.toMatchObject({ sessionId: expect.any(String) });
 	});
 
+	test("router shutdown drains every shared attachment before disposing the runtime", async () => {
+		const { dir } = await createRegistry();
+		let disposed = 0;
+		const registry = new RpcSessionRegistry({
+			agentDir: dir,
+			createRuntime: async (options) => {
+				const result = runtime(options);
+				result.session.dispose = () => {
+					disposed += 1;
+				};
+				return result;
+			},
+		});
+		const router = new SessionCommandRouter(registry, new SessionEventWriter(() => {}), { cwd: dir }, async () => ({
+			handle: async () => {},
+			dispose: async () => {},
+		}));
+		const path = join(dir, "shutdown.jsonl");
+		await router.handle({ id: "open", type: "open_session", cwd: dir, sessionPath: path });
+		await router.handle({ id: "attach", type: "open_session", cwd: dir, sessionPath: path });
+		await router.dispose();
+		expect(disposed).toBe(1);
+		expect(registry.list()).toEqual([]);
+	});
+
 	test("constructs each opened runtime inside an isolated provider scope", async () => {
 		const { dir } = await createRegistry();
 		const api = "rpc-session-scope-test";
