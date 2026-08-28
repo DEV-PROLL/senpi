@@ -2,6 +2,8 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { AuthStorage } from "../src/core/auth-storage.ts";
+import { ModelRuntime } from "../src/core/model-runtime.ts";
 import {
 	acquireHalfOpenLease,
 	CredentialSlotRepository,
@@ -79,6 +81,25 @@ describe("credential pool state sidecar", () => {
 
 		const lease = await acquireHalfOpenLease(repository, "openai", "api", "work", { now: NOW });
 		expect(lease).toBeUndefined();
+	});
+
+	test("two custom agent directories give ModelRuntime isolated repositories", async () => {
+		const one = join(dir, "one");
+		const two = join(dir, "two");
+		const runtimeOne = await ModelRuntime.create({ credentials: AuthStorage.inMemory(), modelsPath: null, agentDir: one });
+		const runtimeTwo = await ModelRuntime.create({ credentials: AuthStorage.inMemory(), modelsPath: null, agentDir: two });
+		const repoOne = (await (runtimeOne as any).loadCredentialPool()).repository as CredentialSlotRepository;
+		const repoTwo = (await (runtimeTwo as any).loadCredentialPool()).repository as CredentialSlotRepository;
+		await repoOne.mutateSlotState("openai", "stored", "work", () => ({ failureCount: 2 }));
+		expect(await repoTwo.listSlots("openai", "stored")).toEqual({});
+		expect(readFileSync(join(one, "credential-pool-state.json"), "utf8")).toContain("work");
+		expect(readFileSync(join(two, "credential-pool-state.json"), "utf8")).not.toContain("work");
+	});
+
+	test("two repositories keep health state isolated", async () => {
+		const second = new CredentialSlotRepository(join(dir, "other-state.json"));
+		await repository.mutateSlotState("openai", "stored", "work", () => ({ failureCount: 2 }));
+		expect(await second.listSlots("openai", "stored")).toEqual({});
 	});
 
 	test("the installation key is stable and env revisions rotate with the value", async () => {

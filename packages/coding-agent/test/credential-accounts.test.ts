@@ -104,6 +104,19 @@ describe("provider-neutral credential accounts", () => {
 		expect(await repository.listSlots("openai", "stored")).toEqual({});
 	});
 
+	test("removing the final stored account deletes the provider credential", async () => {
+		await storage.modify("openai", async () => ({
+			type: "api_key",
+			key: "only-key",
+			accounts: [{ name: "only", key: "only-key", source: "login" }],
+		}));
+
+		await removeCredentialAccount(storage, "openai", "only", {}, repository);
+
+		expect(await storage.read("openai")).toBeUndefined();
+		expect(await getCredentialAccounts(storage, "openai", {}, repository)).toEqual([]);
+	});
+
 	test("env-backed accounts are listed when nothing is stored and refuse removal", async () => {
 		const env = { OPENAI_API_KEY: "sk-one", OPENAI_API_KEY_2: "sk-two" };
 

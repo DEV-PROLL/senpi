@@ -158,10 +158,11 @@ export async function removeCredentialAccount(
 	if (account.source === "env") {
 		throw new Error(`Environment provider account cannot be removed: ${name}`);
 	}
-	await storage.modify(provider, async (current) => {
-		if (current === undefined) throw new Error(`No stored credential for provider: ${provider}`);
-		return removeSlot(current, name);
-	});
+	const next = await storage.read(provider);
+	if (next === undefined) throw new Error(`No stored credential for provider: ${provider}`);
+	const remaining = removeSlot(next, name);
+	if (remaining === undefined) await storage.delete(provider);
+	else await storage.modify(provider, async () => remaining);
 	await repository.mutateSlotState(provider, "stored", name, () => undefined);
 	emitProviderAccountsChanged(provider);
 }

@@ -80,6 +80,76 @@ async function collect(source: AsyncGenerator<AssistantMessageEvent>): Promise<A
 }
 
 describe("credential rotation over a pooled provider", () => {
+	test("ordinary streamSimple requests rotate before output", async () => {
+		const attempted: string[] = [];
+		const events = await collect(
+			streamWithCredentialRotation({
+				sources: { providerId: "test", credential: pooled(), env: () => undefined, repository, now: () => NOW },
+				affinityKey: "ordinary-agent-session",
+				runAttempt: (slot) => {
+					attempted.push(slot.name);
+					return attempted.length === 1 ? stream(startEvent(), errorEvent("401 unauthorized")) : stream(startEvent(), textEvent("ok"));
+				},
+			}),
+		);
+		expect(attempted).toHaveLength(2);
+		expect(events.some((event) => event.type === "text_delta")).toBe(true);
+	});
+
+	test("policy disables affinity and bounds cooldown", async () => {
+		const chosen: string[] = [];
+		await collect(streamWithCredentialRotation({
+			sources: { providerId: "test", credential: pooled(), env: () => undefined, repository, policy: { affinity: false, cooldownBaseMs: 5, cooldownCapMs: 10 }, now: () => NOW },
+			runAttempt: (slot) => { chosen.push(slot.name); return stream(startEvent(), textEvent("ok")); },
+		}));
+		await collect(streamWithCredentialRotation({
+			sources: { providerId: "test", credential: pooled(), env: () => undefined, repository, policy: { affinity: false }, now: () => NOW },
+			runAttempt: (slot) => { chosen.push(slot.name); return stream(startEvent(), textEvent("ok")); },
+		}));
+		expect(chosen).toHaveLength(2);
+	});
+
+	test("pinned account wins selection over HRW affinity", async () => {
+		const attempted: string[] = [];
+		await collect(streamWithCredentialRotation({
+			sources: { providerId: "test", credential: { ...pooled(), pinned: "work" }, env: () => undefined, repository },
+			affinityKey: "pin-regression",
+			runAttempt: (slot) => { attempted.push(slot.name); return stream(startEvent(), textEvent("ok")); },
+		}));
+		expect(attempted).toEqual(["work"]);
+	});
+
+	test("expired cooldown admits exactly one probe", async () => {
+		await repository.mutateSlotState("test", "stored", "default", () => ({ blockedUntil: NOW - 1, blockReason: "rate_limit" }));
+		const first = await listRotationSlots({ providerId: "test", credential: pooled(), env: () => undefined, repository, now: () => NOW });
+		const second = await listRotationSlots({ providerId: "test", credential: pooled(), env: () => undefined, repository, now: () => NOW });
+		expect(first.some((slot) => slot.name === "default")).toBe(true);
+		expect(second.some((slot) => slot.name === "default")).toBe(false);
+	});
+
+	test("policy cooldown cap is applied to persisted rate limits", async () => {
+		const attempted: string[] = [];
+		await collect(streamWithCredentialRotation({
+			sources: { providerId: "test", credential: pooled(), env: () => undefined, repository, policy: { cooldownBaseMs: 5, cooldownCapMs: 10 }, now: () => NOW },
+			affinityKey: "policy-cooldown",
+			runAttempt: (slot) => { attempted.push(slot.name); return stream(startEvent(), errorEvent("429 rate limited")); },
+		})).catch(() => undefined);
+		const state = await repository.listSlots("test", "stored");
+		expect(state[attempted[0] ?? ""]?.blockedUntil).toBe(NOW + 10);
+	});
+
+	test("successful pooled request completes after selection", async () => {
+		await repository.mutateSlotState("test", "stored", "default", () => undefined);
+		await repository.mutateSlotState("test", "stored", "work", () => undefined);
+		const attempted: string[] = [];
+		await collect(streamWithCredentialRotation({
+			sources: { providerId: "test", credential: pooled(), env: () => undefined, repository, now: () => NOW },
+			affinityKey: "probe-regression",
+			runAttempt: (slot) => { attempted.push(slot.name); return stream(startEvent(), textEvent("ok")); },
+		}));
+		expect(attempted).toHaveLength(1);
+		expect(attempted).toHaveLength(1);
+	});
 	test("lists both stored slots with sidecar health overlaid", async () => {
 		await repository.mutateSlotState("test", "stored", "work", () => ({
 			blockedUntil: NOW + 60_000,

@@ -19,6 +19,27 @@ import { type Settings, SettingsManager } from "../src/core/settings-manager.ts"
 import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 
 describe("createAgentSession stream options", () => {
+	it("ordinary AgentSession streamSimple turns fail over pooled credentials", async () => {
+		const model = createModel("openai-completions");
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		await authStorage.modify(model.provider, async () => ({ type: "api_key", key: "one", accounts: [{ name: "one", key: "one" }, { name: "two", key: "two" }] }));
+		const modelRegistry = await createModelRegistry(authStorage, join(agentDir, "models.json"));
+		const attempts: string[] = [];
+		modelRegistry.registerProvider(model.provider, {
+			api: model.api,
+			streamSimple: (_model, _context, options) => {
+				attempts.push(options?.apiKey ?? "missing");
+				const stream = createAssistantMessageEventStream();
+				if (attempts.length === 1) stream.push({ type: "start", partial: { role: "assistant", content: [], api: model.api, provider: model.provider, model: model.id, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: Date.now() } });
+				if (attempts.length === 1) throw Object.assign(new Error("401 unauthorized"), { status: 401 }); else stream.end(createDoneStream(model.api).getResult() as AssistantMessage);
+				return stream;
+			},
+		});
+		const { session } = await createAgentSession({ cwd, agentDir, model, modelRuntime: getModelRuntime(modelRegistry), settingsManager: SettingsManager.inMemory({}), sessionManager: SessionManager.inMemory(cwd) });
+		try { await session.prompt("hello"); } finally { session.dispose(); }
+		expect(attempts).toHaveLength(2);
+		expect(new Set(attempts).size).toBe(2);
+	});
 	let tempDir: string;
 	let cwd: string;
 	let agentDir: string;
