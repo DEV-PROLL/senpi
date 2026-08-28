@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- A model with no fallback chain of its own no longer wedges the session on a terminal error. `resolveChainKey` now falls through exact -> base -> a shipped `"*"` wildcard lane, so an upstream that hard-fails (e.g. repeated provider 500s) can still rotate to a healthy model instead of ending the turn permanently. The wildcard is a last resort only: a model's own chain wins, an in-flight fallback episode keeps walking its own chain, and an explicit `[]` tombstone on the model's key still switches fallback off (`hasExplicitFallbackOptOut`). Disable the lane itself with `"*": []`.
+
 ### Removed
 
 ## [2026.8.28] - 2026-08-28
