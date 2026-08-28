@@ -204,6 +204,21 @@ function normalizeResponse(value: RecordValue): RecordValue {
 				return normalized;
 			});
 		}
+		if (Array.isArray(data.entries)) {
+			data.entries = data.entries.map((entry) => {
+				if (typeof entry !== "object" || entry === null) return entry;
+				const normalized = { ...(entry as RecordValue) };
+				delete normalized.id;
+				delete normalized.parentId;
+				delete normalized.timestamp;
+				if (normalized.data && typeof normalized.data === "object") {
+					const entryData = { ...(normalized.data as RecordValue) };
+					delete entryData.cwd;
+					normalized.data = entryData;
+				}
+				return normalized;
+			});
+		}
 	}
 	return clone;
 }
