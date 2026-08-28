@@ -141,7 +141,10 @@ class RemoteInteractiveRuntime {
 			this.#beforeSessionInvalidate?.();
 			this.#remoteSession.abortLocalBash();
 			await this.#remoteSession.refresh();
-			if (options?.setup) await options.setup(this.#remoteSession.session.sessionManager);
+			if (options?.setup) {
+				await options.setup(this.#remoteSession.session.sessionManager);
+				await this.#remoteSession.refresh();
+			}
 			await this.#rebindSession?.();
 			if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 		}
@@ -296,7 +299,9 @@ function createRemoteSessionProxy(
 		const nextState = await client.getState();
 		state = { ...stateFromRpc(nextState) };
 		let messages: AgentSession["messages"];
-		settingsManager = SettingsManager.create(nextState.cwd, agentDir);
+		settingsManager = SettingsManager.create(nextState.cwd, agentDir, {
+			projectTrusted: nextState.projectTrusted,
+		});
 		if (nextState.sessionFile) {
 			sessionManager = SessionManager.open(nextState.sessionFile, undefined, nextState.cwd);
 			messages = sessionManager.buildSessionContext().messages;
@@ -506,6 +511,21 @@ function createRemoteSessionProxy(
 			const context = local.createReplacedSessionContext();
 			Object.defineProperty(context, "cwd", { value: state.cwd });
 			Object.defineProperty(context, "sessionManager", { value: remoteSessionManager });
+			context.sendMessage = (message, options) => {
+				const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+				return client.prompt(content, {
+					streamingBehavior: options?.deliverAs === "steer" ? "steer" : "followUp",
+				});
+			};
+			context.sendUserMessage = (content, options) => {
+				if (typeof content === "string") return client.prompt(content, { streamingBehavior: options?.deliverAs });
+				const text = content
+					.filter((part) => part.type === "text")
+					.map((part) => part.text)
+					.join("\n");
+				const images = content.filter((part) => part.type === "image");
+				return client.prompt(text, { images, streamingBehavior: options?.deliverAs });
+			};
 			return context;
 		},
 	};

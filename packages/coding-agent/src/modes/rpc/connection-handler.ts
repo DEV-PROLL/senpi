@@ -164,6 +164,7 @@ export function buildRpcSessionState(session: AgentSession): RpcSessionState {
 		sessionId: session.sessionId,
 		sessionName: session.sessionName,
 		cwd: session.sessionManager.getCwd(),
+		projectTrusted: session.settingsManager.isProjectTrusted(),
 		steering: typeof session.getSteeringMessages === "function" ? [...session.getSteeringMessages()] : [],
 		followUp: typeof session.getFollowUpMessages === "function" ? [...session.getFollowUpMessages()] : [],
 		ordered: [
