@@ -15,6 +15,7 @@ import {
 import type {
 	AnthropicMessagesCompat,
 	Api,
+	BedrockCompat,
 	KnownProvider,
 	Model,
 	ModelCost,
@@ -864,6 +865,18 @@ function applyAnthropicAllowedFallbackModelMetadata(models: readonly Model<"anth
 	}
 }
 
+// Bedrock global cross-region inference profiles for OpenAI GPT-5.6 serve the same
+// weights as the regional `openai.gpt-5.6-*` entries and accept `strict: true` tool
+// schemas, but models.dev only reports `structured_output` on the regional IDs. Without
+// this override a regeneration silently drops `compat.supportsStrictMode`, and
+// `bedrock-converse-stream.ts` then rejects `strict: "require"` sampling and downgrades
+// `strict: "prefer"` to an unconstrained schema.
+const BEDROCK_STRICT_MODE_MODEL_IDS = new Set([
+	"global.openai.gpt-5.6-luna",
+	"global.openai.gpt-5.6-sol",
+	"global.openai.gpt-5.6-terra",
+]);
+
 function applyStrictToolCompatMetadata(model: Model<Api>): void {
 	if (
 		(model.provider === "openai" || model.provider === "cloudflare-ai-gateway") &&
@@ -872,6 +885,8 @@ function applyStrictToolCompatMetadata(model: Model<Api>): void {
 		model.compat = { ...(model.compat as OpenAIResponsesCompat | undefined), supportsStrictMode: true };
 	} else if (model.provider === "anthropic" && model.api === "anthropic-messages") {
 		mergeAnthropicMessagesCompat(model, { supportsStrictTools: true });
+	} else if (model.provider === "amazon-bedrock" && BEDROCK_STRICT_MODE_MODEL_IDS.has(model.id)) {
+		model.compat = { ...(model.compat as BedrockCompat | undefined), supportsStrictMode: true };
 	}
 }
 
