@@ -1,5 +1,9 @@
 # changes
 
+## 2026-08-28 - Credential pool runtime wiring
+
+- Normal simple agent streams now use credential rotation, session ids provide affinity, pinned accounts win selection, expired cooldowns use one half-open probe, successful probes persist health, and custom agent directories scope sidecar state.
+
 ## 2026-08-28 - Credential pool final-account removal
 
 - Removing the last stored account now deletes the provider credential instead of leaving stale auth.json data.
