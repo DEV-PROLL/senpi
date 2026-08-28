@@ -560,6 +560,37 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("preserves expandPromptTemplates for string replacement messages", async () => {
+		const qa = scratch("opts");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			await runtime.newSession({
+				withSession: async (ctx) => {
+					await ctx.sendUserMessage("/help", { expandPromptTemplates: false });
+				},
+			});
+			await runtime.session.waitForIdle();
+			expect(fake.requests.length).toBe(1);
+			expect(fake.requests[0]?.text).toContain("/help");
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("refreshes the proxy after new and fork replacements", async () => {
 		const qa = scratch("replace");
 		const fake = await startFakeModelServer();

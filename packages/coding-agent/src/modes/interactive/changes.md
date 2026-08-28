@@ -2868,3 +2868,6 @@ The tip line was teaching a small slice of the product while most of the surface
 
 - NF-1 RED: HEAD rejected setup-state custom entries with "Shared-host setup cannot transport custom entries" (binding test before implementation).
 - NF-1 GREEN: setup now transports every captured SessionEntry verbatim through append_session_entry; custom and session_info entries are persisted and observable by a second RPC client.
+
+- NF-2 RED: replacement string sendUserMessage dropped expandPromptTemplates, so the binding host trace did not preserve explicit false.
+- NF-2 GREEN: string replacement messages now forward expandPromptTemplates exactly like array messages; explicit false leaves /help as provider content.

@@ -524,7 +524,11 @@ function createRemoteSessionProxy(
 					deliverAs: options?.deliverAs,
 				});
 			context.sendUserMessage = (content, options) => {
-				if (typeof content === "string") return client.prompt(content, { streamingBehavior: options?.deliverAs });
+				if (typeof content === "string")
+					return client.prompt(content, {
+						streamingBehavior: options?.deliverAs,
+						expandPromptTemplates: options?.expandPromptTemplates,
+					});
 				const text = content
 					.filter((part) => part.type === "text")
 					.map((part) => part.text)
