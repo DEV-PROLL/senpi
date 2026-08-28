@@ -59,6 +59,34 @@
 ### Expected merge conflict zones
 
 - LOW: `interactive-mode.ts` `compaction_end` case and `interactive-host-runtime.ts` wire event handling.
+||||||| 84a19a642
+## Explain disk-capacity failures during uncaught interactive shutdown (2026-08-29)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: after restoring a live
+  terminal and recording the redacted crash log, `uncaughtCrash` now identifies `EDQUOT` and
+  `ENOSPC` errors and prints a stable disk-quota or disk-full remedy before the existing fatal
+  banner and original error.
+
+### Why
+
+- A filesystem spill write can still reach the last-resort crash path. The generic banner preserved
+  the original error but did not tell the operator that local storage or quota was exhausted or
+  that freeing filesystem capacity before retrying is the recovery action.
+
+### Why an extension could not handle it
+
+- `uncaughtCrash` is the process-level listener installed by interactive mode and exits
+  synchronously after terminal restoration. An extension cannot insert guidance between that
+  restoration and `process.exit(1)`, and its own listener would run after the prepended core
+  listener has already exited.
+
+### Expected merge conflict zones
+
+- LOW: the final live-terminal output sequence in `InteractiveMode.uncaughtCrash` and the adjacent
+  error-code classifier.
+
 ## Shared-host sessions await async session reads and render thinking level from the event (2026-08-28)
 
 ### What changed
