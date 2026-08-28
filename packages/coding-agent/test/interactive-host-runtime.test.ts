@@ -714,8 +714,15 @@ describe("interactive host runtime", () => {
 			{ socket: qa.socket, ensureHost: async () => undefined },
 		);
 		try {
+			const streaming = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type !== "agent_start") return;
+					unsubscribe();
+					resolve();
+				});
+			});
 			void runtime.session.prompt("hold-open-1500 first");
-			while (!runtime.session.isStreaming) await new Promise((resolve) => setImmediate(resolve));
+			await streaming;
 			const consumed = new Promise<void>((resolve) => {
 				const unsubscribe = runtime.session.subscribe((event) => {
 					if (event.type !== "queue_update" || event.ordered.length !== 0) return;
@@ -771,7 +778,6 @@ describe("interactive host runtime", () => {
 				},
 			});
 			await started;
-			while (!runtime.session.isBashRunning) await new Promise((resolve) => setImmediate(resolve));
 			expect(runtime.session.isBashRunning).toBe(true);
 			expect(observedCommand).toBe(`set -e\necho local`);
 			expect(observedSignal).toBeDefined();
