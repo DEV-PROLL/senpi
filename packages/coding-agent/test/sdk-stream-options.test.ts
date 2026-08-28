@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
 	type Api,
 	type AssistantMessage,
+	type AssistantMessageEvent,
 	createAssistantMessageEventStream,
 	type Model,
 	type SimpleStreamOptions,
@@ -37,29 +38,38 @@ describe("createAgentSession stream options", () => {
 			streamSimple: (_model, _context, options) => {
 				attempts.push(options?.apiKey ?? "missing");
 				const stream = createAssistantMessageEventStream();
-				if (attempts.length === 1)
-					stream.push({
-						type: "start",
-						partial: {
-							role: "assistant",
-							content: [],
-							api: model.api,
-							provider: model.provider,
-							model: model.id,
-							usage: {
-								input: 0,
-								output: 0,
-								cacheRead: 0,
-								cacheWrite: 0,
-								totalTokens: 0,
-								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-							},
-							stopReason: "stop",
-							timestamp: Date.now(),
+				const startEvent = {
+					type: "start",
+					partial: {
+						role: "assistant",
+						content: [],
+						api: model.api,
+						provider: model.provider,
+						model: model.id,
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 0,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 						},
-					});
-				if (attempts.length === 1) throw Object.assign(new Error("401 unauthorized"), { status: 401 });
-				else stream.end(createDoneStream(model.api).message);
+						stopReason: "stop",
+						timestamp: Date.now(),
+					},
+				} satisfies AssistantMessageEvent;
+				if (attempts.length === 1) {
+					stream.push(structuredClone(startEvent));
+					throw Object.assign(new Error("401 unauthorized"), { status: 401 });
+				}
+				// Real providers emit events after the stream is returned and finish
+				// with a terminal "done" event; the runtime derives the final message
+				// from that event, never from a bare end() call.
+				const { message } = createDoneStream(model.api);
+				queueMicrotask(() => {
+					stream.push(structuredClone(startEvent));
+					stream.push({ type: "done", reason: "stop", message });
+				});
 				return stream;
 			},
 		});
