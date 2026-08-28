@@ -16,6 +16,7 @@
  */
 
 import * as crypto from "node:crypto";
+import { existsSync } from "node:fs";
 import { basename, dirname, extname } from "node:path";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
 import { VERSION } from "../../config.ts";
@@ -165,7 +166,9 @@ export function buildRpcSessionState(session: AgentSession): RpcSessionState {
 		sessionName: session.sessionName,
 		cwd: session.sessionManager.getCwd(),
 		projectTrusted: session.settingsManager?.isProjectTrusted?.() ?? true,
-		entries: session.sessionManager.getEntries(),
+		...(session.sessionName && session.sessionFile && !existsSync(session.sessionFile)
+			? { entries: session.sessionManager.getEntries() }
+			: {}),
 		steering: typeof session.getSteeringMessages === "function" ? [...session.getSteeringMessages()] : [],
 		followUp: typeof session.getFollowUpMessages === "function" ? [...session.getFollowUpMessages()] : [],
 		ordered: [
