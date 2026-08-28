@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- A client socket that drops while its session's turn is still streaming no longer aborts the run mid-turn: the dropped connection's refcounted release is deferred until the turn settles (`agent_settled`/`agent_idle`), then the path reservation frees as before. This also fixes the RPC socket host never idle-exiting after such a drop (the sealed session leaked the lifecycle observer's busy counter, so the supervisor saw a permanently active turn).
+
 - A model with no fallback chain of its own no longer wedges the session on a terminal error. `resolveChainKey` now falls through exact -> base -> a shipped `"*"` wildcard lane, so an upstream that hard-fails (e.g. repeated provider 500s) can still rotate to a healthy model instead of ending the turn permanently. The wildcard is a last resort only: a model's own chain wins, an in-flight fallback episode keeps walking its own chain, and an explicit `[]` tombstone on the model's key still switches fallback off (`hasExplicitFallbackOptOut`). Disable the lane itself with `"*": []`.
 
 ### Removed
