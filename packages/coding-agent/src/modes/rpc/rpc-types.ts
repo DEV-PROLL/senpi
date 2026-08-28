@@ -44,6 +44,7 @@ type RpcSessionCommand =
 			deliverAs?: "steer" | "followUp" | "nextTurn";
 	  }
 	| { id?: string; type: "append_user_message"; content: unknown }
+	| { id?: string; type: "append_session_entry"; entry: SessionEntry }
 	| { id?: string; type: "steer"; message: string; images?: ImageContent[]; enqueueOrder?: number }
 	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[]; enqueueOrder?: number }
 	| { id?: string; type: "abort" }
@@ -330,6 +331,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "prompt"; success: true; data?: { disposition?: PromptDisposition } }
 	| { id?: string; type: "response"; command: "send_custom_message"; success: true }
 	| { id?: string; type: "response"; command: "append_user_message"; success: true }
+	| { id?: string; type: "response"; command: "append_session_entry"; success: true }
 	| { id?: string; type: "response"; command: "steer"; success: true }
 	| { id?: string; type: "response"; command: "follow_up"; success: true }
 	| { id?: string; type: "response"; command: "abort"; success: true }

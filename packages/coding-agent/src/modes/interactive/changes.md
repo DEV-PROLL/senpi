@@ -2865,3 +2865,6 @@ The tip line was teaching a small slice of the product while most of the surface
 ### Expected merge conflict zones
 
 - LOW: `createToolResultFallback()` in `packages/coding-agent/src/modes/interactive/components/tool-execution-fallback.ts` (additive helpers plus a two-line branch in one small function).
+
+- NF-1 RED: HEAD rejected setup-state custom entries with "Shared-host setup cannot transport custom entries" (binding test before implementation).
+- NF-1 GREEN: setup now transports every captured SessionEntry verbatim through append_session_entry; custom and session_info entries are persisted and observable by a second RPC client.

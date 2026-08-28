@@ -824,6 +824,16 @@ export function createRpcConnectionHandler(
 				return success(id, "append_user_message");
 			}
 
+			case "append_session_entry": {
+				(
+					session.sessionManager as unknown as {
+						_appendEntry(entry: import("../../core/session-manager.ts").SessionEntry): void;
+					}
+				)._appendEntry(command.entry);
+				if (command.entry.type === "message") session.messages.push(command.entry.message);
+				return success(id, "append_session_entry");
+			}
+
 			case "send_custom_message": {
 				await session.sendCustomMessage(
 					{

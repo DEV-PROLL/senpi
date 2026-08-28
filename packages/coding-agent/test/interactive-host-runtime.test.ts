@@ -538,16 +538,20 @@ describe("interactive host runtime", () => {
 		try {
 			await runtime.newSession({
 				setup: async (manager) => {
-					manager.appendCustomMessageEntry("setup-trace", "SETUP_TRACE", true, { marker: true });
+					manager.appendCustomEntry("setup-state", { marker: true });
+					manager.appendSessionInfo("setup session");
 				},
 			});
 			const listed = await observer.listSessions();
 			const hostSession = listed.find((entry) => entry.status === "open");
 			if (!hostSession?.sessionPath) throw new Error("Expected host session path");
 			await observer.openSession({ sessionPath: hostSession.sessionPath, cwd: qa.cwd });
-			const messages = await observer.getMessages();
-			expect(messages).toContainEqual(
-				expect.objectContaining({ role: "custom", customType: "setup-trace", content: "SETUP_TRACE" }),
+			const entries = await observer.getEntries();
+			expect(entries.entries).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ type: "custom", customType: "setup-state", data: { marker: true } }),
+					expect.objectContaining({ type: "session_info", name: "setup session" }),
+				]),
 			);
 		} finally {
 			await observer.stop();
