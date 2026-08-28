@@ -406,7 +406,11 @@ export class RpcClient {
 	/**
 	 * Clear queued steering and follow-up messages, returning their text.
 	 */
-	async clearQueue(options?: { abortWillFollow?: boolean }): Promise<{ steering: string[]; followUp: string[] }> {
+	async clearQueue(options?: { abortWillFollow?: boolean }): Promise<{
+		steering: string[];
+		followUp: string[];
+		ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
+	}> {
 		const response = await this.send({ type: "clear_queue", abortWillFollow: options?.abortWillFollow });
 		return this.getData(response);
 	}

@@ -8173,7 +8173,7 @@ export class InteractiveMode {
 	private async handleSessionCommand(): Promise<void> {
 		// Awaited at the boundary: the shared-host proxy answers this over RPC.
 		const stats = await this.session.getSessionStats();
-		const sessionName = this.sessionManager.getSessionName();
+		const sessionName = this.session.sessionName;
 		const entries = this.sessionManager.getEntries();
 		const cacheWaste = computeCacheWaste(entries, this.session.modelRuntime);
 

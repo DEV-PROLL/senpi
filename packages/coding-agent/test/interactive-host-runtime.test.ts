@@ -626,6 +626,78 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("executes client-local bash operations and records the result on the host", async () => {
+		const qa = scratch("local-ops");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const manager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: manager,
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			const chunks: string[] = [];
+			const result = await runtime.session.executeBash("sentinel", (chunk) => chunks.push(chunk), {
+				operations: {
+					exec: async (_command, _cwd, { onData }) => {
+						onData(Buffer.from("client-sentinel"));
+						return { exitCode: 0 };
+					},
+				},
+			});
+			expect(result.output).toBe("client-sentinel");
+			expect(chunks).toEqual(["client-sentinel"]);
+			const observer = new RpcClient({ socketPath: qa.socket });
+			await observer.start();
+			try {
+				await observer.openSession({ sessionPath: runtime.session.sessionFile!, cwd: qa.cwd });
+				expect(JSON.stringify((await observer.getEntries()).entries)).toContain("client-sentinel");
+			} finally {
+				await observer.stop();
+			}
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("preserves mixed queue chronology through the proxy clear", async () => {
+		const qa = scratch("queue-order");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const manager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: manager,
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			await runtime.session.steer("A");
+			await runtime.session.followUp("B");
+			await runtime.session.steer("C");
+			const cleared = runtime.session.clearQueue({ abortWillFollow: false });
+			expect(cleared.ordered.map((item) => item.text)).toEqual(["A", "B", "C"]);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("accepts the legacy image-array prompt API through a real host", async () => {
 		const qa = scratch("images");
 		const fake = await startFakeModelServer();

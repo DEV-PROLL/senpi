@@ -194,6 +194,7 @@ function normalizeResponse(value: RecordValue): RecordValue {
 		const data = clone.data as RecordValue;
 		delete data.sessionId;
 		delete data.sessionFile;
+		delete data.cwd;
 		if (Array.isArray(data.messages)) {
 			data.messages = data.messages.map((message) => {
 				if (typeof message !== "object" || message === null) return message;
