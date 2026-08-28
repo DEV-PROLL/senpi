@@ -117,12 +117,13 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 		const id = `socket-${++nextConnection}`;
 		const sink = socketSink(socket);
 		writer.registerConnection(id, sink);
-		let commandChain = Promise.resolve();
 		const detachReader = attachJsonlLineReader(
 			socket,
 			(line) => {
-				commandChain = commandChain
-					.then(() => writer.withConnection(id, () => handle(line)))
+				// Do not serialize awaited commands: extension_ui_response and other
+				// re-entrant frames must be able to resolve a command already awaiting them.
+				void writer
+					.withConnection(id, () => handle(line))
 					.catch((cause) => {
 						process.stderr.write(`senpi rpc connection ${id} failed: ${errorMessage(cause)}\n`);
 					});
@@ -130,9 +131,11 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 			{
 				maxLineLength: MAX_RPC_LINE_CHARACTERS,
 				onOversizedLine: () => {
-					commandChain = commandChain.then(() =>
-						writer.withConnection(id, () => writer.enqueueControl(parseError(oversizedLineError()))),
-					);
+					void writer
+						.withConnection(id, () => writer.enqueueControl(parseError(oversizedLineError())))
+						.catch((cause) =>
+							process.stderr.write(`senpi rpc connection ${id} failed: ${errorMessage(cause)}\n`),
+						);
 				},
 			},
 		);
@@ -147,11 +150,9 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 			// and path reservations. Release them on the command chain so this runs after any
 			// in-flight command for this connection settles, otherwise the path stays pinned
 			// by a runtime whose client is gone and later resumes attach to that orphan.
-			commandChain = commandChain
-				.then(() => router.releaseConnection(id))
-				.catch((cause) => {
-					process.stderr.write(`senpi rpc connection ${id} release failed: ${errorMessage(cause)}\n`);
-				});
+			void router.releaseConnection(id).catch((cause) => {
+				process.stderr.write(`senpi rpc connection ${id} release failed: ${errorMessage(cause)}\n`);
+			});
 		};
 		connections.set(id, { id, sink, detach, close: () => socket.destroy() });
 		socket.once("close", detach);
