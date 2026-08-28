@@ -124,7 +124,7 @@ class RemoteInteractiveRuntime {
 	async newSession(): Promise<{ cancelled: boolean }> {
 		this.#beforeSessionInvalidate?.();
 		const result = await this.#client.newSession();
-		if (!result.cancelled) await this.#rebindSession?.();
+		if (!result.cancelled) await this.#refreshAndRebind();
 		return result;
 	}
 	async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
@@ -136,11 +136,14 @@ class RemoteInteractiveRuntime {
 	async fork(entryId: string): Promise<{ cancelled: boolean; selectedText?: string }> {
 		this.#beforeSessionInvalidate?.();
 		const result = await this.#client.fork(entryId);
-		if (!result.cancelled) await this.#rebindSession?.();
+		if (!result.cancelled) await this.#refreshAndRebind();
 		return { cancelled: result.cancelled, selectedText: result.text };
 	}
-	async importFromJsonl(): Promise<{ cancelled: boolean }> {
-		throw new Error("Session import is not available while connected to the shared host");
+	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
+		this.#beforeSessionInvalidate?.();
+		const result = await this.#client.importJsonl(inputPath, cwdOverride);
+		if (!result.cancelled) await this.#refreshAndRebind();
+		return result;
 	}
 
 	async #refreshAndRebind(): Promise<void> {
@@ -171,11 +174,13 @@ function createRemoteSessionProxy(
 		});
 	};
 	let state = initialState;
+	let bashChunk: ((chunk: string) => void) | undefined;
 	let sessionManager = local.sessionManager;
 	let streamingAssistant: Extract<AgentSession["messages"][number], { role: "assistant" }> | undefined;
 	const listeners = new Set<AgentSessionEventListener>();
 	client.onEvent((wireEvent) => {
 		if (wireEvent.type === "agent_settled") state = { ...state, isStreaming: false };
+		if (wireEvent.type === "bash_execution_update") bashChunk?.(wireEvent.delta);
 		if (wireEvent.type === "agent_start") state = { ...state, isStreaming: true };
 		if (wireEvent.type === "model_changed") {
 			state = { ...state, model: wireEvent.model, thinkingLevel: wireEvent.thinkingLevel };
@@ -194,8 +199,8 @@ function createRemoteSessionProxy(
 		}
 		if (wireEvent.type === "compaction_end" && wireEvent.accepted && !wireEvent.aborted) {
 			try {
-				local.sessionManager?.reloadFromDisk?.();
-				local.agent.state.messages = local.sessionManager.buildSessionContext().messages;
+				sessionManager.reloadFromDisk?.();
+				local.agent.state.messages = sessionManager.buildSessionContext().messages;
 			} catch {
 				// Non-fatal if session file is transiently locked or unavailable
 			}
@@ -215,16 +220,25 @@ function createRemoteSessionProxy(
 						...(options?.preflightResult ? { preflightResult: options.preflightResult } : {}),
 					});
 			if (property === "abort") return () => client.abort();
+			if (property === "abortCompaction") return () => void client.abortCompaction();
 			if (property === "steer")
-				return (message: string, images?: Parameters<AgentSession["steer"]>[1]) => client.steer(message, images);
+				return (
+					message: string,
+					images?: Parameters<AgentSession["steer"]>[1],
+					recovery?: { enqueueOrder?: number },
+				) => client.steer(message, images, recovery);
 			if (property === "followUp")
-				return (message: string, images?: Parameters<AgentSession["followUp"]>[1]) =>
-					client.followUp(message, images);
+				return (
+					message: string,
+					images?: Parameters<AgentSession["followUp"]>[1],
+					recovery?: { enqueueOrder?: number },
+				) => client.followUp(message, images, recovery);
 			if (property === "waitForIdle") return () => client.waitForIdle();
 			if (property === "getLastAssistantText") return () => target.getLastAssistantText();
 			if (property === "setModel")
 				return async (model: NonNullable<AgentSession["model"]>) => {
-					await client.setModel(model.provider, model.id);
+					const next = await client.setModel(model.provider, model.id);
+					return { systemPromptName: next.systemPromptName, model: next };
 				};
 			if (property === "cycleModel") return () => client.cycleModel();
 			if (property === "setThinkingLevel")
@@ -243,13 +257,28 @@ function createRemoteSessionProxy(
 			if (property === "setAutoCompactionEnabled")
 				return (enabled: boolean) =>
 					void client.setAutoCompaction(enabled).catch(reportActionFailure("setAutoCompaction"));
-			if (property === "executeBash") return (command: string) => client.bash(command);
+			if (property === "executeBash")
+				return async (
+					command: string,
+					onChunk?: (chunk: string) => void,
+					options?: { excludeFromContext?: boolean },
+				) => {
+					bashChunk = onChunk;
+					try {
+						return await client.bash(command, { excludeFromContext: options?.excludeFromContext });
+					} finally {
+						bashChunk = undefined;
+					}
+				};
 			if (property === "abortBash") return () => void client.abortBash().catch(reportActionFailure("abortBash"));
 			if (property === "getSessionStats") return () => client.getSessionStats();
 			if (property === "exportToHtml")
 				return (outputPath?: string) => client.exportHtml(outputPath).then((result) => result.path);
 			if (property === "setSessionName")
-				return (name: string) => void client.setSessionName(name).catch(reportActionFailure("setSessionName"));
+				return (name: string) => client.setSessionName(name).catch(reportActionFailure("setSessionName"));
+			if (property === "navigateTree")
+				return (targetId: string, options?: Parameters<AgentSession["navigateTree"]>[1]) =>
+					client.navigateTree(targetId, options);
 			if (property === "getUserMessagesForForking") return () => client.getForkMessages();
 			if (property === "subscribe")
 				return (listener: AgentSessionEventListener) => {
@@ -261,6 +290,14 @@ function createRemoteSessionProxy(
 					};
 				};
 			if (property === "isStreaming") return state.isStreaming;
+			if (property === "isCompacting") return state.isCompacting;
+			if (property === "pendingMessageCount") return state.pendingMessageCount;
+			if (property === "retryAttempt") return state.retryAttempt;
+			if (property === "isBashRunning") return state.isBashRunning;
+			if (property === "reload") return (_options?: Parameters<AgentSession["reload"]>[0]) => client.reload();
+			if (property === "checkReloadVeto") return () => client.checkReloadVeto();
+			if (property === "exportToJsonl")
+				return (outputPath?: string) => client.exportJsonl(outputPath).then((result) => result.path);
 			// The footer and other renderers read session.state.*; surface the
 			// host-authoritative fields there too, not only via the direct getters.
 			if (property === "state") {
@@ -334,6 +371,10 @@ function stateFromRpc(state: {
 	model?: AgentSession["model"];
 	thinkingLevel: AgentSession["thinkingLevel"];
 	isStreaming: boolean;
+	isCompacting: boolean;
+	pendingMessageCount: number;
+	retryAttempt: number;
+	isBashRunning: boolean;
 	sessionFile?: string;
 	sessionId: string;
 }) {

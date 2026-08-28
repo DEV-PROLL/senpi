@@ -3815,7 +3815,11 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
-		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
+		this.defaultEditor.onAction("app.thinking.cycle", () => {
+			void this.cycleThinkingLevel().catch((error) =>
+				this.showError(error instanceof Error ? error.message : String(error)),
+			);
+		});
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
 
@@ -4014,7 +4018,7 @@ export class InteractiveMode {
 
 			// Handle commands
 			if (text === "/settings") {
-				this.showSettingsSelector();
+				await this.showSettingsSelector();
 				this.editor.setText("");
 				return;
 			}
@@ -4055,12 +4059,12 @@ export class InteractiveMode {
 				return;
 			}
 			if (text === "/name" || text.startsWith("/name ")) {
-				this.handleNameCommand(text);
+				await this.handleNameCommand(text);
 				this.editor.setText("");
 				return;
 			}
 			if (text === "/session") {
-				this.handleSessionCommand();
+				await this.handleSessionCommand();
 				this.editor.setText("");
 				return;
 			}
@@ -4080,7 +4084,7 @@ export class InteractiveMode {
 				return;
 			}
 			if (text === "/fork") {
-				this.showUserMessageSelector();
+				await this.showUserMessageSelector();
 				this.editor.setText("");
 				return;
 			}
@@ -7925,7 +7929,7 @@ export class InteractiveMode {
 
 		try {
 			if (outputPath?.endsWith(".jsonl")) {
-				const filePath = this.session.exportToJsonl(outputPath);
+				const filePath = await this.session.exportToJsonl(outputPath);
 				this.showStatus(`Session exported to: ${filePath}`);
 			} else {
 				const filePath = await this.session.exportToHtml(outputPath, {
@@ -8130,7 +8134,7 @@ export class InteractiveMode {
 		}
 	}
 
-	private handleNameCommand(text: string): void {
+	private async handleNameCommand(text: string): Promise<void> {
 		const name = text.replace(/^\/name\s*/, "").trim();
 		if (!name) {
 			const currentName = this.sessionManager.getSessionName();
@@ -8144,7 +8148,7 @@ export class InteractiveMode {
 			return;
 		}
 
-		this.session.setSessionName(name);
+		await this.session.setSessionName(name);
 		const sessionName = this.sessionManager.getSessionName();
 		if (sessionName !== name) {
 			this.showWarning(`Session name was normalized from ${JSON.stringify(name)} to ${JSON.stringify(sessionName)}`);

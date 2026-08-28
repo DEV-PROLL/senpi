@@ -32,9 +32,12 @@ type RpcSessionCommand =
 			streamingBehavior?: "steer" | "followUp";
 			thinkingLevel?: ThinkingLevel;
 	  }
-	| { id?: string; type: "steer"; message: string; images?: ImageContent[] }
-	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
+	| { id?: string; type: "steer"; message: string; images?: ImageContent[]; enqueueOrder?: number }
+	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[]; enqueueOrder?: number }
 	| { id?: string; type: "abort" }
+	| { id?: string; type: "abort_compaction" }
+	| { id?: string; type: "reload" }
+	| { id?: string; type: "check_reload_veto" }
 	| { id?: string; type: "clear_queue" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 
@@ -70,10 +73,20 @@ type RpcSessionCommand =
 	// Bash
 	| { id?: string; type: "bash"; command: string; excludeFromContext?: boolean }
 	| { id?: string; type: "abort_bash" }
+	| {
+			id?: string;
+			type: "navigate_tree";
+			targetId: string;
+			summarize?: boolean;
+			customInstructions?: string;
+			replaceInstructions?: boolean;
+			label?: string;
+	  }
 
 	// Session
 	| { id?: string; type: "get_session_stats" }
 	| { id?: string; type: "export_html"; outputPath?: string }
+	| { id?: string; type: "export_jsonl"; outputPath?: string }
 	| { id?: string; type: "switch_session"; sessionPath: string }
 	| { id?: string; type: "fork"; entryId: string }
 	| { id?: string; type: "clone" }
@@ -82,6 +95,7 @@ type RpcSessionCommand =
 	| { id?: string; type: "get_tree" }
 	| { id?: string; type: "get_last_assistant_text" }
 	| { id?: string; type: "set_session_name"; name: string }
+	| { id?: string; type: "import_jsonl"; inputPath: string; cwdOverride?: string }
 
 	// Messages
 	| { id?: string; type: "get_messages" }
@@ -234,6 +248,8 @@ export interface RpcSessionState {
 	autoCompactionEnabled: boolean;
 	messageCount: number;
 	pendingMessageCount: number;
+	retryAttempt: number;
+	isBashRunning: boolean;
 }
 
 // ============================================================================
@@ -286,6 +302,15 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "steer"; success: true }
 	| { id?: string; type: "response"; command: "follow_up"; success: true }
 	| { id?: string; type: "response"; command: "abort"; success: true }
+	| { id?: string; type: "response"; command: "abort_compaction"; success: true }
+	| { id?: string; type: "response"; command: "reload"; success: true; data: { cancelled: boolean; reason?: string } }
+	| {
+			id?: string;
+			type: "response";
+			command: "check_reload_veto";
+			success: true;
+			data: { cancelled: boolean; reason?: string };
+	  }
 	| {
 			id?: string;
 			type: "response";
@@ -304,7 +329,7 @@ export type RpcResponse =
 			type: "response";
 			command: "set_model";
 			success: true;
-			data: Model<any>;
+			data: Model<any> & { systemPromptName?: string };
 	  }
 	| {
 			id?: string;
@@ -368,11 +393,19 @@ export type RpcResponse =
 
 	// Bash
 	| { id?: string; type: "response"; command: "bash"; success: true; data: BashResult }
+	| {
+			id?: string;
+			type: "response";
+			command: "navigate_tree";
+			success: true;
+			data: { cancelled: boolean; editorText?: string; aborted?: boolean; summaryEntry?: unknown };
+	  }
 	| { id?: string; type: "response"; command: "abort_bash"; success: true }
 
 	// Session
 	| { id?: string; type: "response"; command: "get_session_stats"; success: true; data: SessionStats }
 	| { id?: string; type: "response"; command: "export_html"; success: true; data: { path: string } }
+	| { id?: string; type: "response"; command: "export_jsonl"; success: true; data: { path: string } }
 	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }
 	| { id?: string; type: "response"; command: "fork"; success: true; data: { text: string; cancelled: boolean } }
 	| { id?: string; type: "response"; command: "clone"; success: true; data: { cancelled: boolean } }
@@ -405,6 +438,7 @@ export type RpcResponse =
 			data: { text: string | null };
 	  }
 	| { id?: string; type: "response"; command: "set_session_name"; success: true }
+	| { id?: string; type: "response"; command: "import_jsonl"; success: true; data: { cancelled: boolean } }
 
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }

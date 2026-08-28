@@ -361,15 +361,15 @@ export class RpcClient {
 	/**
 	 * Queue a steering message to interrupt the agent mid-run.
 	 */
-	async steer(message: string, images?: ImageContent[]): Promise<void> {
-		await this.send({ type: "steer", message, images });
+	async steer(message: string, images?: ImageContent[], recovery?: { enqueueOrder?: number }): Promise<void> {
+		await this.send({ type: "steer", message, images, enqueueOrder: recovery?.enqueueOrder });
 	}
 
 	/**
 	 * Queue a follow-up message to be processed after the agent finishes.
 	 */
-	async followUp(message: string, images?: ImageContent[]): Promise<void> {
-		await this.send({ type: "follow_up", message, images });
+	async followUp(message: string, images?: ImageContent[], recovery?: { enqueueOrder?: number }): Promise<void> {
+		await this.send({ type: "follow_up", message, images, enqueueOrder: recovery?.enqueueOrder });
 	}
 
 	/**
@@ -377,6 +377,20 @@ export class RpcClient {
 	 */
 	async abort(): Promise<void> {
 		await this.send({ type: "abort" });
+	}
+
+	async abortCompaction(): Promise<void> {
+		await this.send({ type: "abort_compaction" });
+	}
+
+	async reload(): Promise<{ cancelled: boolean; reason?: string }> {
+		const response = await this.send({ type: "reload" });
+		return this.getData(response);
+	}
+
+	async checkReloadVeto(): Promise<{ cancelled: boolean; reason?: string }> {
+		const response = await this.send({ type: "check_reload_veto" });
+		return this.getData(response);
 	}
 
 	/**
@@ -408,7 +422,10 @@ export class RpcClient {
 	/**
 	 * Set model by provider and ID.
 	 */
-	async setModel(provider: string, modelId: string): Promise<{ provider: string; id: string }> {
+	async setModel(
+		provider: string,
+		modelId: string,
+	): Promise<{ provider: string; id: string; systemPromptName?: string }> {
 		const response = await this.send({ type: "set_model", provider, modelId });
 		return this.getData(response);
 	}
@@ -529,8 +546,16 @@ export class RpcClient {
 	/**
 	 * Execute a bash command.
 	 */
-	async bash(command: string): Promise<BashResult> {
-		const response = await this.send({ type: "bash", command });
+	async bash(command: string, options?: { excludeFromContext?: boolean }): Promise<BashResult> {
+		const response = await this.send({ type: "bash", command, excludeFromContext: options?.excludeFromContext });
+		return this.getData(response);
+	}
+
+	async navigateTree(
+		targetId: string,
+		options?: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string },
+	): Promise<{ cancelled: boolean; editorText?: string; aborted?: boolean; summaryEntry?: unknown }> {
+		const response = await this.send({ type: "navigate_tree", targetId, ...options });
 		return this.getData(response);
 	}
 
@@ -554,6 +579,11 @@ export class RpcClient {
 	 */
 	async exportHtml(outputPath?: string): Promise<{ path: string }> {
 		const response = await this.send({ type: "export_html", outputPath });
+		return this.getData(response);
+	}
+
+	async exportJsonl(outputPath?: string): Promise<{ path: string }> {
+		const response = await this.send({ type: "export_jsonl", outputPath });
 		return this.getData(response);
 	}
 
@@ -621,6 +651,11 @@ export class RpcClient {
 	 */
 	async setSessionName(name: string): Promise<void> {
 		await this.send({ type: "set_session_name", name });
+	}
+
+	async importJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
+		const response = await this.send({ type: "import_jsonl", inputPath, cwdOverride });
+		return this.getData(response);
 	}
 
 	/**
