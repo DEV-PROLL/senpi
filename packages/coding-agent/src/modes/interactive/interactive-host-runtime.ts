@@ -141,11 +141,15 @@ class RemoteInteractiveRuntime {
 			this.#beforeSessionInvalidate?.();
 			this.#remoteSession.abortLocalBash();
 			await this.#remoteSession.refresh();
-			if (options?.setup) {
-				await options.setup(this.#remoteSession.session.sessionManager);
-				await this.#remoteSession.refresh();
-			}
+			if (options?.setup) await options.setup(this.#remoteSession.session.sessionManager);
 			await this.#rebindSession?.();
+			if (options?.setup) {
+				this.#remoteSession.session.messages.splice(
+					0,
+					this.#remoteSession.session.messages.length,
+					...this.#remoteSession.session.sessionManager.buildSessionContext().messages,
+				);
+			}
 			if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 		}
 		return result;
@@ -233,12 +237,13 @@ function createRemoteSessionProxy(
 		state = { ...state, isBashRunning: localBashRunning || hostBashRunning };
 	};
 	const remoteSessionManager = new Proxy({} as SessionManager, {
-		get(_target, property, receiver) {
+		get(_target, property, _receiver) {
 			if (property === "appendLabelChange") {
 				return (entryId: string, label?: string) => void client.setLabel(entryId, label);
 			}
 			if (property === "getSessionName") return () => state.sessionName;
-			return Reflect.get(sessionManager, property, receiver);
+			const value = Reflect.get(sessionManager, property, sessionManager);
+			return typeof value === "function" ? value.bind(sessionManager) : value;
 		},
 	});
 	let streamingAssistant: Extract<AgentSession["messages"][number], { role: "assistant" }> | undefined;
