@@ -61,6 +61,13 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
 
+      # coding-agent tool tests resolve rg/fd via system binaries first and only
+      # download from GitHub releases as a fallback. Unauthenticated downloads
+      # are rate-limited on shared runner egress IPs, which flakes the release
+      # gate; provisioning the binaries here keeps the fallback unused.
+      - name: Provision ripgrep and fd
+        run: sudo apt-get update && sudo apt-get install -y ripgrep fd-find
+
       - name: Build all workspaces (so husky pre-commit type check resolves)
         run: npm run build
 
