@@ -2,7 +2,7 @@
 
 ## 2026-08-28 - Hydrate unnamed deferred setup entries
 
-- `get_state` ships deferred (not-yet-persisted) session entries whenever any exist, no longer gated on a session name, so unnamed custom-only setup mutations hydrate the shared-host proxy mirror before the first provider turn.
+- `get_state` ships deferred (not-yet-persisted) session entries whenever the session holds any entry beyond the auto-appended bootstrap kinds (`model_change`, `thinking_level_change`), no longer gated on a session name, so unnamed custom-only setup mutations hydrate the shared-host proxy mirror before the first provider turn. Plain fresh sessions still omit `entries`, preserving classic/socket state parity; a setup that appends ONLY a bare model/thinking change (and nothing else) stays host-side until the first turn.
 
 ## 2026-08-28 - Preserve derived state for verbatim setup entries
 
