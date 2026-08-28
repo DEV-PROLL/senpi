@@ -26,8 +26,12 @@ function error(id: string | undefined, command: string, code: string): RpcRespon
 /** Routes control messages and enforces a routing handle for every session command. */
 export class SessionCommandRouter {
 	private readonly bindings = new Map<string, RpcSessionBinding>();
-	/** Session handles opened by each connection, so a dropped socket releases exactly its own. */
-	private readonly sessionsByConnection = new Map<string, Set<string>>();
+	/** Session handles opened by each connection, with one count per attachment. */
+	private readonly sessionsByConnection = new Map<string, Map<string, number>>();
+	/** Opens currently awaiting runtime/binding setup, keyed by connection. */
+	private readonly opensByConnection = new Map<string, Set<Promise<void>>>();
+	/** Connections whose socket has already been detached. */
+	private readonly releasedConnections = new Set<string>();
 	private readonly registry: RpcSessionRegistry;
 	private readonly writer: SessionEventWriter;
 	private readonly defaults: Pick<
@@ -75,7 +79,7 @@ export class SessionCommandRouter {
 				success: true,
 				data: { sessions: this.registry.list() },
 			};
-		if (command.type === "open_session") return this.open(command);
+		if (command.type === "open_session") return this.openWithBarrier(command);
 		if (command.type === "close_session") return this.close(command);
 		if (controls.has(command.type)) return undefined;
 		if (!command.sessionId) return error(command.id, command.type, RPC_ERROR_MISSING_SESSION_ID);
@@ -113,7 +117,27 @@ export class SessionCommandRouter {
 		this.bindings.clear();
 	}
 
-	private async open(command: Extract<RpcCommand, { type: "open_session" }>): Promise<RpcResponse | undefined> {
+	private openWithBarrier(command: Extract<RpcCommand, { type: "open_session" }>): Promise<RpcResponse | undefined> {
+		const owner = this.writer.currentConnection();
+		if (owner === undefined) return this.open(command);
+		let resolveBarrier!: () => void;
+		const barrier = new Promise<void>((resolve) => {
+			resolveBarrier = resolve;
+		});
+		const opens = this.opensByConnection.get(owner) ?? new Set<Promise<void>>();
+		opens.add(barrier);
+		this.opensByConnection.set(owner, opens);
+		return this.open(command, owner).finally(() => {
+			resolveBarrier();
+			opens.delete(barrier);
+			if (opens.size === 0) this.opensByConnection.delete(owner);
+		});
+	}
+
+	private async open(
+		command: Extract<RpcCommand, { type: "open_session" }>,
+		owner?: string,
+	): Promise<RpcResponse | undefined> {
 		let opened: OpenRpcSession | undefined;
 		try {
 			opened = await this.registry.openSession({
@@ -131,10 +155,9 @@ export class SessionCommandRouter {
 			// A client that dies without close_session (terminal closed, SIGKILL, dropped
 			// SSH) still holds this handle's attachment and its path reservation. Remember
 			// which connection owns it so releaseConnection() can close exactly that.
-			const owner = this.writer.currentConnection();
 			if (owner !== undefined) {
-				const owned = this.sessionsByConnection.get(owner) ?? new Set<string>();
-				owned.add(openedSession.sessionId);
+				const owned = this.sessionsByConnection.get(owner) ?? new Map<string, number>();
+				owned.set(openedSession.sessionId, (owned.get(openedSession.sessionId) ?? 0) + 1);
 				this.sessionsByConnection.set(owner, owned);
 			}
 			if (!this.bindings.has(openedSession.sessionId)) {
@@ -148,6 +171,9 @@ export class SessionCommandRouter {
 						this.connectionOptions,
 					),
 				);
+			}
+			if (owner !== undefined && this.releasedConnections.has(owner)) {
+				await this.releaseOwnedSession(openedSession.sessionId);
 			}
 			const state = entry.runtime!.session;
 			this.writer.enqueue(opened.sessionId, {
@@ -180,36 +206,45 @@ export class SessionCommandRouter {
 	 * connection is still attached to keeps running and only the last owner tears it down.
 	 */
 	async releaseConnection(connectionId: string): Promise<void> {
+		this.releasedConnections.add(connectionId);
+		const opens = this.opensByConnection.get(connectionId);
+		if (opens) await Promise.all([...opens]);
 		const owned = this.sessionsByConnection.get(connectionId);
 		this.sessionsByConnection.delete(connectionId);
-		if (owned === undefined) return;
-		for (const sessionId of owned) {
-			// Headless completion contract: a turn survives its client's death and
-			// runs to settlement (the host lifecycle keeps the process alive on
-			// active turns even with zero connections). Releasing mid-turn aborts
-			// the run and seals the session before agent_settled reaches the
-			// lifecycle observer, leaking the busy counter so the host never
-			// idle-exits. Defer - never skip - the release until the turn settles,
-			// so the dropped owner's reservation still frees afterwards.
-			const live = this.registry.peek(sessionId);
-			const session = live?.state === "open" ? live.runtime?.session : undefined;
-			if (session?.isStreaming) {
-				let released = false;
-				const unsubscribe = session.subscribe((event) => {
-					if (event.type !== "agent_settled" && event.type !== "agent_idle") return;
-					if (released) return;
-					released = true;
-					unsubscribe();
-					void this.releaseOwnedSession(sessionId).catch((cause) => {
-						process.stderr.write(
-							`senpi rpc deferred release for session ${sessionId} failed: ${String(cause)}\n`,
-						);
-					});
-				});
-				continue;
-			}
-			await this.releaseOwnedSession(sessionId);
+		if (owned === undefined) {
+			this.releasedConnections.delete(connectionId);
+			return;
 		}
+		for (const [sessionId, count] of owned) {
+			for (let attachment = 0; attachment < count; attachment++) {
+				// Headless completion contract: a turn survives its client's death and
+				// runs to settlement (the host lifecycle keeps the process alive on
+				// active turns even with zero connections). Releasing mid-turn aborts
+				// the run and seals the session before agent_settled reaches the
+				// lifecycle observer, leaking the busy counter so the host never
+				// idle-exits. Defer - never skip - the release until the turn settles,
+				// so the dropped owner's reservation still frees afterwards.
+				const live = this.registry.peek(sessionId);
+				const session = live?.state === "open" ? live.runtime?.session : undefined;
+				if (session?.isStreaming) {
+					let released = false;
+					const unsubscribe = session.subscribe((event) => {
+						if (event.type !== "agent_settled" && event.type !== "agent_idle") return;
+						if (released) return;
+						released = true;
+						unsubscribe();
+						void this.releaseOwnedSession(sessionId).catch((cause) => {
+							process.stderr.write(
+								`senpi rpc deferred release for session ${sessionId} failed: ${String(cause)}\n`,
+							);
+						});
+					});
+					continue;
+				}
+				await this.releaseOwnedSession(sessionId);
+			}
+		}
+		this.releasedConnections.delete(connectionId);
 	}
 
 	/**
@@ -244,7 +279,15 @@ export class SessionCommandRouter {
 			// otherwise leaves a window where commands can enter the old handler.
 			const entry = this.registry.beginClose(command.sessionId);
 			const owner = this.writer.currentConnection();
-			if (owner !== undefined) this.sessionsByConnection.get(owner)?.delete(command.sessionId);
+			if (owner !== undefined) {
+				const owned = this.sessionsByConnection.get(owner);
+				const count = owned?.get(command.sessionId);
+				if (owned && count !== undefined) {
+					if (count === 1) owned.delete(command.sessionId);
+					else owned.set(command.sessionId, count - 1);
+					if (owned.size === 0) this.sessionsByConnection.delete(owner);
+				}
+			}
 			const response = {
 				id: command.id,
 				type: "response" as const,
