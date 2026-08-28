@@ -1,5 +1,12 @@
 # changes
 
+## 2026-08-28 - SessionManager reloadFromDisk for external/shared-host mutations
+
+### What changed
+
+- `packages/coding-agent/src/core/session-manager.ts`: added `reloadFromDisk()` to reload `fileEntries`, update internal maps/caches, and rebuild index from `this.sessionFile` if it exists.
+- Enables in-process mirrors (such as interactive host proxy) to synchronize with external changes like host-committed compactions.
+
 ## 2026-08-27 - Default retry policy phase-2 close-out (docs)
 
 ### What changed
