@@ -167,8 +167,10 @@ class RemoteInteractiveRuntime {
 			this.#beforeSessionInvalidate?.();
 			this.#remoteSession.abortLocalBash();
 			await this.#remoteSession.refresh();
-			options?.projectTrustContextFactory?.(this.#remoteSession.session.sessionManager.getCwd());
 			await this.#rebindSession?.();
+			// The shared host already resolved trust; this callback is retained for
+			// compatibility, but its result cannot override host-authoritative state.
+			options?.projectTrustContextFactory?.(this.#remoteSession.session.sessionManager.getCwd());
 			if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 		}
 		return result;
