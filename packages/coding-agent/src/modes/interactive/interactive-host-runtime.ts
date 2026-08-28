@@ -141,15 +141,29 @@ class RemoteInteractiveRuntime {
 			this.#beforeSessionInvalidate?.();
 			this.#remoteSession.abortLocalBash();
 			await this.#remoteSession.refresh();
-			if (options?.setup) await options.setup(this.#remoteSession.session.sessionManager);
-			await this.#rebindSession?.();
 			if (options?.setup) {
-				this.#remoteSession.session.messages.splice(
-					0,
-					this.#remoteSession.session.messages.length,
-					...this.#remoteSession.session.sessionManager.buildSessionContext().messages,
-				);
+				const capture = SessionManager.inMemory(this.#remoteSession.session.sessionManager.getCwd());
+				await options.setup(capture);
+				for (const entry of capture.getEntries()) {
+					if (entry.type === "custom_message") {
+						await this.#client.sendCustomMessage(
+							{
+								customType: entry.customType,
+								content: entry.content,
+								display: entry.display,
+								details: entry.details,
+							},
+							{ triggerTurn: false },
+						);
+					} else if (entry.type === "message" && entry.message.role === "user") {
+						await this.#client.appendUserMessage(entry.message.content);
+					} else {
+						throw new Error(`Shared-host setup cannot transport ${entry.type} entries`);
+					}
+				}
+				await this.#remoteSession.refresh();
 			}
+			await this.#rebindSession?.();
 			if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 		}
 		return result;
@@ -234,7 +248,9 @@ function createRemoteSessionProxy(
 	let localBashRunning = false;
 	let hostBashRunning = initialState.isBashRunning;
 	let sessionManager = local.sessionManager;
-	let settingsManager = local.settingsManager;
+	let settingsManager = SettingsManager.create(initialState.cwd, agentDir, {
+		projectTrusted: initialState.projectTrusted,
+	});
 	const updateBashState = () => {
 		state = { ...state, isBashRunning: localBashRunning || hostBashRunning };
 	};
@@ -518,12 +534,11 @@ function createRemoteSessionProxy(
 			const context = local.createReplacedSessionContext();
 			Object.defineProperty(context, "cwd", { value: state.cwd });
 			Object.defineProperty(context, "sessionManager", { value: remoteSessionManager });
-			context.sendMessage = (message, options) => {
-				const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
-				return client.prompt(content, {
-					streamingBehavior: options?.deliverAs === "steer" ? "steer" : "followUp",
+			context.sendMessage = (message, options) =>
+				client.sendCustomMessage(message, {
+					triggerTurn: options?.triggerTurn,
+					deliverAs: options?.deliverAs,
 				});
-			};
 			context.sendUserMessage = (content, options) => {
 				if (typeof content === "string") return client.prompt(content, { streamingBehavior: options?.deliverAs });
 				const text = content
@@ -531,7 +546,11 @@ function createRemoteSessionProxy(
 					.map((part) => part.text)
 					.join("\n");
 				const images = content.filter((part) => part.type === "image");
-				return client.prompt(text, { images, streamingBehavior: options?.deliverAs });
+				return client.prompt(text, {
+					images,
+					streamingBehavior: options?.deliverAs,
+					expandPromptTemplates: options?.expandPromptTemplates,
+				});
 			};
 			return context;
 		},
@@ -581,6 +600,7 @@ function stateFromRpc(state: {
 	sessionId: string;
 	sessionName?: string;
 	cwd: string;
+	projectTrusted: boolean;
 	steering: string[];
 	followUp: string[];
 	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;

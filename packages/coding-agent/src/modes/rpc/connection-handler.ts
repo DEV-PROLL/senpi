@@ -793,6 +793,7 @@ export function createRpcConnectionHandler(
 						images: command.images,
 						streamingBehavior: command.streamingBehavior,
 						thinkingLevel: command.thinkingLevel,
+						expandPromptTemplates: command.expandPromptTemplates,
 						source: "rpc",
 						promptDisposition: (nextDisposition) => {
 							disposition = nextDisposition;
@@ -810,6 +811,30 @@ export function createRpcConnectionHandler(
 						}
 					});
 				return undefined;
+			}
+
+			case "append_user_message": {
+				const content = command.content as Parameters<AgentSession["sendUserMessage"]>[0];
+				const message =
+					typeof content === "string"
+						? { role: "user" as const, content, timestamp: Date.now() }
+						: { role: "user" as const, content, timestamp: Date.now() };
+				session.sessionManager.appendMessage(message);
+				session.messages.push(message);
+				return success(id, "append_user_message");
+			}
+
+			case "send_custom_message": {
+				await session.sendCustomMessage(
+					{
+						customType: command.customType,
+						content: command.content as Parameters<AgentSession["sendCustomMessage"]>[0]["content"],
+						display: command.display,
+						details: command.details,
+					},
+					{ triggerTurn: command.triggerTurn, deliverAs: command.deliverAs },
+				);
+				return success(id, "send_custom_message");
 			}
 
 			case "steer": {

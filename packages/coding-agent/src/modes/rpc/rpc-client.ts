@@ -68,6 +68,7 @@ type PromptOptions = {
 	thinkingLevel?: ThinkingLevel;
 	promptDisposition?: (disposition: PromptDisposition) => void;
 	preflightResult?: (success: boolean) => void;
+	expandPromptTemplates?: boolean;
 };
 
 export type RpcProviderAccountEvent = RpcAuthAccountsChangedEvent | RpcAccountFailoverEvent;
@@ -346,6 +347,9 @@ export class RpcClient {
 				...(options.images ? { images: options.images } : {}),
 				...(options.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
 				...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+				...(options.expandPromptTemplates !== undefined
+					? { expandPromptTemplates: options.expandPromptTemplates }
+					: {}),
 			},
 			true,
 			{
@@ -366,6 +370,17 @@ export class RpcClient {
 		if (!response.success) {
 			throw new Error((response as Extract<RpcResponse, { success: false }>).error);
 		}
+	}
+
+	async appendUserMessage(content: unknown): Promise<void> {
+		await this.send({ type: "append_user_message", content });
+	}
+
+	async sendCustomMessage<T = unknown>(
+		message: { customType: string; content: unknown; display: boolean; details?: T },
+		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
+	): Promise<void> {
+		await this.send({ type: "send_custom_message", ...message, ...options });
 	}
 
 	/**

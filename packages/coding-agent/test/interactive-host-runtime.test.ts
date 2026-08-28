@@ -517,6 +517,45 @@ describe("interactive host runtime", () => {
 			await fake.close();
 		}
 	});
+	it("transports setup mutations to the authoritative host before rebind", async () => {
+		const qa = scratch("setup-host");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		const observer = new RpcClient({ socketPath: qa.socket });
+		await observer.start();
+		try {
+			await runtime.newSession({
+				setup: async (manager) => {
+					manager.appendCustomMessageEntry("setup-trace", "SETUP_TRACE", true, { marker: true });
+				},
+			});
+			const listed = await observer.listSessions();
+			const hostSession = listed.find((entry) => entry.status === "open");
+			if (!hostSession?.sessionPath) throw new Error("Expected host session path");
+			await observer.openSession({ sessionPath: hostSession.sessionPath, cwd: qa.cwd });
+			const messages = await observer.getMessages();
+			expect(messages).toContainEqual(
+				expect.objectContaining({ role: "custom", customType: "setup-trace", content: "SETUP_TRACE" }),
+			);
+		} finally {
+			await observer.stop();
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("refreshes the proxy after new and fork replacements", async () => {
 		const qa = scratch("replace");
 		const fake = await startFakeModelServer();

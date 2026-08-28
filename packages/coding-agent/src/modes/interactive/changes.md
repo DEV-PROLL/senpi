@@ -1,5 +1,7 @@
 # changes
 
+- Shared-host setup callbacks now run against a detached capture and transport appended custom/user messages to the authoritative host before proxy refresh and rebind.
+
 - Shared-host proxy refresh now carries the host's project trust state into local settings, preventing untrusted project-scoped shell prefixes from leaking into client-local bash (NF-3).
 - Shared-host setup callbacks refresh the replacement proxy's mirrored agent messages after setup mutations.
 - Replacement callback contexts route sendMessage/sendUserMessage through the shared host prompt path instead of retaining bootstrap-session closures.
