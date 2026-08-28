@@ -16,6 +16,7 @@
  */
 
 import * as crypto from "node:crypto";
+import { existsSync } from "node:fs";
 import { basename, dirname, extname } from "node:path";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
 import { VERSION } from "../../config.ts";
@@ -165,6 +166,9 @@ export function buildRpcSessionState(session: AgentSession): RpcSessionState {
 		sessionName: session.sessionName,
 		cwd: session.sessionManager.getCwd(),
 		projectTrusted: session.settingsManager?.isProjectTrusted?.() ?? true,
+		...(session.sessionName && session.sessionFile && !existsSync(session.sessionFile)
+			? { entries: session.sessionManager.getEntries() }
+			: {}),
 		steering: typeof session.getSteeringMessages === "function" ? [...session.getSteeringMessages()] : [],
 		followUp: typeof session.getFollowUpMessages === "function" ? [...session.getFollowUpMessages()] : [],
 		ordered: [
@@ -825,11 +829,7 @@ export function createRpcConnectionHandler(
 			}
 
 			case "append_session_entry": {
-				(
-					session.sessionManager as unknown as {
-						_appendEntry(entry: import("../../core/session-manager.ts").SessionEntry): void;
-					}
-				)._appendEntry(command.entry);
+				session.sessionManager.appendEntry(command.entry);
 				if (command.entry.type === "message") session.messages.push(command.entry.message);
 				return success(id, "append_session_entry");
 			}

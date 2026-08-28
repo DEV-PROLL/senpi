@@ -310,7 +310,12 @@ function createRemoteSessionProxy(
 			projectTrusted: nextState.projectTrusted,
 		});
 		if (nextState.sessionFile) {
+			// SessionManager.open retains the explicit path even when the host has
+			// deferred creating the file for a setup-only session.
 			sessionManager = SessionManager.open(nextState.sessionFile, undefined, nextState.cwd);
+			if (nextState.entries?.length && !sessionManager.getEntries().length) {
+				for (const entry of nextState.entries) sessionManager.appendEntry(entry);
+			}
 			messages = sessionManager.buildSessionContext().messages;
 		} else {
 			messages = await client.getMessages();
@@ -589,6 +594,7 @@ function stateFromRpc(state: {
 	sessionName?: string;
 	cwd: string;
 	projectTrusted: boolean;
+	entries?: import("../../core/session-manager.ts").SessionEntry[];
 	steering: string[];
 	followUp: string[];
 	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;

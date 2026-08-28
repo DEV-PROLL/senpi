@@ -1044,6 +1044,28 @@ export class SessionManager {
 		this._persist(residentEntry);
 	}
 
+	/**
+	 * Append an already-materialized entry without rewriting its identity or tree
+	 * fields. This is the transport seam for entries captured by another manager.
+	 */
+	appendEntry(entry: SessionEntry): void {
+		this._appendEntry(entry);
+		const order = this.entryOrdersById.get(entry.id);
+		if (entry.type === "message" && order !== undefined) {
+			this.messageEntryPositions.set(entry.message, { entryId: entry.id, order });
+		}
+		if (entry.type === "session_info") this.sessionNameCache = entry.name?.trim() || undefined;
+		if (entry.type === "label") {
+			if (entry.label) {
+				this.labelsById.set(entry.targetId, entry.label);
+				this.labelTimestampsById.set(entry.targetId, entry.timestamp);
+			} else {
+				this.labelsById.delete(entry.targetId);
+				this.labelTimestampsById.delete(entry.targetId);
+			}
+		}
+	}
+
 	private _materializeEntry(entry: SessionEntry): SessionEntry {
 		const materialized = this.residentStore.materialize(entry);
 		if (materialized.type === "message") {

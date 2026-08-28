@@ -541,12 +541,24 @@ describe("interactive host runtime", () => {
 					manager.appendCustomEntry("setup-state", { marker: true });
 					manager.appendSessionInfo("setup session");
 				},
+				withSession: async (ctx) => {
+					expect(ctx.sessionManager.getEntries()).toEqual(
+						expect.arrayContaining([
+							expect.objectContaining({ type: "custom", customType: "setup-state" }),
+							expect.objectContaining({ type: "session_info", name: "setup session" }),
+						]),
+					);
+				},
 			});
 			const listed = await observer.listSessions();
 			const hostSession = listed.find((entry) => entry.status === "open");
 			if (!hostSession?.sessionPath) throw new Error("Expected host session path");
 			await observer.openSession({ sessionPath: hostSession.sessionPath, cwd: qa.cwd });
 			const entries = await observer.getEntries();
+			const state = await observer.getState();
+			expect(state.sessionName).toBe("setup session");
+			expect(runtime.session.sessionManager.getEntries()).toEqual(entries.entries);
+			expect(runtime.session.sessionManager.getSessionName()).toBe("setup session");
 			expect(entries.entries).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({ type: "custom", customType: "setup-state", data: { marker: true } }),
