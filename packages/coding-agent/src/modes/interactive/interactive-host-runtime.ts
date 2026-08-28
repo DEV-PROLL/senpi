@@ -214,6 +214,7 @@ function createRemoteSessionProxy(
 				...state,
 				steering: [...wireEvent.steering],
 				followUp: [...wireEvent.followUp],
+				ordered: [...wireEvent.ordered],
 				pendingMessageCount: wireEvent.steering.length + wireEvent.followUp.length,
 			};
 		}
