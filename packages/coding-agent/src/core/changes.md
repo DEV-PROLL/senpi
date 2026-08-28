@@ -1,5 +1,9 @@
 # changes
 
+## 2026-08-28 - Credential pool final-account removal
+
+- Removing the last stored account now deletes the provider credential instead of leaving stale auth.json data.
+
 ## 2026-08-28 - SessionManager reloadFromDisk for external/shared-host mutations
 
 ### What changed
