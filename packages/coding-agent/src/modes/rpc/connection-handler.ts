@@ -19,7 +19,7 @@ import * as crypto from "node:crypto";
 import { basename, dirname, extname } from "node:path";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
 import { VERSION } from "../../config.ts";
-import type { AgentSession } from "../../core/agent-session.ts";
+import type { AgentSession, PromptDisposition } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
 import {
@@ -757,17 +757,23 @@ export function createRpcConnectionHandler(
 				}
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
+				// The disposition is captured for the wire: AgentSession always fires promptDisposition
+				// strictly before preflightResult(true), so the success frame carries the final value.
 				let preflightSucceeded = false;
+				let disposition: PromptDisposition | undefined;
 				void session
 					.prompt(command.message, {
 						images: command.images,
 						streamingBehavior: command.streamingBehavior,
 						thinkingLevel: command.thinkingLevel,
 						source: "rpc",
+						promptDisposition: (nextDisposition) => {
+							disposition = nextDisposition;
+						},
 						preflightResult: (didSucceed) => {
 							if (didSucceed && !preflightSucceeded) {
 								preflightSucceeded = true;
-								output(success(id, "prompt"));
+								output(success(id, "prompt", { ...(disposition !== undefined ? { disposition } : {}) }));
 							}
 						},
 					})

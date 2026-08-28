@@ -1,5 +1,26 @@
 # changes
 
+## Shared-host sessions await async session reads and render thinking level from the event (2026-08-28)
+
+### What changed
+
+- `interactive-host-runtime.ts`: new `InteractiveSession` type — the TUI-facing session contract that widens `cycleThinkingLevel`, `getAvailableThinkingLevels`, `getSessionStats`, and `getUserMessagesForForking` to `T | Promise<T>` so the shared-host proxy is honestly typed. The proxy's `prompt` now forwards `streamingBehavior`, `thinkingLevel`, and the optimistic-echo `promptDisposition`/`preflightResult` callbacks across the wire, and fire-and-forget setters report RPC failures through a new `interactive_host_action_failed` warning instead of swallowing them.
+- `interactive-mode.ts`: the Shift+Tab handler awaits the cycle and only renders the unsupported-model branch; the level status/footer render from the `thinking_level_changed` event (single path for local, remote, and other attached clients). `/settings` thinking levels, `/fork` message list, and `/session` stats await their reads. No more `Thinking level: [object Promise]`.
+- `components/footer.ts`, `grok/chrome.ts`, `grok/footer.ts`: session parameters accept `InteractiveSession`.
+
+### Why
+
+- Since the shared RPC host became the default for interactive sessions, the proxy answered these four reads with Promises while the TUI consumed them synchronously: Shift+Tab printed `[object Promise]`, the settings selector lost low/med/high options, and `/fork` + `/session` broke. Event-driven level rendering also fixes multi-client convergence (desktop + terminal on one host session).
+
+### Why an extension could not handle it
+
+- The session contract and key-dispatch handlers are core interactive wiring; extensions cannot retype or resequence them.
+
+### Expected merge conflict zones
+
+- MEDIUM: `interactive-mode.ts` handler/event-case edits and the session getter type.
+- LOW: proxy setter overrides in `interactive-host-runtime.ts`.
+
 ## Footer shows the active credential account (2026-08-27)
 
 ### What changed

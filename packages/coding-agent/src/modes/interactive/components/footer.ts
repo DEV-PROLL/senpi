@@ -4,7 +4,7 @@ import type { Credential } from "@earendil-works/pi-ai";
 import { rendezvousOrder } from "@earendil-works/pi-ai/auth/pool/select";
 import { listSlots } from "@earendil-works/pi-ai/auth/pool/slots";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { AgentSession } from "../../../core/agent-session.ts";
+import type { InteractiveSession } from "../interactive-host-runtime.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import { theme } from "../theme/theme.ts";
 import { type FooterSegment, planFooterLayout } from "./footer-layout.ts";
@@ -96,16 +96,16 @@ function colorRightSide(text: string): string {
  * Computes token/context stats from session, gets git branch and extension statuses from provider.
  */
 export class FooterComponent implements Component {
-	private session: AgentSession;
+	private session: InteractiveSession;
 	private footerData: ReadonlyFooterDataProvider;
 	private autoCompactEnabled = true;
 
-	constructor(session: AgentSession, footerData: ReadonlyFooterDataProvider) {
+	constructor(session: InteractiveSession, footerData: ReadonlyFooterDataProvider) {
 		this.session = session;
 		this.footerData = footerData;
 	}
 
-	setSession(session: AgentSession): void {
+	setSession(session: InteractiveSession): void {
 		this.session = session;
 	}
 

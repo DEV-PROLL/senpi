@@ -108,6 +108,17 @@ export async function startFakeModelServer(): Promise<FakeModelServer> {
 				text,
 			});
 			if (req.url?.includes("/messages")) {
+				// Deterministic slow lane: prompts containing "hold-open-<ms>" keep the
+				// response (and therefore the session's streaming state) open for <ms>.
+				const holdOpenMs = /hold-open-(\d+)/.exec(requestText(body))?.[1];
+				if (holdOpenMs) {
+					// No abort listener: the response stays pending by design; the res.destroyed
+					// guard keeps a late fire quiet after the client gave up.
+					setTimeout(() => {
+						if (!res.destroyed) writeAnthropicSse(res, responseTextFor(body), model ?? MOCK_MODEL);
+					}, Number(holdOpenMs));
+					return;
+				}
 				writeAnthropicSse(res, responseTextFor(body), model ?? MOCK_MODEL);
 				return;
 			}

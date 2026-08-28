@@ -177,6 +177,97 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("delivers prompt disposition and preflight callbacks before the canonical user message_start", async () => {
+		const qa = scratch("disposition");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+			onWarning: vi.fn(),
+		});
+		try {
+			const order: string[] = [];
+			const promptDisposition = vi.fn((disposition: string) => {
+				order.push(`disposition:${disposition}`);
+			});
+			const preflightResult = vi.fn((success: boolean) => {
+				order.push(`preflight:${success}`);
+			});
+			const settled = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type === "message_start" && event.message.role === "user") order.push("event:message_start");
+					if (event.type !== "agent_settled") return;
+					unsubscribe();
+					resolve();
+				});
+			});
+			await runtime.session.prompt("disposition-probe", { promptDisposition, preflightResult });
+			await settled;
+			expect(promptDisposition).toHaveBeenCalledWith("started");
+			expect(preflightResult).toHaveBeenCalledWith(true);
+			expect(order).toEqual(["disposition:started", "preflight:true", "event:message_start"]);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("forwards streamingBehavior so a mid-stream prompt queues instead of failing", async () => {
+		const qa = scratch("queued");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+			onWarning: vi.fn(),
+		});
+		try {
+			const firstSettled = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type !== "agent_settled") return;
+					unsubscribe();
+					resolve();
+				});
+			});
+			void runtime.session.prompt("hold-open-1500 first-turn");
+			const streamingDeadline = Date.now() + 10_000;
+			while (!runtime.session.isStreaming) {
+				if (Date.now() > streamingDeadline) throw new Error("session never entered streaming state");
+				await new Promise((resolve) => setTimeout(resolve, 25));
+			}
+			const queuedDisposition = vi.fn();
+			const queuedPreflight = vi.fn();
+			await runtime.session.prompt("queued second turn", {
+				streamingBehavior: "followUp",
+				promptDisposition: queuedDisposition,
+				preflightResult: queuedPreflight,
+			});
+			await firstSettled;
+			expect(queuedDisposition).toHaveBeenCalledWith("queued");
+			expect(queuedPreflight).toHaveBeenCalledWith(true);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("falls back locally with a typed warning when the host remains unreachable", async () => {
 		const qa = scratch("fallback");
 		const fake = await startFakeModelServer();

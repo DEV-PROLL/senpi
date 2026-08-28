@@ -1,5 +1,5 @@
 import type { Component, EditorOptions, EditorTheme, TUI } from "@earendil-works/pi-tui";
-import type { AgentSession } from "../../../core/agent-session.ts";
+import type { InteractiveSession } from "../interactive-host-runtime.ts";
 import type { WorkingIndicatorOptions } from "../../../core/extensions/index.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import type { KeybindingsManager } from "../../../core/keybindings.ts";
@@ -14,7 +14,7 @@ import { GROK_GLYPHS } from "./palette.ts";
 import { GrokWelcomeCard } from "./welcome-card.ts";
 
 export interface InteractiveFooter extends Component {
-	setSession(session: AgentSession): void;
+	setSession(session: InteractiveSession): void;
 	setAutoCompactEnabled(enabled: boolean): void;
 	invalidate(): void;
 	dispose(): void;
@@ -33,7 +33,7 @@ export interface InteractiveChrome {
 	readonly toolPresentation: ToolExecutionPresentation;
 	createBaseEditor(context: { ui: TUI; keybindings: KeybindingsManager; editorOptions: EditorOptions }): CustomEditor;
 	getEditorTheme(): EditorTheme;
-	createFooter(session: AgentSession, footerData: ReadonlyFooterDataProvider): InteractiveFooter;
+	createFooter(session: InteractiveSession, footerData: ReadonlyFooterDataProvider): InteractiveFooter;
 	createWelcomeContent(appName: string, version: string): Component;
 	createWorkingIndicator(ui: TUI, message: string, indicator?: WorkingIndicatorOptions): WorkingStatusIndicator;
 	getEditorBorderColor(context: EditorBorderContext): (text: string) => string;
@@ -133,7 +133,7 @@ export class GrokChrome implements InteractiveChrome {
 		};
 	}
 
-	createFooter(session: AgentSession, footerData: ReadonlyFooterDataProvider): InteractiveFooter {
+	createFooter(session: InteractiveSession, footerData: ReadonlyFooterDataProvider): InteractiveFooter {
 		return new GrokFooter(session, footerData);
 	}
 

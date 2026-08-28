@@ -8,7 +8,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createConnection, type Socket } from "node:net";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import type { SessionStats } from "../../core/agent-session.ts";
+import type { PromptDisposition, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { ServiceTier } from "../../core/extensions/builtin/service-tier.ts";
@@ -78,8 +78,15 @@ export class RpcClient {
 	private socket: Socket | null = null;
 	private stopReadingStdout: (() => void) | null = null;
 	private eventListeners: RpcEventListener[] = [];
-	private pendingRequests: Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }> =
-		new Map();
+	private pendingRequests: Map<
+		string,
+		{
+			resolve: (response: RpcResponse) => void;
+			reject: (error: Error) => void;
+			onResponse?: (response: RpcResponse) => void;
+			onReject?: (error: Error) => void;
+		}
+	> = new Map();
 	private requestId = 0;
 	private sessionId: string | undefined;
 	private stderr = "";
@@ -265,9 +272,9 @@ export class RpcClient {
 		modelId?: string;
 		thinkingLevel?: ThinkingLevel;
 		permissionPreset?: string;
-	}): Promise<{ sessionId: string; state: RpcSessionState }> {
+	}): Promise<{ sessionId: string; state: RpcSessionState; attached?: boolean }> {
 		const response = await this.send({ type: "open_session", ...options }, false);
-		const opened = this.getData<{ sessionId: string; state: RpcSessionState }>(response);
+		const opened = this.getData<{ sessionId: string; state: RpcSessionState; attached?: boolean }>(response);
 		this.sessionId = opened.sessionId;
 		return opened;
 	}
@@ -305,9 +312,50 @@ export class RpcClient {
 	 * Send a prompt to the agent.
 	 * Returns immediately after sending; use onEvent() to receive streaming events.
 	 * Use waitForIdle() to wait for completion.
+	 *
+	 * The disposition/preflight callbacks mirror AgentSession's local prompt contract:
+	 * they fire synchronously while the response frame is dispatched — before any
+	 * queued message_start event — so optimistic-echo eligibility is settled in wire
+	 * order. A success response without a disposition (older host) maps to "handled"
+	 * so the echo degrades to canonical-only rendering instead of double-rendering.
 	 */
-	async prompt(message: string, images?: ImageContent[]): Promise<void> {
-		await this.send({ type: "prompt", message, images });
+	async prompt(
+		message: string,
+		options?: {
+			images?: ImageContent[];
+			streamingBehavior?: "steer" | "followUp";
+			thinkingLevel?: ThinkingLevel;
+			promptDisposition?: (disposition: PromptDisposition) => void;
+			preflightResult?: (success: boolean) => void;
+		},
+	): Promise<void> {
+		const response = await this.send(
+			{
+				type: "prompt",
+				message,
+				...(options?.images ? { images: options.images } : {}),
+				...(options?.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
+				...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+			},
+			true,
+			{
+				onResponse: (wireResponse) => {
+					if (!wireResponse.success) {
+						options?.preflightResult?.(false);
+						return;
+					}
+					const data = (wireResponse as { data?: { disposition?: PromptDisposition } }).data;
+					options?.promptDisposition?.(data?.disposition ?? "handled");
+					options?.preflightResult?.(true);
+				},
+				onReject: () => {
+					options?.preflightResult?.(false);
+				},
+			},
+		);
+		if (!response.success) {
+			throw new Error((response as Extract<RpcResponse, { success: false }>).error);
+		}
 	}
 
 	/**
@@ -670,7 +718,7 @@ export class RpcClient {
 	 */
 	async promptAndWait(message: string, images?: ImageContent[], timeout = 60000): Promise<JsonAgentSessionEvent[]> {
 		const eventsPromise = this.collectEvents(timeout);
-		await this.prompt(message, images);
+		await this.prompt(message, images ? { images } : undefined);
 		return eventsPromise;
 	}
 
@@ -686,6 +734,10 @@ export class RpcClient {
 			if (data.type === "response" && data.id && this.pendingRequests.has(data.id)) {
 				const pending = this.pendingRequests.get(data.id)!;
 				this.pendingRequests.delete(data.id);
+				// Response hooks run synchronously inside the frame dispatch so ordering-sensitive
+				// contracts (e.g. optimistic-echo disposition) settle before the NEXT frame —
+				// never through the microtask scheduled by resolve().
+				pending.onResponse?.(data as RpcResponse);
 				pending.resolve(data as RpcResponse);
 				return;
 			}
@@ -707,12 +759,17 @@ export class RpcClient {
 
 	private rejectPendingRequests(error: Error): void {
 		for (const pending of this.pendingRequests.values()) {
+			pending.onReject?.(error);
 			pending.reject(error);
 		}
 		this.pendingRequests.clear();
 	}
 
-	private async send(command: RpcCommandBody, route = true): Promise<RpcResponse> {
+	private async send(
+		command: RpcCommandBody,
+		route = true,
+		hooks?: { onResponse?: (response: RpcResponse) => void; onReject?: (error: Error) => void },
+	): Promise<RpcResponse> {
 		const childProcess = this.process;
 		const stream = this.socket ?? childProcess?.stdin;
 		if (!stream) {
@@ -741,8 +798,11 @@ export class RpcClient {
 
 		return new Promise((resolve, reject) => {
 			const timeout = setTimeout(() => {
+				const pending = this.pendingRequests.get(id);
 				this.pendingRequests.delete(id);
-				reject(new Error(`Timeout waiting for response to ${command.type}. Stderr: ${this.stderr}`));
+				const timeoutError = new Error(`Timeout waiting for response to ${command.type}. Stderr: ${this.stderr}`);
+				pending?.onReject?.(timeoutError);
+				reject(timeoutError);
 			}, 30000);
 
 			this.pendingRequests.set(id, {
@@ -754,6 +814,8 @@ export class RpcClient {
 					clearTimeout(timeout);
 					reject(error);
 				},
+				...(hooks?.onResponse ? { onResponse: hooks.onResponse } : {}),
+				...(hooks?.onReject ? { onReject: hooks.onReject } : {}),
 			});
 
 			try {
