@@ -1,5 +1,12 @@
 # changes
 
+## 2026-08-28 - Credential pool parity follow-ups
+
+- Half-open leases now admit their holder exactly once for stored and environment probes.
+- Named `models.json` credential slots participate in rotation, policy cooldown bases drive initial backoff,
+  full streams preserve session affinity, and account health follows the auth storage directory.
+- Bare-family fallback opt-outs normalize provider namespaces, and the shipped `"*"` lane is accepted by validation.
+
 ## 2026-08-28 - Wildcard fallback lane for chainless models
 
 ### What changed

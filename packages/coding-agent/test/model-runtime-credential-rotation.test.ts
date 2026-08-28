@@ -217,6 +217,28 @@ describe("credential rotation over a pooled provider", () => {
 		expect(second.some((slot) => slot.name === "env")).toBe(false);
 	});
 
+	test("policy cooldown base controls the first rate limit cooldown", async () => {
+		const attempted: string[] = [];
+		await collect(
+			streamWithCredentialRotation({
+				sources: {
+					providerId: "test",
+					credential: pooled(),
+					env: () => undefined,
+					repository,
+					policy: { cooldownBaseMs: 5, cooldownCapMs: 100 },
+					now: () => NOW,
+				},
+				runAttempt: (slot) => {
+					attempted.push(slot.name);
+					return stream(startEvent(), errorEvent("429 rate limited"));
+				},
+			}),
+		).catch(() => undefined);
+		const state = await repository.listSlots("test", "stored");
+		expect(state[attempted[0] ?? ""]?.blockedUntil).toBe(NOW + 5);
+	});
+
 	test("policy cooldown cap is applied to persisted rate limits", async () => {
 		const attempted: string[] = [];
 		await collect(
@@ -238,6 +260,27 @@ describe("credential rotation over a pooled provider", () => {
 		).catch(() => undefined);
 		const state = await repository.listSlots("test", "stored");
 		expect(state[attempted[0] ?? ""]?.blockedUntil).toBe(NOW + 10);
+	});
+
+	test("named policy slots join stored credential rotation", async () => {
+		const attempted: string[] = [];
+		await collect(
+			streamWithCredentialRotation({
+				sources: {
+					providerId: "test",
+					credential: pooled(),
+					env: () => "named-key",
+					repository,
+					policy: { slots: { broker: { value: "named-key" } } },
+				},
+				affinityKey: "named-slot",
+				runAttempt: (slot) => {
+					attempted.push(slot.name);
+					return stream(startEvent(), textEvent("ok"));
+				},
+			}),
+		);
+		expect(attempted).toContain("broker");
 	});
 
 	test("successful pooled request completes after selection", async () => {
