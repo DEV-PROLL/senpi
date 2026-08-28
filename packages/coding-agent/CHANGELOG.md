@@ -50,6 +50,9 @@
 
 ### Fixed
 
+- Shared-host `/resume` now completes for sessions with blocked or paused Goals and refreshes the interactive proxy's
+  session identity, manager, history, and token context instead of timing out or returning to the empty bootstrap
+  composer with a stale `0/1M` footer.
 - Shared interactive host sessions no longer print `Thinking level: [object Promise]` on Shift+Tab: the TUI awaits the four session reads the shared-host proxy answers over RPC (`cycleThinkingLevel`, `getAvailableThinkingLevels`, `getSessionStats`, `getUserMessagesForForking`), the thinking-level status and footer render from the `thinking_level_changed` event so every attached client converges, and `/settings` thinking options, `/fork`, and `/session` work again.
 - User messages no longer render twice in shared-host sessions: the RPC prompt success response now carries `data.disposition` (`started`/`queued`/`handled`), delivered through client response hooks that run synchronously inside frame dispatch, so optimistic user echoes resolve exactly like the local path; `streamingBehavior` and `thinkingLevel` are forwarded again, so mid-stream submissions queue instead of failing.
 - Resuming a session that a live shared host already holds no longer fails with `session_path_in_use`: `open_session` on a fully-open path now attaches to the existing session (same handle, `attached: true`), and the runtime is torn down only when the last attachment closes.

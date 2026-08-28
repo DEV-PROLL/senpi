@@ -786,6 +786,23 @@ describe("goal extension resume-on-restart prompt (codex parity)", () => {
 		expect(sent).toHaveLength(0);
 	});
 
+	it("does not block an RPC session switch on the stopped-goal resume prompt", async () => {
+		const { tools, handlers, sent } = createGoalHarness();
+		const prompts: string[] = [];
+		const selectingCtx = await makeSelectingCtx(prompts, (options) => options[0], "thread-blocked-rpc-resume");
+		const ctx = { ...selectingCtx, mode: "rpc" } as ExtensionContext;
+		await tools.get("create_goal")?.execute("c1", { objective: "Finish the migration" }, undefined, undefined, ctx);
+		await tools
+			.get("update_goal")
+			?.execute("u1", { status: "blocked", reason: "provider error" }, undefined, undefined, ctx);
+
+		await runHandlers(handlers, "session_start", { type: "session_start", reason: "resume" }, ctx);
+
+		expect(prompts).toHaveLength(0);
+		expect((await readGoal(storeRefFor(ctx)))?.status).toBe("blocked");
+		expect(sent).toHaveLength(0);
+	});
+
 	it("never prompts for a completed goal on resume", async () => {
 		const { tools, handlers } = createGoalHarness();
 		const prompts: string[] = [];
