@@ -1,5 +1,11 @@
 # Local fork changes
 
+## Shared RPC attachment lifecycle (2026-08-28)
+
+- Socket RPC dispatch remains re-entrant so extension UI responses can resolve in-flight commands.
+- Shared-path session attachments retain one runtime binding and only emit terminal closure on the final attachment.
+
+
 ## Bun-compiled runtime assets (2026-08-27)
 
 ### What changed

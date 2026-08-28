@@ -202,6 +202,40 @@ function normalizeResponse(value: RecordValue): RecordValue {
 }
 
 describe("RPC Unix-socket multi-connection host", () => {
+	it("dispatches a reentrant UI response while switch_session is in flight", async () => {
+		const qa = scratch("reent");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const child = spawnRpc(
+			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL],
+			qa,
+		);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const peer = await connectPeer(qa.socketPath);
+		try {
+			const opened = await peer.peer.request({ id: "open", type: "open_session", cwd: qa.cwd });
+			const ui = peer.peer.waitFor((value) => value.type === "extension_ui_request", 2_000).catch(() => undefined);
+			const switched = peer.peer.request(
+				{
+					id: "switch",
+					type: "switch_session",
+					sessionId: openedSessionId(opened),
+					sessionPath: join(qa.sessionDir, "switch.jsonl"),
+				},
+				5_000,
+			);
+			const request = await ui;
+			if (request) peer.peer.write({ type: "extension_ui_response", id: request.id, confirmed: true });
+			await expect(switched).resolves.toMatchObject({ success: true, command: "switch_session" });
+			expect(opened).toMatchObject({ success: true });
+		} finally {
+			peer.peer.close();
+			peer.socket.destroy();
+			await fake.close();
+			await stopChild(child);
+		}
+	});
+
 	it("parses socket listeners as multi-session RPC", () => {
 		expect(parseArgs(["--mode", "rpc", "--listen", "unix:///tmp/senpi.sock"])).toMatchObject({
 			mode: "rpc",
@@ -396,6 +430,129 @@ describe("RPC Unix-socket multi-connection host", () => {
 		} finally {
 			second.peer.close();
 			second.socket.destroy();
+			await fake.close();
+			await stopChild(child);
+		}
+	});
+
+	it("keeps the surviving attachment bound after the other explicitly closes", async () => {
+		const qa = scratch("att");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const child = spawnRpc(
+			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL],
+			qa,
+		);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const a = await connectPeer(qa.socketPath);
+		const b = await connectPeer(qa.socketPath);
+		try {
+			const opened = await a.peer.request({
+				id: "open",
+				type: "open_session",
+				cwd: qa.cwd,
+				sessionPath: join(qa.sessionDir, "att.jsonl"),
+			});
+			const sessionId = openedSessionId(opened);
+			await expect(
+				b.peer.request({
+					id: "attach",
+					type: "open_session",
+					cwd: qa.cwd,
+					sessionPath: join(qa.sessionDir, "att.jsonl"),
+				}),
+			).resolves.toMatchObject({ success: true });
+			await expect(a.peer.request({ id: "close-a", type: "close_session", sessionId })).resolves.toMatchObject({
+				success: true,
+			});
+			const event = b.peer.waitFor((value) => value.type === "agent_settled" && value.sessionId === sessionId);
+			await expect(
+				b.peer.request({ id: "prompt-b", type: "prompt", sessionId, message: "survivor" }),
+			).resolves.toMatchObject({ success: true });
+			await expect(event).resolves.toMatchObject({ sessionId });
+			expect(
+				b.peer.messages.filter((value) => value.type === "agent_settled" && value.sessionId === sessionId),
+			).toHaveLength(1);
+		} finally {
+			a.peer.close();
+			a.socket.destroy();
+			b.peer.close();
+			b.socket.destroy();
+			await fake.close();
+			await stopChild(child);
+		}
+	});
+
+	it("does not close or stop events for the surviving attachment", async () => {
+		const qa = scratch("live");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const child = spawnRpc(
+			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL],
+			qa,
+		);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const a = await connectPeer(qa.socketPath);
+		const b = await connectPeer(qa.socketPath);
+		try {
+			const path = join(qa.sessionDir, "live.jsonl");
+			const opened = await a.peer.request({ id: "open", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			const sessionId = openedSessionId(opened);
+			await b.peer.request({ id: "attach", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			await a.peer.request({ id: "close", type: "close_session", sessionId });
+			await expect(b.peer.request({ id: "state", type: "get_state", sessionId })).resolves.toMatchObject({
+				success: true,
+			});
+			expect(b.peer.messages.some((value) => value.type === "session_closed" && value.sessionId === sessionId)).toBe(
+				false,
+			);
+		} finally {
+			a.peer.close();
+			a.socket.destroy();
+			b.peer.close();
+			b.socket.destroy();
+			await fake.close();
+			await stopChild(child);
+		}
+	});
+
+	it("reopens the path after explicit close and dropped surviving attachment", async () => {
+		const qa = scratch("reopen");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const child = spawnRpc(
+			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL],
+			qa,
+		);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const a = await connectPeer(qa.socketPath);
+		const b = await connectPeer(qa.socketPath);
+		const path = join(qa.sessionDir, "reopen.jsonl");
+		try {
+			const opened = await a.peer.request({ id: "open", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			const sessionId = openedSessionId(opened);
+			await b.peer.request({ id: "attach", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			await a.peer.request({ id: "close", type: "close_session", sessionId });
+			b.peer.close();
+			b.socket.destroy();
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			const c = await connectPeer(qa.socketPath);
+			try {
+				await expect(
+					c.peer.request({ id: "fresh", type: "open_session", cwd: qa.cwd, sessionPath: path }),
+				).resolves.toMatchObject({ success: true });
+				expect(
+					(c.peer.messages.find((value) => value.id === "fresh")?.data as RecordValue | undefined)?.attached ??
+						false,
+				).toBe(false);
+			} finally {
+				c.peer.close();
+				c.socket.destroy();
+			}
+		} finally {
+			a.peer.close();
+			a.socket.destroy();
+			b.socket.destroy();
 			await fake.close();
 			await stopChild(child);
 		}
