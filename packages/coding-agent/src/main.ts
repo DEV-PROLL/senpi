@@ -176,6 +176,16 @@ function toProjectTrustMode(appMode: AppMode): AppMode {
 	return appMode === "app-server" ? "print" : appMode;
 }
 
+/**
+ * Interactive launches auto-title by default; every other app mode (RPC with or
+ * without `--multi-session`, print, json, app-server) opts in with
+ * `--auto-title-sessions`. Sessions resumed with existing context messages are
+ * never retitled, whatever the mode or flag.
+ */
+export function resolveAutoTitleSessions(appMode: AppMode, parsed: Args, hasContextMessages: boolean): boolean {
+	return (appMode === "interactive" || parsed.autoTitleSessions === true) && !hasContextMessages;
+}
+
 function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
 	return (
 		!parsed.print &&
@@ -1049,7 +1059,7 @@ export async function main(args: string[], options?: MainOptions) {
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
-			autoTitleSessions: appMode === "interactive" && !sessionManager.hasContextMessages(),
+			autoTitleSessions: resolveAutoTitleSessions(appMode, parsed, sessionManager.hasContextMessages()),
 		});
 		const cliThinkingOverride = runtimeParsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {
