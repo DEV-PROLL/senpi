@@ -1,5 +1,7 @@
 # changes
 
+- Model runtime credential admission counts the combined canonical environment and policy slot lane, admitting rotation for more than one live slot without acquiring leases during preflight.
+
 ## 2026-08-28 - Credential pool parity follow-ups
 
 - Half-open leases now admit their holder exactly once for stored and environment probes.

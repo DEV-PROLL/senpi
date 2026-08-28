@@ -44,6 +44,7 @@ import { APP_NAME, BRAND, getAgentDir } from "../config.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
 import { envValue } from "./brand.ts";
+import { discoverEnvSlots } from "./credential-pool/env-slots.ts";
 import type { RotationSources } from "./credential-pool/rotation-stream.ts";
 import { ModelConfig } from "./model-config.ts";
 import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.ts";
@@ -796,7 +797,7 @@ export class ModelRuntime implements Models {
 		const env = (name: string) => options?.env?.[name] ?? process.env[name];
 		if (this.snapshot.storedProviders.has(model.provider)) return true;
 		const policySlots = this.config.getProvider(model.provider)?.credentials?.slots;
-		return Object.keys(policySlots ?? {}).length > 1 || mightHoldEnvCredentialPool(model.provider, env);
+		return discoverEnvSlots(model.provider, env).length + Object.keys(policySlots ?? {}).length > 1;
 	}
 
 	private async credentialRotationSources(
